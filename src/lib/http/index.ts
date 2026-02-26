@@ -1,0 +1,681 @@
+/**
+ * HTTP请求封装模块
+ * 对应 legado 项目的 HttpHelper.kt 和 OkHttpUtils.kt
+ * 
+ * 设计原则：
+ * 1. TypeScript主导 - 所有业务逻辑在TypeScript中实现
+ * 2. 环境适配 - 自动检测Tauri环境，使用Tauri HTTP插件绕过CORS
+ * 3. 统一接口 - 提供与原生fetch类似的API，便于使用
+ * 4. 功能完整 - 支持Cookie、重试、并发控制、代理等
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+import { getCookie, saveCookie } from './cookie-manager';
+import { createRateLimiter } from './rate-limiter';
+import { isTauri } from '@/lib/platform/detect';
+
+/**
+ * 规范化 URL，确保跨平台兼容性
+ * 处理 URL 编码、空格、特殊字符等问题
+ */
+function normalizeUrl(url: string): string {
+  if (!url || typeof url !== 'string') {
+    throw new Error('无效的 URL');
+  }
+
+  // 去除首尾空格
+  let cleaned = url.trim();
+
+  // 确保有协议
+  if (!cleaned.match(/^https?:\/\//i)) {
+    cleaned = 'https://' + cleaned;
+  }
+
+  try {
+    // 使用 URL 构造函数进行规范化
+    // URL 构造函数会自动处理编码和规范化
+    const urlObj = new URL(cleaned);
+
+    // URL 构造函数已经规范化了 URL，直接返回
+    // 但我们需要确保查询参数也被正确编码
+    if (urlObj.search) {
+      // URLSearchParams 会自动处理查询参数的编码
+      const params = new URLSearchParams(urlObj.search);
+      // 重新构建 URL，使用规范化后的查询参数
+      urlObj.search = params.toString();
+    }
+
+    return urlObj.toString();
+  } catch (error) {
+    // 如果 URL 解析失败，尝试手动处理
+    console.warn('[HTTP] URL 解析失败，尝试手动规范化:', error);
+
+    try {
+      // 分离协议、主机和路径部分
+      const match = cleaned.match(/^(https?:\/\/)([^\/?#]+)(.*)$/);
+      if (match) {
+        const [, protocol, host, pathAndQuery] = match;
+
+        // 分离路径和查询参数
+        const [path, query] = pathAndQuery.split('?');
+
+        // 规范化路径：对每个路径段进行编码
+        const normalizedPath = path.split('/').map(segment => {
+          if (!segment) return segment;
+          try {
+            // 尝试解码（避免双重编码）
+            const decoded = decodeURIComponent(segment);
+            // 重新编码
+            return encodeURIComponent(decoded);
+          } catch {
+            // 如果解码失败，直接编码
+            return encodeURIComponent(segment);
+          }
+        }).join('/');
+
+        // 规范化查询参数
+        let normalizedQuery = '';
+        if (query) {
+          const params = new URLSearchParams(query);
+          normalizedQuery = '?' + params.toString();
+        }
+
+        return protocol + host + normalizedPath + normalizedQuery;
+      }
+    } catch (e) {
+      console.warn('[HTTP] URL 手动规范化也失败:', e);
+    }
+
+    // 最后的回退：返回清理后的 URL
+    return cleaned;
+  }
+}
+
+// 检测是否可以使用 Tauri HTTP 插件
+let canUseTauriHttp: boolean | null = null;
+async function checkCanUseTauriHttp(): Promise<boolean> {
+  if (canUseTauriHttp !== null) return canUseTauriHttp;
+
+  // 首先检查是否在 Tauri 环境
+  if (!isTauri()) {
+    canUseTauriHttp = false;
+    return false;
+  }
+
+  try {
+    // 尝试导入 Tauri HTTP 插件
+    await import('@tauri-apps/plugin-http');
+    canUseTauriHttp = true;
+    return true;
+  } catch (error) {
+    console.warn('[HTTP] Tauri HTTP 插件不可用，降级到原生 fetch:', error);
+    canUseTauriHttp = false;
+    return false;
+  }
+}
+
+/**
+ * 请求选项
+ */
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  headers?: Record<string, string>;
+  body?: string | FormData | ArrayBuffer;
+  timeout?: number;
+  retry?: number; // 重试次数，默认0
+  retryDelay?: number; // 重试延迟（毫秒），默认1000
+  followRedirects?: boolean; // 是否跟随重定向，默认true
+  enableCookieJar?: boolean; // 是否启用Cookie管理，默认false
+  concurrentRate?: string; // 并发速率限制，格式：10/1s 表示每秒10个请求
+  /** 为 true 时 4xx/5xx 不抛错，仍返回 response，便于登录脚本 ajax 解析 body（如 code/msg） */
+  allowNon2xx?: boolean;
+}
+
+/**
+ * HTTP响应
+ */
+export interface HttpResponse {
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  url: string;
+  ok: boolean;
+  text: () => Promise<string>;
+  json: <T>() => Promise<T>;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+}
+
+/**
+ * 请求错误
+ */
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    public statusText: string,
+    public url: string,
+    message?: string
+  ) {
+    super(message || `HTTP ${status} ${statusText}`);
+    this.name = 'HttpError';
+  }
+}
+
+/**
+ * 执行HTTP请求（核心函数）
+ */
+async function executeRequest(
+  url: string,
+  options: RequestOptions = {}
+): Promise<HttpResponse> {
+  // 规范化 URL，确保跨平台兼容性
+  const normalizedUrl = normalizeUrl(url);
+
+  const {
+    method = 'GET',
+    headers = {},
+    body,
+    timeout = 30000,
+    followRedirects = true,
+    enableCookieJar = false,
+  } = options;
+
+  const useTauriHttp = await checkCanUseTauriHttp();
+
+  // 设置默认User-Agent
+  // 注意：Connection 和 Keep-Alive 是 fetch 规范禁止的 headers，由 HTTP 客户端自动管理
+  const defaultHeaders: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    ...headers,
+  };
+
+  // 处理Cookie（使用原始 URL 用于 Cookie 管理）
+  if (enableCookieJar) {
+    const cookie = await getCookie(normalizedUrl);
+    if (cookie) {
+      defaultHeaders['Cookie'] = cookie;
+    }
+  }
+
+  // 移除null字符串的header
+  Object.keys(defaultHeaders).forEach(key => {
+    if (defaultHeaders[key] === 'null') {
+      delete defaultHeaders[key];
+    }
+  });
+
+  try {
+    let response: Response;
+
+    if (useTauriHttp) {
+      // 使用 Tauri 环境
+      // 优先使用 Tauri HTTP 插件，如果失败（如非 UTF-8 响应），回退到自定义 Rust 命令
+      try {
+        const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+
+        const tauriOptions: any = {
+          method,
+          headers: defaultHeaders,
+          connectTimeout: timeout,
+          maxRedirections: followRedirects ? 10 : 0,
+          // 信任所有证书：许多书源网站使用的证书不在 Mozilla CA 列表中（UnknownIssuer 错误）
+          // 参考 legado 使用 SSLHelper.unsafeTrustManager 信任所有证书的做法
+          // 统一配置：所有平台（桌面端和移动端）都信任所有证书，以兼容各种书源网站
+          danger: {
+            acceptInvalidCerts: true,
+            acceptInvalidHostnames: true,
+          },
+        };
+
+        if (body) {
+          tauriOptions.body = body;
+        }
+
+        const tauriResponse = await tauriFetch(normalizedUrl, tauriOptions);
+
+        // 转换Tauri响应headers
+        const responseHeaders = new Headers();
+        if (tauriResponse.headers) {
+          if (tauriResponse.headers instanceof Map) {
+            tauriResponse.headers.forEach((value: string, key: string) => {
+              responseHeaders.set(key, value);
+            });
+          } else if (typeof tauriResponse.headers === 'object') {
+            Object.entries(tauriResponse.headers).forEach(([key, value]) => {
+              responseHeaders.set(key, String(value));
+            });
+          }
+        }
+
+        // 优先获取二进制数据，避免 text() 的 UTF-8 解码问题
+        let cachedText: string | null = null;
+        let cachedArrayBuffer: ArrayBuffer | null = null;
+
+        try {
+          const tauriResponseAny = tauriResponse as any;
+          if (typeof tauriResponseAny.bytes === 'function') {
+            const bytes = await tauriResponseAny.bytes();
+            if (bytes instanceof Uint8Array) {
+              // 部分环境（如部分 WebView）无 SharedArrayBuffer，且 bytes.buffer 可能为 SharedArrayBuffer，统一用拷贝得到普通 ArrayBuffer
+              const copy = bytes.slice(0);
+              cachedArrayBuffer = copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
+            } else if (Array.isArray(bytes)) {
+              cachedArrayBuffer = new Uint8Array(bytes).buffer;
+            }
+          }
+        } catch (e) {
+          console.warn('[HTTP] Tauri fetch bytes() 失败:', e);
+        }
+
+        // 创建 Response 对象
+        response = {
+          status: tauriResponse.status,
+          statusText: tauriResponse.statusText || '',
+          ok: tauriResponse.ok,
+          headers: responseHeaders,
+          url: tauriResponse.url || url,
+          text: async () => {
+            if (cachedText === null) {
+              if (cachedArrayBuffer !== null) {
+                const decoder = new TextDecoder('utf-8', { fatal: false });
+                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+              } else {
+                cachedText = await tauriResponse.text();
+              }
+            }
+            return cachedText;
+          },
+          json: async () => {
+            if (cachedText === null) {
+              if (cachedArrayBuffer !== null) {
+                const decoder = new TextDecoder('utf-8', { fatal: false });
+                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+              } else {
+                cachedText = await tauriResponse.text();
+              }
+            }
+            return JSON.parse(cachedText);
+          },
+          arrayBuffer: async () => {
+            if (cachedArrayBuffer !== null) {
+              return cachedArrayBuffer;
+            }
+            // 回退：从 text 转换
+            if (cachedText === null) {
+              cachedText = await tauriResponse.text();
+            }
+            cachedArrayBuffer = new TextEncoder().encode(cachedText).buffer;
+            return cachedArrayBuffer;
+          },
+        } as Response;
+      } catch (tauriFetchError: any) {
+        // Tauri HTTP 插件失败（如非 UTF-8 响应头/体、危险设置未启用等），回退到自定义 Rust 命令
+        const errMsg = String(tauriFetchError?.message || tauriFetchError || '');
+        const errorDetails = {
+          message: errMsg,
+          stack: tauriFetchError?.stack,
+          name: tauriFetchError?.name,
+          cause: tauriFetchError?.cause,
+          url: normalizedUrl,
+        };
+
+        // 检查是否是连接错误，如果是，可能是 Android 网络配置问题
+        const isConnectError = errMsg.toLowerCase().includes('connect') ||
+          errMsg.toLowerCase().includes('error sending request');
+
+        // 检查是否是危险设置未启用错误
+        const isDangerousSettingsError = errMsg.toLowerCase().includes('dangerous settings');
+
+        if (isDangerousSettingsError) {
+          // 危险设置未启用是预期的回退情况，使用更低的日志级别
+          console.debug(`[HTTP] Tauri HTTP 插件危险设置未启用，使用 download_binary 命令`);
+        } else if (isConnectError) {
+          console.warn(`[HTTP] Tauri HTTP 插件连接失败 (${errMsg})，尝试 download_binary 命令`, errorDetails);
+        } else {
+          console.warn(`[HTTP] Tauri HTTP 插件失败 (${errMsg})，回退到 download_binary 命令`, errorDetails);
+        }
+
+        try {
+          // 只在调试模式下输出详细日志
+          if (!isDangerousSettingsError) {
+            console.debug('[HTTP] 调用 download_binary，参数:', {
+              url: normalizedUrl,
+              method: method || 'GET',
+              headers: defaultHeaders,
+              timeoutMs: timeout,
+            });
+          }
+
+          const result = await invoke<{
+            data: number[];
+            status: number;
+            headers: Record<string, string>;
+            url: string;
+          }>('download_binary', {
+            url: normalizedUrl,
+            method: method || 'GET',
+            headers: defaultHeaders,
+            timeoutMs: timeout,
+          });
+
+          // 只在调试模式下输出成功日志
+          if (!isDangerousSettingsError) {
+            console.debug('[HTTP] download_binary 成功，状态码:', result.status);
+          }
+
+          const data = new Uint8Array(result.data);
+
+          // 安全设置 headers：过滤掉包含非 ISO-8859-1 字符的值
+          // Headers API 只接受 ISO-8859-1 字符（U+0000 到 U+00FF）
+          const safeHeaders = new Headers();
+          Object.entries(result.headers).forEach(([key, value]) => {
+            try {
+              safeHeaders.set(key, value);
+            } catch {
+              // 如果 header 值包含非法字符，用 ASCII 安全的版本替代
+              const safeValue = value.replace(/[^\x00-\xFF]/g, '?');
+              try {
+                safeHeaders.set(key, safeValue);
+              } catch {
+                // 完全跳过无法设置的 header
+              }
+            }
+          });
+
+          let cachedText: string | null = null;
+          const cachedArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+
+          response = {
+            status: result.status,
+            statusText: result.status >= 200 && result.status < 300 ? 'OK' : 'Error',
+            ok: result.status >= 200 && result.status < 300,
+            headers: safeHeaders,
+            url: result.url,
+            text: async () => {
+              if (cachedText === null) {
+                const decoder = new TextDecoder('utf-8', { fatal: false });
+                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+              }
+              return cachedText;
+            },
+            json: async () => {
+              if (cachedText === null) {
+                const decoder = new TextDecoder('utf-8', { fatal: false });
+                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+              }
+              return JSON.parse(cachedText);
+            },
+            arrayBuffer: async () => {
+              return cachedArrayBuffer;
+            },
+          } as Response;
+        } catch (invokeError: any) {
+          // Rust 命令也失败了，记录详细错误信息
+          const invokeErrorMsg = String(invokeError?.message || invokeError || '');
+          const invokeErrorDetails = {
+            message: invokeErrorMsg,
+            stack: invokeError?.stack,
+            name: invokeError?.name,
+            cause: invokeError?.cause,
+            url: normalizedUrl,
+            originalError: errMsg,
+          };
+          console.error('[HTTP] download_binary 命令也失败了:', invokeErrorDetails);
+
+          // 抛出包含详细信息的错误
+          throw new Error(`download_binary 失败: ${invokeErrorMsg} (原始错误: ${errMsg})`);
+        }
+      }
+    } else {
+      // 使用原生fetch（浏览器环境）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        response = await fetch(normalizedUrl, {
+          method,
+          headers: defaultHeaders,
+          body: body as BodyInit,
+          redirect: followRedirects ? 'follow' : 'manual',
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    // 保存Cookie（使用规范化后的 URL）
+    if (enableCookieJar && response.headers) {
+      const setCookieHeader = response.headers.get('Set-Cookie');
+      if (setCookieHeader) {
+        await saveCookie(normalizedUrl, setCookieHeader);
+      }
+    }
+
+    // 转换响应为统一格式
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value;
+    });
+
+    // 保存 useTauriHttp 的值，避免闭包问题
+    const isTauriResponse = useTauriHttp;
+
+    return {
+      status: response.status,
+      statusText: response.statusText || '',
+      headers: responseHeaders,
+      url: response.url || normalizedUrl,
+      ok: response.ok,
+      text: async () => {
+        if (isTauriResponse) {
+          return (response as any).text();
+        }
+        return response.text();
+      },
+      json: async <T = any>() => {
+        if (isTauriResponse) {
+          const jsonData = await (response as any).json();
+          return jsonData as T;
+        }
+        return response.json() as Promise<T>;
+      },
+      arrayBuffer: async () => {
+        if (isTauriResponse) {
+          return (response as any).arrayBuffer();
+        }
+        return response.arrayBuffer();
+      },
+    };
+  } catch (error: any) {
+    // 处理超时错误
+    if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+      throw new HttpError(408, 'Request Timeout', normalizedUrl, '请求超时');
+    }
+
+    // 处理网络错误
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    // 处理 Tauri HTTP 插件的错误
+    // Tauri HTTP 插件可能抛出包含 "url not allowed" 或 "error sending request" 的错误
+    const errorMessage = error.message || String(error) || '';
+    const errorString = errorMessage.toLowerCase();
+
+    if (errorString.includes('url not allowed') || errorString.includes('not allowed on the configured scope')) {
+      console.error('[HTTP] URL 不在允许的作用域内:', {
+        url: normalizedUrl,
+        originalUrl: url,
+        error: errorMessage,
+        suggestion: '请检查 src-tauri/capabilities/default.json 中的 http:default 权限配置',
+      });
+      throw new HttpError(403, 'Forbidden', normalizedUrl, `URL 不在允许的作用域内: ${normalizedUrl}`);
+    }
+
+    if (errorString.includes('error sending request')) {
+      console.error('[HTTP] 发送请求失败:', {
+        url: normalizedUrl,
+        originalUrl: url,
+        error: errorMessage,
+        stack: error.stack,
+        suggestion: '可能是网络连接问题或服务器拒绝请求',
+      });
+      throw new HttpError(0, 'Network Error', normalizedUrl, `发送请求失败: ${errorMessage}`);
+    }
+
+    // 记录详细错误信息以便调试
+    console.error('[HTTP] 请求失败:', {
+      url: normalizedUrl,
+      originalUrl: url,
+      error: errorMessage,
+      stack: error.stack,
+      errorType: error.constructor?.name,
+      errorKeys: Object.keys(error),
+    });
+
+    throw new HttpError(0, 'Network Error', normalizedUrl, errorMessage || '网络请求失败');
+  }
+}
+
+/**
+ * 带重试的HTTP请求
+ */
+async function requestWithRetry(
+  url: string,
+  options: RequestOptions = {}
+): Promise<HttpResponse> {
+  const { retry = 0, retryDelay = 1000 } = options;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retry; attempt++) {
+    try {
+      return await executeRequest(url, options);
+    } catch (error) {
+      lastError = error as Error;
+
+      // 如果是最后一次尝试，直接抛出错误
+      if (attempt === retry) {
+        throw error;
+      }
+
+      // 等待后重试
+      if (retryDelay > 0) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+  }
+
+  throw lastError || new Error('请求失败');
+}
+
+/**
+ * HTTP请求主函数
+ */
+export async function request(
+  url: string,
+  options: RequestOptions = {}
+): Promise<HttpResponse> {
+  // 处理并发速率限制
+  if (options.concurrentRate) {
+    const limiter = createRateLimiter(options.concurrentRate);
+    await limiter.acquire();
+  }
+
+  // 执行请求（带重试）
+  const response = await requestWithRetry(url, options);
+
+  // 调试：登录/检测服务器时便于确认是 2xx 还是 4xx
+  if (response.ok && (url.includes('login') || url.includes('login_api'))) {
+    console.warn('[HTTP] 响应 OK', { status: response.status, url: url.slice(0, 55) });
+  }
+  if (!response.ok && response.status >= 400) {
+    if (options.allowNon2xx) {
+      console.warn('[HTTP] 响应非 2xx（allowNon2xx，返回 body）', {
+        status: response.status,
+        url: response.url?.slice(0, 60),
+      });
+      return response;
+    }
+    let bodyPreview = '';
+    try {
+      const raw = await response.text();
+      bodyPreview = raw.slice(0, 200).replace(/\s+/g, ' ');
+      if (raw.length > 200) bodyPreview += '...';
+    } catch {
+      bodyPreview = '(无法读取)';
+    }
+    console.warn('[HTTP] 响应非 2xx', {
+      status: response.status,
+      url: response.url?.slice(0, 60),
+      bodyPreview: bodyPreview.slice(0, 150),
+    });
+    throw new HttpError(
+      response.status,
+      response.statusText,
+      response.url,
+      `HTTP ${response.status}: ${response.statusText}`
+    );
+  }
+
+  return response;
+}
+
+/**
+ * GET请求
+ */
+export async function get(
+  url: string,
+  options?: Omit<RequestOptions, 'method' | 'body'>
+): Promise<string> {
+  const response = await request(url, { ...options, method: 'GET' });
+  return response.text();
+}
+
+/**
+ * POST请求
+ */
+export async function post(
+  url: string,
+  body: string | FormData,
+  options?: Omit<RequestOptions, 'method' | 'body'>
+): Promise<string> {
+  const response = await request(url, { ...options, method: 'POST', body });
+  return response.text();
+}
+
+/**
+ * 获取JSON数据
+ */
+export async function getJson<T>(
+  url: string,
+  options?: Omit<RequestOptions, 'method' | 'body'>
+): Promise<T> {
+  const response = await request(url, { ...options, method: 'GET' });
+  return response.json<T>();
+}
+
+/**
+ * POST JSON数据
+ */
+export async function postJson<T>(
+  url: string,
+  data: any,
+  options?: Omit<RequestOptions, 'method' | 'body'>
+): Promise<T> {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options?.headers,
+  };
+  const response = await request(url, {
+    ...options,
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data),
+  });
+  return response.json<T>();
+}
+
+// HttpError 已在文件顶部定义并导出，无需重复导出

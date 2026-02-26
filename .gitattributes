@@ -1,0 +1,16 @@
+# 文本文件统一使用 LF，便于跨平台与 GitHub 展示一致
+* text=auto eol=lf
+
+# 明确标记二进制，不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.svg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.wasm binary
+*.so binary
+*.dll binary
+*.dylib binary

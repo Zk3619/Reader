@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output（dist 为前端构建产物，不提交；仅保留 dist/.gitkeep 以在 clone 后存在该目录）
+dist/*
+!dist/.gitkeep
+*.local
+
+# Tauri：根目录相关（构建与生成见 src-tauri/.gitignore：target/、gen/）
+.tauri/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and debug
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Vite / Node
+.vite/
+.cache/
+
+# Optional: 测试与覆盖率（若后续有）
+# coverage/
+# *.lcov
+
+# Optional: 本地/临时（若需要）
+# *.local
+# .tmp/

@@ -1,0 +1,735 @@
+/**
+ * 阅读器正文内容区
+ * 参考 legado 阅读界面：应用阅读配置（主题、字体、间距），支持正文选中、段评气泡
+ */
+
+import { Show, For, createMemo, createSignal, createEffect, onCleanup } from 'solid-js';
+import { readerStore } from '@/stores/reader';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+/** 主题 0–6 对应的背景/文字色类名（与 legado 一致：默认、绿、棕、蓝、紫、黑、夜间） */
+const themeClasses: Record<number, { bg: string; text: string }> = {
+  0: { bg: 'bg-[#f5f0e6]', text: 'text-[#5b4636]' },   // 默认纸质
+  1: { bg: 'bg-[#e8f5e9]', text: 'text-[#2e7d32]' },   // 护眼绿
+  2: { bg: 'bg-[#f5e6d3]', text: 'text-[#5d4e37]' },   // 羊皮纸
+  3: { bg: 'bg-[#e3f2fd]', text: 'text-[#1565c0]' },   // 淡蓝
+  4: { bg: 'bg-[#f3e5f5]', text: 'text-[#6a1b9a]' },   // 淡紫
+  5: { bg: 'bg-[#263238]', text: 'text-[#b0bec5]' },   // 深色
+  6: { bg: 'bg-[#1e1e1e]', text: 'text-[#cfcfcf]' },   // 夜间
+};
+
+export interface ReaderContentProps {
+  class?: string;
+  /** 点击段评气泡时打开段评面板，segmentIndex：0=章节标题，1起=段落 */
+  onOpenComments?: (chapterIndex: number, segmentIndex: number) => void;
+  /** 某段段评数量，为 0 时不显示气泡 */
+  getSegmentCommentCount?: (chapterIndex: number, segmentIndex: number) => number;
+  /** 沉浸模式下隐藏段评气泡 */
+  hideCommentBubbles?: boolean;
+  /** 是否应用阅读宽度限制；窄屏+移动端应为 false（正文占满宽度） */
+  applyReadWidth?: () => boolean;
+}
+
+export function ReaderContent(props: ReaderContentProps) {
+  const config = () => readerStore.state.config;
+  const content = () => readerStore.state.content;
+  const contentLoading = () => readerStore.state.contentLoading;
+  const showContent = () => readerStore.state.showContent;
+  const catalog = () => readerStore.state.catalog;
+  const chapterIndex = () => readerStore.state.chapterIndex;
+  const currentChapter = () => catalog()[chapterIndex()];
+  
+  // 检测是否为错误内容（以"加载失败"开头）
+  const isErrorContent = () => {
+    const c = content();
+    return c && (c.startsWith('加载失败') || c.startsWith('内容加载失败') || c.startsWith('书源不存在'));
+  };
+
+  // Skeleton 显示状态管理：仅在首次打开书籍或大文件缓存过期时显示
+  const [skeletonVisible, setSkeletonVisible] = createSignal(false);
+  const [skeletonStartTime, setSkeletonStartTime] = createSignal<number | null>(null);
+  const [lastChapterIndex, setLastChapterIndex] = createSignal<number | null>(null);
+  const [_chapterSwitchStartTime, setChapterSwitchStartTime] = createSignal<number | null>(null);
+  
+  // 智能最小时长策略：
+  // - 加载时间 < 400ms：应用较短最小时长（400ms），避免闪烁
+  // - 加载时间 > 400ms：不需要最小时长，立即切换（用户已看到足够的 skeleton）
+  const getMinDuration = (elapsed: number): number => {
+    if (elapsed < 400) {
+      return 400; // 中等速度，使用较短最小时长避免闪烁
+    } else {
+      return 0; // 加载较慢，用户已看到足够 skeleton，立即切换
+    }
+  };
+  
+  // 监听加载状态和章节索引变化，管理 skeleton 的显示
+  createEffect(() => {
+    const loading = contentLoading() || (!showContent() && !content());
+    const currentIndex = chapterIndex();
+    const currentContent = content();
+    const hadContent = currentContent && currentContent.length > 0;
+    const now = Date.now();
+    
+    let timer: number | undefined;
+    let switchTimer: number | undefined;
+    
+    // 检测章节切换：章节索引变化且之前有内容
+    const prevIndex = lastChapterIndex();
+    const chapterSwitched = prevIndex !== null && prevIndex !== currentIndex && hadContent;
+    
+    if (prevIndex !== currentIndex) {
+      setLastChapterIndex(currentIndex);
+      
+      if (chapterSwitched) {
+        // 切换章节：记录开始时间，用于检测大文件缓存过期
+        setChapterSwitchStartTime(now);
+      } else {
+        setChapterSwitchStartTime(null);
+      }
+    }
+    
+    if (loading) {
+      // 开始加载：判断是否应该显示 skeleton
+      if (!hadContent && prevIndex === null) {
+        // 首次打开：显示 skeleton
+        if (!skeletonVisible()) {
+          setSkeletonVisible(true);
+          setSkeletonStartTime(now);
+        }
+      } else if (chapterSwitched) {
+        // 切换章节：立即显示 skeleton，与首次打开一致
+        if (!skeletonVisible()) {
+          setSkeletonVisible(true);
+          setSkeletonStartTime(now);
+        }
+      } else if (skeletonVisible() && skeletonStartTime() === null) {
+        setSkeletonStartTime(now);
+      }
+    } else {
+      // 加载完成：清理状态
+      const startTime = skeletonStartTime();
+      
+      if (startTime !== null && skeletonVisible()) {
+        // 使用智能最小时长
+        const elapsed = now - startTime;
+        const minDuration = getMinDuration(elapsed);
+        const remaining = Math.max(0, minDuration - elapsed);
+        
+        if (remaining > 0) {
+          timer = window.setTimeout(() => {
+            setSkeletonVisible(false);
+            setSkeletonStartTime(null);
+            setChapterSwitchStartTime(null);
+          }, remaining);
+        } else {
+          setSkeletonVisible(false);
+          setSkeletonStartTime(null);
+          setChapterSwitchStartTime(null);
+        }
+      } else {
+        // 切换章节且不需要 skeleton：清理状态
+        setChapterSwitchStartTime(null);
+      }
+    }
+    
+    // 清理函数：取消未完成的定时器
+    onCleanup(() => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      if (switchTimer !== undefined) {
+        clearTimeout(switchTimer);
+      }
+    });
+  });
+
+  const themeStyle = () => {
+    const c = config();
+    const fontFamily = c.font === 0 || !c.customFontName
+      ? 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)'
+      : c.customFontName;
+    const useReadWidth = (props.applyReadWidth?.() !== false) && c.readWidth;
+    return {
+      'font-size': `${c.fontSize}px`,
+      'line-height': c.spacing.line + 1,
+      'letter-spacing': c.spacing.letter ? `${c.spacing.letter}em` : undefined,
+      'font-family': fontFamily,
+      'max-width': useReadWidth ? `${c.readWidth}px` : undefined,
+    } as Record<string, string | number | undefined>;
+  };
+
+  const paragraphStyle = () => {
+    const p = config().spacing.paragraph;
+    // paragraphStyle 应用在 reader-body 上，用于设置段落间距
+    // 但实际段落间距由每个 <p> 标签的 mb-4 和 paragraphStyle 共同决定
+    return { 'margin-bottom': p ? `${p}em` : undefined };
+  };
+
+  const paragraphs = () =>
+    getParagraphs(content() ?? '', currentChapter()?.title);
+
+  const getCount = (segmentIndex: number) =>
+    (props.getSegmentCommentCount ?? (() => 0))(
+      chapterIndex(),
+      segmentIndex
+    );
+
+  return (
+    <div
+      class={cn(
+        'reader-content mx-auto min-h-full w-full px-6 py-8 selection:bg-primary/20',
+        themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
+        themeClasses[config().theme]?.text ?? themeClasses[0].text,
+        props.class
+      )}
+      data-reader-content="true"
+      style={themeStyle()}
+    >
+      <Show when={skeletonVisible()}>
+        <div class="reader-skeleton-wrapper">
+          <ReaderContentSkeleton />
+        </div>
+      </Show>
+
+      <Show when={!skeletonVisible() && !contentLoading() && showContent() && content()}>
+        <Show
+          when={!isErrorContent()}
+          fallback={
+            <div class="flex flex-col items-center justify-center min-h-[200px] px-4 py-8">
+              <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-6 py-8 max-w-md w-full">
+                <div class="mb-4 text-center text-sm text-destructive">
+                  <p class="font-medium mb-2 text-base">内容加载失败</p>
+                  <p class="text-xs text-destructive/80 wrap-break-word">{content()}</p>
+                </div>
+                <div class="flex justify-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => readerStore.loadChapter(chapterIndex())}>
+                    重试
+                  </Button>
+                </div>
+              </div>
+            </div>
+          }
+        >
+          <div class="wrap-break-word reader-body">
+            {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
+            <Show when={currentChapter()?.title}>
+              <div class="mb-4 flex items-center justify-center gap-2">
+                <h2 class="text-center text-lg font-semibold">
+                  {currentChapter()!.title}
+                </h2>
+                <Show when={!props.hideCommentBubbles && (getCount(0) ?? 0) > 0}>
+                  <button
+                    type="button"
+                    class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onOpenComments?.(chapterIndex(), 0);
+                    }}
+                    aria-label={`本章节 ${getCount(0)} 条段评`}
+                  >
+                    {getCount(0)}
+                  </button>
+                </Show>
+              </div>
+            </Show>
+          {/* 段落 + 段评气泡（segmentIndex=1,2,...）；气泡紧跟段末文字后，不顶到行首/右侧 */}
+          <div class="prose prose-p:mb-4">
+            {paragraphs().map((raw, i) => {
+              const segmentIndex = i + 1;
+              const count = getCount(segmentIndex) ?? 0;
+              // 调试：检查第一段的原始内容
+              // if (i === 0) {
+              //   console.log('[渲染] 第一段原始内容:', {
+              //     index: i,
+              //     length: raw.length,
+              //     firstChar: raw.charCodeAt(0),
+              //     hasSpace: /^[ \u3000]+/.test(raw),
+              //     preview: raw.substring(0, 50),
+              //     rawPreview: Array.from(raw.substring(0, 10)).map(c => ({
+              //       char: c,
+              //       code: c.charCodeAt(0),
+              //     })),
+              //   });
+              // }
+              const html = paragraphToHtml(raw);
+              // 调试：检查第一段的 HTML
+              // if (i === 0) {
+              //   console.log('[渲染] 第一段 HTML:', {
+              //     htmlLength: html.length,
+              //     htmlPreview: html.substring(0, 50),
+              //     startsWithSpace: /^[\u3000]/.test(html),
+              //   });
+              // }
+              return (
+                <p class="reader-p" style={paragraphStyle()}>
+                  <span innerHTML={html} />
+                  <Show when={!props.hideCommentBubbles && count > 0}>
+                    {/* 使用 inline 元素包装气泡，确保它始终显示在段落末尾，不会因为换行而错位 */}
+                    <span class="inline align-baseline whitespace-nowrap ml-1">
+                      <button
+                        type="button"
+                        class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          props.onOpenComments?.(chapterIndex(), segmentIndex);
+                        }}
+                        aria-label={`本段 ${count} 条段评`}
+                      >
+                        {count}
+                      </button>
+                    </span>
+                  </Show>
+                </p>
+              );
+            })}
+          </div>
+          </div>
+        </Show>
+      </Show>
+    </div>
+  );
+}
+
+/** 将纯文本拆成段落数组：保留首行缩进；反复去掉与章节名相同的段首行避免重复 */
+function getParagraphs(text: string, chapterTitle?: string): string[] {
+  if (!text?.trim()) return [];
+  
+  // 先按双换行符分割段落（标准做法：双换行符表示段落分隔）
+  // 分割后，每个段落可能包含前导或尾随的换行符，需要清理
+  let paragraphs = text.split(/\n\n+/);
+  
+  // 清理每个段落的前导和尾随换行符，但保留段首空格
+  paragraphs = paragraphs.map((p) => {
+    // 移除前导换行符（但保留段首空格）
+    let cleaned = p.replace(/^\n+/, '');
+    // 移除尾随换行符和空白
+    cleaned = cleaned.replace(/\n+\s*$/, '');
+    return cleaned;
+  });
+  
+  // 如果按双换行符分割后只有一个段落，且段落内有多行，检查是否需要进一步分割
+  // 这种情况出现在像《悟空传》这样段落之间只有单换行符的书籍
+  if (paragraphs.length === 1 && paragraphs[0].includes('\n')) {
+    const single = paragraphs[0];
+    let newParagraphs: string[] = [];
+
+    // 优先：按「换行+全角空格」分段（与 content.ts cleanContent 的 legado 风格一致）
+    const byFullWidthIndent = single.split(/\n(?=[\u3000])/).map((p) => p.replace(/^\s+/, '').replace(/\s+$/, '')).filter((p) => p.length > 0);
+    if (byFullWidthIndent.length > 1) {
+      newParagraphs = byFullWidthIndent;
+    } else {
+      const lines = single.split('\n');
+      let currentParagraph = '';
+
+    // 检查是否所有非空行都以全角空格开头
+    // 如果是，则每行都应该是一个独立的段落
+    const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+    const allStartWithFullWidthSpace = nonEmptyLines.length > 0 && 
+      nonEmptyLines.every((line) => /^[\u3000]+/.test(line));
+    
+    if (allStartWithFullWidthSpace) {
+      // 所有行都以全角空格开头，每行作为一个独立段落
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmedLine = line.trim();
+        
+        // 跳过空行
+        if (trimmedLine.length === 0) {
+          continue;
+        }
+        
+        // 每行作为一个独立段落
+        newParagraphs.push(line.replace(/\s+$/, ''));
+      }
+    } else {
+      // 不是所有行都以全角空格开头，使用智能分割逻辑
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmedLine = line.trim();
+        
+        // 跳过空行
+        if (trimmedLine.length === 0) {
+          // 如果当前段落不为空，空行表示段落结束
+          if (currentParagraph.trim().length > 0) {
+            newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+            currentParagraph = '';
+          }
+          continue;
+        }
+        
+        // 检查是否是以全角空格开头的行（可能是新段落的开始）
+        const startsWithFullWidthSpace = /^[\u3000]+/.test(line);
+        
+        // 如果当前段落不为空，且当前行以全角空格开头
+        // 检查前一行是否也以全角空格开头，如果不是，则这是新段落
+        if (startsWithFullWidthSpace && currentParagraph.trim().length > 0) {
+          const prevLine = currentParagraph.split('\n').pop() || '';
+          const prevStartsWithFullWidthSpace = /^[\u3000]+/.test(prevLine);
+          
+          // 如果前一行不以全角空格开头，那么当前行是新段落的开始
+          if (!prevStartsWithFullWidthSpace) {
+            newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+            currentParagraph = line;
+          } else {
+            // 前一行也以全角空格开头，可能是段落内的换行（比如对话），继续当前段落
+            currentParagraph += '\n' + line;
+          }
+        } else {
+          // 继续当前段落
+          if (currentParagraph) {
+            currentParagraph += '\n' + line;
+          } else {
+            currentParagraph = line;
+          }
+        }
+      }
+      
+      // 添加最后一个段落
+      if (currentParagraph.trim().length > 0) {
+        newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+      }
+    }
+    }
+
+    // 如果成功分割出多个段落，使用新的段落数组
+    if (newParagraphs.length > 1) {
+      paragraphs = newParagraphs;
+    }
+  }
+  
+  // 处理每个段落：移除段落内的空行，但保留段首空格和行首空格
+  paragraphs = paragraphs
+    .map((p) => {
+      // 移除段落内的空行（只包含空白字符的行）
+      // 但保留段首空格和行首空格
+      const lines = p.split('\n');
+      const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+      
+      // 如果段落内没有非空行，返回空字符串（后续会被过滤掉）
+      if (nonEmptyLines.length === 0) {
+        return '';
+      }
+      
+      // 重新组合段落，移除末尾空白
+      return nonEmptyLines.join('\n').replace(/\s+$/, '');
+    })
+    .filter((p) => p.length > 0);
+  
+  // 移除与章节标题相同的段首行，但保留后续内容的缩进
+  while (chapterTitle && paragraphs.length > 0 && paragraphs[0]) {
+    const first = paragraphs[0];
+    const lines = first.split('\n');
+    const firstLine = lines[0]?.trim() ?? '';
+    
+    if (firstLine !== chapterTitle) break;
+    
+    // 移除章节标题行，保留后续所有行（包括它们的缩进）
+    // 重要：使用 slice(1) 保留所有后续行，包括首段的缩进
+    let rest = lines.slice(1).join('\n');
+    
+    // 移除开头的换行符（但保留段首空格）
+    // 关键：只移除开头的换行符，不移除段首的空格
+    while (rest.startsWith('\n')) {
+      rest = rest.slice(1);
+    }
+    
+    // 只移除末尾空白，保留段首和行首空格
+    const trimmedRest = rest.replace(/\s+$/, '');
+    
+    // 调试：检查移除章节标题后的首段
+    // if (trimmedRest.length > 0) {
+    //   const firstCharAfterTitle = trimmedRest.charCodeAt(0);
+    //   const hasSpaceAfterTitle = firstCharAfterTitle === 0x20 || firstCharAfterTitle === 0x3000;
+    //   console.log('[段落分割] 移除章节标题后:', {
+    //     hasSpace: hasSpaceAfterTitle,
+    //     firstChar: firstCharAfterTitle,
+    //     charCode: firstCharAfterTitle,
+    //     preview: trimmedRest.substring(0, 50),
+    //     rawPreview: Array.from(trimmedRest.substring(0, 10)).map(c => ({
+    //       char: c,
+    //       code: c.charCodeAt(0),
+    //     })),
+    //   });
+    // } else {
+    //   console.warn('[段落分割] 警告：移除章节标题后，首段为空！', {
+    //     originalFirst: first.substring(0, 50),
+    //     rest: rest.substring(0, 50),
+    //   });
+    // }
+    
+    if (trimmedRest.trim().length > 0) {
+      // 确保首段有内容，保留其段首缩进
+      paragraphs[0] = trimmedRest;
+      
+      // 如果移除章节标题后，首段仍然包含多行，需要检查是否需要进一步分割
+      if (paragraphs[0].includes('\n')) {
+        const lines = paragraphs[0].split('\n');
+        const newParagraphs: string[] = [];
+        
+        // 检查是否所有非空行都以全角空格开头
+        const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+        const allStartWithFullWidthSpace = nonEmptyLines.length > 1 && 
+          nonEmptyLines.every((line) => /^[\u3000]+/.test(line));
+        
+        if (allStartWithFullWidthSpace) {
+          // 所有行都以全角空格开头，每行作为一个独立段落
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
+            
+            // 跳过空行
+            if (trimmedLine.length === 0) {
+              continue;
+            }
+            
+            // 每行作为一个独立段落
+            newParagraphs.push(line.replace(/\s+$/, ''));
+          }
+          
+          // 如果成功分割出多个段落，替换原来的首段
+          if (newParagraphs.length > 1) {
+            paragraphs = [...newParagraphs, ...paragraphs.slice(1)];
+          }
+        } else {
+          // 不是所有行都以全角空格开头，使用智能分割逻辑
+          let currentParagraph = '';
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
+            
+            // 跳过空行
+            if (trimmedLine.length === 0) {
+              // 如果当前段落不为空，空行表示段落结束
+              if (currentParagraph.trim().length > 0) {
+                newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+                currentParagraph = '';
+              }
+              continue;
+            }
+            
+            // 检查是否是以全角空格开头的行（可能是新段落的开始）
+            const startsWithFullWidthSpace = /^[\u3000]+/.test(line);
+            
+            // 如果当前段落不为空，且当前行以全角空格开头
+            // 检查前一行是否也以全角空格开头，如果不是，则这是新段落
+            if (startsWithFullWidthSpace && currentParagraph.trim().length > 0) {
+              const prevLine = currentParagraph.split('\n').pop() || '';
+              const prevStartsWithFullWidthSpace = /^[\u3000]+/.test(prevLine);
+              
+              // 如果前一行不以全角空格开头，那么当前行是新段落的开始
+              if (!prevStartsWithFullWidthSpace) {
+                newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+                currentParagraph = line;
+              } else {
+                // 前一行也以全角空格开头，可能是段落内的换行（比如对话），继续当前段落
+                currentParagraph += '\n' + line;
+              }
+            } else {
+              // 继续当前段落
+              if (currentParagraph) {
+                currentParagraph += '\n' + line;
+              } else {
+                currentParagraph = line;
+              }
+            }
+          }
+          
+          // 添加最后一个段落
+          if (currentParagraph.trim().length > 0) {
+            newParagraphs.push(currentParagraph.replace(/\s+$/, ''));
+          }
+        }
+        
+        // 如果成功分割出多个段落，替换原来的首段
+        if (newParagraphs.length > 1) {
+          paragraphs = [...newParagraphs, ...paragraphs.slice(1)];
+        }
+      }
+    } else {
+      paragraphs = paragraphs.slice(1);
+    }
+  }
+  
+  return paragraphs;
+}
+
+/** 单段纯文本转 HTML：转义、中文引号空格、换行，保留段首缩进 */
+function paragraphToHtml(p: string): string {
+  // 先检查段首是否有空格（用于调试）
+  // const hasLeadingSpace = /^[ \u3000]+/.test(p);
+  // if (hasLeadingSpace) {
+  //   const leadingMatch = p.match(/^([ \u3000]+)/);
+  //   console.log('[段落HTML] 原始段首空格:', {
+  //     count: leadingMatch?.[1].length ?? 0,
+  //     chars: leadingMatch?.[1],
+  //     firstChar: p.charCodeAt(0),
+  //     preview: p.substring(0, 30),
+  //   });
+  // }
+  
+  // 先处理段首缩进，再处理转义和引号，避免引号处理影响段首空格
+  // 匹配段首（整个段落开头）的半角空格或全角空格
+  // 支持半角空格（U+0020）和全角空格（U+3000）
+  let withIndent = p;
+  const paragraphStartMatch = withIndent.match(/^([ \u3000]+)/);
+  if (paragraphStartMatch) {
+    const leadingSpaces = paragraphStartMatch[1];
+    const halfWidthCount = (leadingSpaces.match(/ /g) || []).length;
+    const fullWidthCount = (leadingSpaces.match(/\u3000/g) || []).length;
+    const totalHalfWidthEquivalent = halfWidthCount + fullWidthCount * 2;
+    
+    // 中文排版标准：段首缩进为两个全角空格（两个汉字宽度）
+    // 如果原文件有4个半角空格，转换为2个全角空格
+    // 如果原文件有2个半角空格，转换为1个全角空格
+    // 如果原文件已经有全角空格，保持原样
+    let fullWidthIndent: string;
+    if (fullWidthCount > 0) {
+      // 如果已经有全角空格，保持原样（但确保至少2个）
+      fullWidthIndent = '\u3000'.repeat(Math.max(2, fullWidthCount));
+    } else {
+      // 将半角空格转换为全角空格
+      // 标准：4个半角空格 = 2个全角空格
+      const fullWidthSpaceCount = Math.max(2, Math.ceil(totalHalfWidthEquivalent / 2));
+      fullWidthIndent = '\u3000'.repeat(fullWidthSpaceCount);
+    }
+    
+    // console.log('[段落HTML] 转换缩进:', {
+    //   original: { halfWidthCount, fullWidthCount, totalHalfWidthEquivalent },
+    //   converted: fullWidthIndent.length,
+    // });
+    
+    withIndent = withIndent.replace(/^([ \u3000]+)/, fullWidthIndent);
+    
+    // 验证替换后的结果
+    // const finalMatch = withIndent.match(/^([ \u3000]+)/);
+    // console.log('[段落HTML] 最终段首空格:', {
+    //   count: finalMatch?.[1].length ?? 0,
+    //   chars: finalMatch?.[1],
+    //   preview: withIndent.substring(0, 30),
+    // });
+  } else {
+    // 参考 legado：对所有段落统一添加段首缩进（两个全角空格 = 两个汉字宽度）
+    // 即使原文件没有段首空格，也添加标准中文排版缩进
+    withIndent = '\u3000\u3000' + withIndent;
+  }
+  
+  // 匹配每行开头的空格（换行后的行首，不包括段首）
+  // 这些行首空格也转换为全角空格
+  withIndent = withIndent.replace(/\n([ \u3000]+)/g, (_match, spaces) => {
+    const halfWidthCount = (spaces.match(/ /g) || []).length;
+    const fullWidthCount = (spaces.match(/\u3000/g) || []).length;
+    const totalHalfWidthEquivalent = halfWidthCount + fullWidthCount * 2;
+    const fullWidthSpaceCount = Math.max(1, Math.ceil(totalHalfWidthEquivalent / 2));
+    const fullWidthIndent = '\u3000'.repeat(fullWidthSpaceCount);
+    return '\n' + fullWidthIndent;
+  });
+  
+  // 现在处理转义和中文引号空格（在段首缩进处理之后）
+  // 重要：先转义，再处理引号，确保段首空格不被影响
+  const escaped = escapeHtmlForReader(withIndent);
+  
+  // 检查转义后的段首空格（已注释调试代码）
+  // const hasLeadingSpace = /^[ \u3000]+/.test(p);
+  // const hasLeadingSpaceAfterEscape = /^[\u3000]+/.test(escaped);
+  // if (hasLeadingSpaceAfterEscape) {
+  //   const leadingMatchAfterEscape = escaped.match(/^([\u3000]+)/);
+  //   console.log('[段落HTML] 转义后段首空格:', {
+  //     count: leadingMatchAfterEscape?.[1].length ?? 0,
+  //     chars: leadingMatchAfterEscape?.[1],
+  //     preview: escaped.substring(0, 30),
+  //   });
+  // } else if (hasLeadingSpace) {
+  //   console.warn('[段落HTML] 警告：段首空格在转义过程中丢失！', {
+  //     original: p.substring(0, 30),
+  //     afterEscape: escaped.substring(0, 30),
+  //     withIndent: withIndent.substring(0, 30),
+  //   });
+  // }
+  
+  const spaced = spacingAroundChineseQuotes(escaped);
+  
+  // 检查引号处理后的段首空格
+  // const hasLeadingSpaceAfterQuote = /^[\u3000]+/.test(spaced);
+  // if (hasLeadingSpaceAfterQuote) {
+  //   const leadingMatchAfterQuote = spaced.match(/^([\u3000]+)/);
+  //   console.log('[段落HTML] 引号处理后段首空格:', {
+  //     count: leadingMatchAfterQuote?.[1].length ?? 0,
+  //     chars: leadingMatchAfterQuote?.[1],
+  //     preview: spaced.substring(0, 30),
+  //   });
+  // } else if (hasLeadingSpaceAfterEscape) {
+  //   console.warn('[段落HTML] 警告：段首空格在引号处理过程中丢失！', {
+  //     afterEscape: escaped.substring(0, 30),
+  //     afterQuote: spaced.substring(0, 30),
+  //   });
+  // }
+  
+  return spaced.replace(/\n/g, '<br/>');
+}
+
+/**
+ * 阅读器内容加载骨架屏
+ * 不使用 Kobalte Skeleton（bg-primary/10 在阅读器主题背景上不可见），
+ * 改用 bg-current + opacity 继承主题文字色，确保在所有阅读器主题下都清晰可见。
+ * 无需额外 wrapper：父组件 ReaderContent 已提供主题背景和样式。
+ */
+function ReaderContentSkeleton() {
+  // 预生成段落配置，避免每次渲染时重新计算
+  const paragraphs = createMemo(() => {
+    return Array.from({ length: 8 }, () => {
+      const lineCount = Math.floor(Math.random() * 3) + 2; // 2-4 行
+      return Array.from({ length: lineCount }, () => {
+        return Math.floor(Math.random() * 30) + 70; // 70-100% 宽度
+      });
+    });
+  });
+
+  return (
+    <>
+      {/* 章节标题 skeleton */}
+      <div class="mb-6 flex items-center justify-center">
+        <div class="skeleton-bar h-7 w-48 rounded" />
+      </div>
+
+      {/* 段落 skeleton */}
+      <div class="space-y-5">
+        <For each={paragraphs()}>
+          {(lines) => (
+            <div class="space-y-2.5">
+              <For each={lines}>
+                {(width) => (
+                  <div
+                    class="skeleton-bar h-4 rounded"
+                    style={{ width: `${width}%` }}
+                  />
+                )}
+              </For>
+            </div>
+          )}
+        </For>
+      </div>
+    </>
+  );
+}
+
+/** 仅转义 & < >，不转义引号，避免中文引号「」"" 显示异常 */
+function escapeHtmlForReader(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** 左引号前、右引号后遇非空字符时加空格；左引号前若已是标点则不加空格（「」『』""） */
+/** 左引号前若为该类标点，则不插入空格 */
+const PUNCT_BEFORE_LEFT_QUOTE = /[，。、；：？！…—·）】》」』\u201D]/;
+
+function spacingAroundChineseQuotes(s: string): string {
+  return s
+    .replace(/([^\s])([「『\u201C])/g, (_, prev, q) =>
+      PUNCT_BEFORE_LEFT_QUOTE.test(prev) ? prev + q : prev + ' ' + q
+    )
+    .replace(/([」』\u201D])([^\s])/g, '$1 $2');
+}
