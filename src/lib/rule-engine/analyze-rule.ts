@@ -13,7 +13,7 @@ import { parseCss } from './css-parser';
 import { parseXPath } from './xpath-parser';
 import { parseJsonPath } from './jsonpath-parser';
 import { parseRegex } from './regex-parser';
-import { evalJs } from './js-sandbox';
+import { evalJs } from '@/lib/js-engine';
 
 /**
  * 规则模式

@@ -44,3 +44,8 @@ ehthumbs.db
 # Optional: 本地/临时（若需要）
 # *.local
 # .tmp/
+
+.cursor
+.shared
+
+docs

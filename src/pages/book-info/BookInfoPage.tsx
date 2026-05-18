@@ -9,7 +9,20 @@ import { createSignal, Show, onMount, For } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/PageHeader';
-import { BookOpenIcon, ChevronDownIcon, AddToShelfIcon, RemoveFromShelfIcon } from '@/components/icons';
+import {
+  BookOpenIcon,
+  ChevronDownIcon,
+  AddToShelfIcon,
+  RemoveFromShelfIcon,
+  BookCoverIcon,
+  AuthorIcon,
+  OriginIcon,
+  ChapterMetaIcon,
+  WordCountIcon,
+  UpdateTimeIcon,
+  TocMetaIcon,
+  XIcon,
+} from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import { hasBook } from '@/lib/database/books';
@@ -20,75 +33,6 @@ import { pageCacheStore } from '@/stores/page-cache';
 import { bookshelfStore } from '@/stores/bookshelf';
 import type { SearchBook } from '@/types';
 import type { Book } from '@/types';
-
-/* ─── 图标组件 ─── */
-
-function DefaultCoverIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('text-muted-foreground', props.class)} aria-hidden>
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      <path d="M8 7h3" /><path d="M8 11h6" />
-    </svg>
-  );
-}
-
-function AuthorIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function OriginIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      <path d="M2 12h20" />
-    </svg>
-  );
-}
-
-function ChapterIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
-
-function WordCountIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-    </svg>
-  );
-}
-
-function UpdateTimeIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
-
-function TocIcon(props: { class?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={cn('h-[18px] w-[18px] shrink-0', props.class)} aria-hidden>
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      <path d="M8 7h8M8 11h8M8 15h4" />
-    </svg>
-  );
-}
 
 /* ─── 封面图片组件 ─── */
 
@@ -113,7 +57,7 @@ function CoverImage(props: {
         when={props.coverUrl && !props.coverError}
         fallback={
           <div class="flex h-full w-full items-center justify-center">
-            <DefaultCoverIcon class="h-16 w-16" />
+            <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
           </div>
         }
       >
@@ -133,7 +77,7 @@ function CoverImage(props: {
 function InfoRow(props: { icon: any; label?: string; children: any; class?: string }) {
   return (
     <div class={cn('flex items-start gap-2 py-1 text-[13px] text-muted-foreground', props.class)}>
-      <props.icon class="text-muted-foreground shrink-0 mt-0.5" />
+      <props.icon class="h-[18px] w-[18px] text-muted-foreground shrink-0 mt-0.5" size={18} />
       <Show when={props.label}>
         <span class="shrink-0 text-foreground/70">{props.label}</span>
       </Show>
@@ -499,7 +443,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         </Show>
         {/* 最新章节 — 使用 isMeaningful 过滤 " • " 等无效值 */}
         <Show when={isMeaningful(currentBook().latestChapterTitle)}>
-          <InfoRow icon={ChapterIcon} label="最新：">
+          <InfoRow icon={ChapterMetaIcon} label="最新：">
             {currentBook().latestChapterTitle}
           </InfoRow>
         </Show>
@@ -513,7 +457,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         </Show>
         {/* 目录链接 */}
         <Show when={currentBook().tocUrl && /^https?:\/\//.test(currentBook().tocUrl)}>
-          <InfoRow icon={TocIcon} label="目录：">
+          <InfoRow icon={TocMetaIcon} label="目录：">
             <a
               href={currentBook().tocUrl}
               target="_blank"
@@ -857,9 +801,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
               class="absolute top-2 right-2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
               aria-label="关闭"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
+              <XIcon class="h-5 w-5" size={20} />
             </button>
           </div>
         </div>

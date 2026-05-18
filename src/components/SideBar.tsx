@@ -24,6 +24,8 @@ import {
   SettingsIcon,
   ImportIcon,
   GlobeIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "./icons";
 
 // 页面配置（与 Navigation 组件保持一致）
@@ -72,11 +74,8 @@ export function SideBar(props: SideBarProps) {
 
   return (
     <Sidebar
-      collapsible="icon" 
+      collapsible="icon"
       class="h-[calc(100vh-3.5rem)] top-14 bottom-0 border-r border-sidebar-border"
-      style={{
-        "--sidebar-width-icon": "3rem"
-      }}
     >
       <SidebarContent class="h-full overflow-y-auto">
         {/* 主菜单 */}
@@ -186,34 +185,12 @@ export function SideBar(props: SideBarProps) {
               when={isCollapsed()}
               fallback={
                 <>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110"
-                  >
-                    <path d="M18 18l-6-6 6-6" />
-                  </svg>
+                  <ChevronLeftIcon class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110" size={16} />
                   <span class="font-medium group-data-[collapsible=icon]:hidden">收起</span>
                 </>
               }
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110 group-data-[collapsible=icon]:mx-auto"
-              >
-                <path d="M10 18l6-6-6-6" />
-              </svg>
+              <ChevronRightIcon class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110 group-data-[collapsible=icon]:mx-auto" size={16} />
             </Show>
           </SidebarMenuButton>
         </SidebarMenuItem>

@@ -7,6 +7,7 @@ import { createSignal, onMount, onCleanup } from 'solid-js';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ChevronUpIcon } from '@/components/icons';
 
 interface ScrollToTopProps {
   /** 滚动容器元素（默认为 window），可以是元素、函数或 undefined */
@@ -121,19 +122,7 @@ export function ScrollToTop(props: ScrollToTopProps) {
           'hover:bg-primary/90',
           'h-10 w-10'
         )}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="h-5 w-5"
-          >
-            <path d="M12 19V5" />
-            <path d="M5 12l7-7 7 7" />
-          </svg>
+          <ChevronUpIcon class="h-5 w-5" size={20} />
           <span class="sr-only">回到顶部</span>
         </TooltipTrigger>
         <TooltipContent>回到顶部</TooltipContent>

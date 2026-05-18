@@ -72,7 +72,7 @@ export interface SourcesPageProps {
   onSourceSearch?: (source: BookSource) => void;
   /** 点击发现子项（分类/排行榜等），由 App 打开发现页或书籍列表 */
   onExploreSectionClick?: (source: BookSource, section: ExploreSection) => void;
-  /** 页内工具栏：新建/导入等（由导航栏「更多」提供，页内不展示按钮） */
+  /** 页内工具栏：新建/导入等（由 SourcesPageToolbar 提供，页内不展示按钮） */
   onSourcesNew?: () => void;
   onSourcesImportLocal?: () => void;
   onSourcesImportNetwork?: () => void;
@@ -579,7 +579,7 @@ export function SourcesPage(props: SourcesPageProps) {
   }
 
   return (
-    <div class="@container flex flex-col min-h-0 flex-1 w-full overflow-hidden">
+    <div class="@container flex flex-col min-h-0 flex-1 w-full overflow-hidden pt-2">
       {/* 主内容区：可滚动 */}
       <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pb-4">
       <Show when={error()}>

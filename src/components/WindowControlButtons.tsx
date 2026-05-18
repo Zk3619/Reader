@@ -18,6 +18,12 @@ import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { hideWindowAndSaveState, saveWindowStateBeforeExit } from "@/utils/window-state"
+import {
+  MinimizeWindowIcon,
+  MaximizeWindowIcon,
+  RestoreWindowIcon,
+  XIcon,
+} from "@/components/icons"
 
 export function WindowControlButtons() {
   const [isTauri, setIsTauri] = createSignal(false)
@@ -137,18 +143,7 @@ export function WindowControlButtons() {
         <div class="flex items-center gap-1 no-drag">
           <Tooltip>
             <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={minimizeWindow}>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="h-4 w-4"
-              >
-                <path d="M5 12h14" />
-              </svg>
+              <MinimizeWindowIcon class="h-4 w-4" size={16} />
               <span class="sr-only">最小化</span>
             </TooltipTrigger>
             <TooltipContent>最小化</TooltipContent>
@@ -157,33 +152,9 @@ export function WindowControlButtons() {
             <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={maximizeWindow}>
             <Show
               when={isMaximized()}
-              fallback={
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  class="h-4 w-4"
-                >
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-                </svg>
-              }
+              fallback={<MaximizeWindowIcon class="h-4 w-4" size={16} />}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="h-4 w-4"
-              >
-                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
-              </svg>
+              <RestoreWindowIcon class="h-4 w-4" size={16} />
             </Show>
             <span class="sr-only">{isMaximized() ? "还原" : "最大化"}</span>
             </TooltipTrigger>
@@ -194,18 +165,7 @@ export function WindowControlButtons() {
               ;(e.currentTarget as HTMLElement).blur()
               closeWindow(e)
             }}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="h-4 w-4"
-            >
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+            <XIcon class="h-4 w-4" size={16} />
             <span class="sr-only">关闭</span>
             </TooltipTrigger>
             <TooltipContent>关闭</TooltipContent>

@@ -23,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/WindowControlButtons';
 import { withBlurBefore, blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
+import { ChevronLeftIcon, ThemeLightIcon, ThemeDarkIcon } from '@/components/icons';
 import { isTauri, isMobile } from '@/lib/platform/detect';
 
 export interface PageHeaderAction {
@@ -204,19 +205,7 @@ export function PageHeader(props: PageHeaderProps) {
           aria-label="返回"
           class={cn(props.draggable && 'no-drag')}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="m15 18-6-6 6-6" />
-          </svg>
+          <ChevronLeftIcon class="h-5 w-5" size={20} />
         </Button>
       </Show>
 
@@ -289,34 +278,9 @@ export function PageHeader(props: PageHeaderProps) {
                 >
                   <Show
                     when={isDark()}
-                    fallback={
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        class="h-4 w-4"
-                      >
-                        <circle cx="12" cy="12" r="4" />
-                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                      </svg>
-                    }
+                    fallback={<ThemeLightIcon class="h-4 w-4" size={16} />}
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      class="h-4 w-4"
-                    >
-                      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-                    </svg>
+                    <ThemeDarkIcon class="h-4 w-4" size={16} />
                   </Show>
                   <span class="sr-only">{isDark() ? "切换到浅色模式" : "切换到深色模式"}</span>
                 </Toggle>

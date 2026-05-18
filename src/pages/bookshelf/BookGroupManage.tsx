@@ -27,7 +27,9 @@ import * as groupsDb from '@/lib/database/book-groups';
 import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/BookGroupFormDialog';
-import { RefreshIcon } from '@/components/icons';
+import { RefreshIcon, BookshelfIcon, GripVerticalIcon } from '@/components/icons';
+import { BookCoverPlaceholderIcon } from '@/components/book-group-cover-icon';
+import { PageToolbar } from '@/components/PageToolbar';
 import { showAppToast } from '@/components/AppToasts';
 import { getBooksDirectory } from '@/lib/local-book/import';
 import { getFileSystem } from '@/lib/platform/filesystem';
@@ -488,38 +490,34 @@ export function BookGroupManage(props: BookGroupManageProps) {
   }
 
   return (
-    <div class="w-full space-y-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-2xl font-bold text-foreground">分组管理</h2>
-          <p class="text-sm text-muted-foreground">
-            管理书架分组，调整显示顺序和设置
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
-          <Button
-            variant="default"
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              handleAdd();
-            }}
-            type="button"
-          >
-            添加分组
-          </Button>
-          <Button
-            variant="outline"
-            onClick={(e) => {
-              e.stopPropagation();
-              props.onClose?.();
-            }}
-          >
-            返回
-          </Button>
-        </div>
-      </div>
+    <div class="flex flex-col flex-1 min-h-0 w-full">
+      <PageToolbar
+        title="分组管理"
+        description="管理书架分组，调整显示顺序和设置"
+      >
+        <Button
+          variant="default"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            handleAdd();
+          }}
+          type="button"
+        >
+          添加分组
+        </Button>
+        <Button
+          variant="outline"
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onClose?.();
+          }}
+        >
+          返回
+        </Button>
+      </PageToolbar>
 
+      <div class="flex-1 min-h-0 overflow-y-auto pt-2 space-y-6 w-full">
       <Show when={error()}>
         <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
           {error()}
@@ -675,23 +673,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
                     )}
                   >
                   <div class="drag-handle cursor-move text-muted-foreground hover:text-foreground select-none">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      class="h-5 w-5"
-                    >
-                      <circle cx="9" cy="12" r="1" />
-                      <circle cx="9" cy="5" r="1" />
-                      <circle cx="9" cy="19" r="1" />
-                      <circle cx="15" cy="12" r="1" />
-                      <circle cx="15" cy="5" r="1" />
-                      <circle cx="15" cy="19" r="1" />
-                    </svg>
+                    <GripVerticalIcon class="h-5 w-5" size={20} />
                   </div>
 
                   <div class="flex h-10 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50 text-lg">
@@ -701,21 +683,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              class="h-5 w-5"
-                            >
-                              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                              <path d="M8 7h3" />
-                              <path d="M8 11h6" />
-                            </svg>
+                            <BookCoverPlaceholderIcon class="h-5 w-5" size={20} />
                           </span>
                         );
                       }
@@ -734,21 +702,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            class="h-5 w-5"
-                          >
-                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                            <path d="M8 7h3" />
-                            <path d="M8 11h6" />
-                          </svg>
+                          <BookCoverPlaceholderIcon class="h-5 w-5" size={20} />
                         </span>
                       );
                     })()}
@@ -876,7 +830,8 @@ export function BookGroupManage(props: BookGroupManageProps) {
 
       <Show when={!loading() && groups().length === 0}>
         <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
-          <div class="mb-4 text-5xl">📚</div>
+          <BookshelfIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
+
           <h3 class="mb-2 text-lg font-semibold text-foreground">
             暂无分组
           </h3>
@@ -894,6 +849,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
         onSuccess={loadGroups}
         onError={(msg) => setError(msg)}
       />
+      </div>
     </div>
   );
 }

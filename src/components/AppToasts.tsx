@@ -1,21 +1,10 @@
 /**
- * 应用级 Toast 通知组件
- * 基于 components/ui/toast 的基础组件，提供：
- * - 流畅的进入/退出动画
- * - 可选的进度条显示
- * - 统一的 Toast 体验
+ * 应用级 Toast 通知（基于 solid-sonner）
  */
 
 import type { JSX } from "solid-js"
-import { createSignal, Show, onMount } from "solid-js"
-import * as ToastPrimitive from "@kobalte/core/toast"
-import {
-  Toast,
-  ToastTitle,
-  ToastDescription,
-  ToastClose,
-  type ToastVariant,
-} from "@/components/ui/toast"
+import { createSignal } from "solid-js"
+import { toast, type ExternalToast } from "solid-sonner"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 
 const KEY_PERMANENT = "reader.immersiveToastDismissed"
@@ -24,6 +13,8 @@ const KEY_SESSION = "reader.immersiveToastDismissedSession"
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 export type ImmersiveToastChoice = "session" | "week" | "permanent" | ""
+
+export type ToastVariant = "default" | "destructive" | "success" | "warning" | "error"
 
 function persistChoice(choice: ImmersiveToastChoice) {
   if (typeof localStorage === "undefined" && typeof sessionStorage === "undefined") return
@@ -61,15 +52,27 @@ export function shouldShowImmersiveEnterToast(): boolean {
   return true
 }
 
+function toastOptions(props: {
+  description?: JSX.Element
+  duration?: number
+  persistent?: boolean
+}): ExternalToast {
+  const duration = props.persistent ? Number.POSITIVE_INFINITY : (props.duration ?? 5000)
+  const options: ExternalToast = { duration, closeButton: true }
+  if (props.description) {
+    options.description = props.description
+  }
+  return options
+}
+
+function resolveMessage(props: { title?: JSX.Element; description?: JSX.Element }): JSX.Element | string {
+  if (props.title) return props.title
+  if (props.description) return props.description
+  return ""
+}
+
 /**
  * 通用 Toast 通知函数
- * @param props Toast 配置选项
- * - title/description: 简单的标题和描述（与 children 互斥）
- * - children: 自定义内容（优先级高于 title/description）
- * - variant: Toast 样式变体
- * - duration: 显示时长（毫秒），persistent 为 true 时无效
- * - persistent: 是否持久显示（不自动关闭）
- * - showProgress: 是否显示进度条（仅在非持久化时有效）
  */
 export function showAppToast(props: {
   title?: JSX.Element
@@ -80,107 +83,51 @@ export function showAppToast(props: {
   persistent?: boolean
   showProgress?: boolean
 }) {
-  ToastPrimitive.toaster.show((data) => {
-    const duration = props.duration ?? 5000
-    const showProgress = props.showProgress ?? false
-    const hasCustomContent = !!props.children
-    
-    return (
-      <div class="toast-wrapper">
-        <AnimatedToastWrapper
-          toastId={data.toastId}
-          variant={props.variant ?? "default"}
-          persistent={props.persistent}
-          duration={props.persistent ? undefined : duration}
-        >
-          {hasCustomContent ? (
-            props.children
-          ) : (
-            <div class="grid gap-1">
-              {props.title && <ToastTitle>{props.title}</ToastTitle>}
-              {props.description && <ToastDescription>{props.description}</ToastDescription>}
-            </div>
-          )}
-          <Show when={showProgress && !props.persistent && duration > 0}>
-            <ToastProgressBar duration={duration} />
-          </Show>
-          <ToastClose />
-        </AnimatedToastWrapper>
-      </div>
-    )
-  })
-}
+  if (props.children) {
+    toast.custom(() => props.children!, toastOptions(props))
+    return
+  }
 
-/**
- * Toast 进度条组件
- * 通过 ref 设置 CSS 变量，避免内联样式
- */
-function ToastProgressBar(props: { duration: number }) {
-  let progressBarRef: HTMLDivElement | undefined
+  const message = resolveMessage(props)
+  if (!message) return
 
-  onMount(() => {
-    if (progressBarRef) {
-      progressBarRef.style.setProperty('--toast-duration', `${props.duration}ms`)
-    }
+  const options = toastOptions({
+    description: props.title && props.description ? props.description : undefined,
+    duration: props.duration,
+    persistent: props.persistent,
   })
 
-  return (
-    <div 
-      ref={progressBarRef}
-      class="absolute bottom-0 left-0 h-0.5 bg-current/30 opacity-0 transition-opacity duration-200 group-hover:opacity-100 toast-progress-bar"
-    />
-  )
+  const variant = props.variant ?? "default"
+  switch (variant) {
+    case "success":
+      toast.success(message, options)
+      break
+    case "warning":
+      toast.warning(message, options)
+      break
+    case "error":
+    case "destructive":
+      toast.error(message, options)
+      break
+    default:
+      toast(message, options)
+  }
 }
 
-/**
- * 带动画的 Toast 包装组件
- * 通过 CSS 类 toast-animated 配合 App.css 中的 @keyframes 实现流畅动画
- */
-function AnimatedToastWrapper(props: {
-  toastId: number
-  variant?: ToastVariant
-  persistent?: boolean
-  duration?: number
-  children?: JSX.Element
-}) {
-  return (
-    <Toast 
-      toastId={props.toastId} 
-      variant={props.variant}
-      persistent={props.persistent}
-      duration={props.duration}
-      class="toast-enhanced toast-animated"
-    >
-      {props.children}
-    </Toast>
-  )
-}
-
-/**
- * 沉浸模式进入提示 Toast
- * 使用通用组件 showAppToast，保持统一的动画和样式
- */
 export function showImmersiveEnterToast() {
-  showAppToast({
-    variant: "default",
-    persistent: true,
-    children: (
-      <ImmersiveToastContent />
-    ),
+  toast.custom(() => <ImmersiveToastContent />, {
+    duration: Number.POSITIVE_INFINITY,
+    closeButton: true,
   })
 }
 
-/**
- * 沉浸模式 Toast 内容组件
- * 需要在组件内部管理状态，所以单独提取
- */
 function ImmersiveToastContent() {
   const [choice, setChoice] = createSignal<ImmersiveToastChoice>("")
-  
+
   return (
-    <div class="grid gap-2">
-      <ToastTitle>已进入沉浸模式</ToastTitle>
-      <ToastDescription>可按 ESC 键退出</ToastDescription>
+    <div class="grid w-full min-w-[280px] gap-2">
+      <p class="text-sm font-medium leading-none">已进入沉浸模式</p>
+      <p class="text-sm text-muted-foreground">可按 ESC 键退出</p>
       <RadioGroup
         value={choice()}
         onChange={(value: string) => {

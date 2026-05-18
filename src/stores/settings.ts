@@ -10,6 +10,7 @@
  */
 
 import { createStore } from 'solid-js/store';
+import type { ShellLayoutPreference } from '@/lib/shell-layout';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 /**
@@ -30,6 +31,11 @@ export interface AppSettings {
   restoreWindowState: boolean;
   /** 减少动效（无障碍 / 偏好） */
   reduceMotion: boolean;
+  /**
+   * 宽屏（≥480px）下的壳层布局：桌面、移动，或自动（按运行环境）。
+   * 仅移动端且宽度不足 480px 时强制使用底栏。
+   */
+  shellLayout?: ShellLayoutPreference;
   /** 书籍存储目录（首次导入时设置） */
   booksDirectory?: string;
   /** 是否已设置书籍目录 */
@@ -59,6 +65,7 @@ const defaultAppSettings: AppSettings = {
   closeToTray: true,
   restoreWindowState: true,
   reduceMotion: false,
+  shellLayout: 'auto',
   booksDirectorySet: false,
   rememberImportAction: false,
 };
@@ -83,6 +90,9 @@ const [state, setState] = createStore<SettingsState>({
   loading: false,
   error: null,
 });
+
+/** 直接导出 store 根，供 createMemo 细粒度订阅（经 getter 访问可能不触发更新） */
+export const settingsState = state;
 
 /**
  * 设置存储键名
@@ -180,6 +190,10 @@ export const settingsStore = {
    */
   async setReduceMotion(reduceMotion: boolean): Promise<void> {
     await this.updateAppSettings({ reduceMotion });
+  },
+
+  async setShellLayout(shellLayout: ShellLayoutPreference): Promise<void> {
+    await this.updateAppSettings({ shellLayout });
   },
 
   /**

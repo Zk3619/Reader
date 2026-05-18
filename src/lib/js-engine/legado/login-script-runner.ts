@@ -1,5 +1,5 @@
 /**
- * 书源登录脚本执行环境（与 explore-script-runner 风格一致）
+ * 书源登录脚本执行环境（Legado with-scope + java.ajax 挂起/恢复）
  * 提供：result、baseUrl、host、source.getLoginInfo/putLoginInfo、getArgument/setArgument、
  * cookie、java（ajax、toast、longToast、androidId、startBrowserAwait）
  */
@@ -7,9 +7,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get as httpGet, post } from '@/lib/http';
 import { deleteCookie } from '@/lib/http/cookie-manager';
-import { resolveUrl } from './utils';
+import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { openUrlInApp } from '@/lib/platform/open-url';
+import { isQuickJSFallback } from '../core/runtime';
+import { createLoginInjector } from './login-inject';
+import { runLegadoScriptQuickJS } from './quickjs-runner';
+import { installScriptDateShim } from './script-date-shim';
+import { SuspendScript } from './suspend-script';
 
 const SCRIPT_TIMEOUT_MS = 20000;
 const STORAGE_PREFIX_LOGIN = 'reader_source_login_';
@@ -18,18 +23,6 @@ const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
 const ANDROID_ID_KEY = 'reader_login_android_id';
 
 const LOG_TAG = '[login-script]';
-
-/** 脚本内 java.ajax() 需同步返回响应体（Legado 行为），用挂起/恢复实现：抛出此错误后由 runner 等待请求完成并重跑脚本 */
-class SuspendScript extends Error {
-  constructor(
-    public promise: Promise<string>,
-    public writeIndex: number,
-    public resolvedUrl: string
-  ) {
-    super('SuspendScript');
-    this.name = 'SuspendScript';
-  }
-}
 
 /** Legado 格式：java.startBrowser 可能传入 "url,{json}"，只取逗号前的 URL 用于打开 */
 function urlForOpen(url: string): string {
@@ -236,6 +229,318 @@ function getScriptBaseUrl(source: BookSource): string {
   return '';
 }
 
+function parseLoginKeyFromResponse(
+  result: string,
+  baseUrl: string,
+  cookieStore: Map<string, string>,
+  resolvedUrl: string
+): void {
+  if (!result || !baseUrl || !/login|signin|auth/i.test(resolvedUrl)) return;
+  try {
+    const json = JSON.parse(result) as Record<string, unknown>;
+    let keyVal = '';
+    if (typeof json.key === 'string') keyVal = json.key;
+    else if (typeof json.token === 'string') keyVal = json.token;
+    else if (typeof json.accessToken === 'string') keyVal = json.accessToken;
+    else if (typeof json.cookie === 'string') keyVal = json.cookie;
+    else if (typeof json.data === 'string') keyVal = json.data;
+    else if (json.data && typeof json.data === 'object' && json.data !== null) {
+      const d = json.data as Record<string, unknown>;
+      keyVal =
+        typeof d.key === 'string'
+          ? d.key
+          : typeof d.token === 'string'
+            ? d.token
+            : typeof d['密钥'] === 'string'
+              ? (d['密钥'] as string)
+              : '';
+    }
+    if (!keyVal && typeof json['密钥'] === 'string') keyVal = json['密钥'] as string;
+    if (keyVal) {
+      const deviceId = getOrCreateAndroidId();
+      const cookieValue =
+        /qttoken=/.test(keyVal) || /^[a-zA-Z0-9_-]+=/.test(keyVal)
+          ? keyVal
+          : `qttoken=${keyVal};deviceId=${deviceId}`;
+      cookieStore.set(baseUrl, cookieValue);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** QuickJS 执行登录脚本；成功返回 true，失败返回 false 以降级 Function */
+async function tryRunLoginScriptQuickJS(
+  source: BookSource,
+  options: RunLoginScriptOptions,
+  keys: { loginKey: string; argsKey: string; cookiesKey: string; baseUrl: string; loginUrlScript: string }
+): Promise<boolean> {
+  if (isQuickJSFallback()) return false;
+
+  const { formValues, action, onToast } = options;
+  const { loginKey, argsKey, cookiesKey, baseUrl, loginUrlScript } = keys;
+
+  let suppressResumeToast = false;
+  const isWaitingToast = (msg?: string) =>
+    typeof msg === 'string' && (/正在检测|请稍等|正在登录中/.test(msg));
+
+  const toast = (msg?: string) => {
+    if (suppressResumeToast && isWaitingToast(msg)) return;
+    if (typeof msg === 'string' && onToast) onToast(msg, false);
+  };
+  const longToast = (msg?: string) => {
+    if (suppressResumeToast && isWaitingToast(msg)) return;
+    if (typeof msg === 'string' && onToast) onToast(msg, true);
+  };
+
+  const cookieStore = new Map<string, string>();
+  try {
+    const raw = localStorage.getItem(cookiesKey);
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, string>;
+      if (obj && typeof obj === 'object') {
+        Object.entries(obj).forEach(([k, v]) => {
+          if (typeof v === 'string') cookieStore.set(k, v);
+        });
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const cookieObj = {
+    _store: cookieStore,
+    getCookie(url: string): string {
+      return this._store.get(url || baseUrl) ?? '';
+    },
+    setCookie(url: string, value: string): void {
+      this._store.set(url || baseUrl, value);
+    },
+    removeCookie(url: string): void {
+      this._store.delete(url || baseUrl);
+    },
+    getKey(cookieStrOrUrl: string, keyName?: string): string {
+      let s: string;
+      if (keyName != null && keyName !== '') {
+        s = this.getCookie(cookieStrOrUrl);
+      } else {
+        s = String(cookieStrOrUrl ?? '').trim();
+      }
+      if (!s) return '';
+      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
+      for (const part of s.split(';')) {
+        const trimmed = part.trim();
+        if (trimmed.includes(searchKey)) {
+          const eq = trimmed.indexOf('=');
+          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
+        }
+      }
+      return '';
+    },
+  };
+
+  const pending: Promise<unknown>[] = [];
+  let lastAjaxDurationMs: number | undefined;
+
+  const jsLib =
+    typeof (source as Record<string, unknown>).jsLib === 'string'
+      ? ((source as Record<string, unknown>).jsLib as string)
+      : '';
+
+  const fallbackFunctions =
+    'function getArguments(a, k) { try { a = JSON.parse(a); } catch(e) { a = {}; } return k ? a[k] : a; }';
+  const fullScript = [fallbackFunctions, jsLib ? jsLib + '\n' : '', loginUrlScript].join('\n');
+  const scriptThenAction = `${fullScript}\n; ${(action || '').trim()}`;
+
+  const injector = createLoginInjector({
+    baseUrl,
+    formValues,
+    host: [baseUrl],
+    resolveUrl,
+    getArgument: (key) => {
+      try {
+        const raw = localStorage.getItem(argsKey);
+        if (!raw) return '';
+        return (JSON.parse(raw) as Record<string, string>)[key] ?? '';
+      } catch {
+        return '';
+      }
+    },
+    setArgument: (key, value) => {
+      try {
+        const raw = localStorage.getItem(argsKey) ?? '{}';
+        const obj = (JSON.parse(raw) as Record<string, string>) || {};
+        obj[key] = value;
+        localStorage.setItem(argsKey, JSON.stringify(obj));
+      } catch (e) {
+        console.warn(LOG_TAG, 'setArgument failed:', e);
+      }
+    },
+    putLoginInfo: (jsonStr) => {
+      try {
+        localStorage.setItem(loginKey, jsonStr);
+      } catch (e) {
+        console.warn(LOG_TAG, 'putLoginInfo failed:', e);
+      }
+    },
+    cookie: cookieObj,
+    source: {
+      getVariable: (_key?: string) => {
+        try {
+          const raw = localStorage.getItem(argsKey);
+          if (raw != null && raw !== '') return raw;
+        } catch {
+          /* ignore */
+        }
+        const header = (source as Record<string, unknown>).header;
+        return typeof header === 'string' && header ? header : '{}';
+      },
+      setVariable: (val?: string) => {
+        try {
+          if (typeof val === 'string') localStorage.setItem(argsKey, val);
+        } catch (e) {
+          console.warn(LOG_TAG, 'source.setVariable failed:', e);
+        }
+      },
+      getLoginInfo: () => {
+        try {
+          return localStorage.getItem(loginKey) ?? '{}';
+        } catch {
+          return '{}';
+        }
+      },
+    },
+    java: {
+      toast,
+      longToast,
+      log: (...args) => {
+        console.warn(LOG_TAG, 'script log', ...args);
+        return args[0];
+      },
+      getLastAjaxDuration: () => lastAjaxDurationMs,
+      androidId: getOrCreateAndroidId,
+      timeFormat: (timestampMs) => {
+        const d = new Date(timestampMs);
+        if (isNaN(d.getTime())) return '';
+        const y = d.getFullYear();
+        const M = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const h = String(d.getHours()).padStart(2, '0');
+        const m = String(d.getMinutes()).padStart(2, '0');
+        const s = String(d.getSeconds()).padStart(2, '0');
+        return `${y}-${M}-${day} ${h}:${m}:${s}`;
+      },
+      startBrowser: (url) => {
+        const raw = (url || '').trim();
+        const toOpen = raw.startsWith('data:') ? raw : urlForOpen(raw);
+        const resolved = baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
+        if (onToast) {
+          onToast(
+            isOpenableUrl(resolved)
+              ? `正在打开: ${resolved.slice(0, 50)}…`
+              : `[startBrowser] URL 无效: ${resolved.slice(0, 40)}`,
+            false
+          );
+        }
+        let cookieStr = cookieObj.getCookie(resolved) || (baseUrl ? cookieObj.getCookie(baseUrl) : '');
+        if (!cookieStr && resolved.startsWith('http')) {
+          try {
+            cookieStr = cookieObj.getCookie(new URL(resolved).origin);
+          } catch {
+            /* ignore */
+          }
+        }
+        pending.push(
+          isOpenableUrl(resolved)
+            ? openUrlWithOptionalCookies(resolved, cookieStr, '书源设置')
+            : Promise.resolve()
+        );
+      },
+      base64Encode: (str) => {
+        try {
+          return btoa(unescape(encodeURIComponent(String(str ?? ''))));
+        } catch {
+          return '';
+        }
+      },
+      base64Decode: (str) => {
+        try {
+          return decodeURIComponent(escape(atob(String(str ?? ''))));
+        } catch {
+          return '';
+        }
+      },
+      request: (resolvedUrl, call) =>
+        requestInScript(resolvedUrl, { ...call, source }),
+    },
+  });
+
+  try {
+    try {
+      localStorage.setItem(loginKey, JSON.stringify(formValues));
+    } catch {
+      /* ignore */
+    }
+
+    suppressResumeToast = false;
+    await runLegadoScriptQuickJS({
+      script: fullScript,
+      baseUrl,
+      timeoutMs: SCRIPT_TIMEOUT_MS,
+      mode: 'suspend',
+      inject: injector,
+      wrapCatchRethrow: false,
+    });
+    while (pending.length > 0) {
+      await Promise.all(pending.splice(0, pending.length));
+    }
+
+    suppressResumeToast = true;
+    await runLegadoScriptQuickJS({
+      script: scriptThenAction,
+      baseUrl,
+      timeoutMs: SCRIPT_TIMEOUT_MS,
+      mode: 'suspend',
+      inject: (vm, rt) => {
+        injector(vm, rt);
+        lastAjaxDurationMs = rt.coordinator.lastAjaxDurationMs;
+      },
+      wrapCatchRethrow: true,
+      onAjaxSettled: (url, body) => {
+        lastAjaxDurationMs = undefined;
+        parseLoginKeyFromResponse(body, baseUrl, cookieStore, url);
+        if (/login|signin|auth/i.test(url)) {
+          const short = /(\d{3})\s*:?/.exec(body)?.[1] ?? body.slice(0, 40);
+          if (body && !body.trim().startsWith('{') && onToast) {
+            onToast(`登录请求失败: ${short}`, true);
+          }
+        }
+      },
+    });
+    while (pending.length > 0) {
+      await Promise.all(pending.splice(0, pending.length));
+    }
+
+    try {
+      const obj: Record<string, string> = {};
+      cookieStore.forEach((v, k) => {
+        obj[k] = v;
+      });
+      if (Object.keys(obj).length > 0) {
+        localStorage.setItem(cookiesKey, JSON.stringify(obj));
+      }
+    } catch (e) {
+      console.warn(LOG_TAG, 'QuickJS persist cookies failed', e);
+    }
+
+    console.warn(LOG_TAG, 'runLoginScript QuickJS 完成');
+    return true;
+  } catch (e) {
+    console.warn(LOG_TAG, 'QuickJS 登录脚本失败，降级 Function', e);
+    return false;
+  }
+}
+
 export async function runLoginScript(
   source: BookSource,
   options: RunLoginScriptOptions
@@ -267,7 +572,23 @@ export async function runLoginScript(
     }
   }
 
+  if (
+    await tryRunLoginScriptQuickJS(source, options, {
+      baseUrl,
+      loginUrlScript,
+      loginKey,
+      argsKey,
+      cookiesKey,
+    })
+  ) {
+    return;
+  }
+
   const ajaxCache = new Map<string, string>();
+  /** 各 URL 真实 ajax 耗时（ms），供缓存命中时恢复测延迟 */
+  const ajaxDurationCache = new Map<string, number>();
+  const { PatchedDate, applyAjaxDuration } = installScriptDateShim();
+
   let pending: Promise<unknown>[] = [];
   /** 恢复执行时仅屏蔽「正在检测」「请稍等」类重复提示，不屏蔽检测/登录结果通知 */
   let suppressResumeToast = false;
@@ -345,6 +666,7 @@ export async function runLoginScript(
   };
 
   const scopeObj: Record<string, unknown> = {
+    Date: PatchedDate,
     result: { ...formValues },
     baseUrl,
     host: [baseUrl],
@@ -353,7 +675,24 @@ export async function runLoginScript(
     _ajaxWriteIndex: 0,
     /** 最近一次 ajax 的真实耗时（ms），供脚本显示「解析耗时」；因重跑时从缓存返回，Date.now() 差值为 ~0 */
     __lastAjaxDurationMs__: undefined as number | undefined,
+  };
 
+  function recordAjaxDuration(resolvedUrl: string, durationMs: number) {
+    if (durationMs < 0) return;
+    ajaxDurationCache.set(resolvedUrl, durationMs);
+    scopeObj.__lastAjaxDurationMs__ = durationMs;
+    applyAjaxDuration(durationMs);
+  }
+
+  function restoreAjaxDurationForUrl(resolvedUrl: string) {
+    const d = ajaxDurationCache.get(resolvedUrl);
+    if (d != null && d >= 0) {
+      scopeObj.__lastAjaxDurationMs__ = d;
+      applyAjaxDuration(d);
+    }
+  }
+
+  Object.assign(scopeObj, {
     source: {
       /** 书源脚本用 getVariable() 取“参数”JSON（server/tab/sources 等），须与 setVariable 持久化到同一 argsKey，否则 getArgument('server') 为空导致登录请求 404 */
       getVariable(_key?: string): string {
@@ -587,6 +926,7 @@ export async function runLoginScript(
         const readIdx = scopeObj._ajaxReadIndex as number;
         if (results[readIdx] !== undefined) {
           scopeObj._ajaxReadIndex = readIdx + 1;
+          restoreAjaxDurationForUrl(resolvedUrl);
           const out = results[readIdx];
           if (callback) {
             try {
@@ -606,6 +946,7 @@ export async function runLoginScript(
         });
 
         if (ajaxCache.has(resolvedUrl)) {
+          restoreAjaxDurationForUrl(resolvedUrl);
           const cached = ajaxCache.get(resolvedUrl)!;
           if (callback) {
             try {
@@ -666,10 +1007,10 @@ export async function runLoginScript(
           body,
           source,
         });
-        throw new SuspendScript(p, writeIdx, resolvedUrl);
+        throw new SuspendScript(p, writeIdx, resolvedUrl, Date.now());
       },
     },
-  };
+  });
 
   // 防止书源 jsLib/loginUrl 中覆盖 java（导致 java.timeFormat 等丢失），锁定为不可写
   Object.defineProperty(scopeObj, 'java', {
@@ -741,7 +1082,6 @@ export async function runLoginScript(
         } catch (e) {
           if (e instanceof SuspendScript) {
             suppressResumeToast = true;
-            const requestStart = Date.now();
             let result = '';
             try {
               result = await e.promise;
@@ -752,7 +1092,8 @@ export async function runLoginScript(
               const short = /(\d{3})\s*:?/.exec(msg)?.[1] ?? msg.slice(0, 40);
               if (onToast) onToast(`登录请求失败: ${short}`, true);
             }
-            scopeObj.__lastAjaxDurationMs__ = Date.now() - requestStart;
+            const durationMs = Date.now() - e.requestStart;
+            recordAjaxDuration(e.resolvedUrl, durationMs);
             (scopeObj._ajaxResults as string[])[e.writeIndex] = result ?? '';
             ajaxCache.set(e.resolvedUrl, result);
             const isLoginUrl = /login|signin|auth/i.test(e.resolvedUrl);

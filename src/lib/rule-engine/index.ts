@@ -19,4 +19,4 @@ export { parseCss } from './css-parser';
 export { parseXPath } from './xpath-parser';
 export { parseJsonPath } from './jsonpath-parser';
 export { parseRegex } from './regex-parser';
-export { evalJs, initJsSandbox, type JsContext } from './js-sandbox';
+export { evalJs, initJsSandbox, type JsContext } from '@/lib/js-engine';

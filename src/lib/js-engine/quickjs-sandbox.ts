@@ -1,86 +1,41 @@
 /**
- * JavaScript沙箱
- * 对应 legado 项目的 JS 执行功能
- *
- * 优先从固定 URL /quickjs/emscripten-module.wasm 加载 WASM（由 Vite 正确提供），
- * 失败时再试默认 getQuickJS()；若仍失败则降级为原生 Function 执行。
+ * QuickJS WASM 沙箱：规则解析中的 @js: 片段
+ * 对应 legado 项目的 Rhino/QuickJS 规则 JS 执行
  */
 
+import type { QuickJSContext } from 'quickjs-emscripten';
 import {
-  getQuickJS,
-  newQuickJSWASMModuleFromVariant,
-  newVariant,
-  RELEASE_SYNC,
-  type QuickJSContext,
-} from 'quickjs-emscripten';
+  createQuickJSContext,
+  initQuickJSRuntime,
+  isQuickJSFallback,
+  setGlobalString,
+} from './core/runtime';
 
-/** 由 Vite 插件/静态复制提供的 QuickJS WASM 路径，避免 node_modules 请求被 SPA 回退成 HTML */
-const QUICKJS_WASM_URL = '/quickjs/emscripten-module.wasm';
-
-let quickJS: Awaited<ReturnType<typeof getQuickJS>> | null = null;
-/** WASM 加载失败时使用原生执行（无沙箱隔离，仅用于降级） */
-let useFallback = false;
-let initPromise: Promise<void> | null = null;
-
-/**
- * JS执行上下文
- */
 export interface JsContext {
-  /** 上一步结果 */
   result: string;
-  /** 基础URL */
   baseUrl: string;
-  /** 书籍信息 */
   book?: Record<string, unknown>;
-  /** 书源信息 */
   source?: Record<string, unknown>;
-  /** 章节信息 */
   chapter?: Record<string, unknown>;
 }
 
-/**
- * 初始化QuickJS引擎
- * 先尝试从 /quickjs/emscripten-module.wasm 加载，失败则用默认方式，再失败则启用原生降级
- */
 export async function initJsSandbox(): Promise<void> {
-  if (quickJS || useFallback) return;
-  if (initPromise) {
-    await initPromise;
-    return;
-  }
-  initPromise = (async () => {
-    try {
-      const variant = newVariant(RELEASE_SYNC, { wasmLocation: QUICKJS_WASM_URL });
-      quickJS = await newQuickJSWASMModuleFromVariant(variant);
-    } catch (e1) {
-      try {
-        quickJS = await getQuickJS();
-      } catch (e2) {
-        console.warn('[js-sandbox] QuickJS WASM 加载失败，将使用原生执行降级:', e2);
-        useFallback = true;
-      }
-    }
-  })();
-  await initPromise;
+  await initQuickJSRuntime();
 }
 
-/**
- * 在沙箱中执行JavaScript代码
- */
+export function isJsSandboxFallback(): boolean {
+  return isQuickJSFallback();
+}
+
 export async function evalJs(code: string, context: JsContext): Promise<string | null> {
-  if (!code) {
-    return null;
-  }
+  if (!code) return null;
 
   try {
-    if (!quickJS && !useFallback) {
-      await initJsSandbox();
+    await initQuickJSRuntime();
+    if (!isQuickJSFallback()) {
+      const out = await evalJsQuickJS(code, context);
+      if (out !== null) return out;
     }
-
-    if (quickJS) {
-      return await evalJsQuickJS(code, context);
-    }
-
     return evalJsFallback(code, context);
   } catch (error) {
     console.error('JS执行错误:', error, '代码:', code);
@@ -89,7 +44,9 @@ export async function evalJs(code: string, context: JsContext): Promise<string |
 }
 
 async function evalJsQuickJS(code: string, context: JsContext): Promise<string | null> {
-  const vm = quickJS!.newContext();
+  const vm = createQuickJSContext();
+  if (!vm) return null;
+
   try {
     injectContext(vm, context);
     injectUtils(vm);
@@ -110,10 +67,6 @@ async function evalJsQuickJS(code: string, context: JsContext): Promise<string |
   }
 }
 
-/**
- * 原生降级：用 new Function 注入上下文执行，供 WASM 不可用时使用。
- * 与 QuickJS 一致：若最后一行像表达式（非声明/控制），则作为返回值。
- */
 function evalJsFallback(code: string, context: JsContext): string | null {
   const java = {
     base64Encode(str: string): string {
@@ -134,24 +87,28 @@ function evalJsFallback(code: string, context: JsContext): string | null {
     },
     hexDecodeToString(hex: string): string {
       try {
-        const bytes = new Uint8Array((hex.match(/.{1,2}/g) || []).map(b => parseInt(b, 16)));
+        const bytes = new Uint8Array((hex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)));
         return new TextDecoder('utf-8').decode(bytes);
       } catch {
         return String(hex);
       }
     },
-    log(..._args: unknown[]) { /* no-op */ },
-    toast(..._args: unknown[]) { /* no-op */ },
-    longToast(..._args: unknown[]) { /* no-op */ },
-    put(_key: string, _val: unknown) { /* no-op */ },
-    get(_key: string) { return ''; },
+    log(..._args: unknown[]) {},
+    toast(..._args: unknown[]) {},
+    longToast(..._args: unknown[]) {},
+    put(_key: string, _val: unknown) {},
+    get(_key: string) {
+      return '';
+    },
   };
-  // 若 result 是合法 JSON 对象/数组，则解析为对象，与 QuickJS 路径行为一致
+
   let parsedResult: unknown = context.result;
   try {
     const tmp = JSON.parse(context.result);
     if (typeof tmp === 'object' && tmp !== null) parsedResult = tmp;
-  } catch { /* 保留字符串 */ }
+  } catch {
+    /* 保留字符串 */
+  }
 
   const scope = {
     result: parsedResult,
@@ -200,22 +157,14 @@ function evalJsFallback(code: string, context: JsContext): string | null {
   }
 }
 
-/**
- * 注入上下文变量
- */
 function injectContext(vm: QuickJSContext, context: JsContext): void {
-  // 注入result —— 若是合法 JSON 则解析为对象，否则保留字符串
-  // legado 规则中 JS 代码经常通过 result.field 访问属性，要求 result 是对象
   const resultStr = context.result;
-  const safeResultStr = JSON.stringify(resultStr); // 正确转义字符串
-  vm.evalCode(`var result = (function(){ try { var _r = JSON.parse(${safeResultStr}); return (typeof _r === 'object' && _r !== null) ? _r : ${safeResultStr}; } catch(e) { return ${safeResultStr}; } })();`);
+  const safeResultStr = JSON.stringify(resultStr);
+  vm.evalCode(
+    `var result = (function(){ try { var _r = JSON.parse(${safeResultStr}); return (typeof _r === 'object' && _r !== null) ? _r : ${safeResultStr}; } catch(e) { return ${safeResultStr}; } })();`
+  );
+  setGlobalString(vm, 'baseUrl', context.baseUrl);
 
-  // 注入baseUrl
-  const baseUrlHandle = vm.newString(context.baseUrl);
-  vm.setProp(vm.global, 'baseUrl', baseUrlHandle);
-  baseUrlHandle.dispose();
-
-  // 注入book
   if (context.book) {
     const bookHandle = vm.newObject();
     for (const [key, value] of Object.entries(context.book)) {
@@ -227,7 +176,6 @@ function injectContext(vm: QuickJSContext, context: JsContext): void {
     bookHandle.dispose();
   }
 
-  // 注入source
   if (context.source) {
     const sourceHandle = vm.newObject();
     for (const [key, value] of Object.entries(context.source)) {
@@ -239,7 +187,6 @@ function injectContext(vm: QuickJSContext, context: JsContext): void {
     sourceHandle.dispose();
   }
 
-  // 注入chapter
   if (context.chapter) {
     const chapterHandle = vm.newObject();
     for (const [key, value] of Object.entries(context.chapter)) {
@@ -252,51 +199,31 @@ function injectContext(vm: QuickJSContext, context: JsContext): void {
   }
 }
 
-/**
- * 注入工具函数
- */
 function injectUtils(vm: QuickJSContext): void {
-  // QuickJS 自带 JSON.parse / JSON.stringify，无需覆盖
-
-  // 注入常用工具函数 + java 对象（legado 规则常用 java.base64Encode / java.hexDecodeToString）
-  // 重要：base64Encode 必须先将 UTF-16 字符串转为 UTF-8 字节再编码，
-  //       否则中文等多字节字符只保留低 8 位会被截断（legado 的 Java 实现用 UTF-8 字节）
-  const utilsCode = `
+  vm.evalCode(`
     var __b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-
-    /** 将 JS 字符串转为 UTF-8 字节数组 */
     function __strToUtf8(str) {
       var utf8 = [];
       for (var i = 0; i < str.length; i++) {
         var c = str.charCodeAt(i);
-        if (c < 0x80) {
-          utf8.push(c);
-        } else if (c < 0x800) {
-          utf8.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
-        } else if (c >= 0xd800 && c <= 0xdbff) {
-          // 代理对 (surrogate pair)
+        if (c < 0x80) utf8.push(c);
+        else if (c < 0x800) utf8.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+        else if (c >= 0xd800 && c <= 0xdbff) {
           var hi = c, lo = str.charCodeAt(++i);
           var cp = ((hi - 0xd800) << 10) + (lo - 0xdc00) + 0x10000;
           utf8.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
-        } else {
-          utf8.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
-        }
+        } else utf8.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
       }
       return utf8;
     }
-
-    /** 将 UTF-8 字节数组转为 JS 字符串 */
     function __utf8ToStr(bytes) {
       var out = '', i = 0;
       while (i < bytes.length) {
         var b = bytes[i++];
-        if (b < 0x80) {
-          out += String.fromCharCode(b);
-        } else if ((b & 0xe0) === 0xc0) {
-          out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i++] & 0x3f));
-        } else if ((b & 0xf0) === 0xe0) {
-          out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
-        } else if ((b & 0xf8) === 0xf0) {
+        if (b < 0x80) out += String.fromCharCode(b);
+        else if ((b & 0xe0) === 0xc0) out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i++] & 0x3f));
+        else if ((b & 0xf0) === 0xe0) out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+        else if ((b & 0xf8) === 0xf0) {
           var cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
           cp -= 0x10000;
           out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
@@ -304,7 +231,6 @@ function injectUtils(vm: QuickJSContext): void {
       }
       return out;
     }
-
     function base64Encode(str) {
       if (typeof str !== 'string') str = String(str);
       var bytes = __strToUtf8(str);
@@ -319,7 +245,6 @@ function injectUtils(vm: QuickJSContext): void {
       }
       return out;
     }
-
     function base64Decode(str) {
       if (typeof str !== 'string') str = String(str);
       var bytes = [], i = 0, len = str.length, a, b, c, d;
@@ -332,18 +257,12 @@ function injectUtils(vm: QuickJSContext): void {
       }
       return __utf8ToStr(bytes);
     }
-
-    /** legado: java.hexDecodeToString — 将 hex 编码的字节序列还原为 UTF-8 字符串 */
     function hexDecodeToString(hex) {
       if (typeof hex !== 'string') hex = String(hex);
       var bytes = [];
-      for (var i = 0; i < hex.length; i += 2) {
-        bytes.push(parseInt(hex.substr(i, 2), 16));
-      }
+      for (var i = 0; i < hex.length; i += 2) bytes.push(parseInt(hex.substr(i, 2), 16));
       return __utf8ToStr(bytes);
     }
-
-    function md5(str) { return str; }
     var java = {
       base64Encode: base64Encode,
       base64Decode: base64Decode,
@@ -354,6 +273,5 @@ function injectUtils(vm: QuickJSContext): void {
       put: function() {},
       get: function(key) { return ''; },
     };
-  `;
-  vm.evalCode(utilsCode);
+  `);
 }

@@ -821,6 +821,101 @@ li[role="status"].toast-animated[data-closed],
   margin-top: 0.5rem;
 }
 
+/* Sonner：挂到 body，高于 Dialog（z-110），模态打开时仍可点击 */
+.reader-toast-host {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.reader-toast-host [data-sonner-toaster] {
+  pointer-events: auto;
+}
+
+/* Sonner：关闭按钮置于通知内部右上角（覆盖默认边框外偏移） */
+[data-sonner-toaster][dir='ltr'] {
+  --toast-close-button-start: unset;
+  --toast-close-button-end: 0.75rem;
+  --toast-close-button-transform: none;
+}
+
+[data-sonner-toaster][dir='rtl'] {
+  --toast-close-button-start: 0.75rem;
+  --toast-close-button-end: unset;
+  --toast-close-button-transform: none;
+}
+
+[data-sonner-toast][data-styled='true'] [data-close-button] {
+  top: 0.75rem;
+  left: unset;
+  right: var(--toast-close-button-end, 0.75rem);
+  transform: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+[data-sonner-toast][data-styled='true'] [data-close-button] svg {
+  width: 12px;
+  height: 12px;
+}
+
+[data-sonner-toast][data-styled='true']:hover [data-close-button],
+[data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+[data-sonner-toast][data-styled='true']:hover [data-close-button]:hover,
+[data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover {
+  background: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--border));
+  color: hsl(var(--destructive));
+}
+
+[data-sonner-toast][data-styled='true']:hover [data-close-button]:hover svg,
+[data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover svg {
+  color: hsl(var(--destructive));
+}
+
+[data-rich-colors='true'][data-sonner-toast][data-styled='true'] [data-close-button] {
+  background: transparent;
+  border-color: transparent;
+  color: hsl(var(--muted-foreground));
+}
+
+[data-rich-colors='true'][data-sonner-toast][data-styled='true']:hover [data-close-button]:hover,
+[data-rich-colors='true'][data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover {
+  background: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--border));
+  color: hsl(var(--destructive));
+}
+
+[data-sonner-toaster][dir='rtl'] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  right: unset;
+  left: var(--toast-close-button-start, 0.75rem);
+}
+
+[data-sonner-toast][data-styled='true']:has([data-close-button]) {
+  padding-right: 2.5rem;
+}
+
+[data-sonner-toaster][dir='rtl'] [data-sonner-toast][data-styled='true']:has([data-close-button]) {
+  padding-right: 16px;
+  padding-left: 2.5rem;
+}
+
 /* 动画工具类 */
 .fade-in {
   animation-name: fade-in;

@@ -5,7 +5,7 @@
  * - 下拉框/标签：默认显示「全部」书籍，分组名在导航栏以下拉/标签切换，不显示分组页
  */
 
-import { createSignal, For, Show, onMount, onCleanup, createEffect, untrack, createMemo } from 'solid-js';
+import { createSignal, For, Show, onMount, onCleanup, createEffect, untrack, createMemo, type JSX } from 'solid-js';
 import Sortable from 'sortablejs';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { bookshelfStore } from '@/stores/bookshelf';
@@ -26,7 +26,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
-import { RefreshIcon, ChevronLeftIcon } from '@/components/icons';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/icons';
 import { showAppToast } from '@/components/AppToasts';
 import { getBooksDirectory } from '@/lib/local-book/import';
 import { getFileSystem } from '@/lib/platform/filesystem';
@@ -35,6 +36,8 @@ import { importLocalBookFromContent, isLocalBook } from '@/lib/local-book';
 import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
+import { PageToolbar } from '@/components/PageToolbar';
+import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/BookshelfGroupNav';
 
 export interface BookShelfProps {
   /** 分组加载完成后回调，供导航栏下拉/标签使用 */
@@ -43,10 +46,13 @@ export interface BookShelfProps {
   onGroupCountsLoaded?: (counts: Record<number, number>) => void;
   /** 点击书籍时打开阅读器 */
   onOpenBook?: (book: Book) => void;
+  /** 页面工具栏右侧操作区（更多菜单等） */
+  toolbarActions?: JSX.Element;
 }
 
 export function BookShelf(props: BookShelfProps) {
   const [groups, setGroups] = createSignal<BookGroup[]>([]);
+  const [groupBookCounts, setGroupBookCounts] = createSignal<Record<number, number>>({});
   const [books, setBooks] = createSignal<Book[]>([]);
   const [booksLoading, setBooksLoading] = createSignal(false);
   const [booksError, setBooksError] = createSignal<string | null>(null);
@@ -54,6 +60,7 @@ export function BookShelf(props: BookShelfProps) {
   const [bookToEdit, setBookToEdit] = createSignal<Book | null>(null);
   const [bookToDelete, setBookToDelete] = createSignal<Book | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
+  const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
 
   const groupStyle = () => bookshelfLayoutStore.settings.groupStyle;
   const showGroupList = () => bookshelfStore.state.showGroupList;
@@ -89,14 +96,15 @@ export function BookShelf(props: BookShelfProps) {
   }
 
   async function loadGroupCounts(groupsList: BookGroup[]) {
-    if (!props.onGroupCountsLoaded || groupsList.length === 0) return;
+    if (groupsList.length === 0) return;
     try {
       const pairs = await Promise.all(
         groupsList.map((g) => booksDb.getBookCountByGroup(g.groupId).then((c) => [g.groupId, c] as const))
       );
       const counts: Record<number, number> = {};
       for (const [id, c] of pairs) counts[id] = c;
-      props.onGroupCountsLoaded(counts);
+      setGroupBookCounts(counts);
+      props.onGroupCountsLoaded?.(counts);
     } catch (e) {
       console.error('加载分组书籍数量失败:', e);
     }
@@ -106,11 +114,23 @@ export function BookShelf(props: BookShelfProps) {
     if (groupStyle() !== 'normal' && groups().length === 0) loadGroups(); // 下拉/标签模式且分组未加载时加载，供导航栏使用
   });
 
+  /** 分组列表加载后校正标题名，避免 HMR / 存储恢复后 currentGroup 与 currentGroupName 不一致 */
+  createEffect(() => {
+    const cg = currentGroup();
+    const list = groups();
+    if (list.length === 0) return;
+    const expected =
+      cg === -1 ? '全部' : list.find((g) => g.groupId === cg)?.groupName;
+    if (expected && expected !== currentGroupName()) {
+      bookshelfStore.setCurrentGroupName(expected);
+    }
+  });
+
   createEffect(() => {
     const style = groupStyle();
     const cg = currentGroup();
     const showList = showGroupList();
-    
+
     // 常规模式下，如果显示分组列表，不加载书籍
     if (style === 'normal' && showList) {
       // 确保分组列表已加载
@@ -119,7 +139,7 @@ export function BookShelf(props: BookShelfProps) {
       }
       return;
     }
-    
+
     // 其他情况：加载当前分组的书籍
     loadBooksForGroup(cg);
   });
@@ -140,7 +160,7 @@ export function BookShelf(props: BookShelfProps) {
       setBooksLoading(false);
     }
   }
-  
+
   // 监听排序模式变化，立即重新排序当前书籍列表
   // 使用 untrack 避免对 books() 的响应式依赖，防止无限循环
   createEffect(() => {
@@ -152,7 +172,7 @@ export function BookShelf(props: BookShelfProps) {
     if (currentBooks.length > 0) {
       const sorted = sortBooks(currentBooks, mode);
       // 检查排序后的数组是否真的不同，避免不必要的更新
-      const isDifferent = sorted.length !== currentBooks.length || 
+      const isDifferent = sorted.length !== currentBooks.length ||
         sorted.some((book, i) => book.bookUrl !== currentBooks[i]?.bookUrl);
       if (isDifferent) {
         setBooks(sorted);
@@ -239,6 +259,144 @@ export function BookShelf(props: BookShelfProps) {
     groupStyle() === 'normal' && showGroupList();
   const showBooksView = () =>
     groupStyle() !== 'normal' || !showGroupList();
+  /** 常规分组样式：在具体分组书籍页显示返回分组列表 */
+  const showBackToGroupList = createMemo(
+    () => groupStyle() === 'normal' && !showGroupList()
+  );
+
+  function handleBackToGroupList() {
+    bookshelfStore.setShowGroupList(true);
+  }
+
+  const pageTitle = () => {
+    if (showGroupPage()) return '分组';
+    return currentGroupName() || '书架';
+  };
+
+  const pageDescription = () => {
+    if (showGroupPage()) {
+      const n = groups().length;
+      return n > 0 ? `共 ${n} 个分组` : undefined;
+    }
+    return `共 ${books().length} 本书`;
+  };
+
+  const showGroupTabsBelow = () => groupStyle() === 'tabs' && groups().length > 0;
+
+  /** 下拉框样式：书籍视图下标题可切换分组 */
+  const showGroupTitleDropdown = () =>
+    groupStyle() === 'dropdown' && showBooksView();
+  /** 常规 / 下拉框：使用 PageToolbarTitleDropdown（常规为不可下拉） */
+  const showToolbarTitleSlot = () =>
+    groupStyle() === 'normal' || showGroupTitleDropdown();
+
+  const handleGroupChange = (groupId: number) => {
+    bookshelfStore.setCurrentGroup(groupId);
+    const name =
+      groupId === -1
+        ? '全部'
+        : groups().find((g) => g.groupId === groupId)?.groupName ?? '全部';
+    bookshelfStore.setCurrentGroupName(name);
+  };
+
+  async function handleReloadLocalBooks() {
+    if (!isTauri()) {
+      showAppToast({
+        title: '不支持',
+        description: '重新加载功能仅在桌面端和移动端可用',
+        variant: 'error',
+      });
+      return;
+    }
+
+    setIsReloadingBooks(true);
+    try {
+      const booksDir = await getBooksDirectory();
+      const fs = await getFileSystem();
+      const files = await fs.readDir(booksDir);
+      const bookFiles: string[] = [];
+
+      for (const file of files) {
+        const fileName = file;
+        if (!fileName) continue;
+        const fullPath = await join(booksDir, fileName);
+        try {
+          await fs.readDir(fullPath);
+          continue;
+        } catch {
+          const ext = fileName.toLowerCase().split('.').pop();
+          if (ext === 'txt' || ext === 'epub') {
+            bookFiles.push(fullPath);
+          }
+        }
+      }
+
+      if (bookFiles.length === 0) {
+        showAppToast({
+          title: '未找到书籍',
+          description: '本地目录中没有找到书籍文件',
+          variant: 'default',
+        });
+        return;
+      }
+
+      const missingBooks: string[] = [];
+      for (const filePath of bookFiles) {
+        const exists = await hasBook(filePath);
+        if (!exists) missingBooks.push(filePath);
+      }
+
+      if (missingBooks.length === 0) {
+        showAppToast({
+          title: '无需恢复',
+          description: '所有本地书籍文件已在书架中',
+          variant: 'default',
+        });
+        return;
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      for (const filePath of missingBooks) {
+        try {
+          const fileName = filePath.split(/[/\\]/).pop() || '';
+          const content = await fs.readFile(filePath);
+          await importLocalBookFromContent(filePath, fileName, content, { groupId: BookGroupId.Local });
+          successCount++;
+        } catch (error) {
+          console.error(`导入文件失败: ${filePath}`, error);
+          failCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        showAppToast({
+          title: '恢复完成',
+          description: `成功恢复 ${successCount} 本书${failCount > 0 ? `，${failCount} 本失败` : ''}`,
+          variant: 'success',
+        });
+        window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+        loadBooksForGroup(currentGroup());
+        if (groups().length) loadGroupCounts(groups());
+      } else {
+        showAppToast({
+          title: '恢复失败',
+          description: `所有 ${missingBooks.length} 本书恢复失败`,
+          variant: 'error',
+        });
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '重新加载失败';
+      console.error('重新加载本地书籍失败:', e);
+      showAppToast({
+        title: '重新加载失败',
+        description: errorMsg,
+        variant: 'error',
+      });
+    } finally {
+      setIsReloadingBooks(false);
+    }
+  }
 
   onMount(() => {
     const handler = () => {
@@ -247,7 +405,7 @@ export function BookShelf(props: BookShelfProps) {
       if (props.onGroupsLoaded && groups().length) loadGroupCounts(groups());
     };
     window.addEventListener('bookshelf-refresh', handler);
-    
+
     // 监听布局设置变化事件，重新排序当前书籍列表
     const layoutChangeHandler = () => {
       const currentBooks = books();
@@ -257,7 +415,7 @@ export function BookShelf(props: BookShelfProps) {
       }
     };
     window.addEventListener('bookshelf-layout-changed', layoutChangeHandler);
-    
+
     // 监听页面可见性变化：当用户从阅读器返回书架页面时，重新加载并排序
     let wasHidden = document.hidden;
     const visibilityChangeHandler = () => {
@@ -269,7 +427,7 @@ export function BookShelf(props: BookShelfProps) {
       wasHidden = isHidden;
     };
     document.addEventListener('visibilitychange', visibilityChangeHandler);
-    
+
     onCleanup(() => {
       window.removeEventListener('bookshelf-refresh', handler);
       window.removeEventListener('bookshelf-layout-changed', layoutChangeHandler);
@@ -278,43 +436,97 @@ export function BookShelf(props: BookShelfProps) {
   });
 
   return (
-    <div class="w-full space-y-6">
-      <Show when={showGroupPage()}>
-        <BookGroupPage
-          initialGroups={groups()}
-          onGroupSelect={handleGroupSelect}
-          onGroupsLoaded={(g) => {
-            props.onGroupsLoaded?.(g);
-            loadGroupCounts(g);
-          }}
-        />
-      </Show>
+    <div class="flex flex-col flex-1 min-h-0 w-full">
+      <PageToolbar
+        title={pageTitle()}
+        description={pageDescription()}
+        titleSlot={
+          showToolbarTitleSlot() ? (
+            <BookshelfGroupTitleDropdown
+              title={pageTitle()}
+              description={pageDescription()}
+              groups={groups()}
+              groupBookCounts={groupBookCounts()}
+              currentGroupId={currentGroup()}
+              onGroupChange={handleGroupChange}
+              dropdownEnabled={showGroupTitleDropdown()}
+            />
+          ) : undefined
+        }
+        leading={
+          showBackToGroupList() ? (
+            <Tooltip>
+              <TooltipTrigger
+                as={Button}
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9 shrink-0"
+                onClick={handleBackToGroupList}
+                aria-label="返回分组页"
+              >
+                <ChevronLeftIcon class="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent>返回分组</TooltipContent>
+            </Tooltip>
+          ) : undefined
+        }
+        below={
+          showGroupTabsBelow() ? (
+            <BookshelfGroupNav
+              groupStyle="tabs"
+              groups={groups()}
+              groupBookCounts={groupBookCounts()}
+              currentGroupId={currentGroup()}
+              onGroupChange={handleGroupChange}
+            />
+          ) : undefined
+        }
+      >
+        {props.toolbarActions}
+        <Show when={showBooksView() && currentGroup() === BookGroupId.Local}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReloadLocalBooks}
+            disabled={isReloadingBooks()}
+          >
+            <RefreshIcon class="h-4 w-4 mr-2" />
+            {isReloadingBooks() ? '重新加载中...' : '重新加载书籍列表'}
+          </Button>
+        </Show>
+      </PageToolbar>
 
-      <Show when={showBooksView()}>
-        <GroupBooksView
-          groupName={currentGroupName()}
-          books={books()}
-          loading={booksLoading()}
-          error={booksError()}
-          viewMode={viewMode()}
-          titleDisplay={titleDisplay()}
-          sortMode={sortMode()}
-          currentGroupId={currentGroup()}
-          onBack={groupStyle() === 'normal' ? () => bookshelfStore.setShowGroupList(true) : undefined}
-          onOpenBook={props.onOpenBook}
-          onEditBook={handleEditBook}
-          onDeleteBook={handleDeleteBook}
-          onBooksReorder={async (newOrderedBooks) => {
-            const updates = newOrderedBooks.map((b, i) => ({ bookUrl: b.bookUrl, order: i }));
-            await booksDb.updateBooksOrder(updates);
-            // 不 setBooks、不派发 refresh：SortableJS 已重排 DOM，仅持久化顺序；下次进入页面会从 DB 刷新
-          }}
-          onReloadComplete={() => {
-            loadBooksForGroup(currentGroup());
-            if (props.onGroupsLoaded && groups().length) loadGroupCounts(groups());
-          }}
-        />
-      </Show>
+      <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+        <Show when={showGroupPage()}>
+          <BookGroupPage
+            initialGroups={groups()}
+            onGroupSelect={handleGroupSelect}
+            onGroupsLoaded={(g) => {
+              props.onGroupsLoaded?.(g);
+              loadGroupCounts(g);
+            }}
+          />
+        </Show>
+
+        <Show when={showBooksView()}>
+          <GroupBooksView
+            books={books()}
+            loading={booksLoading()}
+            error={booksError()}
+            viewMode={viewMode()}
+            titleDisplay={titleDisplay()}
+            sortMode={sortMode()}
+            onOpenBook={props.onOpenBook}
+            onEditBook={handleEditBook}
+            onDeleteBook={handleDeleteBook}
+            onBooksReorder={async (newOrderedBooks) => {
+              const updates = newOrderedBooks.map((b, i) => ({ bookUrl: b.bookUrl, order: i }));
+              await booksDb.updateBooksOrder(updates);
+              // 不 setBooks、不派发 refresh：SortableJS 已重排 DOM，仅持久化顺序；下次进入页面会从 DB 刷新
+            }}
+          />
+        </Show>
+      </div>
 
       <BookEditDialog
         open={bookEditOpen()}
@@ -339,180 +551,21 @@ export function BookShelf(props: BookShelfProps) {
 
 /** 具体分组的书籍列表/网格，与分组页共用书架布局设置 */
 function GroupBooksView(props: {
-  groupName: string;
   books: Book[];
   loading: boolean;
   error: string | null;
   viewMode: string;
   titleDisplay: string;
   sortMode: string;
-  currentGroupId?: number;
-  /** 常规模式下返回分组页；不传则不显示返回按钮 */
-  onBack?: () => void;
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
-  onReloadComplete?: () => void;
 }) {
-  const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
-  
-  // 使用 skeleton 加载状态管理，避免快速加载时的闪烁
   const showSkeleton = useSkeletonLoading(() => props.loading, { delay: 100, minDisplayTime: 300 });
-
-  /**
-   * 重新加载本地书籍列表
-   */
-  async function handleReloadLocalBooks() {
-    if (!isTauri()) {
-      showAppToast({
-        title: "不支持",
-        description: "重新加载功能仅在桌面端和移动端可用",
-        variant: "error",
-      });
-      return;
-    }
-
-    setIsReloadingBooks(true);
-
-    try {
-      const booksDir = await getBooksDirectory();
-      const fs = await getFileSystem();
-      
-      const files = await fs.readDir(booksDir);
-      const bookFiles: string[] = [];
-      
-      for (const file of files) {
-        const fileName = file;
-        if (!fileName) continue;
-        
-        const fullPath = await join(booksDir, fileName);
-        
-        try {
-          await fs.readDir(fullPath);
-          continue;
-        } catch {
-          const ext = fileName.toLowerCase().split('.').pop();
-          if (ext === 'txt' || ext === 'epub') {
-            bookFiles.push(fullPath);
-          }
-        }
-      }
-
-      if (bookFiles.length === 0) {
-        showAppToast({
-          title: "未找到书籍",
-          description: "本地目录中没有找到书籍文件",
-          variant: "default",
-        });
-        setIsReloadingBooks(false);
-        return;
-      }
-
-      const missingBooks: string[] = [];
-      for (const filePath of bookFiles) {
-        const exists = await hasBook(filePath);
-        if (!exists) {
-          missingBooks.push(filePath);
-        }
-      }
-
-      if (missingBooks.length === 0) {
-        showAppToast({
-          title: "无需恢复",
-          description: "所有本地书籍文件已在书架中",
-          variant: "default",
-        });
-        setIsReloadingBooks(false);
-        return;
-      }
-
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const filePath of missingBooks) {
-        try {
-          const fileName = filePath.split(/[/\\]/).pop() || '';
-          const content = await fs.readFile(filePath);
-          
-          await importLocalBookFromContent(
-            filePath,
-            fileName,
-            content,
-            { groupId: BookGroupId.Local }
-          );
-          
-          successCount++;
-        } catch (error) {
-          console.error(`导入文件失败: ${filePath}`, error);
-          failCount++;
-        }
-      }
-
-      if (successCount > 0) {
-        showAppToast({
-          title: "恢复完成",
-          description: `成功恢复 ${successCount} 本书${failCount > 0 ? `，${failCount} 本失败` : ''}`,
-          variant: "success",
-        });
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
-        props.onReloadComplete?.();
-      } else {
-        showAppToast({
-          title: "恢复失败",
-          description: `所有 ${missingBooks.length} 本书恢复失败`,
-          variant: "error",
-        });
-      }
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : '重新加载失败';
-      console.error('重新加载本地书籍失败:', e);
-      showAppToast({
-        title: "重新加载失败",
-        description: errorMsg,
-        variant: "error",
-      });
-    } finally {
-      setIsReloadingBooks(false);
-    }
-  }
 
   return (
     <div class="w-full space-y-6">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="flex min-w-0 flex-1 items-center gap-3">
-          <Show when={props.onBack}>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => props.onBack?.()}
-              class="shrink-0"
-              aria-label="返回分组页"
-            >
-              <ChevronLeftIcon class="h-4 w-4" />
-            </Button>
-          </Show>
-          <div class="min-w-0">
-            <h2 class="text-2xl font-bold text-foreground truncate">{props.groupName}</h2>
-            <p class="text-sm text-muted-foreground">
-              共 {props.books.length} 本书
-            </p>
-          </div>
-        </div>
-        {/* 本地分组显示重新加载按钮 */}
-        <Show when={props.currentGroupId === BookGroupId.Local}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleReloadLocalBooks}
-            disabled={isReloadingBooks()}
-          >
-            <RefreshIcon class="h-4 w-4 mr-2" />
-            {isReloadingBooks() ? '重新加载中...' : '重新加载书籍列表'}
-          </Button>
-        </Show>
-      </div>
-
       <Show when={props.error}>
         <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
           {props.error}
@@ -550,7 +603,8 @@ function GroupBooksView(props: {
 
       <Show when={!props.loading && !showSkeleton() && !props.error && props.books.length === 0}>
         <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
-          <div class="mb-4 text-5xl">📚</div>
+          <BookshelfIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
+
           <h3 class="mb-2 text-lg font-semibold text-foreground">暂无书籍</h3>
           <p class="text-sm text-muted-foreground">该分组下还没有书籍</p>
         </div>
@@ -645,20 +699,20 @@ function BooksGrid(props: {
     const gap = mode.startsWith('grid-') ? '' : mode === 'list' || mode === 'list-2' ? 'gap-3' : 'gap-2';
     const cols =
       mode === 'list' || mode === 'compact' ? 'grid-cols-1'
-      : mode === 'list-2' || mode === 'compact-2' ? 'grid-cols-1 md:grid-cols-2'
-      : mode === 'grid-2' ? 'grid-cols-2'
-      : mode === 'grid-3' ? 'grid-cols-3'
-      : mode === 'grid-4' ? 'grid-cols-4'
-      : mode === 'grid-5' ? 'grid-cols-5'
-      : mode === 'grid-6' ? 'grid-cols-6'
-      : 'grid-cols-1';
+        : mode === 'list-2' || mode === 'compact-2' ? 'grid-cols-1 md:grid-cols-2'
+          : mode === 'grid-2' ? 'grid-cols-2'
+            : mode === 'grid-3' ? 'grid-cols-3'
+              : mode === 'grid-4' ? 'grid-cols-4'
+                : mode === 'grid-5' ? 'grid-cols-5'
+                  : mode === 'grid-6' ? 'grid-cols-6'
+                    : 'grid-cols-1';
     return cn('grid', cols, gap);
   });
 
   const cardLayout = (): 'list' | 'compact' | 'grid' =>
     props.viewMode === 'list' || props.viewMode === 'list-2' ? 'list'
-    : props.viewMode === 'compact' || props.viewMode === 'compact-2' ? 'compact'
-    : 'grid';
+      : props.viewMode === 'compact' || props.viewMode === 'compact-2' ? 'compact'
+        : 'grid';
 
   const gridStyle = () =>
     props.viewMode.startsWith('grid-') ? { gap: `${spacing()}rem` } : undefined;
@@ -767,7 +821,7 @@ function BookCardWithMenu(props: {
         onMouseDown={(e: MouseEvent) => props.onPointerDown(e)}
         onMouseMove={(e: MouseEvent) => props.onPointerMove(e)}
         onMouseUp={(e: MouseEvent) => props.onPointerUp(e)}
-        onMouseLeave={() => {}}
+        onMouseLeave={() => { }}
         onTouchStart={(e: TouchEvent) => props.onPointerDown(e)}
         onTouchMove={(e: TouchEvent) => props.onPointerMove(e)}
         onTouchEnd={(e: TouchEvent) => props.onPointerUp(e)}

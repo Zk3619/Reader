@@ -20,7 +20,13 @@ import { getBooksByGroup } from '@/lib/database/books';
 import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { cn } from '@/lib/utils';
+import { withLongPressSortableOptions } from '@/utils/sortable-long-press';
 import { getCoverPreviewInfo } from '@/utils/book-group-cover';
+import {
+  DefaultGroupCoverIcon,
+  BookCoverPlaceholderIcon,
+} from '@/components/book-group-cover-icon';
+import { BookshelfIcon } from '@/components/icons';
 
 // 视图模式从布局设置 Store 获取，不再使用本地状态
 
@@ -46,51 +52,6 @@ function getGroupDisplayName(group: BookGroup): string {
     default:
       return group.groupName;
   }
-}
-
-/**
- * 无封面时按分组返回默认 emoji
- * 与系统分组（含 NetNone、LocalNone、Error）对应
- */
-function getDefaultCoverEmoji(group: BookGroup): string {
-  switch (group.groupId) {
-    case BookGroupId.All:
-      return '📚';
-    case BookGroupId.Local:
-      return '💾';
-    case BookGroupId.Audio:
-      return '🎵';
-    case BookGroupId.NetNone:
-      return '🌐';
-    case BookGroupId.LocalNone:
-      return '📁';
-    case BookGroupId.Error:
-      return '⚠️';
-    default:
-      return '📖';
-  }
-}
-
-/** 默认封面图标（无效输入或图片加载失败时使用） */
-function DefaultCoverIcon(props: { class?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      class={cn('h-5 w-5 text-muted-foreground', props.class)}
-      aria-hidden
-    >
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      <path d="M8 7h3" />
-      <path d="M8 11h6" />
-    </svg>
-  );
 }
 
 export interface BookGroupProps {
@@ -143,23 +104,24 @@ export function BookGroup(props: BookGroupProps = {}) {
       sortableInstance.destroy();
       sortableInstance = null;
     }
-    sortableInstance = Sortable.create(container, {
-      animation: 150,
-      ghostClass: 'opacity-50',
-      forceFallback: true,
-      fallbackOnBody: true,
-      onEnd: (evt) => {
-        const { oldIndex, newIndex } = evt;
-        if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex) return;
-        const list = [...groups()];
-        const [removed] = list.splice(oldIndex, 1);
-        list.splice(newIndex, 0, removed);
-        const newGroups = list.map((g, i) => ({ ...g, order: i }));
-        groupsDb.updateGroupsOrder(newGroups.map((g) => ({ groupId: g.groupId, order: g.order })));
-        props.onGroupsLoaded?.(newGroups);
-        // 不 setGroups，避免 Solid 在 Sortable 已移动的 DOM 上重算导致 insertBefore 报错；下次进入会从 DB 加载新顺序
-      },
-    });
+    sortableInstance = Sortable.create(
+      container,
+      withLongPressSortableOptions({
+        animation: 150,
+        ghostClass: 'opacity-50',
+        onEnd: (evt) => {
+          const { oldIndex, newIndex } = evt;
+          if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex) return;
+          const list = [...groups()];
+          const [removed] = list.splice(oldIndex, 1);
+          list.splice(newIndex, 0, removed);
+          const newGroups = list.map((g, i) => ({ ...g, order: i }));
+          groupsDb.updateGroupsOrder(newGroups.map((g) => ({ groupId: g.groupId, order: g.order })));
+          props.onGroupsLoaded?.(newGroups);
+          // 不 setGroups，避免 Solid 在 Sortable 已移动的 DOM 上重算导致 insertBefore 报错；下次进入会从 DB 加载新顺序
+        },
+      })
+    );
     onCleanup(() => {
       if (sortableInstance) {
         sortableInstance.destroy();
@@ -248,19 +210,6 @@ export function BookGroup(props: BookGroupProps = {}) {
 
   return (
     <div class="w-full space-y-6">
-      {/* 工具栏 */}
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-2xl font-bold text-foreground">分组</h2>
-          <Show when={hasLoaded()}>
-            <p class="text-sm text-muted-foreground">
-              共 {groups().length} 个分组
-            </p>
-          </Show>
-        </div>
-        {/* 重新加载按钮仅在进入「本地」分组书籍列表时显示（见 BookShelf GroupBooksView），此处为全部分组列表不显示 */}
-      </div>
-
       {/* 错误提示 */}
       <Show when={error()}>
         <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
@@ -411,12 +360,16 @@ export function BookGroup(props: BookGroupProps = {}) {
                       const info = getCoverPreviewInfo(group.cover);
                       const imageFailed = coverImageErrorIds().has(group.groupId);
                       if (!group.cover?.trim()) {
-                        return <span class="flex h-full w-full items-center justify-center">{getDefaultCoverEmoji(group)}</span>;
+                        return (
+                          <span class="flex h-full w-full items-center justify-center">
+                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                          </span>
+                        );
                       }
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center">
-                            <DefaultCoverIcon />
+                            <BookCoverPlaceholderIcon />
                           </span>
                         );
                       }
@@ -436,7 +389,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center">
-                          <DefaultCoverIcon />
+                          <BookCoverPlaceholderIcon />
                         </span>
                       );
                     })()}
@@ -484,12 +437,16 @@ export function BookGroup(props: BookGroupProps = {}) {
                       const info = getCoverPreviewInfo(group.cover);
                       const imageFailed = coverImageErrorIds().has(group.groupId);
                       if (!group.cover?.trim()) {
-                        return <span class="flex h-full w-full items-center justify-center">{getDefaultCoverEmoji(group)}</span>;
+                        return (
+                          <span class="flex h-full w-full items-center justify-center">
+                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                          </span>
+                        );
                       }
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center">
-                            <DefaultCoverIcon />
+                            <BookCoverPlaceholderIcon />
                           </span>
                         );
                       }
@@ -509,7 +466,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center">
-                          <DefaultCoverIcon />
+                          <BookCoverPlaceholderIcon />
                         </span>
                       );
                     })()}
@@ -557,12 +514,16 @@ export function BookGroup(props: BookGroupProps = {}) {
                       const info = getCoverPreviewInfo(group.cover);
                       const imageFailed = coverImageErrorIds().has(group.groupId);
                       if (!group.cover?.trim()) {
-                        return <span class="flex h-full w-full items-center justify-center">{getDefaultCoverEmoji(group)}</span>;
+                        return (
+                          <span class="flex h-full w-full items-center justify-center">
+                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                          </span>
+                        );
                       }
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center">
-                            <DefaultCoverIcon class="h-4 w-4" />
+                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
                           </span>
                         );
                       }
@@ -582,7 +543,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center">
-                          <DefaultCoverIcon class="h-4 w-4" />
+                          <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
                         </span>
                       );
                     })()}
@@ -630,12 +591,16 @@ export function BookGroup(props: BookGroupProps = {}) {
                       const info = getCoverPreviewInfo(group.cover);
                       const imageFailed = coverImageErrorIds().has(group.groupId);
                       if (!group.cover?.trim()) {
-                        return <span class="flex h-full w-full items-center justify-center">{getDefaultCoverEmoji(group)}</span>;
+                        return (
+                          <span class="flex h-full w-full items-center justify-center">
+                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                          </span>
+                        );
                       }
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center">
-                            <DefaultCoverIcon class="h-4 w-4" />
+                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
                           </span>
                         );
                       }
@@ -655,7 +620,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center">
-                          <DefaultCoverIcon class="h-4 w-4" />
+                          <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
                         </span>
                       );
                     })()}
@@ -718,12 +683,16 @@ export function BookGroup(props: BookGroupProps = {}) {
                       const info = getCoverPreviewInfo(group.cover);
                       const imageFailed = coverImageErrorIds().has(group.groupId);
                       if (!group.cover?.trim()) {
-                        return <span class="flex h-full w-full items-center justify-center">{getDefaultCoverEmoji(group)}</span>;
+                        return (
+                          <span class="flex h-full w-full items-center justify-center">
+                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                          </span>
+                        );
                       }
                       if (info.type === 'invalid' || (info.url && imageFailed)) {
                         return (
                           <span class="flex h-full w-full items-center justify-center">
-                            <DefaultCoverIcon class="h-8 w-8" />
+                            <BookCoverPlaceholderIcon class="h-8 w-8" size={32} />
                           </span>
                         );
                       }
@@ -743,7 +712,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       }
                       return (
                         <span class="flex h-full w-full items-center justify-center">
-                          <DefaultCoverIcon class="h-8 w-8" />
+                          <BookCoverPlaceholderIcon class="h-8 w-8" size={32} />
                         </span>
                       );
                     })()}
@@ -780,7 +749,8 @@ export function BookGroup(props: BookGroupProps = {}) {
       {/* 空状态 */}
       <Show when={!loading() && !showSkeleton() && groups().length === 0}>
         <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
-          <div class="mb-4 text-5xl">📚</div>
+          <BookshelfIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
+
           <h3 class="mb-2 text-lg font-semibold text-foreground">
             暂无分组
           </h3>

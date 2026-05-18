@@ -11,6 +11,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
+import { XIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 
 export interface ReaderCommentsDrawerProps {
@@ -69,7 +70,7 @@ function CommentsPanelContent(props: {
           onClick={props.onClose}
           aria-label="关闭段评"
         >
-          <span class="text-muted-foreground text-lg leading-none">×</span>
+          <XIcon class="h-4 w-4 text-muted-foreground" size={16} />
         </Button>
       </div>
       {/* 加 data-corvu-no-drag：此处仅滚动段评列表，不触发抽屉拖拽；拖拽仅作用于顶部把手/标题栏 */}

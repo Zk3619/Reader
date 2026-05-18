@@ -5,6 +5,7 @@ import * as SelectPrimitive from "@kobalte/core/select"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
 import { cn } from "src/lib/utils"
+import { CheckIcon, ChevronsUpDownIcon } from "@/components/icons"
 
 const Select = SelectPrimitive.Root
 
@@ -44,21 +45,7 @@ const SelectTrigger = <T extends ValidComponent = "button">(
 const SelectIcon: Component<SelectPrimitive.SelectIconProps> = (props) => {
   return (
     <SelectPrimitive.Icon {...props}>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="h-4 w-4 shrink-0 opacity-50"
-      >
-        {/* 上箭头 */}
-        <path d="M18 9 12 3 6 9" />
-        {/* 下箭头 */}
-        <path d="M6 15 12 21 18 15" />
-      </svg>
+      <ChevronsUpDownIcon class="h-4 w-4 shrink-0 opacity-50" />
     </SelectPrimitive.Icon>
   )
 }
@@ -122,18 +109,7 @@ const SelectItemIndicator: Component<SelectPrimitive.SelectItemIndicatorProps> =
       class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center"
       {...props}
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="h-4 w-4"
-      >
-        <path d="M5 12l5 5l10 -10" />
-      </svg>
+      <CheckIcon class="h-4 w-4" />
     </SelectPrimitive.ItemIndicator>
   )
 }

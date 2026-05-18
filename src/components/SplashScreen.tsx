@@ -13,6 +13,13 @@ export function SplashScreen(props: SplashScreenProps) {
   const [isDark, setIsDark] = createSignal(false);
 
   onMount(async () => {
+    // 开发环境 HMR：父级可能已跳过挂载；若仍挂载则立即结束，避免白底遮罩
+    if (import.meta.env.DEV && import.meta.hot?.data?.splashDone) {
+      setIsVisible(false);
+      props.onComplete?.();
+      return;
+    }
+
     // 在开屏动画开始前显示窗口
     // 注意：window-state 插件会在窗口创建时恢复之前保存的状态
     // 如果之前窗口是隐藏的，这里会先显示窗口（用于开屏动画）
@@ -50,18 +57,17 @@ export function SplashScreen(props: SplashScreenProps) {
     const animationDuration = 1500;
     const fadeOutDelay = animationDuration - 300; // 在动画结束前300ms开始淡出
 
-    // 开始淡出动画
-    setTimeout(() => {
+    const fadeTimer = window.setTimeout(() => {
       setIsVisible(false);
     }, fadeOutDelay);
 
-    // 动画完成后调用回调
-    setTimeout(() => {
+    const completeTimer = window.setTimeout(() => {
       props.onComplete?.();
-      observer.disconnect();
     }, animationDuration);
 
     return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(completeTimer);
       observer.disconnect();
     };
   });

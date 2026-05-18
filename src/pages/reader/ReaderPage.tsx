@@ -37,6 +37,10 @@ import {
   MoreIcon,
   ReplaceIcon,
   DownloadIcon,
+  VolumeIcon,
+  ThemeLightIcon,
+  ThemeDarkIcon,
+  XIcon,
 } from '@/components/icons';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { showImmersiveEnterToast, shouldShowImmersiveEnterToast } from '@/components/AppToasts';
@@ -603,11 +607,7 @@ export function ReaderPage(props: ReaderPageProps) {
               onClick={() => {}}
               aria-label="朗读"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-5">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
+              <VolumeIcon class="size-5" size={20} />
             </TooltipTrigger>
             <TooltipContent>朗读（敬请期待）</TooltipContent>
           </Tooltip>
@@ -652,34 +652,9 @@ export function ReaderPage(props: ReaderPageProps) {
               >
             <Show
               when={isDark()}
-              fallback={
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  class="h-4 w-4"
-                >
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                </svg>
-              }
+              fallback={<ThemeLightIcon class="h-4 w-4" size={16} />}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="h-4 w-4"
-              >
-                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-              </svg>
+              <ThemeDarkIcon class="h-4 w-4" size={16} />
             </Show>
             <span class="sr-only">{isDark() ? '切换到浅色模式' : '切换到深色模式'}</span>
               </Toggle>
@@ -765,11 +740,7 @@ export function ReaderPage(props: ReaderPageProps) {
               aria-label="朗读"
               title="敬请期待"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
+              <VolumeIcon class="h-4 w-4" size={16} />
               <span>朗读</span>
             </Button>
             <Button
@@ -824,7 +795,7 @@ export function ReaderPage(props: ReaderPageProps) {
                 class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label="关闭"
               >
-                <span class="text-lg leading-none">×</span>
+                <XIcon class="h-4 w-4" size={16} />
               </DrawerClose>
             </DrawerHeader>
             <div class="flex min-h-0 flex-1 flex-col overflow-hidden" data-corvu-no-drag>
@@ -849,7 +820,7 @@ export function ReaderPage(props: ReaderPageProps) {
           <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
             <DrawerTitle>阅读设置</DrawerTitle>
             <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
-              <span class="text-lg leading-none">×</span>
+              <XIcon class="h-4 w-4" size={16} />
             </DrawerClose>
           </DrawerHeader>
           <div
@@ -874,7 +845,7 @@ export function ReaderPage(props: ReaderPageProps) {
           <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
             <DrawerTitle>设置</DrawerTitle>
             <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
-              <span class="text-lg leading-none">×</span>
+              <XIcon class="h-4 w-4" size={16} />
             </DrawerClose>
           </DrawerHeader>
           <div

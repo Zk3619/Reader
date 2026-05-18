@@ -14,7 +14,13 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/AppToasts';
-import { runLoginScript, runLoginScriptRust, getStoredLoginInfo, clearSourceLoginState, clearSourceLoginStateLocalStorageOnly } from '@/lib/book-source/login-script-runner';
+import {
+  runLoginScript,
+  runLoginScriptRust,
+  getStoredLoginInfo,
+  clearSourceLoginState,
+  clearSourceLoginStateLocalStorageOnly,
+} from '@/lib/js-engine';
 import { isTauri } from '@/lib/platform/detect';
 import JSON5 from 'json5';
 import type { BookSource } from '@/types';

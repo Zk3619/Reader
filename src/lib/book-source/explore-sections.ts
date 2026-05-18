@@ -4,7 +4,7 @@
  */
 
 import type { BookSource } from '@/types';
-import { extractExploreScript, runExploreScript } from './explore-script-runner';
+import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
 export interface ExploreSectionStyle {
