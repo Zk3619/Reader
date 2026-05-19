@@ -17,6 +17,7 @@ import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import { showAppToast } from '@/components/AppToasts';
 import type { BookSource } from '@/types';
 import type { SearchBook } from '@/types';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface SourceSearchDialogProps {
   open: boolean;
@@ -83,9 +84,9 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
-        <DialogHeader class="shrink-0 border-b border-border px-4 py-3">
-          <DialogTitle class="text-lg font-semibold">
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
+          <DialogTitle>
             {props.source ? `搜索 · ${props.source.sourceName}` : '搜索'}
           </DialogTitle>
           <DialogDescription class="sr-only">
@@ -93,7 +94,7 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
           </DialogDescription>
         </DialogHeader>
         <Show when={props.source}>
-          <div class="shrink-0 flex gap-2 px-4 py-3 border-b border-border">
+          <div class="shrink-0 flex gap-2 border-b border-border/50 px-6 pb-4">
             <input
               type="text"
               placeholder="输入关键词"
@@ -107,7 +108,7 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
               {loading() ? '搜索中…' : '搜索'}
             </Button>
           </div>
-          <div class="flex-1 min-h-0 overflow-y-auto">
+          <div class="min-h-0 overflow-y-auto">
             <Show when={loading()}>
               <div class="px-4 py-8 text-center text-sm text-muted-foreground">搜索中…</div>
             </Show>

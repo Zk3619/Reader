@@ -6,6 +6,7 @@
 import type { QuickJSContext } from 'quickjs-emscripten';
 import {
   createQuickJSContext,
+  evalCodeVoid,
   initQuickJSRuntime,
   isQuickJSFallback,
   setGlobalString,
@@ -160,7 +161,8 @@ function evalJsFallback(code: string, context: JsContext): string | null {
 function injectContext(vm: QuickJSContext, context: JsContext): void {
   const resultStr = context.result;
   const safeResultStr = JSON.stringify(resultStr);
-  vm.evalCode(
+  evalCodeVoid(
+    vm,
     `var result = (function(){ try { var _r = JSON.parse(${safeResultStr}); return (typeof _r === 'object' && _r !== null) ? _r : ${safeResultStr}; } catch(e) { return ${safeResultStr}; } })();`
   );
   setGlobalString(vm, 'baseUrl', context.baseUrl);
@@ -200,7 +202,7 @@ function injectContext(vm: QuickJSContext, context: JsContext): void {
 }
 
 function injectUtils(vm: QuickJSContext): void {
-  vm.evalCode(`
+  evalCodeVoid(vm, `
     var __b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     function __strToUtf8(str) {
       var utf8 = [];

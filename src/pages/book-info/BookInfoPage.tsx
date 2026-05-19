@@ -28,6 +28,7 @@ import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import { hasBook } from '@/lib/database/books';
 import { getBookInfo } from '@/lib/book-source/detail';
 import { getSource } from '@/lib/database/sources';
+import { openUrlInApp } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/AppToasts';
 import { pageCacheStore } from '@/stores/page-cache';
 import { bookshelfStore } from '@/stores/bookshelf';
@@ -465,7 +466,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
               class="text-primary hover:underline truncate"
               onClick={(e) => {
                 e.preventDefault();
-                window.open(currentBook().tocUrl, '_blank');
+                void openUrlInApp(currentBook().tocUrl, '目录');
               }}
             >
               查看目录
@@ -629,7 +630,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             </div>
 
             {/* 信息区域 — 与上方白色卡片无缝衔接 */}
-            <div class="shrink-0 bg-background px-4 pb-4" style={{ 'min-height': 'calc(100vh - 320px)' }}>
+            <div class="shrink-0 bg-background px-4 pb-4 min-h-[calc(100dvh-320px)]">
               <div class="pb-4">
                 <Show
                   when={loadError()}
@@ -794,8 +795,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
           class="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-sm"
           onClick={() => setShowCoverDialog(false)}
         >
-          <div class="relative max-w-lg max-h-[80vh] rounded-lg overflow-hidden shadow-2xl">
-            <img src={currentBook().coverUrl} alt={currentBook().name} class="max-w-full max-h-[80vh] object-contain" />
+          <div class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden shadow-2xl">
+            <img src={currentBook().coverUrl} alt={currentBook().name} class="max-w-full max-h-[80dvh] object-contain" />
             <button
               onClick={() => setShowCoverDialog(false)}
               class="absolute top-2 right-2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"

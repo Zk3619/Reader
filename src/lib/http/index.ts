@@ -229,7 +229,7 @@ async function executeRequest(
           },
         };
 
-        if (body) {
+        if (body !== undefined && body !== null) {
           tauriOptions.body = body;
         }
 
@@ -339,13 +339,25 @@ async function executeRequest(
 
         try {
           // 只在调试模式下输出详细日志
+          const bodyForRust =
+            typeof body === 'string' ? body : undefined;
           if (!isDangerousSettingsError) {
             console.debug('[HTTP] 调用 download_binary，参数:', {
               url: normalizedUrl,
               method: method || 'GET',
               headers: defaultHeaders,
               timeoutMs: timeout,
+              bodyLen: bodyForRust?.length ?? 0,
             });
+          } else if (
+            (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
+            bodyForRust &&
+            bodyForRust.length > 0
+          ) {
+            console.warn(
+              '[HTTP] Tauri HTTP 插件未启用危险设置，POST 经 download_binary 回退（已携带 body）',
+              { url: normalizedUrl.slice(0, 80), bodyLen: bodyForRust.length }
+            );
           }
 
           const result = await invoke<{
@@ -357,6 +369,7 @@ async function executeRequest(
             url: normalizedUrl,
             method: method || 'GET',
             headers: defaultHeaders,
+            body: bodyForRust,
             timeoutMs: timeout,
           });
 

@@ -133,8 +133,10 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           <DropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
-              blurActiveElement();
-              setShowBookshelfLayoutDialog(true);
+              requestAnimationFrame(() => {
+                blurActiveElement();
+                requestAnimationFrame(() => setShowBookshelfLayoutDialog(true));
+              });
             }}
           >
             <LayoutIcon class="h-4 w-4" />
@@ -173,12 +175,7 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
 
       <BookshelfLayoutDialog
         open={showBookshelfLayoutDialog()}
-        onOpenChange={(open) => {
-          setShowBookshelfLayoutDialog(open);
-          if (open) {
-            window.dispatchEvent(new CustomEvent('dialog-opened'));
-          }
-        }}
+        onOpenChange={setShowBookshelfLayoutDialog}
       />
     </>
   );

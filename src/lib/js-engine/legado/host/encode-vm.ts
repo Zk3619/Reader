@@ -2,9 +2,10 @@
  * 向 QuickJS 上下文注入 java.base64* / hexDecodeToString（与规则沙箱一致，UTF-8 安全）
  */
 import type { QuickJSContext } from 'quickjs-emscripten';
+import { evalCodeVoid } from '../../core/runtime';
 
 export function injectLegadoEncodingUtils(vm: QuickJSContext): void {
-  vm.evalCode(`
+  evalCodeVoid(vm, `
     var __b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     function __strToUtf8(str) {
       var utf8 = [];

@@ -5,6 +5,7 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -126,13 +127,13 @@ export function BookEditDialog(props: BookEditDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class="max-h-[90vh] max-w-[calc(100vw-2rem)] sm:max-w-md">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>编辑书籍</DialogTitle>
           <DialogDescription>修改书名、作者、封面或所属分组</DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4 py-4">
+        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <div class="space-y-2">
             <Label for="book-edit-name">书名</Label>
             <TextField>
@@ -207,7 +208,7 @@ export function BookEditDialog(props: BookEditDialogProps) {
           </div>
         </div>
 
-        <DialogFooter class="gap-2 sm:gap-0">
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消
           </Button>

@@ -2,11 +2,12 @@
  * 在 QuickJS 内注入测延迟用的 Date 修正（与 script-date-shim 行为一致）
  */
 import type { QuickJSContext } from 'quickjs-emscripten';
+import { evalCodeVoid } from '../../core/runtime';
 
 export function injectDateShimVm(vm: QuickJSContext): {
   applyAjaxDuration: (durationMs: number) => void;
 } {
-  vm.evalCode(`
+  evalCodeVoid(vm, `
     globalThis.__readerPostAjaxBoostMs = 0;
     globalThis.__readerConsumedBoost = false;
     globalThis.__readerApplyAjaxDuration = function(ms) {
@@ -44,7 +45,7 @@ export function injectDateShimVm(vm: QuickJSContext): {
 
   return {
     applyAjaxDuration(durationMs: number) {
-      vm.evalCode(`globalThis.__readerApplyAjaxDuration(${Number(durationMs)});`);
+      evalCodeVoid(vm, `globalThis.__readerApplyAjaxDuration(${Number(durationMs)});`);
     },
   };
 }

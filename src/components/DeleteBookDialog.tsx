@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
 import { isLocalBook } from '@/lib/local-book';
 import type { Book } from '@/types';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface DeleteBookDialogProps {
   open: boolean;
@@ -54,15 +55,13 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>删除书籍</DialogTitle>
-          <DialogDescription class="pt-2">
-            确定删除《{props.book?.name}》吗？
-          </DialogDescription>
+          <DialogDescription>确定删除《{props.book?.name}》吗？</DialogDescription>
         </DialogHeader>
         <Show when={isLocal()}>
-          <div class="py-4 space-y-4">
+          <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <div class="flex items-center space-x-2">
               <Checkbox
                 id="delete-file"
@@ -95,7 +94,7 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
             </div>
           </div>
         </Show>
-        <DialogFooter class="gap-2 sm:gap-0">
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>

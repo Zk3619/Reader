@@ -107,7 +107,7 @@ importers:
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.2.1
-        version: 4.2.1(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1))
+        version: 4.2.1(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0))
       '@tauri-apps/cli':
         specifier: ^2
         version: 2.10.0
@@ -119,10 +119,10 @@ importers:
         version: 5.6.3
       vite:
         specifier: ^6.0.3
-        version: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)
+        version: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)
       vite-plugin-solid:
         specifier: ^2.11.0
-        version: 2.11.10(solid-js@1.9.11)(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1))
+        version: 2.11.10(solid-js@1.9.11)(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0))
 
 packages:
 
@@ -1504,6 +1504,11 @@ packages:
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@babel/code-frame@7.29.0':
@@ -2018,12 +2023,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.2.1
       '@tailwindcss/oxide-win32-x64-msvc': 4.2.1
 
-  '@tailwindcss/vite@4.2.1(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1))':
+  '@tailwindcss/vite@4.2.1(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0))':
     dependencies:
       '@tailwindcss/node': 4.2.1
       '@tailwindcss/oxide': 4.2.1
       tailwindcss: 4.2.1
-      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)
+      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)
 
   '@tauri-apps/api@2.10.1': {}
 
@@ -2711,7 +2716,7 @@ snapshots:
     dependencies:
       inherits: 2.0.3
 
-  vite-plugin-solid@2.11.10(solid-js@1.9.11)(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)):
+  vite-plugin-solid@2.11.10(solid-js@1.9.11)(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)):
     dependencies:
       '@babel/core': 7.29.0
       '@types/babel__core': 7.20.5
@@ -2719,12 +2724,12 @@ snapshots:
       merge-anything: 5.1.7
       solid-js: 1.9.11
       solid-refresh: 0.6.3(solid-js@1.9.11)
-      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)
-      vitefu: 1.1.2(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1))
+      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)
+      vitefu: 1.1.2(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0))
     transitivePeerDependencies:
       - supports-color
 
-  vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1):
+  vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.3)
@@ -2737,10 +2742,11 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.6.1
       lightningcss: 1.31.1
+      yaml: 2.9.0
 
-  vitefu@1.1.2(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)):
+  vitefu@1.1.2(vite@6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)):
     optionalDependencies:
-      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)
+      vite: 6.4.1(@types/node@25.3.1)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.9.0)
 
   whatwg-encoding@3.1.1:
     dependencies:
@@ -2755,3 +2761,6 @@ snapshots:
       whynot: 5.0.0
 
   yallist@3.1.1: {}
+
+  yaml@2.9.0:
+    optional: true

@@ -5,6 +5,7 @@
 import type { QuickJSContext } from 'quickjs-emscripten';
 import {
   createQuickJSContext,
+  evalCodeVoid,
   initQuickJSRuntime,
   isQuickJSFallback,
   LEGADO_SUSPEND_MARKER,
@@ -30,10 +31,22 @@ export interface RunLegadoScriptQuickJSOptions {
   timeoutMs: number;
   mode: AjaxCoordinatorMode;
   inject: LegadoInjector;
+  /**
+   * suspend 模式：先 eval 一次（loginUrl/jsLib 定义函数），挂起重放时仅 eval `script`（action），
+   * 避免每次 ajax 后重跑 `login(true)` 误判「已登录」。
+   */
+  initScript?: string;
   /** suspend 模式：每次 ajax 完成后（如解析登录 cookie） */
   onAjaxSettled?: (resolvedUrl: string, body: string) => void;
   /** suspend 模式：注入 catch 重抛挂起标记 */
   wrapCatchRethrow?: boolean;
+  /** 每次 eval 前调用（挂起重放时刷新 global result 等） */
+  beforeEval?: (vm: QuickJSContext) => void;
+}
+
+/** ajax 挂起 / two-pass 会在同一 VM 内多次 eval 整段脚本；IIFE 避免顶层 const/let 重复声明 */
+function wrapScriptForReeval(script: string): string {
+  return `(function(){\n${script}\n})();`;
 }
 
 function readGlobalResult(vm: QuickJSContext): unknown {
@@ -99,13 +112,28 @@ export async function runLegadoScriptQuickJS(
     getGlobalResult: () => globalResult,
   };
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let rejectTimeout: ((e: Error) => void) | undefined;
+  const armScriptTimeout = () => {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    timeoutId = setTimeout(
+      () => rejectTimeout?.(new Error('Legado 脚本执行超时')),
+      options.timeoutMs
+    );
+  };
+  const disarmScriptTimeout = () => {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    timeoutId = undefined;
+  };
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('Legado 脚本执行超时')), options.timeoutMs);
+    rejectTimeout = reject;
+    armScriptTimeout();
   });
 
-  const scriptText = options.wrapCatchRethrow
+  const scriptBody = options.wrapCatchRethrow
     ? wrapLegadoCatchRethrow(options.script)
     : options.script;
+  const scriptText = wrapScriptForReeval(scriptBody);
 
   const runPromise = (async () => {
     try {
@@ -113,37 +141,51 @@ export async function runLegadoScriptQuickJS(
       injectLegadoEncodingUtils(vm);
 
       if (options.mode === 'two-pass') {
+        options.beforeEval?.(vm);
         evalScript(vm, scriptText, rt);
         if (pending.length > 0) await Promise.all(pending);
-        vm.evalCode('result = undefined;');
+        evalCodeVoid(vm, 'result = undefined;');
         pending.length = 0;
+        options.beforeEval?.(vm);
         evalScript(vm, scriptText, rt);
         if (pending.length > 0) await Promise.all(pending);
         return rt.getGlobalResult();
       }
 
       coordinator.resetReplayIndices();
+      if (options.initScript) {
+        // 不用 IIFE：function login() 等须挂在 global，供挂起重放的 action 调用
+        evalCodeVoid(vm, options.initScript);
+      }
+      const suspendEvalText = options.initScript ? options.script : scriptText;
       for (;;) {
         coordinator.pendingSuspend = null;
-        const state = evalScript(vm, scriptText, rt);
+        options.beforeEval?.(vm);
+        const state = evalScript(vm, suspendEvalText, rt);
         if (state.status === 'done') break;
 
         const s = state.suspend;
 
         let body = '';
+        disarmScriptTimeout();
         try {
-          body = await s.promise;
-        } catch (err) {
-          body = err instanceof Error ? err.message : String(err);
+          try {
+            body = await s.promise;
+          } catch (err) {
+            body = err instanceof Error ? err.message : String(err);
+          }
+        } finally {
+          armScriptTimeout();
         }
-        coordinator.storeResult(
-          s.writeIndex,
-          s.resolvedUrl,
-          body ?? '',
-          s.requestStart,
-          rt.applyAjaxDuration
-        );
-        options.onAjaxSettled?.(s.resolvedUrl, body ?? '');
+        if (s.writeIndex >= 0) {
+          coordinator.storeResult(
+            s.writeIndex,
+            s.resolvedUrl,
+            body ?? '',
+            s.requestStart
+          );
+          options.onAjaxSettled?.(s.resolvedUrl, body ?? '');
+        }
       }
 
       while (pending.length > 0) {
@@ -152,9 +194,14 @@ export async function runLegadoScriptQuickJS(
 
       return rt.getGlobalResult();
     } finally {
+      disarmScriptTimeout();
       vm.dispose();
     }
   })();
 
-  return Promise.race([runPromise, timeoutPromise]);
+  try {
+    return await Promise.race([runPromise, timeoutPromise]);
+  } finally {
+    disarmScriptTimeout();
+  }
 }

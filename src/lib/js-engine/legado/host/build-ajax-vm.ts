@@ -6,6 +6,12 @@ import type { QuickJSContext, QuickJSHandle } from 'quickjs-emscripten';
 import { LEGADO_SUSPEND_MARKER } from '../../core/runtime';
 import type { LegadoRunRuntime } from '../quickjs-runner';
 import { bindVmFunction } from './bind-vm';
+import {
+  isUserApiPost,
+  mergeAjaxCookieHeaders,
+  normalizeUserApiPostBody,
+  resolveUserApiCookieHeader,
+} from '../normalize-legado-ajax-body';
 import { parseAjaxArgs } from './parse-ajax';
 import { SuspendScript } from '../suspend-script';
 
@@ -27,6 +33,17 @@ export function bindJavaAjax(
     applyDuration: (ms: number) => void;
     /** two-pass 首轮：不挂起，返回空并 push promise */
     twoPassDefer?: boolean;
+    /** 修正 login_api 等 POST body（空体、双重 JSON 编码） */
+    normalizePostBody?: (
+      resolvedUrl: string,
+      method: 'GET' | 'POST',
+      body: string | undefined
+    ) => string | undefined;
+    /** 书源 args 中的 qttoken（晴天 checkStatus 等） */
+    getArgToken?: () => string;
+    /** 表单「密钥」字段 */
+    getFormKey?: () => string;
+    getDeviceId?: () => string;
   }
 ): void {
   const { coordinator } = rt;
@@ -70,7 +87,7 @@ export function bindJavaAjax(
           /* ignore */
         }
       }
-      return vm.newString(cached);
+      return vm.newString(cached ?? '');
     }
 
     let scriptCookie =
@@ -82,18 +99,28 @@ export function bindJavaAjax(
         /* ignore */
       }
     }
-    const hdrs = { ...headers };
-    if (scriptCookie) hdrs.Cookie = scriptCookie;
+    const headerCookie = String(headers.Cookie ?? headers.cookie ?? '').trim();
+    const mergedCookie = scriptCookie || headerCookie;
+    const hdrs = mergeAjaxCookieHeaders(headers, mergedCookie);
 
     let reqBody = body;
-    const isUserApi = /\/user_api\b/.test(resolvedUrl);
-    if (isUserApi && method === 'POST' && reqBody == null) {
-      const m = String(scriptCookie || '').match(/qttoken=([^;]+)/);
-      const token = m ? m[1] : '';
-      if (token) {
-        reqBody = JSON.stringify({ key: token });
-        hdrs['Content-Type'] = 'application/json';
-      }
+    if (options.normalizePostBody) {
+      reqBody = options.normalizePostBody(resolvedUrl, method, reqBody);
+    }
+    reqBody = normalizeUserApiPostBody(resolvedUrl, method, reqBody, {
+      cookieStr: mergedCookie || hdrs.Cookie,
+      formKey: options.getFormKey?.(),
+      argToken: options.getArgToken?.(),
+    });
+    if (isUserApiPost(resolvedUrl, method)) {
+      const cookie = resolveUserApiCookieHeader(hdrs.Cookie ?? mergedCookie, {
+        argToken: options.getArgToken?.(),
+        formKey: options.getFormKey?.(),
+        deviceId: options.getDeviceId?.(),
+      });
+      if (cookie) hdrs.Cookie = cookie;
+      reqBody = undefined;
+      delete hdrs['Content-Type'];
     }
 
     const requestStart = Date.now();
@@ -124,8 +151,7 @@ export function bindJavaAjax(
     const writeIdx = coordinator.writeIndex;
     coordinator.writeIndex += 1;
     coordinator.pendingSuspend = new SuspendScript(p, writeIdx, resolvedUrl, requestStart);
-    const err = vm.newString(LEGADO_SUSPEND_MARKER);
-    vm.throw(err);
-    return err;
+    // 同步 QuickJS 下 vm.throw 不会中断宿主函数，eval 会得到 undefined；须抛 JS Error 供 evalScript 挂起
+    throw new Error(LEGADO_SUSPEND_MARKER);
   });
 }

@@ -10,7 +10,7 @@
  * 4. 响应式设计（宽屏/窄屏）
  */
 
-import { createSignal, For, Show, onMount, createEffect, onCleanup } from 'solid-js';
+import { createSignal, For, Show, onMount, createEffect, onCleanup, type JSX } from 'solid-js';
 import Sortable from 'sortablejs';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { bookshelfStore } from '@/stores/bookshelf';
@@ -21,12 +21,28 @@ import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { cn } from '@/lib/utils';
 import { withLongPressSortableOptions } from '@/utils/sortable-long-press';
+import { blurActiveElement } from '@/utils/accessibility';
+import {
+  applyGroupsOrder,
+  isDefaultBookGroup,
+  pinGroupToBottom,
+  pinGroupToTop,
+} from '@/utils/book-group-order';
 import { getCoverPreviewInfo } from '@/utils/book-group-cover';
+import { GroupContextMenu, type GroupContextMenuActions } from '@/components/BookGroupContextMenu';
+import { BookGroupFormDialog } from '@/components/BookGroupFormDialog';
 import {
   DefaultGroupCoverIcon,
   BookCoverPlaceholderIcon,
 } from '@/components/book-group-cover-icon';
 import { BookshelfIcon } from '@/components/icons';
+import { BookshelfLayoutGrid } from '@/components/BookshelfLayoutGrid';
+import {
+  getGroupListSortableContainer,
+  getViewModeContainerGridClass,
+  isGridViewMode,
+  type GroupListSortRefs,
+} from '@/utils/bookshelf-view-mode';
 
 // 视图模式从布局设置 Store 获取，不再使用本地状态
 
@@ -54,6 +70,202 @@ function getGroupDisplayName(group: BookGroup): string {
   }
 }
 
+/** 分组卡片 Button：覆盖 ghost 默认尺寸，保留原有列表/网格布局 */
+const GROUP_CARD_BUTTON_BASE =
+  cn(
+    'h-auto w-full justify-start font-normal whitespace-normal shadow-none hover:text-foreground',
+    'focus-visible:ring-offset-0 active:shadow-none'
+  );
+
+/** 悬停抬升阴影（与 App.css .book-group-card-motion 位移同步，垂直偏移随抬升加深） */
+const GROUP_CARD_HOVER_ELEVATION =
+  'shadow-none hover:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:hover:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]';
+
+const groupListButtonClass = (paddingClass: string) =>
+  cn(
+    GROUP_CARD_BUTTON_BASE,
+    'book-group-card-motion relative flex items-center gap-4 rounded-xl border',
+    paddingClass,
+    'hover:border-primary/50 hover:bg-transparent',
+    GROUP_CARD_HOVER_ELEVATION
+  );
+
+const groupCompactButtonClass = cn(
+  GROUP_CARD_BUTTON_BASE,
+  'book-group-card-motion flex items-center gap-3 rounded-lg border px-3 py-2',
+  'hover:border-primary/50 hover:bg-accent/50',
+  GROUP_CARD_HOVER_ELEVATION
+);
+
+const groupGridButtonClass = cn(
+  GROUP_CARD_BUTTON_BASE,
+  'book-group-card-motion relative flex-col items-center justify-center gap-3 rounded-xl border border-border/50 bg-card p-4',
+  'hover:border-primary/30 hover:bg-card',
+  GROUP_CARD_HOVER_ELEVATION
+);
+
+type GroupListVariant = 'list' | 'list-2' | 'list-3' | 'compact' | 'compact-2' | 'compact-3';
+
+function GroupListCover(props: {
+  group: BookGroup;
+  compact: boolean;
+  coverImageErrorIds: Set<number>;
+  onCoverError: (groupId: number) => void;
+}) {
+  const coverClass = cn(
+    'book-group-card-cover-motion book-group-card-cover-motion--list flex aspect-3/4 shrink-0 items-center justify-center overflow-hidden bg-muted/50',
+    props.compact ? 'h-14 rounded-md text-lg' : 'h-20 rounded-lg text-2xl',
+  );
+  const info = () => getCoverPreviewInfo(props.group.cover);
+  const imageFailed = () => props.coverImageErrorIds.has(props.group.groupId);
+
+  return (
+    <div class={coverClass}>
+      {(() => {
+        const preview = info();
+        if (!props.group.cover?.trim()) {
+          return (
+            <span class="flex h-full w-full items-center justify-center">
+              <DefaultGroupCoverIcon group={props.group} class="h-8 w-8" />
+            </span>
+          );
+        }
+        if (preview.type === 'invalid' || (preview.url && imageFailed())) {
+          return (
+            <span class="flex h-full w-full items-center justify-center">
+              {props.compact ? (
+                <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
+              ) : (
+                <BookCoverPlaceholderIcon />
+              )}
+            </span>
+          );
+        }
+        if (preview.type === 'emoji' && props.group.cover) {
+          return (
+            <span class="flex h-full w-full items-center justify-center">{props.group.cover.trim()}</span>
+          );
+        }
+        if (preview.url && !imageFailed()) {
+          return (
+            <img
+              src={preview.url ?? undefined}
+              alt=""
+              class="h-full w-full object-cover"
+              draggable={false}
+              onError={() => props.onCoverError(props.group.groupId)}
+            />
+          );
+        }
+        return (
+          <span class="flex h-full w-full items-center justify-center">
+            {props.compact ? (
+              <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
+            ) : (
+              <BookCoverPlaceholderIcon />
+            )}
+          </span>
+        );
+      })()}
+    </div>
+  );
+}
+
+function GroupListView(props: {
+  variant: GroupListVariant;
+  groups: BookGroup[];
+  orderGroups: BookGroup[];
+  actions: GroupContextMenuActions;
+  titleDisplay: string;
+  coverImageErrorIds: Set<number>;
+  setCoverImageErrorIds: (fn: (prev: Set<number>) => Set<number>) => void;
+  getGroupBookCount: (group: BookGroup) => number;
+  onGroupClick: (group: BookGroup) => void;
+  setContainerRef: (el: HTMLDivElement) => void;
+}) {
+  const compact = () => props.variant.startsWith('compact');
+  const buttonClass = () =>
+    compact() ? groupCompactButtonClass : groupListButtonClass(props.variant === 'list' ? 'p-2' : 'p-4');
+
+  return (
+    <BookshelfLayoutGrid
+      ref={props.setContainerRef}
+      class={getViewModeContainerGridClass(props.variant)}
+    >
+      <For each={props.groups}>
+        {(group) => (
+          <BookGroupCardWithMenu
+            group={group}
+            orderGroups={props.orderGroups}
+            actions={props.actions}
+            class={buttonClass()}
+            onClick={() => props.onGroupClick(group)}
+          >
+            <GroupListCover
+              group={group}
+              compact={compact()}
+              coverImageErrorIds={props.coverImageErrorIds}
+              onCoverError={(groupId) =>
+                props.setCoverImageErrorIds((prev) => new Set(prev).add(groupId))
+              }
+            />
+            <Show when={props.titleDisplay !== 'hide'}>
+              <div class="min-w-0 flex-1 text-left">
+                <h3
+                  class={cn(
+                    'truncate font-semibold text-foreground',
+                    compact() ? 'mb-0.5' : 'mb-1',
+                  )}
+                >
+                  {getGroupDisplayName(group)}
+                </h3>
+                <p class={compact() ? 'text-xs text-muted-foreground' : 'text-sm text-muted-foreground'}>
+                  {props.getGroupBookCount(group)} 本书
+                </p>
+              </div>
+            </Show>
+          </BookGroupCardWithMenu>
+        )}
+      </For>
+    </BookshelfLayoutGrid>
+  );
+}
+
+const GROUP_LIST_VARIANTS: GroupListVariant[] = [
+  'list',
+  'list-2',
+  'list-3',
+  'compact',
+  'compact-2',
+  'compact-3',
+];
+
+function BookGroupCardWithMenu(props: {
+  group: BookGroup;
+  orderGroups: BookGroup[];
+  actions: GroupContextMenuActions;
+  class: string;
+  onClick: () => void;
+  children: JSX.Element;
+}) {
+  return (
+    <GroupContextMenu
+      group={props.group}
+      orderGroups={props.orderGroups}
+      actions={props.actions}
+      triggerAs="button"
+      withLongPress
+      class={props.class}
+      onClick={(e: MouseEvent) => {
+        e.stopPropagation();
+        props.onClick();
+      }}
+    >
+      {props.children}
+    </GroupContextMenu>
+  );
+}
+
 export interface BookGroupProps {
   /** 父级已加载的分组（有则直接使用，不重复请求，与书源页一致） */
   initialGroups?: BookGroup[];
@@ -66,18 +278,21 @@ export interface BookGroupProps {
 export function BookGroup(props: BookGroupProps = {}) {
   const [groups, setGroups] = createSignal<BookGroup[]>([]);
   const [loading, setLoading] = createSignal(false);
-  /** 是否已完成至少一次加载，用于避免统计从 0 闪到正常值（与书源页描述一致） */
-  const [hasLoaded, setHasLoaded] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [coverImageErrorIds, setCoverImageErrorIds] = createSignal<Set<number>>(new Set());
-  
+  const [allGroupsOrder, setAllGroupsOrder] = createSignal<BookGroup[]>([]);
+  const [formDialogOpen, setFormDialogOpen] = createSignal(false);
+  const [formDialogGroup, setFormDialogGroup] = createSignal<BookGroup | null>(null);
+
   // 使用 skeleton 加载状态管理，避免快速加载时的闪烁
   const showSkeleton = useSkeletonLoading(loading, { delay: 100, minDisplayTime: 300 });
 
   let listRef: HTMLDivElement | null = null;
   let list2Ref: HTMLDivElement | null = null;
+  let list3Ref: HTMLDivElement | null = null;
   let compactRef: HTMLDivElement | null = null;
   let compact2Ref: HTMLDivElement | null = null;
+  let compact3Ref: HTMLDivElement | null = null;
   let gridRef: HTMLDivElement | null = null;
   let sortableInstance: Sortable | null = null;
 
@@ -85,12 +300,16 @@ export function BookGroup(props: BookGroupProps = {}) {
     const manual = sortMode() === 'manual';
     const view = viewMode();
     const listVisible = !loading() && !showSkeleton() && groups().length > 0;
-    const container =
-      view === 'list' ? listRef
-      : view === 'list-2' ? list2Ref
-      : view === 'compact' ? compactRef
-      : view === 'compact-2' ? compact2Ref
-      : gridRef;
+    const sortRefs: GroupListSortRefs = {
+      list: listRef,
+      list2: list2Ref,
+      list3: list3Ref,
+      compact: compactRef,
+      compact2: compact2Ref,
+      compact3: compact3Ref,
+      grid: gridRef,
+    };
+    const container = getGroupListSortableContainer(view, sortRefs);
 
     if (!manual || !listVisible || !container || groups().length === 0) {
       if (sortableInstance) {
@@ -132,7 +351,7 @@ export function BookGroup(props: BookGroupProps = {}) {
 
   // 获取视图模式（从布局设置 Store）
   const viewMode = () => bookshelfLayoutStore.settings.viewMode;
-  
+
   // 获取书名/分组名显示方式（从布局设置 Store）
   const titleDisplay = () => bookshelfLayoutStore.settings.bookTitleDisplay;
   // 排序模式：仅当为手动排序时启用分组拖拽
@@ -144,7 +363,9 @@ export function BookGroup(props: BookGroupProps = {}) {
     const initial = props.initialGroups;
     if (initial?.length) {
       setGroups([...initial]);
-      setHasLoaded(true);
+      void groupsDb.getAllGroups().then((all) => {
+        setAllGroupsOrder([...all].sort((a, b) => a.order - b.order));
+      });
     } else {
       loadGroups();
     }
@@ -161,6 +382,7 @@ export function BookGroup(props: BookGroupProps = {}) {
     try {
       const allGroups = await groupsDb.getAllGroups();
       const sortedGroups = [...allGroups].sort((a, b) => a.order - b.order);
+      setAllGroupsOrder(sortedGroups);
       const visibleGroups = sortedGroups.filter(g => g.show);
       setGroups(visibleGroups);
       props.onGroupsLoaded?.(visibleGroups);
@@ -170,7 +392,6 @@ export function BookGroup(props: BookGroupProps = {}) {
       console.error('加载分组失败:', e);
     } finally {
       setLoading(false);
-      setHasLoaded(true);
     }
   }
 
@@ -183,6 +404,61 @@ export function BookGroup(props: BookGroupProps = {}) {
     bookshelfStore.setShowGroupList(false);
     props.onGroupSelect?.(group);
   }
+
+  function handleEdit(group: BookGroup) {
+    blurActiveElement();
+    setFormDialogGroup(group);
+    setFormDialogOpen(true);
+  }
+
+  async function applyOrderUpdate(updated: BookGroup[] | null) {
+    if (!updated) return;
+    try {
+      await applyGroupsOrder(updated);
+      setAllGroupsOrder(updated);
+      const visible = updated.filter((g) => g.show);
+      setGroups(visible);
+      props.onGroupsLoaded?.(visible);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '更新顺序失败';
+      setError(errorMsg);
+      console.error('更新分组顺序失败:', e);
+      await loadGroups();
+    }
+  }
+
+  async function handlePinTop(group: BookGroup) {
+    await applyOrderUpdate(pinGroupToTop(allGroupsOrder(), group.groupId));
+  }
+
+  async function handlePinBottom(group: BookGroup) {
+    await applyOrderUpdate(pinGroupToBottom(allGroupsOrder(), group.groupId));
+  }
+
+  async function handleDelete(group: BookGroup) {
+    if (isDefaultBookGroup(group.groupId)) {
+      setError('默认分组无法删除');
+      return;
+    }
+    if (!confirm(`确定要删除分组"${group.groupName}"吗？`)) {
+      return;
+    }
+    try {
+      await groupsDb.deleteGroup(group.groupId);
+      await loadGroups();
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '删除失败';
+      setError(errorMsg);
+      console.error('删除分组失败:', e);
+    }
+  }
+
+  const groupContextMenuActions: GroupContextMenuActions = {
+    onEdit: handleEdit,
+    onDelete: handleDelete,
+    onPinTop: handlePinTop,
+    onPinBottom: handlePinBottom,
+  };
 
   // 缓存分组书籍数量（避免重复查询）
   const [groupBookCounts, setGroupBookCounts] = createSignal<Map<number, number>>(new Map());
@@ -221,7 +497,7 @@ export function BookGroup(props: BookGroupProps = {}) {
       <Show when={showSkeleton()}>
         {/* 列表视图 skeleton */}
         <Show when={viewMode() === 'list'}>
-          <div class="grid grid-cols-1 gap-3">
+          <BookshelfLayoutGrid class="grid-cols-1">
             <For each={[1, 2, 3, 4, 5, 6]}>
               {() => (
                 <div class="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-4">
@@ -239,11 +515,11 @@ export function BookGroup(props: BookGroupProps = {}) {
                 </div>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
         </Show>
         {/* 列表二列 skeleton */}
         <Show when={viewMode() === 'list-2'}>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <BookshelfLayoutGrid class="grid-cols-1 md:grid-cols-2">
             <For each={[1, 2, 3, 4, 5, 6]}>
               {() => (
                 <div class="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-4">
@@ -261,11 +537,33 @@ export function BookGroup(props: BookGroupProps = {}) {
                 </div>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
+        </Show>
+        {/* 列表三列 skeleton */}
+        <Show when={viewMode() === 'list-3'}>
+          <BookshelfLayoutGrid class={getViewModeContainerGridClass('list-3')}>
+            <For each={[1, 2, 3, 4, 5, 6]}>
+              {() => (
+                <div class="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-4">
+                  <div class="h-20 aspect-3/4 shrink-0 rounded-lg bg-muted/60 animate-pulse" />
+                  <div class="min-w-0 flex-1 space-y-2">
+                    <div class="h-4 w-2/3 rounded bg-muted/60 animate-pulse" />
+                    <div class="h-3 w-1/3 rounded bg-muted/60 animate-pulse" />
+                    <div class="space-y-1">
+                      <div class="h-3 w-full rounded bg-muted/60 animate-pulse" />
+                      <div class="h-3 w-5/6 rounded bg-muted/60 animate-pulse" />
+                      <div class="h-3 w-4/5 rounded bg-muted/60 animate-pulse" />
+                      <div class="h-3 w-3/4 rounded bg-muted/60 animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </For>
+          </BookshelfLayoutGrid>
         </Show>
         {/* 紧凑列表 skeleton */}
         <Show when={viewMode() === 'compact'}>
-          <div class="grid grid-cols-1 gap-2">
+          <BookshelfLayoutGrid class="grid-cols-1">
             <For each={[1, 2, 3, 4, 5, 6, 7, 8]}>
               {() => (
                 <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2">
@@ -281,11 +579,11 @@ export function BookGroup(props: BookGroupProps = {}) {
                 </div>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
         </Show>
         {/* 紧凑列表二列 skeleton */}
         <Show when={viewMode() === 'compact-2'}>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <BookshelfLayoutGrid class="grid-cols-1 md:grid-cols-2">
             <For each={[1, 2, 3, 4, 5, 6, 7, 8]}>
               {() => (
                 <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2">
@@ -301,23 +599,31 @@ export function BookGroup(props: BookGroupProps = {}) {
                 </div>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
+        </Show>
+        {/* 紧凑列表三列 skeleton */}
+        <Show when={viewMode() === 'compact-3'}>
+          <BookshelfLayoutGrid class={getViewModeContainerGridClass('compact-3')}>
+            <For each={[1, 2, 3, 4, 5, 6, 7, 8]}>
+              {() => (
+                <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2">
+                  <div class="h-14 aspect-3/4 shrink-0 rounded-md bg-muted/60 animate-pulse" />
+                  <div class="min-w-0 flex-1 space-y-1.5">
+                    <div class="h-3.5 w-1/2 rounded bg-muted/60 animate-pulse" />
+                    <div class="h-2.5 w-1/4 rounded bg-muted/60 animate-pulse" />
+                    <div class="space-y-1">
+                      <div class="h-2.5 w-full rounded bg-muted/60 animate-pulse" />
+                      <div class="h-2.5 w-4/5 rounded bg-muted/60 animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </For>
+          </BookshelfLayoutGrid>
         </Show>
         {/* 网格视图 skeleton */}
-        <Show when={viewMode().startsWith('grid-')}>
-          <div
-            class={cn(
-              'grid',
-              viewMode() === 'grid-2' && 'grid-cols-2',
-              viewMode() === 'grid-3' && 'grid-cols-3',
-              viewMode() === 'grid-4' && 'grid-cols-4',
-              viewMode() === 'grid-5' && 'grid-cols-5',
-              viewMode() === 'grid-6' && 'grid-cols-6'
-            )}
-            style={{
-              gap: `${bookshelfLayoutStore.settings.spacing * 0.25}rem`,
-            }}
-          >
+        <Show when={isGridViewMode(viewMode())}>
+          <BookshelfLayoutGrid class={getViewModeContainerGridClass(viewMode())}>
             <For each={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}>
               {() => (
                 <div class="flex flex-col items-center gap-3 rounded-xl border border-border/50 bg-card p-4">
@@ -329,352 +635,59 @@ export function BookGroup(props: BookGroupProps = {}) {
                 </div>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
         </Show>
       </Show>
 
       {/* 分组列表 */}
       <Show when={!loading() && !showSkeleton() && groups().length > 0}>
-        {/* 列表视图（常规列表） */}
-        <Show when={viewMode() === 'list'}>
-          <div ref={(el) => { listRef = el; }} class="grid grid-cols-1 gap-3">
-            <For each={groups()}>
-              {(group) => (
-                <button
-                  onClick={() => handleGroupClick(group)}
-                  class={cn(
-                    'group relative flex items-center gap-4 rounded-xl border p-4 transition-all duration-200',
-                    'hover:border-primary/50 hover:shadow-md hover:-translate-y-0.5',
-                    'active:scale-[0.98]',
-                  )}
-                >
-                  {/* 分组封面 */}
-                  <div
-                    class={cn(
-                      'flex h-20 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg text-2xl transition-transform duration-200',
-                      'group-hover:scale-110',
-                      'bg-muted/50'
-                    )}
-                  >
-                    {(() => {
-                      const info = getCoverPreviewInfo(group.cover);
-                      const imageFailed = coverImageErrorIds().has(group.groupId);
-                      if (!group.cover?.trim()) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'invalid' || (info.url && imageFailed)) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <BookCoverPlaceholderIcon />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'emoji' && group.cover) {
-                        return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                      }
-                      if (info.url && !imageFailed) {
-                        return (
-                          <img
-                            src={info.url}
-                            alt=""
-                            class="h-full w-full object-cover"
-                            draggable={false}
-                            onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                          />
-                        );
-                      }
-                      return (
-                        <span class="flex h-full w-full items-center justify-center">
-                          <BookCoverPlaceholderIcon />
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  {/* 分组信息 */}
-                  <Show when={titleDisplay() !== 'hide'}>
-                    <div class="flex-1 min-w-0 text-left">
-                      <h3 class="mb-1 font-semibold text-foreground truncate">
-                        {getGroupDisplayName(group)}
-                      </h3>
-                      <p class="text-sm text-muted-foreground">
-                        {getGroupBookCount(group)} 本书
-                      </p>
-                    </div>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        {/* 列表视图（列表二列） */}
-        <Show when={viewMode() === 'list-2'}>
-          <div ref={(el) => { list2Ref = el; }} class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <For each={groups()}>
-              {(group) => (
-                <button
-                  onClick={() => handleGroupClick(group)}
-                  class={cn(
-                    'group relative flex items-center gap-4 rounded-xl border p-4 transition-all duration-200',
-                    'hover:border-primary/50 hover:shadow-md hover:-translate-y-0.5',
-                    'active:scale-[0.98]',
-                  )}
-                >
-                  {/* 分组封面 */}
-                  <div
-                    class={cn(
-                      'flex h-20 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg text-2xl transition-transform duration-200',
-                      'group-hover:scale-110',
-                      'bg-muted/50'
-                    )}
-                  >
-                    {(() => {
-                      const info = getCoverPreviewInfo(group.cover);
-                      const imageFailed = coverImageErrorIds().has(group.groupId);
-                      if (!group.cover?.trim()) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'invalid' || (info.url && imageFailed)) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <BookCoverPlaceholderIcon />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'emoji' && group.cover) {
-                        return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                      }
-                      if (info.url && !imageFailed) {
-                        return (
-                          <img
-                            src={info.url}
-                            alt=""
-                            class="h-full w-full object-cover"
-                            draggable={false}
-                            onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                          />
-                        );
-                      }
-                      return (
-                        <span class="flex h-full w-full items-center justify-center">
-                          <BookCoverPlaceholderIcon />
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  {/* 分组信息 */}
-                  <Show when={titleDisplay() !== 'hide'}>
-                    <div class="flex-1 min-w-0 text-left">
-                      <h3 class="mb-1 font-semibold text-foreground truncate">
-                        {getGroupDisplayName(group)}
-                      </h3>
-                      <p class="text-sm text-muted-foreground">
-                        {getGroupBookCount(group)} 本书
-                      </p>
-                    </div>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        {/* 列表视图（紧凑列表） */}
-        <Show when={viewMode() === 'compact'}>
-          <div ref={(el) => { compactRef = el; }} class="grid grid-cols-1 gap-2">
-            <For each={groups()}>
-              {(group) => (
-                <button
-                  onClick={() => handleGroupClick(group)}
-                  class={cn(
-                    'group flex items-center gap-3 rounded-lg border px-3 py-2 transition-all duration-200',
-                    'hover:border-primary/50 hover:bg-accent/50',
-                    'active:scale-[0.98]',
-                  )}
-                >
-                  {/* 分组封面（小） */}
-                  <div
-                    class={cn(
-                      'flex h-14 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-md text-lg transition-transform duration-200',
-                      'group-hover:scale-110',
-                      'bg-muted/50'
-                    )}
-                  >
-                    {(() => {
-                      const info = getCoverPreviewInfo(group.cover);
-                      const imageFailed = coverImageErrorIds().has(group.groupId);
-                      if (!group.cover?.trim()) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'invalid' || (info.url && imageFailed)) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'emoji' && group.cover) {
-                        return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                      }
-                      if (info.url && !imageFailed) {
-                        return (
-                          <img
-                            src={info.url}
-                            alt=""
-                            class="h-full w-full object-cover"
-                            draggable={false}
-                            onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                          />
-                        );
-                      }
-                      return (
-                        <span class="flex h-full w-full items-center justify-center">
-                          <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  {/* 分组信息 */}
-                  <Show when={titleDisplay() !== 'hide'}>
-                    <div class="flex-1 min-w-0 text-left">
-                      <h3 class="font-semibold text-foreground truncate mb-0.5">
-                        {getGroupDisplayName(group)}
-                      </h3>
-                      <p class="text-xs text-muted-foreground">
-                        {getGroupBookCount(group)} 本书
-                      </p>
-                    </div>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        {/* 列表视图（紧凑列表二列） */}
-        <Show when={viewMode() === 'compact-2'}>
-          <div ref={(el) => { compact2Ref = el; }} class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <For each={groups()}>
-              {(group) => (
-                <button
-                  onClick={() => handleGroupClick(group)}
-                  class={cn(
-                    'group flex items-center gap-3 rounded-lg border px-3 py-2 transition-all duration-200',
-                    'hover:border-primary/50 hover:bg-accent/50',
-                    'active:scale-[0.98]',
-                  )}
-                >
-                  {/* 分组封面（小） */}
-                  <div
-                    class={cn(
-                      'flex h-14 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-md text-lg transition-transform duration-200',
-                      'group-hover:scale-110',
-                      'bg-muted/50'
-                    )}
-                  >
-                    {(() => {
-                      const info = getCoverPreviewInfo(group.cover);
-                      const imageFailed = coverImageErrorIds().has(group.groupId);
-                      if (!group.cover?.trim()) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'invalid' || (info.url && imageFailed)) {
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                          </span>
-                        );
-                      }
-                      if (info.type === 'emoji' && group.cover) {
-                        return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                      }
-                      if (info.url && !imageFailed) {
-                        return (
-                          <img
-                            src={info.url}
-                            alt=""
-                            class="h-full w-full object-cover"
-                            draggable={false}
-                            onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                          />
-                        );
-                      }
-                      return (
-                        <span class="flex h-full w-full items-center justify-center">
-                          <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  {/* 分组信息 */}
-                  <Show when={titleDisplay() !== 'hide'}>
-                    <div class="flex-1 min-w-0 text-left">
-                      <h3 class="font-semibold text-foreground truncate mb-0.5">
-                        {getGroupDisplayName(group)}
-                      </h3>
-                      <p class="text-xs text-muted-foreground">
-                        {getGroupBookCount(group)} 本书
-                      </p>
-                    </div>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
+        <For each={GROUP_LIST_VARIANTS}>
+          {(variant) => (
+            <Show when={viewMode() === variant}>
+              <GroupListView
+                variant={variant}
+                groups={groups()}
+                orderGroups={allGroupsOrder()}
+                actions={groupContextMenuActions}
+                titleDisplay={titleDisplay()}
+                coverImageErrorIds={coverImageErrorIds()}
+                setCoverImageErrorIds={setCoverImageErrorIds}
+                getGroupBookCount={getGroupBookCount}
+                onGroupClick={handleGroupClick}
+                setContainerRef={(el) => {
+                  if (variant === 'list') listRef = el;
+                  else if (variant === 'list-2') list2Ref = el;
+                  else if (variant === 'list-3') list3Ref = el;
+                  else if (variant === 'compact') compactRef = el;
+                  else if (variant === 'compact-2') compact2Ref = el;
+                  else if (variant === 'compact-3') compact3Ref = el;
+                }}
+              />
+            </Show>
+          )}
+        </For>
 
         {/* 网格视图 */}
-        <Show when={viewMode().startsWith('grid-')}>
-          <div
-            ref={(el) => { gridRef = el; }}
-            class={cn(
-              'grid',
-              // 根据布局设置动态设置列数
-              viewMode() === 'grid-2' && 'grid-cols-2',
-              viewMode() === 'grid-3' && 'grid-cols-3',
-              viewMode() === 'grid-4' && 'grid-cols-4',
-              viewMode() === 'grid-5' && 'grid-cols-5',
-              viewMode() === 'grid-6' && 'grid-cols-6'
-            )}
-            style={{
-              gap: `${bookshelfLayoutStore.settings.spacing * 0.25}rem`,
+        <Show when={isGridViewMode(viewMode())}>
+          <BookshelfLayoutGrid
+            ref={(el) => {
+              gridRef = el;
             }}
+            class={getViewModeContainerGridClass(viewMode())}
           >
             <For each={groups()}>
               {(group) => (
-                <button
+                <BookGroupCardWithMenu
+                  group={group}
+                  orderGroups={allGroupsOrder()}
+                  actions={groupContextMenuActions}
+                  class={groupGridButtonClass}
                   onClick={() => handleGroupClick(group)}
-                  class={cn(
-                    'group/card relative flex flex-col items-center gap-3 rounded-xl border border-border/50 bg-card p-4 transition-all duration-200',
-                    'hover:border-primary/30 hover:shadow-md',
-                    'active:scale-[0.98]'
-                  )}
                 >
                   {/* 分组封面 */}
                   <div
                     class={cn(
-                      'flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg text-4xl transition-transform duration-200',
-                      'group-hover/card:scale-[1.02]',
+                      'book-group-card-cover-motion book-group-card-cover-motion--grid flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg text-4xl',
                       'bg-linear-to-br from-muted to-accent/30',
                       titleDisplay() === 'overlay' && 'relative'
                     )}
@@ -739,10 +752,10 @@ export function BookGroup(props: BookGroupProps = {}) {
                       {getGroupBookCount(group)} 本书
                     </p>
                   </Show>
-                </button>
+                </BookGroupCardWithMenu>
               )}
             </For>
-          </div>
+          </BookshelfLayoutGrid>
         </Show>
       </Show>
 
@@ -759,6 +772,15 @@ export function BookGroup(props: BookGroupProps = {}) {
           </p>
         </div>
       </Show>
+
+      <BookGroupFormDialog
+        open={formDialogOpen()}
+        onOpenChange={setFormDialogOpen}
+        mode="edit"
+        initialGroup={formDialogGroup()}
+        onSuccess={loadGroups}
+        onError={(msg) => setError(msg)}
+      />
     </div>
   );
 }

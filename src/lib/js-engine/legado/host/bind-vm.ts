@@ -16,7 +16,8 @@ export function bindVmFunction(
 ): void {
   const handle = vm.newFunction(name, (...args) => {
     const ret = fn(...args);
-    return ret ?? vm.undefined;
+    // 勿用 vm.undefined：每次 void 回调会泄漏 handle，dispose 时触发 gc_obj_list 断言
+    if (ret !== undefined) return ret;
   });
   vm.setProp(target, name, handle);
   handle.dispose();
@@ -25,5 +26,32 @@ export function bindVmFunction(
 export function bindVmObject(vm: QuickJSContext, globalName: string): QuickJSHandle {
   const obj = vm.newObject();
   vm.setProp(vm.global, globalName, obj);
+  return obj;
+}
+
+/**
+ * 在 global 上创建对象、绑定方法后 dispose 宿主侧 handle（quickjs-emscripten 要求，否则 vm.dispose 断言失败）
+ */
+export function bindGlobalVmObject(
+  vm: QuickJSContext,
+  globalName: string,
+  bind: (obj: QuickJSHandle) => void
+): void {
+  const obj = bindVmObject(vm, globalName);
+  bind(obj);
+  obj.dispose();
+}
+
+/** 将 string 键值对写入新 QuickJS 对象（避免 evalCode 泄漏 handle） */
+export function vmNewStringRecordObject(
+  vm: QuickJSContext,
+  record: Record<string, string>
+): QuickJSHandle {
+  const obj = vm.newObject();
+  for (const [k, v] of Object.entries(record)) {
+    const valHandle = vm.newString(String(v ?? ''));
+    vm.setProp(obj, k, valHandle);
+    valHandle.dispose();
+  }
   return obj;
 }

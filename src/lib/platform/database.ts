@@ -42,10 +42,13 @@ async function canUseTauriSql(): Promise<boolean> {
       // 只在第一次检测时输出日志
       if (canUseTauriCache === null) {
         const win = window as Window & { __TAURI__?: unknown };
+        const g = globalThis as typeof globalThis & { isTauri?: boolean };
         console.log('[数据库适配层] 环境检测:', {
           isTauri: inTauri,
           hasWindow: typeof window !== 'undefined',
+          globalIsTauri: g.isTauri === true,
           hasTauriObject: typeof window !== 'undefined' && typeof win.__TAURI__ !== 'undefined',
+          tauriEnvPlatform: import.meta.env.TAURI_ENV_PLATFORM ?? null,
         });
       }
 
@@ -353,32 +356,42 @@ async function initTauriDatabase(): Promise<DatabaseAdapter> {
   }
 }
 
+const SQLJS_WASM_VERSION = '1.14.0';
+
+function sqlJsWasmBaseLocal(): string {
+  const base = import.meta.env.BASE_URL || '/';
+  return `${base}sql.js/`;
+}
+
+function sqlJsWasmBaseCdn(): string {
+  return `https://cdn.jsdelivr.net/npm/sql.js@${SQLJS_WASM_VERSION}/dist/`;
+}
+
+async function initSqlJsWithWasm(locateBase: string): Promise<import('sql.js').SqlJsStatic> {
+  const initSqlJsModule = await import('sql.js');
+  const initSqlJs = initSqlJsModule.default;
+  const base = locateBase.endsWith('/') ? locateBase : `${locateBase}/`;
+  return initSqlJs({
+    locateFile: (file: string) => `${base}${file}`,
+  });
+}
+
 /**
  * 初始化 Web 环境数据库
  */
 async function initWebDatabase(): Promise<DatabaseAdapter> {
   try {
     console.log('[数据库适配层] 开始初始化 Web 方案（sql.js）...');
-    const initSqlJsModule = await import('sql.js');
-    const initSqlJs = initSqlJsModule.default;
-    console.log('[数据库适配层] sql.js 导入成功');
 
-    // 尝试使用本地 WASM 文件，如果失败则使用 CDN
     let SQL: import('sql.js').SqlJsStatic;
 
     try {
-      // 优先尝试本地文件
-      SQL = await initSqlJs({
-        locateFile: (file: string) => `/sql.js/${file}`,
-      });
-      console.log('[数据库适配层] sql.js WASM 初始化成功（使用本地文件）');
+      SQL = await initSqlJsWithWasm(sqlJsWasmBaseLocal());
+      console.log('[数据库适配层] sql.js WASM 初始化成功（public/sql.js）');
     } catch (localError) {
-      // 本地文件加载失败，降级到 CDN
-      console.warn('[数据库适配层] 本地 WASM 文件加载失败，使用 CDN:', localError);
-      SQL = await initSqlJs({
-        locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-      });
-      console.log('[数据库适配层] sql.js WASM 初始化成功（使用 CDN）');
+      console.warn('[数据库适配层] 本地 WASM 加载失败，尝试 jsDelivr CDN:', localError);
+      SQL = await initSqlJsWithWasm(sqlJsWasmBaseCdn());
+      console.log('[数据库适配层] sql.js WASM 初始化成功（CDN）');
     }
 
     // 尝试从 IndexedDB 加载现有数据库

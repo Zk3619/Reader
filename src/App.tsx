@@ -18,7 +18,14 @@ import { BookShelf } from "./pages/bookshelf/BookShelf";
 import { SourcesPage } from "./pages/sources/SourcesPage";
 import { DiscoverPage } from "./pages/discover/DiscoverPage";
 import { BookInfoPage } from "./pages/book-info/BookInfoPage";
-import { BookGroupManage } from "./pages/bookshelf/BookGroupManage";
+import {
+  BookGroupManage,
+  type BookGroupManageToolbarActions,
+} from "./pages/bookshelf/BookGroupManage";
+import {
+  BookGroupManagePageToolbar,
+  BookGroupManageToolbarLeading,
+} from "./components/BookGroupManagePageToolbar";
 import { ReaderPage } from "./pages/reader/ReaderPage";
 import { ImportPage } from "./pages/import/ImportPage";
 import { RemoteBookPage } from "./pages/remote-book/RemoteBookPage";
@@ -57,7 +64,15 @@ import { BookDirectoryDialog } from "./components/BookDirectoryDialog";
 import { ImportActionDialog, type ImportAction } from "./components/ImportActionDialog";
 import { ReplaceFileDialog, type ReplaceFileAction } from "./components/ReplaceFileDialog";
 import { getSourceGroupLabel, type SourceSearchMode } from "@/lib/sources-filters";
-import { openUrlInApp } from "@/lib/platform/open-url";
+import { openSourceSettingsInApp } from "@/lib/platform/open-url";
+import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
+import {
+  registerInnerWebOpener,
+  registerInnerWebClose,
+  shouldSuppressLoginDialogDismiss,
+  type InnerWebPayload,
+} from "@/lib/platform/inner-web";
+import { InnerWebHost } from "./pages/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "./components/SourceLoginDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev-hmr-state";
 import "./App.css";
@@ -117,6 +132,8 @@ function AppContent() {
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
   const [showGroupManage, setShowGroupManage] = createSignal(false);
+  const [groupManageToolbarActions, setGroupManageToolbarActions] =
+    createSignal<BookGroupManageToolbarActions | null>(null);
   const [showBookDirectoryDialog, setShowBookDirectoryDialog] = createSignal(false);
   const [showImportActionDialog, setShowImportActionDialog] = createSignal(false);
   const [showReplaceFileDialog, setShowReplaceFileDialog] = createSignal(false);
@@ -129,6 +146,7 @@ function AppContent() {
   const [sourceSearchContext, setSourceSearchContext] = createSignal<{ source: BookSource } | null>(null);
   /** 书源登录对话框：配置了 loginUi 时弹窗显示登录页 */
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
+  const [innerWebPayload, setInnerWebPayload] = createSignal<InnerWebPayload | null>(null);
   const [pendingImportFile, setPendingImportFile] = createSignal<{
     bookUrl: string;
     fileName: string;
@@ -754,6 +772,15 @@ function AppContent() {
     });
   });
 
+  onMount(() => {
+    registerInnerWebOpener((payload) => {
+      setInnerWebPayload(payload);
+    });
+    registerInnerWebClose(() => {
+      setInnerWebPayload(null);
+    });
+  });
+
   // 监听窗口宽度变化
   onMount(() => {
     const handleResize = () => {
@@ -955,7 +982,7 @@ function AppContent() {
 
     return (
       <div
-        class="min-h-screen w-full transition-colors duration-300"
+        class="min-h-dvh w-full transition-colors duration-300"
         data-reduce-motion={reduceMotion() ? "true" : undefined}
       >
         {/* 数据库初始化错误提示 */}
@@ -1034,9 +1061,11 @@ function AppContent() {
             class={cn(
               "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
               showTopNav() ? "top-14" : "top-0",
-              shell().showSidebar &&
-              (state() === "expanded" ? "left-(--sidebar-width)" : "left-(--sidebar-width-icon)"),
-              shell().useMobileShell && "left-0",
+              shell().showSidebar
+                ? state() === "expanded"
+                  ? "left-(--sidebar-width)"
+                  : "left-(--sidebar-width-icon)"
+                : "left-0",
               showBottomBar() && "bottom-14",
             )}
           >
@@ -1046,7 +1075,25 @@ function AppContent() {
               <Show when={currentPage() === "bookshelf"}>
                 <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
                   {showGroupManage() ? (
-                    <BookGroupManage onClose={() => setShowGroupManage(false)} />
+                    <>
+                      <PageToolbar
+                        title="分组管理"
+                        description="管理书架分组，调整显示顺序和设置"
+                        leading={
+                          <BookGroupManageToolbarLeading
+                            onBack={() => setShowGroupManage(false)}
+                          />
+                        }
+                      >
+                        <BookGroupManagePageToolbar
+                          onAdd={() => groupManageToolbarActions()?.handleAdd()}
+                        />
+                      </PageToolbar>
+                      <BookGroupManage
+                        onClose={() => setShowGroupManage(false)}
+                        onToolbarActionsChange={setGroupManageToolbarActions}
+                      />
+                    </>
                   ) : (
                     <BookShelf
                       toolbarActions={
@@ -1120,10 +1167,11 @@ function AppContent() {
                       const hasUi = !!source.loginUi?.trim();
                       const isHttp =
                         !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                      if (isHttp) {
+                      // 仅 http 登录、无 loginUi：与书源设置 control() 相同的全屏内嵌页（工具栏 + √）
+                      if (isHttp && !hasUi) {
                         try {
-                          await openUrlInApp(url, `${source.sourceName ?? '书源'} · 登录`);
-                          showAppToast({ title: "已打开登录页", description: "请在窗口内完成登录", variant: "default" });
+                          const cookies = getStoredSourceCookiesForUrl(source, url);
+                          await openSourceSettingsInApp(url, cookies);
                         } catch (e) {
                           console.error("打开登录页失败:", e);
                           showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
@@ -1459,6 +1507,7 @@ function AppContent() {
               groupId={bookshelfStore.state.currentGroup >= 0 ? bookshelfStore.state.currentGroup : undefined}
             />
           </Show>
+
         </Show>
 
         {/* 回到顶部按钮 - 放在滚动容器外部，确保 fixed 定位正确 */}
@@ -1530,8 +1579,15 @@ function AppContent() {
         />
         <SourceLoginDialog
           open={!!sourceLoginDialogSource()}
-          onOpenChange={(open) => !open && setSourceLoginDialogSource(null)}
+          onOpenChange={(open) => {
+            if (!open && shouldSuppressLoginDialogDismiss()) return;
+            if (!open) setSourceLoginDialogSource(null);
+          }}
           source={sourceLoginDialogSource()}
+        />
+        <InnerWebHost
+          payload={innerWebPayload()}
+          onClose={() => setInnerWebPayload(null)}
         />
       </div>
     );

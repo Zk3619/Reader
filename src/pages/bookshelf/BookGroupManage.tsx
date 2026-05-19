@@ -15,41 +15,32 @@ import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { GroupContextMenu, type GroupContextMenuActions } from '@/components/BookGroupContextMenu';
+import { bookGroupCompactCardClass, bookGroupCompactCoverClass } from '@/utils/book-group-card-styles';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import { cn } from '@/lib/utils';
+  applyGroupsOrder,
+  isDefaultBookGroup,
+  pinGroupToBottom,
+  pinGroupToTop,
+} from '@/utils/book-group-order';
 import { getCoverPreviewInfo } from '@/utils/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
 import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/BookGroupFormDialog';
-import { RefreshIcon, BookshelfIcon, GripVerticalIcon } from '@/components/icons';
+import { BookshelfIcon, GripVerticalIcon } from '@/components/icons';
 import { BookCoverPlaceholderIcon } from '@/components/book-group-cover-icon';
-import { PageToolbar } from '@/components/PageToolbar';
-import { showAppToast } from '@/components/AppToasts';
-import { getBooksDirectory } from '@/lib/local-book/import';
-import { getFileSystem } from '@/lib/platform/filesystem';
-import { hasBook } from '@/lib/database/books';
-import { importLocalBookFromContent } from '@/lib/local-book';
-import { isTauri } from '@/lib/platform/detect';
-import { join } from '@tauri-apps/api/path';
-
 // 注意：不使用 Key 组件，因为 SortableJS 已经移动了 DOM
 // 我们需要让 SolidJS 根据数据顺序重新渲染，而不是阻止它
 
-interface BookGroupManageProps {
-  onClose?: () => void;
-}
+export type BookGroupManageToolbarActions = {
+  handleAdd: () => void;
+};
 
-/**
- * 判断是否为默认分组
- */
-function isDefaultGroup(groupId: number): boolean {
-  return groupId < 0;
+export interface BookGroupManageProps {
+  onClose?: () => void;
+  /** 供 App 层 PageToolbar 绑定「添加分组」等操作 */
+  onToolbarActionsChange?: (actions: BookGroupManageToolbarActions | null) => void;
 }
 
 /**
@@ -94,12 +85,8 @@ export function BookGroupManage(props: BookGroupManageProps) {
   const [formDialogOpen, setFormDialogOpen] = createSignal(false);
   const [formDialogMode, setFormDialogMode] = createSignal<'add' | 'edit'>('add');
   const [formDialogGroup, setFormDialogGroup] = createSignal<BookGroup | null>(null);
-  // 手动管理 hover 状态，避免焦点变化导致 hover 样式丢失
-  const [hoveredGroupId, setHoveredGroupId] = createSignal<number | null>(null);
   // 封面图片加载失败的 groupId 集合，用于显示默认图标
   const [coverImageErrorIds, setCoverImageErrorIds] = createSignal<Set<number>>(new Set());
-  // 重新加载书籍列表状态
-  const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
   // SortableJS 实例
   let sortableInstance: Sortable | null = null;
   let sortableContainer: HTMLDivElement | null = null;
@@ -107,16 +94,10 @@ export function BookGroupManage(props: BookGroupManageProps) {
   // 加载分组数据
   onMount(() => {
     loadGroups();
-
-    // 跟踪鼠标位置，用于判断鼠标是否仍在元素上
-    const handleMouseMove = (e: MouseEvent) => {
-      (window as any).lastMouseX = e.clientX;
-      (window as any).lastMouseY = e.clientY;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
+    props.onToolbarActionsChange?.({ handleAdd });
 
     onCleanup(() => {
-      window.removeEventListener('mousemove', handleMouseMove);
+      props.onToolbarActionsChange?.(null);
       if (sortableInstance) {
         sortableInstance.destroy();
         sortableInstance = null;
@@ -337,8 +318,36 @@ export function BookGroupManage(props: BookGroupManageProps) {
     }
   }
 
+  async function applyOrderUpdate(updated: BookGroup[] | null) {
+    if (!updated) return;
+    try {
+      await applyGroupsOrder(updated);
+      await loadGroups();
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '更新顺序失败';
+      setError(errorMsg);
+      console.error('更新分组顺序失败:', e);
+      await loadGroups();
+    }
+  }
+
+  async function handlePinTop(group: BookGroup) {
+    await applyOrderUpdate(pinGroupToTop(groups(), group.groupId));
+  }
+
+  async function handlePinBottom(group: BookGroup) {
+    await applyOrderUpdate(pinGroupToBottom(groups(), group.groupId));
+  }
+
+  const groupContextMenuActions: GroupContextMenuActions = {
+    onEdit: handleEdit,
+    onDelete: handleDelete,
+    onPinTop: handlePinTop,
+    onPinBottom: handlePinBottom,
+  };
+
   async function handleDelete(group: BookGroup) {
-    if (isDefaultGroup(group.groupId)) {
+    if (isDefaultBookGroup(group.groupId)) {
       setError('默认分组无法删除');
       return;
     }
@@ -357,499 +366,167 @@ export function BookGroupManage(props: BookGroupManageProps) {
     }
   }
 
-  /**
-   * 重新加载本地书籍列表
-   * 扫描本地书籍目录，找出不在数据库中的书籍文件并导入
-   */
-  async function handleReloadLocalBooks() {
-    if (!isTauri()) {
-      showAppToast({
-        title: "不支持",
-        description: "重新加载功能仅在桌面端和移动端可用",
-        variant: "error",
-      });
-      return;
-    }
-
-    setIsReloadingBooks(true);
-    setError(null);
-
-    try {
-      const booksDir = await getBooksDirectory();
-      const fs = await getFileSystem();
-      
-      // 读取目录中的所有文件
-      const files = await fs.readDir(booksDir);
-      
-      // 过滤出书籍文件（.txt, .epub 等）
-      const bookFiles: string[] = [];
-      for (const file of files) {
-        // readDir 返回字符串数组
-        const fileName = file;
-        if (!fileName) continue;
-        
-        const fullPath = await join(booksDir, fileName);
-        
-        // 检查是否是文件（不是目录）
-        try {
-          // 尝试读取目录，如果失败则可能是文件
-          await fs.readDir(fullPath);
-          // 是目录，跳过
-          continue;
-        } catch {
-          // 不是目录，检查是否是书籍文件
-          const ext = fileName.toLowerCase().split('.').pop();
-          if (ext === 'txt' || ext === 'epub') {
-            bookFiles.push(fullPath);
-          }
-        }
-      }
-
-      if (bookFiles.length === 0) {
-        showAppToast({
-          title: "未找到书籍",
-          description: "本地目录中没有找到书籍文件",
-          variant: "default",
-        });
-        setIsReloadingBooks(false);
-        return;
-      }
-
-      // 检查哪些文件不在数据库中
-      const missingBooks: string[] = [];
-      for (const filePath of bookFiles) {
-        const exists = await hasBook(filePath);
-        if (!exists) {
-          missingBooks.push(filePath);
-        }
-      }
-
-      if (missingBooks.length === 0) {
-        showAppToast({
-          title: "无需恢复",
-          description: "所有本地书籍文件已在书架中",
-          variant: "default",
-        });
-        setIsReloadingBooks(false);
-        return;
-      }
-
-      // 导入缺失的书籍
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const filePath of missingBooks) {
-        try {
-          const fileName = filePath.split(/[/\\]/).pop() || '';
-          const content = await fs.readFile(filePath);
-          
-          // 导入到本地分组
-          await importLocalBookFromContent(
-            filePath,
-            fileName,
-            content,
-            { groupId: BookGroupId.Local }
-          );
-          
-          successCount++;
-        } catch (error) {
-          console.error(`导入文件失败: ${filePath}`, error);
-          failCount++;
-        }
-      }
-
-      // 显示结果
-      if (successCount > 0) {
-        showAppToast({
-          title: "恢复完成",
-          description: `成功恢复 ${successCount} 本书${failCount > 0 ? `，${failCount} 本失败` : ''}`,
-          variant: "success",
-        });
-        
-        // 触发书架刷新
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
-      } else {
-        showAppToast({
-          title: "恢复失败",
-          description: `所有 ${missingBooks.length} 本书恢复失败`,
-          variant: "error",
-        });
-      }
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : '重新加载失败';
-      setError(errorMsg);
-      console.error('重新加载本地书籍失败:', e);
-      showAppToast({
-        title: "重新加载失败",
-        description: errorMsg,
-        variant: "error",
-      });
-    } finally {
-      setIsReloadingBooks(false);
-    }
-  }
-
   return (
-    <div class="flex flex-col flex-1 min-h-0 w-full">
-      <PageToolbar
-        title="分组管理"
-        description="管理书架分组，调整显示顺序和设置"
-      >
-        <Button
-          variant="default"
-          onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            handleAdd();
-          }}
-          type="button"
-        >
-          添加分组
-        </Button>
-        <Button
-          variant="outline"
-          onClick={(e) => {
-            e.stopPropagation();
-            props.onClose?.();
-          }}
-        >
-          返回
-        </Button>
-      </PageToolbar>
-
+    <>
       <div class="flex-1 min-h-0 overflow-y-auto pt-2 space-y-6 w-full">
-      <Show when={error()}>
-        <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-          {error()}
-        </div>
-      </Show>
+        <Show when={error()}>
+          <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            {error()}
+          </div>
+        </Show>
 
-      <Show when={loading()}>
-        <div class="space-y-2">
-          <For each={[1, 2, 3, 4, 5, 6]}>
-            {() => (
-              <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2.5 animate-pulse">
-                <span class="h-4 w-4 shrink-0 rounded bg-muted" />
-                <span class="h-10 w-24 shrink-0 rounded-lg bg-muted" />
-                <span class="h-4 flex-1 max-w-[200px] rounded bg-muted" />
-                <span class="h-4 w-16 rounded bg-muted" />
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
+        <Show when={loading()}>
+          <div class="space-y-2">
+            <For each={[1, 2, 3, 4, 5, 6]}>
+              {() => (
+                <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2 animate-pulse">
+                  <span class="h-5 w-5 shrink-0 rounded bg-muted" />
+                  <span class="aspect-3/4 h-14 shrink-0 rounded-md bg-muted" />
+                  <span class="h-4 flex-1 max-w-[200px] rounded bg-muted" />
+                  <span class="h-4 w-16 rounded bg-muted" />
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
 
-      <Show when={!loading() && groups().length > 0}>
-        <div
-          ref={(el) => {
-            sortableContainer = el;
-          }}
-          class="space-y-2"
-        >
-          <For each={groups()} fallback={<div>暂无分组</div>}>
-            {(group) => {
-              const isDefault = isDefaultGroup(group.groupId);
-              let pressStartTime = 0;
-              let pressStartX = 0;
-              let pressStartY = 0;
-              let hasMoved = false;
-              let longPressTimer: number | null = null;
-              let longPressTriggered = false;
-              let triggerElement: HTMLElement | null = null;
+        <Show when={!loading() && groups().length > 0}>
+          <div
+            ref={(el) => {
+              sortableContainer = el;
+            }}
+            class="space-y-2"
+          >
+            <For each={groups()} fallback={<div>暂无分组</div>}>
+              {(group) => {
+                const isDefault = isDefaultBookGroup(group.groupId);
 
-              return (
-                <ContextMenu>
-                  <ContextMenuTrigger
-                    as="div"
-                    ref={(el) => { triggerElement = el; }}
+                return (
+                  <GroupContextMenu
+                    group={group}
+                    orderGroups={groups()}
+                    actions={groupContextMenuActions}
+                    withLongPress
                     data-group-id={group.groupId}
-                    onMouseEnter={() => setHoveredGroupId(group.groupId)}
-                    onMouseLeave={(e) => {
-                      const relatedTarget = e.relatedTarget as HTMLElement;
-                      if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
-                        setHoveredGroupId(null);
-                      }
-                    }}
-                    onMouseDown={(e) => {
-                      if (e.button === 0) {
-                        pressStartTime = Date.now();
-                        pressStartX = e.clientX;
-                        pressStartY = e.clientY;
-                        hasMoved = false;
-                        longPressTriggered = false;
-                        longPressTimer = window.setTimeout(() => {
-                          if (!hasMoved) {
-                            longPressTriggered = true;
-                          }
-                        }, 500);
-                      }
-                    }}
-                    onMouseMove={(e) => {
-                      if (pressStartTime > 0) {
-                        const moveDistance = Math.sqrt(
-                          Math.pow(e.clientX - pressStartX, 2) +
-                          Math.pow(e.clientY - pressStartY, 2)
-                        );
-                        if (moveDistance > 5) {
-                          hasMoved = true;
-                          if (longPressTimer !== null) {
-                            clearTimeout(longPressTimer);
-                            longPressTimer = null;
-                          }
-                        }
-                      }
-                    }}
-                    onMouseUp={(e) => {
-                      if (longPressTimer !== null) {
-                        clearTimeout(longPressTimer);
-                        longPressTimer = null;
-                      }
-                      if (longPressTriggered && !hasMoved && triggerElement) {
-                        const event = new MouseEvent('contextmenu', {
-                          bubbles: true,
-                          cancelable: true,
-                          clientX: e.clientX,
-                          clientY: e.clientY,
-                        });
-                        triggerElement.dispatchEvent(event);
-                      }
-                      pressStartTime = 0;
-                      hasMoved = false;
-                      longPressTriggered = false;
-                    }}
-                    onTouchStart={(e) => {
-                      const touch = e.touches[0];
-                      pressStartTime = Date.now();
-                      pressStartX = touch.clientX;
-                      pressStartY = touch.clientY;
-                      hasMoved = false;
-                      longPressTriggered = false;
-                      longPressTimer = window.setTimeout(() => {
-                        if (!hasMoved) {
-                          longPressTriggered = true;
-                        }
-                      }, 500);
-                    }}
-                    onTouchMove={(e) => {
-                      if (pressStartTime > 0) {
-                        const touch = e.touches[0];
-                        const moveDistance = Math.sqrt(
-                          Math.pow(touch.clientX - pressStartX, 2) +
-                          Math.pow(touch.clientY - pressStartY, 2)
-                        );
-                        if (moveDistance > 10) {
-                          hasMoved = true;
-                          if (longPressTimer !== null) {
-                            clearTimeout(longPressTimer);
-                            longPressTimer = null;
-                          }
-                        }
-                      }
-                    }}
-                    onTouchEnd={(e) => {
-                      if (longPressTimer !== null) {
-                        clearTimeout(longPressTimer);
-                        longPressTimer = null;
-                      }
-                      if (longPressTriggered && !hasMoved && triggerElement) {
-                        const touch = e.changedTouches[0];
-                        const event = new MouseEvent('contextmenu', {
-                          bubbles: true,
-                          cancelable: true,
-                          clientX: touch.clientX,
-                          clientY: touch.clientY,
-                        });
-                        triggerElement.dispatchEvent(event);
-                      }
-                      pressStartTime = 0;
-                      hasMoved = false;
-                      longPressTriggered = false;
-                    }}
-                    class={cn(
-                      'group flex items-center gap-4 rounded-xl border bg-card p-4 transition-all select-none',
-                      hoveredGroupId() === group.groupId && 'border-primary/50 shadow-md',
-                      'hover:border-primary/50 hover:shadow-md',
-                      'group-focus-within:border-primary/50 group-focus-within:shadow-md'
-                    )}
+                    class={bookGroupCompactCardClass('select-none')}
                   >
-                  <div class="drag-handle cursor-move text-muted-foreground hover:text-foreground select-none">
-                    <GripVerticalIcon class="h-5 w-5" size={20} />
-                  </div>
+                    <div class="drag-handle cursor-move text-muted-foreground hover:text-foreground select-none">
+                      <GripVerticalIcon class="h-4 w-4" size={16} />
+                    </div>
 
-                  <div class="flex h-10 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50 text-lg">
-                    {(() => {
-                      const info = getCoverPreviewInfo(group.cover);
-                      const imageFailed = coverImageErrorIds().has(group.groupId);
-                      if (info.type === 'invalid' || (info.url && imageFailed)) {
+                    <div class={bookGroupCompactCoverClass('text-lg')}>
+                      {(() => {
+                        const info = getCoverPreviewInfo(group.cover);
+                        const imageFailed = coverImageErrorIds().has(group.groupId);
+                        if (info.type === 'invalid' || (info.url && imageFailed)) {
+                          return (
+                            <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
+                              <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
+                            </span>
+                          );
+                        }
+                        if (info.type === 'emoji' && group.cover) {
+                          return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
+                        }
+                        if (info.url && !imageFailed) {
+                          return (
+                            <img
+                              src={info.url}
+                              alt=""
+                              class="h-full w-full object-cover"
+                              onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
+                            />
+                          );
+                        }
                         return (
                           <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                            <BookCoverPlaceholderIcon class="h-5 w-5" size={20} />
+                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
                           </span>
                         );
-                      }
-                      if (info.type === 'emoji' && group.cover) {
-                        return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                      }
-                      if (info.url && !imageFailed) {
-                        return (
-                          <img
-                            src={info.url}
-                            alt=""
-                            class="h-full w-full object-cover"
-                            onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                          />
-                        );
-                      }
-                      return (
-                        <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                          <BookCoverPlaceholderIcon class="h-5 w-5" size={20} />
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                      <h3 class="font-semibold text-foreground">
-                        {getGroupDisplayName(group)}
-                      </h3>
-                      {isDefault && (
-                        <span class="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                          系统
-                        </span>
-                      )}
+                      })()}
                     </div>
-                    <p class="text-sm text-muted-foreground">
-                      排序方式: {bookSortOptions.find(o => o.value === group.bookSort)?.label || '默认'}
-                    </p>
-                    {/* 本地分组显示重新加载按钮 */}
-                    <Show when={group.groupId === BookGroupId.Local}>
+
+                    <div class="min-w-0 flex-1">
+                      <div class="flex min-w-0 items-center gap-2">
+                        <h3 class="mb-0.5 truncate font-semibold text-foreground">
+                          {getGroupDisplayName(group)}
+                        </h3>
+                        {isDefault && (
+                          <span class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                            系统
+                          </span>
+                        )}
+                      </div>
+                      <p class="text-xs text-muted-foreground">
+                        排序方式: {bookSortOptions.find(o => o.value === group.bookSort)?.label || '默认'}
+                      </p>
+                    </div>
+
+                    <div
+                      class="flex items-center gap-3"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <div class="flex items-center gap-2">
+                        <Label for={`show-${group.groupId}`} class="text-sm">
+                          显示
+                        </Label>
+                        <Switch
+                          checked={group.show}
+                          onChange={(checked) => handleToggleShow(group, checked)}
+                        >
+                          <SwitchControl id={`show-${group.groupId}`}>
+                            <SwitchThumb />
+                          </SwitchControl>
+                        </Switch>
+                      </div>
+
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={async (e) => {
+                        onClick={(e) => {
                           e.stopPropagation();
                           e.preventDefault();
-                          await handleReloadLocalBooks();
+                          handleEdit(group);
                         }}
-                        disabled={isReloadingBooks()}
-                        class="mt-2"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                        }}
+                        type="button"
                       >
-                        <RefreshIcon class="h-4 w-4 mr-2" />
-                        {isReloadingBooks() ? '重新加载中...' : '重新加载书籍列表'}
+                        编辑
                       </Button>
-                    </Show>
-                  </div>
-
-                  <div
-                    class="flex items-center gap-3"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    <div
-                      class="flex items-center gap-2"
-                      onMouseEnter={() => setHoveredGroupId(group.groupId)}
-                      onMouseLeave={(e) => {
-                        const relatedTarget = e.relatedTarget as HTMLElement;
-                        if (!relatedTarget || !e.currentTarget.closest(`[data-group-id="${group.groupId}"]`)?.contains(relatedTarget)) {
-                          setTimeout(() => {
-                            const element = document.elementFromPoint(
-                              (window as any).lastMouseX || 0,
-                              (window as any).lastMouseY || 0
-                            );
-                            if (!element?.closest(`[data-group-id="${group.groupId}"]`)) {
-                              setHoveredGroupId(null);
-                            }
-                          }, 50);
-                        }
-                      }}
-                    >
-                      <Label for={`show-${group.groupId}`} class="text-sm">
-                        显示
-                      </Label>
-                      <Switch
-                        checked={group.show}
-                        onChange={(checked) => handleToggleShow(group, checked)}
-                        onFocus={() => setHoveredGroupId(group.groupId)}
-                        onBlur={() => {
-                          setTimeout(() => {
-                            const element = document.elementFromPoint(
-                              (window as any).lastMouseX || 0,
-                              (window as any).lastMouseY || 0
-                            );
-                            if (!element?.closest(`[data-group-id="${group.groupId}"]`)) {
-                              setHoveredGroupId(null);
-                            }
-                          }, 100);
-                        }}
-                      >
-                        <SwitchControl id={`show-${group.groupId}`}>
-                          <SwitchThumb />
-                        </SwitchControl>
-                      </Switch>
                     </div>
+                  </GroupContextMenu>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        handleEdit(group);
-                      }}
-                      onMouseDown={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }}
-                      type="button"
-                    >
-                      编辑
-                    </Button>
-                  </div>
-                  <ContextMenuContent>
-                    <ContextMenuItem
-                      onSelect={() => handleEdit(group)}
-                    >
-                      编辑
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      onSelect={() => handleDelete(group)}
-                      disabled={isDefault}
-                      class={cn(isDefault && 'opacity-50 cursor-not-allowed')}
-                    >
-                      删除
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenuTrigger>
-                </ContextMenu>
-              );
-            }}
-          </For>
-        </div>
-      </Show>
+        <Show when={!loading() && groups().length === 0}>
+          <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
+            <BookshelfIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
 
-      <Show when={!loading() && groups().length === 0}>
-        <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
-          <BookshelfIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
+            <h3 class="mb-2 text-lg font-semibold text-foreground">
+              暂无分组
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              分组数据为空
+            </p>
+          </div>
+        </Show>
 
-          <h3 class="mb-2 text-lg font-semibold text-foreground">
-            暂无分组
-          </h3>
-          <p class="text-sm text-muted-foreground">
-            分组数据为空
-          </p>
-        </div>
-      </Show>
-
-      <BookGroupFormDialog
-        open={formDialogOpen()}
-        onOpenChange={(open) => setFormDialogOpen(open)}
-        mode={formDialogMode()}
-        initialGroup={formDialogMode() === 'edit' ? formDialogGroup() : null}
-        onSuccess={loadGroups}
-        onError={(msg) => setError(msg)}
-      />
+        <BookGroupFormDialog
+          open={formDialogOpen()}
+          onOpenChange={(open) => setFormDialogOpen(open)}
+          mode={formDialogMode()}
+          initialGroup={formDialogMode() === 'edit' ? formDialogGroup() : null}
+          onSuccess={loadGroups}
+          onError={(msg) => setError(msg)}
+        />
       </div>
-    </div>
+    </>
   );
 }

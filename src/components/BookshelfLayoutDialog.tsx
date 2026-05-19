@@ -3,9 +3,14 @@
  * 对应 UI.md 中的书架布局设置功能
  */
 
-import { createSignal, For, createEffect } from 'solid-js';
-import { blurActiveElement } from '@/utils/accessibility';
+import { createSignal, For, createEffect, onMount } from 'solid-js';
+import {
+  blurActiveElement,
+  setupAccessibilityListeners,
+  triggerDialogOpened,
+} from '@/utils/accessibility';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { Button } from './ui/button';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from './ui/radio-group';
 import { Checkbox } from './ui/checkbox';
@@ -27,6 +32,31 @@ import {
   type SortMode,
   type BookTitleDisplay,
 } from '@/stores/bookshelf-layout';
+import {
+  gridViewModeOptions,
+  listViewModeOptions,
+} from '@/utils/bookshelf-view-mode';
+
+const sectionPanelClass =
+  'rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3';
+
+const sectionTitleClass = 'text-sm font-medium leading-none text-foreground';
+
+function SettingToggleRow(props: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div class="flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-background/60">
+      <Label for={props.id} class="cursor-pointer text-sm font-normal leading-snug text-foreground">
+        {props.label}
+      </Label>
+      <Checkbox id={props.id} checked={props.checked} onChange={props.onChange} />
+    </div>
+  );
+}
 
 interface BookshelfLayoutDialogProps {
   open: boolean;
@@ -38,7 +68,12 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
   const [spacingValue, setSpacingValue] = createSignal(bookshelfLayoutStore.settings.spacing);
   const [groupStyleSelectOpen, setGroupStyleSelectOpen] = createSignal(false);
 
-  // 每当对话框变为打开状态时，从 store 同步到本地（避免显示上次未确认的修改）
+  onMount(() =>
+    setupAccessibilityListeners({
+      onDialogOpened: () => setGroupStyleSelectOpen(false),
+    }),
+  );
+
   createEffect(() => {
     if (props.open) {
       setLocalSettings(bookshelfLayoutStore.settings);
@@ -46,77 +81,44 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
     }
   });
 
-  // 监听设置变化：打开时从 store 同步到本地，关闭时丢弃未确认的修改（重置本地为 store）
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      // 关闭时（点击遮罩/关闭按钮）丢弃未确认的修改，重置为当前 store
       setLocalSettings(bookshelfLayoutStore.settings);
       setSpacingValue(bookshelfLayoutStore.settings.spacing);
     }
     props.onOpenChange(open);
     if (open) {
-      // 打开时从 store 同步到本地
       setLocalSettings(bookshelfLayoutStore.settings);
       setSpacingValue(bookshelfLayoutStore.settings.spacing);
-      // Dialog 打开时，立即强制关闭所有 Select/DropdownMenu 并移除焦点
+      setGroupStyleSelectOpen(false);
       requestAnimationFrame(() => {
-        setGroupStyleSelectOpen(false);
+        triggerDialogOpened();
         blurActiveElement();
-        const activeElement = document.activeElement as HTMLElement;
-        if (activeElement && activeElement !== document.body) {
-          activeElement.blur();
-        }
       });
+    } else {
+      setGroupStyleSelectOpen(false);
+      blurActiveElement();
     }
   };
 
-  /**
-   * 处理确认
-   */
   function handleConfirm() {
     bookshelfLayoutStore.updateSettings(localSettings());
-    // 触发事件通知书架页面刷新排序
     window.dispatchEvent(new CustomEvent('bookshelf-layout-changed'));
     props.onOpenChange(false);
   }
 
-  /**
-   * 处理取消
-   */
   function handleCancel() {
-    // 重置为当前设置
     setLocalSettings(bookshelfLayoutStore.settings);
     setSpacingValue(bookshelfLayoutStore.settings.spacing);
     props.onOpenChange(false);
   }
 
-  /**
-   * 分组样式选项
-   */
   const groupStyleOptions: { value: GroupStyle; label: string }[] = [
     { value: 'normal', label: '常规' },
     { value: 'tabs', label: '标签' },
     { value: 'dropdown', label: '下拉框' },
   ];
 
-  /**
-   * 视图模式选项
-   */
-  const viewModeOptions: { value: ViewMode; label: string }[] = [
-    { value: 'list', label: '列表' },
-    { value: 'list-2', label: '列表二列' },
-    { value: 'compact', label: '紧凑列表' },
-    { value: 'compact-2', label: '紧凑列表二列' },
-    { value: 'grid-2', label: '网格二列' },
-    { value: 'grid-3', label: '网格三列' },
-    { value: 'grid-4', label: '网格四列' },
-    { value: 'grid-5', label: '网格五列' },
-    { value: 'grid-6', label: '网格六列' },
-  ];
-
-  /**
-   * 排序方式选项
-   */
   const sortModeOptions: { value: SortMode; label: string }[] = [
     { value: 'read-time', label: '按阅读时间' },
     { value: 'update-time', label: '按更新时间' },
@@ -126,9 +128,6 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
     { value: 'author', label: '按作者' },
   ];
 
-  /**
-   * 书名/分组名显示选项
-   */
   const bookTitleDisplayOptions: { value: BookTitleDisplay; label: string }[] = [
     { value: 'show', label: '显示' },
     { value: 'hide', label: '隐藏' },
@@ -136,28 +135,16 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
   ];
 
   return (
-      <Dialog 
-        open={props.open} 
-        onOpenChange={(open) => {
-          handleOpenChange(open);
-          if (open) {
-            // 触发事件通知其他组件
-            window.dispatchEvent(new CustomEvent('dialog-opened'));
-          }
-        }}
-      >
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:w-[70vw] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+    <Dialog open={props.open} onOpenChange={handleOpenChange}>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>书架布局</DialogTitle>
-          <DialogDescription>
-            自定义书架和分组的显示方式
-          </DialogDescription>
+          <DialogDescription>自定义书架和分组的显示方式</DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-6 py-4">
-          {/* 分组样式 */}
-          <div class="space-y-2">
-            <Label class="text-sm font-semibold">分组样式</Label>
+        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <section class={sectionPanelClass}>
+            <Label class={sectionTitleClass}>分组样式</Label>
             <Select
               value={localSettings().groupStyle}
               onChange={(v) => setLocalSettings({ ...localSettings(), groupStyle: (v || 'normal') as GroupStyle })}
@@ -188,92 +175,93 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                 <SelectListbox />
               </SelectContent>
             </Select>
-          </div>
+          </section>
 
-          {/* 显示选项 */}
-          <div class="space-y-3">
-            <Label class="text-sm font-semibold">显示选项</Label>
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <Label for="show-unread-flag" class="text-sm font-normal cursor-pointer">
-                  显示未读标志
-                </Label>
-                <Checkbox
-                  id="show-unread-flag"
-                  checked={localSettings().showUnreadFlag}
-                  onChange={(checked) => {
-                    setLocalSettings({ ...localSettings(), showUnreadFlag: checked });
-                  }}
-                />
-              </div>
-              <div class="flex items-center justify-between">
-                <Label for="show-last-update-time" class="text-sm font-normal cursor-pointer">
-                  显示上次更新时间
-                </Label>
-                <Checkbox
-                  id="show-last-update-time"
-                  checked={localSettings().showLastUpdateTime}
-                  onChange={(checked) => {
-                    setLocalSettings({ ...localSettings(), showLastUpdateTime: checked });
-                  }}
-                />
-              </div>
-              <div class="flex items-center justify-between">
-                <Label for="show-pending-update-count" class="text-sm font-normal cursor-pointer">
-                  显示等待更新数量
-                </Label>
-                <Checkbox
-                  id="show-pending-update-count"
-                  checked={localSettings().showPendingUpdateCount}
-                  onChange={(checked) => {
-                    setLocalSettings({ ...localSettings(), showPendingUpdateCount: checked });
-                  }}
-                />
-              </div>
-              <div class="flex items-center justify-between">
-                <Label for="show-quick-scrollbar" class="text-sm font-normal cursor-pointer">
-                  显示快速滚动条
-                </Label>
-                <Checkbox
-                  id="show-quick-scrollbar"
-                  checked={localSettings().showQuickScrollbar}
-                  onChange={(checked) => {
-                    setLocalSettings({ ...localSettings(), showQuickScrollbar: checked });
-                  }}
-                />
-              </div>
+          <section class={sectionPanelClass}>
+            <Label class={sectionTitleClass}>显示选项</Label>
+            <div class="divide-y divide-border/50 rounded-md border border-border/40 bg-background/40">
+              <SettingToggleRow
+                id="show-unread-flag"
+                label="显示未读标志"
+                checked={localSettings().showUnreadFlag}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), showUnreadFlag: checked })
+                }
+              />
+              <SettingToggleRow
+                id="show-last-update-time"
+                label="显示上次更新时间"
+                checked={localSettings().showLastUpdateTime}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), showLastUpdateTime: checked })
+                }
+              />
+              <SettingToggleRow
+                id="show-pending-update-count"
+                label="显示等待更新数量"
+                checked={localSettings().showPendingUpdateCount}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), showPendingUpdateCount: checked })
+                }
+              />
+              <SettingToggleRow
+                id="show-quick-scrollbar"
+                label="显示快速滚动条"
+                checked={localSettings().showQuickScrollbar}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), showQuickScrollbar: checked })
+                }
+              />
             </div>
-          </div>
+          </section>
 
-          {/* 视图和排序 */}
-          <div class="grid grid-cols-2 gap-6">
-            {/* 视图 */}
-            <div class="space-y-3">
-              <Label class="text-sm font-semibold">视图</Label>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <section class={sectionPanelClass}>
+              <Label class={sectionTitleClass}>视图</Label>
               <RadioGroup
                 value={localSettings().viewMode}
-                onChange={(value) => {
-                  setLocalSettings({ ...localSettings(), viewMode: value as ViewMode });
-                }}
+                onChange={(value) =>
+                  setLocalSettings({ ...localSettings(), viewMode: value as ViewMode })
+                }
+                class="w-full"
               >
-                <For each={viewModeOptions}>
-                  {(option) => (
-                    <RadioGroupItem value={option.value}>
-                      <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                    </RadioGroupItem>
-                  )}
-                </For>
+                <div class="grid grid-cols-2 items-start gap-3">
+                  <div class="space-y-2">
+                    <p class="text-xs font-medium text-muted-foreground">列表</p>
+                    <div class="flex flex-col gap-1.5">
+                    <For each={listViewModeOptions}>
+                      {(option) => (
+                        <RadioGroupItem value={option.value}>
+                          <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                        </RadioGroupItem>
+                      )}
+                    </For>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <p class="text-xs font-medium text-muted-foreground">网格</p>
+                  <div class="flex flex-col gap-1.5">
+                    <For each={gridViewModeOptions}>
+                      {(option) => (
+                        <RadioGroupItem value={option.value}>
+                          <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                        </RadioGroupItem>
+                      )}
+                    </For>
+                  </div>
+                </div>
+                </div>
               </RadioGroup>
-            </div>
+            </section>
 
-            {/* 排序 */}
-            <div class="space-y-3">
-              <Label class="text-sm font-semibold">排序</Label>
+            <section class={sectionPanelClass}>
+              <Label class={sectionTitleClass}>书籍排序</Label>
               <RadioGroup
                 value={localSettings().sortMode}
-                onChange={(value) => {
-                  setLocalSettings({ ...localSettings(), sortMode: value as SortMode });
-                }}
+                onChange={(value) =>
+                  setLocalSettings({ ...localSettings(), sortMode: value as SortMode })
+                }
+                class="flex flex-col gap-1.5"
               >
                 <For each={sortModeOptions}>
                   {(option) => (
@@ -283,95 +271,92 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                   )}
                 </For>
               </RadioGroup>
-            </div>
+            </section>
           </div>
 
-          {/* 书名/分组名显示 */}
-          <div class="space-y-3">
-            <Label class="text-sm font-semibold">书名/分组名</Label>
+          <section class={sectionPanelClass}>
+            <Label class={sectionTitleClass}>书名/分组名</Label>
             <RadioGroup
               value={localSettings().bookTitleDisplay}
               onChange={(value) => {
                 setLocalSettings({ ...localSettings(), bookTitleDisplay: value as BookTitleDisplay });
               }}
+              class="flex flex-wrap gap-x-6 gap-y-2"
             >
-              <div class="flex gap-4">
-                <For each={bookTitleDisplayOptions}>
-                  {(option) => (
-                    <RadioGroupItem value={option.value}>
-                      <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                    </RadioGroupItem>
-                  )}
-                </For>
-              </div>
+              <For each={bookTitleDisplayOptions}>
+                {(option) => (
+                  <RadioGroupItem value={option.value}>
+                    <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                  </RadioGroupItem>
+                )}
+              </For>
             </RadioGroup>
-          </div>
+          </section>
 
-          {/* 网格间距 */}
-          <div class="space-y-3">
-            <div class="flex items-center">
-              <Label class="text-sm font-semibold">网格间距</Label>
-              <div class="flex items-center gap-2 ml-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  class="h-7 w-14"
-                  onClick={() => {
-                    const newValue = Math.max(0, spacingValue() - 1);
-                    setSpacingValue(newValue);
-                    setLocalSettings({ ...localSettings(), spacing: newValue });
-                  }}
-                >
-                  <span class="text-sm">-</span>
-                </Button>
-                <div class="flex-1">
-                  <Slider
-                    value={[spacingValue()]}
-                    onChange={(values: number[]) => {
-                      if (Array.isArray(values) && values.length > 0) {
-                        const newValue = values[0];
-                        setSpacingValue(newValue);
-                        setLocalSettings({ ...localSettings(), spacing: newValue });
-                      }
-                    }}
-                    minValue={0}
-                    maxValue={24}
-                    step={1}
-                    class="w-[15vw]"
-                  >
-                    <SliderTrack>
-                      <SliderFill />
-                    </SliderTrack>
-                    <SliderThumb />
-                  </Slider>
-                </div>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  class="h-7 w-7"
-                  onClick={() => {
-                    const newValue = Math.min(24, spacingValue() + 1);
-                    setSpacingValue(newValue);
-                    setLocalSettings({ ...localSettings(), spacing: newValue });
-                  }}
-                >
-                  <span class="text-sm">+</span>
-                </Button>
-                <span class="text-sm text-muted-foreground">
-                  {spacingValue()}
-                </span>
-              </div>
+          <section class={sectionPanelClass}>
+            <div class="flex items-baseline justify-between gap-2">
+              <Label class={sectionTitleClass}>列表 / 网格间距</Label>
+              <span class="tabular-nums text-sm text-muted-foreground">{spacingValue()}</span>
             </div>
-          </div>
+            <div class="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                class="size-8 shrink-0"
+                onClick={() => {
+                  const newValue = Math.max(0, spacingValue() - 1);
+                  setSpacingValue(newValue);
+                  setLocalSettings({ ...localSettings(), spacing: newValue });
+                }}
+                disabled={spacingValue() <= 0}
+                aria-label="减小列表与网格间距"
+              >
+                <span class="text-sm">-</span>
+              </Button>
+              <Slider
+                value={[spacingValue()]}
+                onChange={(values: number[]) => {
+                  if (Array.isArray(values) && values.length > 0) {
+                    const newValue = values[0];
+                    setSpacingValue(newValue);
+                    setLocalSettings({ ...localSettings(), spacing: newValue });
+                  }
+                }}
+                minValue={0}
+                maxValue={24}
+                step={1}
+                class="min-w-0 flex-1"
+              >
+                <SliderTrack>
+                  <SliderFill />
+                </SliderTrack>
+                <SliderThumb />
+              </Slider>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                class="size-8 shrink-0"
+                onClick={() => {
+                  const newValue = Math.min(24, spacingValue() + 1);
+                  setSpacingValue(newValue);
+                  setLocalSettings({ ...localSettings(), spacing: newValue });
+                }}
+                disabled={spacingValue() >= 24}
+                aria-label="增大列表与网格间距"
+              >
+                <span class="text-sm">+</span>
+              </Button>
+            </div>
+          </section>
         </div>
 
-        <DialogFooter class="gap-2">
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>
-          <Button onClick={handleConfirm}>
-            确定
-          </Button>
+          <Button onClick={handleConfirm}>确定</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

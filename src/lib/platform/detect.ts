@@ -14,13 +14,18 @@
  * @returns 如果在 Tauri 环境中返回 true，否则返回 false
  */
 export function isTauri(): boolean {
-  // 防止 SSR/Node 环境报错
   if (typeof window === 'undefined') {
     return false;
   }
-
-  // 核心检测：Tauri 2.0 仍通过此对象注入 API
-  // 使用类型断言避免 TypeScript 错误
+  // Tauri 2 运行时标记（withGlobalTauri: false 时仍由壳注入）
+  const g = globalThis as typeof globalThis & { isTauri?: boolean };
+  if (g.isTauri === true) {
+    return true;
+  }
+  // Tauri CLI 构建/开发时注入
+  if (import.meta.env.TAURI_ENV_PLATFORM != null && import.meta.env.TAURI_ENV_PLATFORM !== '') {
+    return true;
+  }
   const win = window as Window & { __TAURI__?: unknown };
   return typeof win.__TAURI__ !== 'undefined';
 }
@@ -37,8 +42,9 @@ export function isTauriStrict(): boolean {
   if (!isTauri()) {
     return false;
   }
-
-  // 验证关键 API 是否存在
+  if (import.meta.env.TAURI_ENV_PLATFORM != null) {
+    return true;
+  }
   const win = window as Window & { __TAURI__?: { invoke?: unknown; convertFileSrc?: unknown } };
   const tauri = win.__TAURI__;
   return (

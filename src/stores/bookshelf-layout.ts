@@ -5,6 +5,11 @@
 
 import { createStore } from 'solid-js/store';
 import { getStorage, setStorage } from '@/lib/platform/storage';
+import {
+  getViewModeGridColumnCount,
+  isGridViewMode,
+  isListViewMode,
+} from '@/utils/bookshelf-view-mode';
 
 /**
  * 分组样式
@@ -14,7 +19,20 @@ export type GroupStyle = 'dropdown' | 'tabs' | 'normal';
 /**
  * 视图模式
  */
-export type ViewMode = 'list' | 'list-2' | 'compact' | 'compact-2' | 'grid-2' | 'grid-3' | 'grid-4' | 'grid-5' | 'grid-6';
+export type ViewMode =
+  | 'list'
+  | 'list-2'
+  | 'list-3'
+  | 'compact'
+  | 'compact-2'
+  | 'compact-3'
+  | 'grid-2'
+  | 'grid-3'
+  | 'grid-4'
+  | 'grid-5'
+  | 'grid-6'
+  | 'grid-7'
+  | 'grid-8';
 
 /**
  * 排序方式
@@ -38,7 +56,7 @@ export interface BookshelfLayoutSettings {
   sortMode: SortMode;
   /** 书名/分组名显示方式 */
   bookTitleDisplay: BookTitleDisplay;
-  /** 间距（像素） */
+  /** 列表/网格间距（0–24，实际 gap = spacing × 0.25rem） */
   spacing: number;
   /** 显示未读标志 */
   showUnreadFlag: boolean;
@@ -143,33 +161,20 @@ export const bookshelfLayoutStore = {
    * 获取视图模式的网格列数
    */
   getGridColumns(): number {
-    switch (settings.viewMode) {
-      case 'grid-2':
-        return 2;
-      case 'grid-3':
-        return 3;
-      case 'grid-4':
-        return 4;
-      case 'grid-5':
-        return 5;
-      case 'grid-6':
-        return 6;
-      default:
-        return 4; // 默认4列
-    }
+    return getViewModeGridColumnCount(settings.viewMode);
   },
 
   /**
    * 是否为列表视图
    */
   isListView(): boolean {
-    return settings.viewMode === 'list' || settings.viewMode === 'list-2' || settings.viewMode === 'compact' || settings.viewMode === 'compact-2';
+    return isListViewMode(settings.viewMode);
   },
 
   /**
    * 是否为网格视图
    */
   isGridView(): boolean {
-    return settings.viewMode.startsWith('grid-');
+    return isGridViewMode(settings.viewMode);
   },
 };

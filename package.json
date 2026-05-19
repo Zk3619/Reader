@@ -4,6 +4,10 @@
   "description": "",
   "type": "module",
   "scripts": {
+    "sync-quickjs-wasm": "node scripts/sync-quickjs-wasm.mjs",
+    "sync-sqljs-wasm": "node scripts/sync-sqljs-wasm.mjs",
+    "predev": "node scripts/sync-quickjs-wasm.mjs && node scripts/sync-sqljs-wasm.mjs",
+    "prebuild": "node scripts/sync-quickjs-wasm.mjs && node scripts/sync-sqljs-wasm.mjs",
     "start": "vite",
     "dev": "vite",
     "build": "vite build",

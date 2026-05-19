@@ -100,7 +100,7 @@ export function BookshelfGroupTitleDropdown(props: BookshelfGroupTitleDropdownPr
       description={props.description}
       dropdownEnabled={props.dropdownEnabled}
       selectionKey={props.currentGroupId ?? 'all'}
-      contentClass="p-0 w-[min(280px,calc(100vw-2rem))] min-w-52 max-w-[min(280px,calc(100vw-2rem))] overflow-hidden"
+      contentClass="p-0 w-[min(280px,calc(100dvw-2rem))] min-w-52 max-w-[min(280px,calc(100dvw-2rem))] overflow-hidden"
     >
       <BookshelfGroupMenuList
         groups={props.groups}

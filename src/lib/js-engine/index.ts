@@ -23,6 +23,7 @@ export {
   clearSourceLoginState,
   clearSourceLoginStateLocalStorageOnly,
   getStoredLoginInfo,
+  getStoredSourceCookiesForUrl,
   runLoginScript,
   runLoginScriptRust,
   type RunLoginScriptOptions,
@@ -31,3 +32,7 @@ export {
 } from './legado/login-script-runner';
 
 export { extractExploreScript, runExploreScript } from './legado/explore-script-runner';
+export {
+  getScriptBaseUrl,
+  getSourceUrlIdentifier,
+} from './legado/source-script-shared';

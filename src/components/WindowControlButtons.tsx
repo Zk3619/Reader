@@ -11,12 +11,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { dialogViewportLimits } from "@/lib/viewport-classes"
 import { hideWindowAndSaveState, saveWindowStateBeforeExit } from "@/utils/window-state"
 import {
   MinimizeWindowIcon,
@@ -51,11 +53,11 @@ export function WindowControlButtons() {
             win.isMaximized().then(setIsMaximized)
           })
         })
-        .catch(() => {})
+        .catch(() => { })
     } catch {
       setIsTauri(false)
     }
-    return onCleanup(() => {})
+    return onCleanup(() => { })
   })
 
   const showWindowControls = () => isDesktopPlatform() && isTauri()
@@ -89,7 +91,7 @@ export function WindowControlButtons() {
   async function closeWindow(event?: MouseEvent | KeyboardEvent) {
     if (!isTauri()) return
     if (event?.target instanceof HTMLElement) {
-      ;(event.target as HTMLElement).blur()
+      ; (event.target as HTMLElement).blur()
     }
     const savedChoice = localStorage.getItem("closeAction")
     if (savedChoice === "hide" || savedChoice === "quit") {
@@ -150,23 +152,23 @@ export function WindowControlButtons() {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={maximizeWindow}>
-            <Show
-              when={isMaximized()}
-              fallback={<MaximizeWindowIcon class="h-4 w-4" size={16} />}
-            >
-              <RestoreWindowIcon class="h-4 w-4" size={16} />
-            </Show>
-            <span class="sr-only">{isMaximized() ? "还原" : "最大化"}</span>
+              <Show
+                when={isMaximized()}
+                fallback={<MaximizeWindowIcon class="h-4 w-4" size={16} />}
+              >
+                <RestoreWindowIcon class="h-4 w-4" size={16} />
+              </Show>
+              <span class="sr-only">{isMaximized() ? "还原" : "最大化"}</span>
             </TooltipTrigger>
             <TooltipContent>{isMaximized() ? "还原" : "最大化"}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors" onClick={(e: MouseEvent) => {
-              ;(e.currentTarget as HTMLElement).blur()
+              ; (e.currentTarget as HTMLElement).blur()
               closeWindow(e)
             }}>
-            <XIcon class="h-4 w-4" size={16} />
-            <span class="sr-only">关闭</span>
+              <XIcon class="h-4 w-4" size={16} />
+              <span class="sr-only">关闭</span>
             </TooltipTrigger>
             <TooltipContent>关闭</TooltipContent>
           </Tooltip>
@@ -174,11 +176,11 @@ export function WindowControlButtons() {
       </Show>
 
       <Dialog open={showCloseDialog()} onOpenChange={setShowCloseDialog}>
-        <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md">
-          <DialogHeader>
+        <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+          <DialogHeader class="shrink-0 px-6 pt-6">
             <DialogTitle>关闭</DialogTitle>
           </DialogHeader>
-          <div class="space-y-4 py-4">
+          <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <RadioGroup
               value={closeAction()}
               onChange={(value: string) => setCloseAction(value as "hide" | "quit")}
@@ -190,25 +192,23 @@ export function WindowControlButtons() {
                 <RadioGroupItemLabel>退出应用</RadioGroupItemLabel>
               </RadioGroupItem>
             </RadioGroup>
-          </div>
-          <div class="flex items-center justify-between">
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
               <Checkbox
                 id="window-close-remember"
                 checked={rememberChoice()}
                 onChange={setRememberChoice}
               />
-              <Label for="window-close-remember-input">记住我的选择</Label>
-            </div>
-            <div class="flex gap-2">
-              <Button variant="outline" onClick={handleCloseCancel}>
-                取消
-              </Button>
-              <Button variant="default" onClick={handleCloseConfirm}>
-                确定
-              </Button>
+              <Label for="window-close-remember">记住我的选择</Label>
             </div>
           </div>
+          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+            <Button variant="outline" onClick={handleCloseCancel}>
+              取消
+            </Button>
+            <Button variant="default" onClick={handleCloseConfirm}>
+              确定
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

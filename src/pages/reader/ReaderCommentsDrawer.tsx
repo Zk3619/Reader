@@ -128,7 +128,7 @@ export function ReaderCommentsDrawer(props: ReaderCommentsDrawerProps) {
       >
         {/* 仅关闭/全开两档，避免半屏时溢出按最大高度计算导致无法滚动 */}
         <DrawerContent
-          class="z-110 h-[75vh] max-h-[75vh] flex flex-col"
+          class="z-110 h-[75dvh] max-h-[75dvh] flex flex-col"
           overlayClass="z-[110]"
         >
           <DrawerHeader class="sr-only">

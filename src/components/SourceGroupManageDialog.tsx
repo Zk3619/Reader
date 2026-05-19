@@ -18,6 +18,7 @@ import { blurActiveElement } from '@/utils/accessibility';
 import * as sourcesDb from '@/lib/database/sources';
 import { showAppToast } from '@/components/AppToasts';
 import { fuzzyMatchQuery } from '@/lib/sources-filters';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { SearchIcon } from '@/components/icons';
 
 export interface SourceGroupManageDialogProps {
@@ -134,10 +135,10 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] flex flex-col gap-0 p-0">
-        <DialogHeader class="shrink-0 border-b border-border px-4 py-3">
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <div class="flex items-center justify-between gap-2 pr-8">
-            <DialogTitle class="text-lg font-semibold">分组管理</DialogTitle>
+            <DialogTitle>分组管理</DialogTitle>
             <Button
               variant="default"
               size="sm"
@@ -152,9 +153,9 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
           </div>
         </DialogHeader>
 
-        <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div class="flex flex-col min-h-0 overflow-hidden">
           {/* 搜索 + 模糊搜索（复选框在搜索框右侧） */}
-          <div class="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-border">
+          <div class="shrink-0 flex items-center gap-2 border-b border-border/50 px-6 py-3">
             <div class="relative flex-1 min-w-0 flex items-center">
               <SearchIcon class="absolute left-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
               <input
@@ -181,7 +182,7 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
 
           {/* 添加/编辑表单 */}
           <Show when={formMode()}>
-            <div class="shrink-0 flex items-center gap-2 px-4 py-3 bg-muted/30 border-b border-border">
+            <div class="shrink-0 flex items-center gap-2 border-b border-border/50 bg-muted/30 px-6 py-3">
               <input
                 type="text"
                 placeholder="分组名称"
@@ -204,7 +205,7 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
           </Show>
 
           {/* 分组列表 */}
-          <div class="flex-1 min-h-0 overflow-y-auto">
+          <div class="min-h-0 overflow-y-auto overscroll-contain contain-layout">
             <Show when={loading()}>
               <div class="px-4 py-8 text-center text-sm text-muted-foreground">加载中...</div>
             </Show>

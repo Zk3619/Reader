@@ -71,6 +71,34 @@ function resolveMessage(props: { title?: JSX.Element; description?: JSX.Element 
   return ""
 }
 
+/** 书源脚本 toast 固定 id：新消息替换旧内容，避免多条高卡片堆叠错乱 */
+const READER_SCRIPT_TOAST_ID = "reader-script-toast"
+
+/** 书源脚本框线输出：保留行首/段前空行，仅规整制表符与行尾空白 */
+function normalizeScriptToastText(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\t/g, "    ").trimEnd()
+}
+
+/**
+ * 书源脚本 longToast / checkStatus 等多行框线输出。
+ * 使用标准 toast（data-styled）参与 Sonner 堆叠；固定 id 避免多条高卡片并存。
+ */
+export function showScriptToast(text: string, options?: { duration?: number }) {
+  const body = normalizeScriptToastText(text)
+  if (!body) return
+
+  toast(body, {
+    id: READER_SCRIPT_TOAST_ID,
+    duration: options?.duration ?? 20_000,
+    closeButton: true,
+    class: "reader-script-toast select-none",
+    classNames: {
+      toast: "reader-script-toast-shell select-none",
+      title: "reader-script-toast-text select-none",
+    },
+  })
+}
+
 /**
  * 通用 Toast 通知函数
  */

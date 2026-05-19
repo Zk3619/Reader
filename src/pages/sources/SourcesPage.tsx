@@ -9,6 +9,7 @@ import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 import { getExploreSections, getExploreSectionsAsync, isExploreUrlScript, type ExploreSection } from '@/lib/book-source/explore-sections';
 import { cn } from '@/lib/utils';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -952,14 +953,14 @@ export function SourcesPage(props: SourcesPageProps) {
 
       {/* 批量删除确认 */}
       <Dialog open={batchDeleteCount() > 0} onOpenChange={(open) => !open && setBatchDeleteCount(0)}>
-        <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md">
-          <DialogHeader>
+        <DialogContent class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0')}>
+          <DialogHeader class="shrink-0 px-6 pt-6">
             <DialogTitle>删除所选书源</DialogTitle>
-            <DialogDescription class="pt-2">
+            <DialogDescription>
               确定删除所选 {batchDeleteCount()} 个书源？删除后无法恢复。
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter class="gap-2 sm:gap-0">
+          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setBatchDeleteCount(0)}>
               取消
             </Button>
@@ -972,10 +973,10 @@ export function SourcesPage(props: SourcesPageProps) {
 
       {/* 校验结果 */}
       <Dialog open={validateDialogOpen()} onOpenChange={setValidateDialogOpen}>
-        <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
+        <DialogContent class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0')}>
+          <DialogHeader class="shrink-0 px-6 pt-6">
             <DialogTitle>书源校验结果</DialogTitle>
-            <DialogDescription class="pt-1">
+            <DialogDescription>
               <Show when={validateLoading() && validateProgress()}>
                 {validateProgress()!.current} / {validateProgress()!.total}：{validateProgress()!.name || '…'}
               </Show>
@@ -984,7 +985,7 @@ export function SourcesPage(props: SourcesPageProps) {
               </Show>
             </DialogDescription>
           </DialogHeader>
-          <div class="flex-1 overflow-y-auto space-y-4 pr-2">
+          <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <Show when={validateLoading() && validateResults().length === 0}>
               <p class="text-sm text-muted-foreground">正在校验中…</p>
             </Show>
@@ -1024,7 +1025,7 @@ export function SourcesPage(props: SourcesPageProps) {
               )}
             </For>
           </div>
-          <DialogFooter class="gap-2 sm:gap-0 pt-2 border-t">
+          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>
               关闭
             </Button>

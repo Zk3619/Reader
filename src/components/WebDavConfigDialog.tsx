@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { showAppToast } from '@/components/AppToasts';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 import type { WebDavConfig } from '@/types/remote-book';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface WebDavConfigDialogProps {
   open: boolean;
@@ -107,14 +108,14 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-[500px]">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>WebDav 配置</DialogTitle>
           <DialogDescription>
             配置 WebDav 服务器信息以访问远程书籍
           </DialogDescription>
         </DialogHeader>
-        <div class="space-y-4 py-4">
+        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <div class="space-y-2">
             <Label for="webdav-url">服务器地址 *</Label>
             <TextField>
@@ -169,7 +170,7 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
             </p>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button
             variant="outline"
             onClick={() => props.onOpenChange(false)}

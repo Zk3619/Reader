@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* dark 变体：支持 .dark 与 [data-kb-theme="dark"]，便于移除 tailwind.config 后 dark: 仍生效 */
-@custom-variant dark (&:where(.dark, [data-kb-theme="dark"]));
+/* dark 变体：匹配 html.dark 及其子树（须含 .dark *，否则 dark: 只对根节点生效） */
+@custom-variant dark (&:where(.dark, .dark *, [data-kb-theme="dark"], [data-kb-theme="dark"] *));
 
 /* 让 Tailwind v4 使用我们在 :root 中定义的主题变量 */
 @theme {
@@ -319,6 +319,80 @@
 }
 
 @layer utilities {
+  /** 书架列表/网格：间距由 bindBookshelfLayoutGap 写入 CSS 变量（默认 spacing=12 → 3rem） */
+  .bookshelf-layout-gap,
+  .bookshelf-grid-gap {
+    gap: var(--bookshelf-layout-gap, 3rem);
+  }
+
+  /** 书架分组/书籍卡片：抬升与封面缩放共用时长与缓动，避免先后顺序感 */
+  .book-group-card-motion {
+    --book-card-motion-duration: 0.55s;
+    --book-card-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
+    transition:
+      transform var(--book-card-motion-duration) var(--book-card-motion-ease),
+      box-shadow var(--book-card-motion-duration) var(--book-card-motion-ease),
+      border-color 0.22s ease,
+      background-color 0.22s ease,
+      color 0.22s ease;
+  }
+
+  .book-group-card-motion:hover {
+    transform: translate3d(0, -2px, 0);
+  }
+
+  .book-group-card-motion.book-group-card-motion--pressed {
+    transform: translate3d(0, -1px, 0) scale(0.98);
+    --book-card-motion-duration: 0.12s;
+    transition-duration: 0.12s;
+  }
+
+  /** 封面缩放：与卡片同用父级 :hover，避免 group-hover 与 translate 不同步 */
+  .book-group-card-cover-motion {
+    transform: scale3d(1, 1, 1);
+    transform-origin: center center;
+    backface-visibility: hidden;
+    transition:
+      transform var(--book-card-motion-duration, 0.55s)
+      var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .book-group-card-motion:hover .book-group-card-cover-motion--list {
+    transform: scale3d(1.04, 1.04, 1);
+  }
+
+  .book-group-card-motion:hover .book-group-card-cover-motion--grid {
+    transform: scale3d(1.02, 1.02, 1);
+  }
+
+  .book-group-card-motion.book-group-card-motion--pressed .book-group-card-cover-motion {
+    transition:
+      transform var(--book-card-motion-duration, 0.12s)
+      var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .book-group-card-motion {
+      transition:
+        border-color 0.22s ease,
+        background-color 0.22s ease,
+        color 0.22s ease;
+    }
+
+    .book-group-card-motion:hover {
+      transform: translate3d(0, 0, 0);
+    }
+
+    .book-group-card-cover-motion,
+    .book-group-card-motion:hover .book-group-card-cover-motion--list,
+    .book-group-card-motion:hover .book-group-card-cover-motion--grid {
+      transform: scale3d(1, 1, 1);
+      transition: none;
+    }
+  }
+
   .step {
     counter-increment: step;
   }
@@ -821,6 +895,29 @@ li[role="status"].toast-animated[data-closed],
   margin-top: 0.5rem;
 }
 
+/* 内嵌网页浮层：高于 Dialog/登录弹窗（z-50），低于 Toast（z-200） */
+.reader-inner-web-layer {
+  z-index: 150;
+}
+
+/* Tauri 桌面子 WebView：锁定主界面，仅浮层可交互 */
+body.reader-inner-web-session #root {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.reader-inner-web-session .reader-inner-web-layer {
+  pointer-events: auto;
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+.reader-inner-web-layer--panel .reader-inner-web-toolbar-host {
+  position: relative;
+  z-index: 1;
+}
+
 /* Sonner：挂到 body，高于 Dialog（z-110），模态打开时仍可点击 */
 .reader-toast-host {
   position: fixed;
@@ -831,6 +928,39 @@ li[role="status"].toast-animated[data-closed],
 
 .reader-toast-host [data-sonner-toaster] {
   pointer-events: auto;
+}
+
+/* 书源脚本框线 toast：参与 Sonner 默认堆叠（scale + 高度裁剪，悬停展开） */
+[data-sonner-toast].reader-script-toast.reader-script-toast-shell {
+  align-items: flex-start !important;
+  overflow: hidden !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-sonner-toaster][data-y-position='bottom'] [data-sonner-toast].reader-script-toast {
+  transform-origin: 50% 100%;
+}
+
+.reader-script-toast-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-height: min(70vh, 28rem);
+  margin: 0;
+  padding: 0 2px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  tab-size: 4;
+  letter-spacing: 0.02em;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Sonner：关闭按钮置于通知内部右上角（覆盖默认边框外偏移） */

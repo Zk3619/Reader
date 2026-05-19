@@ -3,7 +3,7 @@
  * 当导入的书籍文件已存在时，询问用户是否替换
  */
 
-import { createSignal, Show, createEffect, onMount } from 'solid-js';
+import { createSignal, Show, createEffect} from 'solid-js';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export type ReplaceFileAction = 'replace' | 'skip' | 'restore-existing' | 'rename-import' | 'cancel';
 
@@ -77,14 +78,14 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>文件已存在</DialogTitle>
-          <DialogDescription class="pt-2">
+          <DialogDescription>
             文件《{props.fileName}》已存在于书籍目录中，请选择操作方式。
           </DialogDescription>
         </DialogHeader>
-        <div class="py-4">
+        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup value={action()} onChange={(value) => setAction(value as ReplaceFileAction)}>
             <Show when={props.isSameSize && props.isSameContent}>
               {/* 文件大小和内容都相同：确定是同一文件，提供恢复选项 */}
@@ -127,8 +128,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
                   <div>
                     <div class="font-medium">重命名导入</div>
                     <div class="text-sm text-muted-foreground">
-                      保留原文件，使用新文件名导入新文件
-                    </div>
+                      保留原文件，使用新文件名导入新文�?                    </div>
                   </div>
                 </RadioGroupItemLabel>
               </RadioGroupItem>
@@ -144,8 +144,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
               </RadioGroupItemLabel>
             </RadioGroupItem>
           </RadioGroup>
-        </div>
-        <div class="flex items-center space-x-2 py-2">
+          <div class="flex items-center space-x-2">
           <Checkbox
             id="remember-replace"
             checked={remember()}
@@ -159,8 +158,9 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
               </div>
             </div>
           </Label>
+          </div>
         </div>
-        <DialogFooter class="gap-2 sm:gap-0">
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>

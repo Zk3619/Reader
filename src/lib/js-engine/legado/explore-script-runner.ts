@@ -7,12 +7,79 @@ import { get as httpGet, post } from '@/lib/http';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
-import { isQuickJSFallback } from '../core/runtime';
+import { initQuickJSRuntime, isQuickJSFallback } from '../core/runtime';
 import { createExploreInjector } from './explore-inject';
 import { runLegadoScriptQuickJS } from './quickjs-runner';
 import { installScriptDateShim } from './script-date-shim';
+import {
+  createSourceVariableHandlers,
+  ensureExploreScriptSetsResult,
+  EXPLORE_JSLIB_CONTEXT_SHIM,
+  getScriptBaseUrl,
+  getSourceArgsKey,
+  getSourceCookiesKey,
+  getSourceUrlIdentifier,
+  hostsFromJsLib,
+  loadSourceCookieStore,
+  readSourceLoginInfoMap,
+} from './source-script-shared';
 
 const SCRIPT_TIMEOUT_MS = 15000;
+const ANDROID_ID_KEY = 'reader_login_android_id';
+
+function getOrCreateAndroidId(): string {
+  try {
+    let id = localStorage.getItem(ANDROID_ID_KEY);
+    if (!id) {
+      id = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(ANDROID_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'web_' + Date.now();
+  }
+}
+
+function createExploreCookieApi(baseUrl: string, store: Map<string, string>) {
+  return {
+    getCookie(url: string): string {
+      const k = url || baseUrl;
+      let s = store.get(k) ?? '';
+      if (!s && k.startsWith('http')) {
+        try {
+          s = store.get(new URL(k).origin) ?? '';
+        } catch {
+          /* ignore */
+        }
+      }
+      return s;
+    },
+    setCookie(url: string, value: string): void {
+      store.set(url || baseUrl, value);
+    },
+    removeCookie(url: string): void {
+      store.delete(url || baseUrl);
+    },
+    getKey(cookieStrOrUrl: string, keyName?: string): string {
+      let s: string;
+      if (keyName != null && keyName !== '') {
+        s = this.getCookie(cookieStrOrUrl);
+      } else {
+        s = String(cookieStrOrUrl ?? '').trim();
+      }
+      if (!s) return '';
+      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
+      for (const part of s.split(';')) {
+        const trimmed = part.trim();
+        if (trimmed.includes(searchKey)) {
+          const eq = trimmed.indexOf('=');
+          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
+        }
+      }
+      return '';
+    },
+  };
+}
 
 /** 从 exploreUrl 中提取 <js>...</js> 内的脚本内容 */
 export function extractExploreScript(exploreUrl: string | undefined): string | null {
@@ -24,51 +91,49 @@ export function extractExploreScript(exploreUrl: string | undefined): string | n
   return s.slice(4, end).trim();
 }
 
+function buildExploreFullScript(scriptContent: string, jsLib: string): string {
+  const body = ensureExploreScriptSetsResult(scriptContent);
+  return [
+    jsLib ? jsLib + '\n' : '',
+    EXPLORE_JSLIB_CONTEXT_SHIM,
+    body,
+  ].join('\n');
+}
+
 async function tryRunExploreScriptQuickJS(
   scriptContent: string,
   source: BookSource
 ): Promise<ExploreSection[] | null> {
+  await initQuickJSRuntime();
   if (isQuickJSFallback()) return null;
 
-  const baseUrl = source.sourceUrl || '';
+  const baseUrl = getScriptBaseUrl(source);
+  const sourceUrl = getSourceUrlIdentifier(source);
+  const argsKey = getSourceArgsKey(source);
+  const cookiesKey = getSourceCookiesKey(source);
   const jsLib =
     typeof (source as Record<string, unknown>).jsLib === 'string'
       ? ((source as Record<string, unknown>).jsLib as string)
       : '';
+  const hosts = hostsFromJsLib(jsLib);
+  const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
 
-  const bindGetFanqieCookie =
-    "if (typeof getFanqieCookie === 'function') { getFanqieCookie = getFanqieCookie.bind({ cookie: cookieRef }); }";
+  const cookieStore = loadSourceCookieStore(cookiesKey);
+  const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
+  const sourceVars = createSourceVariableHandlers(source, argsKey);
 
-  const fullScript = [
-    'function getArguments(a, k) { try { a = JSON.parse(a); } catch(e) { a = {}; } return k ? a[k] : a; }',
-    'function getFanqieCookie() { return ""; }',
-    jsLib ? jsLib + '\n' : '',
-    bindGetFanqieCookie,
-    scriptContent,
-  ].join('\n');
+  const fullScript = buildExploreFullScript(scriptContent, jsLib);
 
   const injector = createExploreInjector({
     baseUrl,
+    sourceUrl,
+    host: hostList,
     resolveUrl,
-    getCookie: () => '',
+    getOrCreateDeviceId: getOrCreateAndroidId,
+    cookie: cookieApi,
     source: {
-      getVariable: (_key?: string) => {
-        const raw = (source as Record<string, unknown>).header;
-        if (typeof raw === 'string' && raw) {
-          try {
-            const h = JSON.parse(raw) as Record<string, string>;
-            if (typeof _key === 'string') {
-              const k = _key.toLowerCase();
-              const entry = Object.entries(h).find(([name]) => name.toLowerCase() === k);
-              if (entry) return entry[1];
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        return '';
-      },
-      setVariable: () => {},
+      ...sourceVars,
+      getLoginInfoMap: () => readSourceLoginInfoMap(source),
     },
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
@@ -78,10 +143,18 @@ async function tryRunExploreScriptQuickJS(
       script: fullScript,
       baseUrl,
       timeoutMs: SCRIPT_TIMEOUT_MS,
-      mode: 'two-pass',
+      mode: 'suspend',
       inject: injector,
     });
-    return parseScriptResult(raw);
+    const sections = parseScriptResult(raw);
+    if (sections.length === 0 && raw != null) {
+      const preview =
+        typeof raw === 'string'
+          ? raw.slice(0, 200)
+          : JSON.stringify(raw)?.slice(0, 200);
+      console.warn('[explore-script] QuickJS result 未解析出条目', { preview });
+    }
+    return sections;
   } catch (e) {
     console.warn('[explore-script] QuickJS 失败，降级 Function', e);
     return null;
@@ -96,9 +169,12 @@ export async function runExploreScript(
   source: BookSource
 ): Promise<ExploreSection[]> {
   const quick = await tryRunExploreScriptQuickJS(scriptContent, source);
-  if (quick) {
+  if (quick != null && quick.length > 0) {
     console.log('[explore-script] QuickJS final:', quick.length, 'sections');
     return quick;
+  }
+  if (quick != null && quick.length === 0) {
+    console.warn('[explore-script] QuickJS 返回 0 条，降级 Function');
   }
 
   return runExploreScriptLegacy(scriptContent, source);
@@ -109,7 +185,17 @@ async function runExploreScriptLegacy(
   scriptContent: string,
   source: BookSource
 ): Promise<ExploreSection[]> {
-  const baseUrl = source.sourceUrl || '';
+  const baseUrl = getScriptBaseUrl(source);
+  const argsKey = getSourceArgsKey(source);
+  const cookiesKey = getSourceCookiesKey(source);
+  const jsLib =
+    typeof (source as Record<string, unknown>).jsLib === 'string'
+      ? ((source as Record<string, unknown>).jsLib as string)
+      : '';
+
+  const cookieStore = loadSourceCookieStore(cookiesKey);
+  const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
+  const sourceVars = createSourceVariableHandlers(source, argsKey);
 
   const ajaxCache = new Map<string, string>();
   const ajaxDurationCache = new Map<string, number>();
@@ -120,27 +206,29 @@ async function runExploreScriptLegacy(
     Date: PatchedDate,
     result: undefined,
     baseUrl,
+    cookie: cookieApi,
+    cookieRef: cookieApi,
 
     source: {
-      getVariable(_key?: string): string {
-        const raw = (source as Record<string, unknown>).header;
-        if (typeof raw === 'string' && raw) {
-          try {
-            const h = JSON.parse(raw) as Record<string, string>;
-            if (typeof _key === 'string') {
-              const k = _key.toLowerCase();
-              const entry = Object.entries(h).find(([name]) => name.toLowerCase() === k);
-              if (entry) return entry[1];
-            }
-          } catch { /* ignore */ }
-        }
-        return '';
-      },
-      setVariable(_val?: string) {},
+      getVariable: (key?: string) => sourceVars.getVariable(key),
+      setVariable: (val?: string) => sourceVars.setVariable(val),
+      getLoginInfoMap: () => readSourceLoginInfoMap(source),
     },
 
     java: {
       toast(_msg?: string) {},
+      longToast(_msg?: string) {},
+      log(...args: unknown[]) {
+        console.warn('[explore-script]', ...args);
+        return args[0];
+      },
+      androidId: getOrCreateAndroidId,
+      deviceID: getOrCreateAndroidId,
+      qread() {},
+      startBrowser(_url?: string) {},
+      getCookie(url: string) {
+        return cookieApi.getCookie(url);
+      },
       ajax(
         url: string | Record<string, unknown>,
         optionsOrCb?: Record<string, unknown> | ((body: string) => void),
@@ -183,7 +271,9 @@ async function runExploreScriptLegacy(
           if (d != null && d >= 0) applyAjaxDuration(d);
           const cached = ajaxCache.get(resolvedUrl)!;
           if (callback) {
-            try { callback(cached); } catch (e) {
+            try {
+              callback(cached);
+            } catch (e) {
               console.warn('[explore-script] ajax callback error:', e);
             }
           }
@@ -202,7 +292,9 @@ async function runExploreScriptLegacy(
             if (durationMs >= 0) ajaxDurationCache.set(resolvedUrl, durationMs);
             ajaxCache.set(resolvedUrl, text);
             if (callback) {
-              try { callback(text); } catch (e) {
+              try {
+                callback(text);
+              } catch (e) {
                 console.warn('[explore-script] ajax callback error:', e);
               }
             }
@@ -220,29 +312,7 @@ async function runExploreScriptLegacy(
     },
   };
 
-  const jsLib =
-    typeof (source as Record<string, unknown>).jsLib === 'string'
-      ? ((source as Record<string, unknown>).jsLib as string)
-      : '';
-
-  const cookieRef: { getCookie?: () => string } = { getCookie: () => '' };
-  scopeObj.cookie = cookieRef;
-  scopeObj.cookieRef = cookieRef;
-
-  const fallbackFunctions = [
-    'function getArguments(a, k) { try { a = JSON.parse(a); } catch(e) { a = {}; } return k ? a[k] : a; }',
-    'function getFanqieCookie() { return ""; }',
-  ].join('\n');
-
-  const bindGetFanqieCookie =
-    "if (typeof getFanqieCookie === 'function') { getFanqieCookie = getFanqieCookie.bind({ cookie: cookieRef }); }";
-
-  const fullScript = [
-    fallbackFunctions,
-    jsLib ? jsLib + '\n' : '',
-    bindGetFanqieCookie,
-    scriptContent,
-  ].join('\n');
+  const fullScript = buildExploreFullScript(scriptContent, jsLib);
 
   const run = new Function(
     '__scope__',
@@ -255,14 +325,18 @@ async function runExploreScriptLegacy(
   });
 
   const runPromise = (async () => {
-    run(scopeObj, fullScript);
-    if (pending.length > 0) await Promise.all(pending);
-    if (scopeObj.result !== undefined) return scopeObj.result;
-    if (ajaxCache.size > 0) {
-      scopeObj.result = undefined;
-      pending = [];
+    const maxRounds = 6;
+    let prevCacheSize = -1;
+    for (let round = 0; round < maxRounds; round++) {
+      if (round > 0) {
+        scopeObj.result = undefined;
+        pending = [];
+      }
       run(scopeObj, fullScript);
       if (pending.length > 0) await Promise.all(pending);
+      if (scopeObj.result !== undefined) return scopeObj.result;
+      if (ajaxCache.size === 0 || ajaxCache.size === prevCacheSize) break;
+      prevCacheSize = ajaxCache.size;
     }
     return scopeObj.result;
   })();

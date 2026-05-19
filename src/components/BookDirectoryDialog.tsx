@@ -18,6 +18,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { join } from '@tauri-apps/api/path';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface BookDirectoryDialogProps {
   open: boolean;
@@ -85,10 +86,10 @@ export function BookDirectoryDialog(props: BookDirectoryDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class="max-w-[calc(100vw-2rem)] sm:max-w-md">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>选择保存书籍的文件夹</DialogTitle>
-          <DialogDescription class="pt-2">
+          <DialogDescription>
             <p class="mb-2">
               由于存在访问权限问题，需要指定一个目录来实现书籍的拷贝、下载等功能，如不指定，则将无法正常使用本地书籍、WebDev等功能。
             </p>
@@ -97,19 +98,11 @@ export function BookDirectoryDialog(props: BookDirectoryDialogProps) {
             </p>
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter class="flex-col sm:flex-row gap-2">
-          <Button
-            variant="outline"
-            onClick={handleLater}
-            class="w-full sm:w-auto"
-          >
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+          <Button variant="outline" onClick={handleLater}>
             稍后处理
           </Button>
-          <Button
-            variant="default"
-            onClick={handleModify}
-            class="w-full sm:w-auto"
-          >
+          <Button variant="default" onClick={handleModify}>
             立即修改
           </Button>
         </DialogFooter>

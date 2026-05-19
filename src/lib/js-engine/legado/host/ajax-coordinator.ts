@@ -45,7 +45,7 @@ export class AjaxCoordinator {
     }
   }
 
-  /** suspend 模式：按序 replay；two-pass 模式：仅读 cache */
+  /** suspend 模式：仅按 results[readIndex] 顺序 replay（禁止 URL cache，避免同 URL 多次 ajax 串响应） */
   getCachedResponse(resolvedUrl: string, apply?: (ms: number) => void): string | undefined {
     if (this.mode === 'suspend') {
       const out = this.results[this.readIndex];
@@ -54,6 +54,7 @@ export class AjaxCoordinator {
         this.restoreDuration(resolvedUrl, apply);
         return out;
       }
+      return undefined;
     }
     if (this.cache.has(resolvedUrl)) {
       this.restoreDuration(resolvedUrl, apply);
@@ -72,12 +73,14 @@ export class AjaxCoordinator {
     writeIndex: number,
     resolvedUrl: string,
     body: string,
-    requestStart: number,
-    apply?: (ms: number) => void
+    requestStart: number
   ): void {
     const durationMs = Date.now() - requestStart;
-    this.recordDuration(resolvedUrl, durationMs, apply);
+    // 仅缓存耗时；Date boost 在 getCachedResponse 回放时注入，避免挂起重跑时 date1 误消费 boost
+    this.recordDuration(resolvedUrl, durationMs);
     this.results[writeIndex] = body;
-    this.cache.set(resolvedUrl, body);
+    if (this.mode === 'two-pass') {
+      this.cache.set(resolvedUrl, body);
+    }
   }
 }

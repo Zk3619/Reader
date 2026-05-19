@@ -7,6 +7,7 @@ import { createResource, createSignal, For, Show, onMount, onCleanup } from 'sol
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { PageHeader } from '@/components/PageHeader';
@@ -435,12 +436,12 @@ export function DiscoverPage(props: DiscoverPageProps) {
         open={props.showPaginationPreferenceDialog ?? false} 
         onOpenChange={(open) => props.onPaginationPreferenceDialogChange?.(open)}
       >
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+          <DialogHeader class="shrink-0 px-6 pt-6">
             <DialogTitle>分页偏好</DialogTitle>
             <DialogDescription>选择发现页的加载方式</DialogDescription>
           </DialogHeader>
-          <div class="py-4">
+          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <RadioGroup
               value={paginationPreference()}
               onChange={(value) => savePaginationPreference(value as PaginationPreference)}

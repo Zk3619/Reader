@@ -56,6 +56,17 @@ interface SideBarProps {
   recentBooks?: RecentBook[];
 }
 
+/** 侧栏可点击项：圆角矩形背景 + 更明显的悬停/选中颜色（覆盖 ui/sidebar 默认弱对比） */
+function sidebarNavButtonClass(active: boolean, extra?: string) {
+  return cn(
+    "relative overflow-hidden rounded-xl transition-colors duration-200",
+    "text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current",
+    !active && "hover:bg-primary/10 hover:text-primary hover:shadow-sm",
+    active && "bg-primary/10! text-primary! font-semibold shadow-sm ring-1 ring-primary/45",
+    extra
+  );
+}
+
 export function SideBar(props: SideBarProps) {
   const currentPage = () => props.currentPage || "bookshelf";
   const recentBooks = () => props.recentBooks || [];
@@ -68,14 +79,16 @@ export function SideBar(props: SideBarProps) {
 
   // 所有菜单页面列表（包括设置）
   const allPages: PageType[] = ["bookshelf", "sources", "subscription", "bookmark", "record", "settings"];
-  
+
   // 判断是否收起
   const isCollapsed = () => state() === "collapsed";
+
+  const isPageActive = (page: PageType) => currentPage() === page;
 
   return (
     <Sidebar
       collapsible="icon"
-      class="h-[calc(100vh-3.5rem)] top-14 bottom-0 border-r border-sidebar-border"
+      class="h-[calc(100dvh-3.5rem)] top-14 bottom-0 border-r border-sidebar-border"
     >
       <SidebarContent class="h-full overflow-y-auto">
         {/* 主菜单 */}
@@ -85,38 +98,29 @@ export function SideBar(props: SideBarProps) {
               <For each={allPages}>
                 {(page) => {
                   const config = pageConfig[page];
+                  const active = () => isPageActive(page);
                   return (
-                    <>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          isActive={currentPage() === page}
-                          onClick={() => handlePageChange(page)}
-                          tooltip={config.label}
-                          class={cn(
-                            "group/menu-button relative rounded-lg transition-all duration-200 h-10",
-                            "group-data-[collapsible=icon]:justify-center",
-                            currentPage() !== page && "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-md hover:translate-x-1",
-                            "active:scale-[0.98]",
-                            currentPage() === page && "bg-sidebar-accent! text-sidebar-accent-foreground! shadow-lg ring-2 ring-primary/50 ring-offset-2 ring-offset-sidebar font-semibold"
-                          )}
-                        >
-                          <span class={cn(
-                            "transition-transform duration-200 group-data-[collapsible=icon]:mx-auto",
-                            "group-hover/menu-button:scale-110",
-                            currentPage() === page && "scale-110"
-                          )}>
-                            <config.icon class="h-5 w-5" />
-                          </span>
-                          <span class={cn("font-medium group-data-[collapsible=icon]:hidden", currentPage() === page && "font-semibold")}>
-                            {config.label}
-                          </span>
-                          <Show when={currentPage() === page}>
-                            <span class="absolute right-2 h-2 w-2 rounded-full bg-primary shadow-sm group-data-[collapsible=icon]:hidden" />
-                          </Show>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                      <Separator class="my-1.5 h-0.3" />
-                    </>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={active()}
+                        onClick={() => handlePageChange(page)}
+                        tooltip={config.label}
+                        class={sidebarNavButtonClass(
+                          active(),
+                          "group/menu-button h-10 group-data-[collapsible=icon]:justify-center"
+                        )}
+                      >
+                        <span class="transition-colors duration-200 group-data-[collapsible=icon]:mx-auto">
+                          <config.icon class="h-5 w-5" />
+                        </span>
+                        <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                          {config.label}
+                        </span>
+                        <Show when={active()}>
+                          <span class="absolute right-2 h-2 w-2 rounded-full bg-primary shadow-sm group-data-[collapsible=icon]:hidden" />
+                        </Show>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
                   );
                 }}
               </For>
@@ -124,9 +128,11 @@ export function SideBar(props: SideBarProps) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* 分割线和最近读过 - 移动到设置下面，收起时不显示 */}
+        {/* 与最近读过区域之间的分割线 */}
         <Show when={recentBooks().length > 0 && !isCollapsed()}>
-          <SidebarGroup>
+          <>
+            <Separator />
+            <SidebarGroup>
             <SidebarGroupLabel class="text-xs font-semibold text-sidebar-foreground/70">
               最近读过
             </SidebarGroupLabel>
@@ -135,62 +141,61 @@ export function SideBar(props: SideBarProps) {
                 <For each={recentBooks().slice(0, 5)}>
                   {(book, index) => (
                     <>
+                      <Show when={index() > 0}>
+                        <Separator class="my-1 h-0.3" />
+                      </Show>
                       <SidebarMenuItem>
                         <SidebarMenuButton
-                          variant="outline"
-                          class={cn(
-                            "flex-col items-start gap-1 h-auto py-2.5 px-3 rounded-lg",
-                            "transition-all duration-200",
-                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-md hover:border-sidebar-accent",
-                            "active:scale-[0.98]",
-                            "group"
+                          class={sidebarNavButtonClass(
+                            false,
+                            "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left"
                           )}
                           tooltip={`${book.title} - ${book.chapterName}`}
                         >
-                          <span class="w-full min-w-0 truncate text-xs font-medium group-hover:text-sidebar-accent-foreground transition-colors">
+                          <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
                             {book.title}
                           </span>
-                          <span class="w-full min-w-0 truncate text-xs text-muted-foreground group-hover:text-sidebar-accent-foreground/90 transition-colors">
+                          <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
                             {book.chapterName}
                           </span>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
-                      {/* 在最后一项之前不添加分割线 */}
-                      <Show when={index() < Math.min(recentBooks().length, 5) - 1}>
-                        <Separator class="my-1.5 h-0.3" />
-                      </Show>
                     </>
                   )}
                 </For>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+          </>
         </Show>
       </SidebarContent>
 
       {/* 底部：收起/展开按钮 */}
-      <SidebarFooter>
+      <SidebarFooter class="border-t border-sidebar-border">
         <SidebarMenuItem>
           <SidebarMenuButton
             onClick={toggleSidebar}
             tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
-            class={cn(
-              "group/toggle-button relative rounded-lg transition-all duration-200 h-10",
-              "group-data-[collapsible=icon]:justify-center",
-              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-md",
-              "active:scale-[0.98]"
+            class={sidebarNavButtonClass(
+              false,
+              "group/toggle-button h-10 [&_svg]:size-4 group-data-[collapsible=icon]:justify-center"
             )}
           >
             <Show
               when={isCollapsed()}
               fallback={
                 <>
-                  <ChevronLeftIcon class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110" size={16} />
-                  <span class="font-medium group-data-[collapsible=icon]:hidden">收起</span>
+                  <ChevronLeftIcon class="h-4 w-4 transition-colors duration-200" size={16} />
+                  <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                    收起
+                  </span>
                 </>
               }
             >
-              <ChevronRightIcon class="h-4 w-4 transition-transform duration-200 group-hover/toggle-button:scale-110 group-data-[collapsible=icon]:mx-auto" size={16} />
+              <ChevronRightIcon
+                class="h-4 w-4 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto"
+                size={16}
+              />
             </Show>
           </SidebarMenuButton>
         </SidebarMenuItem>

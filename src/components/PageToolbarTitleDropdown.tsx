@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { PageToolbarTitleText } from '@/components/PageToolbar';
 import { cn } from '@/lib/utils';
+import { maxHTitleMenu } from '@/lib/viewport-classes';
 import { ChevronDownIcon } from '@/components/icons';
 
 const TITLE_BLOCK_PADDING = 'rounded-md px-2.5 py-2';
@@ -24,7 +25,7 @@ const TITLE_DROPDOWN_TRIGGER_CLASS = cn(
 
 const TITLE_DROPDOWN_CONTENT_CLASS = 'p-0 w-52 min-w-52 max-w-52 overflow-hidden';
 
-const TITLE_MENU_MAX_HEIGHT = 'max-h-[min(24rem,calc(100dvh-11rem))]';
+const TITLE_MENU_MAX_HEIGHT = maxHTitleMenu;
 
 function TitleDropdownChevron() {
   return (

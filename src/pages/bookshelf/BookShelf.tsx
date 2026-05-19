@@ -19,12 +19,7 @@ import { BookGroupId } from '@/types';
 import { BookGroup as BookGroupPage } from './BookGroup';
 import { BookEditDialog } from '@/components/BookEditDialog';
 import { DeleteBookDialog } from '@/components/DeleteBookDialog';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+import { BookContextMenu, type BookContextMenuActions } from '@/components/BookContextMenu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/icons';
@@ -33,6 +28,15 @@ import { getBooksDirectory } from '@/lib/local-book/import';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { hasBook } from '@/lib/database/books';
 import { importLocalBookFromContent, isLocalBook } from '@/lib/local-book';
+import { pinBookToBottom, pinBookToTop } from '@/utils/book-order';
+import {
+  bindBookshelfLayoutGap,
+  BOOKSHELF_LAYOUT_GAP_CLASS,
+} from '@/utils/bookshelf-layout-gap';
+import {
+  getViewModeCardLayout,
+  getViewModeContainerGridClass,
+} from '@/utils/bookshelf-view-mode';
 import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
@@ -519,10 +523,13 @@ export function BookShelf(props: BookShelfProps) {
             onOpenBook={props.onOpenBook}
             onEditBook={handleEditBook}
             onDeleteBook={handleDeleteBook}
-            onBooksReorder={async (newOrderedBooks) => {
+            onBooksReorder={async (newOrderedBooks, syncState) => {
               const updates = newOrderedBooks.map((b, i) => ({ bookUrl: b.bookUrl, order: i }));
               await booksDb.updateBooksOrder(updates);
-              // 不 setBooks、不派发 refresh：SortableJS 已重排 DOM，仅持久化顺序；下次进入页面会从 DB 刷新
+              if (syncState) {
+                setBooks(newOrderedBooks);
+              }
+              // 拖拽排序不 setBooks：SortableJS 已重排 DOM，仅持久化顺序
             }}
           />
         </Show>
@@ -560,7 +567,7 @@ function GroupBooksView(props: {
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
-  onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
+  onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
 }) {
   const showSkeleton = useSkeletonLoading(() => props.loading, { delay: 100, minDisplayTime: 300 });
 
@@ -613,72 +620,6 @@ function GroupBooksView(props: {
   );
 }
 
-/** 长按/右键触发上下文菜单的包装逻辑（与分组管理一致） */
-const LONG_PRESS_MS = 500;
-const MOVE_THRESHOLD = 10;
-
-function useLongPressContextMenu(triggerRef: () => HTMLElement | null) {
-  let pressStartTime = 0;
-  let pressStartX = 0;
-  let pressStartY = 0;
-  let hasMoved = false;
-  let longPressTimer: number | null = null;
-  let longPressTriggered = false;
-  let contextMenuTriggered = false;
-
-  const onPointerDown = (e: MouseEvent | TouchEvent) => {
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    if ('button' in e && e.button !== 0) return;
-    pressStartTime = Date.now();
-    pressStartX = clientX;
-    pressStartY = clientY;
-    hasMoved = false;
-    longPressTriggered = false;
-    contextMenuTriggered = false;
-    longPressTimer = window.setTimeout(() => {
-      if (!hasMoved) longPressTriggered = true;
-    }, LONG_PRESS_MS);
-  };
-
-  const onPointerMove = (e: MouseEvent | TouchEvent) => {
-    if (pressStartTime === 0) return;
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
-    const dist = Math.sqrt((clientX - pressStartX) ** 2 + (clientY - pressStartY) ** 2);
-    if (dist > MOVE_THRESHOLD && longPressTimer !== null) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-    if (dist > MOVE_THRESHOLD) hasMoved = true;
-  };
-
-  const onPointerUp = (e: MouseEvent | TouchEvent) => {
-    if (longPressTimer !== null) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-    const el = triggerRef();
-    if (longPressTriggered && !hasMoved && el) {
-      const clientX = 'changedTouches' in e ? (e as TouchEvent).changedTouches[0].clientX : (e as MouseEvent).clientX;
-      const clientY = 'changedTouches' in e ? (e as TouchEvent).changedTouches[0].clientY : (e as MouseEvent).clientY;
-      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY }));
-      contextMenuTriggered = true;
-      // 延迟重置，确保 onClick 事件能检测到
-      setTimeout(() => {
-        contextMenuTriggered = false;
-      }, 100);
-    }
-    pressStartTime = 0;
-    hasMoved = false;
-    longPressTriggered = false;
-  };
-
-  const shouldPreventClick = () => contextMenuTriggered;
-
-  return { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick };
-}
-
 /** 书籍列表/网格，复用书架布局的视图模式与间距；仅当 sortMode === 'manual' 时启用 SortableJS 拖动排序 */
 function BooksGrid(props: {
   books: Book[];
@@ -688,38 +629,37 @@ function BooksGrid(props: {
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
-  onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
+  onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
 }) {
-  const spacing = () => bookshelfLayoutStore.settings.spacing * 0.25;
-  let gridRef: HTMLDivElement | null = null;
-  let sortableInstance: Sortable | null = null;
+  const manualSort = () => props.sortMode === 'manual';
 
-  const gridClass = createMemo(() => {
-    const mode = props.viewMode;
-    const gap = mode.startsWith('grid-') ? '' : mode === 'list' || mode === 'list-2' ? 'gap-3' : 'gap-2';
-    const cols =
-      mode === 'list' || mode === 'compact' ? 'grid-cols-1'
-        : mode === 'list-2' || mode === 'compact-2' ? 'grid-cols-1 md:grid-cols-2'
-          : mode === 'grid-2' ? 'grid-cols-2'
-            : mode === 'grid-3' ? 'grid-cols-3'
-              : mode === 'grid-4' ? 'grid-cols-4'
-                : mode === 'grid-5' ? 'grid-cols-5'
-                  : mode === 'grid-6' ? 'grid-cols-6'
-                    : 'grid-cols-1';
-    return cn('grid', cols, gap);
+  const bookContextMenuActions = (): BookContextMenuActions => ({
+    onEdit: (book) => props.onEditBook?.(book),
+    onDelete: (book) => props.onDeleteBook?.(book),
+    onPinTop: async (book) => {
+      const updated = pinBookToTop(props.books, book.bookUrl);
+      if (updated) await props.onBooksReorder?.(updated, true);
+    },
+    onPinBottom: async (book) => {
+      const updated = pinBookToBottom(props.books, book.bookUrl);
+      if (updated) await props.onBooksReorder?.(updated, true);
+    },
   });
 
-  const cardLayout = (): 'list' | 'compact' | 'grid' =>
-    props.viewMode === 'list' || props.viewMode === 'list-2' ? 'list'
-      : props.viewMode === 'compact' || props.viewMode === 'compact-2' ? 'compact'
-        : 'grid';
+  const [containerRef, setContainerRef] = createSignal<HTMLDivElement | null>(null);
+  let sortableInstance: Sortable | null = null;
 
-  const gridStyle = () =>
-    props.viewMode.startsWith('grid-') ? { gap: `${spacing()}rem` } : undefined;
+  const gridClass = createMemo(() =>
+    cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, getViewModeContainerGridClass(props.viewMode)),
+  );
+
+  const cardLayout = (): 'list' | 'compact' | 'grid' => getViewModeCardLayout(props.viewMode);
+
+  bindBookshelfLayoutGap(containerRef);
 
   createEffect(() => {
     const manual = props.sortMode === 'manual';
-    const container = gridRef;
+    const container = containerRef();
     const books = props.books;
 
     if (!manual || !container || books.length === 0) {
@@ -762,92 +702,78 @@ function BooksGrid(props: {
   });
 
   return (
-    <div
-      ref={(el) => { gridRef = el; }}
-      class={gridClass()}
-      style={gridStyle()}
-    >
+    <div ref={setContainerRef} class={gridClass()}>
       <For each={props.books}>
-        {(book) => {
-          let triggerEl: HTMLDivElement | null = null;
-          const { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick } = useLongPressContextMenu(() => triggerEl);
-          return (
-            <BookCardWithMenu
-              book={book}
-              layout={cardLayout()}
-              titleDisplay={props.titleDisplay}
-              triggerRef={(el) => { triggerEl = el; }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              shouldPreventClick={shouldPreventClick}
-              onOpenBook={props.onOpenBook}
-              onEditBook={props.onEditBook}
-              onDeleteBook={props.onDeleteBook}
-            />
-          );
-        }}
+        {(book) => (
+          <BookCardWithMenu
+            book={book}
+            layout={cardLayout()}
+            titleDisplay={props.titleDisplay}
+            orderedBooks={props.books}
+            manualSort={manualSort()}
+            actions={bookContextMenuActions()}
+            onOpenBook={props.onOpenBook}
+          />
+        )}
       </For>
     </div>
   );
 }
 
-/** 单本书卡片 + 右键/长按菜单（编辑、删除） */
+/** 书籍卡片悬停抬升阴影（与 BookGroup 分组卡片一致） */
+const BOOK_CARD_HOVER_ELEVATION =
+  'shadow-none hover:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:hover:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]';
+
+const bookListCardClass = cn(
+  'book-group-card-motion relative flex cursor-pointer items-center gap-4 rounded-xl border border-border/50 bg-card p-2',
+  'hover:border-primary/50 hover:bg-transparent',
+  BOOK_CARD_HOVER_ELEVATION,
+);
+
+const bookCompactCardClass = cn(
+  'book-group-card-motion flex cursor-pointer items-center gap-2 rounded-lg border border-border/50 bg-card p-1',
+  'hover:border-primary/50 hover:bg-accent/50',
+  BOOK_CARD_HOVER_ELEVATION,
+);
+
+const bookGridCardClass = cn(
+  'book-group-card-motion flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border/50 bg-card p-2',
+  'hover:border-primary/30 hover:bg-card',
+  BOOK_CARD_HOVER_ELEVATION,
+);
+
+/** 单本书卡片 + 右键/长按菜单 */
 function BookCardWithMenu(props: {
   book: Book;
   layout: 'list' | 'compact' | 'grid';
   titleDisplay: string;
-  triggerRef: (el: HTMLDivElement | null) => void;
-  onPointerDown: (e: MouseEvent | TouchEvent) => void;
-  onPointerMove: (e: MouseEvent | TouchEvent) => void;
-  onPointerUp: (e: MouseEvent | TouchEvent) => void;
-  shouldPreventClick: () => boolean;
+  orderedBooks: Book[];
+  manualSort: boolean;
+  actions: BookContextMenuActions;
   onOpenBook?: (book: Book) => void;
-  onEditBook?: (book: Book) => void;
-  onDeleteBook?: (book: Book) => void;
 }) {
   const cardClass = () =>
     props.layout === 'list'
-      ? 'flex cursor-pointer items-center gap-4 rounded-xl border border-border/50 bg-card p-4 transition-all hover:border-primary/30 hover:shadow-md'
+      ? bookListCardClass
       : props.layout === 'compact'
-        ? 'flex cursor-pointer items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-accent/30'
-        : 'group/card flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border/50 bg-card p-4 transition-all hover:border-primary/30 hover:shadow-md';
+        ? bookCompactCardClass
+        : bookGridCardClass;
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        as="div"
-        ref={props.triggerRef}
-        onMouseDown={(e: MouseEvent) => props.onPointerDown(e)}
-        onMouseMove={(e: MouseEvent) => props.onPointerMove(e)}
-        onMouseUp={(e: MouseEvent) => props.onPointerUp(e)}
-        onMouseLeave={() => { }}
-        onTouchStart={(e: TouchEvent) => props.onPointerDown(e)}
-        onTouchMove={(e: TouchEvent) => props.onPointerMove(e)}
-        onTouchEnd={(e: TouchEvent) => props.onPointerUp(e)}
-        class={cardClass()}
-        onClick={(e: MouseEvent) => {
-          if (props.shouldPreventClick()) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
-          props.onOpenBook?.(props.book);
-        }}
-        onKeyDown={(e: KeyboardEvent) => {
-          if (e.key === 'Enter') {
-            props.onOpenBook?.(props.book);
-          }
-        }}
-        role="button"
-        tabIndex={0}
-      >
+    <BookContextMenu
+      book={props.book}
+      orderedBooks={props.orderedBooks}
+      manualSort={props.manualSort}
+      actions={props.actions}
+      class={cardClass()}
+      onOpenBook={() => props.onOpenBook?.(props.book)}
+    >
         <div class={
           props.layout === 'grid'
-            ? 'flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50'
+            ? 'book-group-card-cover-motion book-group-card-cover-motion--grid flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50'
             : props.layout === 'compact'
-              ? 'h-14 aspect-3/4 shrink-0 overflow-hidden rounded-md bg-muted/50'
-              : 'h-20 aspect-3/4 shrink-0 overflow-hidden rounded-lg bg-muted/50'
+              ? 'book-group-card-cover-motion book-group-card-cover-motion--list h-14 aspect-3/4 shrink-0 overflow-hidden rounded-md bg-muted/50'
+              : 'book-group-card-cover-motion book-group-card-cover-motion--list h-20 aspect-3/4 shrink-0 overflow-hidden rounded-lg bg-muted/50'
         }>
           <Show when={props.book.customCoverUrl || props.book.coverUrl} fallback={<span class="flex h-full w-full items-center justify-center text-2xl">📖</span>}>
             <img
@@ -882,11 +808,6 @@ function BookCardWithMenu(props: {
             </div>
           )}
         </Show>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={() => props.onEditBook?.(props.book)}>编辑</ContextMenuItem>
-        <ContextMenuItem onSelect={() => props.onDeleteBook?.(props.book)}>删除</ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    </BookContextMenu>
   );
 }

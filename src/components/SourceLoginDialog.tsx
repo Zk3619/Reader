@@ -1,7 +1,7 @@
 /**
- * 书源登录对话框（仅当 loginUi 且 loginUrl 非 http(s) 时使用）
- * 常规 http(s) 登录由 App 直接走 open-url 浏览器方案，不进入本弹窗。
- * 本弹窗：loginUi 为 JSON 表单 + loginUrl 为脚本时，渲染表单并执行登录脚本。
+ * 书源登录对话框：loginUi 表单 + loginUrl 脚本。
+ * 脚本内 java.startBrowser / startBrowserAwait 与「书源设置」相同，走 InnerWeb 浮层（工具栏 + √）。
+ * 仅 http(s) 且无 loginUi 时由 App 直接 openSourceSettingsInApp，不进入本弹窗。
  */
 
 import { createSignal, createMemo, createEffect, Show, For } from 'solid-js';
@@ -13,7 +13,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast, showScriptToast } from '@/components/AppToasts';
 import {
   runLoginScript,
   runLoginScriptRust,
@@ -22,7 +22,9 @@ import {
   clearSourceLoginStateLocalStorageOnly,
 } from '@/lib/js-engine';
 import { isTauri } from '@/lib/platform/detect';
+import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import JSON5 from 'json5';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import type { BookSource } from '@/types';
 
 /** legado loginUi 表单项（与晴天聚合等书源格式一致） */
@@ -273,11 +275,17 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
     }
     setRunning(true);
     const onToast = (msg: string, long?: boolean) => {
-      showAppToast({
-        title: long ? '登录' : '',
-        description: msg?.trim() || (long ? '' : '已执行'),
-        variant: 'default',
-      });
+      const text = msg?.trim() ?? '';
+      if (!text) {
+        if (!long) showAppToast({ description: '已执行', variant: 'default' });
+        return;
+      }
+      // longToast / checkStatus 等：多行框线排版，需 pre-wrap + 等宽字体
+      if (long || text.includes('\n')) {
+        showScriptToast(text);
+        return;
+      }
+      showAppToast({ description: text, variant: 'default' });
     };
     try {
       if (useRustEngine()) {
@@ -317,43 +325,54 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
   };
 
   /** 退出登录：先同步清空 localStorage（与脚本同 key），再异步清 HTTP cookie，最后可选执行 logout() */
-  const handleLogout = async () => {
-    const source = props.source;
-    if (!source) {
-      showAppToast({ title: '退出登录', description: '未找到当前书源', variant: 'destructive' });
-      return;
-    }
-    setRunning(true);
-    // 先同步清除 localStorage，确保下次 runLoginScript 读不到旧 cookie（不依赖异步顺序）
-    clearSourceLoginStateLocalStorageOnly(source);
-    setFormValues({});
-    try {
-      await clearSourceLoginState(source);
-      if (source.loginUrl?.trim()) {
-        try {
-          await runLoginScript(source, {
-            formValues: formValues(),
-            action: 'logout()',
-            onToast: (msg) => showAppToast({ description: msg, variant: 'default' }),
-          });
-        } catch {
-          /* 书源可能未定义 logout()，已清除本地即可 */
-        }
-      }
-      showAppToast({ title: '已退出登录', description: '本地登录态已清除', variant: 'default' });
-    } catch (e) {
-      console.error('[login-dialog] handleLogout 异常', e);
-      showAppToast({ title: '退出登录失败', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
-    } finally {
-      setRunning(false);
+  // const handleLogout = async () => {
+  //   const source = props.source;
+  //   if (!source) {
+  //     showAppToast({ title: '退出登录', description: '未找到当前书源', variant: 'destructive' });
+  //     return;
+  //   }
+  //   setRunning(true);
+  //   // 先同步清除 localStorage，确保下次 runLoginScript 读不到旧 cookie（不依赖异步顺序）
+  //   clearSourceLoginStateLocalStorageOnly(source);
+  //   setFormValues({});
+  //   try {
+  //     await clearSourceLoginState(source);
+  //     if (source.loginUrl?.trim()) {
+  //       try {
+  //         await runLoginScript(source, {
+  //           formValues: formValues(),
+  //           action: 'logout()',
+  //           onToast: (msg) => showAppToast({ description: msg, variant: 'default' }),
+  //         });
+  //       } catch {
+  //         /* 书源可能未定义 logout()，已清除本地即可 */
+  //       }
+  //     }
+  //     showAppToast({ title: '已退出登录', description: '本地登录态已清除', variant: 'default' });
+  //   } catch (e) {
+  //     console.error('[login-dialog] handleLogout 异常', e);
+  //     showAppToast({ title: '退出登录失败', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+  //   } finally {
+  //     setRunning(false);
+  //   }
+  // };
+
+  const blockDialogDismissWhileInnerWeb = (e: { preventDefault: () => void }) => {
+    if (shouldSuppressLoginDialogDismiss() || isInnerWebSessionActive()) {
+      e.preventDefault();
     }
   };
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent class="max-w-[80vw] sm:max-w-2xl max-h-[80vh] flex flex-col gap-0 p-0">
-        <DialogHeader class="shrink-0 border-b border-border px-4 py-3">
-          <DialogTitle class="text-lg font-semibold">
+      <DialogContent
+        class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}
+        onPointerDownOutside={blockDialogDismissWhileInnerWeb}
+        onInteractOutside={blockDialogDismissWhileInnerWeb}
+        onFocusOutside={blockDialogDismissWhileInnerWeb}
+      >
+        <DialogHeader class="shrink-0 px-6 pt-6">
+          <DialogTitle>
             {props.source ? `${props.source.sourceName} · 登录` : '书源登录'}
           </DialogTitle>
           <DialogDescription class="sr-only">
@@ -361,11 +380,12 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
+        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
         {/* loginUi 为 JSON 表单（如晴天聚合），渲染表单并执行登录脚本 */}
         <Show when={useFormMode()}>
-          <div class="flex flex-col gap-4 p-4">
+          <div class="flex flex-col gap-4">
             <p class="text-sm text-muted-foreground">
-              该书源使用自定义登录表单，填写后点击按钮将在本机脚本环境中执行登录。
+              填写后点击按钮执行登录脚本；若需打开网页（如「书源设置」），将在全屏内嵌页中打开，点右上角 √ 可同步 Cookie 并返回。
             </p>
             <Show when={isTauri()}>
               <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -463,26 +483,13 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
                   </div>
                 )}
               </For>
-              {/* 退出登录：清除本地 cookie/登录信息，并可选执行书源 logout() */}
-              <div class="mt-2 flex justify-end border-t border-border pt-3">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={running()}
-                  onClick={handleLogout}
-                  class="text-muted-foreground hover:text-destructive"
-                >
-                  退出登录
-                </Button>
-              </div>
             </form>
           </div>
         </Show>
 
         {/* 有书源但无表单模式时提示（与 Legado 一致：loginUi 为 JSON 数组方可解析） */}
         <Show when={props.source && !useFormMode()}>
-          <div class="p-4 text-sm text-muted-foreground space-y-2">
+          <div class="text-sm text-muted-foreground space-y-2">
             <p>
               该书源已配置登录，但未解析到登录表单。与 Legado 对齐：loginUi 须为 JSON 数组字符串（如晴天聚合书源格式）。
             </p>
@@ -491,6 +498,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
             </p>
           </div>
         </Show>
+        </div>
       </DialogContent>
     </Dialog>
   );

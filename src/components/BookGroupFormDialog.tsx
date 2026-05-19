@@ -28,6 +28,7 @@ import {
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { cn } from '@/lib/utils';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { ImageIcon, AlertCircleIcon } from '@/components/icons';
 import { getCoverPreviewInfo } from '@/utils/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
@@ -201,8 +202,8 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class="max-h-[90vh] max-w-[calc(100vw-2rem)] sm:max-w-md">
-        <DialogHeader>
+      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>{isEdit() ? '编辑分组' : '添加分组'}</DialogTitle>
           <DialogDescription>
             {isEdit() && initialGroup() && isDefaultGroup(initialGroup()!.groupId)
@@ -213,7 +214,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4 py-4">
+        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           {/* 分组名称：仅默认分组不可编辑 */}
           <div class="space-y-2">
             <Label for="group-name">分组名称</Label>
@@ -391,7 +392,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>

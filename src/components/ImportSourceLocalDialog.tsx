@@ -17,6 +17,7 @@ import { parseBookSourceJson } from '@/lib/book-source/source-import';
 import * as sourcesDb from '@/lib/database/sources';
 import { showAppToast } from '@/components/AppToasts';
 import { cn } from '@/lib/utils';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface ImportSourceLocalDialogProps {
   open: boolean;
@@ -71,14 +72,16 @@ export function ImportSourceLocalDialog(props: ImportSourceLocalDialogProps) {
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange} modal>
-      <DialogContent class={cn('max-w-[calc(100vw-2rem)] sm:max-w-md', isImporting() && 'dialog-importing')}>
-        <DialogHeader>
+      <DialogContent
+        class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0', isImporting() && 'dialog-importing')}
+      >
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>本地导入书源</DialogTitle>
           <DialogDescription>
             选择本地的书源文件（.json 或 .txt，兼容 legado 书源格式）进行导入
           </DialogDescription>
         </DialogHeader>
-        <div class="py-4">
+        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <Button
             variant="outline"
             class="w-full"
@@ -88,7 +91,7 @@ export function ImportSourceLocalDialog(props: ImportSourceLocalDialogProps) {
             {isImporting() ? (fileName() ? `正在导入 ${fileName()}...` : '导入中...') : '选择文件'}
           </Button>
         </div>
-        <DialogFooter>
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isImporting()}>
             关闭
           </Button>

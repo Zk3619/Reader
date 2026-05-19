@@ -27,6 +27,7 @@ import { ReaderSettings } from './ReaderSettings';
 import { ReaderCatalog } from './ReaderCatalog';
 import { ReaderCommentsDrawer } from './ReaderCommentsDrawer';
 import { cn } from '@/lib/utils';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 import {
   ChevronLeftIcon,
@@ -816,7 +817,7 @@ export function ReaderPage(props: ReaderPageProps) {
 
       {/* 阅读设置 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
       <Drawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
-        <DrawerContent class="z-100 h-[75vh] max-h-[75vh] flex flex-col" overlayClass="z-100">
+        <DrawerContent class="z-100 h-[75dvh] max-h-[75dvh] flex flex-col" overlayClass="z-100">
           <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
             <DrawerTitle>阅读设置</DrawerTitle>
             <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
@@ -841,7 +842,7 @@ export function ReaderPage(props: ReaderPageProps) {
         closeOnOutsideFocus={!statusBarStyleDialogOpen()}
         closeOnOutsidePointer={!statusBarStyleDialogOpen()}
       >
-        <DrawerContent class="z-100 h-[75vh] max-h-[75vh] flex flex-col" overlayClass="z-100">
+        <DrawerContent class="z-100 h-[75dvh] max-h-[75dvh] flex flex-col" overlayClass="z-100">
           <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
             <DrawerTitle>设置</DrawerTitle>
             <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
@@ -876,10 +877,15 @@ export function ReaderPage(props: ReaderPageProps) {
 
       {/* 阅读进度状态栏显示风格选项弹窗：盖过设置抽屉(z-100)；窄屏下限制宽度并留边距；非模态避免关闭后影响阅读器操作 */}
       <Dialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
-        <DialogContent class="w-[calc(100vw-2rem)] max-w-[20rem]" portalZClass="z-[110]" overlayClass="bg-black/80">
-          <DialogHeader>
+        <DialogContent
+          class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0 w-[calc(100dvw-2rem)] max-w-[20rem]')}
+          portalZClass="z-[110]"
+          overlayClass="bg-black/80"
+        >
+          <DialogHeader class="shrink-0 px-6 pt-6">
             <DialogTitle>阅读进度状态栏的显示风格</DialogTitle>
           </DialogHeader>
+          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup
             value={readerStore.state.config.statusBarDisplayStyle}
             onChange={(value) => {
@@ -937,6 +943,7 @@ export function ReaderPage(props: ReaderPageProps) {
               </RadioGroupItem>
             </div>
           </RadioGroup>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

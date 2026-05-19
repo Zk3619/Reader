@@ -1,9 +1,6 @@
 # Dependencies
 node_modules/
 
-# Build output（dist 为前端构建产物，不提交；仅保留 dist/.gitkeep 以在 clone 后存在该目录）
-dist/*
-!dist/.gitkeep
 *.local
 
 # Tauri：根目录相关（构建与生成见 src-tauri/.gitignore：target/、gen/）
@@ -49,3 +46,4 @@ ehthumbs.db
 .shared
 
 docs
+examples

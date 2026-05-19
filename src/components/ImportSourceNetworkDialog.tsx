@@ -20,6 +20,7 @@ import * as sourcesDb from '@/lib/database/sources';
 import { showAppToast } from '@/components/AppToasts';
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
+import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface ImportSourceNetworkDialogProps {
   open: boolean;
@@ -80,14 +81,16 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange} modal>
-      <DialogContent class={cn('max-w-[calc(100vw-2rem)] sm:max-w-md', isImporting() && 'dialog-importing')}>
-        <DialogHeader>
+      <DialogContent
+        class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0', isImporting() && 'dialog-importing')}
+      >
+        <DialogHeader class="shrink-0 px-6 pt-6">
           <DialogTitle>网络导入书源</DialogTitle>
           <DialogDescription>
             输入书源 JSON 的链接（http/https），将拉取并导入，兼容 legado 书源格式。桌面端由应用内网络拉取，不受跨域限制；浏览器环境下若遇跨域请改用「本地导入」。
           </DialogDescription>
         </DialogHeader>
-        <div class="py-4">
+        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <TextField>
             <TextFieldInput
               placeholder="https://example.com/bookSources.json"
@@ -97,7 +100,7 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
             />
           </TextField>
         </div>
-        <DialogFooter>
+        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isImporting()}>
             取消
           </Button>
