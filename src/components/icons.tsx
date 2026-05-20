@@ -66,6 +66,7 @@ import {
   Minimize,
   Volume2,
   ChevronUp,
+  Cookie,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -107,6 +108,7 @@ export const RefreshIcon = icon(RefreshCw);
 export const FolderPlusIcon = icon(FolderPlus);
 export const GlobeIcon = icon(Globe);
 export const LinkIcon = icon(Link);
+export const CookieIcon = icon(Cookie);
 export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);

@@ -3,9 +3,10 @@
  */
 
 import type { JSX } from "solid-js"
-import { createSignal } from "solid-js"
+import { createSignal, onCleanup, onMount } from "solid-js"
 import { toast, type ExternalToast } from "solid-sonner"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
+import { cn } from "@/lib/utils"
 
 const KEY_PERMANENT = "reader.immersiveToastDismissed"
 const KEY_UNTIL = "reader.immersiveToastDismissedUntil"
@@ -52,17 +53,92 @@ export function shouldShowImmersiveEnterToast(): boolean {
   return true
 }
 
+const APP_TOAST_CLASS = "reader-app-toast group"
+
+/** 非 persistent 通知的默认自动关闭时长（毫秒） */
+export const DEFAULT_TOAST_DURATION = 3000
+
+/**
+ * 修复 solid-sonner 在 toast 上 pointer capture 后，若 pointerup 发生在容器外，
+ * 内部 interacting 无法复位、悬停暂停一直生效导致通知永不自动关闭的问题。
+ */
+export function SonnerInteractionFix() {
+  onMount(() => {
+    const reset = () => {
+      document.querySelectorAll("[data-sonner-toaster]").forEach((el) => {
+        el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+      })
+    }
+    window.addEventListener("pointerup", reset)
+    window.addEventListener("pointercancel", reset)
+    onCleanup(() => {
+      window.removeEventListener("pointerup", reset)
+      window.removeEventListener("pointercancel", reset)
+    })
+  })
+  return null
+}
+
 function toastOptions(props: {
   description?: JSX.Element
   duration?: number
   persistent?: boolean
+  showProgress?: boolean
 }): ExternalToast {
-  const duration = props.persistent ? Number.POSITIVE_INFINITY : (props.duration ?? 5000)
-  const options: ExternalToast = { duration, closeButton: true }
-  if (props.description) {
-    options.description = props.description
+  const duration = props.persistent ? Number.POSITIVE_INFINITY : (props.duration ?? DEFAULT_TOAST_DURATION)
+  const showProgress =
+    (props.showProgress ?? false) &&
+    !props.persistent &&
+    Number.isFinite(duration) &&
+    duration > 0
+
+  const options: ExternalToast = {
+    duration,
+    closeButton: true,
+    class: cn(APP_TOAST_CLASS, showProgress && "reader-app-toast--progress"),
   }
+
+  if (showProgress) {
+    options.style = { "--toast-duration": `${duration}ms` }
+  }
+
+  const description = withToastProgress(props.description, duration, showProgress)
+  if (description) {
+    options.description = description
+  }
+
   return options
+}
+
+function withToastProgress(
+  description: JSX.Element | undefined,
+  duration: number,
+  showProgress: boolean,
+): JSX.Element | undefined {
+  if (!showProgress) return description
+  return (
+    <>
+      {description}
+      <ToastProgressBar duration={duration} />
+    </>
+  )
+}
+
+/** 倒计时进度条（挂到 toast 底部，由 App.css 绝对定位） */
+function ToastProgressBar(props: { duration: number }) {
+  let progressBarRef: HTMLDivElement | undefined
+
+  onMount(() => {
+    progressBarRef?.style.setProperty("--toast-duration", `${props.duration}ms`)
+  })
+
+  return (
+    <div
+      ref={progressBarRef}
+      class="toast-progress-bar pointer-events-none h-0.5 w-full shrink-0 bg-current/30"
+      aria-hidden
+    />
+  )
 }
 
 function resolveMessage(props: { title?: JSX.Element; description?: JSX.Element }): JSX.Element | string {
@@ -87,9 +163,11 @@ export function showScriptToast(text: string, options?: { duration?: number }) {
   const body = normalizeScriptToastText(text)
   if (!body) return
 
+  const duration = options?.duration ?? 20_000
+
   toast(body, {
     id: READER_SCRIPT_TOAST_ID,
-    duration: options?.duration ?? 20_000,
+    duration,
     closeButton: true,
     class: "reader-script-toast select-none",
     classNames: {
@@ -123,6 +201,7 @@ export function showAppToast(props: {
     description: props.title && props.description ? props.description : undefined,
     duration: props.duration,
     persistent: props.persistent,
+    showProgress: props.showProgress,
   })
 
   const variant = props.variant ?? "default"
@@ -146,6 +225,7 @@ export function showImmersiveEnterToast() {
   toast.custom(() => <ImmersiveToastContent />, {
     duration: Number.POSITIVE_INFINITY,
     closeButton: true,
+    class: APP_TOAST_CLASS,
   })
 }
 

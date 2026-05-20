@@ -39,7 +39,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
   };
 
   return (
-    <div class="flex flex-1 flex-col gap-6 overflow-y-auto py-4">
+    <div class="flex flex-1 flex-col gap-6 overflow-y-auto scroll-gutter-stable-both py-4">
       {/* 主题 */}
       <div class="space-y-3">
         <Label>主题</Label>

@@ -5,20 +5,19 @@
 
 import { createSignal, Show } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
 import { isLocalBook } from '@/lib/local-book';
 import type { Book } from '@/types';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface DeleteBookDialogProps {
   open: boolean;
@@ -54,12 +53,12 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>删除书籍</DialogTitle>
-          <DialogDescription>确定删除《{props.book?.name}》吗？</DialogDescription>
-        </DialogHeader>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>删除书籍</AppDialogTitle>
+          <AppDialogDescription>确定删除《{props.book?.name}》吗？</AppDialogDescription>
+        </AppDialogHeader>
         <Show when={isLocal()}>
           <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <div class="flex items-center space-x-2">
@@ -94,15 +93,15 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
             </div>
           </div>
         </Show>
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>
           <Button variant="destructive" onClick={handleConfirm}>
             删除
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

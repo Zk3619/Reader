@@ -19,14 +19,19 @@ export interface InnerWebContent {
 /** 是否在本应用 UI 内使用 iframe 承载内容 */
 export function useInnerWebIframe(content: InnerWebContent): boolean {
   const url = content.url?.trim() ?? '';
+  const html = content.html?.trim() ?? '';
   if (isTauri() && /^https?:/i.test(url)) {
     return false;
   }
-  return Boolean(url || content.html?.trim());
+  if (isTauri() && !isMobile() && html && !/^https?:/i.test(url)) {
+    return false;
+  }
+  return Boolean(url || html);
 }
 
-/** Tauri 桌面独立 WebView 面板（仅 https；移动端仍用 iframe） */
+/** Tauri 桌面独立 WebView 面板（https 或 data:text/html；移动端仍用 iframe） */
 export function useInnerWebTauriPanel(content: InnerWebContent): boolean {
   const url = content.url?.trim() ?? '';
-  return isTauri() && !isMobile() && /^https?:/i.test(url);
+  const html = content.html?.trim() ?? '';
+  return isTauri() && !isMobile() && (/^https?:/i.test(url) || Boolean(html));
 }

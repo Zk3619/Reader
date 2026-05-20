@@ -74,7 +74,7 @@ function CommentsPanelContent(props: {
         </Button>
       </div>
       {/* 加 data-corvu-no-drag：此处仅滚动段评列表，不触发抽屉拖拽；拖拽仅作用于顶部把手/标题栏 */}
-      <div class="flex-1 overflow-y-auto p-3" data-corvu-no-drag>
+      <div class="flex-1 overflow-y-auto scroll-gutter-stable-both p-2" data-corvu-no-drag>
         <Show
           when={comments().length > 0}
           fallback={

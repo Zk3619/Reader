@@ -465,7 +465,7 @@ export function ImportPage(props: ImportPageProps) {
       </div>
 
       {/* 文件列表 */}
-      <div class="flex-1 overflow-auto p-4">
+      <div class="flex-1 overflow-auto scroll-gutter-stable-both px-2 py-4">
         <Show
           when={!isLoading()}
           fallback={

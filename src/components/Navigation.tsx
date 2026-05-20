@@ -98,7 +98,7 @@ export function Navigation(props: NavigationProps) {
                   <NavigationMenuIcon />
                 </NavigationMenuTrigger>
                 <NavigationMenuContent class="p-0">
-                  <div class="grid max-h-[80dvh] w-[min(100dvw-2rem,240px)] min-w-0 gap-2 overflow-y-auto p-3 md:w-[480px] md:grid-cols-2 lg:w-[520px]">
+                  <div class="grid max-h-[80dvh] w-[min(100dvw-2rem,240px)] min-w-0 gap-2 overflow-y-auto scroll-gutter-stable-both p-3 md:w-[480px] md:grid-cols-2 lg:w-[520px]">
                     <For each={NAV_MENU_PAGES}>
                       {([page, config]) => (
                         <NavigationMenuLink

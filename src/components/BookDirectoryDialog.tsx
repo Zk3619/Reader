@@ -5,20 +5,19 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { join } from '@tauri-apps/api/path';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface BookDirectoryDialogProps {
   open: boolean;
@@ -85,28 +84,28 @@ export function BookDirectoryDialog(props: BookDirectoryDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>选择保存书籍的文件夹</DialogTitle>
-          <DialogDescription>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>选择保存书籍的文件夹</AppDialogTitle>
+          <AppDialogDescription>
             <p class="mb-2">
               由于存在访问权限问题，需要指定一个目录来实现书籍的拷贝、下载等功能，如不指定，则将无法正常使用本地书籍、WebDev等功能。
             </p>
             <p class="mt-2">
               程序默认使用 <code class="px-1 py-0.5 bg-muted rounded text-sm">{defaultPath() || '加载中...'}</code>，可以点击下方按钮修改或稍后前往设置页面进行修改。
             </p>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+          </AppDialogDescription>
+        </AppDialogHeader>
+        <AppDialogFooter>
           <Button variant="outline" onClick={handleLater}>
             稍后处理
           </Button>
           <Button variant="default" onClick={handleModify}>
             立即修改
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

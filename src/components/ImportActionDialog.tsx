@@ -5,19 +5,18 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export type ImportAction = 'copy' | 'move';
 
@@ -60,12 +59,12 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>选择书籍存放方式</DialogTitle>
-          <DialogDescription>请选择导入书籍时的操作方式</DialogDescription>
-        </DialogHeader>
+    <AppDialog open={props.open} onOpenChange={handleOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>选择书籍存放方式</AppDialogTitle>
+          <AppDialogDescription>请选择导入书籍时的操作方式</AppDialogDescription>
+        </AppDialogHeader>
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup value={action()} onChange={(value) => setAction(value as ImportAction)}>
             <RadioGroupItem value="copy" class="py-2">
@@ -100,15 +99,15 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
             </Label>
           </div>
         </div>
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消
           </Button>
           <Button variant="default" onClick={handleConfirm}>
             确定
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

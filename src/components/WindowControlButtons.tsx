@@ -9,16 +9,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  AppDialog,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from "@/components/AppDialog"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { dialogViewportLimits } from "@/lib/viewport-classes"
 import { hideWindowAndSaveState, saveWindowStateBeforeExit } from "@/utils/window-state"
 import {
   MinimizeWindowIcon,
@@ -26,6 +25,12 @@ import {
   RestoreWindowIcon,
   XIcon,
 } from "@/components/icons"
+import { isInnerWebSessionActive } from "@/lib/platform/inner-web"
+import {
+  retainInnerWebPanelForOverlay,
+  releaseInnerWebPanelForOverlay,
+  INNER_WEB_OVERLAY_Z,
+} from "@/lib/platform/inner-web-panel-overlay"
 
 export function WindowControlButtons() {
   const [isTauri, setIsTauri] = createSignal(false)
@@ -98,6 +103,9 @@ export function WindowControlButtons() {
       await executeCloseAction(savedChoice as "hide" | "quit")
       return
     }
+    if (isInnerWebSessionActive()) {
+      await retainInnerWebPanelForOverlay()
+    }
     setShowCloseDialog(true)
   }
 
@@ -129,14 +137,20 @@ export function WindowControlButtons() {
       localStorage.setItem("closeAction", action)
     }
     setShowCloseDialog(false)
+    if (isInnerWebSessionActive()) {
+      releaseInnerWebPanelForOverlay({ overlap: true })
+    }
   }
 
   function handleCloseConfirm() {
-    executeCloseAction(closeAction())
+    void executeCloseAction(closeAction())
   }
 
   function handleCloseCancel() {
     setShowCloseDialog(false)
+    if (isInnerWebSessionActive()) {
+      releaseInnerWebPanelForOverlay({ immediate: true })
+    }
   }
 
   return (
@@ -175,11 +189,22 @@ export function WindowControlButtons() {
         </div>
       </Show>
 
-      <Dialog open={showCloseDialog()} onOpenChange={setShowCloseDialog}>
-        <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-          <DialogHeader class="shrink-0 px-6 pt-6">
-            <DialogTitle>关闭</DialogTitle>
-          </DialogHeader>
+      <AppDialog
+        open={showCloseDialog()}
+        onOpenChange={(open) => {
+          if (!open) handleCloseCancel()
+        }}
+      >
+        <AppDialogContent
+          portalZClass={
+            isInnerWebSessionActive()
+              ? `${INNER_WEB_OVERLAY_Z} reader-inner-web-overlay-portal`
+              : undefined
+          }
+        >
+          <AppDialogHeader>
+            <AppDialogTitle>关闭</AppDialogTitle>
+          </AppDialogHeader>
           <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <RadioGroup
               value={closeAction()}
@@ -201,16 +226,16 @@ export function WindowControlButtons() {
               <Label for="window-close-remember">记住我的选择</Label>
             </div>
           </div>
-          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+          <AppDialogFooter>
             <Button variant="outline" onClick={handleCloseCancel}>
               取消
             </Button>
             <Button variant="default" onClick={handleCloseConfirm}>
               确定
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </>
   )
 }

@@ -5,6 +5,7 @@
 
 import type { BookSource } from '@/types';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
+import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
 export interface ExploreSectionStyle {
@@ -19,6 +20,82 @@ export interface ExploreSection {
   url?: string;
   /** 可选布局样式（来自 API 的 style），用于发现页 flex 多列展示 */
   style?: ExploreSectionStyle;
+  /** Legado 发现项类型，如 select 下拉筛选 */
+  type?: string;
+  /** select 选项列表 */
+  chars?: string[];
+  /** select 当前选中值 */
+  default?: string;
+  /** 写入书源变量 JSON 的字段名（如 server、find_tab） */
+  paramKey?: string;
+}
+
+function extractParamKeyFromAction(action: unknown): string | undefined {
+  if (typeof action !== 'string') return undefined;
+  const m = action.match(/,\s*'([^']+)'\s*\)\s*$/);
+  return m?.[1];
+}
+
+export function mapRawExploreItem(rec: Record<string, unknown>): ExploreSection | null {
+  const title = rec.title ?? rec.name ?? rec.label;
+  if (title == null || !String(title).trim()) return null;
+  const url = rec.url ?? rec.link;
+  const styleRaw = rec.style;
+  let style: ExploreSectionStyle | undefined;
+  if (styleRaw && typeof styleRaw === 'object' && !Array.isArray(styleRaw)) {
+    const s = styleRaw as Record<string, unknown>;
+    const grow = s.layout_flexGrow;
+    const basis = s.layout_flexBasisPercent;
+    if (typeof grow === 'number' || typeof basis === 'number') {
+      style = {};
+      if (typeof grow === 'number') style.layout_flexGrow = grow;
+      if (typeof basis === 'number') style.layout_flexBasisPercent = basis;
+    }
+  }
+  const type = typeof rec.type === 'string' ? rec.type : undefined;
+  const chars = Array.isArray(rec.chars)
+    ? rec.chars.map((c) => String(c))
+    : undefined;
+  const defaultVal =
+    rec.default != null ? String(rec.default) : chars?.[0];
+  const paramKey =
+    typeof rec.paramKey === 'string'
+      ? rec.paramKey
+      : extractParamKeyFromAction(rec.action);
+  return {
+    title: String(title).trim(),
+    url: typeof url === 'string' ? url : undefined,
+    style,
+    type,
+    chars,
+    default: defaultVal,
+    paramKey,
+  };
+}
+
+/** 更新发现脚本用的书源变量（对齐 Legado setArguments / show） */
+export function updateExploreSourceArgument(
+  source: BookSource,
+  paramKey: string,
+  value: string
+): void {
+  const argsKey = getSourceArgsKey(source);
+  let data: Record<string, unknown> = {};
+  try {
+    const raw = localStorage.getItem(argsKey);
+    if (raw) data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    /* ignore */
+  }
+  data[paramKey] = value;
+  if (paramKey === 'find_tab') {
+    data.find_source = '番茄';
+  }
+  try {
+    localStorage.setItem(argsKey, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -33,17 +110,8 @@ function tryParseJsonSections(jsonStr: string): ExploreSection[] | null {
     const sections: ExploreSection[] = [];
     for (const item of raw) {
       if (item && typeof item === 'object') {
-        const rec = item as Record<string, unknown>;
-        const title = rec.title ?? rec.name;
-        const url = rec.url;
-        const style = rec.style as ExploreSectionStyle | undefined;
-        if (title && typeof title === 'string') {
-          sections.push({
-            title: String(title).trim(),
-            url: typeof url === 'string' ? url : undefined,
-            style,
-          });
-        }
+        const mapped = mapRawExploreItem(item as Record<string, unknown>);
+        if (mapped) sections.push(mapped);
       }
     }
     return sections.length > 0 ? sections : null;
@@ -83,15 +151,43 @@ export function getExploreSections(source: BookSource): ExploreSection[] {
   return [];
 }
 
+const exploreSectionsMemCache = new Map<string, ExploreSection[]>();
+
+function exploreSectionsCacheKey(source: BookSource, argsVersion: number): string {
+  return `${source.sourceUrl}\0${argsVersion}`;
+}
+
+/** 清除某书源的发现脚本缓存（书源更新后可选调用） */
+export function clearExploreSectionsCache(sourceUrl?: string): void {
+  if (!sourceUrl) {
+    exploreSectionsMemCache.clear();
+    return;
+  }
+  for (const key of exploreSectionsMemCache.keys()) {
+    if (key.startsWith(`${sourceUrl}\0`)) exploreSectionsMemCache.delete(key);
+  }
+}
+
 /**
  * 异步获取发现子项：若 exploreUrl 为 <js>...</js> 则在前端执行脚本后返回分类列表
+ * @param argsVersion 书源变量版本，变更筛选后递增以使缓存失效
  */
-export async function getExploreSectionsAsync(source: BookSource): Promise<ExploreSection[]> {
+export async function getExploreSectionsAsync(
+  source: BookSource,
+  argsVersion = 0
+): Promise<ExploreSection[]> {
   const script = extractExploreScript(source.exploreUrl);
   if (script) {
+    const cacheKey = exploreSectionsCacheKey(source, argsVersion);
+    const hit = exploreSectionsMemCache.get(cacheKey);
+    if (hit) return hit;
+
     try {
       const sections = await runExploreScript(script, source);
-      if (sections.length > 0) return sections;
+      if (sections.length > 0) {
+        exploreSectionsMemCache.set(cacheKey, sections);
+        return sections;
+      }
     } catch (e) {
       console.warn('[getExploreSectionsAsync] script run failed:', e);
     }

@@ -288,12 +288,17 @@ fn native_start_browser(
     let u = url.trim();
     let comma = u.find(',').unwrap_or(u.len());
     let u = u[..comma].trim();
-    let resolved =
-        if u.starts_with("http://") || u.starts_with("https://") || u.starts_with("data:") {
-            u.to_string()
-        } else {
-            resolve_url(&base, u)
-        };
+    let lu = u.to_ascii_lowercase();
+    let resolved = if lu.starts_with("http://")
+        || lu.starts_with("https://")
+        || lu.starts_with("data:")
+        || lu.starts_with("legado://")
+        || lu.starts_with("yuedu://")
+    {
+        u.to_string()
+    } else {
+        resolve_url(&base, u)
+    };
     with_state(|s| s.borrow_mut().urls_to_open.push(resolved));
     Ok(JsValue::undefined())
 }
@@ -313,12 +318,17 @@ fn native_start_browser_await(
     let u = url.trim();
     let comma = u.find(',').unwrap_or(u.len());
     let u = u[..comma].trim();
-    let resolved =
-        if u.starts_with("http://") || u.starts_with("https://") || u.starts_with("data:") {
-            u.to_string()
-        } else {
-            resolve_url(&base, u)
-        };
+    let lu = u.to_ascii_lowercase();
+    let resolved = if lu.starts_with("http://")
+        || lu.starts_with("https://")
+        || lu.starts_with("data:")
+        || lu.starts_with("legado://")
+        || lu.starts_with("yuedu://")
+    {
+        u.to_string()
+    } else {
+        resolve_url(&base, u)
+    };
     with_state(|s| s.borrow_mut().urls_to_open.push(resolved));
     Ok(JsValue::undefined())
 }
@@ -847,6 +857,17 @@ pub fn run_login_script_rust(input: RunLoginScriptInput) -> Result<RunLoginScrip
                 js_string!("startBrowserAwait"),
                 to_js_fn(
                     NativeFunction::from_fn_ptr(native_start_browser_await),
+                    &mut context,
+                ),
+                true,
+                &mut context,
+            )
+            .map_err(|e| e.to_string())?;
+        java_obj
+            .set(
+                js_string!("openUrl"),
+                to_js_fn(
+                    NativeFunction::from_fn_ptr(native_start_browser),
                     &mut context,
                 ),
                 true,

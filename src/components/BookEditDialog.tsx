@@ -4,18 +4,16 @@
  */
 
 import { createSignal, createEffect } from 'solid-js';
-import { blurActiveElement } from '@/utils/accessibility';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import {
   Select,
   SelectContent,
@@ -86,11 +84,7 @@ export function BookEditDialog(props: BookEditDialogProps) {
 
   function handleOpenChange(open: boolean) {
     if (open) {
-      requestAnimationFrame(() => {
-        setSelectOpen(false);
-        blurActiveElement();
-      });
-      window.dispatchEvent(new CustomEvent('dialog-opened'));
+      requestAnimationFrame(() => setSelectOpen(false));
     }
     props.onOpenChange(open);
   }
@@ -126,12 +120,12 @@ export function BookEditDialog(props: BookEditDialogProps) {
   const coverValid = () => cover().trim() && getCoverPreviewInfo(cover()).isValid;
 
   return (
-    <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>编辑书籍</DialogTitle>
-          <DialogDescription>修改书名、作者、封面或所属分组</DialogDescription>
-        </DialogHeader>
+    <AppDialog open={props.open} onOpenChange={handleOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>编辑书籍</AppDialogTitle>
+          <AppDialogDescription>修改书名、作者、封面或所属分组</AppDialogDescription>
+        </AppDialogHeader>
 
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <div class="space-y-2">
@@ -208,13 +202,13 @@ export function BookEditDialog(props: BookEditDialogProps) {
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消
           </Button>
           <Button onClick={handleSubmit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

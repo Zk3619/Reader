@@ -16,18 +16,17 @@ import {
   DrawerClose,
 } from '@/components/ui/drawer';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { ReaderContent } from './ReaderContent';
 import { ReaderSettings } from './ReaderSettings';
 import { ReaderCatalog } from './ReaderCatalog';
 import { ReaderCommentsDrawer } from './ReaderCommentsDrawer';
 import { cn } from '@/lib/utils';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 import {
   ChevronLeftIcon,
@@ -429,7 +428,7 @@ export function ReaderPage(props: ReaderPageProps) {
               ref={(el) => {
                 if (el) scrollContainer = el;
               }}
-              class="absolute inset-0 overflow-y-auto"
+              class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both"
               onPointerDown={onContentPointerDown}
               onPointerMove={onContentPointerMove}
               onClick={onContentClick}
@@ -450,7 +449,7 @@ export function ReaderPage(props: ReaderPageProps) {
                 ref={(el) => {
                   if (el) scrollContainer = el;
                 }}
-                class="absolute inset-0 overflow-y-auto"
+                class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both"
                 onPointerDown={onContentPointerDown}
                 onPointerMove={onContentPointerMove}
                 onClick={onContentClick}
@@ -850,7 +849,7 @@ export function ReaderPage(props: ReaderPageProps) {
             </DrawerClose>
           </DrawerHeader>
           <div
-            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 pb-6"
+            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6"
             data-corvu-no-drag
           >
             {/* 阅读进度状态栏的显示风格 */}
@@ -876,15 +875,15 @@ export function ReaderPage(props: ReaderPageProps) {
       </Drawer>
 
       {/* 阅读进度状态栏显示风格选项弹窗：盖过设置抽屉(z-100)；窄屏下限制宽度并留边距；非模态避免关闭后影响阅读器操作 */}
-      <Dialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
-        <DialogContent
-          class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0 w-[calc(100dvw-2rem)] max-w-[20rem]')}
+      <AppDialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
+        <AppDialogContent
+          class={cn('w-[calc(100dvw-2rem)] max-w-[20rem]')}
           portalZClass="z-[110]"
           overlayClass="bg-black/80"
         >
-          <DialogHeader class="shrink-0 px-6 pt-6">
-            <DialogTitle>阅读进度状态栏的显示风格</DialogTitle>
-          </DialogHeader>
+          <AppDialogHeader>
+            <AppDialogTitle>阅读进度状态栏的显示风格</AppDialogTitle>
+          </AppDialogHeader>
           <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup
             value={readerStore.state.config.statusBarDisplayStyle}
@@ -944,8 +943,8 @@ export function ReaderPage(props: ReaderPageProps) {
             </div>
           </RadioGroup>
           </div>
-        </DialogContent>
-      </Dialog>
+        </AppDialogContent>
+      </AppDialog>
     </div>
   );
 }

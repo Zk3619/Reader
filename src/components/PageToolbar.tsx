@@ -3,9 +3,10 @@
  * 与 PageHeader（独立全屏页）区分，不含返回键与窗口控制。
  */
 
-import { Show, type JSX } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js';
 import { useShellLayout } from '@/components/ShellLayoutProvider';
 import { cn } from '@/lib/utils';
+import { pageToolbarBelowScroll } from '@/lib/viewport-classes';
 
 /** 标题+描述文本块：宽度取两行中较宽者（w-max），顶到上限后再省略 */
 export function PageToolbarTitleText(props: {
@@ -36,8 +37,13 @@ export interface PageToolbarProps {
   leading?: JSX.Element;
   /** 主行右侧操作区（搜索、更多等） */
   children?: JSX.Element;
-  /** 第二行：分组筛选、标签 Tab 等 */
+  /**
+   * 第二行插槽（如书架分组标签）。
+   * 横滚由本组件 `below` 外包层 `.page-toolbar-below-scroll` 承担，勿在子组件再设 overflow。
+   */
   below?: JSX.Element;
+  /** 为 true 时 below 外包 `.page-toolbar-below-scroll` 横滚视口 */
+  belowHorizontalWheel?: boolean;
   /** 覆盖壳层默认：移动端布局时顶栏安全区 */
   insetTopSafeArea?: boolean;
   class?: string;
@@ -46,16 +52,33 @@ export interface PageToolbarProps {
 export function PageToolbar(props: PageToolbarProps) {
   const shell = useShellLayout();
   const insetTopSafeArea = () => props.insetTopSafeArea ?? shell().insetTopSafeArea;
+  const [belowScrollRef, setBelowScrollRef] = createSignal<HTMLDivElement | undefined>(undefined);
+
+  createEffect(() => {
+    const el = belowScrollRef();
+    if (!props.belowHorizontalWheel || !el) return;
+    const handler = (e: WheelEvent) => {
+      const maxLeft = el.scrollWidth - el.clientWidth;
+      if (maxLeft <= 0) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.scrollLeft = Math.max(0, Math.min(el.scrollLeft + delta, maxLeft));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    onCleanup(() => el.removeEventListener('wheel', handler));
+  });
 
   return (
     <div
       class={cn(
-        'shrink-0 space-y-3 mb-2',
+        'flex w-full min-w-0 max-w-full shrink-0 flex-col space-y-3 overflow-x-hidden px-4 pt-4',
         insetTopSafeArea() && 'safe-area-inset-top',
         props.class
       )}
     >
-      <div class="flex items-center justify-between gap-4">
+      <div class="flex min-w-0 items-center justify-between gap-4">
         <div class="flex min-w-0 flex-1 items-center gap-3">
           <Show when={props.leading}>
             <div class="flex shrink-0 items-center">{props.leading}</div>
@@ -66,14 +89,25 @@ export function PageToolbar(props: PageToolbarProps) {
               <PageToolbarTitleText title={props.title} description={props.description} />
             }
           >
-            <div class="max-w-full w-fit">{props.titleSlot}</div>
+            <div class="max-w-full w-fit min-w-0">{props.titleSlot}</div>
           </Show>
         </div>
         <Show when={props.children}>
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">{props.children}</div>
         </Show>
       </div>
-      <Show when={props.below}>{props.below}</Show>
+      <Show when={props.below}>
+        <div
+          ref={setBelowScrollRef}
+          data-page-toolbar-below-scroll={props.belowHorizontalWheel ? '' : undefined}
+          class={cn(
+            'w-full min-w-0 max-w-full',
+            props.belowHorizontalWheel && pageToolbarBelowScroll
+          )}
+        >
+          {props.below}
+        </div>
+      </Show>
     </div>
   );
 }

@@ -175,10 +175,11 @@ getFanqieCookie = function() {
 
 export function ensureExploreScriptSetsResult(script: string): string {
   const s = script.trimEnd();
-  if (/\bresult\s*=\s*JSON\.stringify\s*\(/m.test(s)) return s;
+  // QuickJS 路径用 IIFE 包裹脚本，脚本内 `var result` 会遮蔽外层；须写入 globalThis.result
+  if (/\b(?:globalThis\.)?result\s*=\s*JSON\.stringify\s*\(/m.test(s)) return s;
   const m = s.match(/^([\s\S]*?)^(\s*)JSON\.stringify\s*\(\s*([\w$]+)\s*\)\s*;?\s*$/m);
   if (m) {
-    return `${m[1]}${m[2]}result = JSON.stringify(${m[3]});`;
+    return `${m[1]}${m[2]}globalThis.result = JSON.stringify(${m[3]});`;
   }
   return s;
 }

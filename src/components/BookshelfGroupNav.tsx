@@ -2,9 +2,11 @@
  * 书架分组切换：下拉（标题区触发）/ 标签（PageToolbar below）
  */
 
-import { For, Show, createSignal, createEffect, onCleanup, type JSX } from 'solid-js';
+import { For, Show, createSignal, type JSX } from 'solid-js';
+import { Button } from '@/components/ui/button';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { pageToolbarBelowScrollTrack } from '@/lib/viewport-classes';
 import { PageToolbarTitleDropdown } from '@/components/PageToolbarTitleDropdown';
 import type { GroupStyle } from '@/stores/bookshelf-layout';
 import type { BookGroup } from '@/types';
@@ -120,48 +122,29 @@ export interface BookshelfGroupNavProps {
   onGroupChange?: (groupId: number) => void;
 }
 
-/** 标签式分组导航（置于 PageToolbar below） */
+/** 标签内容轨；横滚视口在父级 PageToolbar `.page-toolbar-below-scroll` */
 export function BookshelfGroupNav(props: BookshelfGroupNavProps) {
-  const [tabsScrollRef, setTabsScrollRef] = createSignal<HTMLDivElement | undefined>(undefined);
-
-  createEffect(() => {
-    const style = props.groupStyle;
-    const el = tabsScrollRef();
-    if (style !== 'tabs' || !el) return;
-    const handler = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return;
-      e.preventDefault();
-      e.stopPropagation();
-      el.scrollLeft += e.deltaY;
-    };
-    el.addEventListener('wheel', handler, { passive: false });
-    onCleanup(() => el.removeEventListener('wheel', handler));
-  });
-
   return (
     <Show when={props.groupStyle === 'tabs' && props.groups && props.groups.length > 0}>
-      <div
-        ref={setTabsScrollRef}
-        class="flex min-w-0 overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent [scrollbar-gutter:stable]"
-      >
-        <div class="flex items-center gap-1 shrink-0 py-1 min-w-max">
-          <For each={props.groups}>
-            {(g) => (
-              <button
-                type="button"
-                onClick={() => props.onGroupChange?.(g.groupId)}
+      <div class={pageToolbarBelowScrollTrack}>
+        <For each={props.groups}>
+          {(g) => {
+            const active = () => props.currentGroupId === g.groupId;
+            return (
+              <Button
+                variant={active() ? 'default' : 'ghost'}
+                size="sm"
                 class={cn(
-                  'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap',
-                  props.currentGroupId === g.groupId
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                  'shrink-0 whitespace-nowrap px-3 py-1.5 text-sm',
+                  !active() && 'text-muted-foreground'
                 )}
+                onClick={() => props.onGroupChange?.(g.groupId)}
               >
                 {g.groupName}
-              </button>
-            )}
-          </For>
-        </div>
+              </Button>
+            );
+          }}
+        </For>
       </div>
     </Show>
   );

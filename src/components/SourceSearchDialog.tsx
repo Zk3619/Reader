@@ -5,19 +5,18 @@
 
 import { createSignal, createEffect, Show, For } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { searchBook } from '@/lib/book-source/search';
 import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import { showAppToast } from '@/components/AppToasts';
 import type { BookSource } from '@/types';
 import type { SearchBook } from '@/types';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export interface SourceSearchDialogProps {
   open: boolean;
@@ -83,16 +82,16 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>
             {props.source ? `搜索 · ${props.source.sourceName}` : '搜索'}
-          </DialogTitle>
-          <DialogDescription class="sr-only">
+          </AppDialogTitle>
+          <AppDialogDescription class="sr-only">
             输入关键词，使用当前书源搜索书籍
-          </DialogDescription>
-        </DialogHeader>
+          </AppDialogDescription>
+        </AppDialogHeader>
         <Show when={props.source}>
           <div class="shrink-0 flex gap-2 border-b border-border/50 px-6 pb-4">
             <input
@@ -108,7 +107,7 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
               {loading() ? '搜索中…' : '搜索'}
             </Button>
           </div>
-          <div class="min-h-0 overflow-y-auto">
+          <div class="min-h-0 overflow-y-auto scroll-gutter-stable-both">
             <Show when={loading()}>
               <div class="px-4 py-8 text-center text-sm text-muted-foreground">搜索中…</div>
             </Show>
@@ -152,7 +151,7 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
             </Show>
           </div>
         </Show>
-      </DialogContent>
-    </Dialog>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

@@ -6,12 +6,12 @@
 
 import { createSignal, createMemo, createEffect, Show, For } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { showAppToast, showScriptToast } from '@/components/AppToasts';
 import {
@@ -24,7 +24,6 @@ import {
 import { isTauri } from '@/lib/platform/detect';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import JSON5 from 'json5';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import type { BookSource } from '@/types';
 
 /** legado loginUi 表单项（与晴天聚合等书源格式一致） */
@@ -364,21 +363,20 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent
-        class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+      <AppDialogContent
         onPointerDownOutside={blockDialogDismissWhileInnerWeb}
         onInteractOutside={blockDialogDismissWhileInnerWeb}
         onFocusOutside={blockDialogDismissWhileInnerWeb}
       >
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>
+        <AppDialogHeader>
+          <AppDialogTitle>
             {props.source ? `${props.source.sourceName} · 登录` : '书源登录'}
-          </DialogTitle>
-          <DialogDescription class="sr-only">
+          </AppDialogTitle>
+          <AppDialogDescription class="sr-only">
             在弹窗内完成书源登录或填写登录表单
-          </DialogDescription>
-        </DialogHeader>
+          </AppDialogDescription>
+        </AppDialogHeader>
 
         <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
         {/* loginUi 为 JSON 表单（如晴天聚合），渲染表单并执行登录脚本 */}
@@ -499,7 +497,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
           </div>
         </Show>
         </div>
-      </DialogContent>
-    </Dialog>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

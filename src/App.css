@@ -200,6 +200,8 @@
   --reader-footer-max-height: 20rem;
   --reader-footer-duration: 0.5s;
   --reader-footer-hide-duration: 0.18s;
+  /** 与 ::-webkit-scrollbar 宽高一致，供横滚区块轴预留 */
+  --reader-scrollbar-size: 16px;
 }
 
 @layer base {
@@ -319,6 +321,7 @@
 }
 
 @layer utilities {
+
   /** 书架列表/网格：间距由 bindBookshelfLayoutGap 写入 CSS 变量（默认 spacing=12 → 3rem） */
   .bookshelf-layout-gap,
   .bookshelf-grid-gap {
@@ -343,6 +346,18 @@
     transform: translate3d(0, -2px, 0);
   }
 
+  /** 发现页简介：行数由 JS 写入 --discover-intro-line-clamp（占满剩余高度后多行省略） */
+  .discover-book-list-intro {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--discover-intro-line-clamp, 2);
+    line-clamp: var(--discover-intro-line-clamp, 2);
+    overflow: hidden;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+  }
+
   .book-group-card-motion.book-group-card-motion--pressed {
     transform: translate3d(0, -1px, 0) scale(0.98);
     --book-card-motion-duration: 0.12s;
@@ -355,8 +370,7 @@
     transform-origin: center center;
     backface-visibility: hidden;
     transition:
-      transform var(--book-card-motion-duration, 0.55s)
-      var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
+      transform var(--book-card-motion-duration, 0.55s) var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .book-group-card-motion:hover .book-group-card-cover-motion--list {
@@ -369,8 +383,7 @@
 
   .book-group-card-motion.book-group-card-motion--pressed .book-group-card-cover-motion {
     transition:
-      transform var(--book-card-motion-duration, 0.12s)
-      var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
+      transform var(--book-card-motion-duration, 0.12s) var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -411,7 +424,8 @@
 }
 
 ::-webkit-scrollbar {
-  width: 16px;
+  width: var(--reader-scrollbar-size);
+  height: var(--reader-scrollbar-size);
 }
 
 ::-webkit-scrollbar-thumb {
@@ -423,6 +437,37 @@
 
 ::-webkit-scrollbar-corner {
   display: none;
+}
+
+/* 应用层滚动区：提前占位 + 双侧对称（不含 components/ui 基元，由业务 class 标记） */
+.contain-layout,
+.scroll-gutter-stable-both {
+  scrollbar-gutter: stable both-edges;
+}
+
+/*
+ * PageToolbar 第二行横滚视口（BookshelfGroupNav 仅 __track）：
+ * - 勿用 scrollbar-gutter：横滚时 Chromium 常在行向占位，导致 scrollLeft 范围错误
+ * - padding-block 对称预留块轴（等同纵向 both-edges 视觉）
+ * - overflow-x: scroll 保持轨道宽度稳定
+ */
+.page-toolbar-below-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.page-toolbar-below-scroll__track {
+  display: inline-flex;
+  width: max-content;
+  max-width: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 /* ── 以下为从 Reader-old 迁移的样式 ── */
@@ -540,6 +585,7 @@
 
 /* 阅读器目录滚动条样式 */
 .reader-catalog-scroll {
+  scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
 }
@@ -864,12 +910,12 @@ li[role="status"].toast-animated[data-closed],
 }
 
 .toast-progress-bar {
-  animation: toast-progress var(--toast-duration, 5000ms) linear forwards;
+  animation: toast-progress var(--toast-duration, 3000ms) linear forwards;
 }
 
 .toast-progress-bar[data-toast-duration] {
   --toast-duration: attr(data-toast-duration ms);
-  animation-duration: var(--toast-duration, 5000ms);
+  animation-duration: var(--toast-duration, 3000ms);
 }
 
 [data-kb-toast-close-button] {
@@ -913,6 +959,17 @@ body.reader-inner-web-session .reader-inner-web-layer {
   user-select: auto;
 }
 
+/* 内嵌页 Portal 下拉/对话框：须高于 .reader-inner-web-layer (z-150) */
+body.reader-inner-web-session [data-kb-popper-content-wrapper] {
+  z-index: 160 !important;
+  pointer-events: auto;
+}
+
+/* 内嵌页：关闭确认等 Portal 对话框须高于浮层 */
+body.reader-inner-web-session .reader-inner-web-overlay-portal {
+  z-index: 160 !important;
+}
+
 .reader-inner-web-layer--panel .reader-inner-web-toolbar-host {
   position: relative;
   z-index: 1;
@@ -928,6 +985,79 @@ body.reader-inner-web-session .reader-inner-web-layer {
 
 .reader-toast-host [data-sonner-toaster] {
   pointer-events: auto;
+  /* width: max-content !important; */
+  max-width: min(26.25rem, calc(100dvw - 2rem));
+}
+
+/* 通用 App toast：max 约束下宽度随内容；正文在 [data-content] 内滚动 */
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'] {
+  /* width: max-content !important; */
+  max-width: min(26.25rem, calc(100dvw - 2rem));
+  max-height: min(80dvh, 24rem);
+  min-height: 0;
+  overflow: hidden;
+  align-items: flex-start;
+  /* Sonner 默认 touch-action:none 会阻断内部滚动 */
+  touch-action: auto;
+}
+
+/* Sonner 用全量 initial-height 锁高会导致超出 max-height 时裁切却无滚动 */
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'][data-expanded='true'],
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'][data-front='true'] {
+  height: auto !important;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-icon] {
+  flex-shrink: 0;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-content] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: min(calc(80dvh - 2rem), calc(24rem - 2rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-title],
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-description] {
+  overflow-wrap: anywhere;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--progress [data-content] {
+  padding-bottom: 2px;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--progress .toast-progress-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  animation: toast-progress var(--toast-duration, 3000ms) linear forwards;
+}
+
+/* 与 Sonner 悬停暂停计时一致：鼠标在通知区域时进度条也暂停 */
+.reader-toast-host [data-sonner-toaster]:hover .toast-progress-bar {
+  animation-play-state: paused;
+}
+
+@media (max-width: 600px) {
+  .reader-toast-host [data-sonner-toaster] {
+    width: 100% !important;
+    max-width: none;
+  }
+
+  .reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'] {
+    width: calc(100% - var(--mobile-offset-left, 16px) * 2) !important;
+    max-width: none;
+  }
 }
 
 /* 书源脚本框线 toast：参与 Sonner 默认堆叠（scale + 高度裁剪，悬停展开） */

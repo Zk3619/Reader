@@ -6,11 +6,11 @@
 
 import { createSignal, createMemo, Show, For, createEffect } from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -18,7 +18,6 @@ import { blurActiveElement } from '@/utils/accessibility';
 import * as sourcesDb from '@/lib/database/sources';
 import { showAppToast } from '@/components/AppToasts';
 import { fuzzyMatchQuery } from '@/lib/sources-filters';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { SearchIcon } from '@/components/icons';
 
 export interface SourceGroupManageDialogProps {
@@ -134,11 +133,11 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <div class="flex items-center justify-between gap-2 pr-8">
-            <DialogTitle>分组管理</DialogTitle>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <div class="flex items-center justify-between gap-2">
+            <AppDialogTitle>分组管理</AppDialogTitle>
             <Button
               variant="default"
               size="sm"
@@ -151,7 +150,7 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
               添加
             </Button>
           </div>
-        </DialogHeader>
+        </AppDialogHeader>
 
         <div class="flex flex-col min-h-0 overflow-hidden">
           {/* 搜索 + 模糊搜索（复选框在搜索框右侧） */}
@@ -247,7 +246,7 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
             </Show>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

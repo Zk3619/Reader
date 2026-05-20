@@ -3,11 +3,16 @@
  * 参照 legado 的发现页：列表展示、分页加载、点击加入书架并打开
  */
 
-import { createResource, createSignal, For, Show, onMount, onCleanup } from 'solid-js';
+import { createResource, createSignal, For, Show, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { PageHeader } from '@/components/PageHeader';
@@ -18,9 +23,25 @@ import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import { cn } from '@/lib/utils';
+import {
+  discoverBookListCardClass,
+  discoverBookListCoverClass,
+  discoverBookListBodyClass,
+  discoverBookListBadgeRowClass,
+  discoverBookListBadgeClass,
+  discoverBookListBadgeLastClass,
+  discoverBookListBadgeEllipsisClass,
+} from '@/utils/book-group-card-styles';
+import {
+  DISCOVER_BOOK_GRID_CLASS,
+  DiscoverBookListSkeleton,
+} from './DiscoverBookCardSkeleton';
+import { DiscoverBookListIntro } from './DiscoverBookListIntro';
+import { bookGroupCardPressHandlers } from '@/utils/book-group-card-press';
 import { showAppToast } from '@/components/AppToasts';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 import { pageCacheStore } from '@/stores/page-cache';
+import { tryFormatDisplayUpdateTime } from '@/lib/format-display-time';
 
 /** 分页偏好类型 */
 type PaginationPreference = 'scroll' | 'pagination';
@@ -45,6 +66,19 @@ function getBadgeEntries(sb: SearchBook): { key: BadgeKey; value: string }[] {
   return entries;
 }
 
+type DisplayBadgeEntry = {
+  key: BadgeKey | 'ellipsis';
+  value: string;
+  isEllipsis?: boolean;
+};
+
+function getDisplayBadgeEntries(sb: SearchBook): DisplayBadgeEntry[] {
+  const entries = getBadgeEntries(sb);
+  const MAX_BADGES = 4;
+  if (entries.length <= MAX_BADGES) return entries;
+  return [...entries.slice(0, MAX_BADGES - 1), { key: 'ellipsis', value: '···', isEllipsis: true }];
+}
+
 /** 按状态文案返回徽章颜色：已完结→success，连载中→warning，其余→secondary */
 function getStatusBadgeVariant(status: string): 'success' | 'warning' | 'secondary' | 'default' {
   const s = status.trim();
@@ -60,6 +94,12 @@ function normalizePlaceholder(v: string | undefined): string {
   // 空字符串或只包含空白/分隔符（如 " · "、"•"）时返回 '--'
   if (s === '' || /^[\s·•\-\u00B7\u2022]*$/.test(s)) return '--';
   return s;
+}
+
+/** 展示用章节名（去掉书源模板残留的「 • 」后缀） */
+function displayChapterTitle(title: string | undefined): string {
+  const cleaned = title?.trim().replace(/\s*[•·]\s*$/, '').trim();
+  return normalizePlaceholder(cleaned);
 }
 
 export interface DiscoverPageProps {
@@ -188,38 +228,14 @@ export function DiscoverPage(props: DiscoverPageProps) {
     }
   };
 
-  // 滚动监听：当滚动到底部时自动加载更多（仅在滚动加载模式下）
-  onMount(() => {
-    if (!useScrollLoad() || !hasPagination()) return;
-
-    const handleScroll = () => {
-      if (loadingMore()) return;
-
-      // 查找主滚动容器（#main-content-container）
-      const container = document.getElementById('main-content-container');
-      if (!container) return;
-
-      // 检查是否滚动到底部（距离底部100px内）
-      const scrollTop = container.scrollTop;
-      const scrollHeight = container.scrollHeight;
-      const clientHeight = container.clientHeight;
-      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-
-      // 当距离底部小于100px时，触发加载更多
-      if (distanceToBottom < 100) {
-        loadMore();
-      }
-    };
-
-    // 监听主滚动容器的滚动事件
-    const container = document.getElementById('main-content-container');
-    if (container) {
-      container.addEventListener('scroll', handleScroll, { passive: true });
-      onCleanup(() => {
-        container.removeEventListener('scroll', handleScroll);
-      });
+  const handleContentScroll = (e: Event & { currentTarget: HTMLDivElement }) => {
+    if (!useScrollLoad() || !hasPagination() || loadingMore()) return;
+    const el = e.currentTarget;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom < 100) {
+      loadMore();
     }
-  });
+  };
 
   const handleBookClick = (sb: SearchBook) => {
     // 如果提供了 onOpenBookInfo 回调，跳转到书籍信息页；否则直接加入书架并打开
@@ -250,12 +266,12 @@ export function DiscoverPage(props: DiscoverPageProps) {
   };
 
   return (
-    <section class="flex h-full flex-col">
-      {/* 统一页面头部 - 独立页面模式下强制显示 */}
+    <section class="flex h-dvh min-h-0 flex-col overflow-hidden">
       <PageHeader
         onBack={props.onBack}
         title={`${props.source.sourceName} · ${props.section.title}`}
         subtitle="发现"
+        pinToTop
         draggable={true}
         actions={[
           {
@@ -282,42 +298,13 @@ export function DiscoverPage(props: DiscoverPageProps) {
         class="border-b"
       />
 
-      {/* 内容区域 */}
-      <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+      <div
+        class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain p-4 sm:p-6 lg:p-8"
+        onScroll={handleContentScroll}
+      >
 
       <Show when={loading()}>
-        <ul class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-          <For each={[1, 2, 3, 4, 5, 6, 7, 8, 9]}>
-            {() => (
-              <li class="w-full">
-                <div class="flex w-full items-stretch gap-3 rounded-xl border border-border/60 bg-card p-3">
-                  {/* 封面 skeleton */}
-                  <div class="h-24 w-16 shrink-0 rounded-md bg-muted/60 animate-pulse" />
-                  {/* 右侧信息 skeleton */}
-                  <div class="min-w-0 flex-1 flex flex-col gap-0.5">
-                    {/* 书名 */}
-                    <div class="h-5 w-3/4 rounded bg-muted/60 animate-pulse" />
-                    {/* 作者行 */}
-                    <div class="h-3 w-1/2 rounded bg-muted/60 animate-pulse" />
-                    {/* 徽章行 */}
-                    <div class="flex flex-wrap gap-1.5 mt-0.5">
-                      <div class="h-5 w-12 rounded-md bg-muted/60 animate-pulse" />
-                      <div class="h-5 w-16 rounded-md bg-muted/60 animate-pulse" />
-                      <div class="h-5 w-14 rounded-md bg-muted/60 animate-pulse" />
-                      <div class="h-5 w-20 rounded-md bg-muted/60 animate-pulse" />
-                      <div class="h-5 w-16 rounded-md bg-muted/60 animate-pulse" />
-                    </div>
-                    {/* 简介（2行） */}
-                    <div class="h-3 w-full rounded bg-muted/60 animate-pulse mt-0.5" />
-                    <div class="h-3 w-4/5 rounded bg-muted/60 animate-pulse" />
-                    {/* 最新章节行 */}
-                    <div class="h-3 w-2/3 rounded bg-muted/60 animate-pulse mt-0.5" />
-                  </div>
-                </div>
-              </li>
-            )}
-          </For>
-        </ul>
+        <DiscoverBookListSkeleton />
       </Show>
 
       <Show when={error()}>
@@ -341,28 +328,26 @@ export function DiscoverPage(props: DiscoverPageProps) {
       </Show>
 
       <Show when={!loading() && !error() && books().length > 0}>
-        <ul class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+        <ul class={DISCOVER_BOOK_GRID_CLASS}>
           <For each={books()}>
             {(sb) => (
-              <li>
+              <li class="w-full">
                 <button
                   type="button"
-                  class={cn(
-                    'group flex w-full items-stretch gap-3 rounded-xl border border-border/60 bg-card p-3 text-left shadow-sm transition-all',
-                    'hover:border-primary/40 hover:shadow-md',
-                    'active:scale-[0.99]',
-                    addingBookUrl() === sb.bookUrl && 'pointer-events-none opacity-70'
+                  class={discoverBookListCardClass(
+                    addingBookUrl() === sb.bookUrl && 'pointer-events-none opacity-70',
                   )}
                   onClick={() => handleBookClick(sb)}
+                  {...bookGroupCardPressHandlers}
                 >
-                  {/* 封面：固定宽高，列表行内不占过多空间 */}
-                  <div class="h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted/50">
+                  <div class={discoverBookListCoverClass()}>
                     {sb.coverUrl ? (
                       <img
                         src={sb.coverUrl}
                         alt=""
                         class="h-full w-full object-cover"
                         loading="lazy"
+                        draggable={false}
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
                           (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
@@ -373,36 +358,77 @@ export function DiscoverPage(props: DiscoverPageProps) {
                       <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
                     </div>
                   </div>
-                  {/* 右侧：书名、作者、徽章、简介、最新章节·更新时间、字数等 */}
-                  <div class="min-w-0 flex-1 flex flex-col gap-0.5 text-left">
-                    <p class="truncate font-medium text-foreground">{sb.name}</p>
-                    <p class="text-xs text-muted-foreground truncate">
+                  <div class={discoverBookListBodyClass('text-left')}>
+                    <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">{sb.name}</p>
+                    <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
                       作者：{sb.author || '—'}
                       <Show when={sb.chapterWordCountText ?? sb.wordCount}>
                         <span class="ml-1">· {sb.chapterWordCountText ?? sb.wordCount}</span>
                       </Show>
                     </p>
-                    <div class="flex flex-wrap gap-1.5 mt-0.5">
-                      <For each={getBadgeEntries(sb)}>
-                        {(entry) => (
-                          <Badge
-                            variant={entry.key === 'status' ? getStatusBadgeVariant(entry.value) : 'secondary'}
-                            class="text-[10px] px-1.5 py-0 font-normal"
-                          >
-                            {entry.value}
-                          </Badge>
-                        )}
-                      </For>
-                    </div>
-                    <p class="line-clamp-2 text-xs text-muted-foreground mt-0.5">
-                      简介：{sb.intro?.trim() || '暂无简介'}
+                    <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+                      <Show
+                        when={addingBookUrl() === sb.bookUrl}
+                        fallback={(() => {
+                          const updateLabel = tryFormatDisplayUpdateTime(sb.latestChapterUpdateTime);
+                          return (
+                            <>
+                              最新章节：{displayChapterTitle(sb.latestChapterTitle)}
+                              <Show when={updateLabel}>
+                                <span> · {updateLabel}</span>
+                              </Show>
+                            </>
+                          );
+                        })()}
+                      >
+                        <span class="text-primary">正在加入书架…</span>
+                      </Show>
                     </p>
-                    <p class="truncate text-xs text-muted-foreground mt-0.5">
-                      最新章节：{normalizePlaceholder(sb.latestChapterTitle)} · {normalizePlaceholder(sb.latestChapterUpdateTime)}
-                    </p>
-                    <Show when={addingBookUrl() === sb.bookUrl}>
-                      <span class="text-xs text-primary mt-1">已加书架</span>
+                    <Show when={getDisplayBadgeEntries(sb).length > 0}>
+                      {(() => {
+                        const entries = getDisplayBadgeEntries(sb);
+                        return (
+                          <div class={discoverBookListBadgeRowClass()}>
+                            <For each={entries}>
+                              {(entry, i) => {
+                                const len = entries.length;
+                                const badgeClass = () => {
+                                  const idx = i();
+                                  const isLast = idx === len - 1;
+                                  const nextIsEllipsis = !isLast && entries[idx + 1]?.isEllipsis;
+                                  if (entry.isEllipsis) return discoverBookListBadgeEllipsisClass();
+                                  if (isLast) return discoverBookListBadgeLastClass();
+                                  if (nextIsEllipsis) return discoverBookListBadgeLastClass();
+                                  return discoverBookListBadgeClass();
+                                };
+                                return (
+                                  <Badge
+                                    variant={
+                                      entry.isEllipsis
+                                        ? 'outline'
+                                        : entry.key === 'status'
+                                          ? getStatusBadgeVariant(entry.value)
+                                          : 'secondary'
+                                    }
+                                    class={badgeClass()}
+                                    title={entry.isEllipsis ? '更多徽标已省略' : entry.value}
+                                  >
+                                    <Show when={!entry.isEllipsis} fallback={entry.value}>
+                                      <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                                        {entry.value}
+                                      </span>
+                                    </Show>
+                                  </Badge>
+                                );
+                              }}
+                            </For>
+                          </div>
+                        );
+                      })()}
                     </Show>
+                    <DiscoverBookListIntro>
+                      简介：{sb.intro?.trim() || '暂无简介'}
+                    </DiscoverBookListIntro>
                   </div>
                 </button>
               </li>
@@ -432,15 +458,15 @@ export function DiscoverPage(props: DiscoverPageProps) {
       </Show>
 
       {/* 分页偏好配置对话框 */}
-      <Dialog 
-        open={props.showPaginationPreferenceDialog ?? false} 
+      <AppDialog
+        open={props.showPaginationPreferenceDialog ?? false}
         onOpenChange={(open) => props.onPaginationPreferenceDialogChange?.(open)}
       >
-        <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-          <DialogHeader class="shrink-0 px-6 pt-6">
-            <DialogTitle>分页偏好</DialogTitle>
-            <DialogDescription>选择发现页的加载方式</DialogDescription>
-          </DialogHeader>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>分页偏好</AppDialogTitle>
+            <AppDialogDescription>选择发现页的加载方式</AppDialogDescription>
+          </AppDialogHeader>
           <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <RadioGroup
               value={paginationPreference()}
@@ -463,8 +489,8 @@ export function DiscoverPage(props: DiscoverPageProps) {
               </div>
             </RadioGroup>
           </div>
-        </DialogContent>
-      </Dialog>
+        </AppDialogContent>
+      </AppDialog>
       </div>
     </section>
   );

@@ -30,8 +30,9 @@ import { ReaderPage } from "./pages/reader/ReaderPage";
 import { ImportPage } from "./pages/import/ImportPage";
 import { RemoteBookPage } from "./pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "./components/AddBookByUrlDialog";
-import { ImportSourceLocalDialog } from "./components/ImportSourceLocalDialog";
 import { ImportSourceNetworkDialog } from "./components/ImportSourceNetworkDialog";
+import { ImportSourceQrDialog } from "./components/ImportSourceQrDialog";
+import { ImportSourceSelectDialog } from "./components/ImportSourceSelectDialog";
 import { SourceGroupManageDialog } from "./components/SourceGroupManageDialog";
 import { SourceSearchDialog } from "./components/SourceSearchDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
@@ -41,6 +42,10 @@ import type { BookSource } from "@/types";
 import type { SearchBook } from "@/types";
 import { getSource } from "@/lib/database/sources";
 import type { ExploreSection } from "@/lib/book-source/explore-sections";
+import {
+  openExploreSectionInInnerWeb,
+  shouldOpenDiscoverPageForSection,
+} from "@/lib/book-source/explore-section-action";
 import { DatabaseBackup } from "./components/DatabaseBackup";
 import { ThemeSwitch } from "./components/ThemeSwitch";
 import { ScrollToTop } from "./components/ScrollToTop";
@@ -49,7 +54,7 @@ import { ShellLayoutProvider, useShellLayout } from "./components/ShellLayoutPro
 import { ShellLayoutSetting } from "./components/ShellLayoutSetting";
 import { cn } from "src/lib/utils";
 import { Toaster } from "./components/ui/sonner";
-import { showAppToast } from "./components/AppToasts";
+import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix } from "./components/AppToasts";
 import { initDatabase } from "@/lib/database";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
@@ -69,12 +74,31 @@ import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
 import {
   registerInnerWebOpener,
   registerInnerWebClose,
+  loadPersistedInnerWebSession,
+  applyRestoredInnerWebSession,
   shouldSuppressLoginDialogDismiss,
+  READER_BOOKSOURCE_IMPORT_NETWORK_EVENT,
+  isInnerWebSessionActive,
   type InnerWebPayload,
 } from "@/lib/platform/inner-web";
+import {
+  INNER_WEB_OVERLAY_Z,
+  releaseInnerWebPanelForOverlay,
+  retainInnerWebPanelForOverlay,
+  shouldManageInnerWebPanelOverlay,
+} from "@/lib/platform/inner-web-panel-overlay";
+import { parseReaderImportDeepLink, READER_BOOKSOURCE_IDENTIFY_EVENT } from "@/lib/platform/legado-import-uri";
+import {
+  importSelectedBookSources,
+  resolveBookSourcesFromFile,
+  resolveBookSourcesFromNetworkUrl,
+  resolveBookSourcesFromText,
+} from "@/lib/book-source/import-booksource-resolver";
+import { pickLocalBookSourceFile } from "@/lib/book-source/pick-local-booksource-file";
 import { InnerWebHost } from "./pages/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "./components/SourceLoginDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev-hmr-state";
+import type { NewBookSource } from "@/types";
 import "./App.css";
 // 窗口显示逻辑已移至 SplashScreen 组件，确保在开屏动画前显示
 
@@ -138,15 +162,26 @@ function AppContent() {
   const [showImportActionDialog, setShowImportActionDialog] = createSignal(false);
   const [showReplaceFileDialog, setShowReplaceFileDialog] = createSignal(false);
   const [showAddBookByUrlDialog, setShowAddBookByUrlDialog] = createSignal(false);
-  const [showImportSourceLocalDialog, setShowImportSourceLocalDialog] = createSignal(false);
   const [showImportSourceNetworkDialog, setShowImportSourceNetworkDialog] = createSignal(false);
+  const [showImportSourceQrDialog, setShowImportSourceQrDialog] = createSignal(false);
+  const [showImportSourceSelectDialog, setShowImportSourceSelectDialog] = createSignal(false);
+  const [importSourceNetworkPresetUrl, setImportSourceNetworkPresetUrl] = createSignal("");
+  const [importSourceLoading, setImportSourceLoading] = createSignal(false);
+  const [importSourceCandidates, setImportSourceCandidates] = createSignal<NewBookSource[]>([]);
+  const [importSourceSelectedUrls, setImportSourceSelectedUrls] = createSignal<Set<string>>(new Set());
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
   /** 书源搜索对话框：从书源项右键「搜索」打开，限定该书源 */
   const [sourceSearchContext, setSourceSearchContext] = createSignal<{ source: BookSource } | null>(null);
   /** 书源登录对话框：配置了 loginUi 时弹窗显示登录页 */
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
-  const [innerWebPayload, setInnerWebPayload] = createSignal<InnerWebPayload | null>(null);
+  const initialInnerWeb = loadPersistedInnerWebSession();
+  const [innerWebPayload, setInnerWebPayload] = createSignal<InnerWebPayload | null>(
+    initialInnerWeb
+  );
+  if (initialInnerWeb) {
+    applyRestoredInnerWebSession(initialInnerWeb);
+  }
   const [pendingImportFile, setPendingImportFile] = createSignal<{
     bookUrl: string;
     fileName: string;
@@ -193,8 +228,160 @@ function AppContent() {
     </>
   );
 
+  /** Tauri 子 WebView 叠在主界面之上时需先 hide；与内嵌浮层 z-150 对齐的 Dialog portal */
+  let bookSourceImportPanelRetained = false;
+
+  function releaseBookSourceImportPanelIfNeeded(): void {
+    if (!bookSourceImportPanelRetained) return;
+    bookSourceImportPanelRetained = false;
+    releaseInnerWebPanelForOverlay({ overlap: true });
+  }
+
+  const bookSourceImportDialogPortalZ = () =>
+    isInnerWebSessionActive() ? INNER_WEB_OVERLAY_Z : undefined;
+
+  const openImportSourceSelectLoading = async () => {
+    setImportSourceLoading(true);
+    setImportSourceCandidates([]);
+    setImportSourceSelectedUrls(new Set<string>());
+    const p = innerWebPayload();
+    if (
+      isTauri() &&
+      shouldManageInnerWebPanelOverlay({ url: p?.url, html: p?.html }) &&
+      !bookSourceImportPanelRetained
+    ) {
+      await retainInnerWebPanelForOverlay();
+      bookSourceImportPanelRetained = true;
+    }
+    setShowImportSourceSelectDialog(true);
+  };
+
+  const applyRecognizedSources = (sources: NewBookSource[], title = '导入书源') => {
+    if (sources.length === 0) {
+      setShowImportSourceSelectDialog(false);
+      releaseBookSourceImportPanelIfNeeded();
+      showAppToast({ title, description: '未识别到有效书源', variant: 'default' });
+      return;
+    }
+    setImportSourceCandidates(sources);
+    setImportSourceSelectedUrls(new Set(sources.map((s) => s.sourceUrl)));
+    setImportSourceLoading(false);
+  };
+
+  const identifySourcesFromNetwork = async (url: string) => {
+    const normalized = url.trim();
+    if (!/^https?:\/\//i.test(normalized)) {
+      showAppToast({ title: '网络导入书源', description: '链接无效', variant: 'destructive' });
+      return;
+    }
+    await openImportSourceSelectLoading();
+    try {
+      const { sources } = await resolveBookSourcesFromNetworkUrl(normalized);
+      applyRecognizedSources(sources, '网络导入书源');
+    } catch (err) {
+      setShowImportSourceSelectDialog(false);
+      releaseBookSourceImportPanelIfNeeded();
+      showAppToast({ title: '网络导入书源失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportSourceLoading(false);
+    }
+  };
+
+  const identifySourcesFromLocalFile = async (file: File) => {
+    await openImportSourceSelectLoading();
+    try {
+      const { sources } = await resolveBookSourcesFromFile(file);
+      applyRecognizedSources(sources, '本地导入书源');
+    } catch (err) {
+      setShowImportSourceSelectDialog(false);
+      releaseBookSourceImportPanelIfNeeded();
+      showAppToast({ title: '本地导入书源失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportSourceLoading(false);
+    }
+  };
+
+  const openLocalBookSourceImport = async () => {
+    const file = await pickLocalBookSourceFile();
+    if (file) void identifySourcesFromLocalFile(file);
+  };
+
+  const identifySourcesFromQrRaw = async (raw: string) => {
+    const parsed = parseReaderImportDeepLink(raw);
+    if (parsed?.kind === 'unsupported') {
+      showAppToast({ title: '二维码导入书源', description: parsed.reason, variant: 'default' });
+      return;
+    }
+    if (parsed) {
+      void identifySourcesFromNetwork(parsed.src);
+      return;
+    }
+    await openImportSourceSelectLoading();
+    try {
+      const { sources } = await resolveBookSourcesFromText(raw);
+      applyRecognizedSources(sources, '二维码导入书源');
+    } catch (err) {
+      setShowImportSourceSelectDialog(false);
+      releaseBookSourceImportPanelIfNeeded();
+      showAppToast({ title: '二维码导入书源失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportSourceLoading(false);
+    }
+  };
+
+  const toggleImportSourceSelected = (sourceUrl: string, checked: boolean) => {
+    setImportSourceSelectedUrls((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(sourceUrl);
+      else next.delete(sourceUrl);
+      return next;
+    });
+  };
+
+  const toggleImportSourceSelectAll = () => {
+    const candidates = importSourceCandidates();
+    if (candidates.length === 0) return;
+    const allSelected = importSourceSelectedUrls().size === candidates.length;
+    setImportSourceSelectedUrls(
+      allSelected ? new Set<string>() : new Set<string>(candidates.map((s) => s.sourceUrl))
+    );
+  };
+
+  const toggleImportSourceInvert = () => {
+    const current = importSourceSelectedUrls();
+    const next = new Set<string>();
+    for (const source of importSourceCandidates()) {
+      if (!current.has(source.sourceUrl)) next.add(source.sourceUrl);
+    }
+    setImportSourceSelectedUrls(next);
+  };
+
+  const confirmImportSelectedSources = async () => {
+    const selected = new Set(importSourceSelectedUrls());
+    const list = importSourceCandidates().filter((s) => selected.has(s.sourceUrl));
+    if (list.length === 0) {
+      showAppToast({ title: '导入书源', description: '请先选择书源', variant: 'default' });
+      return;
+    }
+    try {
+      setImportSourceLoading(true);
+      const inserted = await importSelectedBookSources(list);
+      showAppToast({ title: '导入书源', description: `已导入 ${inserted} 条书源`, variant: 'default' });
+      setShowImportSourceSelectDialog(false);
+      releaseBookSourceImportPanelIfNeeded();
+      setImportSourceCandidates([]);
+      setImportSourceSelectedUrls(new Set<string>());
+    } catch (err) {
+      showAppToast({ title: '导入书源失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportSourceLoading(false);
+    }
+  };
+
   /** 发现页上下文：从书源页点击某个分类/排行榜后进入发现页 */
   const [discoverContext, setDiscoverContext] = createSignal<{ source: BookSource; section: ExploreSection } | null>(null);
+  /** 书源页展开项（切到发现页再返回时保持展开） */
+  const [sourcesExpandedSourceUrl, setSourcesExpandedSourceUrl] = createSignal<string | null>(null);
   /** 书籍信息页上下文：从发现页或阅读器进入书籍信息页 */
   const [bookInfoContext, setBookInfoContext] = createSignal<{ source: BookSource; book: SearchBook; fromPage: 'discover' | 'reader' } | null>(null);
   /** 发现页分页偏好对话框显示状态 */
@@ -779,6 +966,62 @@ function AppContent() {
     registerInnerWebClose(() => {
       setInnerWebPayload(null);
     });
+
+    const onBookImport = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ url?: string }>).detail;
+      const u = detail?.url?.trim();
+      if (!u?.startsWith("http")) return;
+      void identifySourcesFromNetwork(u);
+    };
+    window.addEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
+    const onBookSourceIdentify = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ url?: string }>).detail;
+      const u = detail?.url?.trim();
+      if (u) void identifySourcesFromNetwork(u);
+    };
+    window.addEventListener(READER_BOOKSOURCE_IDENTIFY_EVENT, onBookSourceIdentify);
+
+    const unlistenFns: Array<() => void> = [];
+    if (isTauri()) {
+      void (async () => {
+        try {
+          const { listen } = await import("@tauri-apps/api/event");
+          unlistenFns.push(
+            await listen<{ uri?: string }>("reader-import-deeplink", (e) => {
+              const uri = e.payload?.uri?.trim();
+              if (!uri) return;
+              const parsed = parseReaderImportDeepLink(uri);
+              if (!parsed) return;
+              if (parsed.kind === 'unsupported') {
+                showAppToast({ title: '暂不支持', description: parsed.reason, variant: 'default' });
+                return;
+              }
+              void identifySourcesFromNetwork(parsed.src);
+            })
+          );
+          unlistenFns.push(
+            await listen<{ url?: string }>("reader-network-booksource-import", (e) => {
+              const u = e.payload?.url?.trim();
+              if (u?.startsWith("http")) void identifySourcesFromNetwork(u);
+            })
+          );
+        } catch (err) {
+          console.warn("[App] Tauri deeplink/import listen failed", err);
+        }
+      })();
+    }
+
+    onCleanup(() => {
+      window.removeEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
+      window.removeEventListener(READER_BOOKSOURCE_IDENTIFY_EVENT, onBookSourceIdentify);
+      for (const fn of unlistenFns) {
+        try {
+          fn();
+        } catch {
+          /* ignore */
+        }
+      }
+    });
   });
 
   // 监听窗口宽度变化
@@ -1121,85 +1364,116 @@ function AppContent() {
                 </section>
               </Show>
 
-              {/* 书源视图 */}
-              <Show when={currentPage() === "sources"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
-                  <PageToolbar
-                    title={sourcePageToolbarTitle()}
-                    description={sourcePageToolbarDescription()}
-                    titleSlot={
-                      <SourceGroupTitleDropdown
-                        title={sourcePageToolbarTitle()}
-                        description={sourcePageToolbarDescription()}
-                        sourceGroups={sourceGroups()}
-                        currentSourceGroup={currentSourceGroup()}
-                        onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
-                      />
-                    }
-                  >
-                    <SourcesPageToolbar
-                      sourceSearchQuery={sourceSearchQuery()}
-                      onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
-                      sourceSearchMode={sourceSearchMode()}
-                      onSourceSearchModeChange={(m) => setSourceSearchMode(m)}
+              {/* 书源视图：保持挂载，切到发现页再返回时不重载展开的发现脚本 */}
+              <section
+                class={cn(
+                  "flex flex-col flex-1 min-h-0 overflow-hidden",
+                  currentPage() === "sources"
+                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                    : "hidden"
+                )}
+              >
+                <PageToolbar
+                  title={sourcePageToolbarTitle()}
+                  description={sourcePageToolbarDescription()}
+                  titleSlot={
+                    <SourceGroupTitleDropdown
+                      title={sourcePageToolbarTitle()}
+                      description={sourcePageToolbarDescription()}
+                      sourceGroups={sourceGroups()}
                       currentSourceGroup={currentSourceGroup()}
-                      sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                      onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
-                      onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
-                      onSourcesImportLocal={() => setShowImportSourceLocalDialog(true)}
-                      onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                      onSourcesImportQR={() => showAppToast({ title: "二维码导入书源", description: "功能开发中", variant: "default" })}
-                      showSourcesImportQR={isMobile()}
-                      onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
+                      onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
                     />
-                  </PageToolbar>
-                  <SourcesPage
-                    currentSourceGroup={currentSourceGroup()}
+                  }
+                >
+                  <SourcesPageToolbar
                     sourceSearchQuery={sourceSearchQuery()}
+                    onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
                     sourceSearchMode={sourceSearchMode()}
+                    onSourceSearchModeChange={(m) => setSourceSearchMode(m)}
+                    currentSourceGroup={currentSourceGroup()}
                     sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                    onGroupsLoaded={(g) => setSourceGroups(g)}
-                    onSourceCountChange={(n) => setSourceCount(n)}
-                    onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
-                    onSourceEdit={() => showAppToast({ title: "编辑书源", description: "功能开发中", variant: "default" })}
-                    onSourceLogin={async (source) => {
-                      const url = source.loginUrl?.trim();
-                      const hasUi = !!source.loginUi?.trim();
-                      const isHttp =
-                        !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                      // 仅 http 登录、无 loginUi：与书源设置 control() 相同的全屏内嵌页（工具栏 + √）
-                      if (isHttp && !hasUi) {
-                        try {
-                          const cookies = getStoredSourceCookiesForUrl(source, url);
-                          await openSourceSettingsInApp(url, cookies);
-                        } catch (e) {
-                          console.error("打开登录页失败:", e);
-                          showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
-                        }
-                        return;
-                      }
-                      if (url || hasUi) {
-                        setSourceLoginDialogSource(source);
-                      }
-                    }}
-                    onSourceSearch={(source) => {
-                      setSourceSearchContext({ source });
-                    }}
+                    onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
                     onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
-                    onSourcesImportLocal={() => setShowImportSourceLocalDialog(true)}
+                    onSourcesImportLocal={() => void openLocalBookSourceImport()}
                     onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                    onSourcesImportQR={() => showAppToast({ title: "二维码导入书源", description: "功能开发中", variant: "default" })}
-                    onExploreSectionClick={(source, section) => {
-                      if (section.url) {
-                        setDiscoverContext({ source, section });
-                        setCurrentPage("discover");
-                      } else {
-                        showAppToast({ title: `${source.sourceName} · ${section.title}`, description: "该分类暂无链接", variant: "default" });
-                      }
-                    }}
+                    onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                    showSourcesImportQR={isMobile()}
+                    onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
                   />
-                </section>
-              </Show>
+                </PageToolbar>
+                <SourcesPage
+                  currentSourceGroup={currentSourceGroup()}
+                  sourceSearchQuery={sourceSearchQuery()}
+                  sourceSearchMode={sourceSearchMode()}
+                  sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                  expandedSourceUrl={sourcesExpandedSourceUrl()}
+                  onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
+                  onGroupsLoaded={(g) => setSourceGroups(g)}
+                  onSourceCountChange={(n) => setSourceCount(n)}
+                  onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
+                  onSourceEdit={() => showAppToast({ title: "编辑书源", description: "功能开发中", variant: "default" })}
+                  onSourceLogin={async (source) => {
+                    const url = source.loginUrl?.trim();
+                    const hasUi = !!source.loginUi?.trim();
+                    const isHttp =
+                      !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                    // 仅 http 登录、无 loginUi：与书源设置 control() 相同的全屏内嵌页（工具栏 + √）
+                    if (isHttp && !hasUi) {
+                      try {
+                        const cookies = getStoredSourceCookiesForUrl(source, url);
+                        await openSourceSettingsInApp(url, cookies);
+                      } catch (e) {
+                        console.error("打开登录页失败:", e);
+                        showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
+                      }
+                      return;
+                    }
+                    if (url || hasUi) {
+                      setSourceLoginDialogSource(source);
+                    }
+                  }}
+                  onSourceSearch={(source) => {
+                    setSourceSearchContext({ source });
+                  }}
+                  onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
+                  onSourcesImportLocal={() => void openLocalBookSourceImport()}
+                  onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
+                  onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                  onExploreSectionClick={async (source, section) => {
+                    if (!section.url?.trim()) {
+                      showAppToast({
+                        title: `${source.sourceName} · ${section.title}`,
+                        description: "该分类暂无链接",
+                        variant: "default",
+                      });
+                      return;
+                    }
+                    if (!shouldOpenDiscoverPageForSection(section)) {
+                      try {
+                        const opened = await openExploreSectionInInnerWeb(source, section);
+                        if (!opened) {
+                          showAppToast({
+                            title: "无法打开",
+                            description: section.title,
+                            variant: "destructive",
+                          });
+                        }
+                      } catch (e) {
+                        console.error("打开发现子项失败:", e);
+                        showAppToast({
+                          title: "打开失败",
+                          description: e instanceof Error ? e.message : "请稍后重试",
+                          variant: "destructive",
+                        });
+                      }
+                      return;
+                    }
+                    setDiscoverContext({ source, section });
+                    setCurrentPage("discover");
+                  }}
+                />
+              </section>
 
 
               {/* 订阅视图 */}
@@ -1216,7 +1490,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>订阅功能开发中...</p>
                     </div>
@@ -1238,7 +1512,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>书签功能开发中...</p>
                     </div>
@@ -1260,7 +1534,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>阅读记录功能开发中...</p>
                     </div>
@@ -1286,7 +1560,7 @@ function AppContent() {
                     <SettingsPageToolbar />
                   </PageToolbar>
 
-                  <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
                     <div class="w-full max-w-4xl mx-auto space-y-4">
                       {/* 数据库备份 */}
                       <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -1553,13 +1827,42 @@ function AppContent() {
         />
 
         {/* 书源本地/网络导入（对齐 legado） */}
-        <ImportSourceLocalDialog
-          open={showImportSourceLocalDialog()}
-          onOpenChange={setShowImportSourceLocalDialog}
-        />
         <ImportSourceNetworkDialog
           open={showImportSourceNetworkDialog()}
-          onOpenChange={setShowImportSourceNetworkDialog}
+          onOpenChange={(open) => {
+            setShowImportSourceNetworkDialog(open);
+            if (!open) setImportSourceNetworkPresetUrl("");
+          }}
+          presetUrl={importSourceNetworkPresetUrl()}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          onIdentify={(url) => {
+            void identifySourcesFromNetwork(url);
+          }}
+        />
+        <ImportSourceQrDialog
+          open={showImportSourceQrDialog()}
+          onOpenChange={setShowImportSourceQrDialog}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          onIdentify={(raw) => {
+            void identifySourcesFromQrRaw(raw);
+          }}
+        />
+        <ImportSourceSelectDialog
+          open={showImportSourceSelectDialog()}
+          loading={importSourceLoading()}
+          sources={importSourceCandidates()}
+          selectedUrls={importSourceSelectedUrls()}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          onOpenChange={(open) => {
+            setShowImportSourceSelectDialog(open);
+            if (!open) releaseBookSourceImportPanelIfNeeded();
+          }}
+          onToggle={toggleImportSourceSelected}
+          onSelectAllToggle={toggleImportSourceSelectAll}
+          onInvertSelect={toggleImportSourceInvert}
+          onConfirm={() => {
+            void confirmImportSelectedSources();
+          }}
         />
         <SourceGroupManageDialog
           open={showSourceGroupManageDialog()}
@@ -1612,7 +1915,9 @@ function App() {
       <AppContent />
       <Portal mount={document.body}>
         <div class="reader-toast-host" data-kb-top-layer>
+          <SonnerInteractionFix />
           <Toaster
+            duration={DEFAULT_TOAST_DURATION}
             theme="system"
             position="bottom-right"
             closeButton

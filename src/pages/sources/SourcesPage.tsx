@@ -7,9 +7,14 @@ import { createSignal, createEffect, createResource, createMemo, onMount, onClea
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
-import { getExploreSections, getExploreSectionsAsync, isExploreUrlScript, type ExploreSection } from '@/lib/book-source/explore-sections';
+import {
+  getExploreSections,
+  getExploreSectionsAsync,
+  isExploreUrlScript,
+  updateExploreSourceArgument,
+  type ExploreSection,
+} from '@/lib/book-source/explore-sections';
 import { cn } from '@/lib/utils';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,16 +31,26 @@ import { DeleteSourceDialog } from '@/components/DeleteSourceDialog';
 import { showAppToast } from '@/components/AppToasts';
 import { ChevronDownIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectIcon,
+  SelectItem,
+  SelectListbox,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { validateSources, type SourceValidationResult, type ValidateResultKind } from '@/lib/book-source/validate';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -49,6 +64,11 @@ import {
   type SourceSearchMode,
   fuzzyMatchQuery,
 } from '@/lib/sources-filters';
+
+/** 批量栏「操作 / 更多」下拉：展开时 ChevronDown 由向下旋转为向上 */
+const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
+const BATCH_MENU_CHEVRON_CLASS =
+  'h-4 w-4 shrink-0 opacity-50 transition-transform duration-200 group-data-expanded/trigger:rotate-180';
 
 export interface SourcesPageProps {
   /** 当前选中的分组（null = 全部）或筛选（已启用、已禁用等） */
@@ -73,6 +93,10 @@ export interface SourcesPageProps {
   onSourceSearch?: (source: BookSource) => void;
   /** 点击发现子项（分类/排行榜等），由 App 打开发现页或书籍列表 */
   onExploreSectionClick?: (source: BookSource, section: ExploreSection) => void;
+  /** 当前展开的书源 URL（由 App 持有，避免切页后收起） */
+  expandedSourceUrl?: string | null;
+  /** 展开状态变化 */
+  onExpandedSourceUrlChange?: (sourceUrl: string | null) => void;
   /** 页内工具栏：新建/导入等（由 SourcesPageToolbar 提供，页内不展示按钮） */
   onSourcesNew?: () => void;
   onSourcesImportLocal?: () => void;
@@ -147,7 +171,16 @@ export function SourcesPage(props: SourcesPageProps) {
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
-  const [expandedSourceUrl, setExpandedSourceUrl] = createSignal<string | null>(null);
+  const [localExpandedSourceUrl, setLocalExpandedSourceUrl] = createSignal<string | null>(null);
+  const expandedSourceUrl = () =>
+    props.expandedSourceUrl !== undefined ? props.expandedSourceUrl : localExpandedSourceUrl();
+  const setExpandedSourceUrl = (url: string | null) => {
+    if (props.onExpandedSourceUrlChange) {
+      props.onExpandedSourceUrlChange(url);
+    } else {
+      setLocalExpandedSourceUrl(url);
+    }
+  };
   const [sourceToDelete, setSourceToDelete] = createSignal<BookSource | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = createSignal(false);
   /** 多选：选中的书源 sourceUrl 集合（Legado 式批量操作） */
@@ -253,7 +286,8 @@ export function SourcesPage(props: SourcesPageProps) {
   });
 
   function toggleExpand(sourceUrl: string) {
-    setExpandedSourceUrl((prev) => (prev === sourceUrl ? null : sourceUrl));
+    const prev = expandedSourceUrl();
+    setExpandedSourceUrl(prev === sourceUrl ? null : sourceUrl);
   }
 
   /** 在当前分组内按搜索关键词与模式过滤：name=仅名称，fuzzy=名称模糊匹配，extended=legado 扩展（名称+URL+分组+注释等） */
@@ -288,6 +322,23 @@ export function SourcesPage(props: SourcesPageProps) {
     props.onSourceCountChange?.(filteredSources().length);
   });
 
+  const allFilteredSelected = createMemo(() => {
+    const list = filteredSources();
+    if (list.length === 0) return false;
+    const selected = selectedSourceUrls();
+    return list.every((s) => selected.has(s.sourceUrl));
+  });
+
+  const filteredSelectedCount = createMemo(() => {
+    const selected = selectedSourceUrls();
+    return filteredSources().filter((s) => selected.has(s.sourceUrl)).length;
+  });
+
+  function toggleSelectAll() {
+    if (allFilteredSelected()) clearSelection();
+    else selectAll();
+  }
+
   /** 当「按分组名显示」且当前为全部/筛选时，按 sourceGroup 分块；否则单块（当前列表） */
   const displayGroups = createMemo(() => {
     const list = filteredSources();
@@ -308,13 +359,26 @@ export function SourcesPage(props: SourcesPageProps) {
     const url = expandedSourceUrl();
     return url ? sources().find((s) => s.sourceUrl === url) ?? null : null;
   };
-  const [dynamicSections] = createResource(
+  const [exploreArgsVersion, setExploreArgsVersion] = createSignal(0);
+  const [dynamicSections, { refetch: refetchExploreSections }] = createResource(
     () => {
+      const v = exploreArgsVersion();
       const s = expandedSource();
-      return s && isExploreUrlScript(s.exploreUrl) ? s : null;
+      return s && isExploreUrlScript(s.exploreUrl) ? { source: s, argsVersion: v } : null;
     },
-    getExploreSectionsAsync
+    (ctx) => getExploreSectionsAsync(ctx.source, ctx.argsVersion)
   );
+
+  async function handleExploreSelectChange(
+    source: BookSource,
+    section: ExploreSection,
+    value: string
+  ) {
+    if (!section.paramKey) return;
+    updateExploreSourceArgument(source, section.paramKey, value);
+    setExploreArgsVersion((v) => v + 1);
+    await refetchExploreSections();
+  }
 
   async function handlePinSource(source: BookSource) {
     const list = sources();
@@ -582,265 +646,311 @@ export function SourcesPage(props: SourcesPageProps) {
   return (
     <div class="@container flex flex-col min-h-0 flex-1 w-full overflow-hidden pt-2">
       {/* 主内容区：可滚动 */}
-      <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pb-4">
-      <Show when={error()}>
-        <p class="text-sm text-destructive">{error()}</p>
-      </Show>
-      <Show when={showSkeleton()}>
-        <ul class="space-y-2">
-          <For each={[1, 2, 3, 4, 5]}>
-            {() => (
-              <li class="flex h-12 items-center gap-3 rounded-lg border border-border/50 bg-card px-3 animate-pulse">
-                <span class="h-4 w-20 rounded bg-muted" />
-                <span class="h-4 flex-1 rounded bg-muted" />
-              </li>
+      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both space-y-4 pb-4">
+        <Show when={error()}>
+          <p class="text-sm text-destructive">{error()}</p>
+        </Show>
+        <Show when={showSkeleton()}>
+          <ul class="space-y-2">
+            <For each={[1, 2, 3, 4, 5]}>
+              {() => (
+                <li class="flex h-12 items-center gap-3 rounded-lg border border-border/50 bg-card px-3 animate-pulse">
+                  <span class="h-4 w-20 rounded bg-muted" />
+                  <span class="h-4 flex-1 rounded bg-muted" />
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+        <Show when={!loading() && !showSkeleton() && sources().length === 0}>
+          <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
+            <p>暂无书源</p>
+            <p class="mt-1">可通过导航栏「更多」新建或导入书源</p>
+          </div>
+        </Show>
+        <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0}>
+          <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
+            <p>无匹配书源</p>
+            <p class="mt-1">尝试修改搜索关键词或切换分组</p>
+          </div>
+        </Show>
+        <Show when={!loading() && !showSkeleton() && filteredSources().length > 0}>
+          <For each={displayGroups()}>
+            {(group) => (
+              <>
+                <Show when={group.name}>
+                  <div class="pt-2 first:pt-0">
+                    <h3 class="text-sm font-medium text-muted-foreground px-1 pb-1.5">{group.name}</h3>
+                  </div>
+                </Show>
+                <ul class="space-y-2">
+                  <For each={group.sources}>
+                    {(source) => {
+                      let triggerEl: HTMLDivElement | null = null;
+                      const { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick } = useLongPressContextMenu(() => triggerEl);
+                      const isExpanded = () => expandedSourceUrl() === source.sourceUrl;
+                      const sections = (): ExploreSection[] => {
+                        if (!isExploreUrlScript(source.exploreUrl)) return getExploreSections(source);
+                        if (expandedSourceUrl() !== source.sourceUrl) return [];
+                        return dynamicSections() ?? [];
+                      };
+                      const sectionsLoading = () =>
+                        isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'pending';
+                      const sectionsError = () =>
+                        isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'errored';
+                      return (
+                        <li class="rounded-lg border border-border/50 bg-card overflow-hidden">
+                          <ContextMenu>
+                            <ContextMenuTrigger
+                              as="div"
+                              ref={(el) => { triggerEl = el; }}
+                              onMouseDown={(e: MouseEvent) => onPointerDown(e)}
+                              onMouseMove={(e: MouseEvent) => onPointerMove(e)}
+                              onMouseUp={(e: MouseEvent) => onPointerUp(e)}
+                              onTouchStart={(e: TouchEvent) => onPointerDown(e)}
+                              onTouchMove={(e: TouchEvent) => onPointerMove(e)}
+                              onTouchEnd={(e: TouchEvent) => onPointerUp(e)}
+                              class={cn(
+                                'flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm transition-all',
+                                'hover:bg-accent/30'
+                              )}
+                              onClick={(e: MouseEvent) => {
+                                if (shouldPreventClick()) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  return;
+                                }
+                                toggleExpand(source.sourceUrl);
+                              }}
+                              role="button"
+                              tabIndex={0}
+                            >
+                              <div class="shrink-0 flex items-center" onClick={(e: MouseEvent) => e.stopPropagation()} role="presentation">
+                                <Checkbox
+                                  checked={isSelected(source.sourceUrl)}
+                                  onChange={(checked: boolean) => {
+                                    const next = new Set(selectedSourceUrls());
+                                    if (checked) next.add(source.sourceUrl);
+                                    else next.delete(source.sourceUrl);
+                                    setSelectedSourceUrls(next);
+                                  }}
+                                  aria-label={`选择 ${source.sourceName}`}
+                                />
+                              </div>
+                              <div class="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
+                                <span class="min-w-0 shrink truncate font-medium text-foreground" title={source.sourceName}>
+                                  {source.sourceName}
+                                </span>
+                                <Show when={source.sourceGroup && !props.sourcesGroupByGroupName}>
+                                  <span class="min-w-0 shrink-2 truncate rounded bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground" title={source.sourceGroup}>
+                                    {source.sourceGroup}
+                                  </span>
+                                </Show>
+                              </div>
+                              <div class="shrink-0 flex items-center" onClick={(e: MouseEvent) => e.stopPropagation()} role="presentation">
+                                <Switch
+                                  checked={source.enabled}
+                                  onChange={async (checked: boolean) => {
+                                    try {
+                                      await sourcesDb.enableSource(source.sourceUrl, checked);
+                                      window.dispatchEvent(new CustomEvent('sources-refresh'));
+                                      loadSources();
+                                    } catch (e) {
+                                      console.error('切换书源启用状态失败:', e);
+                                      showAppToast({ title: '操作失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+                                    }
+                                  }}
+                                  aria-label={source.enabled ? '禁用书源' : '启用书源'}
+                                >
+                                  <SwitchControl class="data-disabled:cursor-not-allowed">
+                                    <SwitchThumb />
+                                  </SwitchControl>
+                                </Switch>
+                              </div>
+                              <ChevronDownIcon
+                                class={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded() && 'rotate-180')}
+                              />
+                            </ContextMenuTrigger>
+                            <ContextMenuContent>
+                              <ContextMenuItem onSelect={() => props.onSourceEdit?.(source)}>
+                                编辑
+                              </ContextMenuItem>
+                              <ContextMenuItem onSelect={() => handlePinSource(source)}>
+                                置顶
+                              </ContextMenuItem>
+                              <Show when={hasLogin(source)}>
+                                <ContextMenuItem onSelect={() => props.onSourceLogin?.(source)}>
+                                  登录
+                                </ContextMenuItem>
+                              </Show>
+                              <Show when={hasSearch(source)}>
+                                <ContextMenuItem onSelect={() => props.onSourceSearch?.(source)}>
+                                  搜索
+                                </ContextMenuItem>
+                              </Show>
+                              <ContextMenuItem onSelect={() => handleSourceRefresh(source)}>
+                                刷新
+                              </ContextMenuItem>
+                              <ContextMenuItem
+                                class="text-destructive focus:text-destructive"
+                                onSelect={() => {
+                                  setSourceToDelete(source);
+                                  setDeleteDialogOpen(true);
+                                }}
+                              >
+                                删除
+                              </ContextMenuItem>
+                            </ContextMenuContent>
+                          </ContextMenu>
+
+                          {/* 展开内容：书源内置的发现子项（分类、排行榜等，参照 legado） */}
+                          <Show when={isExpanded()}>
+                            <div
+                              class="border-t border-border/50 bg-muted/20 px-3 py-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Show when={sectionsLoading()}>
+                                <ul class="flex flex-wrap justify-center gap-2 py-2">
+                                  {/* 模拟不同宽度的按钮：整行、两列、四列 */}
+                                  <li class="min-w-0 flex-[1_1_100%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_45%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_45%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_25%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_25%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_25%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                  <li class="min-w-0 flex-[1_1_25%]">
+                                    <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
+                                  </li>
+                                </ul>
+                              </Show>
+                              <Show when={sectionsError()}>
+                                <div class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 my-2">
+                                  <p class="text-center text-sm text-destructive">
+                                    <span class="font-medium">加载失败：</span>
+                                    <span class="text-xs text-destructive/80">
+                                      {dynamicSections.error instanceof Error
+                                        ? dynamicSections.error.message
+                                        : '网络请求失败，请检查网络连接'}
+                                    </span>
+                                  </p>
+                                </div>
+                              </Show>
+                              <Show when={!sectionsLoading() && !sectionsError() && sections().length > 0}>
+                                <ul class="flex flex-wrap justify-center gap-2">
+                                  <For each={sections()}>
+                                    {(section) => {
+                                      const basisPct = section.style?.layout_flexBasisPercent ?? 1;
+                                      // Legado: layout_flexBasisPercent 1=整行, 0.45≈两列, 0.25=四列
+                                      const flexClass =
+                                        basisPct <= 0.25
+                                          ? 'min-w-0 flex-[1_1_25%]'
+                                          : basisPct <= 0.45
+                                            ? 'min-w-0 flex-[1_1_45%]'
+                                            : 'min-w-0 flex-[1_1_100%]';
+                                      const isSelect =
+                                        section.type === 'select' &&
+                                        section.chars &&
+                                        section.chars.length > 0 &&
+                                        section.paramKey;
+                                      const isClickable = !!section.url;
+                                      return (
+                                        <li class={flexClass}>
+                                          <Show
+                                            when={isSelect}
+                                            fallback={
+                                              <Button
+                                                variant="outline"
+                                                class="flex h-auto min-h-9 w-full justify-center rounded-lg border-border/60 bg-background/80 px-3 py-2 text-center text-sm font-medium shadow-sm"
+                                                disabled={!isClickable}
+                                                onClick={() => props.onExploreSectionClick?.(source, section)}
+                                              >
+                                                <span class="min-w-0 truncate">{section.title}</span>
+                                              </Button>
+                                            }
+                                          >
+                                            <div
+                                              class="flex w-full items-center gap-2 rounded-lg border border-border/60 bg-background/80 px-2 py-1.5 shadow-sm"
+                                              onClick={(e: MouseEvent) => e.stopPropagation()}
+                                            >
+                                              <Label class="shrink-0 text-xs text-muted-foreground">
+                                                {section.title}
+                                              </Label>
+                                              <div class="min-w-0 flex-1">
+                                                <Select
+                                                  value={section.default ?? section.chars![0]}
+                                                  onChange={(v) => {
+                                                    if (v) {
+                                                      void handleExploreSelectChange(source, section, v);
+                                                    }
+                                                  }}
+                                                  options={[...section.chars!]}
+                                                  itemComponent={(itemProps) => (
+                                                    <SelectItem class="pl-2" item={itemProps.item}>
+                                                      {itemProps.item.rawValue}
+                                                    </SelectItem>
+                                                  )}
+                                                >
+                                                  <SelectTrigger
+                                                    class="h-8 w-full border-border/60 bg-background text-sm"
+                                                    aria-label={section.title}
+                                                  >
+                                                    <SelectValue<string>>
+                                                      {(state) => state.selectedOption() ?? section.default}
+                                                    </SelectValue>
+                                                    <SelectIcon />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectListbox />
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                            </div>
+                                          </Show>
+                                        </li>
+                                      );
+                                    }}
+                                  </For>
+                                </ul>
+                              </Show>
+                              <Show when={!sectionsLoading() && sections().length === 0}>
+                                <p class="py-3 text-center text-sm text-muted-foreground">该书源暂无发现内容（分类/排行榜）</p>
+                              </Show>
+                            </div>
+                          </Show>
+                        </li>
+                      );
+                    }}
+                  </For>
+                </ul>
+              </>
             )}
           </For>
-        </ul>
-      </Show>
-      <Show when={!loading() && !showSkeleton() && sources().length === 0}>
-        <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-          <p>暂无书源</p>
-          <p class="mt-1">可通过导航栏「更多」新建或导入书源</p>
-        </div>
-      </Show>
-      <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0}>
-        <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-          <p>无匹配书源</p>
-          <p class="mt-1">尝试修改搜索关键词或切换分组</p>
-        </div>
-      </Show>
-      <Show when={!loading() && !showSkeleton() && filteredSources().length > 0}>
-        <For each={displayGroups()}>
-          {(group) => (
-            <>
-              <Show when={group.name}>
-                <div class="pt-2 first:pt-0">
-                  <h3 class="text-sm font-medium text-muted-foreground px-1 pb-1.5">{group.name}</h3>
-                </div>
-              </Show>
-              <ul class="space-y-2">
-                <For each={group.sources}>
-                  {(source) => {
-              let triggerEl: HTMLDivElement | null = null;
-              const { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick } = useLongPressContextMenu(() => triggerEl);
-              const isExpanded = () => expandedSourceUrl() === source.sourceUrl;
-              const sections = (): ExploreSection[] => {
-                if (!isExploreUrlScript(source.exploreUrl)) return getExploreSections(source);
-                if (expandedSourceUrl() !== source.sourceUrl) return [];
-                return dynamicSections() ?? [];
-              };
-              const sectionsLoading = () =>
-                isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'pending';
-              const sectionsError = () =>
-                isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'errored';
-              return (
-                <li class="rounded-lg border border-border/50 bg-card overflow-hidden">
-                  <ContextMenu>
-                    <ContextMenuTrigger
-                      as="div"
-                      ref={(el) => { triggerEl = el; }}
-                      onMouseDown={(e: MouseEvent) => onPointerDown(e)}
-                      onMouseMove={(e: MouseEvent) => onPointerMove(e)}
-                      onMouseUp={(e: MouseEvent) => onPointerUp(e)}
-                      onTouchStart={(e: TouchEvent) => onPointerDown(e)}
-                      onTouchMove={(e: TouchEvent) => onPointerMove(e)}
-                      onTouchEnd={(e: TouchEvent) => onPointerUp(e)}
-                      class={cn(
-                        'flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm transition-all',
-                        'hover:bg-accent/30'
-                      )}
-                      onClick={(e: MouseEvent) => {
-                        if (shouldPreventClick()) {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          return;
-                        }
-                        toggleExpand(source.sourceUrl);
-                      }}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <div class="shrink-0 flex items-center" onClick={(e: MouseEvent) => e.stopPropagation()} role="presentation">
-                        <Checkbox
-                          checked={isSelected(source.sourceUrl)}
-                          onChange={(checked: boolean) => {
-                            const next = new Set(selectedSourceUrls());
-                            if (checked) next.add(source.sourceUrl);
-                            else next.delete(source.sourceUrl);
-                            setSelectedSourceUrls(next);
-                          }}
-                          aria-label={`选择 ${source.sourceName}`}
-                        />
-                      </div>
-                      <div class="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
-                        <span class="min-w-0 shrink truncate font-medium text-foreground" title={source.sourceName}>
-                          {source.sourceName}
-                        </span>
-                        <Show when={source.sourceGroup && !props.sourcesGroupByGroupName}>
-                          <span class="min-w-0 shrink-2 truncate rounded bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground" title={source.sourceGroup}>
-                            {source.sourceGroup}
-                          </span>
-                        </Show>
-                      </div>
-                      <div class="shrink-0 flex items-center" onClick={(e: MouseEvent) => e.stopPropagation()} role="presentation">
-                        <Switch
-                          checked={source.enabled}
-                          onChange={async (checked: boolean) => {
-                            try {
-                              await sourcesDb.enableSource(source.sourceUrl, checked);
-                              window.dispatchEvent(new CustomEvent('sources-refresh'));
-                              loadSources();
-                            } catch (e) {
-                              console.error('切换书源启用状态失败:', e);
-                              showAppToast({ title: '操作失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
-                            }
-                          }}
-                          aria-label={source.enabled ? '禁用书源' : '启用书源'}
-                        >
-                          <SwitchControl class="data-disabled:cursor-not-allowed">
-                            <SwitchThumb />
-                          </SwitchControl>
-                        </Switch>
-                      </div>
-                      <ChevronDownIcon
-                        class={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded() && 'rotate-180')}
-                      />
-                    </ContextMenuTrigger>
-                    <ContextMenuContent>
-                      <ContextMenuItem onSelect={() => props.onSourceEdit?.(source)}>
-                        编辑
-                      </ContextMenuItem>
-                      <ContextMenuItem onSelect={() => handlePinSource(source)}>
-                        置顶
-                      </ContextMenuItem>
-                      <Show when={hasLogin(source)}>
-                        <ContextMenuItem onSelect={() => props.onSourceLogin?.(source)}>
-                          登录
-                        </ContextMenuItem>
-                      </Show>
-                      <Show when={hasSearch(source)}>
-                        <ContextMenuItem onSelect={() => props.onSourceSearch?.(source)}>
-                          搜索
-                        </ContextMenuItem>
-                      </Show>
-                      <ContextMenuItem onSelect={() => handleSourceRefresh(source)}>
-                        刷新
-                      </ContextMenuItem>
-                      <ContextMenuItem
-                        class="text-destructive focus:text-destructive"
-                        onSelect={() => {
-                          setSourceToDelete(source);
-                          setDeleteDialogOpen(true);
-                        }}
-                      >
-                        删除
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
-
-                  {/* 展开内容：书源内置的发现子项（分类、排行榜等，参照 legado） */}
-                  <Show when={isExpanded()}>
-                    <div
-                      class="border-t border-border/50 bg-muted/20 px-3 py-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Show when={sectionsLoading()}>
-                        <ul class="flex flex-wrap justify-center gap-2 py-2">
-                          {/* 模拟不同宽度的按钮：整行、两列、四列 */}
-                          <li class="min-w-0 flex-[1_1_100%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_45%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_45%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_25%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_25%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_25%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                          <li class="min-w-0 flex-[1_1_25%]">
-                            <div class="h-9 w-full rounded-lg bg-muted/60 animate-pulse border border-border/30" />
-                          </li>
-                        </ul>
-                      </Show>
-                      <Show when={sectionsError()}>
-                        <div class="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 my-2">
-                          <p class="text-center text-sm text-destructive">
-                            <span class="font-medium">加载失败：</span>
-                            <span class="text-xs text-destructive/80">
-                              {dynamicSections.error instanceof Error 
-                                ? dynamicSections.error.message 
-                                : '网络请求失败，请检查网络连接'}
-                            </span>
-                          </p>
-                        </div>
-                      </Show>
-                      <Show when={!sectionsLoading() && !sectionsError() && sections().length > 0}>
-                        <ul class="flex flex-wrap justify-center gap-2">
-                          <For each={sections()}>
-                            {(section) => {
-                              const basisPct = section.style?.layout_flexBasisPercent ?? 1;
-                              // Legado: layout_flexBasisPercent 1=整行, 0.45≈两列, 0.25=四列
-                              const flexClass =
-                                basisPct <= 0.25
-                                  ? 'min-w-0 flex-[1_1_25%]'
-                                  : basisPct <= 0.45
-                                    ? 'min-w-0 flex-[1_1_45%]'
-                                    : 'min-w-0 flex-[1_1_100%]';
-                              const isClickable = !!section.url;
-                              return (
-                                <li class={flexClass}>
-                                  <button
-                                    type="button"
-                                    class="flex w-full items-center justify-center rounded-lg border border-border/60 bg-background/80 px-3 py-2 text-center text-sm font-medium text-foreground shadow-sm transition-colors hover:border-border hover:bg-accent/50 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-background/80"
-                                    classList={{ 'cursor-pointer': isClickable, 'cursor-default': !isClickable }}
-                                    disabled={!isClickable}
-                                    onClick={() => props.onExploreSectionClick?.(source, section)}
-                                  >
-                                    <span class="min-w-0 truncate">{section.title}</span>
-                                  </button>
-                                </li>
-                              );
-                            }}
-                          </For>
-                        </ul>
-                      </Show>
-                      <Show when={!sectionsLoading() && sections().length === 0}>
-                        <p class="py-3 text-center text-sm text-muted-foreground">该书源暂无发现内容（分类/排行榜）</p>
-                      </Show>
-                    </div>
-                  </Show>
-                </li>
-                  );
-                }}
-                </For>
-              </ul>
-            </>
-          )}
-        </For>
-      </Show>
+        </Show>
       </div>
 
       {/* 底部固定：批量操作栏（无选中时按钮禁用，分界线上方为可滚动内容） */}
       <div class="shrink-0 border-t border-border px-3 py-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <span class="text-sm text-muted-foreground mr-1">已选 {selectedCount()} 项</span>
-            <Button variant="ghost" size="sm" onClick={selectAll} disabled={filteredSources().length === 0}>
-              全选
+            <Button variant="outline" size="sm" onClick={toggleSelectAll} disabled={filteredSources().length === 0}>
+              {allFilteredSelected() ? '取消全选' : '全选'}({filteredSelectedCount()}/{filteredSources().length})
             </Button>
-            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={selectedCount() === 0}>
+            <Button variant="outline" size="sm" onClick={clearSelection} disabled={selectedCount() === 0}>
               取消选中
             </Button>
-            <Button variant="ghost" size="sm" onClick={invertSelection} disabled={filteredSources().length === 0}>
+            <Button variant="outline" size="sm" onClick={invertSelection} disabled={filteredSources().length === 0}>
               反选
             </Button>
           </div>
@@ -853,11 +963,11 @@ export function SourcesPage(props: SourcesPageProps) {
                     variant="outline"
                     size="sm"
                     disabled={selectedCount() === 0}
-                    class="gap-1.5"
+                    class={BATCH_MENU_TRIGGER_CLASS}
                     {...props}
                   >
                     操作
-                    <ChevronDownIcon class="h-4 w-4 opacity-50" />
+                    <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
                   </Button>
                 )}
               />
@@ -882,7 +992,7 @@ export function SourcesPage(props: SourcesPageProps) {
           {/* 紧凑：删除 + 更多（448px <= 父容器 < 1026px） */}
           <div class="hidden @min-[448px]:flex @min-[1026px]:hidden items-center gap-2">
             <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>
-              删除
+              删除所选
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -891,11 +1001,11 @@ export function SourcesPage(props: SourcesPageProps) {
                     variant="outline"
                     size="sm"
                     disabled={selectedCount() === 0}
-                    class="gap-1.5"
+                    class={BATCH_MENU_TRIGGER_CLASS}
                     {...props}
                   >
                     更多
-                    <ChevronDownIcon class="h-4 w-4 opacity-50" />
+                    <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
                   </Button>
                 )}
               />
@@ -952,39 +1062,39 @@ export function SourcesPage(props: SourcesPageProps) {
       />
 
       {/* 批量删除确认 */}
-      <Dialog open={batchDeleteCount() > 0} onOpenChange={(open) => !open && setBatchDeleteCount(0)}>
-        <DialogContent class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0')}>
-          <DialogHeader class="shrink-0 px-6 pt-6">
-            <DialogTitle>删除所选书源</DialogTitle>
-            <DialogDescription>
+      <AppDialog open={batchDeleteCount() > 0} onOpenChange={(open) => !open && setBatchDeleteCount(0)}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选书源</AppDialogTitle>
+            <AppDialogDescription>
               确定删除所选 {batchDeleteCount()} 个书源？删除后无法恢复。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter>
             <Button variant="outline" onClick={() => setBatchDeleteCount(0)}>
               取消
             </Button>
             <Button variant="destructive" onClick={handleBatchDeleteConfirm}>
               删除
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
 
       {/* 校验结果 */}
-      <Dialog open={validateDialogOpen()} onOpenChange={setValidateDialogOpen}>
-        <DialogContent class={cn(dialogViewportLimits, 'flex flex-col overflow-hidden p-0')}>
-          <DialogHeader class="shrink-0 px-6 pt-6">
-            <DialogTitle>书源校验结果</DialogTitle>
-            <DialogDescription>
+      <AppDialog open={validateDialogOpen()} onOpenChange={setValidateDialogOpen}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>书源校验结果</AppDialogTitle>
+            <AppDialogDescription>
               <Show when={validateLoading() && validateProgress()}>
                 {validateProgress()!.current} / {validateProgress()!.total}：{validateProgress()!.name || '…'}
               </Show>
               <Show when={!validateLoading() && validateResults().length > 0}>
                 共 {validateResults().length} 个书源，可查看各检查项结果。
               </Show>
-            </DialogDescription>
-          </DialogHeader>
+            </AppDialogDescription>
+          </AppDialogHeader>
           <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <Show when={validateLoading() && validateResults().length === 0}>
               <p class="text-sm text-muted-foreground">正在校验中…</p>
@@ -1025,13 +1135,13 @@ export function SourcesPage(props: SourcesPageProps) {
               )}
             </For>
           </div>
-          <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+          <AppDialogFooter>
             <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>
               关闭
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </div>
   );
 }

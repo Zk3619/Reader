@@ -608,7 +608,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             )}
           />
 
-          <div class="flex-1 overflow-y-auto overscroll-contain">
+          <div class="flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain">
             {/* 窄屏滚动内容：用 flex + min-h-full 保证至少占满视口，底部用填充块延伸白底到 ActionBar 消除缝隙 */}
             <div class="flex min-h-full flex-col">
             {/* 封面区域：白色卡片从封面中部开始，封面下半部分覆盖在白色背景上 */}
@@ -741,7 +741,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             {/* ── 右栏：详细信息（唯一可滚动区域） ── */}
             <div class="flex min-h-0 flex-1 flex-col bg-background overflow-hidden">
               {/* 白色背景从顶部开始，仅此区域可滚动 */}
-              <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
+              <div class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain px-4 py-5">
               <Show
                 when={loadError()}
                 fallback={

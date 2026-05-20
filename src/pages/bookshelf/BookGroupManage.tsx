@@ -368,7 +368,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
 
   return (
     <>
-      <div class="flex-1 min-h-0 overflow-y-auto pt-2 space-y-6 w-full">
+      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2 space-y-6 w-full">
         <Show when={error()}>
           <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             {error()}

@@ -1,7 +1,7 @@
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_prevent_default::Flags;
 #[cfg(target_os = "windows")]
@@ -326,7 +326,7 @@ async fn fetch_url_text(url: String, timeout_ms: Option<u64>) -> Result<String, 
     let request_url = reqwest::Url::parse(&normalized_url)
         .map_err(|e| format!("URL 解析失败: {}", e))?;
 
-    let mut client_builder = reqwest::Client::builder()
+    let client_builder = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(30000)))
         .connect_timeout(std::time::Duration::from_secs(15))
@@ -336,9 +336,7 @@ async fn fetch_url_text(url: String, timeout_ms: Option<u64>) -> Result<String, 
         .deflate(true);
     // 桌面端信任无效证书以兼容部分书源站；移动端使用默认校验证书
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        client_builder = client_builder.danger_accept_invalid_certs(true);
-    }
+    let client_builder = client_builder.danger_accept_invalid_certs(true);
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -424,6 +422,58 @@ fn apply_http_cookies_to_webview(
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const INNER_WEB_PANEL_LABEL: &str = "reader-inner-web";
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[derive(Clone, Copy)]
+struct InnerWebPanelRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn inner_web_panel_rect_store() -> &'static Mutex<Option<InnerWebPanelRect>> {
+    static STORE: OnceLock<Mutex<Option<InnerWebPanelRect>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn store_inner_web_panel_rect(x: f64, y: f64, width: f64, height: f64) {
+    *inner_web_panel_rect_store().lock().unwrap() = Some(InnerWebPanelRect {
+        x,
+        y,
+        width: width.max(1.0),
+        height: height.max(1.0),
+    });
+}
+
+/// hide() 在 Windows WebView2 子 WebView 上有时仍留合成层；移出视口并缩到 1×1 作为兜底。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn apply_inner_web_panel_visible(panel: &tauri::Webview, visible: bool) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize};
+
+    if visible {
+        if let Some(r) = *inner_web_panel_rect_store().lock().unwrap() {
+            panel
+                .set_position(LogicalPosition::new(r.x, r.y))
+                .map_err(|e| e.to_string())?;
+            panel
+                .set_size(LogicalSize::new(r.width, r.height))
+                .map_err(|e| e.to_string())?;
+        }
+        panel.show().map_err(|e| e.to_string())?;
+    } else {
+        let _ = panel.hide();
+        panel
+            .set_position(LogicalPosition::new(-10_000.0, -10_000.0))
+            .map_err(|e| e.to_string())?;
+        panel
+            .set_size(LogicalSize::new(1.0, 1.0))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 /// 备用：独立子窗口（WebviewWindow.parent），与内嵌 add_child 面板互斥 label
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -536,10 +586,13 @@ async fn open_inner_web_panel(
 
     let url = url.trim().to_string();
     let cookies_str = cookies.trim().to_string();
-    if url.is_empty() || !url.starts_with("http") {
+    let ok_http = url.starts_with("http://") || url.starts_with("https://");
+    let ok_data = url.starts_with("data:text/html");
+    if url.is_empty() || !(ok_http || ok_data) {
         return Err("URL 无效".to_string());
     }
-    url.parse::<url::Url>()
+    let target_url = url
+        .parse::<url::Url>()
         .map_err(|e: url::ParseError| e.to_string())?;
     let w = width.max(1.0);
     let h = height.max(1.0);
@@ -547,46 +600,54 @@ async fn open_inner_web_panel(
     let size = LogicalSize::new(w, h);
 
     if let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) {
-        if !cookies_str.is_empty() {
+        if !cookies_str.is_empty() && ok_http {
             apply_http_cookies_to_webview(&panel, &url, &cookies_str)?;
         }
+        store_inner_web_panel_rect(x, y, w, h);
         panel
             .set_position(pos)
             .map_err(|e| e.to_string())?;
         panel.set_size(size).map_err(|e| e.to_string())?;
-        let nav = format!(
-            "window.location.replace({});",
-            serde_json::to_string(&url).unwrap()
-        );
-        panel.eval(&nav).map_err(|e| e.to_string())?;
-        let _ = panel.set_focus();
-        return Ok(());
+        // WebView2 会拦截已加载页再跳 data: 顶层导航；data: 时改为重建子 WebView。
+        if ok_data {
+            panel.close().map_err(|e| e.to_string())?;
+        } else {
+            let nav = format!(
+                "window.location.replace({});",
+                serde_json::to_string(&url).unwrap()
+            );
+            panel.eval(&nav).map_err(|e| e.to_string())?;
+            let _ = panel.set_focus();
+            return Ok(());
+        }
     }
 
     let window = app
         .get_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
-    let blank = "about:blank"
-        .parse::<url::Url>()
-        .map_err(|e: url::ParseError| e.to_string())?;
+    let app_for_nav = app.clone();
     let panel = window
         .add_child(
-            WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(blank))
+            WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(target_url))
+                .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
                 .focused(true),
             pos,
             size,
         )
         .map_err(|e| e.to_string())?;
 
-    if !cookies_str.is_empty() {
+    if !cookies_str.is_empty() && ok_http {
         apply_http_cookies_to_webview(&panel, &url, &cookies_str)?;
     }
-    let nav = format!(
-        "window.location.replace({});",
-        serde_json::to_string(&url).unwrap()
-    );
-    panel.eval(&nav).map_err(|e| e.to_string())?;
+    store_inner_web_panel_rect(x, y, w, h);
+    if ok_http {
+        let nav = format!(
+            "window.location.replace({});",
+            serde_json::to_string(&url).unwrap()
+        );
+        panel.eval(&nav).map_err(|e| e.to_string())?;
+    }
     let _ = panel.set_focus();
     Ok(())
 }
@@ -605,11 +666,14 @@ async fn reposition_inner_web_panel(
     let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) else {
         return Ok(());
     };
+    let w = width.max(1.0);
+    let h = height.max(1.0);
+    store_inner_web_panel_rect(x, y, w, h);
     panel
         .set_position(LogicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     panel
-        .set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))
+        .set_size(LogicalSize::new(w, h))
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -659,16 +723,19 @@ async fn open_inner_web_child_window(
 
     let url = url.trim().to_string();
     let cookies_str = cookies.trim().to_string();
-    if url.is_empty() || !url.starts_with("http") {
+    let ok_http = url.starts_with("http://") || url.starts_with("https://");
+    let ok_data = url.starts_with("data:text/html");
+    if url.is_empty() || !(ok_http || ok_data) {
         return Err("URL 无效".to_string());
     }
-    url.parse::<url::Url>()
+    let target_url = url
+        .parse::<url::Url>()
         .map_err(|e: url::ParseError| e.to_string())?;
     let w = width.max(1.0);
     let h = height.max(1.0);
 
     if let Some(child) = app.get_webview_window(INNER_WEB_CHILD_LABEL) {
-        if !cookies_str.is_empty() {
+        if !cookies_str.is_empty() && ok_http {
             let wv = app
                 .get_webview(INNER_WEB_CHILD_LABEL)
                 .ok_or_else(|| "子窗口 WebView 不存在".to_string())?;
@@ -680,28 +747,31 @@ async fn open_inner_web_child_window(
         child
             .set_size(LogicalSize::new(w, h))
             .map_err(|e| e.to_string())?;
-        let nav = format!(
-            "window.location.replace({});",
-            serde_json::to_string(&url).unwrap()
-        );
-        child.eval(&nav).map_err(|e| e.to_string())?;
-        let _ = child.show();
-        let _ = child.set_focus();
-        return Ok(());
+        if ok_data {
+            child.close().map_err(|e| e.to_string())?;
+        } else {
+            let nav = format!(
+                "window.location.replace({});",
+                serde_json::to_string(&url).unwrap()
+            );
+            child.eval(&nav).map_err(|e| e.to_string())?;
+            let _ = child.show();
+            let _ = child.set_focus();
+            return Ok(());
+        }
     }
 
     let parent = app
         .get_webview_window("main")
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
-    let blank = "about:blank"
-        .parse::<url::Url>()
-        .map_err(|e: url::ParseError| e.to_string())?;
+    let app_for_nav = app.clone();
     let child = WebviewWindowBuilder::new(
         &app,
         INNER_WEB_CHILD_LABEL,
-        WebviewUrl::External(blank),
+        WebviewUrl::External(target_url),
     )
+    .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
     .parent(&parent)
     .map_err(|e| e.to_string())?
     .title("")
@@ -715,16 +785,18 @@ async fn open_inner_web_child_window(
     .build()
     .map_err(|e| e.to_string())?;
 
-    if !cookies_str.is_empty() {
+    if !cookies_str.is_empty() && ok_http {
         if let Some(wv) = app.get_webview(INNER_WEB_CHILD_LABEL) {
             apply_http_cookies_to_webview(&wv, &url, &cookies_str)?;
         }
     }
-    let nav = format!(
-        "window.location.replace({});",
-        serde_json::to_string(&url).unwrap()
-    );
-    child.eval(&nav).map_err(|e| e.to_string())?;
+    if ok_http {
+        let nav = format!(
+            "window.location.replace({});",
+            serde_json::to_string(&url).unwrap()
+        );
+        child.eval(&nav).map_err(|e| e.to_string())?;
+    }
     let _ = child.set_focus();
     Ok(())
 }
@@ -811,6 +883,44 @@ async fn focus_inner_web_panel(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+/// 临时隐藏内嵌原生 WebView，使主 WebView 上的下拉/对话框/Toast 能显示在最上层
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn set_inner_web_panel_visible(
+    app: tauri::AppHandle,
+    visible: bool,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let mut has_surface = false;
+
+    if let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) {
+        apply_inner_web_panel_visible(&panel, visible)?;
+        has_surface = true;
+    }
+
+    if let Some(child) = app.get_webview_window(INNER_WEB_CHILD_LABEL) {
+        if visible {
+            child.show().map_err(|e| e.to_string())?;
+        } else {
+            child.hide().map_err(|e| e.to_string())?;
+        }
+        has_surface = true;
+    }
+
+    if !has_surface {
+        return Ok(());
+    }
+
+    if visible {
+        let _ = try_focus_inner_web_surface(&app);
+    } else if let Some(main) = app.get_webview_window("main") {
+        let _ = main.set_focus();
+    }
+
+    Ok(())
+}
+
 /// 注册在所有子 frame 文档开始前执行的 bootstrap（修复 iframe 内 Tauri 注入报错 + postMessage 桥）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -837,6 +947,71 @@ fn prepare_login_open(url: String, cookies: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
         .insert(id.clone(), (url, cookies));
     Ok(id)
+}
+
+/// 从内嵌 data: HTML 子 WebView 由 `window.__TAURI__.core.invoke` 调用，派发网络书源导入（宿主侧拉取 JSON）
+#[tauri::command]
+fn reader_emit_network_booksource_import(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Ok(());
+    }
+    app.emit(
+        "reader-network-booksource-import",
+        serde_json::json!({ "url": url }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn handle_inner_web_special_uri(app: &tauri::AppHandle, uri: &str) -> bool {
+    let s = uri.trim();
+    let sl = s.to_ascii_lowercase();
+    if sl.starts_with("yuedu://") {
+        if let Ok(parsed) = url::Url::parse(s) {
+            if let Some(src_raw) = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "src")
+                .map(|(_, v)| v.to_string())
+            {
+                let src = src_raw.trim().to_string();
+                if src.starts_with("http://") || src.starts_with("https://") {
+                    let _ = app.emit(
+                        "reader-network-booksource-import",
+                        serde_json::json!({ "url": src }),
+                    );
+                    return true;
+                }
+            }
+        }
+        let _ = app.emit(
+            "reader-import-deeplink",
+            serde_json::json!({ "uri": s.to_string() }),
+        );
+        return true;
+    }
+    if sl.starts_with("legado://") {
+        let _ = app.emit(
+            "reader-import-deeplink",
+            serde_json::json!({ "uri": s.to_string() }),
+        );
+        return true;
+    }
+    false
+}
+
+fn emit_argv_import_deeplinks(emitter: &tauri::AppHandle, argv: impl IntoIterator<Item = String>) {
+    for arg in argv {
+        let trimmed = arg.trim().to_string();
+        let tl = trimmed.to_ascii_lowercase();
+        if tl.starts_with("legado://") || tl.starts_with("yuedu://") {
+            let _ = emitter.emit(
+                "reader-import-deeplink",
+                serde_json::json!({ "uri": trimmed }),
+            );
+        }
+    }
 }
 
 /// 直接创建 WebviewWindow：先加载 about:blank，用 Tauri set_cookie API 为目标域注入 cookie，再导航到目标 URL（用于用户后台等，避免协议 302 导致 cookie 归属错误）。
@@ -994,12 +1169,12 @@ pub fn run() {
         //         )
         //         .build(),
         // )
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 当第二个实例启动时，激活主窗口
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 window.show().unwrap();
                 window.set_focus().unwrap();
             }
+            emit_argv_import_deeplinks(&app, argv);
         }));
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1043,6 +1218,11 @@ pub fn run() {
             resp.body(vec![]).unwrap()
         });
 
+    let builder = builder.setup(|app| {
+        emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
+        Ok(())
+    });
+
     builder
         .invoke_handler(tauri::generate_handler![
             download_binary,
@@ -1052,6 +1232,7 @@ pub fn run() {
             get_config,
             set_config,
             run_login_script_rust,
+            reader_emit_network_booksource_import,
             prepare_login_open,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             set_cookies_for_inner_web,
@@ -1073,6 +1254,8 @@ pub fn run() {
             set_inner_web_session_active,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             focus_inner_web_panel,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            set_inner_web_panel_visible,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             open_inner_web_child_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

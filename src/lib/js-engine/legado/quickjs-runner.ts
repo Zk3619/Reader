@@ -50,12 +50,18 @@ function wrapScriptForReeval(script: string): string {
 }
 
 function readGlobalResult(vm: QuickJSContext): unknown {
-  const rh = vm.getProp(vm.global, 'result');
-  if (!rh) return undefined;
+  const r = vm.evalCode(
+    '(typeof globalThis.result !== "undefined" ? globalThis.result : (typeof result !== "undefined" ? result : undefined))'
+  );
+  if (r.error) {
+    const err = vm.dump(r.error);
+    r.error.dispose();
+    throw new Error(`readGlobalResult: ${String(err)}`);
+  }
   try {
-    return vm.dump(rh);
+    return vm.dump(r.value);
   } finally {
-    rh.dispose();
+    r.value.dispose();
   }
 }
 
@@ -144,7 +150,7 @@ export async function runLegadoScriptQuickJS(
         options.beforeEval?.(vm);
         evalScript(vm, scriptText, rt);
         if (pending.length > 0) await Promise.all(pending);
-        evalCodeVoid(vm, 'result = undefined;');
+        evalCodeVoid(vm, 'globalThis.result = undefined;');
         pending.length = 0;
         options.beforeEval?.(vm);
         evalScript(vm, scriptText, rt);

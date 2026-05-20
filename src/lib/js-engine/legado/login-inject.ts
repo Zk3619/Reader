@@ -36,6 +36,7 @@ export interface LoginInjectContext {
     deviceID: () => string;
     timeFormat: (ms: number) => string;
     startBrowser: (url: string, title?: string) => void;
+    openUrl: (url: string) => void;
     base64Encode: (s: string) => string;
     base64Decode: (s: string) => string;
     request: AjaxRequestFn;
@@ -145,6 +146,9 @@ export function createLoginInjector(ctx: LoginInjectContext): LegadoInjector {
           String(vm.dump(u)),
           title != null && vm.dump(title) !== undefined ? String(vm.dump(title)) : undefined
         );
+      });
+      bindVmFunction(vm, javaObj, 'openUrl', (u) => {
+        ctx.java.openUrl(String(vm.dump(u)));
       });
       bindVmFunction(vm, javaObj, 'startBrowserAwait', (u, title) => {
         try {

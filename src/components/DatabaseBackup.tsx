@@ -5,7 +5,15 @@
 
 import { createSignal, Show, onMount, createEffect } from 'solid-js';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  DialogTrigger,
+} from '@/components/AppDialog';
 import { createBackup, restoreBackup } from '@/lib/database/backup-manager';
 import { getDatabaseLocation, checkDatabaseExists, openDatabaseDirectory } from '@/lib/database/db-location';
 import { isTauri } from '@/lib/platform/detect';
@@ -13,7 +21,6 @@ import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getConfig, setDataDir } from '@/lib/platform/config-file';
 import { DownloadIcon, UploadIcon } from './icons';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export function DatabaseBackup() {
   const [isExporting, setIsExporting] = createSignal(false);
@@ -111,19 +118,19 @@ export function DatabaseBackup() {
   }
 
   return (
-    <Dialog open={showDialog()} onOpenChange={setShowDialog}>
+    <AppDialog open={showDialog()} onOpenChange={setShowDialog}>
       <DialogTrigger as={Button} variant="outline" class="gap-2">
         <DownloadIcon class="h-4 w-4" />
         数据备份
       </DialogTrigger>
       
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>数据库备份与恢复</DialogTitle>
-          <DialogDescription>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>数据库备份与恢复</AppDialogTitle>
+          <AppDialogDescription>
             导出数据库备份文件，或从备份文件恢复数据
-          </DialogDescription>
-        </DialogHeader>
+          </AppDialogDescription>
+        </AppDialogHeader>
 
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           {/* 数据库位置信息 */}
@@ -278,12 +285,12 @@ export function DatabaseBackup() {
           </Show>
         </div>
 
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={() => setShowDialog(false)}>
             关闭
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

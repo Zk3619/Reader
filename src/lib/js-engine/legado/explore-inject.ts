@@ -94,6 +94,7 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
         getCookie: (url) => ctx.cookie.getCookie(url),
         request: ctx.request,
         applyDuration: dateVm.applyAjaxDuration,
+        twoPassDefer: rt.coordinator.mode === 'two-pass',
       });
     });
 

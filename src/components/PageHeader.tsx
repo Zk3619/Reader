@@ -71,8 +71,15 @@ export interface PageHeaderProps {
   showWindowControls?: boolean;
   /** 自定义类名 */
   class?: string;
-  /** 是否固定在顶部（默认 false，跟随内容滚动） */
+  /**
+   * 固定在页面顶部、不参与内容区滚动。
+   * 父级须为 `flex flex-col overflow-hidden`（如 `h-dvh`），内容区单独 `flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both`。
+   */
+  pinToTop?: boolean;
+  /** 是否在滚动容器内吸顶（默认 false）；与 pinToTop 互斥，pinToTop 优先 */
   sticky?: boolean;
+  /** 操作按钮与主题/窗口控制之间的自定义区域（如内嵌页「更多」菜单） */
+  trailing?: JSX.Element;
   /** 是否支持拖拽（用于 Tauri 窗口，默认 false） */
   draggable?: boolean;
 }
@@ -185,13 +192,15 @@ export function PageHeader(props: PageHeaderProps) {
 
   const showThemeToggle = props.showThemeToggle !== false;
   const showWindowControls = props.showWindowControls !== false;
+  const pinToTop = props.pinToTop === true;
 
   return (
     <header
       class={cn(
         'flex h-14 shrink-0 items-center gap-3 border-b border-border/50 bg-background/95 px-4 backdrop-blur',
         'safe-area-inset-top',
-        props.sticky && 'sticky top-0 z-10',
+        pinToTop && 'z-20',
+        !pinToTop && props.sticky && 'sticky top-0 z-10',
         props.class
       )}
       data-tauri-drag-region={props.draggable}
@@ -259,8 +268,21 @@ export function PageHeader(props: PageHeaderProps) {
         </div>
       </Show>
 
+      <Show when={props.trailing}>
+        <div class={cn('flex shrink-0 items-center', props.draggable && 'no-drag')}>
+          {props.trailing}
+        </div>
+      </Show>
+
       {/* 竖向分隔：仅桌面端（Tauri 且非移动端）且在左侧有操作按钮时显示 */}
-      <Show when={(props.actions && props.actions.length > 0) && isTauri() && !isMobile()}>
+      <Show
+        when={
+          ((props.actions && props.actions.length > 0) || props.trailing) &&
+          (showThemeToggle || showWindowControls) &&
+          isTauri() &&
+          !isMobile()
+        }
+      >
         <Separator orientation="vertical" class={cn('mx-2 h-6', props.draggable && 'no-drag')} />
       </Show>
       {/* 主题切换与窗口控制 */}

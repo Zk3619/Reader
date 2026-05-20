@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
-import { cn } from '@/lib/utils';
 import {
   SearchIcon,
   StarIcon,
@@ -40,6 +39,23 @@ export interface SourcesPageToolbarProps {
   onSourcesImportQR?: () => void;
   showSourcesImportQR?: boolean;
   onOpenSourceGroupManage?: () => void;
+}
+
+/** 菜单内单选指示：外圈始终可见，选中时叠加内点（对齐 RadioGroup 细线样式） */
+function MenuRadioIndicator(props: { selected: boolean }) {
+  return (
+    <span
+      class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none"
+      aria-label={props.selected ? '已选' : '未选'}
+    >
+      <span class="relative flex size-4 items-center justify-center" aria-hidden>
+        <span class="size-4 rounded-full border border-primary" />
+        <Show when={props.selected}>
+          <span class="absolute size-2 rounded-full bg-primary" />
+        </Show>
+      </span>
+    </span>
+  );
 }
 
 export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
@@ -204,18 +220,7 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             }
             class="flex items-center gap-2"
           >
-            <span
-              class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none"
-              aria-label={props.sourceSearchMode === 'fuzzy' ? '已选' : '未选'}
-            >
-              <span
-                class={cn(
-                  'rounded-full border-2 border-primary',
-                  props.sourceSearchMode === 'fuzzy' ? 'size-2.5 bg-primary' : 'size-4'
-                )}
-                aria-hidden
-              />
-            </span>
+            <MenuRadioIndicator selected={props.sourceSearchMode === 'fuzzy'} />
             <span>模糊搜索</span>
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -224,18 +229,7 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             }
             class="flex items-center gap-2"
           >
-            <span
-              class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none"
-              aria-label={props.sourceSearchMode === 'extended' ? '已选' : '未选'}
-            >
-              <span
-                class={cn(
-                  'rounded-full border-2 border-primary',
-                  props.sourceSearchMode === 'extended' ? 'size-2.5 bg-primary' : 'size-4'
-                )}
-                aria-hidden
-              />
-            </span>
+            <MenuRadioIndicator selected={props.sourceSearchMode === 'extended'} />
             <span>扩展搜索规则</span>
           </DropdownMenuItem>
         </DropdownMenuContent>

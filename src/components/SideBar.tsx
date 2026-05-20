@@ -133,39 +133,39 @@ export function SideBar(props: SideBarProps) {
           <>
             <Separator />
             <SidebarGroup>
-            <SidebarGroupLabel class="text-xs font-semibold text-sidebar-foreground/70">
-              最近读过
-            </SidebarGroupLabel>
-            <SidebarGroupContent class="mt-3">
-              <SidebarMenu>
-                <For each={recentBooks().slice(0, 5)}>
-                  {(book, index) => (
-                    <>
-                      <Show when={index() > 0}>
-                        <Separator class="my-1 h-0.3" />
-                      </Show>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          class={sidebarNavButtonClass(
-                            false,
-                            "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left"
-                          )}
-                          tooltip={`${book.title} - ${book.chapterName}`}
-                        >
-                          <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
-                            {book.title}
-                          </span>
-                          <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
-                            {book.chapterName}
-                          </span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    </>
-                  )}
-                </For>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+              <SidebarGroupLabel class="text-xs font-semibold text-sidebar-foreground/70">
+                最近读过
+              </SidebarGroupLabel>
+              <SidebarGroupContent class="mt-3">
+                <SidebarMenu>
+                  <For each={recentBooks().slice(0, 5)}>
+                    {(book, index) => (
+                      <>
+                        <Show when={index() > 0}>
+                          <Separator class="my-1 h-0.3" />
+                        </Show>
+                        <SidebarMenuItem>
+                          <SidebarMenuButton
+                            class={sidebarNavButtonClass(
+                              false,
+                              "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left"
+                            )}
+                            tooltip={`${book.title} - ${book.chapterName}`}
+                          >
+                            <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
+                              {book.title}
+                            </span>
+                            <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
+                              {book.chapterName}
+                            </span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      </>
+                    )}
+                  </For>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
           </>
         </Show>
       </SidebarContent>

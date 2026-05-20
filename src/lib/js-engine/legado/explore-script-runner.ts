@@ -6,8 +6,8 @@
 import { get as httpGet, post } from '@/lib/http';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
-import type { ExploreSection } from '@/lib/book-source/explore-sections';
-import { initQuickJSRuntime, isQuickJSFallback } from '../core/runtime';
+import { mapRawExploreItem, type ExploreSection } from '@/lib/book-source/explore-sections';
+import { evalCodeVoid, initQuickJSRuntime, isQuickJSFallback } from '../core/runtime';
 import { createExploreInjector } from './explore-inject';
 import { runLegadoScriptQuickJS } from './quickjs-runner';
 import { installScriptDateShim } from './script-date-shim';
@@ -139,12 +139,16 @@ async function tryRunExploreScriptQuickJS(
   });
 
   try {
+    // two-pass：首轮 ajax 返回空串，次轮走 URL 缓存。suspend 的挂起异常会被书源里 try/catch 吞掉（如 discovestyle）。
     const raw = await runLegadoScriptQuickJS({
       script: fullScript,
       baseUrl,
       timeoutMs: SCRIPT_TIMEOUT_MS,
-      mode: 'suspend',
+      mode: 'two-pass',
       inject: injector,
+      beforeEval: (vm) => {
+        evalCodeVoid(vm, 'globalThis.result = undefined;');
+      },
     });
     const sections = parseScriptResult(raw);
     if (sections.length === 0 && raw != null) {
@@ -333,8 +337,17 @@ async function runExploreScriptLegacy(
         pending = [];
       }
       run(scopeObj, fullScript);
-      if (pending.length > 0) await Promise.all(pending);
-      if (scopeObj.result !== undefined) return scopeObj.result;
+      const hadAsyncAjax = pending.length > 0;
+      if (hadAsyncAjax) await Promise.all(pending);
+      // 脚本在 java.ajax 返回空串时已执行 result=JSON.stringify(...)，须等 ajax 入缓存后重跑
+      if (scopeObj.result !== undefined) {
+        if (hadAsyncAjax && round < maxRounds - 1) {
+          scopeObj.result = undefined;
+          prevCacheSize = ajaxCache.size;
+          continue;
+        }
+        return scopeObj.result;
+      }
       if (ajaxCache.size === 0 || ajaxCache.size === prevCacheSize) break;
       prevCacheSize = ajaxCache.size;
     }
@@ -423,28 +436,8 @@ function parseScriptResult(raw: unknown): ExploreSection[] {
   const sections: ExploreSection[] = [];
   for (const item of arr) {
     if (item && typeof item === 'object') {
-      const o = item as Record<string, unknown>;
-      const title = o.title ?? o.name ?? o.label;
-      const url = o.url ?? o.link;
-      if (title != null && String(title).trim()) {
-        const styleRaw = o.style;
-        let style: ExploreSection['style'] | undefined;
-        if (styleRaw && typeof styleRaw === 'object' && !Array.isArray(styleRaw)) {
-          const s = styleRaw as Record<string, unknown>;
-          const grow = s.layout_flexGrow;
-          const basis = s.layout_flexBasisPercent;
-          if (typeof grow === 'number' || typeof basis === 'number') {
-            style = {};
-            if (typeof grow === 'number') style.layout_flexGrow = grow;
-            if (typeof basis === 'number') style.layout_flexBasisPercent = basis;
-          }
-        }
-        sections.push({
-          title: String(title).trim(),
-          url: typeof url === 'string' ? url : undefined,
-          style,
-        });
-      }
+      const mapped = mapRawExploreItem(item as Record<string, unknown>);
+      if (mapped) sections.push(mapped);
     }
   }
   return sections;

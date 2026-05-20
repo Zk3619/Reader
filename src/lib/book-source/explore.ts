@@ -3,11 +3,44 @@
  * 对应 legado 项目的 WebBook.exploreBook
  */
 
-import { get } from '@/lib/http';
+import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
+import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
+import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import type { BookSource, ExploreRule } from '@/types';
 import type { SearchBook } from '@/types';
+import { isLegadoAjaxBookListExploreUrl } from './explore-legado-ajax';
+import { tryFormatDisplayUpdateTime } from '@/lib/format-display-time';
 import { buildUrl, parseHeaders, resolveUrl, detectContentType } from './utils';
+
+/** JSON 发现列表常见更新时间字段（如晴天书架 last_chapter_update_time） */
+const JSON_UPDATE_TIME_PATHS = [
+  '$.last_chapter_update_time',
+  '$.last_update_time',
+  '$.update_time',
+] as const;
+
+/** 拆分书源 lastChapter 模板中的「章节 • 时间」 */
+function splitLastChapterField(raw: string): { title?: string; embeddedTime?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  const sep = trimmed.search(/\s*[•·]\s*/);
+  if (sep < 0) return { title: trimmed };
+  const title = trimmed.slice(0, sep).trim();
+  const embeddedTime = trimmed.slice(sep).replace(/^\s*[•·]\s*/, '').trim();
+  return {
+    title: title || undefined,
+    embeddedTime: embeddedTime || undefined,
+  };
+}
+
+async function pickJsonUpdateTime(context: RuleContext): Promise<string | undefined> {
+  for (const path of JSON_UPDATE_TIME_PATHS) {
+    const v = (await analyzeString(path, context)).trim();
+    if (v) return v;
+  }
+  return undefined;
+}
 
 /**
  * 发现书籍（浏览推荐书籍）
@@ -15,6 +48,118 @@ import { buildUrl, parseHeaders, resolveUrl, detectContentType } from './utils';
  * @param page 页码（从 1 开始）
  * @param exploreUrlOverride 可选：发现页子分类 URL（如点击排行榜/标签后的 URL），支持 {{page}} 分页
  */
+function mergeCookieHeader(stored: string, headerCookie: string | undefined): string {
+  const a = (stored ?? '').trim();
+  const b = (headerCookie ?? '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  return `${a}; ${b}`;
+}
+
+/** Legado ajax 书单列（如晴天 `/get_book_shelf,{...}`） */
+async function exploreBookViaLegadoAjax(
+  source: BookSource,
+  page: number,
+  rawUrl: string
+): Promise<SearchBook[]> {
+  const ajax = parseAjaxArgs(rawUrl.trim());
+  if (!ajax || !source.ruleExplore) return [];
+
+  const origin = source.sourceUrl?.trim() ?? '';
+  const resolved = origin ? resolveUrl(origin, ajax.urlStr) : ajax.urlStr;
+  const stored = getStoredSourceCookiesForUrl(source, resolved);
+  const cookieHeader = mergeCookieHeader(
+    stored,
+    ajax.headers.Cookie ?? ajax.headers.cookie
+  );
+  const headers: Record<string, string> = {
+    ...parseHeaders(source.header),
+    ...ajax.headers,
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+  };
+
+  const pageStr = page.toString();
+  const requestUrl = buildUrl(resolved, { page: pageStr });
+  const body =
+    ajax.body != null
+      ? buildUrl(
+        typeof ajax.body === 'string' ? ajax.body : JSON.stringify(ajax.body),
+        { page: pageStr }
+      )
+      : undefined;
+
+  console.log('[explore] Legado ajax 书单列:', ajax.method, requestUrl.substring(0, 120));
+
+  const startTime = Date.now();
+  try {
+    const html =
+      ajax.method === 'POST'
+        ? await post(requestUrl, body ?? '', {
+          headers,
+          enableCookieJar: source.enabledCookieJar,
+          concurrentRate: source.concurrentRate,
+          timeout: 30000,
+        })
+        : await get(requestUrl, {
+          headers,
+          enableCookieJar: source.enabledCookieJar,
+          concurrentRate: source.concurrentRate,
+          timeout: 30000,
+        });
+
+    const respondTime = Date.now() - startTime;
+    return parseExploreBooksFromContent(source, html, requestUrl, respondTime);
+  } catch (error) {
+    console.error(`[explore] Legado ajax 书单列失败 [${source.sourceName}]:`, error);
+    return [];
+  }
+}
+
+async function parseExploreBooksFromContent(
+  source: BookSource,
+  html: string,
+  exploreUrl: string,
+  respondTime: number
+): Promise<SearchBook[]> {
+  const rule = source.ruleExplore;
+  if (!rule) return [];
+
+  const contentType = detectContentType(html);
+  const context: RuleContext = {
+    content: html,
+    contentType,
+    baseUrl: exploreUrl,
+    source: source as unknown as Record<string, unknown>,
+  };
+
+  const bookList: SearchBook[] = [];
+
+  if (rule.bookList) {
+    let bookListRule = rule.bookList;
+    if (!bookListRule.includes('@')) {
+      bookListRule = `${bookListRule}@all`;
+    }
+    const bookElements = await analyzeStringList(bookListRule, context);
+    for (let i = 0; i < bookElements.length; i++) {
+      const element = bookElements[i];
+      const elementContext: RuleContext = {
+        content: element,
+        contentType,
+        baseUrl: exploreUrl,
+        source: source as unknown as Record<string, unknown>,
+        _debugIndex: i,
+      } as RuleContext;
+      const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
+      if (book) bookList.push(book);
+    }
+  } else {
+    const book = await parseExploreBook(source, rule, context, exploreUrl, respondTime);
+    if (book) bookList.push(book);
+  }
+
+  return bookList;
+}
+
 export async function exploreBook(
   source: BookSource,
   page: number = 1,
@@ -24,6 +169,10 @@ export async function exploreBook(
   if (!source.ruleExplore || !baseUrl) {
     console.warn('[explore] 缺少必要参数:', { hasRuleExplore: !!source.ruleExplore, baseUrl });
     return [];
+  }
+
+  if (exploreUrlOverride && isLegadoAjaxBookListExploreUrl(exploreUrlOverride)) {
+    return exploreBookViaLegadoAjax(source, page, exploreUrlOverride);
   }
 
   console.log('[explore] 初始 baseUrl:', baseUrl.substring(0, 200));
@@ -47,7 +196,7 @@ export async function exploreBook(
     // 构建发现 URL（支持 {{page}} 分页）
     const exploreUrl = buildUrl(baseUrl, { page: page.toString() });
     console.log('[explore] 构建后的 URL:', exploreUrl.substring(0, 200), '页码:', page);
-    
+
     // 发起请求
     const headers = parseHeaders(source.header);
     const html = await get(exploreUrl, {
@@ -59,93 +208,8 @@ export async function exploreBook(
 
     console.log('[explore] 响应长度:', html.length, '前200字符:', html.substring(0, 200));
 
-    const contentType = detectContentType(html);
     const respondTime = Date.now() - startTime;
-
-    // 创建规则上下文
-    const context: RuleContext = {
-      content: html,
-      contentType,
-      baseUrl: exploreUrl,
-      source: source as unknown as Record<string, unknown>,
-    };
-
-    // 解析书籍列表
-    const bookList: SearchBook[] = [];
-
-    if (rule.bookList) {
-      // 获取书籍列表元素
-      // 如果规则没有提取器（如 "li"），添加 @all 提取器以获取完整HTML元素
-      // 这样后续的子规则（如 ".novelname@text"）可以在完整的元素HTML上应用
-      let bookListRule = rule.bookList;
-      if (!bookListRule.includes('@')) {
-        bookListRule = `${bookListRule}@all`;
-      }
-      
-      console.log('[explore] 使用 bookList 规则:', rule.bookList, '-> 处理后:', bookListRule);
-      const bookElements = await analyzeStringList(bookListRule, context);
-      console.log('[explore] 提取到书籍元素数:', bookElements.length);
-      
-      if (bookElements.length > 0) {
-        console.log('[explore] 第一个元素预览:', bookElements[0].substring(0, 500));
-      }
-
-      // 先不过滤，尝试解析所有元素，看看哪些能成功
-      // 同时记录包含 novelname 的元素索引，用于分析
-      const novelnameIndices: number[] = [];
-      
-      for (let i = 0; i < bookElements.length; i++) {
-        const element = bookElements[i];
-        
-        // 检查是否包含 novelname（用于分析）
-        if (element.includes('novelname')) {
-          novelnameIndices.push(i);
-          if (novelnameIndices.length <= 3) {
-            console.log(`[explore] 找到包含novelname的元素[${i}]:`, element.substring(0, 500));
-          }
-        }
-        
-        // 为每个元素创建新的上下文（继承原始内容类型，JSON数据不应当作HTML）
-        const elementContext: RuleContext = {
-          content: element,
-          contentType,
-          baseUrl: exploreUrl,
-          source: source as unknown as Record<string, unknown>,
-          _debugIndex: i, // 用于调试日志
-        } as RuleContext;
-
-        const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
-        if (book) {
-          if (i < 10 || bookList.length < 5) {
-            console.log(`[explore] 解析书籍[${i}]成功:`, { name: book.name, author: book.author, bookUrl: book.bookUrl?.substring(0, 100) });
-          }
-          bookList.push(book);
-        } else {
-          // 只记录前10个失败的元素，避免日志过多
-          if (i < 10) {
-            const hasNovelname = element.includes('novelname');
-            console.warn(`[explore] 解析书籍[${i}]失败 (包含novelname: ${hasNovelname}):`, {
-              nameRule: rule.name,
-              bookUrlRule: rule.bookUrl,
-              elementPreview: element.substring(0, 300),
-            });
-          }
-        }
-      }
-      
-      console.log(`[explore] 处理统计: 总数=${bookElements.length}, 包含novelname的元素数=${novelnameIndices.length}, 成功解析=${bookList.length}`);
-      if (novelnameIndices.length > 0 && bookList.length === 0) {
-        console.warn(`[explore] 警告: 找到${novelnameIndices.length}个包含novelname的元素，但解析失败。前3个索引:`, novelnameIndices.slice(0, 3));
-      }
-    } else {
-      // 如果没有bookList规则，尝试直接解析单个书籍
-      console.log('[explore] 没有 bookList 规则，尝试直接解析');
-      const book = await parseExploreBook(source, rule, context, exploreUrl, respondTime);
-      if (book) {
-        bookList.push(book);
-      }
-    }
-
+    const bookList = await parseExploreBooksFromContent(source, html, exploreUrl, respondTime);
     console.log('[explore] 最终解析到书籍数:', bookList.length);
     return bookList;
   } catch (error) {
@@ -172,14 +236,14 @@ async function parseExploreBook(
     // 调试日志（仅前3个）
     const debugIndex = (context as unknown as { _debugIndex?: number })._debugIndex;
     const isDebug = debugIndex !== undefined && debugIndex < 3;
-    
+
     if (isDebug) {
       // 检查元素中是否包含 .novelname
-      const hasNovelnameClass = 
-        context.content.includes('class="novelname') || 
+      const hasNovelnameClass =
+        context.content.includes('class="novelname') ||
         context.content.includes("class='novelname") ||
         (context.content.includes('class="') && context.content.includes('novelname'));
-      
+
       console.log('[explore] parseExploreBook 解析结果:', {
         name: name || '(空)',
         author: author || '(空)',
@@ -203,15 +267,29 @@ async function parseExploreBook(
     // 解析其他字段
     const intro = rule.intro ? await analyzeString(rule.intro, context) : undefined;
     const coverUrl = rule.coverUrl ? await analyzeString(rule.coverUrl, context) : undefined;
-    const latestChapterTitle = rule.lastChapter
+    let latestChapterTitle = rule.lastChapter
       ? await analyzeString(rule.lastChapter, context)
       : undefined;
-    const latestChapterUpdateTime = rule.updateTime
+    let updateTimeRaw = rule.updateTime
       ? await analyzeString(rule.updateTime, context)
       : undefined;
+
+    if (latestChapterTitle) {
+      const split = splitLastChapterField(latestChapterTitle);
+      latestChapterTitle = split.title;
+      if (!updateTimeRaw && split.embeddedTime) {
+        updateTimeRaw = split.embeddedTime;
+      }
+    }
+
+    if (!updateTimeRaw && context.contentType === 'json') {
+      updateTimeRaw = await pickJsonUpdateTime(context);
+    }
+
+    const latestChapterUpdateTime = tryFormatDisplayUpdateTime(updateTimeRaw) || undefined;
     const kind = rule.kind ? await analyzeString(rule.kind, context) : undefined;
     const wordCount = rule.wordCount ? await analyzeString(rule.wordCount, context) : undefined;
-    
+
     // 解析徽章字段：优先使用规则配置，若规则未配置但内容为 JSON，则尝试自动提取
     const sourceStr = rule.source
       ? await analyzeString(rule.source, context)

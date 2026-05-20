@@ -4,13 +4,15 @@
  */
 
 import { createSignal, For, createEffect, onMount } from 'solid-js';
+import { setupAccessibilityListeners } from '@/utils/accessibility';
 import {
-  blurActiveElement,
-  setupAccessibilityListeners,
-  triggerDialogOpened,
-} from '@/utils/accessibility';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from './ui/button';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from './ui/radio-group';
 import { Checkbox } from './ui/checkbox';
@@ -85,20 +87,13 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
     if (!open) {
       setLocalSettings(bookshelfLayoutStore.settings);
       setSpacingValue(bookshelfLayoutStore.settings.spacing);
-    }
-    props.onOpenChange(open);
-    if (open) {
+      setGroupStyleSelectOpen(false);
+    } else {
       setLocalSettings(bookshelfLayoutStore.settings);
       setSpacingValue(bookshelfLayoutStore.settings.spacing);
       setGroupStyleSelectOpen(false);
-      requestAnimationFrame(() => {
-        triggerDialogOpened();
-        blurActiveElement();
-      });
-    } else {
-      setGroupStyleSelectOpen(false);
-      blurActiveElement();
     }
+    props.onOpenChange(open);
   };
 
   function handleConfirm() {
@@ -135,12 +130,12 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
   ];
 
   return (
-    <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>书架布局</DialogTitle>
-          <DialogDescription>自定义书架和分组的显示方式</DialogDescription>
-        </DialogHeader>
+    <AppDialog open={props.open} onOpenChange={handleOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>书架布局</AppDialogTitle>
+          <AppDialogDescription>自定义书架和分组的显示方式</AppDialogDescription>
+        </AppDialogHeader>
 
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <section class={sectionPanelClass}>
@@ -352,13 +347,13 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
           </section>
         </div>
 
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>
           <Button onClick={handleConfirm}>确定</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

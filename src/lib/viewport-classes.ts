@@ -41,3 +41,18 @@ export const maxHTitleMenu = 'max-h-[min(24rem,calc(100dvh-11rem))]';
 
 /** Sidebar inset 变体：四周留白 spacing(4) = 1rem */
 export const minHInsetViewport = 'min-h-[calc(100dvh-1rem)]';
+
+/**
+ * 双侧 stable scrollbar gutter（与 App.css 中同名 class 一致）。
+ * 用于 overflow 滚动区，避免滚动条显隐时内容横向抖动。
+ */
+export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
+
+/**
+ * PageToolbar `below` 横滚视口（唯一滚动层，见 App.css）。
+ * BookshelfGroupNav 只渲染 `pageToolbarBelowScrollTrack`，勿设 overflow。
+ */
+export const pageToolbarBelowScroll = 'page-toolbar-below-scroll';
+
+/** 横滚内容轨，置于 `pageToolbarBelowScroll` 容器内 */
+export const pageToolbarBelowScrollTrack = 'page-toolbar-below-scroll__track';

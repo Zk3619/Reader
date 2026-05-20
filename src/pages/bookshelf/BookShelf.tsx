@@ -442,6 +442,7 @@ export function BookShelf(props: BookShelfProps) {
   return (
     <div class="flex flex-col flex-1 min-h-0 w-full">
       <PageToolbar
+        belowHorizontalWheel={showGroupTabsBelow()}
         title={pageTitle()}
         description={pageDescription()}
         titleSlot={
@@ -500,7 +501,7 @@ export function BookShelf(props: BookShelfProps) {
         </Show>
       </PageToolbar>
 
-      <div class="flex-1 min-h-0 overflow-y-auto pt-2">
+      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}
@@ -737,7 +738,7 @@ const bookCompactCardClass = cn(
 );
 
 const bookGridCardClass = cn(
-  'book-group-card-motion flex cursor-pointer flex-col items-center gap-3 rounded-xl border border-border/50 bg-card p-2',
+  'book-group-card-motion flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card p-2',
   'hover:border-primary/30 hover:bg-card',
   BOOK_CARD_HOVER_ELEVATION,
 );
@@ -786,10 +787,10 @@ function BookCardWithMenu(props: {
         </div>
         <Show when={props.layout === 'grid' ? props.titleDisplay === 'show' : props.titleDisplay !== 'hide'}>
           {props.layout === 'grid' ? (
-            <>
-              <h3 class="w-full truncate text-center text-sm font-semibold text-foreground">{props.book.name}</h3>
-              <p class="text-xs text-muted-foreground truncate w-full text-center">{props.book.author ?? '—'}</p>
-            </>
+            <div class="flex w-full flex-col items-center gap-0.5">
+              <h3 class="m-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground">{props.book.name}</h3>
+              <p class="m-0 w-full truncate text-center text-xs leading-tight text-muted-foreground">{props.book.author ?? '—'}</p>
+            </div>
           ) : (
             <div class="flex min-w-0 flex-1 items-center gap-3">
               <div class="shrink-0 min-w-0 max-w-[40%] text-left">

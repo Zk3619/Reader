@@ -21,6 +21,7 @@ import {
 } from './normalize-legado-ajax-body';
 import { createLoginInjector } from './login-inject';
 import { runLegadoScriptQuickJS } from './quickjs-runner';
+import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
 import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from './script-wrap';
 import {
   getScriptBaseUrl,
@@ -66,6 +67,10 @@ function syncWebViewCookiesToStore(
 
 function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
   const toOpen = raw.startsWith('data:') ? raw : urlForOpen(raw);
+  const t = toOpen.trim();
+  if (/^(https?:|data:|legado:|yuedu:)/i.test(t)) {
+    return t;
+  }
   return baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
 }
 
@@ -607,6 +612,10 @@ async function tryRunLoginScriptQuickJS(
             startBrowser: (url, title?: string) => {
               const raw = (url || '').trim();
               const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+              if (/^(legado|yuedu):\/\//i.test(resolved)) {
+                pending.push(handleReaderImportDeepLink(resolved));
+                return;
+              }
               if (onToast) {
                 onToast(
                   isOpenableUrl(resolved)
@@ -621,6 +630,17 @@ async function tryRunLoginScriptQuickJS(
                   ? openLegadoBrowserInApp(resolved, cookieStr, title)
                   : Promise.resolve()
               );
+            },
+            openUrl: (url: string) => {
+              const raw = (url || '').trim();
+              const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+              if (/^(legado|yuedu):\/\//i.test(resolved)) {
+                pending.push(handleReaderImportDeepLink(resolved));
+                return;
+              }
+              if (!isOpenableUrl(resolved)) return;
+              const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
+              pending.push(openLegadoBrowserInApp(resolved, cookieStr, undefined));
             },
             base64Encode: (str) => {
               try {
@@ -643,6 +663,10 @@ async function tryRunLoginScriptQuickJS(
             if (browserAwaitDone.value) return;
             const raw = (url || '').trim();
             const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+            if (/^(legado|yuedu):\/\//i.test(resolved)) {
+              const p = handleReaderImportDeepLink(resolved).then(() => '');
+              throw new SuspendScript(p, BROWSER_SUSPEND_WRITE_INDEX, resolved, Date.now());
+            }
             if (onToast) {
               onToast(
                 isOpenableUrl(resolved)
@@ -1002,6 +1026,10 @@ export async function runLoginScript(
         if (browserAwaitDone) return Promise.resolve('');
         const raw = (url || '').trim();
         const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+        if (/^(legado|yuedu):\/\//i.test(resolved)) {
+          const p = handleReaderImportDeepLink(resolved).then(() => '');
+          throw new SuspendScript(p, BROWSER_SUSPEND_WRITE_INDEX, resolved, Date.now());
+        }
         const ok = isOpenableUrl(resolved);
         console.warn(LOG_TAG, 'startBrowserAwait', {
           raw: raw.slice(0, 80),
@@ -1040,15 +1068,17 @@ export async function runLoginScript(
           });
         throw new SuspendScript(p, BROWSER_SUSPEND_WRITE_INDEX, resolved, Date.now());
       },
-      /** Legado：打开 URL（不等待），本端与 startBrowserAwait 相同：仅 http(s) 打开，同源带 cookie */
+      /** Legado：打开 URL（不等待）；http(s)/data: 走内嵌页；legado/yuedu 走书源导入 */
       startBrowser(url: string, title?: string): void {
         const raw = (url || '').trim();
-        const toOpen = raw.startsWith('data:') ? raw : urlForOpen(raw);
-        const resolved = baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
+        const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+        if (/^(legado|yuedu):\/\//i.test(resolved)) {
+          pending.push(handleReaderImportDeepLink(resolved));
+          return;
+        }
         const ok = isOpenableUrl(resolved);
         console.warn(LOG_TAG, 'startBrowser', {
           raw: raw.slice(0, 80),
-          toOpen: toOpen.slice(0, 60),
           resolved: resolved.slice(0, 80),
           title: (title ?? '').slice(0, 40),
           baseUrl: baseUrl?.slice(0, 60),
@@ -1071,6 +1101,18 @@ export async function runLoginScript(
           ? openLegadoBrowserInApp(resolved, cookieStr, title)
           : Promise.resolve();
         pending.push(p);
+      },
+      /** Legado JsExtensions.openUrl：支持 legado/yuedu 导入与内嵌 http(s)/data: */
+      openUrl(url: string): void {
+        const raw = (url || '').trim();
+        const resolved = resolveBrowserOpenUrl(raw, baseUrl);
+        if (/^(legado|yuedu):\/\//i.test(resolved)) {
+          pending.push(handleReaderImportDeepLink(resolved));
+          return;
+        }
+        if (!isOpenableUrl(resolved)) return;
+        const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
+        pending.push(openLegadoBrowserInApp(resolved, cookieStr, undefined));
       },
       base64Encode(str: string): string {
         try {
@@ -1639,7 +1681,13 @@ export async function runLoginScriptRust(
   const urlCookies = output.urlCookies ?? [];
   if (urlCookies.length > 0) {
     for (const item of urlCookies) {
-      if (!item?.url?.trim() || !/^https?:/i.test(item.url.trim())) continue;
+      if (!item?.url?.trim()) continue;
+      const uOpen = item.url.trim();
+      if (/^(legado|yuedu):\/\//i.test(uOpen)) {
+        void handleReaderImportDeepLink(uOpen);
+        continue;
+      }
+      if (!/^https?:/i.test(uOpen)) continue;
       await openSourceSettingsInApp(item.url.trim(), (item.cookies ?? '').trim()).catch((e) => {
         console.warn(LOG_TAG, 'open with cookies failed, fallback to plain url', e);
         return openSourceSettingsInApp(item.url.trim(), '');
@@ -1647,8 +1695,14 @@ export async function runLoginScriptRust(
     }
   } else {
     for (const url of output.urlsToOpen ?? []) {
-      if (url?.trim() && /^(https?:|data:)/i.test(url.trim())) {
-        void openSourceSettingsInApp(url.trim(), '');
+      const u = url?.trim() ?? '';
+      if (!u) continue;
+      if (/^(legado|yuedu):\/\//i.test(u)) {
+        void handleReaderImportDeepLink(u);
+        continue;
+      }
+      if (/^(https?:|data:)/i.test(u)) {
+        void openSourceSettingsInApp(u, '');
       }
     }
   }

@@ -5,19 +5,18 @@
 
 import { createSignal, Show, createEffect} from 'solid-js';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 
 export type ReplaceFileAction = 'replace' | 'skip' | 'restore-existing' | 'rename-import' | 'cancel';
 
@@ -77,14 +76,14 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
   };
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>文件已存在</DialogTitle>
-          <DialogDescription>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>文件已存在</AppDialogTitle>
+          <AppDialogDescription>
             文件《{props.fileName}》已存在于书籍目录中，请选择操作方式。
-          </DialogDescription>
-        </DialogHeader>
+          </AppDialogDescription>
+        </AppDialogHeader>
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup value={action()} onChange={(value) => setAction(value as ReplaceFileAction)}>
             <Show when={props.isSameSize && props.isSameContent}>
@@ -128,7 +127,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
                   <div>
                     <div class="font-medium">重命名导入</div>
                     <div class="text-sm text-muted-foreground">
-                      保留原文件，使用新文件名导入新文�?                    </div>
+                      保留原文件，使用新文件名导入新文件                    </div>
                   </div>
                 </RadioGroupItemLabel>
               </RadioGroupItem>
@@ -160,15 +159,15 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
           </Label>
           </div>
         </div>
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>
           <Button variant="default" onClick={handleConfirm}>
             确定
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

@@ -4,7 +4,6 @@
  */
 
 import { createSignal, Show, createEffect } from 'solid-js';
-import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -18,17 +17,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/AppDialog';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { cn } from '@/lib/utils';
-import { dialogViewportLimits } from '@/lib/viewport-classes';
 import { ImageIcon, AlertCircleIcon } from '@/components/icons';
 import { getCoverPreviewInfo } from '@/utils/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
@@ -124,13 +122,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
 
   function handleOpenChange(open: boolean) {
     if (open) {
-      requestAnimationFrame(() => {
-        setSelectOpen(false);
-        blurActiveElement();
-        const activeElement = document.activeElement as HTMLElement;
-        if (activeElement && activeElement !== document.body) activeElement.blur();
-      });
-      window.dispatchEvent(new CustomEvent('dialog-opened'));
+      requestAnimationFrame(() => setSelectOpen(false));
     }
     props.onOpenChange(open);
   }
@@ -201,18 +193,18 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
   const options = () => bookSortOptions.map((o) => String(o.value));
 
   return (
-    <Dialog open={props.open} onOpenChange={handleOpenChange}>
-      <DialogContent class={`${dialogViewportLimits} flex flex-col overflow-hidden p-0`}>
-        <DialogHeader class="shrink-0 px-6 pt-6">
-          <DialogTitle>{isEdit() ? '编辑分组' : '添加分组'}</DialogTitle>
-          <DialogDescription>
+    <AppDialog open={props.open} onOpenChange={handleOpenChange}>
+      <AppDialogContent>
+        <AppDialogHeader>
+          <AppDialogTitle>{isEdit() ? '编辑分组' : '添加分组'}</AppDialogTitle>
+          <AppDialogDescription>
             {isEdit() && initialGroup() && isDefaultGroup(initialGroup()!.groupId)
               ? '默认分组无法修改名称'
               : isEdit()
                 ? '修改分组设置'
                 : '创建一个新的书架分组'}
-          </DialogDescription>
-        </DialogHeader>
+          </AppDialogDescription>
+        </AppDialogHeader>
 
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           {/* 分组名称：仅默认分组不可编辑 */}
@@ -392,13 +384,13 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 flex-row justify-end gap-2 border-t border-border/50 bg-background px-6 py-4">
+        <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
             取消
           </Button>
           <Button onClick={handleSubmit}>确认</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
   );
 }

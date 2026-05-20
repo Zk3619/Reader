@@ -35,8 +35,17 @@ export interface InnerWebCloseResult {
 type OpenFn = (payload: InnerWebPayload) => void;
 type CloseFn = () => void;
 
+const INNER_WEB_SESSION_STORAGE_KEY = 'reader_inner_web_session_v1';
+export const INNER_WEB_REFRESH_EVENT = 'reader-inner-web-refresh';
+
+/** 内嵌晴天等页 yuedu:// 书源导入桥：转成「网络导入书源」预填 URL */
+export const READER_BOOKSOURCE_IMPORT_NETWORK_EVENT = 'reader-booksource-import-network';
+
+export type ReaderBooksourceImportNetworkDetail = { url: string };
+
 let openEmbedded: OpenFn | null = null;
 let closeOverlay: CloseFn | null = null;
+let refreshGuardInstalled = false;
 
 let pendingAwait: {
   resolve: (r: InnerWebCloseResult) => void;
@@ -75,10 +84,80 @@ export function registerInnerWebClose(fn: CloseFn): void {
   closeOverlay = fn;
 }
 
+function persistInnerWebSession(payload: InnerWebPayload): void {
+  try {
+    sessionStorage.setItem(INNER_WEB_SESSION_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearInnerWebSessionStorage(): void {
+  try {
+    sessionStorage.removeItem(INNER_WEB_SESSION_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 页面刷新后同步读取内嵌页会话（供 App 初始 signal 使用） */
+export function loadPersistedInnerWebSession(): InnerWebPayload | null {
+  try {
+    const raw = sessionStorage.getItem(INNER_WEB_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as InnerWebPayload;
+    if (!p?.title || (!p.html?.trim() && !p.url?.trim())) {
+      clearInnerWebSessionStorage();
+      return null;
+    }
+    return p;
+  } catch {
+    clearInnerWebSessionStorage();
+    return null;
+  }
+}
+
+function installInnerWebRefreshGuard(): void {
+  if (refreshGuardInstalled || typeof window === 'undefined') return;
+  refreshGuardInstalled = true;
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (!loadPersistedInnerWebSession() && !isInnerWebSessionActive()) return;
+      const isRefresh =
+        e.key === 'F5' ||
+        (e.key === 'r' && (e.ctrlKey || e.metaKey)) ||
+        (e.key === 'R' && (e.ctrlKey || e.metaKey));
+      if (!isRefresh) return;
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent(INNER_WEB_REFRESH_EVENT));
+    },
+    { capture: true }
+  );
+}
+
+/** 刷新后恢复内嵌页：重建 bridge / body 会话类（不重复 openEmbedded） */
+export function applyRestoredInnerWebSession(payload: InnerWebPayload): void {
+  installInnerWebRefreshGuard();
+  if (useInnerWebIframe({ url: payload.url, html: payload.html })) {
+    if (payload.url?.startsWith('http')) {
+      void startInnerWebBridge(payload.url);
+    }
+  }
+  setSessionActive(true, payload);
+}
+
 function setSessionActive(active: boolean, payload?: InnerWebPayload): void {
-  if (useInnerWebTauriPanel({ url: payload?.url, html: payload?.html })) {
+  if (typeof document !== 'undefined') {
     document.body.classList.toggle('reader-inner-web-session', active);
+  }
+  if (active) {
+    installInnerWebRefreshGuard();
+  }
+  if (payload && useInnerWebTauriPanel({ url: payload.url, html: payload.html })) {
     void setInnerWebSessionActive(active);
+  } else if (!active && isTauri()) {
+    void setInnerWebSessionActive(false);
   }
 }
 
@@ -93,6 +172,7 @@ async function dismissOverlay(): Promise<void> {
     console.warn('[inner-web] close inner web views failed', e);
   }
   await waitPointerGestureEnd();
+  clearInnerWebSessionStorage();
   document.body.classList.remove('reader-inner-web-session');
   await setInnerWebSessionActive(false);
   closeOverlay?.();
@@ -109,15 +189,17 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
         void startInnerWebBridge(url);
       }
     }
-    openEmbedded({
+    const normalized: InnerWebPayload = {
       title: payload.title || '网页',
       html,
       url,
       showConfirm: payload.showConfirm,
       cookieSyncUrl: payload.cookieSyncUrl?.trim() || url || undefined,
       initialCookies: payload.initialCookies?.trim() || undefined,
-    });
-    setSessionActive(true, payload);
+    };
+    persistInnerWebSession(normalized);
+    openEmbedded(normalized);
+    setSessionActive(true, normalized);
     return true;
   } catch (e) {
     console.error('[inner-web] openInnerWeb failed', e);
@@ -153,7 +235,8 @@ export function openInnerWebAwait(
   });
 }
 
-async function readWebViewCookies(url: string): Promise<string> {
+/** 读取内嵌 WebView / iframe 当前 URL 的 Cookie（供「更多 → 查看 Cookie」） */
+export async function readInnerWebCookies(url: string): Promise<string> {
   const trimmed = url.trim();
   if (!trimmed.startsWith('http')) return '';
   if (isTauri()) {
@@ -172,7 +255,7 @@ export async function confirmInnerWebClose(cookieSyncUrl?: string): Promise<void
   const url = (cookieSyncUrl ?? session?.cookieSyncUrl ?? '').trim();
   let cookies = '';
   if (url) {
-    cookies = await readWebViewCookies(url);
+    cookies = await readInnerWebCookies(url);
   }
   session?.resolve({ confirmed: true, cookies, url });
   pendingAwait = null;

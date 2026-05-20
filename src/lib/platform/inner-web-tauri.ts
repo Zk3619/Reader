@@ -3,9 +3,15 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { appendYueduTauriPanelBridgeToHtml } from './inner-web-yuedu-bridge-snippet';
 import { isTauri } from './detect';
 
 export const INNER_WEB_WEBVIEW_LABEL = 'reader-inner-web';
+
+function htmlToDataDocumentUrl(html: string): string {
+  const b64 = btoa(unescape(encodeURIComponent(html)));
+  return `data:text/html;charset=utf-8;base64,${b64}`;
+}
 
 export interface InnerWebPanelRect {
   x: number;
@@ -34,20 +40,24 @@ export async function focusInnerWebTauriPanel(): Promise<void> {
 }
 
 export async function openInnerWebTauriPanel(
-  url: string,
-  cookies: string,
-  rect: InnerWebPanelRect
+  opts: { url?: string; html?: string; cookies: string; rect: InnerWebPanelRect }
 ): Promise<void> {
   if (!isTauri()) return;
-  const trimmed = url.trim();
-  if (!trimmed.startsWith('http')) return;
+  const httpUrl = (opts.url ?? '').trim();
+  const htmlRaw = (opts.html ?? '').trim();
+  const navigationUrl = httpUrl.startsWith('http')
+    ? httpUrl
+    : htmlRaw
+      ? htmlToDataDocumentUrl(appendYueduTauriPanelBridgeToHtml(htmlRaw))
+      : '';
+  if (!navigationUrl.startsWith('http') && !navigationUrl.startsWith('data:text/html')) return;
   await invoke('open_inner_web_panel', {
-    url: trimmed,
-    cookies: cookies.trim(),
-    x: rect.x,
-    y: rect.y,
-    width: rect.width,
-    height: rect.height,
+    url: navigationUrl,
+    cookies: opts.cookies.trim(),
+    x: opts.rect.x,
+    y: opts.rect.y,
+    width: opts.rect.width,
+    height: opts.rect.height,
   });
 }
 
