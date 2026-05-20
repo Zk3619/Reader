@@ -64,9 +64,11 @@ export const DEFAULT_TOAST_DURATION = 3000
  */
 export function SonnerInteractionFix() {
   onMount(() => {
-    const reset = () => {
+    const reset = (e: PointerEvent) => {
+      // 仅响应真实指针事件；合成 pointerup 会冒泡回 window，否则会无限递归
+      if (!e.isTrusted) return
       document.querySelectorAll("[data-sonner-toaster]").forEach((el) => {
-        el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+        el.dispatchEvent(new PointerEvent("pointerup", { bubbles: false }))
       })
     }
     window.addEventListener("pointerup", reset)

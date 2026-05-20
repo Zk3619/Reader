@@ -52,6 +52,13 @@ let pendingAwait: {
   cookieSyncUrl?: string;
 } | null = null;
 
+/** 纯 Web 内嵌页文档代理会话（供 confirm 时读取 Cookie） */
+let activeWebProxySessionId: string | null = null;
+
+export function setActiveWebProxySessionId(sessionId: string | null): void {
+  activeWebProxySessionId = sessionId;
+}
+
 /** 关闭 inner-web 后短暂忽略登录 Dialog 的 onOpenChange(false)，避免点击穿透误关 */
 let suppressLoginDialogDismissUntil = 0;
 
@@ -239,7 +246,27 @@ export function openInnerWebAwait(
 export async function readInnerWebCookies(url: string): Promise<string> {
   const trimmed = url.trim();
   if (!trimmed.startsWith('http')) return '';
+  if (activeWebProxySessionId) {
+    try {
+      const { readInnerWebProxySessionCookies } = await import(
+        '@/lib/http/inner-web-proxy-session'
+      );
+      return readInnerWebProxySessionCookies(activeWebProxySessionId);
+    } catch (e) {
+      console.warn('[inner-web] read proxy session cookies failed', e);
+    }
+  }
   if (isTauri()) {
+    if (isInnerWebSessionActive()) {
+      try {
+        const panelCookies = await invoke<string>('get_inner_web_panel_cookies_for_url', {
+          url: trimmed,
+        });
+        if (panelCookies.trim()) return panelCookies;
+      } catch (e) {
+        console.warn('[inner-web] get_inner_web_panel_cookies_for_url failed', e);
+      }
+    }
     try {
       return await invoke<string>('get_webview_cookies_for_url', { url: trimmed });
     } catch (e) {

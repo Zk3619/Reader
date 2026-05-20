@@ -15,6 +15,7 @@ import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobal
 import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
+  normalizeControlSettingsCookieHeader,
   normalizeLegadoCookieHeader,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
@@ -48,13 +49,51 @@ function urlForOpen(url: string): string {
   return comma > 0 ? s.slice(0, comma).trim() : s;
 }
 
+/** control() 重放时避免用 source.getVariable() 的旧 cookie 覆盖 WebView √ 同步结果 */
+interface BrowserCookieSyncGuard {
+  recordSync(resolved: string): void;
+  markAwaitDone(): void;
+  shouldSkipOverwrite(url: string): boolean;
+}
+
+function createBrowserCookieSyncGuard(baseUrl: string): BrowserCookieSyncGuard {
+  let syncedResolved: string | null = null;
+  let awaitDone = false;
+  return {
+    recordSync(resolved: string) {
+      syncedResolved = resolved;
+    },
+    markAwaitDone() {
+      awaitDone = true;
+    },
+    shouldSkipOverwrite(url: string): boolean {
+      if (!awaitDone || !syncedResolved) return false;
+      const target = (url || '').trim() || baseUrl;
+      if (!target) return false;
+      if (target === syncedResolved) return true;
+      const controlBase = syncedResolved.replace(/\/control\/?$/i, '');
+      if (controlBase && target === controlBase) return true;
+      try {
+        const a = new URL(target);
+        const b = new URL(syncedResolved);
+        if (a.origin === b.origin) return true;
+      } catch {
+        /* ignore */
+      }
+      if (target === baseUrl) return true;
+      return false;
+    },
+  };
+}
+
 function syncWebViewCookiesToStore(
   store: { setCookie: (url: string, value: string) => void },
   baseUrl: string,
   resolved: string,
-  cookies: string
+  cookies: string,
+  guard?: BrowserCookieSyncGuard
 ): void {
-  const trimmed = cookies.trim();
+  const trimmed = normalizeControlSettingsCookieHeader(cookies.trim());
   if (!trimmed) return;
   try {
     store.setCookie(new URL(resolved).origin, trimmed);
@@ -62,7 +101,12 @@ function syncWebViewCookiesToStore(
     /* ignore */
   }
   store.setCookie(resolved, trimmed);
+  const controlBase = resolved.replace(/\/control\/?$/i, '');
+  if (controlBase && controlBase !== resolved) {
+    store.setCookie(controlBase, trimmed);
+  }
   if (baseUrl) store.setCookie(baseUrl, trimmed);
+  guard?.recordSync(resolved);
 }
 
 function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
@@ -428,12 +472,20 @@ async function tryRunLoginScriptQuickJS(
     /* ignore */
   }
 
+  const browserCookieGuard = createBrowserCookieSyncGuard(baseUrl);
+
   const cookieObj = {
     _store: cookieStore,
     getCookie(url: string): string {
       return this._store.get(url || baseUrl) ?? '';
     },
     setCookie(url: string, value: string): void {
+      if (browserCookieGuard.shouldSkipOverwrite(url)) {
+        console.warn(LOG_TAG, 'skip setCookie after startBrowserAwait sync', {
+          url: (url || baseUrl).slice(0, 80),
+        });
+        return;
+      }
       this._store.set(url || baseUrl, value);
     },
     removeCookie(url: string): void {
@@ -680,7 +732,13 @@ async function tryRunLoginScriptQuickJS(
             const p = openLegadoBrowserInApp(resolved, cookieStr, title, { awaitClose: true })
               .then((r) => {
                 if (r.confirmed && r.cookies) {
-                  syncWebViewCookiesToStore(cookieObj, baseUrl, resolved, r.cookies);
+                  syncWebViewCookiesToStore(
+                    cookieObj,
+                    baseUrl,
+                    resolved,
+                    r.cookies,
+                    browserCookieGuard
+                  );
                 }
                 return '';
               })
@@ -690,6 +748,7 @@ async function tryRunLoginScriptQuickJS(
               })
               .finally(() => {
                 browserAwaitDone.value = true;
+                browserCookieGuard.markAwaitDone();
               });
             rt.coordinator.pendingSuspend = new SuspendScript(
               p,
@@ -864,6 +923,7 @@ export async function runLoginScript(
       keys: Array.from(cookieStore.keys()).slice(0, 10),
     });
   }
+  const browserCookieGuard = createBrowserCookieSyncGuard(baseUrl);
   const cookieObj = {
     _store: cookieStore,
     getCookie(url: string): string {
@@ -871,6 +931,12 @@ export async function runLoginScript(
       return this._store.get(k) ?? '';
     },
     setCookie(url: string, value: string): void {
+      if (browserCookieGuard.shouldSkipOverwrite(url)) {
+        console.warn(LOG_TAG, 'skip setCookie after startBrowserAwait sync', {
+          url: (url || baseUrl).slice(0, 80),
+        });
+        return;
+      }
       const k = url || baseUrl;
       this._store.set(k, value);
       console.warn(LOG_TAG, 'cookie.setCookie', {
@@ -1054,7 +1120,13 @@ export async function runLoginScript(
         const p = openLegadoBrowserInApp(resolved, cookieStr, title, { awaitClose: true })
           .then((r) => {
             if (r.confirmed && r.cookies) {
-              syncWebViewCookiesToStore(cookieObj, baseUrl, resolved, r.cookies);
+              syncWebViewCookiesToStore(
+                cookieObj,
+                baseUrl,
+                resolved,
+                r.cookies,
+                browserCookieGuard
+              );
             }
             console.warn(LOG_TAG, 'startBrowserAwait 已关闭', { confirmed: r.confirmed });
             return '';
@@ -1065,6 +1137,7 @@ export async function runLoginScript(
           })
           .finally(() => {
             browserAwaitDone = true;
+            browserCookieGuard.markAwaitDone();
           });
         throw new SuspendScript(p, BROWSER_SUSPEND_WRITE_INDEX, resolved, Date.now());
       },

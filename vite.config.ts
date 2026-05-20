@@ -2,12 +2,13 @@ import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { readerHttpProxy } from "./vite-plugins/reader-http-proxy";
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [solid(), tailwindcss()],
+  plugins: [solid(), tailwindcss(), readerHttpProxy()],
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
   base: process.env.NODE_ENV === "production" ? "./" : "",
   assetsInclude: ["**/*.wasm"],

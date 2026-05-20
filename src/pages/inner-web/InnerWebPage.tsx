@@ -27,6 +27,13 @@ import {
   type InnerWebPanelRect,
 } from '@/lib/platform/inner-web-tauri';
 import { isTauri } from '@/lib/platform/detect';
+import {
+  buildInnerWebDocumentProxyUrl,
+  createInnerWebProxySession,
+  deleteInnerWebProxySession,
+  shouldUseInnerWebDocumentProxy,
+} from '@/lib/http/inner-web-proxy-session';
+import { setActiveWebProxySessionId } from '@/lib/platform/inner-web';
 import { isInnerWebPanelMaskVisible } from '@/lib/platform/inner-web-panel-overlay';
 import { InnerWebHeader } from './InnerWebHeader';
 
@@ -79,6 +86,8 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const [confirmLoading, setConfirmLoading] = createSignal(false);
   const [iframeEl, setIframeEl] = createSignal<HTMLIFrameElement | undefined>();
   const [contentEl, setContentEl] = createSignal<HTMLDivElement | undefined>();
+  const [iframeSrc, setIframeSrc] = createSignal<string | undefined>();
+  let webProxySessionId: string | undefined;
 
   /** srcdoc iframe：用于校验 yuedu:// postMessage 来源 */
   let yueduBridgeIframe: HTMLIFrameElement | undefined;
@@ -115,6 +124,10 @@ export function InnerWebPage(props: InnerWebPageProps) {
     if (!el) return;
     if (useHtml) {
       el.srcdoc = snap.html ?? '';
+    } else if (webProxySessionId) {
+      const proxyUrl = buildInnerWebDocumentProxyUrl(webProxySessionId);
+      setIframeSrc(proxyUrl);
+      el.src = proxyUrl;
     } else if (snap.url) {
       el.src = snap.url;
     }
@@ -144,6 +157,19 @@ export function InnerWebPage(props: InnerWebPageProps) {
 
     if (iframeMode && pageUrl.startsWith('http')) {
       void startInnerWebBridge(pageUrl);
+      const cookies = snap.initialCookies?.trim();
+      if (shouldUseInnerWebDocumentProxy(pageUrl, cookies)) {
+        void (async () => {
+          try {
+            webProxySessionId = await createInnerWebProxySession(pageUrl, cookies!);
+            setActiveWebProxySessionId(webProxySessionId);
+            setIframeSrc(buildInnerWebDocumentProxyUrl(webProxySessionId));
+          } catch (e) {
+            console.warn('[InnerWebPage] 内嵌页文档代理失败，回退直连', e);
+            setIframeSrc(pageUrl);
+          }
+        })();
+      }
     }
 
     if (panelMode) {
@@ -171,6 +197,11 @@ export function InnerWebPage(props: InnerWebPageProps) {
       window.removeEventListener('message', onYueduBooksourceImport);
       resizeObserver?.disconnect();
       stopInnerWebBridge();
+      if (webProxySessionId) {
+        void deleteInnerWebProxySession(webProxySessionId);
+        setActiveWebProxySessionId(null);
+        webProxySessionId = undefined;
+      }
       if (panelMode) {
         void closeInnerWebTauriPanel();
       }
@@ -265,7 +296,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
                 ref={setIframeEl}
                 class="reader-inner-web-iframe absolute inset-0 h-full w-full border-0 bg-background"
                 title={snap.title}
-                src={snap.url}
+                src={iframeSrc() ?? snap.url}
                 allow="fullscreen"
                 referrerpolicy="no-referrer-when-downgrade"
                 onLoad={handleIframeLoad}

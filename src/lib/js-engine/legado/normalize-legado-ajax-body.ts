@@ -91,3 +91,12 @@ export function normalizeUserApiPostBody(
 export function isUserApiPost(resolvedUrl: string, method: string): boolean {
   return method.toUpperCase() === 'POST' && /\/user_api\b/.test(resolvedUrl);
 }
+
+/** WebView 读出 `a=1;b=2` → 书源 applyCookieSettings 使用的 `; ` 分隔 */
+export function normalizeControlSettingsCookieHeader(raw: string): string {
+  return String(raw ?? '')
+    .split(';')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join('; ');
+}

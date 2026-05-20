@@ -551,6 +551,35 @@ async fn get_webview_cookies_for_url(
     Ok(parts.join("; "))
 }
 
+/// 仅从桌面内嵌子 WebView 面板读取 Cookie（√ 同步书源设置时避免回退到主 WebView 的旧 Cookie）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn get_inner_web_panel_cookies_for_url(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<String, String> {
+    use tauri::Manager;
+
+    let url = url.trim();
+    if url.is_empty() || !url.starts_with("http") {
+        return Err("URL 无效".to_string());
+    }
+    let parsed_url = url::Url::parse(url).map_err(|e| e.to_string())?;
+    let panel = app
+        .get_webview(INNER_WEB_PANEL_LABEL)
+        .ok_or_else(|| "内嵌网页面板未打开".to_string())?;
+
+    let cookies = panel
+        .cookies_for_url(parsed_url)
+        .map_err(|e| e.to_string())?;
+
+    let parts: Vec<String> = cookies
+        .iter()
+        .map(|c| format!("{}={}", c.name(), c.value()))
+        .collect();
+    Ok(parts.join("; "))
+}
+
 /// iframe 内 document.cookie 变更时，由主窗口 postMessage 桥接写入 WebView Cookie 罐
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -1239,6 +1268,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             get_webview_cookies_for_url,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            get_inner_web_panel_cookies_for_url,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             sync_document_cookies_for_inner_web,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             ensure_inner_web_iframe_scripts,
@@ -1254,8 +1285,6 @@ pub fn run() {
             set_inner_web_session_active,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             focus_inner_web_panel,
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            set_inner_web_panel_visible,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             open_inner_web_child_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

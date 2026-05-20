@@ -3,6 +3,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { updateInnerWebProxySessionCookies } from '@/lib/http/inner-web-proxy-session';
 import { isTauri } from './detect';
 
 export const INNER_WEB_MESSAGE_CHANNEL = 'reader-inner-web';
@@ -53,15 +54,30 @@ async function handleMethod(
   switch (method) {
     case 'iframeReady':
     case 'syncDocumentCookie': {
-      if (!isTauri()) return true;
-      const url = String(args?.url ?? '').trim();
       const cookie = String(args?.cookie ?? '').trim();
+      if (!isTauri()) {
+        const sessionId = String(args?.sessionId ?? '').trim();
+        if (sessionId && cookie) {
+          await updateInnerWebProxySessionCookies(sessionId, cookie);
+        }
+        return true;
+      }
+      const url = String(args?.url ?? '').trim();
       if (!url.startsWith('http') || !cookie) return true;
       await invoke('sync_document_cookies_for_inner_web', { url, cookies: cookie });
       return true;
     }
     case 'getCookies': {
-      if (!isTauri()) return '';
+      if (!isTauri()) {
+        const sessionId = String(args?.sessionId ?? '').trim();
+        if (sessionId) {
+          const { readInnerWebProxySessionCookies } = await import(
+            '@/lib/http/inner-web-proxy-session'
+          );
+          return readInnerWebProxySessionCookies(sessionId);
+        }
+        return '';
+      }
       const url = String(args?.url ?? '').trim();
       if (!url.startsWith('http')) return '';
       return invoke<string>('get_webview_cookies_for_url', { url });

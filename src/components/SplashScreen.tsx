@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import logoLight from "../assets/logo-l-512x512.png";
 import logoDark from "../assets/logo-d-512x512.png";
 import { cn } from "src/lib/utils";
+import { isTauri } from "@/lib/platform/detect";
 
 interface SplashScreenProps {
   onComplete?: () => void;
@@ -24,16 +25,17 @@ export function SplashScreen(props: SplashScreenProps) {
     // 注意：window-state 插件会在窗口创建时恢复之前保存的状态
     // 如果之前窗口是隐藏的，这里会先显示窗口（用于开屏动画）
     // 动画完成后，窗口状态会根据用户操作或退出时的状态保存
-    try {
-      const appWindow = getCurrentWindow();
-      const isVisible = await appWindow.isVisible();
-      if (!isVisible) {
-        // 显示窗口并居中，确保在动画开始前窗口已显示
-        await appWindow.show();
-        await appWindow.center();
+    if (isTauri()) {
+      try {
+        const appWindow = getCurrentWindow();
+        const windowVisible = await appWindow.isVisible();
+        if (!windowVisible) {
+          await appWindow.show();
+          await appWindow.center();
+        }
+      } catch (error) {
+        console.warn("窗口显示失败:", error);
       }
-    } catch (error) {
-      console.warn("窗口显示失败:", error);
     }
 
     // 检测当前主题（支持 class=\"dark\" 和 data-kb-theme=\"dark\" 两种方式）

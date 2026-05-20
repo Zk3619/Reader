@@ -12,6 +12,7 @@
 import { join } from '@tauri-apps/api/path';
 import { getAppDataDir } from './app-data-dir';
 import { isTauri } from './detect';
+import sqlWasmBundledUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
 /**
  * 检测是否可以使用 Tauri SQL 插件（带缓存）
@@ -367,13 +368,17 @@ function sqlJsWasmBaseCdn(): string {
   return `https://cdn.jsdelivr.net/npm/sql.js@${SQLJS_WASM_VERSION}/dist/`;
 }
 
-async function initSqlJsWithWasm(locateBase: string): Promise<import('sql.js').SqlJsStatic> {
+async function initSqlJsWithLocate(
+  locateFile: (file: string) => string
+): Promise<import('sql.js').SqlJsStatic> {
   const initSqlJsModule = await import('sql.js');
   const initSqlJs = initSqlJsModule.default;
+  return initSqlJs({ locateFile });
+}
+
+async function initSqlJsWithWasmBase(locateBase: string): Promise<import('sql.js').SqlJsStatic> {
   const base = locateBase.endsWith('/') ? locateBase : `${locateBase}/`;
-  return initSqlJs({
-    locateFile: (file: string) => `${base}${file}`,
-  });
+  return initSqlJsWithLocate((file) => `${base}${file}`);
 }
 
 /**
@@ -383,15 +388,37 @@ async function initWebDatabase(): Promise<DatabaseAdapter> {
   try {
     console.log('[数据库适配层] 开始初始化 Web 方案（sql.js）...');
 
-    let SQL: import('sql.js').SqlJsStatic;
+    let SQL: import('sql.js').SqlJsStatic | undefined;
+    const loaders: Array<{ label: string; run: () => Promise<import('sql.js').SqlJsStatic> }> = [
+      {
+        label: 'Vite 资源',
+        run: () => initSqlJsWithLocate(() => sqlWasmBundledUrl),
+      },
+      {
+        label: 'public/sql.js',
+        run: () => initSqlJsWithWasmBase(sqlJsWasmBaseLocal()),
+      },
+      {
+        label: 'jsDelivr CDN',
+        run: () => initSqlJsWithWasmBase(sqlJsWasmBaseCdn()),
+      },
+    ];
 
-    try {
-      SQL = await initSqlJsWithWasm(sqlJsWasmBaseLocal());
-      console.log('[数据库适配层] sql.js WASM 初始化成功（public/sql.js）');
-    } catch (localError) {
-      console.warn('[数据库适配层] 本地 WASM 加载失败，尝试 jsDelivr CDN:', localError);
-      SQL = await initSqlJsWithWasm(sqlJsWasmBaseCdn());
-      console.log('[数据库适配层] sql.js WASM 初始化成功（CDN）');
+    let lastError: unknown;
+    for (const { label, run } of loaders) {
+      try {
+        SQL = await run();
+        console.log(`[数据库适配层] sql.js WASM 初始化成功（${label}）`);
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn(`[数据库适配层] ${label} WASM 加载失败:`, error);
+      }
+    }
+    if (SQL === undefined) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(String(lastError ?? 'sql.js WASM 加载失败'));
     }
 
     // 尝试从 IndexedDB 加载现有数据库

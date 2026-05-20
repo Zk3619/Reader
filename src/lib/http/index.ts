@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCookie, saveCookie } from './cookie-manager';
 import { createRateLimiter } from './rate-limiter';
 import { isTauri } from '@/lib/platform/detect';
+import { toWebHttpProxyRequest } from './web-http-proxy';
 
 /**
  * 规范化 URL，确保跨平台兼容性
@@ -442,18 +443,30 @@ async function executeRequest(
         }
       }
     } else {
-      // 使用原生fetch（浏览器环境）
+      // 浏览器环境：Cookie 为 forbidden 头，须走同源 __reader_http 代理（见 web-http-proxy.ts）
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       try {
-        response = await fetch(normalizedUrl, {
+        const proxied = toWebHttpProxyRequest(normalizedUrl, {
           method,
           headers: defaultHeaders,
-          body: body as BodyInit,
+          body: body as string | FormData | ArrayBuffer | undefined,
           redirect: followRedirects ? 'follow' : 'manual',
           signal: controller.signal,
         });
+
+        if (proxied) {
+          response = await fetch(proxied.url, proxied.init);
+        } else {
+          response = await fetch(normalizedUrl, {
+            method,
+            headers: defaultHeaders,
+            body: body as BodyInit,
+            redirect: followRedirects ? 'follow' : 'manual',
+            signal: controller.signal,
+          });
+        }
       } finally {
         clearTimeout(timeoutId);
       }
