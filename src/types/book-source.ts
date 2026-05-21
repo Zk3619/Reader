@@ -3,7 +3,7 @@
  * 对应 legado 项目的 BookSource.kt
  */
 
-import type { BaseSource } from './base-source';
+import type { BaseSource } from '@/types/base-source';
 import type {
   SearchRule,
   ExploreRule,
@@ -11,7 +11,7 @@ import type {
   TocRule,
   ContentRule,
   ReviewRule,
-} from './rule';
+} from '@/types/rule';
 
 /**
  * 书源实体（完整）

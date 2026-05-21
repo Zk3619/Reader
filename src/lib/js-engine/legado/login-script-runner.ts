@@ -11,7 +11,7 @@ import { deleteCookie } from '@/lib/http/cookie-manager';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { openLegadoBrowserInApp, openSourceSettingsInApp } from '@/lib/platform/open-url';
-import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobalJson } from '../core/runtime';
+import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobalJson } from '@/lib/js-engine/core/runtime';
 import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
@@ -19,20 +19,20 @@ import {
   normalizeLegadoCookieHeader,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
-} from './normalize-legado-ajax-body';
-import { createLoginInjector } from './login-inject';
-import { runLegadoScriptQuickJS } from './quickjs-runner';
+} from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { createLoginInjector } from '@/lib/js-engine/legado/login-inject';
+import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
-import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from './script-wrap';
+import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from '@/lib/js-engine/legado/script-wrap';
 import {
   getScriptBaseUrl,
   getSourceUrlIdentifier,
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
   storageKey,
-} from './source-script-shared';
-import { installScriptDateShim } from './script-date-shim';
-import { SuspendScript } from './suspend-script';
+} from '@/lib/js-engine/legado/source-script-shared';
+import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 const SCRIPT_TIMEOUT_MS = 20000;
 /** startBrowserAwait 挂起索引（与 ajax writeIndex 区分，避免写入 ajax 回放队列） */
@@ -123,7 +123,11 @@ function getScriptCookieForUrl(
   resolved: string,
   baseUrl: string
 ): string {
-  let cookieStr = cookieObj.getCookie(resolved) || (baseUrl ? cookieObj.getCookie(baseUrl) : '');
+  const controlBase = resolved.replace(/\/control\/?$/i, '');
+  let cookieStr =
+    cookieObj.getCookie(resolved) ||
+    (controlBase && controlBase !== resolved ? cookieObj.getCookie(controlBase) : '') ||
+    (baseUrl ? cookieObj.getCookie(baseUrl) : '');
   if (!cookieStr && resolved.startsWith('http')) {
     try {
       cookieStr = cookieObj.getCookie(new URL(resolved).origin);

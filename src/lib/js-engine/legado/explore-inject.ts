@@ -3,13 +3,13 @@
  */
 
 import type { QuickJSContext } from 'quickjs-emscripten';
-import { evalCodeVoid, setGlobalJson, setGlobalString } from '../core/runtime';
-import type { LegadoInjector, LegadoRunRuntime } from './quickjs-runner';
-import { bindGlobalVmObject, bindVmFunction, vmNewStringRecordObject } from './host/bind-vm';
-import { bindJavaAjax, type AjaxRequestFn } from './host/build-ajax-vm';
-import { injectDateShimVm } from './host/date-vm';
-import { injectLegadoEncodingUtils } from './host/encode-vm';
-import { injectRhinoLegadoShims } from './host/rhino-shim-vm';
+import { evalCodeVoid, setGlobalJson, setGlobalString } from '@/lib/js-engine/core/runtime';
+import type { LegadoInjector, LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
+import { bindGlobalVmObject, bindVmFunction, vmNewStringRecordObject } from '@/lib/js-engine/legado/host/bind-vm';
+import { bindJavaAjax, type AjaxRequestFn } from '@/lib/js-engine/legado/host/build-ajax-vm';
+import { injectDateShimVm } from '@/lib/js-engine/legado/host/date-vm';
+import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
+import { injectRhinoLegadoShims } from '@/lib/js-engine/legado/host/rhino-shim-vm';
 
 export interface ExploreInjectContext {
   baseUrl: string;

@@ -17,8 +17,8 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-} from '@/components/AppDialog';
-import { MoreIcon, GlobeIcon, LinkIcon, CookieIcon, LoaderIcon } from '@/components/icons';
+} from '@/components/shared/AppDialog';
+import { MoreIcon, GlobeIcon, LinkIcon, CookieIcon, LoaderIcon } from '@/components/shared/icons';
 import { readInnerWebCookies } from '@/lib/platform/inner-web';
 import {
   createInnerWebDialogOpenChange,
@@ -26,7 +26,7 @@ import {
   INNER_WEB_OVERLAY_Z,
 } from '@/lib/platform/inner-web-panel-overlay';
 import { openUrlInBrowser } from '@/lib/platform/open-url';
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface InnerWebMoreMenuProps {
   pageUrl?: string;

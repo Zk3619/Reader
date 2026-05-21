@@ -3,7 +3,7 @@
  * 对应 legado 项目的 RssSource.kt
  */
 
-import type { BaseSource } from './base-source';
+import type { BaseSource } from '@/types/base-source';
 
 /**
  * RSS源实体（完整）

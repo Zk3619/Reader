@@ -1,4 +1,4 @@
-import { LEGADO_SUSPEND_MARKER } from '../core/runtime';
+import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
 
 /**
  * 挂起重放时把顶层 const/let 换成 var，避免「已声明」错误（函数声明可重复）。

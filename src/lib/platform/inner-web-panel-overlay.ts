@@ -5,8 +5,8 @@
 
 import { createRoot, createSignal } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
-import { isTauri } from './detect';
-import { useInnerWebTauriPanel } from './inner-web-mode';
+import { isTauri } from '@/lib/platform/detect';
+import { useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
 
 /** 高于 .reader-inner-web-layer (z-150) 的 Portal 层级 */
 export const INNER_WEB_OVERLAY_Z = 'z-[160]';

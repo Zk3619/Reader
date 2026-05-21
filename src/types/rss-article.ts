@@ -3,7 +3,7 @@
  * 对应 legado 项目的 RssArticle.kt
  */
 
-import type { BaseRssArticle } from './base-rss-article';
+import type { BaseRssArticle } from '@/types/base-rss-article';
 
 /**
  * RSS文章实体（完整）

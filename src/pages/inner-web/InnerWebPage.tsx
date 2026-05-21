@@ -35,7 +35,7 @@ import {
 } from '@/lib/http/inner-web-proxy-session';
 import { setActiveWebProxySessionId } from '@/lib/platform/inner-web';
 import { isInnerWebPanelMaskVisible } from '@/lib/platform/inner-web-panel-overlay';
-import { InnerWebHeader } from './InnerWebHeader';
+import { InnerWebHeader } from '@/pages/inner-web/InnerWebHeader';
 
 const INNER_WEB_YUEDU_CHANNEL = 'reader-inner-web-yuedu';
 
@@ -122,15 +122,18 @@ export function InnerWebPage(props: InnerWebPageProps) {
     }
     const el = iframeEl();
     if (!el) return;
-    if (useHtml) {
-      el.srcdoc = snap.html ?? '';
-    } else if (webProxySessionId) {
-      const proxyUrl = buildInnerWebDocumentProxyUrl(webProxySessionId);
-      setIframeSrc(proxyUrl);
-      el.src = proxyUrl;
-    } else if (snap.url) {
-      el.src = snap.url;
-    }
+    void (async () => {
+      // 勿在刷新前 pull iframe：document.cookie 可能落后于代理 API 已写入会话的配置
+      if (useHtml) {
+        el.srcdoc = snap.html ?? '';
+      } else if (webProxySessionId) {
+        const proxyUrl = buildInnerWebDocumentProxyUrl(webProxySessionId);
+        setIframeSrc(proxyUrl);
+        el.src = proxyUrl;
+      } else if (snap.url) {
+        el.src = snap.url;
+      }
+    })();
   };
 
   onMount(() => {

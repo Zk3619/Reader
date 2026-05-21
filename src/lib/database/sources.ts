@@ -3,7 +3,7 @@
  * 对应 legado 项目的 BookSourceDao.kt
  */
 
-import { getDatabase } from './database-core';
+import { getDatabase } from '@/lib/database/database-core';
 import type { BookSource, NewBookSource } from '@/types';
 import type {
   SearchRule,

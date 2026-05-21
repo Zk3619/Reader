@@ -78,6 +78,45 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+/** 合并两段 `name=value; …`（后者同名覆盖前者） */
+function mergeSemicolonCookieStrings(existing: string, incoming: string): string {
+  const map = new Map<string, string>();
+  for (const part of `${existing};${incoming}`.split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());
+  }
+  return Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+/** 合并 Set-Cookie / 现有 Cookie 串为 `name=value; …`（供内嵌书源设置页） */
+function mergeCookieHeader(existing: string, setCookieLines: string[]): string {
+  const map = new Map<string, string>();
+  for (const part of existing.split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());
+  }
+  for (const line of setCookieLines) {
+    const first = line.split(';')[0]?.trim() ?? '';
+    const i = first.indexOf('=');
+    if (i > 0) map.set(first.slice(0, i).trim(), first.slice(i + 1).trim());
+  }
+  return Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+function collectUpstreamSetCookies(headers: Headers): string[] {
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
 async function forwardToTarget(
   target: string,
   req: IncomingMessage,
@@ -131,12 +170,24 @@ async function forwardToTarget(
     redirect: 'follow',
   });
 
+  if (session && sessionId) {
+    const setLines = collectUpstreamSetCookies(upstream.headers);
+    if (setLines.length > 0) {
+      session.cookies = mergeCookieHeader(session.cookies, setLines);
+      innerWebSessions.set(sessionId, session);
+    }
+  }
+
   res.statusCode = upstream.status;
   upstream.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
     if (STRIP_RESPONSE_HEADERS.has(lower)) return;
+    if (sessionId && lower === 'set-cookie') return;
     res.setHeader(key, value);
   });
+  if (sessionId && session?.cookies) {
+    res.setHeader('X-Reader-Session-Cookie', session.cookies);
+  }
 
   const ct = upstream.headers.get('content-type') ?? '';
   let buf = Buffer.from(await upstream.arrayBuffer());
@@ -225,8 +276,9 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
             res.end('session not found');
             return;
           }
-          if (typeof body.cookies === 'string') {
-            session.cookies = body.cookies;
+          if (typeof body.cookies === 'string' && body.cookies.trim()) {
+            session.cookies = mergeSemicolonCookieStrings(session.cookies, body.cookies.trim());
+            innerWebSessions.set(id, session);
           }
           res.statusCode = 204;
           res.end();
@@ -288,6 +340,11 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
           },
           redirect: 'follow',
         });
+        const setLines = collectUpstreamSetCookies(upstream.headers);
+        if (setLines.length > 0) {
+          session.cookies = mergeCookieHeader(session.cookies, setLines);
+          innerWebSessions.set(sessionId, session);
+        }
         const ct = upstream.headers.get('content-type') ?? '';
         const raw = await upstream.text();
         if (!ct.includes('text/html') && !raw.trimStart().startsWith('<')) {

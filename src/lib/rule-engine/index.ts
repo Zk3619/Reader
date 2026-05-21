@@ -12,11 +12,11 @@ export {
   type RuleMode,
   type ParsedRule,
   type RuleContext,
-} from './analyze-rule';
+} from '@/lib/rule-engine/analyze-rule';
 
 // 各解析器
-export { parseCss } from './css-parser';
-export { parseXPath } from './xpath-parser';
-export { parseJsonPath } from './jsonpath-parser';
-export { parseRegex } from './regex-parser';
+export { parseCss } from '@/lib/rule-engine/css-parser';
+export { parseXPath } from '@/lib/rule-engine/xpath-parser';
+export { parseJsonPath } from '@/lib/rule-engine/jsonpath-parser';
+export { parseRegex } from '@/lib/rule-engine/regex-parser';
 export { evalJs, initJsSandbox, type JsContext } from '@/lib/js-engine';

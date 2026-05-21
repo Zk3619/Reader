@@ -3,17 +3,17 @@
  */
 
 import type { QuickJSContext, QuickJSHandle } from 'quickjs-emscripten';
-import { LEGADO_SUSPEND_MARKER } from '../../core/runtime';
-import type { LegadoRunRuntime } from '../quickjs-runner';
-import { bindVmFunction } from './bind-vm';
+import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
+import type { LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
+import { bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
 import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
-} from '../normalize-legado-ajax-body';
-import { parseAjaxArgs } from './parse-ajax';
-import { SuspendScript } from '../suspend-script';
+} from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 export type AjaxRequestFn = (resolvedUrl: string, call: {
   method: 'GET' | 'POST';

@@ -7,8 +7,8 @@ import { get } from '@/lib/http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { RssSource } from '@/types';
 import type { RssArticle } from '@/types';
-import { parseHeaders, detectContentType } from '../book-source/utils';
-import { processContent } from '../book-source/content-processor';
+import { parseHeaders, detectContentType } from '@/lib/book-source/utils';
+import { processContent } from '@/lib/book-source/content-processor';
 
 /**
  * 获取RSS文章正文内容

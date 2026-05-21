@@ -10,7 +10,7 @@ import {
   exportDatabaseAndDownload,
   importDatabaseFromFile,
   importDatabaseFromPath,
-} from './export-import';
+} from '@/lib/database/export-import';
 import { isTauri } from '@/lib/platform/detect';
 
 /**

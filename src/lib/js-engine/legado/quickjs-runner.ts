@@ -9,11 +9,11 @@ import {
   initQuickJSRuntime,
   isQuickJSFallback,
   LEGADO_SUSPEND_MARKER,
-} from '../core/runtime';
-import { injectLegadoEncodingUtils } from './host/encode-vm';
-import { AjaxCoordinator, type AjaxCoordinatorMode } from './host/ajax-coordinator';
-import { SuspendScript } from './suspend-script';
-import { wrapLegadoCatchRethrow } from './script-wrap';
+} from '@/lib/js-engine/core/runtime';
+import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
+import { AjaxCoordinator, type AjaxCoordinatorMode } from '@/lib/js-engine/legado/host/ajax-coordinator';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+import { wrapLegadoCatchRethrow } from '@/lib/js-engine/legado/script-wrap';
 
 export type LegadoInjector = (vm: QuickJSContext, rt: LegadoRunRuntime) => void;
 

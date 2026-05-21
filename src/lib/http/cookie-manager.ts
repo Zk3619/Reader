@@ -9,7 +9,7 @@
  * 4. 合并多个Cookie
  */
 
-import { getDatabase } from '../database/database-core';
+import { getDatabase } from '@/lib/database/database-core';
 
 /**
  * 从数据库获取Cookie

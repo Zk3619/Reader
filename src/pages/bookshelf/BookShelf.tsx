@@ -5,43 +5,47 @@
  * - 下拉框/标签：默认显示「全部」书籍，分组名在导航栏以下拉/标签切换，不显示分组页
  */
 
-import { createSignal, For, Show, onMount, onCleanup, createEffect, untrack, createMemo, type JSX } from 'solid-js';
+import { createSignal, For, Show, onMount, onCleanup, createEffect, untrack, createMemo} from 'solid-js';
 import Sortable from 'sortablejs';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { bookshelfStore } from '@/stores/bookshelf';
 import { bookshelfLayoutStore, initBookshelfLayoutSettings } from '@/stores/bookshelf-layout';
-import { sortBooks } from '@/utils/book-sort';
+import { sortBooks } from '@/lib/bookshelf/book-sort';
 import * as groupsDb from '@/lib/database/book-groups';
 import * as booksDb from '@/lib/database/books';
 import type { BookGroup } from '@/types';
 import type { Book } from '@/types';
 import { BookGroupId } from '@/types';
-import { BookGroup as BookGroupPage } from './BookGroup';
-import { BookEditDialog } from '@/components/BookEditDialog';
-import { DeleteBookDialog } from '@/components/DeleteBookDialog';
-import { BookContextMenu, type BookContextMenuActions } from '@/components/BookContextMenu';
+import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroup';
+import { BookEditDialog } from '@/components/books/BookEditDialog';
+import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
+import { BookContextMenu, type BookContextMenuActions } from '@/components/bookshelf/BookContextMenu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/icons';
-import { showAppToast } from '@/components/AppToasts';
+import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { getBooksDirectory } from '@/lib/local-book/import';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { hasBook } from '@/lib/database/books';
 import { importLocalBookFromContent, isLocalBook } from '@/lib/local-book';
-import { pinBookToBottom, pinBookToTop } from '@/utils/book-order';
+import { pinBookToBottom, pinBookToTop } from '@/lib/bookshelf/book-order';
 import {
   bindBookshelfLayoutGap,
   BOOKSHELF_LAYOUT_GAP_CLASS,
-} from '@/utils/bookshelf-layout-gap';
+} from '@/lib/bookshelf/bookshelf-layout-gap';
 import {
   getViewModeCardLayout,
   getViewModeContainerGridClass,
-} from '@/utils/bookshelf-view-mode';
+} from '@/lib/bookshelf/bookshelf-view-mode';
 import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
-import { PageToolbar } from '@/components/PageToolbar';
-import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/BookshelfGroupNav';
+import { PageToolbar } from '@/components/shell/PageToolbar';
+import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/bookshelf/BookshelfGroupNav';
+import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolbar';
+import type { PageType } from '@/components/shell/Navigation';
+import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
+import { readerStore } from '@/stores/reader';
 
 export interface BookShelfProps {
   /** 分组加载完成后回调，供导航栏下拉/标签使用 */
@@ -50,8 +54,10 @@ export interface BookShelfProps {
   onGroupCountsLoaded?: (counts: Record<number, number>) => void;
   /** 点击书籍时打开阅读器 */
   onOpenBook?: (book: Book) => void;
-  /** 页面工具栏右侧操作区（更多菜单等） */
-  toolbarActions?: JSX.Element;
+  onPageChange?: (page: PageType) => void;
+  onOpenGroupManage?: () => void;
+  onImportLocal?: () => void;
+  onAddBookByUrl?: () => void;
 }
 
 export function BookShelf(props: BookShelfProps) {
@@ -188,6 +194,67 @@ export function BookShelf(props: BookShelfProps) {
     bookshelfStore.setCurrentGroup(group.groupId);
     bookshelfStore.setCurrentGroupName(group.groupName);
     bookshelfStore.setShowGroupList(false);
+  }
+
+  function handleUpdateToc() {
+    if (!showBooksView()) {
+      showAppToast({
+        title: '请先选择分组',
+        description: '进入具体分组后再更新该分组书籍的目录',
+        variant: 'warning',
+      });
+      return;
+    }
+    const targets = books().filter((b) => !isLocalBook(b) && b.canUpdate !== false);
+    if (targets.length === 0) {
+      showAppToast({
+        title: '没有可更新的书籍',
+        description: '当前分组没有需要更新的在线书籍',
+      });
+      return;
+    }
+
+    showAppToast({
+      title: '正在更新目录',
+      description: `共 ${targets.length} 本，更新完成后将刷新书架`,
+      persistent: true,
+    });
+
+    enqueueUpdateToc(
+      targets.map((b) => b.bookUrl),
+      {
+        onBookDone: (bookUrl, error) => {
+          void loadBooksForGroup(currentGroup());
+          void bookshelfStore.refreshBooks();
+          const open = readerStore.state.book;
+          if (open?.bookUrl === bookUrl && !error) {
+            void readerStore.loadCatalog(bookUrl);
+          }
+        },
+        onAllDone: (result) => {
+          if (result.total === 0) return;
+          if (result.failed === 0) {
+            showAppToast({
+              title: '目录更新完成',
+              description: `成功更新 ${result.success} 本`,
+              variant: 'success',
+            });
+          } else if (result.success === 0) {
+            showAppToast({
+              title: '目录更新失败',
+              description: `${result.failed} 本更新失败，可在「更新失败」分组查看`,
+              variant: 'error',
+            });
+          } else {
+            showAppToast({
+              title: '目录更新完成',
+              description: `成功 ${result.success} 本，失败 ${result.failed} 本`,
+              variant: 'warning',
+            });
+          }
+        },
+      },
+    );
   }
 
   function handleEditBook(book: Book) {
@@ -487,7 +554,13 @@ export function BookShelf(props: BookShelfProps) {
           ) : undefined
         }
       >
-        {props.toolbarActions}
+        <BookshelfPageToolbar
+          onPageChange={props.onPageChange}
+          onOpenGroupManage={props.onOpenGroupManage}
+          onImportLocal={props.onImportLocal}
+          onAddBookByUrl={props.onAddBookByUrl}
+          onUpdateToc={handleUpdateToc}
+        />
         <Show when={showBooksView() && currentGroup() === BookGroupId.Local}>
           <Button
             variant="outline"

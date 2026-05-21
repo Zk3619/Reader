@@ -4,9 +4,9 @@ import { createEffect, on, splitProps } from "solid-js"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 
-import { cn } from "src/lib/utils"
-import type { BadgeProps } from "src/components/ui/badge"
-import { Badge } from "src/components/ui/badge"
+import { cn } from "@/lib/utils"
+import type { BadgeProps } from "@/components/ui/badge"
+import { Badge } from "@/components/ui/badge"
 
 type DeltaType = "increase" | "moderateIncrease" | "unchanged" | "moderateDecrease" | "decrease"
 

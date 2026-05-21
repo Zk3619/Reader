@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { parseBookSourceJson } from '@/lib/book-source/source-import';
 import * as sourcesDb from '@/lib/database/sources';
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { isTauri } from '@/lib/platform/detect';
 
 export interface ImportBookSourcesNetworkResult {

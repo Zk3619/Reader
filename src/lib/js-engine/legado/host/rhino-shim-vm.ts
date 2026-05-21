@@ -3,7 +3,7 @@
  */
 
 import type { QuickJSContext } from 'quickjs-emscripten';
-import { evalCodeVoid } from '../../core/runtime';
+import { evalCodeVoid } from '@/lib/js-engine/core/runtime';
 
 /** 注入 Packages、cache、java.createSymmetricCrypto 等（须在书源脚本 eval 之前调用） */
 export function injectRhinoLegadoShims(vm: QuickJSContext): void {

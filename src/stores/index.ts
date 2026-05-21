@@ -3,8 +3,8 @@
  * 对应 legado 项目的 store/index.ts
  */
 
-export * from './bookshelf';
-export * from './reader';
-export * from './settings';
-export * from './sources';
-export * from './page-cache';
+export * from '@/stores/bookshelf';
+export * from '@/stores/reader';
+export * from '@/stores/settings';
+export * from '@/stores/sources';
+export * from '@/stores/page-cache';

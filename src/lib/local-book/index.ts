@@ -10,8 +10,8 @@
  */
 
 import type { Book, BookChapter } from '@/types';
-import { getTxtChapterList, getTxtContent } from './txt-parser';
-import { getEpubChapterList, getEpubContent } from './epub-parser';
+import { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
+import { getEpubChapterList, getEpubContent } from '@/lib/local-book/epub-parser';
 
 /**
  * 本地书籍文件类型
@@ -280,8 +280,8 @@ export function formatBookAuthor(author: string): string {
 }
 
 // 导出解析器
-export { getTxtChapterList, getTxtContent } from './txt-parser';
-export { getEpubChapterList, getEpubContent } from './epub-parser';
+export { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
+export { getEpubChapterList, getEpubContent } from '@/lib/local-book/epub-parser';
 
 // 导出导入能力
 export {
@@ -289,5 +289,5 @@ export {
   importLocalBookFromContent,
   pickLocalBookFile,
   readLocalBookContent,
-} from './import';
-export type { ImportResult } from './import';
+} from '@/lib/local-book/import';
+export type { ImportResult } from '@/lib/local-book/import';

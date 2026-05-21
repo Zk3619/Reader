@@ -12,7 +12,7 @@ import { get } from '@/lib/http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from './utils';
+import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
 
 /**
  * 处理 data: URL 场景的 getBookInfo

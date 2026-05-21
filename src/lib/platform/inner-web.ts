@@ -4,13 +4,17 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { isTauri } from './detect';
-import { startInnerWebBridge, stopInnerWebBridge } from './inner-web-bridge';
+import { isTauri } from '@/lib/platform/detect';
+import {
+  INNER_WEB_MESSAGE_CHANNEL,
+  startInnerWebBridge,
+  stopInnerWebBridge,
+} from '@/lib/platform/inner-web-bridge';
 import {
   closeInnerWebTauriPanel,
   setInnerWebSessionActive,
-} from './inner-web-tauri';
-import { useInnerWebIframe, useInnerWebTauriPanel } from './inner-web-mode';
+} from '@/lib/platform/inner-web-tauri';
+import { useInnerWebIframe, useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
 
 export interface InnerWebPayload {
   title: string;
@@ -242,16 +246,59 @@ export function openInnerWebAwait(
   });
 }
 
+/** 纯 Web 代理 iframe：向子页索取 document.cookie 并写入代理会话（刷新 / √ 前调用） */
+export async function pullInnerWebProxyCookiesFromIframe(sessionId: string): Promise<void> {
+  if (typeof document === 'undefined') return;
+  const { mergeInnerWebProxySessionCookies } = await import(
+    '@/lib/http/inner-web-proxy-session'
+  );
+  const frames = document.querySelectorAll('iframe.reader-inner-web-iframe');
+  for (const el of frames) {
+    const win = (el as HTMLIFrameElement).contentWindow;
+    if (!win) continue;
+    try {
+      const cookies = await new Promise<string>((resolve) => {
+        const id = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timeout = window.setTimeout(() => resolve(''), 600);
+        const onMsg = (ev: MessageEvent) => {
+          if (ev.source !== win) return;
+          const d = ev.data as { channel?: string; id?: string; result?: unknown };
+          if (d?.channel !== INNER_WEB_MESSAGE_CHANNEL || d.id !== id) return;
+          window.clearTimeout(timeout);
+          window.removeEventListener('message', onMsg);
+          resolve(String(d.result ?? ''));
+        };
+        window.addEventListener('message', onMsg);
+        win.postMessage(
+          { channel: INNER_WEB_MESSAGE_CHANNEL, id, method: 'exportCookies' },
+          '*'
+        );
+      });
+      if (cookies.trim()) {
+        await mergeInnerWebProxySessionCookies(sessionId, cookies);
+        return;
+      }
+    } catch (e) {
+      console.warn('[inner-web] pullInnerWebProxyCookiesFromIframe failed', e);
+    }
+  }
+}
+
 /** 读取内嵌 WebView / iframe 当前 URL 的 Cookie（供「更多 → 查看 Cookie」） */
 export async function readInnerWebCookies(url: string): Promise<string> {
   const trimmed = url.trim();
   if (!trimmed.startsWith('http')) return '';
   if (activeWebProxySessionId) {
     try {
+      await pullInnerWebProxyCookiesFromIframe(activeWebProxySessionId);
       const { readInnerWebProxySessionCookies } = await import(
         '@/lib/http/inner-web-proxy-session'
       );
-      return readInnerWebProxySessionCookies(activeWebProxySessionId);
+      const { normalizeControlSettingsCookieHeader } = await import(
+        '@/lib/js-engine/legado/normalize-legado-ajax-body'
+      );
+      const raw = await readInnerWebProxySessionCookies(activeWebProxySessionId);
+      return normalizeControlSettingsCookieHeader(raw);
     } catch (e) {
       console.warn('[inner-web] read proxy session cookies failed', e);
     }

@@ -3,7 +3,7 @@
  * 对应 legado 项目的章节缓存功能
  */
 
-import { getDatabase } from './database-core';
+import { getDatabase } from '@/lib/database/database-core';
 import type { ChapterCache } from '@/types';
 
 /**

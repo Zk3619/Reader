@@ -4,8 +4,8 @@ import { splitProps } from "solid-js"
 import * as SelectPrimitive from "@kobalte/core/select"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
-import { cn } from "src/lib/utils"
-import { CheckIcon, ChevronsUpDownIcon } from "@/components/icons"
+import { cn } from "@/lib/utils"
+import { CheckIcon, ChevronsUpDownIcon } from "@/components/shared/icons"
 
 const Select = SelectPrimitive.Root
 

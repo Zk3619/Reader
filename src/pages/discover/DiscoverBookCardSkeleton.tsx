@@ -10,7 +10,7 @@ import {
   discoverBookListBadgeRowClass,
   discoverBookListIntroWrapClass,
   discoverSkeletonPulseClass,
-} from '@/utils/book-group-card-styles';
+} from '@/lib/bookshelf/book-group-card-styles';
 import { cn } from '@/lib/utils';
 
 export const DISCOVER_BOOK_GRID_CLASS =

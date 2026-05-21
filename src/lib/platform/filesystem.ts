@@ -20,8 +20,8 @@ import {
   writeFile as fsWriteFile,
   writeTextFile as fsWriteTextFile,
 } from '@tauri-apps/plugin-fs';
-import { getAppDataDir } from './app-data-dir';
-import { isTauri } from './detect';
+import { getAppDataDir } from '@/lib/platform/app-data-dir';
+import { isTauri } from '@/lib/platform/detect';
 
 // File System Access API 类型声明
 declare global {

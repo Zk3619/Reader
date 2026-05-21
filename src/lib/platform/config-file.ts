@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { clearAppDataDirCache } from './app-data-dir';
+import { clearAppDataDirCache } from '@/lib/platform/app-data-dir';
 
 export type ConfigJson = Record<string, unknown> & { dataDir?: string | null };
 

@@ -10,9 +10,9 @@
 
 import { join } from '@tauri-apps/api/path';
 import { Store } from '@tauri-apps/plugin-store';
-import { getAppDataDir } from './app-data-dir';
-import { getConfig, setConfig } from './config-file';
-import { isTauri } from './detect';
+import { getAppDataDir } from '@/lib/platform/app-data-dir';
+import { getConfig, setConfig } from '@/lib/platform/config-file';
+import { isTauri } from '@/lib/platform/detect';
 
 /**
  * 默认存储文件名（仅Tauri使用）

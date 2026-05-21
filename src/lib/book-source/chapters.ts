@@ -12,7 +12,7 @@ import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, TocRule } from '@/types';
 import type { BookChapter, NewBookChapter } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from './utils';
+import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
 
 // ─── data: URL 场景 ───
 

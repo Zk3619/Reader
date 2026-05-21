@@ -8,7 +8,7 @@
 import { createSignal, Show, onMount, For } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/PageHeader';
+import { PageHeader } from '@/components/shell/PageHeader';
 import {
   BookOpenIcon,
   ChevronDownIcon,
@@ -22,14 +22,14 @@ import {
   UpdateTimeIcon,
   TocMetaIcon,
   XIcon,
-} from '@/components/icons';
+} from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import { hasBook } from '@/lib/database/books';
 import { getBookInfo } from '@/lib/book-source/detail';
 import { getSource } from '@/lib/database/sources';
 import { openUrlInApp } from '@/lib/platform/open-url';
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { pageCacheStore } from '@/stores/page-cache';
 import { bookshelfStore } from '@/stores/bookshelf';
 import type { SearchBook } from '@/types';

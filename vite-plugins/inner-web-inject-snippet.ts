@@ -86,10 +86,17 @@ function buildProxyInit(input,init,url){
   }catch(e){}
   return o;
 }
+function applySessionCookieHeader(r){
+  try{
+    var h=r.headers&&r.headers.get&&r.headers.get('X-Reader-Session-Cookie');
+    if(h){store=String(h);syncParent();}
+  }catch(e){}
+  return r;
+}
 var rawFetch=window.fetch.bind(window);
 window.fetch=function(input,init){
   var url=typeof input==='string'?input:(input&&input.url);
-  if(url&&shouldProxy(url))return rawFetch(proxyUrl(url),buildProxyInit(input,init,url));
+  if(url&&shouldProxy(url))return rawFetch(proxyUrl(url),buildProxyInit(input,init,url)).then(applySessionCookieHeader);
   return rawFetch(input,init);
 };
 var XO=XMLHttpRequest.prototype.open;
@@ -107,7 +114,7 @@ XMLHttpRequest.prototype.send=function(body){
     var init={method:m};
     if(!(m==='POST'&&resolveToTarget(u).indexOf('/user_api')!==-1))init.body=body;
     rawFetch(proxyUrl(u),withCookie(init))
-      .then(function(r){return r.text().then(function(t){
+      .then(function(r){applySessionCookieHeader(r);return r.text().then(function(t){
         Object.defineProperty(self,'status',{value:r.status});
         Object.defineProperty(self,'responseText',{value:t});
         Object.defineProperty(self,'readyState',{value:4});
@@ -129,6 +136,16 @@ try{
     set:function(v){store=mergeCookie(store,v);syncParent();}
   });
 }catch(e){}
+window.addEventListener('message',function(ev){
+  var d=ev.data;
+  if(!d||d.channel!==CHANNEL||!d.id)return;
+  if(d.method==='exportCookies'){
+    syncParent();
+    try{ev.source.postMessage({channel:CHANNEL,id:d.id,result:store},ev.origin||'*');}catch(e){}
+  }
+});
+window.addEventListener('beforeunload',function(){syncParent();});
+window.addEventListener('pagehide',function(){syncParent();});
 syncParent();
 })();`;
 }

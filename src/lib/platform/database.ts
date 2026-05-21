@@ -10,8 +10,8 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from './app-data-dir';
-import { isTauri } from './detect';
+import { getAppDataDir } from '@/lib/platform/app-data-dir';
+import { isTauri } from '@/lib/platform/detect';
 import sqlWasmBundledUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
 /**

@@ -12,8 +12,8 @@ import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookChapter, Book } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from './utils';
-import { processContent, processImageStyle } from './content-processor';
+import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
+import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
 
 // ─── data: URL 场景 ───
 

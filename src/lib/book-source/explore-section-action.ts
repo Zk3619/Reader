@@ -9,12 +9,12 @@ import { openLegadoBrowserInApp } from '@/lib/platform/open-url';
 import {
   isLegadoAjaxBookListExploreUrl,
   isLegadoAjaxExploreUrl,
-} from './explore-legado-ajax';
-import { resolveUrl } from './utils';
+} from '@/lib/book-source/explore-legado-ajax';
+import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
-import type { ExploreSection } from './explore-sections';
+import type { ExploreSection } from '@/lib/book-source/explore-sections';
 
-export { isLegadoAjaxBookListExploreUrl, isLegadoAjaxExploreUrl } from './explore-legado-ajax';
+export { isLegadoAjaxBookListExploreUrl, isLegadoAjaxExploreUrl } from '@/lib/book-source/explore-legado-ajax';
 
 /** 书源 JSON 中常见的 `{\{ ... }\}` 转义 */
 function normalizeLegadoTemplate(url: string): string {

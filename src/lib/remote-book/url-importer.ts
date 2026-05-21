@@ -5,7 +5,7 @@
  */
 
 import { importLocalBookFromContent, detectFileTypeByContent } from '@/lib/local-book';
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { request } from '@/lib/http';
 
 /**

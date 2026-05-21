@@ -9,10 +9,10 @@
  * 4. 调用相应的解析器
  */
 
-import { parseCss } from './css-parser';
-import { parseXPath } from './xpath-parser';
-import { parseJsonPath } from './jsonpath-parser';
-import { parseRegex } from './regex-parser';
+import { parseCss } from '@/lib/rule-engine/css-parser';
+import { parseXPath } from '@/lib/rule-engine/xpath-parser';
+import { parseJsonPath } from '@/lib/rule-engine/jsonpath-parser';
+import { parseRegex } from '@/lib/rule-engine/regex-parser';
 import { evalJs } from '@/lib/js-engine';
 
 /**

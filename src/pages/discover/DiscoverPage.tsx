@@ -12,11 +12,11 @@ import {
   AppDialogDescription,
   AppDialogHeader,
   AppDialogTitle,
-} from '@/components/AppDialog';
+} from '@/components/shared/AppDialog';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { PageHeader } from '@/components/PageHeader';
-import { RefreshIcon, MoreIcon, Settings2Icon, BookCoverIcon } from '@/components/icons';
+import { PageHeader } from '@/components/shell/PageHeader';
+import { RefreshIcon, MoreIcon, Settings2Icon, BookCoverIcon } from '@/components/shared/icons';
 import { exploreBook } from '@/lib/book-source/explore';
 import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
 import type { BookSource } from '@/types';
@@ -31,17 +31,17 @@ import {
   discoverBookListBadgeClass,
   discoverBookListBadgeLastClass,
   discoverBookListBadgeEllipsisClass,
-} from '@/utils/book-group-card-styles';
+} from '@/lib/bookshelf/book-group-card-styles';
 import {
   DISCOVER_BOOK_GRID_CLASS,
   DiscoverBookListSkeleton,
-} from './DiscoverBookCardSkeleton';
-import { DiscoverBookListIntro } from './DiscoverBookListIntro';
-import { bookGroupCardPressHandlers } from '@/utils/book-group-card-press';
-import { showAppToast } from '@/components/AppToasts';
+} from '@/pages/discover/DiscoverBookCardSkeleton';
+import { DiscoverBookListIntro } from '@/pages/discover/DiscoverBookListIntro';
+import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 import { pageCacheStore } from '@/stores/page-cache';
-import { tryFormatDisplayUpdateTime } from '@/lib/format-display-time';
+import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 
 /** 分页偏好类型 */
 type PaginationPreference = 'scroll' | 'pagination';

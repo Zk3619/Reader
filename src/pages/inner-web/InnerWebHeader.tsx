@@ -2,11 +2,11 @@
  * 内嵌网页顶栏：基于统一 PageHeader（返回、标题、刷新、完成、更多、窗口控制）
  */
 
-import { PageHeader, type PageHeaderAction } from '@/components/PageHeader';
+import { PageHeader, type PageHeaderAction } from '@/components/shell/PageHeader';
 import { withBlurBefore } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
-import { CheckIcon, RefreshIcon } from '@/components/icons';
-import { InnerWebMoreMenu } from './InnerWebMoreMenu';
+import { CheckIcon, RefreshIcon } from '@/components/shared/icons';
+import { InnerWebMoreMenu } from '@/pages/inner-web/InnerWebMoreMenu';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
 export interface InnerWebHeaderProps {

@@ -3,7 +3,7 @@
  * 对应 legado 项目的 BookDao.kt
  */
 
-import { getDatabase } from './database-core';
+import { getDatabase } from '@/lib/database/database-core';
 import type { Book, NewBook } from '@/types';
 import { BookGroupId } from '@/types/book-group';
 
@@ -51,7 +51,7 @@ export async function getBooksByGroup(groupId: number): Promise<Book[]> {
         ORDER BY "order"`;
       break;
     case BookGroupId.Error:
-      query = 'SELECT * FROM books WHERE type & 8 > 0 ORDER BY durChapterTime DESC';
+      query = 'SELECT * FROM books WHERE type & 16 > 0 ORDER BY durChapterTime DESC';
       break;
     default:
       // 用户自定义分组（使用位运算）
@@ -92,7 +92,7 @@ export async function getBookCountByGroup(groupId: number): Promise<number> {
         AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0`;
       break;
     case BookGroupId.Error:
-      query = 'SELECT COUNT(*) as count FROM books WHERE type & 8 > 0';
+      query = 'SELECT COUNT(*) as count FROM books WHERE type & 16 > 0';
       break;
     default:
       query = 'SELECT COUNT(*) as count FROM books WHERE ("group" & ?) > 0';
@@ -185,6 +185,68 @@ export async function insertBook(book: NewBook): Promise<void> {
       now, // durChapterTime
     ]
   );
+}
+
+/**
+ * 更换书籍主键 bookUrl（目录更新后 bookUrl 可能变化）
+ */
+export async function replaceBookUrl(oldBookUrl: string, book: Book): Promise<void> {
+  if (oldBookUrl === book.bookUrl) {
+    await updateBook(book);
+    return;
+  }
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE books SET
+      bookUrl = ?, tocUrl = ?, origin = ?, originName = ?, name = ?, author = ?,
+      kind = ?, customTag = ?, coverUrl = ?, customCoverUrl = ?,
+      intro = ?, customIntro = ?, charset = ?, type = ?, "group" = ?,
+      latestChapterTitle = ?, latestChapterTime = ?,
+      lastCheckTime = ?, lastCheckCount = ?, totalChapterNum = ?,
+      durChapterTitle = ?, durChapterIndex = ?, durChapterPos = ?,
+      durChapterTime = ?, wordCount = ?, canUpdate = ?,
+      "order" = ?, originOrder = ?, variable = ?, readConfig = ?,
+      syncTime = ?
+    WHERE bookUrl = ?`,
+    [
+      book.bookUrl,
+      book.tocUrl,
+      book.origin,
+      book.originName,
+      book.name,
+      book.author,
+      book.kind ?? null,
+      book.customTag ?? null,
+      book.coverUrl ?? null,
+      book.customCoverUrl ?? null,
+      book.intro ?? null,
+      book.customIntro ?? null,
+      book.charset ?? null,
+      book.type,
+      book.group,
+      book.latestChapterTitle ?? null,
+      book.latestChapterTime,
+      book.lastCheckTime,
+      book.lastCheckCount,
+      book.totalChapterNum,
+      book.durChapterTitle ?? null,
+      book.durChapterIndex,
+      book.durChapterPos,
+      book.durChapterTime,
+      book.wordCount ?? null,
+      book.canUpdate ? 1 : 0,
+      book.order,
+      book.originOrder,
+      book.variable ?? null,
+      book.readConfig ? JSON.stringify(book.readConfig) : null,
+      book.syncTime,
+      oldBookUrl,
+    ]
+  );
+  await db.execute('UPDATE chapters SET bookUrl = ? WHERE bookUrl = ?', [
+    book.bookUrl,
+    oldBookUrl,
+  ]);
 }
 
 /**

@@ -27,22 +27,22 @@ import {
   isDefaultBookGroup,
   pinGroupToBottom,
   pinGroupToTop,
-} from '@/utils/book-group-order';
-import { getCoverPreviewInfo } from '@/utils/book-group-cover';
-import { GroupContextMenu, type GroupContextMenuActions } from '@/components/BookGroupContextMenu';
-import { BookGroupFormDialog } from '@/components/BookGroupFormDialog';
+} from '@/lib/bookshelf/book-group-order';
+import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
+import { GroupContextMenu, type GroupContextMenuActions } from '@/components/bookshelf/BookGroupContextMenu';
+import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
 import {
   DefaultGroupCoverIcon,
   BookCoverPlaceholderIcon,
-} from '@/components/book-group-cover-icon';
-import { BookshelfIcon } from '@/components/icons';
-import { BookshelfLayoutGrid } from '@/components/BookshelfLayoutGrid';
+} from '@/components/bookshelf/book-group-cover-icon';
+import { BookshelfIcon } from '@/components/shared/icons';
+import { BookshelfLayoutGrid } from '@/components/bookshelf/BookshelfLayoutGrid';
 import {
   getGroupListSortableContainer,
   getViewModeContainerGridClass,
   isGridViewMode,
   type GroupListSortRefs,
-} from '@/utils/bookshelf-view-mode';
+} from '@/lib/bookshelf/bookshelf-view-mode';
 
 // 视图模式从布局设置 Store 获取，不再使用本地状态
 

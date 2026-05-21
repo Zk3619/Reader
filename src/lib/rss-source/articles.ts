@@ -7,8 +7,8 @@ import { get } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { RssSource } from '@/types';
 import type { RssArticle, NewRssArticle } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, buildUrl } from '../book-source/utils';
-import { parseRssDefault } from './rss-parser-default';
+import { parseHeaders, resolveUrl, detectContentType, buildUrl } from '@/lib/book-source/utils';
+import { parseRssDefault } from '@/lib/rss-source/rss-parser-default';
 
 /**
  * 获取RSS文章列表

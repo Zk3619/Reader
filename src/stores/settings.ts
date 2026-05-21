@@ -10,7 +10,7 @@
  */
 
 import { createStore } from 'solid-js/store';
-import type { ShellLayoutPreference } from '@/lib/shell-layout';
+import type { ShellLayoutPreference } from '@/lib/shell/layout';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 /**

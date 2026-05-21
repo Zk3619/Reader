@@ -2,7 +2,7 @@
  * 向 QuickJS 上下文注入 java.base64* / hexDecodeToString（与规则沙箱一致，UTF-8 安全）
  */
 import type { QuickJSContext } from 'quickjs-emscripten';
-import { evalCodeVoid } from '../../core/runtime';
+import { evalCodeVoid } from '@/lib/js-engine/core/runtime';
 
 export function injectLegadoEncodingUtils(vm: QuickJSContext): void {
   evalCodeVoid(vm, `

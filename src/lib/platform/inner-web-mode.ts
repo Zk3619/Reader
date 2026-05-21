@@ -3,7 +3,7 @@
  * 纯 Web / data: HTML 仍用 iframe。
  */
 
-import { isMobile, isTauri } from './detect';
+import { isMobile, isTauri } from '@/lib/platform/detect';
 
 /**
  * 备用：true 时使用 WebviewWindow 子窗口（见 inner-web-child-window.ts），

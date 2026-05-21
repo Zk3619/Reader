@@ -2,6 +2,7 @@
  * 纯 Web 内嵌页：通过 Vite /__reader_http 会话在 iframe 内注入 Cookie 并代理 API。
  */
 
+import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { isTauri } from '@/lib/platform/detect';
 
 const PROXY_SEGMENT = '__reader_http';
@@ -65,9 +66,23 @@ export async function updateInnerWebProxySessionCookies(
   await fetch(`${proxyPath()}/session/${encodeURIComponent(sessionId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cookies }),
+    body: JSON.stringify({ cookies: cookies.trim() }),
     credentials: 'same-origin',
   });
+}
+
+/** 将 iframe / 宿主上报的 Cookie 合并进会话（勿整段覆盖，避免冲掉代理 API 已写入的新配置） */
+export async function mergeInnerWebProxySessionCookies(
+  sessionId: string,
+  cookies: string
+): Promise<void> {
+  const incoming = cookies.trim();
+  if (!incoming) return;
+  const existing = (await readInnerWebProxySessionCookies(sessionId)).trim();
+  const merged = existing
+    ? mergeLegadoCookieHeaderStrings(existing, incoming)
+    : incoming;
+  await updateInnerWebProxySessionCookies(sessionId, merged);
 }
 
 export async function deleteInnerWebProxySession(sessionId: string): Promise<void> {

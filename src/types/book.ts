@@ -3,7 +3,7 @@
  * 对应 legado 项目的 Book.kt
  */
 
-import type { BaseBook } from './base-book';
+import type { BaseBook } from '@/types/base-book';
 
 /**
  * 阅读配置

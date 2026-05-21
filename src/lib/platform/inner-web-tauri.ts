@@ -3,8 +3,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { appendYueduTauriPanelBridgeToHtml } from './inner-web-yuedu-bridge-snippet';
-import { isTauri } from './detect';
+import { appendYueduTauriPanelBridgeToHtml } from '@/lib/platform/inner-web-yuedu-bridge-snippet';
+import { isTauri } from '@/lib/platform/detect';
 
 export const INNER_WEB_WEBVIEW_LABEL = 'reader-inner-web';
 

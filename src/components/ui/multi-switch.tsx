@@ -5,8 +5,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "./dropdown-menu";
-import { ChevronDownIcon } from "@/components/icons";
+} from "@/components/ui/dropdown-menu";
+import { ChevronDownIcon } from "@/components/shared/icons";
 import { cn } from "@/lib/utils";
 
 const LONG_PRESS_MS = 500;

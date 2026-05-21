@@ -7,8 +7,8 @@ import { createSignal, Show, For, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { Checkbox } from '@/components/ui/checkbox';
-import { PageHeader } from '@/components/PageHeader';
-import { showAppToast } from '@/components/AppToasts';
+import { PageHeader } from '@/components/shell/PageHeader';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { getBooksDirectory } from '@/lib/local-book/import';
 import { hasBook } from '@/lib/database/books';
@@ -21,7 +21,7 @@ import {
   ChevronLeftIcon,
   SearchIcon,
   LoaderIcon
-} from '@/components/icons';
+} from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';

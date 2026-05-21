@@ -9,7 +9,7 @@ import {
   getViewModeGridColumnCount,
   isGridViewMode,
   isListViewMode,
-} from '@/utils/bookshelf-view-mode';
+} from '@/lib/bookshelf/bookshelf-view-mode';
 
 /**
  * 分组样式

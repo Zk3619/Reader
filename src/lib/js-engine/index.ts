@@ -11,13 +11,13 @@ export {
   initQuickJSRuntime,
   isQuickJSFallback,
   LEGADO_SUSPEND_MARKER,
-} from './core/runtime';
+} from '@/lib/js-engine/core/runtime';
 
-export { evalJs, initJsSandbox, isJsSandboxFallback, type JsContext } from './quickjs-sandbox';
+export { evalJs, initJsSandbox, isJsSandboxFallback, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
 
-export { installScriptDateShim, type ScriptDateShim } from './legado/script-date-shim';
-export { SuspendScript } from './legado/suspend-script';
-export { runLegadoScriptQuickJS, type LegadoInjector, type LegadoRunRuntime } from './legado/quickjs-runner';
+export { installScriptDateShim, type ScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
+export { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+export { runLegadoScriptQuickJS, type LegadoInjector, type LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
 
 export {
   clearSourceLoginState,
@@ -29,10 +29,10 @@ export {
   type RunLoginScriptOptions,
   type RunLoginScriptRustOutput,
   type UrlWithCookies,
-} from './legado/login-script-runner';
+} from '@/lib/js-engine/legado/login-script-runner';
 
-export { extractExploreScript, runExploreScript } from './legado/explore-script-runner';
+export { extractExploreScript, runExploreScript } from '@/lib/js-engine/legado/explore-script-runner';
 export {
   getScriptBaseUrl,
   getSourceUrlIdentifier,
-} from './legado/source-script-shared';
+} from '@/lib/js-engine/legado/source-script-shared';

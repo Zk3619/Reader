@@ -4,9 +4,9 @@
  */
 
 // 基础接口
-export type { BaseBook } from './base-book';
-export type { BaseSource } from './base-source';
-export type { BaseRssArticle } from './base-rss-article';
+export type { BaseBook } from '@/types/base-book';
+export type { BaseSource } from '@/types/base-source';
+export type { BaseRssArticle } from '@/types/base-rss-article';
 
 // 书籍相关类型
 export type {
@@ -15,10 +15,10 @@ export type {
   BookInfo,
   BookProgress,
   ReadConfig,
-} from './book';
+} from '@/types/book';
 
 // 书源相关类型
-export type { BookSource, NewBookSource } from './book-source';
+export type { BookSource, NewBookSource } from '@/types/book-source';
 
 // 章节相关类型
 export type {
@@ -26,24 +26,24 @@ export type {
   NewBookChapter,
   ChapterContent,
   ChapterCache,
-} from './book-chapter';
+} from '@/types/book-chapter';
 
 // 搜索相关类型
-export type { SearchBook } from './search-book';
-export type { SearchKeyword } from './search-keyword';
+export type { SearchBook } from '@/types/search-book';
+export type { SearchKeyword } from '@/types/search-keyword';
 
 // 分组相关类型
-export type { BookGroup } from './book-group';
-export { BookGroupId } from './book-group';
+export type { BookGroup } from '@/types/book-group';
+export { BookGroupId } from '@/types/book-group';
 
 // 书签相关类型
-export type { Bookmark } from './bookmark';
+export type { Bookmark } from '@/types/bookmark';
 
 // 替换规则类型
-export type { ReplaceRule } from './replace-rule';
+export type { ReplaceRule } from '@/types/replace-rule';
 
 // 阅读记录类型
-export type { ReadRecord } from './read-record';
+export type { ReadRecord } from '@/types/read-record';
 
 // 远程书籍相关类型
 export type {
@@ -51,13 +51,13 @@ export type {
   RemoteBookManager,
   WebDavConfig,
   RemoteBookSort,
-} from './remote-book';
+} from '@/types/remote-book';
 
 // RSS订阅相关类型
-export type { RssSource, NewRssSource } from './rss-source';
-export type { RssArticle, NewRssArticle } from './rss-article';
-export type { RssStar } from './rss-star';
-export type { RssReadRecord } from './rss-read-record';
+export type { RssSource, NewRssSource } from '@/types/rss-source';
+export type { RssArticle, NewRssArticle } from '@/types/rss-article';
+export type { RssStar } from '@/types/rss-star';
+export type { RssReadRecord } from '@/types/rss-read-record';
 
 // 规则类型
 export type {
@@ -67,9 +67,9 @@ export type {
   TocRule,
   ContentRule,
   ReviewRule,
-} from './rule';
+} from '@/types/rule';
 
 // 书源联合类型（书籍源或RSS源）
-import type { BookSource } from './book-source';
-import type { RssSource } from './rss-source';
+import type { BookSource } from '@/types/book-source';
+import type { RssSource } from '@/types/rss-source';
 export type Source = BookSource | RssSource;

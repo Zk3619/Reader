@@ -3,7 +3,7 @@
  * 对应 legado 项目的 SearchBook.kt
  */
 
-import type { BaseBook } from './base-book';
+import type { BaseBook } from '@/types/base-book';
 
 /**
  * 搜索书籍结果实体

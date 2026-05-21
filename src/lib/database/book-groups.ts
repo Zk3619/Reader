@@ -3,7 +3,7 @@
  * 对应 legado 项目的 BookGroupDao.kt
  */
 
-import { getDatabase } from './database-core';
+import { getDatabase } from '@/lib/database/database-core';
 import type { BookGroup } from '@/types';
 
 /**

@@ -7,7 +7,7 @@ import { Portal } from 'solid-js/web';
 import type { InnerWebPayload } from '@/lib/platform/inner-web';
 import { useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
 import { cn } from '@/lib/utils';
-import { InnerWebPage } from './InnerWebPage';
+import { InnerWebPage } from '@/pages/inner-web/InnerWebPage';
 
 export interface InnerWebHostProps {
   payload: InnerWebPayload | null | undefined;

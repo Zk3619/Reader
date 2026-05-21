@@ -100,3 +100,16 @@ export function normalizeControlSettingsCookieHeader(raw: string): string {
     .filter(Boolean)
     .join('; ');
 }
+
+/** 合并两段 `name=value; …` Cookie 串（后者同名覆盖前者） */
+export function mergeLegadoCookieHeaderStrings(existing: string, incoming: string): string {
+  const map = new Map<string, string>();
+  for (const part of `${existing};${incoming}`.split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());
+  }
+  return Array.from(map.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}

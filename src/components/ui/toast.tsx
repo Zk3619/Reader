@@ -7,7 +7,7 @@ import * as ToastPrimitive from "@kobalte/core/toast"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 
-import { cn } from "src/lib/utils"
+import { cn } from "@/lib/utils"
 
 const toastVariants = cva(
   "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all duration-300 ease-out data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--kb-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--kb-toast-swipe-move-x)] data-[swipe=move]:transition-none",

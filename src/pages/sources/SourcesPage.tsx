@@ -27,9 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DeleteSourceDialog } from '@/components/DeleteSourceDialog';
-import { showAppToast } from '@/components/AppToasts';
-import { ChevronDownIcon } from '@/components/icons';
+import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
+import { showAppToast } from '@/components/shared/AppToasts';
+import { ChevronDownIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -50,7 +50,7 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-} from '@/components/AppDialog';
+} from '@/components/shared/AppDialog';
 import { validateSources, type SourceValidationResult, type ValidateResultKind } from '@/lib/book-source/validate';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -63,7 +63,7 @@ import {
   isSourceFilterOrAll,
   type SourceSearchMode,
   fuzzyMatchQuery,
-} from '@/lib/sources-filters';
+} from '@/lib/sources/filters';
 
 /** 批量栏「操作 / 更多」下拉：展开时 ChevronDown 由向下旋转为向上 */
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';

@@ -2,8 +2,8 @@
  * Legado java.ajax 的缓存、挂起索引与耗时（Web 端模拟同步阻塞）
  */
 
-import { installScriptDateShim } from '../script-date-shim';
-import { SuspendScript } from '../suspend-script';
+import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 export type AjaxCoordinatorMode = 'suspend' | 'two-pass';
 

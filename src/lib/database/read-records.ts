@@ -3,7 +3,7 @@
  * 对应 legado 项目的 ReadRecordDao.kt
  */
 
-import { getDatabase } from './database-core';
+import { getDatabase } from '@/lib/database/database-core';
 import type { ReadRecord } from '@/types';
 
 /**

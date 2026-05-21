@@ -3,7 +3,7 @@
  */
 
 import { onCleanup, onMount, type JSX } from 'solid-js';
-import { discoverBookListIntroClass, discoverBookListIntroWrapClass } from '@/utils/book-group-card-styles';
+import { discoverBookListIntroClass, discoverBookListIntroWrapClass } from '@/lib/bookshelf/book-group-card-styles';
 
 export function DiscoverBookListIntro(props: { children: JSX.Element }) {
   let wrap: HTMLDivElement | undefined;

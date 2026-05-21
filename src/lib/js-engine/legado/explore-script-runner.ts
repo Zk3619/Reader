@@ -7,10 +7,10 @@ import { get as httpGet, post } from '@/lib/http';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { mapRawExploreItem, type ExploreSection } from '@/lib/book-source/explore-sections';
-import { evalCodeVoid, initQuickJSRuntime, isQuickJSFallback } from '../core/runtime';
-import { createExploreInjector } from './explore-inject';
-import { runLegadoScriptQuickJS } from './quickjs-runner';
-import { installScriptDateShim } from './script-date-shim';
+import { evalCodeVoid, initQuickJSRuntime, isQuickJSFallback } from '@/lib/js-engine/core/runtime';
+import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
+import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
+import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import {
   createSourceVariableHandlers,
   ensureExploreScriptSetsResult,
@@ -22,7 +22,7 @@ import {
   hostsFromJsLib,
   loadSourceCookieStore,
   readSourceLoginInfoMap,
-} from './source-script-shared';
+} from '@/lib/js-engine/legado/source-script-shared';
 
 const SCRIPT_TIMEOUT_MS = 15000;
 const ANDROID_ID_KEY = 'reader_login_android_id';

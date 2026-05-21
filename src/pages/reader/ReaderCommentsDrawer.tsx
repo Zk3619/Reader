@@ -11,7 +11,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
-import { XIcon } from '@/components/icons';
+import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 
 export interface ReaderCommentsDrawerProps {

@@ -4,8 +4,8 @@ import { splitProps } from "solid-js"
 import * as DialogPrimitive from "@kobalte/core/dialog"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
-import { cn } from "src/lib/utils"
-import { XIcon } from "@/components/icons"
+import { cn } from "@/lib/utils"
+import { XIcon } from "@/components/shared/icons"
 
 const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger

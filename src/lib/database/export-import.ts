@@ -11,7 +11,7 @@
 import { join } from '@tauri-apps/api/path';
 import { readFile, writeFile } from '@tauri-apps/plugin-fs';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
-import { getDatabase, closeDatabase, initDatabase } from './database-core';
+import { getDatabase, closeDatabase, initDatabase } from '@/lib/database/database-core';
 import { isTauri } from '@/lib/platform/detect';
 import type { DatabaseAdapter } from '@/lib/platform/database';
 

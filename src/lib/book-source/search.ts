@@ -7,7 +7,7 @@ import { get } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
-import { buildUrl, parseHeaders, resolveUrl, detectContentType } from './utils';
+import { buildUrl, parseHeaders, resolveUrl, detectContentType } from '@/lib/book-source/utils';
 
 /**
  * 搜索书籍

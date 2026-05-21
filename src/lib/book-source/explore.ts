@@ -9,9 +9,9 @@ import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import type { BookSource, ExploreRule } from '@/types';
 import type { SearchBook } from '@/types';
-import { isLegadoAjaxBookListExploreUrl } from './explore-legado-ajax';
-import { tryFormatDisplayUpdateTime } from '@/lib/format-display-time';
-import { buildUrl, parseHeaders, resolveUrl, detectContentType } from './utils';
+import { isLegadoAjaxBookListExploreUrl } from '@/lib/book-source/explore-legado-ajax';
+import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
+import { buildUrl, parseHeaders, resolveUrl, detectContentType } from '@/lib/book-source/utils';
 
 /** JSON 发现列表常见更新时间字段（如晴天书架 last_chapter_update_time） */
 const JSON_UPDATE_TIME_PATHS = [

@@ -10,7 +10,7 @@ import {
   initQuickJSRuntime,
   isQuickJSFallback,
   setGlobalString,
-} from './core/runtime';
+} from '@/lib/js-engine/core/runtime';
 
 export interface JsContext {
   result: string;

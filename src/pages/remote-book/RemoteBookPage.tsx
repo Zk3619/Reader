@@ -8,10 +8,10 @@ import { createSignal, Show, For, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { Checkbox } from '@/components/ui/checkbox';
-import { PageHeader } from '@/components/PageHeader';
-import { showAppToast } from '@/components/AppToasts';
+import { PageHeader } from '@/components/shell/PageHeader';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { WebDavRemoteBookManager } from '@/lib/remote-book/webdav';
-import { WebDavConfigDialog } from '@/components/WebDavConfigDialog';
+import { WebDavConfigDialog } from '@/components/remote-book/WebDavConfigDialog';
 import { importLocalBookFromContent } from '@/lib/local-book';
 import { bookshelfStore } from '@/stores/bookshelf';
 import { getFileSystem } from '@/lib/platform/filesystem';
@@ -24,7 +24,7 @@ import {
   LoaderIcon,
   SettingsIcon,
   RefreshIcon
-} from '@/components/icons';
+} from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/platform/detect';
 import { getStorage } from '@/lib/platform/storage';

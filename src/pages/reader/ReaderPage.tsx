@@ -20,12 +20,12 @@ import {
   AppDialogContent,
   AppDialogHeader,
   AppDialogTitle,
-} from '@/components/AppDialog';
+} from '@/components/shared/AppDialog';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
-import { ReaderContent } from './ReaderContent';
-import { ReaderSettings } from './ReaderSettings';
-import { ReaderCatalog } from './ReaderCatalog';
-import { ReaderCommentsDrawer } from './ReaderCommentsDrawer';
+import { ReaderContent } from '@/pages/reader/ReaderContent';
+import { ReaderSettings } from '@/pages/reader/ReaderSettings';
+import { ReaderCatalog } from '@/pages/reader/ReaderCatalog';
+import { ReaderCommentsDrawer } from '@/pages/reader/ReaderCommentsDrawer';
 import { cn } from '@/lib/utils';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 import {
@@ -41,10 +41,10 @@ import {
   ThemeLightIcon,
   ThemeDarkIcon,
   XIcon,
-} from '@/components/icons';
+} from '@/components/shared/icons';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import { showImmersiveEnterToast, shouldShowImmersiveEnterToast } from '@/components/AppToasts';
-import { WindowControlButtons } from '@/components/WindowControlButtons';
+import { showImmersiveEnterToast, shouldShowImmersiveEnterToast } from '@/components/shared/AppToasts';
+import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { Separator } from '@/components/ui/separator';
 
 const LONG_PRESS_MS = 400;

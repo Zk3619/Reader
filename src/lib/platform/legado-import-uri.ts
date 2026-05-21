@@ -3,7 +3,7 @@
  * Reader 当前仅支持书源 JSON（网络导入）；其它类型退回提示不支持。
  */
 
-import { showAppToast } from '@/components/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 export const READER_BOOKSOURCE_IDENTIFY_EVENT = 'reader-booksource-identify';
 
 export type ReaderImportParsed =

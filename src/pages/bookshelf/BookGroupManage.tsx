@@ -15,21 +15,21 @@ import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { GroupContextMenu, type GroupContextMenuActions } from '@/components/BookGroupContextMenu';
-import { bookGroupCompactCardClass, bookGroupCompactCoverClass } from '@/utils/book-group-card-styles';
+import { GroupContextMenu, type GroupContextMenuActions } from '@/components/bookshelf/BookGroupContextMenu';
+import { bookGroupCompactCardClass, bookGroupCompactCoverClass } from '@/lib/bookshelf/book-group-card-styles';
 import {
   applyGroupsOrder,
   isDefaultBookGroup,
   pinGroupToBottom,
   pinGroupToTop,
-} from '@/utils/book-group-order';
-import { getCoverPreviewInfo } from '@/utils/book-group-cover';
+} from '@/lib/bookshelf/book-group-order';
+import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
 import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
-import { BookGroupFormDialog } from '@/components/BookGroupFormDialog';
-import { BookshelfIcon, GripVerticalIcon } from '@/components/icons';
-import { BookCoverPlaceholderIcon } from '@/components/book-group-cover-icon';
+import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
+import { BookshelfIcon, GripVerticalIcon } from '@/components/shared/icons';
+import { BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 // 注意：不使用 Key 组件，因为 SortableJS 已经移动了 DOM
 // 我们需要让 SolidJS 根据数据顺序重新渲染，而不是阻止它
 

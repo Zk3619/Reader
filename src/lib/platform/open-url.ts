@@ -4,9 +4,9 @@
  * 系统浏览器仍用 openUrlInBrowser。
  */
 
-import { parseDataHtmlUrl } from './data-url';
-import { isTauri } from './detect';
-import { openInnerWeb, openInnerWebAwait, type InnerWebCloseResult } from './inner-web';
+import { parseDataHtmlUrl } from '@/lib/platform/data-url';
+import { isTauri } from '@/lib/platform/detect';
+import { openInnerWeb, openInnerWebAwait, type InnerWebCloseResult } from '@/lib/platform/inner-web';
 
 const OPEN_URL_LOG = '[openUrlInApp]';
 

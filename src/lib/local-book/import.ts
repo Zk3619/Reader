@@ -18,7 +18,7 @@ import {
   parseNameAuthor,
   formatBookName,
   formatBookAuthor,
-} from './index';
+} from '@/lib/local-book/index';
 import type { Book, BookChapter } from '@/types';
 import type { NewBookChapter } from '@/types/book-chapter';
 import * as booksDb from '@/lib/database/books';

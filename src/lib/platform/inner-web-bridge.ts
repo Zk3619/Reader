@@ -3,8 +3,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { updateInnerWebProxySessionCookies } from '@/lib/http/inner-web-proxy-session';
-import { isTauri } from './detect';
+import { mergeInnerWebProxySessionCookies } from '@/lib/http/inner-web-proxy-session';
+import { isTauri } from '@/lib/platform/detect';
 
 export const INNER_WEB_MESSAGE_CHANNEL = 'reader-inner-web';
 
@@ -18,12 +18,13 @@ export interface InnerWebBridgeMessage {
 type MessageSource = MessageEventSource | null | undefined;
 
 let listening = false;
-let allowedOrigin = '';
+/** 允许回传 postMessage 的来源（宿主页 + 书源站；代理 iframe 与宿主同源） */
+const allowedOrigins = new Set<string>();
 
 function isAllowedOrigin(origin: string): boolean {
   if (!origin || origin === 'null') return false;
-  if (!allowedOrigin) return origin.startsWith('https://') || origin.startsWith('http://');
-  return origin === allowedOrigin;
+  if (allowedOrigins.size > 0) return allowedOrigins.has(origin);
+  return origin.startsWith('https://') || origin.startsWith('http://');
 }
 
 function reply(
@@ -58,7 +59,7 @@ async function handleMethod(
       if (!isTauri()) {
         const sessionId = String(args?.sessionId ?? '').trim();
         if (sessionId && cookie) {
-          await updateInnerWebProxySessionCookies(sessionId, cookie);
+          await mergeInnerWebProxySessionCookies(sessionId, cookie);
         }
         return true;
       }
@@ -105,10 +106,14 @@ function onMessage(ev: MessageEvent): void {
 
 /** 打开内嵌 https 页时启动桥接（并确保子 frame 注入脚本已注册） */
 export async function startInnerWebBridge(pageUrl: string): Promise<void> {
+  allowedOrigins.clear();
+  if (typeof window !== 'undefined') {
+    allowedOrigins.add(window.location.origin);
+  }
   try {
-    allowedOrigin = new URL(pageUrl).origin;
+    allowedOrigins.add(new URL(pageUrl).origin);
   } catch {
-    allowedOrigin = '';
+    /* ignore */
   }
   if (!listening) {
     window.addEventListener('message', onMessage);
@@ -128,5 +133,5 @@ export function stopInnerWebBridge(): void {
     window.removeEventListener('message', onMessage);
     listening = false;
   }
-  allowedOrigin = '';
+  allowedOrigins.clear();
 }

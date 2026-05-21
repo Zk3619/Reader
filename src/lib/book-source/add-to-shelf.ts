@@ -6,7 +6,7 @@
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
-import { getChapterList as fetchChapterList, toNewBookChapter } from './chapters';
+import { getChapterList as fetchChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
 import type { Book, NewBook, SearchBook } from '@/types';
 
 function searchBookToNewBook(sb: SearchBook): NewBook {

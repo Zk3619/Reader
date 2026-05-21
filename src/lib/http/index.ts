@@ -10,10 +10,10 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { getCookie, saveCookie } from './cookie-manager';
-import { createRateLimiter } from './rate-limiter';
+import { getCookie, saveCookie } from '@/lib/http/cookie-manager';
+import { createRateLimiter } from '@/lib/http/rate-limiter';
 import { isTauri } from '@/lib/platform/detect';
-import { toWebHttpProxyRequest } from './web-http-proxy';
+import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
 
 /**
  * 规范化 URL，确保跨平台兼容性

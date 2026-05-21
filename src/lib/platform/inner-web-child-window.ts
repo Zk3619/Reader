@@ -7,8 +7,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { isTauri } from './detect';
-import type { InnerWebPanelRect } from './inner-web-tauri';
+import { isTauri } from '@/lib/platform/detect';
+import type { InnerWebPanelRect } from '@/lib/platform/inner-web-tauri';
 
 export const INNER_WEB_CHILD_WINDOW_LABEL = 'reader-inner-web-child';
 
