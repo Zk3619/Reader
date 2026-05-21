@@ -13,15 +13,16 @@ import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
-import { withBlurBefore, blurActiveElement } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 import { ChevronLeftIcon, ThemeLightIcon, ThemeDarkIcon } from '@/components/shared/icons';
 import { isTauri, isMobile } from '@/lib/platform/detect';
@@ -123,36 +124,32 @@ function DropdownActionButton(props: {
   };
   
   return (
-    <DropdownMenu open={dropdownOpen()} onOpenChange={setDropdownOpen}>
+    <AppDropdownMenu open={dropdownOpen()} onOpenChange={setDropdownOpen}>
       <Tooltip>
         <TooltipTrigger as="div">
-          <DropdownMenuTrigger
-            as={(triggerProps: any) => (
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-9 w-9"
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger
+                triggerProps={triggerProps}
                 disabled={props.action.disabled}
-                onClick={withBlurBefore(triggerProps.onClick)}
                 aria-label={props.action.label}
-                {...triggerProps}
               >
                 {props.iconElement}
                 <span class="sr-only">{props.action.label}</span>
-              </Button>
+              </AppDropdownMenuIconTrigger>
             )}
           />
         </TooltipTrigger>
         <TooltipContent>{props.action.label}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent class="min-w-0 w-auto">
+      <AppDropdownMenuContent layout="compact">
         <For each={props.action.dropdownItems}>
           {(item) => (
             <>
               <Show when={item.separator}>
-                <DropdownMenuSeparator />
+                <AppDropdownMenuSeparator />
               </Show>
-                <DropdownMenuItem onSelect={() => handleItemSelect(item)}>
+                <AppDropdownMenuItem onSelect={() => handleItemSelect(item)}>
                   {(() => {
                     if (item.icon) {
                       const Icon = item.icon;
@@ -161,12 +158,12 @@ function DropdownActionButton(props: {
                     return null;
                   })()}
                   <span>{item.label}</span>
-                </DropdownMenuItem>
+                </AppDropdownMenuItem>
             </>
           )}
         </For>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </AppDropdownMenuContent>
+    </AppDropdownMenu>
   );
 }
 

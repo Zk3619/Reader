@@ -3,9 +3,9 @@
  */
 
 import { onCleanup, onMount, type JSX } from 'solid-js';
-import { discoverBookListIntroClass, discoverBookListIntroWrapClass } from '@/lib/bookshelf/book-group-card-styles';
+import { exploreBookListIntroClass, exploreBookListIntroWrapClass } from '@/lib/bookshelf/book-group-card-styles';
 
-export function DiscoverBookListIntro(props: { children: JSX.Element }) {
+export function ExploreBookListIntro(props: { children: JSX.Element }) {
   let wrap: HTMLDivElement | undefined;
   let intro: HTMLParagraphElement | undefined;
 
@@ -19,7 +19,7 @@ export function DiscoverBookListIntro(props: { children: JSX.Element }) {
     const lh = parseFloat(lhRaw);
     const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : 20;
     const n = Math.max(1, Math.floor((h - 2) / lineHeight));
-    p.style.setProperty('--discover-intro-line-clamp', String(n));
+    p.style.setProperty('--explore-intro-line-clamp', String(n));
   }
 
   onMount(() => {
@@ -35,8 +35,8 @@ export function DiscoverBookListIntro(props: { children: JSX.Element }) {
   });
 
   return (
-    <div ref={(el) => (wrap = el)} class={discoverBookListIntroWrapClass()}>
-      <p ref={(el) => (intro = el)} class={discoverBookListIntroClass()}>
+    <div ref={(el) => (wrap = el)} class={exploreBookListIntroWrapClass()}>
+      <p ref={(el) => (intro = el)} class={exploreBookListIntroClass()}>
         {props.children}
       </p>
     </div>

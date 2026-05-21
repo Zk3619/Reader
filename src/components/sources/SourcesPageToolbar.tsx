@@ -3,15 +3,16 @@
  */
 
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
-import { withBlurBefore, blurActiveElement } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   SearchIcon,
@@ -130,28 +131,22 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
         <TooltipContent>收藏</TooltipContent>
       </Tooltip>
 
-      <DropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
+      <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
         <Tooltip>
           <TooltipTrigger as="div">
-            <DropdownMenuTrigger
+            <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-9 w-9"
-                  onClick={withBlurBefore(triggerProps.onClick as (() => void) | undefined)}
-                  {...triggerProps}
-                >
+                <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
                   <MoreIcon class="h-4 w-4" />
                   <span class="sr-only">更多</span>
-                </Button>
+                </AppDropdownMenuIconTrigger>
               )}
             />
           </TooltipTrigger>
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent class="min-w-0 w-auto">
-          <DropdownMenuItem
+        <AppDropdownMenuContent layout="compact">
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -160,8 +155,8 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <FileTextIcon class="h-4 w-4" />
             <span>新建书源</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -170,8 +165,8 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <FolderPlusIcon class="h-4 w-4" />
             <span>本地导入</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -180,9 +175,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <LinkIcon class="h-4 w-4" />
             <span>网络导入</span>
-          </DropdownMenuItem>
+          </AppDropdownMenuItem>
           <Show when={props.showSourcesImportQR}>
-            <DropdownMenuItem
+            <AppDropdownMenuItem
               onSelect={() => {
                 setMoreMenuOpen(false);
                 blurActiveElement();
@@ -191,9 +186,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             >
               <QrCodeIcon class="h-4 w-4" />
               <span>二维码导入</span>
-            </DropdownMenuItem>
+            </AppDropdownMenuItem>
           </Show>
-          <DropdownMenuItem
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -202,9 +197,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <FolderTreeIcon class="h-4 w-4" />
             <span>分组管理</span>
-          </DropdownMenuItem>
+          </AppDropdownMenuItem>
           <Show when={isSourceFilterOrAll(props.currentSourceGroup ?? null)}>
-            <DropdownMenuItem
+            <AppDropdownMenuItem
               onSelect={() => props.onSourcesGroupByGroupNameChange?.(!props.sourcesGroupByGroupName)}
               class="flex items-center gap-2"
             >
@@ -212,9 +207,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
                 <Checkbox checked={!!props.sourcesGroupByGroupName} aria-label="按分组名显示" />
               </span>
               <span>按分组名显示</span>
-            </DropdownMenuItem>
+            </AppDropdownMenuItem>
           </Show>
-          <DropdownMenuItem
+          <AppDropdownMenuItem
             onSelect={() =>
               props.onSourceSearchModeChange?.(sourceSearchModeRef.current === 'fuzzy' ? 'name' : 'fuzzy')
             }
@@ -222,8 +217,8 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <MenuRadioIndicator selected={props.sourceSearchMode === 'fuzzy'} />
             <span>模糊搜索</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() =>
               props.onSourceSearchModeChange?.(sourceSearchModeRef.current === 'extended' ? 'name' : 'extended')
             }
@@ -231,9 +226,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           >
             <MenuRadioIndicator selected={props.sourceSearchMode === 'extended'} />
             <span>扩展搜索规则</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </AppDropdownMenuItem>
+        </AppDropdownMenuContent>
+      </AppDropdownMenu>
     </>
   );
 }

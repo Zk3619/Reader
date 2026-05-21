@@ -346,12 +346,12 @@
     transform: translate3d(0, -2px, 0);
   }
 
-  /** 发现页简介：行数由 JS 写入 --discover-intro-line-clamp（占满剩余高度后多行省略） */
-  .discover-book-list-intro {
+  /** 发现页简介：行数由 JS 写入 --explore-intro-line-clamp（占满剩余高度后多行省略） */
+  .explore-book-list-intro {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: var(--discover-intro-line-clamp, 2);
-    line-clamp: var(--discover-intro-line-clamp, 2);
+    -webkit-line-clamp: var(--explore-intro-line-clamp, 2);
+    line-clamp: var(--explore-intro-line-clamp, 2);
     overflow: hidden;
     word-break: break-word;
     overflow-wrap: anywhere;

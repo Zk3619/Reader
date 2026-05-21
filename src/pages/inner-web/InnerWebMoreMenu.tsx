@@ -5,11 +5,12 @@
 import { createSignal, createEffect, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import {
   AppDialog,
   AppDialogContent,
@@ -105,35 +106,33 @@ export function InnerWebMoreMenu(props: InnerWebMoreMenuProps) {
 
   return (
     <Show when={showMenu()}>
-      <DropdownMenu placement="top-end" open={open()} onOpenChange={handleMenuOpenChange}>
-        <DropdownMenuTrigger
+      <AppDropdownMenu placement="top-end" open={open()} onOpenChange={handleMenuOpenChange}>
+        <AppDropdownMenuTrigger
           as={(triggerProps: Record<string, unknown>) => (
-            <Button
-              variant="ghost"
-              size="icon"
+            <AppDropdownMenuIconTrigger
+              triggerProps={triggerProps}
               class="no-drag h-9 w-9"
               aria-label="更多"
-              {...triggerProps}
             >
               <MoreIcon class="h-4 w-4" />
-            </Button>
+            </AppDropdownMenuIconTrigger>
           )}
         />
-        <DropdownMenuContent class={`${INNER_WEB_OVERLAY_Z} min-w-40`}>
-          <DropdownMenuItem onSelect={handleOpenInBrowser}>
+        <AppDropdownMenuContent layout="min" portalZClass={INNER_WEB_OVERLAY_Z}>
+          <AppDropdownMenuItem onSelect={handleOpenInBrowser}>
             <GlobeIcon class="h-4 w-4" />
             <span>在浏览器中打开</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void handleCopyUrl()}>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => void handleCopyUrl()}>
             <LinkIcon class="h-4 w-4" />
             <span>复制链接</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void handleViewCookie()}>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => void handleViewCookie()}>
             <CookieIcon class="h-4 w-4" />
             <span>查看 Cookie</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </AppDropdownMenuItem>
+        </AppDropdownMenuContent>
+      </AppDropdownMenu>
 
       <AppDialog open={cookieDialogOpen()} onOpenChange={handleCookieDialogOpenChange}>
         <AppDialogContent portalZClass={INNER_WEB_OVERLAY_Z}>

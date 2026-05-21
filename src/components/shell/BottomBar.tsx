@@ -12,13 +12,15 @@ import {
   SettingsIcon,
   ImportIcon,
   GlobeIcon,
+  BookOpenIcon,
 } from "@/components/shared/icons";
 
 // 页面配置（与 Navigation 和 SideBar 组件保持一致）
 const pageConfig: Record<PageType, { label: string; icon: Component<any> }> = {
   bookshelf: { label: "书架", icon: BookshelfIcon },
+  scout: { label: "探索", icon: BookOpenIcon },
   sources: { label: "书源", icon: BookSourceIcon },
-  discover: { label: "发现", icon: BookSourceIcon },
+  explore: { label: "发现", icon: BookSourceIcon },
   subscription: { label: "订阅", icon: SubscriptionIcon },
   bookmark: { label: "书签", icon: BookmarkIcon },
   record: { label: "记录", icon: RecordIcon },
@@ -41,7 +43,7 @@ export function BottomBar(props: BottomBarProps) {
   }
 
   // 底栏显示的页面（书架、书源、订阅、其他）
-  const bottomBarPages: PageType[] = ["bookshelf", "sources", "subscription", "settings"];
+  const bottomBarPages: PageType[] = ["bookshelf", "scout", "sources", "subscription", "settings"];
 
   return (
     <div class="fixed bottom-0 left-0 right-0 z-50 border-t border-border/40 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/95 safe-area-inset-bottom">

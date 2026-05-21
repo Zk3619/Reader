@@ -29,6 +29,8 @@ import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
 import { BookshelfIcon, GripVerticalIcon } from '@/components/shared/icons';
+import { cn } from '@/lib/utils';
+import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 // 注意：不使用 Key 组件，因为 SortableJS 已经移动了 DOM
 // 我们需要让 SolidJS 根据数据顺序重新渲染，而不是阻止它
@@ -368,7 +370,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
 
   return (
     <>
-      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2 space-y-6 w-full">
+      <div class={cn(mainShellPageScroll, 'space-y-6 w-full')}>
         <Show when={error()}>
           <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             {error()}

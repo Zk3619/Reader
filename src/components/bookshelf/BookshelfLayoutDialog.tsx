@@ -19,14 +19,14 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectListbox,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import {
   bookshelfLayoutStore,
   type GroupStyle,
@@ -140,7 +140,7 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <section class={sectionPanelClass}>
             <Label class={sectionTitleClass}>分组样式</Label>
-            <Select
+            <AppSelect
               value={localSettings().groupStyle}
               onChange={(v) => setLocalSettings({ ...localSettings(), groupStyle: (v || 'normal') as GroupStyle })}
               options={groupStyleOptions.map((o) => o.value)}
@@ -150,26 +150,26 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
               itemComponent={(itemProps) => {
                 const option = groupStyleOptions.find((o) => o.value === itemProps.item.rawValue);
                 return (
-                  <SelectItem class="pl-2" item={itemProps.item}>
+                  <AppSelectItem item={itemProps.item}>
                     {option?.label ?? itemProps.item.rawValue}
-                  </SelectItem>
+                  </AppSelectItem>
                 );
               }}
             >
-              <SelectTrigger class="w-full" aria-label="分组样式">
-                <SelectValue<GroupStyle>>
+              <AppSelectTrigger aria-label="分组样式">
+                <AppSelectValue<GroupStyle>>
                   {(state) => {
                     const v = state.selectedOption();
                     const opt = groupStyleOptions.find((o) => o.value === v);
                     return opt?.label ?? v ?? '常规';
                   }}
-                </SelectValue>
-                <SelectIcon />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectListbox />
-              </SelectContent>
-            </Select>
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
           </section>
 
           <section class={sectionPanelClass}>

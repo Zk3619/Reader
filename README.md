@@ -44,6 +44,7 @@ Tauri 桌面版走 `pnpm tauri dev` / `tauri build`，由 Rust WebView + 原生 
 | `components/shared/` | 跨页面共享组件（对话框、Toast、图标） |
 | `components/bookshelf/`、`sources/`、`books/`、`remote-book/` | 按功能域划分的业务组件 |
 | `lib/` | 领域逻辑（`database`、`book-source`、`js-engine`、`platform` 等） |
+| `pages/explore/` | 发现页（与 Legado `exploreUrl` / `lib/book-source/explore*` 同名，勿用 `discover`） |
 | `lib/bookshelf/` | 书架布局/排序等 UI 辅助逻辑（自 `utils/` 迁入） |
 | `stores/` | Solid 全局状态 |
 | `types/` | 类型定义 |

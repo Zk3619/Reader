@@ -12,13 +12,37 @@ import type { SearchBook } from '@/types';
 import { isLegadoAjaxBookListExploreUrl } from '@/lib/book-source/explore-legado-ajax';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 import { buildUrl, parseHeaders, resolveUrl, detectContentType } from '@/lib/book-source/utils';
+import {
+  EXPLORE_INTRO_JSON_PATHS,
+  EXPLORE_LAST_CHAPTER_JSON_PATHS,
+  EXPLORE_UPDATE_TIME_JSON_PATHS,
+  pickFirstJsonField,
+} from '@/lib/book-source/explore-json-fields';
 
-/** JSON 发现列表常见更新时间字段（如晴天书架 last_chapter_update_time） */
-const JSON_UPDATE_TIME_PATHS = [
-  '$.last_chapter_update_time',
-  '$.last_update_time',
-  '$.update_time',
-] as const;
+function enrichJsonBookContext(
+  element: string,
+  contentType: 'html' | 'json' | 'text',
+  baseUrl: string,
+  source: BookSource,
+  debugIndex?: number
+): RuleContext {
+  const ctx: RuleContext = {
+    content: element,
+    contentType,
+    baseUrl,
+    source: source as unknown as Record<string, unknown>,
+    result: element,
+    ...(debugIndex !== undefined ? { _debugIndex: debugIndex } : {}),
+  };
+  if (contentType === 'json') {
+    try {
+      ctx.book = JSON.parse(element) as Record<string, unknown>;
+    } catch {
+      /* 单条书籍 JSON 解析失败时仍用字符串 content */
+    }
+  }
+  return ctx as RuleContext;
+}
 
 /** 拆分书源 lastChapter 模板中的「章节 • 时间」 */
 function splitLastChapterField(raw: string): { title?: string; embeddedTime?: string } {
@@ -35,11 +59,7 @@ function splitLastChapterField(raw: string): { title?: string; embeddedTime?: st
 }
 
 async function pickJsonUpdateTime(context: RuleContext): Promise<string | undefined> {
-  for (const path of JSON_UPDATE_TIME_PATHS) {
-    const v = (await analyzeString(path, context)).trim();
-    if (v) return v;
-  }
-  return undefined;
+  return pickFirstJsonField(context, EXPLORE_UPDATE_TIME_JSON_PATHS);
 }
 
 /**
@@ -142,13 +162,13 @@ async function parseExploreBooksFromContent(
     const bookElements = await analyzeStringList(bookListRule, context);
     for (let i = 0; i < bookElements.length; i++) {
       const element = bookElements[i];
-      const elementContext: RuleContext = {
-        content: element,
+      const elementContext = enrichJsonBookContext(
+        element,
         contentType,
-        baseUrl: exploreUrl,
-        source: source as unknown as Record<string, unknown>,
-        _debugIndex: i,
-      } as RuleContext;
+        exploreUrl,
+        source,
+        i
+      );
       const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
       if (book) bookList.push(book);
     }
@@ -265,7 +285,11 @@ async function parseExploreBook(
     }
 
     // 解析其他字段
-    const intro = rule.intro ? await analyzeString(rule.intro, context) : undefined;
+    let intro = rule.intro ? await analyzeString(rule.intro, context) : undefined;
+    if (!intro?.trim()) {
+      intro = await pickFirstJsonField(context, EXPLORE_INTRO_JSON_PATHS);
+    }
+
     const coverUrl = rule.coverUrl ? await analyzeString(rule.coverUrl, context) : undefined;
     let latestChapterTitle = rule.lastChapter
       ? await analyzeString(rule.lastChapter, context)
@@ -282,7 +306,11 @@ async function parseExploreBook(
       }
     }
 
-    if (!updateTimeRaw && context.contentType === 'json') {
+    if (!latestChapterTitle?.trim()) {
+      latestChapterTitle = await pickFirstJsonField(context, EXPLORE_LAST_CHAPTER_JSON_PATHS);
+    }
+
+    if (!updateTimeRaw?.trim()) {
       updateTimeRaw = await pickJsonUpdateTime(context);
     }
 

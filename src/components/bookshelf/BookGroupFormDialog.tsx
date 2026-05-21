@@ -8,14 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectListbox,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import {
   AppDialog,
   AppDialogContent,
@@ -325,7 +325,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           {/* 排序方式 */}
           <div class="space-y-2">
             <Label for="book-sort">内部书籍排序方式</Label>
-            <Select
+            <AppSelect
               value={bookSort()}
               onChange={(v) => setBookSort(v || '')}
               options={options()}
@@ -335,26 +335,26 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
               itemComponent={(itemProps) => {
                 const option = bookSortOptions.find((o) => String(o.value) === itemProps.item.rawValue);
                 return (
-                  <SelectItem class="pl-2" item={itemProps.item}>
+                  <AppSelectItem item={itemProps.item}>
                     {option?.label || itemProps.item.rawValue}
-                  </SelectItem>
+                  </AppSelectItem>
                 );
               }}
             >
-              <SelectTrigger id="book-sort" class="w-full" aria-label="内部书籍排序方式">
-                <SelectValue<string>>
+              <AppSelectTrigger id="book-sort" aria-label="内部书籍排序方式">
+                <AppSelectValue<string>>
                   {(state) => {
                     const v = state.selectedOption();
                     const opt = bookSortOptions.find((o) => String(o.value) === v);
                     return opt?.label || v || '选择排序方式';
                   }}
-                </SelectValue>
-                <SelectIcon />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectListbox />
-              </SelectContent>
-            </Select>
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
           </div>
 
           {/* 允许下拉刷新 */}

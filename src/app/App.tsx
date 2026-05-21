@@ -15,7 +15,8 @@ import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { BookShelf } from "@/pages/bookshelf/BookShelf";
 import { SourcesPage } from "@/pages/sources/SourcesPage";
-import { DiscoverPage } from "@/pages/discover/DiscoverPage";
+import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
+import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
 import {
   BookGroupManage,
@@ -43,7 +44,7 @@ import { getSource } from "@/lib/database/sources";
 import type { ExploreSection } from "@/lib/book-source/explore-sections";
 import {
   openExploreSectionInInnerWeb,
-  shouldOpenDiscoverPageForSection,
+  shouldOpenExplorePageForSection,
 } from "@/lib/book-source/explore-section-action";
 import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
@@ -52,6 +53,7 @@ import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
 import { cn } from "@/lib/utils";
+import { mainShellInset, mainShellPageRoot, mainShellPageScroll } from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
 import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
@@ -67,7 +69,7 @@ import { basename, extname, join, normalize } from "@tauri-apps/api/path";
 import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
 import { ImportActionDialog, type ImportAction } from "@/components/books/ImportActionDialog";
 import { ReplaceFileDialog, type ReplaceFileAction } from "@/components/books/ReplaceFileDialog";
-import { getSourceGroupLabel, type SourceSearchMode } from "@/lib/sources/filters";
+import { getSourceGroupLabel, normalizeSourceFilterValue, type SourceSearchMode } from "@/lib/sources/filters";
 import { openSourceSettingsInApp } from "@/lib/platform/open-url";
 import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
 import {
@@ -135,7 +137,7 @@ const mockRecentBooks = [
 ];
 
 // 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
-const STANDALONE_PAGES: PageType[] = ["reader", "discover", "book-info", "import", "remote-book"];
+const STANDALONE_PAGES: PageType[] = ["reader", "explore", "book-info", "import", "remote-book"];
 
 // 内部组件，用于访问 SidebarProvider 的上下文
 function AppContent() {
@@ -198,7 +200,7 @@ function AppContent() {
   const [sourceGroups, setSourceGroups] = createSignal<string[]>([]);
   const [sourceCount, setSourceCount] = createSignal(0);
   const [currentSourceGroup, setCurrentSourceGroup] = createSignal<string | null>(
-    readHmrData<string | null>("currentSourceGroup", null)
+    normalizeSourceFilterValue(readHmrData<string | null>("currentSourceGroup", null))
   );
 
   // 开发 HMR：持久化当前页与书源筛选，避免工具栏下拉与列表状态错位
@@ -378,13 +380,20 @@ function AppContent() {
   };
 
   /** 发现页上下文：从书源页点击某个分类/排行榜后进入发现页 */
-  const [discoverContext, setDiscoverContext] = createSignal<{ source: BookSource; section: ExploreSection } | null>(null);
+  const [exploreContext, setExploreContext] = createSignal<{
+    source: BookSource;
+    section: ExploreSection;
+  } | null>(null);
   /** 书源页展开项（切到发现页再返回时保持展开） */
   const [sourcesExpandedSourceUrl, setSourcesExpandedSourceUrl] = createSignal<string | null>(null);
   /** 书籍信息页上下文：从发现页或阅读器进入书籍信息页 */
-  const [bookInfoContext, setBookInfoContext] = createSignal<{ source: BookSource; book: SearchBook; fromPage: 'discover' | 'reader' } | null>(null);
+  const [bookInfoContext, setBookInfoContext] = createSignal<{
+    source: BookSource;
+    book: SearchBook;
+    fromPage: 'explore' | 'scout' | 'reader';
+  } | null>(null);
   /** 发现页分页偏好对话框显示状态 */
-  const [showDiscoverPaginationPreferenceDialog, setShowDiscoverPaginationPreferenceDialog] = createSignal(false);
+  const [showExplorePaginationPreferenceDialog, setShowExplorePaginationPreferenceDialog] = createSignal(false);
 
   /**
    * 执行导入操作
@@ -1312,10 +1321,15 @@ function AppContent() {
             )}
           >
             {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
-            <main class="flex flex-col flex-1 min-h-0 w-full overflow-hidden p-2">
+            <main class={cn("flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
               {/* 书架视图 */}
               <Show when={currentPage() === "bookshelf"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
+                <section
+                  class={cn(
+                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                    mainShellPageRoot,
+                  )}
+                >
                   {showGroupManage() ? (
                     <>
                       <PageToolbar
@@ -1359,13 +1373,40 @@ function AppContent() {
                 </section>
               </Show>
 
+              {/* 探索页：导航独立入口 */}
+              <section
+                class={cn(
+                  mainShellPageRoot,
+                  currentPage() === "scout"
+                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                    : "hidden",
+                )}
+              >
+                <ExplorePage
+                  onOpenBook={(book) => {
+                    readerStore.setBookInitialState(book);
+                    setCurrentPage("reader");
+                    readerStore.openBook(book).catch((e) => {
+                      console.error("打开书籍失败:", e);
+                      setCurrentPage("scout");
+                    });
+                  }}
+                  onOpenBookInfo={(source, book) => {
+                    setBookInfoContext({ source, book, fromPage: "scout" });
+                    setCurrentPage("book-info");
+                  }}
+                  showPaginationPreferenceDialog={showExplorePaginationPreferenceDialog()}
+                  onPaginationPreferenceDialogChange={setShowExplorePaginationPreferenceDialog}
+                />
+              </section>
+
               {/* 书源视图：保持挂载，切到发现页再返回时不重载展开的发现脚本 */}
               <section
                 class={cn(
-                  "flex flex-col flex-1 min-h-0 overflow-hidden",
+                  mainShellPageRoot,
                   currentPage() === "sources"
                     ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    : "hidden"
+                    : "hidden",
                 )}
               >
                 <PageToolbar
@@ -1444,7 +1485,7 @@ function AppContent() {
                       });
                       return;
                     }
-                    if (!shouldOpenDiscoverPageForSection(section)) {
+                    if (!shouldOpenExplorePageForSection(section)) {
                       try {
                         const opened = await openExploreSectionInInnerWeb(source, section);
                         if (!opened) {
@@ -1464,16 +1505,20 @@ function AppContent() {
                       }
                       return;
                     }
-                    setDiscoverContext({ source, section });
-                    setCurrentPage("discover");
+                    setExploreContext({ source, section });
+                    setCurrentPage("explore");
                   }}
                 />
               </section>
 
-
               {/* 订阅视图 */}
               <Show when={currentPage() === "subscription"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
+                <section
+                  class={cn(
+                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                    mainShellPageRoot,
+                  )}
+                >
                   <PageToolbar
                     title="订阅"
                     description="管理你的订阅内容"
@@ -1485,7 +1530,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
+                  <div class={mainShellPageScroll}>
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>订阅功能开发中...</p>
                     </div>
@@ -1495,7 +1540,12 @@ function AppContent() {
 
               {/* 书签视图 */}
               <Show when={currentPage() === "bookmark"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
+                <section
+                  class={cn(
+                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                    mainShellPageRoot,
+                  )}
+                >
                   <PageToolbar
                     title="书签"
                     description="查看你的书签"
@@ -1507,7 +1557,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
+                  <div class={mainShellPageScroll}>
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>书签功能开发中...</p>
                     </div>
@@ -1517,7 +1567,12 @@ function AppContent() {
 
               {/* 记录视图 */}
               <Show when={currentPage() === "record"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
+                <section
+                  class={cn(
+                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                    mainShellPageRoot,
+                  )}
+                >
                   <PageToolbar
                     title="阅读记录"
                     description="查看你的阅读历史"
@@ -1529,7 +1584,7 @@ function AppContent() {
                       />
                     }
                   />
-                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
+                  <div class={mainShellPageScroll}>
                     <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
                       <p>阅读记录功能开发中...</p>
                     </div>
@@ -1540,7 +1595,12 @@ function AppContent() {
 
               {/* 设置视图 */}
               <Show when={currentPage() === "settings"}>
-                <section class="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col flex-1 min-h-0 overflow-hidden">
+                <section
+                  class={cn(
+                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                    mainShellPageRoot,
+                  )}
+                >
                   <PageToolbar
                     title="设置"
                     description="自定义你的阅读体验"
@@ -1555,7 +1615,7 @@ function AppContent() {
                     <SettingsPageToolbar />
                   </PageToolbar>
 
-                  <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
+                  <div class={mainShellPageScroll}>
                     <div class="w-full max-w-4xl mx-auto space-y-4">
                       {/* 数据库备份 */}
                       <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -1705,16 +1765,16 @@ function AppContent() {
             />
           </Show>
 
-          {/* 发现页：书源 · 分类下的书籍列表 */}
-          <Show when={currentPage() === "discover" && discoverContext()}>
+          {/* 发现页：书源展开项进入，全屏独立（与阅读器同级，不在主容器内） */}
+          <Show when={currentPage() === "explore" && exploreContext()}>
             {(ctx) => {
               const { source, section } = ctx();
               return (
-                <DiscoverPage
+                <ExploreSourcePage
                   source={source}
                   section={section}
                   onBack={() => {
-                    setDiscoverContext(null);
+                    setExploreContext(null);
                     setCurrentPage("sources");
                   }}
                   onOpenBook={(book) => {
@@ -1722,15 +1782,15 @@ function AppContent() {
                     setCurrentPage("reader");
                     readerStore.openBook(book).catch((e) => {
                       console.error("打开书籍失败:", e);
-                      setCurrentPage("discover");
+                      setCurrentPage("explore");
                     });
                   }}
-                  onOpenBookInfo={(book) => {
-                    setBookInfoContext({ source, book, fromPage: "discover" });
+                  onOpenBookInfo={(source, book) => {
+                    setBookInfoContext({ source, book, fromPage: "explore" });
                     setCurrentPage("book-info");
                   }}
-                  showPaginationPreferenceDialog={showDiscoverPaginationPreferenceDialog()}
-                  onPaginationPreferenceDialogChange={setShowDiscoverPaginationPreferenceDialog}
+                  showPaginationPreferenceDialog={showExplorePaginationPreferenceDialog()}
+                  onPaginationPreferenceDialogChange={setShowExplorePaginationPreferenceDialog}
                 />
               );
             }}
@@ -1745,7 +1805,7 @@ function AppContent() {
                   book={book}
                   onBack={() => {
                     setBookInfoContext(null);
-                    setCurrentPage(fromPage ?? "discover");
+                    setCurrentPage(fromPage ?? "explore");
                   }}
                   onOpenBook={(book) => {
                     readerStore.setBookInitialState(book);
@@ -1869,7 +1929,7 @@ function AppContent() {
           onOpenChange={(open) => !open && setSourceSearchContext(null)}
           source={sourceSearchContext()?.source ?? null}
           onOpenBookInfo={(source, book) => {
-            setBookInfoContext({ source, book, fromPage: 'discover' });
+            setBookInfoContext({ source, book, fromPage: 'explore' });
             setCurrentPage('book-info');
             setSourceSearchContext(null);
           }}

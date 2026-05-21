@@ -4,13 +4,13 @@
 
 import { Show, type JSX } from 'solid-js';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  APP_DROPDOWN_MENU_TITLE_LIST_CLASS,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { PageToolbarTitleText } from '@/components/shell/PageToolbar';
 import { cn } from '@/lib/utils';
-import { maxHTitleMenu } from '@/lib/ui/viewport-classes';
 import { ChevronDownIcon } from '@/components/shared/icons';
 
 const TITLE_BLOCK_PADDING = 'rounded-md px-2.5 py-2';
@@ -22,10 +22,6 @@ const TITLE_DROPDOWN_TRIGGER_CLASS = cn(
   'hover:bg-accent/50 focus:bg-accent/50 focus-visible:outline-none',
   'data-expanded:bg-accent/50'
 );
-
-const TITLE_DROPDOWN_CONTENT_CLASS = 'p-0 w-52 min-w-52 max-w-52 overflow-hidden';
-
-const TITLE_MENU_MAX_HEIGHT = maxHTitleMenu;
 
 function TitleDropdownChevron() {
   return (
@@ -47,7 +43,9 @@ export interface PageToolbarTitleDropdownProps {
    */
   selectionKey?: string | number;
   children?: JSX.Element;
-  /** 覆盖 DropdownMenuContent 的 class（如书架更宽面板） */
+  /** 内容面板布局：title 固定宽；titleWide 为书架分组下拉 */
+  contentLayout?: 'title' | 'titleWide';
+  /** 在 layout 默认类之上追加的 class */
   contentClass?: string;
   /** 列表容器额外 class */
   listClass?: string;
@@ -67,25 +65,22 @@ export function PageToolbarTitleDropdown(props: PageToolbarTitleDropdownProps) {
       }
     >
       <Show when={menuKey()} keyed>
-        <DropdownMenu>
-          <DropdownMenuTrigger class={TITLE_DROPDOWN_TRIGGER_CLASS}>
+        <AppDropdownMenu>
+          <AppDropdownMenuTrigger class={TITLE_DROPDOWN_TRIGGER_CLASS}>
             <PageToolbarTitleText title={props.title} description={props.description} />
             <span class="flex shrink-0 items-center justify-center self-center">
               <TitleDropdownChevron />
             </span>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent class={cn(TITLE_DROPDOWN_CONTENT_CLASS, props.contentClass)}>
-            <div
-              class={cn(
-                'flex w-full min-w-0 flex-col gap-2 p-3 overflow-y-auto overflow-x-hidden overscroll-contain',
-                TITLE_MENU_MAX_HEIGHT,
-                props.listClass
-              )}
-            >
+          </AppDropdownMenuTrigger>
+          <AppDropdownMenuContent
+            layout={props.contentLayout ?? 'title'}
+            class={props.contentClass}
+          >
+            <div class={cn(APP_DROPDOWN_MENU_TITLE_LIST_CLASS, props.listClass)}>
               {props.children}
             </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </AppDropdownMenuContent>
+        </AppDropdownMenu>
       </Show>
     </Show>
   );

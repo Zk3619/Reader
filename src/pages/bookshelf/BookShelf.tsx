@@ -40,6 +40,7 @@ import {
 import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
+import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/bookshelf/BookshelfGroupNav';
 import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolbar';
@@ -357,9 +358,9 @@ export function BookShelf(props: BookShelfProps) {
   /** 下拉框样式：书籍视图下标题可切换分组 */
   const showGroupTitleDropdown = () =>
     groupStyle() === 'dropdown' && showBooksView();
-  /** 常规 / 下拉框：使用 PageToolbarTitleDropdown（常规为不可下拉） */
+  /** 常规 / 标签 / 下拉：标题区均经 PageToolbarTitleDropdown 渲染（常规与标签禁下拉，样式一致） */
   const showToolbarTitleSlot = () =>
-    groupStyle() === 'normal' || showGroupTitleDropdown();
+    groupStyle() === 'normal' || groupStyle() === 'tabs' || showGroupTitleDropdown();
 
   const handleGroupChange = (groupId: number) => {
     bookshelfStore.setCurrentGroup(groupId);
@@ -507,7 +508,7 @@ export function BookShelf(props: BookShelfProps) {
   });
 
   return (
-    <div class="flex flex-col flex-1 min-h-0 w-full">
+    <div class={mainShellPageRoot}>
       <PageToolbar
         belowHorizontalWheel={showGroupTabsBelow()}
         title={pageTitle()}
@@ -574,7 +575,7 @@ export function BookShelf(props: BookShelfProps) {
         </Show>
       </PageToolbar>
 
-      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2">
+      <div class={mainShellPageScroll}>
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}

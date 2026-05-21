@@ -11,10 +11,14 @@ import {
   getExploreSections,
   getExploreSectionsAsync,
   isExploreUrlScript,
+  resolveExploreSectionsFromResource,
+  shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
   type ExploreSection,
 } from '@/lib/book-source/explore-sections';
+import { formatExploreSelectOptionLabel } from '@/lib/book-source/explore-nav-items';
 import { cn } from '@/lib/utils';
+import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -22,25 +26,26 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuButtonTrigger,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ChevronDownIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectListbox,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import {
@@ -58,8 +63,9 @@ import {
   SOURCE_FILTER_DISABLED,
   SOURCE_FILTER_NEED_LOGIN,
   SOURCE_FILTER_UNGROUPED,
-  SOURCE_FILTER_DISCOVER_ENABLED,
-  SOURCE_FILTER_DISCOVER_DISABLED,
+  SOURCE_FILTER_EXPLORE_ENABLED,
+  SOURCE_FILTER_EXPLORE_DISABLED,
+  normalizeSourceFilterValue,
   isSourceFilterOrAll,
   type SourceSearchMode,
   fuzzyMatchQuery,
@@ -229,7 +235,7 @@ export function SourcesPage(props: SourcesPageProps) {
   }
 
   async function loadSources() {
-    const group = props.currentSourceGroup;
+    const group = normalizeSourceFilterValue(props.currentSourceGroup);
     setLoading(true);
     setError(null);
     try {
@@ -241,8 +247,8 @@ export function SourcesPage(props: SourcesPageProps) {
         group === SOURCE_FILTER_DISABLED ||
         group === SOURCE_FILTER_NEED_LOGIN ||
         group === SOURCE_FILTER_UNGROUPED ||
-        group === SOURCE_FILTER_DISCOVER_ENABLED ||
-        group === SOURCE_FILTER_DISCOVER_DISABLED
+        group === SOURCE_FILTER_EXPLORE_ENABLED ||
+        group === SOURCE_FILTER_EXPLORE_DISABLED
       ) {
         const all = await sourcesDb.getAllSources();
         list = all.filter((s) => {
@@ -250,8 +256,8 @@ export function SourcesPage(props: SourcesPageProps) {
           if (group === SOURCE_FILTER_DISABLED) return !s.enabled;
           if (group === SOURCE_FILTER_NEED_LOGIN) return !!(s.loginUrl || s.loginCheckJs);
           if (group === SOURCE_FILTER_UNGROUPED) return !s.sourceGroup || s.sourceGroup.trim() === '';
-          if (group === SOURCE_FILTER_DISCOVER_ENABLED) return s.enableExplore;
-          if (group === SOURCE_FILTER_DISCOVER_DISABLED) return !s.enableExplore;
+          if (group === SOURCE_FILTER_EXPLORE_ENABLED) return s.enableExplore;
+          if (group === SOURCE_FILTER_EXPLORE_DISABLED) return !s.enableExplore;
           return false;
         });
       } else {
@@ -287,7 +293,12 @@ export function SourcesPage(props: SourcesPageProps) {
 
   function toggleExpand(sourceUrl: string) {
     const prev = expandedSourceUrl();
-    setExpandedSourceUrl(prev === sourceUrl ? null : sourceUrl);
+    const next = prev === sourceUrl ? null : sourceUrl;
+    setExpandedSourceUrl(next);
+    if (next !== prev) {
+      setExploreArgsVersion(0);
+      setLoadedExploreArgsVersion(-1);
+    }
   }
 
   /** 在当前分组内按搜索关键词与模式过滤：name=仅名称，fuzzy=名称模糊匹配，extended=legado 扩展（名称+URL+分组+注释等） */
@@ -360,6 +371,7 @@ export function SourcesPage(props: SourcesPageProps) {
     return url ? sources().find((s) => s.sourceUrl === url) ?? null : null;
   };
   const [exploreArgsVersion, setExploreArgsVersion] = createSignal(0);
+  const [loadedExploreArgsVersion, setLoadedExploreArgsVersion] = createSignal(-1);
   const [dynamicSections, { refetch: refetchExploreSections }] = createResource(
     () => {
       const v = exploreArgsVersion();
@@ -368,6 +380,17 @@ export function SourcesPage(props: SourcesPageProps) {
     },
     (ctx) => getExploreSectionsAsync(ctx.source, ctx.argsVersion)
   );
+
+  createEffect(() => {
+    const s = expandedSource();
+    if (!s || !isExploreUrlScript(s.exploreUrl)) {
+      setLoadedExploreArgsVersion(exploreArgsVersion());
+      return;
+    }
+    if (dynamicSections.state === 'ready' && !dynamicSections.loading) {
+      setLoadedExploreArgsVersion(exploreArgsVersion());
+    }
+  });
 
   async function handleExploreSelectChange(
     source: BookSource,
@@ -644,9 +667,8 @@ export function SourcesPage(props: SourcesPageProps) {
   }
 
   return (
-    <div class="@container flex flex-col min-h-0 flex-1 w-full overflow-hidden pt-2">
-      {/* 主内容区：可滚动 */}
-      <div class="flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both space-y-4 pb-4">
+    <div class={cn('@container', mainShellPageRoot, 'pt-2')}>
+      <div class={cn(mainShellPageScroll, 'space-y-4 pb-4')}>
         <Show when={error()}>
           <p class="text-sm text-destructive">{error()}</p>
         </Show>
@@ -692,10 +714,18 @@ export function SourcesPage(props: SourcesPageProps) {
                       const sections = (): ExploreSection[] => {
                         if (!isExploreUrlScript(source.exploreUrl)) return getExploreSections(source);
                         if (expandedSourceUrl() !== source.sourceUrl) return [];
-                        return dynamicSections() ?? [];
+                        if (sectionsLoading()) return [];
+                        return resolveExploreSectionsFromResource(dynamicSections);
                       };
                       const sectionsLoading = () =>
-                        isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'pending';
+                        isExpanded() &&
+                        shouldShowExploreSectionsSkeleton(
+                          isExploreUrlScript(source.exploreUrl),
+                          exploreArgsVersion(),
+                          loadedExploreArgsVersion(),
+                          dynamicSections,
+                        );
+                      const showExploreSkeleton = () => sectionsLoading();
                       const sectionsError = () =>
                         isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'errored';
                       return (
@@ -809,7 +839,7 @@ export function SourcesPage(props: SourcesPageProps) {
                               class="border-t border-border/50 bg-muted/20 px-3 py-2"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <Show when={sectionsLoading()}>
+                              <Show when={showExploreSkeleton()}>
                                 <ul class="flex flex-wrap justify-center gap-2 py-2">
                                   {/* 模拟不同宽度的按钮：整行、两列、四列 */}
                                   <li class="min-w-0 flex-[1_1_100%]">
@@ -865,6 +895,8 @@ export function SourcesPage(props: SourcesPageProps) {
                                         section.chars.length > 0 &&
                                         section.paramKey;
                                       const isClickable = !!section.url;
+                                      const selectValue = () =>
+                                        section.default ?? section.chars?.[0] ?? '';
                                       return (
                                         <li class={flexClass}>
                                           <Show
@@ -888,8 +920,8 @@ export function SourcesPage(props: SourcesPageProps) {
                                                 {section.title}
                                               </Label>
                                               <div class="min-w-0 flex-1">
-                                                <Select
-                                                  value={section.default ?? section.chars![0]}
+                                                <AppSelect
+                                                  value={selectValue()}
                                                   onChange={(v) => {
                                                     if (v) {
                                                       void handleExploreSelectChange(source, section, v);
@@ -897,24 +929,32 @@ export function SourcesPage(props: SourcesPageProps) {
                                                   }}
                                                   options={[...section.chars!]}
                                                   itemComponent={(itemProps) => (
-                                                    <SelectItem class="pl-2" item={itemProps.item}>
-                                                      {itemProps.item.rawValue}
-                                                    </SelectItem>
+                                                    <AppSelectItem item={itemProps.item}>
+                                                      {formatExploreSelectOptionLabel(
+                                                        String(itemProps.item.rawValue),
+                                                        section.paramKey,
+                                                      )}
+                                                    </AppSelectItem>
                                                   )}
                                                 >
-                                                  <SelectTrigger
-                                                    class="h-8 w-full border-border/60 bg-background text-sm"
+                                                  <AppSelectTrigger
+                                                    layout="compact"
                                                     aria-label={section.title}
                                                   >
-                                                    <SelectValue<string>>
-                                                      {(state) => state.selectedOption() ?? section.default}
-                                                    </SelectValue>
-                                                    <SelectIcon />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    <SelectListbox />
-                                                  </SelectContent>
-                                                </Select>
+                                                    <AppSelectValue<string>>
+                                                      {(state) =>
+                                                        formatExploreSelectOptionLabel(
+                                                          state.selectedOption() ?? selectValue(),
+                                                          section.paramKey,
+                                                        )
+                                                      }
+                                                    </AppSelectValue>
+                                                    <AppSelectIcon />
+                                                  </AppSelectTrigger>
+                                                  <AppSelectContent>
+                                                    <AppSelectListbox />
+                                                  </AppSelectContent>
+                                                </AppSelect>
                                               </div>
                                             </div>
                                           </Show>
@@ -924,7 +964,13 @@ export function SourcesPage(props: SourcesPageProps) {
                                   </For>
                                 </ul>
                               </Show>
-                              <Show when={!sectionsLoading() && sections().length === 0}>
+                              <Show
+                                when={
+                                  !sectionsLoading() &&
+                                  !sectionsError() &&
+                                  sections().length === 0
+                                }
+                              >
                                 <p class="py-3 text-center text-sm text-muted-foreground">该书源暂无发现内容（分类/排行榜）</p>
                               </Show>
                             </div>
@@ -956,70 +1002,70 @@ export function SourcesPage(props: SourcesPageProps) {
           </div>
           {/* 窄屏：仅「操作」下拉（父容器 < 448px，删除并入下拉） */}
           <div class="flex items-center gap-2 @min-[448px]:hidden">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                as={(props: any) => (
-                  <Button
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(props: Record<string, unknown>) => (
+                  <AppDropdownMenuButtonTrigger
+                    triggerProps={props}
                     variant="outline"
                     size="sm"
                     disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
-                    {...props}
                   >
                     操作
                     <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
-                  </Button>
+                  </AppDropdownMenuButtonTrigger>
                 )}
               />
-              <DropdownMenuContent class="w-auto min-w-0">
-                <DropdownMenuItem onSelect={() => batchEnable()}>启用所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchDisable()}>禁用所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchExport()}>导出所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchValidate()}>校验所选</DropdownMenuItem>
-                <DropdownMenuItem
+              <AppDropdownMenuContent layout="compact">
+                <AppDropdownMenuItem onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem
                   class="text-destructive focus:text-destructive"
                   onSelect={() => openBatchDeleteConfirm()}
                 >
                   删除所选
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </AppDropdownMenuItem>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
           </div>
           {/* 紧凑：删除 + 更多（448px <= 父容器 < 1026px） */}
           <div class="hidden @min-[448px]:flex @min-[1026px]:hidden items-center gap-2">
             <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>
               删除所选
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                as={(props: any) => (
-                  <Button
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(props: Record<string, unknown>) => (
+                  <AppDropdownMenuButtonTrigger
+                    triggerProps={props}
                     variant="outline"
                     size="sm"
                     disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
-                    {...props}
                   >
                     更多
                     <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
-                  </Button>
+                  </AppDropdownMenuButtonTrigger>
                 )}
               />
-              <DropdownMenuContent class="w-auto min-w-0">
-                <DropdownMenuItem onSelect={() => batchEnable()}>启用所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchDisable()}>禁用所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchExport()}>导出所选</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => batchValidate()}>校验所选</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <AppDropdownMenuContent layout="compact">
+                <AppDropdownMenuItem onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
           </div>
           {/* 全部按钮（父容器宽度 >= 1026px 时显示） */}
           <div class="hidden @min-[1026px]:flex flex-wrap items-center gap-2">

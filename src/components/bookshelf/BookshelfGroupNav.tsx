@@ -4,7 +4,7 @@
 
 import { For, Show, createSignal, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { AppDropdownMenuItem } from '@/components/shared/AppDropdownMenu';
 import { cn } from '@/lib/utils';
 import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
@@ -63,7 +63,7 @@ function BookshelfGroupMenuList(props: {
   return (
     <For each={props.groups}>
       {(g) => (
-        <DropdownMenuItem
+        <AppDropdownMenuItem
           class={cn(
             groupMenuItemClass,
             props.currentGroupId === g.groupId && 'bg-accent/50'
@@ -77,7 +77,7 @@ function BookshelfGroupMenuList(props: {
               {props.groupBookCounts?.[g.groupId] ?? 0} 本书
             </span>
           </div>
-        </DropdownMenuItem>
+        </AppDropdownMenuItem>
       )}
     </For>
   );
@@ -102,7 +102,7 @@ export function BookshelfGroupTitleDropdown(props: BookshelfGroupTitleDropdownPr
       description={props.description}
       dropdownEnabled={props.dropdownEnabled}
       selectionKey={props.currentGroupId ?? 'all'}
-      contentClass="p-0 w-[min(280px,calc(100dvw-2rem))] min-w-52 max-w-[min(280px,calc(100dvw-2rem))] overflow-hidden"
+      contentLayout="titleWide"
     >
       <BookshelfGroupMenuList
         groups={props.groups}

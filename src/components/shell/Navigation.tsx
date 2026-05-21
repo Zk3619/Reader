@@ -27,9 +27,22 @@ import {
   ImportIcon,
   GlobeIcon,
   BookInfoIcon,
+  BookOpenIcon,
 } from "@/components/shared/icons";
 
-export type PageType = "bookshelf" | "sources" | "discover" | "subscription" | "bookmark" | "record" | "settings" | "import" | "remote-book" | "reader" | "book-info";
+export type PageType =
+  | "bookshelf"
+  | "scout"
+  | "sources"
+  | "explore"
+  | "subscription"
+  | "bookmark"
+  | "record"
+  | "settings"
+  | "import"
+  | "remote-book"
+  | "reader"
+  | "book-info";
 
 interface NavigationProps {
   currentPage?: PageType;
@@ -38,8 +51,9 @@ interface NavigationProps {
 
 const pageConfig: Record<PageType, { label: string; icon: Component<any>; description: string }> = {
   bookshelf: { label: "书架", icon: BookshelfIcon, description: "管理你的书籍收藏" },
+  scout: { label: "探索", icon: BookOpenIcon, description: "浏览书源发现分类与书籍" },
   sources: { label: "书源", icon: BookSourceIcon, description: "浏览和添加书源" },
-  discover: { label: "发现", icon: BookSourceIcon, description: "发现页分类" },
+  explore: { label: "发现", icon: BookSourceIcon, description: "书源发现分类书籍列表" },
   subscription: { label: "订阅", icon: SubscriptionIcon, description: "订阅更新" },
   bookmark: { label: "书签", icon: BookmarkIcon, description: "查看书签" },
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
@@ -50,10 +64,11 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
 };
 
-const STANDALONE_PAGES: PageType[] = ["import", "remote-book", "reader", "discover", "book-info"];
+/** 不出现在顶栏页面菜单；与 App.tsx 的 STANDALONE_PAGES（布局/挂载）无关 */
+const NAV_HIDDEN_PAGES: PageType[] = ["explore", "import", "remote-book", "reader", "book-info"];
 
 const NAV_MENU_PAGES = Object.entries(pageConfig).filter(
-  ([page]) => !STANDALONE_PAGES.includes(page as PageType)
+  ([page]) => !NAV_HIDDEN_PAGES.includes(page as PageType)
 );
 
 function CurrentPageIcon(props: { page: PageType; class?: string }) {

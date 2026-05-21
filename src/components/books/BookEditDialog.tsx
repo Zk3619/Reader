@@ -15,14 +15,14 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectListbox,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import * as booksDb from '@/lib/database/books';
@@ -173,7 +173,7 @@ export function BookEditDialog(props: BookEditDialogProps) {
 
           <div class="space-y-2">
             <Label for="book-edit-group">所属分组</Label>
-            <Select
+            <AppSelect
               value={groupValue()}
               onChange={(v) => setGroupValue(v || '0')}
               options={['0', ...groups().map((g) => String(g.groupId))]}
@@ -181,24 +181,24 @@ export function BookEditDialog(props: BookEditDialogProps) {
               open={selectOpen()}
               onOpenChange={setSelectOpen}
               itemComponent={(itemProps) => (
-                <SelectItem class="pl-2" item={itemProps.item}>
+                <AppSelectItem item={itemProps.item}>
                   {itemProps.item.rawValue === '0' ? '未分组' : groups().find((g) => String(g.groupId) === itemProps.item.rawValue)?.groupName ?? itemProps.item.rawValue}
-                </SelectItem>
+                </AppSelectItem>
               )}
             >
-              <SelectTrigger id="book-edit-group" class="w-full" aria-label="所属分组">
-                <SelectValue<string>>
+              <AppSelectTrigger id="book-edit-group" aria-label="所属分组">
+                <AppSelectValue<string>>
                   {(state) => {
                     const v = state.selectedOption();
                     return v === '0' ? '未分组' : (groups().find((g) => String(g.groupId) === v)?.groupName ?? v ?? '选择分组');
                   }}
-                </SelectValue>
-                <SelectIcon />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectListbox />
-              </SelectContent>
-            </Select>
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
           </div>
         </div>
 

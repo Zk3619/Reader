@@ -64,8 +64,8 @@ export function withBlurAfter<T extends (...args: any[]) => any>(
  * <DropdownMenuTrigger
  *   as={(props: any) => (
  *     <Button
- *       onClick={withBlurBefore(props.onClick)}
  *       {...props}
+ *       onClick={withBlurBefore(props.onClick)}
  *     />
  *   )}
  * />

@@ -6,7 +6,7 @@
 import { createStore } from 'solid-js/store';
 import type { SearchBook } from '@/types';
 
-interface DiscoverPageCache {
+interface ExplorePageCache {
   sourceId: string;
   sectionUrl: string;
   books: SearchBook[];
@@ -22,13 +22,13 @@ interface BookInfoCache {
 }
 
 interface PageCacheState {
-  discover: Map<string, DiscoverPageCache>;
+  explore: Map<string, ExplorePageCache>;
   bookInfo: Map<string, BookInfoCache>;
 }
 
 const CACHE_EXPIRY = 5 * 60 * 1000; // 5分钟过期
 
-function getDiscoverCacheKey(sourceId: string, sectionUrl: string): string {
+function getExploreCacheKey(sourceId: string, sectionUrl: string): string {
   return `${sourceId}:${sectionUrl}`;
 }
 
@@ -41,30 +41,30 @@ function isCacheValid(timestamp: number): boolean {
 }
 
 const [state, setState] = createStore<PageCacheState>({
-  discover: new Map(),
+  explore: new Map(),
   bookInfo: new Map(),
 });
 
 export const pageCacheStore = {
   // 发现页缓存
-  getDiscoverCache(sourceId: string, sectionUrl: string): DiscoverPageCache | null {
-    const key = getDiscoverCacheKey(sourceId, sectionUrl);
-    const cache = state.discover.get(key);
+  getExploreCache(sourceId: string, sectionUrl: string): ExplorePageCache | null {
+    const key = getExploreCacheKey(sourceId, sectionUrl);
+    const cache = state.explore.get(key);
     if (cache && isCacheValid(cache.timestamp)) {
       return cache;
     }
     return null;
   },
 
-  setDiscoverCache(
+  setExploreCache(
     sourceId: string,
     sectionUrl: string,
     books: SearchBook[],
     page: number = 1,
     allBooks: SearchBook[] = []
   ): void {
-    const key = getDiscoverCacheKey(sourceId, sectionUrl);
-    setState('discover', (prev) => {
+    const key = getExploreCacheKey(sourceId, sectionUrl);
+    setState('explore', (prev) => {
       const newMap = new Map(prev);
       newMap.set(key, {
         sourceId,
@@ -78,13 +78,13 @@ export const pageCacheStore = {
     });
   },
 
-  updateDiscoverCache(
+  updateExploreCache(
     sourceId: string,
     sectionUrl: string,
-    updater: (cache: DiscoverPageCache) => DiscoverPageCache
+    updater: (cache: ExplorePageCache) => ExplorePageCache
   ): void {
-    const key = getDiscoverCacheKey(sourceId, sectionUrl);
-    setState('discover', (prev) => {
+    const key = getExploreCacheKey(sourceId, sectionUrl);
+    setState('explore', (prev) => {
       const newMap = new Map(prev);
       const existing = newMap.get(key);
       if (existing) {
@@ -94,16 +94,16 @@ export const pageCacheStore = {
     });
   },
 
-  clearDiscoverCache(sourceId?: string, sectionUrl?: string): void {
+  clearExploreCache(sourceId?: string, sectionUrl?: string): void {
     if (sourceId && sectionUrl) {
-      const key = getDiscoverCacheKey(sourceId, sectionUrl);
-      setState('discover', (prev) => {
+      const key = getExploreCacheKey(sourceId, sectionUrl);
+      setState('explore', (prev) => {
         const newMap = new Map(prev);
         newMap.delete(key);
         return newMap;
       });
     } else {
-      setState('discover', new Map());
+      setState('explore', new Map());
     }
   },
 
@@ -145,7 +145,7 @@ export const pageCacheStore = {
 
   // 清理所有过期缓存
   clearExpiredCache(): void {
-    setState('discover', (prev) => {
+    setState('explore', (prev) => {
       const newMap = new Map();
       for (const [key, cache] of prev.entries()) {
         if (isCacheValid(cache.timestamp)) {

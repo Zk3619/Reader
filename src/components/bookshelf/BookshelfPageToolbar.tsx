@@ -3,16 +3,17 @@
  */
 
 import { createSignal, onMount } from 'solid-js';
-import { withBlurBefore, blurActiveElement } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import {
   SearchIcon,
   StarIcon,
@@ -72,28 +73,22 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
         <TooltipContent>收藏</TooltipContent>
       </Tooltip>
 
-      <DropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
+      <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
         <Tooltip>
           <TooltipTrigger as="div">
-            <DropdownMenuTrigger
+            <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-9 w-9"
-                  onClick={withBlurBefore(triggerProps.onClick as (() => void) | undefined)}
-                  {...triggerProps}
-                >
+                <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
                   <MoreIcon class="h-4 w-4" />
                   <span class="sr-only">更多</span>
-                </Button>
+                </AppDropdownMenuIconTrigger>
               )}
             />
           </TooltipTrigger>
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent class="min-w-0 w-auto">
-          <DropdownMenuItem
+        <AppDropdownMenuContent layout="compact">
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -102,8 +97,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <RefreshIcon class="h-4 w-4" />
             <span>更新目录</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -112,8 +107,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <FolderPlusIcon class="h-4 w-4" />
             <span>添加本地</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -122,8 +117,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <GlobeIcon class="h-4 w-4" />
             <span>远程书籍</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -132,13 +127,13 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <LinkIcon class="h-4 w-4" />
             <span>添加网址</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
+          <AppDropdownMenuItem>
             <Settings2Icon class="h-4 w-4" />
             <span>书架管理</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               requestAnimationFrame(() => {
@@ -149,8 +144,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <LayoutIcon class="h-4 w-4" />
             <span>书架布局</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => {
               setMoreMenuOpen(false);
               blurActiveElement();
@@ -159,27 +154,27 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <FolderTreeIcon class="h-4 w-4" />
             <span>分组管理</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
+          <AppDropdownMenuItem>
             <DownloadIcon class="h-4 w-4" />
             <span>缓存导出</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem>
             <UploadIcon class="h-4 w-4" />
             <span>导出书单</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem>
             <ImportIcon class="h-4 w-4" />
             <span>导入书单</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
+          <AppDropdownMenuItem>
             <FileTextIcon class="h-4 w-4" />
             <span>查看日志</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </AppDropdownMenuItem>
+        </AppDropdownMenuContent>
+      </AppDropdownMenu>
 
       <BookshelfLayoutDialog
         open={showBookshelfLayoutDialog()}

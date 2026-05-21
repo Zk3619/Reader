@@ -37,7 +37,7 @@ export function parseLegadoStartBrowserFromExploreUrl(
 }
 
 /** 是否应进入发现书籍列表页（普通 exploreUrl / 相对路径 / 含 {{page}} / 书单列 ajax） */
-export function shouldOpenDiscoverPageForSection(section: ExploreSection): boolean {
+export function shouldOpenExplorePageForSection(section: ExploreSection): boolean {
   const url = section.url?.trim();
   if (!url) return false;
   if (parseLegadoStartBrowserFromExploreUrl(url)) return false;
@@ -55,7 +55,7 @@ function mergeCookieHeader(stored: string, headerCookie: string | undefined): st
 }
 
 /**
- * 在应用内打开发现子项（个人中心、登录番茄等），不进入 DiscoverPage
+ * 在应用内打开发现子项（个人中心、登录番茄等），不进入发现书籍列表页
  * @returns 是否已处理
  */
 export async function openExploreSectionInInnerWeb(

@@ -146,17 +146,31 @@ function extractPutVariables(rule: string, putMap: Record<string, string>): stri
   return result.trim();
 }
 
+/** 模板占位 JSONPath 别名（主路径为空时尝试，如晴天书源 last_update_time → last_chapter_update_time） */
+const JSON_TEMPLATE_PATH_ALIASES: Record<string, string[]> = {
+  '$.last_update_time': ['$.last_chapter_update_time'],
+  '$.update_time': ['$.last_chapter_update_time'],
+};
+
+function resolveJsonTemplatePath(pathTrim: string, jsonString: string): string {
+  const candidates = [pathTrim, ...(JSON_TEMPLATE_PATH_ALIASES[pathTrim] ?? [])];
+  for (const path of candidates) {
+    const values = parseJsonPath(path, jsonString);
+    const v = values[0];
+    if (v != null && String(v).trim() !== '') return String(v);
+  }
+  return '';
+}
+
 /**
  * Legado 模板语法：{{$.path}} 用 JSONPath 结果替换
  * 当规则含 {{ }} 且内容为 JSON 时，不当作 CSS，而是做模板替换
  */
 function applyJsonTemplate(rule: string, jsonString: string): string {
   const placeholderRegex = /\{\{(\$[^}]*)\}\}/g;
-  return rule.replace(placeholderRegex, (_, path: string) => {
-    const pathTrim = path.trim();
-    const values = parseJsonPath(pathTrim, jsonString);
-    return values[0] ?? '';
-  });
+  return rule.replace(placeholderRegex, (_, path: string) =>
+    resolveJsonTemplatePath(path.trim(), jsonString)
+  );
 }
 
 /**

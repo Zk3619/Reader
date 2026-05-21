@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { PageType } from "@/components/shell/Navigation";
 import {
   BookshelfIcon,
+  BookOpenIcon,
   BookSourceIcon,
   SubscriptionIcon,
   BookmarkIcon,
@@ -31,8 +32,9 @@ import {
 // 页面配置（与 Navigation 组件保持一致）
 const pageConfig: Record<PageType, { label: string; icon: Component<any>; description: string }> = {
   bookshelf: { label: "书架", icon: BookshelfIcon, description: "管理你的书籍收藏" },
+  scout: { label: "探索", icon: BookOpenIcon, description: "浏览书源发现分类与书籍" },
   sources: { label: "书源", icon: BookSourceIcon, description: "浏览和添加书源" },
-  discover: { label: "发现", icon: BookSourceIcon, description: "发现页分类" },
+  explore: { label: "发现", icon: BookSourceIcon, description: "书源发现分类书籍列表" },
   subscription: { label: "订阅", icon: SubscriptionIcon, description: "订阅更新" },
   bookmark: { label: "书签", icon: BookmarkIcon, description: "查看书签" },
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
@@ -78,7 +80,15 @@ export function SideBar(props: SideBarProps) {
   }
 
   // 所有菜单页面列表（包括设置）
-  const allPages: PageType[] = ["bookshelf", "sources", "subscription", "bookmark", "record", "settings"];
+  const allPages: PageType[] = [
+    "bookshelf",
+    "scout",
+    "sources",
+    "subscription",
+    "bookmark",
+    "record",
+    "settings",
+  ];
 
   // 判断是否收起
   const isCollapsed = () => state() === "collapsed";
