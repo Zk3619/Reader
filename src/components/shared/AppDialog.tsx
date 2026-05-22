@@ -4,7 +4,7 @@
  */
 
 import type { Component, ComponentProps, JSX, ValidComponent } from 'solid-js';
-import { Show, splitProps } from 'solid-js';
+import { Show, on, splitProps } from 'solid-js';
 import type { PolymorphicProps } from '@kobalte/core/polymorphic';
 import * as DialogPrimitive from '@kobalte/core/dialog';
 
@@ -14,7 +14,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { dialogViewportLimits } from '@/lib/ui/viewport-classes';
-import { blurActiveElement, triggerDialogOpened } from '@/utils/accessibility';
+import {
+  blurActiveElement,
+  prepareForAppDialogOpen,
+  releasePageFocus,
+} from '@/utils/accessibility';
 
 /** 与 WindowControlButtons 关闭钮一致（ghost + destructive hover） */
 export const APP_DIALOG_CLOSE_BUTTON_CLASS =
@@ -70,16 +74,14 @@ function mergeOpenChange(
   accessibilityDisabled: boolean | undefined
 ): (open: boolean) => void {
   return (open: boolean) => {
-    userOnOpenChange(open);
-    if (accessibilityDisabled) return;
-    if (open) {
-      requestAnimationFrame(() => {
-        triggerDialogOpened();
+    if (!accessibilityDisabled) {
+      if (open) {
+        prepareForAppDialogOpen();
+      } else {
         blurActiveElement();
-      });
-    } else {
-      blurActiveElement();
+      }
     }
+    userOnOpenChange(open);
   };
 }
 
@@ -104,6 +106,19 @@ export const AppDialog: Component<AppDialogProps> = (props) => {
     local.onOpenChange,
     local.disableAccessibilityAnnounce
   );
+
+  // 父组件受控 setOpen(true) 时未必走 onOpenChange；defer:false 在子节点挂载/aria-hidden 之前执行
+  on(
+    () => local.open,
+    (open) => {
+      if (local.disableAccessibilityAnnounce) return;
+      if (open) {
+        prepareForAppDialogOpen();
+      }
+    },
+    { defer: false }
+  );
+
   return (
     <Dialog open={local.open} onOpenChange={handleOpenChange} {...rest}>
       {local.children}
@@ -120,7 +135,9 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
     'portalZClass',
     'overlayClass',
     'layout',
+    'onOpenAutoFocus',
   ]);
+  const userOnOpenAutoFocus = () => (props as AppDialogContentProps<T>).onOpenAutoFocus;
   const layout = () => (props as AppDialogContentProps<T>).layout ?? 'app';
   const portalZ = () => (props as AppDialogContentProps<T>).portalZClass;
   const overlayCls = () => (props as AppDialogContentProps<T>).overlayClass;
@@ -129,6 +146,14 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
       <AppDialogOverlay class={cn(portalZ(), overlayCls())} />
       <DialogPrimitive.Content
         {...(rest as DialogPrimitive.DialogContentProps<'div'>)}
+        onOpenAutoFocus={(e) => {
+          userOnOpenAutoFocus()?.(e);
+          if (e.defaultPrevented) return;
+          e.preventDefault();
+          releasePageFocus();
+          const dialog = e.currentTarget as HTMLElement | undefined;
+          dialog?.focus({ preventScroll: true });
+        }}
         class={cn(
           APP_DIALOG_CONTENT_BASE_CLASS,
           portalZ(),
@@ -154,6 +179,7 @@ export const AppDialogCloseButton: Component<{
   return (
     <Tooltip>
       <TooltipTrigger
+        onFocus={(e) => e.preventDefault()}
         as={(triggerProps: Record<string, unknown>) => (
           <DialogPrimitive.CloseButton
             as={Button}
@@ -169,7 +195,7 @@ export const AppDialogCloseButton: Component<{
           </DialogPrimitive.CloseButton>
         )}
       />
-      <TooltipContent>关闭</TooltipContent>
+      <TooltipContent class="z-100">关闭</TooltipContent>
     </Tooltip>
   );
 };

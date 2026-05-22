@@ -4,7 +4,6 @@
  * 使用 fetch API 进行 HTTP 请求
  */
 
-import { hasBook } from '@/lib/database/books';
 import { getBooksDirectory } from '@/lib/local-book/import';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { join } from '@tauri-apps/api/path';
@@ -30,13 +29,10 @@ class WebDavClient {
   private baseUrl: string;
   private username: string;
   private password: string;
-  private serverID?: number;
-
   constructor(config: WebDavConfig) {
     this.baseUrl = config.url.replace(/\/$/, ''); // 移除末尾斜杠
     this.username = config.username;
     this.password = config.password;
-    this.serverID = config.serverID;
   }
 
   /**
@@ -230,12 +226,10 @@ class WebDavClient {
 export class WebDavRemoteBookManager implements RemoteBookManager {
   private client: WebDavClient;
   private rootBookPath: string;
-  private serverID?: number;
 
   constructor(config: WebDavConfig) {
     this.client = new WebDavClient(config);
     this.rootBookPath = config.rootBookPath || 'books';
-    this.serverID = config.serverID;
   }
 
   /**
@@ -351,7 +345,7 @@ export class WebDavRemoteBookManager implements RemoteBookManager {
   /**
    * 检查书籍是否已在书架中
    */
-  private async checkBookInShelf(filename: string): Promise<boolean> {
+  private async checkBookInShelf(_filename: string): Promise<boolean> {
     try {
       // 这里需要根据文件名查找书籍，可能需要遍历所有书籍
       // 简化实现：检查是否有同名文件

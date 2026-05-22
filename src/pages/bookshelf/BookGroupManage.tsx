@@ -486,12 +486,12 @@ export function BookGroupManage(props: BookGroupManageProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={(e) => {
+                        onClick={(e: MouseEvent) => {
                           e.stopPropagation();
                           e.preventDefault();
                           handleEdit(group);
                         }}
-                        onMouseDown={(e) => {
+                        onMouseDown={(e: MouseEvent) => {
                           e.stopPropagation();
                           e.preventDefault();
                         }}

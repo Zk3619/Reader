@@ -3,7 +3,7 @@
  * 询问用户是否删除本地文件，并允许记住选择
  */
 
-import { createSignal, Show } from 'solid-js';
+import { createEffect, createSignal, Show } from 'solid-js';
 import {
   AppDialog,
   AppDialogContent,
@@ -16,7 +16,12 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
-import { isLocalBook } from '@/lib/local-book';
+import {
+  defaultDeleteStoredFileForLocalBook,
+  deleteStoredFileCheckboxHint,
+  deleteStoredFileCheckboxLabel,
+  isLocalBook,
+} from '@/lib/local-book';
 import type { Book } from '@/types';
 
 export interface DeleteBookDialogProps {
@@ -33,6 +38,19 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
   );
 
   const isLocal = () => props.book && isLocalBook(props.book);
+
+  createEffect(() => {
+    if (!props.open || !props.book) return;
+    const app = settingsStore.state.app;
+    const remembered =
+      app.rememberDeleteFileAction && app.deleteFileAction !== undefined
+        ? app.deleteFileAction
+        : undefined;
+    setDeleteFile(
+      defaultDeleteStoredFileForLocalBook(props.book.bookUrl, remembered),
+    );
+    setRemember(app.rememberDeleteFileAction ?? false);
+  });
 
   const handleConfirm = () => {
     props.onConfirm(deleteFile());
@@ -69,9 +87,11 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
               />
               <Label for="delete-file" class="cursor-pointer">
                 <div>
-                  <div class="font-medium">同时删除本地文件</div>
+                  <div class="font-medium">
+                    {deleteStoredFileCheckboxLabel(props.book!.bookUrl)}
+                  </div>
                   <div class="text-sm text-muted-foreground">
-                    删除书籍时，同时删除本地存储的书籍文件。
+                    {deleteStoredFileCheckboxHint(props.book!.bookUrl)}
                   </div>
                 </div>
               </Label>

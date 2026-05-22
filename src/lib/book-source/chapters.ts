@@ -12,7 +12,11 @@ import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, TocRule } from '@/types';
 import type { BookChapter, NewBookChapter } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
+import {
+  buildSourceRequestHeaders,
+  resolveAggregationServerUrl,
+} from '@/lib/book-source/source-http';
+import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
 
 // ─── data: URL 场景 ───
 
@@ -42,8 +46,8 @@ async function getChapterListFromDataUrl(
     return [];
   }
 
-  // 2. 确定 server 地址
-  const serverUrl = extractServerFromJsLib(source as unknown as Record<string, unknown>);
+  // 2. 确定 server 地址（优先用户所选线路）
+  const serverUrl = resolveAggregationServerUrl(source);
   if (!serverUrl) {
     console.warn('[chapters] 无法从书源获取 server 地址');
     return [];
@@ -56,12 +60,12 @@ async function getChapterListFromDataUrl(
   console.log('[chapters] 请求目录 API:', catalogUrl);
 
   // 4. POST 请求（书源规则用 POST + body: { html: "" }）
-  const headers = parseHeaders(source.header);
+  const headers = buildSourceRequestHeaders(source, catalogUrl);
   const responseText = await post(
     catalogUrl,
     JSON.stringify({ html: '' }),
     {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       timeout: 30000,
     },
@@ -130,7 +134,7 @@ export async function getChapterList(
 
     // ── 标准 HTTP URL 路径 ──
     const rule = source.ruleToc;
-    const headers = parseHeaders(source.header);
+    const headers = buildSourceRequestHeaders(source, tocUrl);
 
     console.log('[chapters] 请求目录 URL:', tocUrl);
 
@@ -149,7 +153,7 @@ export async function getChapterList(
         tocUrl,
         JSON.stringify(body),
         {
-          ...headers,
+          headers,
           enableCookieJar: source.enabledCookieJar,
           timeout: 30000,
         },
@@ -157,7 +161,7 @@ export async function getChapterList(
     } else {
       // 其他 URL 使用 GET
       html = await get(tocUrl, {
-        ...headers,
+        headers,
         enableCookieJar: source.enabledCookieJar,
         concurrentRate: source.concurrentRate,
         timeout: 30000,

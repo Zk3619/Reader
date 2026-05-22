@@ -3,11 +3,15 @@
  * 提供高级的备份和恢复功能
  */
 
-import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
+import { pickFile } from '@/lib/platform/fs/pick-file';
+import { isUserCancelled } from '@/lib/platform/fs/errors';
+import { readBytes } from '@/lib/platform/fs/read-write';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import {
   exportDatabaseAsBlob,
   exportDatabaseAndDownload,
+  importDatabase,
   importDatabaseFromFile,
   importDatabaseFromPath,
 } from '@/lib/database/export-import';
@@ -132,8 +136,7 @@ export async function restoreBackup(replace: boolean = true): Promise<void> {
 async function restoreBackupFromFile(replace: boolean): Promise<void> {
   try {
     // 打开文件选择对话框
-    const filePath = await openDialog({
-      multiple: false,
+    const picked = await pickFile({
       filters: [
         {
           name: 'SQLite Database',
@@ -142,13 +145,17 @@ async function restoreBackupFromFile(replace: boolean): Promise<void> {
       ],
     });
 
-    if (!filePath || typeof filePath !== 'string') {
-      throw new Error('用户取消选择文件');
+    if (picked.ref.kind === 'path' || picked.ref.kind === 'uri') {
+      await importDatabaseFromPath(picked.ref.value, replace);
+    } else {
+      const bytes = picked.bytes ?? (await readBytes(picked.ref));
+      await importDatabase(bytes, replace);
     }
-
-    await importDatabaseFromPath(filePath, replace);
     console.log('[备份管理器] 备份已恢复');
   } catch (error) {
+    if (isUserCancelled(error)) {
+      throw new Error('用户取消选择文件');
+    }
     console.error('[备份管理器] 恢复备份失败:', error);
     throw error;
   }

@@ -36,6 +36,7 @@ import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ChevronDownIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
 import {
   AppSelect,
@@ -768,13 +769,22 @@ export function SourcesPage(props: SourcesPageProps) {
                                 />
                               </div>
                               <div class="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
-                                <span class="min-w-0 shrink truncate font-medium text-foreground" title={source.sourceName}>
-                                  {source.sourceName}
-                                </span>
+                                <Tooltip>
+                                  <TooltipTrigger as="span" class="min-w-0 shrink truncate font-medium text-foreground">
+                                    {source.sourceName}
+                                  </TooltipTrigger>
+                                  <TooltipContent>{source.sourceName}</TooltipContent>
+                                </Tooltip>
                                 <Show when={source.sourceGroup && !props.sourcesGroupByGroupName}>
-                                  <span class="min-w-0 shrink-2 truncate rounded bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground" title={source.sourceGroup}>
-                                    {source.sourceGroup}
-                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      as="span"
+                                      class="min-w-0 shrink-2 truncate rounded bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
+                                    >
+                                      {source.sourceGroup}
+                                    </TooltipTrigger>
+                                    <TooltipContent>{source.sourceGroup}</TooltipContent>
+                                  </Tooltip>
                                 </Show>
                               </div>
                               <div class="shrink-0 flex items-center" onClick={(e: MouseEvent) => e.stopPropagation()} role="presentation">
@@ -1148,9 +1158,12 @@ export function SourcesPage(props: SourcesPageProps) {
             <For each={validateResults()}>
               {(r) => (
                 <div class="rounded-lg border border-border/60 p-3 space-y-2">
-                  <div class="font-medium text-sm truncate" title={r.sourceName}>
-                    {r.sourceName}
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger as="div" class="font-medium text-sm truncate">
+                      {r.sourceName}
+                    </TooltipTrigger>
+                    <TooltipContent>{r.sourceName}</TooltipContent>
+                  </Tooltip>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div class="flex flex-col gap-0.5">
                       <span class="text-muted-foreground">搜索</span>

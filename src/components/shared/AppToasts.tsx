@@ -118,28 +118,17 @@ function withToastProgress(
   showProgress: boolean,
 ): JSX.Element | undefined {
   if (!showProgress) return description
+  // 勿使用带 onMount 的组件：description 在 showAppToast 调用处构建（常在 async 回调里），
+  // 不在应用 createRoot 内，会导致 "computations created outside createRoot" 警告。
   return (
     <>
       {description}
-      <ToastProgressBar duration={duration} />
+      <div
+        class="toast-progress-bar pointer-events-none h-0.5 w-full shrink-0 bg-current/30"
+        style={{ "--toast-duration": `${duration}ms` }}
+        aria-hidden
+      />
     </>
-  )
-}
-
-/** 倒计时进度条（挂到 toast 底部，由 App.css 绝对定位） */
-function ToastProgressBar(props: { duration: number }) {
-  let progressBarRef: HTMLDivElement | undefined
-
-  onMount(() => {
-    progressBarRef?.style.setProperty("--toast-duration", `${props.duration}ms`)
-  })
-
-  return (
-    <div
-      ref={progressBarRef}
-      class="toast-progress-bar pointer-events-none h-0.5 w-full shrink-0 bg-current/30"
-      aria-hidden
-    />
   )
 }
 

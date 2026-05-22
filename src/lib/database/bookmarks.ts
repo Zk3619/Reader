@@ -11,7 +11,7 @@ import type { Bookmark } from '@/types';
  */
 export async function getAllBookmarks(): Promise<Bookmark[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM bookmarks 
      ORDER BY bookName, bookAuthor, chapterIndex, chapterPos`
   );
@@ -26,7 +26,7 @@ export async function getBookmarksByBook(
   bookAuthor: string
 ): Promise<Bookmark[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM bookmarks WHERE bookName = ? AND bookAuthor = ? ORDER BY chapterIndex',
     [bookName, bookAuthor]
   );
@@ -42,7 +42,7 @@ export async function searchBookmarks(
   keyword: string
 ): Promise<Bookmark[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM bookmarks 
      WHERE bookName = ? AND bookAuthor = ?
      AND (chapterName LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%')

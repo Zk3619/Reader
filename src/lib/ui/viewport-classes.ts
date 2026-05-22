@@ -83,4 +83,4 @@ export const mainShellPageRoot = 'flex flex-col flex-1 min-h-0 w-full overflow-h
 
 /** 侧边栏 Tab 页主内容可滚动区（书架列表、书源列表、探索书籍区等） */
 export const mainShellPageScroll =
-  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both pt-2';
+  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-2';

@@ -32,7 +32,7 @@ const EXPLORE_HUB_CHIP_BASE =
   'shrink-0 rounded-lg border-border/60 bg-background/80 text-sm font-medium shadow-sm';
 
 const exploreHubItemsTrackClass =
-  'flex max-h-36 flex-wrap items-center gap-2 overflow-y-auto scroll-gutter-stable-both overscroll-contain py-1';
+  'flex max-h-36 flex-wrap items-center gap-2 overflow-y-auto scroll-gutter-stable-both overscroll-contain py-2';
 
 const exploreHubButtonClass = (selected: boolean) =>
   cn(
@@ -150,7 +150,7 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
   const showNav = () => !isLoading() && !props.error && navItems().length > 0;
 
   return (
-    <div class="shrink-0 border-b border-border/50 bg-muted/10 my-1">
+    <div class="shrink-0 border-b border-border/50 bg-muted/10">
       <Show when={!props.source}>
         <p class="py-2 text-center text-sm text-muted-foreground">请选择书源</p>
       </Show>

@@ -12,7 +12,11 @@ import { get } from '@/lib/http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
+import {
+  buildSourceRequestHeaders,
+  resolveAggregationServerUrl,
+} from '@/lib/book-source/source-http';
+import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
 
 /**
  * 处理 data: URL 场景的 getBookInfo
@@ -40,8 +44,8 @@ async function getBookInfoFromDataUrl(
     return null;
   }
 
-  // 2. 确定 server 地址
-  const serverUrl = extractServerFromJsLib(source as unknown as Record<string, unknown>);
+  // 2. 确定 server 地址（优先用户所选线路）
+  const serverUrl = resolveAggregationServerUrl(source);
   if (!serverUrl) {
     console.warn('[detail] 无法从书源获取 server 地址');
     return null;
@@ -54,9 +58,9 @@ async function getBookInfoFromDataUrl(
   console.log('[detail] 请求详情 API:', detailUrl);
 
   // 4. 请求并解析
-  const headers = parseHeaders(source.header);
+  const headers = buildSourceRequestHeaders(source, detailUrl);
   const responseText = await get(detailUrl, {
-    ...headers,
+    headers,
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,
   });
@@ -123,9 +127,9 @@ export async function getBookInfo(
 
     // ── 标准 HTTP URL 路径 ──
     const rule = source.ruleBookInfo;
-    const headers = parseHeaders(source.header);
+    const headers = buildSourceRequestHeaders(source, bookUrl);
     const html = await get(bookUrl, {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout: 30000,

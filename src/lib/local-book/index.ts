@@ -10,6 +10,7 @@
  */
 
 import type { Book, BookChapter } from '@/types';
+import { parseStorageRef } from '@/lib/platform/fs/storage-ref';
 import { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
 import { getEpubChapterList, getEpubContent } from '@/lib/local-book/epub-parser';
 
@@ -80,7 +81,12 @@ export function detectFileTypeByContent(content: ArrayBuffer): LocalBookType | n
  * 检查路径是否是 Android Content URI
  */
 export function isAndroidContentUri(path: string): boolean {
-  return path.startsWith('content://');
+  if (path.startsWith('content://')) return true;
+  try {
+    return parseStorageRef(path).kind === 'uri';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -90,6 +96,18 @@ export function isLocalBook(book: Book): boolean {
   // 本地书籍的origin通常是 "local" 或 "local::文件名"
   return book.origin === 'local' || book.origin.startsWith('local::');
 }
+
+export {
+  defaultDeleteStoredFileForLocalBook,
+  deleteStoredFileCheckboxHint,
+  deleteStoredFileCheckboxLabel,
+  describeDeleteLocalBookToast,
+  isWebPrivateStoredLocalBook,
+  isWebUserFolderStoredLocalBook,
+  localBookStorageKind,
+  removeLocalBookStoredFile,
+  resolveWebLocalDeleteStorageKind,
+} from '@/lib/local-book/stored-file';
 
 /**
  * 获取本地书籍的章节列表
@@ -164,10 +182,19 @@ export async function getLocalContent(
   chapter: BookChapter,
   fileContent: string | ArrayBuffer
 ): Promise<string | null> {
-  // 首先尝试通过文件名检测类型
-  let fileType = detectFileType(book.originName);
+  let typeHint = book.originName;
+  if (
+    !typeHint ||
+    /primary[%_]/i.test(typeHint) ||
+    typeHint.includes('_2F')
+  ) {
+    const { displayFileNameFromBookUrl } = await import('@/lib/platform/fs/storage-ref');
+    const decoded = displayFileNameFromBookUrl(book.bookUrl);
+    if (decoded && detectFileType(decoded)) typeHint = decoded;
+  }
 
-  // 如果无法通过文件名检测，且文件内容是 ArrayBuffer，尝试通过内容检测
+  let fileType = detectFileType(typeHint);
+
   if (!fileType && fileContent instanceof ArrayBuffer) {
     fileType = detectFileTypeByContent(fileContent);
   }
@@ -289,5 +316,6 @@ export {
   importLocalBookFromContent,
   pickLocalBookFile,
   readLocalBookContent,
+  resolveAndroidOriginFileName,
 } from '@/lib/local-book/import';
 export type { ImportResult } from '@/lib/local-book/import';

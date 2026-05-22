@@ -1,42 +1,32 @@
 import { createSignal, Show, onMount } from "solid-js";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import logoLight from "@/assets/logo-l-512x512.png";
 import logoDark from "@/assets/logo-d-512x512.png";
 import { cn } from "@/lib/utils";
-import { isTauri } from "@/lib/platform/detect";
+import {
+  ensureMainWindowVisible,
+  isDevSplashDone,
+  markDevSplashDone,
+} from "@/lib/dev/splash-session";
 
 interface SplashScreenProps {
   onComplete?: () => void;
 }
 
 export function SplashScreen(props: SplashScreenProps) {
-  const [isVisible, setIsVisible] = createSignal(true);
+  const skipForHmr = isDevSplashDone();
+  const [isVisible, setIsVisible] = createSignal(!skipForHmr);
   const [isDark, setIsDark] = createSignal(false);
 
   onMount(async () => {
-    // 开发环境 HMR：父级可能已跳过挂载；若仍挂载则立即结束，避免白底遮罩
-    if (import.meta.env.DEV && import.meta.hot?.data?.splashDone) {
-      setIsVisible(false);
+    // 开发环境 HMR：立即结束，避免白底遮罩盖住主界面
+    if (skipForHmr) {
+      await ensureMainWindowVisible();
+      markDevSplashDone();
       props.onComplete?.();
       return;
     }
 
-    // 在开屏动画开始前显示窗口
-    // 注意：window-state 插件会在窗口创建时恢复之前保存的状态
-    // 如果之前窗口是隐藏的，这里会先显示窗口（用于开屏动画）
-    // 动画完成后，窗口状态会根据用户操作或退出时的状态保存
-    if (isTauri()) {
-      try {
-        const appWindow = getCurrentWindow();
-        const windowVisible = await appWindow.isVisible();
-        if (!windowVisible) {
-          await appWindow.show();
-          await appWindow.center();
-        }
-      } catch (error) {
-        console.warn("窗口显示失败:", error);
-      }
-    }
+    await ensureMainWindowVisible();
 
     // 检测当前主题（支持 class=\"dark\" 和 data-kb-theme=\"dark\" 两种方式）
     const checkTheme = () => {

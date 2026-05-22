@@ -14,7 +14,7 @@ export async function getRssArticlesByOriginAndSort(
   sort: string
 ): Promise<RssArticle[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT t1.*, IFNULL(t2.read, 0) as read
      FROM rssArticles as t1 
      LEFT JOIN rssReadRecords as t2 ON t1.link = t2.record
@@ -33,7 +33,7 @@ export async function getRssArticle(
   link: string
 ): Promise<RssArticle | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssArticles WHERE origin = ? AND link = ?',
     [origin, link]
   );

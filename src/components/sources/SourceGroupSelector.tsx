@@ -4,6 +4,7 @@
 
 import { For, type JSX } from 'solid-js';
 import { AppDropdownMenuItem } from '@/components/shared/AppDropdownMenu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import {
@@ -62,9 +63,12 @@ function SourceGroupMenuList(props: {
             )}
             onSelect={() => props.onSourceGroupChange?.(groupName)}
           >
-            <span class="block min-w-0 flex-1 truncate" title={groupName}>
-              {groupName}
-            </span>
+            <Tooltip>
+              <TooltipTrigger as="span" class="block min-w-0 flex-1 truncate">
+                {groupName}
+              </TooltipTrigger>
+              <TooltipContent>{groupName}</TooltipContent>
+            </Tooltip>
           </AppDropdownMenuItem>
         )}
       </For>

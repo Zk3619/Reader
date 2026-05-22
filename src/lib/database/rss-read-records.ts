@@ -13,7 +13,7 @@ export async function getRssReadRecord(
   record: string
 ): Promise<RssReadRecord | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssReadRecords WHERE record = ?',
     [record]
   );

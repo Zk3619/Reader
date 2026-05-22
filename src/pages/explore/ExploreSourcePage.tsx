@@ -65,7 +65,7 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
         class="border-b"
       />
       <ExploreSourcePageContent
-        class="px-4"
+        class="py-4 px-1"
         source={props.source}
         section={props.section}
         refreshKey={refreshKey()}

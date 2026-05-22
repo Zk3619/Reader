@@ -11,7 +11,7 @@ import type { RssStar } from '@/types';
  */
 export async function getAllRssStars(): Promise<RssStar[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssStars ORDER BY starTime DESC'
   );
   return rows.map(row => mapRowToStar(row));
@@ -25,7 +25,7 @@ export async function getRssStarsByOriginAndSort(
   sort: string
 ): Promise<RssStar[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssStars WHERE origin = ? AND sort = ? ORDER BY starTime DESC',
     [origin, sort]
   );
@@ -40,7 +40,7 @@ export async function getRssStar(
   link: string
 ): Promise<RssStar | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssStars WHERE origin = ? AND link = ?',
     [origin, link]
   );

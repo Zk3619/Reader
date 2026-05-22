@@ -36,10 +36,16 @@ export interface AppSettings {
    * 仅移动端且宽度不足 480px 时强制使用底栏。
    */
   shellLayout?: ShellLayoutPreference;
-  /** 书籍存储目录（首次导入时设置） */
+  /** 书籍存储目录（首次导入时设置，path: 兼容字段） */
   booksDirectory?: string;
+  /** 书籍库根 StorageRef 字符串（path: / saf-tree: / opfs: / handle:dir:） */
+  booksStorageRoot?: string;
   /** 是否已设置书籍目录 */
   booksDirectorySet?: boolean;
+  /** 封面缓存目录（可选；未设置则用数据根目录下的 cover-cache） */
+  coverCacheDirectory?: string;
+  /** 是否已自定义封面缓存目录 */
+  coverCacheDirectorySet?: boolean;
   /** 导入书籍时的操作偏好：copy（复制）或 move（移动） */
   importBookAction?: 'copy' | 'move';
   /** 是否记住导入操作偏好 */
@@ -117,7 +123,17 @@ export const settingsStore = {
     try {
       const stored = await getStorage<AppSettings>(SETTINGS_STORAGE_KEY);
       if (stored) {
-        setState({ app: { ...defaultAppSettings, ...stored }, loading: false });
+        const { migrateAppStorageSettings } = await import(
+          '@/lib/platform/fs/migration'
+        );
+        const migrated = migrateAppStorageSettings({
+          ...defaultAppSettings,
+          ...stored,
+        });
+        setState({ app: migrated, loading: false });
+        if (migrated.booksStorageRoot && migrated.booksStorageRoot !== stored.booksStorageRoot) {
+          await setStorage(SETTINGS_STORAGE_KEY, migrated);
+        }
       } else {
         setState({ loading: false });
       }
@@ -204,6 +220,28 @@ export const settingsStore = {
       booksDirectory: directory,
       booksDirectorySet: true
     });
+  },
+
+  /**
+   * 设置封面缓存目录；传空字符串表示恢复默认（数据根/cover-cache）
+   */
+  async setCoverCacheDirectory(directory: string): Promise<void> {
+    const { clearCoverCacheDirectoryCache } = await import(
+      '@/lib/cover/cover-cache-path'
+    );
+    const trimmed = directory.trim();
+    if (!trimmed) {
+      await this.updateAppSettings({
+        coverCacheDirectory: undefined,
+        coverCacheDirectorySet: false,
+      });
+    } else {
+      await this.updateAppSettings({
+        coverCacheDirectory: trimmed,
+        coverCacheDirectorySet: true,
+      });
+    }
+    clearCoverCacheDirectoryCache();
   },
 
   /**

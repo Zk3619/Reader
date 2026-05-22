@@ -22,6 +22,38 @@ import {
 } from '@tauri-apps/plugin-fs';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
+import { parseStorageRef } from '@/lib/platform/fs/storage-ref';
+
+/** 是否为 StorageRef 字符串（path:/uri:/handle: 等） */
+export function isStorageRefString(path: string): boolean {
+  const t = path.trim();
+  return (
+    t.startsWith('path:') ||
+    t.startsWith('uri:') ||
+    t.startsWith('opfs:') ||
+    t.startsWith('handle:') ||
+    t.startsWith('virtual:') ||
+    t.startsWith('local::') ||
+    t.startsWith('saf-tree:') ||
+    t.startsWith('content://')
+  );
+}
+
+/**
+ * 转为 Tauri plugin-fs / @tauri-apps/api/path 可用的原生路径。
+ * L1 选文件返回的 `path:D:\...` 必须先剥离前缀。
+ */
+export function toNativeFilesystemPath(pathOrRef: string): string {
+  if (isLocalBookPath(pathOrRef)) {
+    throw new Error('local:: 请使用 readFile() 便捷方法');
+  }
+  if (!isStorageRefString(pathOrRef)) return pathOrRef;
+  const ref = parseStorageRef(pathOrRef);
+  if (ref.kind === 'path' || ref.kind === 'uri') return ref.value;
+  throw new Error(
+    `无法转为原生路径（请使用 readBytes）: ${pathOrRef.slice(0, 64)}`,
+  );
+}
 
 // File System Access API 类型声明
 declare global {
@@ -148,54 +180,77 @@ class TauriFileSystemAdapter implements FileSystemAdapter {
   }
 
   async readFile(path: string): Promise<ArrayBuffer> {
-    // 处理本地书籍虚拟路径（local::uuid 格式）
-    let actualPath = path;
-    if (isLocalBookPath(path)) {
-      const bookId = extractLocalBookId(path);
-      actualPath = await this.getLocalBookFilePath(bookId);
+    if (isStorageRefString(path)) {
+      const ref = parseStorageRef(path);
+      if (ref.kind !== 'path') {
+        const { readBytes } = await import('@/lib/platform/fs/read-write');
+        return readBytes(ref);
+      }
     }
 
-    // 使用 readFile 方法（返回 Uint8Array）
+    let actualPath = path;
+    if (isStorageRefString(path)) {
+      actualPath = parseStorageRef(path).value;
+    } else if (isLocalBookPath(path)) {
+      actualPath = await this.getLocalBookFilePath(extractLocalBookId(path));
+    }
+
     const data = await fsReadFile(actualPath);
-    const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    const buffer = data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength,
+    );
     return buffer as ArrayBuffer;
   }
 
   async readTextFile(path: string): Promise<string> {
-    return await fsReadTextFile(path);
+    return await fsReadTextFile(toNativeFilesystemPath(path));
   }
 
   async writeFile(path: string, data: ArrayBuffer): Promise<void> {
-    // 处理本地书籍虚拟路径（local::uuid 格式）
     let actualPath = path;
     if (isLocalBookPath(path)) {
       await this.ensureLocalBooksDir();
       const bookId = extractLocalBookId(path);
       actualPath = await this.getLocalBookFilePath(bookId);
+    } else if (isStorageRefString(path)) {
+      actualPath = toNativeFilesystemPath(path);
     }
 
-    // 使用 writeFile 方法
     await fsWriteFile(actualPath, new Uint8Array(data));
   }
 
   async writeTextFile(path: string, content: string): Promise<void> {
-    await fsWriteTextFile(path, content);
+    await fsWriteTextFile(toNativeFilesystemPath(path), content);
   }
 
   async exists(path: string): Promise<boolean> {
-    return await fsExists(path);
+    if (isLocalBookPath(path)) {
+      const bookId = extractLocalBookId(path);
+      const actualPath = await this.getLocalBookFilePath(bookId);
+      return fsExists(actualPath);
+    }
+    if (isStorageRefString(path)) {
+      const ref = parseStorageRef(path);
+      if (ref.kind === 'path' || ref.kind === 'uri') {
+        return fsExists(ref.value);
+      }
+      const { fileRefExists } = await import('@/lib/platform/fs/read-write');
+      return fileRefExists(ref);
+    }
+    return fsExists(path);
   }
 
   async mkdir(path: string, recursive: boolean = true): Promise<void> {
-    await fsMkdir(path, { recursive });
+    await fsMkdir(toNativeFilesystemPath(path), { recursive });
   }
 
   async remove(path: string, recursive: boolean = false): Promise<void> {
-    await fsRemove(path, { recursive });
+    await fsRemove(toNativeFilesystemPath(path), { recursive });
   }
 
   async readDir(path: string): Promise<string[]> {
-    const entries = await fsReadDir(path);
+    const entries = await fsReadDir(toNativeFilesystemPath(path));
     return entries.map(entry => {
       // DirEntry 可能有 name 属性
       if (entry && typeof entry === 'object' && 'name' in entry) {
@@ -210,12 +265,20 @@ class TauriFileSystemAdapter implements FileSystemAdapter {
   }
 
   async getFileSize(path: string): Promise<number> {
+    if (isStorageRefString(path)) {
+      const ref = parseStorageRef(path);
+      if (ref.kind === 'path' || ref.kind === 'uri') {
+        const metadata = await fsStat(ref.value);
+        return metadata.size ?? 0;
+      }
+      const content = await this.readFile(path);
+      return content.byteLength;
+    }
     const metadata = await fsStat(path);
-    return metadata.size || 0;
+    return metadata.size ?? 0;
   }
 
   async getFileHash(path: string): Promise<string> {
-    // 读取文件内容
     const content = await this.readFile(path);
 
     // 使用 Web Crypto API 计算 SHA-256 哈希
@@ -474,8 +537,23 @@ export async function getFileSystem(): Promise<FileSystemAdapter> {
 
 /**
  * 便捷方法：读取文件
+ * @deprecated 优先使用 `readBytes(parseStorageRef(bookUrl))`（`@/lib/platform/fs`）
  */
 export async function readFile(path: string): Promise<ArrayBuffer> {
+  const trimmed = path.trim();
+  if (
+    trimmed.startsWith('path:') ||
+    trimmed.startsWith('uri:') ||
+    trimmed.startsWith('opfs:') ||
+    trimmed.startsWith('handle:') ||
+    trimmed.startsWith('virtual:') ||
+    trimmed.startsWith('local::') ||
+    trimmed.startsWith('content://')
+  ) {
+    const { readBytes } = await import('@/lib/platform/fs/read-write');
+    const { parseStorageRef } = await import('@/lib/platform/fs/storage-ref');
+    return readBytes(parseStorageRef(trimmed));
+  }
   const fs = await getFileSystem();
   return fs.readFile(path);
 }

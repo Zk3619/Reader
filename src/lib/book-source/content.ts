@@ -12,7 +12,11 @@ import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookChapter, Book } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, decodeDataUrl, extractServerFromJsLib } from '@/lib/book-source/utils';
+import {
+  buildSourceRequestHeaders,
+  resolveAggregationServerUrl,
+} from '@/lib/book-source/source-http';
+import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
 import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
 
 // ─── data: URL 场景 ───
@@ -48,8 +52,8 @@ async function getContentFromDataUrl(
     return null;
   }
 
-  // 2. 确定 server 地址
-  const serverUrl = extractServerFromJsLib(source as unknown as Record<string, unknown>);
+  // 2. 确定 server 地址（优先用户所选线路 getArgument('server')）
+  const serverUrl = resolveAggregationServerUrl(source);
   if (!serverUrl) {
     console.warn('[content] 无法从书源获取 server 地址');
     return null;
@@ -74,12 +78,12 @@ async function getContentFromDataUrl(
 
   console.log('[content] 请求正文 API:', contentApiUrl, 'body:', JSON.stringify(body));
 
-  const headers = parseHeaders(source.header);
+  const headers = buildSourceRequestHeaders(source, contentApiUrl);
   const responseText = await post(
     contentApiUrl,
     JSON.stringify(body),
     {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       timeout: 60000,
     },
@@ -165,12 +169,12 @@ export async function getContent(
             const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
             console.log('[content] 独立书源 POST 请求:', baseUrl, 'body:', JSON.stringify(body));
 
-            const headers = parseHeaders(source.header);
+            const headers = buildSourceRequestHeaders(source, baseUrl);
             html = await post(
               baseUrl,
               JSON.stringify(body),
               {
-                ...headers,
+                headers,
                 enableCookieJar: source.enabledCookieJar,
                 timeout: 60000,
               },
@@ -178,9 +182,9 @@ export async function getContent(
           } else {
             // 如果无法解析参数，回退到 GET
             console.log('[content] 无法解析 item_id，使用 GET 请求');
-            const headers = parseHeaders(source.header);
+            const headers = buildSourceRequestHeaders(source, absoluteUrl);
             html = await get(absoluteUrl, {
-              ...headers,
+              headers,
               enableCookieJar: source.enabledCookieJar,
               concurrentRate: source.concurrentRate,
               timeout: 60000,
@@ -188,9 +192,9 @@ export async function getContent(
           }
         } catch (e) {
           console.warn('[content] 解析章节 URL 失败，使用 GET:', e);
-          const headers = parseHeaders(source.header);
+          const headers = buildSourceRequestHeaders(source, chapter.url);
           html = await get(chapter.url, {
-            ...headers,
+            headers,
             enableCookieJar: source.enabledCookieJar,
             concurrentRate: source.concurrentRate,
             timeout: 60000,
@@ -198,9 +202,9 @@ export async function getContent(
         }
       } else {
         // 其他 URL 使用 GET
-        const headers = parseHeaders(source.header);
+        const headers = buildSourceRequestHeaders(source, chapter.url);
         html = await get(chapter.url, {
-          ...headers,
+          headers,
           enableCookieJar: source.enabledCookieJar,
           concurrentRate: source.concurrentRate,
           timeout: 60000,

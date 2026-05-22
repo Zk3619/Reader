@@ -1,6 +1,7 @@
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
+mod android_fs_commands;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_prevent_default::Flags;
@@ -1247,6 +1248,9 @@ pub fn run() {
             resp.body(vec![]).unwrap()
         });
 
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_android_fs::init());
+
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
         Ok(())
@@ -1254,6 +1258,15 @@ pub fn run() {
 
     builder
         .invoke_handler(tauri::generate_handler![
+            android_fs_commands::android_fs_probe,
+            android_fs_commands::android_pick_files,
+            android_fs_commands::android_uri_display_name,
+            android_fs_commands::android_read_uri_bytes,
+            android_fs_commands::android_delete_uri,
+            android_fs_commands::android_pick_dir,
+            android_fs_commands::android_persist_dir_permission,
+            android_fs_commands::android_read_dir,
+            android_fs_commands::android_write_book_to_tree,
             download_binary,
             fetch_url_text,
             decode_gbk,
@@ -1285,6 +1298,8 @@ pub fn run() {
             set_inner_web_session_active,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             focus_inner_web_panel,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            set_inner_web_panel_visible,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             open_inner_web_child_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

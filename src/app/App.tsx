@@ -47,6 +47,8 @@ import {
   shouldOpenExplorePageForSection,
 } from "@/lib/book-source/explore-section-action";
 import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
+import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
+import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { ScrollToTop } from "@/components/shell/ScrollToTop";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
@@ -62,9 +64,24 @@ import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
 import { hasBook } from "@/lib/database/books";
 import { importLocalBook, importLocalBookFromContent, isAndroidContentUri, pickLocalBookFile } from "@/lib/local-book";
-import { copyFileToBooksDir, getBooksDirectory, moveFileToBooksDir } from "@/lib/local-book/import";
+import {
+  copyFileToBooksDir,
+  copyWebFileToBooksDir,
+  getBooksDirectory,
+  moveFileToBooksDir,
+  moveWebFileToBooksDir,
+  needsImportFileActionSelection,
+  resolveTauriImportTarget,
+} from "@/lib/local-book/import";
+import {
+  getManagedBooksRoot,
+  sanitizeManagedFileName,
+  usesSafTreeBooksRoot,
+} from "@/lib/platform/fs/managed-storage";
+import { formatStorageRef, parseStorageRef } from "@/lib/platform/fs/storage-ref";
+import { fileRefExists, readBytes } from "@/lib/platform/fs/read-write";
 import { isMobile, isTauri } from "@/lib/platform/detect";
-import { getFileSystem } from "@/lib/platform/filesystem";
+import { getFileSystem, toNativeFilesystemPath } from "@/lib/platform/filesystem";
 import { basename, extname, join, normalize } from "@tauri-apps/api/path";
 import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
 import { ImportActionDialog, type ImportAction } from "@/components/books/ImportActionDialog";
@@ -99,23 +116,14 @@ import { pickLocalBookSourceFile } from "@/lib/book-source/pick-local-booksource
 import { InnerWebHost } from "@/pages/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
+import {
+  ensureMainWindowVisible,
+  isDevSplashDone,
+  markDevSplashDone,
+} from "@/lib/dev/splash-session";
 import type { NewBookSource } from "@/types";
 import "@/app/App.css";
-// 窗口显示逻辑已移至 SplashScreen 组件，确保在开屏动画前显示
-
-/** 开发环境 HMR 下跳过重复开屏（避免白屏盖住主界面） */
-function isSplashDoneForSession(): boolean {
-  if (import.meta.env.DEV && import.meta.hot) {
-    return !!import.meta.hot.data.splashDone;
-  }
-  return false;
-}
-
-function markSplashDoneForSession(): void {
-  if (import.meta.env.DEV && import.meta.hot) {
-    import.meta.hot.data.splashDone = true;
-  }
-}
+// 窗口显示：开屏时由 SplashScreen 处理；HMR 跳过开屏时由 App onMount 补 show
 
 // 模拟最近读过的书籍数据
 const mockRecentBooks = [
@@ -148,7 +156,7 @@ function AppContent() {
   // 判断是否为独立页面
   const isStandalonePage = () => STANDALONE_PAGES.includes(currentPage());
   const [greetMsg, setGreetMsg] = createSignal("");
-  const [showSplash, setShowSplash] = createSignal(!isSplashDoneForSession());
+  const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [_dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
@@ -461,8 +469,10 @@ function AppContent() {
     setShowBookDirectoryDialog(open);
     if (!open) {
       // 弹窗关闭后，如果目录已设置，继续导入流程
-      const settings = settingsStore.state.app;
-      if (settings.booksDirectorySet) {
+      const { hasBooksStorageRoot: hasRoot } = await import(
+        '@/lib/platform/fs/managed-storage'
+      );
+      if (hasRoot()) {
         const groupId = bookshelfStore.state.currentGroup;
         await performImport(groupId >= 0 ? groupId : undefined);
       }
@@ -502,31 +512,43 @@ function AppContent() {
 
     // 用户选择操作后，检查文件是否存在
     if (isTauri()) {
-      const booksDir = await getBooksDirectory();
-      const targetPath = await join(booksDir, fileInfo.fileName);
+      const { targetUrl: targetPath, exists: targetFileExists } =
+        await resolveTauriImportTarget(fileInfo.fileName);
       const fs = await getFileSystem();
+      const safRoot = await usesSafTreeBooksRoot();
 
-      const targetFileExists = await fs.exists(targetPath);
       let isSameFile = false;
       let isSameSize = false;
       let isSameContent = false;
 
       if (targetFileExists) {
-        // 检查是否是同一个文件（路径相同）
-        try {
-          const normalizedSource = await normalize(fileInfo.bookUrl);
-          const normalizedTarget = await normalize(targetPath);
-          isSameFile = normalizedSource === normalizedTarget;
-        } catch (error) {
-          console.warn('路径规范化失败，假设不是同一文件:', error);
-          isSameFile = false;
+        if (safRoot) {
+          const srcUrl = formatStorageRef(parseStorageRef(fileInfo.bookUrl));
+          isSameFile = srcUrl === targetPath || fileInfo.bookUrl === targetPath;
+        } else {
+          try {
+            const normalizedSource = await normalize(
+              toNativeFilesystemPath(fileInfo.bookUrl),
+            );
+            const normalizedTarget = await normalize(targetPath);
+            isSameFile = normalizedSource === normalizedTarget;
+          } catch (error) {
+            console.warn('路径规范化失败，假设不是同一文件:', error);
+            isSameFile = false;
+          }
         }
 
         // 如果不是同一文件，检查文件大小和内容是否相同
         if (!isSameFile) {
           try {
-            const sourceSize = fileInfo.content ? fileInfo.content.byteLength : await fs.getFileSize(fileInfo.bookUrl);
-            const targetSize = await fs.getFileSize(targetPath);
+            const sourceSize = fileInfo.content
+              ? fileInfo.content.byteLength
+              : await fs.getFileSize(fileInfo.bookUrl);
+            const targetSize = safRoot
+              ? (
+                  await readBytes(parseStorageRef(targetPath))
+                ).byteLength
+              : await fs.getFileSize(targetPath);
             isSameSize = sourceSize === targetSize;
 
             // 如果文件大小相同，进一步比较文件内容（哈希）
@@ -544,8 +566,15 @@ function AppContent() {
                   sourceHash = await fs.getFileHash(fileInfo.bookUrl);
                 }
 
-                // 计算目标文件哈希
-                const targetHash = await fs.getFileHash(targetPath);
+                let targetHash: string;
+                if (safRoot) {
+                  const targetBytes = await readBytes(parseStorageRef(targetPath));
+                  const hashBuffer = await crypto.subtle.digest('SHA-256', targetBytes);
+                  const hashArray = Array.from(new Uint8Array(hashBuffer));
+                  targetHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+                } else {
+                  targetHash = await fs.getFileHash(targetPath);
+                }
                 isSameContent = sourceHash === targetHash;
               } catch (error) {
                 console.warn('计算文件哈希失败:', error);
@@ -842,45 +871,27 @@ function AppContent() {
       if (isTauri()) {
         // Tauri 环境：先执行文件操作，再读取内容
         if (isAndroidContentUri(fileInfo.bookUrl) || fileInfo.bookUrl.startsWith('local::')) {
-          // Android Content URI 或虚拟路径：内容已经在内存中
-          // 将内容保存到书籍目录
           if (!fileInfo.content) {
             throw new Error('Android Content URI 必须预先读取内容');
           }
-
-          const booksDir = await getBooksDirectory();
-          const fs = await getFileSystem();
-
-          // 确保目录存在
-          try {
-            await fs.mkdir(booksDir, true);
-          } catch (error) {
-            // 目录可能已存在，忽略错误
+          if (action === 'copy') {
+            finalBookUrl = await copyFileToBooksDir(
+              fileInfo.bookUrl,
+              fileInfo.fileName,
+              replaceFile,
+              fileInfo.content,
+            );
+          } else if (action === 'move') {
+            finalBookUrl = await moveFileToBooksDir(
+              fileInfo.bookUrl,
+              fileInfo.fileName,
+              replaceFile,
+              fileInfo.content,
+            );
+          } else {
+            finalBookUrl = fileInfo.bookUrl;
           }
-
-          // 构建目标路径
-          const targetPath = await join(booksDir, fileInfo.fileName);
-
-          // 如果目标文件已存在且需要替换，先删除它
-          if (replaceFile) {
-            try {
-              const exists = await fs.exists(targetPath);
-              if (exists) {
-                await fs.remove(targetPath, false);
-              }
-            } catch (error) {
-              // 删除失败不影响后续操作，writeFile 可能会覆盖
-              console.warn('删除已存在文件失败，尝试直接覆盖:', error);
-            }
-          }
-
-          // 写入文件到书籍目录
-          if (!fileInfo.content) {
-            throw new Error('Android Content URI 必须预先读取内容');
-          }
-          await fs.writeFile(targetPath, fileInfo.content);
-          finalBookUrl = targetPath;
-          finalContent = fileInfo.content; // 使用已读取的内容
+          finalContent = fileInfo.content;
         } else {
           // 普通文件路径：先复制/移动文件，再读取内容（更高效，避免大文件全部加载到内存）
           if (action === 'copy') {
@@ -889,12 +900,29 @@ function AppContent() {
             finalBookUrl = await moveFileToBooksDir(fileInfo.bookUrl, fileInfo.fileName, replaceFile);
           }
 
-          // 从目标位置读取文件内容
-          const fs = await getFileSystem();
-          finalContent = await fs.readFile(finalBookUrl);
+          finalContent = await readBytes(parseStorageRef(finalBookUrl));
         }
+      } else if (await needsImportFileActionSelection()) {
+        if (!fileInfo.content) {
+          throw new Error('Web 端必须预先读取内容');
+        }
+        if (action === 'copy') {
+          finalBookUrl = await copyWebFileToBooksDir(
+            fileInfo.bookUrl,
+            fileInfo.fileName,
+            fileInfo.content,
+            replaceFile,
+          );
+        } else {
+          finalBookUrl = await moveWebFileToBooksDir(
+            fileInfo.bookUrl,
+            fileInfo.fileName,
+            fileInfo.content,
+            replaceFile,
+          );
+        }
+        finalContent = await readBytes(parseStorageRef(finalBookUrl));
       } else {
-        // Web 端：使用已有内容
         if (!fileInfo.content) {
           throw new Error('Web 端必须预先读取内容');
         }
@@ -933,6 +961,13 @@ function AppContent() {
   // 主题与设置同步到 document（持久化在 settingsStore，此处只做应用）
   createEffect(() => {
     applyThemeToDocument(settingsStore.state.app.theme);
+  });
+
+  // HMR 已跳过开屏时仍须 show 主窗口（tauri.conf visible:false）
+  onMount(() => {
+    if (!showSplash()) {
+      void ensureMainWindowVisible();
+    }
   });
 
   // 初始化数据库、应用设置与布局设置
@@ -1059,7 +1094,8 @@ function AppContent() {
     try {
       const groupId = bookshelfStore.state.currentGroup;
       const settings = settingsStore.state.app;
-      if (!settings.booksDirectorySet) {
+      const { hasBooksStorageRoot } = await import('@/lib/platform/fs/managed-storage');
+      if (!hasBooksStorageRoot()) {
         setShowBookDirectoryDialog(true);
         return;
       }
@@ -1073,28 +1109,40 @@ function AppContent() {
           return;
         }
 
-        const booksDir = await getBooksDirectory();
-        const targetPath = await join(booksDir, picked.fileName);
+        const { targetUrl: targetPath, exists: targetFileExists } =
+          await resolveTauriImportTarget(picked.fileName);
         const fs = await getFileSystem();
-        const targetFileExists = await fs.exists(targetPath);
+        const safRoot = await usesSafTreeBooksRoot();
+
         let isSameFile = false;
         let isSameSize = false;
         let isSameContent = false;
 
         if (targetFileExists) {
-          try {
-            const normalizedSource = await normalize(picked.bookUrl);
-            const normalizedTarget = await normalize(targetPath);
-            isSameFile = normalizedSource === normalizedTarget;
-          } catch (error) {
-            console.warn('路径规范化失败，假设不是同一文件:', error);
-            isSameFile = false;
+          if (safRoot) {
+            const srcUrl = formatStorageRef(parseStorageRef(picked.bookUrl));
+            isSameFile = srcUrl === targetPath || picked.bookUrl === targetPath;
+          } else {
+            try {
+              const normalizedSource = await normalize(
+                toNativeFilesystemPath(picked.bookUrl),
+              );
+              const normalizedTarget = await normalize(targetPath);
+              isSameFile = normalizedSource === normalizedTarget;
+            } catch (error) {
+              console.warn('路径规范化失败，假设不是同一文件:', error);
+              isSameFile = false;
+            }
           }
 
           if (!isSameFile) {
             try {
-              const sourceSize = picked.content ? picked.content.byteLength : await fs.getFileSize(picked.bookUrl);
-              const targetSize = await fs.getFileSize(targetPath);
+              const sourceSize = picked.content
+                ? picked.content.byteLength
+                : await fs.getFileSize(picked.bookUrl);
+              const targetSize = safRoot
+                ? (await readBytes(parseStorageRef(targetPath))).byteLength
+                : await fs.getFileSize(targetPath);
               isSameSize = sourceSize === targetSize;
               if (isSameSize) {
                 try {
@@ -1102,11 +1150,19 @@ function AppContent() {
                   if (picked.content) {
                     const hashBuffer = await crypto.subtle.digest('SHA-256', picked.content);
                     const hashArray = Array.from(new Uint8Array(hashBuffer));
-                    sourceHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                    sourceHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
                   } else {
                     sourceHash = await fs.getFileHash(picked.bookUrl);
                   }
-                  const targetHash = await fs.getFileHash(targetPath);
+                  let targetHash: string;
+                  if (safRoot) {
+                    const targetBytes = await readBytes(parseStorageRef(targetPath));
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', targetBytes);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    targetHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+                  } else {
+                    targetHash = await fs.getFileHash(targetPath);
+                  }
                   isSameContent = sourceHash === targetHash;
                 } catch (error) {
                   console.warn('计算文件哈希失败:', error);
@@ -1197,6 +1253,47 @@ function AppContent() {
           });
           return;
         }
+
+        if (await needsImportFileActionSelection()) {
+          if (!settings.rememberImportAction || !settings.importBookAction) {
+            setPendingImportFile({
+              ...picked,
+              groupId: groupId >= 0 ? groupId : undefined,
+            });
+            setShowImportActionDialog(true);
+            return;
+          }
+
+          const root = await getManagedBooksRoot();
+          const safeName = sanitizeManagedFileName(picked.fileName);
+          const targetRef =
+            root.kind === 'dir-handle'
+              ? { kind: 'dir-handle' as const, value: `${root.value}/${safeName}` }
+              : null;
+          const targetUrl = targetRef ? formatStorageRef(targetRef) : '';
+          const targetExists = targetRef ? await fileRefExists(targetRef) : false;
+
+          if (targetExists) {
+            const bookExists = targetUrl ? await hasBook(targetUrl) : false;
+            if (bookExists) {
+              showAppToast({
+                title: "书籍已存在",
+                description: `《${picked.fileName}》已在书架中，已跳过导入`,
+                variant: "default",
+              });
+              return;
+            }
+          }
+
+          await performImportWithAction(
+            picked,
+            settings.importBookAction,
+            targetExists,
+            groupId >= 0 ? groupId : undefined,
+          );
+          return;
+        }
+
         const result = await importLocalBookFromContent(
           picked.bookUrl,
           picked.fileName,
@@ -1253,7 +1350,7 @@ function AppContent() {
         <Show when={showSplash()}>
           <SplashScreen
             onComplete={() => {
-              markSplashDoneForSession();
+              markDevSplashDone();
               setShowSplash(false);
             }}
           />
@@ -1305,75 +1402,72 @@ function AppContent() {
           />
         </Show>
 
-        {/* 主容器 - 为导航栏、侧边栏和底栏留出空间；独立页面时隐藏 */}
-        <Show when={!isStandalonePage()}>
-          <div
-            id="main-content-container"
-            class={cn(
-              "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
-              showTopNav() ? "top-14" : "top-0",
-              shell().showSidebar
-                ? state() === "expanded"
-                  ? "left-(--sidebar-width)"
-                  : "left-(--sidebar-width-icon)"
-                : "left-0",
-              showBottomBar() && "bottom-14",
-            )}
-          >
+        {/* 主容器 - 独立页时仅 hidden，保持挂载以保留书架/探索/书源状态 */}
+        <div
+          id="main-content-container"
+          class={cn(
+            "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
+            showTopNav() ? "top-14" : "top-0",
+            shell().showSidebar
+              ? state() === "expanded"
+                ? "left-(--sidebar-width)"
+                : "left-(--sidebar-width-icon)"
+              : "left-0",
+            showBottomBar() && "bottom-14",
+            isStandalonePage() && "hidden pointer-events-none",
+          )}
+        >
             {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
             <main class={cn("flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
-              {/* 书架视图 */}
-              <Show when={currentPage() === "bookshelf"}>
-                <section
-                  class={cn(
-                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                    mainShellPageRoot,
-                  )}
-                >
-                  {showGroupManage() ? (
-                    <>
-                      <PageToolbar
-                        title="分组管理"
-                        description="管理书架分组，调整显示顺序和设置"
-                        leading={
-                          <BookGroupManageToolbarLeading
-                            onBack={() => setShowGroupManage(false)}
-                          />
-                        }
-                      >
-                        <BookGroupManagePageToolbar
-                          onAdd={() => groupManageToolbarActions()?.handleAdd()}
+              {/* 书架：保持挂载，切走再回保留分组/列表状态 */}
+              <section
+                class={cn(
+                  mainShellPageRoot,
+                  currentPage() === "bookshelf"
+                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                    : "hidden",
+                )}
+              >
+                {showGroupManage() ? (
+                  <>
+                    <PageToolbar
+                      title="分组管理"
+                      description="管理书架分组，调整显示顺序和设置"
+                      leading={
+                        <BookGroupManageToolbarLeading
+                          onBack={() => setShowGroupManage(false)}
                         />
-                      </PageToolbar>
-                      <BookGroupManage
-                        onClose={() => setShowGroupManage(false)}
-                        onToolbarActionsChange={setGroupManageToolbarActions}
+                      }
+                    >
+                      <BookGroupManagePageToolbar
+                        onAdd={() => groupManageToolbarActions()?.handleAdd()}
                       />
-                    </>
-                  ) : (
-                    <BookShelf
-                      onPageChange={setCurrentPage}
-                      onOpenGroupManage={() => setShowGroupManage(true)}
-                      onImportLocal={handleBookshelfImportLocal}
-                      onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                      onOpenBook={async (book) => {
-                        // 先设置初始状态，触发 skeleton 显示
-                        readerStore.setBookInitialState(book);
-                        // 立即切换到阅读器页面
-                        setCurrentPage("reader");
-                        // 异步加载书籍内容（不阻塞页面切换）
-                        readerStore.openBook(book).catch((e) => {
-                          console.error('打开书籍失败:', e);
-                          // 如果加载失败，返回书架页面
-                          setCurrentPage("bookshelf");
-                        });
-                      }}
+                    </PageToolbar>
+                    <BookGroupManage
+                      onClose={() => setShowGroupManage(false)}
+                      onToolbarActionsChange={setGroupManageToolbarActions}
                     />
-                  )}
-                </section>
-              </Show>
+                  </>
+                ) : (
+                  <BookShelf
+                    active={() => currentPage() === "bookshelf"}
+                    onPageChange={setCurrentPage}
+                    onOpenGroupManage={() => setShowGroupManage(true)}
+                    onImportLocal={handleBookshelfImportLocal}
+                    onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
+                    onOpenBook={async (book) => {
+                      readerStore.setBookInitialState(book);
+                      setCurrentPage("reader");
+                      readerStore.openBook(book).catch((e) => {
+                        console.error('打开书籍失败:', e);
+                        setCurrentPage("bookshelf");
+                      });
+                    }}
+                  />
+                )}
+              </section>
 
-              {/* 探索页：导航独立入口 */}
+              {/* 探索页：保持挂载保留状态；active 门控避免隐藏时触发发现请求 */}
               <section
                 class={cn(
                   mainShellPageRoot,
@@ -1383,6 +1477,7 @@ function AppContent() {
                 )}
               >
                 <ExplorePage
+                  active={() => currentPage() === "scout"}
                   onOpenBook={(book) => {
                     readerStore.setBookInitialState(book);
                     setCurrentPage("reader");
@@ -1617,6 +1712,10 @@ function AppContent() {
 
                   <div class={mainShellPageScroll}>
                     <div class="w-full max-w-4xl mx-auto space-y-4">
+                      <BooksStorageSetting />
+
+                      <CoverCacheSetting />
+
                       {/* 数据库备份 */}
                       <div class="rounded-2xl border border-border/50 bg-card p-6">
                         <div class="mb-4">
@@ -1718,8 +1817,7 @@ function AppContent() {
                 </section>
               </Show>
             </main>
-          </div>
-        </Show>
+        </div>
 
         {/* 独立页面（阅读器、发现、书籍信息、导入、远程书籍）- 全屏显示，在主容器外部 */}
         <Show when={isStandalonePage()}>
@@ -1799,10 +1897,11 @@ function AppContent() {
           {/* 书籍信息页 */}
           <Show when={currentPage() === "book-info" && bookInfoContext()}>
             {(ctx) => {
-              const { book, fromPage } = ctx();
+              const { book, source, fromPage } = ctx();
               return (
                 <BookInfoPage
                   book={book}
+                  source={source}
                   onBack={() => {
                     setBookInfoContext(null);
                     setCurrentPage(fromPage ?? "explore");
@@ -1857,6 +1956,7 @@ function AppContent() {
         <BookDirectoryDialog
           open={showBookDirectoryDialog()}
           onOpenChange={handleBookDirectoryDialogClose}
+          onOpenSettings={() => setCurrentPage("settings")}
         />
 
         {/* 导入操作选择弹窗 */}

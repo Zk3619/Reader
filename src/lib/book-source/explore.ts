@@ -209,7 +209,6 @@ export async function exploreBook(
     }
   }
 
-  const rule = source.ruleExplore;
   const startTime = Date.now();
 
   try {
@@ -220,7 +219,7 @@ export async function exploreBook(
     // 发起请求
     const headers = parseHeaders(source.header);
     const html = await get(exploreUrl, {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout: 30000,

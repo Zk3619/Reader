@@ -11,7 +11,7 @@ import type { RssSource, NewRssSource } from '@/types';
  */
 export async function getAllRssSources(): Promise<RssSource[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssSources ORDER BY customOrder ASC'
   );
   return rows.map(row => mapRowToRssSource(row));
@@ -22,7 +22,7 @@ export async function getAllRssSources(): Promise<RssSource[]> {
  */
 export async function getEnabledRssSources(): Promise<RssSource[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssSources WHERE enabled = 1 ORDER BY customOrder ASC'
   );
   return rows.map(row => mapRowToRssSource(row));
@@ -33,7 +33,7 @@ export async function getEnabledRssSources(): Promise<RssSource[]> {
  */
 export async function getRssSource(sourceUrl: string): Promise<RssSource | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM rssSources WHERE sourceUrl = ?',
     [sourceUrl]
   );

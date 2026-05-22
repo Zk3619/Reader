@@ -9,8 +9,11 @@ import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { getFileSystem } from '@/lib/platform/filesystem';
-import { getBooksDirectory } from '@/lib/local-book/import';
+import { getManagedBooksRoot } from '@/lib/platform/fs/managed-storage';
+import { pickDirectory } from '@/lib/platform/fs/pick-directory';
+import { listDirectory, getFileSize } from '@/lib/platform/fs/read-write';
+import { formatStorageRef, parseStorageRef } from '@/lib/platform/fs/storage-ref';
+import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { hasBook } from '@/lib/database/books';
 import { importLocalBookFromContent } from '@/lib/local-book';
 import { bookshelfStore } from '@/stores/bookshelf';
@@ -24,9 +27,6 @@ import {
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/platform/detect';
-import { join } from '@tauri-apps/api/path';
-import { open } from '@tauri-apps/plugin-dialog';
-import { readDir } from '@tauri-apps/plugin-fs';
 
 export interface FileItem {
   path: string;
@@ -71,9 +71,10 @@ export function ImportPage(props: ImportPageProps) {
     }
 
     try {
-      const booksDir = await getBooksDirectory();
-      setCurrentPath(booksDir);
-      await loadDirectory(booksDir);
+      const root = await getManagedBooksRoot();
+      const rootKey = formatStorageRef(root);
+      setCurrentPath(rootKey);
+      await loadDirectory(rootKey);
     } catch (error) {
       console.error('初始化导入页面失败:', error);
       showAppToast({
@@ -85,74 +86,48 @@ export function ImportPage(props: ImportPageProps) {
   });
 
   // 加载目录内容
-  const loadDirectory = async (path: string) => {
+  const loadDirectory = async (pathKey: string) => {
     setIsLoading(true);
     try {
-      // 使用 Tauri 的 readDir API 获取目录项信息（包括类型）
-      const entries = await readDir(path);
-      
+      const ref = parseStorageRef(pathKey);
+      const entries = await listDirectory(ref);
       const fileItems: FileItem[] = [];
-      
+
       for (const entry of entries) {
-        // Tauri readDir 返回 DirEntry 对象，包含 name 和可能的 isDir 属性
-        let name: string;
-        let isDir: boolean;
-        
-        if (typeof entry === 'string') {
-          name = entry;
-          // 需要检查是文件还是目录
-          const fullPath = await join(path, name);
-          const fs = await getFileSystem();
-          try {
-            await fs.readDir(fullPath);
-            isDir = true;
-          } catch {
-            isDir = false;
-          }
-        } else {
-          name = (entry as any).name || '';
-          // 检查是否有 isDir 属性，如果没有则通过尝试读取目录来判断
-          if ('isDir' in entry && typeof (entry as any).isDir === 'boolean') {
-            isDir = (entry as any).isDir;
-          } else {
-            const fullPath = await join(path, name);
-            const fs = await getFileSystem();
-            try {
-              await fs.readDir(fullPath);
-              isDir = true;
-            } catch {
-              isDir = false;
-            }
-          }
+        let childKey = entry.path;
+        if (ref.kind === 'saf-tree') {
+          childKey = entry.isDirectory
+            ? formatStorageRef({ kind: 'saf-tree', value: entry.path })
+            : formatStorageRef({ kind: 'uri', value: entry.path });
+        } else if (
+          !entry.path.startsWith('path:') &&
+          !entry.path.startsWith('uri:') &&
+          !entry.path.startsWith('handle:') &&
+          ref.kind === 'path' &&
+          isTauri()
+        ) {
+          childKey = entry.path;
+        } else if (entry.path.startsWith('handle:dir:')) {
+          childKey = entry.path;
         }
-        
-        if (!name) continue;
-        
-        const fullPath = await join(path, name);
 
         const fileItem: FileItem = {
-          path: fullPath,
-          name: name,
-          isDirectory: isDir,
+          path: childKey,
+          name: entry.name,
+          isDirectory: entry.isDirectory,
         };
 
-        // 获取文件大小和修改时间
-        if (!isDir) {
+        if (!entry.isDirectory) {
           try {
-            const fs = await getFileSystem();
-            const size = await fs.getFileSize(fullPath);
-            fileItem.size = size;
-            // 注意：当前 FileSystemAdapter 没有 getModifiedTime，可以后续添加
+            const childRef = parseStorageRef(childKey);
+            fileItem.size = await getFileSize(childRef);
           } catch (error) {
-            console.warn(`获取文件信息失败: ${fullPath}`, error);
+            console.warn(`获取文件信息失败: ${childKey}`, error);
           }
-
-          // 检查是否已在书架中
           try {
-            const exists = await hasBook(fullPath);
-            fileItem.isInBookshelf = exists;
+            fileItem.isInBookshelf = await hasBook(childKey);
           } catch (error) {
-            console.warn(`检查书籍存在性失败: ${fullPath}`, error);
+            console.warn(`检查书籍存在性失败: ${childKey}`, error);
           }
         }
 
@@ -222,18 +197,19 @@ export function ImportPage(props: ImportPageProps) {
   // 选择文件夹
   const selectFolder = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-      });
-      
-      if (selected && typeof selected === 'string') {
-        setCurrentPath(selected);
-        setPathHistory([]);
-        await loadDirectory(selected);
-      }
+      const result = await pickDirectory();
+      const key = formatStorageRef(result.ref);
+      setCurrentPath(key);
+      setPathHistory([]);
+      await loadDirectory(key);
     } catch (error) {
+      if (isUserCancelled(error)) return;
       console.error('选择文件夹失败:', error);
+      showAppToast({
+        title: '选择文件夹失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'error',
+      });
     }
   };
 
@@ -319,15 +295,14 @@ export function ImportPage(props: ImportPageProps) {
     let failCount = 0;
 
     try {
-      const fs = await getFileSystem();
-      
+      const { readBytes } = await import('@/lib/platform/fs/read-write');
+
       for (let i = 0; i < fileItems.length; i++) {
         const fileItem = fileItems[i];
         setImportProgress({ current: i + 1, total: fileItems.length });
 
         try {
-          // 读取文件内容
-          const content = await fs.readFile(fileItem.path);
+          const content = await readBytes(parseStorageRef(fileItem.path));
           const fileName = fileItem.name;
 
           // 导入书籍
@@ -527,7 +502,7 @@ export function ImportPage(props: ImportPageProps) {
                         checked={selectedFiles().has(file.path)}
                         onChange={() => toggleFileSelection(file.path)}
                         disabled={file.isInBookshelf}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e: MouseEvent) => e.stopPropagation()}
                       />
                     </Show>
 

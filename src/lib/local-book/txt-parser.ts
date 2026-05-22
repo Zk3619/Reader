@@ -84,8 +84,6 @@ const DEFAULT_CHAPTER_PATTERNS: RegExp[] = [
 const MAX_LENGTH_WITH_NO_TOC = 10 * 1024;
 
 /** 章节匹配视为有效的最小间距（字节），避免把段落内相似行当成章节 */
-const MIN_CHAPTER_DISTANCE = 400;
-
 /** 判断两条是否同为【第X天】且其一为另一前缀（行首整行匹配 vs 补采短匹配视为同一章） */
 function isSameDayMarker(a: string, b: string): boolean {
   const x = a.trim();
@@ -94,19 +92,6 @@ function isSameDayMarker(a: string, b: string): boolean {
   if (!/^[【\[]\s*第[零一二三四五六七八九十百千万0-9]+天\s*[】\]]/.test(x)) return false;
   if (!/^[【\[]\s*第[零一二三四五六七八九十百千万0-9]+天\s*[】\]]/.test(y)) return false;
   return x.startsWith(y) || y.startsWith(x);
-}
-
-/** 明确章节标题（【第X天】、第X章/回等），不因与上章间距过小而被跳过 */
-function isStrongChapterTitle(title: string): boolean {
-  const t = title.trim();
-  if (!t) return false;
-  // 【第X天】形式：字符串兜底，确保西游日记等【第一天】～【第N天】全部保留
-  if (t.startsWith('【') && t.includes('天') && (t.includes('】') || t.includes(']'))) return true;
-  if (/【[^】]*第[^】]*天[】\]]/.test(t) || /^[【\[]\s*第[零一二三四五六七八九十百千万0-9]+天\s*[】\]]/.test(t))
-    return true;
-  // 第X章/回
-  if (/^\s*第[零一二三四五六七八九十百千万〇○0-9]+[章节回]\s*/.test(t)) return true;
-  return false;
 }
 
 /**
@@ -118,9 +103,6 @@ function normalizeLineEndings(text: string): string {
 
 /** 作者行：作者：xxx 或 作者:xxx */
 const AUTHOR_LINE = /^\s*作者\s*[：:]\s*(.+)$/m;
-/** 简介标题行：内容简介： 或 内容简介: */
-const INTRO_HEADER = /^\s*内容简介\s*[：:]\s*$/m;
-
 /**
  * 判断一行是否匹配任一章节标题规则（按单行测试，^$ 即行首行尾）
  */
@@ -425,7 +407,7 @@ export async function getTxtContent(
  */
 function parseChaptersWithAllPatterns(
   content: string,
-  charset: string
+  _charset: string
 ): { chapters: BookChapter[]; wordCount: number } {
   const matches: { index: number; title: string }[] = [];
 
@@ -713,42 +695,6 @@ async function detectEncoding(content: string | ArrayBuffer): Promise<string> {
     return charset;
   }
   return 'utf-8';
-}
-
-/**
- * 检测目录规则：在样本中尝试所有默认规则，取有效匹配数最多的一个
- */
-function detectTocRule(content: string): string | undefined {
-  const sample = content.substring(0, Math.min(150 * 1024, content.length));
-  let bestRule: string | undefined;
-  let maxValidMatches = 0;
-
-  for (const pattern of DEFAULT_CHAPTER_PATTERNS) {
-    const regex = new RegExp(pattern.source, 'gm');
-    const matches: { match: string; index: number }[] = [];
-    let m: RegExpExecArray | null;
-    regex.lastIndex = 0;
-    while ((m = regex.exec(sample)) !== null) {
-      const match = m[0].trim();
-      if (match.length > 0 && match.length <= 120) matches.push({ match, index: m.index });
-    }
-
-    let validMatches = 0;
-    let lastIndex = -1;
-    for (const { index } of matches) {
-      if (lastIndex === -1 || index - lastIndex >= MIN_CHAPTER_DISTANCE) {
-        validMatches++;
-        lastIndex = index;
-      }
-    }
-
-    if (validMatches > maxValidMatches && validMatches >= 1) {
-      maxValidMatches = validMatches;
-      bestRule = pattern.source;
-    }
-  }
-
-  return bestRule;
 }
 
 /**

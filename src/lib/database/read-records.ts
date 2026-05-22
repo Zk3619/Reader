@@ -14,7 +14,7 @@ export async function getReadRecord(
   bookName: string
 ): Promise<ReadRecord | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM readRecord WHERE deviceId = ? AND bookName = ?',
     [deviceId, bookName]
   );

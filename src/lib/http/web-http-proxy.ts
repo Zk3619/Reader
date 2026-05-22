@@ -1,6 +1,6 @@
 /**
- * 纯 Web 下浏览器禁止在 fetch 中设置 Cookie 等 forbidden 头。
- * 通过同源 /__reader_http 代理（Vite dev/preview 中间件）转发真实 Cookie。
+ * 纯 Web 下跨域书源请求走同源 /__reader_http（Vite dev/preview 中间件），
+ * 避免 CORS；含 Cookie 时一并解决浏览器 forbidden 头限制。
  */
 
 import { isTauri } from '@/lib/platform/detect';
@@ -21,7 +21,8 @@ const HOP_BY_HOP = new Set([
   'upgrade',
 ]);
 
-function resolveProxyEndpoint(): string {
+/** 同源 HTTP 代理路径（如 /__reader_http），供图片等资源改写 URL */
+export function resolveWebHttpProxyPath(): string {
   const external = import.meta.env.VITE_WEB_HTTP_PROXY as string | undefined;
   if (external?.trim()) {
     const base = external.trim().replace(/\/$/, '');
@@ -35,12 +36,46 @@ export function isWebHttpProxyNeeded(): boolean {
   return !isTauri() && typeof window !== 'undefined';
 }
 
+export function isCrossOriginHttpUrl(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (typeof window === 'undefined') return true;
+  try {
+    return new URL(url).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** 已是同源 __reader_http 代理地址（含历史错误规范化 host） */
+export function isReaderHttpProxyUrl(url: string): boolean {
+  if (!url.includes(PROXY_SEGMENT)) return false;
+  try {
+    const base =
+      typeof window !== 'undefined' ? window.location.href : 'http://127.0.0.1/';
+    const parsed = new URL(url, base);
+    if (parsed.hostname === PROXY_SEGMENT) return true;
+    return parsed.pathname.includes(PROXY_SEGMENT);
+  } catch {
+    return url.includes(PROXY_SEGMENT);
+  }
+}
+
 export function headersNeedWebHttpProxy(headers: Record<string, string>): boolean {
-  if (!isWebHttpProxyNeeded()) return false;
   return Object.keys(headers).some((k) => {
     const lower = k.toLowerCase();
     return lower === 'cookie' || lower === WEB_PROXY_COOKIE_HEADER.toLowerCase();
   });
+}
+
+/** 纯 Web：跨域书源请求或含 Cookie 头时须走同源 __reader_http（避免 CORS / forbidden 头） */
+export function shouldUseWebHttpProxy(
+  targetUrl: string,
+  headers: Record<string, string> = {},
+): boolean {
+  if (!isWebHttpProxyNeeded()) return false;
+  if (isReaderHttpProxyUrl(targetUrl)) return false;
+  if (headersNeedWebHttpProxy(headers)) return true;
+  return isCrossOriginHttpUrl(targetUrl);
 }
 
 export type WebHttpProxyRequest = {
@@ -49,7 +84,7 @@ export type WebHttpProxyRequest = {
 };
 
 /**
- * 将带 Cookie 的请求改写为走同源代理；无 Cookie 时返回 null，仍直连 fetch。
+ * 将须代理的请求改写为走同源 __reader_http；同源且无 Cookie 时返回 null。
  */
 export function toWebHttpProxyRequest(
   targetUrl: string,
@@ -61,7 +96,7 @@ export function toWebHttpProxyRequest(
     signal?: AbortSignal;
   }
 ): WebHttpProxyRequest | null {
-  if (!headersNeedWebHttpProxy(options.headers ?? {})) {
+  if (!shouldUseWebHttpProxy(targetUrl, options.headers ?? {})) {
     return null;
   }
 
@@ -84,7 +119,7 @@ export function toWebHttpProxyRequest(
     forwardHeaders[WEB_PROXY_COOKIE_HEADER] = cookie;
   }
 
-  const proxyPath = resolveProxyEndpoint();
+  const proxyPath = resolveWebHttpProxyPath();
   const proxyUrl = `${proxyPath}?target=${encodeURIComponent(targetUrl)}`;
 
   return {

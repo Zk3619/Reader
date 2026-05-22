@@ -5,10 +5,42 @@
  */
 
 import { basename, join, normalize } from '@tauri-apps/api/path';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
-import { getFileSystem, readFile, writeFile } from '@/lib/platform/filesystem';
+import {
+  getManagedBooksRoot,
+  hasBooksStorageRoot,
+  resolveBooksDirectoryPath,
+  sanitizeManagedFileName,
+  usesDirectoryHandleBooksRoot,
+  usesSafTreeBooksRoot,
+} from '@/lib/platform/fs/managed-storage';
+import { androidWriteBookToTree } from '@/lib/platform/fs/android-bridge';
+import { pickFileAsBookUrl } from '@/lib/platform/fs/pick-file';
+import {
+  bookUrlToRef,
+  formatStorageRef,
+  looksLikeAndroidDocumentId,
+  normalizeUriStorageValue,
+  parseStorageRef,
+  resolveHumanFileName,
+} from '@/lib/platform/fs/storage-ref';
+import { androidUriDisplayName } from '@/lib/platform/fs/android-bridge';
+import { mayUseAndroidFsLayer } from '@/lib/platform/fs/capabilities';
+import {
+  fileRefExists,
+  listDirectory,
+  readBytes,
+  removeRef,
+  writeBytes,
+} from '@/lib/platform/fs/read-write';
+import { removeHandle } from '@/lib/platform/fs/handle-store';
+import { ensureManagedBooksRoot } from '@/lib/platform/fs/managed-storage';
+import {
+  getFileSystem,
+  readFile,
+  toNativeFilesystemPath,
+  writeFile,
+} from '@/lib/platform/filesystem';
 import { settingsStore } from '@/stores/settings';
 import {
   detectFileType,
@@ -27,6 +59,9 @@ import * as chaptersDb from '@/lib/database/chapters';
 /** 本地书 type：legado BookType 文本且本地 = 4 */
 const LOCAL_BOOK_TYPE = 4;
 
+/** 本地导入文件选择器支持的扩展名（与 importLocalBookFromContent 一致） */
+const LOCAL_BOOK_PICK_EXTENSIONS = ['txt', 'epub'] as const;
+
 /** 导入结果 */
 export interface ImportResult {
   book: Book;
@@ -37,30 +72,132 @@ export interface ImportResult {
  * 获取书籍存储目录路径
  */
 export async function getBooksDirectory(): Promise<string> {
-  const settings = settingsStore.state.app;
-  if (settings.booksDirectory) {
-    return settings.booksDirectory;
-  }
+  return resolveBooksDirectoryPath();
+}
 
-  // 返回默认路径
-  if (isTauri()) {
-    try {
-      const appDir = await getAppDataDir();
-      return await join(appDir, 'Books');
-    } catch (error) {
-      console.error('获取默认书籍目录失败:', error);
-      return 'Books';
+/** Tauri 导入：解析目标 bookUrl 及是否已有同名文件 */
+export async function resolveTauriImportTarget(
+  fileName: string,
+): Promise<{ targetUrl: string; exists: boolean }> {
+  if (await usesSafTreeBooksRoot()) {
+    const existing = await findSafTreeBookUrlByName(fileName);
+    return {
+      targetUrl: existing ?? '',
+      exists: existing != null,
+    };
+  }
+  const booksDir = await getBooksDirectory();
+  const targetPath = await join(booksDir, fileName);
+  const fs = await getFileSystem();
+  const exists = await fs.exists(targetPath);
+  return { targetUrl: targetPath, exists };
+}
+
+/** Android SAF 书籍库：按文件名查找已有书籍 URI */
+export async function findSafTreeBookUrlByName(fileName: string): Promise<string | null> {
+  const root = await getManagedBooksRoot();
+  if (root.kind !== 'saf-tree') return null;
+  const safeName = sanitizeManagedFileName(fileName);
+  const entries = await listDirectory(root);
+  const hit = entries.find((e) => !e.isDirectory && e.name === safeName);
+  if (!hit) return null;
+  return formatStorageRef({ kind: 'uri', value: hit.path });
+}
+
+async function copySafBookToBooksDir(
+  sourcePath: string,
+  fileName: string,
+  replaceFile: boolean,
+  content?: ArrayBuffer,
+): Promise<string> {
+  const root = await getManagedBooksRoot();
+  if (root.kind !== 'saf-tree') {
+    throw new Error('当前书籍库不是 SAF 目录');
+  }
+  const srcRef = parseStorageRef(sourcePath);
+  let displayName = resolveHumanFileName(fileName, sourcePath);
+  if (srcRef.kind === 'uri' && mayUseAndroidFsLayer()) {
+    displayName = await resolveAndroidOriginFileName(
+      formatStorageRef(srcRef),
+      displayName,
+    );
+    if (looksLikeAndroidDocumentId(displayName)) {
+      displayName = resolveHumanFileName(displayName, sourcePath);
+    }
+  }
+  const safeName = sanitizeManagedFileName(displayName);
+
+  if (replaceFile) {
+    const existing = await findSafTreeBookUrlByName(displayName);
+    if (existing) {
+      await removeRef(parseStorageRef(existing), false);
+    }
+  } else {
+    const existing = await findSafTreeBookUrlByName(displayName);
+    if (existing) {
+      const normalizedSrc =
+        srcRef.kind === 'uri' ? formatStorageRef(srcRef) : sourcePath;
+      if (existing === normalizedSrc || existing === sourcePath) {
+        return existing;
+      }
     }
   }
 
-  return 'Books';
+  const bytes =
+    content ??
+    (await readBytes(srcRef.kind === 'uri' || srcRef.kind === 'path' ? srcRef : parseStorageRef(sourcePath)));
+  const writtenUri = await androidWriteBookToTree(root.value, safeName, bytes);
+  const bareUri = normalizeUriStorageValue(writtenUri);
+  return formatStorageRef({ kind: 'uri', value: bareUri });
+}
+
+/** Android：从 content URI 解析系统显示文件名，用于 originName / 类型检测 */
+export async function resolveAndroidOriginFileName(
+  bookUrl: string,
+  fallback: string,
+): Promise<string> {
+  const ref = parseStorageRef(bookUrl);
+  if (ref.kind !== 'uri' || !mayUseAndroidFsLayer()) return fallback;
+  try {
+    const name = await androidUriDisplayName(normalizeUriStorageValue(ref.value));
+    return name.trim() || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function moveSafBookToBooksDir(
+  sourcePath: string,
+  fileName: string,
+  replaceFile: boolean,
+  content?: ArrayBuffer,
+): Promise<string> {
+  const targetUrl = await copySafBookToBooksDir(sourcePath, fileName, replaceFile, content);
+  const srcRef = parseStorageRef(sourcePath);
+  if (srcRef.kind === 'uri') {
+    try {
+      await removeRef(srcRef, false);
+    } catch (e) {
+      console.warn('SAF 移动：删除源文件失败，已复制到书籍库', e);
+    }
+  }
+  return targetUrl;
 }
 
 /**
  * 复制文件到书籍目录
  * @param replaceFile 是否替换已存在的文件
  */
-export async function copyFileToBooksDir(sourcePath: string, fileName: string, replaceFile: boolean = false): Promise<string> {
+export async function copyFileToBooksDir(
+  sourcePath: string,
+  fileName: string,
+  replaceFile: boolean = false,
+  content?: ArrayBuffer,
+): Promise<string> {
+  if (await usesSafTreeBooksRoot()) {
+    return copySafBookToBooksDir(sourcePath, fileName, replaceFile, content);
+  }
+
   const fs = await getFileSystem();
   const booksDir = await getBooksDirectory();
 
@@ -75,7 +212,7 @@ export async function copyFileToBooksDir(sourcePath: string, fileName: string, r
   const targetPath = await join(booksDir, fileName);
 
   // 规范化路径进行比较
-  const normalizedSource = await normalize(sourcePath);
+  const normalizedSource = await normalize(toNativeFilesystemPath(sourcePath));
   const normalizedTarget = await normalize(targetPath);
 
   // 如果源文件和目标文件是同一个文件，直接返回
@@ -96,11 +233,8 @@ export async function copyFileToBooksDir(sourcePath: string, fileName: string, r
     }
   }
 
-  // 读取源文件
-  const content = await fs.readFile(sourcePath);
-
-  // 写入目标文件
-  await fs.writeFile(targetPath, content);
+  const fileBytes = content ?? (await fs.readFile(sourcePath));
+  await fs.writeFile(targetPath, fileBytes);
 
   return targetPath;
 }
@@ -109,7 +243,16 @@ export async function copyFileToBooksDir(sourcePath: string, fileName: string, r
  * 移动文件到书籍目录
  * @param replaceFile 是否替换已存在的文件
  */
-export async function moveFileToBooksDir(sourcePath: string, fileName: string, replaceFile: boolean = false): Promise<string> {
+export async function moveFileToBooksDir(
+  sourcePath: string,
+  fileName: string,
+  replaceFile: boolean = false,
+  content?: ArrayBuffer,
+): Promise<string> {
+  if (await usesSafTreeBooksRoot()) {
+    return moveSafBookToBooksDir(sourcePath, fileName, replaceFile, content);
+  }
+
   const fs = await getFileSystem();
   const booksDir = await getBooksDirectory();
 
@@ -124,7 +267,7 @@ export async function moveFileToBooksDir(sourcePath: string, fileName: string, r
   const targetPath = await join(booksDir, fileName);
 
   // 规范化路径进行比较
-  const normalizedSource = await normalize(sourcePath);
+  const normalizedSource = await normalize(toNativeFilesystemPath(sourcePath));
   const normalizedTarget = await normalize(targetPath);
 
   // 如果源文件和目标文件是同一个文件，直接返回
@@ -145,13 +288,9 @@ export async function moveFileToBooksDir(sourcePath: string, fileName: string, r
     }
   }
 
-  // 读取源文件
-  const content = await fs.readFile(sourcePath);
+  const fileBytes = content ?? (await fs.readFile(sourcePath));
+  await fs.writeFile(targetPath, fileBytes);
 
-  // 写入目标文件
-  await fs.writeFile(targetPath, content);
-
-  // 删除源文件
   try {
     await fs.remove(sourcePath, false);
   } catch (error) {
@@ -159,6 +298,56 @@ export async function moveFileToBooksDir(sourcePath: string, fileName: string, r
   }
 
   return targetPath;
+}
+
+/** Web + 用户指定 handle:dir 书籍库：复制到该目录 */
+export async function copyWebFileToBooksDir(
+  sourceBookUrl: string,
+  fileName: string,
+  content?: ArrayBuffer,
+  replaceFile = false,
+): Promise<string> {
+  const root = await getManagedBooksRoot();
+  if (root.kind !== 'dir-handle') {
+    throw new Error('当前未使用浏览器本地文件夹作为书籍库');
+  }
+  const safeName = sanitizeManagedFileName(fileName);
+  const targetRef = { kind: 'dir-handle' as const, value: `${root.value}/${safeName}` };
+  const targetUrl = formatStorageRef(targetRef);
+
+  if (await fileRefExists(targetRef)) {
+    if (!replaceFile) return targetUrl;
+    await removeRef(targetRef, false);
+  }
+
+  const bytes = content ?? (await readBytes(parseStorageRef(sourceBookUrl)));
+  await writeBytes(targetRef, bytes);
+  return targetUrl;
+}
+
+/** Web + handle:dir 书籍库：写入目录并丢弃临时句柄（无法删除用户原文件） */
+export async function moveWebFileToBooksDir(
+  sourceBookUrl: string,
+  fileName: string,
+  content?: ArrayBuffer,
+  replaceFile = false,
+): Promise<string> {
+  const targetUrl = await copyWebFileToBooksDir(
+    sourceBookUrl,
+    fileName,
+    content,
+    replaceFile,
+  );
+  const src = parseStorageRef(sourceBookUrl);
+  if (src.kind === 'handle') {
+    await removeRef(src, false);
+  }
+  return targetUrl;
+}
+
+export async function needsImportFileActionSelection(): Promise<boolean> {
+  if (isTauri()) return true;
+  return usesDirectoryHandleBooksRoot();
 }
 
 /**
@@ -170,16 +359,18 @@ export async function moveFileToBooksDir(sourcePath: string, fileName: string, r
  * @returns 文件名
  */
 function extractFileName(path: string, content: ArrayBuffer): string {
-  // 1. 尝试从传统路径中提取
   const pathFileName = path.replace(/^.*[/\\]/, '');
 
-  // 2. 检查是否是有效的文件名（包含扩展名）
+  if (looksLikeAndroidDocumentId(pathFileName)) {
+    const human = resolveHumanFileName(pathFileName, path);
+    if (human && detectFileType(human)) return human;
+  }
+
   const fileType = detectFileType(pathFileName);
-  if (fileType) {
+  if (fileType && !looksLikeAndroidDocumentId(pathFileName)) {
     return pathFileName;
   }
 
-  // 3. 如果是 Android Content URI，尝试从 URI 中解码
   if (isAndroidContentUri(path)) {
     // 尝试从 URI 中提取文件名（某些 Content Provider 会在路径中包含文件名）
     // 例如：content://com.android.externalstorage.documents/document/primary%3ADownload%2F书籍.txt
@@ -222,49 +413,83 @@ function extractFileName(path: string, content: ArrayBuffer): string {
 export async function pickLocalBookFile(): Promise<
   { bookUrl: string; fileName: string; content?: ArrayBuffer } | null
 > {
-  if (isTauri()) {
-    const path = await openDialog({
-      multiple: false,
-      filters: [
-        { name: 'TXT', extensions: ['txt'] },
-        { name: 'EPUB', extensions: ['epub'] },
-      ],
-    });
-    if (path === null || typeof path !== 'string') return null;
+  const picked = await pickFileAsBookUrl({
+    filters: [
+      { name: '支持的类型', extensions: [...LOCAL_BOOK_PICK_EXTENSIONS] },
+      { name: 'TXT', extensions: ['txt'] },
+      { name: 'EPUB', extensions: ['epub'] },
+    ],
+  });
+  if (!picked) return null;
 
-    // 检查是否是 Android Content URI
-    if (isAndroidContentUri(path)) {
-      // Android Content URI：权限可能随时失效，必须先读取内容
-      const fs = await getFileSystem();
-      const content = await fs.readFile(path);
-      const fileName = extractFileName(path, content);
-      return { bookUrl: path, fileName, content };
-    }
-
-    // 普通文件路径：先不读取内容，让后续流程先操作文件再读取
-    // 需要先读取少量内容来检测文件名（通过文件扩展名）
+  const ref = parseStorageRef(picked.bookUrl);
+  if (!picked.content && (ref.kind === 'path' || ref.kind === 'uri')) {
     const fs = await getFileSystem();
-    // 只读取前几个字节用于文件名检测
-    const header = await fs.readFile(path);
-    const headerSlice = header.slice(0, 1024); // 只读取前1KB用于检测
-    const fileName = extractFileName(path, headerSlice);
-
-    return { bookUrl: path, fileName };
+    const header = await fs.readFile(
+      ref.kind === 'uri' ? ref.value : picked.bookUrl,
+    );
+    const headerSlice = header.slice(0, 1024);
+    const fileName = extractFileName(picked.bookUrl, headerSlice);
+    return { bookUrl: picked.bookUrl, fileName, content: undefined };
   }
 
-  // Web：input 选文件，内容写入 IndexedDB（path 用 local::uuid）
-  const file = await new Promise<File | null>((resolve) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.txt,.epub,text/plain,application/epub+zip';
-    input.onchange = () => resolve((input.files && input.files[0]) || null);
-    input.click();
-  });
-  if (!file) return null;
-  const content = await file.arrayBuffer();
-  const bookUrl = `local::${crypto.randomUUID()}`;
-  await writeFile(bookUrl, content);
-  return { bookUrl, fileName: file.name, content };
+  if (!picked.content && ref.kind === 'handle') {
+    const bytes = await readBytes(ref);
+    const fileName = extractFileName(picked.fileName, bytes.slice(0, 1024));
+    return { bookUrl: picked.bookUrl, fileName, content: bytes };
+  }
+
+  const content = picked.content;
+  let fileName = resolveHumanFileName(picked.fileName, picked.bookUrl);
+  if (content && !detectFileType(fileName)) {
+    fileName = extractFileName(picked.bookUrl, content.slice(0, 1024));
+  }
+  if (looksLikeAndroidDocumentId(fileName)) {
+    fileName = resolveHumanFileName(fileName, picked.bookUrl);
+  }
+  return { bookUrl: picked.bookUrl, fileName, content };
+}
+
+const OPFS_BOOKS_PREFIX = 'books';
+
+/**
+ * Web 端将 File System Access 句柄等不稳定引用物化到 OPFS，避免阅读时 getFile() 因无用户手势失败。
+ */
+async function persistWebBookUrlIfNeeded(
+  bookUrl: string,
+  fileName: string,
+  content: ArrayBuffer,
+): Promise<string> {
+  if (isTauri()) return bookUrl;
+  const ref = parseStorageRef(bookUrl);
+  if (ref.kind === 'opfs' || ref.kind === 'virtual') {
+    return bookUrl;
+  }
+  if (ref.kind === 'dir-handle' && ref.value.includes('/')) {
+    return bookUrl;
+  }
+  const root = await getManagedBooksRoot();
+  if (root.kind === 'dir-handle') {
+    const safeName = sanitizeManagedFileName(fileName);
+    const targetRef = { kind: 'dir-handle' as const, value: `${root.value}/${safeName}` };
+    await writeBytes(targetRef, content);
+    if (ref.kind === 'handle') {
+      await removeHandle(ref.value).catch((e) => {
+        console.warn('[import] 清理临时文件句柄失败', e);
+      });
+    }
+    return formatStorageRef(targetRef);
+  }
+  await ensureManagedBooksRoot();
+  const safeName = sanitizeManagedFileName(fileName);
+  const opfsPath = `${OPFS_BOOKS_PREFIX}/${crypto.randomUUID()}_${safeName}`;
+  await writeBytes({ kind: 'opfs', value: opfsPath }, content);
+  if (ref.kind === 'handle') {
+    await removeHandle(ref.value).catch((e) => {
+      console.warn('[import] 清理临时文件句柄失败', e);
+    });
+  }
+  return formatStorageRef({ kind: 'opfs', value: opfsPath });
 }
 
 /**
@@ -321,7 +546,22 @@ export async function importLocalBookFromContent(
     }
   }
 
-  const { name: parsedName, author: parsedAuthor } = parseNameAuthor(fileName);
+  finalBookUrl = await persistWebBookUrlIfNeeded(finalBookUrl, fileName, content);
+
+  const storedRef = parseStorageRef(finalBookUrl);
+  if (storedRef.kind === 'uri') {
+    finalBookUrl = formatStorageRef({
+      kind: 'uri',
+      value: normalizeUriStorageValue(storedRef.value),
+    });
+  }
+
+  let originFileName = fileName;
+  if (isTauri() && parseStorageRef(finalBookUrl).kind === 'uri') {
+    originFileName = await resolveAndroidOriginFileName(finalBookUrl, fileName);
+  }
+
+  const { name: parsedName, author: parsedAuthor } = parseNameAuthor(originFileName);
   const name = formatBookName(parsedName) || '未知书名';
   const author = formatBookAuthor(parsedAuthor) || '未知作者';
 
@@ -330,7 +570,7 @@ export async function importLocalBookFromContent(
     bookUrl: finalBookUrl,
     tocUrl: finalBookUrl,
     origin: 'local',
-    originName: fileName,
+    originName: originFileName,
     name,
     author,
     type: LOCAL_BOOK_TYPE,
@@ -510,8 +750,7 @@ export async function importLocalBook(options?: {
 }): Promise<ImportResult | null> {
   // 检查是否需要显示首次导入目录选择弹窗
   if (!options?.skipDialogs && isTauri()) {
-    const settings = settingsStore.state.app;
-    if (!settings.booksDirectorySet) {
+    if (!hasBooksStorageRoot()) {
       // 返回一个 Promise，等待用户选择目录
       // 这个逻辑会在调用处通过弹窗组件处理
       throw new Error('NEED_DIRECTORY_SELECTION');
@@ -527,16 +766,14 @@ export async function importLocalBook(options?: {
   // 2. 桌面端用户选择的文件可能在不同位置，需要统一管理
   let action: 'copy' | 'move' | null = options?.action || null;
 
-  if (!action && isTauri()) {
-    // Tauri 环境（桌面端和移动端）都需要操作选择
+  const needsAction = await needsImportFileActionSelection();
+  if (!action && needsAction) {
     const settings = settingsStore.state.app;
     if (settings.rememberImportAction && settings.importBookAction) {
       action = settings.importBookAction;
     } else if (!options?.skipDialogs) {
-      // 需要弹窗选择，返回特殊错误码
       throw new Error('NEED_ACTION_SELECTION');
     } else {
-      // 默认复制
       action = 'copy';
     }
   }
@@ -548,48 +785,54 @@ export async function importLocalBook(options?: {
   if (action && isTauri()) {
     // Tauri 环境：先执行文件操作，再读取内容
     if (isAndroidContentUri(picked.bookUrl) || picked.bookUrl.startsWith('local::')) {
-      // Android Content URI 或虚拟路径：内容已经在内存中
-      // 将内容保存到书籍目录
-      const booksDir = await getBooksDirectory();
-      const fs = await getFileSystem();
-
-      // 确保目录存在
-      try {
-        await fs.mkdir(booksDir, true);
-      } catch (error) {
-        // 目录可能已存在，忽略错误
-      }
-
-      // 构建目标路径
-      const targetPath = await join(booksDir, picked.fileName);
-
-      // 写入文件到书籍目录
-      if (picked.content) {
-        await fs.writeFile(targetPath, picked.content);
-        finalBookUrl = targetPath;
-        finalContent = picked.content; // 使用已读取的内容
-      } else {
+      if (!picked.content) {
         throw new Error('Android Content URI 必须预先读取内容');
       }
+      if (action === 'copy') {
+        finalBookUrl = await copyFileToBooksDir(
+          picked.bookUrl,
+          picked.fileName,
+          false,
+          picked.content,
+        );
+      } else if (action === 'move') {
+        finalBookUrl = await moveFileToBooksDir(
+          picked.bookUrl,
+          picked.fileName,
+          false,
+          picked.content,
+        );
+      }
+      finalContent = picked.content;
     } else {
-      // 普通文件路径：先复制/移动文件，再读取内容（更高效）
       if (action === 'copy') {
         finalBookUrl = await copyFileToBooksDir(picked.bookUrl, picked.fileName);
       } else if (action === 'move') {
         finalBookUrl = await moveFileToBooksDir(picked.bookUrl, picked.fileName);
       }
-
-      // 从目标位置读取文件内容
-      const fs = await getFileSystem();
-      finalContent = await fs.readFile(finalBookUrl);
+      finalContent = await readBytes(parseStorageRef(finalBookUrl));
     }
+  } else if (action && (await usesDirectoryHandleBooksRoot())) {
+    if (action === 'copy') {
+      finalBookUrl = await copyWebFileToBooksDir(
+        picked.bookUrl,
+        picked.fileName,
+        picked.content,
+      );
+    } else {
+      finalBookUrl = await moveWebFileToBooksDir(
+        picked.bookUrl,
+        picked.fileName,
+        picked.content,
+      );
+    }
+    finalContent = await readBytes(parseStorageRef(finalBookUrl));
   } else {
-    // Web 端或没有操作：使用已有内容或读取文件
+    // Web OPFS 或未指定复制/移动：使用已有内容或读取文件
     if (picked.content) {
       finalContent = picked.content;
     } else {
-      const fs = await getFileSystem();
-      finalContent = await fs.readFile(finalBookUrl);
+      finalContent = await readBytes(parseStorageRef(finalBookUrl));
     }
   }
 
@@ -607,5 +850,16 @@ export async function importLocalBook(options?: {
  * Web：bookUrl 为 local::uuid，从 IndexedDB 读取
  */
 export async function readLocalBookContent(bookUrl: string): Promise<ArrayBuffer> {
+  const ref = bookUrlToRef(bookUrl);
+  if (
+    ref.kind === 'path' ||
+    ref.kind === 'uri' ||
+    ref.kind === 'opfs' ||
+    ref.kind === 'handle' ||
+    ref.kind === 'dir-handle' ||
+    ref.kind === 'virtual'
+  ) {
+    return readBytes(ref);
+  }
   return readFile(bookUrl);
 }

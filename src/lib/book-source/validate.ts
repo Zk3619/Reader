@@ -59,6 +59,12 @@ function classifyError(err: unknown): SingleCheckResult {
 }
 
 /** 探测请求是否可达（用于区分“无结果”与“网络/超时”） */
+function isProbeSuccess(
+  probe: { ok: true } | SingleCheckResult,
+): probe is { ok: true } {
+  return 'ok' in probe && probe.ok === true;
+}
+
 async function probeGet(
   url: string,
   source: BookSource,
@@ -67,7 +73,7 @@ async function probeGet(
   try {
     const headers = parseHeaders(source.header);
     const text = await get(url, {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout,
@@ -97,7 +103,7 @@ async function validateSearch(source: BookSource): Promise<SingleCheckResult> {
   try {
     const url = buildUrl(source.searchUrl, { key: '一' });
     const probe = await probeGet(url, source);
-    if (probe.ok !== true) return probe;
+    if (!isProbeSuccess(probe)) return probe;
     const books = await searchBook(source, '一');
     if (books.length > 0) return { kind: 'success' };
     return { kind: 'search_empty', message: '搜索无结果' };
@@ -153,14 +159,14 @@ async function validateExplore(source: BookSource): Promise<SingleCheckResult> {
       }
       const exploreUrlToUse = toAbsoluteExploreUrl(source, firstWithUrl.url);
       const probe = await probeGet(buildUrl(exploreUrlToUse, { page: '1' }), source);
-      if (probe.ok !== true) return probe;
+      if (!isProbeSuccess(probe)) return probe;
       const list = await exploreBook(source, 1, exploreUrlToUse);
       if (list.length > 0) return { kind: 'success' };
       return { kind: 'explore_empty', message: '发现无结果' };
     }
     const url = buildUrl(source.exploreUrl, { page: '1' });
     const probe = await probeGet(url, source);
-    if (probe.ok !== true) return probe;
+    if (!isProbeSuccess(probe)) return probe;
     const list = await exploreBook(source, 1);
     if (list.length > 0) return { kind: 'success' };
     return { kind: 'explore_empty', message: '发现无结果' };

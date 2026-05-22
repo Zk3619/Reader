@@ -31,8 +31,9 @@ import { ImageIcon, AlertCircleIcon } from '@/components/shared/icons';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
 import type { BookGroup } from '@/types';
-import { readFile } from '@tauri-apps/plugin-fs';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { pickFile } from '@/lib/platform/fs/pick-file';
+import { readBytes } from '@/lib/platform/fs/read-write';
+import { isUserCancelled } from '@/lib/platform/fs/errors';
 
 export type BookGroupFormMode = 'add' | 'edit';
 
@@ -102,18 +103,22 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
 
   async function selectLocalImage(): Promise<string | null> {
     try {
-      const filePath = await openDialog({
-        multiple: false,
-        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] }],
+      const picked = await pickFile({
+        filters: [
+          {
+            name: 'Images',
+            extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'],
+          },
+        ],
       });
-      if (!filePath || typeof filePath !== 'string') return null;
-      const fileData = await readFile(filePath);
-      const extension = filePath.split('.').pop()?.toLowerCase() || 'png';
+      const fileData = await readBytes(picked.ref);
+      const extension = picked.fileName.split('.').pop()?.toLowerCase() || 'png';
       const mimeType = `image/${extension === 'jpg' ? 'jpeg' : extension === 'svg' ? 'svg+xml' : extension}`;
       const uint8Array = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
       const base64 = btoa(String.fromCharCode(...uint8Array));
       return `data:${mimeType};base64,${base64}`;
     } catch (error) {
+      if (isUserCancelled(error)) return null;
       console.error('选择本地图片失败:', error);
       props.onError('选择本地图片失败');
       return null;

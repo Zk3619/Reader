@@ -18,6 +18,54 @@ export function blurActiveElement(element?: HTMLElement | null): void {
   }
 }
 
+/** 将焦点移出页面控件，避免模态 dialog 施加 aria-hidden 时焦点仍落在 #root 内 */
+export function releasePageFocus(): void {
+  if (typeof document === 'undefined') return;
+  blurActiveElement();
+  const body = document.body;
+  if (!body) return;
+  const prevTabIndex = body.getAttribute('tabindex');
+  body.setAttribute('tabindex', '-1');
+  body.focus({ preventScroll: true });
+  if (prevTabIndex === null) {
+    body.removeAttribute('tabindex');
+  } else {
+    body.setAttribute('tabindex', prevTabIndex);
+  }
+}
+
+/** 关闭当前 Kobalte 浮层（菜单/选择器等），避免与模态 dialog 叠层时焦点留在浮层内 */
+export function dismissOpenKobalteOverlays(): void {
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
+}
+
+/**
+ * 打开 AppDialog 前调用：关闭浮层、释放焦点，并在下一微任务/帧再次处理
+ * （菜单项 onSelect 通过 setTimeout 关闭且会 refocus trigger，须延后补刀）
+ */
+export function prepareForAppDialogOpen(): void {
+  closeAllSelectMenus();
+  dismissOpenKobalteOverlays();
+  releasePageFocus();
+  // 菜单 closeOnSelect 在 setTimeout 里关闭并 refocus trigger，仅再次释放焦点，勿再发 Escape（dialog 可能已打开）
+  const reinforce = () => {
+    releasePageFocus();
+  };
+  queueMicrotask(reinforce);
+  requestAnimationFrame(reinforce);
+  window.dispatchEvent(new CustomEvent(ACCESSIBILITY_EVENTS.DIALOG_OPENED));
+}
+
 /**
  * 创建一个包装函数，在执行回调后自动移除焦点
  * 用于 Switch、Button 等组件的 onChange/onClick 事件
@@ -192,10 +240,7 @@ export function closeAllSelectMenus(): void {
  * ```
  */
 export function triggerDialogOpened(): void {
-  // 先关闭所有打开的 Select 和 DropdownMenu
-  closeAllSelectMenus();
-  // 然后触发事件通知其他组件
-  window.dispatchEvent(new CustomEvent(ACCESSIBILITY_EVENTS.DIALOG_OPENED));
+  prepareForAppDialogOpen();
 }
 
 /**

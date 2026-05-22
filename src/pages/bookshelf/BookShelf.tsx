@@ -5,10 +5,22 @@
  * - 下拉框/标签：默认显示「全部」书籍，分组名在导航栏以下拉/标签切换，不显示分组页
  */
 
-import { createSignal, For, Show, onMount, onCleanup, createEffect, untrack, createMemo} from 'solid-js';
+import {
+  type Accessor,
+  createSignal,
+  For,
+  Show,
+  onMount,
+  onCleanup,
+  createEffect,
+  untrack,
+  createMemo,
+} from 'solid-js';
+import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import Sortable from 'sortablejs';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { bookshelfStore } from '@/stores/bookshelf';
+import { sourcesStore } from '@/stores/sources';
 import { bookshelfLayoutStore, initBookshelfLayoutSettings } from '@/stores/bookshelf-layout';
 import { sortBooks } from '@/lib/bookshelf/book-sort';
 import * as groupsDb from '@/lib/database/book-groups';
@@ -17,6 +29,7 @@ import type { BookGroup } from '@/types';
 import type { Book } from '@/types';
 import { BookGroupId } from '@/types';
 import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroup';
+import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookEditDialog } from '@/components/books/BookEditDialog';
 import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
 import { BookContextMenu, type BookContextMenuActions } from '@/components/bookshelf/BookContextMenu';
@@ -24,10 +37,21 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { getBooksDirectory } from '@/lib/local-book/import';
-import { getFileSystem } from '@/lib/platform/filesystem';
+import { getManagedBooksRoot } from '@/lib/platform/fs/managed-storage';
+import { listDirectory } from '@/lib/platform/fs/read-write';
+import {
+  displayFileNameFromBookUrl,
+  formatStorageRef,
+  parseStorageRef,
+} from '@/lib/platform/fs/storage-ref';
+import { readBytes } from '@/lib/platform/fs/read-write';
 import { hasBook } from '@/lib/database/books';
-import { importLocalBookFromContent, isLocalBook } from '@/lib/local-book';
+import {
+  importLocalBookFromContent,
+  isLocalBook,
+  describeDeleteLocalBookToast,
+  removeLocalBookStoredFile,
+} from '@/lib/local-book';
 import { pinBookToBottom, pinBookToTop } from '@/lib/bookshelf/book-order';
 import {
   bindBookshelfLayoutGap,
@@ -38,7 +62,6 @@ import {
   getViewModeContainerGridClass,
 } from '@/lib/bookshelf/bookshelf-view-mode';
 import { isTauri } from '@/lib/platform/detect';
-import { join } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
@@ -49,6 +72,8 @@ import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
 import { readerStore } from '@/stores/reader';
 
 export interface BookShelfProps {
+  /** 为 false 时保留 UI 状态但不拉取分组/书籍（侧边栏隐藏态） */
+  active?: boolean | Accessor<boolean>;
   /** 分组加载完成后回调，供导航栏下拉/标签使用 */
   onGroupsLoaded?: (groups: BookGroup[]) => void;
   /** 各分组书籍数量加载完成后回调，供导航栏下拉描述使用 */
@@ -62,6 +87,7 @@ export interface BookShelfProps {
 }
 
 export function BookShelf(props: BookShelfProps) {
+  const isActive = createMemo(() => readShellPageActive(props.active));
   const [groups, setGroups] = createSignal<BookGroup[]>([]);
   const [groupBookCounts, setGroupBookCounts] = createSignal<Record<number, number>>({});
   const [books, setBooks] = createSignal<Book[]>([]);
@@ -85,11 +111,20 @@ export function BookShelf(props: BookShelfProps) {
     return settings.sortMode;
   };
 
-  onMount(async () => {
-    await initBookshelfLayoutSettings();
-    // 等待状态恢复完成，确保使用恢复的状态
-    await bookshelfStore.waitForStateRestore();
-    // 始终加载分组（供导航栏与分组页使用），与书源页一致：数据由父级加载一次，进入分组页不重复请求
+  let layoutSettingsInitialized = false;
+  createEffect(() => {
+    if (!isActive() || layoutSettingsInitialized) return;
+    layoutSettingsInitialized = true;
+    void (async () => {
+      await initBookshelfLayoutSettings();
+      await bookshelfStore.waitForStateRestore();
+      void sourcesStore.loadBookSources();
+    })();
+  });
+
+  createEffect(() => {
+    if (!isActive()) return;
+    if (groups().length > 0) return;
     loadGroups();
   });
 
@@ -122,7 +157,8 @@ export function BookShelf(props: BookShelfProps) {
   }
 
   createEffect(() => {
-    if (groupStyle() !== 'normal' && groups().length === 0) loadGroups(); // 下拉/标签模式且分组未加载时加载，供导航栏使用
+    if (!isActive()) return;
+    if (groupStyle() !== 'normal' && groups().length === 0) loadGroups();
   });
 
   /** 分组列表加载后校正标题名，避免 HMR / 存储恢复后 currentGroup 与 currentGroupName 不一致 */
@@ -138,6 +174,7 @@ export function BookShelf(props: BookShelfProps) {
   });
 
   createEffect(() => {
+    if (!isActive()) return;
     const style = groupStyle();
     const cg = currentGroup();
     const showList = showGroupList();
@@ -170,6 +207,21 @@ export function BookShelf(props: BookShelfProps) {
     } finally {
       setBooksLoading(false);
     }
+  }
+
+  async function handleCoverUrlRefreshed(bookUrl: string, newCoverUrl: string) {
+    const list = books();
+    const idx = list.findIndex((b) => b.bookUrl === bookUrl);
+    if (idx < 0) return;
+    const updated: Book = { ...list[idx], coverUrl: newCoverUrl };
+    try {
+      await booksDb.updateBook(updated);
+    } catch (e) {
+      console.warn('[bookshelf] 更新封面 URL 失败', e);
+    }
+    const next = [...list];
+    next[idx] = updated;
+    setBooks(next);
   }
 
   // 监听排序模式变化，立即重新排序当前书籍列表
@@ -278,12 +330,9 @@ export function BookShelf(props: BookShelfProps) {
 
       if (deleteFile && isLocal) {
         try {
-          const fs = await getFileSystem();
-          if (!book.bookUrl.startsWith('local::')) {
-            await fs.remove(book.bookUrl, false);
-          }
+          await removeLocalBookStoredFile(book.bookUrl);
         } catch (fileError) {
-          console.warn('删除本地文件失败:', fileError);
+          console.warn('删除本地书籍存储失败:', fileError);
           fileDeleteFailed = true;
         }
       }
@@ -293,23 +342,17 @@ export function BookShelf(props: BookShelfProps) {
       loadBooksForGroup(currentGroup());
       if (props.onGroupsLoaded && groups().length) loadGroupCounts(groups());
 
-      if (fileDeleteFailed) {
+      const toast = isLocal
+        ? describeDeleteLocalBookToast(book.bookUrl, book.name, {
+            deleteFile,
+            fileDeleteFailed,
+          })
+        : { title: '已从书架删除', description: '' };
+      if (fileDeleteFailed || (deleteFile && isLocal) || isLocal) {
         showAppToast({
-          title: '已从书架删除',
-          description: '本地文件未能删除，请手动清理。',
-          variant: 'default',
-        });
-      } else if (deleteFile && isLocal) {
-        showAppToast({
-          title: '已删除书籍及本地文件',
-          description: `《${book.name}》已从书架移除，本地文件已删除。`,
-          variant: 'success',
-        });
-      } else if (isLocal) {
-        showAppToast({
-          title: '已从书架删除',
-          description: '本地文件已保留。',
-          variant: 'success',
+          title: toast.title,
+          description: toast.description,
+          variant: fileDeleteFailed ? 'default' : 'success',
         });
       } else {
         showAppToast({
@@ -372,41 +415,35 @@ export function BookShelf(props: BookShelfProps) {
   };
 
   async function handleReloadLocalBooks() {
-    if (!isTauri()) {
-      showAppToast({
-        title: '不支持',
-        description: '重新加载功能仅在桌面端和移动端可用',
-        variant: 'error',
-      });
-      return;
-    }
-
     setIsReloadingBooks(true);
     try {
-      const booksDir = await getBooksDirectory();
-      const fs = await getFileSystem();
-      const files = await fs.readDir(booksDir);
+      const root = await getManagedBooksRoot();
+      const entries = await listDirectory(root);
       const bookFiles: string[] = [];
 
-      for (const file of files) {
-        const fileName = file;
-        if (!fileName) continue;
-        const fullPath = await join(booksDir, fileName);
-        try {
-          await fs.readDir(fullPath);
-          continue;
-        } catch {
-          const ext = fileName.toLowerCase().split('.').pop();
-          if (ext === 'txt' || ext === 'epub') {
-            bookFiles.push(fullPath);
-          }
-        }
+      for (const entry of entries) {
+        if (entry.isDirectory) continue;
+        const ext = entry.name.toLowerCase().split('.').pop();
+        if (ext !== 'txt' && ext !== 'epub') continue;
+        const bookUrl =
+          entry.path.startsWith('path:') ||
+          entry.path.startsWith('uri:') ||
+          entry.path.startsWith('opfs:')
+            ? entry.path
+            : formatStorageRef(
+                root.kind === 'path'
+                  ? { kind: 'path', value: entry.path }
+                  : parseStorageRef(entry.path),
+              );
+        bookFiles.push(bookUrl);
       }
 
       if (bookFiles.length === 0) {
         showAppToast({
           title: '未找到书籍',
-          description: '本地目录中没有找到书籍文件',
+          description: isTauri()
+            ? '本地目录中没有找到书籍文件'
+            : '浏览器书籍库（OPFS）中没有找到 .txt / .epub 文件',
           variant: 'default',
         });
         return;
@@ -431,8 +468,8 @@ export function BookShelf(props: BookShelfProps) {
       let failCount = 0;
       for (const filePath of missingBooks) {
         try {
-          const fileName = filePath.split(/[/\\]/).pop() || '';
-          const content = await fs.readFile(filePath);
+          const fileName = displayFileNameFromBookUrl(filePath);
+          const content = await readBytes(parseStorageRef(filePath));
           await importLocalBookFromContent(filePath, fileName, content, { groupId: BookGroupId.Local });
           successCount++;
         } catch (error) {
@@ -470,11 +507,30 @@ export function BookShelf(props: BookShelfProps) {
     }
   }
 
+  /** 导入/删书等事件触发：组件仍挂载在隐藏区时也刷新，避免从导入页返回后列表陈旧 */
+  async function refreshFromBookshelfEvent() {
+    if (groups().length === 0) {
+      await loadGroups();
+    } else {
+      await loadGroupCounts(groups());
+    }
+    // 始终刷新当前分组书籍（含常规样式停留在分组页时预加载，进入分组即可见新书）
+    await loadBooksForGroup(currentGroup());
+  }
+
+  /** 从导入页/设置等切回书架时补刷一次（避免仅依赖隐藏态下的事件刷新） */
+  let wasBookshelfActive = false;
+  createEffect(() => {
+    const active = isActive();
+    if (active && !wasBookshelfActive) {
+      void refreshFromBookshelfEvent();
+    }
+    wasBookshelfActive = active;
+  });
+
   onMount(() => {
     const handler = () => {
-      // 重新加载书籍列表（会自动应用当前排序模式）
-      loadBooksForGroup(currentGroup());
-      if (props.onGroupsLoaded && groups().length) loadGroupCounts(groups());
+      void refreshFromBookshelfEvent();
     };
     window.addEventListener('bookshelf-refresh', handler);
 
@@ -493,7 +549,7 @@ export function BookShelf(props: BookShelfProps) {
     const visibilityChangeHandler = () => {
       const isHidden = document.hidden;
       // 页面从隐藏变为可见时，重新加载并排序
-      if (wasHidden && !isHidden && books().length > 0) {
+      if (wasHidden && !isHidden && isActive() && books().length > 0) {
         loadBooksForGroup(currentGroup());
       }
       wasHidden = isHidden;
@@ -606,6 +662,7 @@ export function BookShelf(props: BookShelfProps) {
               }
               // 拖拽排序不 setBooks：SortableJS 已重排 DOM，仅持久化顺序
             }}
+            onCoverUrlRefreshed={handleCoverUrlRefreshed}
           />
         </Show>
       </div>
@@ -643,6 +700,7 @@ function GroupBooksView(props: {
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
+  onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
 }) {
   const showSkeleton = useSkeletonLoading(() => props.loading, { delay: 100, minDisplayTime: 300 });
 
@@ -680,6 +738,7 @@ function GroupBooksView(props: {
           onEditBook={props.onEditBook}
           onDeleteBook={props.onDeleteBook}
           onBooksReorder={props.onBooksReorder}
+          onCoverUrlRefreshed={props.onCoverUrlRefreshed}
         />
       </Show>
 
@@ -705,6 +764,7 @@ function BooksGrid(props: {
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
+  onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
 }) {
   const manualSort = () => props.sortMode === 'manual';
 
@@ -788,6 +848,7 @@ function BooksGrid(props: {
             manualSort={manualSort()}
             actions={bookContextMenuActions()}
             onOpenBook={props.onOpenBook}
+            onCoverUrlRefreshed={props.onCoverUrlRefreshed}
           />
         )}
       </For>
@@ -826,6 +887,7 @@ function BookCardWithMenu(props: {
   manualSort: boolean;
   actions: BookContextMenuActions;
   onOpenBook?: (book: Book) => void;
+  onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
 }) {
   const cardClass = () =>
     props.layout === 'list'
@@ -850,14 +912,19 @@ function BookCardWithMenu(props: {
               ? 'book-group-card-cover-motion book-group-card-cover-motion--list h-14 aspect-3/4 shrink-0 overflow-hidden rounded-md bg-muted/50'
               : 'book-group-card-cover-motion book-group-card-cover-motion--list h-20 aspect-3/4 shrink-0 overflow-hidden rounded-lg bg-muted/50'
         }>
-          <Show when={props.book.customCoverUrl || props.book.coverUrl} fallback={<span class="flex h-full w-full items-center justify-center text-2xl">📖</span>}>
-            <img
-              src={props.book.customCoverUrl || props.book.coverUrl || ''}
-              alt=""
-              class="h-full w-full object-cover"
-              draggable={false}
-            />
-          </Show>
+          <BookCoverImg
+            src={props.book.customCoverUrl || props.book.coverUrl}
+            referer={props.book.origin}
+            source={sourcesStore.getBookSource(props.book.origin)}
+            bookUrl={props.book.bookUrl}
+            onCoverUrlRefreshed={(url) =>
+              props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
+            }
+            alt=""
+            class="h-full w-full object-cover"
+            draggable={false}
+            fallback={<span class="flex h-full w-full items-center justify-center text-2xl">📖</span>}
+          />
         </div>
         <Show when={props.layout === 'grid' ? props.titleDisplay === 'show' : props.titleDisplay !== 'hide'}>
           {props.layout === 'grid' ? (

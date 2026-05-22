@@ -45,7 +45,6 @@ export async function insertSearchBook(book: SearchBook): Promise<void> {
  * 批量插入搜索结果
  */
 export async function insertSearchBooks(books: SearchBook[]): Promise<void> {
-  const db = await getDatabase();
   for (const book of books) {
     await insertSearchBook(book);
   }
@@ -58,7 +57,7 @@ export async function getSearchBook(
   bookUrl: string
 ): Promise<SearchBook | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM searchBooks WHERE bookUrl = ?',
     [bookUrl]
   );
@@ -72,7 +71,7 @@ export async function getSearchBooksByOrigin(
   origin: string
 ): Promise<SearchBook[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM searchBooks WHERE origin = ? ORDER BY originOrder DESC',
     [origin]
   );

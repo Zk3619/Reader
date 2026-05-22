@@ -5,6 +5,7 @@
 import { createResource, createSignal, For, Show, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AppDialog,
   AppDialogContent,
@@ -14,6 +15,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import { exploreBook } from '@/lib/book-source/explore';
 import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
@@ -242,7 +244,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
 
   return (
     <div
-      class={cn(mainShellPageScroll, 'overscroll-contain pb-4', props.class)}
+      class={cn(mainShellPageScroll, 'h-full', props.class)}
       onScroll={handleContentScroll}
     >
       <Show when={loading()}>
@@ -283,27 +285,28 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
                   {...bookGroupCardPressHandlers}
                 >
                   <div class={exploreBookListCoverClass()}>
-                    {sb.coverUrl ? (
-                      <img
-                        src={sb.coverUrl}
-                        alt=""
-                        class="h-full w-full object-cover"
-                        loading="lazy"
-                        draggable={false}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                          (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                    ) : null}
-                    <div
-                      class={cn(
-                        'hidden h-full w-full items-center justify-center',
-                        !sb.coverUrl && 'flex',
-                      )}
-                    >
-                      <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
-                    </div>
+                    <BookCoverImg
+                      src={sb.coverUrl}
+                      referer={sb.origin}
+                      source={props.source}
+                      bookUrl={sb.bookUrl}
+                      onCoverUrlRefreshed={(url) => {
+                        setAllBooks((prev) =>
+                          prev.map((b) =>
+                            b.bookUrl === sb.bookUrl ? { ...b, coverUrl: url } : b,
+                          ),
+                        );
+                      }}
+                      alt=""
+                      class="h-full w-full object-cover"
+                      loading="lazy"
+                      draggable={false}
+                      fallback={
+                        <div class="flex h-full w-full items-center justify-center">
+                          <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
+                        </div>
+                      }
+                    />
                   </div>
                   <div class={exploreBookListBodyClass('text-left')}>
                     <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">{sb.name}</p>
@@ -348,24 +351,29 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
                                   if (nextIsEllipsis) return exploreBookListBadgeLastClass();
                                   return exploreBookListBadgeClass();
                                 };
+                                const badgeLabel =
+                                  entry.isEllipsis ? '更多徽标已省略' : entry.value;
                                 return (
-                                  <Badge
-                                    variant={
-                                      entry.isEllipsis
-                                        ? 'outline'
-                                        : entry.key === 'status'
-                                          ? getStatusBadgeVariant(entry.value)
-                                          : 'secondary'
-                                    }
-                                    class={badgeClass()}
-                                    title={entry.isEllipsis ? '更多徽标已省略' : entry.value}
-                                  >
-                                    <Show when={!entry.isEllipsis} fallback={entry.value}>
-                                      <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                                        {entry.value}
-                                      </span>
-                                    </Show>
-                                  </Badge>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      as={Badge}
+                                      variant={
+                                        entry.isEllipsis
+                                          ? 'outline'
+                                          : entry.key === 'status'
+                                            ? getStatusBadgeVariant(entry.value)
+                                            : 'secondary'
+                                      }
+                                      class={badgeClass()}
+                                    >
+                                      <Show when={!entry.isEllipsis} fallback={entry.value}>
+                                        <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                                          {entry.value}
+                                        </span>
+                                      </Show>
+                                    </TooltipTrigger>
+                                    <TooltipContent>{badgeLabel}</TooltipContent>
+                                  </Tooltip>
                                 );
                               }}
                             </For>

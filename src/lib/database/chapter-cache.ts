@@ -14,7 +14,7 @@ export async function getChapterCache(
   chapterIndex: number
 ): Promise<ChapterCache | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapter_cache WHERE book_url = ? AND chapter_index = ?',
     [bookUrl, chapterIndex]
   );

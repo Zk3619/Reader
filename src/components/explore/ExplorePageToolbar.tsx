@@ -30,6 +30,9 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const sourceDropdownEnabled = () => explorePageLayoutStore.settings.sourceDropdownEnabled;
   const sourceTabsEnabled = () => explorePageLayoutStore.settings.sourceTabsEnabled;
+  /** 仅剩书源下拉时不可取消，保证至少勾选一项 */
+  const dropdownToggleLocked = () => sourceDropdownEnabled() && !sourceTabsEnabled();
+  const tabsToggleLocked = () => sourceTabsEnabled() && !sourceDropdownEnabled();
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -104,28 +107,34 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           </AppDropdownMenuItem>
           <AppDropdownMenuSeparator />
           <AppDropdownMenuItem
-            onSelect={() =>
-              explorePageLayoutStore.updateSettings({
-                sourceDropdownEnabled: !sourceDropdownEnabled(),
-              })
-            }
-            class="flex items-center gap-2"
+            onSelect={() => {
+              if (dropdownToggleLocked()) return;
+              explorePageLayoutStore.toggleSourceDropdown();
+            }}
+            class={cn('flex items-center gap-2', dropdownToggleLocked() && 'opacity-60')}
           >
             <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox checked={sourceDropdownEnabled()} aria-label="书源下拉" />
+              <Checkbox
+                checked={sourceDropdownEnabled()}
+                disabled={dropdownToggleLocked()}
+                aria-label="书源下拉"
+              />
             </span>
             <span>书源下拉</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
-            onSelect={() =>
-              explorePageLayoutStore.updateSettings({
-                sourceTabsEnabled: !sourceTabsEnabled(),
-              })
-            }
-            class="flex items-center gap-2"
+            onSelect={() => {
+              if (tabsToggleLocked()) return;
+              explorePageLayoutStore.toggleSourceTabs();
+            }}
+            class={cn('flex items-center gap-2', tabsToggleLocked() && 'opacity-60')}
           >
             <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox checked={sourceTabsEnabled()} aria-label="书源标签" />
+              <Checkbox
+                checked={sourceTabsEnabled()}
+                disabled={tabsToggleLocked()}
+                aria-label="书源标签"
+              />
             </span>
             <span>书源标签</span>
           </AppDropdownMenuItem>

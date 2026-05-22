@@ -102,6 +102,45 @@ export function formatExploreSelectOptionLabel(title: string, paramKey?: string)
   return title;
 }
 
+function pickFirstExploreHubListSection(
+  sections: ExploreSection[],
+  skipArgumentSelect: boolean,
+): ExploreSection | null {
+  for (const section of sections) {
+    if (section.children && section.children.length > 0) {
+      const parentUrl = section.url?.trim();
+      if (
+        parentUrl &&
+        shouldOpenExplorePageForSection({ ...section, url: parentUrl }) &&
+        (!skipArgumentSelect || !isExploreSourceArgumentSelect(section))
+      ) {
+        return { ...section, url: parentUrl };
+      }
+      for (const child of section.children) {
+        if (!shouldOpenExplorePageForSection(child)) continue;
+        if (skipArgumentSelect && isExploreSourceArgumentSelect(child)) continue;
+        return child;
+      }
+      continue;
+    }
+    if (!shouldOpenExplorePageForSection(section)) continue;
+    if (skipArgumentSelect && isExploreSourceArgumentSelect(section)) continue;
+    return section;
+  }
+  return null;
+}
+
+/**
+ * 探索 hub 默认书籍列表分类：优先第一个非 type=select 筛选（paramKey），
+ * 若无则回退到第一个可进入列表页的项。
+ */
+export function pickDefaultExploreHubSection(sections: ExploreSection[]): ExploreSection | null {
+  return (
+    pickFirstExploreHubListSection(sections, true) ??
+    pickFirstExploreHubListSection(sections, false)
+  );
+}
+
 export function buildExploreSectionNavItems(sections: ExploreSection[]): ExploreSectionNavItem[] {
   const items: ExploreSectionNavItem[] = [];
   for (const section of sections) {

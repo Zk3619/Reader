@@ -59,7 +59,8 @@ mod windows_impl {
 #[cfg(windows)]
 pub use windows_impl::ensure_iframe_bootstrap;
 
-#[cfg(not(windows))]
+/// 非 Windows 桌面（macOS / Linux）无 WebView2 子 frame 注入，保持 no-op。
+#[cfg(all(not(windows), not(any(target_os = "android", target_os = "ios"))))]
 pub fn ensure_iframe_bootstrap(_window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }

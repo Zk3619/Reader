@@ -27,6 +27,15 @@ function normalizeUrl(url: string): string {
   // 去除首尾空格
   let cleaned = url.trim();
 
+  // 同源代理路径（如 /__reader_http?target=…），勿补 https:// 以免变成 https://__reader_http
+  if (cleaned.startsWith('/') && typeof window !== 'undefined') {
+    try {
+      return new URL(cleaned, window.location.href).toString();
+    } catch {
+      /* 继续走下方逻辑 */
+    }
+  }
+
   // 确保有协议
   if (!cleaned.match(/^https?:\/\//i)) {
     cleaned = 'https://' + cleaned;
@@ -161,6 +170,82 @@ export class HttpError extends Error {
   }
 }
 
+/** Tauri HTTP 插件按 fetch 规范会丢弃这些头，须走 download_binary */
+const TAURI_FETCH_STRIPPED_HEADERS = new Set(['referer', 'cookie', 'origin']);
+
+function requestNeedsDownloadBinary(headers: Record<string, string>): boolean {
+  return Object.keys(headers).some((k) =>
+    TAURI_FETCH_STRIPPED_HEADERS.has(k.toLowerCase()),
+  );
+}
+
+type DownloadBinaryResult = {
+  data: number[];
+  status: number;
+  headers: Record<string, string>;
+  url: string;
+};
+
+async function fetchViaDownloadBinary(
+  normalizedUrl: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+  timeout: number,
+): Promise<Response> {
+  const result = await invoke<DownloadBinaryResult>('download_binary', {
+    url: normalizedUrl,
+    method: method || 'GET',
+    headers,
+    body,
+    timeoutMs: timeout,
+  });
+
+  const data = new Uint8Array(result.data);
+  const safeHeaders = new Headers();
+  Object.entries(result.headers).forEach(([key, value]) => {
+    try {
+      safeHeaders.set(key, value);
+    } catch {
+      const safeValue = value.replace(/[^\x00-\xFF]/g, '?');
+      try {
+        safeHeaders.set(key, safeValue);
+      } catch {
+        /* skip */
+      }
+    }
+  });
+
+  let cachedText: string | null = null;
+  const cachedArrayBuffer = data.buffer.slice(
+    data.byteOffset,
+    data.byteOffset + data.byteLength,
+  );
+
+  return {
+    status: result.status,
+    statusText: result.status >= 200 && result.status < 300 ? 'OK' : 'Error',
+    ok: result.status >= 200 && result.status < 300,
+    headers: safeHeaders,
+    url: result.url,
+    text: async () => {
+      if (cachedText === null) {
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+      }
+      return cachedText;
+    },
+    json: async () => {
+      if (cachedText === null) {
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+      }
+      return JSON.parse(cachedText);
+    },
+    arrayBuffer: async () => cachedArrayBuffer,
+  } as Response;
+}
+
 /**
  * 执行HTTP请求（核心函数）
  */
@@ -211,6 +296,18 @@ async function executeRequest(
     let response: Response;
 
     if (useTauriHttp) {
+      const bodyForRust = typeof body === 'string' ? body : undefined;
+      const useRustDirect = requestNeedsDownloadBinary(defaultHeaders);
+
+      if (useRustDirect) {
+        response = await fetchViaDownloadBinary(
+          normalizedUrl,
+          method,
+          defaultHeaders,
+          bodyForRust,
+          timeout,
+        );
+      } else {
       // 使用 Tauri 环境
       // 优先使用 Tauri HTTP 插件，如果失败（如非 UTF-8 响应），回退到自定义 Rust 命令
       try {
@@ -339,9 +436,6 @@ async function executeRequest(
         }
 
         try {
-          // 只在调试模式下输出详细日志
-          const bodyForRust =
-            typeof body === 'string' ? body : undefined;
           if (!isDangerousSettingsError) {
             console.debug('[HTTP] 调用 download_binary，参数:', {
               url: normalizedUrl,
@@ -361,70 +455,17 @@ async function executeRequest(
             );
           }
 
-          const result = await invoke<{
-            data: number[];
-            status: number;
-            headers: Record<string, string>;
-            url: string;
-          }>('download_binary', {
-            url: normalizedUrl,
-            method: method || 'GET',
-            headers: defaultHeaders,
-            body: bodyForRust,
-            timeoutMs: timeout,
-          });
+          response = await fetchViaDownloadBinary(
+            normalizedUrl,
+            method,
+            defaultHeaders,
+            bodyForRust,
+            timeout,
+          );
 
-          // 只在调试模式下输出成功日志
           if (!isDangerousSettingsError) {
-            console.debug('[HTTP] download_binary 成功，状态码:', result.status);
+            console.debug('[HTTP] download_binary 成功，状态码:', response.status);
           }
-
-          const data = new Uint8Array(result.data);
-
-          // 安全设置 headers：过滤掉包含非 ISO-8859-1 字符的值
-          // Headers API 只接受 ISO-8859-1 字符（U+0000 到 U+00FF）
-          const safeHeaders = new Headers();
-          Object.entries(result.headers).forEach(([key, value]) => {
-            try {
-              safeHeaders.set(key, value);
-            } catch {
-              // 如果 header 值包含非法字符，用 ASCII 安全的版本替代
-              const safeValue = value.replace(/[^\x00-\xFF]/g, '?');
-              try {
-                safeHeaders.set(key, safeValue);
-              } catch {
-                // 完全跳过无法设置的 header
-              }
-            }
-          });
-
-          let cachedText: string | null = null;
-          const cachedArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-
-          response = {
-            status: result.status,
-            statusText: result.status >= 200 && result.status < 300 ? 'OK' : 'Error',
-            ok: result.status >= 200 && result.status < 300,
-            headers: safeHeaders,
-            url: result.url,
-            text: async () => {
-              if (cachedText === null) {
-                const decoder = new TextDecoder('utf-8', { fatal: false });
-                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
-              }
-              return cachedText;
-            },
-            json: async () => {
-              if (cachedText === null) {
-                const decoder = new TextDecoder('utf-8', { fatal: false });
-                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
-              }
-              return JSON.parse(cachedText);
-            },
-            arrayBuffer: async () => {
-              return cachedArrayBuffer;
-            },
-          } as Response;
         } catch (invokeError: any) {
           // Rust 命令也失败了，记录详细错误信息
           const invokeErrorMsg = String(invokeError?.message || invokeError || '');
@@ -441,6 +482,7 @@ async function executeRequest(
           // 抛出包含详细信息的错误
           throw new Error(`download_binary 失败: ${invokeErrorMsg} (原始错误: ${errMsg})`);
         }
+      }
       }
     } else {
       // 浏览器环境：Cookie 为 forbidden 头，须走同源 __reader_http 代理（见 web-http-proxy.ts）

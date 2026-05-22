@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { clearCoverCacheDirectoryCache } from '@/lib/cover/cover-cache-path';
 import { clearAppDataDirCache } from '@/lib/platform/app-data-dir';
 
 export type ConfigJson = Record<string, unknown> & { dataDir?: string | null };
@@ -22,6 +23,7 @@ export async function getConfig(): Promise<ConfigJson> {
 export async function setConfig(config: ConfigJson): Promise<void> {
   await invoke('set_config', { config });
   clearAppDataDirCache();
+  clearCoverCacheDirectoryCache();
 }
 
 /**

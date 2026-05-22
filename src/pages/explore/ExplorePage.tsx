@@ -3,14 +3,16 @@
  */
 
 import {
+  type Accessor,
+  type Component,
   createEffect,
   createMemo,
   createResource,
   createSignal,
-  onMount,
   Show,
   untrack,
 } from 'solid-js';
+import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
@@ -24,6 +26,7 @@ import {
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
 import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
+import { pickDefaultExploreHubSection } from '@/lib/book-source/explore-nav-items';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
 import {
   explorePageLayoutStore,
@@ -42,6 +45,8 @@ import { ExploreSectionsPanel } from '@/components/explore/ExploreSectionsPanel'
 import { ExploreSourcePageContent } from '@/pages/explore/ExploreSourcePageContent';
 
 export interface ExplorePageProps {
+  /** 为 false 时保留 UI 状态但不拉取发现分类/书籍列表（侧边栏隐藏态） */
+  active?: boolean | Accessor<boolean>;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
   showPaginationPreferenceDialog?: boolean;
@@ -59,7 +64,8 @@ function sectionsMatch(a: ExploreSection, b: ExploreSection): boolean {
 
 const EXPLORE_PAGE_TITLE = '探索';
 
-export function ExplorePage(props: ExplorePageProps) {
+export const ExplorePage: Component<ExplorePageProps> = (props) => {
+  const isActive = createMemo(() => readShellPageActive(props.active));
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [selectedSourceUrl, setSelectedSourceUrl] = createSignal<string | null>(null);
   const [selectedSection, setSelectedSection] = createSignal<ExploreSection | null>(null);
@@ -67,6 +73,11 @@ export function ExplorePage(props: ExplorePageProps) {
   /** 与 dynamicSections 最后一次 ready 对齐的 args 版本（用于筛选变更后立即骨架屏） */
   const [loadedExploreArgsVersion, setLoadedExploreArgsVersion] = createSignal(-1);
   const [listRefreshKey, setListRefreshKey] = createSignal(0);
+  /** 脚本分类重载期间保留上一份列表，避免切回探索页时整页骨架屏 */
+  const [sectionsSnapshot, setSectionsSnapshot] = createSignal<{
+    key: string;
+    sections: ExploreSection[];
+  } | null>(null);
 
   const sourceDropdownEnabled = () => explorePageLayoutStore.settings.sourceDropdownEnabled;
   const sourceTabsEnabled = () => explorePageLayoutStore.settings.sourceTabsEnabled;
@@ -79,6 +90,7 @@ export function ExplorePage(props: ExplorePageProps) {
 
   const [dynamicSections] = createResource(
     () => {
+      if (!isActive()) return null;
       const s = selectedSource();
       const v = exploreArgsVersion();
       if (!s) return null;
@@ -90,8 +102,14 @@ export function ExplorePage(props: ExplorePageProps) {
 
   const usesScriptExplore = createMemo(() => isExploreUrlScript(selectedSource()?.exploreUrl));
 
+  const sectionsSnapshotKey = () => {
+    const s = selectedSource();
+    if (!s) return '';
+    return `${s.sourceUrl}\0${exploreArgsVersion()}`;
+  };
+
   const sectionsLoading = createMemo(() => {
-    if (!usesScriptExplore()) return false;
+    if (!isActive() || !usesScriptExplore()) return false;
     return shouldShowExploreSectionsSkeleton(
       true,
       exploreArgsVersion(),
@@ -104,11 +122,29 @@ export function ExplorePage(props: ExplorePageProps) {
     const s = selectedSource();
     if (!s) return [];
     if (isExploreUrlScript(s.exploreUrl)) {
-      if (sectionsLoading()) return [];
+      if (sectionsLoading()) {
+        const snap = sectionsSnapshot();
+        if (snap && snap.key === sectionsSnapshotKey()) return snap.sections;
+        return [];
+      }
       return resolveExploreSectionsFromResource(dynamicSections);
     }
     return getExploreSections(s);
   });
+
+  const showSectionsSkeleton = () => sectionsLoading() && sections().length === 0;
+
+  createEffect(() => {
+    if (!usesScriptExplore() || sectionsLoading()) return;
+    const resolved = resolveExploreSectionsFromResource(dynamicSections);
+    if (resolved.length === 0) return;
+    setSectionsSnapshot({ key: sectionsSnapshotKey(), sections: resolved });
+  });
+
+  const showBookList = () => {
+    const sec = selectedSection();
+    return !!(selectedSource() && sec?.url?.trim());
+  };
 
   const sectionsError = () =>
     isExploreUrlScript(selectedSource()?.exploreUrl) && dynamicSections.state === 'errored'
@@ -134,12 +170,21 @@ export function ExplorePage(props: ExplorePageProps) {
     }
   }
 
-  onMount(async () => {
-    await initExplorePageLayoutSettings();
-    await loadSources();
+  let layoutSettingsInitialized = false;
+  createEffect(() => {
+    if (!isActive() || layoutSettingsInitialized) return;
+    layoutSettingsInitialized = true;
+    void initExplorePageLayoutSettings();
   });
 
   createEffect(() => {
+    if (!isActive()) return;
+    if (sources().length > 0) return;
+    void loadSources();
+  });
+
+  createEffect(() => {
+    if (!isActive()) return;
     if (!usesScriptExplore()) {
       setLoadedExploreArgsVersion(exploreArgsVersion());
       return;
@@ -150,13 +195,16 @@ export function ExplorePage(props: ExplorePageProps) {
   });
 
   createEffect(() => {
+    if (!isActive()) return;
     const s = selectedSource();
     const secs = sections();
+    if (!s || secs.length === 0 || sectionsLoading()) return;
     const sel = untrack(selectedSection);
-    if (!s || secs.length === 0) return;
     if (sel && secs.some((x) => sectionsMatch(x, sel))) return;
-    const firstOpenable = secs.find((x) => shouldOpenExplorePageForSection(x));
-    setSelectedSection(firstOpenable ?? null);
+    const next = pickDefaultExploreHubSection(secs);
+    setSelectedSection(next);
+    // 与 handleSectionSelect 一致：refreshKey 保持 0，pageCacheStore 才能在再次进入时命中
+    if (next?.url?.trim()) setListRefreshKey(0);
   });
 
   const pageDescription = () => {
@@ -183,6 +231,7 @@ export function ExplorePage(props: ExplorePageProps) {
     setExploreArgsVersion(0);
     setLoadedExploreArgsVersion(-1);
     setListRefreshKey(0);
+    setSectionsSnapshot(null);
   }
 
   async function handleSelectFilterChange(section: ExploreSection, value: string) {
@@ -216,15 +265,14 @@ export function ExplorePage(props: ExplorePageProps) {
         title={EXPLORE_PAGE_TITLE}
         description={pageDescription()}
         titleSlot={
-          showSourceDropdown() ? (
-            <ExploreSourceTitleDropdown
-              title={dropdownTitle()}
-              description={dropdownDescription()}
-              sources={sources()}
-              currentSourceUrl={selectedSourceUrl()}
-              onSourceChange={handleSourceChange}
-            />
-          ) : undefined
+          <ExploreSourceTitleDropdown
+            title={showSourceDropdown() ? dropdownTitle() : EXPLORE_PAGE_TITLE}
+            description={showSourceDropdown() ? dropdownDescription() : pageDescription()}
+            dropdownEnabled={showSourceDropdown()}
+            sources={sources()}
+            currentSourceUrl={selectedSourceUrl()}
+            onSourceChange={handleSourceChange}
+          />
         }
         below={
           showSourceTabs() ? (
@@ -256,33 +304,33 @@ export function ExplorePage(props: ExplorePageProps) {
         onSelectFilterChange={handleSelectFilterChange}
       />
 
-      <Show when={sectionsLoading()}>
-        <div class={cn(mainShellPageScroll, 'pb-4')}>
+      <Show when={showSectionsSkeleton()}>
+        <div class={cn(mainShellPageScroll, 'flex-1 min-h-0')}>
           <ExploreBookListSkeleton />
+        </div>
+      </Show>
+      <Show when={showBookList()}>
+        <div
+          class={cn(
+            'flex-1 min-h-0 overflow-hidden',
+            (!isActive() || showSectionsSkeleton()) && 'hidden',
+          )}
+        >
+          <ExploreSourcePageContent
+            source={selectedSource()!}
+            section={selectedSection()!}
+            refreshKey={listRefreshKey()}
+            onOpenBook={props.onOpenBook}
+            onOpenBookInfo={props.onOpenBookInfo}
+            showPaginationPreferenceDialog={props.showPaginationPreferenceDialog}
+            onPaginationPreferenceDialogChange={props.onPaginationPreferenceDialogChange}
+          />
         </div>
       </Show>
       <Show
         when={
-          !sectionsLoading() &&
-          selectedSource() &&
-          selectedSection() &&
-          selectedSection()!.url?.trim()
-        }
-      >
-        <ExploreSourcePageContent
-          source={selectedSource()!}
-          section={selectedSection()!}
-          refreshKey={listRefreshKey()}
-          onOpenBook={props.onOpenBook}
-          onOpenBookInfo={props.onOpenBookInfo}
-          showPaginationPreferenceDialog={props.showPaginationPreferenceDialog}
-          onPaginationPreferenceDialogChange={props.onPaginationPreferenceDialogChange}
-        />
-      </Show>
-      <Show
-        when={
-          !sectionsLoading() &&
-          !(selectedSource() && selectedSection() && selectedSection()!.url?.trim())
+          !showSectionsSkeleton() &&
+          !showBookList()
         }
       >
         <div
@@ -296,7 +344,7 @@ export function ExplorePage(props: ExplorePageProps) {
       </Show>
     </div>
   );
-}
+};
 
 /** @deprecated 使用 ExplorePage */
 export const ScoutPage = ExplorePage;

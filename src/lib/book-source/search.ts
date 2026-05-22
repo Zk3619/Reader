@@ -30,7 +30,7 @@ export async function searchBook(
     // 发起请求
     const headers = parseHeaders(source.header);
     const html = await get(searchUrl, {
-      ...headers,
+      headers,
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout: 30000,

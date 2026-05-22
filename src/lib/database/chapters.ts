@@ -11,7 +11,7 @@ import type { BookChapter, NewBookChapter } from '@/types';
  */
 export async function getChapterList(bookUrl: string): Promise<BookChapter[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapters WHERE bookUrl = ? ORDER BY "index"',
     [bookUrl]
   );
@@ -27,7 +27,7 @@ export async function getChapterListByRange(
   end: number
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapters WHERE bookUrl = ? AND "index" >= ? AND "index" <= ? ORDER BY "index"',
     [bookUrl, start, end]
   );
@@ -42,7 +42,7 @@ export async function getChapter(
   chapterIndex: number
 ): Promise<BookChapter | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapters WHERE bookUrl = ? AND "index" = ?',
     [bookUrl, chapterIndex]
   );
@@ -57,7 +57,7 @@ export async function getChapterByTitle(
   title: string
 ): Promise<BookChapter | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapters WHERE bookUrl = ? AND title = ?',
     [bookUrl, title]
   );
@@ -72,7 +72,7 @@ export async function searchChapters(
   keyword: string
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapters WHERE bookUrl = ? AND title LIKE ? || ? || ? ORDER BY "index"',
     [bookUrl, '%', keyword, '%']
   );
@@ -89,7 +89,7 @@ export async function searchChaptersInRange(
   end: number
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM chapters 
      WHERE bookUrl = ? AND "index" >= ? AND "index" <= ? 
      AND title LIKE ? || ? || ?
@@ -104,7 +104,7 @@ export async function searchChaptersInRange(
  */
 export async function getChapterCount(bookUrl: string): Promise<number> {
   const db = await getDatabase();
-  const rows = await db.select<Array<{ count: number }>>(
+  const rows = await db.select<{ count: number }>(
     'SELECT COUNT(url) as count FROM chapters WHERE bookUrl = ?',
     [bookUrl]
   );
@@ -144,9 +144,6 @@ export async function insertChapter(chapter: NewBookChapter): Promise<void> {
 export async function insertChapters(
   chapters: NewBookChapter[]
 ): Promise<void> {
-  const db = await getDatabase();
-  
-  // 使用事务批量插入
   for (const chapter of chapters) {
     await insertChapter(chapter);
   }

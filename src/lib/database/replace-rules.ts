@@ -11,7 +11,7 @@ import type { ReplaceRule } from '@/types';
  */
 export async function getAllReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM replace_rules ORDER BY sortOrder ASC'
   );
   return rows.map(row => mapRowToRule(row));
@@ -24,7 +24,7 @@ export async function searchReplaceRules(
   keyword: string
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM replace_rules 
      WHERE "group" LIKE '%' || ? || '%' OR name LIKE '%' || ? || '%'
      ORDER BY sortOrder ASC`,
@@ -40,7 +40,7 @@ export async function getReplaceRulesByGroup(
   groupName: string
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM replace_rules 
      WHERE "group" LIKE '%' || ? || '%'
      ORDER BY sortOrder ASC`,
@@ -54,7 +54,7 @@ export async function getReplaceRulesByGroup(
  */
 export async function getNoGroupReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM replace_rules 
      WHERE "group" IS NULL OR TRIM("group") = '' OR TRIM("group") LIKE '%未分组%'
      ORDER BY sortOrder ASC`
@@ -67,7 +67,7 @@ export async function getNoGroupReplaceRules(): Promise<ReplaceRule[]> {
  */
 export async function getEnabledReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM replace_rules WHERE isEnabled = 1 ORDER BY sortOrder ASC'
   );
   return rows.map(row => mapRowToRule(row));
@@ -81,7 +81,7 @@ export async function getEnabledRulesByContentScope(
   origin: string
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM replace_rules 
      WHERE isEnabled = 1 AND scopeContent = 1
      AND (scope LIKE '%' || ? || '%' OR scope LIKE '%' || ? || '%' OR scope IS NULL OR scope = '')
@@ -100,7 +100,7 @@ export async function getEnabledRulesByTitleScope(
   origin: string
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     `SELECT * FROM replace_rules 
      WHERE isEnabled = 1 AND scopeTitle = 1
      AND (scope LIKE '%' || ? || '%' OR scope LIKE '%' || ? || '%' OR scope IS NULL OR scope = '')
@@ -116,7 +116,7 @@ export async function getEnabledRulesByTitleScope(
  */
 export async function getReplaceRuleById(id: number): Promise<ReplaceRule | null> {
   const db = await getDatabase();
-  const rows = await db.select<Array<Record<string, unknown>>>(
+  const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM replace_rules WHERE id = ?',
     [id]
   );
@@ -149,9 +149,9 @@ export async function insertReplaceRule(rule: ReplaceRule): Promise<number> {
       rule.order,
     ]
   );
-  
+
   // 获取插入的ID
-  const rows = await db.select<Array<{ id: number }>>(
+  const rows = await db.select<{ id: number }>(
     'SELECT last_insert_rowid() as id'
   );
   return rows[0]?.id ?? 0;
@@ -209,7 +209,7 @@ export async function enableAllReplaceRules(enabled: boolean): Promise<void> {
  */
 export async function getAllRuleGroups(): Promise<string[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<{ group: string }>>(
+  const rows = await db.select<{ group: string }>(
     `SELECT DISTINCT "group" FROM replace_rules 
      WHERE "group" IS NOT NULL AND TRIM("group") != ''`
   );

@@ -5,7 +5,8 @@
  *   - 宽屏（桌面端）：左右分栏，左侧封面+名称，右侧详情+简介（参考 layout-land/activity_book_info.xml）
  */
 
-import { createSignal, Show, onMount, For } from 'solid-js';
+import { createSignal, createEffect, Show, onMount, For } from 'solid-js';
+import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/shell/PageHeader';
@@ -30,23 +31,42 @@ import { getBookInfo } from '@/lib/book-source/detail';
 import { getSource } from '@/lib/database/sources';
 import { openUrlInApp } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/shared/AppToasts';
+import {
+  loadCoverImageObjectUrl,
+  shouldFetchCoverAsBlob,
+} from '@/lib/http/cover-image-loader';
 import { pageCacheStore } from '@/stores/page-cache';
 import { bookshelfStore } from '@/stores/bookshelf';
-import type { SearchBook } from '@/types';
+import type { BookSource, SearchBook } from '@/types';
 import type { Book } from '@/types';
 
-/* ─── 封面图片组件 ─── */
+/** 模糊背景 / 大图：跨域用 blob，同源可直接用 coverUrl */
+function resolveCoverBackgroundUrl(
+  coverUrl: string | undefined,
+  blobUrl: string | null,
+): string | undefined {
+  const raw = coverUrl?.trim();
+  if (!raw) return undefined;
+  if (blobUrl) return blobUrl;
+  if (!shouldFetchCoverAsBlob(raw)) return raw;
+  return undefined;
+}
 
-function CoverImage(props: {
+/* ─── 封面（fetch/blob + 磁盘缓存） ─── */
+
+function CoverImageButton(props: {
   coverUrl?: string;
+  bookUrl: string;
+  referer?: string;
+  source?: BookSource | null;
   name: string;
-  coverError: boolean;
-  onCoverError: () => void;
+  onCoverUrlRefreshed?: (url: string) => void;
   onClick?: () => void;
   class?: string;
 }) {
   return (
     <button
+      type="button"
       onClick={props.onClick}
       class={cn(
         'rounded-md shadow-2xl overflow-hidden bg-muted/50 focus:outline-none transition-transform hover:scale-[1.02] active:scale-[0.98]',
@@ -54,21 +74,20 @@ function CoverImage(props: {
       )}
       aria-label="查看封面大图"
     >
-      <Show
-        when={props.coverUrl && !props.coverError}
+      <BookCoverImg
+        src={props.coverUrl}
+        referer={props.referer}
+        source={props.source}
+        bookUrl={props.bookUrl}
+        onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+        alt={props.name}
+        class="h-full w-full object-cover"
         fallback={
           <div class="flex h-full w-full items-center justify-center">
             <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
           </div>
         }
-      >
-        <img
-          src={props.coverUrl}
-          alt={props.name}
-          class="h-full w-full object-cover"
-          onError={props.onCoverError}
-        />
-      </Show>
+      />
     </button>
   );
 }
@@ -167,6 +186,8 @@ function isMeaningful(s: string | undefined | null): boolean {
 
 export interface BookInfoPageProps {
   book: SearchBook;
+  /** 从发现/探索进入时已有书源，可立即加载封面 */
+  source?: BookSource;
   onBack: () => void;
   onOpenBook: (book: Book) => void;
 }
@@ -175,7 +196,10 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [isInShelf, setIsInShelf] = createSignal(false);
   const [isAdding, setIsAdding] = createSignal(false);
   const [isRemoving, setIsRemoving] = createSignal(false);
-  const [coverError, setCoverError] = createSignal(false);
+  const [bookSource, setBookSource] = createSignal<BookSource | undefined>(
+    props.source,
+  );
+  const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
   const [introExpanded, setIntroExpanded] = createSignal(false);
   const [showCoverDialog, setShowCoverDialog] = createSignal(false);
   const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
@@ -298,6 +322,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
     const inShelf = await hasBook(props.book.bookUrl);
     setIsInShelf(inShelf);
 
+    if (!bookSource()) {
+      const source = await getSource(props.book.origin);
+      setBookSource(source ?? undefined);
+    }
+
     const bookUrl = props.book.tocUrl || props.book.bookUrl;
 
     console.log('[BookInfo] 刷新检查:', {
@@ -379,6 +408,55 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   // 使用刷新后的数据
   const currentBook = () => bookData();
+
+  const cacheBookInfoKey = () => props.book.tocUrl || props.book.bookUrl;
+
+  const handleCoverUrlRefreshed = (fresh: string) => {
+    setBookData((b) => {
+      const next = { ...b, coverUrl: fresh };
+      const key = cacheBookInfoKey();
+      if (key) pageCacheStore.setBookInfoCache(key, next);
+      return next;
+    });
+  };
+
+  const coverLoadOptions = () => ({
+    referer: currentBook().origin,
+    source: bookSource() ?? null,
+    bookUrl: props.book.bookUrl,
+    onCoverUrlRefreshed: handleCoverUrlRefreshed,
+  });
+
+  const coverBackgroundSrc = () =>
+    resolveCoverBackgroundUrl(currentBook().coverUrl, coverBlobUrl());
+
+  createEffect(() => {
+    const url = currentBook().coverUrl?.trim();
+    if (!url || !shouldFetchCoverAsBlob(url)) {
+      setCoverBlobUrl(null);
+      return;
+    }
+    const origin = currentBook().origin;
+    if (!bookSource() && origin && !/^https?:\/\//i.test(origin)) {
+      return;
+    }
+
+    let cancelled = false;
+    void loadCoverImageObjectUrl(url, coverLoadOptions()).then((blob) => {
+      if (!cancelled) setCoverBlobUrl(blob);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  createEffect(() => {
+    const blob = coverBlobUrl();
+    return () => {
+      if (blob) URL.revokeObjectURL(blob);
+    };
+  });
 
   /* ── 书名 + 标签区块（桌面端用于左栏，移动端用于信息区顶部） ── */
   function NameAndBadges(props_inner: { class?: string; center?: boolean; onBlurBg?: boolean }) {
@@ -539,23 +617,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   // 根据主题计算模糊背景的样式
   const blurBgStyle = () => {
-    const coverUrl = currentBook().coverUrl;
-    if (!coverUrl) return {};
+    const bgUrl = coverBackgroundSrc();
+    if (!bgUrl) return {};
     if (isDark()) {
-      // 深色主题：更暗的模糊背景
       return {
-        'background-image': `url(${coverUrl})`,
+        'background-image': `url(${bgUrl})`,
         filter: 'blur(40px) brightness(0.35)',
         transform: 'scale(1.1)',
       };
-    } else {
-      // 浅色主题：更亮的模糊背景
-      return {
-        'background-image': `url(${coverUrl})`,
-        filter: 'blur(40px) brightness(0.7) saturate(1.1)',
-        transform: 'scale(1.1)',
-      };
     }
+    return {
+      'background-image': `url(${bgUrl})`,
+      filter: 'blur(40px) brightness(0.7) saturate(1.1)',
+      transform: 'scale(1.1)',
+    };
   };
 
   // 根据主题计算遮罩层样式
@@ -575,7 +650,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
   return (
     <div class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background">
       {/* ── 窄屏：全屏模糊背景（受主题影响） ── */}
-      <Show when={props.book.coverUrl && !coverError()}>
+      <Show when={coverBackgroundSrc()}>
         <div class="absolute inset-0 md:hidden">
           <div
             class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-300"
@@ -618,11 +693,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
               <div class="absolute inset-x-0 bottom-0 top-[88px] rounded-t-[128px] bg-background pointer-events-none" />
               {/* 封面 — z-10 使其浮于白色卡片之上 */}
               <div class="relative z-10 flex justify-center pt-2 pb-5">
-                <CoverImage
+                <CoverImageButton
                   coverUrl={currentBook().coverUrl}
+                  bookUrl={props.book.bookUrl}
+                  referer={currentBook().origin}
+                  source={bookSource()}
                   name={currentBook().name}
-                  coverError={coverError()}
-                  onCoverError={() => setCoverError(true)}
+                  onCoverUrlRefreshed={handleCoverUrlRefreshed}
                   onClick={() => setShowCoverDialog(true)}
                   class="h-[160px] w-[110px]"
                 />
@@ -704,7 +781,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             {/* ── 左栏：封面区域（仅此区域有模糊背景，不参与滚动） ── */}
             <div class="relative flex min-h-0 w-[340px] shrink-0 flex-col overflow-hidden">
               {/* 宽屏：仅封面区域的模糊背景 */}
-              <Show when={props.book.coverUrl && !coverError()}>
+              <Show when={coverBackgroundSrc()}>
                 <div class="absolute inset-0">
                   <div
                     class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-300"
@@ -715,11 +792,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
               </Show>
               {/* 封面 + 书名 + 作者（居中，受主题影响的文字颜色） */}
               <div class="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
-                <CoverImage
+                <CoverImageButton
                   coverUrl={currentBook().coverUrl}
+                  bookUrl={props.book.bookUrl}
+                  referer={currentBook().origin}
+                  source={bookSource()}
                   name={currentBook().name}
-                  coverError={coverError()}
-                  onCoverError={() => setCoverError(true)}
+                  onCoverUrlRefreshed={handleCoverUrlRefreshed}
                   onClick={() => setShowCoverDialog(true)}
                   class="h-[200px] w-[130px] lg:h-[240px] lg:w-[156px] mb-5"
                 />
@@ -790,13 +869,17 @@ export function BookInfoPage(props: BookInfoPageProps) {
       </div>
 
       {/* ── 封面大图对话框 ── */}
-      <Show when={showCoverDialog() && currentBook().coverUrl && !coverError()}>
+      <Show when={showCoverDialog() && coverBackgroundSrc()}>
         <div
           class="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-sm"
           onClick={() => setShowCoverDialog(false)}
         >
           <div class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden shadow-2xl">
-            <img src={currentBook().coverUrl} alt={currentBook().name} class="max-w-full max-h-[80dvh] object-contain" />
+            <img
+              src={coverBackgroundSrc()}
+              alt={currentBook().name}
+              class="max-w-full max-h-[80dvh] object-contain"
+            />
             <button
               onClick={() => setShowCoverDialog(false)}
               class="absolute top-2 right-2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"

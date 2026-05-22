@@ -17,6 +17,7 @@ import {
   mergeAjaxCookieHeaders,
   normalizeControlSettingsCookieHeader,
   normalizeLegadoCookieHeader,
+  mergeLegadoCookieHeaderStrings,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
@@ -121,21 +122,138 @@ function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
 function getScriptCookieForUrl(
   cookieObj: { getCookie: (url: string) => string },
   resolved: string,
-  baseUrl: string
+  baseUrl: string,
+  options?: { omitBaseUrlFallback?: boolean }
 ): string {
   const controlBase = resolved.replace(/\/control\/?$/i, '');
   let cookieStr =
     cookieObj.getCookie(resolved) ||
-    (controlBase && controlBase !== resolved ? cookieObj.getCookie(controlBase) : '') ||
-    (baseUrl ? cookieObj.getCookie(baseUrl) : '');
+    (controlBase && controlBase !== resolved ? cookieObj.getCookie(controlBase) : '');
+  if (!cookieStr && !options?.omitBaseUrlFallback && baseUrl) {
+    cookieStr = cookieObj.getCookie(baseUrl);
+  }
   if (!cookieStr && resolved.startsWith('http')) {
     try {
-      cookieStr = cookieObj.getCookie(new URL(resolved).origin);
+      const u = new URL(resolved);
+      cookieStr =
+        cookieObj.getCookie(u.origin) ||
+        cookieObj.getCookie(u.hostname) ||
+        cookieObj.getCookie(`https://${u.hostname}`) ||
+        '';
     } catch {
       /* ignore */
     }
   }
   return cookieStr;
+}
+
+/** 与书源脚本 cookie 表一致（键可为 origin 或 fanqienovel.com 等裸 host） */
+export function readSourceCookieStore(source: BookSource): Map<string, string> {
+  const store = new Map<string, string>();
+  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getSourceUrlIdentifier(source));
+  try {
+    const raw = localStorage.getItem(cookiesKey);
+    if (!raw) return store;
+    const obj = JSON.parse(raw) as Record<string, string>;
+    if (obj && typeof obj === 'object') {
+      Object.entries(obj).forEach(([k, v]) => {
+        if (typeof v === 'string') store.set(k, v);
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+  return store;
+}
+
+/** 书源 cookie 存储键 → 可用作 Referer 的 origin（https://…/） */
+export function cookieStorageKeyToOrigin(key: string): string | undefined {
+  const k = key.trim();
+  if (!k) return undefined;
+  if (/^https?:\/\//i.test(k)) {
+    try {
+      return `${new URL(k).origin}/`;
+    } catch {
+      return undefined;
+    }
+  }
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(k)) {
+    return `https://${k}/`;
+  }
+  return undefined;
+}
+
+/** 封面：仅带图床域或含 sessionid 的读者端 Cookie，避免聚合站 qttoken 导致 403 */
+export function getStoredSourceCookiesForCover(
+  source: BookSource,
+  coverUrl: string,
+): string {
+  let normalized = coverUrl.trim();
+  if (normalized.startsWith('//')) {
+    normalized =
+      typeof window !== 'undefined'
+        ? `${window.location.protocol}${normalized}`
+        : `https:${normalized}`;
+  }
+  const direct = getStoredSourceCookiesForUrl(source, normalized, {
+    omitBaseUrlFallback: true,
+  });
+  let merged = direct.trim();
+  const coverHost = (() => {
+    try {
+      return new URL(normalized).hostname;
+    } catch {
+      return '';
+    }
+  })();
+
+  const store = readSourceCookieStore(source);
+  for (const [key, val] of store) {
+    const v = (val ?? '').trim();
+    if (!v) continue;
+    const origin = cookieStorageKeyToOrigin(key);
+    if (!origin) continue;
+    let keyHost = '';
+    try {
+      keyHost = new URL(origin).hostname;
+    } catch {
+      continue;
+    }
+    const isCoverDomain = coverHost && keyHost === coverHost;
+    const isReaderSession = /sessionid=/i.test(v);
+    if (isCoverDomain || isReaderSession) {
+      merged = mergeLegadoCookieHeaderStrings(
+        merged,
+        normalizeLegadoCookieHeader(v),
+      );
+    }
+  }
+
+  const fanqieBare = store.get('fanqienovel.com')?.trim();
+  if (fanqieBare && /sessionid=/i.test(fanqieBare)) {
+    merged = mergeLegadoCookieHeaderStrings(
+      merged,
+      normalizeLegadoCookieHeader(fanqieBare),
+    );
+  }
+
+  try {
+    const login = getStoredLoginInfo(getSourceUrlIdentifier(source));
+    const manual = String(login['手动填写番茄token(可不填)'] ?? '').trim();
+    if (manual) {
+      const cookiePart = /sessionid=/i.test(manual)
+        ? manual
+        : `sessionid=${manual}`;
+      merged = mergeLegadoCookieHeaderStrings(
+        merged,
+        normalizeLegadoCookieHeader(cookiePart),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return merged;
 }
 
 function cookiesForInnerWeb(
@@ -236,8 +354,19 @@ export async function clearSourceLoginState(source: BookSource): Promise<void> {
   }
 }
 
+export type StoredSourceCookiesOptions = {
+  /**
+   * 封面等第三方 CDN：勿回落书源 baseUrl（避免聚合站 qttoken 发到无关图床导致 403）。
+   */
+  omitBaseUrlFallback?: boolean;
+};
+
 /** 读取该书源已持久化的 Cookie 串，供打开内嵌页时注入（与脚本内 cookie 表一致） */
-export function getStoredSourceCookiesForUrl(source: BookSource, targetUrl: string): string {
+export function getStoredSourceCookiesForUrl(
+  source: BookSource,
+  targetUrl: string,
+  options?: StoredSourceCookiesOptions,
+): string {
   const sourceUrl = getSourceUrlIdentifier(source);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
   const store = new Map<string, string>();
@@ -260,7 +389,31 @@ export function getStoredSourceCookiesForUrl(source: BookSource, targetUrl: stri
     baseUrl && !targetUrl.trim().startsWith('data:')
       ? resolveUrl(baseUrl, targetUrl.trim())
       : targetUrl.trim();
-  return cookiesForInnerWeb(cookieObj, resolved, baseUrl);
+  const raw = getScriptCookieForUrl(cookieObj, resolved, baseUrl, options);
+  return normalizeLegadoCookieHeader(raw, getOrCreateAndroidId());
+}
+
+/** 合并该书源 cookie 表中所有域（如聚合站 + 番茄登录域） */
+export function getStoredSourceCookiesMerged(source: BookSource): string {
+  const sourceUrl = getSourceUrlIdentifier(source);
+  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
+  let merged = '';
+  try {
+    const raw = localStorage.getItem(cookiesKey);
+    if (!raw) return merged;
+    const obj = JSON.parse(raw) as Record<string, string>;
+    if (!obj || typeof obj !== 'object') return merged;
+    for (const value of Object.values(obj)) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      merged = mergeLegadoCookieHeaderStrings(
+        merged,
+        normalizeLegadoCookieHeader(value),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  return merged;
 }
 
 /** 获取该书源在 localStorage 中保存的登录信息（邮箱、密码等），供登录对话框预填 */

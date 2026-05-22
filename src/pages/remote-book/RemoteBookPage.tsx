@@ -458,7 +458,7 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
                         checked={selectedBooks().has(book.path)}
                         onChange={() => toggleSelection(book.path)}
                         disabled={book.isOnBookShelf}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e: MouseEvent) => e.stopPropagation()}
                       />
                     </Show>
 

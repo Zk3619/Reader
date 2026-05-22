@@ -359,6 +359,10 @@ export function BookGroup(props: BookGroupProps = {}) {
 
   // 与书源页一致：有父级数据则直接用，不重复请求
   onMount(async () => {
+    const onBookshelfRefresh = () => void reloadAllGroupBookCounts();
+    window.addEventListener('bookshelf-refresh', onBookshelfRefresh);
+    onCleanup(() => window.removeEventListener('bookshelf-refresh', onBookshelfRefresh));
+
     await initBookshelfLayoutSettings();
     const initial = props.initialGroups;
     if (initial?.length) {
@@ -367,7 +371,7 @@ export function BookGroup(props: BookGroupProps = {}) {
         setAllGroupsOrder([...all].sort((a, b) => a.order - b.order));
       });
     } else {
-      loadGroups();
+      await loadGroups();
     }
   });
 
@@ -460,29 +464,34 @@ export function BookGroup(props: BookGroupProps = {}) {
     onPinBottom: handlePinBottom,
   };
 
-  // 缓存分组书籍数量（避免重复查询）
   const [groupBookCounts, setGroupBookCounts] = createSignal<Map<number, number>>(new Map());
 
-  /**
-   * 获取分组中的书籍数量（带缓存）
-   */
-  async function loadGroupBookCount(group: BookGroup): Promise<void> {
-    if (groupBookCounts().has(group.groupId)) return;
-    try {
-      const books = await getBooksByGroup(group.groupId);
-      setGroupBookCounts((prev) => new Map(prev).set(group.groupId, books.length));
-    } catch {
-      setGroupBookCounts((prev) => new Map(prev).set(group.groupId, 0));
-    }
+  /** 重新统计各分组书籍数（导入/删书后由 bookshelf-refresh 触发） */
+  async function reloadAllGroupBookCounts() {
+    const list = groups();
+    if (!list.length) return;
+    const entries = await Promise.all(
+      list.map(async (g) => {
+        try {
+          const n = (await getBooksByGroup(g.groupId)).length;
+          return [g.groupId, n] as const;
+        } catch {
+          return [g.groupId, 0] as const;
+        }
+      }),
+    );
+    setGroupBookCounts(new Map(entries));
   }
 
-  /**
-   * 获取分组书籍数量（从缓存）
-   */
   function getGroupBookCount(group: BookGroup): number {
-    loadGroupBookCount(group); // 触发加载（如果未缓存）
     return groupBookCounts().get(group.groupId) ?? 0;
   }
+
+  createEffect(() => {
+    const list = groups();
+    if (!list.length) return;
+    void reloadAllGroupBookCounts();
+  });
 
   return (
     <div class="w-full space-y-6">

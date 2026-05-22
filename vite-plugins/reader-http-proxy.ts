@@ -117,11 +117,26 @@ function collectUpstreamSetCookies(headers: Headers): string[] {
   return single ? [single] : [];
 }
 
+const DEFAULT_BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function resolveUpstreamReferer(
+  targetUrl: URL,
+  session: InnerWebSession | undefined,
+  refererOverride?: string
+): string {
+  if (refererOverride && /^https?:\/\//i.test(refererOverride)) {
+    return refererOverride;
+  }
+  return session?.target ?? `${targetUrl.origin}/`;
+}
+
 async function forwardToTarget(
   target: string,
   req: IncomingMessage,
   res: ServerResponse,
-  sessionId?: string
+  sessionId?: string,
+  refererOverride?: string
 ): Promise<void> {
   target = normalizeProxyTarget(target);
 
@@ -140,9 +155,20 @@ async function forwardToTarget(
     }
   }
 
+  const referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
+  let origin = targetUrl.origin;
+  try {
+    origin = new URL(referer).origin;
+  } catch {
+    /* keep target origin */
+  }
+
   upstreamHeaders.set('Host', targetUrl.host);
-  upstreamHeaders.set('Origin', targetUrl.origin);
-  upstreamHeaders.set('Referer', session?.target ?? `${targetUrl.origin}/`);
+  upstreamHeaders.set('Origin', origin);
+  upstreamHeaders.set('Referer', referer);
+  if (!upstreamHeaders.has('user-agent') && !upstreamHeaders.has('User-Agent')) {
+    upstreamHeaders.set('User-Agent', DEFAULT_BROWSER_UA);
+  }
 
   const cookie = req.headers[COOKIE_HEADER];
   if (cookie) {
@@ -382,9 +408,12 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
     }
 
     const proxySessionId = parsed.searchParams.get('session') ?? undefined;
+    const refererParam = parsed.searchParams.get('referer') ?? undefined;
+    const refererOverride =
+      refererParam && /^https?:\/\//i.test(refererParam) ? refererParam : undefined;
 
     try {
-      await forwardToTarget(target, req, res, proxySessionId);
+      await forwardToTarget(target, req, res, proxySessionId, refererOverride);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('[reader-http-proxy]', target, msg);

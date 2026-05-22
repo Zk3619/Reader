@@ -511,15 +511,18 @@ export function ReaderPage(props: ReaderPageProps) {
             </h1>
           }
         >
-          <button
-            type="button"
-            class="min-w-0 max-w-[40%] truncate text-left text-sm font-medium text-foreground transition-colors cursor-pointer hover:text-primary no-drag"
-            onClick={() => props.onOpenBookInfo!()}
-            aria-label="进入书籍信息页"
-            title="书籍信息"
-          >
-            {book()?.name ?? '—'}
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              as="button"
+              type="button"
+              class="min-w-0 max-w-[40%] truncate text-left text-sm font-medium text-foreground transition-colors cursor-pointer hover:text-primary no-drag"
+              onClick={() => props.onOpenBookInfo!()}
+              aria-label="进入书籍信息页"
+            >
+              {book()?.name ?? '—'}
+            </TooltipTrigger>
+            <TooltipContent>书籍信息</TooltipContent>
+          </Tooltip>
         </Show>
         <div class="min-w-0 flex-1" data-tauri-drag-region />
         {/* 宽屏时显示：换源/刷新/缓存/更多在沉浸左侧，整体右对齐 */}
@@ -681,9 +684,12 @@ export function ReaderPage(props: ReaderPageProps) {
             !statusBarVisible() && 'reader-bar-hidden'
           )}
         >
-          <span class="min-w-0 flex-1 truncate text-left" title={currentChapter()?.title}>
-            {currentChapter()?.title ?? '—'}
-          </span>
+          <Tooltip>
+            <TooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
+              {currentChapter()?.title ?? '—'}
+            </TooltipTrigger>
+            <TooltipContent>{currentChapter()?.title ?? '—'}</TooltipContent>
+          </Tooltip>
           <div class="flex shrink-0 items-center gap-3">
             <span>{chapterWordCountText() === '—' ? '—' : `${chapterWordCountText()}字`}</span>
             <span>本章 {chapterProgressPercent()}%</span>
@@ -732,17 +738,20 @@ export function ReaderPage(props: ReaderPageProps) {
               <ListIcon class="h-4 w-4" />
               <span>目录</span>
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-              onClick={() => {}}
-              aria-label="朗读"
-              title="敬请期待"
-            >
-              <VolumeIcon class="h-4 w-4" size={16} />
-              <span>朗读</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                as={Button}
+                variant="ghost"
+                size="sm"
+                class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
+                onClick={() => {}}
+                aria-label="朗读"
+              >
+                <VolumeIcon class="h-4 w-4" size={16} />
+                <span>朗读</span>
+              </TooltipTrigger>
+              <TooltipContent>朗读（敬请期待）</TooltipContent>
+            </Tooltip>
             <Button
               variant="ghost"
               size="sm"
