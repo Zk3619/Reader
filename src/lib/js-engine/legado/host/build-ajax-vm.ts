@@ -9,6 +9,8 @@ import { bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
 import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
+  mergeLegadoCookieHeaderStrings,
+  normalizeLegadoCookieHeader,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
@@ -100,8 +102,15 @@ export function bindJavaAjax(
       }
     }
     const headerCookie = String(headers.Cookie ?? headers.cookie ?? '').trim();
-    const mergedCookie = scriptCookie || headerCookie;
+    const mergedCookie =
+      scriptCookie && headerCookie
+        ? mergeLegadoCookieHeaderStrings(scriptCookie, headerCookie)
+        : scriptCookie || headerCookie;
     const hdrs = mergeAjaxCookieHeaders(headers, mergedCookie);
+    if (hdrs.Cookie?.trim()) {
+      const deviceId = options.getDeviceId?.();
+      hdrs.Cookie = normalizeLegadoCookieHeader(hdrs.Cookie, deviceId);
+    }
 
     let reqBody = body;
     if (options.normalizePostBody) {

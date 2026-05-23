@@ -89,8 +89,17 @@ function evalScript(
     }
     throw new Error(`Legado script error: ${msg}`);
   }
-  r.value.dispose();
-  rt.setGlobalResult(readGlobalResult(vm));
+  try {
+    const returnVal = vm.dump(r.value);
+    // 对齐 Legado AnalyzeRule.evalJS：优先使用脚本 return，而非全局 result
+    if (returnVal !== undefined && returnVal !== null) {
+      rt.setGlobalResult(returnVal);
+    } else {
+      rt.setGlobalResult(readGlobalResult(vm));
+    }
+  } finally {
+    r.value.dispose();
+  }
   return { status: 'done' };
 }
 

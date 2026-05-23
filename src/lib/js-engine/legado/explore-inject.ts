@@ -17,6 +17,10 @@ export interface ExploreInjectContext {
   host: string[];
   resolveUrl: (base: string, rel: string) => string;
   getOrCreateDeviceId: () => string;
+  /** 书源 args 中的 qttoken（与登录脚本一致，供 ajax Cookie 补全） */
+  getArgToken?: () => string;
+  /** 登录表单「密钥」字段 */
+  getFormKey?: () => string;
   cookie: {
     getCookie: (url: string) => string;
     setCookie: (url: string, value: string) => void;
@@ -95,6 +99,9 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
         request: ctx.request,
         applyDuration: dateVm.applyAjaxDuration,
         twoPassDefer: rt.coordinator.mode === 'two-pass',
+        getDeviceId: ctx.getOrCreateDeviceId,
+        getArgToken: ctx.getArgToken,
+        getFormKey: ctx.getFormKey,
       });
     });
 

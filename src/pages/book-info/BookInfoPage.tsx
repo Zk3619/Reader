@@ -6,7 +6,10 @@
  */
 
 import { createSignal, createEffect, Show, onMount, For } from 'solid-js';
-import { BookCoverImg } from '@/components/books/BookCoverImg';
+import { BookCoverPreviewButton } from '@/components/books/BookCoverPreviewButton';
+import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
+import { BookInfoChapterListDialog } from '@/components/books/BookInfoChapterListDialog';
+import { BookGroupPickDialog } from '@/components/bookshelf/BookGroupPickDialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/shell/PageHeader';
@@ -22,23 +25,32 @@ import {
   WordCountIcon,
   UpdateTimeIcon,
   TocMetaIcon,
-  XIcon,
+  GroupFolderIcon,
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
-import { hasBook } from '@/lib/database/books';
+import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+import { formatBookshelfBookGroupNames, bookshelfBookCustomGroupIds } from '@/lib/bookshelf/book-source-name';
+import {
+  formatBookIntroPlainText,
+  preferDetailField,
+  preferDetailIntro,
+} from '@/lib/book-source/intro-merge';
+import { collectBookBadgeEntries } from '@/lib/book-source/book-tags';
+import { getBook, hasBook, updateBooksGroupMask } from '@/lib/database/books';
+import { getAllGroups } from '@/lib/database/book-groups';
 import { getBookInfo } from '@/lib/book-source/detail';
+import { getChapterList } from '@/lib/book-source/chapters';
 import { getSource } from '@/lib/database/sources';
-import { openUrlInApp } from '@/lib/platform/open-url';
+import { getChapterList as getDbChapterList } from '@/lib/database/chapters';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { bookshelfStore } from '@/stores/bookshelf';
 import {
   loadCoverImageObjectUrl,
   shouldFetchCoverAsBlob,
 } from '@/lib/http/cover-image-loader';
 import { pageCacheStore } from '@/stores/page-cache';
-import { bookshelfStore } from '@/stores/bookshelf';
-import type { BookSource, SearchBook } from '@/types';
-import type { Book } from '@/types';
+import { isLocalBook } from '@/lib/local-book';
+import type { Book, BookChapter, BookGroup, BookSource, SearchBook } from '@/types';
 
 /** 模糊背景 / 大图：跨域用 blob，同源可直接用 coverUrl */
 function resolveCoverBackgroundUrl(
@@ -52,56 +64,48 @@ function resolveCoverBackgroundUrl(
   return undefined;
 }
 
-/* ─── 封面（fetch/blob + 磁盘缓存） ─── */
-
-function CoverImageButton(props: {
-  coverUrl?: string;
-  bookUrl: string;
-  referer?: string;
-  source?: BookSource | null;
-  name: string;
-  onCoverUrlRefreshed?: (url: string) => void;
-  onClick?: () => void;
-  class?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      class={cn(
-        'rounded-md shadow-2xl overflow-hidden bg-muted/50 focus:outline-none transition-transform hover:scale-[1.02] active:scale-[0.98]',
-        props.class,
-      )}
-      aria-label="查看封面大图"
-    >
-      <BookCoverImg
-        src={props.coverUrl}
-        referer={props.referer}
-        source={props.source}
-        bookUrl={props.bookUrl}
-        onCoverUrlRefreshed={props.onCoverUrlRefreshed}
-        alt={props.name}
-        class="h-full w-full object-cover"
-        fallback={
-          <div class="flex h-full w-full items-center justify-center">
-            <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
-          </div>
-        }
-      />
-    </button>
-  );
-}
-
 /* ─── 信息行组件 ─── */
+
+const INFO_ROW_CLASS = 'flex min-h-9 items-center gap-2 py-1.5 text-[13px] text-muted-foreground';
 
 function InfoRow(props: { icon: any; label?: string; children: any; class?: string }) {
   return (
-    <div class={cn('flex items-start gap-2 py-1 text-[13px] text-muted-foreground', props.class)}>
+    <div class={cn(INFO_ROW_CLASS, 'items-start', props.class)}>
       <props.icon class="h-[18px] w-[18px] text-muted-foreground shrink-0 mt-0.5" size={18} />
       <Show when={props.label}>
         <span class="shrink-0 text-foreground/70">{props.label}</span>
       </Show>
       <span class="flex-1 min-w-0 wrap-break-word">{props.children}</span>
+    </div>
+  );
+}
+
+const INFO_ROW_ACTION_CLASS =
+  'h-7 shrink-0 px-2 text-xs text-primary hover:text-primary';
+
+function InfoRowWithAction(props: {
+  icon: any;
+  label: string;
+  children: any;
+  actionLabel: string;
+  onAction: () => void;
+  actionDisabled?: boolean;
+}) {
+  return (
+    <div class={INFO_ROW_CLASS}>
+      <props.icon class="h-[18px] w-[18px] text-muted-foreground shrink-0" size={18} />
+      <span class="shrink-0 text-foreground/70">{props.label}</span>
+      <span class="min-w-0 flex-1 truncate leading-snug">{props.children}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        class={cn(INFO_ROW_ACTION_CLASS, 'self-center')}
+        disabled={props.actionDisabled}
+        onClick={() => props.onAction()}
+      >
+        {props.actionLabel}
+      </Button>
     </div>
   );
 }
@@ -182,6 +186,11 @@ function isMeaningful(s: string | undefined | null): boolean {
   return s.replace(/[\s•·\-—_|,，.。、/\\]+/g, '').length > 0;
 }
 
+function isOnlineSearchBook(book: Pick<SearchBook, 'origin'>): boolean {
+  const o = book.origin;
+  return o !== 'local' && !o.startsWith('local::');
+}
+
 /* ─── 主组件 ─── */
 
 export interface BookInfoPageProps {
@@ -218,6 +227,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
         || !props.book.latestChapterUpdateTime || !props.book.coverUrl);
   const [isLoading, setIsLoading] = createSignal(needsRefresh && !cachedBook);
   const [loadError, setLoadError] = createSignal<string | null>(null);
+  /** 对齐 legado：详情页后台预加载目录，加入书架时直接写入 */
+  const [preloadedChapters, setPreloadedChapters] = createSignal<BookChapter[] | null>(null);
+  const [tocLoading, setTocLoading] = createSignal(false);
+  const [tocLoadError, setTocLoadError] = createSignal<string | null>(null);
+  const [shelfBook, setShelfBook] = createSignal<Book | null>(null);
+  const [userGroups, setUserGroups] = createSignal<BookGroup[]>([]);
+  const [showGroupPick, setShowGroupPick] = createSignal(false);
+  const [showTocDialog, setShowTocDialog] = createSignal(false);
 
   // 检测主题变化
   onMount(() => {
@@ -238,6 +255,41 @@ export function BookInfoPage(props: BookInfoPageProps) {
   });
 
   // isValidHttpUrl 和 tryBuildBookInfoUrlFromDataUrl 已移至 detail.ts（getBookInfo 统一处理）
+
+  const refreshShelfBook = async () => {
+    const url = currentBook().bookUrl;
+    if (!url || !(await hasBook(url))) {
+      setShelfBook(null);
+      return;
+    }
+    setShelfBook((await getBook(url)) ?? null);
+  };
+
+  const preloadChapterList = async (book: SearchBook, source: BookSource) => {
+    if (book.origin === 'local' || book.origin.startsWith('local::')) return;
+    const tocUrl = book.tocUrl || book.bookUrl;
+    if (!tocUrl) return;
+    setTocLoading(true);
+    setTocLoadError(null);
+    try {
+      const inDb = await getDbChapterList(book.bookUrl);
+      if (inDb.length > 0) {
+        setPreloadedChapters(inDb);
+        return;
+      }
+      const list = await getChapterList(source, tocUrl);
+      if (list.length > 0) {
+        setPreloadedChapters(list);
+      } else {
+        setTocLoadError('目录为空');
+      }
+    } catch (e) {
+      console.warn('[BookInfo] 预加载目录失败:', e);
+      setTocLoadError(e instanceof Error ? e.message : '加载目录失败');
+    } finally {
+      setTocLoading(false);
+    }
+  };
 
   // 加载书籍信息的函数（可重用）
   const loadBookInfo = async () => {
@@ -263,7 +315,10 @@ export function BookInfoPage(props: BookInfoPageProps) {
       }
 
       console.log('[BookInfo] 开始获取书籍详情，bookUrl:', bookUrl.substring(0, 100));
-      const bookInfo = await getBookInfo(source, bookUrl);
+      const durTitle = shelfBook()?.durChapterTitle?.trim() ?? '';
+      const bookInfo = await getBookInfo(source, bookUrl, {
+        durChapterTitle: durTitle || undefined,
+      });
 
       if (bookInfo) {
       console.log('[BookInfo] 获取到书籍详情:', {
@@ -280,10 +335,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
         const wordCountText = bookInfo.wordCount || undefined;
         const mergedBook: SearchBook = {
           ...props.book,
-          intro: m(props.book.intro, bookInfo.intro),
+          name: preferDetailField(bookInfo.name, props.book.name) ?? props.book.name,
+          author: preferDetailField(bookInfo.author, props.book.author) ?? props.book.author,
+          kind: preferDetailField(bookInfo.kind, props.book.kind),
+          intro: preferDetailIntro(bookInfo.intro, props.book.intro),
           latestChapterTitle: m(props.book.latestChapterTitle, bookInfo.latestChapterTitle),
           latestChapterUpdateTime: m(props.book.latestChapterUpdateTime, bookInfo.latestChapterUpdateTime),
-          coverUrl: props.book.coverUrl || bookInfo.coverUrl,
+          coverUrl: preferDetailField(bookInfo.coverUrl, props.book.coverUrl),
           // tocUrl 优先使用 API 返回值（如 /catalog?...），因为发现页的 tocUrl 通常只是 bookUrl（/detail?...）
           tocUrl: bookInfo.tocUrl || props.book.tocUrl,
           wordCount: m(props.book.wordCount, wordCountText),
@@ -297,11 +355,15 @@ export function BookInfoPage(props: BookInfoPageProps) {
         };
         
         setBookData(mergedBook);
-        
+        if (mergedBook.coverUrl && mergedBook.coverUrl !== props.book.coverUrl) {
+          setCoverBlobUrl(null);
+        }
+
         // 保存到缓存
         if (bookUrl) {
           pageCacheStore.setBookInfoCache(bookUrl, mergedBook);
         }
+        void preloadChapterList(mergedBook, source);
       } else {
         const errorMsg = '获取书籍详情失败，返回数据为空';
         console.warn('[BookInfo]', errorMsg);
@@ -321,6 +383,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
   onMount(async () => {
     const inShelf = await hasBook(props.book.bookUrl);
     setIsInShelf(inShelf);
+    if (inShelf) await refreshShelfBook();
+    setUserGroups((await getAllGroups()).filter((g) => g.groupId > 0));
 
     if (!bookSource()) {
       const source = await getSource(props.book.origin);
@@ -337,15 +401,23 @@ export function BookInfoPage(props: BookInfoPageProps) {
     });
 
     await loadBookInfo();
+    const source = bookSource();
+    if (source && !needsRefresh) {
+      void preloadChapterList(currentBook(), source);
+    }
   });
 
   async function handleAddToShelf() {
     if (isAdding()) return;
     setIsAdding(true);
     try {
-      const book = await addSearchBookToShelf(currentBook());
+      const cached = preloadedChapters();
+      const book = await addSearchBookToShelf(currentBook(), {
+        chapters: cached && cached.length > 0 ? cached : undefined,
+      });
       if (book) {
         setIsInShelf(true);
+        await refreshShelfBook();
         showAppToast({ title: '已加入书架', description: `《${currentBook().name}》已成功加入书架`, variant: 'success' });
       } else {
         showAppToast({ title: '加入失败', description: '无法加入书架，请检查书源是否有效', variant: 'error' });
@@ -367,6 +439,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
     try {
       await bookshelfStore.removeBook(url);
       setIsInShelf(false);
+      setShelfBook(null);
       showAppToast({ title: '已移出书架', description: `《${book.name}》已从书架移除`, variant: 'default' });
     } catch (error) {
       console.error('[BookInfo] 移出书架失败:', error);
@@ -379,24 +452,18 @@ export function BookInfoPage(props: BookInfoPageProps) {
   async function handleStartReading() {
     if (!isInShelf()) {
       await handleAddToShelf();
+      if (!isInShelf()) return;
     }
-    const book = await addSearchBookToShelf(currentBook());
-    if (book) {
-      props.onOpenBook(book);
+    const sb = shelfBook();
+    if (sb) {
+      props.onOpenBook(sb);
+      return;
     }
+    const fromDb = await getBook(currentBook().bookUrl);
+    if (fromDb) props.onOpenBook(fromDb);
   }
 
-  const badgeEntries = () => {
-    const book = currentBook();
-    const entries: { key: string; value: string }[] = [];
-    if (book.source) entries.push({ key: 'source', value: book.source });
-    if (book.status) entries.push({ key: 'status', value: book.status });
-    if (book.tab) entries.push({ key: 'tab', value: book.tab });
-    if (book.category) entries.push({ key: 'category', value: book.category });
-    if (book.tags) entries.push({ key: 'tags', value: book.tags });
-    if (book.score) entries.push({ key: 'score', value: book.score });
-    return entries;
-  };
+  const badgeEntries = () => collectBookBadgeEntries(currentBook());
 
   const getStatusBadgeVariant = (status: string): 'success' | 'warning' | 'secondary' | 'default' => {
     const s = status.trim();
@@ -409,7 +476,112 @@ export function BookInfoPage(props: BookInfoPageProps) {
   // 使用刷新后的数据
   const currentBook = () => bookData();
 
+  const displayIntro = () => {
+    const sb = shelfBook();
+    const raw = sb?.customIntro?.trim() || currentBook().intro?.trim();
+    if (!raw) return undefined;
+    return formatBookIntroPlainText(raw);
+  };
+
+  const originDisplayName = () => {
+    const b = currentBook();
+    if (!isOnlineSearchBook(b)) return '本地';
+    return b.originName || bookSource()?.sourceName || b.origin || '';
+  };
+
+  const groupDisplayName = () => {
+    const sb = shelfBook();
+    if (!sb) return '未分组';
+    if (isLocalBook(sb)) {
+      const names = formatBookshelfBookGroupNames(sb, userGroups());
+      return names === '无' ? '本地·无分组' : names;
+    }
+    const names = formatBookshelfBookGroupNames(sb, userGroups());
+    return names === '无' ? '未分组' : names;
+  };
+
+  const tocRowText = () => {
+    if (tocLoading()) return '加载中…';
+    const chapters = preloadedChapters();
+    const sb = shelfBook();
+    const prefix = currentBook().source || originDisplayName();
+    if (chapters && chapters.length > 0) {
+      const idx = sb?.durChapterIndex ?? 0;
+      const ch = chapters[Math.min(Math.max(idx, 0), chapters.length - 1)];
+      return `${prefix}:${ch?.title || '第1章'}`;
+    }
+    if (tocLoadError()) return '加载失败';
+    return '暂无目录';
+  };
+
   const cacheBookInfoKey = () => props.book.tocUrl || props.book.bookUrl;
+
+  const handleChangeSource = () => {
+    showAppToast({
+      title: '换源',
+      description: '整书换源功能开发中，敬请期待',
+      variant: 'default',
+    });
+  };
+
+  const handleSetGroup = async () => {
+    if (!isInShelf()) {
+      await handleAddToShelf();
+      if (!isInShelf()) return;
+    }
+    await refreshShelfBook();
+    setShowGroupPick(true);
+  };
+
+  const handleGroupConfirm = async (groupIds: number[]) => {
+    const url = currentBook().bookUrl;
+    if (!url) return;
+    const mask = groupIds.reduce((acc, id) => acc | id, 0);
+    try {
+      await updateBooksGroupMask([url], mask);
+      await refreshShelfBook();
+      await bookshelfStore.refreshBooks();
+      setShowGroupPick(false);
+      showAppToast({ title: '分组已更新', variant: 'success' });
+    } catch (e) {
+      console.error('[BookInfo] 设置分组失败:', e);
+      showAppToast({
+        title: '设置分组失败',
+        description: e instanceof Error ? e.message : '未知错误',
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleViewToc = async () => {
+    const chapters = preloadedChapters();
+    if (!chapters || chapters.length === 0) {
+      const source = bookSource();
+      const book = currentBook();
+      if (source && isOnlineSearchBook(book)) {
+        await preloadChapterList(book, source);
+      }
+    }
+    const list = preloadedChapters();
+    if (!list || list.length === 0) {
+      showAppToast({
+        title: '目录为空',
+        description: tocLoadError() || '请检查网络或书源规则',
+        variant: 'error',
+      });
+      return;
+    }
+    if (!isInShelf()) {
+      const added = await addSearchBookToShelf(currentBook(), {
+        chapters: list,
+      });
+      if (added) {
+        setIsInShelf(true);
+        await refreshShelfBook();
+      }
+    }
+    setShowTocDialog(true);
+  };
 
   const handleCoverUrlRefreshed = (fresh: string) => {
     setBookData((b) => {
@@ -506,20 +678,41 @@ export function BookInfoPage(props: BookInfoPageProps) {
   /* 注意：所有 signal 访问必须在 JSX 内部才能保持响应式（Solid.js 组件体只执行一次） */
   function DetailInfoList(dlProps: { hideAuthor?: boolean }) {
     return (
-      <div class="space-y-0.5">
+      <div class="space-y-0">
         {/* 作者（宽屏左栏已显示时隐藏） */}
         <Show when={!dlProps.hideAuthor && currentBook().author}>
           <InfoRow icon={AuthorIcon} label="作者：">{currentBook().author}</InfoRow>
         </Show>
-        {/* 来源 */}
-        <Show when={currentBook().source || currentBook().originName}>
-          <InfoRow icon={OriginIcon} label="来源：">
-            {currentBook().source || currentBook().originName}
-            <Show when={currentBook().source && currentBook().originName && currentBook().source !== currentBook().originName}>
-              <span class="text-muted-foreground/60 ml-1">({currentBook().originName})</span>
+        {/* 来源 + 换源 */}
+        <Show when={originDisplayName() || currentBook().source}>
+          <InfoRowWithAction
+            icon={OriginIcon}
+            label="来源："
+            actionLabel="换源"
+            onAction={handleChangeSource}
+            actionDisabled={!isOnlineSearchBook(currentBook())}
+          >
+            {currentBook().source || originDisplayName()}
+            <Show
+              when={
+                currentBook().source &&
+                originDisplayName() &&
+                currentBook().source !== originDisplayName()
+              }
+            >
+              <span class="text-muted-foreground/60 ml-1">({originDisplayName()})</span>
             </Show>
-          </InfoRow>
+          </InfoRowWithAction>
         </Show>
+        {/* 分组 + 设置分组 */}
+        <InfoRowWithAction
+          icon={GroupFolderIcon}
+          label="分组："
+          actionLabel="设置分组"
+          onAction={() => void handleSetGroup()}
+        >
+          {groupDisplayName()}
+        </InfoRowWithAction>
         {/* 最新章节 — 使用 isMeaningful 过滤 " • " 等无效值 */}
         <Show when={isMeaningful(currentBook().latestChapterTitle)}>
           <InfoRow icon={ChapterMetaIcon} label="最新：">
@@ -534,22 +727,16 @@ export function BookInfoPage(props: BookInfoPageProps) {
         <Show when={isMeaningful(currentBook().chapterWordCountText) || isMeaningful(currentBook().wordCount)}>
           <InfoRow icon={WordCountIcon} label="字数：">{currentBook().chapterWordCountText || currentBook().wordCount}</InfoRow>
         </Show>
-        {/* 目录链接 */}
-        <Show when={currentBook().tocUrl && /^https?:\/\//.test(currentBook().tocUrl)}>
-          <InfoRow icon={TocMetaIcon} label="目录：">
-            <a
-              href={currentBook().tocUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-primary hover:underline truncate"
-              onClick={(e) => {
-                e.preventDefault();
-                void openUrlInApp(currentBook().tocUrl, '目录');
-              }}
-            >
-              查看目录
-            </a>
-          </InfoRow>
+        {/* 目录 + 查看目录 */}
+        <Show when={isOnlineSearchBook(currentBook())}>
+          <InfoRowWithAction
+            icon={TocMetaIcon}
+            label="目录："
+            actionLabel="查看目录"
+            onAction={() => void handleViewToc()}
+          >
+            {tocRowText()}
+          </InfoRowWithAction>
         </Show>
       </div>
     );
@@ -558,13 +745,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
   /* ── 简介区块 ── */
   /* 默认完整显示，窄屏模式下才提供收起功能（因为窄屏空间有限） */
   function IntroSection(introProps: { collapsible?: boolean }) {
+    const intro = () => displayIntro();
     return (
-      <Show when={currentBook().intro}>
+      <Show when={intro()}>
         <div class="mt-3">
           <div class="flex items-center justify-between mb-1.5">
             <h3 class="text-sm font-medium text-foreground">简介</h3>
             {/* 仅在可折叠模式（窄屏）且内容较长时显示展开/收起 */}
-            <Show when={introProps.collapsible && currentBook().intro && currentBook().intro!.length > 150}>
+            <Show when={introProps.collapsible && intro() && intro()!.length > 150}>
               <button
                 onClick={() => setIntroExpanded(!introExpanded())}
                 class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -577,10 +765,10 @@ export function BookInfoPage(props: BookInfoPageProps) {
           <p
             class={cn(
               'whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground',
-              introProps.collapsible && !introExpanded() && currentBook().intro && currentBook().intro!.length > 150 && 'line-clamp-6',
+              introProps.collapsible && !introExpanded() && intro() && intro()!.length > 150 && 'line-clamp-6',
             )}
           >
-            {currentBook().intro}
+            {intro()}
           </p>
         </div>
       </Show>
@@ -693,15 +881,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
               <div class="absolute inset-x-0 bottom-0 top-[88px] rounded-t-[128px] bg-background pointer-events-none" />
               {/* 封面 — z-10 使其浮于白色卡片之上 */}
               <div class="relative z-10 flex justify-center pt-2 pb-5">
-                <CoverImageButton
+                <BookCoverPreviewButton
                   coverUrl={currentBook().coverUrl}
                   bookUrl={props.book.bookUrl}
-                  referer={currentBook().origin}
+                  origin={currentBook().origin}
                   source={bookSource()}
                   name={currentBook().name}
                   onCoverUrlRefreshed={handleCoverUrlRefreshed}
-                  onClick={() => setShowCoverDialog(true)}
-                  class="h-[160px] w-[110px]"
+                  onPreview={() => setShowCoverDialog(true)}
+                  class="h-[160px] w-[110px] rounded-md shadow-2xl bg-muted/50 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                  fallback={
+                    <div class="flex h-full w-full items-center justify-center">
+                      <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
+                    </div>
+                  }
                 />
               </div>
             </div>
@@ -792,15 +985,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
               </Show>
               {/* 封面 + 书名 + 作者（居中，受主题影响的文字颜色） */}
               <div class="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
-                <CoverImageButton
+                <BookCoverPreviewButton
                   coverUrl={currentBook().coverUrl}
                   bookUrl={props.book.bookUrl}
-                  referer={currentBook().origin}
+                  origin={currentBook().origin}
                   source={bookSource()}
                   name={currentBook().name}
                   onCoverUrlRefreshed={handleCoverUrlRefreshed}
-                  onClick={() => setShowCoverDialog(true)}
-                  class="h-[200px] w-[130px] lg:h-[240px] lg:w-[156px] mb-5"
+                  onPreview={() => setShowCoverDialog(true)}
+                  class="mb-5 h-[200px] w-[130px] rounded-md shadow-2xl bg-muted/50 transition-transform hover:scale-[1.02] active:scale-[0.98] lg:h-[240px] lg:w-[156px]"
+                  fallback={
+                    <div class="flex h-full w-full items-center justify-center">
+                      <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
+                    </div>
+                  }
                 />
                 <NameAndBadges center onBlurBg class="mb-3" />
                 <Show when={currentBook().author}>
@@ -868,28 +1066,37 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
       </div>
 
-      {/* ── 封面大图对话框 ── */}
-      <Show when={showCoverDialog() && coverBackgroundSrc()}>
-        <div
-          class="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-          onClick={() => setShowCoverDialog(false)}
-        >
-          <div class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden shadow-2xl">
-            <img
-              src={coverBackgroundSrc()}
-              alt={currentBook().name}
-              class="max-w-full max-h-[80dvh] object-contain"
-            />
-            <button
-              onClick={() => setShowCoverDialog(false)}
-              class="absolute top-2 right-2 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors"
-              aria-label="关闭"
-            >
-              <XIcon class="h-5 w-5" size={20} />
-            </button>
-          </div>
-        </div>
-      </Show>
+      <BookCoverPreviewDialog
+        open={showCoverDialog()}
+        onOpenChange={setShowCoverDialog}
+        coverUrl={currentBook().coverUrl}
+        bookUrl={props.book.bookUrl}
+        origin={currentBook().origin}
+        source={bookSource() ?? null}
+        name={currentBook().name}
+      />
+
+      <BookGroupPickDialog
+        open={showGroupPick()}
+        onOpenChange={setShowGroupPick}
+        mode="move"
+        title="设置分组"
+        description={`为《${currentBook().name}》选择分组`}
+        groups={userGroups()}
+        initialGroupIds={
+          shelfBook() ? bookshelfBookCustomGroupIds(shelfBook()!, userGroups()) : []
+        }
+        onConfirm={(ids) => void handleGroupConfirm(ids)}
+      />
+
+      <BookInfoChapterListDialog
+        open={showTocDialog()}
+        onOpenChange={setShowTocDialog}
+        bookName={currentBook().name}
+        chapters={preloadedChapters() ?? []}
+        loading={tocLoading()}
+        error={tocLoadError()}
+      />
     </div>
   );
 }
