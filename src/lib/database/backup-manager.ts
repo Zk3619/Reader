@@ -130,6 +130,13 @@ export async function restoreBackup(replace: boolean = true): Promise<void> {
   }
 }
 
+/** 从已选 File 恢复数据库（书源导入流程检测到 .db 时使用） */
+export async function restoreBackupFromUserFile(file: File, replace = true): Promise<void> {
+  const buffer = await file.arrayBuffer();
+  await importDatabase(buffer, replace);
+  console.log('[备份管理器] 已从所选文件恢复备份:', file.name);
+}
+
 /**
  * 从文件恢复备份（Tauri 环境）
  */

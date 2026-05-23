@@ -84,6 +84,34 @@ export async function getSourcesByGroup(
 }
 
 /**
+ * 按站点根 URL 查找可用于「添加网址」的书源（对齐 legado BookSourceDao.getBookSourceAddBook）
+ */
+export async function getBookSourceForAddBook(baseUrl: string): Promise<BookSource | null> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM book_sources WHERE enabled = 1 AND bookSourceUrl = ?',
+    [baseUrl]
+  );
+  return rows.length > 0 ? mapRowToSource(rows[0]) : null;
+}
+
+/**
+ * 已启用且配置了 bookUrlPattern 的书源（对齐 legado hasBookUrlPattern）
+ */
+export async function getEnabledSourcesWithBookUrlPattern(): Promise<BookSource[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM book_sources
+     WHERE enabled = 1
+       AND bookUrlPattern IS NOT NULL
+       AND trim(bookUrlPattern) <> ''
+       AND trim(bookUrlPattern) <> 'NONE'
+     ORDER BY customOrder ASC`
+  );
+  return rows.map((row) => mapRowToSource(row));
+}
+
+/**
  * 根据URL获取书源
  */
 export async function getSource(sourceUrl: string): Promise<BookSource | null> {
@@ -122,8 +150,9 @@ export async function insertSource(source: NewBookSource): Promise<void> {
       bookSourceComment, variableComment, lastUpdateTime,
       respondTime, weight, exploreUrl, exploreScreen,
       ruleExplore, searchUrl, ruleSearch, ruleBookInfo,
-      ruleToc, ruleContent, ruleReview
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ruleToc, ruleContent, ruleReview,
+      eventListener, customButton, nextPageLazyLoad
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       source.sourceUrl,
       source.sourceName,
@@ -134,7 +163,7 @@ export async function insertSource(source: NewBookSource): Promise<void> {
       source.enabled !== false ? 1 : 0,
       source.enableExplore !== false ? 1 : 0,
       source.jsLib ?? null,
-      source.enabledCookieJar ? 1 : 0,
+      source.enabledCookieJar === false ? 0 : 1,
       source.concurrentRate ?? null,
       source.header ?? null,
       source.loginUrl ?? null,
@@ -155,6 +184,9 @@ export async function insertSource(source: NewBookSource): Promise<void> {
       source.ruleToc ? JSON.stringify(source.ruleToc) : null,
       source.ruleContent ? JSON.stringify(source.ruleContent) : null,
       source.ruleReview ? JSON.stringify(source.ruleReview) : null,
+      Boolean((source as BookSource).eventListener) ? 1 : 0,
+      Boolean((source as BookSource).customButton) ? 1 : 0,
+      Boolean((source as BookSource).nextPageLazyLoad) ? 1 : 0,
     ]
   );
 }
@@ -174,7 +206,8 @@ export async function updateSource(source: BookSource): Promise<void> {
       bookSourceComment = ?, variableComment = ?, lastUpdateTime = ?,
       respondTime = ?, weight = ?, exploreUrl = ?, exploreScreen = ?,
       ruleExplore = ?, searchUrl = ?, ruleSearch = ?, ruleBookInfo = ?,
-      ruleToc = ?, ruleContent = ?, ruleReview = ?
+      ruleToc = ?, ruleContent = ?, ruleReview = ?,
+      eventListener = ?, customButton = ?, nextPageLazyLoad = ?
     WHERE bookSourceUrl = ?`,
     [
       source.sourceName,
@@ -185,7 +218,7 @@ export async function updateSource(source: BookSource): Promise<void> {
       source.enabled ? 1 : 0,
       source.enableExplore ? 1 : 0,
       source.jsLib ?? null,
-      source.enabledCookieJar ? 1 : 0,
+      source.enabledCookieJar === false ? 0 : 1,
       source.concurrentRate ?? null,
       source.header ?? null,
       source.loginUrl ?? null,
@@ -206,6 +239,9 @@ export async function updateSource(source: BookSource): Promise<void> {
       source.ruleToc ? JSON.stringify(source.ruleToc) : null,
       source.ruleContent ? JSON.stringify(source.ruleContent) : null,
       source.ruleReview ? JSON.stringify(source.ruleReview) : null,
+      source.eventListener ? 1 : 0,
+      source.customButton ? 1 : 0,
+      source.nextPageLazyLoad ? 1 : 0,
       source.sourceUrl,
     ]
   );
@@ -311,6 +347,22 @@ export async function deleteSourceGroup(groupName: string): Promise<void> {
 }
 
 /**
+ * 重排书源 customOrder（对齐 Legado SourceHelp.adjustSortNumber）
+ */
+export async function adjustBookSourceSortNumbers(): Promise<void> {
+  const all = await getAllSources();
+  if (all.length === 0) return;
+  const orders = all.map((s) => s.customOrder);
+  const maxOrder = Math.max(...orders);
+  const minOrder = Math.min(...orders);
+  const hasDuplicate = new Set(orders).size !== orders.length;
+  if (maxOrder <= 99999 && minOrder >= -99999 && !hasDuplicate) return;
+  for (let i = 0; i < all.length; i++) {
+    await updateSourceOrder(all[i].sourceUrl, i);
+  }
+}
+
+/**
  * 重命名分组（对齐 legado BookSourceViewModel.upGroup）
  */
 export async function renameSourceGroup(oldName: string, newName: string | null): Promise<void> {
@@ -383,5 +435,8 @@ function mapRowToSource(row: Record<string, unknown>): BookSource {
     concurrentRate: row.concurrentRate ? String(row.concurrentRate) : undefined,
     jsLib: row.jsLib ? String(row.jsLib) : undefined,
     enabledCookieJar: Boolean(row.enabledCookieJar ?? 0),
+    eventListener: Boolean(row.eventListener ?? 0),
+    customButton: Boolean(row.customButton ?? 0),
+    nextPageLazyLoad: Boolean(row.nextPageLazyLoad ?? 0),
   };
 }

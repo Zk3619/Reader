@@ -65,6 +65,12 @@ export interface BookSource extends BaseSource {
   ruleContent?: ContentRule;
   /** 段评规则 */
   ruleReview?: ReviewRule;
+  /** 事件监听 */
+  eventListener: boolean;
+  /** 自定义按钮 */
+  customButton: boolean;
+  /** 下一页懒加载 */
+  nextPageLazyLoad: boolean;
   /** 允许额外的未知字段（用于兼容导入时的额外字段） */
   [key: string]: unknown;
 }

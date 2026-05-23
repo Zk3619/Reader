@@ -39,6 +39,8 @@ export interface BookChapter {
   variable?: string;
   /** 本章节字数 */
   wordCount?: string;
+  /** 章节图片 URL */
+  imgUrl?: string;
 }
 
 /**

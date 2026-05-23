@@ -7,6 +7,9 @@
  */
 
 import type { DatabaseAdapter } from '@/lib/platform/database';
+import { LEGADO_SCHEMA_VERSION, migrateToLegadoV96 } from '@/lib/database/migration-v96';
+
+export { LEGADO_SCHEMA_VERSION };
 
 export interface Migration {
   version: number;
@@ -21,7 +24,7 @@ export const migrations: Migration[] = [
     version: 1,
     up: async (db: DatabaseAdapter) => {
       // ========== 书籍相关表 ==========
-      
+
       // 书籍表
       await db.execute(`
         CREATE TABLE IF NOT EXISTS books (
@@ -417,5 +420,9 @@ export const migrations: Migration[] = [
         ON replace_rules(id)
       `);
     },
+  },
+  {
+    version: LEGADO_SCHEMA_VERSION,
+    up: migrateToLegadoV96,
   },
 ];

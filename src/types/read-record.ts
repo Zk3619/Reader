@@ -11,8 +11,14 @@ export interface ReadRecord {
   deviceId: string;
   /** 书籍名称（主键之一） */
   bookName: string;
+  /** 作者（主键之一） */
+  bookAuthor: string;
   /** 阅读时间 */
   readTime: number;
   /** 最后阅读时间 */
   lastRead: number;
+  /** 当前章节标题 */
+  durChapterTitle: string;
+  /** 当前章节索引 */
+  durChapterIndex: number;
 }

@@ -61,6 +61,10 @@ export interface Book extends BaseBook {
   durChapterIndex: number;
   /** 当前阅读的进度（首行字符的索引位置） */
   durChapterPos: number;
+  /** 当前分卷索引 */
+  durVolumeIndex: number;
+  /** 分卷内章节索引 */
+  chapterInVolumeIndex: number;
   /** 最近一次阅读书籍的时间（打开正文的时间） */
   durChapterTime: number;
   /** 刷新书架时更新书籍信息 */

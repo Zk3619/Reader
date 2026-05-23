@@ -11,12 +11,13 @@ import type { ReadRecord } from '@/types';
  */
 export async function getReadRecord(
   deviceId: string,
-  bookName: string
+  bookName: string,
+  bookAuthor = ''
 ): Promise<ReadRecord | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM readRecord WHERE deviceId = ? AND bookName = ?',
-    [deviceId, bookName]
+    'SELECT * FROM readRecord WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    [deviceId, bookName, bookAuthor]
   );
   return rows.length > 0 ? mapRowToRecord(rows[0]) : null;
 }
@@ -28,9 +29,17 @@ export async function upsertReadRecord(record: ReadRecord): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `INSERT OR REPLACE INTO readRecord (
-      deviceId, bookName, readTime, lastRead
-    ) VALUES (?, ?, ?, ?)`,
-    [record.deviceId, record.bookName, record.readTime, record.lastRead]
+      deviceId, bookName, bookAuthor, readTime, lastRead, durChapterTitle, durChapterIndex
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      record.deviceId,
+      record.bookName,
+      record.bookAuthor ?? '',
+      record.readTime,
+      record.lastRead,
+      record.durChapterTitle ?? '',
+      record.durChapterIndex ?? 0,
+    ]
   );
 }
 
@@ -40,12 +49,13 @@ export async function upsertReadRecord(record: ReadRecord): Promise<void> {
 export async function updateReadTime(
   deviceId: string,
   bookName: string,
-  readTime: number
+  readTime: number,
+  bookAuthor = ''
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE readRecord SET readTime = ?, lastRead = ? WHERE deviceId = ? AND bookName = ?',
-    [readTime, Date.now(), deviceId, bookName]
+    'UPDATE readRecord SET readTime = ?, lastRead = ? WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    [readTime, Date.now(), deviceId, bookName, bookAuthor]
   );
 }
 
@@ -54,12 +64,13 @@ export async function updateReadTime(
  */
 export async function deleteReadRecord(
   deviceId: string,
-  bookName: string
+  bookName: string,
+  bookAuthor = ''
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM readRecord WHERE deviceId = ? AND bookName = ?',
-    [deviceId, bookName]
+    'DELETE FROM readRecord WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    [deviceId, bookName, bookAuthor]
   );
 }
 
@@ -70,7 +81,10 @@ function mapRowToRecord(row: Record<string, unknown>): ReadRecord {
   return {
     deviceId: String(row.deviceId ?? ''),
     bookName: String(row.bookName ?? ''),
+    bookAuthor: String(row.bookAuthor ?? ''),
     readTime: Number(row.readTime ?? 0),
     lastRead: Number(row.lastRead ?? 0),
+    durChapterTitle: String(row.durChapterTitle ?? ''),
+    durChapterIndex: Number(row.durChapterIndex ?? 0),
   };
 }

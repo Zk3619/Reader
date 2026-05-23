@@ -70,6 +70,24 @@ export interface RssSource extends BaseSource {
   lastUpdateTime: number;
   /** 手动排序编号 */
   customOrder: number;
+  /** 预加载 JS */
+  preloadJs?: string;
+  /** 起始 HTML */
+  startHtml?: string;
+  /** 起始样式 */
+  startStyle?: string;
+  /** 起始 JS */
+  startJs?: string;
+  /** 显示 Web 日志 */
+  showWebLog: boolean;
+  /** 类型 */
+  type: number;
+  /** 预加载 */
+  preload: boolean;
+  /** 缓存优先 */
+  cacheFirst: boolean;
+  /** 搜索 URL */
+  searchUrl?: string;
   /** 允许额外的未知字段（用于兼容导入时的额外字段） */
   [key: string]: unknown;
 }

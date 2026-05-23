@@ -55,8 +55,8 @@ export async function insertRssStar(star: RssStar): Promise<void> {
   await db.execute(
     `INSERT OR REPLACE INTO rssStars (
       origin, sort, title, starTime, link, pubDate,
-      description, content, image, "group", variable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      description, content, image, "group", variable, type, durPos
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       star.origin,
       star.sort,
@@ -69,6 +69,8 @@ export async function insertRssStar(star: RssStar): Promise<void> {
       star.image ?? null,
       star.group,
       star.variable ?? null,
+      star.type,
+      star.durPos,
     ]
   );
 }
@@ -100,5 +102,7 @@ function mapRowToStar(row: Record<string, unknown>): RssStar {
     image: row.image ? String(row.image) : undefined,
     group: String(row.group ?? '默认分组'),
     variable: row.variable ? String(row.variable) : undefined,
+    type: Number(row.type ?? 0),
+    durPos: Number(row.durPos ?? 0),
   };
 }

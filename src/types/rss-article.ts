@@ -27,6 +27,10 @@ export interface RssArticle extends BaseRssArticle {
   group: string;
   /** 已读状态 */
   read: boolean;
+  /** 类型 */
+  type: number;
+  /** 阅读进度 */
+  durPos: number;
 }
 
 /**

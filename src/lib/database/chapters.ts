@@ -119,8 +119,8 @@ export async function insertChapter(chapter: NewBookChapter): Promise<void> {
   await db.execute(
     `INSERT OR REPLACE INTO chapters (
       url, title, isVolume, baseUrl, bookUrl, "index",
-      isVip, isPay, resourceUrl, tag, wordCount, variable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      isVip, isPay, resourceUrl, tag, wordCount, variable, imgUrl
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       chapter.url,
       chapter.title,
@@ -134,6 +134,7 @@ export async function insertChapter(chapter: NewBookChapter): Promise<void> {
       chapter.tag ?? null,
       chapter.wordCount ?? null,
       chapter.variable ?? null,
+      (chapter as BookChapter).imgUrl ?? null,
     ]
   );
 }
@@ -160,7 +161,7 @@ export async function updateChapter(chapter: BookChapter): Promise<void> {
       isVip = ?, isPay = ?, resourceUrl = ?,
       tag = ?, wordCount = ?, start = ?,
       "end" = ?, startFragmentId = ?, endFragmentId = ?,
-      variable = ?
+      variable = ?, imgUrl = ?
     WHERE url = ? AND bookUrl = ?`,
     [
       chapter.title,
@@ -176,6 +177,7 @@ export async function updateChapter(chapter: BookChapter): Promise<void> {
       chapter.startFragmentId ?? null,
       chapter.endFragmentId ?? null,
       chapter.variable ?? null,
+      chapter.imgUrl ?? null,
       chapter.url,
       chapter.bookUrl,
     ]
@@ -228,5 +230,6 @@ function mapRowToChapter(row: Record<string, unknown>): BookChapter {
       : undefined,
     endFragmentId: row.endFragmentId ? String(row.endFragmentId) : undefined,
     variable: row.variable ? String(row.variable) : undefined,
+    imgUrl: row.imgUrl ? String(row.imgUrl) : undefined,
   };
 }

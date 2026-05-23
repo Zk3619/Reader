@@ -10,6 +10,8 @@ import {
   closeDatabase as closePlatformDatabase,
   type DatabaseAdapter,
 } from '@/lib/platform/database';
+import { DEFAULT_KEYBOARD_ASSISTS } from '@/lib/database/default-keyboard-assists';
+import { LEGADO_SCHEMA_VERSION } from '@/lib/database/migration-v96';
 
 let db: DatabaseAdapter | null = null;
 let initPromise: Promise<DatabaseAdapter> | null = null;
@@ -63,7 +65,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
 /**
  * 运行数据库迁移
  */
-async function runMigrations(db: DatabaseAdapter): Promise<void> {
+export async function runMigrations(db: DatabaseAdapter): Promise<void> {
   // 创建版本表
   await db.execute(`
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -94,6 +96,42 @@ async function runMigrations(db: DatabaseAdapter): Promise<void> {
 }
 
 /**
+ * 导入 legado.db 等整库替换后：关闭连接并重新初始化（幂等迁移 + 默认数据）
+ */
+export async function reinitializeDatabaseAfterImport(): Promise<DatabaseAdapter> {
+  await closeDatabase();
+  return initDatabase();
+}
+
+/**
+ * 若已对齐 Legado schema 但 schema_version 未记录，补写目标版本（幂等）
+ */
+export async function ensureLegadoSchemaVersionRecord(
+  db: DatabaseAdapter
+): Promise<void> {
+  const rows = await db.select<{ version: number }>(
+    'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1'
+  );
+  const current = rows[0]?.version ?? 0;
+  if (current >= LEGADO_SCHEMA_VERSION) return;
+
+  const legadoTables = await db.select<{ name: string }>(
+    `SELECT name FROM sqlite_master
+     WHERE type='table' AND name IN ('books', 'book_sources', 'txtTocRules')`
+  );
+  if (legadoTables.length < 3) return;
+
+  const { migrateToLegadoV96 } = await import('@/lib/database/migration-v96');
+  await migrateToLegadoV96(db);
+  if (current < 1) {
+    await db.execute('INSERT INTO schema_version (version) VALUES (?)', [1]);
+  }
+  await db.execute('INSERT INTO schema_version (version) VALUES (?)', [
+    LEGADO_SCHEMA_VERSION,
+  ]);
+}
+
+/**
  * 初始化默认数据
  * 对应 legado 项目的 AppDatabase.dbCallback.onOpen
  */
@@ -106,7 +144,7 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
     WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -1)
   `);
 
-  // 本地
+  // 本地（enableRefresh=0 与 Legado 一致）
   await db.execute(`
     INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
     SELECT -2, '本地', -9, 0, 1, -1
@@ -134,6 +172,13 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
     WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -5)
   `);
 
+  // 视频
+  await db.execute(`
+    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
+    SELECT -6, '视频', -5, 1, 1, -1
+    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -6)
+  `);
+
   // 更新失败
   await db.execute(`
     INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
@@ -149,6 +194,27 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
   await db.execute(`
     UPDATE rssSources SET loginUi = NULL WHERE loginUi = 'null'
   `);
+
+  await db.execute(`
+    UPDATE httpTTS SET loginUi = NULL WHERE loginUi = 'null'
+  `);
+
+  await db.execute(`
+    UPDATE httpTTS SET concurrentRate = '0' WHERE concurrentRate IS NULL
+  `);
+
+  const keyboardRows = await db.select<{ count: number }>(
+    'SELECT COUNT(*) as count FROM keyboardAssists'
+  );
+  if ((keyboardRows[0]?.count ?? 0) === 0) {
+    for (const assist of DEFAULT_KEYBOARD_ASSISTS) {
+      await db.execute(
+        `INSERT OR REPLACE INTO keyboardAssists (type, key, value, serialNo)
+         VALUES (?, ?, ?, ?)`,
+        [assist.type, assist.key, assist.value, assist.serialNo]
+      );
+    }
+  }
 }
 
 /**

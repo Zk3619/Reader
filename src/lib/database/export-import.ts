@@ -11,7 +11,11 @@
 import { join } from '@tauri-apps/api/path';
 import { readFile, writeFile } from '@tauri-apps/plugin-fs';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
-import { getDatabase, closeDatabase, initDatabase } from '@/lib/database/database-core';
+import {
+  getDatabase,
+  closeDatabase,
+  reinitializeDatabaseAfterImport,
+} from '@/lib/database/database-core';
 import { isTauri } from '@/lib/platform/detect';
 import type { DatabaseAdapter } from '@/lib/platform/database';
 
@@ -152,9 +156,8 @@ async function importTauriDatabase(
     // 如果替换，直接写入
     if (replace) {
       await writeFile(dbPath, new Uint8Array(buffer));
-      // 重新初始化数据库
-      await closeDatabase();
-      await initDatabase();
+      // 重新初始化：幂等 v96 迁移、补 schema_version、默认分组等
+      await reinitializeDatabaseAfterImport();
     } else {
       // 追加模式：需要合并数据（复杂，暂时不支持）
       throw new Error('Tauri 环境暂不支持追加模式导入，请使用替换模式');
@@ -219,8 +222,8 @@ async function importWebDatabase(
         };
       });
 
-      // 重新初始化数据库
-      await initDatabase();
+      // 重新初始化：支持 legado.db（无 schema_version）整库导入
+      await reinitializeDatabaseAfterImport();
     } else {
       // 追加模式：合并数据（需要实现数据合并逻辑）
       throw new Error('Web 环境暂不支持追加模式导入，请使用替换模式');

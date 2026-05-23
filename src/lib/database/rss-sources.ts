@@ -53,8 +53,9 @@ export async function insertRssSource(source: NewRssSource): Promise<void> {
       singleUrl, articleStyle, ruleArticles, ruleNextPage, ruleTitle,
       rulePubDate, ruleDescription, ruleImage, ruleLink, ruleContent,
       contentWhitelist, contentBlacklist, shouldOverrideUrlLoading,
-      style, enableJs, loadWithBaseUrl, injectJs, lastUpdateTime, customOrder
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      style, enableJs, loadWithBaseUrl, injectJs, lastUpdateTime, customOrder,
+      preloadJs, startHtml, startStyle, startJs, showWebLog, type, preload, cacheFirst, searchUrl
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       source.sourceUrl,
       source.sourceName,
@@ -91,6 +92,15 @@ export async function insertRssSource(source: NewRssSource): Promise<void> {
       source.injectJs ?? null,
       source.lastUpdateTime ?? 0,
       source.customOrder ?? 0,
+      (source as RssSource).preloadJs ?? null,
+      (source as RssSource).startHtml ?? null,
+      (source as RssSource).startStyle ?? null,
+      (source as RssSource).startJs ?? null,
+      (source as RssSource).showWebLog ? 1 : 0,
+      (source as RssSource).type ?? 0,
+      (source as RssSource).preload ? 1 : 0,
+      (source as RssSource).cacheFirst ? 1 : 0,
+      (source as RssSource).searchUrl ?? null,
     ]
   );
 }
@@ -110,7 +120,9 @@ export async function updateRssSource(source: RssSource): Promise<void> {
       rulePubDate = ?, ruleDescription = ?, ruleImage = ?, ruleLink = ?,
       ruleContent = ?, contentWhitelist = ?, contentBlacklist = ?,
       shouldOverrideUrlLoading = ?, style = ?, enableJs = ?,
-      loadWithBaseUrl = ?, injectJs = ?, lastUpdateTime = ?, customOrder = ?
+      loadWithBaseUrl = ?, injectJs = ?, lastUpdateTime = ?, customOrder = ?,
+      preloadJs = ?, startHtml = ?, startStyle = ?, startJs = ?,
+      showWebLog = ?, type = ?, preload = ?, cacheFirst = ?, searchUrl = ?
     WHERE sourceUrl = ?`,
     [
       source.sourceName,
@@ -147,6 +159,15 @@ export async function updateRssSource(source: RssSource): Promise<void> {
       source.injectJs ?? null,
       source.lastUpdateTime,
       source.customOrder,
+      source.preloadJs ?? null,
+      source.startHtml ?? null,
+      source.startStyle ?? null,
+      source.startJs ?? null,
+      source.showWebLog ? 1 : 0,
+      source.type,
+      source.preload ? 1 : 0,
+      source.cacheFirst ? 1 : 0,
+      source.searchUrl ?? null,
       source.sourceUrl,
     ]
   );
@@ -224,5 +245,14 @@ function mapRowToRssSource(row: Record<string, unknown>): RssSource {
     header: row.header ? String(row.header) : undefined,
     loginUrl: row.loginUrl ? String(row.loginUrl) : undefined,
     loginUi: row.loginUi ? String(row.loginUi) : undefined,
+    preloadJs: row.preloadJs ? String(row.preloadJs) : undefined,
+    startHtml: row.startHtml ? String(row.startHtml) : undefined,
+    startStyle: row.startStyle ? String(row.startStyle) : undefined,
+    startJs: row.startJs ? String(row.startJs) : undefined,
+    showWebLog: Boolean(row.showWebLog ?? 0),
+    type: Number(row.type ?? 0),
+    preload: Boolean(row.preload ?? 0),
+    cacheFirst: Boolean(row.cacheFirst ?? 0),
+    searchUrl: row.searchUrl ? String(row.searchUrl) : undefined,
   };
 }

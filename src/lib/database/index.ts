@@ -4,7 +4,14 @@
  */
 
 // 数据库初始化和管理
-export { initDatabase, getDatabase, closeDatabase } from '@/lib/database/database-core';
+export {
+  initDatabase,
+  getDatabase,
+  closeDatabase,
+  runMigrations,
+  reinitializeDatabaseAfterImport,
+  ensureLegadoSchemaVersionRecord,
+} from '@/lib/database/database-core';
 
 // 书籍相关DAO
 export * from '@/lib/database/books';
@@ -47,6 +54,21 @@ export * from '@/lib/database/rss-read-records';
 
 // 章节缓存相关DAO
 export * from '@/lib/database/chapter-cache';
+
+// Legado v96 扩展表 DAO
+export * from '@/lib/database/txt-toc-rules';
+export * from '@/lib/database/read-record-details';
+export * from '@/lib/database/read-record-sessions';
+export * from '@/lib/database/http-tts';
+export * from '@/lib/database/rule-subs';
+export * from '@/lib/database/dict-rules';
+export * from '@/lib/database/keyboard-assists';
+export * from '@/lib/database/servers';
+export * from '@/lib/database/url-records';
+export * from '@/lib/database/direct-link-upload-rules';
+export * from '@/lib/database/upload-histories';
+
+export { LEGADO_SCHEMA_VERSION } from '@/lib/database/migrations';
 
 // 数据库导出/导入功能
 export * from '@/lib/database/export-import';

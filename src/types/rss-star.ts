@@ -25,4 +25,8 @@ export interface RssStar extends BaseRssArticle {
   image?: string;
   /** 收藏分组 */
   group: string;
+  /** 类型 */
+  type: number;
+  /** 阅读进度 */
+  durPos: number;
 }

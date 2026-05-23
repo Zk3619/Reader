@@ -61,8 +61,8 @@ export async function insertGroup(group: BookGroup): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `INSERT OR REPLACE INTO book_groups (
-      groupId, groupName, cover, "order", enableRefresh, show, bookSort
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      groupId, groupName, cover, "order", enableRefresh, show, bookSort, onlyUpdateRead
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       group.groupId,
       group.groupName,
@@ -71,6 +71,7 @@ export async function insertGroup(group: BookGroup): Promise<void> {
       group.enableRefresh ? 1 : 0,
       group.show ? 1 : 0,
       group.bookSort,
+      group.onlyUpdateRead ? 1 : 0,
     ]
   );
 }
@@ -83,7 +84,7 @@ export async function updateGroup(group: BookGroup): Promise<void> {
   await db.execute(
     `UPDATE book_groups SET
       groupName = ?, cover = ?, "order" = ?,
-      enableRefresh = ?, show = ?, bookSort = ?
+      enableRefresh = ?, show = ?, bookSort = ?, onlyUpdateRead = ?
     WHERE groupId = ?`,
     [
       group.groupName,
@@ -92,6 +93,7 @@ export async function updateGroup(group: BookGroup): Promise<void> {
       group.enableRefresh ? 1 : 0,
       group.show ? 1 : 0,
       group.bookSort,
+      group.onlyUpdateRead ? 1 : 0,
       group.groupId,
     ]
   );
@@ -189,5 +191,6 @@ function mapRowToGroup(row: Record<string, unknown>): BookGroup {
     enableRefresh: Boolean(row.enableRefresh ?? 1),
     show: Boolean(row.show ?? 1),
     bookSort: Number(row.bookSort ?? -1),
+    onlyUpdateRead: Boolean(row.onlyUpdateRead ?? 0),
   };
 }

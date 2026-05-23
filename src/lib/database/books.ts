@@ -204,6 +204,7 @@ export async function replaceBookUrl(oldBookUrl: string, book: Book): Promise<vo
       latestChapterTitle = ?, latestChapterTime = ?,
       lastCheckTime = ?, lastCheckCount = ?, totalChapterNum = ?,
       durChapterTitle = ?, durChapterIndex = ?, durChapterPos = ?,
+      durVolumeIndex = ?, chapterInVolumeIndex = ?,
       durChapterTime = ?, wordCount = ?, canUpdate = ?,
       "order" = ?, originOrder = ?, variable = ?, readConfig = ?,
       syncTime = ?
@@ -232,6 +233,8 @@ export async function replaceBookUrl(oldBookUrl: string, book: Book): Promise<vo
       book.durChapterTitle ?? null,
       book.durChapterIndex,
       book.durChapterPos,
+      book.durVolumeIndex ?? 0,
+      book.chapterInVolumeIndex ?? 0,
       book.durChapterTime,
       book.wordCount ?? null,
       book.canUpdate ? 1 : 0,
@@ -263,6 +266,7 @@ export async function updateBook(book: Book): Promise<void> {
       latestChapterTitle = ?, latestChapterTime = ?,
       lastCheckTime = ?, lastCheckCount = ?, totalChapterNum = ?,
       durChapterTitle = ?, durChapterIndex = ?, durChapterPos = ?,
+      durVolumeIndex = ?, chapterInVolumeIndex = ?,
       durChapterTime = ?, wordCount = ?, canUpdate = ?,
       "order" = ?, originOrder = ?, variable = ?, readConfig = ?,
       syncTime = ?
@@ -290,6 +294,8 @@ export async function updateBook(book: Book): Promise<void> {
       book.durChapterTitle ?? null,
       book.durChapterIndex,
       book.durChapterPos,
+      book.durVolumeIndex ?? 0,
+      book.chapterInVolumeIndex ?? 0,
       book.durChapterTime,
       book.wordCount ?? null,
       book.canUpdate ? 1 : 0,
@@ -333,6 +339,61 @@ export async function deleteBook(bookUrl: string): Promise<void> {
   const db = await getDatabase();
   // 由于外键约束，删除书籍时会自动删除相关章节
   await db.execute('DELETE FROM books WHERE bookUrl = ?', [bookUrl]);
+}
+
+/** 批量设置是否允许更新 */
+export async function updateBooksCanUpdate(
+  bookUrls: string[],
+  canUpdate: boolean
+): Promise<void> {
+  if (bookUrls.length === 0) return;
+  const db = await getDatabase();
+  const value = canUpdate ? 1 : 0;
+  for (const bookUrl of bookUrls) {
+    await db.execute('UPDATE books SET canUpdate = ? WHERE bookUrl = ?', [value, bookUrl]);
+  }
+}
+
+/** 批量设置分组掩码 */
+export async function updateBooksGroupMask(
+  bookUrls: string[],
+  groupMask: number
+): Promise<void> {
+  if (bookUrls.length === 0) return;
+  const db = await getDatabase();
+  for (const bookUrl of bookUrls) {
+    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [groupMask, bookUrl]);
+  }
+}
+
+/** 为所选书籍加入分组（位或） */
+export async function addBooksToGroupMask(
+  bookUrls: string[],
+  groupId: number
+): Promise<void> {
+  if (bookUrls.length === 0 || groupId <= 0) return;
+  for (const bookUrl of bookUrls) {
+    const book = await getBook(bookUrl);
+    if (!book) continue;
+    const next = book.group | groupId;
+    if (next === book.group) continue;
+    await updateBook({ ...book, group: next });
+  }
+}
+
+/** 为所选书籍移除分组（位清除） */
+export async function removeBooksFromGroupMask(
+  bookUrls: string[],
+  groupId: number
+): Promise<void> {
+  if (bookUrls.length === 0 || groupId <= 0) return;
+  for (const bookUrl of bookUrls) {
+    const book = await getBook(bookUrl);
+    if (!book) continue;
+    const next = book.group & ~groupId;
+    if (next === book.group) continue;
+    await updateBook({ ...book, group: next });
+  }
 }
 
 /**
@@ -430,6 +491,8 @@ function mapRowToBook(row: Record<string, unknown>): Book {
     durChapterTitle: row.durChapterTitle ? String(row.durChapterTitle) : undefined,
     durChapterIndex: Number(row.durChapterIndex ?? 0),
     durChapterPos: Number(row.durChapterPos ?? 0),
+    durVolumeIndex: Number(row.durVolumeIndex ?? 0),
+    chapterInVolumeIndex: Number(row.chapterInVolumeIndex ?? 0),
     durChapterTime: Number(row.durChapterTime ?? 0),
     wordCount: row.wordCount ? String(row.wordCount) : undefined,
     canUpdate: Boolean(row.canUpdate ?? 1),

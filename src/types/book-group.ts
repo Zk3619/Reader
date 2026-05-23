@@ -21,6 +21,8 @@ export interface BookGroup {
   show: boolean;
   /** 书籍排序方式 */
   bookSort: number;
+  /** 仅更新已读书籍 */
+  onlyUpdateRead: boolean;
 }
 
 /**
@@ -39,6 +41,8 @@ export const BookGroupId = {
   NetNone: -4,
   /** 本地无分组 */
   LocalNone: -5,
+  /** 视频分组 */
+  Video: -6,
   /** 错误分组 */
   Error: -11,
 } as const;

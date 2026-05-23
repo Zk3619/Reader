@@ -48,8 +48,8 @@ export async function insertRssArticle(article: NewRssArticle): Promise<void> {
   await db.execute(
     `INSERT OR REPLACE INTO rssArticles (
       origin, sort, title, "order", link, pubDate,
-      description, content, image, "group", read, variable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      description, content, image, "group", read, variable, type, durPos
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       article.origin,
       article.sort ?? '',
@@ -63,6 +63,8 @@ export async function insertRssArticle(article: NewRssArticle): Promise<void> {
       article.group ?? '默认分组',
       article.read ? 1 : 0,
       article.variable ?? null,
+      (article as RssArticle).type ?? 0,
+      (article as RssArticle).durPos ?? 0,
     ]
   );
 }
@@ -75,8 +77,8 @@ export async function appendRssArticle(article: NewRssArticle): Promise<void> {
   await db.execute(
     `INSERT OR IGNORE INTO rssArticles (
       origin, sort, title, "order", link, pubDate,
-      description, content, image, "group", read, variable
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      description, content, image, "group", read, variable, type, durPos
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       article.origin,
       article.sort ?? '',
@@ -90,6 +92,8 @@ export async function appendRssArticle(article: NewRssArticle): Promise<void> {
       article.group ?? '默认分组',
       article.read ? 1 : 0,
       article.variable ?? null,
+      (article as RssArticle).type ?? 0,
+      (article as RssArticle).durPos ?? 0,
     ]
   );
 }
@@ -129,8 +133,8 @@ export async function updateRssArticle(article: RssArticle): Promise<void> {
     `UPDATE rssArticles SET
       sort = ?, title = ?, "order" = ?, pubDate = ?,
       description = ?, content = ?, image = ?,
-      "group" = ?, read = ?, variable = ?
-    WHERE origin = ? AND link = ?`,
+      "group" = ?, read = ?, variable = ?, type = ?, durPos = ?
+    WHERE origin = ? AND link = ? AND sort = ?`,
     [
       article.sort,
       article.title,
@@ -142,8 +146,11 @@ export async function updateRssArticle(article: RssArticle): Promise<void> {
       article.group,
       article.read ? 1 : 0,
       article.variable ?? null,
+      article.type,
+      article.durPos,
       article.origin,
       article.link,
+      article.sort,
     ]
   );
 }
@@ -173,5 +180,7 @@ function mapRowToArticle(row: Record<string, unknown>): RssArticle {
     group: String(row.group ?? '默认分组'),
     read: Boolean(row.read ?? 0),
     variable: row.variable ? String(row.variable) : undefined,
+    type: Number(row.type ?? 0),
+    durPos: Number(row.durPos ?? 0),
   };
 }

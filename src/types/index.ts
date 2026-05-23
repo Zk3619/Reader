@@ -44,6 +44,19 @@ export type { ReplaceRule } from '@/types/replace-rule';
 
 // 阅读记录类型
 export type { ReadRecord } from '@/types/read-record';
+export type { ReadRecordDetail } from '@/types/read-record-detail';
+export type { ReadRecordSession } from '@/types/read-record-session';
+
+// Legado v96 扩展实体
+export type { TxtTocRule } from '@/types/txt-toc-rule';
+export type { HttpTTS } from '@/types/http-tts';
+export type { RuleSub } from '@/types/rule-sub';
+export type { DictRule } from '@/types/dict-rule';
+export type { KeyboardAssist } from '@/types/keyboard-assist';
+export type { Server } from '@/types/server';
+export type { UrlRecord } from '@/types/url-record';
+export type { DirectLinkUploadRule } from '@/types/direct-link-upload-rule';
+export type { UploadHistory } from '@/types/upload-history';
 
 // 远程书籍相关类型
 export type {

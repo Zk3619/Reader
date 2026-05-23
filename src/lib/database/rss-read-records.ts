@@ -29,13 +29,19 @@ export async function upsertRssReadRecord(
   const db = await getDatabase();
   await db.execute(
     `INSERT OR REPLACE INTO rssReadRecords (
-      record, title, readTime, read
-    ) VALUES (?, ?, ?, ?)`,
+      record, title, readTime, read, origin, sort, image, type, durPos, pubDate
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.record,
       record.title ?? null,
       record.readTime ?? null,
       record.read ? 1 : 0,
+      record.origin ?? '',
+      record.sort ?? '',
+      record.image ?? null,
+      record.type ?? 0,
+      record.durPos ?? 0,
+      record.pubDate ?? null,
     ]
   );
 }
@@ -68,8 +74,14 @@ export async function deleteRssReadRecord(record: string): Promise<void> {
 function mapRowToRecord(row: Record<string, unknown>): RssReadRecord {
   return {
     record: String(row.record ?? ''),
+    origin: String(row.origin ?? ''),
+    sort: String(row.sort ?? ''),
     title: row.title ? String(row.title) : undefined,
     readTime: row.readTime ? Number(row.readTime) : undefined,
     read: Boolean(row.read ?? 1),
+    image: row.image ? String(row.image) : undefined,
+    type: Number(row.type ?? 0),
+    durPos: Number(row.durPos ?? 0),
+    pubDate: row.pubDate ? String(row.pubDate) : undefined,
   };
 }
