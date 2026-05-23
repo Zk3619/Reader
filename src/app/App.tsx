@@ -18,19 +18,15 @@ import { SourcesPage } from "@/pages/sources/SourcesPage";
 import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
 import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
-import {
-  BookGroupManage,
-  type BookGroupManageToolbarActions,
-} from "@/pages/bookshelf/BookGroupManage";
-import {
-  BookGroupManagePageToolbar,
-  BookGroupManageToolbarLeading,
-} from "@/components/bookshelf/BookGroupManagePageToolbar";
+import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
+import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
+import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
 import { ReaderPage } from "@/pages/reader/ReaderPage";
-import { ImportPage } from "@/pages/import/ImportPage";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
 import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetworkDialog";
+import { ImportSourceLocalDialog } from "@/components/sources/ImportSourceLocalDialog";
+import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog";
 import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
@@ -63,13 +59,21 @@ import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
 import { hasBook } from "@/lib/database/books";
-import { importLocalBook, importLocalBookFromContent, isAndroidContentUri, pickLocalBookFile } from "@/lib/local-book";
+import {
+  importLocalBook,
+  importLocalBookFromContent,
+  isAndroidContentUri,
+  pickLocalBookFiles,
+  type LocalBookPickResult,
+} from "@/lib/local-book";
+import { pickLocalBookDirectory } from "@/lib/local-book/pick-local-book-directory";
 import {
   copyFileToBooksDir,
   copyWebFileToBooksDir,
   getBooksDirectory,
   moveFileToBooksDir,
   moveWebFileToBooksDir,
+  needsImportBookActionPrompt,
   needsImportFileActionSelection,
   resolveTauriImportTarget,
 } from "@/lib/local-book/import";
@@ -105,14 +109,32 @@ import {
   retainInnerWebPanelForOverlay,
   shouldManageInnerWebPanelOverlay,
 } from "@/lib/platform/inner-web-panel-overlay";
-import { parseReaderImportDeepLink, READER_BOOKSOURCE_IDENTIFY_EVENT } from "@/lib/platform/legado-import-uri";
 import {
+  parseReaderImportDeepLink,
+  READER_BOOKSOURCE_IDENTIFY_EVENT,
+  READER_RSS_IMPORT_EVENT,
+  READER_REPLACE_RULE_IMPORT_EVENT,
+} from "@/lib/platform/legado-import-uri";
+import {
+  buildImportComparisons,
+  defaultImportSelection,
+  DatabaseRestoreRequiredError,
   importSelectedBookSources,
   resolveBookSourcesFromFile,
+  resolveBookSourcesFromLocalFiles,
   resolveBookSourcesFromNetworkUrl,
   resolveBookSourcesFromText,
+  type ImportSourceComparison,
 } from "@/lib/book-source/import-booksource-resolver";
-import { pickLocalBookSourceFile } from "@/lib/book-source/pick-local-booksource-file";
+import { pickLocalBookSourceFiles } from "@/lib/book-source/pick-local-booksource-file";
+import { pickLocalBookSourceDirectory } from "@/lib/book-source/pick-local-booksource-directory";
+import {
+  importLegadoJsonFromNetworkUrl,
+  importReplaceRulesFromNetworkUrl,
+  importRssFromNetworkUrl,
+} from "@/lib/book-source/import-network-sidecar";
+import { importDatabase } from "@/lib/database/export-import";
+import { SourceBlocklistSetting } from "@/components/settings/SourceBlocklistSetting";
 import { InnerWebHost } from "@/pages/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
@@ -145,12 +167,17 @@ const mockRecentBooks = [
 ];
 
 // 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
-const STANDALONE_PAGES: PageType[] = ["reader", "explore", "book-info", "import", "remote-book"];
+const STANDALONE_PAGES: PageType[] = ["reader", "explore", "book-info", "remote-book"];
+
+function normalizeRestoredPage(page: string): PageType {
+  if (page === "import") return "bookshelf";
+  return page as PageType;
+}
 
 // 内部组件，用于访问 SidebarProvider 的上下文
 function AppContent() {
   const [currentPage, setCurrentPage] = createSignal<PageType>(
-    readHmrData<PageType>("currentPage", "bookshelf")
+    normalizeRestoredPage(readHmrData<string>("currentPage", "bookshelf"))
   );
 
   // 判断是否为独立页面
@@ -165,19 +192,34 @@ function AppContent() {
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
   const [showGroupManage, setShowGroupManage] = createSignal(false);
-  const [groupManageToolbarActions, setGroupManageToolbarActions] =
-    createSignal<BookGroupManageToolbarActions | null>(null);
+  const [showBookshelfManage, setShowBookshelfManage] = createSignal(false);
   const [showBookDirectoryDialog, setShowBookDirectoryDialog] = createSignal(false);
   const [showImportActionDialog, setShowImportActionDialog] = createSignal(false);
   const [showReplaceFileDialog, setShowReplaceFileDialog] = createSignal(false);
   const [showAddBookByUrlDialog, setShowAddBookByUrlDialog] = createSignal(false);
   const [showImportSourceNetworkDialog, setShowImportSourceNetworkDialog] = createSignal(false);
+  const [showImportSourceLocalDialog, setShowImportSourceLocalDialog] = createSignal(false);
+  const [importSourceLocalBusy, setImportSourceLocalBusy] = createSignal(false);
+  const [showImportBookLocalDialog, setShowImportBookLocalDialog] = createSignal(false);
+  const [importBookLocalBusy, setImportBookLocalBusy] = createSignal(false);
+  const [pendingImportBatch, setPendingImportBatch] = createSignal<LocalBookPickResult[] | null>(
+    null
+  );
+  const [pendingImportBatchGroupId, setPendingImportBatchGroupId] = createSignal<
+    number | undefined
+  >();
   const [showImportSourceQrDialog, setShowImportSourceQrDialog] = createSignal(false);
   const [showImportSourceSelectDialog, setShowImportSourceSelectDialog] = createSignal(false);
   const [importSourceNetworkPresetUrl, setImportSourceNetworkPresetUrl] = createSignal("");
   const [importSourceLoading, setImportSourceLoading] = createSignal(false);
   const [importSourceCandidates, setImportSourceCandidates] = createSignal<NewBookSource[]>([]);
+  const [importSourceComparisons, setImportSourceComparisons] = createSignal<ImportSourceComparison[]>([]);
   const [importSourceSelectedUrls, setImportSourceSelectedUrls] = createSignal<Set<string>>(new Set());
+  const [importKeepName, setImportKeepName] = createSignal(false);
+  const [importKeepGroup, setImportKeepGroup] = createSignal(false);
+  const [importKeepEnable, setImportKeepEnable] = createSignal(false);
+  const [importGroupName, setImportGroupName] = createSignal('');
+  const [importAddGroup, setImportAddGroup] = createSignal(false);
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
   /** 书源搜索对话框：从书源项右键「搜索」打开，限定该书源 */
@@ -252,7 +294,14 @@ function AppContent() {
   const openImportSourceSelectLoading = async () => {
     setImportSourceLoading(true);
     setImportSourceCandidates([]);
+    setImportSourceComparisons([]);
     setImportSourceSelectedUrls(new Set<string>());
+    const app = settingsStore.state.app;
+    setImportKeepName(app.importKeepName ?? false);
+    setImportKeepGroup(app.importKeepGroup ?? false);
+    setImportKeepEnable(app.importKeepEnable ?? false);
+    setImportGroupName('');
+    setImportAddGroup(false);
     const p = innerWebPayload();
     if (
       isTauri() &&
@@ -265,15 +314,17 @@ function AppContent() {
     setShowImportSourceSelectDialog(true);
   };
 
-  const applyRecognizedSources = (sources: NewBookSource[], title = '导入书源') => {
+  const applyRecognizedSources = async (sources: NewBookSource[], title = '导入书源') => {
     if (sources.length === 0) {
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
       showAppToast({ title, description: '未识别到有效书源', variant: 'default' });
       return;
     }
+    const comparisons = await buildImportComparisons(sources);
     setImportSourceCandidates(sources);
-    setImportSourceSelectedUrls(new Set(sources.map((s) => s.sourceUrl)));
+    setImportSourceComparisons(comparisons);
+    setImportSourceSelectedUrls(defaultImportSelection(comparisons));
     setImportSourceLoading(false);
   };
 
@@ -286,7 +337,7 @@ function AppContent() {
     await openImportSourceSelectLoading();
     try {
       const { sources } = await resolveBookSourcesFromNetworkUrl(normalized);
-      applyRecognizedSources(sources, '网络导入书源');
+      await applyRecognizedSources(sources, '网络导入书源');
     } catch (err) {
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
@@ -296,12 +347,52 @@ function AppContent() {
     }
   };
 
+  const restoreDatabaseFromFile = async (file: File) => {
+    const ok = confirm(
+      '检测到数据库备份（.db）。恢复将替换当前全部数据且不可撤销。\n\n是否立即恢复？也可稍后在「设置 → 数据备份」中操作。'
+    );
+    if (!ok) return;
+    try {
+      const buf = await file.arrayBuffer();
+      await importDatabase(buf, true);
+      showAppToast({
+        title: '数据库已恢复',
+        description: '建议刷新页面以应用更改',
+        variant: 'default',
+      });
+      setTimeout(() => {
+        if (confirm('数据库已恢复，是否刷新页面？')) {
+          window.location.reload();
+        }
+      }, 800);
+    } catch (e) {
+      showAppToast({
+        title: '数据库恢复失败',
+        description: String(e),
+        variant: 'destructive',
+      });
+    }
+  };
+
   const identifySourcesFromLocalFile = async (file: File) => {
     await openImportSourceSelectLoading();
     try {
-      const { sources } = await resolveBookSourcesFromFile(file);
-      applyRecognizedSources(sources, '本地导入书源');
+      const { sources, sideImportSummary } = await resolveBookSourcesFromFile(file);
+      if (sideImportSummary?.length) {
+        showAppToast({
+          title: 'ZIP 附带导入',
+          description: sideImportSummary.join('、'),
+          variant: 'default',
+        });
+      }
+      await applyRecognizedSources(sources, '本地导入书源');
     } catch (err) {
+      if (err instanceof DatabaseRestoreRequiredError) {
+        setShowImportSourceSelectDialog(false);
+        releaseBookSourceImportPanelIfNeeded();
+        await restoreDatabaseFromFile(err.file);
+        return;
+      }
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
       showAppToast({ title: '本地导入书源失败', description: String(err), variant: 'destructive' });
@@ -310,25 +401,200 @@ function AppContent() {
     }
   };
 
-  const openLocalBookSourceImport = async () => {
-    const file = await pickLocalBookSourceFile();
-    if (file) void identifySourcesFromLocalFile(file);
+  const openLocalBookSourceImport = () => {
+    setShowImportSourceLocalDialog(true);
+  };
+
+  const runLocalBookSourceFilePick = async () => {
+    setImportSourceLocalBusy(true);
+    try {
+      const files = await pickLocalBookSourceFiles();
+      if (!files?.length) return;
+      if (files.length === 1) {
+        void identifySourcesFromLocalFile(files[0]!);
+        return;
+      }
+      await openImportSourceSelectLoading();
+      try {
+        const { sources, sideImportSummary } = await resolveBookSourcesFromLocalFiles(files);
+        if (sideImportSummary?.length) {
+          showAppToast({
+            title: '多文件导入',
+            description: sideImportSummary.join('；'),
+            variant: 'default',
+          });
+        }
+        await applyRecognizedSources(
+          sources,
+          `本地导入书源（${files.length} 个文件）`
+        );
+      } catch (err) {
+        if (err instanceof DatabaseRestoreRequiredError) {
+          setShowImportSourceSelectDialog(false);
+          releaseBookSourceImportPanelIfNeeded();
+          await restoreDatabaseFromFile(err.file);
+          return;
+        }
+        setShowImportSourceSelectDialog(false);
+        releaseBookSourceImportPanelIfNeeded();
+        showAppToast({
+          title: '本地导入书源失败',
+          description: String(err),
+          variant: 'destructive',
+        });
+      } finally {
+        setImportSourceLoading(false);
+      }
+    } catch (err) {
+      showAppToast({
+        title: '选择文件失败',
+        description: String(err),
+        variant: 'destructive',
+      });
+    } finally {
+      setImportSourceLocalBusy(false);
+    }
+  };
+
+  const identifySourcesFromLocalDirectory = async () => {
+    setImportSourceLocalBusy(true);
+    try {
+      const picked = await pickLocalBookSourceDirectory();
+      if (!picked) return;
+      if (picked.files.length === 0) {
+        showAppToast({
+          title: '目录导入书源',
+          description: '该目录中未找到符合条件的书源文件',
+          variant: 'default',
+        });
+        return;
+      }
+      await openImportSourceSelectLoading();
+      try {
+        const { sources, sideImportSummary } = await resolveBookSourcesFromLocalFiles(
+          picked.files
+        );
+        if (sideImportSummary?.length) {
+          showAppToast({
+            title: '目录扫描',
+            description: sideImportSummary.join('；'),
+            variant: 'default',
+          });
+        }
+        await applyRecognizedSources(
+          sources,
+          `目录导入书源（${picked.files.length} 个文件）`
+        );
+      } catch (err) {
+        if (err instanceof DatabaseRestoreRequiredError) {
+          setShowImportSourceSelectDialog(false);
+          releaseBookSourceImportPanelIfNeeded();
+          await restoreDatabaseFromFile(err.file);
+          return;
+        }
+        setShowImportSourceSelectDialog(false);
+        releaseBookSourceImportPanelIfNeeded();
+        showAppToast({
+          title: '目录导入书源失败',
+          description: String(err),
+          variant: 'destructive',
+        });
+      } finally {
+        setImportSourceLoading(false);
+      }
+    } catch (err) {
+      showAppToast({
+        title: '选择目录失败',
+        description: String(err),
+        variant: 'destructive',
+      });
+    } finally {
+      setImportSourceLocalBusy(false);
+    }
+  };
+
+  const handleLocalImportPickFile = () => {
+    setShowImportSourceLocalDialog(false);
+    void runLocalBookSourceFilePick();
+  };
+
+  const handleLocalImportPickDirectory = () => {
+    setShowImportSourceLocalDialog(false);
+    void identifySourcesFromLocalDirectory();
+  };
+
+  const handleLegadoNetworkImport = async (url: string, title = '网络导入') => {
+    const parsed = parseReaderImportDeepLink(url);
+    if (parsed?.kind === 'unsupported') {
+      showAppToast({ title, description: parsed.reason, variant: 'default' });
+      return;
+    }
+    if (parsed?.kind === 'rssNetwork') {
+      try {
+        const n = await importRssFromNetworkUrl(parsed.src);
+        showAppToast({ title: '导入 RSS', description: `已导入 ${n} 条`, variant: 'default' });
+      } catch (err) {
+        showAppToast({ title: '导入 RSS 失败', description: String(err), variant: 'destructive' });
+      }
+      return;
+    }
+    if (parsed?.kind === 'replaceRuleNetwork') {
+      try {
+        const n = await importReplaceRulesFromNetworkUrl(parsed.src);
+        showAppToast({ title: '导入替换规则', description: `已导入 ${n} 条`, variant: 'default' });
+      } catch (err) {
+        showAppToast({
+          title: '导入替换规则失败',
+          description: String(err),
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+    if (parsed?.kind === 'determineType') {
+      try {
+        const result = await importLegadoJsonFromNetworkUrl(parsed.src);
+        if (result.kind === 'book') {
+          void identifySourcesFromNetwork(parsed.src);
+          return;
+        }
+        const label = result.kind === 'rss' ? 'RSS 源' : '替换规则';
+        showAppToast({
+          title: `导入${label}`,
+          description: `已导入 ${result.count} 条`,
+          variant: 'default',
+        });
+        return;
+      } catch {
+        void identifySourcesFromNetwork(parsed.src);
+        return;
+      }
+    }
+    void identifySourcesFromNetwork(parsed?.src ?? url);
   };
 
   const identifySourcesFromQrRaw = async (raw: string) => {
     const parsed = parseReaderImportDeepLink(raw);
     if (parsed?.kind === 'unsupported') {
-      showAppToast({ title: '二维码导入书源', description: parsed.reason, variant: 'default' });
+      showAppToast({ title: '二维码导入', description: parsed.reason, variant: 'default' });
       return;
     }
     if (parsed) {
-      void identifySourcesFromNetwork(parsed.src);
+      void handleLegadoNetworkImport(
+        parsed.kind === 'bookSourceNetwork' ||
+          parsed.kind === 'rssNetwork' ||
+          parsed.kind === 'replaceRuleNetwork' ||
+          parsed.kind === 'determineType'
+          ? parsed.src
+          : raw,
+        '二维码导入'
+      );
       return;
     }
     await openImportSourceSelectLoading();
     try {
       const { sources } = await resolveBookSourcesFromText(raw);
-      applyRecognizedSources(sources, '二维码导入书源');
+      await applyRecognizedSources(sources, '二维码导入书源');
     } catch (err) {
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
@@ -365,6 +631,40 @@ function AppContent() {
     setImportSourceSelectedUrls(next);
   };
 
+  const toggleImportSourceSelectNew = () => {
+    const comparisons = importSourceComparisons();
+    const current = importSourceSelectedUrls();
+    const newUrls = comparisons.filter((c) => c.isNew).map((c) => c.source.sourceUrl);
+    const allNewSelected = newUrls.length > 0 && newUrls.every((u) => current.has(u));
+    const next = new Set(current);
+    for (const u of newUrls) {
+      if (allNewSelected) next.delete(u);
+      else next.add(u);
+    }
+    setImportSourceSelectedUrls(next);
+  };
+
+  const toggleImportSourceSelectUpdate = () => {
+    const comparisons = importSourceComparisons();
+    const current = importSourceSelectedUrls();
+    const updateUrls = comparisons.filter((c) => c.isUpdate).map((c) => c.source.sourceUrl);
+    const allUpdateSelected = updateUrls.length > 0 && updateUrls.every((u) => current.has(u));
+    const next = new Set(current);
+    for (const u of updateUrls) {
+      if (allUpdateSelected) next.delete(u);
+      else next.add(u);
+    }
+    setImportSourceSelectedUrls(next);
+  };
+
+  const persistImportKeepSettings = async () => {
+    await settingsStore.setImportSourceKeepOptions({
+      importKeepName: importKeepName(),
+      importKeepGroup: importKeepGroup(),
+      importKeepEnable: importKeepEnable(),
+    });
+  };
+
   const confirmImportSelectedSources = async () => {
     const selected = new Set(importSourceSelectedUrls());
     const list = importSourceCandidates().filter((s) => selected.has(s.sourceUrl));
@@ -374,11 +674,25 @@ function AppContent() {
     }
     try {
       setImportSourceLoading(true);
-      const inserted = await importSelectedBookSources(list);
-      showAppToast({ title: '导入书源', description: `已导入 ${inserted} 条书源`, variant: 'default' });
+      await persistImportKeepSettings();
+      const { inserted, blocked } = await importSelectedBookSources(list, {
+        keepName: importKeepName(),
+        keepGroup: importKeepGroup(),
+        keepEnable: importKeepEnable(),
+        groupName: importGroupName(),
+        addGroup: importAddGroup(),
+      });
+      const blockedNote =
+        blocked.length > 0 ? `，跳过 ${blocked.length} 条黑名单书源` : '';
+      showAppToast({
+        title: '导入书源',
+        description: `已导入 ${inserted} 条书源${blockedNote}`,
+        variant: 'default',
+      });
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
       setImportSourceCandidates([]);
+      setImportSourceComparisons([]);
       setImportSourceSelectedUrls(new Set<string>());
     } catch (err) {
       showAppToast({ title: '导入书源失败', description: String(err), variant: 'destructive' });
@@ -398,7 +712,7 @@ function AppContent() {
   const [bookInfoContext, setBookInfoContext] = createSignal<{
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'reader';
+    fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf';
   } | null>(null);
   /** 发现页分页偏好对话框显示状态 */
   const [showExplorePaginationPreferenceDialog, setShowExplorePaginationPreferenceDialog] = createSignal(false);
@@ -479,6 +793,68 @@ function AppContent() {
     }
   };
 
+  const runBatchLocalBookImport = async (
+    candidates: LocalBookPickResult[],
+    action: ImportAction,
+    groupId?: number
+  ) => {
+    const gid = groupId !== undefined && groupId >= 0 ? groupId : undefined;
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const picked of candidates) {
+      try {
+        if (isTauri()) {
+          const { targetUrl, exists } = await resolveTauriImportTarget(picked.fileName);
+          if (exists && (await hasBook(targetUrl))) {
+            skipped += 1;
+            continue;
+          }
+          await performImportWithAction(picked, action, exists, gid);
+          success += 1;
+        } else {
+          let item = picked;
+          if (!item.content) {
+            item = {
+              ...item,
+              content: await readBytes(parseStorageRef(item.bookUrl)),
+            };
+          }
+          const root = await getManagedBooksRoot();
+          const safeName = sanitizeManagedFileName(item.fileName);
+          const targetRef =
+            root.kind === 'dir-handle'
+              ? { kind: 'dir-handle' as const, value: `${root.value}/${safeName}` }
+              : null;
+          const targetUrl = targetRef ? formatStorageRef(targetRef) : '';
+          const targetExists = targetRef ? await fileRefExists(targetRef) : false;
+          if (targetExists && targetUrl && (await hasBook(targetUrl))) {
+            skipped += 1;
+            continue;
+          }
+          await performImportWithAction(item, action, targetExists, gid);
+          success += 1;
+        }
+      } catch (e) {
+        console.error('[目录导入书籍]', picked.fileName, e);
+        failed += 1;
+      }
+    }
+
+    const parts = [`成功 ${success} 本`];
+    if (skipped > 0) parts.push(`跳过 ${skipped} 本`);
+    if (failed > 0) parts.push(`失败 ${failed} 本`);
+    showAppToast({
+      title: '目录导入完成',
+      description: parts.join('，'),
+      variant: success > 0 ? 'success' : failed > 0 ? 'error' : 'default',
+    });
+    if (success > 0) {
+      window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+    }
+  };
+
   /**
    * 处理导入操作选择确认
    */
@@ -488,6 +864,15 @@ function AppContent() {
     // 如果用户选择记住，保存到设置中（这个逻辑在 ImportActionDialog 组件内部已经处理，但为了保持一致性保留）
     if (remember) {
       await settingsStore.setImportBookAction(action, true);
+    }
+
+    const batch = pendingImportBatch();
+    if (batch && batch.length > 0) {
+      const batchGroupId = pendingImportBatchGroupId();
+      setPendingImportBatch(null);
+      setPendingImportBatchGroupId(undefined);
+      await runBatchLocalBookImport(batch, action, batchGroupId);
+      return;
     }
 
     const fileInfo = pendingImportFile();
@@ -868,7 +1253,19 @@ function AppContent() {
       let finalContent: ArrayBuffer;
       const finalGroupId = groupId !== undefined ? groupId : (bookshelfStore.state.currentGroup >= 0 ? bookshelfStore.state.currentGroup : undefined);
 
-      if (isTauri()) {
+      if (action === 'none') {
+        finalBookUrl = fileInfo.bookUrl;
+        if (isAndroidContentUri(fileInfo.bookUrl) || fileInfo.bookUrl.startsWith('local::')) {
+          if (!fileInfo.content) {
+            throw new Error('Android Content URI 必须预先读取内容');
+          }
+          finalContent = fileInfo.content;
+        } else if (fileInfo.content) {
+          finalContent = fileInfo.content;
+        } else {
+          finalContent = await readBytes(parseStorageRef(finalBookUrl));
+        }
+      } else if (isTauri()) {
         // Tauri 环境：先执行文件操作，再读取内容
         if (isAndroidContentUri(fileInfo.bookUrl) || fileInfo.bookUrl.startsWith('local::')) {
           if (!fileInfo.content) {
@@ -881,25 +1278,21 @@ function AppContent() {
               replaceFile,
               fileInfo.content,
             );
-          } else if (action === 'move') {
+          } else {
             finalBookUrl = await moveFileToBooksDir(
               fileInfo.bookUrl,
               fileInfo.fileName,
               replaceFile,
               fileInfo.content,
             );
-          } else {
-            finalBookUrl = fileInfo.bookUrl;
           }
           finalContent = fileInfo.content;
         } else {
-          // 普通文件路径：先复制/移动文件，再读取内容（更高效，避免大文件全部加载到内存）
           if (action === 'copy') {
             finalBookUrl = await copyFileToBooksDir(fileInfo.bookUrl, fileInfo.fileName, replaceFile);
-          } else if (action === 'move') {
+          } else {
             finalBookUrl = await moveFileToBooksDir(fileInfo.bookUrl, fileInfo.fileName, replaceFile);
           }
-
           finalContent = await readBytes(parseStorageRef(finalBookUrl));
         }
       } else if (await needsImportFileActionSelection()) {
@@ -913,15 +1306,19 @@ function AppContent() {
             fileInfo.content,
             replaceFile,
           );
-        } else {
+          finalContent = await readBytes(parseStorageRef(finalBookUrl));
+        } else if (action === 'move') {
           finalBookUrl = await moveWebFileToBooksDir(
             fileInfo.bookUrl,
             fileInfo.fileName,
             fileInfo.content,
             replaceFile,
           );
+          finalContent = await readBytes(parseStorageRef(finalBookUrl));
+        } else {
+          finalBookUrl = fileInfo.bookUrl;
+          finalContent = fileInfo.content;
         }
-        finalContent = await readBytes(parseStorageRef(finalBookUrl));
       } else {
         if (!fileInfo.content) {
           throw new Error('Web 端必须预先读取内容');
@@ -929,12 +1326,11 @@ function AppContent() {
         finalContent = fileInfo.content;
       }
 
-      // 执行导入
       const result = await importLocalBookFromContent(
         finalBookUrl,
         fileInfo.fileName,
         finalContent,
-        { groupId: finalGroupId }
+        { groupId: finalGroupId, keepSourceRef: action === 'none' },
       );
 
       if (result) {
@@ -1020,9 +1416,41 @@ function AppContent() {
     const onBookSourceIdentify = (ev: Event) => {
       const detail = (ev as CustomEvent<{ url?: string }>).detail;
       const u = detail?.url?.trim();
-      if (u) void identifySourcesFromNetwork(u);
+      if (u) void handleLegadoNetworkImport(u);
     };
     window.addEventListener(READER_BOOKSOURCE_IDENTIFY_EVENT, onBookSourceIdentify);
+    const onRssImport = (ev: Event) => {
+      const u = (ev as CustomEvent<{ url?: string }>).detail?.url?.trim();
+      if (!u) return;
+      void importRssFromNetworkUrl(u)
+        .then((n) =>
+          showAppToast({ title: '导入 RSS', description: `已导入 ${n} 条`, variant: 'default' })
+        )
+        .catch((err) =>
+          showAppToast({ title: '导入 RSS 失败', description: String(err), variant: 'destructive' })
+        );
+    };
+    window.addEventListener(READER_RSS_IMPORT_EVENT, onRssImport);
+    const onReplaceImport = (ev: Event) => {
+      const u = (ev as CustomEvent<{ url?: string }>).detail?.url?.trim();
+      if (!u) return;
+      void importReplaceRulesFromNetworkUrl(u)
+        .then((n) =>
+          showAppToast({
+            title: '导入替换规则',
+            description: `已导入 ${n} 条`,
+            variant: 'default',
+          })
+        )
+        .catch((err) =>
+          showAppToast({
+            title: '导入替换规则失败',
+            description: String(err),
+            variant: 'destructive',
+          })
+        );
+    };
+    window.addEventListener(READER_REPLACE_RULE_IMPORT_EVENT, onReplaceImport);
 
     const unlistenFns: Array<() => void> = [];
     if (isTauri()) {
@@ -1039,7 +1467,14 @@ function AppContent() {
                 showAppToast({ title: '暂不支持', description: parsed.reason, variant: 'default' });
                 return;
               }
-              void identifySourcesFromNetwork(parsed.src);
+              void handleLegadoNetworkImport(
+                parsed.kind === 'bookSourceNetwork' ||
+                  parsed.kind === 'rssNetwork' ||
+                  parsed.kind === 'replaceRuleNetwork' ||
+                  parsed.kind === 'determineType'
+                  ? parsed.src
+                  : uri
+              );
             })
           );
           unlistenFns.push(
@@ -1057,6 +1492,8 @@ function AppContent() {
     onCleanup(() => {
       window.removeEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
       window.removeEventListener(READER_BOOKSOURCE_IDENTIFY_EVENT, onBookSourceIdentify);
+      window.removeEventListener(READER_RSS_IMPORT_EVENT, onRssImport);
+      window.removeEventListener(READER_REPLACE_RULE_IMPORT_EVENT, onReplaceImport);
       for (const fn of unlistenFns) {
         try {
           fn();
@@ -1090,17 +1527,10 @@ function AppContent() {
     }
   }
 
-  async function handleBookshelfImportLocal() {
+  async function processSingleLocalBookPick(picked: LocalBookPickResult) {
     try {
       const groupId = bookshelfStore.state.currentGroup;
       const settings = settingsStore.state.app;
-      const { hasBooksStorageRoot } = await import('@/lib/platform/fs/managed-storage');
-      if (!hasBooksStorageRoot()) {
-        setShowBookDirectoryDialog(true);
-        return;
-      }
-      const picked = await pickLocalBookFile();
-      if (!picked) return;
 
       if (isTauri()) {
         if (!settings.rememberImportAction || !settings.importBookAction) {
@@ -1255,7 +1685,7 @@ function AppContent() {
         }
 
         if (await needsImportFileActionSelection()) {
-          if (!settings.rememberImportAction || !settings.importBookAction) {
+          if (await needsImportBookActionPrompt()) {
             setPendingImportFile({
               ...picked,
               groupId: groupId >= 0 ? groupId : undefined,
@@ -1287,7 +1717,7 @@ function AppContent() {
 
           await performImportWithAction(
             picked,
-            settings.importBookAction,
+            settings.importBookAction ?? 'copy',
             targetExists,
             groupId >= 0 ? groupId : undefined,
           );
@@ -1320,6 +1750,91 @@ function AppContent() {
       window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
     }
   }
+
+  const ensureBooksStorageForImport = async (): Promise<boolean> => {
+    const { hasBooksStorageRoot } = await import('@/lib/platform/fs/managed-storage');
+    if (!hasBooksStorageRoot()) {
+      setShowBookDirectoryDialog(true);
+      return false;
+    }
+    return true;
+  };
+
+  function handleBookshelfImportLocal() {
+    setShowImportBookLocalDialog(true);
+  }
+
+  const runLocalBookFilePick = async () => {
+    setImportBookLocalBusy(true);
+    try {
+      if (!(await ensureBooksStorageForImport())) return;
+      const candidates = await pickLocalBookFiles();
+      if (!candidates?.length) return;
+      const groupId = bookshelfStore.state.currentGroup;
+      const settings = settingsStore.state.app;
+      const gid = groupId >= 0 ? groupId : undefined;
+      if (candidates.length === 1) {
+        await processSingleLocalBookPick(candidates[0]!);
+        return;
+      }
+      if (await needsImportBookActionPrompt()) {
+        setPendingImportBatch(candidates);
+        setPendingImportBatchGroupId(gid);
+        setShowImportActionDialog(true);
+        return;
+      }
+      const action = settings.importBookAction ?? 'copy';
+      await runBatchLocalBookImport(candidates, action, gid);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '选择文件失败';
+      showAppToast({ title: '选择文件失败', description: msg, variant: 'error' });
+    } finally {
+      setImportBookLocalBusy(false);
+    }
+  };
+
+  const runLocalBookDirectoryPick = async () => {
+    setImportBookLocalBusy(true);
+    try {
+      if (!(await ensureBooksStorageForImport())) return;
+      const candidates = await pickLocalBookDirectory();
+      if (!candidates) return;
+      if (candidates.length === 0) {
+        showAppToast({
+          title: '目录导入',
+          description: '该目录中未找到符合条件的书籍文件（txt、epub）',
+          variant: 'default',
+        });
+        return;
+      }
+      const groupId = bookshelfStore.state.currentGroup;
+      const settings = settingsStore.state.app;
+      const gid = groupId >= 0 ? groupId : undefined;
+      if (await needsImportBookActionPrompt()) {
+        setPendingImportBatch(candidates);
+        setPendingImportBatchGroupId(gid);
+        setShowImportActionDialog(true);
+        return;
+      }
+      const action = settings.importBookAction ?? 'copy';
+      await runBatchLocalBookImport(candidates, action, gid);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '选择目录失败';
+      showAppToast({ title: '选择目录失败', description: msg, variant: 'error' });
+    } finally {
+      setImportBookLocalBusy(false);
+    }
+  };
+
+  const handleBookLocalImportPickFile = () => {
+    setShowImportBookLocalDialog(false);
+    void runLocalBookFilePick();
+  };
+
+  const handleBookLocalImportPickDirectory = () => {
+    setShowImportBookLocalDialog(false);
+    void runLocalBookDirectoryPick();
+  };
 
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
 
@@ -1429,30 +1944,42 @@ function AppContent() {
                 )}
               >
                 {showGroupManage() ? (
-                  <>
-                    <PageToolbar
-                      title="分组管理"
-                      description="管理书架分组，调整显示顺序和设置"
-                      leading={
-                        <BookGroupManageToolbarLeading
-                          onBack={() => setShowGroupManage(false)}
-                        />
+                  <BookGroupManage onClose={() => setShowGroupManage(false)} />
+                ) : showBookshelfManage() ? (
+                  <BookshelfManagePage
+                    onClose={() => setShowBookshelfManage(false)}
+                    onOpenBook={async (book) => {
+                      readerStore.setBookInitialState(book);
+                      setCurrentPage("reader");
+                      readerStore.openBook(book).catch((e) => {
+                        console.error("打开书籍失败:", e);
+                        setCurrentPage("bookshelf");
+                      });
+                    }}
+                    onOpenBookInfo={async (book) => {
+                      const source = await getSource(book.origin);
+                      if (!source) {
+                        showAppToast({
+                          title: "无法打开详情",
+                          description: "未找到对应书源",
+                          variant: "destructive",
+                        });
+                        return;
                       }
-                    >
-                      <BookGroupManagePageToolbar
-                        onAdd={() => groupManageToolbarActions()?.handleAdd()}
-                      />
-                    </PageToolbar>
-                    <BookGroupManage
-                      onClose={() => setShowGroupManage(false)}
-                      onToolbarActionsChange={setGroupManageToolbarActions}
-                    />
-                  </>
+                      setBookInfoContext({
+                        source,
+                        book: bookToSearchBook(book),
+                        fromPage: "bookshelf",
+                      });
+                      setCurrentPage("book-info");
+                    }}
+                  />
                 ) : (
                   <BookShelf
                     active={() => currentPage() === "bookshelf"}
                     onPageChange={setCurrentPage}
                     onOpenGroupManage={() => setShowGroupManage(true)}
+                    onOpenBookshelfManage={() => setShowBookshelfManage(true)}
                     onImportLocal={handleBookshelfImportLocal}
                     onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
                     onOpenBook={async (book) => {
@@ -1716,6 +2243,8 @@ function AppContent() {
 
                       <CoverCacheSetting />
 
+                      <SourceBlocklistSetting />
+
                       {/* 数据库备份 */}
                       <div class="rounded-2xl border border-border/50 bg-card p-6">
                         <div class="mb-4">
@@ -1920,14 +2449,6 @@ function AppContent() {
             }}
           </Show>
 
-          {/* 导入页面 */}
-          <Show when={currentPage() === "import"}>
-            <ImportPage
-              onClose={() => setCurrentPage("bookshelf")}
-              groupId={bookshelfStore.state.currentGroup >= 0 ? bookshelfStore.state.currentGroup : undefined}
-            />
-          </Show>
-
           {/* 远程书籍页面 */}
           <Show when={currentPage() === "remote-book"}>
             <RemoteBookPage
@@ -1982,6 +2503,21 @@ function AppContent() {
         />
 
         {/* 书源本地/网络导入（对齐 legado） */}
+        <ImportBookLocalDialog
+          open={showImportBookLocalDialog()}
+          busy={importBookLocalBusy()}
+          onOpenChange={setShowImportBookLocalDialog}
+          onPickFile={handleBookLocalImportPickFile}
+          onPickDirectory={handleBookLocalImportPickDirectory}
+        />
+        <ImportSourceLocalDialog
+          open={showImportSourceLocalDialog()}
+          busy={importSourceLocalBusy()}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          onOpenChange={setShowImportSourceLocalDialog}
+          onPickFile={handleLocalImportPickFile}
+          onPickDirectory={handleLocalImportPickDirectory}
+        />
         <ImportSourceNetworkDialog
           open={showImportSourceNetworkDialog()}
           onOpenChange={(open) => {
@@ -2006,7 +2542,13 @@ function AppContent() {
           open={showImportSourceSelectDialog()}
           loading={importSourceLoading()}
           sources={importSourceCandidates()}
+          comparisons={importSourceComparisons()}
           selectedUrls={importSourceSelectedUrls()}
+          keepName={importKeepName()}
+          keepGroup={importKeepGroup()}
+          keepEnable={importKeepEnable()}
+          groupName={importGroupName()}
+          addGroup={importAddGroup()}
           portalZClass={bookSourceImportDialogPortalZ()}
           onOpenChange={(open) => {
             setShowImportSourceSelectDialog(open);
@@ -2015,6 +2557,13 @@ function AppContent() {
           onToggle={toggleImportSourceSelected}
           onSelectAllToggle={toggleImportSourceSelectAll}
           onInvertSelect={toggleImportSourceInvert}
+          onSelectNewToggle={toggleImportSourceSelectNew}
+          onSelectUpdateToggle={toggleImportSourceSelectUpdate}
+          onKeepNameChange={setImportKeepName}
+          onKeepGroupChange={setImportKeepGroup}
+          onKeepEnableChange={setImportKeepEnable}
+          onGroupNameChange={setImportGroupName}
+          onAddGroupChange={setImportAddGroup}
           onConfirm={() => {
             void confirmImportSelectedSources();
           }}

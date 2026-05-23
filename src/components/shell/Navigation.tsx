@@ -24,7 +24,6 @@ import {
   BookmarkIcon,
   RecordIcon,
   SettingsIcon,
-  ImportIcon,
   GlobeIcon,
   BookInfoIcon,
   BookOpenIcon,
@@ -39,7 +38,6 @@ export type PageType =
   | "bookmark"
   | "record"
   | "settings"
-  | "import"
   | "remote-book"
   | "reader"
   | "book-info";
@@ -58,14 +56,13 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   bookmark: { label: "书签", icon: BookmarkIcon, description: "查看书签" },
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
   settings: { label: "设置", icon: SettingsIcon, description: "应用设置" },
-  import: { label: "导入", icon: ImportIcon, description: "批量导入本地书籍" },
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
   reader: { label: "阅读器", icon: BookmarkIcon, description: "阅读书籍" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
 };
 
 /** 不出现在顶栏页面菜单；与 App.tsx 的 STANDALONE_PAGES（布局/挂载）无关 */
-const NAV_HIDDEN_PAGES: PageType[] = ["explore", "import", "remote-book", "reader", "book-info"];
+const NAV_HIDDEN_PAGES: PageType[] = ["explore", "remote-book", "reader", "book-info"];
 
 const NAV_MENU_PAGES = Object.entries(pageConfig).filter(
   ([page]) => !NAV_HIDDEN_PAGES.includes(page as PageType)

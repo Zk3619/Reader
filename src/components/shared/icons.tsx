@@ -45,6 +45,7 @@ import {
   LibraryBig,
   Link,
   List,
+  ListFilter,
   LoaderCircle,
   Minus,
   Monitor,
@@ -52,6 +53,7 @@ import {
   Music,
   Newspaper,
   PanelLeft,
+  Plus,
   QrCode,
   RefreshCw,
   Search,
@@ -67,6 +69,8 @@ import {
   Volume2,
   ChevronUp,
   Cookie,
+  SquareArrowRightEnter,
+  SquareArrowRightExit,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -103,9 +107,11 @@ export const AddToShelfIcon = icon(BookPlus);
 export const RemoveFromShelfIcon = icon(BookMinus);
 export const BookInfoIcon = icon(Info);
 export const SearchIcon = icon(Search);
+export const FilterIcon = icon(ListFilter);
 export const MoreIcon = icon(Ellipsis);
 export const RefreshIcon = icon(RefreshCw);
 export const FolderPlusIcon = icon(FolderPlus);
+export const PlusIcon = icon(Plus);
 export const GlobeIcon = icon(Globe);
 export const LinkIcon = icon(Link);
 export const CookieIcon = icon(Cookie);
@@ -114,7 +120,8 @@ export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);
 export const DownloadIcon = icon(Download);
 export const UploadIcon = icon(Upload);
-export const ImportIcon = icon(Download);
+export const ExportIcon = icon(SquareArrowRightExit);
+export const ImportIcon = icon(SquareArrowRightEnter);
 export const FileTextIcon = icon(FileText);
 export const QrCodeIcon = icon(QrCode);
 export const ChevronLeftIcon = icon(ChevronLeft);

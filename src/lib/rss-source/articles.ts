@@ -174,6 +174,8 @@ async function parseRssArticle(
       image: imageUrl,
       group: '默认分组',
       read: false,
+      type: 0,
+      durPos: 0,
     };
   } catch (error) {
     console.error('解析RSS文章失败:', error);

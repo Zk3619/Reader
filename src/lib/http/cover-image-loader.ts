@@ -5,6 +5,7 @@
 
 import { refreshBookCoverUrl } from '@/lib/book-source/refresh-book-cover';
 import {
+  deleteCoverFromDisk,
   patchCoverDiskMetaLastUrl,
   readCoverFromDisk,
   writeCoverToDisk,
@@ -246,15 +247,20 @@ export async function loadCoverImageObjectUrl(
   if (bookUrlTrim) {
     const disk = await readCoverFromDisk(bookUrlTrim);
     if (disk) {
-      const objectUrl = blobUrlFromBytes(disk.bytes, disk.meta.mime);
-      rememberInMemoryCache(key, objectUrl);
-      scheduleBackgroundCoverUpdate(
-        bookUrlTrim,
-        normalized,
-        disk.meta,
-        { ...options, _backgroundRefreshScheduled: true },
-      );
-      return objectUrl;
+      const diskUrl = normalizeImageUrl(disk.meta.lastCoverUrl ?? '');
+      const urlMatches = !diskUrl || diskUrl === normalized;
+      if (urlMatches) {
+        const objectUrl = blobUrlFromBytes(disk.bytes, disk.meta.mime);
+        rememberInMemoryCache(key, objectUrl);
+        scheduleBackgroundCoverUpdate(
+          bookUrlTrim,
+          normalized,
+          disk.meta,
+          { ...options, _backgroundRefreshScheduled: true },
+        );
+        return objectUrl;
+      }
+      void deleteCoverFromDisk(bookUrlTrim).catch(() => {});
     }
   }
 

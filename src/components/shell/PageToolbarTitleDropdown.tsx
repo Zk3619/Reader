@@ -16,7 +16,7 @@ import { ChevronDownIcon } from '@/components/shared/icons';
 const TITLE_BLOCK_PADDING = 'rounded-md px-2.5 py-2';
 
 const TITLE_DROPDOWN_TRIGGER_CLASS = cn(
-  'group/trigger inline-grid max-w-full w-auto grid-cols-[auto_auto] items-center gap-x-2',
+  'group/trigger grid min-w-0 max-w-full w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2',
   'h-auto bg-transparent text-left font-normal',
   TITLE_BLOCK_PADDING,
   'hover:bg-accent/50 focus:bg-accent/50 focus-visible:outline-none',
@@ -59,7 +59,7 @@ export function PageToolbarTitleDropdown(props: PageToolbarTitleDropdownProps) {
     <Show
       when={dropdownEnabled()}
       fallback={
-        <div class={cn('w-max max-w-full', TITLE_BLOCK_PADDING)}>
+        <div class={cn('min-w-0 max-w-full overflow-hidden', TITLE_BLOCK_PADDING)}>
           <PageToolbarTitleText title={props.title} description={props.description} />
         </div>
       }

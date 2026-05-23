@@ -50,6 +50,8 @@ export function parseRssDefault(
           image: image || undefined,
           group: '默认分组',
           read: false,
+          type: 0,
+          durPos: 0,
         });
       }
     });
@@ -80,6 +82,8 @@ export function parseRssDefault(
             image: image || undefined,
             group: '默认分组',
             read: false,
+          type: 0,
+          durPos: 0,
           });
         }
       });

@@ -1,1 +1,0 @@
-import{p as s,f as a}from"./index-BRorlpKC.js";function S(e){var t,r;let o={...e};if(!((t=o.booksStorageRoot)!=null&&t.trim())&&((r=o.booksDirectory)!=null&&r.trim())){const i=s(o.booksDirectory);o={...o,booksStorageRoot:a(i),booksDirectorySet:o.booksDirectorySet??!0}}return o}export{S as migrateAppStorageSettings};

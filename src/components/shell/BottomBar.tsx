@@ -10,7 +10,6 @@ import {
   BookInfoIcon,
   RecordIcon,
   SettingsIcon,
-  ImportIcon,
   GlobeIcon,
   BookOpenIcon,
 } from "@/components/shared/icons";
@@ -25,7 +24,6 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any> }> = {
   bookmark: { label: "书签", icon: BookmarkIcon },
   record: { label: "记录", icon: RecordIcon },
   settings: { label: "设置", icon: SettingsIcon },
-  import: { label: "导入", icon: ImportIcon },
   "remote-book": { label: "远程书籍", icon: GlobeIcon },
   reader: { label: "阅读器", icon: BookmarkIcon }, // reader 页面通常不显示在导航中，但需要配置以避免类型错误
   "book-info": { label: "书籍信息", icon: BookInfoIcon }, // book-info 页面通常不显示在导航中，但需要配置以避免类型错误

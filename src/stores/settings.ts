@@ -46,8 +46,8 @@ export interface AppSettings {
   coverCacheDirectory?: string;
   /** 是否已自定义封面缓存目录 */
   coverCacheDirectorySet?: boolean;
-  /** 导入书籍时的操作偏好：copy（复制）或 move（移动） */
-  importBookAction?: 'copy' | 'move';
+  /** 导入书籍时的操作偏好：copy / move / none（不写入书籍库，保留原位置） */
+  importBookAction?: 'copy' | 'move' | 'none';
   /** 是否记住导入操作偏好 */
   rememberImportAction?: boolean;
   /** 删除书籍时是否删除本地文件 */
@@ -58,6 +58,12 @@ export interface AppSettings {
   replaceExistingFile?: 'replace' | 'skip' | 'restore-existing' | 'rename-import';
   /** 是否记住文件替换操作偏好 */
   rememberReplaceFile?: boolean;
+  /** 导入书源时保留本地名称（对齐 Legado importKeepName） */
+  importKeepName?: boolean;
+  /** 导入书源时保留本地分组（对齐 Legado importKeepGroup） */
+  importKeepGroup?: boolean;
+  /** 导入书源时保留本地启用/发现状态（对齐 Legado importKeepEnable） */
+  importKeepEnable?: boolean;
 }
 
 /**
@@ -247,7 +253,10 @@ export const settingsStore = {
   /**
    * 设置导入书籍操作偏好
    */
-  async setImportBookAction(action: 'copy' | 'move', remember: boolean = false): Promise<void> {
+  async setImportBookAction(
+    action: 'copy' | 'move' | 'none',
+    remember: boolean = false,
+  ): Promise<void> {
     await this.updateAppSettings({
       importBookAction: action,
       rememberImportAction: remember
@@ -272,6 +281,14 @@ export const settingsStore = {
       replaceExistingFile: action,
       rememberReplaceFile: remember
     });
+  },
+
+  async setImportSourceKeepOptions(options: {
+    importKeepName?: boolean;
+    importKeepGroup?: boolean;
+    importKeepEnable?: boolean;
+  }): Promise<void> {
+    await this.updateAppSettings(options);
   },
 
   /**

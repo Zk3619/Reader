@@ -1,0 +1,115 @@
+/**
+ * 应用内右键菜单：统一内容区视口约束/滚动样式，以及打开时的无障碍处理。
+ * 底层仍使用 @/components/ui/context-menu（Kobalte ContextMenu 原语）。
+ */
+
+import type { Component, ComponentProps } from 'solid-js';
+import { splitProps } from 'solid-js';
+
+import {
+  ContextMenu,
+  ContextMenuCheckboxItem,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuGroupLabel,
+  ContextMenuItem,
+  ContextMenuPortal,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { cn } from '@/lib/utils';
+import {
+  popperContentViewportScroll,
+  popperOverflowPadding,
+} from '@/lib/ui/viewport-classes';
+import { blurActiveElement } from '@/utils/accessibility';
+
+/** 常规右键菜单：最小宽度 + 不超过锚点方向可用高度时纵向滚动 */
+export const APP_CONTEXT_MENU_CONTENT_COMPACT = cn(
+  'min-w-32 max-w-[min(280px,calc(100dvw-2rem))]',
+  popperContentViewportScroll
+);
+
+export type AppContextMenuContentLayout = 'compact' | 'plain';
+
+const CONTENT_LAYOUT_CLASS: Record<AppContextMenuContentLayout, string> = {
+  compact: APP_CONTEXT_MENU_CONTENT_COMPACT,
+  plain: popperContentViewportScroll,
+};
+
+function mergeOpenChange(
+  userOnOpenChange: ((open: boolean) => void) | undefined,
+  accessibilityDisabled: boolean | undefined
+): (open: boolean) => void {
+  return (open: boolean) => {
+    userOnOpenChange?.(open);
+    if (accessibilityDisabled) return;
+    if (open) {
+      requestAnimationFrame(() => blurActiveElement());
+    } else {
+      blurActiveElement();
+    }
+  };
+}
+
+export type AppContextMenuProps = ComponentProps<typeof ContextMenu> & {
+  /**
+   * 为 true 时不注入打开/关闭时的 blur（与内嵌页手势等极少数场景协调时使用）
+   */
+  disableAccessibilityAnnounce?: boolean;
+};
+
+export const AppContextMenu: Component<AppContextMenuProps> = (props) => {
+  const [local, rest] = splitProps(props, ['onOpenChange', 'disableAccessibilityAnnounce']);
+  const handleOpenChange = mergeOpenChange(
+    local.onOpenChange,
+    local.disableAccessibilityAnnounce
+  );
+  return (
+    <ContextMenu
+      fitViewport
+      overflowPadding={popperOverflowPadding}
+      {...rest}
+      onOpenChange={handleOpenChange}
+    />
+  );
+};
+
+type AppContextMenuContentProps = ComponentProps<typeof ContextMenuContent> & {
+  layout?: AppContextMenuContentLayout;
+  /** 附加在 Content 上的 z-index 等 */
+  portalZClass?: string;
+};
+
+export const AppContextMenuContent: Component<AppContextMenuContentProps> = (props) => {
+  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
+  const layout = () => local.layout ?? 'compact';
+  return (
+    <ContextMenuContent
+      {...rest}
+      class={cn(CONTENT_LAYOUT_CLASS[layout()], local.portalZClass, local.class)}
+    />
+  );
+};
+
+export {
+  ContextMenuTrigger as AppContextMenuTrigger,
+  ContextMenuItem as AppContextMenuItem,
+  ContextMenuSeparator as AppContextMenuSeparator,
+  ContextMenuCheckboxItem as AppContextMenuCheckboxItem,
+  ContextMenuRadioGroup as AppContextMenuRadioGroup,
+  ContextMenuRadioItem as AppContextMenuRadioItem,
+  ContextMenuGroup as AppContextMenuGroup,
+  ContextMenuGroupLabel as AppContextMenuGroupLabel,
+  ContextMenuShortcut as AppContextMenuShortcut,
+  ContextMenuSub as AppContextMenuSub,
+  ContextMenuSubTrigger as AppContextMenuSubTrigger,
+  ContextMenuSubContent as AppContextMenuSubContent,
+  ContextMenuPortal as AppContextMenuPortal,
+};

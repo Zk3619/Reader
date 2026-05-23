@@ -8,19 +8,19 @@ import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { cn } from '@/lib/utils';
 import { pageToolbarBelowScroll } from '@/lib/ui/viewport-classes';
 
-/** 标题+描述文本块：宽度取两行中较宽者（w-max），顶到上限后再省略 */
+/** 标题+描述文本块：占满可用宽度，超出后以 … 省略 */
 export function PageToolbarTitleText(props: {
   title: string;
   description?: string | JSX.Element;
   class?: string;
 }) {
   return (
-    <div class={cn('w-max max-w-full overflow-hidden text-left', props.class)}>
-      <h2 class="overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-bold leading-tight text-foreground">
+    <div class={cn('min-w-0 max-w-full overflow-hidden text-left', props.class)}>
+      <h2 class="min-w-0 truncate text-2xl font-bold leading-tight text-foreground">
         {props.title}
       </h2>
       <Show when={props.description}>
-        <div class="overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-snug text-muted-foreground">
+        <div class="min-w-0 truncate text-sm leading-snug text-muted-foreground">
           {props.description}
         </div>
       </Show>
@@ -89,7 +89,7 @@ export function PageToolbar(props: PageToolbarProps) {
               <PageToolbarTitleText title={props.title} description={props.description} />
             }
           >
-            <div class="max-w-full w-fit min-w-0">{props.titleSlot}</div>
+            <div class="min-w-0 max-w-full overflow-hidden">{props.titleSlot}</div>
           </Show>
         </div>
         <Show when={props.children}>

@@ -20,11 +20,11 @@ import { formatExploreSelectOptionLabel } from '@/lib/book-source/explore-nav-it
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+  AppContextMenu,
+  AppContextMenuContent,
+  AppContextMenuItem,
+  AppContextMenuTrigger,
+} from '@/components/shared/AppContextMenu';
 import {
   AppDropdownMenu,
   AppDropdownMenuButtonTrigger,
@@ -731,8 +731,8 @@ export function SourcesPage(props: SourcesPageProps) {
                         isExpanded() && isExploreUrlScript(source.exploreUrl) && dynamicSections.state === 'errored';
                       return (
                         <li class="rounded-lg border border-border/50 bg-card overflow-hidden">
-                          <ContextMenu>
-                            <ContextMenuTrigger
+                          <AppContextMenu>
+                            <AppContextMenuTrigger
                               as="div"
                               ref={(el) => { triggerEl = el; }}
                               onMouseDown={(e: MouseEvent) => onPointerDown(e)}
@@ -810,28 +810,28 @@ export function SourcesPage(props: SourcesPageProps) {
                               <ChevronDownIcon
                                 class={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', isExpanded() && 'rotate-180')}
                               />
-                            </ContextMenuTrigger>
-                            <ContextMenuContent>
-                              <ContextMenuItem onSelect={() => props.onSourceEdit?.(source)}>
+                            </AppContextMenuTrigger>
+                            <AppContextMenuContent>
+                              <AppContextMenuItem onSelect={() => props.onSourceEdit?.(source)}>
                                 编辑
-                              </ContextMenuItem>
-                              <ContextMenuItem onSelect={() => handlePinSource(source)}>
+                              </AppContextMenuItem>
+                              <AppContextMenuItem onSelect={() => handlePinSource(source)}>
                                 置顶
-                              </ContextMenuItem>
+                              </AppContextMenuItem>
                               <Show when={hasLogin(source)}>
-                                <ContextMenuItem onSelect={() => props.onSourceLogin?.(source)}>
+                                <AppContextMenuItem onSelect={() => props.onSourceLogin?.(source)}>
                                   登录
-                                </ContextMenuItem>
+                                </AppContextMenuItem>
                               </Show>
                               <Show when={hasSearch(source)}>
-                                <ContextMenuItem onSelect={() => props.onSourceSearch?.(source)}>
+                                <AppContextMenuItem onSelect={() => props.onSourceSearch?.(source)}>
                                   搜索
-                                </ContextMenuItem>
+                                </AppContextMenuItem>
                               </Show>
-                              <ContextMenuItem onSelect={() => handleSourceRefresh(source)}>
+                              <AppContextMenuItem onSelect={() => handleSourceRefresh(source)}>
                                 刷新
-                              </ContextMenuItem>
-                              <ContextMenuItem
+                              </AppContextMenuItem>
+                              <AppContextMenuItem
                                 class="text-destructive focus:text-destructive"
                                 onSelect={() => {
                                   setSourceToDelete(source);
@@ -839,9 +839,9 @@ export function SourcesPage(props: SourcesPageProps) {
                                 }}
                               >
                                 删除
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
+                              </AppContextMenuItem>
+                            </AppContextMenuContent>
+                          </AppContextMenu>
 
                           {/* 展开内容：书源内置的发现子项（分类、排行榜等，参照 legado） */}
                           <Show when={isExpanded()}>
@@ -1010,8 +1010,8 @@ export function SourcesPage(props: SourcesPageProps) {
               反选
             </Button>
           </div>
-          {/* 窄屏：仅「操作」下拉（父容器 < 448px，删除并入下拉） */}
-          <div class="flex items-center gap-2 @min-[448px]:hidden">
+          {/* 窄屏：仅「操作」下拉（视口 < 448px，删除并入下拉） */}
+          <div class="flex min-[448px]:hidden! items-center gap-2">
             <AppDropdownMenu>
               <AppDropdownMenuTrigger
                 as={(props: Record<string, unknown>) => (
@@ -1045,8 +1045,8 @@ export function SourcesPage(props: SourcesPageProps) {
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
-          {/* 紧凑：删除 + 更多（448px <= 父容器 < 1026px） */}
-          <div class="hidden @min-[448px]:flex @min-[1026px]:hidden items-center gap-2">
+          {/* 紧凑：删除 + 更多（448px <= 视口 < xl） */}
+          <div class="hidden min-[448px]:flex xl:hidden! items-center gap-2">
             <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>
               删除所选
             </Button>
@@ -1077,8 +1077,8 @@ export function SourcesPage(props: SourcesPageProps) {
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
-          {/* 全部按钮（父容器宽度 >= 1026px 时显示） */}
-          <div class="hidden @min-[1026px]:flex flex-wrap items-center gap-2">
+          {/* 全部按钮（视口 >= xl 时显示） */}
+          <div class="hidden xl:flex! flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={batchEnable} disabled={selectedCount() === 0}>
               启用所选
             </Button>

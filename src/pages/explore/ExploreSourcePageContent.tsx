@@ -18,7 +18,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import { exploreBook } from '@/lib/book-source/explore';
-import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
+import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
 import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
