@@ -13,7 +13,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { searchBook } from '@/lib/book-source/search';
-import { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
+import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
 import { showAppToast } from '@/components/shared/AppToasts';
 import type { BookSource } from '@/types';
 import type { SearchBook } from '@/types';

@@ -2,18 +2,19 @@
  * 书源 JSON 网络导入（与 ImportSourceNetworkDialog 共用）
  */
 
-import { invoke } from '@tauri-apps/api/core';
-import { parseBookSourceJson } from '@/lib/book-source/source-import';
-import * as sourcesDb from '@/lib/database/sources';
+import {
+  importSelectedBookSources,
+  resolveBookSourcesFromNetworkUrl,
+} from '@/lib/book-source/import-booksource-resolver';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { isTauri } from '@/lib/platform/detect';
+import { settingsStore } from '@/stores/settings';
 
 export interface ImportBookSourcesNetworkResult {
   inserted: number;
 }
 
 /**
- * 从网络地址拉取并导入书源；成功/失败均以 toast 提示。
+ * 从网络地址拉取并直接导入书源（不经过勾选对话框）；使用设置中的保留项。
  */
 export async function importBookSourcesFromNetworkUrl(
   urlRaw: string
@@ -24,25 +25,24 @@ export async function importBookSourcesFromNetworkUrl(
     return { error: 'empty' };
   }
   try {
-    let text: string;
-    if (isTauri()) {
-      text = await invoke<string>('fetch_url_text', { url, timeoutMs: 30000 });
-    } else {
-      const res = await fetch(url, { mode: 'cors' });
-      if (!res.ok) throw new Error(`请求失败: ${res.status}`);
-      text = await res.text();
-    }
-    const list = parseBookSourceJson(text);
+    const { sources: list } = await resolveBookSourcesFromNetworkUrl(url);
     if (list.length === 0) {
       showAppToast({ title: '网络导入书源', description: '未解析到有效书源', variant: 'default' });
       return { error: 'none' };
     }
-    for (const source of list) {
-      await sourcesDb.insertSource(source);
-    }
-    window.dispatchEvent(new CustomEvent('sources-refresh'));
-    showAppToast({ title: '网络导入书源', description: `已导入 ${list.length} 条书源`, variant: 'default' });
-    return { inserted: list.length };
+    const app = settingsStore.state.app;
+    const { inserted, blocked } = await importSelectedBookSources(list, {
+      keepName: app.importKeepName,
+      keepGroup: app.importKeepGroup,
+      keepEnable: app.importKeepEnable,
+    });
+    const blockedNote = blocked.length > 0 ? `，跳过 ${blocked.length} 条 18+ 书源` : '';
+    showAppToast({
+      title: '网络导入书源',
+      description: `已导入 ${inserted} 条书源${blockedNote}`,
+      variant: 'default',
+    });
+    return { inserted };
   } catch (err) {
     console.error('书源网络导入失败:', err);
     const isCorsOrNetwork =

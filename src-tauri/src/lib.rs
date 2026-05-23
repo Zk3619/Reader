@@ -317,7 +317,11 @@ async fn download_binary(
 
 /// 由后端拉取 URL 返回文本（用于绕过浏览器 CORS，如书源网络导入）
 #[tauri::command]
-async fn fetch_url_text(url: String, timeout_ms: Option<u64>) -> Result<String, String> {
+async fn fetch_url_text(
+    url: String,
+    timeout_ms: Option<u64>,
+    skip_user_agent: Option<bool>,
+) -> Result<String, String> {
     let trimmed = url.trim();
     let normalized_url = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         trimmed.to_string()
@@ -342,8 +346,11 @@ async fn fetch_url_text(url: String, timeout_ms: Option<u64>) -> Result<String, 
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let response = client
-        .get(request_url)
+    let mut request = client.get(request_url);
+    if skip_user_agent.unwrap_or(false) {
+        request = request.header("User-Agent", "null");
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| format!("请求失败: {}", e))?;
@@ -364,6 +371,35 @@ async fn fetch_url_text(url: String, timeout_ms: Option<u64>) -> Result<String, 
         String::from_utf8_lossy(&bytes).into_owned()
     });
     Ok(text)
+}
+
+/// 从 ZIP 中提取文本类条目（用于 Legado 备份包 / 书源包），返回 JSON：{ "bookSource.json": "..." }
+#[tauri::command]
+fn extract_zip_json_entries(zip_bytes: Vec<u8>) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::io::Read;
+    let cursor = std::io::Cursor::new(zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP 解析失败: {}", e))?;
+    let mut out = std::collections::HashMap::new();
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let name = file.name().replace('\\', "/");
+        let base = name.rsplit('/').next().unwrap_or(&name).to_lowercase();
+        if !(base.ends_with(".json") || base.ends_with(".txt")) {
+            continue;
+        }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)
+            .map_err(|e| format!("解压 {} 失败: {}", name, e))?;
+        let text = String::from_utf8(buf.clone()).unwrap_or_else(|_| {
+            String::from_utf8_lossy(&buf).into_owned()
+        });
+        if !text.trim().is_empty() {
+            out.insert(base, text);
+        }
+    }
+    Ok(out)
 }
 
 /// 书源登录脚本（Rust 侧备选）：同步执行 Legado 脚本，java.ajax 真阻塞。需启用 feature login-script-engine。
@@ -1269,6 +1305,7 @@ pub fn run() {
             android_fs_commands::android_write_book_to_tree,
             download_binary,
             fetch_url_text,
+            extract_zip_json_entries,
             decode_gbk,
             get_app_data_root,
             get_config,

@@ -1,11 +1,9 @@
 /**
  * 书源详情功能
- * 对应 legado 项目的 WebBook.getBookInfo
+ * 对应 legado 项目的 WebBook.getBookInfo + BookInfo.analyzeBookInfo
  *
- * 支持两种场景：
- * 1. bookUrl 是标准 HTTP(S) URL → 直接请求，用 ruleBookInfo 解析
- * 2. bookUrl 是 data: URL → 解码内容，提取 book_id 等参数，
- *    构建真实 API URL 请求后解析（模拟 legado ruleBookInfo.init 行为）
+ * 统一通过 ruleBookInfo 各字段规则解析；<js> 简介走 Legado QuickJS 环境。
+ * data: URL 仅负责解码并请求 init 目标（与 Legado AnalyzeUrl 等价），不做书源专属拼装。
  */
 
 import { get } from '@/lib/http';
@@ -17,20 +15,236 @@ import {
   resolveAggregationServerUrl,
 } from '@/lib/book-source/source-http';
 import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
+import { runBookInfoIntroScript } from '@/lib/book-source/book-info-script-runner';
+import {
+  buildIntroFromDetailJson,
+  preferDetailField,
+} from '@/lib/book-source/intro-merge';
+
+function isJsRule(rule: string | undefined | null): boolean {
+  return !!rule?.trim().startsWith('<js>');
+}
+
+/** 从详情页 JSON 文本解析供 <js> 使用的 result 对象 */
+function parseRuleResultObject(body: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) {
+      return obj.data as Record<string, unknown>;
+    }
+    return obj;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveBookInfoIntro(
+  source: BookSource,
+  rule: string | undefined,
+  context: RuleContext,
+  options: {
+    ruleResult?: Record<string, unknown>;
+    fetchUrl: string;
+    bookUrl: string;
+    durChapterTitle?: string;
+  },
+): Promise<string | undefined> {
+  if (!rule?.trim()) {
+    return options.ruleResult
+      ? buildIntroFromDetailJson(options.ruleResult)
+      : undefined;
+  }
+
+  if (isJsRule(rule)) {
+    if (!options.ruleResult) {
+      console.warn('[detail] <js> 简介规则需要 JSON result，当前内容无法解析');
+      return buildIntroFromDetailJson(
+        parseRuleResultObject(context.content) ?? {},
+      );
+    }
+    const scripted = await runBookInfoIntroScript(
+      source,
+      options.ruleResult,
+      options.fetchUrl,
+      options.bookUrl,
+      { durChapterTitle: options.durChapterTitle },
+    );
+    if (scripted?.trim()) return scripted;
+    return buildIntroFromDetailJson(options.ruleResult);
+  }
+
+  const parsed = (await analyzeString(rule, context)).trim();
+  if (parsed) return parsed;
+  return options.ruleResult
+    ? buildIntroFromDetailJson(options.ruleResult)
+    : undefined;
+}
 
 /**
- * 处理 data: URL 场景的 getBookInfo
- * 模拟 legado ruleBookInfo.init 的行为：
- *   1. 解码 data URL → 提取 book_id / sources / tab
- *   2. 从 jsLib 获取 server 地址
- *   3. 构建 ${server}/detail?book_id=...&source=...&tab=... 并请求
- *   4. 解析返回的 JSON
+ * 对齐 BookInfo.analyzeBookInfo：对已有 body 应用 ruleBookInfo 各字段
+ */
+async function analyzeBookInfoFromBody(
+  source: BookSource,
+  bookUrl: string,
+  redirectUrl: string,
+  body: string,
+  options?: {
+    ruleResult?: Record<string, unknown>;
+    fetchUrl?: string;
+    durChapterTitle?: string;
+  },
+): Promise<BookInfo | null> {
+  const rule = source.ruleBookInfo;
+  if (!rule) return null;
+
+  let contextContent = body;
+  let contentType = detectContentType(body);
+
+  if (rule.init?.trim() && !isJsRule(rule.init) && contentType === 'json') {
+    try {
+      const initResult = await analyzeString(rule.init, {
+        content: body,
+        contentType,
+        baseUrl: bookUrl,
+        source: source as unknown as Record<string, unknown>,
+      });
+      if (initResult) {
+        contextContent = initResult;
+        contentType = detectContentType(contextContent);
+      }
+    } catch (e) {
+      console.warn('[detail] init 规则执行失败:', e);
+    }
+  }
+
+  const ruleResult =
+    options?.ruleResult ?? parseRuleResultObject(contextContent);
+  const fetchUrl = options?.fetchUrl ?? redirectUrl;
+
+  const context: RuleContext = {
+    content: contextContent,
+    contentType,
+    baseUrl: bookUrl,
+    source: source as unknown as Record<string, unknown>,
+    result: ruleResult ? JSON.stringify(ruleResult) : contextContent,
+  };
+
+  const nameFromRule = rule.name ? await analyzeString(rule.name, context) : '';
+  const name =
+    nameFromRule.trim() ||
+    (ruleResult?.book_name != null ? String(ruleResult.book_name) : '');
+  const authorFromRule = rule.author
+    ? await analyzeString(rule.author, context)
+    : '';
+  const author =
+    authorFromRule.trim() ||
+    (ruleResult?.author != null ? String(ruleResult.author) : '');
+
+  const intro = await resolveBookInfoIntro(source, rule.intro, context, {
+    ruleResult,
+    fetchUrl,
+    bookUrl,
+    durChapterTitle: options?.durChapterTitle,
+  });
+
+  let coverUrl: string | undefined;
+  if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
+    const parsed = await analyzeString(rule.coverUrl, context);
+    if (parsed.trim()) {
+      coverUrl = resolveUrl(redirectUrl, parsed);
+    }
+  }
+  if (!coverUrl && typeof ruleResult?.thumb_url === 'string') {
+    coverUrl = ruleResult.thumb_url;
+  }
+
+  const kindFromRule = rule.kind ? await analyzeString(rule.kind, context) : '';
+  const kind =
+    kindFromRule.trim() ||
+    (typeof ruleResult?.category === 'string'
+      ? ruleResult.category
+      : typeof ruleResult?.tags === 'string'
+        ? ruleResult.tags
+        : undefined);
+
+  const wordCountFromRule = rule.wordCount
+    ? await analyzeString(rule.wordCount, context)
+    : '';
+  const wordCount =
+    wordCountFromRule.trim() ||
+    (ruleResult?.word_number != null ? String(ruleResult.word_number) : undefined);
+
+  const latestFromRule = rule.lastChapter
+    ? await analyzeString(rule.lastChapter, context)
+    : '';
+  const latestChapterTitle =
+    latestFromRule.trim() ||
+    (typeof ruleResult?.last_chapter_title === 'string'
+      ? ruleResult.last_chapter_title
+      : undefined);
+
+  const updateFromRule = rule.updateTime
+    ? await analyzeString(rule.updateTime, context)
+    : '';
+  const latestChapterUpdateTime =
+    updateFromRule.trim() ||
+    (typeof ruleResult?.last_chapter_update_time === 'string'
+      ? ruleResult.last_chapter_update_time
+      : undefined);
+
+  if (!name.trim()) {
+    return null;
+  }
+
+  let tocUrl = bookUrl;
+  if (rule.tocUrl && !isJsRule(rule.tocUrl)) {
+    const parsedTocUrl = await analyzeString(rule.tocUrl, context);
+    if (parsedTocUrl.trim()) {
+      tocUrl = resolveUrl(bookUrl, parsedTocUrl);
+    }
+  }
+
+  return {
+    bookUrl,
+    name: name.trim(),
+    author: author.trim(),
+    kind,
+    intro,
+    coverUrl: preferDetailField(coverUrl, undefined),
+    wordCount,
+    latestChapterTitle,
+    latestChapterUpdateTime,
+    tocUrl,
+    origin: source.sourceUrl,
+    originName: source.sourceName,
+    source:
+      typeof ruleResult?.source === 'string' ? ruleResult.source : undefined,
+    status:
+      typeof ruleResult?.status === 'string' ? ruleResult.status : undefined,
+    tab: typeof ruleResult?.tab === 'string' ? ruleResult.tab : undefined,
+    category:
+      typeof ruleResult?.category === 'string'
+        ? ruleResult.category
+        : typeof ruleResult?.tags === 'string'
+          ? ruleResult.tags
+          : undefined,
+    tags: typeof ruleResult?.tags === 'string' ? ruleResult.tags : undefined,
+    score:
+      ruleResult?.score != null ? String(ruleResult.score) : undefined,
+  };
+}
+
+/**
+ * data: URL：解码载荷并请求详情（等同 Legado ruleBookInfo.init 的服务器分支），
+ * 再交给统一规则解析。
  */
 async function getBookInfoFromDataUrl(
   source: BookSource,
   bookUrl: string,
+  options?: { durChapterTitle?: string },
 ): Promise<BookInfo | null> {
-  // 1. 解码 data URL
   const payload = decodeDataUrl(bookUrl);
   if (!payload) {
     console.warn('[detail] 无法解码 data URL');
@@ -44,89 +258,70 @@ async function getBookInfoFromDataUrl(
     return null;
   }
 
-  // 2. 确定 server 地址（优先用户所选线路）
   const serverUrl = resolveAggregationServerUrl(source);
   if (!serverUrl) {
-    console.warn('[detail] 无法从书源获取 server 地址');
+    console.warn('[detail] 无法从书源解析详情请求地址（jsLib server / 变量）');
     return null;
   }
 
-  // 3. 构建详情 API URL（遵循 ruleBookInfo.init 的模式）
   const sources = payload.sources || payload.source || '';
   const tab = payload.tab || '';
   const detailUrl = `${serverUrl}/detail?book_id=${encodeURIComponent(bookId)}&source=${encodeURIComponent(sources)}&tab=${encodeURIComponent(tab)}`;
   console.log('[detail] 请求详情 API:', detailUrl);
 
-  // 4. 请求并解析
   const headers = buildSourceRequestHeaders(source, detailUrl);
   const responseText = await get(detailUrl, {
     headers,
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,
   });
-  const response = JSON.parse(responseText);
+
+  let response: { code?: number; data?: unknown; msg?: string };
+  try {
+    response = JSON.parse(responseText);
+  } catch {
+    console.warn('[detail] 详情 API 响应非 JSON');
+    return null;
+  }
 
   if (response.code !== 0 || !response.data) {
     console.warn('[detail] 详情 API 返回异常:', response.msg || response);
     return null;
   }
 
-  const d = response.data;
+  const d = response.data as Record<string, unknown>;
   console.log('[detail] 详情 API 响应:', {
     book_name: d.book_name,
     author: d.author,
     hasAbstract: !!d.abstract,
     hasLastChapter: !!d.last_chapter_title,
     source: d.source,
-    status: d.status,
-    score: d.score,
   });
 
-  return {
-    bookUrl,
-    name: d.book_name || '',
-    author: d.author || '',
-    kind: d.category || d.tags || undefined,
-    intro: d.abstract || undefined,
-    coverUrl: d.thumb_url || undefined,
-    wordCount: d.word_number || undefined,
-    latestChapterTitle: d.last_chapter_title || undefined,
-    latestChapterUpdateTime: d.last_chapter_update_time || undefined,
-    tocUrl: bookUrl, // 保持原始 data URL，后续目录页也需要解码
-    origin: source.sourceUrl,
-    originName: source.sourceName,
-    // 扩展字段
-    source: d.source || undefined,
-    status: d.status || undefined,
-    tab: d.tab || undefined,
-    category: d.category || undefined,
-    tags: d.tags || undefined,
-    score: d.score || undefined,
-  };
+  return analyzeBookInfoFromBody(source, bookUrl, detailUrl, JSON.stringify(d), {
+    ruleResult: d,
+    fetchUrl: detailUrl,
+    durChapterTitle: options?.durChapterTitle,
+  });
 }
-
-// ─── 主入口 ───
 
 /**
  * 获取书籍详情
- * 自动检测 bookUrl 类型，选择对应的处理路径
  */
 export async function getBookInfo(
   source: BookSource,
-  bookUrl: string
+  bookUrl: string,
+  options?: { durChapterTitle?: string },
 ): Promise<BookInfo | null> {
   if (!source.ruleBookInfo) {
     return null;
   }
 
   try {
-    // ── data: URL 路径 ──
     if (bookUrl.startsWith('data:')) {
-      return await getBookInfoFromDataUrl(source, bookUrl);
+      return await getBookInfoFromDataUrl(source, bookUrl, options);
     }
 
-    // ── 标准 HTTP URL 路径 ──
-    const rule = source.ruleBookInfo;
     const headers = buildSourceRequestHeaders(source, bookUrl);
     const html = await get(bookUrl, {
       headers,
@@ -135,74 +330,7 @@ export async function getBookInfo(
       timeout: 30000,
     });
 
-    const contentType = detectContentType(html);
-
-    // 处理 init 规则（如 "$.data"）：先导航到 JSON 子节点再应用其他规则
-    let contextContent = html;
-    if (rule.init && contentType === 'json') {
-      try {
-        const initResult = await analyzeString(rule.init, {
-          content: html,
-          contentType,
-          baseUrl: bookUrl,
-          source: source as unknown as Record<string, unknown>,
-        });
-        if (initResult) {
-          contextContent = initResult;
-        }
-      } catch (e) {
-        console.warn('[detail] init 规则执行失败:', e);
-      }
-    }
-
-    const context: RuleContext = {
-      content: contextContent,
-      contentType: detectContentType(contextContent),
-      baseUrl: bookUrl,
-      source: source as unknown as Record<string, unknown>,
-    };
-
-    // 解析书籍信息
-    const name = rule.name ? await analyzeString(rule.name, context) : '';
-    const author = rule.author ? await analyzeString(rule.author, context) : '';
-    const intro = rule.intro ? await analyzeString(rule.intro, context) : undefined;
-    const coverUrl = rule.coverUrl ? await analyzeString(rule.coverUrl, context) : undefined;
-    const kind = rule.kind ? await analyzeString(rule.kind, context) : undefined;
-    const wordCount = rule.wordCount ? await analyzeString(rule.wordCount, context) : undefined;
-    const latestChapterTitle = rule.lastChapter
-      ? await analyzeString(rule.lastChapter, context)
-      : undefined;
-    const latestChapterUpdateTime = rule.updateTime
-      ? await analyzeString(rule.updateTime, context)
-      : undefined;
-
-    if (!name) {
-      return null;
-    }
-
-    // 解析 tocUrl（目录页URL）
-    let tocUrl = bookUrl;
-    if (rule.tocUrl) {
-      const parsedTocUrl = await analyzeString(rule.tocUrl, context);
-      if (parsedTocUrl) {
-        tocUrl = resolveUrl(bookUrl, parsedTocUrl);
-      }
-    }
-
-    return {
-      bookUrl,
-      name,
-      author: author || '',
-      kind,
-      intro,
-      coverUrl: coverUrl ? resolveUrl(bookUrl, coverUrl) : undefined,
-      wordCount,
-      latestChapterTitle,
-      latestChapterUpdateTime,
-      tocUrl,
-      origin: source.sourceUrl,
-      originName: source.sourceName,
-    };
+    return analyzeBookInfoFromBody(source, bookUrl, bookUrl, html, options);
   } catch (error) {
     console.error(`获取书籍详情失败 [${source.sourceName}]:`, error);
     return null;

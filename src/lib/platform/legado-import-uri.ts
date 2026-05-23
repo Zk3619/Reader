@@ -1,13 +1,17 @@
 /**
  * Legado / 阅读 深链接解析（对齐 Legado_Max OnLineImportActivity + determineType）。
- * Reader 当前仅支持书源 JSON（网络导入）；其它类型退回提示不支持。
  */
 
 import { showAppToast } from '@/components/shared/AppToasts';
+
 export const READER_BOOKSOURCE_IDENTIFY_EVENT = 'reader-booksource-identify';
+export const READER_RSS_IMPORT_EVENT = 'reader-rss-import';
+export const READER_REPLACE_RULE_IMPORT_EVENT = 'reader-replace-rule-import';
 
 export type ReaderImportParsed =
   | { kind: 'bookSourceNetwork'; src: string }
+  | { kind: 'rssNetwork'; src: string }
+  | { kind: 'replaceRuleNetwork'; src: string }
   | { kind: 'determineType'; src: string }
   | { kind: 'unsupported'; reason: string };
 
@@ -50,24 +54,29 @@ export function parseReaderImportDeepLink(uri: string): ReaderImportParsed | nul
   const path = u.pathname.replace(/\\/g, '/');
   const pl = path.toLowerCase();
 
-  // legado://import/bookSource?src=
   if (host === 'import' && /^\/booksource\/?$/i.test(path)) {
     return { kind: 'bookSourceNetwork', src };
   }
 
-  // legado://booksource/importonline?src=  / yuedu://...
   if (host === 'booksource' && pl.endsWith('/importonline')) {
     return { kind: 'bookSourceNetwork', src };
   }
 
   if (host === 'import') {
-    // Legado：`/rssSource`、`/replaceRule` 等与书源无关的导入
+    if (/^\/rsssource\/?$/i.test(path)) {
+      return { kind: 'rssNetwork', src };
+    }
+    if (/^\/replacerule\/?$/i.test(path)) {
+      return { kind: 'replaceRuleNetwork', src };
+    }
     if (
-      /^\/(rsssource|replacerule|theme|texttocrule|dictrule|httptts|readconfig|addtobookshelf)\/?$/i.test(
-        path
-      )
+      /^\/(theme|texttocrule|dictrule|httptts|readconfig|addtobookshelf)\/?$/i.test(path)
     ) {
-      return { kind: 'unsupported', reason: '当前 Reader 仅支持书源 JSON，暂不支持该类型的 legado:// 导入' };
+      return {
+        kind: 'unsupported',
+        reason:
+          '当前 Reader 不支持通过链接导入该类型（主题、字典等）。完整备份请使用「设置 → 数据备份」恢复 .db 文件。',
+      };
     }
     return { kind: 'determineType', src };
   }
@@ -75,7 +84,7 @@ export function parseReaderImportDeepLink(uri: string): ReaderImportParsed | nul
   return { kind: 'determineType', src };
 }
 
-/** 处理一条深链接：触发识别流程（供事件 / 命令行 / java.openUrl 调用） */
+/** 处理一条深链接：触发识别或侧向导入流程 */
 export async function handleReaderImportDeepLink(uri: string): Promise<void> {
   const parsed = parseReaderImportDeepLink(uri);
   if (!parsed) {
@@ -88,6 +97,20 @@ export async function handleReaderImportDeepLink(uri: string): Promise<void> {
       description: parsed.reason,
       variant: 'default',
     });
+    return;
+  }
+  if (parsed.kind === 'rssNetwork') {
+    window.dispatchEvent(
+      new CustomEvent<{ url: string }>(READER_RSS_IMPORT_EVENT, { detail: { url: parsed.src } })
+    );
+    return;
+  }
+  if (parsed.kind === 'replaceRuleNetwork') {
+    window.dispatchEvent(
+      new CustomEvent<{ url: string }>(READER_REPLACE_RULE_IMPORT_EVENT, {
+        detail: { url: parsed.src },
+      })
+    );
     return;
   }
   window.dispatchEvent(

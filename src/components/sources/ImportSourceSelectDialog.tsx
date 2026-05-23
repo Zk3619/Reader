@@ -9,21 +9,59 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
+import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import type { ImportSourceComparison } from '@/lib/book-source/import-booksource-resolver';
 import type { NewBookSource } from '@/types';
 
 export interface ImportSourceSelectDialogProps {
   open: boolean;
   loading: boolean;
   sources: NewBookSource[];
+  comparisons: ImportSourceComparison[];
   selectedUrls: Set<string>;
+  keepName: boolean;
+  keepGroup: boolean;
+  keepEnable: boolean;
+  groupName: string;
+  addGroup: boolean;
   /** 内嵌页会话时须高于 .reader-inner-web-layer（如 z-[160]） */
   portalZClass?: string;
   onOpenChange: (open: boolean) => void;
   onToggle: (sourceUrl: string, checked: boolean) => void;
   onSelectAllToggle: () => void;
   onInvertSelect: () => void;
+  onSelectNewToggle: () => void;
+  onSelectUpdateToggle: () => void;
+  onKeepNameChange: (v: boolean) => void;
+  onKeepGroupChange: (v: boolean) => void;
+  onKeepEnableChange: (v: boolean) => void;
+  onGroupNameChange: (v: string) => void;
+  onAddGroupChange: (v: boolean) => void;
   onConfirm: () => void;
+}
+
+function OptionCheckRow(props: {
+  checked: boolean;
+  label: string;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      class="flex cursor-pointer select-none items-center gap-2 text-sm"
+      onClick={() => props.onChange(!props.checked)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          props.onChange(!props.checked);
+        }
+      }}
+    >
+      <Checkbox checked={props.checked} class="pointer-events-none" />
+      {props.label}
+    </div>
+  );
 }
 
 export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
@@ -31,16 +69,72 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
     props.sources.length > 0 && props.selectedUrls.size === props.sources.length;
   const selectedCountText = () => `(${props.selectedUrls.size}/${props.sources.length})`;
 
+  const comparisonByUrl = () => {
+    const map = new Map<string, ImportSourceComparison>();
+    for (const c of props.comparisons) {
+      map.set(c.source.sourceUrl, c);
+    }
+    return map;
+  };
+
+  const statusLabel = (url: string) => {
+    const c = comparisonByUrl().get(url);
+    if (!c) return null;
+    if (c.isNew) return '新';
+    if (c.isUpdate) return '更新';
+    return '已有';
+  };
+
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalZClass={props.portalZClass}>
+      <AppDialogContent portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
         <AppDialogHeader>
           <AppDialogTitle>识别导入书源</AppDialogTitle>
           <AppDialogDescription>
-            识别完成后可勾选需要导入的书源，点击确认才会真正导入。
+            默认勾选新增或远程更新时间更晚的书源。可保留本地名称、分组与启用状态。
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <Show when={!props.loading}>
+            <section class="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <p class="text-xs font-medium text-muted-foreground">导入选项</p>
+              <div class="flex flex-wrap gap-x-4 gap-y-2">
+                <OptionCheckRow
+                  checked={props.keepName}
+                  label="保留名称"
+                  onChange={props.onKeepNameChange}
+                />
+                <OptionCheckRow
+                  checked={props.keepGroup}
+                  label="保留分组"
+                  onChange={props.onKeepGroupChange}
+                />
+                <OptionCheckRow
+                  checked={props.keepEnable}
+                  label="保留启用"
+                  onChange={props.onKeepEnableChange}
+                />
+              </div>
+              <div class="flex flex-wrap items-end gap-2">
+                <TextField class="min-w-48 flex-1">
+                  <TextFieldInput
+                    placeholder="导入分组（可选）"
+                    value={props.groupName}
+                    onInput={(e: Event) =>
+                      props.onGroupNameChange((e.currentTarget as HTMLInputElement).value)
+                    }
+                  />
+                </TextField>
+                <div class="pb-2">
+                  <OptionCheckRow
+                    checked={props.addGroup}
+                    label="追加分组"
+                    onChange={props.onAddGroupChange}
+                  />
+                </div>
+              </div>
+            </section>
+          </Show>
           <Show
             when={!props.loading}
             fallback={
@@ -55,36 +149,66 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
             >
               <div class="space-y-3">
                 <For each={props.sources}>
-                  {(source, index) => {
-                    const checkboxId = `import-source-${index()}`;
+                  {(source) => {
+                    const checked = () => props.selectedUrls.has(source.sourceUrl);
+                    const tag = statusLabel(source.sourceUrl);
+                    const toggle = () => props.onToggle(source.sourceUrl, !checked());
                     return (
-                    <div class="flex cursor-pointer items-start gap-2 rounded-md border border-border/70 p-3 hover:bg-muted/40">
-                      <Checkbox
-                        id={checkboxId}
-                        checked={props.selectedUrls.has(source.sourceUrl)}
-                        onChange={(checked) => props.onToggle(source.sourceUrl, !!checked)}
-                      />
-                      <div class="min-w-0 flex-1">
-                        <Label for={checkboxId} class="block cursor-pointer truncate text-sm font-medium">
-                          {source.sourceName}
-                        </Label>
-                        <Label for={checkboxId} class="block cursor-pointer truncate text-xs text-muted-foreground">
-                          {source.sourceUrl}
-                        </Label>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        class="flex cursor-pointer select-none items-start gap-2 rounded-md border border-border/70 p-3 hover:bg-muted/40"
+                        onClick={toggle}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggle();
+                          }
+                        }}
+                      >
+                        <Checkbox checked={checked()} class="pointer-events-none mt-0.5" />
+                        <div class="min-w-0 flex-1">
+                          <div class="flex items-center gap-2">
+                            <span class="block truncate text-sm font-medium">
+                              {source.sourceName}
+                            </span>
+                            <Show when={tag}>
+                              <span
+                                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                                classList={{
+                                  'bg-primary/15 text-primary': tag === '新',
+                                  'bg-amber-500/15 text-amber-700 dark:text-amber-400': tag === '更新',
+                                  'bg-muted text-muted-foreground': tag === '已有',
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            </Show>
+                          </div>
+                          <span class="block truncate text-xs text-muted-foreground">
+                            {source.sourceUrl}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )}}
+                    );
+                  }}
                 </For>
               </div>
             </Show>
           </Show>
         </div>
-        <AppDialogFooter class="w-full justify-start items-center gap-2 sm:justify-start!">
+        <AppDialogFooter class="w-full flex-wrap items-center justify-start gap-2 sm:justify-start!">
           <Button variant="outline" onClick={props.onSelectAllToggle} disabled={props.loading || props.sources.length === 0}>
             {allSelected() ? '取消选中' : '全选'} {selectedCountText()}
           </Button>
           <Button variant="outline" onClick={props.onInvertSelect} disabled={props.loading || props.sources.length === 0}>
             反选
+          </Button>
+          <Button variant="outline" onClick={props.onSelectNewToggle} disabled={props.loading || props.sources.length === 0}>
+            勾选新增
+          </Button>
+          <Button variant="outline" onClick={props.onSelectUpdateToggle} disabled={props.loading || props.sources.length === 0}>
+            勾选更新
           </Button>
           <div class="flex-1" />
           <div class="flex items-center gap-2">

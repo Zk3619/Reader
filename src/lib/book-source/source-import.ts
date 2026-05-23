@@ -5,8 +5,9 @@
 
 import type { NewBookSource } from '@/types';
 
-/** legado 风格的单条书源（可能带 bookSource 前缀的字段） */
+/** legado 风格的单条书源（可能带 bookSource 前缀的字段）；允许 GSON 额外字段透传 */
 interface LegadoSourceItem {
+  [key: string]: unknown;
   bookSourceUrl?: string;
   bookSourceName?: string;
   bookSourceGroup?: string;
@@ -17,7 +18,47 @@ interface LegadoSourceItem {
   sourceGroup?: string;
   sourceType?: number;
   sourceComment?: string;
-  [key: string]: unknown;
+  enabled?: boolean;
+  /** Legado JSON 字段名 */
+  enabledExplore?: boolean;
+  enableExplore?: boolean;
+  bookUrlPattern?: string;
+  customOrder?: number;
+  lastUpdateTime?: number;
+  respondTime?: number;
+  weight?: number;
+  searchUrl?: string;
+  exploreUrl?: string;
+  exploreScreen?: string;
+  ruleSearch?: NewBookSource['ruleSearch'];
+  ruleExplore?: NewBookSource['ruleExplore'];
+  ruleBookInfo?: NewBookSource['ruleBookInfo'];
+  ruleToc?: NewBookSource['ruleToc'];
+  ruleContent?: NewBookSource['ruleContent'];
+  ruleReview?: unknown;
+  header?: string;
+  jsLib?: string;
+  loginUrl?: string;
+  loginUi?: string;
+  loginCheckJs?: string;
+  coverDecodeJs?: string;
+  variableComment?: string;
+  concurrentRate?: string;
+  enabledCookieJar?: boolean;
+  eventListener?: boolean | number;
+  customButton?: boolean | number;
+  nextPageLazyLoad?: boolean | number;
+  nextPagePreload?: boolean | number;
+  sourceUrls?: string[];
+}
+
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, '').trim();
+}
+
+function looksLikeHtml(text: string): boolean {
+  const head = text.slice(0, 200).trimStart().toLowerCase();
+  return head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<?xml');
 }
 
 /**
@@ -29,14 +70,22 @@ function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
   if (!sourceUrl || typeof sourceUrl !== 'string' || !sourceName || typeof sourceName !== 'string') {
     return null;
   }
-  const out = {
-    sourceUrl: String(sourceUrl).trim(),
-    sourceName: String(sourceName).trim(),
+  const trimmedUrl = String(sourceUrl).trim();
+  const trimmedName = String(sourceName).trim();
+  if (!trimmedUrl || !trimmedName) return null;
+
+  const exploreEnabled = raw.enableExplore ?? raw.enabledExplore;
+  const cookieJar =
+    raw.enabledCookieJar === undefined ? true : Boolean(raw.enabledCookieJar);
+
+  const out: NewBookSource = {
+    sourceUrl: trimmedUrl,
+    sourceName: trimmedName,
     sourceGroup: raw.sourceGroup ?? raw.bookSourceGroup,
     sourceType: raw.sourceType ?? raw.bookSourceType,
     sourceComment: raw.sourceComment ?? raw.bookSourceComment,
     enabled: raw.enabled,
-    enableExplore: raw.enableExplore,
+    enableExplore: exploreEnabled,
     bookUrlPattern: raw.bookUrlPattern,
     customOrder: raw.customOrder,
     lastUpdateTime: raw.lastUpdateTime,
@@ -59,9 +108,43 @@ function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
     coverDecodeJs: raw.coverDecodeJs,
     variableComment: raw.variableComment,
     concurrentRate: raw.concurrentRate,
-    enabledCookieJar: raw.enabledCookieJar,
+    enabledCookieJar: cookieJar,
+    eventListener: Boolean(raw.eventListener),
+    customButton: Boolean(raw.customButton),
+    nextPageLazyLoad: Boolean(raw.nextPageLazyLoad ?? raw.nextPagePreload),
   };
-  return out as NewBookSource;
+  return out;
+}
+
+function collectLegadoItems(data: unknown): LegadoSourceItem[] {
+  if (Array.isArray(data)) {
+    return data.filter((item): item is LegadoSourceItem => !!item && typeof item === 'object');
+  }
+  if (data && typeof data === 'object') {
+    const obj = data as LegadoSourceItem;
+    if (Array.isArray(obj.sourceUrls)) {
+      return [];
+    }
+    return [obj];
+  }
+  return [];
+}
+
+/**
+ * legado 订阅列表格式：{ "sourceUrls": ["https://...", ...] }
+ */
+export function extractSourceUrlsEnvelope(jsonText: string): string[] {
+  const trimmed = stripBom(jsonText);
+  if (!trimmed.startsWith('{')) return [];
+  try {
+    const data = JSON.parse(trimmed) as LegadoSourceItem;
+    if (!data || typeof data !== 'object' || !Array.isArray(data.sourceUrls)) return [];
+    return data.sourceUrls
+      .map((u) => (typeof u === 'string' ? u.trim() : ''))
+      .filter((u) => /^https?:\/\//i.test(u));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -69,21 +152,26 @@ function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
  * @returns 规范后的书源列表，无效项已过滤
  */
 export function parseBookSourceJson(jsonText: string): NewBookSource[] {
-  const trimmed = jsonText.trim();
+  const trimmed = stripBom(jsonText);
   if (!trimmed) return [];
+  if (looksLikeHtml(trimmed)) {
+    console.warn('[书源导入] 响应内容为 HTML，可能 URL 无效或未指向 JSON 文件');
+    return [];
+  }
+
   let data: unknown;
   try {
     data = JSON.parse(trimmed);
   } catch {
+    console.warn('[书源导入] JSON 解析失败');
     return [];
   }
-  const items: LegadoSourceItem[] = Array.isArray(data) ? data : [data as LegadoSourceItem];
+
+  const items = collectLegadoItems(data);
   const result: NewBookSource[] = [];
   for (const item of items) {
-    if (item && typeof item === 'object') {
-      const normalized = normalizeSourceItem(item as LegadoSourceItem);
-      if (normalized) result.push(normalized);
-    }
+    const normalized = normalizeSourceItem(item);
+    if (normalized) result.push(normalized);
   }
   return result;
 }

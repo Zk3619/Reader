@@ -14,6 +14,13 @@ import {
 } from '@/lib/database/replace-rules';
 import type { ReplaceRule } from '@/types';
 
+/** 对齐 Legado ContentProcessor.upReplaceRules：导入书源后使替换规则缓存失效 */
+export function invalidateReplaceRulesCache(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('replace-rules-refresh'));
+  }
+}
+
 /**
  * 处理正文内容（应用替换规则）
  */

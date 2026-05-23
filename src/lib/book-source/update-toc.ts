@@ -14,25 +14,16 @@ import {
   BOOK_TYPE_UPDATE_ERROR,
   removeBookType,
 } from '@/lib/book-source/book-type';
+import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
+import type { BookChapter } from '@/types';
 
-/** 更新目录后保留的阅读进度与用户自定义字段 */
-export function syncBookPreserveProgress(updated: Book, preserved: Book): Book {
-  return {
-    ...updated,
-    durChapterTime: preserved.durChapterTime,
-    durChapterPos: preserved.durChapterPos,
-    durChapterIndex: preserved.durChapterIndex,
-    durChapterTitle: preserved.durChapterTitle,
-    canUpdate: preserved.canUpdate,
-    readConfig: preserved.readConfig,
-    group: preserved.group,
-    order: preserved.order,
-    originOrder: preserved.originOrder,
-    customCoverUrl: preserved.customCoverUrl,
-    customIntro: preserved.customIntro,
-    customTag: preserved.customTag,
-    variable: preserved.variable ?? updated.variable,
-  };
+/** 更新目录后保留的阅读进度与用户自定义字段（有目录时按 legado 重映射章节索引） */
+export function syncBookPreserveProgress(
+  updated: Book,
+  preserved: Book,
+  chapters?: BookChapter[]
+): Book {
+  return migrateBookProgress(updated, preserved, chapters);
 }
 
 function applyBookInfoToBook(book: Book, info: BookInfo): void {
@@ -93,7 +84,7 @@ export async function updateBookToc(bookUrl: string): Promise<void> {
       working.latestChapterTime = now;
     }
 
-    working = syncBookPreserveProgress(working, oldBook);
+    working = syncBookPreserveProgress(working, oldBook, chapters);
 
     const originalUrl = bookUrl;
     if (working.bookUrl !== originalUrl) {

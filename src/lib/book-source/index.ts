@@ -8,7 +8,14 @@ export { searchBook } from '@/lib/book-source/search';
 
 // 发现功能
 export { exploreBook } from '@/lib/book-source/explore';
-export { addSearchBookToShelf } from '@/lib/book-source/add-to-shelf';
+export { addSearchBookToShelf, saveBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+export { migrateBookProgress, getDurChapterIndex, isSameNameAndAuthor } from '@/lib/bookshelf/book-migrate';
+export {
+  addOnlineBookByUrl,
+  resolveSourceForBookUrl,
+  isLikelyDirectFileUrl,
+} from '@/lib/book-source/add-by-url';
+export { parseBookUrlWithOption, getNetworkBaseUrl } from '@/lib/book-source/url-option';
 
 // 详情功能
 export { getBookInfo } from '@/lib/book-source/detail';
