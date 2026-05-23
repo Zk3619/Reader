@@ -1,9 +1,9 @@
 /**
  * 导入操作选择对话框
- * 每次导入本地书籍时让用户选择复制或移动操作
+ * 每次导入本地书籍时让用户选择复制、移动或无动作
  */
 
-import { createSignal, createEffect } from 'solid-js';
+import { createSignal, createEffect, createResource } from 'solid-js';
 import {
   AppDialog,
   AppDialogContent,
@@ -17,8 +17,11 @@ import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { settingsStore } from '@/stores/settings';
+import { isTauri } from '@/lib/platform/detect';
+import { usesDirectoryHandleBooksRoot } from '@/lib/platform/fs/managed-storage';
+import type { ImportBookAction } from '@/lib/local-book/import';
 
-export type ImportAction = 'copy' | 'move';
+export type ImportAction = ImportBookAction;
 
 export interface ImportActionDialogProps {
   open: boolean;
@@ -26,25 +29,31 @@ export interface ImportActionDialogProps {
   onConfirm: (action: ImportAction, remember: boolean) => void;
 }
 
+function defaultAction(): ImportAction {
+  return settingsStore.state.app.importBookAction || 'copy';
+}
+
 export function ImportActionDialog(props: ImportActionDialogProps) {
-  const [action, setAction] = createSignal<ImportAction>(
-    settingsStore.state.app.importBookAction || 'copy'
-  );
-  const [remember, setRemember] = createSignal(
-    settingsStore.state.app.rememberImportAction || false
+  const [webUsesUserFolder] = createResource(
+    () => props.open && !isTauri(),
+    async (shouldLoad) => (shouldLoad ? await usesDirectoryHandleBooksRoot() : false),
   );
 
-  // 每次打开时从 store 同步，避免显示上次未确认的选择
+  const [action, setAction] = createSignal<ImportAction>(defaultAction());
+  const [remember, setRemember] = createSignal(
+    settingsStore.state.app.rememberImportAction || false,
+  );
+
   createEffect(() => {
     if (props.open) {
-      setAction(settingsStore.state.app.importBookAction || 'copy');
+      setAction(defaultAction());
       setRemember(settingsStore.state.app.rememberImportAction || false);
     }
   });
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      setAction(settingsStore.state.app.importBookAction || 'copy');
+      setAction(defaultAction());
       setRemember(settingsStore.state.app.rememberImportAction || false);
     }
     props.onOpenChange(open);
@@ -63,7 +72,11 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
       <AppDialogContent>
         <AppDialogHeader>
           <AppDialogTitle>选择书籍存放方式</AppDialogTitle>
-          <AppDialogDescription>请选择导入书籍时的操作方式</AppDialogDescription>
+          <AppDialogDescription>
+            {webUsesUserFolder()
+              ? '可将书籍写入指定文件夹，或仅登记原文件位置（无动作）。浏览器无法移动磁盘上的原文件；选「移动」表示写入书籍库后释放本次选择的文件句柄。'
+              : '请选择导入书籍时的操作方式。选「无动作」时书架将直接引用所选文件，不复制到书籍库目录。'}
+          </AppDialogDescription>
         </AppDialogHeader>
         <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
           <RadioGroup value={action()} onChange={(value) => setAction(value as ImportAction)}>
@@ -72,7 +85,7 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
                 <div>
                   <div class="font-medium">复制</div>
                   <div class="text-sm text-muted-foreground">
-                    将书籍文件复制到指定目录，保留原文件
+                    将书籍文件复制到书籍库目录，保留原文件
                   </div>
                 </div>
               </RadioGroupItemLabel>
@@ -82,7 +95,19 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
                 <div>
                   <div class="font-medium">移动</div>
                   <div class="text-sm text-muted-foreground">
-                    将书籍文件移动到指定目录，删除原文件
+                    {isTauri()
+                      ? '将书籍文件移动到书籍库目录，删除原文件'
+                      : '将书籍写入书籍库目录，并释放本次选择的文件句柄'}
+                  </div>
+                </div>
+              </RadioGroupItemLabel>
+            </RadioGroupItem>
+            <RadioGroupItem value="none" class="py-2">
+              <RadioGroupItemLabel class="flex-1 cursor-pointer">
+                <div>
+                  <div class="font-medium">无动作</div>
+                  <div class="text-sm text-muted-foreground">
+                    不写入书籍库目录，书架直接引用当前文件位置（移动或删除原文件后可能无法阅读）
                   </div>
                 </div>
               </RadioGroupItemLabel>

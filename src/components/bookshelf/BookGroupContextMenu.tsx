@@ -4,12 +4,12 @@
 
 import { createSignal, onCleanup, type ParentProps } from 'solid-js';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+  AppContextMenu,
+  AppContextMenuContent,
+  AppContextMenuItem,
+  AppContextMenuSeparator,
+  AppContextMenuTrigger,
+} from '@/components/shared/AppContextMenu';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import {
   findGroupOrderIndex,
@@ -46,31 +46,31 @@ export function GroupContextMenuContent(props: GroupContextMenuContentProps) {
   const canPinBottom = () => !isDefault() && index() >= 0 && index() < sorted().length - 1;
 
   return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => props.actions.onEdit(props.group)}>
+    <AppContextMenuContent>
+      <AppContextMenuItem onSelect={() => props.actions.onEdit(props.group)}>
         编辑
-      </ContextMenuItem>
-      <ContextMenuItem
+      </AppContextMenuItem>
+      <AppContextMenuItem
         disabled={!canPinTop()}
         onSelect={() => props.actions.onPinTop(props.group)}
       >
         置顶
-      </ContextMenuItem>
-      <ContextMenuItem
+      </AppContextMenuItem>
+      <AppContextMenuItem
         disabled={!canPinBottom()}
         onSelect={() => props.actions.onPinBottom(props.group)}
       >
         置底
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem
+      </AppContextMenuItem>
+      <AppContextMenuSeparator />
+      <AppContextMenuItem
         disabled={isDefault()}
         class={isDefault() ? DELETE_ITEM_DISABLED_CLASS : DELETE_ITEM_CLASS}
         onSelect={() => props.actions.onDelete(props.group)}
       >
         删除
-      </ContextMenuItem>
-    </ContextMenuContent>
+      </AppContextMenuItem>
+    </AppContextMenuContent>
   );
 }
 
@@ -212,15 +212,15 @@ export function GroupContextMenu(props: GroupContextMenuProps) {
   };
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger as={triggerAs()} {...triggerProps()}>
+    <AppContextMenu>
+      <AppContextMenuTrigger as={triggerAs()} {...triggerProps()}>
         {props.children}
-      </ContextMenuTrigger>
+      </AppContextMenuTrigger>
       <GroupContextMenuContent
         group={props.group}
         orderGroups={props.orderGroups}
         actions={props.actions}
       />
-    </ContextMenu>
+    </AppContextMenu>
   );
 }

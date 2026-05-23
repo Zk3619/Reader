@@ -4,7 +4,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ChevronLeftIcon } from '@/components/shared/icons';
+import { ChevronLeftIcon, FolderPlusIcon } from '@/components/shared/icons';
 
 export function BookGroupManageToolbarLeading(props: { onBack: () => void }) {
   return (
@@ -27,7 +27,8 @@ export function BookGroupManageToolbarLeading(props: { onBack: () => void }) {
 
 export function BookGroupManagePageToolbar(props: { onAdd: () => void }) {
   return (
-    <Button variant="default" type="button" onClick={props.onAdd}>
+    <Button variant="outline" size="sm" type="button" onClick={props.onAdd}>
+      <FolderPlusIcon class="h-4 w-4 mr-2" />
       添加分组
     </Button>
   );

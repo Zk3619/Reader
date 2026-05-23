@@ -4,12 +4,12 @@
 
 import { createSignal, onCleanup, Show, type ParentProps } from 'solid-js';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+  AppContextMenu,
+  AppContextMenuContent,
+  AppContextMenuItem,
+  AppContextMenuSeparator,
+  AppContextMenuTrigger,
+} from '@/components/shared/AppContextMenu';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { findBookOrderIndex } from '@/lib/bookshelf/book-order';
 import type { Book } from '@/types';
@@ -40,32 +40,32 @@ export function BookContextMenuContent(props: BookContextMenuContentProps) {
     props.manualSort && index() >= 0 && index() < props.orderedBooks.length - 1;
 
   return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => props.actions.onEdit(props.book)}>
+    <AppContextMenuContent>
+      <AppContextMenuItem onSelect={() => props.actions.onEdit(props.book)}>
         编辑
-      </ContextMenuItem>
+      </AppContextMenuItem>
       <Show when={props.manualSort}>
-        <ContextMenuItem
+        <AppContextMenuItem
           disabled={!canPinTop()}
           onSelect={() => props.actions.onPinTop(props.book)}
         >
           置顶
-        </ContextMenuItem>
-        <ContextMenuItem
+        </AppContextMenuItem>
+        <AppContextMenuItem
           disabled={!canPinBottom()}
           onSelect={() => props.actions.onPinBottom(props.book)}
         >
           置底
-        </ContextMenuItem>
+        </AppContextMenuItem>
       </Show>
-      <ContextMenuSeparator />
-      <ContextMenuItem
+      <AppContextMenuSeparator />
+      <AppContextMenuItem
         class={DELETE_ITEM_CLASS}
         onSelect={() => props.actions.onDelete(props.book)}
       >
         删除
-      </ContextMenuItem>
-    </ContextMenuContent>
+      </AppContextMenuItem>
+    </AppContextMenuContent>
   );
 }
 
@@ -189,8 +189,8 @@ export function BookContextMenu(props: BookContextMenuProps) {
   const longPress = useBookContextMenuLongPress();
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger
+    <AppContextMenu>
+      <AppContextMenuTrigger
         as="div"
         class={props.class}
         ref={(el: HTMLElement | null) => longPress.setTriggerRef(el)}
@@ -212,13 +212,13 @@ export function BookContextMenu(props: BookContextMenuProps) {
         {...longPress.pointerProps}
       >
         {props.children}
-      </ContextMenuTrigger>
+      </AppContextMenuTrigger>
       <BookContextMenuContent
         book={props.book}
         orderedBooks={props.orderedBooks}
         manualSort={props.manualSort}
         actions={props.actions}
       />
-    </ContextMenu>
+    </AppContextMenu>
   );
 }

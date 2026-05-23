@@ -3,7 +3,7 @@
  * 根据 mode 自动切换为「添加」或「编辑」模式
  */
 
-import { createSignal, Show, createEffect } from 'solid-js';
+import { createSignal, Show, createEffect, onCleanup } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -49,6 +49,125 @@ export const bookSortOptions = [
 
 function isDefaultGroup(groupId: number): boolean {
   return groupId < 0;
+}
+
+const COVER_ASPECT_WIDTH = 3;
+const COVER_ASPECT_HEIGHT = 4;
+
+function GroupCoverPreview(props: {
+  cover: () => string | undefined;
+  onPickCover: () => void | Promise<void>;
+  /** md+ 横向布局：高度与右侧栏一致，宽度按 3:4 比例推算 */
+  matchSiblingHeight?: boolean;
+}) {
+  const previewInfo = () => getCoverPreviewInfo(props.cover());
+  const [imageError, setImageError] = createSignal(false);
+  const [matchedWidth, setMatchedWidth] = createSignal<number>();
+  const [matchHeightFrame, setMatchHeightFrame] = createSignal<HTMLDivElement>();
+
+  createEffect(() => {
+    if (!props.matchSiblingHeight) return;
+    const el = matchHeightFrame();
+    if (!el) return;
+
+    const syncWidth = () => {
+      const height = el.clientHeight;
+      if (height > 0) {
+        setMatchedWidth((height * COVER_ASPECT_WIDTH) / COVER_ASPECT_HEIGHT);
+      }
+    };
+
+    syncWidth();
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(el);
+    onCleanup(() => {
+      observer.disconnect();
+      setMatchedWidth(undefined);
+    });
+  });
+
+  const frameClass = cn(
+    'shrink-0 overflow-hidden rounded-lg border bg-muted',
+    props.matchSiblingHeight ? 'h-full' : 'w-full',
+  );
+
+  const previewBody = (
+    <button
+      type="button"
+      onClick={props.onPickCover}
+      class="flex h-full w-full items-center justify-center transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+    >
+      <Show
+        when={props.cover()}
+        fallback={
+          <div class="flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <ImageIcon class="h-8 w-8" size={32} />
+            <span>点击选择封面</span>
+          </div>
+        }
+      >
+        {(() => {
+          const info = previewInfo();
+          const cover = props.cover();
+          if (!info.isValid) {
+            return (
+              <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
+                <AlertCircleIcon class="h-8 w-8" size={32} />
+                <span class="text-center px-2">
+                  {info.type === 'invalid' && cover?.startsWith('http') ? 'URL 格式错误' : '无效的输入'}
+                </span>
+              </div>
+            );
+          }
+          if (info.type === 'emoji') {
+            return (
+              <div class="flex h-full w-full items-center justify-center text-6xl">
+                {cover}
+              </div>
+            );
+          }
+          if (info.url && !imageError()) {
+            return (
+              <img
+                src={info.url}
+                alt="封面预览"
+                class="h-full w-full object-cover"
+                onError={() => setImageError(true)}
+              />
+            );
+          }
+          if (imageError()) {
+            return (
+              <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
+                <AlertCircleIcon class="h-8 w-8" size={32} />
+                <span class="text-center px-2">图片加载失败</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
+      </Show>
+    </button>
+  );
+
+  return (
+    <Show
+      when={props.matchSiblingHeight}
+      fallback={
+        <AspectRatio ratio={3 / 4} class={frameClass}>
+          {previewBody}
+        </AspectRatio>
+      }
+    >
+      <div
+        ref={setMatchHeightFrame}
+        class={frameClass}
+        style={{ width: matchedWidth() ? `${matchedWidth()}px` : undefined }}
+      >
+        {previewBody}
+      </div>
+    </Show>
+  );
 }
 
 export interface BookGroupFormDialogProps {
@@ -179,6 +298,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
         bookSort: Number(bookSort()),
         enableRefresh: formData.enableRefresh ?? true,
         show: formData.show ?? true,
+        onlyUpdateRead: formData.onlyUpdateRead ?? false,
         order: maxOrder + 1,
       };
       await groupsDb.insertGroup(newGroup);
@@ -195,7 +315,13 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
     props.onOpenChange(false);
   }
 
+  async function pickCoverFromLocal() {
+    const dataUrl = await selectLocalImage();
+    if (dataUrl) setForm({ ...form(), cover: dataUrl });
+  }
+
   const options = () => bookSortOptions.map((o) => String(o.value));
+  const cover = () => form().cover;
 
   return (
     <AppDialog open={props.open} onOpenChange={handleOpenChange}>
@@ -211,181 +337,114 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-          {/* 分组名称：仅默认分组不可编辑 */}
-          <div class="space-y-2">
-            <Label for="group-name">分组名称</Label>
-            <TextField>
-              <TextFieldInput
-                id="group-name"
-                value={form().groupName ?? ''}
-                disabled={!!nameDisabled()}
-                readOnly={!!nameDisabled()}
-                onInput={(e) => !nameDisabled() && setForm({ ...form(), groupName: e.currentTarget.value })}
-                placeholder="输入分组名称"
-                class={cn(nameDisabled() && 'bg-muted')}
-              />
-            </TextField>
-          </div>
-
-          {/* 封面 */}
-          <div class="space-y-2">
-            <Label for="group-cover">封面（URL或Emoji）</Label>
-            <div class="flex gap-2">
-              <TextField class="flex-1">
-                <TextFieldInput
-                  id="group-cover"
-                  value={form().cover || ''}
-                  onInput={(e) => setForm({ ...form(), cover: e.currentTarget.value })}
-                  placeholder={isEdit() ? '输入图片URL或Emoji' : '输入图片URL或Emoji（可选）'}
-                />
-              </TextField>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={async () => {
-                  const dataUrl = await selectLocalImage();
-                  if (dataUrl) setForm({ ...form(), cover: dataUrl });
-                }}
-              >
-                选择本地图片
-              </Button>
+        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <div class="flex flex-col gap-4 md:flex-row md:gap-6">
+            {/* md+：左侧封面预览，高度与右侧表单一致 */}
+            <div class="hidden min-h-0 shrink-0 self-stretch md:block">
+              <GroupCoverPreview cover={cover} onPickCover={pickCoverFromLocal} matchSiblingHeight />
             </div>
 
-            {/* 封面预览 */}
-            {(() => {
-              const cover = () => form().cover;
-              const previewInfo = () => getCoverPreviewInfo(cover());
-              const [imageError, setImageError] = createSignal(false);
-              return (
-                <AspectRatio ratio={3 / 4} class="overflow-hidden rounded-lg border bg-muted">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const dataUrl = await selectLocalImage();
-                      if (dataUrl) {
-                        setForm({ ...form(), cover: dataUrl });
-                        setImageError(false);
-                      }
-                    }}
-                    class="flex h-full w-full items-center justify-center transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  >
-                    <Show
-                      when={cover()}
-                      fallback={
-                        <div class="flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-                          <ImageIcon class="h-8 w-8" size={32} />
-                          <span>点击选择封面</span>
-                        </div>
-                      }
-                    >
-                      {(() => {
-                        const info = previewInfo();
-                        if (!info.isValid) {
-                          return (
-                            <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
-                              <AlertCircleIcon class="h-8 w-8" size={32} />
-                              <span class="text-center px-2">
-                                {info.type === 'invalid' && cover()?.startsWith('http')
-                                  ? 'URL 格式错误'
-                                  : '无效的输入'}
-                              </span>
-                            </div>
-                          );
-                        }
-                        if (info.type === 'emoji') {
-                          return (
-                            <div class="flex h-full w-full items-center justify-center text-6xl">
-                              {cover()}
-                            </div>
-                          );
-                        }
-                        if (info.url && !imageError()) {
-                          return (
-                            <img
-                              src={info.url}
-                              alt="封面预览"
-                              class="h-full w-full object-cover"
-                              onError={() => setImageError(true)}
-                            />
-                          );
-                        }
-                        if (imageError()) {
-                          return (
-                            <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
-                              <AlertCircleIcon class="h-8 w-8" size={32} />
-                              <span class="text-center px-2">图片加载失败</span>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </Show>
-                  </button>
-                </AspectRatio>
-              );
-            })()}
-          </div>
+            <div class="min-w-0 flex-1 space-y-4">
+              {/* 分组名称：仅默认分组不可编辑 */}
+              <div class="space-y-2">
+                <Label for="group-name">分组名称</Label>
+                <TextField>
+                  <TextFieldInput
+                    id="group-name"
+                    value={form().groupName ?? ''}
+                    disabled={!!nameDisabled()}
+                    readOnly={!!nameDisabled()}
+                    onInput={(e) => !nameDisabled() && setForm({ ...form(), groupName: e.currentTarget.value })}
+                    placeholder="输入分组名称"
+                    class={cn(nameDisabled() && 'bg-muted')}
+                  />
+                </TextField>
+              </div>
 
-          {/* 排序方式 */}
-          <div class="space-y-2">
-            <Label for="book-sort">内部书籍排序方式</Label>
-            <AppSelect
-              value={bookSort()}
-              onChange={(v) => setBookSort(v || '')}
-              options={options()}
-              placeholder="选择排序方式"
-              open={selectOpen()}
-              onOpenChange={setSelectOpen}
-              itemComponent={(itemProps) => {
-                const option = bookSortOptions.find((o) => String(o.value) === itemProps.item.rawValue);
-                return (
-                  <AppSelectItem item={itemProps.item}>
-                    {option?.label || itemProps.item.rawValue}
-                  </AppSelectItem>
-                );
-              }}
-            >
-              <AppSelectTrigger id="book-sort" aria-label="内部书籍排序方式">
-                <AppSelectValue<string>>
-                  {(state) => {
-                    const v = state.selectedOption();
-                    const opt = bookSortOptions.find((o) => String(o.value) === v);
-                    return opt?.label || v || '选择排序方式';
+              {/* 封面 */}
+              <div class="space-y-2">
+                <Label for="group-cover">封面（URL或Emoji）</Label>
+                <div class="flex gap-2">
+                  <TextField class="flex-1">
+                    <TextFieldInput
+                      id="group-cover"
+                      value={form().cover || ''}
+                      onInput={(e) => setForm({ ...form(), cover: e.currentTarget.value })}
+                      placeholder={isEdit() ? '输入图片URL或Emoji' : '输入图片URL或Emoji（可选）'}
+                    />
+                  </TextField>
+                  <Button type="button" variant="outline" onClick={pickCoverFromLocal}>
+                    选择本地图片
+                  </Button>
+                </div>
+
+                {/* 小于 md：封面预览在输入框下方 */}
+                <div class="md:hidden">
+                  <GroupCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
+                </div>
+              </div>
+
+              {/* 排序方式 */}
+              <div class="space-y-2">
+                <Label for="book-sort">内部书籍排序方式</Label>
+                <AppSelect
+                  value={bookSort()}
+                  onChange={(v) => setBookSort(v || '')}
+                  options={options()}
+                  placeholder="选择排序方式"
+                  open={selectOpen()}
+                  onOpenChange={setSelectOpen}
+                  itemComponent={(itemProps) => {
+                    const option = bookSortOptions.find((o) => String(o.value) === itemProps.item.rawValue);
+                    return (
+                      <AppSelectItem item={itemProps.item}>
+                        {option?.label || itemProps.item.rawValue}
+                      </AppSelectItem>
+                    );
                   }}
-                </AppSelectValue>
-                <AppSelectIcon />
-              </AppSelectTrigger>
-              <AppSelectContent>
-                <AppSelectListbox />
-              </AppSelectContent>
-            </AppSelect>
-          </div>
+                >
+                  <AppSelectTrigger id="book-sort" aria-label="内部书籍排序方式">
+                    <AppSelectValue<string>>
+                      {(state) => {
+                        const v = state.selectedOption();
+                        const opt = bookSortOptions.find((o) => String(o.value) === v);
+                        return opt?.label || v || '选择排序方式';
+                      }}
+                    </AppSelectValue>
+                    <AppSelectIcon />
+                  </AppSelectTrigger>
+                  <AppSelectContent>
+                    <AppSelectListbox />
+                  </AppSelectContent>
+                </AppSelect>
+              </div>
 
-          {/* 允许下拉刷新 */}
-          <div class="flex items-center justify-between">
-            <Label for="enable-refresh">允许下拉刷新</Label>
-            <Switch
-              checked={form().enableRefresh ?? true}
-              onChange={(checked) => setForm({ ...form(), enableRefresh: checked })}
-            >
-              <SwitchControl id="enable-refresh">
-                <SwitchThumb />
-              </SwitchControl>
-            </Switch>
-          </div>
+              {/* 允许下拉刷新 */}
+              <div class="flex items-center justify-between">
+                <Label for="enable-refresh">允许下拉刷新</Label>
+                <Switch
+                  checked={form().enableRefresh ?? true}
+                  onChange={(checked) => setForm({ ...form(), enableRefresh: checked })}
+                >
+                  <SwitchControl id="enable-refresh">
+                    <SwitchThumb />
+                  </SwitchControl>
+                </Switch>
+              </div>
 
-          {/* 是否显示 */}
-          <div class="flex items-center justify-between">
-            <Label for="show-group">显示分组</Label>
-            <Switch
-              checked={form().show ?? true}
-              onChange={(checked) => setForm({ ...form(), show: checked })}
-            >
-              <SwitchControl id="show-group">
-                <SwitchThumb />
-              </SwitchControl>
-            </Switch>
+              {/* 是否显示 */}
+              <div class="flex items-center justify-between">
+                <Label for="show-group">显示分组</Label>
+                <Switch
+                  checked={form().show ?? true}
+                  onChange={(checked) => setForm({ ...form(), show: checked })}
+                >
+                  <SwitchControl id="show-group">
+                    <SwitchThumb />
+                  </SwitchControl>
+                </Switch>
+              </div>
+            </div>
           </div>
         </div>
 

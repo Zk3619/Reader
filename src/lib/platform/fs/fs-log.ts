@@ -2,7 +2,13 @@ import type { FsLayer } from '@/lib/platform/fs/capabilities';
 
 export function logFsBridge(
   operation: string,
-  detail: { platform?: string; attempted?: FsLayer[]; winner?: FsLayer; message?: string },
+  detail: {
+    platform?: string;
+    attempted?: FsLayer[];
+    winner?: FsLayer;
+    message?: string;
+    count?: number;
+  },
 ): void {
   const parts = [operation];
   if (detail.platform) parts.push(`platform=${detail.platform}`);

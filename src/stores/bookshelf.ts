@@ -193,12 +193,36 @@ export const bookshelfStore = {
   },
 
   /**
-   * 添加书籍到书架
+   * 添加书籍到书架（含同名同作者迁移）
    */
   async addBook(book: Book): Promise<void> {
     try {
-      await booksDb.insertBook(book);
-      setState('books', books => [...books, book]);
+      const { saveBookToShelf } = await import('@/lib/bookshelf/save-book-to-shelf');
+      const saved = await saveBookToShelf(
+        {
+          bookUrl: book.bookUrl,
+          tocUrl: book.tocUrl,
+          name: book.name,
+          author: book.author,
+          kind: book.kind,
+          intro: book.intro,
+          coverUrl: book.coverUrl,
+          charset: book.charset,
+          origin: book.origin,
+          originName: book.originName,
+          type: book.type,
+        },
+        { fetchChapters: false }
+      );
+      if (!saved) {
+        throw new Error('添加书籍失败');
+      }
+      setState('books', (books) => {
+        const without = books.filter(
+          (b) => b.bookUrl !== book.bookUrl && !(b.name === saved.name && b.author === saved.author)
+        );
+        return [...without, saved];
+      });
     } catch (e) {
       const error = e instanceof Error ? e.message : '添加书籍失败';
       setState({ error });

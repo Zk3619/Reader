@@ -15,7 +15,7 @@ import {
   androidPickFiles,
   androidReadUriBytes,
 } from '@/lib/platform/fs/android-bridge';
-import { normalizeUriStorageValue, parseStorageRef } from '@/lib/platform/fs/storage-ref';
+import { normalizeUriStorageValue } from '@/lib/platform/fs/storage-ref';
 import { newHandleId, putHandle } from '@/lib/platform/fs/handle-store';
 import {
   DEFAULT_BOOK_FILTERS,
@@ -43,135 +43,211 @@ function filtersToAccept(
   return map;
 }
 
-async function tryL1PickFile(options: PickFileOptions): Promise<PickResult | null> {
-  if (!supportsTauriDialogFilePicker()) return null;
-  const filters = options.filters ?? DEFAULT_BOOK_FILTERS;
-  const path = await openDialog({
-    multiple: options.multiple ?? false,
-    directory: false,
-    filters,
-  });
-  if (path === null) throw new FsUserCancelledError();
-  const paths = Array.isArray(path) ? path : [path];
-  const first = paths[0];
-  if (typeof first !== 'string') return null;
+function filtersToAcceptAttribute(filters: PickFileOptions['filters']): string {
+  const exts = new Set<string>();
+  for (const f of filters ?? DEFAULT_BOOK_FILTERS) {
+    for (const ext of f.extensions) {
+      exts.add(`.${ext}`);
+    }
+  }
+  return [...exts].join(',');
+}
 
-  const isUri = first.startsWith('content://');
+async function l1PathToPickResult(path: string): Promise<PickResult> {
+  const isUri = path.startsWith('content://');
   const ref = isUri
-    ? { kind: 'uri' as const, value: first }
-    : { kind: 'path' as const, value: first };
+    ? { kind: 'uri' as const, value: path }
+    : { kind: 'path' as const, value: path };
 
   let bytes: ArrayBuffer | undefined;
   if (isUri) {
-    const data = await fsReadFile(first);
+    const data = await fsReadFile(path);
     bytes = data.buffer.slice(
       data.byteOffset,
       data.byteOffset + data.byteLength,
     ) as ArrayBuffer;
   }
 
-  const fileName = first.split(/[/\\]/).pop() || 'book.dat';
+  const fileName = path.split(/[/\\]/).pop() || 'book.dat';
   return { ref, fileName, bytes, sourceLayer: 'L1' };
 }
 
-async function tryL2PickFile(options: PickFileOptions): Promise<PickResult | null> {
+async function tryL1PickFiles(options: PickFileOptions): Promise<PickResult[] | null> {
+  if (!supportsTauriDialogFilePicker()) return null;
+  const filters = options.filters ?? DEFAULT_BOOK_FILTERS;
+  const multiple = options.multiple ?? false;
+  const path = await openDialog({
+    multiple,
+    directory: false,
+    filters,
+  });
+  if (path === null) throw new FsUserCancelledError();
+  const paths = (Array.isArray(path) ? path : [path]).filter(
+    (p): p is string => typeof p === 'string',
+  );
+  if (paths.length === 0) return null;
+  return Promise.all(paths.map((p) => l1PathToPickResult(p)));
+}
+
+async function tryL2PickFiles(options: PickFileOptions): Promise<PickResult[] | null> {
   if (mayUseAndroidFsLayer()) return null;
   if (!supportsFsAccessOpenFilePicker()) return null;
   const accept = filtersToAccept(options.filters);
+  const multiple = options.multiple ?? false;
   const handles = await window.showOpenFilePicker!({
-    multiple: options.multiple ?? false,
+    multiple,
     types: Object.keys(accept).length
       ? [{ accept }]
       : undefined,
   });
   if (!handles.length) throw new FsUserCancelledError();
-  const handle = handles[0];
-  const id = newHandleId();
-  await putHandle(id, handle);
-  const file = await handle.getFile();
-  return {
-    ref: { kind: 'handle', value: id },
-    fileName: file.name,
-    bytes: await file.arrayBuffer(),
-    sourceLayer: 'L2',
-  };
+
+  const results: PickResult[] = [];
+  for (const handle of handles) {
+    const id = newHandleId();
+    await putHandle(id, handle);
+    const file = await handle.getFile();
+    results.push({
+      ref: { kind: 'handle', value: id },
+      fileName: file.name,
+      bytes: await file.arrayBuffer(),
+      sourceLayer: 'L2',
+    });
+  }
+  return results;
 }
 
-async function tryL3PickFile(): Promise<PickResult | null> {
+async function tryL3PickFiles(options: PickFileOptions): Promise<PickResult[] | null> {
   if (!mayUseAndroidFsLayer() || !(await supportsAndroidFsPlugin())) return null;
-  const picked = await androidPickFiles(['*/*'], false);
+  const multiple = options.multiple ?? false;
+  const picked = await androidPickFiles(['*/*'], multiple);
   if (!picked.length) throw new FsUserCancelledError();
-  const { uri, name } = picked[0];
-  const bareUri = normalizeUriStorageValue(uri);
-  const bytes = await androidReadUriBytes(bareUri);
-  const fileName = name.trim() || 'book.dat';
-  return {
-    ref: { kind: 'uri', value: bareUri },
-    fileName,
-    bytes,
-    sourceLayer: 'L3',
-  };
+
+  const results: PickResult[] = [];
+  for (const { uri, name } of picked) {
+    const bareUri = normalizeUriStorageValue(uri);
+    const bytes = await androidReadUriBytes(bareUri);
+    const fileName = name.trim() || 'book.dat';
+    results.push({
+      ref: { kind: 'uri', value: bareUri },
+      fileName,
+      bytes,
+      sourceLayer: 'L3',
+    });
+  }
+  return results;
 }
 
-async function tryL4PickFile(): Promise<PickResult | null> {
+async function tryL4PickFiles(options: PickFileOptions): Promise<PickResult[] | null> {
   if (!supportsLegacyFileInput()) return null;
-  const file = await new Promise<File | null>((resolve) => {
+  const multiple = options.multiple ?? false;
+  const accept = filtersToAcceptAttribute(options.filters);
+  const files = await new Promise<File[]>((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.txt,.epub,text/plain,application/epub+zip';
-    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.accept = accept || '.txt,.epub,text/plain,application/epub+zip';
+    input.multiple = multiple;
+    input.onchange = () => {
+      const list = input.files;
+      resolve(list ? Array.from(list) : []);
+    };
+    input.oncancel = () => resolve([]);
     input.click();
   });
-  if (!file) throw new FsUserCancelledError();
-  return {
-    ref: { kind: 'virtual', value: crypto.randomUUID() },
-    fileName: file.name,
-    bytes: await file.arrayBuffer(),
-    sourceLayer: 'L4',
-    legacyFile: file,
-  };
+  if (files.length === 0) throw new FsUserCancelledError();
+
+  const results: PickResult[] = [];
+  for (const file of files) {
+    results.push({
+      ref: { kind: 'virtual', value: crypto.randomUUID() },
+      fileName: file.name,
+      bytes: await file.arrayBuffer(),
+      sourceLayer: 'L4',
+      legacyFile: file,
+    });
+  }
+  return results;
 }
 
-export async function pickFile(options: PickFileOptions = {}): Promise<PickResult> {
+/** 选择一个或多个文件（默认允许多选） */
+export async function pickFiles(options: PickFileOptions = {}): Promise<PickResult[]> {
   const platform = resolveFsPlatform();
   const attempted: FsLayer[] = [];
+  const resolvedOptions: PickFileOptions = {
+    ...options,
+    multiple: options.multiple ?? true,
+  };
 
   if (options.managedOnly) {
     attempted.push('L5');
-    throw new FsUnsupportedError(platform, 'pickFile', attempted, 'managedOnly 无法选择单个文件');
+    throw new FsUnsupportedError(platform, 'pickFile', attempted, 'managedOnly 无法选择文件');
   }
 
-  const layers: Array<{ layer: FsLayer; run: () => Promise<PickResult | null> }> = [
-    { layer: 'L1', run: () => tryL1PickFile(options) },
+  const layers: Array<{ layer: FsLayer; run: () => Promise<PickResult[] | null> }> = [
+    { layer: 'L1', run: () => tryL1PickFiles(resolvedOptions) },
     ...(mayUseAndroidFsLayer()
-      ? [{ layer: 'L3' as const, run: () => tryL3PickFile() }]
-      : [{ layer: 'L2' as const, run: () => tryL2PickFile(options) }]),
-    { layer: 'L4', run: () => tryL4PickFile() },
+      ? [{ layer: 'L3' as const, run: () => tryL3PickFiles(resolvedOptions) }]
+      : [{ layer: 'L2' as const, run: () => tryL2PickFiles(resolvedOptions) }]),
+    { layer: 'L4', run: () => tryL4PickFiles(resolvedOptions) },
   ];
 
   for (const { layer, run } of layers) {
     attempted.push(layer);
     try {
       const result = await run();
-      if (result) {
-        logFsBridge('pickFile', { platform, attempted, winner: layer });
+      if (result && result.length > 0) {
+        logFsBridge('pickFiles', {
+          platform,
+          attempted,
+          winner: layer,
+          count: result.length,
+        });
         return result;
       }
     } catch (e) {
       if (isUserCancelled(e)) throw e;
-      console.warn(`[fs-bridge] pickFile ${layer} failed`, e);
+      console.warn(`[fs-bridge] pickFiles ${layer} failed`, e);
     }
   }
 
   attempted.push('L6');
-  logFsBridge('pickFile', { platform, attempted, message: 'unsupported' });
+  logFsBridge('pickFiles', { platform, attempted, message: 'unsupported' });
   throw new FsUnsupportedError(platform, 'pickFile', attempted);
 }
 
-/** 兼容旧 API：返回 bookUrl 字符串 */
+/** 选择单个文件 */
+export async function pickFile(options: PickFileOptions = {}): Promise<PickResult> {
+  const results = await pickFiles({ ...options, multiple: false });
+  return results[0]!;
+}
+
+export type PickedFileUrl = {
+  bookUrl: string;
+  fileName: string;
+  content?: ArrayBuffer;
+};
+
+/** 多选：返回 bookUrl 列表；取消时返回空数组 */
+export async function pickFilesAsBookUrl(
+  options?: PickFileOptions,
+): Promise<PickedFileUrl[]> {
+  try {
+    const picks = await pickFiles(options);
+    return picks.map((pick) => ({
+      bookUrl: formatStorageRef(pick.ref),
+      fileName: pick.fileName,
+      content: pick.bytes,
+    }));
+  } catch (e) {
+    if (isUserCancelled(e)) return [];
+    throw e;
+  }
+}
+
+/** 单选：兼容旧 API */
 export async function pickFileAsBookUrl(
   options?: PickFileOptions,
-): Promise<{ bookUrl: string; fileName: string; content?: ArrayBuffer } | null> {
+): Promise<PickedFileUrl | null> {
   try {
     const pick = await pickFile(options);
     return {

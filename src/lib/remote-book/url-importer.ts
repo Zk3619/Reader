@@ -19,6 +19,8 @@ export async function importBookFromUrl(
   options?: {
     groupId?: number;
     fileName?: string;
+    /** 批量导入时抑制单条 toast */
+    quiet?: boolean;
   }
 ): Promise<{ success: boolean; bookName?: string; error?: string }> {
   try {
@@ -44,12 +46,13 @@ export async function importBookFromUrl(
       }
     }
 
-    // 显示下载提示
-    showAppToast({
-      title: "正在下载",
-      description: `正在从 URL 下载书籍...`,
-      variant: "default",
-    });
+    if (!options?.quiet) {
+      showAppToast({
+        title: '正在下载',
+        description: '正在从 URL 下载书籍...',
+        variant: 'default',
+      });
+    }
 
     // 下载文件（使用 HTTP 模块以绕过 CORS）
     const response = await request(url, {
@@ -121,11 +124,13 @@ export async function importBookFromUrl(
     );
 
     if (result) {
-      showAppToast({
-        title: "导入成功",
-        description: `已导入《${result.book.name}》，共 ${result.chapterCount} 章`,
-        variant: "success",
-      });
+      if (!options?.quiet) {
+        showAppToast({
+          title: '导入成功',
+          description: `已导入《${result.book.name}》，共 ${result.chapterCount} 章`,
+          variant: 'success',
+        });
+      }
 
       return {
         success: true,
@@ -151,11 +156,13 @@ export async function importBookFromUrl(
       errorMessage = String(error);
     }
 
-    showAppToast({
-      title: "导入失败",
-      description: errorMessage,
-      variant: "error",
-    });
+    if (!options?.quiet) {
+      showAppToast({
+        title: '导入失败',
+        description: errorMessage,
+        variant: 'error',
+      });
+    }
 
     return {
       success: false,

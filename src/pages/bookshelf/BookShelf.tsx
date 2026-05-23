@@ -35,7 +35,7 @@ import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
 import { BookContextMenu, type BookContextMenuActions } from '@/components/bookshelf/BookContextMenu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RefreshIcon, ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
+import { ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { getManagedBooksRoot } from '@/lib/platform/fs/managed-storage';
 import { listDirectory } from '@/lib/platform/fs/read-write';
@@ -82,6 +82,7 @@ export interface BookShelfProps {
   onOpenBook?: (book: Book) => void;
   onPageChange?: (page: PageType) => void;
   onOpenGroupManage?: () => void;
+  onOpenBookshelfManage?: () => void;
   onImportLocal?: () => void;
   onAddBookByUrl?: () => void;
 }
@@ -614,21 +615,14 @@ export function BookShelf(props: BookShelfProps) {
         <BookshelfPageToolbar
           onPageChange={props.onPageChange}
           onOpenGroupManage={props.onOpenGroupManage}
+          onOpenBookshelfManage={props.onOpenBookshelfManage}
           onImportLocal={props.onImportLocal}
           onAddBookByUrl={props.onAddBookByUrl}
           onUpdateToc={handleUpdateToc}
+          showReloadLocal={showBooksView() && currentGroup() === BookGroupId.Local}
+          isReloadingLocal={isReloadingBooks()}
+          onReloadLocal={handleReloadLocalBooks}
         />
-        <Show when={showBooksView() && currentGroup() === BookGroupId.Local}>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleReloadLocalBooks}
-            disabled={isReloadingBooks()}
-          >
-            <RefreshIcon class="h-4 w-4 mr-2" />
-            {isReloadingBooks() ? '重新加载中...' : '重新加载书籍列表'}
-          </Button>
-        </Show>
       </PageToolbar>
 
       <div class={mainShellPageScroll}>

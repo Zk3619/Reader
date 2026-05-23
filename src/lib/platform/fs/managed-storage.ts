@@ -1,8 +1,9 @@
 import { join } from '@tauri-apps/api/path';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
-import { androidWriteBookToTree } from '@/lib/platform/fs/android-bridge';
 import { isDesktopTauri, mayUseAndroidFsLayer } from '@/lib/platform/fs/capabilities';
 import { isTauri } from '@/lib/platform/detect';
+import { splitDirHandleRefValue } from '@/lib/platform/fs/dir-handle-file';
+import { removeHandle } from '@/lib/platform/fs/handle-store';
 import { formatStorageRef, parseStorageRef, type StorageRef } from '@/lib/platform/fs/storage-ref';
 import { readBytes, writeBytes } from '@/lib/platform/fs/read-write';
 import { settingsStore } from '@/stores/settings';
@@ -71,8 +72,26 @@ export function hasBooksStorageRoot(): boolean {
   );
 }
 
+/** Web：更换书籍库根目录时释放旧的 handle:dir 目录句柄 */
+async function releasePreviousWebBooksDirHandle(previousRoot?: string): Promise<void> {
+  if (isTauri() || !previousRoot?.trim()) return;
+  const ref = parseStorageRef(previousRoot.trim());
+  if (ref.kind !== 'dir-handle') return;
+  const { dirId } = splitDirHandleRefValue(ref.value);
+  if (!dirId) return;
+  try {
+    await removeHandle(dirId);
+  } catch (e) {
+    console.warn('[managed-storage] 释放旧书籍目录句柄失败', e);
+  }
+}
+
 export async function setBooksStorageRoot(ref: StorageRef): Promise<void> {
+  const previous = settingsStore.state.app.booksStorageRoot?.trim();
   const formatted = formatStorageRef(ref);
+  if (previous && previous !== formatted) {
+    await releasePreviousWebBooksDirHandle(previous);
+  }
   await settingsStore.updateAppSettings({
     booksStorageRoot: formatted,
     booksDirectory: ref.kind === 'path' ? ref.value : undefined,

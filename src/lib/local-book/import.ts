@@ -15,7 +15,7 @@ import {
   usesSafTreeBooksRoot,
 } from '@/lib/platform/fs/managed-storage';
 import { androidWriteBookToTree } from '@/lib/platform/fs/android-bridge';
-import { pickFileAsBookUrl } from '@/lib/platform/fs/pick-file';
+import { pickFileAsBookUrl, pickFilesAsBookUrl } from '@/lib/platform/fs/pick-file';
 import {
   bookUrlToRef,
   formatStorageRef,
@@ -55,12 +55,20 @@ import type { Book, BookChapter } from '@/types';
 import type { NewBookChapter } from '@/types/book-chapter';
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
+import { LOCAL_BOOK_FILE_PICKER_FILTERS } from '@/lib/local-book/local-book-import-files';
 
 /** 本地书 type：legado BookType 文本且本地 = 4 */
 const LOCAL_BOOK_TYPE = 4;
 
-/** 本地导入文件选择器支持的扩展名（与 importLocalBookFromContent 一致） */
-const LOCAL_BOOK_PICK_EXTENSIONS = ['txt', 'epub'] as const;
+/** 本地书导入时的文件处置方式 */
+export type ImportBookAction = 'copy' | 'move' | 'none';
+
+/** 单本 / 目录扫描后的待导入项 */
+export type LocalBookPickResult = {
+  bookUrl: string;
+  fileName: string;
+  content?: ArrayBuffer;
+};
 
 /** 导入结果 */
 export interface ImportResult {
@@ -322,6 +330,12 @@ export async function copyWebFileToBooksDir(
 
   const bytes = content ?? (await readBytes(parseStorageRef(sourceBookUrl)));
   await writeBytes(targetRef, bytes);
+  const src = parseStorageRef(sourceBookUrl);
+  if (src.kind === 'handle') {
+    await removeHandle(src.value).catch((e) => {
+      console.warn('[import] 复制后清理临时文件句柄失败', e);
+    });
+  }
   return targetUrl;
 }
 
@@ -348,6 +362,19 @@ export async function moveWebFileToBooksDir(
 export async function needsImportFileActionSelection(): Promise<boolean> {
   if (isTauri()) return true;
   return usesDirectoryHandleBooksRoot();
+}
+
+/** 是否尚未记住导入方式，需要弹出复制/移动对话框 */
+export function shouldPromptImportBookAction(
+  settings = settingsStore.state.app,
+): boolean {
+  return !settings.rememberImportAction || !settings.importBookAction;
+}
+
+/** Tauri 或 Web 自定义书籍目录，且需要用户选择复制/移动 */
+export async function needsImportBookActionPrompt(): Promise<boolean> {
+  if (!(await needsImportFileActionSelection())) return false;
+  return shouldPromptImportBookAction();
 }
 
 /**
@@ -400,28 +427,11 @@ function extractFileName(path: string, content: ArrayBuffer): string {
   return pathFileName;
 }
 
-/**
- * 打开文件选择器并返回文件路径
- * 
- * Tauri 桌面端：系统对话框，返回真实路径
- * Tauri Android：系统对话框返回 Content URI
- * Web：input/File System Access，返回 local::uuid，内容写入 IndexedDB
- * 
- * 注意：对于 Android Content URI，需要先读取内容（因为权限可能失效），
- * 但对于普通文件路径，可以先操作文件再读取内容，更高效。
- */
-export async function pickLocalBookFile(): Promise<
-  { bookUrl: string; fileName: string; content?: ArrayBuffer } | null
-> {
-  const picked = await pickFileAsBookUrl({
-    filters: [
-      { name: '支持的类型', extensions: [...LOCAL_BOOK_PICK_EXTENSIONS] },
-      { name: 'TXT', extensions: ['txt'] },
-      { name: 'EPUB', extensions: ['epub'] },
-    ],
-  });
-  if (!picked) return null;
-
+async function localBookPickFromUrl(picked: {
+  bookUrl: string;
+  fileName: string;
+  content?: ArrayBuffer;
+}): Promise<LocalBookPickResult> {
   const ref = parseStorageRef(picked.bookUrl);
   if (!picked.content && (ref.kind === 'path' || ref.kind === 'uri')) {
     const fs = await getFileSystem();
@@ -450,6 +460,32 @@ export async function pickLocalBookFile(): Promise<
   return { bookUrl: picked.bookUrl, fileName, content };
 }
 
+/**
+ * 打开文件选择器（可多选）并返回待导入项列表
+ */
+export async function pickLocalBookFiles(): Promise<LocalBookPickResult[] | null> {
+  const pickedList = await pickFilesAsBookUrl({
+    filters: LOCAL_BOOK_FILE_PICKER_FILTERS,
+    multiple: true,
+  });
+  if (pickedList.length === 0) return null;
+  const results: LocalBookPickResult[] = [];
+  for (const picked of pickedList) {
+    results.push(await localBookPickFromUrl(picked));
+  }
+  return results;
+}
+
+/** 单文件选择（兼容旧调用） */
+export async function pickLocalBookFile(): Promise<LocalBookPickResult | null> {
+  const picked = await pickFileAsBookUrl({
+    filters: LOCAL_BOOK_FILE_PICKER_FILTERS,
+    multiple: false,
+  });
+  if (!picked) return null;
+  return localBookPickFromUrl(picked);
+}
+
 const OPFS_BOOKS_PREFIX = 'books';
 
 /**
@@ -459,7 +495,9 @@ async function persistWebBookUrlIfNeeded(
   bookUrl: string,
   fileName: string,
   content: ArrayBuffer,
+  keepSourceRef = false,
 ): Promise<string> {
+  if (keepSourceRef) return bookUrl;
   if (isTauri()) return bookUrl;
   const ref = parseStorageRef(bookUrl);
   if (ref.kind === 'opfs' || ref.kind === 'virtual') {
@@ -499,7 +537,7 @@ export async function importLocalBookFromContent(
   bookUrl: string,
   fileName: string,
   content: ArrayBuffer,
-  options?: { groupId?: number }
+  options?: { groupId?: number; keepSourceRef?: boolean }
 ): Promise<ImportResult> {
   // 首先尝试通过文件名检测类型
   let fileType = detectFileType(fileName);
@@ -546,7 +584,12 @@ export async function importLocalBookFromContent(
     }
   }
 
-  finalBookUrl = await persistWebBookUrlIfNeeded(finalBookUrl, fileName, content);
+  finalBookUrl = await persistWebBookUrlIfNeeded(
+    finalBookUrl,
+    fileName,
+    content,
+    options?.keepSourceRef,
+  );
 
   const storedRef = parseStorageRef(finalBookUrl);
   if (storedRef.kind === 'uri') {
@@ -740,12 +783,12 @@ export async function importLocalBookFromContent(
  * 
  * @param options 导入选项
  * @param options.groupId 分组ID
- * @param options.action 导入操作：copy（复制）或 move（移动），如果不提供则使用用户偏好或弹窗选择
+ * @param options.action 导入操作：copy / move / none，如果不提供则使用用户偏好或弹窗选择
  * @param options.skipDialogs 跳过所有弹窗（用于测试或程序化调用）
  */
 export async function importLocalBook(options?: {
   groupId?: number;
-  action?: 'copy' | 'move';
+  action?: ImportBookAction;
   skipDialogs?: boolean;
 }): Promise<ImportResult | null> {
   // 检查是否需要显示首次导入目录选择弹窗
@@ -764,7 +807,7 @@ export async function importLocalBook(options?: {
   // 移动端和桌面端都需要复制/移动操作，因为：
   // 1. Android Content URI 权限是临时的，必须复制到应用目录
   // 2. 桌面端用户选择的文件可能在不同位置，需要统一管理
-  let action: 'copy' | 'move' | null = options?.action || null;
+  let action: ImportBookAction | null = options?.action || null;
 
   const needsAction = await needsImportFileActionSelection();
   if (!action && needsAction) {
@@ -782,7 +825,18 @@ export async function importLocalBook(options?: {
   let finalBookUrl = picked.bookUrl;
   let finalContent: ArrayBuffer;
 
-  if (action && isTauri()) {
+  if (action === 'none') {
+    if (isAndroidContentUri(picked.bookUrl) || picked.bookUrl.startsWith('local::')) {
+      if (!picked.content) {
+        throw new Error('Android Content URI 必须预先读取内容');
+      }
+      finalContent = picked.content;
+    } else if (picked.content) {
+      finalContent = picked.content;
+    } else {
+      finalContent = await readBytes(parseStorageRef(finalBookUrl));
+    }
+  } else if (action && isTauri()) {
     // Tauri 环境：先执行文件操作，再读取内容
     if (isAndroidContentUri(picked.bookUrl) || picked.bookUrl.startsWith('local::')) {
       if (!picked.content) {
@@ -813,13 +867,16 @@ export async function importLocalBook(options?: {
       finalContent = await readBytes(parseStorageRef(finalBookUrl));
     }
   } else if (action && (await usesDirectoryHandleBooksRoot())) {
+    if (!picked.content) {
+      throw new Error('Web 端必须预先读取内容');
+    }
     if (action === 'copy') {
       finalBookUrl = await copyWebFileToBooksDir(
         picked.bookUrl,
         picked.fileName,
         picked.content,
       );
-    } else {
+    } else if (action === 'move') {
       finalBookUrl = await moveWebFileToBooksDir(
         picked.bookUrl,
         picked.fileName,
@@ -836,12 +893,10 @@ export async function importLocalBook(options?: {
     }
   }
 
-  return importLocalBookFromContent(
-    finalBookUrl,
-    picked.fileName,
-    finalContent,
-    { groupId: options?.groupId }
-  );
+  return importLocalBookFromContent(finalBookUrl, picked.fileName, finalContent, {
+    groupId: options?.groupId,
+    keepSourceRef: action === 'none',
+  });
 }
 
 /**

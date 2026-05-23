@@ -30,19 +30,19 @@ import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
 import { BookshelfIcon, GripVerticalIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
+import {
+  BookGroupManagePageToolbar,
+  BookGroupManageToolbarLeading,
+} from '@/components/bookshelf/BookGroupManagePageToolbar';
 import { BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 // 注意：不使用 Key 组件，因为 SortableJS 已经移动了 DOM
 // 我们需要让 SolidJS 根据数据顺序重新渲染，而不是阻止它
 
-export type BookGroupManageToolbarActions = {
-  handleAdd: () => void;
-};
-
 export interface BookGroupManageProps {
   onClose?: () => void;
-  /** 供 App 层 PageToolbar 绑定「添加分组」等操作 */
-  onToolbarActionsChange?: (actions: BookGroupManageToolbarActions | null) => void;
 }
 
 /**
@@ -96,10 +96,8 @@ export function BookGroupManage(props: BookGroupManageProps) {
   // 加载分组数据
   onMount(() => {
     loadGroups();
-    props.onToolbarActionsChange?.({ handleAdd });
 
     onCleanup(() => {
-      props.onToolbarActionsChange?.(null);
       if (sortableInstance) {
         sortableInstance.destroy();
         sortableInstance = null;
@@ -368,8 +366,30 @@ export function BookGroupManage(props: BookGroupManageProps) {
     }
   }
 
+  const pageDescription = () => {
+    const n = groups().length;
+    return n > 0 ? `共 ${n} 个分组` : undefined;
+  };
+
   return (
-    <>
+    <div class={mainShellPageRoot}>
+      <PageToolbar
+        title="分组管理"
+        description={pageDescription()}
+        titleSlot={
+          <PageToolbarTitleDropdown
+            title="分组管理"
+            description={pageDescription()}
+            dropdownEnabled={false}
+          />
+        }
+        leading={
+          <BookGroupManageToolbarLeading onBack={() => props.onClose?.()} />
+        }
+      >
+        <BookGroupManagePageToolbar onAdd={handleAdd} />
+      </PageToolbar>
+
       <div class={cn(mainShellPageScroll, 'space-y-6 w-full')}>
         <Show when={error()}>
           <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
@@ -529,6 +549,6 @@ export function BookGroupManage(props: BookGroupManageProps) {
           onError={(msg) => setError(msg)}
         />
       </div>
-    </>
+    </div>
   );
 }

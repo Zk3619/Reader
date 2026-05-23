@@ -289,12 +289,10 @@ export function parseNameAuthor(fileName: string): { name: string; author: strin
 }
 
 /**
- * 格式化书名（移除特殊字符）
+ * 格式化书名（移除书名号等装饰符号，保留括号等书名组成部分）
  */
 export function formatBookName(name: string): string {
-  return name
-    .replace(/[《》【】\[\]()（）]/g, '')
-    .trim();
+  return name.replace(/[《》【】]/g, '').trim();
 }
 
 /**
@@ -315,7 +313,8 @@ export {
   importLocalBook,
   importLocalBookFromContent,
   pickLocalBookFile,
+  pickLocalBookFiles,
   readLocalBookContent,
   resolveAndroidOriginFileName,
 } from '@/lib/local-book/import';
-export type { ImportResult } from '@/lib/local-book/import';
+export type { ImportResult, LocalBookPickResult } from '@/lib/local-book/import';

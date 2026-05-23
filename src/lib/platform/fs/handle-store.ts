@@ -48,6 +48,29 @@ export async function removeHandle(id: string): Promise<void> {
   });
 }
 
+/** 移除与给定文件名匹配的临时 file 句柄（Web 导入后可能残留） */
+export async function removeFileHandlesByBaseName(fileName: string): Promise<void> {
+  const db = await openDb();
+  const ids = await new Promise<string[]>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = () => resolve((req.result as string[]) ?? []);
+    req.onerror = () => reject(req.error);
+  });
+
+  for (const id of ids) {
+    const handle = await getHandle(id);
+    if (!handle || handle.kind !== 'file') continue;
+    try {
+      const name = await (handle as FileSystemFileHandle).getFile().then((f) => f.name);
+      if (name !== fileName) continue;
+    } catch {
+      /* 句柄已失效，一并清理 */
+    }
+    await removeHandle(id);
+  }
+}
+
 export function newHandleId(): string {
   return crypto.randomUUID();
 }
