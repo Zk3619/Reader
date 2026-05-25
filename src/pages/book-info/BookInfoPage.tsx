@@ -450,17 +450,30 @@ export function BookInfoPage(props: BookInfoPageProps) {
   }
 
   async function handleStartReading() {
+    await openBookAtChapter();
+  }
+
+  async function openBookAtChapter(chapterIndex?: number) {
     if (!isInShelf()) {
       await handleAddToShelf();
       if (!isInShelf()) return;
     }
     const sb = shelfBook();
-    if (sb) {
-      props.onOpenBook(sb);
-      return;
-    }
-    const fromDb = await getBook(currentBook().bookUrl);
-    if (fromDb) props.onOpenBook(fromDb);
+    const base = sb ?? (await getBook(currentBook().bookUrl));
+    if (!base) return;
+    const book =
+      chapterIndex !== undefined
+        ? { ...base, durChapterIndex: chapterIndex, durChapterPos: 0 }
+        : base;
+    props.onOpenBook(book);
+  }
+
+  async function handleSelectChapterFromToc(index: number) {
+    const list = preloadedChapters();
+    if (!list || list.length === 0) return;
+    const idx = Math.min(Math.max(index, 0), list.length - 1);
+    setShowTocDialog(false);
+    await openBookAtChapter(idx);
   }
 
   const badgeEntries = () => collectBookBadgeEntries(currentBook());
@@ -1096,6 +1109,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
         chapters={preloadedChapters() ?? []}
         loading={tocLoading()}
         error={tocLoadError()}
+        currentChapterIndex={shelfBook()?.durChapterIndex ?? 0}
+        onSelectChapter={(index) => void handleSelectChapterFromToc(index)}
       />
     </div>
   );

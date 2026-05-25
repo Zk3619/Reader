@@ -3,7 +3,7 @@
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
-import { blurActiveElement } from '@/utils/accessibility';
+import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -116,76 +116,40 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
-          <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onUpdateToc?.();
-            }}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onUpdateToc?.()}>
             <RefreshIcon class="h-4 w-4" />
             <span>更新目录</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onImportLocal?.();
-            }}
+            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onImportLocal?.())}
           >
             <FolderPlusIcon class="h-4 w-4" />
             <span>添加本地</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onPageChange?.('remote-book');
-            }}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onPageChange?.('remote-book')}>
             <GlobeIcon class="h-4 w-4" />
             <span>远程书籍</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onAddBookByUrl?.();
-            }}
+            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onAddBookByUrl?.())}
           >
             <LinkIcon class="h-4 w-4" />
-            <span>添加书籍网址</span>
+            <span>添加网址</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuSeparator />
-          <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onOpenBookshelfManage?.();
-            }}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onOpenBookshelfManage?.()}>
             <Settings2Icon class="h-4 w-4" />
             <span>书架管理</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              requestAnimationFrame(() => {
-                blurActiveElement();
-                requestAnimationFrame(() => setShowBookshelfLayoutDialog(true));
-              });
-            }}
+            onSelect={() =>
+              openAppDialogAfterMenuDismiss(() => setShowBookshelfLayoutDialog(true))
+            }
           >
             <LayoutIcon class="h-4 w-4" />
             <span>书架布局</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onOpenGroupManage?.();
-            }}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onOpenGroupManage?.()}>
             <FolderTreeIcon class="h-4 w-4" />
             <span>分组管理</span>
           </AppDropdownMenuItem>

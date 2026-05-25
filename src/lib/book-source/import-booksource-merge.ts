@@ -4,40 +4,24 @@
 
 import type { BookSource, NewBookSource } from '@/types';
 
-const GROUP_SPLIT = /[,，;；]\s*/;
-
 export interface ImportBookSourceOptions {
   keepName?: boolean;
   keepGroup?: boolean;
   keepEnable?: boolean;
-  /** 导入时指定分组名 */
+  /** 导入时指定分组名（配合 adjustGroup） */
   groupName?: string;
-  /** true=追加分组；false=覆盖为 groupName */
-  addGroup?: boolean;
+  /** true=按 groupName 替换分组；空则清除分组 */
+  adjustGroup?: boolean;
 }
 
-function splitGroups(group?: string | null): string[] {
-  if (!group?.trim()) return [];
-  return group.split(GROUP_SPLIT).map((g) => g.trim()).filter(Boolean);
-}
-
-function joinGroups(groups: Iterable<string>): string | undefined {
-  const list = [...new Set(groups)].filter(Boolean);
-  return list.length > 0 ? list.join(',') : undefined;
-}
-
-function applyImportGroup(
+function applyAdjustGroup(
   incomingGroup: string | undefined,
   groupName: string | undefined,
-  addGroup: boolean
+  adjustGroup: boolean
 ): string | undefined {
+  if (!adjustGroup) return incomingGroup;
   const name = groupName?.trim();
-  if (!name) return incomingGroup;
-  if (addGroup) {
-    const groups = new Set(splitGroups(incomingGroup));
-    groups.add(name);
-    return joinGroups(groups);
-  }
+  if (!name) return undefined;
   return name;
 }
 
@@ -62,10 +46,10 @@ export function mergeBookSourceForImport(
     merged.customOrder = existing.customOrder;
   }
 
-  merged.sourceGroup = applyImportGroup(
+  merged.sourceGroup = applyAdjustGroup(
     merged.sourceGroup,
     options.groupName,
-    options.addGroup === true
+    options.adjustGroup === true
   );
 
   return merged;

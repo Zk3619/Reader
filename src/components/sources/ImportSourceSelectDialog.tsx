@@ -9,8 +9,9 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppCombobox } from '@/components/shared/AppCombobox';
 import type { ImportSourceComparison } from '@/lib/book-source/import-booksource-resolver';
+import { cn } from '@/lib/utils';
 import type { NewBookSource } from '@/types';
 
 export interface ImportSourceSelectDialogProps {
@@ -23,7 +24,8 @@ export interface ImportSourceSelectDialogProps {
   keepGroup: boolean;
   keepEnable: boolean;
   groupName: string;
-  addGroup: boolean;
+  groupOptions: string[];
+  adjustGroup: boolean;
   /** 内嵌页会话时须高于 .reader-inner-web-layer（如 z-[160]） */
   portalZClass?: string;
   onOpenChange: (open: boolean) => void;
@@ -36,7 +38,7 @@ export interface ImportSourceSelectDialogProps {
   onKeepGroupChange: (v: boolean) => void;
   onKeepEnableChange: (v: boolean) => void;
   onGroupNameChange: (v: string) => void;
-  onAddGroupChange: (v: boolean) => void;
+  onAdjustGroupChange: (v: boolean) => void;
   onConfirm: () => void;
 }
 
@@ -89,7 +91,7 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <AppDialogContent portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
         <AppDialogHeader>
-          <AppDialogTitle>识别导入书源</AppDialogTitle>
+          <AppDialogTitle>导入书源</AppDialogTitle>
           <AppDialogDescription>
             默认勾选新增或远程更新时间更晚的书源。可保留本地名称、分组与启用状态。
           </AppDialogDescription>
@@ -116,20 +118,22 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
                 />
               </div>
               <div class="flex flex-wrap items-end gap-2">
-                <TextField class="min-w-48 flex-1">
-                  <TextFieldInput
-                    placeholder="导入分组（可选）"
-                    value={props.groupName}
-                    onInput={(e: Event) =>
-                      props.onGroupNameChange((e.currentTarget as HTMLInputElement).value)
-                    }
-                  />
-                </TextField>
+                <AppCombobox
+                  class="min-w-48 flex-1"
+                  options={props.groupOptions}
+                  value={props.groupName}
+                  onChange={props.onGroupNameChange}
+                  placeholder="导入分组（可选）"
+                  aria-label="导入分组"
+                  contentClass={
+                    props.portalZClass ? cn(props.portalZClass, 'z-[170]') : undefined
+                  }
+                />
                 <div class="pb-2">
                   <OptionCheckRow
-                    checked={props.addGroup}
-                    label="追加分组"
-                    onChange={props.onAddGroupChange}
+                    checked={props.adjustGroup}
+                    label="调整分组"
+                    onChange={props.onAdjustGroupChange}
                   />
                 </div>
               </div>

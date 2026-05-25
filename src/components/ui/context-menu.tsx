@@ -5,7 +5,6 @@ import * as ContextMenuPrimitive from "@kobalte/core/context-menu"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 
 import { cn } from "@/lib/utils"
-import { CheckIcon, ChevronRightIcon, DotIcon } from "@/components/shared/icons"
 
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger
 const ContextMenuPortal = ContextMenuPrimitive.Portal

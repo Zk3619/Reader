@@ -32,7 +32,13 @@ import {
   popperOverflowPadding,
   scrollGutterStableBoth,
 } from '@/lib/ui/viewport-classes';
-import { blurActiveElement, withBlurBefore } from '@/utils/accessibility';
+import {
+  blurActiveElement,
+  blurAfterMenuTriggerRefocus,
+  handleMenuCloseAutoFocusForPendingDialog,
+  shouldPreventMenuCloseAutoFocus,
+  withBlurBefore,
+} from '@/utils/accessibility';
 
 /** 工具栏/批量操作等：按内容收缩宽度 */
 export const APP_DROPDOWN_MENU_CONTENT_COMPACT = 'min-w-0 w-auto';
@@ -84,6 +90,9 @@ function mergeOpenChange(
       requestAnimationFrame(() => blurActiveElement());
     } else {
       blurActiveElement();
+      if (shouldPreventMenuCloseAutoFocus()) {
+        blurAfterMenuTriggerRefocus();
+      }
     }
   };
 }
@@ -96,13 +105,18 @@ export type AppDropdownMenuProps = ComponentProps<typeof DropdownMenu> & {
 };
 
 export const AppDropdownMenu: Component<AppDropdownMenuProps> = (props) => {
-  const [local, rest] = splitProps(props, ['onOpenChange', 'disableAccessibilityAnnounce']);
+  const [local, rest] = splitProps(props, [
+    'onOpenChange',
+    'disableAccessibilityAnnounce',
+    'modal',
+  ]);
   const handleOpenChange = mergeOpenChange(
     local.onOpenChange,
     local.disableAccessibilityAnnounce
   );
   return (
     <DropdownMenu
+      modal={local.modal ?? false}
       fitViewport
       overflowPadding={popperOverflowPadding}
       {...rest}
@@ -118,11 +132,16 @@ type AppDropdownMenuContentProps = ComponentProps<typeof DropdownMenuContent> & 
 };
 
 export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
+  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'onCloseAutoFocus']);
   const layout = () => local.layout ?? 'compact';
+  const userOnCloseAutoFocus = local.onCloseAutoFocus;
   return (
     <DropdownMenuContent
       {...rest}
+      onCloseAutoFocus={(e) => {
+        if (handleMenuCloseAutoFocusForPendingDialog(e)) return;
+        userOnCloseAutoFocus?.(e);
+      }}
       class={cn(CONTENT_LAYOUT_CLASS[layout()], local.portalZClass, local.class)}
     />
   );

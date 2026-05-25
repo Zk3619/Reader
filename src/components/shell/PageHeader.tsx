@@ -22,7 +22,7 @@ import {
 } from '@/components/shared/AppDropdownMenu';
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
-import { blurActiveElement } from '@/utils/accessibility';
+import { openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 import { ChevronLeftIcon, ThemeLightIcon, ThemeDarkIcon } from '@/components/shared/icons';
 import { isTauri, isMobile } from '@/lib/platform/detect';
@@ -118,9 +118,7 @@ function DropdownActionButton(props: {
   const [dropdownOpen, setDropdownOpen] = createSignal(false);
   
   const handleItemSelect = (item: PageHeaderDropdownItem) => {
-    setDropdownOpen(false);
-    blurActiveElement();
-    item.onClick();
+    openAppDialogAfterMenuDismiss(() => item.onClick());
   };
   
   return (

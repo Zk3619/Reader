@@ -15,7 +15,7 @@ import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { dialogViewportLimits } from '@/lib/ui/viewport-classes';
 import {
-  blurActiveElement,
+  clearFocusBeforeModal,
   prepareForAppDialogOpen,
   releasePageFocus,
 } from '@/utils/accessibility';
@@ -69,22 +69,6 @@ export type AppDialogContentProps<T extends ValidComponent = 'div'> =
     layout?: 'app' | 'plain';
   };
 
-function mergeOpenChange(
-  userOnOpenChange: (open: boolean) => void,
-  accessibilityDisabled: boolean | undefined
-): (open: boolean) => void {
-  return (open: boolean) => {
-    if (!accessibilityDisabled) {
-      if (open) {
-        prepareForAppDialogOpen();
-      } else {
-        blurActiveElement();
-      }
-    }
-    userOnOpenChange(open);
-  };
-}
-
 export type AppDialogProps = ComponentProps<typeof Dialog> & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -102,22 +86,24 @@ export const AppDialog: Component<AppDialogProps> = (props) => {
     'children',
     'disableAccessibilityAnnounce',
   ]);
-  const handleOpenChange = mergeOpenChange(
-    local.onOpenChange,
-    local.disableAccessibilityAnnounce
-  );
 
-  // 父组件受控 setOpen(true) 时未必走 onOpenChange；defer:false 在子节点挂载/aria-hidden 之前执行
   on(
     () => local.open,
     (open) => {
-      if (local.disableAccessibilityAnnounce) return;
-      if (open) {
-        prepareForAppDialogOpen();
-      }
+      if (local.disableAccessibilityAnnounce || !open) return;
+      releasePageFocus();
+      prepareForAppDialogOpen();
+      requestAnimationFrame(() => releasePageFocus());
     },
     { defer: false }
   );
+
+  const handleOpenChange = (open: boolean) => {
+    if (!local.disableAccessibilityAnnounce && !open) {
+      clearFocusBeforeModal();
+    }
+    local.onOpenChange(open);
+  };
 
   return (
     <Dialog open={local.open} onOpenChange={handleOpenChange} {...rest}>

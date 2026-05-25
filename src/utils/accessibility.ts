@@ -3,6 +3,74 @@
  * 用于解决 aria-hidden 警告和其他无障碍相关问题
  */
 
+const APP_ROOT_ID = 'root';
+
+/** 模态打开前：只 blur，不把焦点移到带 aria-hidden 的节点（避免 sentinel 类警告） */
+export function clearFocusBeforeModal(): void {
+  blurFocusInDismissableOverlay();
+  blurFocusInsideAppRoot();
+  blurActiveElement();
+}
+
+function focusBodyWithoutAriaHidden(): void {
+  const body = document.body;
+  if (!body) return;
+  const prevTabIndex = body.getAttribute('tabindex');
+  body.setAttribute('tabindex', '-1');
+  body.focus({ preventScroll: true });
+  if (prevTabIndex === null) {
+    body.removeAttribute('tabindex');
+  } else {
+    body.setAttribute('tabindex', prevTabIndex);
+  }
+}
+
+function isFocusInDismissableOverlay(el: HTMLElement): boolean {
+  if (el.id.includes('dropdownmenu')) return true;
+  return !!(
+    el.closest('[role="menu"]') ||
+    el.closest('[role="menuitem"]') ||
+    el.closest('[role="listbox"]') ||
+    el.closest('[role="option"]') ||
+    el.closest('[id*="dropdownmenu"]')
+  );
+}
+
+/** 焦点在菜单 Portal 内时 blur（菜单不在 #root 内） */
+export function blurFocusInDismissableOverlay(): void {
+  if (typeof document === 'undefined') return;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active === document.body) return;
+  if (isFocusInDismissableOverlay(active)) {
+    active.blur();
+  }
+}
+
+/** Kobalte DropdownMenu 的 trigger / 菜单项（关闭后可能仍持焦） */
+export function blurOpenDropdownMenuTriggers(): void {
+  if (typeof document === 'undefined') return;
+  document
+    .querySelectorAll<HTMLElement>(
+      '[id*="dropdownmenu"][id*="-trigger"], [id*="dropdownmenu"][id*="-item-"]'
+    )
+    .forEach((el) => el.blur());
+  const active = document.activeElement as HTMLElement | null;
+  if (active?.id.includes('dropdownmenu')) {
+    active.blur();
+  }
+}
+
+/** 焦点在 #root 内时 blur（模态 dialog aria-hide 前须移出） */
+export function blurFocusInsideAppRoot(): void {
+  if (typeof document === 'undefined') return;
+  const root = document.getElementById(APP_ROOT_ID);
+  const active = document.activeElement as HTMLElement | null;
+  if (!root || !active || active === document.body) return;
+  if (root.contains(active)) {
+    active.blur();
+  }
+}
+
 /**
  * 移除当前焦点，避免焦点变化导致的样式闪烁和 aria-hidden 警告
  * @param element 可选的特定元素，如果不提供则移除当前活动元素的焦点
@@ -18,25 +86,30 @@ export function blurActiveElement(element?: HTMLElement | null): void {
   }
 }
 
-/** 将焦点移出页面控件，避免模态 dialog 施加 aria-hidden 时焦点仍落在 #root 内 */
+let releasingPageFocus = false;
+
+/** 将焦点移出 #root / 菜单（落到 body，无 aria-hidden） */
 export function releasePageFocus(): void {
-  if (typeof document === 'undefined') return;
-  blurActiveElement();
-  const body = document.body;
-  if (!body) return;
-  const prevTabIndex = body.getAttribute('tabindex');
-  body.setAttribute('tabindex', '-1');
-  body.focus({ preventScroll: true });
-  if (prevTabIndex === null) {
-    body.removeAttribute('tabindex');
-  } else {
-    body.setAttribute('tabindex', prevTabIndex);
+  if (typeof document === 'undefined' || releasingPageFocus) return;
+  releasingPageFocus = true;
+  try {
+    blurOpenDropdownMenuTriggers();
+    clearFocusBeforeModal();
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active !== document.body) {
+      focusBodyWithoutAriaHidden();
+    }
+  } finally {
+    queueMicrotask(() => {
+      releasingPageFocus = false;
+    });
   }
 }
 
 /** 关闭当前 Kobalte 浮层（菜单/选择器等），避免与模态 dialog 叠层时焦点留在浮层内 */
 export function dismissOpenKobalteOverlays(): void {
   if (typeof document === 'undefined') return;
+  blurFocusInDismissableOverlay();
   document.dispatchEvent(
     new KeyboardEvent('keydown', {
       key: 'Escape',
@@ -49,20 +122,123 @@ export function dismissOpenKobalteOverlays(): void {
   );
 }
 
+/** 从菜单项打开 dialog 时，本帧内 AppDialog.prepare 不再发 Escape */
+let skipNextDialogPrepare = false;
+
+/** 阻止菜单 onCloseAutoFocus 把焦点还给 trigger（避免 #root aria-hidden + trigger 焦点） */
+let preventMenuCloseAutoFocus = false;
+
+let pendingDialogAfterMenu: (() => void) | null = null;
+let pendingDialogFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingDialogRunScheduled = false;
+
+/** Kobalte onCloseAutoFocus 在 sync 内 refocus(trigger) 之后执行 */
+export function blurAfterMenuTriggerRefocus(): void {
+  queueMicrotask(() => {
+    blurOpenDropdownMenuTriggers();
+    releasePageFocus();
+  });
+}
+
+export function shouldPreventMenuCloseAutoFocus(): boolean {
+  return preventMenuCloseAutoFocus;
+}
+
+/** 在 trigger refocus 之后、dialog aria-hide #root 之前打开 dialog */
+function runPendingDialogAfterMenuClose(action: () => void): void {
+  const finishFlags = () => {
+    queueMicrotask(() => {
+      skipNextDialogPrepare = false;
+      preventMenuCloseAutoFocus = false;
+      pendingDialogRunScheduled = false;
+    });
+  };
+
+  const openDialog = () => {
+    blurOpenDropdownMenuTriggers();
+    releasePageFocus();
+    skipNextDialogPrepare = true;
+    try {
+      action();
+    } finally {
+      requestAnimationFrame(() => {
+        blurOpenDropdownMenuTriggers();
+        releasePageFocus();
+        finishFlags();
+      });
+    }
+  };
+
+  blurOpenDropdownMenuTriggers();
+  releasePageFocus();
+  blurAfterMenuTriggerRefocus();
+  setTimeout(openDialog, 0);
+}
+
+function flushPendingDialogAfterMenuClose(): void {
+  const action = pendingDialogAfterMenu;
+  if (!action || pendingDialogRunScheduled) return;
+  pendingDialogAfterMenu = null;
+  pendingDialogRunScheduled = true;
+  if (pendingDialogFallbackTimer !== undefined) {
+    clearTimeout(pendingDialogFallbackTimer);
+    pendingDialogFallbackTimer = undefined;
+  }
+  runPendingDialogAfterMenuClose(action);
+}
+
+/** 在 DropdownMenu onCloseAutoFocus 内 sync refocus(trigger) 之后再 flush */
+function scheduleFlushAfterMenuCloseAutoFocus(): void {
+  setTimeout(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => flushPendingDialogAfterMenuClose());
+    });
+  }, 0);
+}
+
 /**
- * 打开 AppDialog 前调用：关闭浮层、释放焦点，并在下一微任务/帧再次处理
- * （菜单项 onSelect 通过 setTimeout 关闭且会 refocus trigger，须延后补刀）
+ * 登记待打开的 dialog；在菜单 onCloseAutoFocus（含 trigger refocus）之后再 setOpen。
+ */
+export function openAppDialogAfterMenuDismiss(action: () => void): void {
+  preventMenuCloseAutoFocus = true;
+  pendingDialogAfterMenu = action;
+  pendingDialogRunScheduled = false;
+  clearFocusBeforeModal();
+  if (pendingDialogFallbackTimer !== undefined) {
+    clearTimeout(pendingDialogFallbackTimer);
+  }
+  pendingDialogFallbackTimer = setTimeout(() => flushPendingDialogAfterMenuClose(), 200);
+}
+
+/**
+ * AppDropdownMenuContent.onCloseAutoFocus：须在 Kobalte refocus trigger 之后再 flush。
+ * （Kobalte 先调用户回调，再 focusWithoutScrolling(trigger)，最后 preventDefault）
+ */
+export function handleMenuCloseAutoFocusForPendingDialog(event: {
+  preventDefault: () => void;
+}): boolean {
+  if (!preventMenuCloseAutoFocus || !pendingDialogAfterMenu) return false;
+  event.preventDefault();
+  if (pendingDialogFallbackTimer !== undefined) {
+    clearTimeout(pendingDialogFallbackTimer);
+    pendingDialogFallbackTimer = undefined;
+  }
+  blurAfterMenuTriggerRefocus();
+  scheduleFlushAfterMenuCloseAutoFocus();
+  return true;
+}
+
+/**
+ * 打开 AppDialog 时调用：关闭其它浮层并把焦点移出 #root（仅一次）
  */
 export function prepareForAppDialogOpen(): void {
-  closeAllSelectMenus();
-  dismissOpenKobalteOverlays();
-  releasePageFocus();
-  // 菜单 closeOnSelect 在 setTimeout 里关闭并 refocus trigger，仅再次释放焦点，勿再发 Escape（dialog 可能已打开）
-  const reinforce = () => {
+  if (skipNextDialogPrepare) {
     releasePageFocus();
-  };
-  queueMicrotask(reinforce);
-  requestAnimationFrame(reinforce);
+    window.dispatchEvent(new CustomEvent(ACCESSIBILITY_EVENTS.DIALOG_OPENED));
+    return;
+  }
+  closeAllSelectMenus();
+  releasePageFocus();
   window.dispatchEvent(new CustomEvent(ACCESSIBILITY_EVENTS.DIALOG_OPENED));
 }
 

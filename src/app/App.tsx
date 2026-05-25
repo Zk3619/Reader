@@ -36,7 +36,7 @@ import { readerStore } from "@/stores/reader";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { BookSource } from "@/types";
 import type { SearchBook } from "@/types";
-import { getSource } from "@/lib/database/sources";
+import { getAllSourceGroups, getSource } from "@/lib/database/sources";
 import type { ExploreSection } from "@/lib/book-source/explore-sections";
 import {
   openExploreSectionInInnerWeb,
@@ -219,7 +219,8 @@ function AppContent() {
   const [importKeepGroup, setImportKeepGroup] = createSignal(false);
   const [importKeepEnable, setImportKeepEnable] = createSignal(false);
   const [importGroupName, setImportGroupName] = createSignal('');
-  const [importAddGroup, setImportAddGroup] = createSignal(false);
+  const [importGroupOptions, setImportGroupOptions] = createSignal<string[]>([]);
+  const [importAdjustGroup, setImportAdjustGroup] = createSignal(false);
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
   /** 书源搜索对话框：从书源项右键「搜索」打开，限定该书源 */
@@ -301,7 +302,21 @@ function AppContent() {
     setImportKeepGroup(app.importKeepGroup ?? false);
     setImportKeepEnable(app.importKeepEnable ?? false);
     setImportGroupName('');
-    setImportAddGroup(false);
+    setImportAdjustGroup(false);
+    try {
+      const raw = await getAllSourceGroups();
+      const names = new Set<string>();
+      const split = /[,，;；]\s*/;
+      for (const g of raw) {
+        for (const part of g.split(split)) {
+          const t = part.trim();
+          if (t) names.add(t);
+        }
+      }
+      setImportGroupOptions([...names].sort((a, b) => a.localeCompare(b, 'zh-CN')));
+    } catch {
+      setImportGroupOptions([]);
+    }
     const p = innerWebPayload();
     if (
       isTauri() &&
@@ -680,7 +695,7 @@ function AppContent() {
         keepGroup: importKeepGroup(),
         keepEnable: importKeepEnable(),
         groupName: importGroupName(),
-        addGroup: importAddGroup(),
+        adjustGroup: importAdjustGroup(),
       });
       const blockedNote =
         blocked.length > 0 ? `，跳过 ${blocked.length} 条黑名单书源` : '';
@@ -714,8 +729,6 @@ function AppContent() {
     book: SearchBook;
     fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf';
   } | null>(null);
-  /** 发现页分页偏好对话框显示状态 */
-  const [showExplorePaginationPreferenceDialog, setShowExplorePaginationPreferenceDialog] = createSignal(false);
 
   /**
    * 执行导入操作
@@ -2017,8 +2030,6 @@ function AppContent() {
                     setBookInfoContext({ source, book, fromPage: "scout" });
                     setCurrentPage("book-info");
                   }}
-                  showPaginationPreferenceDialog={showExplorePaginationPreferenceDialog()}
-                  onPaginationPreferenceDialogChange={setShowExplorePaginationPreferenceDialog}
                 />
               </section>
 
@@ -2416,8 +2427,6 @@ function AppContent() {
                     setBookInfoContext({ source, book, fromPage: "explore" });
                     setCurrentPage("book-info");
                   }}
-                  showPaginationPreferenceDialog={showExplorePaginationPreferenceDialog()}
-                  onPaginationPreferenceDialogChange={setShowExplorePaginationPreferenceDialog}
                 />
               );
             }}
@@ -2548,7 +2557,8 @@ function AppContent() {
           keepGroup={importKeepGroup()}
           keepEnable={importKeepEnable()}
           groupName={importGroupName()}
-          addGroup={importAddGroup()}
+          groupOptions={importGroupOptions()}
+          adjustGroup={importAdjustGroup()}
           portalZClass={bookSourceImportDialogPortalZ()}
           onOpenChange={(open) => {
             setShowImportSourceSelectDialog(open);
@@ -2563,7 +2573,7 @@ function AppContent() {
           onKeepGroupChange={setImportKeepGroup}
           onKeepEnableChange={setImportKeepEnable}
           onGroupNameChange={setImportGroupName}
-          onAddGroupChange={setImportAddGroup}
+          onAdjustGroupChange={setImportAdjustGroup}
           onConfirm={() => {
             void confirmImportSelectedSources();
           }}
