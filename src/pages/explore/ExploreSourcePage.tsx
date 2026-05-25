@@ -3,6 +3,7 @@
  */
 
 import { createSignal } from 'solid-js';
+import { ExplorePaginationPreferenceDialog } from '@/components/explore/ExplorePaginationPreferenceDialog';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { RefreshIcon, MoreIcon, Settings2Icon } from '@/components/shared/icons';
 import type { BookSource } from '@/types';
@@ -17,12 +18,11 @@ export interface ExploreSourcePageProps {
   onBack: () => void;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
-  showPaginationPreferenceDialog?: boolean;
-  onPaginationPreferenceDialogChange?: (open: boolean) => void;
 }
 
 export function ExploreSourcePage(props: ExploreSourcePageProps) {
   const [refreshKey, setRefreshKey] = createSignal(0);
+  const [paginationPreferenceOpen, setPaginationPreferenceOpen] = createSignal(false);
 
   const sectionUrl = () => props.section.url ?? '';
 
@@ -57,7 +57,7 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
               {
                 icon: Settings2Icon,
                 label: '分页偏好',
-                onClick: () => props.onPaginationPreferenceDialogChange?.(true),
+                onClick: () => setPaginationPreferenceOpen(true),
               },
             ],
           },
@@ -71,8 +71,10 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
         refreshKey={refreshKey()}
         onOpenBook={props.onOpenBook}
         onOpenBookInfo={props.onOpenBookInfo}
-        showPaginationPreferenceDialog={props.showPaginationPreferenceDialog}
-        onPaginationPreferenceDialogChange={props.onPaginationPreferenceDialogChange}
+      />
+      <ExplorePaginationPreferenceDialog
+        open={paginationPreferenceOpen()}
+        onOpenChange={setPaginationPreferenceOpen}
       />
     </section>
   );

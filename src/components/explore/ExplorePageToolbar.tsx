@@ -3,7 +3,8 @@
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
-import { blurActiveElement } from '@/utils/accessibility';
+import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
+import { ExplorePaginationPreferenceDialog } from '@/components/explore/ExplorePaginationPreferenceDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -23,11 +24,11 @@ export interface ExplorePageToolbarProps {
   showRefresh?: boolean;
   refreshDisabled?: boolean;
   onRefresh?: () => void;
-  onPaginationPreference?: () => void;
 }
 
 export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [paginationPreferenceOpen, setPaginationPreferenceOpen] = createSignal(false);
   const sourceDropdownEnabled = () => explorePageLayoutStore.settings.sourceDropdownEnabled;
   const sourceTabsEnabled = () => explorePageLayoutStore.settings.sourceTabsEnabled;
   /** 仅剩书源下拉时不可取消，保证至少勾选一项 */
@@ -96,11 +97,9 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem
-            onSelect={() => {
-              setMoreMenuOpen(false);
-              blurActiveElement();
-              props.onPaginationPreference?.();
-            }}
+            onSelect={() =>
+              openAppDialogAfterMenuDismiss(() => setPaginationPreferenceOpen(true))
+            }
           >
             <Settings2Icon class="h-4 w-4" />
             <span>分页偏好</span>
@@ -140,6 +139,11 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>
+
+      <ExplorePaginationPreferenceDialog
+        open={paginationPreferenceOpen()}
+        onOpenChange={setPaginationPreferenceOpen}
+      />
     </>
   );
 }

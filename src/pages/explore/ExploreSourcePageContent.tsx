@@ -6,15 +6,6 @@ import { createResource, createSignal, For, Show, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogDescription,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
-import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import { exploreBook } from '@/lib/book-source/explore';
@@ -40,15 +31,15 @@ import {
 import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { getStorage, setStorage } from '@/lib/platform/storage';
+import {
+  explorePaginationPreference,
+  initExplorePaginationPreference,
+} from '@/stores/explore-pagination-preference';
 import { pageCacheStore } from '@/stores/page-cache';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 
-export type PaginationPreference = 'scroll' | 'pagination';
-
-export const EXPLORE_PAGINATION_PREFERENCE_KEY = 'explore_pagination_preference';
-
-const DEFAULT_PAGINATION_PREFERENCE: PaginationPreference = 'scroll';
+export type { PaginationPreference } from '@/stores/explore-pagination-preference';
+export { EXPLORE_PAGINATION_PREFERENCE_KEY } from '@/stores/explore-pagination-preference';
 
 const BADGE_KEYS = ['source', 'status', 'tab', 'category', 'tags', 'score'] as const;
 type BadgeKey = (typeof BADGE_KEYS)[number];
@@ -103,8 +94,6 @@ export interface ExploreSourcePageContentProps {
   refreshKey?: number;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
-  showPaginationPreferenceDialog?: boolean;
-  onPaginationPreferenceDialogChange?: (open: boolean) => void;
   class?: string;
 }
 
@@ -113,13 +102,9 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   const [allBooks, setAllBooks] = createSignal<SearchBook[]>([]);
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [addingBookUrl, setAddingBookUrl] = createSignal<string | null>(null);
-  const [paginationPreference, setPaginationPreference] = createSignal<PaginationPreference>(
-    DEFAULT_PAGINATION_PREFERENCE,
-  );
-
   const sectionUrl = () => props.section.url ?? '';
   const hasPagination = () => sectionUrl().includes('{{page}}') || sectionUrl().includes('{page}');
-  const useScrollLoad = () => paginationPreference() === 'scroll';
+  const useScrollLoad = () => explorePaginationPreference() === 'scroll';
   const refreshKey = () => props.refreshKey ?? 0;
 
   const [firstPageResource] = createResource(
@@ -156,17 +141,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   const loading = () => firstPageResource.loading;
   const error = () => firstPageResource.error;
 
-  onMount(async () => {
-    const saved = await getStorage<PaginationPreference>(EXPLORE_PAGINATION_PREFERENCE_KEY);
-    if (saved === 'scroll' || saved === 'pagination') {
-      setPaginationPreference(saved);
-    }
-  });
-
-  const savePaginationPreference = async (pref: PaginationPreference) => {
-    setPaginationPreference(pref);
-    await setStorage(EXPLORE_PAGINATION_PREFERENCE_KEY, pref);
-  };
+  onMount(() => void initExplorePaginationPreference());
 
   const clearCacheAndReload = () => {
     const cacheSourceId = props.source.sourceId || props.source.sourceName;
@@ -406,39 +381,6 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
         </Show>
       </Show>
 
-      <AppDialog
-        open={props.showPaginationPreferenceDialog ?? false}
-        onOpenChange={(open) => props.onPaginationPreferenceDialogChange?.(open)}
-      >
-        <AppDialogContent>
-          <AppDialogHeader>
-            <AppDialogTitle>分页偏好</AppDialogTitle>
-            <AppDialogDescription>选择发现页的加载方式</AppDialogDescription>
-          </AppDialogHeader>
-          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-            <RadioGroup
-              value={paginationPreference()}
-              onChange={(value) => savePaginationPreference(value as PaginationPreference)}
-              class="space-y-3"
-            >
-              <div class="flex items-center space-x-2">
-                <RadioGroupItem value="scroll" id="explore-scroll" />
-                <Label for="explore-scroll" class="flex-1 cursor-pointer">
-                  <div class="font-medium">滚动加载</div>
-                  <div class="text-xs text-muted-foreground">滚动到底部时自动加载更多</div>
-                </Label>
-              </div>
-              <div class="flex items-center space-x-2">
-                <RadioGroupItem value="pagination" id="explore-pagination" />
-                <Label for="explore-pagination" class="flex-1 cursor-pointer">
-                  <div class="font-medium">分页列表</div>
-                  <div class="text-xs text-muted-foreground">点击「加载更多」按钮手动加载</div>
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-        </AppDialogContent>
-      </AppDialog>
     </div>
   );
 }

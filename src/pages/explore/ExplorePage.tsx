@@ -49,8 +49,6 @@ export interface ExplorePageProps {
   active?: boolean | Accessor<boolean>;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
-  showPaginationPreferenceDialog?: boolean;
-  onPaginationPreferenceDialogChange?: (open: boolean) => void;
 }
 
 function sourceHasExplore(source: BookSource): boolean {
@@ -290,7 +288,6 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
           showRefresh={!!selectedSection()?.url?.trim()}
           refreshDisabled={false}
           onRefresh={handleRefreshList}
-          onPaginationPreference={() => props.onPaginationPreferenceDialogChange?.(true)}
         />
       </PageToolbar>
 
@@ -322,8 +319,6 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
             refreshKey={listRefreshKey()}
             onOpenBook={props.onOpenBook}
             onOpenBookInfo={props.onOpenBookInfo}
-            showPaginationPreferenceDialog={props.showPaginationPreferenceDialog}
-            onPaginationPreferenceDialogChange={props.onPaginationPreferenceDialogChange}
           />
         </div>
       </Show>
