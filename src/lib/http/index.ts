@@ -14,6 +14,9 @@ import { getCookie, saveCookie } from '@/lib/http/cookie-manager';
 import { createRateLimiter } from '@/lib/http/rate-limiter';
 import { isTauri } from '@/lib/platform/detect';
 import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
+import { isAbortError, mergeAbortSignals, raceWithAbortSignal } from '@/lib/http/abort';
+
+export { isAbortError } from '@/lib/http/abort';
 
 /**
  * 规范化 URL，确保跨平台兼容性
@@ -139,6 +142,8 @@ export interface RequestOptions {
   concurrentRate?: string; // 并发速率限制，格式：10/1s 表示每秒10个请求
   /** 为 true 时 4xx/5xx 不抛错，仍返回 response，便于登录脚本 ajax 解析 body（如 code/msg） */
   allowNon2xx?: boolean;
+  /** 外部取消（如探索页切换分类）；与 timeout 合并，用户取消时保留 AbortError */
+  signal?: AbortSignal;
 }
 
 /**
@@ -263,7 +268,12 @@ async function executeRequest(
     timeout = 30000,
     followRedirects = true,
     enableCookieJar = false,
+    signal: userSignal,
   } = options;
+
+  if (userSignal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
 
   const useTauriHttp = await checkCanUseTauriHttp();
 
@@ -300,12 +310,15 @@ async function executeRequest(
       const useRustDirect = requestNeedsDownloadBinary(defaultHeaders);
 
       if (useRustDirect) {
-        response = await fetchViaDownloadBinary(
-          normalizedUrl,
-          method,
-          defaultHeaders,
-          bodyForRust,
-          timeout,
+        response = await raceWithAbortSignal(
+          fetchViaDownloadBinary(
+            normalizedUrl,
+            method,
+            defaultHeaders,
+            bodyForRust,
+            timeout,
+          ),
+          userSignal,
         );
       } else {
       // 使用 Tauri 环境
@@ -331,7 +344,10 @@ async function executeRequest(
           tauriOptions.body = body;
         }
 
-        const tauriResponse = await tauriFetch(normalizedUrl, tauriOptions);
+        const tauriResponse = await raceWithAbortSignal(
+          tauriFetch(normalizedUrl, tauriOptions),
+          userSignal,
+        );
 
         // 转换Tauri响应headers
         const responseHeaders = new Headers();
@@ -455,12 +471,15 @@ async function executeRequest(
             );
           }
 
-          response = await fetchViaDownloadBinary(
-            normalizedUrl,
-            method,
-            defaultHeaders,
-            bodyForRust,
-            timeout,
+          response = await raceWithAbortSignal(
+            fetchViaDownloadBinary(
+              normalizedUrl,
+              method,
+              defaultHeaders,
+              bodyForRust,
+              timeout,
+            ),
+            userSignal,
           );
 
           if (!isDangerousSettingsError) {
@@ -486,8 +505,7 @@ async function executeRequest(
       }
     } else {
       // 浏览器环境：Cookie 为 forbidden 头，须走同源 __reader_http 代理（见 web-http-proxy.ts）
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      const { signal, dispose } = mergeAbortSignals(timeout, userSignal);
 
       try {
         const proxied = toWebHttpProxyRequest(normalizedUrl, {
@@ -495,22 +513,22 @@ async function executeRequest(
           headers: defaultHeaders,
           body: body as string | FormData | ArrayBuffer | undefined,
           redirect: followRedirects ? 'follow' : 'manual',
-          signal: controller.signal,
+          signal,
         });
 
         if (proxied) {
-          response = await fetch(proxied.url, proxied.init);
+          response = await fetch(proxied.url, { ...proxied.init, signal });
         } else {
           response = await fetch(normalizedUrl, {
             method,
             headers: defaultHeaders,
             body: body as BodyInit,
             redirect: followRedirects ? 'follow' : 'manual',
-            signal: controller.signal,
+            signal,
           });
         }
       } finally {
-        clearTimeout(timeoutId);
+        dispose();
       }
     }
 
@@ -558,8 +576,8 @@ async function executeRequest(
       },
     };
   } catch (error: any) {
-    // 处理超时错误
-    if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+    if (isAbortError(error)) {
+      if (userSignal?.aborted) throw error;
       throw new HttpError(408, 'Request Timeout', normalizedUrl, '请求超时');
     }
 
@@ -623,6 +641,10 @@ async function requestWithRetry(
       return await executeRequest(url, options);
     } catch (error) {
       lastError = error as Error;
+
+      if (isAbortError(error)) {
+        throw error;
+      }
 
       // 如果是最后一次尝试，直接抛出错误
       if (attempt === retry) {
