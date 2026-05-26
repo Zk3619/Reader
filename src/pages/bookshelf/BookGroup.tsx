@@ -43,6 +43,9 @@ import {
   isGridViewMode,
   type GroupListSortRefs,
 } from '@/lib/bookshelf/bookshelf-view-mode';
+import { BookshelfCoverTitleOverlay } from '@/components/bookshelf/BookshelfCoverTitleOverlay';
+import { BookshelfGridHideTooltip } from '@/components/bookshelf/BookshelfGridHideTooltip';
+import type { BookTitleDisplay } from '@/stores/bookshelf-layout';
 
 // 视图模式从布局设置 Store 获取，不再使用本地状态
 
@@ -176,7 +179,7 @@ function GroupListView(props: {
   groups: BookGroup[];
   orderGroups: BookGroup[];
   actions: GroupContextMenuActions;
-  titleDisplay: string;
+  titleDisplay: BookTitleDisplay;
   coverImageErrorIds: Set<number>;
   setCoverImageErrorIds: (fn: (prev: Set<number>) => Set<number>) => void;
   getGroupBookCount: (group: BookGroup) => number;
@@ -209,8 +212,7 @@ function GroupListView(props: {
                 props.setCoverImageErrorIds((prev) => new Set(prev).add(groupId))
               }
             />
-            <Show when={props.titleDisplay !== 'hide'}>
-              <div class="min-w-0 flex-1 text-left">
+            <div class="min-w-0 flex-1 text-left">
                 <h3
                   class={cn(
                     'truncate font-semibold text-foreground',
@@ -223,7 +225,6 @@ function GroupListView(props: {
                   {props.getGroupBookCount(group)} 本书
                 </p>
               </div>
-            </Show>
           </BookGroupCardWithMenu>
         )}
       </For>
@@ -528,7 +529,7 @@ export function BookGroup(props: BookGroupProps = {}) {
         </Show>
         {/* 列表二列 skeleton */}
         <Show when={viewMode() === 'list-2'}>
-          <BookshelfLayoutGrid class="grid-cols-1 md:grid-cols-2">
+          <BookshelfLayoutGrid class={getViewModeContainerGridClass('list-2')}>
             <For each={[1, 2, 3, 4, 5, 6]}>
               {() => (
                 <div class="flex items-center gap-4 rounded-xl border border-border/50 bg-card p-4">
@@ -592,7 +593,7 @@ export function BookGroup(props: BookGroupProps = {}) {
         </Show>
         {/* 紧凑列表二列 skeleton */}
         <Show when={viewMode() === 'compact-2'}>
-          <BookshelfLayoutGrid class="grid-cols-1 md:grid-cols-2">
+          <BookshelfLayoutGrid class={getViewModeContainerGridClass('compact-2')}>
             <For each={[1, 2, 3, 4, 5, 6, 7, 8]}>
               {() => (
                 <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2">
@@ -693,6 +694,11 @@ export function BookGroup(props: BookGroupProps = {}) {
                   class={groupGridButtonClass}
                   onClick={() => handleGroupClick(group)}
                 >
+                  <BookshelfGridHideTooltip
+                    enabled={titleDisplay() === 'hide'}
+                    title={getGroupDisplayName(group)}
+                    subtitle={`${getGroupBookCount(group)} 本书`}
+                  >
                   {/* 分组封面 */}
                   <div
                     class={cn(
@@ -738,13 +744,8 @@ export function BookGroup(props: BookGroupProps = {}) {
                         </span>
                       );
                     })()}
-                    {/* 叠加模式：在封面上显示分组名 */}
                     <Show when={titleDisplay() === 'overlay'}>
-                      <div class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg backdrop-blur-sm">
-                        <h3 class="px-2 py-1 text-xs font-semibold text-white truncate max-w-full">
-                          {getGroupDisplayName(group)}
-                        </h3>
-                      </div>
+                      <BookshelfCoverTitleOverlay title={getGroupDisplayName(group)} />
                     </Show>
                   </div>
 
@@ -761,6 +762,7 @@ export function BookGroup(props: BookGroupProps = {}) {
                       {getGroupBookCount(group)} 本书
                     </p>
                   </Show>
+                  </BookshelfGridHideTooltip>
                 </BookGroupCardWithMenu>
               )}
             </For>

@@ -624,7 +624,7 @@ export async function importLocalBookFromContent(
     totalChapterNum: 0,
     durChapterIndex: 0,
     durChapterPos: 0,
-    durChapterTime: now,
+    durChapterTime: 0,
     canUpdate: false,
     order: 0,
     originOrder: 0,

@@ -13,6 +13,7 @@ import {
   GroupFolderIcon,
   GroupLocalIcon,
   GroupNetIcon,
+  GroupVideoIcon,
   BookCoverIcon,
   type IconProps,
 } from '@/components/shared/icons';
@@ -33,6 +34,8 @@ export function DefaultGroupCoverIcon(props: {
       return <GroupLocalIcon {...iconProps} />;
     case BookGroupId.Audio:
       return <GroupAudioIcon {...iconProps} />;
+    case BookGroupId.Video:
+      return <GroupVideoIcon {...iconProps} />;
     case BookGroupId.NetNone:
       return <GroupNetIcon {...iconProps} />;
     case BookGroupId.LocalNone:

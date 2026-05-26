@@ -1,4 +1,34 @@
 import { cn } from '@/lib/utils';
+import { getBookshelfListColumnLayout } from '@/lib/bookshelf/bookshelf-view-mode';
+
+function bookshelfListIntroResponsiveClasses(mode: string, display: 'flex' | 'block') {
+  const cols = getBookshelfListColumnLayout(mode);
+  const base =
+    'h-full min-h-0 min-w-0 overflow-hidden border-l border-border/40 pl-3';
+  if (display === 'flex') {
+    if (cols === 3) {
+      return `${base} hidden shrink-0 2xl:flex 2xl:w-[38%] 2xl:max-w-[46%]`;
+    }
+    if (cols === 2) {
+      return `${base} hidden shrink-0 lg:flex lg:w-[38%] lg:max-w-[46%]`;
+    }
+    return `${base} hidden shrink-0 sm:flex sm:w-[38%] sm:max-w-[46%]`;
+  }
+  if (cols === 3) return `${base} hidden 2xl:block`;
+  if (cols === 2) return `${base} hidden lg:block`;
+  return `${base} hidden sm:block`;
+}
+
+function bookshelfCompactRowGridClasses(mode: string) {
+  const cols = getBookshelfListColumnLayout(mode);
+  if (cols === 3) {
+    return '2xl:grid 2xl:w-full 2xl:grid-cols-[3rem_7.75rem_minmax(0,1fr)] 2xl:gap-x-1.5';
+  }
+  if (cols === 2) {
+    return 'lg:grid lg:w-full lg:grid-cols-[3rem_7.75rem_minmax(0,1fr)] lg:gap-x-1.5';
+  }
+  return 'sm:grid sm:w-full sm:grid-cols-[3rem_7.75rem_minmax(0,1fr)] sm:gap-x-1.5';
+}
 
 /** 悬停抬升阴影（与 App.css .book-group-card-motion 位移同步） */
 export const BOOK_GROUP_CARD_HOVER_ELEVATION =
@@ -47,6 +77,81 @@ export function bookGroupCompactCoverClass(...extra: Parameters<typeof cn>) {
     'flex h-14 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/50',
     ...extra,
   );
+}
+
+/** 书架列表卡片：固定高度，封面按 3:4 撑满左侧 */
+export function bookshelfListCardClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    '[contain-intrinsic-size:auto_7rem] [content-visibility:auto] book-group-card-motion relative flex h-28 w-full cursor-pointer items-stretch gap-3 overflow-hidden rounded-xl border border-border/50 bg-card p-2',
+    'hover:border-primary/50 hover:bg-transparent',
+    BOOK_GROUP_CARD_HOVER_ELEVATION,
+    ...extra,
+  );
+}
+
+/** 书架紧凑列表卡片 */
+export function bookshelfCompactListCardClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    '[contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] book-group-card-motion relative flex h-[4.5rem] w-full cursor-pointer items-stretch gap-2 overflow-hidden rounded-lg border border-border/50 bg-card p-1',
+    'hover:border-primary/50 hover:bg-accent/50',
+    BOOK_GROUP_CARD_HOVER_ELEVATION,
+    ...extra,
+  );
+}
+
+/** 书架列表封面：高度占满项、固定 3:4 */
+export function bookshelfListCoverClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-cover-motion book-group-card-cover-motion--list',
+    'flex h-full w-auto shrink-0 self-stretch aspect-3/4 items-center justify-center overflow-hidden rounded-md bg-muted/50',
+    ...extra,
+  );
+}
+
+/** 紧凑列表行：窄时 flex；达简介断点后固定列宽网格，保证分界线与未读徽标纵向对齐 */
+export function bookshelfCompactRowClass(
+  viewMode: string,
+  hasIntro?: boolean,
+  ...extra: Parameters<typeof cn>
+) {
+  return cn(
+    'flex min-w-0 flex-1 items-stretch gap-1.5 overflow-hidden',
+    hasIntro && bookshelfCompactRowGridClasses(viewMode),
+    ...extra,
+  );
+}
+
+/** 紧凑列表主信息列（grid 第 2 列固定 7.75rem；flex 单列时 flex-1 占满封面右侧） */
+export function bookshelfCompactMainClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'flex h-full min-h-0 min-w-0 flex-1 flex-col justify-center gap-0.5 overflow-hidden text-left',
+    ...extra,
+  );
+}
+
+/** 紧凑列表简介列（grid 第 3 列，占满剩余宽度） */
+export function bookshelfCompactIntroColumnClass(
+  viewMode: string,
+  ...extra: Parameters<typeof cn>
+) {
+  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'block'), ...extra);
+}
+
+/** 书架列表主信息区（封面右侧：书名/作者/章节/未读） */
+export function bookshelfListMainClass(compact?: boolean, ...extra: Parameters<typeof cn>) {
+  return cn(
+    'flex h-full min-h-0 min-w-0 flex-col justify-center gap-0.5 overflow-hidden text-left',
+    compact ? 'min-w-0 flex-1' : 'flex-1',
+    ...extra,
+  );
+}
+
+/** 书架列表简介列（仅普通列表；紧凑列表用 bookshelfCompactIntroColumnClass） */
+export function bookshelfListIntroColumnClass(
+  viewMode: string,
+  ...extra: Parameters<typeof cn>
+) {
+  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'flex'), ...extra);
 }
 
 /** 发现页书籍列表卡片（固定高度，与书架列表卡片共用抬升/阴影动效） */
@@ -108,6 +213,18 @@ export function exploreBookListIntroWrapClass(...extra: Parameters<typeof cn>) {
 export function exploreBookListIntroClass(...extra: Parameters<typeof cn>) {
   return cn(
     'explore-book-list-intro m-0 h-full min-h-0 min-w-0 text-xs leading-5 text-muted-foreground',
+    ...extra,
+  );
+}
+
+/** 书架列表简介正文（固定行高项，用 line-clamp 即可，无需 ResizeObserver） */
+export function bookshelfListIntroTextClass(
+  layout: 'list' | 'compact',
+  ...extra: Parameters<typeof cn>
+) {
+  return cn(
+    'm-0 max-h-full min-h-0 min-w-0 w-full wrap-break-word text-xs leading-5 text-muted-foreground',
+    layout === 'compact' ? 'line-clamp-3' : 'line-clamp-4',
     ...extra,
   );
 }

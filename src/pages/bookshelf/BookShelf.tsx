@@ -36,7 +36,12 @@ import { BookContextMenu, type BookContextMenuActions } from '@/components/books
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
-import { showAppToast } from '@/components/shared/AppToasts';
+import {
+  dismissAppToast,
+  showAppToast,
+  UPDATE_TOC_TOAST_ID,
+  updateAppToastProgress,
+} from '@/components/shared/AppToasts';
 import { getManagedBooksRoot } from '@/lib/platform/fs/managed-storage';
 import { listDirectory } from '@/lib/platform/fs/read-write';
 import {
@@ -61,10 +66,25 @@ import {
   getViewModeCardLayout,
   getViewModeContainerGridClass,
 } from '@/lib/bookshelf/bookshelf-view-mode';
+import { getEffectiveTitleDisplay } from '@/lib/bookshelf/bookshelf-title-display';
+import { BookshelfCoverTitleOverlay } from '@/components/bookshelf/BookshelfCoverTitleOverlay';
+import { BookshelfGridHideTooltip } from '@/components/bookshelf/BookshelfGridHideTooltip';
+import {
+  BookShelfGridLastUpdateBadge,
+  BookShelfGridUnreadBadge,
+} from '@/components/bookshelf/BookShelfReadingMeta';
+import { shouldShowBookshelfLastUpdateTime } from '@/lib/bookshelf/book-reading-progress';
+import { BookShelfListBookRow } from '@/components/bookshelf/BookShelfListBookRow';
+import {
+  bookshelfCompactListCardClass,
+  bookshelfListCardClass,
+} from '@/lib/bookshelf/book-group-card-styles';
+import type { BookTitleDisplay, ViewMode } from '@/stores/bookshelf-layout';
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
+import { QuickScrollButtons } from '@/components/shell/QuickScrollButtons';
 import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/bookshelf/BookshelfGroupNav';
 import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolbar';
 import type { PageType } from '@/components/shell/Navigation';
@@ -106,6 +126,10 @@ export function BookShelf(props: BookShelfProps) {
   const currentGroupName = () => bookshelfStore.state.currentGroupName;
   const viewMode = () => bookshelfLayoutStore.settings.viewMode;
   const titleDisplay = () => bookshelfLayoutStore.settings.bookTitleDisplay;
+  const showUnreadFlag = () => bookshelfLayoutStore.settings.showUnreadFlag;
+  const showLastUpdateTime = () => bookshelfLayoutStore.settings.showLastUpdateTime;
+  const showQuickScrollButtons = () => bookshelfLayoutStore.settings.showQuickScrollbar;
+  const [bookshelfScrollRoot, setBookshelfScrollRoot] = createSignal<HTMLDivElement>();
   // 直接访问 store 属性以确保响应式追踪
   const sortMode = () => {
     const settings = bookshelfLayoutStore.settings;
@@ -210,6 +234,29 @@ export function BookShelf(props: BookShelfProps) {
     }
   }
 
+  /** 目录更新后仅替换列表中的单本书，避免整页重载 */
+  async function patchBookInShelf(resultUrl: string, requestedUrl?: string) {
+    const updated = await booksDb.getBook(resultUrl);
+    const lookupUrls = new Set(
+      [resultUrl, requestedUrl].filter((u): u is string => Boolean(u)),
+    );
+
+    setBooks((prev) => {
+      const idx = prev.findIndex((b) => lookupUrls.has(b.bookUrl));
+      if (!updated) {
+        if (idx < 0) return prev;
+        const next = prev.filter((b) => !lookupUrls.has(b.bookUrl));
+        return next.length === prev.length ? prev : next;
+      }
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = updated;
+        return sortBooks(next, sortMode());
+      }
+      return prev;
+    });
+  }
+
   async function handleCoverUrlRefreshed(bookUrl: string, newCoverUrl: string) {
     const list = books();
     const idx = list.findIndex((b) => b.bookUrl === bookUrl);
@@ -268,24 +315,47 @@ export function BookShelf(props: BookShelfProps) {
       return;
     }
 
+    const batchSize = targets.length;
     showAppToast({
+      id: UPDATE_TOC_TOAST_ID,
       title: '正在更新目录',
-      description: `共 ${targets.length} 本，更新完成后将刷新书架`,
+      description: `共 ${batchSize} 本`,
+      variant: 'plain',
+      progress: 0,
       persistent: true,
     });
 
+    let lastProgressDone = -1;
     enqueueUpdateToc(
       targets.map((b) => b.bookUrl),
       {
-        onBookDone: (bookUrl, error) => {
-          void loadBooksForGroup(currentGroup());
-          void bookshelfStore.refreshBooks();
+        onProgress: ({ done, total }) => {
+          if (total <= 0) return;
+          const ratio = done / total;
+          updateAppToastProgress(UPDATE_TOC_TOAST_ID, ratio);
+          if (done === lastProgressDone) return;
+          lastProgressDone = done;
+          showAppToast({
+            id: UPDATE_TOC_TOAST_ID,
+            title: '正在更新目录',
+            description: `已完成 ${done} / ${total} 本`,
+            variant: 'plain',
+            progress: ratio,
+            persistent: true,
+          });
+        },
+        onBookDone: (bookUrl, error, requestedUrl) => {
+          void patchBookInShelf(bookUrl, requestedUrl);
           const open = readerStore.state.book;
-          if (open?.bookUrl === bookUrl && !error) {
+          const openUrls = new Set(
+            [bookUrl, requestedUrl, open?.bookUrl].filter((u): u is string => Boolean(u)),
+          );
+          if (open && openUrls.has(open.bookUrl) && !error) {
             void readerStore.loadCatalog(bookUrl);
           }
         },
         onAllDone: (result) => {
+          dismissAppToast(UPDATE_TOC_TOAST_ID);
           if (result.total === 0) return;
           if (result.failed === 0) {
             showAppToast({
@@ -625,7 +695,7 @@ export function BookShelf(props: BookShelfProps) {
         />
       </PageToolbar>
 
-      <div class={mainShellPageScroll}>
+      <div ref={setBookshelfScrollRoot} class={mainShellPageScroll}>
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}
@@ -644,6 +714,8 @@ export function BookShelf(props: BookShelfProps) {
             error={booksError()}
             viewMode={viewMode()}
             titleDisplay={titleDisplay()}
+            showUnreadFlag={showUnreadFlag()}
+            showLastUpdateTime={showLastUpdateTime()}
             sortMode={sortMode()}
             onOpenBook={props.onOpenBook}
             onEditBook={handleEditBook}
@@ -660,6 +732,21 @@ export function BookShelf(props: BookShelfProps) {
           />
         </Show>
       </div>
+
+      <Show when={showQuickScrollButtons()}>
+        <QuickScrollButtons
+          container={bookshelfScrollRoot}
+          contentRevision={() =>
+            [
+              showGroupPage(),
+              showBooksView(),
+              books().length,
+              booksLoading(),
+              groups().length,
+            ].join(':')
+          }
+        />
+      </Show>
 
       <BookEditDialog
         open={bookEditOpen()}
@@ -687,8 +774,10 @@ function GroupBooksView(props: {
   books: Book[];
   loading: boolean;
   error: string | null;
-  viewMode: string;
-  titleDisplay: string;
+  viewMode: ViewMode;
+  titleDisplay: BookTitleDisplay;
+  showUnreadFlag: boolean;
+  showLastUpdateTime: boolean;
   sortMode: string;
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
@@ -727,6 +816,8 @@ function GroupBooksView(props: {
           books={props.books}
           viewMode={props.viewMode}
           titleDisplay={props.titleDisplay}
+          showUnreadFlag={props.showUnreadFlag}
+          showLastUpdateTime={props.showLastUpdateTime}
           sortMode={props.sortMode}
           onOpenBook={props.onOpenBook}
           onEditBook={props.onEditBook}
@@ -751,8 +842,10 @@ function GroupBooksView(props: {
 /** 书籍列表/网格，复用书架布局的视图模式与间距；仅当 sortMode === 'manual' 时启用 SortableJS 拖动排序 */
 function BooksGrid(props: {
   books: Book[];
-  viewMode: string;
-  titleDisplay: string;
+  viewMode: ViewMode;
+  titleDisplay: BookTitleDisplay;
+  showUnreadFlag: boolean;
+  showLastUpdateTime: boolean;
   sortMode: string;
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
@@ -837,7 +930,10 @@ function BooksGrid(props: {
           <BookCardWithMenu
             book={book}
             layout={cardLayout()}
+            viewMode={props.viewMode}
             titleDisplay={props.titleDisplay}
+            showUnreadFlag={props.showUnreadFlag}
+            showLastUpdateTime={props.showLastUpdateTime}
             orderedBooks={props.books}
             manualSort={manualSort()}
             actions={bookContextMenuActions()}
@@ -854,20 +950,12 @@ function BooksGrid(props: {
 const BOOK_CARD_HOVER_ELEVATION =
   'shadow-none hover:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:hover:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]';
 
-const bookListCardClass = cn(
-  'book-group-card-motion relative flex cursor-pointer items-center gap-4 rounded-xl border border-border/50 bg-card p-2',
-  'hover:border-primary/50 hover:bg-transparent',
-  BOOK_CARD_HOVER_ELEVATION,
-);
+const bookListCardClass = bookshelfListCardClass();
 
-const bookCompactCardClass = cn(
-  'book-group-card-motion flex cursor-pointer items-center gap-2 rounded-lg border border-border/50 bg-card p-1',
-  'hover:border-primary/50 hover:bg-accent/50',
-  BOOK_CARD_HOVER_ELEVATION,
-);
+const bookCompactCardClass = bookshelfCompactListCardClass();
 
 const bookGridCardClass = cn(
-  'book-group-card-motion flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card p-2',
+  'book-group-card-motion flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card p-1',
   'hover:border-primary/30 hover:bg-card',
   BOOK_CARD_HOVER_ELEVATION,
 );
@@ -876,7 +964,10 @@ const bookGridCardClass = cn(
 function BookCardWithMenu(props: {
   book: Book;
   layout: 'list' | 'compact' | 'grid';
-  titleDisplay: string;
+  viewMode: ViewMode;
+  titleDisplay: BookTitleDisplay;
+  showUnreadFlag: boolean;
+  showLastUpdateTime: boolean;
   orderedBooks: Book[];
   manualSort: boolean;
   actions: BookContextMenuActions;
@@ -890,6 +981,12 @@ function BookCardWithMenu(props: {
         ? bookCompactCardClass
         : bookGridCardClass;
 
+  const effectiveTitleDisplay = () =>
+    getEffectiveTitleDisplay(props.layout, props.titleDisplay);
+
+  const showGridHideTooltip = () =>
+    props.layout === 'grid' && effectiveTitleDisplay() === 'hide';
+
   return (
     <BookContextMenu
       book={props.book}
@@ -899,51 +996,83 @@ function BookCardWithMenu(props: {
       class={cardClass()}
       onOpenBook={() => props.onOpenBook?.(props.book)}
     >
-        <div class={
-          props.layout === 'grid'
-            ? 'book-group-card-cover-motion book-group-card-cover-motion--grid flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50'
-            : props.layout === 'compact'
-              ? 'book-group-card-cover-motion book-group-card-cover-motion--list h-14 aspect-3/4 shrink-0 overflow-hidden rounded-md bg-muted/50'
-              : 'book-group-card-cover-motion book-group-card-cover-motion--list h-20 aspect-3/4 shrink-0 overflow-hidden rounded-lg bg-muted/50'
-        }>
-          <BookCoverImg
-            src={props.book.customCoverUrl || props.book.coverUrl}
-            referer={props.book.origin}
-            source={sourcesStore.getBookSource(props.book.origin)}
-            bookUrl={props.book.bookUrl}
-            onCoverUrlRefreshed={(url) =>
-              props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
-            }
-            alt=""
-            class="h-full w-full object-cover"
-            draggable={false}
-            fallback={<span class="flex h-full w-full items-center justify-center text-2xl">📖</span>}
-          />
-        </div>
-        <Show when={props.layout === 'grid' ? props.titleDisplay === 'show' : props.titleDisplay !== 'hide'}>
-          {props.layout === 'grid' ? (
-            <div class="flex w-full flex-col items-center gap-0.5">
-              <h3 class="m-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground">{props.book.name}</h3>
-              <p class="m-0 w-full truncate text-center text-xs leading-tight text-muted-foreground">{props.book.author ?? '—'}</p>
-            </div>
-          ) : (
-            <div class="flex min-w-0 flex-1 items-center gap-3">
-              <div class="shrink-0 min-w-0 max-w-[40%] text-left">
-                <h3 class="truncate font-semibold text-foreground">{props.book.name}</h3>
-                <p class={cn(
-                  "text-muted-foreground truncate",
-                  props.layout === 'list' ? "text-sm" : "text-xs"
-                )}>{props.book.author ?? '—'}</p>
+      <BookshelfGridHideTooltip
+        enabled={showGridHideTooltip()}
+        title={props.book.name}
+        subtitle={props.book.author ?? '—'}
+      >
+        <Show
+          when={props.layout !== 'grid' && effectiveTitleDisplay() === 'show'}
+          fallback={
+            <>
+              <div
+                class={cn(
+                  'book-group-card-cover-motion book-group-card-cover-motion--grid flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50',
+                  (effectiveTitleDisplay() === 'overlay' ||
+                    (props.layout === 'grid' &&
+                      (props.showUnreadFlag ||
+                        shouldShowBookshelfLastUpdateTime(
+                          props.book,
+                          props.showLastUpdateTime,
+                        )))) &&
+                    'relative',
+                )}
+              >
+                <Show when={props.showLastUpdateTime && props.layout === 'grid'}>
+                  <BookShelfGridLastUpdateBadge
+                    book={props.book}
+                    showLastUpdateTime={props.showLastUpdateTime}
+                  />
+                </Show>
+                <Show when={props.showUnreadFlag && props.layout === 'grid'}>
+                  <BookShelfGridUnreadBadge book={props.book} />
+                </Show>
+                <BookCoverImg
+                  src={props.book.customCoverUrl || props.book.coverUrl}
+                  referer={props.book.origin}
+                  source={sourcesStore.getBookSource(props.book.origin)}
+                  bookUrl={props.book.bookUrl}
+                  onCoverUrlRefreshed={(url) =>
+                    props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
+                  }
+                  alt=""
+                  class="h-full w-full object-cover"
+                  draggable={false}
+                  fallback={
+                    <span class="flex h-full w-full items-center justify-center text-2xl">📖</span>
+                  }
+                />
+                <Show when={effectiveTitleDisplay() === 'overlay'}>
+                  <BookshelfCoverTitleOverlay
+                    title={props.book.name}
+                    subtitle={props.book.author ?? '—'}
+                  />
+                </Show>
               </div>
-              <Show when={props.book.intro}>
-                <p class={cn(
-                  "min-w-0 flex-1 text-left text-xs text-muted-foreground",
-                  props.layout === 'list' ? "line-clamp-4" : "line-clamp-2"
-                )}>{props.book.intro}</p>
+              <Show when={effectiveTitleDisplay() === 'show' && props.layout === 'grid'}>
+                <div class="flex w-full flex-col items-center gap-0.5">
+                  <h3 class="m-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground">
+                    {props.book.name}
+                  </h3>
+                  <p class="m-0 w-full truncate text-center text-xs leading-tight text-muted-foreground">
+                    {props.book.author ?? '—'}
+                  </p>
+                </div>
               </Show>
-            </div>
-          )}
+            </>
+          }
+        >
+          <BookShelfListBookRow
+            book={props.book}
+            layout={props.layout === 'compact' ? 'compact' : 'list'}
+            viewMode={props.viewMode}
+            showUnreadFlag={props.showUnreadFlag}
+            showLastUpdateTime={props.showLastUpdateTime}
+            source={sourcesStore.getBookSource(props.book.origin)}
+            onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+          />
         </Show>
+      </BookshelfGridHideTooltip>
     </BookContextMenu>
   );
 }

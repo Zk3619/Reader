@@ -11,6 +11,10 @@ import * as sourcesDb from '@/lib/database/sources';
 import { getChapterList as fetchChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
+import {
+  mergeShelfReadingProgress,
+  type ShelfReadingProgressInput,
+} from '@/lib/bookshelf/reading-progress-snapshot';
 import type { Book, BookChapter, NewBook, SearchBook } from '@/types';
 
 /** true=阻塞拉目录；false=不拉；'background'=先上架再后台拉（默认，对齐 legado） */
@@ -21,6 +25,8 @@ export type SaveBookToShelfOptions = {
   /** 已拉取的目录，传入则不再请求书源 */
   chapters?: BookChapter[];
   fetchChapters?: ChapterFetchMode;
+  /** 带着进度加入书架（阅读器/详情页中途上架） */
+  readingProgress?: ShelfReadingProgressInput | null;
 };
 
 function resolveFetchMode(options?: SaveBookToShelfOptions): 'none' | 'blocking' | 'background' {
@@ -68,7 +74,7 @@ function newBookToBook(nb: NewBook): Book {
     durChapterPos: 0,
     durVolumeIndex: 0,
     chapterInVolumeIndex: 0,
-    durChapterTime: now,
+    durChapterTime: 0,
     canUpdate: true,
     order: 0,
     originOrder: 0,
@@ -107,11 +113,18 @@ async function updateBookChapterMeta(bookUrl: string, chapters: BookChapter[]): 
   const saved = await booksDb.getBook(bookUrl);
   if (!saved) return;
   const latest = chapters[chapters.length - 1];
+  const hadChapters = (saved.totalChapterNum ?? 0) > 0;
+  const now = Date.now();
   await booksDb.updateBook({
     ...saved,
     totalChapterNum: chapters.length,
     latestChapterTitle: latest?.title ?? saved.latestChapterTitle,
-    latestChapterTime: latest?.title ? Date.now() : saved.latestChapterTime,
+    latestChapterTime:
+      !hadChapters && latest?.title
+        ? now
+        : chapters.length > (saved.totalChapterNum ?? 0)
+          ? now
+          : saved.latestChapterTime,
   });
 }
 
@@ -213,7 +226,11 @@ export async function saveBookToShelf(
   }
 
   await applyGroupMask(bookUrl, options?.groupId);
-  const saved = await booksDb.getBook(bookUrl);
+  let saved = await booksDb.getBook(bookUrl);
+  if (saved && options?.readingProgress) {
+    saved = mergeShelfReadingProgress(saved, options.readingProgress);
+    await booksDb.updateBook(saved);
+  }
   const chaptersReady = chapters && chapters.length > 0;
   if (saved && fetchMode === 'background' && isOnline && !chaptersReady) {
     scheduleBackgroundChapterFetch(saved);

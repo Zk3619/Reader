@@ -29,6 +29,7 @@ import {
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+import { getReaderProgressSnapshot } from '@/lib/bookshelf/reading-progress-snapshot';
 import { formatBookshelfBookGroupNames, bookshelfBookCustomGroupIds } from '@/lib/bookshelf/book-source-name';
 import {
   formatBookIntroPlainText,
@@ -407,14 +408,19 @@ export function BookInfoPage(props: BookInfoPageProps) {
     }
   });
 
+  function shelfAddOptions(chapters?: BookChapter[]) {
+    const cached = chapters ?? preloadedChapters();
+    return {
+      chapters: cached && cached.length > 0 ? cached : undefined,
+      readingProgress: getReaderProgressSnapshot(currentBook().bookUrl),
+    };
+  }
+
   async function handleAddToShelf() {
     if (isAdding()) return;
     setIsAdding(true);
     try {
-      const cached = preloadedChapters();
-      const book = await addSearchBookToShelf(currentBook(), {
-        chapters: cached && cached.length > 0 ? cached : undefined,
-      });
+      const book = await addSearchBookToShelf(currentBook(), shelfAddOptions());
       if (book) {
         setIsInShelf(true);
         await refreshShelfBook();
@@ -585,9 +591,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       return;
     }
     if (!isInShelf()) {
-      const added = await addSearchBookToShelf(currentBook(), {
-        chapters: list,
-      });
+      const added = await addSearchBookToShelf(currentBook(), shelfAddOptions(list));
       if (added) {
         setIsInShelf(true);
         await refreshShelfBook();

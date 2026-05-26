@@ -272,20 +272,21 @@ export const bookshelfStore = {
    */
   async updateReadProgress(
     bookUrl: string,
-    chapterIndex: number,
-    chapterPos: number
+    update: booksDb.ReadProgressUpdate
   ): Promise<void> {
     try {
-      await booksDb.updateReadProgress(bookUrl, chapterIndex, chapterPos);
+      await booksDb.updateReadProgress(bookUrl, update);
+      const chapterPos = Math.min(1, Math.max(0, update.chapterPos));
 
       setState('books', books =>
         books.map(b => {
           if (b.bookUrl === bookUrl) {
             return {
               ...b,
-              durChapterIndex: chapterIndex,
+              durChapterIndex: update.chapterIndex,
               durChapterPos: chapterPos,
               durChapterTime: Date.now(),
+              durChapterTitle: update.chapterTitle ?? b.durChapterTitle,
             };
           }
           return b;

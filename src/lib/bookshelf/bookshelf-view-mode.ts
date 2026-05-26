@@ -42,6 +42,21 @@ export function getViewModeCardLayout(mode: string): 'list' | 'compact' | 'grid'
   return 'grid';
 }
 
+/** 列表/紧凑列表的列数（用于简介显示断点） */
+export function getBookshelfListColumnLayout(mode: string): 1 | 2 | 3 {
+  if (mode === 'list-3' || mode === 'compact-3') return 3;
+  if (mode === 'list-2' || mode === 'compact-2') return 2;
+  return 1;
+}
+
+/** 简介可见的最小视口断点：单列 sm、二列 lg、三列 2xl */
+export function getBookshelfListIntroMinBreakpoint(mode: string): 'sm' | 'lg' | '2xl' {
+  const cols = getBookshelfListColumnLayout(mode);
+  if (cols === 3) return '2xl';
+  if (cols === 2) return 'lg';
+  return 'sm';
+}
+
 /** 列表/紧凑列表/网格容器的 grid-cols 类名 */
 export function getViewModeContainerGridClass(mode: string): string {
   switch (mode) {
@@ -50,10 +65,10 @@ export function getViewModeContainerGridClass(mode: string): string {
       return 'grid-cols-1';
     case 'list-2':
     case 'compact-2':
-      return 'grid-cols-1 md:grid-cols-2';
+      return 'grid-cols-2';
     case 'list-3':
     case 'compact-3':
-      return 'grid-cols-1 md:grid-cols-3';
+      return 'grid-cols-3';
     case 'grid-2':
       return 'grid-cols-2';
     case 'grid-3':

@@ -127,11 +127,12 @@ export const bookProgress = (): BookProgress | null => {
     return null;
   }
 
+  const progress = Math.min(1, Math.max(0, state.chapterPos));
   return {
     name: state.book.name,
     author: state.book.author,
     durChapterIndex: state.chapterIndex,
-    durChapterPos: state.chapterPos,
+    durChapterPos: progress,
     durChapterTime: Date.now(),
     durChapterTitle: chapter.title,
   };
@@ -395,12 +396,12 @@ export const readerStore = {
     try {
       const chapter = state.catalog[state.chapterIndex];
       const chapterTitle = chapter?.title;
-      await booksDb.updateReadProgress(
-        state.book.bookUrl,
-        state.chapterIndex,
-        state.chapterPos,
-        chapterTitle
-      );
+      const progress = Math.min(1, Math.max(0, state.chapterPos));
+      await booksDb.updateReadProgress(state.book.bookUrl, {
+        chapterIndex: state.chapterIndex,
+        chapterPos: progress,
+        chapterTitle,
+      });
       // 触发书架刷新事件，让书架页面重新加载并排序
       window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
     } catch (e) {

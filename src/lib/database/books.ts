@@ -7,6 +7,13 @@ import { getDatabase } from '@/lib/database/database-core';
 import type { Book, NewBook } from '@/types';
 import { BookGroupId } from '@/types/book-group';
 
+export type ReadProgressUpdate = {
+  chapterIndex: number;
+  /** 0–1 章内滚动比例 */
+  chapterPos: number;
+  chapterTitle?: string;
+};
+
 /**
  * 获取所有书籍
  */
@@ -165,8 +172,9 @@ export async function insertBook(book: NewBook): Promise<void> {
 
   await db.execute(
     `INSERT INTO books (
-      bookUrl, tocUrl, origin, originName, name, author, kind, 
-      intro, coverUrl, charset, type, "group", lastCheckTime, durChapterTime
+      bookUrl, tocUrl, origin, originName, name, author, kind,
+      intro, coverUrl, charset, type, "group", lastCheckTime,
+      durChapterTime
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       book.bookUrl,
@@ -182,7 +190,7 @@ export async function insertBook(book: NewBook): Promise<void> {
       book.type ?? 0,
       0, // group
       now, // lastCheckTime
-      now, // durChapterTime
+      0, // durChapterTime：未读前为 0
     ]
   );
 }
@@ -314,12 +322,11 @@ export async function updateBook(book: Book): Promise<void> {
  */
 export async function updateReadProgress(
   bookUrl: string,
-  chapterIndex: number,
-  chapterPos: number,
-  chapterTitle?: string
+  update: ReadProgressUpdate
 ): Promise<void> {
   const db = await getDatabase();
   const now = Date.now();
+  const chapterPos = Math.min(1, Math.max(0, update.chapterPos));
 
   await db.execute(
     `UPDATE books SET
@@ -328,7 +335,13 @@ export async function updateReadProgress(
       durChapterTime = ?,
       durChapterTitle = ?
     WHERE bookUrl = ?`,
-    [chapterIndex, chapterPos, now, chapterTitle ?? null, bookUrl]
+    [
+      update.chapterIndex,
+      chapterPos,
+      now,
+      update.chapterTitle ?? null,
+      bookUrl,
+    ]
   );
 }
 

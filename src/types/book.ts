@@ -59,7 +59,7 @@ export interface Book extends BaseBook {
   durChapterTitle?: string;
   /** 当前章节索引 */
   durChapterIndex: number;
-  /** 当前阅读的进度（首行字符的索引位置） */
+  /** 当前章阅读位置（0–1 滚动比例，与阅读器底栏一致） */
   durChapterPos: number;
   /** 当前分卷索引 */
   durVolumeIndex: number;
