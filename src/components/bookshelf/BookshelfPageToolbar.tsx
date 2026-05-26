@@ -31,6 +31,7 @@ import {
   FileTextIcon,
 } from '@/components/shared/icons';
 import { BookshelfLayoutDialog } from '@/components/bookshelf/BookshelfLayoutDialog';
+import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
 import type { PageType } from '@/components/shell/Navigation';
 import { cn } from '@/lib/utils';
 
@@ -63,13 +64,15 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 shrink-0">
-          <SearchIcon class="h-4 w-4" />
-          <span class="sr-only">搜索</span>
-        </TooltipTrigger>
-        <TooltipContent>搜索</TooltipContent>
-      </Tooltip>
+      <div class="flex shrink-0 items-center gap-2">
+        <BookshelfPendingUpdateNavBadge class="self-center" />
+        <Tooltip>
+          <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 shrink-0">
+            <SearchIcon class="h-4 w-4" />
+            <span class="sr-only">搜索</span>
+          </TooltipTrigger>
+          <TooltipContent>搜索</TooltipContent>
+        </Tooltip>
 
       <Tooltip>
         <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
@@ -174,10 +177,11 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
         </AppDropdownMenuContent>
       </AppDropdownMenu>
 
-      <BookshelfLayoutDialog
-        open={showBookshelfLayoutDialog()}
-        onOpenChange={setShowBookshelfLayoutDialog}
-      />
+        <BookshelfLayoutDialog
+          open={showBookshelfLayoutDialog()}
+          onOpenChange={setShowBookshelfLayoutDialog}
+        />
+      </div>
     </>
   );
 }

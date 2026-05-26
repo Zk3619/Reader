@@ -1,4 +1,4 @@
-import { For, Show, type Component } from "solid-js";
+import { For, Show, type Accessor, type Component } from "solid-js";
 import {
   Sidebar,
   SidebarContent,
@@ -9,11 +9,11 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { PageType } from "@/components/shell/Navigation";
+import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
 import {
   BookshelfIcon,
   BookOpenIcon,
@@ -54,15 +54,18 @@ interface SideBarProps {
   currentPage?: PageType;
   onPageChange?: (page: PageType) => void;
   recentBooks?: RecentBook[];
+  /** 由 App 层 SidebarProvider 注入，避免独立页卸载后重挂载时丢失上下文 */
+  sidebarState: Accessor<"expanded" | "collapsed">;
+  onToggleSidebar: () => void;
 }
 
-/** 侧栏可点击项：圆角矩形背景 + 更明显的悬停/选中颜色（覆盖 ui/sidebar 默认弱对比） */
+/** 侧栏可点击项：圆角矩形背景 + 选中时左侧主色竖条（避免与右侧徽标冲突） */
 function sidebarNavButtonClass(active: boolean, extra?: string) {
   return cn(
-    "relative overflow-hidden rounded-xl transition-colors duration-200",
+    "relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200",
     "text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current",
+    active ? "border-l-primary bg-primary/10! text-primary! font-semibold shadow-sm" : "border-l-transparent",
     !active && "hover:bg-primary/10 hover:text-primary hover:shadow-sm",
-    active && "bg-primary/10! text-primary! font-semibold shadow-sm ring-1 ring-primary/45",
     extra
   );
 }
@@ -70,7 +73,6 @@ function sidebarNavButtonClass(active: boolean, extra?: string) {
 export function SideBar(props: SideBarProps) {
   const currentPage = () => props.currentPage || "bookshelf";
   const recentBooks = () => props.recentBooks || [];
-  const { toggleSidebar, state } = useSidebar();
 
   // 处理页面切换
   function handlePageChange(page: PageType) {
@@ -89,7 +91,7 @@ export function SideBar(props: SideBarProps) {
   ];
 
   // 判断是否收起
-  const isCollapsed = () => state() === "collapsed";
+  const isCollapsed = () => props.sidebarState() === "collapsed";
 
   const isPageActive = (page: PageType) => currentPage() === page;
 
@@ -118,14 +120,20 @@ export function SideBar(props: SideBarProps) {
                           "group/menu-button h-10 group-data-[collapsible=icon]:justify-center"
                         )}
                       >
-                        <span class="transition-colors duration-200 group-data-[collapsible=icon]:mx-auto">
+                        <span class="relative shrink-0 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto">
                           <config.icon class="h-5 w-5" />
+                          <Show when={page === 'bookshelf' && isCollapsed()}>
+                            <BookshelfPendingUpdateNavBadge
+                              variant="sidebar-collapsed"
+                              class="absolute -top-1 -right-1 z-10"
+                            />
+                          </Show>
                         </span>
-                        <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                        <span class="min-w-0 flex-1 truncate font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
                           {config.label}
                         </span>
-                        <Show when={active()}>
-                          <span class="absolute right-2 h-2 w-2 rounded-full bg-primary shadow-sm group-data-[collapsible=icon]:hidden" />
+                        <Show when={page === 'bookshelf' && !isCollapsed()}>
+                          <BookshelfPendingUpdateNavBadge class="shrink-0" />
                         </Show>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -182,7 +190,7 @@ export function SideBar(props: SideBarProps) {
       <SidebarFooter class="border-t border-sidebar-border">
         <SidebarMenuItem>
           <SidebarMenuButton
-            onClick={toggleSidebar}
+            onClick={() => props.onToggleSidebar()}
             tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
             class={sidebarNavButtonClass(
               false,

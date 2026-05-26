@@ -30,8 +30,10 @@ export {
   isBookTocUpdating,
   getUpdateTocQueueSize,
   isUpdateTocRunning,
+  updateTocQueueStore,
   type UpdateTocBatchResult,
   type UpdateTocQueueCallbacks,
+  type UpdateTocQueueProgress,
 } from '@/lib/book-source/update-toc-queue';
 
 // 正文内容功能

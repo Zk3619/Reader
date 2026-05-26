@@ -2,18 +2,30 @@
  * 书架批量更新目录队列（对应 Legado MainViewModel.upToc / startUpTocJob）
  */
 
+import { createStore } from 'solid-js/store';
 import * as booksDb from '@/lib/database/books';
 import { updateBookToc } from '@/lib/book-source/update-toc';
 
 const DEFAULT_CONCURRENCY = 3;
 
 export interface UpdateTocQueueCallbacks {
-  /** 单本书更新结束（成功或失败） */
-  onBookDone?: (bookUrl: string, error: Error | null) => void;
+  /** 单本书更新结束（成功或失败）；requestedUrl 为入队时的 URL */
+  onBookDone?: (
+    bookUrl: string,
+    error: Error | null,
+    requestedUrl?: string,
+  ) => void;
   /** 全部任务结束 */
   onAllDone?: (result: UpdateTocBatchResult) => void;
-  /** 队列长度变化 */
-  onProgress?: (pending: number, active: number) => void;
+  /** 队列进度变化 */
+  onProgress?: (progress: UpdateTocQueueProgress) => void;
+}
+
+export interface UpdateTocQueueProgress {
+  pending: number;
+  active: number;
+  done: number;
+  total: number;
 }
 
 export interface UpdateTocBatchResult {
@@ -30,22 +42,48 @@ let batchSuccess = 0;
 let batchFailed = 0;
 let callbacks: UpdateTocQueueCallbacks = {};
 
+const [queueState, setQueueState] = createStore({
+  pending: 0,
+  active: 0,
+});
+
+/** 等待 + 正在更新的书本数（Solid 响应式） */
+export const updateTocQueueStore = {
+  get state() {
+    return queueState;
+  },
+  get totalCount() {
+    return queueState.pending + queueState.active;
+  },
+};
+
 /** 按书源串行（Legado 每书源 Semaphore(1)） */
 const sourceTail = new Map<string, Promise<void>>();
 
 function notifyProgress(): void {
-  callbacks.onProgress?.(waitQueue.length, activeSet.size);
+  setQueueState({
+    pending: waitQueue.length,
+    active: activeSet.size,
+  });
+  callbacks.onProgress?.({
+    pending: waitQueue.length,
+    active: activeSet.size,
+    done: batchSuccess + batchFailed,
+    total: batchTotal,
+  });
 }
 
-function enqueueSourceTask(sourceUrl: string, task: () => Promise<void>): Promise<void> {
+function enqueueSourceTask(sourceUrl: string, task: () => Promise<string>): Promise<string> {
   const prev = sourceTail.get(sourceUrl) ?? Promise.resolve();
-  const next = prev
-    .catch(() => undefined)
-    .then(task);
+  const next = prev.catch(() => undefined).then(task);
+  const tail = next.then(
+    () => undefined,
+    () => undefined,
+  );
   sourceTail.set(
     sourceUrl,
-    next.finally(() => {
-      if (sourceTail.get(sourceUrl) === next) {
+    tail.finally(() => {
+      if (sourceTail.get(sourceUrl) === tail) {
         sourceTail.delete(sourceUrl);
       }
     }),
@@ -54,26 +92,28 @@ function enqueueSourceTask(sourceUrl: string, task: () => Promise<void>): Promis
 }
 
 async function runOne(bookUrl: string): Promise<void> {
-  activeSet.add(bookUrl);
+  const requestedUrl = bookUrl;
+  activeSet.add(requestedUrl);
   notifyProgress();
   let error: Error | null = null;
+  let resultUrl = requestedUrl;
   try {
-    const book = await booksDb.getBook(bookUrl);
+    const book = await booksDb.getBook(requestedUrl);
     const sourceUrl = book?.origin ?? '';
     if (sourceUrl) {
-      await enqueueSourceTask(sourceUrl, () => updateBookToc(bookUrl));
+      resultUrl = await enqueueSourceTask(sourceUrl, () => updateBookToc(requestedUrl));
     } else {
-      await updateBookToc(bookUrl);
+      resultUrl = await updateBookToc(requestedUrl);
     }
     batchSuccess += 1;
   } catch (e) {
     error = e instanceof Error ? e : new Error(String(e));
     batchFailed += 1;
-    console.warn('[update-toc]', bookUrl, error.message);
+    console.warn('[update-toc]', requestedUrl, error.message);
   } finally {
-    activeSet.delete(bookUrl);
+    activeSet.delete(requestedUrl);
     notifyProgress();
-    callbacks.onBookDone?.(bookUrl, error);
+    callbacks.onBookDone?.(resultUrl, error, requestedUrl);
     running -= 1;
     pump();
     if (running === 0 && waitQueue.length === 0 && activeSet.size === 0) {

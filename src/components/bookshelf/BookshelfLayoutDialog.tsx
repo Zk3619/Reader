@@ -36,8 +36,10 @@ import {
 } from '@/stores/bookshelf-layout';
 import {
   gridViewModeOptions,
+  isGridViewMode,
   listViewModeOptions,
 } from '@/lib/bookshelf/bookshelf-view-mode';
+import { cn } from '@/lib/utils';
 
 const sectionPanelClass =
   'rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3';
@@ -201,7 +203,7 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
               />
               <SettingToggleRow
                 id="show-quick-scrollbar"
-                label="显示快速滚动条"
+                label="显示快速滚动按钮"
                 checked={localSettings().showQuickScrollbar}
                 onChange={(checked) =>
                   setLocalSettings({ ...localSettings(), showQuickScrollbar: checked })
@@ -269,14 +271,23 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
             </section>
           </div>
 
-          <section class={sectionPanelClass}>
-            <Label class={sectionTitleClass}>书名/分组名</Label>
+          <section
+            class={cn(
+              sectionPanelClass,
+              !isGridViewMode(localSettings().viewMode) && 'opacity-60',
+            )}
+          >
+            <Label class={sectionTitleClass}>网格布局下的书名/作者/分组名</Label>
+            <p class="text-xs text-muted-foreground">
+              仅对网格视图生效；列表与紧凑列表始终显示名称。
+            </p>
             <RadioGroup
               value={localSettings().bookTitleDisplay}
               onChange={(value) => {
                 setLocalSettings({ ...localSettings(), bookTitleDisplay: value as BookTitleDisplay });
               }}
               class="flex flex-wrap gap-x-6 gap-y-2"
+              disabled={!isGridViewMode(localSettings().viewMode)}
             >
               <For each={bookTitleDisplayOptions}>
                 {(option) => (

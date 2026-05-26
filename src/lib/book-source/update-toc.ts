@@ -40,11 +40,12 @@ function applyBookInfoToBook(book: Book, info: BookInfo): void {
 /**
  * 更新一本书的目录：拉取书源章节列表并写入数据库
  */
-export async function updateBookToc(bookUrl: string): Promise<void> {
+/** @returns 更新后的 bookUrl（可能与入参不同，例如 replaceBookUrl 后） */
+export async function updateBookToc(bookUrl: string): Promise<string> {
   const book = await booksDb.getBook(bookUrl);
-  if (!book) return;
-  if (isLocalBook(book)) return;
-  if (book.canUpdate === false) return;
+  if (!book) return bookUrl;
+  if (isLocalBook(book)) return bookUrl;
+  if (book.canUpdate === false) return bookUrl;
 
   const source = await sourcesDb.getSource(book.origin);
   if (!source) {
@@ -73,15 +74,26 @@ export async function updateBookToc(bookUrl: string): Promise<void> {
     }
 
     const now = Date.now();
+    const oldTotal = Math.max(oldBook.totalChapterNum, 0);
+    const newTotal = chapters.length;
+
     working.tocUrl = tocUrl;
     working.lastCheckTime = now;
-    working.totalChapterNum = chapters.length;
+    working.totalChapterNum = newTotal;
     working.type = removeBookType(working.type, BOOK_TYPE_UPDATE_ERROR);
 
     const lastChapter = chapters[chapters.length - 1];
     if (lastChapter?.title) {
       working.latestChapterTitle = lastChapter.title;
+    }
+
+    // 对齐 Legado：仅当发现新章节时更新 latestChapterTime / lastCheckCount
+    if (newTotal > oldTotal) {
+      working.lastCheckCount = newTotal - oldTotal;
       working.latestChapterTime = now;
+    } else {
+      working.lastCheckCount = 0;
+      working.latestChapterTime = oldBook.latestChapterTime;
     }
 
     working = syncBookPreserveProgress(working, oldBook, chapters);
@@ -97,6 +109,7 @@ export async function updateBookToc(bookUrl: string): Promise<void> {
 
     const newChapters = chapters.map((ch) => toNewBookChapter(ch, working.bookUrl));
     await chaptersDb.insertChapters(newChapters);
+    return working.bookUrl;
   } catch (error) {
     const latest =
       (await booksDb.getBook(bookUrl)) ??
@@ -110,4 +123,5 @@ export async function updateBookToc(bookUrl: string): Promise<void> {
     }
     throw error;
   }
+  return bookUrl;
 }

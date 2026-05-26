@@ -64,7 +64,7 @@ export interface BookshelfLayoutSettings {
   showLastUpdateTime: boolean;
   /** 显示等待更新数量 */
   showPendingUpdateCount: boolean;
-  /** 显示快速滚动条 */
+  /** 显示快速滚动按钮（到顶 / 到底） */
   showQuickScrollbar: boolean;
 }
 

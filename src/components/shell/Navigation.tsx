@@ -1,4 +1,4 @@
-import { For, type Component } from "solid-js";
+import { For, Show, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import logoLight from "@/assets/logo-l-512x512.png";
 import logoDark from "@/assets/logo-d-512x512.png";
@@ -17,6 +17,8 @@ import { WindowControlButtons } from "@/components/shell/WindowControlButtons";
 import { getEffectiveDark } from "@/lib/theme";
 import { settingsStore } from "@/stores/settings";
 import { cn } from "@/lib/utils";
+import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
+import { useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import {
   BookshelfIcon,
   BookSourceIcon,
@@ -74,8 +76,11 @@ function CurrentPageIcon(props: { page: PageType; class?: string }) {
 }
 
 export function Navigation(props: NavigationProps) {
+  const shell = useShellLayout();
   const isDark = () => getEffectiveDark(settingsStore.state.app.theme);
   const currentPage = () => props.currentPage || "bookshelf";
+  /** 侧栏未挂载时（移动壳层或宽度不足）在顶栏显示等待更新徽标 */
+  const showNavPendingBadge = () => !shell().showSidebar;
 
   function handlePageChange(page: PageType) {
     props.onPageChange?.(page);
@@ -104,9 +109,12 @@ export function Navigation(props: NavigationProps) {
 
           <NavigationMenu class="min-w-0 flex-1">
               <NavigationMenuItem>
-                <NavigationMenuTrigger class="h-9 max-w-full px-3 text-sm font-medium">
-                  <CurrentPageIcon page={currentPage()} class="mr-1.5" />
-                  <span class="truncate">{pageConfig[currentPage()].label}</span>
+                <NavigationMenuTrigger class="h-9 max-w-full gap-1.5 px-3 text-sm font-medium">
+                  <CurrentPageIcon page={currentPage()} class="shrink-0" />
+                  <span class="min-w-0 truncate">{pageConfig[currentPage()].label}</span>
+                  <Show when={showNavPendingBadge() && currentPage() === "bookshelf"}>
+                    <BookshelfPendingUpdateNavBadge class="shrink-0" />
+                  </Show>
                   <NavigationMenuIcon />
                 </NavigationMenuTrigger>
                 <NavigationMenuContent class="p-0">
@@ -128,9 +136,14 @@ export function Navigation(props: NavigationProps) {
                             })()}
                           </div>
                           <div class="min-w-0 flex-1 space-y-0.5 py-0.5">
-                            <NavigationMenuLabel class="block truncate text-sm font-medium">
-                              {config.label}
-                            </NavigationMenuLabel>
+                            <div class="flex min-w-0 items-center gap-1.5">
+                              <NavigationMenuLabel class="block min-w-0 flex-1 truncate text-sm font-medium">
+                                {config.label}
+                              </NavigationMenuLabel>
+                              <Show when={showNavPendingBadge() && page === "bookshelf"}>
+                                <BookshelfPendingUpdateNavBadge class="shrink-0" />
+                              </Show>
+                            </div>
                             <NavigationMenuDescription class="block truncate text-xs leading-snug text-muted-foreground">
                               {config.description}
                             </NavigationMenuDescription>
