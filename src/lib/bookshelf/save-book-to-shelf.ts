@@ -108,7 +108,8 @@ async function persistChapters(bookUrl: string, chapters: BookChapter[]): Promis
   await chaptersDb.insertChapters(chapters.map((ch) => toNewBookChapter(ch, bookUrl)));
 }
 
-async function updateBookChapterMeta(bookUrl: string, chapters: BookChapter[]): Promise<void> {
+/** 目录写入后同步 totalChapterNum / latestChapterTitle（本地导入、在线拉目录共用） */
+export async function updateBookChapterMeta(bookUrl: string, chapters: BookChapter[]): Promise<void> {
   if (chapters.length === 0) return;
   const saved = await booksDb.getBook(bookUrl);
   if (!saved) return;

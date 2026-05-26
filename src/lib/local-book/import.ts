@@ -55,6 +55,7 @@ import type { Book, BookChapter } from '@/types';
 import type { NewBookChapter } from '@/types/book-chapter';
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
+import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import { LOCAL_BOOK_FILE_PICKER_FILTERS } from '@/lib/local-book/local-book-import-files';
 
 /** 本地书 type：legado BookType 文本且本地 = 4 */
@@ -770,6 +771,12 @@ export async function importLocalBookFromContent(
     if (ch.start != null || ch.end != null) {
       await chaptersDb.updateChapter(ch);
     }
+  }
+
+  await updateBookChapterMeta(finalBookUrl, chapters);
+
+  if (options?.groupId !== undefined && options.groupId > 0) {
+    await booksDb.addBooksToGroupMask([finalBookUrl], options.groupId);
   }
 
   const book = await booksDb.getBook(finalBookUrl);
