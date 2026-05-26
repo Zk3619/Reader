@@ -2,14 +2,15 @@
  * 发现书籍列表内容区（无页头），供 ScoutPage / ExploreSourcePage 复用
  */
 
-import { createResource, createSignal, For, Show, onMount } from 'solid-js';
+import { createEffect, createResource, createSignal, For, onCleanup, Show, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import { exploreBook } from '@/lib/book-source/explore';
-import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+import { isAbortError } from '@/lib/http';
+import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
 import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
@@ -101,11 +102,36 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   const [page, setPage] = createSignal(1);
   const [allBooks, setAllBooks] = createSignal<SearchBook[]>([]);
   const [loadingMore, setLoadingMore] = createSignal(false);
-  const [addingBookUrl, setAddingBookUrl] = createSignal<string | null>(null);
   const sectionUrl = () => props.section.url ?? '';
   const hasPagination = () => sectionUrl().includes('{{page}}') || sectionUrl().includes('{page}');
   const useScrollLoad = () => explorePaginationPreference() === 'scroll';
   const refreshKey = () => props.refreshKey ?? 0;
+
+  /** 当前分类列表请求标识；切换分类时变更，用于丢弃过期响应 */
+  const listFetchKey = () => `${sectionUrl()}\0${refreshKey()}`;
+
+  const [committedFetchKey, setCommittedFetchKey] = createSignal<string | null>(null);
+
+  let loadMoreAbort: AbortController | null = null;
+
+  const isFetchKeyCurrent = (fetchKey: string) => listFetchKey() === fetchKey;
+
+  const abortLoadMore = () => {
+    loadMoreAbort?.abort();
+    loadMoreAbort = null;
+  };
+
+  createEffect(() => {
+    listFetchKey();
+    abortLoadMore();
+    setPage(1);
+    setAllBooks([]);
+    setCommittedFetchKey(null);
+  });
+
+  onCleanup(() => {
+    abortLoadMore();
+  });
 
   const [firstPageResource] = createResource(
     () => ({
@@ -113,33 +139,52 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       sectionUrl: sectionUrl(),
       refreshKey: refreshKey(),
       sectionTitle: props.section.title,
+      fetchKey: listFetchKey(),
     }),
-    async ({ source, sectionUrl, refreshKey: rk }) => {
+    async ({ source, sectionUrl, refreshKey: rk, fetchKey }) => {
       if (!sectionUrl) return [];
+
+      const controller = new AbortController();
+      onCleanup(() => controller.abort());
 
       const cacheSourceId = (source.sourceId || source.sourceName) as string | undefined;
       const cached = cacheSourceId ? pageCacheStore.getExploreCache(cacheSourceId, sectionUrl) : null;
 
       if (cached && rk === 0) {
+        if (!isFetchKeyCurrent(fetchKey)) return [];
         setAllBooks(cached.allBooks);
         setPage(cached.page);
+        setCommittedFetchKey(fetchKey);
         return cached.books;
       }
 
-      const list = await exploreBook(source, 1, sectionUrl);
-      setAllBooks(list);
+      try {
+        const list = await exploreBook(source, 1, sectionUrl, { signal: controller.signal });
+        if (!isFetchKeyCurrent(fetchKey)) return [];
 
-      if (cacheSourceId) {
-        pageCacheStore.setExploreCache(cacheSourceId, sectionUrl, list, 1, list);
+        setAllBooks(list);
+        setCommittedFetchKey(fetchKey);
+
+        if (cacheSourceId) {
+          pageCacheStore.setExploreCache(cacheSourceId, sectionUrl, list, 1, list);
+        }
+
+        return list;
+      } catch (e) {
+        if (isAbortError(e)) return [];
+        throw e;
       }
-
-      return list;
     },
   );
 
-  const books = () => (firstPageResource.state === 'ready' ? allBooks() : []);
-  const loading = () => firstPageResource.loading;
-  const error = () => firstPageResource.error;
+  const books = () =>
+    committedFetchKey() === listFetchKey() && firstPageResource.state === 'ready'
+      ? allBooks()
+      : [];
+  const loading = () =>
+    firstPageResource.loading || committedFetchKey() !== listFetchKey();
+  const error = () =>
+    committedFetchKey() === listFetchKey() ? firstPageResource.error : undefined;
 
   onMount(() => void initExplorePaginationPreference());
 
@@ -153,10 +198,17 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
 
   const loadMore = async () => {
     if (!hasPagination() || loadingMore()) return;
+    const fetchKeyAtStart = listFetchKey();
+    abortLoadMore();
+    const controller = new AbortController();
+    loadMoreAbort = controller;
     const next = page() + 1;
     setLoadingMore(true);
     try {
-      const list = await exploreBook(props.source, next, sectionUrl());
+      const list = await exploreBook(props.source, next, sectionUrl(), {
+        signal: controller.signal,
+      });
+      if (!isFetchKeyCurrent(fetchKeyAtStart) || controller.signal.aborted) return;
       const updatedBooks = [...allBooks(), ...list];
       setAllBooks(updatedBooks);
       setPage(next);
@@ -175,9 +227,13 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
         showAppToast({ title: '没有更多了', variant: 'default' });
       }
     } catch (e) {
+      if (isAbortError(e)) return;
       console.error('加载更多失败:', e);
       showAppToast({ title: '加载失败', description: String(e), variant: 'destructive' });
     } finally {
+      if (loadMoreAbort === controller) {
+        loadMoreAbort = null;
+      }
       setLoadingMore(false);
     }
   };
@@ -195,25 +251,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
     if (props.onOpenBookInfo) {
       props.onOpenBookInfo(props.source, sb);
     } else {
-      void handleAddAndOpen(sb);
-    }
-  };
-
-  const handleAddAndOpen = async (sb: SearchBook) => {
-    if (addingBookUrl() === sb.bookUrl) return;
-    setAddingBookUrl(sb.bookUrl);
-    try {
-      const book = await addSearchBookToShelf(sb);
-      if (book) {
-        props.onOpenBook(book);
-      } else {
-        showAppToast({ title: '加入书架失败', variant: 'destructive' });
-      }
-    } catch (e) {
-      console.error('加入书架失败:', e);
-      showAppToast({ title: '加入书架失败', description: String(e), variant: 'destructive' });
-    } finally {
-      setAddingBookUrl(null);
+      props.onOpenBook(searchBookToEphemeralBook(sb));
     }
   };
 
@@ -253,9 +291,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
               <li class="w-full">
                 <button
                   type="button"
-                  class={exploreBookListCardClass(
-                    addingBookUrl() === sb.bookUrl && 'pointer-events-none opacity-70',
-                  )}
+                  class={exploreBookListCardClass()}
                   onClick={() => handleBookClick(sb)}
                   {...bookGroupCardPressHandlers}
                 >
@@ -292,22 +328,17 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
                       </Show>
                     </p>
                     <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
-                      <Show
-                        when={addingBookUrl() === sb.bookUrl}
-                        fallback={(() => {
-                          const updateLabel = tryFormatDisplayUpdateTime(sb.latestChapterUpdateTime);
-                          return (
-                            <>
-                              最新章节：{displayChapterTitle(sb.latestChapterTitle)}
-                              <Show when={updateLabel}>
-                                <span> · {updateLabel}</span>
-                              </Show>
-                            </>
-                          );
-                        })()}
-                      >
-                        <span class="text-primary">正在加入书架…</span>
-                      </Show>
+                      {(() => {
+                        const updateLabel = tryFormatDisplayUpdateTime(sb.latestChapterUpdateTime);
+                        return (
+                          <>
+                            最新章节：{displayChapterTitle(sb.latestChapterTitle)}
+                            <Show when={updateLabel}>
+                              <span> · {updateLabel}</span>
+                            </Show>
+                          </>
+                        );
+                      })()}
                     </p>
                     <Show when={getDisplayBadgeEntries(sb).length > 0}>
                       {(() => {

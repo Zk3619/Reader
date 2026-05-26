@@ -3,7 +3,7 @@
  * 对应 legado 项目的 WebBook.exploreBook
  */
 
-import { get, post } from '@/lib/http';
+import { get, isAbortError, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
@@ -76,11 +76,16 @@ function mergeCookieHeader(stored: string, headerCookie: string | undefined): st
   return `${a}; ${b}`;
 }
 
+export type ExploreBookOptions = {
+  signal?: AbortSignal;
+};
+
 /** Legado ajax 书单列（如晴天 `/get_book_shelf,{...}`） */
 async function exploreBookViaLegadoAjax(
   source: BookSource,
   page: number,
-  rawUrl: string
+  rawUrl: string,
+  signal?: AbortSignal,
 ): Promise<SearchBook[]> {
   const ajax = parseAjaxArgs(rawUrl.trim());
   if (!ajax || !source.ruleExplore) return [];
@@ -112,24 +117,22 @@ async function exploreBookViaLegadoAjax(
 
   const startTime = Date.now();
   try {
+    const httpOpts = {
+      headers,
+      enableCookieJar: source.enabledCookieJar,
+      concurrentRate: source.concurrentRate,
+      timeout: 30000,
+      signal,
+    };
     const html =
       ajax.method === 'POST'
-        ? await post(requestUrl, body ?? '', {
-          headers,
-          enableCookieJar: source.enabledCookieJar,
-          concurrentRate: source.concurrentRate,
-          timeout: 30000,
-        })
-        : await get(requestUrl, {
-          headers,
-          enableCookieJar: source.enabledCookieJar,
-          concurrentRate: source.concurrentRate,
-          timeout: 30000,
-        });
+        ? await post(requestUrl, body ?? '', httpOpts)
+        : await get(requestUrl, httpOpts);
 
     const respondTime = Date.now() - startTime;
     return parseExploreBooksFromContent(source, html, requestUrl, respondTime);
   } catch (error) {
+    if (isAbortError(error)) throw error;
     console.error(`[explore] Legado ajax 书单列失败 [${source.sourceName}]:`, error);
     return [];
   }
@@ -183,8 +186,10 @@ async function parseExploreBooksFromContent(
 export async function exploreBook(
   source: BookSource,
   page: number = 1,
-  exploreUrlOverride?: string
+  exploreUrlOverride?: string,
+  options?: ExploreBookOptions,
 ): Promise<SearchBook[]> {
+  const signal = options?.signal;
   let baseUrl = exploreUrlOverride ?? source.exploreUrl;
   if (!source.ruleExplore || !baseUrl) {
     console.warn('[explore] 缺少必要参数:', { hasRuleExplore: !!source.ruleExplore, baseUrl });
@@ -192,7 +197,7 @@ export async function exploreBook(
   }
 
   if (exploreUrlOverride && isLegadoAjaxBookListExploreUrl(exploreUrlOverride)) {
-    return exploreBookViaLegadoAjax(source, page, exploreUrlOverride);
+    return exploreBookViaLegadoAjax(source, page, exploreUrlOverride, signal);
   }
 
   console.log('[explore] 初始 baseUrl:', baseUrl.substring(0, 200));
@@ -223,6 +228,7 @@ export async function exploreBook(
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout: 30000,
+      signal,
     });
 
     console.log('[explore] 响应长度:', html.length, '前200字符:', html.substring(0, 200));
@@ -232,6 +238,7 @@ export async function exploreBook(
     console.log('[explore] 最终解析到书籍数:', bookList.length);
     return bookList;
   } catch (error) {
+    if (isAbortError(error)) throw error;
     console.error(`发现书籍失败 [${source.sourceName}]:`, error);
     return [];
   }
