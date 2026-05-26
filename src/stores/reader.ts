@@ -17,6 +17,7 @@ import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-book';
 import { getContent as getBookSourceContent } from '@/lib/book-source';
 import { getChapterList as fetchChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
+import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import type { Book, BookChapter, BookProgress } from '@/types';
 
 /**
@@ -95,6 +96,8 @@ export interface ReaderState {
   readSettingsVisible: boolean;
   /** 是否迷你界面 */
   miniInterface: boolean;
+  /** 未上架试读：不写阅读进度与章节目录到数据库 */
+  guestReading: boolean;
 }
 
 /**
@@ -112,6 +115,7 @@ const [state, setState] = createStore<ReaderState>({
   popCataVisible: false,
   readSettingsVisible: false,
   miniInterface: false,
+  guestReading: false,
 });
 
 /**
@@ -177,19 +181,25 @@ export const readerStore = {
    * 打开书籍
    */
   async openBook(book: Book): Promise<void> {
+    const guestReading =
+      !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
+
     // 如果状态已经设置（通过 setBookInitialState），则跳过重复设置
     // 否则设置初始状态，立即显示 skeleton 加载状态
     if (state.book?.bookUrl !== book.bookUrl || !state.contentLoading) {
       setState({
         book,
+        guestReading,
         contentLoading: true,
         showContent: false,
       });
+    } else {
+      setState({ guestReading });
     }
 
     try {
       // 加载章节列表
-      const catalog = await chaptersDb.getChapterList(book.bookUrl);
+      const catalog = guestReading ? [] : await chaptersDb.getChapterList(book.bookUrl);
       setState({ catalog });
 
       // 恢复阅读进度，并限制在有效范围内
@@ -216,9 +226,14 @@ export const readerStore = {
           if (source) {
             const chapters = await fetchChapterList(source, book.tocUrl);
             if (chapters.length > 0) {
-              const newChapters = chapters.map((ch) => toNewBookChapter(ch, book.bookUrl));
-              await chaptersDb.insertChapters(newChapters);
-              catalogToUse = await chaptersDb.getChapterList(book.bookUrl);
+              if (guestReading) {
+                catalogToUse = chapters;
+              } else {
+                const newChapters = chapters.map((ch) => toNewBookChapter(ch, book.bookUrl));
+                await chaptersDb.insertChapters(newChapters);
+                catalogToUse = await chaptersDb.getChapterList(book.bookUrl);
+                await updateBookChapterMeta(book.bookUrl, catalogToUse);
+              }
               setState({ catalog: catalogToUse });
             }
           }
@@ -389,7 +404,7 @@ export const readerStore = {
    * 保存阅读进度
    */
   async saveProgress(): Promise<void> {
-    if (!state.book) {
+    if (!state.book || state.guestReading) {
       return;
     }
 
@@ -455,10 +470,10 @@ export const readerStore = {
    * 关闭书籍
    */
   closeBook(): void {
-    // 保存进度（saveProgress 内部会触发 bookshelf-refresh 事件）
-    this.saveProgress().catch(console.error);
+    if (!state.guestReading) {
+      this.saveProgress().catch(console.error);
+    }
 
-    // 重置状态
     setState({
       book: null,
       catalog: [],
@@ -468,6 +483,11 @@ export const readerStore = {
       contentLoading: false,
       showContent: false,
       popCataVisible: false,
+      guestReading: false,
     });
+  },
+
+  isGuestReading(): boolean {
+    return state.guestReading;
   },
 };

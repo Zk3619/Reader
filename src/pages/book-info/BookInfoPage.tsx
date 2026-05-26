@@ -29,6 +29,7 @@ import {
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
 import { getReaderProgressSnapshot } from '@/lib/bookshelf/reading-progress-snapshot';
 import { formatBookshelfBookGroupNames, bookshelfBookCustomGroupIds } from '@/lib/bookshelf/book-source-name';
 import {
@@ -460,17 +461,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
   }
 
   async function openBookAtChapter(chapterIndex?: number) {
-    if (!isInShelf()) {
-      await handleAddToShelf();
-      if (!isInShelf()) return;
+    let book: Book;
+    if (isInShelf()) {
+      const base = shelfBook() ?? (await getBook(currentBook().bookUrl));
+      if (!base) return;
+      book =
+        chapterIndex !== undefined
+          ? { ...base, durChapterIndex: chapterIndex, durChapterPos: 0 }
+          : base;
+    } else {
+      book = searchBookToEphemeralBook(currentBook());
+      if (chapterIndex !== undefined) {
+        book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
+      }
     }
-    const sb = shelfBook();
-    const base = sb ?? (await getBook(currentBook().bookUrl));
-    if (!base) return;
-    const book =
-      chapterIndex !== undefined
-        ? { ...base, durChapterIndex: chapterIndex, durChapterPos: 0 }
-        : base;
     props.onOpenBook(book);
   }
 

@@ -34,8 +34,10 @@ import { SourceSearchDialog } from "@/components/sources/SourceSearchDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
 import { readerStore } from "@/stores/reader";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
-import type { BookSource } from "@/types";
-import type { SearchBook } from "@/types";
+import type { Book, BookSource, SearchBook } from "@/types";
+import { ReaderGuestAddToShelfDialog } from "@/components/reader/ReaderGuestAddToShelfDialog";
+import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
+import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
 import type { ExploreSection } from "@/lib/book-source/explore-sections";
 import {
@@ -728,6 +730,69 @@ function AppContent() {
     book: SearchBook;
     fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf';
   } | null>(null);
+
+  const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
+  const [guestAddToShelfOpen, setGuestAddToShelfOpen] = createSignal(false);
+  const [guestAddToShelfBusy, setGuestAddToShelfBusy] = createSignal(false);
+
+  function openReaderPage(book: Book, returnPage: PageType) {
+    setReaderReturnPage(returnPage);
+    readerStore.setBookInitialState(book);
+    setCurrentPage("reader");
+    void readerStore.openBook(book).catch((e) => {
+      console.error("打开书籍失败:", e);
+      setCurrentPage(returnPage);
+    });
+  }
+
+  function finishCloseReader() {
+    readerStore.closeBook();
+    setGuestAddToShelfOpen(false);
+    setGuestAddToShelfBusy(false);
+    setCurrentPage(readerReturnPage());
+  }
+
+  function requestCloseReader() {
+    if (readerStore.isGuestReading() && readerStore.state.book) {
+      setGuestAddToShelfOpen(true);
+      return;
+    }
+    finishCloseReader();
+  }
+
+  async function confirmGuestAddToShelf() {
+    const book = readerStore.state.book;
+    if (!book || guestAddToShelfBusy()) return;
+    setGuestAddToShelfBusy(true);
+    try {
+      const catalog = readerStore.state.catalog;
+      const saved = await addSearchBookToShelf(bookToSearchBook(book), {
+        chapters: catalog.length > 0 ? catalog : undefined,
+        fetchChapters: catalog.length > 0 ? false : "background",
+        readingProgress: getReaderProgressSnapshot(book.bookUrl),
+      });
+      if (saved) {
+        showAppToast({
+          title: "已加入书架",
+          description: book.name,
+          variant: "success",
+        });
+        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+        finishCloseReader();
+      } else {
+        showAppToast({ title: "加入书架失败", variant: "destructive" });
+      }
+    } catch (e) {
+      console.error("试读加入书架失败:", e);
+      showAppToast({
+        title: "加入书架失败",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setGuestAddToShelfBusy(false);
+    }
+  }
 
   /**
    * 执行导入操作
@@ -1963,14 +2028,7 @@ function AppContent() {
                 ) : showBookshelfManage() ? (
                   <BookshelfManagePage
                     onClose={() => setShowBookshelfManage(false)}
-                    onOpenBook={async (book) => {
-                      readerStore.setBookInitialState(book);
-                      setCurrentPage("reader");
-                      readerStore.openBook(book).catch((e) => {
-                        console.error("打开书籍失败:", e);
-                        setCurrentPage("bookshelf");
-                      });
-                    }}
+                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
                     onOpenBookInfo={async (book) => {
                       const source = await getSource(book.origin);
                       if (!source) {
@@ -1997,14 +2055,7 @@ function AppContent() {
                     onOpenBookshelfManage={() => setShowBookshelfManage(true)}
                     onImportLocal={handleBookshelfImportLocal}
                     onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                    onOpenBook={async (book) => {
-                      readerStore.setBookInitialState(book);
-                      setCurrentPage("reader");
-                      readerStore.openBook(book).catch((e) => {
-                        console.error('打开书籍失败:', e);
-                        setCurrentPage("bookshelf");
-                      });
-                    }}
+                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
                   />
                 )}
               </section>
@@ -2020,14 +2071,7 @@ function AppContent() {
               >
                 <ExplorePage
                   active={() => currentPage() === "scout"}
-                  onOpenBook={(book) => {
-                    readerStore.setBookInitialState(book);
-                    setCurrentPage("reader");
-                    readerStore.openBook(book).catch((e) => {
-                      console.error("打开书籍失败:", e);
-                      setCurrentPage("scout");
-                    });
-                  }}
+                  onOpenBook={(book) => openReaderPage(book, "scout")}
                   onOpenBookInfo={(source, book) => {
                     setBookInfoContext({ source, book, fromPage: "scout" });
                     setCurrentPage("book-info");
@@ -2366,10 +2410,7 @@ function AppContent() {
           {/* 阅读器页面 */}
           <Show when={currentPage() === "reader"}>
             <ReaderPage
-              onClose={() => {
-                readerStore.closeBook();
-                setCurrentPage("bookshelf");
-              }}
+              onClose={requestCloseReader}
               onOpenBookInfo={async () => {
                 const book = readerStore.state.book;
                 if (!book) return;
@@ -2417,14 +2458,7 @@ function AppContent() {
                     setExploreContext(null);
                     setCurrentPage("sources");
                   }}
-                  onOpenBook={(book) => {
-                    readerStore.setBookInitialState(book);
-                    setCurrentPage("reader");
-                    readerStore.openBook(book).catch((e) => {
-                      console.error("打开书籍失败:", e);
-                      setCurrentPage("explore");
-                    });
-                  }}
+                  onOpenBook={(book) => openReaderPage(book, "explore")}
                   onOpenBookInfo={(source, book) => {
                     setBookInfoContext({ source, book, fromPage: "explore" });
                     setCurrentPage("book-info");
@@ -2446,15 +2480,7 @@ function AppContent() {
                     setBookInfoContext(null);
                     setCurrentPage(fromPage ?? "explore");
                   }}
-                  onOpenBook={(book) => {
-                    readerStore.setBookInitialState(book);
-                    setCurrentPage("reader");
-                    setBookInfoContext(null);
-                    readerStore.openBook(book).catch((e) => {
-                      console.error("打开书籍失败:", e);
-                      setCurrentPage("book-info");
-                    });
-                  }}
+                  onOpenBook={(book) => openReaderPage(book, "book-info")}
                 />
               );
             }}
@@ -2589,6 +2615,18 @@ function AppContent() {
             if (!open) setSourceLoginDialogSource(null);
           }}
           source={sourceLoginDialogSource()}
+        />
+        <ReaderGuestAddToShelfDialog
+          open={guestAddToShelfOpen()}
+          bookName={readerStore.state.book?.name ?? ""}
+          adding={guestAddToShelfBusy()}
+          onOpenChange={(open) => {
+            if (!open && !guestAddToShelfBusy()) {
+              finishCloseReader();
+            }
+          }}
+          onDecline={finishCloseReader}
+          onConfirm={() => void confirmGuestAddToShelf()}
         />
         <InnerWebHost
           payload={innerWebPayload()}
