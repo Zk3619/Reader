@@ -1,4 +1,4 @@
-import { Show, createMemo } from 'solid-js';
+import { Show, createMemo, type Accessor } from 'solid-js';
 import { bookshelfLayoutStore } from '@/stores/bookshelf-layout';
 import { updateTocQueueStore } from '@/lib/book-source/update-toc-queue';
 import { cn } from '@/lib/utils';
@@ -6,10 +6,20 @@ import { cn } from '@/lib/utils';
 const pendingUpdateBadgeClass =
   'inline-flex shrink-0 items-center justify-center rounded-full bg-red-500 text-center font-semibold leading-none tabular-nums text-white shadow-sm';
 
-export function useBookshelfPendingUpdateCount() {
+/** total：全队列；group：仅当前分组书籍与队列交集，无交集时不显示徽标 */
+export type BookshelfPendingUpdateScope = 'total' | 'group';
+
+export function useBookshelfPendingUpdateCount(options: {
+  scope: Accessor<BookshelfPendingUpdateScope>;
+  scopeBookUrls?: Accessor<readonly string[] | undefined>;
+}) {
   return createMemo(() => {
     if (!bookshelfLayoutStore.settings.showPendingUpdateCount) return 0;
-    return updateTocQueueStore.totalCount;
+    if (options.scope() === 'total') {
+      return updateTocQueueStore.totalCount;
+    }
+    const urls = options.scopeBookUrls?.() ?? [];
+    return updateTocQueueStore.countForBookUrls(new Set(urls));
   });
 }
 
@@ -21,8 +31,15 @@ export type BookshelfPendingUpdateBadgeVariant =
 export function BookshelfPendingUpdateNavBadge(props: {
   class?: string;
   variant?: BookshelfPendingUpdateBadgeVariant;
+  /** 默认 total（导航/侧栏/底栏）；书架书籍列表为 group */
+  scope?: BookshelfPendingUpdateScope;
+  scopeBookUrls?: Accessor<readonly string[] | undefined>;
 }) {
-  const count = useBookshelfPendingUpdateCount();
+  const scope = () => props.scope ?? (props.scopeBookUrls ? 'group' : 'total');
+  const count = useBookshelfPendingUpdateCount({
+    scope,
+    scopeBookUrls: props.scopeBookUrls,
+  });
   const variant = () => props.variant ?? 'default';
 
   const label = () => `${count()} 本正在排队或更新目录`;

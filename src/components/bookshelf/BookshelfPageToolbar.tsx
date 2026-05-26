@@ -47,6 +47,10 @@ export interface BookshelfPageToolbarProps {
   showReloadLocal?: boolean;
   isReloadingLocal?: boolean;
   onReloadLocal?: () => void;
+  /** 分组选择页 total；书籍列表页 group */
+  pendingUpdateScope?: 'total' | 'group';
+  /** group 模式下当前分组书籍 URL */
+  pendingUpdateBookUrls?: () => readonly string[];
 }
 
 export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
@@ -65,7 +69,11 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
   return (
     <>
       <div class="flex shrink-0 items-center gap-2">
-        <BookshelfPendingUpdateNavBadge class="self-center" />
+        <BookshelfPendingUpdateNavBadge
+          class="self-center"
+          scope={props.pendingUpdateScope}
+          scopeBookUrls={props.pendingUpdateBookUrls}
+        />
         <Tooltip>
           <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 shrink-0">
             <SearchIcon class="h-4 w-4" />

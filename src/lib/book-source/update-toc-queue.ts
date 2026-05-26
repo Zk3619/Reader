@@ -45,6 +45,8 @@ let callbacks: UpdateTocQueueCallbacks = {};
 const [queueState, setQueueState] = createStore({
   pending: 0,
   active: 0,
+  /** 排队中 + 更新中的 bookUrl（供按分组统计徽标） */
+  queuedBookUrls: [] as string[],
 });
 
 /** 等待 + 正在更新的书本数（Solid 响应式） */
@@ -53,7 +55,15 @@ export const updateTocQueueStore = {
     return queueState;
   },
   get totalCount() {
-    return queueState.pending + queueState.active;
+    return queueState.queuedBookUrls.length;
+  },
+  /** 仅统计落在给定 bookUrl 集合内的排队/更新中书籍 */
+  countForBookUrls(bookUrls: ReadonlySet<string>): number {
+    let n = 0;
+    for (const url of queueState.queuedBookUrls) {
+      if (bookUrls.has(url)) n += 1;
+    }
+    return n;
   },
 };
 
@@ -64,6 +74,7 @@ function notifyProgress(): void {
   setQueueState({
     pending: waitQueue.length,
     active: activeSet.size,
+    queuedBookUrls: [...activeSet, ...waitQueue],
   });
   callbacks.onProgress?.({
     pending: waitQueue.length,

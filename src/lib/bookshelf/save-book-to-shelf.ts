@@ -129,11 +129,24 @@ export async function updateBookChapterMeta(bookUrl: string, chapters: BookChapt
   });
 }
 
+function shelfBookNeedsChapterMeta(book: Book): boolean {
+  return (book.totalChapterNum ?? 0) <= 0 || !book.latestChapterTitle?.trim();
+}
+
 /** 拉取并写入目录（书架上已有书但目录为空时复用） */
 export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> {
   if (isLocalBook(book) || !book.tocUrl || !book.origin) return;
+
   const count = await chaptersDb.getChapterCount(book.bookUrl);
-  if (count > 0) return;
+  if (count > 0) {
+    const saved = await booksDb.getBook(book.bookUrl);
+    if (!saved || !shelfBookNeedsChapterMeta(saved)) return;
+    const chapters = await chaptersDb.getChapterList(book.bookUrl);
+    if (chapters.length === 0) return;
+    await updateBookChapterMeta(book.bookUrl, chapters);
+    window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+    return;
+  }
 
   const source = await sourcesDb.getSource(book.origin);
   if (!source) return;
@@ -151,6 +164,21 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
 
 function scheduleBackgroundChapterFetch(book: Book): void {
   void fetchAndPersistChaptersForBook(book);
+}
+
+/** 在线书架书是否仍缺目录或 latestChapterTitle / totalChapterNum 元数据 */
+export function onlineBookNeedsChapterRepair(book: Book): boolean {
+  if (isLocalBook(book) || !book.tocUrl || !book.origin) return false;
+  return (book.totalChapterNum ?? 0) <= 0 || !book.latestChapterTitle?.trim();
+}
+
+/** 书架加载后后台补救（加入书架时拉目录中断、进程退出等） */
+export function scheduleShelfChapterRepairs(books: Book[]): void {
+  for (const book of books) {
+    if (onlineBookNeedsChapterRepair(book)) {
+      scheduleBackgroundChapterFetch(book);
+    }
+  }
 }
 
 /**

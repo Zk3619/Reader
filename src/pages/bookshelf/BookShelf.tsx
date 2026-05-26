@@ -51,6 +51,7 @@ import {
 } from '@/lib/platform/fs/storage-ref';
 import { readBytes } from '@/lib/platform/fs/read-write';
 import { hasBook } from '@/lib/database/books';
+import { scheduleShelfChapterRepairs } from '@/lib/bookshelf/save-book-to-shelf';
 import {
   importLocalBookFromContent,
   isLocalBook,
@@ -225,6 +226,7 @@ export function BookShelf(props: BookShelfProps) {
       // 根据当前排序模式对书籍进行排序
       const sorted = sortBooks(list, sortMode());
       setBooks(sorted);
+      scheduleShelfChapterRepairs(sorted);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '加载书籍失败';
       setBooksError(msg);
@@ -689,6 +691,8 @@ export function BookShelf(props: BookShelfProps) {
           onImportLocal={props.onImportLocal}
           onAddBookByUrl={props.onAddBookByUrl}
           onUpdateToc={handleUpdateToc}
+          pendingUpdateScope={showBooksView() ? 'group' : 'total'}
+          pendingUpdateBookUrls={() => books().map((b) => b.bookUrl)}
           showReloadLocal={showBooksView() && currentGroup() === BookGroupId.Local}
           isReloadingLocal={isReloadingBooks()}
           onReloadLocal={handleReloadLocalBooks}
