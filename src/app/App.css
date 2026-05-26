@@ -909,14 +909,7 @@ li[role="status"].toast-animated[data-closed],
   }
 }
 
-.toast-progress-bar {
-  animation: toast-progress var(--toast-duration, 3000ms) linear forwards;
-}
-
-.toast-progress-bar[data-toast-duration] {
-  --toast-duration: attr(data-toast-duration ms);
-  animation-duration: var(--toast-duration, 3000ms);
-}
+/* 由 AppToasts ToastProgressBar 以 JS 驱动宽度，与 Sonner 悬停暂停计时同步 */
 
 [data-kb-toast-close-button] {
   transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out, background-color 0.2s ease-in-out;
@@ -985,115 +978,63 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
 
 .reader-toast-host [data-sonner-toaster] {
   pointer-events: auto;
-  /* width: max-content !important; */
-  max-width: min(26.25rem, calc(100dvw - 2rem));
 }
 
-/* 通用 App toast：max 约束下宽度随内容；正文在 [data-content] 内滚动 */
-.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'] {
-  /* width: max-content !important; */
-  max-width: min(26.25rem, calc(100dvw - 2rem));
-  max-height: min(80dvh, 24rem);
-  min-height: 0;
-  overflow: hidden;
+/* 左图标 + 右标题/描述；宽高上限由 AppToasts 注入的 CSS 变量决定 */
+.reader-toast-host [data-sonner-toast].reader-app-toast {
   align-items: flex-start;
-  /* Sonner 默认 touch-action:none 会阻断内部滚动 */
-  touch-action: auto;
-}
-
-/* Sonner 用全量 initial-height 锁高会导致超出 max-height 时裁切却无滚动 */
-.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'][data-expanded='true'],
-.reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'][data-front='true'] {
-  height: auto !important;
+  max-width: var(--reader-app-toast-max-width, min(26.25rem, calc(100dvw - 2rem)));
+  max-height: var(--reader-app-toast-max-height, min(80dvh, 28rem));
+  overflow: hidden;
 }
 
 .reader-toast-host [data-sonner-toast].reader-app-toast [data-icon] {
   flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--plain [data-icon] {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  overflow: hidden;
 }
 
 .reader-toast-host [data-sonner-toast].reader-app-toast [data-content] {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
-  max-width: 100%;
-  max-height: min(calc(80dvh - 2rem), calc(24rem - 2rem));
+}
+
+/* 悬停展开：长内容可滚动（Sonner 锁高时避免裁切） */
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-expanded='true'] {
+  height: auto !important;
+  touch-action: auto;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-expanded='true'] [data-content] {
+  max-height: var(--reader-app-toast-content-max-height, min(calc(80dvh - 2rem), calc(28rem - 2rem)));
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-gutter: stable both-edges;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
 }
 
-.reader-toast-host [data-sonner-toast].reader-app-toast [data-title],
-.reader-toast-host [data-sonner-toast].reader-app-toast [data-description] {
-  overflow-wrap: anywhere;
-}
-
+/* 进度条 */
 .reader-toast-host [data-sonner-toast].reader-app-toast--progress [data-content] {
   padding-bottom: 2px;
 }
 
-.reader-toast-host [data-sonner-toast].reader-app-toast--progress .toast-progress-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  flex-shrink: 0;
+.reader-toast-host .toast-progress-track {
   margin-top: 0.25rem;
-  animation: toast-progress var(--toast-duration, 3000ms) linear forwards;
 }
 
-/* 与 Sonner 悬停暂停计时一致：鼠标在通知区域时进度条也暂停 */
-.reader-toast-host [data-sonner-toaster]:hover .toast-progress-bar {
-  animation-play-state: paused;
+.reader-toast-host .toast-progress-fill {
+  transition: width 75ms linear;
 }
 
-@media (max-width: 600px) {
-  .reader-toast-host [data-sonner-toaster] {
-    width: 100% !important;
-    max-width: none;
-  }
-
-  .reader-toast-host [data-sonner-toast].reader-app-toast[data-styled='true'] {
-    width: calc(100% - var(--mobile-offset-left, 16px) * 2) !important;
-    max-width: none;
-  }
-}
-
-/* 书源脚本框线 toast：参与 Sonner 默认堆叠（scale + 高度裁剪，悬停展开） */
-[data-sonner-toast].reader-script-toast.reader-script-toast-shell {
-  align-items: flex-start !important;
-  overflow: hidden !important;
-  overflow-wrap: normal !important;
-  word-break: normal !important;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-[data-sonner-toaster][data-y-position='bottom'] [data-sonner-toast].reader-script-toast {
-  transform-origin: 50% 100%;
-}
-
-.reader-script-toast-text {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  max-height: min(70vh, 28rem);
-  margin: 0;
-  padding: 0 2px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.45;
-  tab-size: 4;
-  letter-spacing: 0.02em;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* Sonner 关闭按钮：限定在 .reader-toast-host，优先级高于 solid-sonner 运行时 styleInject */
+/* 关闭按钮：限定在 .reader-toast-host，优先级高于 solid-sonner 运行时 styleInject */
 .reader-toast-host [data-sonner-toaster][dir='ltr'] {
   --toast-close-button-start: unset;
   --toast-close-button-end: 0.75rem;
@@ -1146,19 +1087,6 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
 
 .reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button]:hover svg,
 .reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover svg {
-  color: hsl(var(--destructive));
-}
-
-.reader-toast-host [data-rich-colors='true'][data-sonner-toast][data-styled='true'] [data-close-button] {
-  background: transparent;
-  border-color: transparent;
-  color: hsl(var(--muted-foreground));
-}
-
-.reader-toast-host [data-rich-colors='true'][data-sonner-toast][data-styled='true']:hover [data-close-button]:hover,
-.reader-toast-host [data-rich-colors='true'][data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover {
-  background: hsl(var(--muted) / 0.65);
-  border-color: hsl(var(--border));
   color: hsl(var(--destructive));
 }
 
@@ -1286,6 +1214,7 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
 [data-reduce-motion="true"] [data-opened],
 [data-reduce-motion="true"] [data-closed],
 [data-reduce-motion="true"] .toast-progress-bar,
+[data-reduce-motion="true"] .toast-progress-fill,
 [data-reduce-motion="true"] .fade-in,
 [data-reduce-motion="true"] .fade-out,
 [data-reduce-motion="true"] .slide-in-from-bottom-4,

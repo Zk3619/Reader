@@ -33,12 +33,14 @@ import {
   Ellipsis,
   File,
   FileText,
+  Film,
   Folder,
   FolderPlus,
   FolderTree,
   Globe,
   GripVertical,
   HardDrive,
+  History,
   Image,
   Info,
   LayoutGrid,
@@ -173,10 +175,15 @@ export const TocMetaIcon = icon(BookMarked);
 export const GroupAllIcon = icon(Book);
 export const GroupLocalIcon = icon(HardDrive);
 export const GroupAudioIcon = icon(Music);
+export const GroupVideoIcon = icon(Film);
 export const GroupNetIcon = icon(Globe);
 export const GroupFolderIcon = icon(Folder);
 export const GroupErrorIcon = icon(CircleAlert);
 export const GroupDefaultIcon = icon(BookOpen);
+
+/** 书架阅读进度（对齐 Legado 列表 ic_book_last / ic_history） */
+export const BookshelfLatestChapterIcon = icon(BookMarked);
+export const BookshelfReadProgressIcon = icon(History);
 
 /** 阅读器 */
 export const VolumeIcon = icon(Volume2);

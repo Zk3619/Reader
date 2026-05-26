@@ -1,7 +1,8 @@
-import { For, createMemo, type Component } from "solid-js";
+import { For, Show, createMemo, type Component } from "solid-js";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PageType } from "@/components/shell/Navigation";
+import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
 import {
   BookshelfIcon,
   BookSourceIcon,
@@ -61,10 +62,15 @@ export function BottomBar(props: BottomBarProps) {
                 onClick={() => handlePageChange(page)}
                 class={buttonClass()}
               >
-                {(() => {
-                  const Icon = config.icon;
-                  return <Icon class="h-5 w-5" />;
-                })()}
+                <span class="relative inline-flex">
+                  {(() => {
+                    const Icon = config.icon;
+                    return <Icon class="h-5 w-5" />;
+                  })()}
+                  <Show when={page === 'bookshelf'}>
+                    <BookshelfPendingUpdateNavBadge class="absolute -top-1.5 -right-2.5 z-10" />
+                  </Show>
+                </span>
                 <span class="text-xs font-medium">{config.label}</span>
               </Button>
             );

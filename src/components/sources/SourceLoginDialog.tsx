@@ -273,16 +273,15 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
     setRunning(true);
     const onToast = (msg: string, long?: boolean) => {
       const text = msg?.trim() ?? '';
-      if (!text) {
-        if (!long) showAppToast({ description: '已执行', variant: 'default' });
-        return;
-      }
+      if (!text) return;
+      // 框架层「脚本执行」提示，非书源脚本输出
+      if (/^脚本执行/.test(text)) return;
       // longToast / checkStatus 等：多行框线排版，需 pre-wrap + 等宽字体
       if (long || text.includes('\n')) {
         showScriptToast(text);
         return;
       }
-      showAppToast({ description: text, variant: 'default' });
+      showAppToast({ description: text, variant: 'plain' });
     };
     try {
       if (useRustEngine()) {
@@ -308,7 +307,6 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
         const stored = getStoredLoginInfo(source.sourceUrl ?? '');
         if (Object.keys(stored).length > 0) setFormValues(stored);
       }
-      showAppToast({ title: '执行完成', description: `「${item.name ?? ''}」已执行`, variant: 'default' });
     } catch (e) {
       console.error('登录脚本执行失败:', e);
       showAppToast({

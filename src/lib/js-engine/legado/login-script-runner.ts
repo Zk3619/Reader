@@ -992,7 +992,6 @@ export async function runLoginScript(
   const baseUrl = getScriptBaseUrl(source);
   const loginUrlScript = (source.loginUrl ?? '').trim();
   if (!loginUrlScript) return;
-  if (onToast) onToast(`脚本执行: ${(action || '').trim().slice(0, 40) || '(空)'}`, false);
   console.warn(LOG_TAG, 'runLoginScript', { action: action?.slice(0, 50), baseUrl: baseUrl?.slice(0, 60) });
 
   const sourceUrl = getSourceUrlIdentifier(source);
@@ -1854,8 +1853,6 @@ export async function runLoginScriptRust(
   const loginKey = storageKey(STORAGE_PREFIX_LOGIN, sourceUrl);
   const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
-
-  if (onToast) onToast(`脚本执行(Rust): ${(action || '').trim().slice(0, 40) || '(空)'}`, false);
 
   const argsJson = (() => {
     try {

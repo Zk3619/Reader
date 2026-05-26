@@ -46,14 +46,13 @@ import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
 import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
 import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
-import { ScrollToTop } from "@/components/shell/ScrollToTop";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
 import { cn } from "@/lib/utils";
 import { mainShellInset, mainShellPageRoot, mainShellPageScroll } from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
-import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix } from "@/components/shared/AppToasts";
+import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
@@ -187,7 +186,7 @@ function AppContent() {
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [_dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const [windowWidth, setWindowWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
@@ -1906,18 +1905,21 @@ function AppContent() {
           </div>
         </Show>
 
-        {/* 左侧边栏：桌面壳层且宽度 ≥768px（与 ui/sidebar md 断点一致） */}
-        <Show when={!isStandalonePage() && shell().showSidebar}>
+        {/* 左侧边栏：桌面壳层且宽度 ≥768px；独立页仅隐藏不卸载，避免返回时 useSidebar 上下文丢失 */}
+        <Show when={shell().showSidebar}>
           <div
             class={cn(
               "fixed bottom-0 left-0 z-40",
-              showTopNav() ? "top-14" : "top-0"
+              showTopNav() ? "top-14" : "top-0",
+              isStandalonePage() && "hidden pointer-events-none",
             )}
           >
             <SideBar
               currentPage={currentPage()}
               onPageChange={setCurrentPage}
               recentBooks={mockRecentBooks}
+              sidebarState={state}
+              onToggleSidebar={toggleSidebar}
             />
           </div>
         </Show>
@@ -2468,20 +2470,6 @@ function AppContent() {
 
         </Show>
 
-        {/* 回到顶部按钮 - 放在滚动容器外部，确保 fixed 定位正确 */}
-        <ScrollToTop
-          container={() => {
-            // 获取主内容容器元素
-            const containerEl = document.getElementById('main-content-container');
-            return containerEl || window;
-          }}
-          threshold={300}
-          positionClass={cn(
-            "bottom-8",
-            shell().useMobileShell ? "right-4" : "right-8"
-          )}
-        />
-
         {/* 书籍目录选择弹窗 */}
         <BookDirectoryDialog
           open={showBookDirectoryDialog()}
@@ -2624,18 +2612,21 @@ const appSidebarStyle = {
 } as const;
 
 function App() {
+  const toastIcons = createAppToastIcons();
+
   return (
     <SidebarProvider style={appSidebarStyle}>
       <AppContent />
       <Portal mount={document.body}>
-        <div class="reader-toast-host" data-kb-top-layer>
+        <div class="reader-toast-host" data-kb-top-layer style={appToastHostStyle()}>
           <SonnerInteractionFix />
           <Toaster
             duration={DEFAULT_TOAST_DURATION}
             theme="system"
             position="bottom-right"
             closeButton
-            richColors
+            richColors={false}
+            icons={toastIcons}
             swipeDirections={["bottom", "right"]}
             class="z-200"
           />
