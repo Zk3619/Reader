@@ -333,6 +333,7 @@
     --book-card-motion-duration: 0.55s;
     --book-card-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
     transform: translate3d(0, 0, 0);
+    will-change: transform;
     backface-visibility: hidden;
     transition:
       transform var(--book-card-motion-duration) var(--book-card-motion-ease),
@@ -340,6 +341,11 @@
       border-color 0.22s ease,
       background-color 0.22s ease,
       color 0.22s ease;
+  }
+
+  /** 紧凑列表：缩短 transform 过渡，减少文字/边缘栅格化的“发糊中间态” */
+  .book-group-card-motion.book-group-card-motion--compact {
+    --book-card-motion-duration: 0.22s;
   }
 
   .book-group-card-motion:hover {
@@ -368,6 +374,7 @@
   .book-group-card-cover-motion {
     transform: scale3d(1, 1, 1);
     transform-origin: center center;
+    will-change: transform;
     backface-visibility: hidden;
     transition:
       transform var(--book-card-motion-duration, 0.55s) var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
@@ -375,6 +382,11 @@
 
   .book-group-card-motion:hover .book-group-card-cover-motion--list {
     transform: scale3d(1.04, 1.04, 1);
+  }
+
+  /** 紧凑列表：微缩放，避免被轻微裁切 */
+  .book-group-card-motion:hover .book-group-card-cover-motion--compact {
+    transform: scale3d(1.012, 1.012, 1);
   }
 
   .book-group-card-motion:hover .book-group-card-cover-motion--grid {
@@ -400,9 +412,14 @@
 
     .book-group-card-cover-motion,
     .book-group-card-motion:hover .book-group-card-cover-motion--list,
+    .book-group-card-motion:hover .book-group-card-cover-motion--compact,
     .book-group-card-motion:hover .book-group-card-cover-motion--grid {
       transform: scale3d(1, 1, 1);
       transition: none;
+    }
+
+    .book-group-card-motion.book-group-card-motion--compact:hover {
+      transform: translate3d(0, 0, 0);
     }
   }
 

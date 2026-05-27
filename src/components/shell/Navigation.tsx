@@ -33,6 +33,8 @@ import {
 
 export type PageType =
   | "bookshelf"
+  | "bookshelf-cache"
+  | "book-search"
   | "scout"
   | "sources"
   | "explore"
@@ -61,10 +63,23 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
   reader: { label: "阅读器", icon: BookmarkIcon, description: "阅读书籍" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
+  "book-search": { label: "搜索", icon: BookOpenIcon, description: "搜索书架与全网书籍" },
+  "bookshelf-cache": {
+    label: "离线缓存",
+    icon: BookshelfIcon,
+    description: "批量缓存与导出正文",
+  },
 };
 
 /** 不出现在顶栏页面菜单；与 App.tsx 的 STANDALONE_PAGES（布局/挂载）无关 */
-const NAV_HIDDEN_PAGES: PageType[] = ["explore", "remote-book", "reader", "book-info"];
+const NAV_HIDDEN_PAGES: PageType[] = [
+  "explore",
+  "remote-book",
+  "reader",
+  "book-info",
+  "book-search",
+  "bookshelf-cache",
+];
 
 const NAV_MENU_PAGES = Object.entries(pageConfig).filter(
   ([page]) => !NAV_HIDDEN_PAGES.includes(page as PageType)

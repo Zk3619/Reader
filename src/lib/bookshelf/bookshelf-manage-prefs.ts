@@ -1,25 +1,14 @@
-import { getStorage, setStorage } from '@/lib/platform/storage';
+import { getStorage } from '@/lib/platform/storage';
+import { loadBookshelfPagePrefs, saveBookshelfPagePrefs } from '@/lib/search/search-prefs';
 
-const PREFS_KEY = 'bookshelf_manage_prefs';
 const LEGACY_OPEN_INFO_KEY = 'bookshelf_manage_open_info_by_title';
 
-/** 书架管理搜索模式：常规 / 模糊 / 扩展（至少保留一项，默认常规） */
-export type BookshelfManageSearchMode = 'name' | 'fuzzy' | 'extended';
-
-export function normalizeBookshelfManageSearchMode(
-  mode: unknown,
-): BookshelfManageSearchMode {
-  if (mode === 'fuzzy' || mode === 'extended' || mode === 'name') return mode;
-  return 'name';
-}
-
-/** 书架管理页持久化偏好（不含具体筛选条件） */
+/** 书架管理页持久化偏好（嵌套在 bookshelf_page_prefs.children.manage） */
 export interface BookshelfManagePrefs {
   filterByBookGroup: boolean;
   filterBySource: boolean;
   openBookInfoByClickTitle: boolean;
   coverClickPreview: boolean;
-  searchMode: BookshelfManageSearchMode;
 }
 
 export const DEFAULT_BOOKSHELF_MANAGE_PREFS: BookshelfManagePrefs = {
@@ -27,29 +16,58 @@ export const DEFAULT_BOOKSHELF_MANAGE_PREFS: BookshelfManagePrefs = {
   filterBySource: false,
   openBookInfoByClickTitle: false,
   coverClickPreview: true,
-  searchMode: 'name',
 };
 
 export async function loadBookshelfManagePrefs(): Promise<BookshelfManagePrefs> {
-  const stored = await getStorage<Record<string, unknown>>(PREFS_KEY);
-  if (stored && typeof stored === 'object') {
-    return {
-      filterByBookGroup: stored.filterByBookGroup === true,
-      filterBySource: stored.filterBySource === true,
-      openBookInfoByClickTitle: stored.openBookInfoByClickTitle === true,
-      coverClickPreview: stored.coverClickPreview !== false,
-      searchMode: normalizeBookshelfManageSearchMode(stored.searchMode),
-    };
-  }
+  const pagePrefs = await loadBookshelfPagePrefs();
+  const child = pagePrefs.children.manage;
+  const legacy = await getStorage<Record<string, unknown>>('bookshelf_manage_prefs');
   const legacyOpenInfo = await getStorage<boolean>(LEGACY_OPEN_INFO_KEY);
-  if (legacyOpenInfo === true) {
-    return { ...DEFAULT_BOOKSHELF_MANAGE_PREFS, openBookInfoByClickTitle: true };
-  }
-  return { ...DEFAULT_BOOKSHELF_MANAGE_PREFS };
+  return {
+    filterByBookGroup: child.filterByBookGroup || legacy?.filterByBookGroup === true,
+    filterBySource: child.filterBySource || legacy?.filterBySource === true,
+    openBookInfoByClickTitle:
+      child.openBookInfoByClickTitle ||
+      legacy?.openBookInfoByClickTitle === true ||
+      legacyOpenInfo === true,
+    coverClickPreview:
+      legacy?.coverClickPreview === undefined
+        ? child.coverClickPreview
+        : child.coverClickPreview && legacy.coverClickPreview !== false,
+  };
 }
 
 export async function saveBookshelfManagePrefs(prefs: BookshelfManagePrefs): Promise<void> {
-  await setStorage(PREFS_KEY, prefs);
+  const pagePrefs = await loadBookshelfPagePrefs();
+  await saveBookshelfPagePrefs({
+    ...pagePrefs,
+    children: {
+      ...pagePrefs.children,
+      manage: {
+        ...pagePrefs.children.manage,
+        filterByBookGroup: prefs.filterByBookGroup,
+        filterBySource: prefs.filterBySource,
+        openBookInfoByClickTitle: prefs.openBookInfoByClickTitle,
+        coverClickPreview: prefs.coverClickPreview,
+      },
+    },
+  });
+}
+
+export async function loadGroupManageCoverClickPreview(): Promise<boolean> {
+  const pagePrefs = await loadBookshelfPagePrefs();
+  return pagePrefs.children.groupManage.coverClickPreview !== false;
+}
+
+export async function saveGroupManageCoverClickPreview(value: boolean): Promise<void> {
+  const pagePrefs = await loadBookshelfPagePrefs();
+  await saveBookshelfPagePrefs({
+    ...pagePrefs,
+    children: {
+      ...pagePrefs.children,
+      groupManage: { ...pagePrefs.children.groupManage, coverClickPreview: value },
+    },
+  });
 }
 
 /** 生成筛选条件摘要（用于工具栏 Tooltip 与页头描述） */

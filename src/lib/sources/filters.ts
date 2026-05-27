@@ -53,8 +53,8 @@ export function getSourceGroupLabel(value: string | null): string {
   return LABELS[normalized ?? value] ?? LABELS[value] ?? value;
 }
 
-/** 书源列表搜索模式：仅名称 / 模糊搜索（名称） / 扩展规则（对齐 legado，名称+URL+分组+注释等） */
-export type SourceSearchMode = 'name' | 'fuzzy' | 'extended';
+/** 书源列表搜索模式（由 sources_page_prefs 持久化） */
+export type { SearchMode as SourceSearchMode } from '@/lib/search/search-prefs';
 
 /** 模糊匹配：关键词各字符在文本中按顺序出现（可不连续） */
 export function fuzzyMatchQuery(query: string, text: string): boolean {

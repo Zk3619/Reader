@@ -41,6 +41,11 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
   reader: { label: "阅读器", icon: BookmarkIcon, description: "阅读书籍" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
+  "bookshelf-cache": {
+    label: "离线缓存",
+    icon: BookshelfIcon,
+    description: "批量缓存与导出正文",
+  },
 };
 
 // 最近读过的书籍类型

@@ -9,26 +9,36 @@
  * 4. 对于默认分组，禁止删除和修改名称
  */
 
-import { createSignal, For, Show, onMount, onCleanup, batch, createEffect } from 'solid-js';
+import { createSignal, For, Show, onMount, onCleanup, batch, createEffect, createMemo } from 'solid-js';
 import Sortable from 'sortablejs';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { GroupContextMenu, type GroupContextMenuActions } from '@/components/bookshelf/BookGroupContextMenu';
-import { bookGroupCompactCardClass, bookGroupCompactCoverClass } from '@/lib/bookshelf/book-group-card-styles';
+import {
+  bookshelfCompactCoverClass,
+  bookshelfCompactListRowClass,
+  bookshelfCompactMainClass,
+} from '@/lib/bookshelf/book-group-card-styles';
 import {
   applyGroupsOrder,
   isDefaultBookGroup,
   pinGroupToBottom,
   pinGroupToTop,
 } from '@/lib/bookshelf/book-group-order';
+import { filterBookGroups } from '@/lib/search/search-filters';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
 import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
-import { BookshelfIcon, GripVerticalIcon } from '@/components/shared/icons';
+import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
+import { BookshelfIcon, GripVerticalIcon, SearchIcon } from '@/components/shared/icons';
+import {
+  loadGroupManageCoverClickPreview,
+  saveGroupManageCoverClickPreview,
+} from '@/lib/bookshelf/bookshelf-manage-prefs';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
@@ -80,6 +90,85 @@ const bookSortOptions = [
   { value: 5, label: '作者' },
 ];
 
+function GroupManageListCover(props: {
+  group: BookGroup;
+  coverImageErrorIds: Set<number>;
+  onCoverError: (groupId: number) => void;
+  coverClickPreview?: boolean;
+  onCoverPreview?: () => void;
+}) {
+  const info = () => getCoverPreviewInfo(props.group.cover);
+  const imageFailed = () => props.coverImageErrorIds.has(props.group.groupId);
+  const canPreview = () =>
+    !!props.coverClickPreview && !!info().url && !imageFailed();
+
+  const coverContent = () => {
+    const preview = info();
+    if (preview.type === 'invalid' || (preview.url && imageFailed())) {
+      return (
+        <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
+          <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
+        </span>
+      );
+    }
+    if (preview.type === 'emoji' && props.group.cover) {
+      return (
+        <span class="flex h-full w-full items-center justify-center">{props.group.cover.trim()}</span>
+      );
+    }
+    if (preview.url && !imageFailed()) {
+      return (
+        <img
+          src={preview.url ?? undefined}
+          alt=""
+          class="h-full w-full object-cover"
+          onError={() => props.onCoverError(props.group.groupId)}
+        />
+      );
+    }
+    return (
+      <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
+        <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
+      </span>
+    );
+  };
+
+  return (
+    <Show
+      when={canPreview()}
+      fallback={
+        <div
+          class={bookshelfCompactCoverClass('text-lg')}
+          role="presentation"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {coverContent()}
+        </div>
+      }
+    >
+      <div
+        class={cn(bookshelfCompactCoverClass('text-lg'), 'cursor-pointer')}
+        role="button"
+        tabIndex={0}
+        aria-label={`查看 ${props.group.groupName} 封面大图`}
+        onClick={(e) => {
+          e.stopPropagation();
+          props.onCoverPreview?.();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            props.onCoverPreview?.();
+          }
+        }}
+      >
+        {coverContent()}
+      </div>
+    </Show>
+  );
+}
+
 export function BookGroupManage(props: BookGroupManageProps) {
   const [groups, setGroups] = createSignal<BookGroup[]>([]);
   const [loading, setLoading] = createSignal(false);
@@ -89,12 +178,27 @@ export function BookGroupManage(props: BookGroupManageProps) {
   const [formDialogGroup, setFormDialogGroup] = createSignal<BookGroup | null>(null);
   // 封面图片加载失败的 groupId 集合，用于显示默认图标
   const [coverImageErrorIds, setCoverImageErrorIds] = createSignal<Set<number>>(new Set());
+  const [searchQuery, setSearchQuery] = createSignal('');
+  const [coverClickPreview, setCoverClickPreview] = createSignal(true);
+  const [coverPreviewGroup, setCoverPreviewGroup] = createSignal<BookGroup | null>(null);
   // SortableJS 实例
   let sortableInstance: Sortable | null = null;
   let sortableContainer: HTMLDivElement | null = null;
 
+  const filteredGroups = createMemo(() =>
+    filterBookGroups(groups(), searchQuery(), getGroupDisplayName),
+  );
+
   // 加载分组数据
+  async function handleCoverClickPreviewChange(value: boolean) {
+    setCoverClickPreview(value);
+    await saveGroupManageCoverClickPreview(value);
+  }
+
   onMount(() => {
+    void loadGroupManageCoverClickPreview().then((v) => {
+      setCoverClickPreview(v);
+    });
     loadGroups();
 
     onCleanup(() => {
@@ -191,6 +295,16 @@ export function BookGroupManage(props: BookGroupManageProps) {
   createEffect(() => {
     const groupsData = groups();
     const isLoading = loading();
+    const hasSearch = searchQuery().trim().length > 0;
+
+    if (hasSearch) {
+      if (sortableInstance) {
+        sortableInstance.destroy();
+        sortableInstance = null;
+        isInitialized = false;
+      }
+      return;
+    }
 
     if (!isInitialized && sortableContainer && !isLoading && groupsData.length > 0) {
       setTimeout(() => {
@@ -367,8 +481,13 @@ export function BookGroupManage(props: BookGroupManageProps) {
   }
 
   const pageDescription = () => {
-    const n = groups().length;
-    return n > 0 ? `共 ${n} 个分组` : undefined;
+    const total = groups().length;
+    if (total === 0) return undefined;
+    const q = searchQuery().trim();
+    if (q) {
+      return `共 ${total} 个分组，匹配 ${filteredGroups().length} 个`;
+    }
+    return `共 ${total} 个分组`;
   };
 
   return (
@@ -387,7 +506,13 @@ export function BookGroupManage(props: BookGroupManageProps) {
           <BookGroupManageToolbarLeading onBack={() => props.onClose?.()} />
         }
       >
-        <BookGroupManagePageToolbar onAdd={handleAdd} />
+        <BookGroupManagePageToolbar
+          searchQuery={searchQuery()}
+          onSearchQueryChange={setSearchQuery}
+          coverClickPreview={coverClickPreview()}
+          onCoverClickPreviewChange={handleCoverClickPreviewChange}
+          onAdd={handleAdd}
+        />
       </PageToolbar>
 
       <div class={cn(mainShellPageScroll, 'space-y-6 w-full')}>
@@ -403,7 +528,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
               {() => (
                 <div class="flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2 animate-pulse">
                   <span class="h-5 w-5 shrink-0 rounded bg-muted" />
-                  <span class="aspect-3/4 h-14 shrink-0 rounded-md bg-muted" />
+                  <span class="aspect-3/4 h-16 shrink-0 rounded-md bg-muted" />
                   <span class="h-4 flex-1 max-w-[200px] rounded bg-muted" />
                   <span class="h-4 w-16 rounded bg-muted" />
                 </div>
@@ -413,118 +538,110 @@ export function BookGroupManage(props: BookGroupManageProps) {
         </Show>
 
         <Show when={!loading() && groups().length > 0}>
-          <div
-            ref={(el) => {
-              sortableContainer = el;
-            }}
-            class="space-y-2"
+          <Show
+            when={filteredGroups().length > 0}
+            fallback={
+              <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
+                <SearchIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />
+                <h3 class="mb-2 text-lg font-semibold text-foreground">无匹配分组</h3>
+                <p class="text-sm text-muted-foreground">请尝试其他关键词</p>
+              </div>
+            }
           >
-            <For each={groups()} fallback={<div>暂无分组</div>}>
-              {(group) => {
-                const isDefault = isDefaultBookGroup(group.groupId);
-
-                return (
-                  <GroupContextMenu
-                    group={group}
-                    orderGroups={groups()}
-                    actions={groupContextMenuActions}
-                    withLongPress
-                    data-group-id={group.groupId}
-                    class={bookGroupCompactCardClass('select-none')}
-                  >
-                    <div class="drag-handle cursor-move text-muted-foreground hover:text-foreground select-none">
-                      <GripVerticalIcon class="h-4 w-4" size={16} />
-                    </div>
-
-                    <div class={bookGroupCompactCoverClass('text-lg')}>
-                      {(() => {
-                        const info = getCoverPreviewInfo(group.cover);
-                        const imageFailed = coverImageErrorIds().has(group.groupId);
-                        if (info.type === 'invalid' || (info.url && imageFailed)) {
-                          return (
-                            <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                              <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                            </span>
-                          );
-                        }
-                        if (info.type === 'emoji' && group.cover) {
-                          return <span class="flex h-full w-full items-center justify-center">{group.cover.trim()}</span>;
-                        }
-                        if (info.url && !imageFailed) {
-                          return (
-                            <img
-                              src={info.url}
-                              alt=""
-                              class="h-full w-full object-cover"
-                              onError={() => setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))}
-                            />
-                          );
-                        }
-                        return (
-                          <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
-                            <BookCoverPlaceholderIcon class="h-4 w-4" size={16} />
-                          </span>
-                        );
-                      })()}
-                    </div>
-
-                    <div class="min-w-0 flex-1">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <h3 class="mb-0.5 truncate font-semibold text-foreground">
-                          {getGroupDisplayName(group)}
-                        </h3>
-                        {isDefault && (
-                          <span class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                            系统
-                          </span>
-                        )}
-                      </div>
-                      <p class="text-xs text-muted-foreground">
-                        排序方式: {bookSortOptions.find(o => o.value === group.bookSort)?.label || '默认'}
-                      </p>
-                    </div>
-
-                    <div
-                      class="flex items-center gap-3"
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      <div class="flex items-center gap-2">
-                        <Label for={`show-${group.groupId}`} class="text-sm">
-                          显示
-                        </Label>
-                        <Switch
-                          checked={group.show}
-                          onChange={(checked) => handleToggleShow(group, checked)}
-                        >
-                          <SwitchControl id={`show-${group.groupId}`}>
-                            <SwitchThumb />
-                          </SwitchControl>
-                        </Switch>
-                      </div>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e: MouseEvent) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          handleEdit(group);
-                        }}
-                        onMouseDown={(e: MouseEvent) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                        }}
-                        type="button"
-                      >
-                        编辑
-                      </Button>
-                    </div>
-                  </GroupContextMenu>
-                );
+            <div
+              ref={(el) => {
+                sortableContainer = el;
               }}
-            </For>
-          </div>
+              class="space-y-2"
+            >
+              <For each={filteredGroups()}>
+                {(group) => {
+                  const isDefault = isDefaultBookGroup(group.groupId);
+                  const dragEnabled = () => !searchQuery().trim();
+
+                  return (
+                    <GroupContextMenu
+                      group={group}
+                      orderGroups={groups()}
+                      actions={groupContextMenuActions}
+                      withLongPress
+                      data-group-id={group.groupId}
+                      class={bookshelfCompactListRowClass('select-none')}
+                    >
+                      <Show when={dragEnabled()}>
+                        <div class="drag-handle flex h-full items-center cursor-move text-muted-foreground hover:text-foreground select-none">
+                          <GripVerticalIcon class="h-4 w-4" size={16} />
+                        </div>
+                      </Show>
+
+                      <GroupManageListCover
+                        group={group}
+                        coverImageErrorIds={coverImageErrorIds()}
+                        onCoverError={(groupId) =>
+                          setCoverImageErrorIds((prev) => new Set(prev).add(groupId))
+                        }
+                        coverClickPreview={coverClickPreview()}
+                        onCoverPreview={() => setCoverPreviewGroup(group)}
+                      />
+
+                      <div class={bookshelfCompactMainClass()}>
+                        <div class="flex min-w-0 items-center gap-2">
+                          <h3 class="mb-0.5 truncate font-semibold text-foreground">
+                            {getGroupDisplayName(group)}
+                          </h3>
+                          {isDefault && (
+                            <span class="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                              系统
+                            </span>
+                          )}
+                        </div>
+                        <p class="text-xs text-muted-foreground">
+                          排序方式: {bookSortOptions.find(o => o.value === group.bookSort)?.label || '默认'}
+                        </p>
+                      </div>
+
+                      <div
+                        class="flex h-full items-center gap-3"
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <div class="flex items-center gap-2">
+                          <Label for={`show-${group.groupId}`} class="text-sm">
+                            显示
+                          </Label>
+                          <Switch
+                            checked={group.show}
+                            onChange={(checked) => handleToggleShow(group, checked)}
+                          >
+                            <SwitchControl id={`show-${group.groupId}`}>
+                              <SwitchThumb />
+                            </SwitchControl>
+                          </Switch>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e: MouseEvent) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleEdit(group);
+                          }}
+                          onMouseDown={(e: MouseEvent) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                          }}
+                          type="button"
+                        >
+                          编辑
+                        </Button>
+                      </div>
+                    </GroupContextMenu>
+                  );
+                }}
+              </For>
+            </div>
+          </Show>
         </Show>
 
         <Show when={!loading() && groups().length === 0}>
@@ -547,6 +664,22 @@ export function BookGroupManage(props: BookGroupManageProps) {
           initialGroup={formDialogMode() === 'edit' ? formDialogGroup() : null}
           onSuccess={loadGroups}
           onError={(msg) => setError(msg)}
+        />
+
+        <BookCoverPreviewDialog
+          open={!!coverPreviewGroup()}
+          onOpenChange={(open) => {
+            if (!open) setCoverPreviewGroup(null);
+          }}
+          coverUrl={(() => {
+            const g = coverPreviewGroup();
+            if (!g) return null;
+            return getCoverPreviewInfo(g.cover).url;
+          })()}
+          bookUrl=""
+          name={
+            coverPreviewGroup() ? getGroupDisplayName(coverPreviewGroup()!) : ''
+          }
         />
       </div>
     </div>

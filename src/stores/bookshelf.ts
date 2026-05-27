@@ -13,6 +13,10 @@ import { createStore } from 'solid-js/store';
 import * as booksDb from '@/lib/database/books';
 import type { Book } from '@/types';
 import { getStorage, setStorage } from '@/lib/platform/storage';
+import {
+  loadBookshelfPageShowGroupList,
+  saveBookshelfPageShowGroupList,
+} from '@/lib/search/search-prefs';
 
 /**
  * 书架状态接口
@@ -41,8 +45,6 @@ export interface BookshelfState {
  */
 const STORAGE_KEY_CURRENT_GROUP = 'bookshelf_currentGroup';
 const STORAGE_KEY_CURRENT_GROUP_NAME = 'bookshelf_currentGroupName';
-const STORAGE_KEY_SHOW_GROUP_LIST = 'bookshelf_showGroupList';
-
 /**
  * 从存储恢复状态
  */
@@ -51,13 +53,13 @@ async function restoreStateFromStorage(): Promise<Partial<BookshelfState>> {
     const [currentGroup, currentGroupName, showGroupList] = await Promise.all([
       getStorage<number>(STORAGE_KEY_CURRENT_GROUP),
       getStorage<string>(STORAGE_KEY_CURRENT_GROUP_NAME),
-      getStorage<boolean>(STORAGE_KEY_SHOW_GROUP_LIST),
+      loadBookshelfPageShowGroupList(),
     ]);
 
     return {
       currentGroup: currentGroup ?? -1,
       currentGroupName: currentGroupName ?? '全部',
-      showGroupList: showGroupList ?? true,
+      showGroupList,
     };
   } catch (error) {
     console.warn('从存储恢复书架状态失败:', error);
@@ -326,8 +328,7 @@ export const bookshelfStore = {
    */
   setShowGroupList(show: boolean): void {
     setState({ showGroupList: show });
-    // 异步保存到存储（不阻塞 UI）
-    setStorage(STORAGE_KEY_SHOW_GROUP_LIST, show).catch((error) => {
+    saveBookshelfPageShowGroupList(show).catch((error) => {
       console.warn('保存显示分组页状态到存储失败:', error);
     });
   },

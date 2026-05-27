@@ -35,9 +35,11 @@ import {
   type BookTitleDisplay,
 } from '@/stores/bookshelf-layout';
 import {
+  bookshelfCompactListViewModeOptions,
+  bookshelfStandardListViewModeOptions,
   gridViewModeOptions,
   isGridViewMode,
-  listViewModeOptions,
+  isListViewMode,
 } from '@/lib/bookshelf/bookshelf-view-mode';
 import { cn } from '@/lib/utils';
 
@@ -50,14 +52,31 @@ function SettingToggleRow(props: {
   id: string;
   label: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <div class="flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-background/60">
-      <Label for={props.id} class="cursor-pointer text-sm font-normal leading-snug text-foreground">
+    <div
+      class={cn(
+        'flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors',
+        props.disabled ? 'opacity-60' : 'hover:bg-background/60',
+      )}
+    >
+      <Label
+        for={props.id}
+        class={cn(
+          'text-sm font-normal leading-snug text-foreground',
+          props.disabled ? 'cursor-not-allowed' : 'cursor-pointer',
+        )}
+      >
         {props.label}
       </Label>
-      <Checkbox id={props.id} checked={props.checked} onChange={props.onChange} />
+      <Checkbox
+        id={props.id}
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={props.onChange}
+      />
     </div>
   );
 }
@@ -223,30 +242,44 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                 class="w-full"
               >
                 <div class="grid grid-cols-2 items-start gap-3">
+                  <div class="space-y-3">
+                    <div class="space-y-2">
+                      <p class="text-xs font-medium text-muted-foreground">列表</p>
+                      <div class="flex flex-col gap-1.5">
+                        <For each={bookshelfStandardListViewModeOptions}>
+                          {(option) => (
+                            <RadioGroupItem value={option.value}>
+                              <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                            </RadioGroupItem>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                    <div class="space-y-2">
+                      <p class="text-xs font-medium text-muted-foreground">紧凑列表</p>
+                      <div class="flex flex-col gap-1.5">
+                        <For each={bookshelfCompactListViewModeOptions}>
+                          {(option) => (
+                            <RadioGroupItem value={option.value}>
+                              <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                            </RadioGroupItem>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </div>
                   <div class="space-y-2">
-                    <p class="text-xs font-medium text-muted-foreground">列表</p>
+                    <p class="text-xs font-medium text-muted-foreground">网格</p>
                     <div class="flex flex-col gap-1.5">
-                    <For each={listViewModeOptions}>
-                      {(option) => (
-                        <RadioGroupItem value={option.value}>
-                          <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                        </RadioGroupItem>
-                      )}
-                    </For>
+                      <For each={gridViewModeOptions}>
+                        {(option) => (
+                          <RadioGroupItem value={option.value}>
+                            <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
+                          </RadioGroupItem>
+                        )}
+                      </For>
+                    </div>
                   </div>
-                </div>
-                <div class="space-y-2">
-                  <p class="text-xs font-medium text-muted-foreground">网格</p>
-                  <div class="flex flex-col gap-1.5">
-                    <For each={gridViewModeOptions}>
-                      {(option) => (
-                        <RadioGroupItem value={option.value}>
-                          <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                        </RadioGroupItem>
-                      )}
-                    </For>
-                  </div>
-                </div>
                 </div>
               </RadioGroup>
             </section>
@@ -270,6 +303,29 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
               </RadioGroup>
             </section>
           </div>
+
+          <section
+            class={cn(
+              sectionPanelClass,
+              !isListViewMode(localSettings().viewMode) && 'opacity-60',
+            )}
+          >
+            <Label class={sectionTitleClass}>列表与紧凑列表下的封面点击预览</Label>
+            <p class="text-xs text-muted-foreground">
+              仅对列表与紧凑列表生效；网格布局下不可用。
+            </p>
+            <div class="divide-y divide-border/50 rounded-md border border-border/40 bg-background/40">
+              <SettingToggleRow
+                id="cover-click-preview"
+                label="封面点击预览"
+                checked={localSettings().coverClickPreview}
+                disabled={!isListViewMode(localSettings().viewMode)}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), coverClickPreview: checked })
+                }
+              />
+            </div>
+          </section>
 
           <section
             class={cn(

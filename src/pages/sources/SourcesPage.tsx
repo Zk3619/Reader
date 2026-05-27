@@ -69,8 +69,8 @@ import {
   normalizeSourceFilterValue,
   isSourceFilterOrAll,
   type SourceSearchMode,
-  fuzzyMatchQuery,
 } from '@/lib/sources/filters';
+import { filterBookSources } from '@/lib/search/search-filters';
 
 /** 批量栏「操作 / 更多」下拉：展开时 ChevronDown 由向下旋转为向上 */
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
@@ -82,7 +82,7 @@ export interface SourcesPageProps {
   currentSourceGroup: string | null;
   /** 搜索关键词，在当前分组内过滤书源 */
   sourceSearchQuery?: string;
-  /** 搜索模式：name=仅名称，fuzzy=名称模糊匹配，extended=legado 扩展规则（名称+URL+分组+注释等） */
+  /** 搜索模式（来源于 sources_page_prefs，各页扩展规则不同） */
   sourceSearchMode?: SourceSearchMode;
   /** 为 true 且当前为全部/筛选时，按分组名分块显示 */
   sourcesGroupByGroupName?: boolean;
@@ -302,32 +302,12 @@ export function SourcesPage(props: SourcesPageProps) {
     }
   }
 
-  /** 在当前分组内按搜索关键词与模式过滤：name=仅名称，fuzzy=名称模糊匹配，extended=legado 扩展（名称+URL+分组+注释等） */
+  /** 在当前分组内按全局搜索模式过滤 */
   const filteredSources = createMemo(() => {
     const list = sources();
     const q = (props.sourceSearchQuery ?? '').trim();
     if (!q) return list;
-    const mode = props.sourceSearchMode ?? 'name';
-    const qLower = q.toLowerCase();
-    return list.filter((s) => {
-      const name = s.sourceName || '';
-      if (mode === 'name') {
-        return name.toLowerCase().includes(qLower);
-      }
-      if (mode === 'fuzzy') {
-        return fuzzyMatchQuery(q, name);
-      }
-      // extended: 对齐 legado 书源搜索，匹配名称、URL、分组、注释
-      const url = (s.sourceUrl || '').toLowerCase();
-      const group = (s.sourceGroup || '').toLowerCase();
-      const comment = (s.sourceComment || '').toLowerCase();
-      return (
-        name.toLowerCase().includes(qLower) ||
-        url.includes(qLower) ||
-        group.includes(qLower) ||
-        comment.includes(qLower)
-      );
-    });
+    return filterBookSources(list, q, props.sourceSearchMode ?? 'name');
   });
 
   createEffect(() => {

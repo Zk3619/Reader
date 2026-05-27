@@ -56,11 +56,13 @@ import {
   Newspaper,
   PanelLeft,
   Plus,
+  Play,
   QrCode,
   RefreshCw,
   Search,
   Settings,
   SlidersHorizontal,
+  Square,
   Star,
   Sun,
   Upload,
@@ -70,6 +72,7 @@ import {
   Minimize,
   Volume2,
   ChevronUp,
+  Cloud,
   Cookie,
   SquareArrowRightEnter,
   SquareArrowRightExit,
@@ -121,6 +124,8 @@ export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);
 export const DownloadIcon = icon(Download);
+export const PlayIcon = icon(Play);
+export const SquareIcon = icon(Square);
 export const UploadIcon = icon(Upload);
 export const ExportIcon = icon(SquareArrowRightExit);
 export const ImportIcon = icon(SquareArrowRightEnter);
@@ -188,3 +193,5 @@ export const BookshelfReadProgressIcon = icon(History);
 /** 阅读器 */
 export const VolumeIcon = icon(Volume2);
 export const ChevronUpIcon = icon(ChevronUp);
+/** 目录：章节尚未写入正文缓存 */
+export const ChapterUncachedIcon = icon(Cloud);

@@ -186,18 +186,21 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             </AppDropdownMenuItem>
           </Show>
           <AppDropdownMenuItem
-            onSelect={() =>
-              props.onSourceSearchModeChange?.(sourceSearchModeRef.current === 'fuzzy' ? 'name' : 'fuzzy')
-            }
+            onSelect={() => props.onSourceSearchModeChange?.('name')}
+            class="flex items-center gap-2"
+          >
+            <MenuRadioIndicator selected={(props.sourceSearchMode ?? 'name') === 'name'} />
+            <span>常规搜索</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => props.onSourceSearchModeChange?.('fuzzy')}
             class="flex items-center gap-2"
           >
             <MenuRadioIndicator selected={props.sourceSearchMode === 'fuzzy'} />
             <span>模糊搜索</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
-            onSelect={() =>
-              props.onSourceSearchModeChange?.(sourceSearchModeRef.current === 'extended' ? 'name' : 'extended')
-            }
+            onSelect={() => props.onSourceSearchModeChange?.('extended')}
             class="flex items-center gap-2"
           >
             <MenuRadioIndicator selected={props.sourceSearchMode === 'extended'} />

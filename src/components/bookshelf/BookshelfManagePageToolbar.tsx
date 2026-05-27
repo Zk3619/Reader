@@ -22,13 +22,13 @@ import {
   DownloadIcon,
   ChevronLeftIcon,
 } from '@/components/shared/icons';
-import type { BookshelfManageSearchMode } from '@/lib/bookshelf/bookshelf-manage-prefs';
+import type { SearchMode } from '@/lib/search/search-prefs';
 
 export interface BookshelfManagePageToolbarProps {
   searchQuery?: string;
   onSearchQueryChange?: (query: string) => void;
-  searchMode?: BookshelfManageSearchMode;
-  onSearchModeChange?: (mode: BookshelfManageSearchMode) => void;
+  searchMode?: SearchMode;
+  onSearchModeChange?: (mode: SearchMode) => void;
   showFilterButton?: boolean;
   filterTooltip?: string;
   onOpenFilterDialog?: () => void;

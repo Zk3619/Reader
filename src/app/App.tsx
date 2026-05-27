@@ -14,12 +14,14 @@ import { Tray } from "@/components/shell/Tray";
 import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { BookShelf } from "@/pages/bookshelf/BookShelf";
+import { BookshelfCachePage } from "@/pages/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/sources/SourcesPage";
 import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
 import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
 import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
+import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
 import { ReaderPage } from "@/pages/reader/ReaderPage";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
@@ -30,7 +32,6 @@ import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog"
 import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
-import { SourceSearchDialog } from "@/components/sources/SourceSearchDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
 import { readerStore } from "@/stores/reader";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
@@ -47,6 +48,7 @@ import {
 import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
 import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
 import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
+import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
@@ -92,6 +94,7 @@ import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
 import { ImportActionDialog, type ImportAction } from "@/components/books/ImportActionDialog";
 import { ReplaceFileDialog, type ReplaceFileAction } from "@/components/books/ReplaceFileDialog";
 import { getSourceGroupLabel, normalizeSourceFilterValue, type SourceSearchMode } from "@/lib/sources/filters";
+import { loadSourcesPagePrefs, saveSourcesPagePrefs } from "@/lib/search/search-prefs";
 import { openSourceSettingsInApp } from "@/lib/platform/open-url";
 import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
 import {
@@ -168,7 +171,13 @@ const mockRecentBooks = [
 ];
 
 // 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
-const STANDALONE_PAGES: PageType[] = ["reader", "explore", "book-info", "remote-book"];
+const STANDALONE_PAGES: PageType[] = [
+  "reader",
+  "explore",
+  "book-info",
+  "book-search",
+  "remote-book",
+];
 
 function normalizeRestoredPage(page: string): PageType {
   if (page === "import") return "bookshelf";
@@ -194,6 +203,8 @@ function AppContent() {
   );
   const [showGroupManage, setShowGroupManage] = createSignal(false);
   const [showBookshelfManage, setShowBookshelfManage] = createSignal(false);
+  const [showBookshelfCache, setShowBookshelfCache] = createSignal(false);
+  const [bookshelfCacheGroupId, setBookshelfCacheGroupId] = createSignal(-1);
   const [showBookDirectoryDialog, setShowBookDirectoryDialog] = createSignal(false);
   const [showImportActionDialog, setShowImportActionDialog] = createSignal(false);
   const [showReplaceFileDialog, setShowReplaceFileDialog] = createSignal(false);
@@ -224,8 +235,11 @@ function AppContent() {
   const [importAdjustGroup, setImportAdjustGroup] = createSignal(false);
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
-  /** 书源搜索对话框：从书源项右键「搜索」打开，限定该书源 */
-  const [sourceSearchContext, setSourceSearchContext] = createSignal<{ source: BookSource } | null>(null);
+  /** 书籍搜索页：书架/书源入口 */
+  const [bookSearchContext, setBookSearchContext] = createSignal<{
+    initialQuery?: string;
+    initialScope?: string;
+  } | null>(null);
   /** 书源登录对话框：配置了 loginUi 时弹窗显示登录页 */
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
   const initialInnerWeb = loadPersistedInnerWebSession();
@@ -264,8 +278,26 @@ function AppContent() {
   const [sourceSearchQuery, setSourceSearchQuery] = createSignal("");
   /** 书源页：按分组名分块显示（仅全部/筛选时有效） */
   const [sourcesGroupByGroupName, setSourcesGroupByGroupName] = createSignal(false);
-  /** 书源页：搜索模式 name=仅名称，fuzzy=模糊搜索，extended=扩展搜索规则（与 legado 对齐）；模糊与扩展互斥 */
+  /** 书源页：搜索模式（持久化到 sources_page_prefs） */
   const [sourceSearchMode, setSourceSearchMode] = createSignal<SourceSearchMode>('name');
+
+  createEffect(() => {
+    if (currentPage() !== "sources") return;
+    void loadSourcesPagePrefs().then((p) => setSourceSearchMode(p.searchMode));
+  });
+
+  const persistSearchMode = (mode: SourceSearchMode) => {
+    setSourceSearchMode(mode);
+    void saveSourcesPagePrefs({ searchMode: mode });
+  };
+
+  const openBookSearch = (query?: string, scope?: string) => {
+    setBookSearchContext({
+      initialQuery: query?.trim() || undefined,
+      initialScope: scope,
+    });
+    setCurrentPage("book-search");
+  };
 
   const sourcePageToolbarTitle = () => {
     const label = getSourceGroupLabel(currentSourceGroup());
@@ -728,7 +760,7 @@ function AppContent() {
   const [bookInfoContext, setBookInfoContext] = createSignal<{
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf';
+    fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf' | 'book-search';
   } | null>(null);
 
   const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
@@ -745,11 +777,11 @@ function AppContent() {
     });
   }
 
-  function finishCloseReader() {
-    readerStore.closeBook();
+  async function finishCloseReader() {
     setGuestAddToShelfOpen(false);
     setGuestAddToShelfBusy(false);
     setCurrentPage(readerReturnPage());
+    await readerStore.closeBook();
   }
 
   function requestCloseReader() {
@@ -757,7 +789,7 @@ function AppContent() {
       setGuestAddToShelfOpen(true);
       return;
     }
-    finishCloseReader();
+    void finishCloseReader();
   }
 
   async function confirmGuestAddToShelf() {
@@ -778,7 +810,7 @@ function AppContent() {
           variant: "success",
         });
         window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
-        finishCloseReader();
+        void finishCloseReader();
       } else {
         showAppToast({ title: "加入书架失败", variant: "destructive" });
       }
@@ -1456,6 +1488,11 @@ function AppContent() {
       setDbInitialized(true);
       console.log('数据库初始化成功');
 
+      const { clearInvalidChapterCache } = await import('@/lib/chapter-cache');
+      void clearInvalidChapterCache().catch((e) => {
+        console.warn('[chapter-cache] clearInvalidChapterCache', e);
+      });
+
       // 初始化书架布局设置
       await initBookshelfLayoutSettings();
     } catch (error) {
@@ -2023,41 +2060,68 @@ function AppContent() {
                     : "hidden",
                 )}
               >
-                {showGroupManage() ? (
-                  <BookGroupManage onClose={() => setShowGroupManage(false)} />
-                ) : showBookshelfManage() ? (
-                  <BookshelfManagePage
-                    onClose={() => setShowBookshelfManage(false)}
-                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
-                    onOpenBookInfo={async (book) => {
-                      const source = await getSource(book.origin);
-                      if (!source) {
-                        showAppToast({
-                          title: "无法打开详情",
-                          description: "未找到对应书源",
-                          variant: "destructive",
+                <div class="flex flex-col flex-1 min-h-0 w-full">
+                  <div
+                    class={cn(
+                      'flex flex-col flex-1 min-h-0 w-full',
+                      (showGroupManage() ||
+                        showBookshelfManage() ||
+                        showBookshelfCache()) &&
+                        'hidden pointer-events-none',
+                    )}
+                  >
+                    <BookShelf
+                      active={() => currentPage() === "bookshelf"}
+                      onPageChange={setCurrentPage}
+                      onOpenGroupManage={() => setShowGroupManage(true)}
+                      onOpenBookshelfManage={() => setShowBookshelfManage(true)}
+                      onImportLocal={handleBookshelfImportLocal}
+                      onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
+                      onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                      onOpenBookshelfCache={(groupId) => {
+                        setBookshelfCacheGroupId(groupId);
+                        setShowBookshelfCache(true);
+                      }}
+                      onOpenBookSearch={(q) => openBookSearch(q)}
+                    />
+                  </div>
+
+                  <Show when={showGroupManage()}>
+                    <BookGroupManage onClose={() => setShowGroupManage(false)} />
+                  </Show>
+
+                  <Show when={showBookshelfManage()}>
+                    <BookshelfManagePage
+                      onClose={() => setShowBookshelfManage(false)}
+                      onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                      onOpenBookInfo={async (book) => {
+                        const source = await getSource(book.origin);
+                        if (!source) {
+                          showAppToast({
+                            title: "无法打开详情",
+                            description: "未找到对应书源",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+                        setBookInfoContext({
+                          source,
+                          book: bookToSearchBook(book),
+                          fromPage: "bookshelf",
                         });
-                        return;
-                      }
-                      setBookInfoContext({
-                        source,
-                        book: bookToSearchBook(book),
-                        fromPage: "bookshelf",
-                      });
-                      setCurrentPage("book-info");
-                    }}
-                  />
-                ) : (
-                  <BookShelf
-                    active={() => currentPage() === "bookshelf"}
-                    onPageChange={setCurrentPage}
-                    onOpenGroupManage={() => setShowGroupManage(true)}
-                    onOpenBookshelfManage={() => setShowBookshelfManage(true)}
-                    onImportLocal={handleBookshelfImportLocal}
-                    onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
-                  />
-                )}
+                        setCurrentPage("book-info");
+                      }}
+                    />
+                  </Show>
+
+                  <Show when={showBookshelfCache()}>
+                    <BookshelfCachePage
+                      groupId={bookshelfCacheGroupId()}
+                      groupName={bookshelfStore.state.currentGroupName}
+                      onBack={() => setShowBookshelfCache(false)}
+                    />
+                  </Show>
+                </div>
               </section>
 
               {/* 探索页：保持挂载保留状态；active 门控避免隐藏时触发发现请求 */}
@@ -2105,7 +2169,7 @@ function AppContent() {
                     sourceSearchQuery={sourceSearchQuery()}
                     onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
                     sourceSearchMode={sourceSearchMode()}
-                    onSourceSearchModeChange={(m) => setSourceSearchMode(m)}
+                    onSourceSearchModeChange={persistSearchMode}
                     currentSourceGroup={currentSourceGroup()}
                     sourcesGroupByGroupName={sourcesGroupByGroupName()}
                     onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
@@ -2149,7 +2213,7 @@ function AppContent() {
                     }
                   }}
                   onSourceSearch={(source) => {
-                    setSourceSearchContext({ source });
+                    openBookSearch(undefined, formatSourceScope(source));
                   }}
                   onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
                   onSourcesImportLocal={() => void openLocalBookSourceImport()}
@@ -2299,6 +2363,8 @@ function AppContent() {
                       <BooksStorageSetting />
 
                       <CoverCacheSetting />
+
+                      <ChapterCacheSetting />
 
                       <SourceBlocklistSetting />
 
@@ -2486,6 +2552,23 @@ function AppContent() {
             }}
           </Show>
 
+          <Show when={currentPage() === "book-search"}>
+            <BookSearchPage
+              initialQuery={bookSearchContext()?.initialQuery}
+              initialScope={bookSearchContext()?.initialScope}
+              onBack={() => {
+                setBookSearchContext(null);
+                setCurrentPage("bookshelf");
+              }}
+              onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+              onOpenBookInfo={(source, book) => {
+                setBookInfoContext({ source, book, fromPage: "book-search" });
+                setCurrentPage("book-info");
+              }}
+              onAddedToShelf={() => window.dispatchEvent(new CustomEvent("bookshelf-refresh"))}
+            />
+          </Show>
+
           {/* 远程书籍页面 */}
           <Show when={currentPage() === "remote-book"}>
             <RemoteBookPage
@@ -2597,17 +2680,6 @@ function AppContent() {
           onOpenChange={setShowSourceGroupManageDialog}
           onGroupsChange={() => window.dispatchEvent(new CustomEvent('sources-refresh'))}
         />
-        <SourceSearchDialog
-          open={!!sourceSearchContext()}
-          onOpenChange={(open) => !open && setSourceSearchContext(null)}
-          source={sourceSearchContext()?.source ?? null}
-          onOpenBookInfo={(source, book) => {
-            setBookInfoContext({ source, book, fromPage: 'explore' });
-            setCurrentPage('book-info');
-            setSourceSearchContext(null);
-          }}
-          onAddedToShelf={() => window.dispatchEvent(new CustomEvent('bookshelf-refresh'))}
-        />
         <SourceLoginDialog
           open={!!sourceLoginDialogSource()}
           onOpenChange={(open) => {
@@ -2622,10 +2694,10 @@ function AppContent() {
           adding={guestAddToShelfBusy()}
           onOpenChange={(open) => {
             if (!open && !guestAddToShelfBusy()) {
-              finishCloseReader();
+              void finishCloseReader();
             }
           }}
-          onDecline={finishCloseReader}
+          onDecline={() => void finishCloseReader()}
           onConfirm={() => void confirmGuestAddToShelf()}
         />
         <InnerWebHost

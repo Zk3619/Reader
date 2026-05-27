@@ -1,10 +1,16 @@
 import { cn } from '@/lib/utils';
 import { getBookshelfListColumnLayout } from '@/lib/bookshelf/bookshelf-view-mode';
 
-function bookshelfListIntroResponsiveClasses(mode: string, display: 'flex' | 'block') {
+function bookshelfListIntroResponsiveClasses(
+  mode: string,
+  display: 'flex' | 'block',
+  layout: 'list' | 'compact',
+) {
   const cols = getBookshelfListColumnLayout(mode);
-  const base =
-    'h-full min-h-0 min-w-0 overflow-hidden border-l border-border/40 pl-3';
+  const base = cn(
+    'h-full min-h-0 min-w-0 overflow-hidden border-l border-border/40',
+    layout === 'compact' ? 'pl-1' : 'pl-3',
+  );
   if (display === 'flex') {
     if (cols === 3) {
       return `${base} hidden shrink-0 2xl:flex 2xl:w-[38%] 2xl:max-w-[46%]`;
@@ -37,16 +43,59 @@ export const BOOK_GROUP_CARD_HOVER_ELEVATION =
 const BOOK_GROUP_CARD_FOCUS_ELEVATION =
   'focus-within:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:focus-within:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]';
 
-/** 书架分组列表卡片（div / ContextMenuTrigger，与 BookGroup 列表视图一致） */
-export function bookGroupListCardClass(...extra: Parameters<typeof cn>) {
+/** 分组/书籍可点击卡片按钮基底（覆盖 ghost 默认尺寸） */
+export const BOOK_GROUP_CARD_BUTTON_BASE = cn(
+  'h-auto w-full justify-start font-normal whitespace-normal shadow-none hover:text-foreground',
+  'focus-visible:ring-offset-0 active:shadow-none',
+);
+
+/** 标准列表行：边框、圆角、动效（书架书卡与分组按钮共用） */
+function bookGroupListRowVisualClass(...extra: Parameters<typeof cn>) {
   return cn(
-    'book-group-card-motion relative flex items-center gap-4 rounded-xl border border-border/50 bg-card',
+    'book-group-card-motion relative overflow-hidden rounded-xl border border-border/50 bg-card',
     'hover:border-primary/50 hover:bg-transparent',
     'focus-within:border-primary/50',
     BOOK_GROUP_CARD_HOVER_ELEVATION,
     BOOK_GROUP_CARD_FOCUS_ELEVATION,
     ...extra,
   );
+}
+
+/** 紧凑列表行：边框、圆角、动效 */
+function bookGroupCompactRowVisualClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-motion book-group-card-motion--compact relative w-full overflow-hidden rounded-lg border border-border/50 bg-card',
+    'hover:border-primary/50 hover:bg-accent/50',
+    'focus-within:border-primary/50',
+    BOOK_GROUP_CARD_HOVER_ELEVATION,
+    BOOK_GROUP_CARD_FOCUS_ELEVATION,
+    ...extra,
+  );
+}
+
+/** 网格卡片：边框、圆角、动效 */
+function bookGroupGridRowVisualClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-motion relative overflow-hidden rounded-xl border border-border/50 bg-card',
+    'hover:border-primary/30 hover:bg-card',
+    'focus-within:border-primary/50',
+    BOOK_GROUP_CARD_HOVER_ELEVATION,
+    BOOK_GROUP_CARD_FOCUS_ELEVATION,
+    ...extra,
+  );
+}
+
+/** 书架分组列表卡片（div / ContextMenuTrigger） */
+export function bookGroupListCardClass(...extra: Parameters<typeof cn>) {
+  return bookGroupListRowVisualClass('flex items-center gap-4', ...extra);
+}
+
+/** 分组页标准列表按钮 */
+export function bookGroupListButtonClass(
+  padding: 'p-2' | 'p-4' = 'p-2',
+  ...extra: Parameters<typeof cn>
+) {
+  return cn(BOOK_GROUP_CARD_BUTTON_BASE, bookGroupListCardClass(), padding, ...extra);
 }
 
 /** 分组列表封面容器 */
@@ -58,45 +107,117 @@ export function bookGroupListCoverClass(...extra: Parameters<typeof cn>) {
   );
 }
 
-/** 书架分组紧凑列表卡片（与 BookGroup compact 视图一致） */
+/** 书架/分组管理页等：紧凑行卡片（高度随内容，非书架列表 4.5rem 行） */
 export function bookGroupCompactCardClass(...extra: Parameters<typeof cn>) {
-  return cn(
-    'book-group-card-motion relative flex items-center gap-3 rounded-lg border border-border/50 bg-card px-3 py-2',
-    'hover:border-primary/50 hover:bg-accent/50',
-    'focus-within:border-primary/50',
-    BOOK_GROUP_CARD_HOVER_ELEVATION,
-    BOOK_GROUP_CARD_FOCUS_ELEVATION,
+  return bookGroupCompactRowVisualClass('flex items-center gap-3 p-2', ...extra);
+}
+
+/** 书架/分组页紧凑列表行外壳（固定行高 + 封面撑满） */
+export function bookshelfCompactListRowClass(...extra: Parameters<typeof cn>) {
+  return bookGroupCompactRowVisualClass(
+    'flex h-[4.5rem] items-stretch gap-2 p-1',
     ...extra,
   );
 }
 
-/** 紧凑列表封面容器 */
+/** 分组页紧凑列表按钮 */
+export function bookGroupCompactButtonClass(...extra: Parameters<typeof cn>) {
+  return cn(BOOK_GROUP_CARD_BUTTON_BASE, bookshelfCompactListRowClass(), ...extra);
+}
+
+/** 紧凑列表封面：行高撑满、3:4（书架书籍与分组列表共用） */
+export function bookshelfCompactCoverClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-cover-motion book-group-card-cover-motion--compact',
+    'flex h-full w-auto shrink-0 self-stretch aspect-3/4 items-center justify-center overflow-hidden rounded-md bg-muted/50',
+    ...extra,
+  );
+}
+
+/** @deprecated 使用 bookshelfCompactCoverClass；保留别名供管理页等传入固定尺寸 */
 export function bookGroupCompactCoverClass(...extra: Parameters<typeof cn>) {
-  return cn(
-    'book-group-card-cover-motion book-group-card-cover-motion--list',
-    'flex h-14 aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/50',
-    ...extra,
-  );
+  return bookshelfCompactCoverClass(...extra);
 }
 
-/** 书架列表卡片：固定高度，封面按 3:4 撑满左侧 */
+/** 书架页标准列表书籍卡片 */
 export function bookshelfListCardClass(...extra: Parameters<typeof cn>) {
-  return cn(
-    '[contain-intrinsic-size:auto_7rem] [content-visibility:auto] book-group-card-motion relative flex h-28 w-full cursor-pointer items-stretch gap-3 overflow-hidden rounded-xl border border-border/50 bg-card p-2',
-    'hover:border-primary/50 hover:bg-transparent',
-    BOOK_GROUP_CARD_HOVER_ELEVATION,
+  return bookGroupListRowVisualClass(
+    'flex h-28 w-full cursor-pointer items-stretch gap-3 p-2',
+    '[contain-intrinsic-size:auto_7rem] [content-visibility:auto]',
     ...extra,
   );
 }
 
-/** 书架紧凑列表卡片 */
+/** 书架页紧凑列表书籍卡片 */
 export function bookshelfCompactListCardClass(...extra: Parameters<typeof cn>) {
-  return cn(
-    '[contain-intrinsic-size:auto_4.5rem] [content-visibility:auto] book-group-card-motion relative flex h-[4.5rem] w-full cursor-pointer items-stretch gap-2 overflow-hidden rounded-lg border border-border/50 bg-card p-1',
-    'hover:border-primary/50 hover:bg-accent/50',
-    BOOK_GROUP_CARD_HOVER_ELEVATION,
+  return bookshelfCompactListRowClass(
+    'w-full cursor-pointer',
+    '[contain-intrinsic-size:auto_4.5rem] [content-visibility:auto]',
     ...extra,
   );
+}
+
+/** 书架/分组网格卡片（书籍为 div，分组为 button 时叠加 BOOK_GROUP_CARD_BUTTON_BASE） */
+export function bookGroupGridCardClass(...extra: Parameters<typeof cn>) {
+  return bookGroupGridRowVisualClass(
+    'flex flex-col items-center gap-1.5 p-2',
+    ...extra,
+  );
+}
+
+/** 分组页网格按钮 */
+export function bookGroupGridButtonClass(...extra: Parameters<typeof cn>) {
+  return cn(BOOK_GROUP_CARD_BUTTON_BASE, bookGroupGridCardClass(), ...extra);
+}
+
+/** 网格封面容器 */
+export function bookGroupGridCoverClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-cover-motion book-group-card-cover-motion--grid',
+    'flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50',
+    ...extra,
+  );
+}
+
+/** 列表/紧凑列表主标题（书架书籍行） */
+export function bookshelfRowTitleClass(compact: boolean, ...extra: Parameters<typeof cn>) {
+  return cn(
+    'truncate font-semibold leading-tight text-foreground',
+    compact ? 'text-sm' : 'text-base',
+    ...extra,
+  );
+}
+
+/** 列表/紧凑列表副标题（作者等） */
+export function bookshelfRowSubtitleClass(compact: boolean, ...extra: Parameters<typeof cn>) {
+  return cn(
+    'truncate leading-tight text-muted-foreground',
+    compact ? 'text-xs' : 'text-sm',
+    ...extra,
+  );
+}
+
+/** 分组列表主标题 */
+export function bookGroupRowTitleClass(compact: boolean, ...extra: Parameters<typeof cn>) {
+  return cn(bookshelfRowTitleClass(compact), compact ? 'mb-0.5' : 'mb-1', ...extra);
+}
+
+/** 分组列表副标题（本书数） */
+export function bookGroupRowSubtitleClass(compact: boolean, ...extra: Parameters<typeof cn>) {
+  return bookshelfRowSubtitleClass(compact, ...extra);
+}
+
+/** 网格标题（显示书名/分组名） */
+export function bookGroupGridTitleClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'm-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground',
+    ...extra,
+  );
+}
+
+/** 网格副标题 */
+export function bookGroupGridSubtitleClass(...extra: Parameters<typeof cn>) {
+  return cn('m-0 text-xs leading-tight text-muted-foreground', ...extra);
 }
 
 /** 书架列表封面：高度占满项、固定 3:4 */
@@ -134,7 +255,7 @@ export function bookshelfCompactIntroColumnClass(
   viewMode: string,
   ...extra: Parameters<typeof cn>
 ) {
-  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'block'), ...extra);
+  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'block', 'compact'), ...extra);
 }
 
 /** 书架列表主信息区（封面右侧：书名/作者/章节/未读） */
@@ -151,7 +272,7 @@ export function bookshelfListIntroColumnClass(
   viewMode: string,
   ...extra: Parameters<typeof cn>
 ) {
-  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'flex'), ...extra);
+  return cn(bookshelfListIntroResponsiveClasses(viewMode, 'flex', 'list'), ...extra);
 }
 
 /** 发现页书籍列表卡片（固定高度，与书架列表卡片共用抬升/阴影动效） */

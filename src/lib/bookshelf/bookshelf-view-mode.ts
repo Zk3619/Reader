@@ -1,13 +1,21 @@
 import type { ViewMode } from '@/stores/bookshelf-layout';
 
 export const listViewModeOptions: { value: ViewMode; label: string }[] = [
-  { value: 'list', label: '列表' },
-  { value: 'list-2', label: '列表二列' },
-  { value: 'list-3', label: '列表三列' },
-  { value: 'compact', label: '紧凑列表' },
+  { value: 'list', label: '标准列表一列' },
+  { value: 'list-2', label: '标准列表二列' },
+  { value: 'list-3', label: '标准列表三列' },
+  { value: 'compact', label: '紧凑列表一列' },
   { value: 'compact-2', label: '紧凑列表二列' },
   { value: 'compact-3', label: '紧凑列表三列' },
 ];
+
+export const bookshelfStandardListViewModeOptions = listViewModeOptions.filter((o) =>
+  o.value.startsWith('list'),
+);
+
+export const bookshelfCompactListViewModeOptions = listViewModeOptions.filter((o) =>
+  o.value.startsWith('compact'),
+);
 
 export const gridViewModeOptions: { value: ViewMode; label: string }[] = [
   { value: 'grid-2', label: '网格二列' },

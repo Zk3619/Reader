@@ -23,14 +23,23 @@ import { bookshelfStore } from '@/stores/bookshelf';
 import { sourcesStore } from '@/stores/sources';
 import { bookshelfLayoutStore, initBookshelfLayoutSettings } from '@/stores/bookshelf-layout';
 import { sortBooks } from '@/lib/bookshelf/book-sort';
+import {
+  applyShelfBookInPlace,
+  mergeShelfBookList,
+  shelfListsSameOrderAndRefs,
+} from '@/lib/bookshelf/shelf-book-list-merge';
 import * as groupsDb from '@/lib/database/book-groups';
 import * as booksDb from '@/lib/database/books';
 import type { BookGroup } from '@/types';
 import type { Book } from '@/types';
 import { BookGroupId } from '@/types';
+import { exportBookshelfJson } from '@/lib/bookshelf/export-bookshelf';
+import { ImportBookshelfDialog } from '@/components/bookshelf/ImportBookshelfDialog';
+import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroup';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookEditDialog } from '@/components/books/BookEditDialog';
+import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
 import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
 import { BookContextMenu, type BookContextMenuActions } from '@/components/bookshelf/BookContextMenu';
 import { Button } from '@/components/ui/button';
@@ -77,6 +86,10 @@ import {
 import { shouldShowBookshelfLastUpdateTime } from '@/lib/bookshelf/book-reading-progress';
 import { BookShelfListBookRow } from '@/components/bookshelf/BookShelfListBookRow';
 import {
+  bookGroupGridCardClass,
+  bookGroupGridCoverClass,
+  bookGroupGridSubtitleClass,
+  bookGroupGridTitleClass,
   bookshelfCompactListCardClass,
   bookshelfListCardClass,
 } from '@/lib/bookshelf/book-group-card-styles';
@@ -91,6 +104,12 @@ import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolba
 import type { PageType } from '@/components/shell/Navigation';
 import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
 import { readerStore } from '@/stores/reader';
+import { filterBookshelfBooks } from '@/lib/search/search-filters';
+import {
+  loadBookshelfMainSearchMode,
+  saveBookshelfMainSearchMode,
+  type SearchMode,
+} from '@/lib/search/search-prefs';
 
 export interface BookShelfProps {
   /** 为 false 时保留 UI 状态但不拉取分组/书籍（侧边栏隐藏态） */
@@ -106,6 +125,10 @@ export interface BookShelfProps {
   onOpenBookshelfManage?: () => void;
   onImportLocal?: () => void;
   onAddBookByUrl?: () => void;
+  /** 打开章节缓存管理（传入当前分组 id） */
+  onOpenBookshelfCache?: (groupId: number) => void;
+  /** 进入全网搜索页 */
+  onOpenBookSearch?: (query: string) => void;
 }
 
 export function BookShelf(props: BookShelfProps) {
@@ -120,9 +143,16 @@ export function BookShelf(props: BookShelfProps) {
   const [bookToDelete, setBookToDelete] = createSignal<Book | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
   const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
+  const [importBookshelfOpen, setImportBookshelfOpen] = createSignal(false);
+  const [shelfSearchQuery, setShelfSearchQuery] = createSignal('');
+  const [groupSearchQuery, setGroupSearchQuery] = createSignal('');
+  const [shelfSearchMode, setShelfSearchMode] = createSignal<SearchMode>('name');
 
   const groupStyle = () => bookshelfLayoutStore.settings.groupStyle;
   const showGroupList = () => bookshelfStore.state.showGroupList;
+  const showGroupPage = () => groupStyle() === 'normal' && showGroupList();
+  const showBooksView = () => groupStyle() !== 'normal' || !showGroupList();
+  const isGroupSearchToolbar = () => showGroupPage();
   const currentGroup = () => bookshelfStore.state.currentGroup;
   const currentGroupName = () => bookshelfStore.state.currentGroupName;
   const viewMode = () => bookshelfLayoutStore.settings.viewMode;
@@ -130,6 +160,8 @@ export function BookShelf(props: BookShelfProps) {
   const showUnreadFlag = () => bookshelfLayoutStore.settings.showUnreadFlag;
   const showLastUpdateTime = () => bookshelfLayoutStore.settings.showLastUpdateTime;
   const showQuickScrollButtons = () => bookshelfLayoutStore.settings.showQuickScrollbar;
+  const coverClickPreview = () => bookshelfLayoutStore.settings.coverClickPreview;
+  const [coverPreviewBook, setCoverPreviewBook] = createSignal<Book | null>(null);
   const [bookshelfScrollRoot, setBookshelfScrollRoot] = createSignal<HTMLDivElement>();
   // 直接访问 store 属性以确保响应式追踪
   const sortMode = () => {
@@ -145,7 +177,14 @@ export function BookShelf(props: BookShelfProps) {
       await initBookshelfLayoutSettings();
       await bookshelfStore.waitForStateRestore();
       void sourcesStore.loadBookSources();
+      const mode = await loadBookshelfMainSearchMode();
+      setShelfSearchMode(mode);
     })();
+  });
+
+  createEffect(() => {
+    if (!isActive() || !showBooksView()) return;
+    void loadBookshelfMainSearchMode().then((mode) => setShelfSearchMode(mode));
   });
 
   createEffect(() => {
@@ -199,6 +238,9 @@ export function BookShelf(props: BookShelfProps) {
     }
   });
 
+  /** 上次已加载书籍列表的分组，用于从阅读器等返回时静默刷新 */
+  let lastLoadedBooksGroupId: number | null = null;
+
   createEffect(() => {
     if (!isActive()) return;
     const style = groupStyle();
@@ -214,25 +256,40 @@ export function BookShelf(props: BookShelfProps) {
       return;
     }
 
-    // 其他情况：加载当前分组的书籍
-    loadBooksForGroup(cg);
+    const sameGroupWithList =
+      lastLoadedBooksGroupId === cg && untrack(() => books().length > 0);
+    // 从阅读器返回：列表仍在内存，进度由 bookshelf-book-updated 补丁
+    if (!sameGroupWithList) {
+      void loadBooksForGroup(cg);
+      lastLoadedBooksGroupId = cg;
+    }
   });
 
-  async function loadBooksForGroup(groupId: number) {
-    setBooksLoading(true);
+  async function loadBooksForGroup(groupId: number, options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setBooksLoading(true);
+    }
     setBooksError(null);
     try {
       const list = await booksDb.getBooksByGroup(groupId);
       // 根据当前排序模式对书籍进行排序
       const sorted = sortBooks(list, sortMode());
-      setBooks(sorted);
+      setBooks((prev) => {
+        if (options?.silent && prev.length > 0) {
+          const merged = mergeShelfBookList(prev, sorted);
+          return shelfListsSameOrderAndRefs(prev, merged) ? prev : merged;
+        }
+        return sorted;
+      });
       scheduleShelfChapterRepairs(sorted);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '加载书籍失败';
       setBooksError(msg);
       setBooks([]);
     } finally {
-      setBooksLoading(false);
+      if (!options?.silent) {
+        setBooksLoading(false);
+      }
     }
   }
 
@@ -242,21 +299,28 @@ export function BookShelf(props: BookShelfProps) {
     const lookupUrls = new Set(
       [resultUrl, requestedUrl].filter((u): u is string => Boolean(u)),
     );
+    const prev = untrack(() => books());
 
-    setBooks((prev) => {
-      const idx = prev.findIndex((b) => lookupUrls.has(b.bookUrl));
-      if (!updated) {
-        if (idx < 0) return prev;
-        const next = prev.filter((b) => !lookupUrls.has(b.bookUrl));
-        return next.length === prev.length ? prev : next;
-      }
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = updated;
-        return sortBooks(next, sortMode());
-      }
-      return prev;
-    });
+    if (!updated) {
+      setBooks((list) => {
+        const idx = list.findIndex((b) => lookupUrls.has(b.bookUrl));
+        if (idx < 0) return list;
+        const next = list.filter((b) => !lookupUrls.has(b.bookUrl));
+        return next.length === list.length ? list : next;
+      });
+      return;
+    }
+
+    const idx = prev.findIndex((b) => lookupUrls.has(b.bookUrl));
+    if (idx < 0) return;
+
+    const existing = prev[idx];
+    applyShelfBookInPlace(existing, updated);
+    const sorted = sortBooks([...prev], sortMode());
+    const merged = mergeShelfBookList(prev, sorted);
+    if (shelfListsSameOrderAndRefs(prev, merged)) return;
+
+    setBooks(merged);
   }
 
   async function handleCoverUrlRefreshed(bookUrl: string, newCoverUrl: string) {
@@ -383,6 +447,40 @@ export function BookShelf(props: BookShelfProps) {
     );
   }
 
+  function resolveBookshelfScopeGroupId(): number {
+    return showBooksView() ? currentGroup() : BookGroupId.All;
+  }
+
+  function handleOpenChapterCache() {
+    props.onOpenBookshelfCache?.(resolveBookshelfScopeGroupId());
+  }
+
+  async function handleExportBookshelf() {
+    try {
+      const list = await booksDb.getBooksByGroup(resolveBookshelfScopeGroupId());
+      if (list.length === 0) {
+        showAppToast({
+          title: '当前范围没有书籍',
+          variant: 'warning',
+        });
+        return;
+      }
+      await exportBookshelfJson(list);
+      showAppToast({
+        title: '书单已导出',
+        description: `共 ${list.length} 本（仅书名、作者、简介）`,
+        variant: 'success',
+      });
+    } catch (e) {
+      if (e instanceof SaveTextFileCancelledError) return;
+      showAppToast({
+        title: '导出失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    }
+  }
+
   function handleEditBook(book: Book) {
     setBookToEdit(book);
     setBookEditOpen(true);
@@ -443,10 +541,12 @@ export function BookShelf(props: BookShelfProps) {
     }
   }
 
-  const showGroupPage = () =>
-    groupStyle() === 'normal' && showGroupList();
-  const showBooksView = () =>
-    groupStyle() !== 'normal' || !showGroupList();
+  const displayBooks = createMemo(() => {
+    const q = shelfSearchQuery().trim();
+    if (!q || !showBooksView()) return books();
+    return filterBookshelfBooks(books(), q, shelfSearchMode());
+  });
+
   /** 常规分组样式：在具体分组书籍页显示返回分组列表 */
   const showBackToGroupList = createMemo(
     () => groupStyle() === 'normal' && !showGroupList()
@@ -466,7 +566,13 @@ export function BookShelf(props: BookShelfProps) {
       const n = groups().length;
       return n > 0 ? `共 ${n} 个分组` : undefined;
     }
-    return `共 ${books().length} 本书`;
+    const total = books().length;
+    const shown = displayBooks().length;
+    const q = shelfSearchQuery().trim();
+    if (q && shown !== total) {
+      return `显示 ${shown} / ${total} 本书`;
+    }
+    return `共 ${total} 本书`;
   };
 
   const showGroupTabsBelow = () => groupStyle() === 'tabs' && groups().length > 0;
@@ -591,12 +697,16 @@ export function BookShelf(props: BookShelfProps) {
     await loadBooksForGroup(currentGroup());
   }
 
-  /** 从导入页/设置等切回书架时补刷一次（避免仅依赖隐藏态下的事件刷新） */
+  /** 从阅读器等切回书架：列表仍在内存中时不整页重载 */
   let wasBookshelfActive = false;
   createEffect(() => {
     const active = isActive();
     if (active && !wasBookshelfActive) {
-      void refreshFromBookshelfEvent();
+      if (books().length === 0) {
+        void refreshFromBookshelfEvent();
+      } else if (groups().length > 0) {
+        void loadGroupCounts(groups());
+      }
     }
     wasBookshelfActive = active;
   });
@@ -605,7 +715,16 @@ export function BookShelf(props: BookShelfProps) {
     const handler = () => {
       void refreshFromBookshelfEvent();
     };
+    const bookUpdatedHandler = (e: Event) => {
+      const url = (e as CustomEvent<{ bookUrl?: string }>).detail?.bookUrl;
+      if (url) {
+        void patchBookInShelf(url);
+        return;
+      }
+      void refreshFromBookshelfEvent();
+    };
     window.addEventListener('bookshelf-refresh', handler);
+    window.addEventListener('bookshelf-book-updated', bookUpdatedHandler);
 
     // 监听布局设置变化事件，重新排序当前书籍列表
     const layoutChangeHandler = () => {
@@ -617,22 +736,10 @@ export function BookShelf(props: BookShelfProps) {
     };
     window.addEventListener('bookshelf-layout-changed', layoutChangeHandler);
 
-    // 监听页面可见性变化：当用户从阅读器返回书架页面时，重新加载并排序
-    let wasHidden = document.hidden;
-    const visibilityChangeHandler = () => {
-      const isHidden = document.hidden;
-      // 页面从隐藏变为可见时，重新加载并排序
-      if (wasHidden && !isHidden && isActive() && books().length > 0) {
-        loadBooksForGroup(currentGroup());
-      }
-      wasHidden = isHidden;
-    };
-    document.addEventListener('visibilitychange', visibilityChangeHandler);
-
     onCleanup(() => {
       window.removeEventListener('bookshelf-refresh', handler);
+      window.removeEventListener('bookshelf-book-updated', bookUpdatedHandler);
       window.removeEventListener('bookshelf-layout-changed', layoutChangeHandler);
-      document.removeEventListener('visibilitychange', visibilityChangeHandler);
     });
   });
 
@@ -691,11 +798,33 @@ export function BookShelf(props: BookShelfProps) {
           onImportLocal={props.onImportLocal}
           onAddBookByUrl={props.onAddBookByUrl}
           onUpdateToc={handleUpdateToc}
+          onOpenChapterCache={handleOpenChapterCache}
+          onExportBookshelf={() => void handleExportBookshelf()}
+          onImportBookshelf={() => setImportBookshelfOpen(true)}
           pendingUpdateScope={showBooksView() ? 'group' : 'total'}
-          pendingUpdateBookUrls={() => books().map((b) => b.bookUrl)}
+          pendingUpdateBookUrls={() => displayBooks().map((b) => b.bookUrl)}
           showReloadLocal={showBooksView() && currentGroup() === BookGroupId.Local}
           isReloadingLocal={isReloadingBooks()}
           onReloadLocal={handleReloadLocalBooks}
+          searchTarget={isGroupSearchToolbar() ? 'groups' : 'books'}
+          searchQuery={
+            isGroupSearchToolbar() ? groupSearchQuery() : shelfSearchQuery()
+          }
+          onSearchQueryChange={
+            isGroupSearchToolbar() ? setGroupSearchQuery : setShelfSearchQuery
+          }
+          searchMode={isGroupSearchToolbar() ? undefined : shelfSearchMode()}
+          onSearchModeChange={
+            isGroupSearchToolbar()
+              ? undefined
+              : (mode) => {
+                  setShelfSearchMode(mode);
+                  void saveBookshelfMainSearchMode(mode);
+                }
+          }
+          onOpenGlobalSearch={
+            isGroupSearchToolbar() ? undefined : (q) => props.onOpenBookSearch?.(q)
+          }
         />
       </PageToolbar>
 
@@ -703,6 +832,7 @@ export function BookShelf(props: BookShelfProps) {
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}
+            searchQuery={groupSearchQuery()}
             onGroupSelect={handleGroupSelect}
             onGroupsLoaded={(g) => {
               props.onGroupsLoaded?.(g);
@@ -713,7 +843,7 @@ export function BookShelf(props: BookShelfProps) {
 
         <Show when={showBooksView()}>
           <GroupBooksView
-            books={books()}
+            books={displayBooks()}
             loading={booksLoading()}
             error={booksError()}
             viewMode={viewMode()}
@@ -733,6 +863,8 @@ export function BookShelf(props: BookShelfProps) {
               // 拖拽排序不 setBooks：SortableJS 已重排 DOM，仅持久化顺序
             }}
             onCoverUrlRefreshed={handleCoverUrlRefreshed}
+            coverClickPreview={coverClickPreview()}
+            onCoverPreview={setCoverPreviewBook}
           />
         </Show>
       </div>
@@ -769,6 +901,33 @@ export function BookShelf(props: BookShelfProps) {
         book={bookToDelete()}
         onConfirm={confirmDeleteBook}
       />
+
+      <ImportBookshelfDialog
+        open={importBookshelfOpen()}
+        onOpenChange={setImportBookshelfOpen}
+        groupId={resolveBookshelfScopeGroupId()}
+        onDone={() => {
+          loadBooksForGroup(currentGroup());
+          if (props.onGroupsLoaded && groups().length) loadGroupCounts(groups());
+        }}
+      />
+
+      <BookCoverPreviewDialog
+        open={!!coverPreviewBook()}
+        onOpenChange={(open) => {
+          if (!open) setCoverPreviewBook(null);
+        }}
+        coverUrl={coverPreviewBook()?.coverUrl}
+        customCoverUrl={coverPreviewBook()?.customCoverUrl}
+        bookUrl={coverPreviewBook()?.bookUrl ?? ''}
+        origin={coverPreviewBook()?.origin}
+        source={
+          coverPreviewBook()
+            ? sourcesStore.getBookSource(coverPreviewBook()!.origin)
+            : null
+        }
+        name={coverPreviewBook()?.name ?? ''}
+      />
     </div>
   );
 }
@@ -788,6 +947,8 @@ function GroupBooksView(props: {
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
   onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
+  coverClickPreview?: boolean;
+  onCoverPreview?: (book: Book) => void;
 }) {
   const showSkeleton = useSkeletonLoading(() => props.loading, { delay: 100, minDisplayTime: 300 });
 
@@ -828,6 +989,8 @@ function GroupBooksView(props: {
           onDeleteBook={props.onDeleteBook}
           onBooksReorder={props.onBooksReorder}
           onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+          coverClickPreview={props.coverClickPreview}
+          onCoverPreview={props.onCoverPreview}
         />
       </Show>
 
@@ -856,6 +1019,8 @@ function BooksGrid(props: {
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
   onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
+  coverClickPreview?: boolean;
+  onCoverPreview?: (book: Book) => void;
 }) {
   const manualSort = () => props.sortMode === 'manual';
 
@@ -943,6 +1108,8 @@ function BooksGrid(props: {
             actions={bookContextMenuActions()}
             onOpenBook={props.onOpenBook}
             onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+            coverClickPreview={props.coverClickPreview}
+            onCoverPreview={props.onCoverPreview}
           />
         )}
       </For>
@@ -950,19 +1117,11 @@ function BooksGrid(props: {
   );
 }
 
-/** 书籍卡片悬停抬升阴影（与 BookGroup 分组卡片一致） */
-const BOOK_CARD_HOVER_ELEVATION =
-  'shadow-none hover:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:hover:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]';
-
 const bookListCardClass = bookshelfListCardClass();
 
 const bookCompactCardClass = bookshelfCompactListCardClass();
 
-const bookGridCardClass = cn(
-  'book-group-card-motion flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card p-1',
-  'hover:border-primary/30 hover:bg-card',
-  BOOK_CARD_HOVER_ELEVATION,
-);
+const bookGridCardClass = bookGroupGridCardClass('cursor-pointer');
 
 /** 单本书卡片 + 右键/长按菜单 */
 function BookCardWithMenu(props: {
@@ -977,6 +1136,8 @@ function BookCardWithMenu(props: {
   actions: BookContextMenuActions;
   onOpenBook?: (book: Book) => void;
   onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
+  coverClickPreview?: boolean;
+  onCoverPreview?: (book: Book) => void;
 }) {
   const cardClass = () =>
     props.layout === 'list'
@@ -1011,7 +1172,7 @@ function BookCardWithMenu(props: {
             <>
               <div
                 class={cn(
-                  'book-group-card-cover-motion book-group-card-cover-motion--grid flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50',
+                  bookGroupGridCoverClass(),
                   (effectiveTitleDisplay() === 'overlay' ||
                     (props.layout === 'grid' &&
                       (props.showUnreadFlag ||
@@ -1055,10 +1216,10 @@ function BookCardWithMenu(props: {
               </div>
               <Show when={effectiveTitleDisplay() === 'show' && props.layout === 'grid'}>
                 <div class="flex w-full flex-col items-center gap-0.5">
-                  <h3 class="m-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground">
+                  <h3 class={bookGroupGridTitleClass()}>
                     {props.book.name}
                   </h3>
-                  <p class="m-0 w-full truncate text-center text-xs leading-tight text-muted-foreground">
+                  <p class={cn(bookGroupGridSubtitleClass(), 'w-full truncate text-center')}>
                     {props.book.author ?? '—'}
                   </p>
                 </div>
@@ -1072,8 +1233,10 @@ function BookCardWithMenu(props: {
             viewMode={props.viewMode}
             showUnreadFlag={props.showUnreadFlag}
             showLastUpdateTime={props.showLastUpdateTime}
+            coverClickPreview={props.coverClickPreview}
             source={sourcesStore.getBookSource(props.book.origin)}
             onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+            onCoverPreview={() => props.onCoverPreview?.(props.book)}
           />
         </Show>
       </BookshelfGridHideTooltip>
