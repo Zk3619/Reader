@@ -1,4 +1,4 @@
-const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_master WHERE type='table' AND name = ?",[E])).length>0}async function r(T,E,N){return await o(T,E)?(await T.select(`PRAGMA table_info(${E})`)).some(a=>a.name===N):!1}async function e(T,E,N,L){await r(T,E,N)||await T.execute(`ALTER TABLE ${E} ADD COLUMN ${N} ${L}`)}async function t(T){if(!await o(T,"readRecord")){await T.execute(`
+import{ensureChapterCacheSchema as t,migrateChapterCacheV97 as i,CHAPTER_CACHE_SCHEMA_VERSION as U}from"./migration-chapter-cache-v97-ggtQT808.js";const s=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_master WHERE type='table' AND name = ?",[E])).length>0}async function r(T,E,N){return await o(T,E)?(await T.select(`PRAGMA table_info(${E})`)).some(a=>a.name===N):!1}async function e(T,E,N,L){await r(T,E,N)||await T.execute(`ALTER TABLE ${E} ADD COLUMN ${N} ${L}`)}async function I(T){if(!await o(T,"readRecord")){await T.execute(`
       CREATE TABLE IF NOT EXISTS readRecord (
         deviceId TEXT NOT NULL,
         bookName TEXT NOT NULL,
@@ -23,7 +23,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
   `),await T.execute(`
     INSERT INTO readRecord_new (deviceId, bookName, bookAuthor, readTime, lastRead, durChapterTitle, durChapterIndex)
     SELECT deviceId, bookName, '', readTime, lastRead, '', 0 FROM readRecord
-  `),await T.execute("DROP TABLE readRecord"),await T.execute("ALTER TABLE readRecord_new RENAME TO readRecord"))}async function i(T){if(!await o(T,"rssArticles")){await T.execute(`
+  `),await T.execute("DROP TABLE readRecord"),await T.execute("ALTER TABLE readRecord_new RENAME TO readRecord"))}async function c(T){if(!await o(T,"rssArticles")){await T.execute(`
       CREATE TABLE IF NOT EXISTS rssArticles (
         origin TEXT NOT NULL,
         sort TEXT NOT NULL,
@@ -68,7 +68,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
       origin, sort, title, "order", link, pubDate, description, content, image,
       "group", read, variable, 0, 0
     FROM rssArticles
-  `),await T.execute("DROP TABLE rssArticles"),await T.execute("ALTER TABLE rssArticles_new RENAME TO rssArticles"))}async function U(T){if(!await o(T,"book_sources"))return;const E=await r(T,"book_sources","nextPagePreload"),N=await r(T,"book_sources","nextPageLazyLoad");if(E&&!N){await T.execute(`
+  `),await T.execute("DROP TABLE rssArticles"),await T.execute("ALTER TABLE rssArticles_new RENAME TO rssArticles"))}async function R(T){if(!await o(T,"book_sources"))return;const E=await r(T,"book_sources","nextPagePreload"),N=await r(T,"book_sources","nextPageLazyLoad");if(E&&!N){await T.execute(`
       CREATE TABLE IF NOT EXISTS book_sources_new (
         bookSourceUrl TEXT NOT NULL,
         bookSourceName TEXT NOT NULL,
@@ -117,7 +117,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
     `),await T.execute("DROP TABLE book_sources"),await T.execute("ALTER TABLE book_sources_new RENAME TO book_sources"),await T.execute(`
       CREATE INDEX IF NOT EXISTS index_book_sources_bookSourceUrl
       ON book_sources(bookSourceUrl)
-    `);return}await e(T,"book_sources","eventListener","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_sources","customButton","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_sources","nextPageLazyLoad","INTEGER NOT NULL DEFAULT 0")}async function s(T){await T.execute(`
+    `);return}await e(T,"book_sources","eventListener","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_sources","customButton","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_sources","nextPageLazyLoad","INTEGER NOT NULL DEFAULT 0")}async function O(T){await T.execute(`
     CREATE TABLE IF NOT EXISTS txtTocRules (
       id INTEGER NOT NULL,
       name TEXT NOT NULL,
@@ -254,7 +254,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
       errorMsg TEXT,
       FOREIGN KEY(ruleId) REFERENCES direct_link_upload_rules(id) ON DELETE CASCADE
     )
-  `)}async function I(T){await T.execute(`
+  `)}async function u(T){await T.execute(`
     CREATE INDEX IF NOT EXISTS index_url_records_timestamp ON url_records(timestamp)
   `),await T.execute(`
     CREATE INDEX IF NOT EXISTS index_url_records_domain ON url_records(domain)
@@ -280,7 +280,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
       (exploreUrl IS NOT NULL AND trim(exploreUrl) <> '') AS hasExploreUrl,
       eventListener, bookSourceType
     FROM book_sources
-  `)}async function O(T){await e(T,"books","durVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"books","chapterInVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_groups","onlyUpdateRead","INTEGER NOT NULL DEFAULT 0"),await U(T),await e(T,"chapters","imgUrl","TEXT"),await e(T,"rssSources","preloadJs","TEXT"),await e(T,"rssSources","startHtml","TEXT"),await e(T,"rssSources","startStyle","TEXT"),await e(T,"rssSources","startJs","TEXT"),await e(T,"rssSources","showWebLog","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","preload","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","cacheFirst","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","searchUrl","TEXT"),await i(T),await e(T,"rssStars","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssStars","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","origin","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","sort","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","image","TEXT"),await e(T,"rssReadRecords","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","pubDate","TEXT"),await t(T),await s(T),await I(T)}const c=[{version:1,up:async T=>{await T.execute(`
+  `)}async function l(T){await e(T,"books","durVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"books","chapterInVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_groups","onlyUpdateRead","INTEGER NOT NULL DEFAULT 0"),await R(T),await e(T,"chapters","imgUrl","TEXT"),await e(T,"rssSources","preloadJs","TEXT"),await e(T,"rssSources","startHtml","TEXT"),await e(T,"rssSources","startStyle","TEXT"),await e(T,"rssSources","startJs","TEXT"),await e(T,"rssSources","showWebLog","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","preload","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","cacheFirst","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","searchUrl","TEXT"),await c(T),await e(T,"rssStars","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssStars","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","origin","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","sort","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","image","TEXT"),await e(T,"rssReadRecords","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","pubDate","TEXT"),await I(T),await O(T),await u(T)}const n=98;async function X(T){await t(T)}const d=[{version:1,up:async T=>{await T.execute(`
         CREATE TABLE IF NOT EXISTS books (
           bookUrl TEXT NOT NULL DEFAULT '',
           tocUrl TEXT NOT NULL DEFAULT '',
@@ -352,6 +352,7 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
           book_url TEXT NOT NULL,
           chapter_index INTEGER NOT NULL,
           content TEXT,
+          file_path TEXT,
           created_at INTEGER DEFAULT (strftime('%s', 'now')),
           PRIMARY KEY(book_url, chapter_index)
         )
@@ -582,4 +583,4 @@ const R=96;async function o(T,E){return(await T.select("SELECT name FROM sqlite_
       `),await T.execute(`
         CREATE INDEX IF NOT EXISTS index_replace_rules_id 
         ON replace_rules(id)
-      `)}},{version:96,up:O}];export{R as LEGADO_SCHEMA_VERSION,c as migrations};
+      `)}},{version:s,up:l},{version:U,up:i},{version:n,up:X}];export{U as CHAPTER_CACHE_SCHEMA_VERSION,s as LEGADO_SCHEMA_VERSION,d as migrations};
