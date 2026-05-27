@@ -11,12 +11,12 @@ import type { ChapterCache } from '@/types';
  */
 export async function getChapterCache(
   bookUrl: string,
-  chapterIndex: number
+  chapterIndex: number,
 ): Promise<ChapterCache | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM chapter_cache WHERE book_url = ? AND chapter_index = ?',
-    [bookUrl, chapterIndex]
+    [bookUrl, chapterIndex],
   );
   return rows.length > 0 ? mapRowToCache(rows[0]) : null;
 }
@@ -28,9 +28,15 @@ export async function upsertChapterCache(cache: ChapterCache): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `INSERT OR REPLACE INTO chapter_cache (
-      book_url, chapter_index, content, created_at
-    ) VALUES (?, ?, ?, ?)`,
-    [cache.bookUrl, cache.chapterIndex, cache.content, cache.createdAt]
+      book_url, chapter_index, content, file_path, created_at
+    ) VALUES (?, ?, ?, ?, ?)`,
+    [
+      cache.bookUrl,
+      cache.chapterIndex,
+      cache.content,
+      cache.filePath ?? null,
+      cache.createdAt,
+    ],
   );
 }
 
@@ -39,12 +45,12 @@ export async function upsertChapterCache(cache: ChapterCache): Promise<void> {
  */
 export async function deleteChapterCache(
   bookUrl: string,
-  chapterIndex: number
+  chapterIndex: number,
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     'DELETE FROM chapter_cache WHERE book_url = ? AND chapter_index = ?',
-    [bookUrl, chapterIndex]
+    [bookUrl, chapterIndex],
   );
 }
 
@@ -64,14 +70,38 @@ export async function clearAllChapterCache(): Promise<void> {
   await db.execute('DELETE FROM chapter_cache');
 }
 
-/**
- * 将数据库行映射为ChapterCache对象
- */
+export async function countChapterCacheByBook(bookUrl: string): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<{ cnt: number }>(
+    'SELECT COUNT(*) as cnt FROM chapter_cache WHERE book_url = ?',
+    [bookUrl],
+  );
+  return rows[0]?.cnt ?? 0;
+}
+
+export async function listChapterCacheByBook(bookUrl: string): Promise<ChapterCache[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM chapter_cache WHERE book_url = ? ORDER BY chapter_index',
+    [bookUrl],
+  );
+  return rows.map(mapRowToCache);
+}
+
+export async function listDistinctCachedBookUrls(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.select<{ book_url: string }>(
+    'SELECT DISTINCT book_url FROM chapter_cache',
+  );
+  return rows.map((r) => String(r.book_url ?? ''));
+}
+
 function mapRowToCache(row: Record<string, unknown>): ChapterCache {
   return {
     bookUrl: String(row.book_url ?? ''),
     chapterIndex: Number(row.chapter_index ?? 0),
     content: String(row.content ?? ''),
+    filePath: row.file_path != null ? String(row.file_path) : null,
     createdAt: Number(row.created_at ?? 0),
   };
 }

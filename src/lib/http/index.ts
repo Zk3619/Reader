@@ -12,6 +12,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCookie, saveCookie } from '@/lib/http/cookie-manager';
 import { createRateLimiter } from '@/lib/http/rate-limiter';
+import { collapseUrlPathSlashes } from '@/lib/book-source/utils';
 import { isTauri } from '@/lib/platform/detect';
 import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
 import { isAbortError, mergeAbortSignals, raceWithAbortSignal } from '@/lib/http/abort';
@@ -58,7 +59,7 @@ function normalizeUrl(url: string): string {
       urlObj.search = params.toString();
     }
 
-    return urlObj.toString();
+    return collapseUrlPathSlashes(urlObj.toString());
   } catch (error) {
     // 如果 URL 解析失败，尝试手动处理
     console.warn('[HTTP] URL 解析失败，尝试手动规范化:', error);
@@ -93,14 +94,14 @@ function normalizeUrl(url: string): string {
           normalizedQuery = '?' + params.toString();
         }
 
-        return protocol + host + normalizedPath + normalizedQuery;
+        return collapseUrlPathSlashes(protocol + host + normalizedPath + normalizedQuery);
       }
     } catch (e) {
       console.warn('[HTTP] URL 手动规范化也失败:', e);
     }
 
     // 最后的回退：返回清理后的 URL
-    return cleaned;
+    return collapseUrlPathSlashes(cleaned);
   }
 }
 

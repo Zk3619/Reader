@@ -87,8 +87,10 @@ export interface ChapterCache {
   bookUrl: string;
   /** 章节索引 */
   chapterIndex: number;
-  /** 章节内容 */
+  /** 章节内容（大文件时为空，见 filePath） */
   content: string;
+  /** 落盘路径（Tauri 绝对路径或 opfs: 引用） */
+  filePath?: string | null;
   /** 创建时间 */
   createdAt: number;
 }

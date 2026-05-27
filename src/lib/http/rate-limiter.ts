@@ -14,9 +14,18 @@ interface RateLimiter {
  * 创建速率限制器
  */
 export function createRateLimiter(rate: string): RateLimiter {
-  const match = rate.match(/^(\d+)\/(\d+)([sm]?)$/);
+  const trimmed = rate.trim();
+  // Legado：纯数字表示两次请求间隔（毫秒），等价于 1/间隔
+  if (/^\d+$/.test(trimmed)) {
+    const intervalMs = parseInt(trimmed, 10);
+    if (intervalMs > 0) {
+      return new TokenBucketRateLimiter(1, intervalMs);
+    }
+  }
+
+  const match = trimmed.match(/^(\d+)\/(\d+)([sm]?)$/);
   if (!match) {
-    throw new Error(`无效的速率格式: ${rate}，应为 "数量/时间单位"，如 "10/1s"`);
+    throw new Error(`无效的速率格式: ${rate}，应为 "数量/时间单位"（如 "10/1s"）或间隔毫秒数（如 "1500"）`);
   }
 
   const count = parseInt(match[1], 10);

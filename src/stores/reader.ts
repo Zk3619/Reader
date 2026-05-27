@@ -15,7 +15,14 @@ import * as chaptersDb from '@/lib/database/chapters';
 import * as booksDb from '@/lib/database/books';
 import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-book';
-import { getContent as getBookSourceContent } from '@/lib/book-source';
+import {
+  readCachedChapterRaw,
+  fetchAndCacheChapterContent,
+} from '@/lib/chapter-cache/storage';
+import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
+import {
+  prefetchChaptersOnRead,
+} from '@/lib/chapter-cache/prefetch';
 import { getChapterList as fetchChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import type { Book, BookChapter, BookProgress } from '@/types';
@@ -317,22 +324,36 @@ export const readerStore = {
         const fileContent = await readLocalBookContent(state.book.bookUrl);
         content = await getLocalContent(state.book, chapter, fileContent);
       } else {
-        // 在线书籍：从书源加载
+        // 在线书籍：先读缓存，再无则拉网并落库
         if (state.book.origin && state.book.origin !== 'local') {
           try {
-            // 根据origin获取书源
             const source = await sourcesDb.getSource(state.book.origin);
             if (source && source.enabled) {
-              // 获取下一章节URL（用于内容处理）
               const nextChapter = state.catalog[index + 1];
               const nextChapterUrl = nextChapter?.url;
 
-              content = await getBookSourceContent(
-                source,
-                chapter,
-                nextChapterUrl,
-                state.book
+              const cachedRaw = await readCachedChapterRaw(
+                state.book.bookUrl,
+                index,
               );
+              let raw: string | null = cachedRaw;
+              if (!raw?.trim()) {
+                raw = await fetchAndCacheChapterContent(
+                  source,
+                  state.book,
+                  chapter,
+                  nextChapterUrl,
+                );
+              }
+              if (raw) {
+                content = await applyChapterDisplayProcessing(
+                  raw,
+                  state.book,
+                  source,
+                );
+              } else {
+                content = '内容加载失败';
+              }
             } else {
               content = '书源不存在或已禁用';
             }
@@ -352,6 +373,10 @@ export const readerStore = {
         contentLoading: false,
         showContent: true,
       });
+
+      if (state.book && !isLocalBook(state.book)) {
+        void prefetchChaptersOnRead(state.book, state.catalog, index);
+      }
 
       // 保存阅读进度
       await this.saveProgress();
@@ -404,21 +429,27 @@ export const readerStore = {
    * 保存阅读进度
    */
   async saveProgress(): Promise<void> {
-    if (!state.book || state.guestReading) {
+    const book = state.book;
+    if (!book || state.guestReading) {
       return;
     }
 
+    const bookUrl = book.bookUrl;
+    const chapterIndex = state.chapterIndex;
+    const chapterPos = Math.min(1, Math.max(0, state.chapterPos));
+    const chapterTitle = state.catalog[chapterIndex]?.title;
+
     try {
-      const chapter = state.catalog[state.chapterIndex];
-      const chapterTitle = chapter?.title;
-      const progress = Math.min(1, Math.max(0, state.chapterPos));
-      await booksDb.updateReadProgress(state.book.bookUrl, {
-        chapterIndex: state.chapterIndex,
-        chapterPos: progress,
+      await booksDb.updateReadProgress(bookUrl, {
+        chapterIndex,
+        chapterPos,
         chapterTitle,
       });
-      // 触发书架刷新事件，让书架页面重新加载并排序
-      window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+      window.dispatchEvent(
+        new CustomEvent('bookshelf-book-updated', {
+          detail: { bookUrl },
+        }),
+      );
     } catch (e) {
       console.error('保存阅读进度失败:', e);
     }
@@ -469,9 +500,9 @@ export const readerStore = {
   /**
    * 关闭书籍
    */
-  closeBook(): void {
+  async closeBook(): Promise<void> {
     if (!state.guestReading) {
-      this.saveProgress().catch(console.error);
+      await this.saveProgress();
     }
 
     setState({

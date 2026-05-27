@@ -112,6 +112,11 @@ async function getContentFromDataUrl(
 
 // ─── 主入口 ───
 
+export interface GetContentOptions {
+  /** 为 true 时不应用数据库替换规则（用于章节缓存落盘） */
+  skipReplaceRules?: boolean;
+}
+
 /**
  * 获取章节正文内容
  * 自动检测 chapterUrl 类型，选择对应的处理路径
@@ -120,7 +125,8 @@ export async function getContent(
   source: BookSource,
   chapter: BookChapter,
   nextChapterUrl?: string,
-  book?: Book
+  book?: Book,
+  options?: GetContentOptions,
 ): Promise<string | null> {
   if (!source.ruleContent) {
     return null;
@@ -293,7 +299,7 @@ export async function getContent(
     }
 
     // 应用替换规则（从数据库获取）
-    if (book) {
+    if (book && !options?.skipReplaceRules) {
       content = await processContent(content, book.name, source.sourceUrl);
     }
 

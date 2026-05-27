@@ -2,7 +2,7 @@
  * 书籍封面：跨域一律 fetch → blob，避免 CDN 403 / CORB。
  */
 
-import { createEffect, createSignal, Show, type JSX } from 'solid-js';
+import { createEffect, createSignal, on, Show, type JSX } from 'solid-js';
 import type { BookSource } from '@/types';
 import {
   loadCoverImageObjectUrl,
@@ -57,25 +57,41 @@ export function BookCoverImg(props: BookCoverImgProps) {
     return !r || !/^https?:\/\//i.test(r);
   };
 
-  createEffect(() => {
-    const norm = normalizedSrc();
-    setFailed(false);
-    setBlobSrc(null);
+  createEffect(
+    on(
+      () => ({
+        norm: normalizedSrc(),
+        source: props.source,
+      }),
+      (cur, prev) => {
+        if (
+          prev &&
+          cur.norm === prev.norm &&
+          cur.source === prev.source
+        ) {
+          return;
+        }
 
-    if (!norm || !shouldFetchCoverAsBlob(norm)) return;
-    if (needsBookSourceForCover() && !props.source) return;
+        setFailed(false);
+        setBlobSrc(null);
 
-    let cancelled = false;
-    void loadCoverImageObjectUrl(norm, loadOptions()).then((url) => {
-      if (cancelled) return;
-      if (url) setBlobSrc(url);
-      else setFailed(true);
-    });
+        const { norm } = cur;
+        if (!norm || !shouldFetchCoverAsBlob(norm)) return;
+        if (needsBookSourceForCover() && !cur.source) return;
 
-    return () => {
-      cancelled = true;
-    };
-  });
+        let cancelled = false;
+        void loadCoverImageObjectUrl(norm, loadOptions()).then((url) => {
+          if (cancelled) return;
+          if (url) setBlobSrc(url);
+          else setFailed(true);
+        });
+
+        return () => {
+          cancelled = true;
+        };
+      },
+    ),
+  );
 
   return (
     <Show when={ready()} fallback={props.fallback}>

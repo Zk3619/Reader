@@ -101,6 +101,9 @@ function evalJsFallback(code: string, context: JsContext): string | null {
     get(_key: string) {
       return '';
     },
+    getString(_rule: string) {
+      return '';
+    },
   };
 
   let parsedResult: unknown = context.result;
@@ -274,6 +277,7 @@ function injectUtils(vm: QuickJSContext): void {
       longToast: function() {},
       put: function() {},
       get: function(key) { return ''; },
+      getString: function(rule) { return ''; },
     };
   `);
 }

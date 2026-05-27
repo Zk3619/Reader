@@ -9,12 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerClose,
-} from '@/components/ui/drawer';
+  AppDrawer,
+  AppDrawerBody,
+  AppDrawerClose,
+  AppDrawerContent,
+  AppDrawerHeader,
+} from '@/components/shared/AppDrawer';
+import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import {
   AppDialog,
   AppDialogContent,
@@ -26,8 +27,10 @@ import { ReaderContent } from '@/pages/reader/ReaderContent';
 import { ReaderSettings } from '@/pages/reader/ReaderSettings';
 import { ReaderCatalog } from '@/pages/reader/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/pages/reader/ReaderCommentsDrawer';
+import { ReaderOfflineCacheDialog } from '@/components/reader/ReaderOfflineCacheDialog';
 import { cn } from '@/lib/utils';
 import { isMobile, isTauri } from '@/lib/platform/detect';
+import { isLocalBook } from '@/lib/local-book';
 import {
   ChevronLeftIcon,
   ListIcon,
@@ -40,10 +43,13 @@ import {
   VolumeIcon,
   ThemeLightIcon,
   ThemeDarkIcon,
-  XIcon,
 } from '@/components/shared/icons';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import { showImmersiveEnterToast, shouldShowImmersiveEnterToast } from '@/components/shared/AppToasts';
+import {
+  showAppToast,
+  showImmersiveEnterToast,
+  shouldShowImmersiveEnterToast,
+} from '@/components/shared/AppToasts';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { Separator } from '@/components/ui/separator';
 
@@ -78,6 +84,7 @@ export function ReaderPage(props: ReaderPageProps) {
   /** 设置抽屉（另外的菜单）：仅窄屏底栏的「设置」打开 */
   const [readerMenuDrawerOpen, setReaderMenuDrawerOpen] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
+  const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   /** 阅读进度状态栏选项行：整行可点触发 radio，仅本弹窗使用 */
   const statusBarOptionRowClass =
     'flex cursor-pointer items-center rounded-md px-2 py-1.5 hover:bg-muted/50 has-[[data-checked]]:bg-accent has-[[data-checked]]:text-accent-foreground'
@@ -98,6 +105,26 @@ export function ReaderPage(props: ReaderPageProps) {
   let tapMoved = false;
 
   const book = () => readerStore.state.book;
+  const catalogSize = () => readerStore.state.catalog.length;
+  const canOfflineCache = () => {
+    const b = book();
+    if (!b || readerStore.isGuestReading()) return false;
+    return !isLocalBook(b);
+  };
+
+  const openOfflineCacheDialog = () => {
+    if (!canOfflineCache()) {
+      showAppToast({
+        title: '无法离线缓存',
+        description: readerStore.isGuestReading()
+          ? '试读书籍请先加入书架'
+          : '本地书籍无需缓存',
+        variant: 'default',
+      });
+      return;
+    }
+    setOfflineCacheDialogOpen(true);
+  };
   const catalog = () => readerStore.state.catalog;
   const chapterIndex = () => readerStore.state.chapterIndex;
   const currentChapter = () => catalog()[chapterIndex()];
@@ -552,10 +579,17 @@ export function ReaderPage(props: ReaderPageProps) {
             <TooltipContent>刷新</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="no-drag" onClick={() => {}} aria-label="缓存">
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={openOfflineCacheDialog}
+              aria-label="离线缓存"
+            >
               <DownloadIcon class="size-5" />
             </TooltipTrigger>
-            <TooltipContent>缓存（敬请期待）</TooltipContent>
+            <TooltipContent>离线缓存</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button} variant="ghost" size="icon" class="no-drag" onClick={() => {}} aria-label="更多">
@@ -789,60 +823,45 @@ export function ReaderPage(props: ReaderPageProps) {
 
       {/* 目录 Drawer：左侧滑出，向左拖动整块收起（与底部 Drawer 一致） */}
       <Show when={book()}>
-        <Drawer
+        <AppDrawer
           open={catalogOpen()}
           onOpenChange={setCatalogOpen}
           side="left"
           snapPoints={[0, 1]}
           defaultSnapPoint={1}
         >
-          <DrawerContent class="z-100 flex h-full w-full max-w-sm flex-col" overlayClass="z-100">
-            <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
-              <DrawerTitle>目录</DrawerTitle>
-              <DrawerClose
-                as="button"
-                class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="关闭"
-              >
-                <XIcon class="h-4 w-4" size={16} />
-              </DrawerClose>
-            </DrawerHeader>
-            <div class="flex min-h-0 flex-1 flex-col overflow-hidden" data-corvu-no-drag>
-              <ReaderCatalog
-                open={catalogOpen()}
-                initialScrollTop={catalogScrollTop()}
-                onScrollTop={setCatalogScrollTop}
-                onSelectChapter={(index: number) => {
-                  readerStore.jumpToChapter(index);
-                  setCatalogOpen(false);
-                }}
-                onClose={() => setCatalogOpen(false)}
-              />
-            </div>
-          </DrawerContent>
-        </Drawer>
+          <AppDrawerContent class="z-100 flex h-full w-full max-w-sm flex-col" overlayClass="z-100">
+            <AppDrawerHeader title="目录" />
+            <AppDrawerBody>
+              <Show when={catalogOpen()}>
+                <ReaderCatalog
+                  open
+                  initialScrollTop={catalogScrollTop()}
+                  onScrollTop={setCatalogScrollTop}
+                  onSelectChapter={(index: number) => {
+                    readerStore.jumpToChapter(index);
+                    setCatalogOpen(false);
+                  }}
+                  onClose={() => setCatalogOpen(false)}
+                />
+              </Show>
+            </AppDrawerBody>
+          </AppDrawerContent>
+        </AppDrawer>
       </Show>
 
       {/* 阅读设置 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
-      <Drawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
-        <DrawerContent class="z-100 h-[75dvh] max-h-[75dvh] flex flex-col" overlayClass="z-100">
-          <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
-            <DrawerTitle>阅读设置</DrawerTitle>
-            <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
-              <XIcon class="h-4 w-4" size={16} />
-            </DrawerClose>
-          </DrawerHeader>
-          <div
-            class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-6 pt-1"
-            data-corvu-no-drag
-          >
+      <AppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
+        <AppDrawerContent class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)} overlayClass="z-100">
+          <AppDrawerHeader title="阅读设置" />
+          <AppDrawerBody class="px-4 pb-6 pt-1">
             <ReaderSettings onClose={() => setSettingsOpen(false)} showReadWidth={() => isWideScreen() || !isMobile()} />
-          </div>
-        </DrawerContent>
-      </Drawer>
+          </AppDrawerBody>
+        </AppDrawerContent>
+      </AppDrawer>
 
       {/* 设置抽屉：仅关闭/全开两档，保证可滚动区高度固定、滚动正常。从本抽屉内打开「阅读进度状态栏」对话框时禁止因焦点/点击移出而关闭，避免抽屉被误关、对话框随之关闭并触发设置按钮 tooltip */}
-      <Drawer
+      <AppDrawer
         open={readerMenuDrawerOpen()}
         onOpenChange={setReaderMenuDrawerOpen}
         snapPoints={[0, 1]}
@@ -850,17 +869,9 @@ export function ReaderPage(props: ReaderPageProps) {
         closeOnOutsideFocus={!statusBarStyleDialogOpen()}
         closeOnOutsidePointer={!statusBarStyleDialogOpen()}
       >
-        <DrawerContent class="z-100 h-[75dvh] max-h-[75dvh] flex flex-col" overlayClass="z-100">
-          <DrawerHeader class="flex flex-row items-center justify-between gap-2 pb-2">
-            <DrawerTitle>设置</DrawerTitle>
-            <DrawerClose as="button" class="h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="关闭">
-              <XIcon class="h-4 w-4" size={16} />
-            </DrawerClose>
-          </DrawerHeader>
-          <div
-            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6"
-            data-corvu-no-drag
-          >
+        <AppDrawerContent class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)} overlayClass="z-100">
+          <AppDrawerHeader title="设置" />
+          <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6">
             {/* 阅读进度状态栏的显示风格 */}
             <div class="flex items-center justify-between gap-3 py-2">
               <span class="text-sm text-foreground">阅读进度状态栏的显示风格</span>
@@ -876,12 +887,12 @@ export function ReaderPage(props: ReaderPageProps) {
                     : '始终隐藏'}
               </button>
             </div>
-            <DrawerClose as="button" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
+            <AppDrawerClose as="button" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
               关闭
-            </DrawerClose>
-          </div>
-        </DrawerContent>
-      </Drawer>
+            </AppDrawerClose>
+          </AppDrawerBody>
+        </AppDrawerContent>
+      </AppDrawer>
 
       {/* 阅读进度状态栏显示风格选项弹窗：盖过设置抽屉(z-100)；窄屏下限制宽度并留边距；非模态避免关闭后影响阅读器操作 */}
       <AppDialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
@@ -954,6 +965,14 @@ export function ReaderPage(props: ReaderPageProps) {
           </div>
         </AppDialogContent>
       </AppDialog>
+
+      <ReaderOfflineCacheDialog
+        open={offlineCacheDialogOpen()}
+        onOpenChange={setOfflineCacheDialogOpen}
+        book={book() ?? null}
+        chapterIndex={readerStore.state.chapterIndex}
+        catalogSize={catalogSize()}
+      />
     </div>
   );
 }

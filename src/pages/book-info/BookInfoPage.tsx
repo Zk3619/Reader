@@ -499,6 +499,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
   // 使用刷新后的数据
   const currentBook = () => bookData();
 
+  /** 在线书目录才显示章节正文缓存云标 */
+  const showChapterCacheHint = () => {
+    const sb = shelfBook();
+    if (sb) return !isLocalBook(sb);
+    const origin = currentBook().origin ?? '';
+    return origin !== 'local' && !origin.startsWith('local::');
+  };
+
   const displayIntro = () => {
     const sb = shelfBook();
     const raw = sb?.customIntro?.trim() || currentBook().intro?.trim();
@@ -577,15 +585,19 @@ export function BookInfoPage(props: BookInfoPageProps) {
   };
 
   const handleViewToc = async () => {
-    const chapters = preloadedChapters();
-    if (!chapters || chapters.length === 0) {
+    // 先打开目录 UI，再在后台补全章节数据（对齐 legado 即时弹出列表）
+    setShowTocDialog(true);
+
+    let list = preloadedChapters();
+    if (!list || list.length === 0) {
       const source = bookSource();
       const book = currentBook();
       if (source && isOnlineSearchBook(book)) {
         await preloadChapterList(book, source);
       }
+      list = preloadedChapters();
     }
-    const list = preloadedChapters();
+
     if (!list || list.length === 0) {
       showAppToast({
         title: '目录为空',
@@ -594,6 +606,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       });
       return;
     }
+
     if (!isInShelf()) {
       const added = await addSearchBookToShelf(currentBook(), shelfAddOptions(list));
       if (added) {
@@ -601,7 +614,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
         await refreshShelfBook();
       }
     }
-    setShowTocDialog(true);
   };
 
   const handleCoverUrlRefreshed = (fresh: string) => {
@@ -1114,6 +1126,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
         open={showTocDialog()}
         onOpenChange={setShowTocDialog}
         bookName={currentBook().name}
+        bookUrl={currentBook().bookUrl}
+        showChapterCacheHint={showChapterCacheHint()}
         chapters={preloadedChapters() ?? []}
         loading={tocLoading()}
         error={tocLoadError()}

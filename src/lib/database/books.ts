@@ -349,6 +349,11 @@ export async function updateReadProgress(
  * 删除书籍
  */
 export async function deleteBook(bookUrl: string): Promise<void> {
+  const existing = await getBook(bookUrl);
+  if (existing) {
+    const { deleteCachedChaptersByBook } = await import('@/lib/chapter-cache/storage');
+    await deleteCachedChaptersByBook(existing);
+  }
   const db = await getDatabase();
   // 由于外键约束，删除书籍时会自动删除相关章节
   await db.execute('DELETE FROM books WHERE bookUrl = ?', [bookUrl]);

@@ -77,7 +77,7 @@ export async function runMigrations(db: DatabaseAdapter): Promise<void> {
   const result = await db.select<{ version: number }>(
     'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1'
   );
-  const currentVersion = result[0]?.version ?? 0;
+  let currentVersion = result[0]?.version ?? 0;
 
   // 导入迁移
   const { migrations } = await import('./migrations');
@@ -91,8 +91,15 @@ export async function runMigrations(db: DatabaseAdapter): Promise<void> {
         'INSERT INTO schema_version (version) VALUES (?)',
         [migration.version]
       );
+      currentVersion = migration.version;
     }
   }
+
+  // 章节缓存列与版本号解耦，避免「已记录 v97 但缺 file_path」导致读写失败
+  const { ensureChapterCacheSchema } = await import(
+    '@/lib/database/migration-chapter-cache-v97'
+  );
+  await ensureChapterCacheSchema(db);
 }
 
 /**

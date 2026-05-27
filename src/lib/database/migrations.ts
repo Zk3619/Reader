@@ -8,8 +8,17 @@
 
 import type { DatabaseAdapter } from '@/lib/platform/database';
 import { LEGADO_SCHEMA_VERSION, migrateToLegadoV96 } from '@/lib/database/migration-v96';
+import {
+  CHAPTER_CACHE_SCHEMA_VERSION,
+  migrateChapterCacheV97,
+} from '@/lib/database/migration-chapter-cache-v97';
+import {
+  CHAPTER_CACHE_ENSURE_SCHEMA_VERSION,
+  migrateChapterCacheV98,
+} from '@/lib/database/migration-chapter-cache-v98';
 
 export { LEGADO_SCHEMA_VERSION };
+export { CHAPTER_CACHE_SCHEMA_VERSION };
 
 export interface Migration {
   version: number;
@@ -107,6 +116,7 @@ export const migrations: Migration[] = [
           book_url TEXT NOT NULL,
           chapter_index INTEGER NOT NULL,
           content TEXT,
+          file_path TEXT,
           created_at INTEGER DEFAULT (strftime('%s', 'now')),
           PRIMARY KEY(book_url, chapter_index)
         )
@@ -424,5 +434,13 @@ export const migrations: Migration[] = [
   {
     version: LEGADO_SCHEMA_VERSION,
     up: migrateToLegadoV96,
+  },
+  {
+    version: CHAPTER_CACHE_SCHEMA_VERSION,
+    up: migrateChapterCacheV97,
+  },
+  {
+    version: CHAPTER_CACHE_ENSURE_SCHEMA_VERSION,
+    up: migrateChapterCacheV98,
   },
 ];

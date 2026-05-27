@@ -5,13 +5,14 @@
 
 import { Show } from 'solid-js';
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer';
-import { Button } from '@/components/ui/button';
-import { XIcon } from '@/components/shared/icons';
+  AppDrawer,
+  AppDrawerBody,
+  AppDrawerCloseButton,
+  AppDrawerContent,
+  AppDrawerHeader,
+  AppDrawerTitle,
+} from '@/components/shared/AppDrawer';
+import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
 export interface ReaderCommentsDrawerProps {
@@ -63,15 +64,7 @@ function CommentsPanelContent(props: {
         )}
       >
         <span class="text-sm font-medium text-foreground">段评</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-8 w-8 shrink-0"
-          onClick={props.onClose}
-          aria-label="关闭段评"
-        >
-          <XIcon class="h-4 w-4 text-muted-foreground" size={16} />
-        </Button>
+        <AppDrawerCloseButton onClick={props.onClose} aria-label="关闭段评" />
       </div>
       {/* 加 data-corvu-no-drag：此处仅滚动段评列表，不触发抽屉拖拽；拖拽仅作用于顶部把手/标题栏 */}
       <div class="flex-1 overflow-y-auto scroll-gutter-stable-both p-2" data-corvu-no-drag>
@@ -120,28 +113,28 @@ export function ReaderCommentsDrawer(props: ReaderCommentsDrawerProps) {
         </div>
       }
     >
-      <Drawer
+      <AppDrawer
         open={props.open ?? false}
         onOpenChange={props.onOpenChange}
         snapPoints={[0, 1]}
         defaultSnapPoint={1}
       >
         {/* 仅关闭/全开两档，避免半屏时溢出按最大高度计算导致无法滚动 */}
-        <DrawerContent
-          class="z-110 h-[75dvh] max-h-[75dvh] flex flex-col"
+        <AppDrawerContent
+          class={cn('z-110 flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
           overlayClass="z-[110]"
         >
-          <DrawerHeader class="sr-only">
-            <DrawerTitle>段评</DrawerTitle>
-          </DrawerHeader>
-          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <AppDrawerHeader class="sr-only" showClose={false}>
+            <AppDrawerTitle>段评</AppDrawerTitle>
+          </AppDrawerHeader>
+          <AppDrawerBody>
             <CommentsPanelContent
               segment={props.segment}
               onClose={handleClose}
             />
-          </div>
-        </DrawerContent>
-      </Drawer>
+          </AppDrawerBody>
+        </AppDrawerContent>
+      </AppDrawer>
     </Show>
   );
 }

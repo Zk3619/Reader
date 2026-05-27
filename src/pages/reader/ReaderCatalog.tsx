@@ -2,12 +2,20 @@
  * 阅读器目录列表
  * 参考 legado：卷/章层级、当前章节高亮、点击跳转、自动滚动到当前章节
  * - 卷（isVolume）作为分组标题展示，其下章节缩进
+ * - 大目录使用虚拟列表，打开抽屉不阻塞主线程
  */
 
-import { For, createEffect } from 'solid-js';
+import { createEffect, createMemo } from 'solid-js';
 import { readerStore } from '@/stores/reader';
+import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
+import {
+  scrollCatalogIndexIntoView,
+  VirtualChapterList,
+} from '@/components/books/VirtualChapterList';
+import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-indices';
+import { buildChapterRowMetas, CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
+import { isLocalBook } from '@/lib/local-book';
 import { cn } from '@/lib/utils';
-import type { BookChapter } from '@/types';
 
 export interface ReaderCatalogProps {
   onSelectChapter: (index: number) => void;
@@ -20,21 +28,24 @@ export interface ReaderCatalogProps {
   onScrollTop?: (scrollTop: number) => void;
 }
 
-/** 判断章节是否属于某个卷下（即前面存在卷标题，应缩进显示） */
-function isUnderVolume(list: BookChapter[], idx: number): boolean {
-  for (let k = idx - 1; k >= 0; k--) {
-    if (list[k].isVolume) return true;
-  }
-  return false;
-}
-
 export function ReaderCatalog(props: ReaderCatalogProps) {
-  /** 目录列表使用 readerStore 中的缓存（openBook 时已加载），不在此处发起请求 */
   const catalog = () => readerStore.state.catalog;
   const chapterIndex = () => readerStore.state.chapterIndex;
+  const bookUrl = () => readerStore.state.book?.bookUrl;
+  const showCacheHint = () => {
+    const book = readerStore.state.book;
+    return Boolean(book && !isLocalBook(book));
+  };
+  const { cached: cachedIndices } = useCachedChapterIndices(
+    bookUrl,
+    () => showCacheHint() && Boolean(props.open),
+    true,
+  );
+  const isChapterCached = (idx: number) => cachedIndices().has(idx);
+
+  const rows = createMemo(() => buildChapterRowMetas(catalog()));
+
   let scrollContainer: HTMLDivElement | undefined;
-  let currentChapterButton: HTMLButtonElement | undefined;
-  /** 上次滚动到的章节索引，仅当当前章变化时才滚动，避免每次打开目录都重新滚动 */
   let lastScrolledToIndex = -1;
   let lastCatalogLength = 0;
 
@@ -47,22 +58,20 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
     if (!props.open || list.length === 0) return;
     const idx = chapterIndex();
     if (idx === lastScrolledToIndex) return;
-    if (!scrollContainer || !currentChapterButton) return;
+    if (!scrollContainer) return;
     lastScrolledToIndex = idx;
     requestAnimationFrame(() => {
-      if (!scrollContainer || !currentChapterButton) return;
-      const buttonRect = currentChapterButton.getBoundingClientRect();
-      const scrollTop = currentChapterButton.offsetTop - scrollContainer.offsetTop -
-        (scrollContainer.clientHeight / 2) + (buttonRect.height / 2);
-      const targetTop = Math.max(0, scrollTop);
-      scrollContainer.scrollTo({ top: targetTop, behavior: 'smooth' });
-      props.onScrollTop?.(targetTop);
+      if (!scrollContainer) return;
+      scrollCatalogIndexIntoView(
+        scrollContainer,
+        idx,
+        CATALOG_ROW_HEIGHT_PX,
+        'smooth',
+      );
+      props.onScrollTop?.(scrollContainer.scrollTop);
     });
   });
 
-  const list = () => catalog();
-
-  // 恢复缓存的滚动位置；先标记当前章已处理，避免“滚到当前章”效果覆盖
   createEffect(() => {
     if (!props.open || !scrollContainer) return;
     const initial = props.initialScrollTop ?? 0;
@@ -74,64 +83,79 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
   });
 
   return (
-    <div
-      ref={scrollContainer}
-      class="reader-catalog-scroll flex-1 overflow-y-auto"
-      onScroll={() => {
-        if (scrollContainer && props.onScrollTop) props.onScrollTop(scrollContainer.scrollTop);
+    <VirtualChapterList
+      class="reader-catalog-scroll"
+      count={rows().length}
+      onScrollContainer={(el) => {
+        scrollContainer = el;
+      }}
+      onScroll={(el) => {
+        props.onScrollTop?.(el.scrollTop);
       }}
     >
-      <ul class="space-y-0.5 py-2">
-        <For each={list()}>
-          {(chapter: BookChapter, index) => {
-            const idx = index();
-            const isVol = () => chapter.isVolume;
-            const isCurrent = () => idx === chapterIndex();
-            const underVolume = () => isUnderVolume(list(), idx);
+      {(index) => {
+        const row = rows()[index];
+        if (!row) return null;
+        const { chapter, underVolume } = row;
+        const isVol = chapter.isVolume;
+        const isCurrent = index === chapterIndex();
 
-            if (isVol()) {
-              return (
-                <li class="mt-1 first:mt-0">
-                  <button
-                    ref={(el) => {
-                      if (isCurrent()) currentChapterButton = el;
-                    }}
-                    type="button"
-                    class={cn(
-                      'w-full truncate px-4 py-2.5 text-left text-sm rounded-md',
-                      'text-muted-foreground hover:bg-muted/80',
-                      isCurrent() && 'bg-primary/10 font-medium text-primary'
-                    )}
-                    onClick={() => props.onSelectChapter(idx)}
-                  >
-                    {chapter.title}
-                  </button>
-                </li>
-              );
-            }
+        if (isVol) {
+          return (
+            <div
+              class="box-border px-0"
+              style={{ height: `${CATALOG_ROW_HEIGHT_PX}px` }}
+            >
+              <button
+                type="button"
+                class={cn(
+                  'flex h-full w-full items-center truncate rounded-md px-4 text-left text-sm',
+                  'text-muted-foreground hover:bg-muted/80',
+                  isCurrent && 'bg-primary/10 font-medium text-primary',
+                )}
+                onClick={() => props.onSelectChapter(index)}
+              >
+                <span class="flex w-full min-w-0 items-center gap-2">
+                  <span class="min-w-0 flex-1 truncate">{chapter.title}</span>
+                  <ChapterCacheCloudIcon
+                    enabled={showCacheHint()}
+                    cached={isChapterCached(index)}
+                    isVolume
+                  />
+                </span>
+              </button>
+            </div>
+          );
+        }
 
-            return (
-              <li class={cn(underVolume() && 'pl-4')}>
-                <button
-                  ref={(el) => {
-                    if (isCurrent()) currentChapterButton = el;
-                  }}
-                  type="button"
-                  class={cn(
-                    'w-full truncate px-4 py-2.5 text-left text-sm transition-colors rounded-md',
-                    isCurrent()
-                      ? 'bg-primary/10 font-medium text-primary'
-                      : 'text-foreground hover:bg-muted'
-                  )}
-                  onClick={() => props.onSelectChapter(idx)}
-                >
-                  {chapter.title || `第 ${idx + 1} 章`}
-                </button>
-              </li>
-            );
-          }}
-        </For>
-      </ul>
-    </div>
+        return (
+          <div
+            class={cn('box-border px-0', underVolume && 'pl-4')}
+            style={{ height: `${CATALOG_ROW_HEIGHT_PX}px` }}
+          >
+            <button
+              type="button"
+              class={cn(
+                'flex h-full w-full items-center truncate rounded-md px-4 text-left text-sm transition-colors',
+                isCurrent
+                  ? 'bg-primary/10 font-medium text-primary'
+                  : 'text-foreground hover:bg-muted',
+              )}
+              onClick={() => props.onSelectChapter(index)}
+            >
+              <span class="flex w-full min-w-0 items-center gap-2">
+                <span class="min-w-0 flex-1 truncate">
+                  {chapter.title || `第 ${index + 1} 章`}
+                </span>
+                <ChapterCacheCloudIcon
+                  enabled={showCacheHint()}
+                  cached={isChapterCached(index)}
+                />
+              </span>
+            </button>
+          </div>
+        );
+      }}
+    </VirtualChapterList>
   );
 }

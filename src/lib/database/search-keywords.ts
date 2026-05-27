@@ -17,6 +17,21 @@ export async function getAllSearchKeywords(): Promise<SearchKeyword[]> {
   return rows.map(row => mapRowToKeyword(row));
 }
 
+/** ??????????? Legado SearchKeywordDao.flowSearch? */
+export async function searchSearchKeywords(key: string): Promise<SearchKeyword[]> {
+  const q = key.trim();
+  const db = await getDatabase();
+  if (!q) {
+    return getAllSearchKeywords();
+  }
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM search_keywords WHERE word LIKE '%' || ? || '%'
+     ORDER BY usage DESC, lastUseTime DESC`,
+    [q]
+  );
+  return rows.map((row) => mapRowToKeyword(row));
+}
+
 /**
  * Ë?∑Âè?Êê?Á¥¢Â?≥È?ÆËØç
  */

@@ -25,6 +25,39 @@ function isJsRule(rule: string | undefined | null): boolean {
   return !!rule?.trim().startsWith('<js>');
 }
 
+function splitAuthorAndInlineTags(rawAuthor: string): {
+  author: string;
+  inlineTags: string[];
+} {
+  const text = rawAuthor.trim();
+  if (!text) return { author: '', inlineTags: [] };
+  const parts = text.split('|').map((s) => s.trim()).filter(Boolean);
+  const inlineTags: string[] = [];
+  const authorParts: string[] = [];
+  for (const p of parts) {
+    if (/#/.test(p)) {
+      const tags = p.split(/\s+/).map((x) => x.trim()).filter((x) => x.startsWith('#') && x.length > 1);
+      if (tags.length > 0) {
+        inlineTags.push(...tags);
+        continue;
+      }
+    }
+    authorParts.push(p);
+  }
+  return {
+    author: (authorParts.join(' | ') || parts[0] || text).trim(),
+    inlineTags: Array.from(new Set(inlineTags)),
+  };
+}
+
+function getRuleBaseBeforeReplace(ruleText: string | undefined): string | undefined {
+  if (!ruleText?.trim()) return undefined;
+  const idx = ruleText.indexOf('##');
+  if (idx < 0) return ruleText.trim();
+  const base = ruleText.slice(0, idx).trim();
+  return base || undefined;
+}
+
 /** 从详情页 JSON 文本解析供 <js> 使用的 result 对象 */
 function parseRuleResultObject(body: string): Record<string, unknown> | undefined {
   try {
@@ -59,10 +92,11 @@ async function resolveBookInfoIntro(
 
   if (isJsRule(rule)) {
     if (!options.ruleResult) {
-      console.warn('[detail] <js> 简介规则需要 JSON result，当前内容无法解析');
-      return buildIntroFromDetailJson(
-        parseRuleResultObject(context.content) ?? {},
-      );
+      // HTML 详情页同样可能使用 <js> 规则，按通用规则引擎执行而不是强制 JSON。
+      const parsed = (await analyzeString(rule, context)).trim();
+      if (parsed) return parsed;
+      console.warn('[detail] <js> 简介规则执行为空，已回退默认简介构建');
+      return buildIntroFromDetailJson(parseRuleResultObject(context.content) ?? {});
     }
     const scripted = await runBookInfoIntroScript(
       source,
@@ -131,16 +165,28 @@ async function analyzeBookInfoFromBody(
     result: ruleResult ? JSON.stringify(ruleResult) : contextContent,
   };
 
-  const nameFromRule = rule.name ? await analyzeString(rule.name, context) : '';
+  const safeAnalyze = async (ruleText: string | undefined): Promise<string> => {
+    if (!ruleText?.trim()) return '';
+    try {
+      return await analyzeString(ruleText, context);
+    } catch (e) {
+      console.warn('[detail] 字段规则解析失败，已跳过:', { rule: ruleText.slice(0, 80), error: e });
+      return '';
+    }
+  };
+
+  const nameFromRule = await safeAnalyze(rule.name);
   const name =
     nameFromRule.trim() ||
     (ruleResult?.book_name != null ? String(ruleResult.book_name) : '');
-  const authorFromRule = rule.author
-    ? await analyzeString(rule.author, context)
-    : '';
-  const author =
+  const authorFromRule = await safeAnalyze(rule.author);
+  const authorRawFromBaseRule = await safeAnalyze(getRuleBaseBeforeReplace(rule.author));
+  const rawAuthor =
+    authorRawFromBaseRule.trim() ||
     authorFromRule.trim() ||
     (ruleResult?.author != null ? String(ruleResult.author) : '');
+  const authorSplit = splitAuthorAndInlineTags(rawAuthor);
+  const author = authorSplit.author;
 
   const intro = await resolveBookInfoIntro(source, rule.intro, context, {
     ruleResult,
@@ -151,7 +197,7 @@ async function analyzeBookInfoFromBody(
 
   let coverUrl: string | undefined;
   if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
-    const parsed = await analyzeString(rule.coverUrl, context);
+    const parsed = await safeAnalyze(rule.coverUrl);
     if (parsed.trim()) {
       coverUrl = resolveUrl(redirectUrl, parsed);
     }
@@ -160,7 +206,7 @@ async function analyzeBookInfoFromBody(
     coverUrl = ruleResult.thumb_url;
   }
 
-  const kindFromRule = rule.kind ? await analyzeString(rule.kind, context) : '';
+  const kindFromRule = await safeAnalyze(rule.kind);
   const kind =
     kindFromRule.trim() ||
     (typeof ruleResult?.category === 'string'
@@ -169,25 +215,19 @@ async function analyzeBookInfoFromBody(
         ? ruleResult.tags
         : undefined);
 
-  const wordCountFromRule = rule.wordCount
-    ? await analyzeString(rule.wordCount, context)
-    : '';
+  const wordCountFromRule = await safeAnalyze(rule.wordCount);
   const wordCount =
     wordCountFromRule.trim() ||
     (ruleResult?.word_number != null ? String(ruleResult.word_number) : undefined);
 
-  const latestFromRule = rule.lastChapter
-    ? await analyzeString(rule.lastChapter, context)
-    : '';
+  const latestFromRule = await safeAnalyze(rule.lastChapter);
   const latestChapterTitle =
     latestFromRule.trim() ||
     (typeof ruleResult?.last_chapter_title === 'string'
       ? ruleResult.last_chapter_title
       : undefined);
 
-  const updateFromRule = rule.updateTime
-    ? await analyzeString(rule.updateTime, context)
-    : '';
+  const updateFromRule = await safeAnalyze(rule.updateTime);
   const latestChapterUpdateTime =
     updateFromRule.trim() ||
     (typeof ruleResult?.last_chapter_update_time === 'string'
@@ -200,11 +240,18 @@ async function analyzeBookInfoFromBody(
 
   let tocUrl = bookUrl;
   if (rule.tocUrl && !isJsRule(rule.tocUrl)) {
-    const parsedTocUrl = await analyzeString(rule.tocUrl, context);
+    const parsedTocUrl = await safeAnalyze(rule.tocUrl);
     if (parsedTocUrl.trim()) {
       tocUrl = resolveUrl(bookUrl, parsedTocUrl);
     }
   }
+
+  const tagsFromResult = typeof ruleResult?.tags === 'string' ? ruleResult.tags.trim() : '';
+  const mergedInlineTags = authorSplit.inlineTags.join(' ');
+  const mergedTags = [tagsFromResult, mergedInlineTags]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(' ');
 
   return {
     bookUrl,
@@ -230,7 +277,7 @@ async function analyzeBookInfoFromBody(
         : typeof ruleResult?.tags === 'string'
           ? ruleResult.tags
           : undefined,
-    tags: typeof ruleResult?.tags === 'string' ? ruleResult.tags : undefined,
+    tags: mergedTags || undefined,
     score:
       ruleResult?.score != null ? String(ruleResult.score) : undefined,
   };
