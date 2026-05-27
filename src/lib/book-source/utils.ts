@@ -65,6 +65,19 @@ export function isAbsoluteUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
+/** 合并路径中重复斜杠（保留 https:// 中的 //） */
+export function collapseUrlPathSlashes(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const u = new URL(trimmed);
+    u.pathname = u.pathname.replace(/\/{2,}/g, '/');
+    return u.toString();
+  } catch {
+    return trimmed.replace(/(https?:\/\/[^/]+)\/+/gi, '$1/');
+  }
+}
+
 /**
  * 解析相对URL为绝对URL
  */

@@ -69,15 +69,32 @@ export function parseRule(rule: string): ParsedRule {
   let replacement: ParsedRule['replacement'];
   const putMap: Record<string, string> = {};
 
-  // 1. 提取替换规则（##正则##替换 或 ##正则##替换###）
-  const replaceMatch = rule.match(/##(.+?)##(.*?)(###)?$/);
-  if (replaceMatch) {
-    ruleBody = rule.substring(0, rule.indexOf('##')).trim();
-    replacement = {
-      pattern: replaceMatch[1],
-      replacement: replaceMatch[2] ?? '',
-      replaceFirst: replaceMatch[3] === '###',
-    };
+  // 1. 提取替换规则
+  // 兼容以下 Legado 常见写法：
+  // - rule##regex##replacement
+  // - rule##regex##replacement###
+  // - rule##regex      (仅删除匹配项，replacement 为空)
+  const firstSharp = rule.indexOf('##');
+  if (firstSharp >= 0) {
+    ruleBody = rule.substring(0, firstSharp).trim();
+    const tail = rule.substring(firstSharp + 2);
+    const secondSharp = tail.indexOf('##');
+    if (secondSharp >= 0) {
+      const pattern = tail.substring(0, secondSharp);
+      let replacementPart = tail.substring(secondSharp + 2);
+      const replaceFirst = replacementPart.endsWith('###');
+      if (replaceFirst) replacementPart = replacementPart.slice(0, -3);
+      replacement = {
+        pattern,
+        replacement: replacementPart ?? '',
+        replaceFirst,
+      };
+    } else {
+      replacement = {
+        pattern: tail,
+        replacement: '',
+      };
+    }
   }
 
   // 2. 提取@put变量
@@ -101,7 +118,10 @@ export function parseRule(rule: string): ParsedRule {
   } else if (ruleBody.startsWith('/') && !ruleBody.startsWith('//')) {
     // 以/开头但不是//，可能是XPath
     mode = 'xpath';
-  } else if (ruleBody.includes('<js>') || ruleBody.startsWith('@js:')) {
+  } else if (
+    ruleBody.startsWith('@js:') ||
+    (/^<js>[\s\S]*<\/js>$/i.test(ruleBody))
+  ) {
     mode = 'js';
     if (ruleBody.startsWith('@js:')) {
       ruleBody = ruleBody.slice(4).trim();
@@ -121,6 +141,54 @@ export function parseRule(rule: string): ParsedRule {
     replacement,
     putMap: Object.keys(putMap).length > 0 ? putMap : undefined,
   };
+}
+
+function splitTopLevelAlternatives(rule: string, separator: '||' | '&&'): string[] {
+  const out: string[] = [];
+  let quote: "'" | '"' | null = null;
+  let brace = 0;
+  let i = 0;
+  let start = 0;
+  while (i < rule.length) {
+    const c = rule[i];
+    if (quote) {
+      if (c === quote && rule[i - 1] !== '\\') quote = null;
+      i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      i += 1;
+      continue;
+    }
+    if (c === '{') brace += 1;
+    if (c === '}') brace = Math.max(0, brace - 1);
+    if (brace === 0 && rule.slice(i, i + separator.length) === separator) {
+      const seg = rule.slice(start, i).trim();
+      if (seg) out.push(seg);
+      i += separator.length;
+      start = i;
+      continue;
+    }
+    i += 1;
+  }
+  const tail = rule.slice(start).trim();
+  if (tail) out.push(tail);
+  return out;
+}
+
+function inferContentType(content: string): 'html' | 'json' | 'text' {
+  const trimmed = content.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      JSON.parse(trimmed);
+      return 'json';
+    } catch {
+      // ignore
+    }
+  }
+  if (trimmed.startsWith('<')) return 'html';
+  return 'text';
 }
 
 /**
@@ -173,6 +241,15 @@ function applyJsonTemplate(rule: string, jsonString: string): string {
   );
 }
 
+function applyGetVariables(rule: string, context: RuleContext): string {
+  if (!rule.includes('@get:{')) return rule;
+  return rule.replace(/@get:\{([^}]+)\}/gi, (_m, key: string) => {
+    const k = key.trim();
+    const v = context.variables?.[k];
+    return v == null ? '' : String(v);
+  });
+}
+
 /**
  * 判断规则是否为 Legado 模板（含 {{$.xxx}}）
  */
@@ -201,11 +278,67 @@ export async function analyzeRule(
     return [];
   }
 
+  // 兼容 Legado “A||B” 备选规则：前者为空时回退后者
+  const alternatives = splitTopLevelAlternatives(rule, '||');
+  if (alternatives.length > 1) {
+    for (const alt of alternatives) {
+      const r = await analyzeRule(alt, context);
+      if (r.length > 0) return r;
+    }
+    return [];
+  }
+
+  // 兼容 Legado “A&&B” 串联规则：前一步结果作为后一步输入
+  const chainRules = splitTopLevelAlternatives(rule, '&&');
+  if (chainRules.length > 1) {
+    let current: string[] = [context.content];
+    for (const part of chainRules) {
+      const next: string[] = [];
+      for (const item of current) {
+        const itemStr = String(item ?? '');
+        if (!itemStr) continue;
+        const subContext: RuleContext = {
+          ...context,
+          content: itemStr,
+          contentType: inferContentType(itemStr),
+          result: itemStr,
+        };
+        const out = await analyzeRule(part, subContext);
+        if (out.length > 0) next.push(...out);
+      }
+      current = next;
+      if (current.length === 0) break;
+    }
+    return current;
+  }
+
   // Legado 模板：{{$.path}} 等，在 JSON 上下文中按模板替换，避免被误判为 CSS
   if (context.contentType === 'json' && isJsonTemplateRule(rule)) {
     const result = applyJsonTemplate(rule, context.content);
     return result.trim() ? [result] : [];
   }
+
+  // 非 JSON 场景：先展开 {{...}} 内部规则（可嵌 XPath/CSS/JS 与 ## 替换）
+  if (context.contentType !== 'json' && rule.includes('{{') && rule.includes('}}')) {
+    const templateRegex = /\{\{([\s\S]*?)\}\}/g;
+    let expanded = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = templateRegex.exec(rule)) !== null) {
+      expanded += rule.slice(lastIndex, match.index);
+      const innerRule = match[1]?.trim() ?? '';
+      if (innerRule) {
+        const innerResults = await analyzeRule(innerRule, context);
+        expanded += innerResults[0] ?? '';
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    expanded += rule.slice(lastIndex);
+    rule = expanded;
+  }
+
+  // 兼容 Legado 变量读取：@get:{key}
+  rule = applyGetVariables(rule, context);
 
   const parsed = parseRule(rule);
   let results: string[] = [];
@@ -230,7 +363,11 @@ export async function analyzeRule(
       break;
 
     case 'json':
-      results = parseJsonPath(jsonPathWithoutExtractor(parsed.ruleBody), context.content);
+      if (context.contentType !== 'json') {
+        results = [];
+      } else {
+        results = parseJsonPath(jsonPathWithoutExtractor(parsed.ruleBody), context.content);
+      }
       break;
 
     case 'regex':

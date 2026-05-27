@@ -12,7 +12,6 @@ import {
 import { normalizeLegadoCookieHeader } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
   getSourceArgsKey,
-  getScriptBaseUrl,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { extractServerFromJsLib, parseHeaders } from '@/lib/book-source/utils';
 
@@ -62,9 +61,6 @@ export function resolveAggregationServerUrl(source: BookSource): string | null {
 
   const fromJsLib = extractServerFromJsLib(source as unknown as Record<string, unknown>);
   if (fromJsLib) return fromJsLib.replace(/\/+$/, '');
-
-  const base = getScriptBaseUrl(source);
-  if (base && isHttpUrl(base)) return base.replace(/\/+$/, '');
 
   return null;
 }

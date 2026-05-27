@@ -31,8 +31,12 @@ export interface ExploreInjectContext {
     getVariable: (key?: string) => string;
     setVariable: (val?: string) => void;
     getLoginInfoMap: () => Record<string, string>;
+    getKey?: () => string;
   };
   request: AjaxRequestFn;
+  /** 搜索 URL 脚本：关键词与页码 */
+  searchKey?: string;
+  searchPage?: number;
 }
 
 export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector {
@@ -46,6 +50,12 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
     setGlobalString(vm, 'sourceUrl', ctx.sourceUrl);
     setGlobalString(vm, 'bookSourceUrl', ctx.sourceUrl);
     setGlobalJson(vm, 'host', ctx.host.length > 0 ? ctx.host : [ctx.baseUrl]);
+    if (ctx.searchKey != null) {
+      setGlobalString(vm, 'key', ctx.searchKey);
+    }
+    if (ctx.searchPage != null) {
+      evalCodeVoid(vm, `globalThis.page = ${ctx.searchPage};`);
+    }
     evalCodeVoid(vm, 'result = undefined;');
 
     bindGlobalVmObject(vm, 'cookie', (cookieObj) => {
@@ -56,6 +66,9 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
         ctx.cookie.setCookie(String(vm.dump(u)), String(vm.dump(v)));
       });
       bindVmFunction(vm, cookieObj, 'removeCookie', (u) => {
+        ctx.cookie.removeCookie(String(vm.dump(u)));
+      });
+      bindVmFunction(vm, cookieObj, 'removecookie', (u) => {
         ctx.cookie.removeCookie(String(vm.dump(u)));
       });
       bindVmFunction(vm, cookieObj, 'getKey', (a, b) => {
@@ -75,6 +88,11 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       bindVmFunction(vm, sourceObj, 'getLoginInfoMap', () =>
         vmNewStringRecordObject(vm, ctx.source.getLoginInfoMap())
       );
+      if (ctx.source.getKey) {
+        const sourceKey = ctx.source.getKey!;
+        bindVmFunction(vm, sourceObj, 'getKey', () => vm.newString(sourceKey()));
+        bindVmFunction(vm, sourceObj, 'getkey', () => vm.newString(sourceKey()));
+      }
     });
 
     bindGlobalVmObject(vm, 'java', (javaObj) => {
@@ -115,6 +133,12 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
         '    try { a = JSON.parse(a); } catch(e) { a = {}; }\n' +
         '    return k ? a[k] : a;\n' +
         '  }\n' +
+        '}\n' +
+        'if (typeof globalThis.bhost !== "function") {\n' +
+        '  globalThis.bhost = function() {\n' +
+        '    try { return (globalThis.host && globalThis.host[0]) || globalThis.baseUrl || ""; }\n' +
+        '    catch (e) { return globalThis.baseUrl || ""; }\n' +
+        '  };\n' +
         '}'
     );
   };

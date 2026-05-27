@@ -46,7 +46,9 @@ export function collectBookBadgeEntries(book: {
     .filter((s) => s?.trim())
     .join(',');
   for (const v of splitBookTagValues(tagBlob)) {
-    push('tag', v);
+    const normalized = v.replace(/^#+/, '').trim();
+    if (!normalized) continue;
+    push('tag', normalized);
   }
 
   return entries;

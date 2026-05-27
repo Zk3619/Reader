@@ -3,11 +3,13 @@
  * 对应 legado 项目的 WebBook.searchBook
  */
 
-import { get } from '@/lib/http';
+import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
-import { buildUrl, parseHeaders, resolveUrl, detectContentType } from '@/lib/book-source/utils';
+import { resolveSearchRequest } from '@/lib/book-source/analyze-search-url';
+import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
+import { resolveUrl, detectContentType } from '@/lib/book-source/utils';
 
 /**
  * 搜索书籍
@@ -24,20 +26,56 @@ export async function searchBook(
   const startTime = Date.now();
 
   try {
-    // 构建搜索URL
-    const searchUrl = buildUrl(source.searchUrl, { key: keyword });
-    
-    // 发起请求
-    const headers = parseHeaders(source.header);
-    const html = await get(searchUrl, {
+    const { url: searchUrl, method, headers: urlOptionHeaders, body } = await resolveSearchRequest(
+      source,
+      keyword,
+      1,
+    );
+
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(urlOptionHeaders)) {
+      const key = k.trim();
+      if (!key || key.includes('{{') || key.includes('}}') || key.includes('@')) continue;
+      if (String(v).includes('{{') || String(v).includes('}}')) continue;
+      headers[key] = String(v);
+    }
+    const storedCookie = resolveSourceCookiesForHttp(source, searchUrl).trim();
+    if (storedCookie) {
+      const existing = (headers.Cookie ?? headers.cookie ?? '').trim();
+      headers.Cookie = existing ? `${storedCookie}; ${existing}` : storedCookie;
+      delete headers.cookie;
+    }
+
+    const httpOpts = {
       headers,
       enableCookieJar: source.enabledCookieJar,
       concurrentRate: source.concurrentRate,
       timeout: 30000,
-    });
+    };
+
+    const html =
+      method === 'POST'
+        ? await post(searchUrl, body ?? '', httpOpts)
+        : await get(searchUrl, httpOpts);
 
     const contentType = detectContentType(html);
     const respondTime = Date.now() - startTime;
+
+    const bookListRule = rule.bookList?.trim() ?? '';
+    if (
+      bookListRule.startsWith('$.') &&
+      contentType !== 'json'
+    ) {
+      const preview = html.trim().slice(0, 80);
+      console.warn(
+        `[search] 搜索响应非 JSON [${source.sourceName}]，无法解析 ${bookListRule}。` +
+          (preview.startsWith('<!DOCTYPE') || preview.includes('Just a moment')
+            ? ' 可能为验证页/未登录/线路未配置。'
+            : ''),
+        { url: searchUrl.slice(0, 120), preview },
+      );
+      return [];
+    }
 
     // 创建规则上下文
     const context: RuleContext = {
@@ -70,12 +108,23 @@ export async function searchBook(
       // 获取书籍列表元素
       // 如果规则没有提取器（如 "li"），添加 @all 提取器以获取完整HTML元素
       // 这样后续的子规则（如 ".novelname@text"）可以在完整的元素HTML上应用
-      let bookListRule = rule.bookList;
-      if (!bookListRule.includes('@')) {
-        bookListRule = `${bookListRule}@all`;
+      let listRule = normalizeBookListRule(bookListRule || rule.bookList);
+      if (!listRule.includes('@')) {
+        listRule = `${listRule}@all`;
       }
-      
-      const bookElements = await analyzeStringList(bookListRule, context);
+
+      const bookElements = await analyzeStringList(listRule, context);
+      if (bookElements.length === 0) {
+        console.warn(
+          `[search] 书源无可解析列表 [${source.sourceName}]`,
+          {
+            url: searchUrl.slice(0, 120),
+            rule: listRule,
+            contentType,
+            preview: html.trim().slice(0, 80),
+          },
+        );
+      }
 
       for (const element of bookElements) {
         // 如果 bookList 规则是通用的（如 "li"），且 name/bookUrl 规则需要特定类（如 ".novelname"），
@@ -106,11 +155,29 @@ export async function searchBook(
       }
     }
 
+    if (bookList.length === 0) {
+      console.warn(`[search] 书源无搜索结果 [${source.sourceName}]`, {
+        url: searchUrl.slice(0, 120),
+        contentType,
+      });
+    }
     return bookList;
   } catch (error) {
     console.error(`搜索失败 [${source.sourceName}]:`, error);
     return [];
   }
+}
+
+/**
+ * Legado 中 bookList 常写成「选择器 + <js>后处理」。
+ * 提取列表元素阶段只需要前半段选择器，否则会把 <js> 一并当成 CSS 导致空列表。
+ */
+function normalizeBookListRule(rule: string): string {
+  const trimmed = rule.trim();
+  if (!trimmed) return trimmed;
+  const jsIdx = trimmed.search(/\n\s*<js>|<js>|@js:/i);
+  if (jsIdx <= 0) return trimmed;
+  return trimmed.slice(0, jsIdx).trim();
 }
 
 /**
@@ -181,7 +248,24 @@ async function parseSearchBook(
   try {
     const name = rule.name ? await analyzeString(rule.name, context) : '';
     const author = rule.author ? await analyzeString(rule.author, context) : '';
-    const bookUrl = rule.bookUrl ? await analyzeString(rule.bookUrl, context) : '';
+    let bookUrl = rule.bookUrl ? await analyzeString(rule.bookUrl, context) : '';
+
+    // 通用兜底：部分 JSON 书源存在 detail_url / book_url，但自定义 bookUrl 规则可能失效
+    if (!bookUrl && context.contentType === 'json') {
+      try {
+        const raw = JSON.parse(context.content) as Record<string, unknown>;
+        const fallback =
+          (typeof raw.detail_url === 'string' && raw.detail_url.trim()) ||
+          (typeof raw.book_url === 'string' && raw.book_url.trim()) ||
+          (typeof raw.url === 'string' && raw.url.trim()) ||
+          '';
+        if (fallback) {
+          bookUrl = fallback;
+        }
+      } catch {
+        // ignore JSON fallback parse errors
+      }
+    }
 
     if (!name || !bookUrl) {
       return null;
