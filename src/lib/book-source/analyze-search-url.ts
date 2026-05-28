@@ -34,32 +34,6 @@ export { isScriptSearchUrl };
 
 const JS_BLOCK_RE = /<js>([\s\S]*?)<\/js>|@js:([^\s@]+)/g;
 
-/** 按首个「, {」拆分 URL 与 UrlOption（与 legado paramPattern 一致） */
-function splitUrlOptions(raw: string): { urlPart: string; optionsJson?: string } {
-  let braceDepth = 0;
-  let inQuote: "'" | '"' | null = null;
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i];
-    if (inQuote) {
-      if (c === inQuote && raw[i - 1] !== '\\') inQuote = null;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      inQuote = c;
-      continue;
-    }
-    if (c === '{') braceDepth++;
-    else if (c === '}') braceDepth--;
-    else if (c === ',' && braceDepth === 0) {
-      const rest = raw.slice(i + 1).trimStart();
-      if (rest.startsWith('{') || rest.startsWith('[')) {
-        return { urlPart: raw.slice(0, i).trim(), optionsJson: rest };
-      }
-    }
-  }
-  return { urlPart: raw.trim() };
-}
-
 function substitutePagePlaceholders(input: string, page: number): string {
   return input.replace(/<([^>]+)>/g, (_, inner: string) => {
     const pages = inner.split(',').map((p: string) => p.trim());
@@ -186,38 +160,6 @@ async function analyzeEmbeddedJsBlocks(
     }
   }
   return result;
-}
-
-function parseUrlOptions(jsonPart: string | undefined): {
-  method: 'GET' | 'POST';
-  headers: Record<string, string>;
-  body?: string;
-} {
-  const out: {
-    method: 'GET' | 'POST';
-    headers: Record<string, string>;
-    body?: string;
-  } = { method: 'GET', headers: {} };
-  if (!jsonPart?.trim()) return out;
-
-  try {
-    const opt = JSON.parse(jsonPart) as Record<string, unknown>;
-    const method = typeof opt.method === 'string' ? opt.method.toUpperCase() : 'GET';
-    out.method = method === 'POST' ? 'POST' : 'GET';
-    if (opt.body != null) {
-      out.body = typeof opt.body === 'string' ? opt.body : JSON.stringify(opt.body);
-    }
-    const headers = opt.headers as Record<string, string> | undefined;
-    if (headers && typeof headers === 'object') {
-      out.headers = { ...headers };
-    }
-    if (typeof opt.charset === 'string' && opt.charset) {
-      out.headers['X-UrlOption-Charset'] = out.headers['X-UrlOption-Charset'] ?? String(opt.charset);
-    }
-  } catch {
-    console.warn('[analyze-search-url] UrlOption JSON 解析失败');
-  }
-  return out;
 }
 
 /** 展开 header 字段中的 {{...}} 模板 */

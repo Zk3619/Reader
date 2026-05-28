@@ -5,6 +5,7 @@ use tauri::AppHandle;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct BackstageWebJsParams {
     pub request_id: String,
     pub url: Option<String>,

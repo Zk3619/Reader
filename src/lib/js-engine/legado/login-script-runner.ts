@@ -43,8 +43,9 @@ const ANDROID_ID_KEY = 'reader_login_android_id';
 
 const LOG_TAG = '[login-script]';
 
-function innerWebPoolOpts(source: BookSource): { bookSourceUrl: string } {
-  return { bookSourceUrl: source.bookSourceUrl };
+function innerWebPoolOpts(source: BookSource): { bookSourceUrl?: string } {
+  const url = (source.bookSourceUrl ?? source.sourceUrl)?.trim();
+  return url ? { bookSourceUrl: url } : {};
 }
 
 /** Legado 格式：java.startBrowser 可能传入 "url,{json}"，只取逗号前的 URL 用于打开 */

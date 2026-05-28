@@ -41,6 +41,7 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
   reader: { label: "阅读器", icon: BookmarkIcon, description: "阅读书籍" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
+  "book-search": { label: "搜索", icon: BookOpenIcon, description: "搜索书架与全网书籍" },
   "bookshelf-cache": {
     label: "离线缓存",
     icon: BookshelfIcon,

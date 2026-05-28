@@ -254,7 +254,10 @@ export async function loadSourcesPagePrefs(): Promise<SourcesPagePrefs> {
     return normalizeSourcesPagePrefs(stored);
   }
   const legacyGlobal = await getStorage<Record<string, unknown>>('search_prefs');
-  return { searchMode: normalizeSearchMode(legacyGlobal?.searchMode) };
+  return {
+    ...DEFAULT_SOURCES_PAGE_PREFS,
+    searchMode: normalizeSearchMode(legacyGlobal?.searchMode),
+  };
 }
 
 export async function saveSourcesPagePrefs(prefs: SourcesPagePrefs): Promise<void> {

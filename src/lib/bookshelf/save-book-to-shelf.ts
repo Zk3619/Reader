@@ -333,7 +333,6 @@ export async function saveBookToShelf(
     saved = mergeShelfReadingProgress(saved, options.readingProgress);
     await booksDb.updateBook(saved);
   }
-  const chaptersReady = chapters && chapters.length > 0;
   if (saved && fetchMode === 'background' && isOnline) {
     scheduleBackgroundChapterFetch(saved);
   }

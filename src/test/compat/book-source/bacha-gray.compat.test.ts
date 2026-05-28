@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRule, analyzeString } from '@/lib/rule-engine';
+import { analyzeString } from '@/lib/rule-engine';
 import { normalizeSearchDisplayFields } from '@/lib/book-source/search';
 
 const BACHA_ROW = `

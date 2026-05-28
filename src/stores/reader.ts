@@ -39,7 +39,6 @@ import {
   fetchChapterListDeduped,
   isChapterListFetchInFlight,
   toNewBookChapter,
-  type PartialChapterList,
 } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import type { Book, BookChapter, BookProgress } from '@/types';

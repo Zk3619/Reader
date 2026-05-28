@@ -185,6 +185,7 @@ pub async fn android_persist_dir_permission(app: AppHandle, uri: String) -> Resu
     }
 }
 
+#[allow(dead_code)]
 fn mime_for_file_name(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".epub") {

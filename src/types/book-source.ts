@@ -17,6 +17,8 @@ import type {
  * 书源实体（完整）
  */
 export interface BookSource extends BaseSource {
+  /** Legado 书源 URL 字段（导入 JSON 常用；未设置时与 sourceUrl 一致） */
+  bookSourceUrl?: string;
   /** 地址，包括 http/https */
   sourceUrl: string;
   /** 名称 */

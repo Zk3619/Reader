@@ -175,28 +175,6 @@ function evalJsFallback(code: string, context: JsContext): unknown {
       responseHeaders,
     };
   };
-  const lookupJsonPath = (rule: string): string => {
-    const path = rule.trim();
-    if (!path.startsWith('$.')) return '';
-    let source: unknown = context.result;
-    if (typeof source === 'string') {
-      try {
-        source = JSON.parse(source);
-      } catch {
-        return '';
-      }
-    }
-    if (!source || typeof source !== 'object') return '';
-    const segments = path.slice(2).split('.').filter(Boolean);
-    let cursor: unknown = source;
-    for (const seg of segments) {
-      if (!cursor || typeof cursor !== 'object' || !(seg in (cursor as Record<string, unknown>))) {
-        return '';
-      }
-      cursor = (cursor as Record<string, unknown>)[seg];
-    }
-    return toStringSafe(cursor);
-  };
 
   const ruleContent =
     context.ruleContent ??

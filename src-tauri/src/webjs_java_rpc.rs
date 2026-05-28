@@ -11,6 +11,7 @@ pub struct WebJsJavaRpcParams {
     pub base_url: Option<String>,
     pub cookies: Option<String>,
     pub headers_json: Option<String>,
+    #[allow(dead_code)]
     pub source_url: Option<String>,
     #[allow(dead_code)]
     pub request_id: Option<String>,

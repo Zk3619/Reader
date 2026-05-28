@@ -194,7 +194,7 @@ export async function runWebJs(opts: RunWebJsOptions): Promise<string> {
   }
 
   if (!script) {
-    return opts.priorResult ?? opts.html ?? '';
+    return String(opts.priorResult ?? opts.html ?? '');
   }
 
   const v = await evalJs(script, jsCtx);

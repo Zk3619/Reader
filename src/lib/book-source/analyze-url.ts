@@ -200,7 +200,7 @@ async function fetchHttpOnce(
 ): Promise<string> {
   const { url: finalUrl, method, body } = prepareHttpRequest(url, option, headers);
   const res = await request(finalUrl, {
-    method: method === 'POST' ? 'POST' : method === 'HEAD' ? 'HEAD' : 'GET',
+    method: method === 'POST' ? 'POST' : 'GET',
     headers,
     body,
     enableCookieJar: true,
@@ -303,7 +303,7 @@ export async function fetchByAnalyzeUrl(
       timeoutMs: 60_000,
       cacheFirst: true,
       isRule: true,
-      sourceKey: params.source?.bookSourceUrl,
+      sourceKey: params.source?.bookSourceUrl ?? params.source?.sourceUrl,
       source: params.source,
       jsLib: params.source?.jsLib,
     };

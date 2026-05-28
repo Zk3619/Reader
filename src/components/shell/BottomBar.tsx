@@ -28,6 +28,7 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any> }> = {
   "remote-book": { label: "远程书籍", icon: GlobeIcon },
   reader: { label: "阅读器", icon: BookmarkIcon }, // reader 页面通常不显示在导航中，但需要配置以避免类型错误
   "book-info": { label: "书籍信息", icon: BookInfoIcon }, // book-info 页面通常不显示在导航中，但需要配置以避免类型错误
+  "book-search": { label: "搜索", icon: BookOpenIcon },
   "bookshelf-cache": { label: "缓存章节", icon: BookshelfIcon },
 };
 
