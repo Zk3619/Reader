@@ -10,7 +10,8 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/test/**/*.test.ts'],
+    setupFiles: ['./src/test/vitest.setup.ts'],
   },
   plugins: [solid(), tailwindcss(), readerHttpProxy()],
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
