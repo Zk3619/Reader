@@ -11,6 +11,12 @@ import {
   isQuickJSFallback,
   setGlobalString,
 } from '@/lib/js-engine/core/runtime';
+import { javaGetString } from '@/lib/rule-engine/java-get-string';
+import {
+  needsLegadoRuleScriptRunner,
+  runLegadoRuleScript,
+} from '@/lib/js-engine/legado/rule-script-runner';
+import type { BookSource } from '@/types';
 
 export interface JsContext {
   result: unknown;
@@ -18,9 +24,34 @@ export interface JsContext {
   book?: Record<string, unknown>;
   source?: Record<string, unknown>;
   chapter?: Record<string, unknown>;
+  /** 规则正文，供 java.getString 子规则解析 */
+  ruleContent?: string;
+  ruleContentType?: 'html' | 'json' | 'text';
+  /** 会话变量（java.put / @get），与 RuleContext.variables 共享 */
+  variables?: Record<string, unknown>;
+  /** 用于 java.ajax 请求头/Cookie（正文解密等） */
+  bookSource?: BookSource;
 }
 
 const fallbackScopedStore = new Map<string, Map<string, unknown>>();
+
+/** Legado @js 中 result 应为对象；列表项常为 JSON 字符串，避免 JSON.stringify 二次编码 */
+export function normalizeJsRuleResult(input: unknown): unknown {
+  if (typeof input === 'string') {
+    const t = input.trim();
+    if (
+      (t.startsWith('{') && t.endsWith('}')) ||
+      (t.startsWith('[') && t.endsWith(']'))
+    ) {
+      try {
+        return JSON.parse(t);
+      } catch {
+        return input;
+      }
+    }
+  }
+  return input ?? null;
+}
 
 export async function initJsSandbox(): Promise<void> {
   await initQuickJSRuntime();
@@ -33,9 +64,22 @@ export function isJsSandboxFallback(): boolean {
 export async function evalJs(code: string, context: JsContext): Promise<unknown> {
   if (!code) return null;
 
+  if (needsLegadoRuleScriptRunner(code)) {
+    try {
+      return await runLegadoRuleScript(code, context, context.bookSource);
+    } catch (e) {
+      console.error('[js-engine] rule-script 执行失败:', e);
+      return null;
+    }
+  }
+
+  const needsRuleJava =
+    /\bjava\.getString\b/.test(code) ||
+    (/\bjava\.put\b/.test(code) && context.variables != null);
+
   try {
     await initQuickJSRuntime();
-    if (!isQuickJSFallback()) {
+    if (!needsRuleJava && !isQuickJSFallback()) {
       const out = await evalJsQuickJS(code, context);
       if (out !== null) return out;
     }
@@ -154,6 +198,19 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     return toStringSafe(cursor);
   };
 
+  const ruleContent =
+    context.ruleContent ??
+    (typeof context.result === 'string' ? context.result : '');
+
+  const readVariable = (key: string): string => {
+    const k = key.trim();
+    if (!k) return '';
+    const fromVars = context.variables?.[k];
+    if (fromVars != null) return toStringSafe(fromVars);
+    const hit = fallbackStore.get(k);
+    return hit == null ? '' : toStringSafe(hit);
+  };
+
   const java = {
     base64Encode(str: string): string {
       try {
@@ -183,27 +240,27 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     toast(..._args: unknown[]) {},
     longToast(..._args: unknown[]) {},
     put(key: string, val: unknown) {
-      fallbackStore.set(String(key), val);
+      const k = String(key);
+      fallbackStore.set(k, val);
+      if (context.variables) {
+        context.variables[k] = val;
+      }
     },
     get(keyOrUrl: string, headers?: unknown) {
       const candidate = toStringSafe(keyOrUrl);
       if (/^https?:\/\//i.test(candidate)) {
         return xhrRequest('GET', candidate, undefined, parseHeaderObject(headers)).text;
       }
-      const hit = fallbackStore.get(candidate);
-      return hit == null ? '' : toStringSafe(hit);
+      return readVariable(candidate);
     },
     getString(rule: string) {
-      const expr = String(rule || '').trim();
-      if (!expr) return '';
-      if (expr.startsWith('@get:{') && expr.endsWith('}')) {
-        const key = expr.slice(6, -1).trim();
-        return java.get(key);
-      }
-      if (expr.startsWith('$.')) {
-        return lookupJsonPath(expr);
-      }
-      return '';
+      return javaGetString(rule, {
+        content: ruleContent,
+        contentType: context.ruleContentType,
+        baseUrl: context.baseUrl,
+        variables: context.variables,
+        getVariable: readVariable,
+      });
     },
     ajax(_url: string, _options?: unknown) {
       const url = toStringSafe(_url);
@@ -239,15 +296,7 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     },
   };
 
-  let parsedResult: unknown = context.result;
-  if (typeof context.result === 'string') {
-    try {
-      const tmp = JSON.parse(context.result);
-      if (typeof tmp === 'object' && tmp !== null) parsedResult = tmp;
-    } catch {
-      /* 保留字符串 */
-    }
-  }
+  const parsedResult = normalizeJsRuleResult(context.result);
 
   const scope = {
     result: parsedResult,
@@ -267,6 +316,7 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     }
   }
   try {
+    // 对齐 Legado Rhino：非 strict，允许书源脚本对 tag7 等隐式全局赋值
     const fn = new Function(
       'result',
       'baseUrl',
@@ -275,7 +325,7 @@ function evalJsFallback(code: string, context: JsContext): unknown {
       'chapter',
       'java',
       'JSON',
-      '"use strict";\n' + body
+      body,
     );
     const out = fn(
       scope.result,
@@ -295,7 +345,8 @@ function evalJsFallback(code: string, context: JsContext): unknown {
 }
 
 function injectContext(vm: QuickJSContext, context: JsContext): void {
-  const resultHandle = vm.newString(JSON.stringify(context.result ?? null));
+  const resultForJs = normalizeJsRuleResult(context.result);
+  const resultHandle = vm.newString(JSON.stringify(resultForJs ?? null));
   vm.setProp(vm.global, '__reader_result_json__', resultHandle);
   resultHandle.dispose();
   evalCodeVoid(
