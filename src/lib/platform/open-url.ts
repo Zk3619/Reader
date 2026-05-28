@@ -6,53 +6,72 @@
 
 import { parseDataHtmlUrl } from '@/lib/platform/data-url';
 import { isTauri } from '@/lib/platform/detect';
-import { openInnerWeb, openInnerWebAwait, type InnerWebCloseResult } from '@/lib/platform/inner-web';
+import {
+  openInnerWeb,
+  openInnerWebAwait,
+  type InnerWebCloseResult,
+  type InnerWebPayload,
+} from '@/lib/platform/inner-web';
 
 const OPEN_URL_LOG = '[openUrlInApp]';
 
 /** 书源登录/设置内嵌页标题（与 Legado WebViewActivity、control() 一致） */
 export const SOURCE_SETTINGS_INNER_WEB_TITLE = '书源设置';
 
-function resolveInnerWebUrl(
-  url: string,
-  title?: string,
-  options?: {
-    showConfirm?: boolean;
-    awaitClose?: boolean;
-    cookieSyncUrl?: string;
-    initialCookies?: string;
-  }
-): boolean | Promise<InnerWebCloseResult> {
-  const trimmed = url?.trim();
-  if (!trimmed) return false;
+export interface InnerWebOpenOptions {
+  showConfirm?: boolean;
+  awaitClose?: boolean;
+  cookieSyncUrl?: string;
+  initialCookies?: string;
+  /** 书源 bookSourceUrl，用于统一 Cookie 池双向同步 */
+  bookSourceUrl?: string;
+}
 
-  const base = {
+function buildInnerWebPayload(
+  trimmed: string,
+  title: string | undefined,
+  options?: InnerWebOpenOptions,
+): InnerWebPayload | null {
+  const base: InnerWebPayload = {
     title: title ?? '网页',
     showConfirm: options?.showConfirm,
     cookieSyncUrl: options?.cookieSyncUrl ?? trimmed,
     initialCookies: options?.initialCookies,
+    bookSourceUrl: options?.bookSourceUrl?.trim() || undefined,
   };
 
   if (trimmed.startsWith('data:')) {
     const html = parseDataHtmlUrl(trimmed);
-    if (html) {
-      const payload = { ...base, html };
-      return options?.awaitClose ? openInnerWebAwait(payload) : openInnerWeb(payload);
+    if (!html) {
+      console.warn(OPEN_URL_LOG, 'data: 无法解析为 HTML', trimmed.slice(0, 80));
+      return null;
     }
-    console.warn(OPEN_URL_LOG, 'data: 无法解析为 HTML', trimmed.slice(0, 80));
-    return false;
+    return { ...base, html };
   }
 
   if (trimmed.startsWith('reader-login-open://')) {
     console.warn(
       OPEN_URL_LOG,
       'reader-login-open:// 不能用于 iframe，请使用 set_cookies_for_inner_web',
-      trimmed.slice(0, 80)
+      trimmed.slice(0, 80),
     );
-    return false;
+    return null;
   }
 
-  const payload = { ...base, url: trimmed };
+  return { ...base, url: trimmed };
+}
+
+function resolveInnerWebUrl(
+  url: string,
+  title?: string,
+  options?: InnerWebOpenOptions,
+): boolean | Promise<InnerWebCloseResult> {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+
+  const payload = buildInnerWebPayload(trimmed, title, options);
+  if (!payload) return false;
+
   return options?.awaitClose ? openInnerWebAwait(payload) : openInnerWeb(payload);
 }
 
@@ -62,7 +81,7 @@ function resolveInnerWebUrl(
 export async function openUrlInApp(
   url: string,
   title?: string,
-  options?: { showConfirm?: boolean }
+  options?: Pick<InnerWebOpenOptions, 'showConfirm' | 'bookSourceUrl'>,
 ): Promise<void> {
   const trimmed = url?.trim();
   console.warn(OPEN_URL_LOG, 'entry', { url: trimmed?.slice(0, 100), title });
@@ -74,7 +93,7 @@ export async function openUrlInApp(
     });
     return;
   }
-  const r = resolveInnerWebUrl(trimmed, title, { showConfirm: options?.showConfirm });
+  const r = resolveInnerWebUrl(trimmed, title, { showConfirm: options?.showConfirm, bookSourceUrl: options?.bookSourceUrl });
   if (r === false) {
     console.error(OPEN_URL_LOG, '内嵌页未注册或打开失败');
   }
@@ -86,7 +105,8 @@ export async function openUrlInApp(
 export async function openUrlInAppAwait(
   url: string,
   cookies: string,
-  title?: string
+  title?: string,
+  options?: Pick<InnerWebOpenOptions, 'bookSourceUrl'>,
 ): Promise<InnerWebCloseResult> {
   const trimmed = (url ?? '').trim();
   const cookieStr = (cookies ?? '').trim();
@@ -99,6 +119,7 @@ export async function openUrlInAppAwait(
     showConfirm: true,
     cookieSyncUrl: trimmed,
     initialCookies: cookieStr || undefined,
+    bookSourceUrl: options?.bookSourceUrl,
   });
   if (r === false) {
     return { confirmed: false, cookies: '', url: '' };
@@ -113,7 +134,7 @@ export async function openUrlInAppWithCookies(
   url: string,
   cookies: string,
   title?: string,
-  options?: { showConfirm?: boolean }
+  options?: Pick<InnerWebOpenOptions, 'showConfirm' | 'bookSourceUrl'>,
 ): Promise<void> {
   const trimmed = (url ?? '').trim();
   const cookieStr = (cookies ?? '').trim();
@@ -131,6 +152,7 @@ export async function openUrlInAppWithCookies(
       showConfirm: options?.showConfirm ?? true,
       cookieSyncUrl: trimmed,
       initialCookies: cookieStr,
+      bookSourceUrl: options?.bookSourceUrl,
     })
   ) {
     console.error(OPEN_URL_LOG, '内嵌页未注册');
@@ -144,19 +166,19 @@ export async function openLegadoBrowserInApp(
   url: string,
   cookies: string,
   title?: string,
-  options?: { awaitClose?: false }
+  options?: { awaitClose?: false; bookSourceUrl?: string },
 ): Promise<void>;
 export async function openLegadoBrowserInApp(
   url: string,
   cookies: string,
   title: string | undefined,
-  options: { awaitClose: true }
+  options: { awaitClose: true; bookSourceUrl?: string },
 ): Promise<InnerWebCloseResult>;
 export async function openLegadoBrowserInApp(
   url: string,
   cookies = '',
   title?: string,
-  options?: { awaitClose?: boolean }
+  options?: { awaitClose?: boolean; bookSourceUrl?: string },
 ): Promise<InnerWebCloseResult | void> {
   const trimmed = url?.trim();
   if (!trimmed) {
@@ -165,10 +187,14 @@ export async function openLegadoBrowserInApp(
       : undefined;
   }
   const pageTitle = (title ?? '').trim() || '网页';
+  const poolOpts = { bookSourceUrl: options?.bookSourceUrl };
   if (options?.awaitClose) {
-    return openUrlInAppAwait(trimmed, cookies, pageTitle);
+    return openUrlInAppAwait(trimmed, cookies, pageTitle, poolOpts);
   }
-  await openUrlInAppWithCookies(trimmed, cookies, pageTitle, { showConfirm: true });
+  await openUrlInAppWithCookies(trimmed, cookies, pageTitle, {
+    showConfirm: true,
+    ...poolOpts,
+  });
 }
 
 /**
@@ -177,17 +203,17 @@ export async function openLegadoBrowserInApp(
 export async function openSourceSettingsInApp(
   url: string,
   cookies?: string,
-  options?: { awaitClose?: false }
+  options?: { awaitClose?: false; bookSourceUrl?: string },
 ): Promise<void>;
 export async function openSourceSettingsInApp(
   url: string,
   cookies: string | undefined,
-  options: { awaitClose: true }
+  options: { awaitClose: true; bookSourceUrl?: string },
 ): Promise<InnerWebCloseResult>;
 export async function openSourceSettingsInApp(
   url: string,
   cookies = '',
-  options?: { awaitClose?: boolean }
+  options?: { awaitClose?: boolean; bookSourceUrl?: string },
 ): Promise<InnerWebCloseResult | void> {
   const trimmed = url?.trim();
   if (!trimmed) {
@@ -195,11 +221,13 @@ export async function openSourceSettingsInApp(
       ? { confirmed: false, cookies: '', url: '' }
       : undefined;
   }
+  const poolOpts = { bookSourceUrl: options?.bookSourceUrl };
   if (options?.awaitClose) {
-    return openUrlInAppAwait(trimmed, cookies, SOURCE_SETTINGS_INNER_WEB_TITLE);
+    return openUrlInAppAwait(trimmed, cookies, SOURCE_SETTINGS_INNER_WEB_TITLE, poolOpts);
   }
   await openUrlInAppWithCookies(trimmed, cookies, SOURCE_SETTINGS_INNER_WEB_TITLE, {
     showConfirm: true,
+    ...poolOpts,
   });
 }
 

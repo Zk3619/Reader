@@ -4208,6 +4208,7 @@ dependencies = [
  "chrono",
  "encoding_rs",
  "http",
+ "regex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

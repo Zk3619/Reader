@@ -64,6 +64,10 @@ export interface AppSettings {
   importKeepGroup?: boolean;
   /** 导入书源时保留本地启用/发现状态（对齐 Legado importKeepEnable） */
   importKeepEnable?: boolean;
+  /** 目录分页安全阈值开关（超限中止，避免 nextTocUrl 死循环） */
+  tocPaginationSafetyEnabled?: boolean;
+  /** 目录分页最大抓取页数（含第一页） */
+  tocPaginationMaxPages?: number;
 }
 
 /**
@@ -80,6 +84,8 @@ const defaultAppSettings: AppSettings = {
   shellLayout: 'auto',
   booksDirectorySet: false,
   rememberImportAction: false,
+  tocPaginationSafetyEnabled: true,
+  tocPaginationMaxPages: 80,
 };
 
 /**
@@ -289,6 +295,17 @@ export const settingsStore = {
     importKeepEnable?: boolean;
   }): Promise<void> {
     await this.updateAppSettings(options);
+  },
+
+  async setTocPaginationSafety(enabled: boolean, maxPages?: number): Promise<void> {
+    const normalizedMax =
+      typeof maxPages === 'number' && Number.isFinite(maxPages)
+        ? Math.max(1, Math.min(2000, Math.floor(maxPages)))
+        : state.app.tocPaginationMaxPages;
+    await this.updateAppSettings({
+      tocPaginationSafetyEnabled: enabled,
+      tocPaginationMaxPages: normalizedMax,
+    });
   },
 
   /**

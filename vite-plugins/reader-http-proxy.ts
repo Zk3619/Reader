@@ -72,6 +72,31 @@ function resolveProxyBase(req: IncomingMessage): string {
   return `http://${host}${PROXY_PATH}`;
 }
 
+function parseCharsetFromContentType(contentType: string): string | null {
+  const match = contentType.match(/charset\s*=\s*["']?([^;"'\s]+)/i);
+  if (!match?.[1]) return null;
+  return match[1].trim().toLowerCase();
+}
+
+function inferHtmlCharsetFromMeta(buffer: Buffer): string | null {
+  const asciiHead = buffer.subarray(0, Math.min(buffer.length, 4096)).toString('latin1');
+  const match = asciiHead.match(
+    /<meta[^>]+(?:charset\s*=\s*["']?\s*([^"'\s/>]+)|content=["'][^"']*charset\s*=\s*([^"';\s>]+))/i,
+  );
+  const raw = (match?.[1] || match?.[2] || '').trim();
+  return raw ? raw.toLowerCase() : null;
+}
+
+function decodeBufferWithCharset(buffer: Buffer, contentType: string): string {
+  const preferredCharset = parseCharsetFromContentType(contentType) || inferHtmlCharsetFromMeta(buffer) || 'utf-8';
+  try {
+    // Node TextDecoder supports WHATWG labels (including gbk/gb18030 in modern runtimes).
+    return new TextDecoder(preferredCharset as string, { fatal: false }).decode(buffer);
+  } catch {
+    return buffer.toString('utf8');
+  }
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -225,7 +250,7 @@ async function forwardToTarget(
 
   if (shouldRewriteBody) {
     const proxyBase = resolveProxyBase(req);
-    const text = buf.toString('utf8');
+    const text = decodeBufferWithCharset(buf, ct);
     const isCss =
       ct.toLowerCase().includes('text/css') || /\.css(?:\?|#|$)/i.test(rewriteBase);
     let rewritten = isCss

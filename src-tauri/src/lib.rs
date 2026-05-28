@@ -1,6 +1,8 @@
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
+mod backstage_webview;
+mod webjs_java_rpc;
 mod android_fs_commands;
 use tauri::Emitter;
 use tauri::Manager;
@@ -415,7 +417,7 @@ async fn run_login_script_rust(
 
 /// 向 Webview 注入目标 URL 域下的 Cookie
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn apply_http_cookies_to_webview(
+pub(crate) fn apply_http_cookies_to_webview(
     webview: &tauri::Webview,
     url: &str,
     cookies_str: &str,
@@ -1347,6 +1349,13 @@ pub fn run() {
             close_inner_web_child_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             open_url_with_cookies,
+            crate::backstage_webview::backstage_webjs_complete,
+            crate::backstage_webview::run_backstage_webjs,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            crate::backstage_webview::get_backstage_webview_cookies_for_url,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            crate::backstage_webview::set_cookies_for_backstage_webview,
+            crate::webjs_java_rpc::webjs_java_rpc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

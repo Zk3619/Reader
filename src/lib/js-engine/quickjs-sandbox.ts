@@ -13,12 +13,14 @@ import {
 } from '@/lib/js-engine/core/runtime';
 
 export interface JsContext {
-  result: string;
+  result: unknown;
   baseUrl: string;
   book?: Record<string, unknown>;
   source?: Record<string, unknown>;
   chapter?: Record<string, unknown>;
 }
+
+const fallbackScopedStore = new Map<string, Map<string, unknown>>();
 
 export async function initJsSandbox(): Promise<void> {
   await initQuickJSRuntime();
@@ -28,7 +30,7 @@ export function isJsSandboxFallback(): boolean {
   return isQuickJSFallback();
 }
 
-export async function evalJs(code: string, context: JsContext): Promise<string | null> {
+export async function evalJs(code: string, context: JsContext): Promise<unknown> {
   if (!code) return null;
 
   try {
@@ -44,7 +46,7 @@ export async function evalJs(code: string, context: JsContext): Promise<string |
   }
 }
 
-async function evalJsQuickJS(code: string, context: JsContext): Promise<string | null> {
+async function evalJsQuickJS(code: string, context: JsContext): Promise<unknown> {
   const vm = createQuickJSContext();
   if (!vm) return null;
 
@@ -60,15 +62,98 @@ async function evalJsQuickJS(code: string, context: JsContext): Promise<string |
     const value = vm.dump(result.value);
     result.value.dispose();
     if (value === null || value === undefined) return null;
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    return JSON.stringify(value);
+    return value;
   } finally {
     vm.dispose();
   }
 }
 
-function evalJsFallback(code: string, context: JsContext): string | null {
+function evalJsFallback(code: string, context: JsContext): unknown {
+  const sourceInfo = (context.source ?? {}) as Record<string, unknown>;
+  const scopedKey = String(
+    sourceInfo.bookSourceUrl ??
+      sourceInfo.sourceUrl ??
+      context.baseUrl ??
+      'global',
+  );
+  let fallbackStore = fallbackScopedStore.get(scopedKey);
+  if (!fallbackStore) {
+    fallbackStore = new Map<string, unknown>();
+    fallbackScopedStore.set(scopedKey, fallbackStore);
+  }
+  const toStringSafe = (input: unknown): string => {
+    if (input == null) return '';
+    return typeof input === 'string' ? input : String(input);
+  };
+  const parseHeaderObject = (headers: unknown): Record<string, string> => {
+    if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+      out[String(k)] = toStringSafe(v);
+    }
+    return out;
+  };
+  const xhrRequest = (
+    method: string,
+    url: string,
+    payload?: string,
+    headers?: Record<string, string>,
+  ): { text: string; status: number; responseHeaders: Record<string, string> } => {
+    if (typeof XMLHttpRequest === 'undefined') {
+      return { text: '', status: 0, responseHeaders: {} };
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, false);
+    for (const [k, v] of Object.entries(headers ?? {})) {
+      try {
+        xhr.setRequestHeader(k, v);
+      } catch {
+        // ignore invalid header
+      }
+    }
+    try {
+      xhr.send(payload ?? null);
+    } catch {
+      return { text: '', status: 0, responseHeaders: {} };
+    }
+    const rawHeaders = xhr.getAllResponseHeaders();
+    const responseHeaders: Record<string, string> = {};
+    for (const line of rawHeaders.split('\n')) {
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const k = line.slice(0, idx).trim();
+      const v = line.slice(idx + 1).trim();
+      if (k) responseHeaders[k] = v;
+    }
+    return {
+      text: xhr.responseText ?? '',
+      status: xhr.status ?? 0,
+      responseHeaders,
+    };
+  };
+  const lookupJsonPath = (rule: string): string => {
+    const path = rule.trim();
+    if (!path.startsWith('$.')) return '';
+    let source: unknown = context.result;
+    if (typeof source === 'string') {
+      try {
+        source = JSON.parse(source);
+      } catch {
+        return '';
+      }
+    }
+    if (!source || typeof source !== 'object') return '';
+    const segments = path.slice(2).split('.').filter(Boolean);
+    let cursor: unknown = source;
+    for (const seg of segments) {
+      if (!cursor || typeof cursor !== 'object' || !(seg in (cursor as Record<string, unknown>))) {
+        return '';
+      }
+      cursor = (cursor as Record<string, unknown>)[seg];
+    }
+    return toStringSafe(cursor);
+  };
+
   const java = {
     base64Encode(str: string): string {
       try {
@@ -97,21 +182,71 @@ function evalJsFallback(code: string, context: JsContext): string | null {
     log(..._args: unknown[]) {},
     toast(..._args: unknown[]) {},
     longToast(..._args: unknown[]) {},
-    put(_key: string, _val: unknown) {},
-    get(_key: string) {
+    put(key: string, val: unknown) {
+      fallbackStore.set(String(key), val);
+    },
+    get(keyOrUrl: string, headers?: unknown) {
+      const candidate = toStringSafe(keyOrUrl);
+      if (/^https?:\/\//i.test(candidate)) {
+        return xhrRequest('GET', candidate, undefined, parseHeaderObject(headers)).text;
+      }
+      const hit = fallbackStore.get(candidate);
+      return hit == null ? '' : toStringSafe(hit);
+    },
+    getString(rule: string) {
+      const expr = String(rule || '').trim();
+      if (!expr) return '';
+      if (expr.startsWith('@get:{') && expr.endsWith('}')) {
+        const key = expr.slice(6, -1).trim();
+        return java.get(key);
+      }
+      if (expr.startsWith('$.')) {
+        return lookupJsonPath(expr);
+      }
       return '';
     },
-    getString(_rule: string) {
-      return '';
+    ajax(_url: string, _options?: unknown) {
+      const url = toStringSafe(_url);
+      if (!url) return '';
+      const options = (_options && typeof _options === 'object'
+        ? (_options as Record<string, unknown>)
+        : {}) as Record<string, unknown>;
+      const method = toStringSafe(options.method || 'GET').toUpperCase();
+      const body =
+        options.body == null
+          ? undefined
+          : typeof options.body === 'string'
+            ? options.body
+            : JSON.stringify(options.body);
+      const headers = parseHeaderObject(options.headers);
+      return xhrRequest(method, url, body, headers).text;
+    },
+    connect(url: string, headers?: unknown) {
+      return xhrRequest('GET', toStringSafe(url), undefined, parseHeaderObject(headers)).status;
+    },
+    post(url: string, body?: unknown, headers?: unknown) {
+      const payload =
+        body == null ? '' : typeof body === 'string' ? body : JSON.stringify(body);
+      return xhrRequest('POST', toStringSafe(url), payload, parseHeaderObject(headers)).text;
+    },
+    head(url: string, headers?: unknown) {
+      return JSON.stringify(
+        xhrRequest('HEAD', toStringSafe(url), undefined, parseHeaderObject(headers)).responseHeaders,
+      );
+    },
+    getResponse(url: string, headers?: unknown) {
+      return xhrRequest('GET', toStringSafe(url), undefined, parseHeaderObject(headers)).text;
     },
   };
 
   let parsedResult: unknown = context.result;
-  try {
-    const tmp = JSON.parse(context.result);
-    if (typeof tmp === 'object' && tmp !== null) parsedResult = tmp;
-  } catch {
-    /* 保留字符串 */
+  if (typeof context.result === 'string') {
+    try {
+      const tmp = JSON.parse(context.result);
+      if (typeof tmp === 'object' && tmp !== null) parsedResult = tmp;
+    } catch {
+      /* 保留字符串 */
+    }
   }
 
   const scope = {
@@ -152,9 +287,7 @@ function evalJsFallback(code: string, context: JsContext): string | null {
       scope.JSON
     );
     if (out === undefined || out === null) return null;
-    if (typeof out === 'string') return out;
-    if (typeof out === 'number' || typeof out === 'boolean') return String(out);
-    return JSON.stringify(out);
+    return out;
   } catch (e) {
     console.warn('[js-sandbox] fallback 执行报错:', e);
     return null;
@@ -162,11 +295,12 @@ function evalJsFallback(code: string, context: JsContext): string | null {
 }
 
 function injectContext(vm: QuickJSContext, context: JsContext): void {
-  const resultStr = context.result;
-  const safeResultStr = JSON.stringify(resultStr);
+  const resultHandle = vm.newString(JSON.stringify(context.result ?? null));
+  vm.setProp(vm.global, '__reader_result_json__', resultHandle);
+  resultHandle.dispose();
   evalCodeVoid(
     vm,
-    `var result = (function(){ try { var _r = JSON.parse(${safeResultStr}); return (typeof _r === 'object' && _r !== null) ? _r : ${safeResultStr}; } catch(e) { return ${safeResultStr}; } })();`
+    `var result = JSON.parse(globalThis.__reader_result_json__);delete globalThis.__reader_result_json__;`
   );
   setGlobalString(vm, 'baseUrl', context.baseUrl);
 

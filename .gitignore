@@ -45,7 +45,4 @@ ehthumbs.db
 .cursor
 .shared
 
-docs
-examples
-
 *.tsbuildinfo

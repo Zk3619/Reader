@@ -28,6 +28,8 @@ export interface InnerWebPayload {
   cookieSyncUrl?: string;
   /** 打开前注入 WebView 的 Cookie 串（iframe 每次 load 会重新注入） */
   initialCookies?: string;
+  /** 用于 Cookie 池双向同步的书源 URL（bookSourceUrl） */
+  bookSourceUrl?: string;
 }
 
 export interface InnerWebCloseResult {
@@ -54,6 +56,7 @@ let refreshGuardInstalled = false;
 let pendingAwait: {
   resolve: (r: InnerWebCloseResult) => void;
   cookieSyncUrl?: string;
+  bookSourceUrl?: string;
 } | null = null;
 
 /** 纯 Web 内嵌页文档代理会话（供 confirm 时读取 Cookie） */
@@ -61,6 +64,10 @@ let activeWebProxySessionId: string | null = null;
 
 export function setActiveWebProxySessionId(sessionId: string | null): void {
   activeWebProxySessionId = sessionId;
+}
+
+export function getActiveWebProxySessionId(): string | null {
+  return activeWebProxySessionId;
 }
 
 /** 关闭 inner-web 后短暂忽略登录 Dialog 的 onOpenChange(false)，避免点击穿透误关 */
@@ -207,8 +214,24 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
       showConfirm: payload.showConfirm,
       cookieSyncUrl: payload.cookieSyncUrl?.trim() || url || undefined,
       initialCookies: payload.initialCookies?.trim() || undefined,
+      bookSourceUrl: payload.bookSourceUrl?.trim() || undefined,
     };
     persistInnerWebSession(normalized);
+    const syncUrl = normalized.cookieSyncUrl ?? url ?? '';
+    if (normalized.bookSourceUrl && syncUrl.startsWith('http')) {
+      void (async () => {
+        try {
+          const { getSource } = await import('@/lib/database/sources');
+          const { pushSourceCookiesToWebviews } = await import(
+            '@/lib/book-source/source-cookie-pool'
+          );
+          const src = await getSource(normalized.bookSourceUrl!);
+          if (src) await pushSourceCookiesToWebviews(src, syncUrl);
+        } catch (e) {
+          console.warn('[inner-web] 打开前回灌 Cookie 池失败', e);
+        }
+      })();
+    }
     openEmbedded(normalized);
     setSessionActive(true, normalized);
     return true;
@@ -221,13 +244,15 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
 /**
  * 打开内嵌页并等待用户点击 √ 或返回取消（Legado startBrowserAwait / getVerificationResult）
  */
-export function openInnerWebAwait(
-  payload: InnerWebPayload & { cookieSyncUrl?: string }
-): Promise<InnerWebCloseResult> {
+export function openInnerWebAwait(payload: InnerWebPayload): Promise<InnerWebCloseResult> {
   const cookieSyncUrl =
     payload.cookieSyncUrl?.trim() || payload.url?.trim() || '';
   return new Promise((resolve) => {
-    pendingAwait = { resolve, cookieSyncUrl: cookieSyncUrl || undefined };
+    pendingAwait = {
+      resolve,
+      cookieSyncUrl: cookieSyncUrl || undefined,
+      bookSourceUrl: payload.bookSourceUrl?.trim() || undefined,
+    };
     try {
       const opened = openInnerWeb({
         ...payload,
@@ -324,13 +349,41 @@ export async function readInnerWebCookies(url: string): Promise<string> {
 }
 
 /** 用户点击 √（Legado menu_ok） */
-export async function confirmInnerWebClose(cookieSyncUrl?: string): Promise<void> {
+export async function confirmInnerWebClose(
+  cookieSyncUrl?: string,
+  bookSourceUrl?: string,
+): Promise<void> {
   const session = pendingAwait;
-  const url = (cookieSyncUrl ?? session?.cookieSyncUrl ?? '').trim();
+  const persisted = loadPersistedInnerWebSession();
+  const url = (cookieSyncUrl ?? session?.cookieSyncUrl ?? persisted?.cookieSyncUrl ?? '').trim();
+  const sourceKey =
+    bookSourceUrl?.trim() ||
+    session?.bookSourceUrl?.trim() ||
+    persisted?.bookSourceUrl?.trim() ||
+    undefined;
+
   let cookies = '';
   if (url) {
     cookies = await readInnerWebCookies(url);
   }
+
+  if (url.startsWith('http') && sourceKey) {
+    try {
+      const { getSource } = await import('@/lib/database/sources');
+      const src = await getSource(sourceKey);
+      if (src) {
+        const { syncSourceCookiePool } = await import('@/lib/book-source/source-cookie-pool');
+        await syncSourceCookiePool(src, url);
+        if (!cookies.trim()) {
+          const { resolveSourceCookiesForHttp } = await import('@/lib/book-source/source-http');
+          cookies = resolveSourceCookiesForHttp(src, url);
+        }
+      }
+    } catch (e) {
+      console.warn('[inner-web] cookie pool sync failed', e);
+    }
+  }
+
   session?.resolve({ confirmed: true, cookies, url });
   pendingAwait = null;
   await dismissOverlay();

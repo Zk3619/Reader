@@ -4,7 +4,7 @@
  */
 
 import { get } from '@/lib/http';
-import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
+import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { RssSource } from '@/types';
 import type { RssArticle, NewRssArticle } from '@/types';
 import { parseHeaders, resolveUrl, detectContentType, buildUrl } from '@/lib/book-source/utils';
@@ -77,7 +77,7 @@ async function parseRssByRule(
   };
 
   // 获取文章列表元素
-  const articleElements = await analyzeStringList(ruleArticles, context);
+  const listItems = await analyzeListElements(ruleArticles, context);
 
   // 解析下一页URL
   let nextUrl: string | undefined;
@@ -94,13 +94,14 @@ async function parseRssByRule(
 
   // 解析每个文章
   const articles: RssArticle[] = [];
-  for (let index = 0; index < articleElements.length; index++) {
-    const element = articleElements[index];
+  for (let index = 0; index < listItems.length; index++) {
+    const element = listItems[index].content;
     const elementContext: RuleContext = {
       content: element,
       contentType: 'html',
       baseUrl,
       source: source as unknown as Record<string, unknown>,
+      regexGroups: listItems[index].regexGroups,
     };
 
     const article = await parseRssArticle(source, elementContext, baseUrl, sortName, index);

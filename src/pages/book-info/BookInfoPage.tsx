@@ -607,13 +607,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
       return;
     }
 
-    if (!isInShelf()) {
-      const added = await addSearchBookToShelf(currentBook(), shelfAddOptions(list));
-      if (added) {
-        setIsInShelf(true);
-        await refreshShelfBook();
-      }
-    }
   };
 
   const handleCoverUrlRefreshed = (fresh: string) => {

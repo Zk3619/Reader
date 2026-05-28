@@ -43,6 +43,10 @@ const ANDROID_ID_KEY = 'reader_login_android_id';
 
 const LOG_TAG = '[login-script]';
 
+function innerWebPoolOpts(source: BookSource): { bookSourceUrl: string } {
+  return { bookSourceUrl: source.bookSourceUrl };
+}
+
 /** Legado 格式：java.startBrowser 可能传入 "url,{json}"，只取逗号前的 URL 用于打开 */
 function urlForOpen(url: string): string {
   const s = String(url ?? '').trim();
@@ -836,7 +840,7 @@ async function tryRunLoginScriptQuickJS(
               const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
               pending.push(
                 isOpenableUrl(resolved)
-                  ? openLegadoBrowserInApp(resolved, cookieStr, title)
+                  ? openLegadoBrowserInApp(resolved, cookieStr, title, innerWebPoolOpts(source))
                   : Promise.resolve()
               );
             },
@@ -849,7 +853,9 @@ async function tryRunLoginScriptQuickJS(
               }
               if (!isOpenableUrl(resolved)) return;
               const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
-              pending.push(openLegadoBrowserInApp(resolved, cookieStr, undefined));
+              pending.push(
+                openLegadoBrowserInApp(resolved, cookieStr, undefined, innerWebPoolOpts(source)),
+              );
             },
             base64Encode: (str) => {
               try {
@@ -886,7 +892,10 @@ async function tryRunLoginScriptQuickJS(
             }
             if (!isOpenableUrl(resolved)) return;
             const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
-            const p = openLegadoBrowserInApp(resolved, cookieStr, title, { awaitClose: true })
+            const p = openLegadoBrowserInApp(resolved, cookieStr, title, {
+              awaitClose: true,
+              ...innerWebPoolOpts(source),
+            })
               .then((r) => {
                 if (r.confirmed && r.cookies) {
                   syncWebViewCookiesToStore(
@@ -1273,7 +1282,10 @@ export async function runLoginScript(
           cookiePreview: (cookieStr || '').replace(/qttoken=([^;]+)/, 'qttoken=***').slice(0, 120),
           hasCookie: !!cookieStr,
         });
-        const p = openLegadoBrowserInApp(resolved, cookieStr, title, { awaitClose: true })
+        const p = openLegadoBrowserInApp(resolved, cookieStr, title, {
+          awaitClose: true,
+          ...innerWebPoolOpts(source),
+        })
           .then((r) => {
             if (r.confirmed && r.cookies) {
               syncWebViewCookiesToStore(
@@ -1327,7 +1339,7 @@ export async function runLoginScript(
           hasCookie: !!cookieStr,
         });
         const p: Promise<void> = ok
-          ? openLegadoBrowserInApp(resolved, cookieStr, title)
+          ? openLegadoBrowserInApp(resolved, cookieStr, title, innerWebPoolOpts(source))
           : Promise.resolve();
         pending.push(p);
       },
@@ -1341,7 +1353,9 @@ export async function runLoginScript(
         }
         if (!isOpenableUrl(resolved)) return;
         const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
-        pending.push(openLegadoBrowserInApp(resolved, cookieStr, undefined));
+        pending.push(
+          openLegadoBrowserInApp(resolved, cookieStr, undefined, innerWebPoolOpts(source)),
+        );
       },
       base64Encode(str: string): string {
         try {
@@ -1915,9 +1929,13 @@ export async function runLoginScriptRust(
         continue;
       }
       if (!/^https?:/i.test(uOpen)) continue;
-      await openSourceSettingsInApp(item.url.trim(), (item.cookies ?? '').trim()).catch((e) => {
+      await openSourceSettingsInApp(item.url.trim(), (item.cookies ?? '').trim(), {
+        bookSourceUrl: source.bookSourceUrl,
+      }).catch((e) => {
         console.warn(LOG_TAG, 'open with cookies failed, fallback to plain url', e);
-        return openSourceSettingsInApp(item.url.trim(), '');
+        return openSourceSettingsInApp(item.url.trim(), '', {
+          bookSourceUrl: source.bookSourceUrl,
+        });
       });
     }
   } else {
@@ -1929,7 +1947,7 @@ export async function runLoginScriptRust(
         continue;
       }
       if (/^(https?:|data:)/i.test(u)) {
-        void openSourceSettingsInApp(u, '');
+        void openSourceSettingsInApp(u, '', { bookSourceUrl: source.bookSourceUrl });
       }
     }
   }

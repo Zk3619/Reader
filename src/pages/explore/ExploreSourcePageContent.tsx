@@ -23,7 +23,6 @@ import {
   exploreBookListBadgeRowClass,
   exploreBookListBadgeClass,
   exploreBookListBadgeLastClass,
-  exploreBookListBadgeEllipsisClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import {
   EXPLORE_BOOK_GRID_CLASS,
@@ -38,43 +37,14 @@ import {
 } from '@/stores/explore-pagination-preference';
 import { pageCacheStore } from '@/stores/page-cache';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
+import {
+  buildBadgeTooltipText,
+  buildExploreBadgeEntries,
+  BOOK_BADGE_TOOLTIP_CONTENT_CLASS,
+} from '@/lib/bookshelf/book-badge-utils';
 
 export type { PaginationPreference } from '@/stores/explore-pagination-preference';
 export { EXPLORE_PAGINATION_PREFERENCE_KEY } from '@/stores/explore-pagination-preference';
-
-const BADGE_KEYS = ['source', 'status', 'tab', 'category', 'tags', 'score'] as const;
-type BadgeKey = (typeof BADGE_KEYS)[number];
-
-function getBadgeEntries(sb: SearchBook): { key: BadgeKey; value: string }[] {
-  const entries: { key: BadgeKey; value: string }[] = [];
-  for (const key of BADGE_KEYS) {
-    const v = sb[key];
-    const value = v != null ? String(v).trim() : '';
-    if (value) entries.push({ key, value });
-  }
-  return entries;
-}
-
-type DisplayBadgeEntry = {
-  key: BadgeKey | 'ellipsis';
-  value: string;
-  isEllipsis?: boolean;
-};
-
-function getDisplayBadgeEntries(sb: SearchBook): DisplayBadgeEntry[] {
-  const entries = getBadgeEntries(sb);
-  const MAX_BADGES = 4;
-  if (entries.length <= MAX_BADGES) return entries;
-  return [...entries.slice(0, MAX_BADGES - 1), { key: 'ellipsis', value: '···', isEllipsis: true }];
-}
-
-function getStatusBadgeVariant(status: string): 'success' | 'warning' | 'secondary' | 'default' {
-  const s = status.trim();
-  if (/已完结|完结|完成/i.test(s)) return 'success';
-  if (/连载|更新中/i.test(s)) return 'warning';
-  if (/已出版|出版/i.test(s)) return 'secondary';
-  return 'default';
-}
 
 function normalizePlaceholder(v: string | undefined): string {
   if (v == null) return '--';
@@ -86,6 +56,38 @@ function normalizePlaceholder(v: string | undefined): string {
 function displayChapterTitle(title: string | undefined): string {
   const cleaned = title?.trim().replace(/\s*[•·]\s*$/, '').trim();
   return normalizePlaceholder(cleaned);
+}
+
+function ExploreBookBadgeRow(props: { book: SearchBook }) {
+  const entries = () => buildExploreBadgeEntries(props.book);
+  const tooltipText = () => buildBadgeTooltipText(entries());
+
+  return (
+    <Show when={entries().length > 0}>
+      <Tooltip>
+        <TooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
+          <For each={entries()}>
+            {(entry, i) => {
+              const isLast = i() === entries().length - 1;
+              return (
+                <Badge
+                  variant={entry.variant}
+                  class={isLast ? exploreBookListBadgeLastClass() : exploreBookListBadgeClass()}
+                >
+                  <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                    {entry.value}
+                  </span>
+                </Badge>
+              );
+            }}
+          </For>
+        </TooltipTrigger>
+        <TooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
+          {tooltipText()}
+        </TooltipContent>
+      </Tooltip>
+    </Show>
+  );
 }
 
 export interface ExploreSourcePageContentProps {
@@ -340,53 +342,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
                         );
                       })()}
                     </p>
-                    <Show when={getDisplayBadgeEntries(sb).length > 0}>
-                      {(() => {
-                        const entries = getDisplayBadgeEntries(sb);
-                        return (
-                          <div class={exploreBookListBadgeRowClass()}>
-                            <For each={entries}>
-                              {(entry, i) => {
-                                const len = entries.length;
-                                const badgeClass = () => {
-                                  const idx = i();
-                                  const isLast = idx === len - 1;
-                                  const nextIsEllipsis = !isLast && entries[idx + 1]?.isEllipsis;
-                                  if (entry.isEllipsis) return exploreBookListBadgeEllipsisClass();
-                                  if (isLast) return exploreBookListBadgeLastClass();
-                                  if (nextIsEllipsis) return exploreBookListBadgeLastClass();
-                                  return exploreBookListBadgeClass();
-                                };
-                                const badgeLabel =
-                                  entry.isEllipsis ? '更多徽标已省略' : entry.value;
-                                return (
-                                  <Tooltip>
-                                    <TooltipTrigger
-                                      as={Badge}
-                                      variant={
-                                        entry.isEllipsis
-                                          ? 'outline'
-                                          : entry.key === 'status'
-                                            ? getStatusBadgeVariant(entry.value)
-                                            : 'secondary'
-                                      }
-                                      class={badgeClass()}
-                                    >
-                                      <Show when={!entry.isEllipsis} fallback={entry.value}>
-                                        <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                                          {entry.value}
-                                        </span>
-                                      </Show>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{badgeLabel}</TooltipContent>
-                                  </Tooltip>
-                                );
-                              }}
-                            </For>
-                          </div>
-                        );
-                      })()}
-                    </Show>
+                    <ExploreBookBadgeRow book={sb} />
                     <ExploreBookListIntro>
                       简介：{sb.intro?.trim() || '暂无简介'}
                     </ExploreBookListIntro>

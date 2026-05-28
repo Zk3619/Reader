@@ -249,7 +249,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
     suppressLoginDialogDismiss();
     setConfirmLoading(true);
     try {
-      await confirmInnerWebClose(snap.cookieSyncUrl);
+      await confirmInnerWebClose(snap.cookieSyncUrl, snap.bookSourceUrl);
     } finally {
       setConfirmLoading(false);
     }

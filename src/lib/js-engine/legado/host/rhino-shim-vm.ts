@@ -67,8 +67,49 @@ export function injectRhinoLegadoShims(vm: QuickJSContext): void {
             },
             decryptStr: function(data) {
               return String(data == null ? '' : data);
+            },
+            encryptBase64: function(data) {
+              return globalThis.__readerB64Enc(String(data == null ? '' : data));
+            },
+            encryptHex: function(data) {
+              return String(data == null ? '' : data);
             }
           };
+        };
+      }
+      if (typeof globalThis.java.base64Encode !== 'function') {
+        globalThis.java.base64Encode = function(s) {
+          return globalThis.__readerB64Enc(String(s == null ? '' : s));
+        };
+      }
+      if (typeof globalThis.java.base64Decode !== 'function') {
+        globalThis.java.base64Decode = function(s) {
+          return globalThis.__readerB64Dec(String(s == null ? '' : s));
+        };
+      }
+      if (typeof globalThis.java.digestHex !== 'function') {
+        globalThis.java.digestHex = function(alg, input) {
+          return String(input == null ? '' : input);
+        };
+      }
+      if (typeof globalThis.java.hexDecodeToString !== 'function') {
+        globalThis.java.hexDecodeToString = function(hex) {
+          return String(hex == null ? '' : hex);
+        };
+      }
+      if (typeof globalThis.java.longToast !== 'function') {
+        globalThis.java.longToast = function(msg) {
+          console.log('[longToast]', msg);
+        };
+      }
+      if (typeof globalThis.java.zip !== 'function') {
+        globalThis.java.zip = function(path) {
+          return '';
+        };
+      }
+      if (typeof globalThis.java.unzip !== 'function') {
+        globalThis.java.unzip = function(path) {
+          return '';
         };
       }
     })();

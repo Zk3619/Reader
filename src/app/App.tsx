@@ -49,6 +49,7 @@ import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
 import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
 import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
 import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
+import { TocPaginationSafetySetting } from "@/components/settings/TocPaginationSafetySetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
@@ -2201,7 +2202,9 @@ function AppContent() {
                     if (isHttp && !hasUi) {
                       try {
                         const cookies = getStoredSourceCookiesForUrl(source, url);
-                        await openSourceSettingsInApp(url, cookies);
+                        await openSourceSettingsInApp(url, cookies, {
+                          bookSourceUrl: source.bookSourceUrl,
+                        });
                       } catch (e) {
                         console.error("打开登录页失败:", e);
                         showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
@@ -2365,6 +2368,8 @@ function AppContent() {
                       <CoverCacheSetting />
 
                       <ChapterCacheSetting />
+
+                      <TocPaginationSafetySetting />
 
                       <SourceBlocklistSetting />
 
@@ -2552,10 +2557,11 @@ function AppContent() {
             }}
           </Show>
 
-          <Show when={currentPage() === "book-search"}>
+          <Show when={true}>
             <BookSearchPage
               initialQuery={bookSearchContext()?.initialQuery}
               initialScope={bookSearchContext()?.initialScope}
+              className={cn(currentPage() === "book-search" ? "" : "hidden")}
               onBack={() => {
                 setBookSearchContext(null);
                 setCurrentPage("bookshelf");
