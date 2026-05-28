@@ -768,11 +768,15 @@ function AppContent() {
   const [guestAddToShelfOpen, setGuestAddToShelfOpen] = createSignal(false);
   const [guestAddToShelfBusy, setGuestAddToShelfBusy] = createSignal(false);
 
-  function openReaderPage(book: Book, returnPage: PageType) {
+  function openReaderPage(
+    book: Book,
+    returnPage: PageType,
+    initialCatalog?: import("@/types").BookChapter[],
+  ) {
     setReaderReturnPage(returnPage);
     readerStore.setBookInitialState(book);
     setCurrentPage("reader");
-    void readerStore.openBook(book).catch((e) => {
+    void readerStore.openBook(book, { initialCatalog }).catch((e) => {
       console.error("打开书籍失败:", e);
       setCurrentPage(returnPage);
     });
@@ -2551,7 +2555,9 @@ function AppContent() {
                     setBookInfoContext(null);
                     setCurrentPage(fromPage ?? "explore");
                   }}
-                  onOpenBook={(book) => openReaderPage(book, "book-info")}
+                  onOpenBook={(book, catalog) =>
+                    openReaderPage(book, "book-info", catalog)
+                  }
                 />
               );
             }}
