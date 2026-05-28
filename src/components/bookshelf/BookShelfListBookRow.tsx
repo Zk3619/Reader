@@ -44,7 +44,7 @@ export function BookShelfListBookRow(props: {
 }) {
   const intro = () => getBookshelfListItemIntro(props.book);
   const isCompact = () => props.layout === 'compact';
-  const showIntro = () => Boolean(intro());
+  const introText = () => intro() || '暂无简介';
 
   const coverClass = () =>
     isCompact() ? bookshelfCompactCoverClass() : bookshelfListCoverClass('rounded-lg');
@@ -135,6 +135,13 @@ export function BookShelfListBookRow(props: {
     </div>
   );
 
+  const leftBlock = () => (
+    <div class={cn('flex min-w-0 basis-1/2 flex-1 items-stretch', isCompact() ? 'gap-1.5' : 'gap-3')}>
+      {coverBlock()}
+      {mainBlock()}
+    </div>
+  );
+
   const introBlock = () => (
     <div
       class={
@@ -145,7 +152,7 @@ export function BookShelfListBookRow(props: {
     >
       <div class="flex h-full w-full items-center justify-center overflow-hidden">
         <p class={bookshelfListIntroTextClass(isCompact() ? 'compact' : 'list')}>
-          {intro()}
+          {introText()}
         </p>
       </div>
     </div>
@@ -153,15 +160,14 @@ export function BookShelfListBookRow(props: {
 
   return (
     <>
-      <Show when={isCompact()} fallback={<>{coverBlock()}{mainBlock()}</>}>
-        <div class={bookshelfCompactRowClass(props.viewMode, showIntro())}>
-          {coverBlock()}
-          {mainBlock()}
-          <Show when={showIntro()}>{introBlock()}</Show>
+      <Show when={isCompact()} fallback={<>{leftBlock()}</>}>
+        <div class={bookshelfCompactRowClass(props.viewMode, true)}>
+          {leftBlock()}
+          {introBlock()}
         </div>
       </Show>
 
-      <Show when={!isCompact() && showIntro()}>{introBlock()}</Show>
+      <Show when={!isCompact()}>{introBlock()}</Show>
     </>
   );
 }

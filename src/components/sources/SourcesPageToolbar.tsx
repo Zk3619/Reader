@@ -23,6 +23,7 @@ import {
   LinkIcon,
   QrCodeIcon,
   FolderTreeIcon,
+  XIcon,
 } from '@/components/shared/icons';
 import { isSourceFilterOrAll, type SourceSearchMode } from '@/lib/sources/filters';
 
@@ -117,9 +118,23 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             onBlur={() => {
               if (!sourceSearchQueryRef.current.trim()) setSourceSearchExpanded(false);
             }}
-            class="h-full w-full flex-1 bg-transparent pl-9 pr-3 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
+            class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
             aria-label="搜索书源"
           />
+          <Show when={(props.sourceSearchQuery ?? '').length > 0}>
+            <button
+              type="button"
+              class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="清除搜索内容"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                sourceSearchQueryRef.current = '';
+                props.onSourceSearchQueryChange?.('');
+              }}
+            >
+              <XIcon class="h-3.5 w-3.5" />
+            </button>
+          </Show>
         </div>
       </Show>
 

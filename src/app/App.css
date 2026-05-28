@@ -343,11 +343,6 @@
       color 0.22s ease;
   }
 
-  /** 紧凑列表：缩短 transform 过渡，减少文字/边缘栅格化的“发糊中间态” */
-  .book-group-card-motion.book-group-card-motion--compact {
-    --book-card-motion-duration: 0.22s;
-  }
-
   .book-group-card-motion:hover {
     transform: translate3d(0, -2px, 0);
   }
@@ -418,9 +413,6 @@
       transition: none;
     }
 
-    .book-group-card-motion.book-group-card-motion--compact:hover {
-      transform: translate3d(0, 0, 0);
-    }
   }
 
   .step {
@@ -1271,4 +1263,48 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
   .safe-area-min-height-bottom {
     min-height: var(--mobile-safe-bottom);
   }
+}
+
+:root {
+  --search-loop-duration: 2600ms;
+  --search-loop-min-width: 10%;
+}
+
+@keyframes search-loop-pulse {
+  0% {
+    width: 100%;
+    left: 0%;
+  }
+  50% {
+    width: var(--search-loop-min-width);
+    left: calc((100% - var(--search-loop-min-width)) / 2);
+  }
+  100% {
+    width: 100%;
+    left: 0%;
+  }
+}
+
+.search-loop-track {
+  position: relative;
+  height: 0.25rem;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+.search-loop-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+.search-loop-bar--active {
+  background: hsl(var(--primary));
+  animation: search-loop-pulse var(--search-loop-duration) cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }

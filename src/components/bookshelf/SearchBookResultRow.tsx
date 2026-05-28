@@ -1,94 +1,105 @@
 import { For, Show } from 'solid-js';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
+import { BookCoverIcon } from '@/components/shared/icons';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
 import { cn } from '@/lib/utils';
+import {
+  exploreBookListBadgeClass,
+  exploreBookListBadgeLastClass,
+  exploreBookListBadgeRowClass,
+  exploreBookListBodyClass,
+  exploreBookListCardClass,
+  exploreBookListCoverClass,
+} from '@/lib/bookshelf/book-group-card-styles';
+import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
+import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
+import {
+  buildBadgeTooltipText,
+  buildSearchResultBadgeEntries,
+  BOOK_BADGE_TOOLTIP_CONTENT_CLASS,
+} from '@/lib/bookshelf/book-badge-utils';
 
 export interface SearchBookResultRowProps {
   book: MergedSearchBook;
   onShelf: boolean;
   onOpen: () => void;
-  onAddToShelf?: () => void;
-  adding?: boolean;
   class?: string;
+  source?: import('@/types').BookSource | null;
 }
 
 export function SearchBookResultRow(props: SearchBookResultRowProps) {
-  const origins = () =>
-    props.book.mergedOriginNames.length > 0
-      ? props.book.mergedOriginNames
-      : props.book.originName
-        ? [props.book.originName]
-        : [];
+  const badgeEntries = () => buildSearchResultBadgeEntries(props.book, props.onShelf);
+  const badgeTooltipText = () => buildBadgeTooltipText(badgeEntries());
+  const latestChapterText = () => props.book.latestChapterTitle?.trim() || '无最新章节';
 
   return (
-    <li
-      class={cn(
-        'flex gap-3 border-b border-border/50 px-4 py-3 hover:bg-muted/40 transition-colors',
-        props.class,
-      )}
-    >
-      <button
-        type="button"
-        class="shrink-0 overflow-hidden rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => props.onOpen()}
-        aria-label={`查看 ${props.book.name}`}
-      >
-        <BookCoverImg
-          bookUrl={props.book.bookUrl}
-          coverUrl={props.book.coverUrl}
-          name={props.book.name}
-          class="h-16 w-11 object-cover"
-        />
-      </button>
-      <div class="min-w-0 flex-1">
-        <button type="button" class="text-left w-full" onClick={() => props.onOpen()}>
-          <p class="font-medium leading-snug line-clamp-2">{props.book.name}</p>
-          <p class="mt-0.5 text-xs text-muted-foreground truncate">
-            {props.book.author || '未知作者'}
-          </p>
+    <li class={cn('w-full px-1 py-1', props.class)}>
+      <div class={exploreBookListCardClass('cursor-default')}>
+        <button
+          type="button"
+          class={exploreBookListCoverClass(
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+          onClick={() => props.onOpen()}
+          aria-label={`查看 ${props.book.name}`}
+        >
+          <BookCoverImg
+            bookUrl={props.book.bookUrl}
+            src={props.book.coverUrl}
+            referer={props.book.origin}
+            source={props.source ?? null}
+            class="h-full w-full object-cover"
+            fallback={
+              <div class="flex h-full w-full items-center justify-center">
+                <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
+              </div>
+            }
+          />
         </button>
-        <Show when={props.book.latestChapterTitle}>
-          <p class="mt-1 text-xs text-muted-foreground line-clamp-1">
-            {props.book.latestChapterTitle}
+        <div class={exploreBookListBodyClass()}>
+          <button type="button" class="text-left" onClick={() => props.onOpen()}>
+            <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">{props.book.name}</p>
+          </button>
+          <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+            作者：{props.book.author || '—'}
           </p>
-        </Show>
-        <div class="mt-1.5 flex flex-wrap gap-1">
-          <For each={origins().slice(0, 3)}>
-            {(name) => (
-              <Badge variant="outline" class="text-[10px] px-1.5 py-0 font-normal">
-                {name}
-              </Badge>
-            )}
-          </For>
-          <Show when={origins().length > 3}>
-            <Badge variant="outline" class="text-[10px] px-1.5 py-0 font-normal">
-              +{origins().length - 3}
-            </Badge>
+          <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+            最新章节：{latestChapterText()}
+            <Show when={tryFormatDisplayUpdateTime(props.book.latestChapterUpdateTime)}>
+              {(label) => <span> · {label()}</span>}
+            </Show>
+          </p>
+          <Show when={badgeEntries().length > 0}>
+            <Tooltip>
+              <TooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
+                <For each={badgeEntries()}>
+                  {(entry, i) => (
+                    <Badge
+                      variant={entry.variant}
+                      class={
+                        i() === badgeEntries().length - 1
+                          ? exploreBookListBadgeLastClass()
+                          : exploreBookListBadgeClass()
+                      }
+                    >
+                      <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        {entry.value}
+                      </span>
+                    </Badge>
+                  )}
+                </For>
+              </TooltipTrigger>
+              <TooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
+                {badgeTooltipText()}
+              </TooltipContent>
+            </Tooltip>
           </Show>
-          <Show when={props.onShelf}>
-            <Badge variant="secondary" class="text-[10px] px-1.5 py-0">
-              已在书架
-            </Badge>
-          </Show>
+          <ExploreBookListIntro>
+            简介：{props.book.intro?.trim() || '暂无简介'}
+          </ExploreBookListIntro>
         </div>
-      </div>
-      <div class="flex shrink-0 flex-col items-end justify-center gap-1">
-        <Button variant="ghost" size="sm" class="h-8" onClick={() => props.onOpen()}>
-          详情
-        </Button>
-        <Show when={!props.onShelf && props.onAddToShelf}>
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-8"
-            disabled={props.adding}
-            onClick={() => props.onAddToShelf?.()}
-          >
-            {props.adding ? '添加中…' : '加入书架'}
-          </Button>
-        </Show>
       </div>
     </li>
   );

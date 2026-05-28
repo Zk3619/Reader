@@ -2,7 +2,7 @@
  * 书架页操作区：搜索（本地过滤 + 回车全网搜索）、收藏占位、更多菜单
  */
 
-import { Show, createSignal, createEffect, onMount } from 'solid-js';
+import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -76,14 +76,7 @@ function MenuRadioIndicator(props: { selected: boolean }) {
 
 export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
-  const [searchExpanded, setSearchExpanded] = createSignal(false);
   const [showBookshelfLayoutDialog, setShowBookshelfLayoutDialog] = createSignal(false);
-  const searchQueryRef: { current: string } = { current: '' };
-
-  createEffect(() => {
-    searchQueryRef.current = props.searchQuery ?? '';
-    if ((props.searchQuery ?? '').trim()) setSearchExpanded(true);
-  });
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -91,15 +84,14 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
       blurActiveElement();
     };
     window.addEventListener('dialog-opened', handleDialogOpened);
-    return () => window.removeEventListener('dialog-opened', handleDialogOpened);
+    onCleanup(() => {
+      window.removeEventListener('dialog-opened', handleDialogOpened);
+    });
   });
 
   const isGroupSearch = () => (props.searchTarget ?? 'books') === 'groups';
-
-  const submitGlobalSearch = () => {
-    const q = searchQueryRef.current.trim();
-    if (!q) return;
-    props.onOpenGlobalSearch?.(q);
+  const openGlobalSearchPage = () => {
+    props.onOpenGlobalSearch?.((props.searchQuery ?? '').trim());
   };
 
   return (
@@ -110,85 +102,19 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           scope={props.pendingUpdateScope}
           scopeBookUrls={props.pendingUpdateBookUrls}
         />
-        <Show
-          when={searchExpanded()}
-          fallback={
-            <Tooltip>
-              <TooltipTrigger
-                as={Button}
-                variant="ghost"
-                size="icon"
-                class="h-9 w-9 shrink-0"
-                onClick={() => setSearchExpanded(true)}
-              >
-                <SearchIcon class="h-4 w-4" />
-                <span class="sr-only">搜索</span>
-              </TooltipTrigger>
-              <TooltipContent>搜索</TooltipContent>
-            </Tooltip>
-          }
-        >
-          <Show
-            when={isGroupSearch()}
-            fallback={
-              <div class="flex items-center gap-1">
-                <div class="relative flex h-9 w-36 sm:w-44 items-center rounded-md border border-input bg-transparent text-sm">
-                  <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="search"
-                    enterkeyhint="search"
-                    placeholder="搜索书籍"
-                    value={props.searchQuery ?? ''}
-                    onInput={(e) => {
-                      const v = e.currentTarget.value;
-                      searchQueryRef.current = v;
-                      props.onSearchQueryChange?.(v);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        submitGlobalSearch();
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!searchQueryRef.current.trim()) setSearchExpanded(false);
-                    }}
-                    class="h-full w-full flex-1 bg-transparent pl-9 pr-2 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-                    aria-label="搜索书籍"
-                  />
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  class="h-9 shrink-0 px-2.5"
-                  disabled={!(props.searchQuery ?? '').trim()}
-                  onClick={submitGlobalSearch}
-                >
-                  搜索
-                </Button>
-              </div>
-            }
+        <Tooltip>
+          <TooltipTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9 shrink-0"
+            onClick={openGlobalSearchPage}
           >
-            <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
-              <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                placeholder="搜索分组"
-                value={props.searchQuery ?? ''}
-                onInput={(e) => {
-                  const v = e.currentTarget.value;
-                  searchQueryRef.current = v;
-                  props.onSearchQueryChange?.(v);
-                }}
-                onBlur={() => {
-                  if (!searchQueryRef.current.trim()) setSearchExpanded(false);
-                }}
-                class="h-full w-full flex-1 bg-transparent pl-9 pr-3 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-                aria-label="搜索分组"
-              />
-            </div>
-          </Show>
-        </Show>
+            <SearchIcon class="h-4 w-4" />
+            <span class="sr-only">搜索</span>
+          </TooltipTrigger>
+          <TooltipContent>{isGroupSearch() ? '进入搜索页' : '进入搜索页'}</TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">

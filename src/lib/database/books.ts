@@ -169,13 +169,17 @@ export async function hasBook(bookUrl: string): Promise<boolean> {
 export async function insertBook(book: NewBook): Promise<void> {
   const db = await getDatabase();
   const now = Date.now();
+  const orderRows = await db.select<{ minOrder: number }>(
+    'SELECT COALESCE(MIN("order"), 0) as minOrder FROM books'
+  );
+  const topOrder = Number(orderRows[0]?.minOrder ?? 0) - 1;
 
   await db.execute(
     `INSERT INTO books (
       bookUrl, tocUrl, origin, originName, name, author, kind,
-      intro, coverUrl, charset, type, "group", lastCheckTime,
-      durChapterTime
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      intro, coverUrl, charset, type, "group", latestChapterTime,
+      lastCheckTime, durChapterTime, "order"
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       book.bookUrl,
       book.tocUrl ?? book.bookUrl,
@@ -189,8 +193,10 @@ export async function insertBook(book: NewBook): Promise<void> {
       book.charset ?? null,
       book.type ?? 0,
       0, // group
+      now, // latestChapterTime：对齐 legado，新入架视为最新
       now, // lastCheckTime
-      0, // durChapterTime：未读前为 0
+      now, // durChapterTime：对齐 legado，写入加入书架时间
+      topOrder, // order：手动排序默认插到首位
     ]
   );
 }

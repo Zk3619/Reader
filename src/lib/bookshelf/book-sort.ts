@@ -18,6 +18,13 @@ function cnCompare(a: string | null | undefined, b: string | null | undefined): 
   return strA.localeCompare(strB, 'zh-CN');
 }
 
+function compareByStableOrder(a: Book, b: Book): number {
+  const orderA = a.order || 0;
+  const orderB = b.order || 0;
+  if (orderA !== orderB) return orderA - orderB;
+  return cnCompare(a.name, b.name);
+}
+
 /**
  * 根据排序模式对书籍列表进行排序
  */
@@ -30,7 +37,8 @@ export function sortBooks(books: Book[], sortMode: SortMode): Book[] {
       sorted.sort((a, b) => {
         const timeA = a.durChapterTime || 0;
         const timeB = b.durChapterTime || 0;
-        return timeB - timeA;
+        if (timeB !== timeA) return timeB - timeA;
+        return compareByStableOrder(a, b);
       });
       break;
 
@@ -39,7 +47,8 @@ export function sortBooks(books: Book[], sortMode: SortMode): Book[] {
       sorted.sort((a, b) => {
         const timeA = a.latestChapterTime || 0;
         const timeB = b.latestChapterTime || 0;
-        return timeB - timeA;
+        if (timeB !== timeA) return timeB - timeA;
+        return compareByStableOrder(a, b);
       });
       break;
 
@@ -50,11 +59,7 @@ export function sortBooks(books: Book[], sortMode: SortMode): Book[] {
 
     case 'manual':
       // 手动排序（按 order 字段升序）
-      sorted.sort((a, b) => {
-        const orderA = a.order || 0;
-        const orderB = b.order || 0;
-        return orderA - orderB;
-      });
+      sorted.sort(compareByStableOrder);
       break;
 
     case 'comprehensive':
@@ -62,7 +67,8 @@ export function sortBooks(books: Book[], sortMode: SortMode): Book[] {
       sorted.sort((a, b) => {
         const timeA = Math.max(a.latestChapterTime || 0, a.durChapterTime || 0);
         const timeB = Math.max(b.latestChapterTime || 0, b.durChapterTime || 0);
-        return timeB - timeA;
+        if (timeB !== timeA) return timeB - timeA;
+        return compareByStableOrder(a, b);
       });
       break;
 

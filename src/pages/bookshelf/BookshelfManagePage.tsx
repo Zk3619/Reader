@@ -35,7 +35,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   bookshelfCompactCoverClass,
-  bookshelfCompactListRowClass,
+  bookshelfCompactListCardClass,
   bookshelfCompactMainClass,
   bookshelfRowSubtitleClass,
   bookshelfRowTitleClass,
@@ -684,7 +684,7 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
                           triggerEl = el;
                         }}
                         class={cn(
-                          bookshelfCompactListRowClass('select-none'),
+                          bookshelfCompactListCardClass('select-none'),
                           'cursor-pointer min-w-0 text-left',
                         )}
                         onMouseDown={onPointerDown}

@@ -104,7 +104,6 @@ import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolba
 import type { PageType } from '@/components/shell/Navigation';
 import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
 import { readerStore } from '@/stores/reader';
-import { filterBookshelfBooks } from '@/lib/search/search-filters';
 import {
   loadBookshelfMainSearchMode,
   saveBookshelfMainSearchMode,
@@ -144,8 +143,6 @@ export function BookShelf(props: BookShelfProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
   const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
   const [importBookshelfOpen, setImportBookshelfOpen] = createSignal(false);
-  const [shelfSearchQuery, setShelfSearchQuery] = createSignal('');
-  const [groupSearchQuery, setGroupSearchQuery] = createSignal('');
   const [shelfSearchMode, setShelfSearchMode] = createSignal<SearchMode>('name');
 
   const groupStyle = () => bookshelfLayoutStore.settings.groupStyle;
@@ -542,9 +539,8 @@ export function BookShelf(props: BookShelfProps) {
   }
 
   const displayBooks = createMemo(() => {
-    const q = shelfSearchQuery().trim();
-    if (!q || !showBooksView()) return books();
-    return filterBookshelfBooks(books(), q, shelfSearchMode());
+    if (!showBooksView()) return books();
+    return books();
   });
 
   /** 常规分组样式：在具体分组书籍页显示返回分组列表 */
@@ -567,11 +563,6 @@ export function BookShelf(props: BookShelfProps) {
       return n > 0 ? `共 ${n} 个分组` : undefined;
     }
     const total = books().length;
-    const shown = displayBooks().length;
-    const q = shelfSearchQuery().trim();
-    if (q && shown !== total) {
-      return `显示 ${shown} / ${total} 本书`;
-    }
     return `共 ${total} 本书`;
   };
 
@@ -807,12 +798,7 @@ export function BookShelf(props: BookShelfProps) {
           isReloadingLocal={isReloadingBooks()}
           onReloadLocal={handleReloadLocalBooks}
           searchTarget={isGroupSearchToolbar() ? 'groups' : 'books'}
-          searchQuery={
-            isGroupSearchToolbar() ? groupSearchQuery() : shelfSearchQuery()
-          }
-          onSearchQueryChange={
-            isGroupSearchToolbar() ? setGroupSearchQuery : setShelfSearchQuery
-          }
+          onSearchQueryChange={undefined}
           searchMode={isGroupSearchToolbar() ? undefined : shelfSearchMode()}
           onSearchModeChange={
             isGroupSearchToolbar()
@@ -822,9 +808,7 @@ export function BookShelf(props: BookShelfProps) {
                   void saveBookshelfMainSearchMode(mode);
                 }
           }
-          onOpenGlobalSearch={
-            isGroupSearchToolbar() ? undefined : (q) => props.onOpenBookSearch?.(q)
-          }
+          onOpenGlobalSearch={(q) => props.onOpenBookSearch?.(q)}
         />
       </PageToolbar>
 
@@ -832,7 +816,7 @@ export function BookShelf(props: BookShelfProps) {
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}
-            searchQuery={groupSearchQuery()}
+          searchQuery=""
             onGroupSelect={handleGroupSelect}
             onGroupsLoaded={(g) => {
               props.onGroupsLoaded?.(g);

@@ -52,7 +52,7 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
       <div
         class={cn(
           bookGroupCompactCardClass(),
-          'h-16 min-h-16 cursor-default gap-2.5 hover:bg-card',
+          'h-16 min-h-16 cursor-default gap-2.5',
         )}
       >
         <div class={bookGroupCompactCoverClass('h-12 w-9')}>

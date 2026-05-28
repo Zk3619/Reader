@@ -18,7 +18,7 @@ import { Label } from '@/components/ui/label';
 import { GroupContextMenu, type GroupContextMenuActions } from '@/components/bookshelf/BookGroupContextMenu';
 import {
   bookshelfCompactCoverClass,
-  bookshelfCompactListRowClass,
+  bookshelfCompactListCardClass,
   bookshelfCompactMainClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import {
@@ -566,7 +566,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
                       actions={groupContextMenuActions}
                       withLongPress
                       data-group-id={group.groupId}
-                      class={bookshelfCompactListRowClass('select-none')}
+                      class={bookshelfCompactListCardClass('select-none')}
                     >
                       <Show when={dragEnabled()}>
                         <div class="drag-handle flex h-full items-center cursor-move text-muted-foreground hover:text-foreground select-none">

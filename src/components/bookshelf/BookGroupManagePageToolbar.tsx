@@ -19,6 +19,7 @@ import {
   MoreIcon,
   FolderPlusIcon,
   ChevronLeftIcon,
+  XIcon,
 } from '@/components/shared/icons';
 export interface BookGroupManagePageToolbarProps {
   searchQuery?: string;
@@ -100,9 +101,23 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
             onBlur={() => {
               if (!searchQueryRef.current.trim()) setSearchExpanded(false);
             }}
-            class="h-full w-full flex-1 bg-transparent pl-9 pr-3 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
+            class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
             aria-label="搜索分组"
           />
+          <Show when={(props.searchQuery ?? '').length > 0}>
+            <button
+              type="button"
+              class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="清除搜索内容"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                searchQueryRef.current = '';
+                props.onSearchQueryChange?.('');
+              }}
+            >
+              <XIcon class="h-3.5 w-3.5" />
+            </button>
+          </Show>
         </div>
       </Show>
 
