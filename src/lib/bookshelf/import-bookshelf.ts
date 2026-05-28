@@ -5,7 +5,7 @@
 import { get } from '@/lib/http';
 import * as booksDb from '@/lib/database/books';
 import * as sourcesDb from '@/lib/database/sources';
-import { searchBook } from '@/lib/book-source/search';
+import { preciseSearchBook, searchBook } from '@/lib/book-source/search';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
 import type { BookshelfExportEntry } from '@/lib/bookshelf/export-bookshelf';
 import type { SearchBook } from '@/types';
@@ -52,15 +52,12 @@ async function preciseSearchOne(
   const sources = await sourcesDb.getEnabledSources();
   for (const source of sources) {
     if (!source.ruleSearch) continue;
-    const keyword = author ? `${name} ${author}` : name;
     try {
-      const results = await searchBook(source, keyword);
-      const exact = results.find(
-        (r) =>
-          r.name === name &&
-          (r.author ?? '').trim() === author.trim(),
-      );
-      if (exact) return exact;
+      if (author.trim()) {
+        const exact = await preciseSearchBook(source, name, author.trim());
+        if (exact) return exact;
+      }
+      const results = await searchBook(source, name);
       const loose = results.find((r) => r.name === name);
       if (loose && !author) return loose;
     } catch {

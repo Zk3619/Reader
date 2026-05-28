@@ -12,7 +12,7 @@ import type { SearchKeyword } from '@/types';
 export async function getAllSearchKeywords(): Promise<SearchKeyword[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM search_keywords ORDER BY usage DESC, lastUseTime DESC'
+    'SELECT * FROM search_keywords ORDER BY lastUseTime DESC'
   );
   return rows.map(row => mapRowToKeyword(row));
 }

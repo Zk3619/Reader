@@ -8,7 +8,12 @@
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
-import { getChapterList as fetchChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
+import {
+  fetchChapterListDeduped,
+  isChapterListFetchInFlight,
+  toNewBookChapter,
+  type PartialChapterList,
+} from '@/lib/book-source/chapters';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
 import {
@@ -93,7 +98,7 @@ async function fetchChaptersForBook(
   const source = await sourcesDb.getSource(incoming.origin);
   if (!source) return [];
   const tocUrl = incoming.tocUrl || bookUrl;
-  return fetchChapterList(source, tocUrl);
+  return fetchChapterListDeduped(source, tocUrl);
 }
 
 async function applyGroupMask(bookUrl: string, groupId?: number): Promise<void> {
@@ -133,30 +138,94 @@ function shelfBookNeedsChapterMeta(book: Book): boolean {
   return (book.totalChapterNum ?? 0) <= 0 || !book.latestChapterTitle?.trim();
 }
 
-/** 拉取并写入目录（书架上已有书但目录为空时复用） */
+function notifyShelfBookMeta(bookUrl: string): void {
+  window.dispatchEvent(
+    new CustomEvent('bookshelf-book-updated', { detail: { bookUrl } }),
+  );
+}
+
+export type BookChaptersUpdatedDetail = {
+  bookUrl: string;
+  chapters: BookChapter[];
+  /** false=渐进中间页（对齐 Legado isIncremental） */
+  isComplete: boolean;
+};
+
+export function notifyChaptersUpdated(
+  bookUrl: string,
+  chapters: BookChapter[],
+  isComplete: boolean,
+): void {
+  window.dispatchEvent(
+    new CustomEvent<BookChaptersUpdatedDetail>('book-chapters-updated', {
+      detail: { bookUrl, chapters, isComplete },
+    }),
+  );
+}
+
+/** 拉取并写入目录：分页过程中仅更新书籍元数据，完成后一次性写入章节表 */
 export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> {
   if (isLocalBook(book) || !book.tocUrl || !book.origin) return;
-
-  const count = await chaptersDb.getChapterCount(book.bookUrl);
-  if (count > 0) {
-    const saved = await booksDb.getBook(book.bookUrl);
-    if (!saved || !shelfBookNeedsChapterMeta(saved)) return;
-    const chapters = await chaptersDb.getChapterList(book.bookUrl);
-    if (chapters.length === 0) return;
-    await updateBookChapterMeta(book.bookUrl, chapters);
-    window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
-    return;
-  }
 
   const source = await sourcesDb.getSource(book.origin);
   if (!source) return;
 
+  const count = await chaptersDb.getChapterCount(book.bookUrl);
+  const tocInFlight = isChapterListFetchInFlight(source, book.tocUrl);
+  if (count > 0 && !tocInFlight) {
+    const saved = await booksDb.getBook(book.bookUrl);
+    if (saved && !shelfBookNeedsChapterMeta(saved)) {
+      return;
+    }
+    if (saved && shelfBookNeedsChapterMeta(saved)) {
+      const chapters = await chaptersDb.getChapterList(book.bookUrl);
+      if (chapters.length > 0) {
+        await updateBookChapterMeta(book.bookUrl, chapters);
+        notifyShelfBookMeta(book.bookUrl);
+      }
+    }
+  }
+
+  let lastMetaPersistAt = 0;
+
+  const onPartial = async (partial: PartialChapterList) => {
+    if (partial.chapters.length === 0) return;
+
+    // 对齐 Legado savePartialBookChapters：仅 INSERT OR REPLACE，不每页 delete
+    await chaptersDb.insertChapters(
+      partial.chapters.map((ch) => toNewBookChapter(ch, book.bookUrl)),
+    );
+
+    const now = Date.now();
+    if (!partial.isComplete && now - lastMetaPersistAt < 2000) {
+      notifyChaptersUpdated(book.bookUrl, partial.chapters, false);
+      return;
+    }
+    lastMetaPersistAt = now;
+
+    const saved = await booksDb.getBook(book.bookUrl);
+    if (saved) {
+      const latest = partial.chapters[partial.chapters.length - 1];
+      await booksDb.updateBook({
+        ...saved,
+        totalChapterNum: partial.chapters.length,
+        latestChapterTitle: latest?.title ?? saved.latestChapterTitle,
+      });
+    }
+    notifyShelfBookMeta(book.bookUrl);
+    notifyChaptersUpdated(book.bookUrl, partial.chapters, partial.isComplete);
+  };
+
   try {
-    const chapters = await fetchChapterList(source, book.tocUrl);
+    const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
+      reverseToc: book.readConfig?.reverseToc === true,
+      onPartial,
+    });
     if (chapters.length === 0) return;
     await persistChapters(book.bookUrl, chapters);
     await updateBookChapterMeta(book.bookUrl, chapters);
-    window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+    notifyShelfBookMeta(book.bookUrl);
+    notifyChaptersUpdated(book.bookUrl, chapters, true);
   } catch (e) {
     console.warn('[saveBookToShelf] 后台拉取目录失败:', e);
   }
@@ -238,7 +307,9 @@ export async function saveBookToShelf(
     await booksDb.replaceBookUrl(oldUrl, targetBook);
     if (chapters && chapters.length > 0) {
       await persistChapters(targetBook.bookUrl, chapters);
-      await updateBookChapterMeta(targetBook.bookUrl, chapters);
+      if (fetchMode === 'blocking') {
+        await updateBookChapterMeta(targetBook.bookUrl, chapters);
+      }
     }
   } else if (isOnline) {
     if (!(await sourcesDb.getSource(incoming.origin))) {
@@ -248,7 +319,9 @@ export async function saveBookToShelf(
     await booksDb.insertBook(incoming);
     if (chapters && chapters.length > 0) {
       await persistChapters(bookUrl, chapters);
-      await updateBookChapterMeta(bookUrl, chapters);
+      if (fetchMode === 'blocking') {
+        await updateBookChapterMeta(bookUrl, chapters);
+      }
     }
   } else {
     await booksDb.insertBook(incoming);
@@ -261,7 +334,7 @@ export async function saveBookToShelf(
     await booksDb.updateBook(saved);
   }
   const chaptersReady = chapters && chapters.length > 0;
-  if (saved && fetchMode === 'background' && isOnline && !chaptersReady) {
+  if (saved && fetchMode === 'background' && isOnline) {
     scheduleBackgroundChapterFetch(saved);
   }
   return saved;

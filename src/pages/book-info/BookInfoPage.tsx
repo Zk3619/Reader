@@ -41,7 +41,7 @@ import { collectBookBadgeEntries } from '@/lib/book-source/book-tags';
 import { getBook, hasBook, updateBooksGroupMask } from '@/lib/database/books';
 import { getAllGroups } from '@/lib/database/book-groups';
 import { getBookInfo } from '@/lib/book-source/detail';
-import { getChapterList } from '@/lib/book-source/chapters';
+import { fetchChapterListDeduped } from '@/lib/book-source/chapters';
 import { getSource } from '@/lib/database/sources';
 import { getChapterList as getDbChapterList } from '@/lib/database/chapters';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -200,7 +200,7 @@ export interface BookInfoPageProps {
   /** 从发现/探索进入时已有书源，可立即加载封面 */
   source?: BookSource;
   onBack: () => void;
-  onOpenBook: (book: Book) => void;
+  onOpenBook: (book: Book, initialCatalog?: BookChapter[]) => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
@@ -279,10 +279,17 @@ export function BookInfoPage(props: BookInfoPageProps) {
         setPreloadedChapters(inDb);
         return;
       }
-      const list = await getChapterList(source, tocUrl);
+      const list = await fetchChapterListDeduped(source, tocUrl, {
+        onPartial: async (partial) => {
+          if (partial.chapters.length > 0) {
+            setPreloadedChapters(partial.chapters);
+            setTocLoading(false);
+          }
+        },
+      });
       if (list.length > 0) {
         setPreloadedChapters(list);
-      } else {
+      } else if (!preloadedChapters()?.length) {
         setTocLoadError('目录为空');
       }
     } catch (e) {
@@ -413,6 +420,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
     const cached = chapters ?? preloadedChapters();
     return {
       chapters: cached && cached.length > 0 ? cached : undefined,
+      fetchChapters: 'background' as const,
       readingProgress: getReaderProgressSnapshot(currentBook().bookUrl),
     };
   }
@@ -475,7 +483,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
         book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
       }
     }
-    props.onOpenBook(book);
+    const catalog = preloadedChapters();
+    props.onOpenBook(
+      book,
+      catalog && catalog.length > 0 ? catalog : undefined,
+    );
   }
 
   async function handleSelectChapterFromToc(index: number) {

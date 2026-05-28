@@ -1,4 +1,5 @@
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
+import { isLikelySerializedBookDetailJson } from '@/lib/book-source/intro-merge';
 import type { SearchBook } from '@/types';
 
 export type SharedBadgeVariant = 'default' | 'secondary' | 'outline' | 'success' | 'warning';
@@ -51,7 +52,12 @@ function parseKindBadges(rawKind: string | undefined): string[] {
       return [s];
     })
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(
+      (s) =>
+        s &&
+        !isLikelySerializedBookDetailJson(s) &&
+        !(s.startsWith('{') && /"book_name"|"book_id"|"thumb_url"/.test(s)),
+    );
   return Array.from(new Set(tokens)).slice(0, 4);
 }
 
@@ -65,6 +71,20 @@ export function buildExploreBadgeEntries(book: SearchBook): SharedBadgeEntry[] {
     pushUniqueBadge(entries, seen, value, variant);
   }
   return entries;
+}
+
+/** 合并命中书源数量（对齐 Legado SearchBook.origins.size） */
+export function getSearchResultOriginCount(book: MergedSearchBook): number {
+  if (book.mergedOriginUrls.length > 0) return book.mergedOriginUrls.length;
+  if (book.mergedOriginNames.length > 0) return book.mergedOriginNames.length;
+  return book.origin ? 1 : 0;
+}
+
+/** 字数、分类等元信息徽标（不含书源名与「已在书架」） */
+export function buildSearchResultMetaBadgeEntries(book: MergedSearchBook): SharedBadgeEntry[] {
+  return buildSearchResultBadgeEntries(book, false).filter(
+    (e) => e.variant !== 'outline' && e.value !== '已在书架',
+  );
 }
 
 export function buildSearchResultBadgeEntries(

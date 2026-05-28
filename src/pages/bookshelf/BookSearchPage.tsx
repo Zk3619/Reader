@@ -23,6 +23,7 @@ import {
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import { SearchBookResultRow } from '../../components/bookshelf/SearchBookResultRow';
+import { SearchHistoryChip } from '@/components/bookshelf/SearchHistoryChip';
 import { BookSearchScopeDialog } from '@/components/bookshelf/BookSearchScopeDialog';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { filterBookshelfBooks } from '@/lib/search/search-filters';
@@ -34,11 +35,11 @@ import {
 } from '@/lib/search/search-prefs';
 import { buildShelfMembershipKeys, isSearchBookOnShelf } from '@/lib/bookshelf/shelf-membership';
 import {
-  collectSourceGroupNames,
   loadSearchScope,
   resolveSearchScopeSources,
   saveSearchScope,
   scopeDisplayLabel,
+  scopeMenuItemLabel,
   formatSourceScope,
 } from '@/lib/book-source/search-scope';
 import { MultiSourceSearchSession } from '@/lib/book-source/multi-source-search';
@@ -54,7 +55,7 @@ import { getEnabledSources } from '@/lib/database/sources';
 import { getSource } from '@/lib/database/sources';
 import { bookToSearchBook } from '@/lib/bookshelf/book-to-search-book';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import type { Book, BookSource, SearchBook, SearchKeyword } from '@/types';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
@@ -105,7 +106,6 @@ export function BookSearchPage(props: BookSearchPageProps) {
   const [hasMore, setHasMore] = createSignal(false);
   const [manualStop, setManualStop] = createSignal(false);
   const [shelfKeys, setShelfKeys] = createSignal<Set<string>>(new Set());
-  const [sourceGroups, setSourceGroups] = createSignal<string[]>([]);
   const [sourceMap, setSourceMap] = createSignal<Record<string, BookSource>>({});
   const [scopeDialogOpen, setScopeDialogOpen] = createSignal(false);
   const session = new MultiSourceSearchSession();
@@ -118,7 +118,6 @@ export function BookSearchPage(props: BookSearchPageProps) {
     const all = await getAllBooks();
     setShelfKeys(buildShelfMembershipKeys(all));
     const sources = await getEnabledSources();
-    setSourceGroups(collectSourceGroupNames(sources));
     setSourceMap(Object.fromEntries(sources.map((s) => [s.sourceUrl, s])));
     if (props.initialQuery?.trim()) {
       void submitSearch(props.initialQuery.trim());
@@ -188,7 +187,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
     session.resume();
     if (!reRun) {
       await upsertSearchKeyword(trimmed);
-      const hist = await searchSearchKeywords(query().trim());
+      const hist = await searchSearchKeywords('');
       setHistory(hist);
     }
     session.setSearchMode(searchMode());
@@ -206,9 +205,11 @@ export function BookSearchPage(props: BookSearchPageProps) {
       return;
     }
     session.setCallbacks({
-      onStart: () => {
+      onStart: (isNewSearch) => {
         setSearching(true);
-        setOnlineResults([]);
+        if (isNewSearch) {
+          setOnlineResults([]);
+        }
       },
       onResults: (books) => setOnlineResults(books),
       onFinish: (empty, more) => {
@@ -305,10 +306,16 @@ export function BookSearchPage(props: BookSearchPageProps) {
   };
 
   return (
-    <div class={cn(mainShellPageRoot, 'bg-background', props.className)}>
+    <section
+      class={cn(
+        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-background',
+        props.className,
+      )}
+    >
       <PageHeader
         title="搜索"
         onBack={props.onBack}
+        pinToTop
         showThemeToggle
         showWindowControls
         draggable={true}
@@ -384,12 +391,12 @@ export function BookSearchPage(props: BookSearchPageProps) {
               />
               <AppDropdownMenuContent align="end" layout="compact">
                 <AppDropdownMenuItem onSelect={() => setScopeDialogOpen(true)}>
-                  搜索范围：{scopeDisplayLabel(scope())}
+                  {scopeMenuItemLabel(scope())}
                 </AppDropdownMenuItem>
                 <AppDropdownMenuSeparator />
                 <AppDropdownMenuItem onSelect={() => persistMode('name')}>
                   <MenuRadioIndicator selected={searchMode() === 'name'} />
-                  <span>常规搜索（精准）</span>
+                  <span>常规搜索</span>
                 </AppDropdownMenuItem>
                 <AppDropdownMenuItem onSelect={() => persistMode('fuzzy')}>
                   <MenuRadioIndicator selected={searchMode() === 'fuzzy'} />
@@ -404,15 +411,15 @@ export function BookSearchPage(props: BookSearchPageProps) {
           </div>
         }
       />
-      <div class="shrink-0 px-4 pb-2">
+      <div class="shrink-0 px-2 pb-2">
         <div class="search-loop-track">
           <div class={cn('search-loop-bar', searching() ? 'search-loop-bar--active' : '')} />
         </div>
       </div>
 
-      <div class={mainShellPageScroll} onScroll={handleScroll}>
+      <div class={cn(mainShellPageScroll, 'px-2')} onScroll={handleScroll}>
         <Show when={helpVisible()}>
-          <section class="px-4 pt-3">
+          <section class="pt-3">
             <Show
               when={query().trim()}
               fallback={
@@ -435,28 +442,17 @@ export function BookSearchPage(props: BookSearchPageProps) {
                   <div class="flex flex-wrap gap-2 pb-4">
                     <For each={history()}>
                       {(item) => (
-                        <span class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/20 pl-3 pr-1 py-1 text-sm">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setQuery(item.word);
-                              void submitSearch(item.word);
-                            }}
-                          >
-                            {item.word}
-                          </button>
-                          <button
-                            type="button"
-                            class="rounded-full px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            aria-label={`删除 ${item.word}`}
-                            onClick={async () => {
-                              await deleteSearchKeyword(item.word);
-                              setHistory((h) => h.filter((x) => x.word !== item.word));
-                            }}
-                          >
-                            <XIcon class="h-3 w-3" />
-                          </button>
-                        </span>
+                        <SearchHistoryChip
+                          item={item}
+                          onSelect={(word) => {
+                            setQuery(word);
+                            void submitSearch(word);
+                          }}
+                          onDelete={async (word) => {
+                            await deleteSearchKeyword(word);
+                            setHistory((h) => h.filter((x) => x.word !== word));
+                          }}
+                        />
                       )}
                     </For>
                     <Show when={history().length === 0}>
@@ -567,7 +563,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
         <Show when={submitted()}>
           <section class="pb-8">
             <Show when={!searching() && onlineResults().length === 0}>
-              <p class="px-4 py-12 text-center text-sm text-muted-foreground">
+              <p class="py-12 text-center text-sm text-muted-foreground">
                 {manualStop() ? '搜索已停止' : '暂无搜索结果'}
               </p>
             </Show>
@@ -605,10 +601,9 @@ export function BookSearchPage(props: BookSearchPageProps) {
         open={scopeDialogOpen()}
         onOpenChange={setScopeDialogOpen}
         scope={scope()}
-        groupNames={sourceGroups()}
         onConfirm={(s) => void openScope(s)}
       />
-    </div>
+    </section>
   );
 }
 
