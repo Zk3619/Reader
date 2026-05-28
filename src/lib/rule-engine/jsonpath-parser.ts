@@ -43,8 +43,12 @@ function parseJsonPathSingle(jsonPath: string, jsonString: string): string[] {
 }
 
 function expandInnerJsonRules(rule: string, jsonString: string): string {
+  // {{$.x}} 由 analyze-rule.applyJsonTemplate 处理；此处 innerRule 会误留 {vip}
+  if (/\{\{\s*\$/.test(rule)) {
+    return rule;
+  }
   const analyzer = new RuleAnalyzer(rule, true);
-  const expanded = analyzer.innerRule('{$.', 2, 1, (inner) => {
+  const expanded = analyzer.innerRule('{$.', 1, 1, (inner) => {
     const values = parseJsonPathSingle(inner.trim(), jsonString);
     return values.length > 0 ? values.join('\n') : null;
   });

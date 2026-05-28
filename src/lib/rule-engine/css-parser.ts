@@ -10,6 +10,8 @@
  */
 
 import * as cheerio from 'cheerio';
+import { joinElementTextNodes } from '@/lib/rule-engine/legado-dom-text';
+import { isLikelyJavaScriptRule } from '@/lib/rule-engine/legado-source-rule';
 import { mergeRulePartsSync, RuleAnalyzer } from '@/lib/rule-engine/rule-analyzer';
 
 /**
@@ -17,6 +19,9 @@ import { mergeRulePartsSync, RuleAnalyzer } from '@/lib/rule-engine/rule-analyze
  */
 export function parseCss(rule: string, html: string): string[] {
   if (!rule || !html) {
+    return [];
+  }
+  if (isLikelyJavaScriptRule(rule)) {
     return [];
   }
 
@@ -28,10 +33,82 @@ export function parseCss(rule: string, html: string): string[] {
   }
 }
 
+/**
+ * Legado AnalyzeByJSoup.getElements：纯 CSS 列表（如 dl dd,dt），逗号作选择器而非运算符。
+ * 规则可为 `selector` 或 `selector@all`。
+ */
+export function selectElementsOuterHtml(rule: string, html: string): string[] {
+  const trimmed = rule.trim();
+  if (!trimmed || !html || isLikelyJavaScriptRule(trimmed)) return [];
+
+  const allSuffix = trimmed.match(/^(.+?)@all$/i);
+  const selector = (allSuffix ? allSuffix[1] : trimmed).trim();
+  if (!selector || selector.includes('@')) return [];
+  if (!isValidCssSelector(selector)) return [];
+
+  try {
+    const $ = cheerio.load(html, { xml: false });
+    const results: string[] = [];
+    $(selector).each((_, element) => {
+      results.push($(element).toString());
+    });
+    return results.filter((r) => r.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Legado 非 @CSS: 规则里，@ 前可能是纯文本（如分类元数据），不能交给 cheerio 当选择器。
+ */
+export function isValidCssSelector(selector: string): boolean {
+  const s = selector.trim();
+  if (!s) return false;
+  if (s === '*') return true;
+  if (/[^\x00-\x7f]/.test(s)) return false;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+  if (s.includes(',') && !/^[.#\[:>*a-zA-Z]/.test(s)) return false;
+  if (/\d{1,2}:\d{2}:\d{2}/.test(s) && !s.includes('.') && !s.includes('#') && !s.includes('[')) {
+    return false;
+  }
+  return (
+    /^[.#\[:>*a-zA-Z_][\w#.:\[\](),\s>*+~-]*$/i.test(s) ||
+    /^[a-zA-Z][\w-]*([.:#\[]|$)/.test(s)
+  );
+}
+
+function resolveContextElements($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
+  const body = $('body');
+  if (body.length > 0) return body;
+  const rootChildren = $.root().children();
+  if (rootChildren.length > 0) return rootChildren;
+  return $('*');
+}
+
+function isJsonDocumentContent(html: string): boolean {
+  const t = html.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return false;
+  try {
+    JSON.parse(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseCssSegment(rule: string, html: string): string[] {
-  const $ = cheerio.load(html, { xml: false });
   const normalizedRule = normalizeCssRule(rule);
   if (!normalizedRule) return [];
+
+  // JSON 列表项上误走 CSS：非选择器规则直接返回规则字面量，避免 cheerio 包一层 <body> 泄漏整段 JSON
+  if (isJsonDocumentContent(html)) {
+    const head = normalizedRule.split('@')[0]?.trim() ?? normalizedRule;
+    if (!isValidCssSelector(head)) {
+      return normalizedRule.trim() ? [normalizedRule.trim()] : [];
+    }
+  }
+
+  const $ = cheerio.load(html, { xml: false });
 
   if (normalizedRule.toLowerCase().startsWith('@css:')) {
     const body = normalizedRule.slice(5).trim();
@@ -48,7 +125,10 @@ function parseCssSegment(rule: string, html: string): string[] {
   analyzer.trimRule();
   const chain = analyzer.splitRule('@');
   if (chain.length > 1) {
-    let elements = selectWithLegacyIndex($, null, chain[0] || '*');
+    const headSel = chain[0]?.trim() ?? '';
+    let elements = isValidCssSelector(headSel)
+      ? selectWithLegacyIndex($, null, headSel || '*')
+      : resolveContextElements($);
     const tail = chain.slice(1);
     const last = tail[tail.length - 1] || '';
     const lowerLast = last.toLowerCase();
@@ -74,7 +154,10 @@ function parseCssSegment(rule: string, html: string): string[] {
   }
 
   const { rootSelector, nestedSelectors, extractor } = parseSelectorChain(normalizedRule);
-  let elements = selectWithLegacyIndex($, null, rootSelector || '*');
+  const root = isValidCssSelector(rootSelector) ? rootSelector : '*';
+  let elements = root === '*' && !isValidCssSelector(rootSelector)
+    ? resolveContextElements($)
+    : selectWithLegacyIndex($, null, root || '*');
   for (const nested of nestedSelectors) {
     elements = selectWithLegacyIndex($, elements, nested);
   }
@@ -87,6 +170,14 @@ function extractElements(
   extractor: string,
 ): string[] {
   if (elements.length === 0) return [];
+  if (extractor === '@html') {
+    // 对齐 Legado(Jsoup): elements.select("script/style").remove(); elements.outerHtml()
+    const clone = elements.clone();
+    clone.find('script').remove();
+    clone.find('style').remove();
+    const mergedOuterHtml = clone.toString().trim();
+    return mergedOuterHtml ? [mergedOuterHtml] : [];
+  }
   const results: string[] = [];
   elements.each((_, element) => {
     const $el = $(element);
@@ -101,7 +192,11 @@ function extractElements(
 function normalizeCssRule(rule: string): string {
   const trimmed = rule.trim();
   if (!trimmed) return '';
-  // 兼容逗号分隔时的空片段，如 "," / "a,,b"
+  const head = trimmed.split('@')[0]?.trim() ?? trimmed;
+  if (!isValidCssSelector(head)) {
+    return trimmed;
+  }
+  // 兼容逗号分隔时的空片段，如 "," / "a,,b"（仅对 CSS 选择器）
   const parts = trimmed
     .split(',')
     .map((p) => p.trim())
@@ -280,8 +375,23 @@ function selectByLegadoBeforeRule(
   switch (parts[0]) {
     case 'children':
       return base.children();
-    case 'class':
-      return parts[1] ? base.find(`.${parts[1]}`) : base.children();
+    case 'class': {
+      if (!parts[1]) return base.children();
+      // Legado getElementsByClass：class.db cf → 同时含 .db 与 .cf（非 ".db cf" 单 class 名）
+      const names = parts[1]
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (names.length === 0) return base.children();
+      const sel = names.length === 1 ? `.${names[0]}` : names.map((n) => `.${n}`).join('');
+      if (scope && scope.length > 0) {
+        const $scope = scope as cheerio.Cheerio<any>;
+        const selfMatched = $scope.filter(sel);
+        const descendants = $scope.find(sel);
+        return selfMatched.add(descendants);
+      }
+      return base.find(sel);
+    }
     case 'tag':
       return parts[1] ? base.find(parts[1]) : base.children();
     case 'id':
@@ -307,9 +417,10 @@ function selectWithLegacyIndex<T>(
     return applyBracketIndex($, selected, bracket.spec);
   }
   const { selector, index, end, step, splitMode } = parseSelectorWithLegacyIndex(selectorWithIndex);
-  const isLegadoBuiltin =
-    !selector.includes(' ') &&
-    /^(children|class|tag|id|text)(\.|$)/.test(selector);
+  if (!isValidCssSelector(selector)) {
+    return scope ? (scope as any) : resolveContextElements($);
+  }
+  const isLegadoBuiltin = /^(children|class|tag|id|text)(\.|$)/.test(selector);
   const selected = isLegadoBuiltin
     ? selectByLegadoBeforeRule($, scope, selector)
     : scope
@@ -337,7 +448,10 @@ function parseSelectorChain(rule: string): {
     return { rootSelector: '*', nestedSelectors: [], extractor: '@text' };
   }
 
-  const rootSelector = parts[0] || '*';
+  let rootSelector = parts[0] || '*';
+  if (!isValidCssSelector(rootSelector)) {
+    rootSelector = '*';
+  }
   const tail = parts.slice(1);
   if (tail.length === 0) {
     return { rootSelector, nestedSelectors: [], extractor: '@text' };
@@ -394,17 +508,7 @@ function extractValue(
   }
 
   if (extractor === '@textNodes') {
-    // 提取文本节点（换行分隔）
-    const textNodes: string[] = [];
-    $el.contents().each((_, node) => {
-      if (node.type === 'text') {
-        const text = $(node).text().trim();
-        if (text) {
-          textNodes.push(text);
-        }
-      }
-    });
-    return textNodes.join('\n');
+    return joinElementTextNodes($el, $);
   }
 
   if (extractor === '@ownText') {

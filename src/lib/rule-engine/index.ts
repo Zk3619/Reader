@@ -15,6 +15,7 @@ export {
   type ParsedRule,
   type RuleContext,
   type ListElementItem,
+  type AnalyzeStringOptions,
 } from '@/lib/rule-engine/analyze-rule';
 export { compileSourceRule, stripReplacementTail } from '@/lib/rule-engine/source-rule';
 export {

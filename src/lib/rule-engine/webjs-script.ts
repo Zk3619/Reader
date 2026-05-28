@@ -10,7 +10,7 @@ export interface RunWebJsOptions {
   html?: string;
   baseUrl?: string;
   script: string;
-  priorResult?: string;
+  priorResult?: unknown;
   timeoutMs?: number;
   delayMs?: number;
   headers?: Record<string, string>;

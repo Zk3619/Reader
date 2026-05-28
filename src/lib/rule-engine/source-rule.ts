@@ -94,48 +94,4 @@ export async function compileSourceRule(
   return out.trim();
 }
 
-/** 从 ## 中分离主规则与替换段（已在 parseRule 处理；此处供列表规则预检） */
-export function stripReplacementTail(rule: string): string {
-  const text = rule.trim();
-  if (!text.includes('##')) return text;
-  let inSingle = false;
-  let inDouble = false;
-  let templateDepth = 0;
-  let inJsBlock = false;
-  for (let i = 0; i < text.length - 1; i += 1) {
-    const ch = text[i]!;
-    const next = text[i + 1]!;
-    if (!inSingle && !inDouble) {
-      if (!inJsBlock && text.slice(i, i + 4).toLowerCase() === '<js>') {
-        inJsBlock = true;
-        i += 3;
-        continue;
-      }
-      if (inJsBlock && text.slice(i, i + 5).toLowerCase() === '</js>') {
-        inJsBlock = false;
-        i += 4;
-        continue;
-      }
-      if (!inJsBlock) {
-        if (ch === '{' && next === '{') {
-          templateDepth += 1;
-          i += 1;
-          continue;
-        }
-        if (ch === '}' && next === '}' && templateDepth > 0) {
-          templateDepth -= 1;
-          i += 1;
-          continue;
-        }
-      }
-    }
-    if (!inJsBlock && templateDepth === 0) {
-      if (ch === "'" && !inDouble && text[i - 1] !== '\\') inSingle = !inSingle;
-      else if (ch === '"' && !inSingle && text[i - 1] !== '\\') inDouble = !inDouble;
-      if (!inSingle && !inDouble && ch === '#' && next === '#') {
-        return text.slice(0, i).trim();
-      }
-    }
-  }
-  return text;
-}
+export { stripReplacementTail } from '@/lib/rule-engine/legado-source-rule';

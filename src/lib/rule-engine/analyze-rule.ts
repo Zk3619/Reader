@@ -9,7 +9,7 @@
  * 4. 调用相应的解析器
  */
 
-import { parseCss } from '@/lib/rule-engine/css-parser';
+import { parseCss, selectElementsOuterHtml } from '@/lib/rule-engine/css-parser';
 import { parseXPath } from '@/lib/rule-engine/xpath-parser';
 import { parseJsonPath } from '@/lib/rule-engine/jsonpath-parser';
 import {
@@ -17,11 +17,23 @@ import {
   parseRegex,
   regexGroupsToElementContent,
 } from '@/lib/rule-engine/regex-parser';
-import { compileSourceRule, stripReplacementTail } from '@/lib/rule-engine/source-rule';
+import {
+  detectSourceRuleMode,
+  shieldInlineReplacementJsInPattern,
+  splitLegadoReplaceTail,
+  splitPutRule,
+  splitSourceRule,
+  stripReplacementTail,
+  unshieldInlineReplacementJsInPattern,
+  type LegadoSourceRuleSegment,
+} from '@/lib/rule-engine/legado-source-rule';
+import { compileSourceRule } from '@/lib/rule-engine/source-rule';
+import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
 import { evalJs } from '@/lib/js-engine';
-import { RuleAnalyzer } from '@/lib/rule-engine/rule-analyzer';
+import { normalizeJsRuleResult, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
 import { parseWebJsListResult, runWebJs } from '@/lib/rule-engine/webjs-runner';
 import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
+import type { BookSource } from '@/types';
 
 /**
  * 规则模式
@@ -52,8 +64,8 @@ export interface RuleContext {
   contentType?: 'html' | 'json' | 'text';
   /** 基础URL */
   baseUrl?: string;
-  /** 上一步结果 */
-  result?: string;
+  /** 上一步结果（HTML/JSON 字符串或 JSON 列表项对象，供 @js 使用） */
+  result?: unknown;
   /** 变量存储 */
   variables?: Record<string, unknown>;
   /** 书籍信息 */
@@ -64,6 +76,35 @@ export interface RuleContext {
   chapter?: Record<string, unknown>;
   /** 当前正则捕获组（$1/$2） */
   regexGroups?: string[];
+}
+
+function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
+  const content =
+    typeof context.content === 'string' ? context.content : String(context.content ?? '');
+  const sourceRaw = (context.source ?? {}) as Record<string, unknown>;
+  const comment = sourceRaw.bookSourceComment ?? sourceRaw.sourceComment ?? '';
+  const source = {
+    ...sourceRaw,
+    bookSourceComment: comment,
+    sourceComment: comment,
+    bookSourceUrl: sourceRaw.bookSourceUrl ?? sourceRaw.sourceUrl ?? '',
+  };
+  return {
+    result: normalizeJsRuleResult(result ?? context.result ?? context.content),
+    baseUrl: context.baseUrl || '',
+    book: context.book,
+    source,
+    chapter: context.chapter,
+    ruleContent: content,
+    ruleContentType: context.contentType,
+    variables: context.variables,
+    bookSource: context.source as BookSource | undefined,
+  };
+}
+
+export interface AnalyzeStringOptions {
+  /** 对齐 Legado getString(..., isUrl = true) → AnalyzeByJSoup.getString0 */
+  isUrl?: boolean;
 }
 
 function splitReplacementTail(rule: string): {
@@ -206,65 +247,6 @@ export function parseRule(rule: string): ParsedRule {
   };
 }
 
-/** 拆分 <js> / @js: / @webjs: 片段（对齐 Legado splitSourceRule） */
-function splitSourceRuleSegments(ruleStr: string): Array<{ text: string; mode: 'js' | 'webjs' | 'default' }> {
-  const findInlineScriptEnd = (start: number): number => {
-    const tail = ruleStr.slice(start);
-    const m = tail.search(/(?:&&|\|\||%%)|<js>|@js:|@webjs:/i);
-    return m < 0 ? ruleStr.length : start + m;
-  };
-  const out: Array<{ text: string; mode: 'js' | 'webjs' | 'default' }> = [];
-  const lower = ruleStr.toLowerCase();
-  let i = 0;
-
-  while (i < ruleStr.length) {
-    const jsTagIdx = lower.indexOf('<js>', i);
-    const jsPrefixIdx = lower.indexOf('@js:', i);
-    const webJsIdx = lower.indexOf('@webjs:', i);
-
-    const candidates = [jsTagIdx, jsPrefixIdx, webJsIdx].filter((x) => x >= 0);
-    if (candidates.length === 0) {
-      const tail = ruleStr.slice(i).trim();
-      if (tail) out.push({ text: tail, mode: 'default' });
-      break;
-    }
-
-    const nextIdx = Math.min(...candidates);
-    if (nextIdx > i) {
-      const pre = ruleStr.slice(i, nextIdx).trim();
-      if (pre) out.push({ text: pre, mode: 'default' });
-    }
-
-    if (nextIdx === jsTagIdx) {
-      const closeIdx = lower.indexOf('</js>', jsTagIdx + 4);
-      const end = closeIdx >= 0 ? closeIdx + 5 : ruleStr.length;
-      const body = ruleStr.slice(jsTagIdx + 4, closeIdx >= 0 ? closeIdx : ruleStr.length).trim();
-      out.push({ text: body, mode: 'js' });
-      i = end;
-      continue;
-    }
-
-    if (nextIdx === webJsIdx) {
-      const end = findInlineScriptEnd(webJsIdx + 7);
-      const body = ruleStr.slice(webJsIdx + 7, end).trim();
-      if (body) out.push({ text: body, mode: 'webjs' });
-      i = end;
-      continue;
-    }
-
-    if (nextIdx === jsPrefixIdx) {
-      const end = findInlineScriptEnd(jsPrefixIdx + 4);
-      const body = ruleStr.slice(jsPrefixIdx + 4, end).trim();
-      if (body) out.push({ text: body, mode: 'js' });
-      i = end;
-      continue;
-    }
-
-    i = nextIdx + 1;
-  }
-  return out.length > 0 ? out : [{ text: ruleStr.trim(), mode: 'default' }];
-}
-
 function inferContentType(content: string): 'html' | 'json' | 'text' {
   const trimmed = content.trim();
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -320,6 +302,8 @@ function extractPutVariables(rule: string, putMap: Record<string, string>): stri
 const JSON_TEMPLATE_PATH_ALIASES: Record<string, string[]> = {
   '$.last_update_time': ['$.last_chapter_update_time'],
   '$.update_time': ['$.last_chapter_update_time'],
+  /** 晴天等 JSON 条目常用 book_id，模板写 {{$.source}} */
+  '$.source': ['$.book_id'],
 };
 
 function resolveJsonTemplatePath(pathTrim: string, jsonString: string): string {
@@ -375,13 +359,7 @@ async function expandTemplates(
           }
           expanded += innerResults[0] ?? '';
       } else {
-        const jsResult = await evalJs(innerExpr, {
-          result: context.result || context.content,
-          baseUrl: context.baseUrl || '',
-          book: context.book,
-          source: context.source,
-          chapter: context.chapter,
-        });
+        const jsResult = await evalJs(innerExpr, buildRuleJsContext(context));
         expanded += jsResult == null ? '' : String(jsResult);
       }
     }
@@ -389,16 +367,6 @@ async function expandTemplates(
   }
   expanded += rule.slice(lastIndex);
   return expanded;
-}
-
-function expandJsonInnerRules(rule: string, jsonString: string): string {
-  const analyzer = new RuleAnalyzer(rule, true);
-  const expanded = analyzer.innerRule('{$.', 2, 1, (inner) => {
-    const values = parseJsonPath(inner.trim(), jsonString);
-    const v = values.join('\n');
-    return v || null;
-  });
-  return expanded || rule;
 }
 
 /**
@@ -450,313 +418,12 @@ async function prepareRule(
     regexGroups: context.regexGroups,
     expandTemplate: (inner) => analyzeString(inner, context),
     expandJs: async (js) => {
-      const v = await evalJs(js, {
-        result: context.result || context.content,
-        baseUrl: context.baseUrl || '',
-        book: context.book,
-        source: context.source,
-        chapter: context.chapter,
-      });
+      const v = await evalJs(js, buildRuleJsContext(context));
       return v == null ? '' : String(v);
     },
   });
 }
 
-/**
- * 获取列表元素（书籍列表/目录列表；对齐 Legado getElements）
- * 支持 `:pattern` 全正则模式
- */
-export async function analyzeElements(
-  rule: string,
-  context: RuleContext,
-): Promise<string[]> {
-  if (!rule?.trim() || !context.content) return [];
-
-  const segments = splitSourceRuleSegments(rule);
-  if (segments.length > 1) {
-    let current = context.content;
-    let elements: string[] = [];
-    for (const seg of segments) {
-      if (seg.mode === 'webjs') {
-        const sub: RuleContext = { ...context, content: current, result: current };
-        const out = await runWebJsSegment(seg.text, sub);
-        if (out.length > 0) {
-          elements = out;
-          current = elements[0] ?? current;
-        }
-        continue;
-      }
-      if (seg.mode === 'js') {
-        const jsInput: unknown =
-          elements.length > 0 ? elements : decodePossibleJsonArray(current);
-        const v = await evalJs(seg.text, {
-          result: jsInput,
-          baseUrl: context.baseUrl || '',
-          book: context.book,
-          source: context.source,
-          chapter: context.chapter,
-        });
-        if (v == null) {
-          current = '';
-          elements = [];
-          continue;
-        }
-        if (Array.isArray(v)) {
-          elements = v.map((x) => (x == null ? '' : String(x))).filter((x) => x.trim().length > 0);
-          current = elements[0] ?? '';
-        } else {
-          current = String(v);
-          elements = current.trim() ? [current] : [];
-        }
-        continue;
-      }
-      if (elements.length > 0) {
-        const merged: string[] = [];
-        for (const item of elements) {
-          const subCtx: RuleContext = { ...context, content: item, result: item };
-          const compiled = await prepareRule(seg.text, subCtx);
-          const next = await analyzeElements(compiled, subCtx);
-          merged.push(...next);
-        }
-        elements = merged.filter((e) => e.trim());
-      } else {
-        const compiled = await prepareRule(seg.text, { ...context, content: current, result: current });
-        const next = await analyzeElements(compiled, { ...context, content: current, result: current });
-        elements = next;
-      }
-      if (elements.length > 0) current = elements[0];
-    }
-    return elements.filter((e) => e.trim());
-  }
-
-  let compiled = await prepareRule(rule, context);
-  const trimmed = compiled.trim();
-  const regexBody = trimmed.startsWith(':') ? trimmed.slice(1).trim() : trimmed;
-  const isColonRegex = trimmed.startsWith(':');
-
-  if (isColonRegex || (parseRule(compiled).mode === 'regex' && !trimmed.includes('@'))) {
-    const groupsList = getRegexElements(regexBody, context.content);
-    return groupsList
-      .map((g) => regexGroupsToElementContent(g))
-      .filter((s) => s.trim().length > 0);
-  }
-
-  let listRule = compiled;
-  if (!listRule.includes('@')) {
-    listRule = `${listRule}@all`;
-  }
-  return analyzeRule(listRule, context);
-}
-
-/**
- * 执行规则解析
- */
-export async function analyzeRule(
-  rule: string,
-  context: RuleContext
-): Promise<string[]> {
-  if (!rule || !context.content) {
-    return [];
-  }
-
-  // 顶层先按原始规则拆分；replace tail 已支持上下文感知，不会误拆 {{}} / <js> 内部 ##。
-  // 编译（@get/{{}}/$N）在具体段执行阶段进行，避免提前编译改变 rule mode 判定。
-  const topLevelParsed = parseRule(rule);
-  const hadOriginalRuleBody = topLevelParsed.ruleBody.trim().length > 0;
-
-  // 对齐 Legado putRule 时序：在当前 SourceRule 执行前写入变量（基于编译后规则）。
-  if (topLevelParsed.putMap) {
-    if (!context.variables) context.variables = {};
-    for (const [key, valueRule] of Object.entries(topLevelParsed.putMap)) {
-      const resolved = await analyzeString(valueRule, context);
-      context.variables[key] = resolved;
-      if (key.startsWith('book.') && context.book) {
-        context.book[key.slice(5)] = resolved;
-      } else if (key.startsWith('chapter.') && context.chapter) {
-        context.chapter[key.slice(8)] = resolved;
-      } else if (key.startsWith('source.') && context.source) {
-        context.source[key.slice(7)] = resolved;
-      }
-    }
-  }
-
-  // Legado：先按“原始规则串”切分 <js> / @js: 片段，再逐段执行。
-  // 这样 replaceRegex 中内嵌 <js>（例如 "##.*\\|<js>result</js>##\\#"）也能按 legado 语义生效。
-  const segments = splitSourceRuleSegments(rule);
-  if (segments.length > 1) {
-    let currentContent = context.content;
-    let currentType = context.contentType ?? inferContentType(currentContent);
-    let lastResults: string[] = [];
-    for (const seg of segments) {
-      const subContext: RuleContext = {
-        ...context,
-        content: currentContent,
-        contentType: currentType,
-        result: currentContent,
-      };
-      if (seg.mode === 'webjs') {
-        lastResults = await runWebJsSegment(seg.text, subContext);
-        currentContent = lastResults.join('\n');
-        currentType = inferContentType(currentContent);
-        continue;
-      }
-      if (seg.mode === 'js') {
-        const jsResult = await evalJs(seg.text, {
-          result: subContext.result || subContext.content,
-          baseUrl: subContext.baseUrl || '',
-          book: subContext.book,
-          source: subContext.source,
-          chapter: subContext.chapter,
-        });
-        if (Array.isArray(jsResult)) {
-          const normalized = jsResult
-            .map((x) => (x == null ? '' : String(x)))
-            .filter((x) => x.trim().length > 0);
-          currentContent = normalized.join('\n');
-          currentType = inferContentType(currentContent);
-          lastResults = normalized;
-        } else {
-          currentContent = jsResult == null ? '' : String(jsResult);
-          currentType = inferContentType(currentContent);
-          lastResults = currentContent.trim() ? [currentContent] : [];
-        }
-        continue;
-      }
-      lastResults = await analyzeRule(seg.text, subContext);
-      if (lastResults.length > 0) {
-        currentContent = lastResults.join('\n');
-        currentType = inferContentType(currentContent);
-      }
-    }
-    let mixedResults = lastResults.filter((r) => r && r.trim().length > 0);
-    if (topLevelParsed.replacement && mixedResults.length > 0) {
-      mixedResults = await Promise.all(
-        mixedResults.map((r) => applyReplacement(r, topLevelParsed.replacement!, context)),
-      );
-    }
-    return mixedResults.filter((r) => r && r.trim().length > 0);
-  }
-
-  const hadTemplateBeforeExpand = context.contentType !== 'json' && rule.includes('{{') && rule.includes('}}');
-  // 对齐 Legado SourceRule:
-  // 当规则前段包含 {{...}} 求值且其前缀为空/不含 ## 时，会按“文本+replace”路径处理，
-  // 不应把求值后的文本再当 CSS 选择器解析。
-  const firstTemplateIdx = rule.indexOf('{{');
-  const templatePrefix = firstTemplateIdx >= 0 ? rule.slice(0, firstTemplateIdx) : '';
-  const templateShouldUseLiteralBase =
-    hadTemplateBeforeExpand &&
-    firstTemplateIdx >= 0 &&
-    (firstTemplateIdx === 0 || !templatePrefix.includes('##'));
-
-  // Legado 模板：{{$.path}} 等，在 JSON 上下文中按模板替换，避免被误判为 CSS
-  if (context.contentType === 'json' && isJsonTemplateRule(rule)) {
-    const expanded = expandJsonInnerRules(rule, context.content);
-    const result = applyJsonTemplate(expanded, context.content);
-    return result.trim() ? [result] : [];
-  }
-
-  // 非 JSON 场景：展开 {{...}}（规则表达式按规则执行；否则按 JS 求值）
-  if (context.contentType !== 'json' && rule.includes('{{') && rule.includes('}}')) {
-    rule = await expandTemplates(rule, context);
-  }
-
-  rule = await prepareRule(rule, context);
-
-  // 关键修复：模板/变量展开后，规则模式可能从 default 变成 xpath/json/js。
-  // 必须使用“编译后规则”重新判定 mode，避免 {{//...}} 被误路由到 CSS。
-  const parsed = parseRule(rule);
-  let results: string[] = [];
-
-  // 对齐 Legado 边界：当主规则为空但存在 ## 替换时，
-  // 不执行选择器/脚本，而是直接对“当前结果”应用替换。
-  // Kotlin 条件对应：
-  // if (rule.isNotBlank() || sourceRule.replaceRegex.isEmpty()) { ... } else { skip 执行 }
-  // 随后若 replaceRegex 非空则对现有 result 执行 replaceRegex。
-  if (!parsed.ruleBody.trim() && parsed.replacement && !hadOriginalRuleBody) {
-    const base =
-      (typeof context.result === 'string' && context.result) ||
-      context.content ||
-      '';
-    results = base ? [String(base)] : [];
-  } else if (templateShouldUseLiteralBase && parsed.mode === 'default') {
-    const literal = parsed.ruleBody.trim();
-    results = literal ? [literal] : [];
-  } else {
-
-    // 根据模式调用相应的解析器
-    switch (parsed.mode) {
-      case 'css':
-        results = parseCss(parsed.ruleBody, context.content);
-        break;
-
-      case 'default':
-        // 未显式指定模式时：若内容为 JSON 且规则像 JSONPath 则用 json
-        if (context.contentType === 'json' && (parsed.ruleBody.startsWith('$.') || parsed.ruleBody.startsWith('$['))) {
-          results = parseJsonPath(jsonPathWithoutExtractor(parsed.ruleBody), context.content);
-        } else {
-          results = parseCss(parsed.ruleBody, context.content);
-        }
-        break;
-
-      case 'xpath':
-        results = parseXPath(parsed.ruleBody, context.content, context.baseUrl);
-        break;
-
-      case 'json':
-        if (context.contentType !== 'json') {
-          results = [];
-        } else {
-          results = parseJsonPath(jsonPathWithoutExtractor(parsed.ruleBody), context.content);
-        }
-        break;
-
-      case 'regex':
-        results = parseRegex(parsed.ruleBody, context.content);
-        break;
-
-      case 'webjs': {
-        results = await runWebJsSegment(parsed.ruleBody, context);
-        break;
-      }
-
-      case 'js': {
-        const jsResult = await evalJs(parsed.ruleBody, {
-          result: context.result || context.content,
-          baseUrl: context.baseUrl || '',
-          book: context.book,
-          source: context.source,
-          chapter: context.chapter,
-        });
-        results = jsResult == null ? [] : [String(jsResult)];
-        break;
-      }
-    }
-  }
-
-  // 应用替换规则
-  if (parsed.replacement && results.length > 0) {
-    results = await Promise.all(
-      results.map((r) => applyReplacement(r, parsed.replacement!, context)),
-    );
-  }
-
-  // 对齐 legado 模板场景：当规则由 {{...}} 展开成纯文本时，不应再强行走 CSS 选择器。
-  if (
-    results.length === 0 &&
-    hadTemplateBeforeExpand &&
-    parsed.mode === 'default' &&
-    parsed.ruleBody.trim().length > 0
-  ) {
-    results = [parsed.ruleBody];
-  }
-
-  // 过滤空结果
-  return results.filter(r => r && r.trim().length > 0);
-}
-
-/**
- * 应用替换规则
- */
 async function expandReplacementInlineJs(
   input: string,
   context: RuleContext,
@@ -786,52 +453,331 @@ async function expandReplacementInlineJs(
   return out;
 }
 
-async function applyReplacement(
+/** 对齐 Legado AnalyzeRule.replaceRegex */
+async function applyLegadoReplaceRegex(
   text: string,
-  replacement: NonNullable<ParsedRule['replacement']>,
+  replaceRegex: string,
+  replacement: string,
+  replaceFirst: boolean,
   context: RuleContext,
 ): Promise<string> {
+  if (!replaceRegex) return text;
   try {
     const replacementContext: RuleContext = {
       ...context,
       result: text,
       content: text,
     };
-    const compiledPattern = await prepareRule(replacement.pattern, replacementContext);
-    const compiledReplacement = await prepareRule(replacement.replacement, replacementContext);
-    // 对齐 Legado：replaceRegex 部分不执行 <js>，历史书源中常见
-    // `##.*\\|<js>result</js>##\\#` 依赖此行为避免把当前结果注入正则。
-    const expandedPattern = compiledPattern.replace(/<js>[\s\S]*?<\/js>/gi, '');
+    const shieldedPattern = shieldInlineReplacementJsInPattern(replaceRegex);
+    const compiledPattern = unshieldInlineReplacementJsInPattern(
+      await prepareRule(shieldedPattern, replacementContext),
+    );
+    const compiledReplacement = await prepareRule(replacement, replacementContext);
+    const expandedPattern = compiledPattern.replace(/<js>\s*result\s*<\/js>/gi, '');
     const expandedReplacement = await expandReplacementInlineJs(
       compiledReplacement,
       context,
       text,
     );
     const normalizedReplacement = expandedReplacement.replace(/\\#/g, '#');
-    const regex = new RegExp(expandedPattern, 'g');
-    if (!replacement.replaceFirst) {
-      return text.replace(regex, normalizedReplacement);
+    if (normalizedReplacement === '#' && !text.includes('|') && /#/.test(text)) {
+      const parts = text
+        .split(/[,，\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return parts.map((s) => `#${s.replace(/^#+/, '')}`).join(' ');
     }
-    const first = text.match(regex)?.[0];
-    if (!first) return text;
-    return text.replace(first, normalizedReplacement);
+    const regex = new RegExp(expandedPattern, 'g');
+    if (replaceFirst) {
+      const first = text.match(regex)?.[0];
+      if (!first) return text;
+      return text.replace(first, normalizedReplacement);
+    }
+    return text.replace(regex, normalizedReplacement);
   } catch (e) {
-    console.warn('替换规则执行失败:', replacement.pattern, e);
+    console.warn('替换规则执行失败:', replaceRegex, e);
     return text;
   }
 }
 
+async function executeRuleByMode(
+  mode: RuleMode,
+  ruleBody: string,
+  context: RuleContext,
+): Promise<string[]> {
+  switch (mode) {
+    case 'css':
+      return parseCss(ruleBody, context.content);
+    case 'default':
+      if (context.contentType === 'json') {
+        if (ruleBody.startsWith('$.') || ruleBody.startsWith('$[')) {
+          return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
+        }
+        // {{$.x}} 模板展开后的元数据（如 已完结,0分,tags）不是 CSS，勿对 JSON 正文做 select
+        const literal = ruleBody.trim();
+        return literal ? [literal] : [];
+      }
+      return parseCss(ruleBody, context.content);
+    case 'xpath':
+      return parseXPath(ruleBody, context.content, context.baseUrl);
+    case 'json':
+      if (context.contentType !== 'json') return [];
+      return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
+    case 'regex':
+      return parseRegex(ruleBody, context.content);
+    case 'webjs':
+      return runWebJsSegment(ruleBody, context);
+    case 'js': {
+      const jsResult = await evalJs(ruleBody, buildRuleJsContext(context));
+      if (jsResult == null) return [];
+      if (Array.isArray(jsResult)) {
+        return jsResult
+          .map((x) => (x == null ? '' : String(x)))
+          .filter((x) => x.trim().length > 0);
+      }
+      const s = String(jsResult);
+      return s.trim() ? [s] : [];
+    }
+    default:
+      return [];
+  }
+}
+
 /**
- * 获取单个字符串结果（取第一个）
+ * 执行单个 SourceRule（对齐 Legado getStringList 内层循环）
+ */
+async function executeSourceRuleSegment(
+  segment: LegadoSourceRuleSegment,
+  context: RuleContext,
+): Promise<string[]> {
+  const putMap: Record<string, string> = {};
+  const rawRule = splitPutRule(segment.ruleStr, putMap);
+  if (Object.keys(putMap).length > 0) {
+    if (!context.variables) context.variables = {};
+    Object.assign(context.variables, putMap);
+    for (const [key, valueRule] of Object.entries(putMap)) {
+      const resolved = await analyzeString(valueRule, context);
+      context.variables[key] = resolved;
+    }
+  }
+
+  let workingRule = rawRule;
+  if (context.contentType !== 'json' && workingRule.includes('{{') && workingRule.includes('}}')) {
+    workingRule = await expandTemplates(workingRule, context);
+  }
+  const jsonLikeContent =
+    context.contentType === 'json' ||
+    (context.content.trim().startsWith('{') && inferContentType(context.content) === 'json');
+  if (jsonLikeContent && isJsonTemplateRule(workingRule)) {
+    // 勿对 {{$.x}} 先走 expandJsonInnerRules：内层 {$ 会误匹配，留下单侧 { 如 {vip}
+    const result = applyJsonTemplate(workingRule, context.content);
+    return result.trim() ? [result] : [];
+  }
+
+  const compiled = await prepareRule(workingRule, context);
+  const tail = splitLegadoReplaceTail(compiled);
+  const mode = detectSourceRuleMode(tail.rule, segment.mode);
+  const firstTemplateIdx = segment.ruleStr.indexOf('{{');
+  const templatePrefix = firstTemplateIdx >= 0 ? segment.ruleStr.slice(0, firstTemplateIdx) : '';
+  // 模板已展开时 workingRule 不再含 {{，仍应把展开结果当字面量（勿再走 parseCss）
+  const templateShouldUseLiteralBase =
+    context.contentType !== 'json' &&
+    segment.ruleStr.includes('{{') &&
+    firstTemplateIdx >= 0 &&
+    (firstTemplateIdx === 0 || !templatePrefix.includes('##'));
+  let results: string[] = [];
+
+  // if (rule.isNotBlank() || sourceRule.replaceRegex.isEmpty())
+  if (templateShouldUseLiteralBase && mode === 'default' && tail.rule.trim()) {
+    results = [tail.rule];
+  } else if (tail.rule.trim() || !tail.replaceRegex) {
+    const body = mode === 'regex' && tail.rule.startsWith(':') ? tail.rule.slice(1).trim() : tail.rule;
+    results = await executeRuleByMode(mode, body, context);
+  } else if (!segment.ruleStr.includes('{{')) {
+    const base =
+      (typeof context.result === 'string' && context.result) ||
+      context.content ||
+      '';
+    results = base.trim() ? [String(base)] : [];
+  } else {
+    results = [];
+  }
+
+  if (tail.replaceRegex && results.length > 0) {
+    results = await Promise.all(
+      results.map((r) =>
+        applyLegadoReplaceRegex(
+          r,
+          tail.replaceRegex,
+          tail.replacement,
+          tail.replaceFirst,
+          context,
+        ),
+      ),
+    );
+  }
+
+  return results.filter((r) => r && r.trim().length > 0);
+}
+
+/**
+ * 获取列表元素（书籍列表/目录列表；对齐 Legado getElements）
+ * 支持 `:pattern` 全正则模式
+ */
+export async function analyzeElements(
+  rule: string,
+  context: RuleContext,
+): Promise<string[]> {
+  if (!rule?.trim() || !context.content) return [];
+
+  const segments = splitSourceRule(rule, true);
+  if (segments.length > 1) {
+    let current = context.content;
+    let elements: string[] = [];
+    for (const seg of segments) {
+      if (seg.mode === 'webjs') {
+        const sub: RuleContext = { ...context, content: current, result: current };
+        const out = await runWebJsSegment(seg.ruleStr, sub);
+        if (out.length > 0) {
+          elements = out;
+          current = elements[0] ?? current;
+        }
+        continue;
+      }
+      if (seg.mode === 'js') {
+        const jsInput: unknown =
+          elements.length > 0 ? elements : decodePossibleJsonArray(current);
+        const v = await evalJs(seg.ruleStr, buildRuleJsContext(context, jsInput));
+        if (v == null) {
+          current = '';
+          elements = [];
+          continue;
+        }
+        if (Array.isArray(v)) {
+          elements = v.map((x) => (x == null ? '' : String(x))).filter((x) => x.trim().length > 0);
+          current = elements[0] ?? '';
+        } else {
+          current = String(v);
+          elements = current.trim() ? [current] : [];
+        }
+        continue;
+      }
+      if (elements.length > 0) {
+        const merged: string[] = [];
+        for (const item of elements) {
+          const subCtx: RuleContext = { ...context, content: item, result: item };
+          const compiled = await prepareRule(seg.ruleStr, subCtx);
+          const next = await analyzeElements(compiled, subCtx);
+          merged.push(...next);
+        }
+        elements = merged.filter((e) => e.trim());
+      } else {
+        const compiled = await prepareRule(seg.ruleStr, { ...context, content: current, result: current });
+        const next = await analyzeElements(compiled, { ...context, content: current, result: current });
+        elements = next;
+      }
+      if (elements.length > 0) current = elements[0];
+    }
+    return elements.filter((e) => e.trim());
+  }
+
+  let compiled = await prepareRule(rule, context);
+  const trimmed = compiled.trim();
+  const regexBody = trimmed.startsWith(':') ? trimmed.slice(1).trim() : trimmed;
+  const isColonRegex = trimmed.startsWith(':');
+
+  if (isColonRegex || (parseRule(compiled).mode === 'regex' && !trimmed.includes('@'))) {
+    const groupsList = getRegexElements(regexBody, context.content);
+    return groupsList
+      .map((g) => regexGroupsToElementContent(g))
+      .filter((s) => s.trim().length > 0);
+  }
+
+  const directList = selectElementsOuterHtml(compiled, context.content);
+  if (directList.length > 0) {
+    return directList;
+  }
+
+  let listRule = compiled;
+  if (!listRule.includes('@')) {
+    listRule = `${listRule}@all`;
+  }
+  const viaRule = await analyzeRule(listRule, context);
+  if (viaRule.length > 1) {
+    return viaRule;
+  }
+
+  const retryDirect = selectElementsOuterHtml(listRule, context.content);
+  return retryDirect.length > 0 ? retryDirect : viaRule;
+}
+
+/**
+ * 执行规则解析
+ */
+export async function analyzeRule(
+  rule: string,
+  context: RuleContext
+): Promise<string[]> {
+  if (!rule || !context.content) {
+    return [];
+  }
+
+  const segments = splitSourceRule(rule);
+  if (segments.length === 0) return [];
+
+  let currentContent = context.content;
+  let currentType = context.contentType ?? inferContentType(currentContent);
+  let lastResults: string[] = [];
+
+  for (const seg of segments) {
+    const subContext: RuleContext = {
+      ...context,
+      content: currentContent,
+      contentType: currentType,
+      result: currentContent,
+    };
+    lastResults = await executeSourceRuleSegment(seg, subContext);
+    if (lastResults.length > 0) {
+      currentContent = lastResults.join('\n');
+      currentType = inferContentType(currentContent);
+    }
+  }
+
+  return lastResults.filter((r) => r && r.trim().length > 0);
+}
+
+/**
+ * 获取单个字符串结果
+ * - 默认：多元素 join('\n')（对齐 Legado getString）
+ * - isUrl：仅首个非空（对齐 getString0 / tocUrl）
  */
 export async function analyzeString(
   rule: string,
-  context: RuleContext
+  context: RuleContext,
+  options?: AnalyzeStringOptions,
 ): Promise<string> {
-  const results = await analyzeRule(rule, context);
-  if (results.length === 0) return '';
-  if (results.length === 1) return results[0] || '';
-  return results.filter((r) => r && r.length > 0).join('\n');
+  const trimmed = rule.trim();
+  if (!trimmed) return '';
+
+  const { parts, op } = splitRuleByOperators(trimmed);
+  if (op === '||' && parts.length > 1) {
+    for (const part of parts) {
+      const results = await analyzeRule(part, context);
+      const hit = results.find((r) => r?.trim());
+      if (hit) return hit.trim();
+    }
+    return '';
+  }
+
+  const results = await analyzeRule(trimmed, context);
+  const nonEmpty = results.filter((r) => r && r.trim().length > 0);
+  if (nonEmpty.length === 0) return '';
+
+  if (options?.isUrl) {
+    return nonEmpty[0].trim();
+  }
+  if (nonEmpty.length === 1) return nonEmpty[0];
+  return nonEmpty.join('\n');
 }
 
 /**
