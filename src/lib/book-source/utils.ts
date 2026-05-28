@@ -149,14 +149,23 @@ export function decodeDataUrl(dataUrl: string): Record<string, string> | null {
 /**
  * 从书源的 jsLib 中解析 host 列表，取第一个作为 server 地址
  */
-export function extractServerFromJsLib(source: Record<string, unknown>): string | null {
+/** 从 jsLib 解析 `var host = ['https://...', ...]` */
+export function extractHostListFromJsLib(source: Record<string, unknown>): string[] {
   const jsLib = source.jsLib as string | undefined;
-  if (!jsLib) return null;
+  if (!jsLib) return [];
 
-  // 匹配 var host = ['https://...', ...]
   const hostArrayMatch = jsLib.match(/var\s+host\s*=\s*\[([^\]]+)\]/);
-  if (!hostArrayMatch) return null;
+  if (!hostArrayMatch) return [];
 
-  const firstUrlMatch = hostArrayMatch[1].match(/'(https?:\/\/[^']+)'/);
-  return firstUrlMatch ? firstUrlMatch[1] : null;
+  const urls: string[] = [];
+  const re = /['"](https?:\/\/[^'"]+)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(hostArrayMatch[1])) !== null) {
+    urls.push(m[1]);
+  }
+  return urls;
+}
+
+export function extractServerFromJsLib(source: Record<string, unknown>): string | null {
+  return extractHostListFromJsLib(source)[0] ?? null;
 }

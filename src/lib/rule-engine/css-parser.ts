@@ -10,9 +10,10 @@
  */
 
 import * as cheerio from 'cheerio';
+import { mergeRulePartsSync, RuleAnalyzer } from '@/lib/rule-engine/rule-analyzer';
 
 /**
- * 解析CSS选择器规则
+ * 解析CSS选择器规则（支持 Legado && / || / %%）
  */
 export function parseCss(rule: string, html: string): string[] {
   if (!rule || !html) {
@@ -20,38 +21,81 @@ export function parseCss(rule: string, html: string): string[] {
   }
 
   try {
-    const $ = cheerio.load(html, {
-      xml: false,
-    });
-
-    const normalizedRule = normalizeCssRule(rule);
-    if (!normalizedRule) return [];
-
-    // 处理 Legado 链式语法：A@B@C@text
-    const { rootSelector, nestedSelectors, extractor } = parseSelectorChain(normalizedRule);
-    let elements = selectWithLegacyIndex($, null, rootSelector || '*');
-    for (const nested of nestedSelectors) {
-      elements = selectWithLegacyIndex($, elements, nested);
-    }
-    if (elements.length === 0) {
-      return [];
-    }
-
-    const results: string[] = [];
-
-    elements.each((_, element) => {
-      const $el = $(element);
-      const value = extractValue($el, extractor, $);
-      if (value !== null && value !== undefined) {
-        results.push(String(value).trim());
-      }
-    });
-
-    return results.filter(r => r.length > 0);
+    return mergeRulePartsSync(rule, (part) => parseCssSegment(part, html), (x) => x);
   } catch (error) {
     console.error('CSS解析错误:', error, '规则:', rule);
     return [];
   }
+}
+
+function parseCssSegment(rule: string, html: string): string[] {
+  const $ = cheerio.load(html, { xml: false });
+  const normalizedRule = normalizeCssRule(rule);
+  if (!normalizedRule) return [];
+
+  if (normalizedRule.toLowerCase().startsWith('@css:')) {
+    const body = normalizedRule.slice(5).trim();
+    const lastAt = body.lastIndexOf('@');
+    if (lastAt > 0) {
+      const selector = body.slice(0, lastAt).trim();
+      const extractor = `@${body.slice(lastAt + 1)}`;
+      const elements = $(selector);
+      return extractElements($, elements, extractor);
+    }
+  }
+
+  const analyzer = new RuleAnalyzer(normalizedRule, false);
+  analyzer.trimRule();
+  const chain = analyzer.splitRule('@');
+  if (chain.length > 1) {
+    let elements = selectWithLegacyIndex($, null, chain[0] || '*');
+    const tail = chain.slice(1);
+    const last = tail[tail.length - 1] || '';
+    const lowerLast = last.toLowerCase();
+    const extractorKeywords = new Set(['text', 'textnodes', 'owntext', 'html', 'all']);
+    const looksLikeSelector =
+      /^[.#\[:>*]/.test(last) ||
+      /\s/.test(last) ||
+      /[:\[\]()>]/.test(last);
+
+    // Legado 兼容：末段形如 ".c_row" / "#id" / "a:nth-child(1)" 应作为嵌套选择器，
+    // 而不是属性提取器（否则会被解释成 @.c_row 并得到空结果）。
+    const nestedCount = looksLikeSelector ? tail.length : Math.max(0, tail.length - 1);
+    for (let i = 0; i < nestedCount; i += 1) {
+      elements = selectWithLegacyIndex($, elements, tail[i] || '*');
+    }
+
+    const ext = looksLikeSelector
+      ? '@all'
+      : extractorKeywords.has(lowerLast)
+        ? `@${last}`
+        : `@${last}`;
+    return extractElements($, elements, ext);
+  }
+
+  const { rootSelector, nestedSelectors, extractor } = parseSelectorChain(normalizedRule);
+  let elements = selectWithLegacyIndex($, null, rootSelector || '*');
+  for (const nested of nestedSelectors) {
+    elements = selectWithLegacyIndex($, elements, nested);
+  }
+  return extractElements($, elements, extractor);
+}
+
+function extractElements(
+  $: cheerio.CheerioAPI,
+  elements: cheerio.Cheerio<any>,
+  extractor: string,
+): string[] {
+  if (elements.length === 0) return [];
+  const results: string[] = [];
+  elements.each((_, element) => {
+    const $el = $(element);
+    const value = extractValue($el, extractor, $);
+    if (value !== null && value !== undefined) {
+      results.push(String(value).trim());
+    }
+  });
+  return results.filter((r) => r.length > 0);
 }
 
 function normalizeCssRule(rule: string): string {
@@ -77,7 +121,9 @@ function normalizeLegacySelector(selector: string): string {
 
 function toArray<T>(items: cheerio.Cheerio<T>): T[] {
   const out: T[] = [];
-  items.each((_, el) => out.push(el));
+  items.each((_, el) => {
+    out.push(el);
+  });
   return out;
 }
 
@@ -90,6 +136,8 @@ function applyLegacyIndex<T>(
   items: cheerio.Cheerio<T>,
   rawIndex?: string,
   rawEnd?: string,
+  rawStep?: string,
+  splitMode: '.' | '!' = '.',
 ): cheerio.Cheerio<T> {
   if (rawIndex == null) return items;
   const all = toArray(items);
@@ -105,24 +153,144 @@ function applyLegacyIndex<T>(
     return $(all.slice(boundedStart) as any) as cheerio.Cheerio<T>;
   }
   const boundedEnd = Math.max(0, Math.min(all.length - 1, end));
-  const from = Math.min(boundedStart, boundedEnd);
-  const to = Math.max(boundedStart, boundedEnd);
-  return $(all.slice(from, to + 1) as any) as cheerio.Cheerio<T>;
+  const step = Math.max(1, Math.abs(parseInt(rawStep ?? '1', 10)) || 1);
+  const selected: T[] = [];
+  if (boundedStart <= boundedEnd) {
+    for (let i = boundedStart; i <= boundedEnd; i += step) selected.push(all[i]);
+  } else {
+    for (let i = boundedStart; i >= boundedEnd; i -= step) selected.push(all[i]);
+  }
+  if (splitMode === '!') {
+    const selectedSet = new Set(selected);
+    return $(all.filter((el) => !selectedSet.has(el)) as any) as cheerio.Cheerio<T>;
+  }
+  return $(selected as any) as cheerio.Cheerio<T>;
 }
 
 function parseSelectorWithLegacyIndex(selector: string): {
   selector: string;
   index?: string;
   end?: string;
+  step?: string;
+  splitMode?: '.' | '!';
+  bracketSpec?: string;
 } {
   const s = normalizeLegacySelector(selector);
-  const m = s.match(/^(.*)\.(-?\d+)(?::(-?\d+))?$/);
+  const m = s.match(/^(.*?)([.!])(-?\d+)(?::(-?\d+))?(?::(-?\d+))?$/);
   if (!m) return { selector: s };
   const base = m[1].trim();
   // base 为空时（如 ".c_row"）是正常 class 选择器，不应当识别为索引语法
   if (!base) return { selector: s };
   // 纯数字尾索引语法，仅作为 legado 索引处理
-  return { selector: base, index: m[2], end: m[3] };
+  return { selector: base, splitMode: m[2] as '.' | '!', index: m[3], end: m[4], step: m[5] };
+}
+
+function parseBracketIndexSpec(selector: string): { baseSelector: string; spec: string } | null {
+  const s = normalizeLegacySelector(selector);
+  if (!s.endsWith(']')) return null;
+  let depth = 0;
+  let idx = -1;
+  for (let i = s.length - 1; i >= 0; i -= 1) {
+    const ch = s[i];
+    if (ch === ']') depth += 1;
+    if (ch === '[') {
+      depth -= 1;
+      if (depth === 0) {
+        idx = i;
+        break;
+      }
+    }
+  }
+  if (idx <= 0) return null;
+  const spec = s.slice(idx + 1, -1).trim();
+  if (!/^[!\d,\s:\-]+$/.test(spec) || !/\d/.test(spec)) return null;
+  return { baseSelector: s.slice(0, idx).trim(), spec };
+}
+
+function parseSingleIndexSpec(spec: string): Array<{ start: number; end?: number; step?: number }> {
+  return spec
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => {
+      const parts = x.split(':').map((p) => p.trim());
+      if (parts.length === 1) {
+        return { start: parseInt(parts[0], 10) };
+      }
+      return {
+        start: parts[0] === '' ? 0 : parseInt(parts[0], 10),
+        end: parts[1] === '' ? undefined : parseInt(parts[1], 10),
+        step: parts[2] === '' || parts[2] == null ? 1 : parseInt(parts[2], 10),
+      };
+    })
+    .filter((x) => !Number.isNaN(x.start));
+}
+
+function applyBracketIndex<T>(
+  $: cheerio.CheerioAPI,
+  items: cheerio.Cheerio<T>,
+  spec: string,
+): cheerio.Cheerio<T> {
+  const all = toArray(items);
+  if (all.length === 0) return items;
+  const exclude = spec.startsWith('!');
+  const normalized = exclude ? spec.slice(1).trim() : spec;
+  const ranges = parseSingleIndexSpec(normalized);
+  const picked = new Set<number>();
+  for (const rg of ranges) {
+    const startRaw = normalizeIndex(all.length, rg.start);
+    const endRaw = normalizeIndex(all.length, rg.end ?? rg.start);
+    let start = Math.max(0, Math.min(all.length - 1, startRaw));
+    let end = Math.max(0, Math.min(all.length - 1, endRaw));
+    const step = Math.max(1, Math.abs(rg.step ?? 1));
+    if (start <= end) {
+      for (let i = start; i <= end; i += step) picked.add(i);
+    } else {
+      for (let i = start; i >= end; i -= step) picked.add(i);
+    }
+  }
+  const out: T[] = [];
+  for (let i = 0; i < all.length; i += 1) {
+    const hit = picked.has(i);
+    if ((exclude && !hit) || (!exclude && hit)) out.push(all[i]);
+  }
+  return $(out as any) as cheerio.Cheerio<T>;
+}
+
+function pickScope(
+  $: cheerio.CheerioAPI,
+  scope: cheerio.Cheerio<any> | null,
+): cheerio.Cheerio<any> {
+  if (scope && scope.length > 0) return scope;
+  const body = $('body');
+  if (body.length > 0) return body;
+  return $.root().children();
+}
+
+/** Legado ElementsSingle：children / class.x / tag.x / id.x / text.x */
+function selectByLegadoBeforeRule(
+  $: cheerio.CheerioAPI,
+  scope: cheerio.Cheerio<any> | null,
+  beforeRule: string,
+): cheerio.Cheerio<any> {
+  const base = pickScope($, scope);
+  const trimmed = beforeRule.trim();
+  if (!trimmed) return base.children();
+  const parts = trimmed.split('.');
+  switch (parts[0]) {
+    case 'children':
+      return base.children();
+    case 'class':
+      return parts[1] ? base.find(`.${parts[1]}`) : base.children();
+    case 'tag':
+      return parts[1] ? base.find(parts[1]) : base.children();
+    case 'id':
+      return parts[1] ? $(`#${parts[1]}`, base) : base.children();
+    case 'text':
+      return parts[1] ? base.find(`*:contains(${parts[1]})`) : base.children();
+    default:
+      return scope ? (scope as any).find(trimmed) : $(trimmed);
+  }
 }
 
 function selectWithLegacyIndex<T>(
@@ -130,9 +298,30 @@ function selectWithLegacyIndex<T>(
   scope: cheerio.Cheerio<T> | null,
   selectorWithIndex: string,
 ): cheerio.Cheerio<any> {
-  const { selector, index, end } = parseSelectorWithLegacyIndex(selectorWithIndex);
-  const selected = scope ? scope.find(selector) : $(selector);
-  return applyLegacyIndex($, selected, index, end);
+  if (!selectorWithIndex?.trim()) {
+    return scope ? (scope as any) : $('');
+  }
+  const bracket = parseBracketIndexSpec(selectorWithIndex);
+  if (bracket) {
+    const selected = selectByLegadoBeforeRule($, scope, bracket.baseSelector);
+    return applyBracketIndex($, selected, bracket.spec);
+  }
+  const { selector, index, end, step, splitMode } = parseSelectorWithLegacyIndex(selectorWithIndex);
+  const isLegadoBuiltin =
+    !selector.includes(' ') &&
+    /^(children|class|tag|id|text)(\.|$)/.test(selector);
+  const selected = isLegadoBuiltin
+    ? selectByLegadoBeforeRule($, scope, selector)
+    : scope
+      ? (() => {
+          const $scope = scope as any;
+          // 对齐 JSoup: Element.select("img") 在元素自身命中时也可返回自身。
+          const selfMatched = $scope.filter(selector);
+          const descendants = $scope.find(selector);
+          return selfMatched.add(descendants);
+        })()
+      : $(selector);
+  return applyLegacyIndex($, selected, index, end, step, splitMode);
 }
 
 /**
@@ -197,9 +386,11 @@ function extractValue(
   extractor: string,
   $: cheerio.CheerioAPI
 ): string | null {
+  const normalizeLegadoText = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
   if (!extractor || extractor === '@text') {
-    // 提取所有文本（包括子元素）
-    return $el.text();
+    // 对齐 Legado(Jsoup): element.text() 会规整空白为单空格
+    return normalizeLegadoText($el.text());
   }
 
   if (extractor === '@textNodes') {
@@ -217,13 +408,15 @@ function extractValue(
   }
 
   if (extractor === '@ownText') {
-    // 提取直接文本（不含子元素）
-    return $el.clone().children().remove().end().text();
+    // 对齐 Legado(Jsoup): ownText 同样规整空白
+    return normalizeLegadoText($el.clone().children().remove().end().text());
   }
 
   if (extractor === '@html') {
-    // 提取内部HTML
-    return $el.html() || null;
+    const clone = $el.clone();
+    clone.find('script').remove();
+    clone.find('style').remove();
+    return clone.html() || null;
   }
 
   if (extractor === '@all') {
@@ -242,5 +435,5 @@ function extractValue(
   }
 
   // 默认返回文本
-  return $el.text();
+  return normalizeLegadoText($el.text());
 }

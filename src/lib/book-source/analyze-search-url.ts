@@ -12,12 +12,22 @@ import {
   isScriptSearchUrl,
   runSearchUrlScript,
 } from '@/lib/book-source/search-script-runner';
+import {
+  parseAnalyzeUrlOption,
+  splitUrlAndOption,
+} from '@/lib/book-source/analyze-url-option';
 
 export type ResolvedSearchRequest = {
   url: string;
+  /** 含 UrlOption 尾缀，供 fetchByAnalyzeUrl / WebView 使用 */
+  ruleUrlWithOption: string;
   method: 'GET' | 'POST';
   headers: Record<string, string>;
   body?: string;
+  useWebView?: boolean;
+  webJs?: string;
+  webViewDelayMs?: number;
+  sourceRegex?: string;
 };
 
 export { isScriptSearchUrl };
@@ -289,7 +299,8 @@ export async function resolveSearchRequest(
   ruleUrl = buildUrl(ruleUrl, { key: keyword, page: String(page) });
   ruleUrl = substitutePagePlaceholders(ruleUrl, page);
 
-  const { urlPart, optionsJson } = splitUrlOptions(ruleUrl);
+  const { urlPart, optionsJson } = splitUrlAndOption(ruleUrl);
+  const urlOption = parseAnalyzeUrlOption(optionsJson);
   const base = getScriptBaseUrl(source) || source.sourceUrl || '';
   let absoluteUrl = urlPart;
   if (!/^https?:\/\//i.test(absoluteUrl)) {
@@ -297,7 +308,7 @@ export async function resolveSearchRequest(
   }
   absoluteUrl = collapseUrlPathSlashes(absoluteUrl);
 
-  const options = parseUrlOptions(optionsJson);
+  const options = urlOption;
   let body = options.body;
   if (body) {
     body = await expandInnerJsTemplates(body, source, keyword, page);
@@ -335,10 +346,18 @@ export async function resolveSearchRequest(
     }
   }
 
+  const ruleUrlWithOption =
+    optionsJson?.trim() ? `${absoluteUrl}, ${optionsJson.trim()}` : absoluteUrl;
+
   return {
     url: absoluteUrl,
-    method: options.method,
+    ruleUrlWithOption,
+    method: options.method === 'HEAD' ? 'GET' : options.method,
     headers: mergedHeaders,
     body,
+    useWebView: options.useWebView,
+    webJs: options.webJs,
+    webViewDelayMs: options.webViewDelayMs,
+    sourceRegex: options.sourceRegex,
   };
 }

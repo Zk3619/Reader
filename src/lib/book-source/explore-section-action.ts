@@ -74,11 +74,9 @@ export async function openExploreSectionInInnerWeb(
       ? resolveUrl(baseUrl, browser.url)
       : browser.url;
     const cookies = getStoredSourceCookiesForUrl(source, resolved);
-    await openLegadoBrowserInApp(
-      resolved,
-      cookies,
-      browser.title?.trim() || section.title
-    );
+    await openLegadoBrowserInApp(resolved, cookies, browser.title?.trim() || section.title, {
+      bookSourceUrl: source.bookSourceUrl,
+    });
     return true;
   }
 
@@ -101,11 +99,15 @@ export async function openExploreSectionInInnerWeb(
         timeout: 30000,
       });
       const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-      await openLegadoBrowserInApp(dataUrl, '', section.title);
+      await openLegadoBrowserInApp(dataUrl, '', section.title, {
+        bookSourceUrl: source.bookSourceUrl,
+      });
       return true;
     }
 
-    await openLegadoBrowserInApp(resolved, cookies, section.title);
+    await openLegadoBrowserInApp(resolved, cookies, section.title, {
+      bookSourceUrl: source.bookSourceUrl,
+    });
     return true;
   }
 

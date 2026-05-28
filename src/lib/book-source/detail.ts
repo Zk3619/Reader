@@ -7,7 +7,7 @@
  */
 
 import { get } from '@/lib/http';
-import { analyzeString, type RuleContext } from '@/lib/rule-engine';
+import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
 import {
@@ -20,6 +20,7 @@ import {
   buildIntroFromDetailJson,
   preferDetailField,
 } from '@/lib/book-source/intro-merge';
+import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 
 function isJsRule(rule: string | undefined | null): boolean {
   return !!rule?.trim().startsWith('<js>');
@@ -48,6 +49,65 @@ function splitAuthorAndInlineTags(rawAuthor: string): {
     author: (authorParts.join(' | ') || parts[0] || text).trim(),
     inlineTags: Array.from(new Set(inlineTags)),
   };
+}
+
+function normalizeAuthorText(author: string): string {
+  const t = author.trim();
+  if (!t) return '';
+  // 常见站点详情格式："作者名 著"
+  const m = t.match(/^(.+?)\s*著(?:\s|$)/);
+  if (m?.[1]?.trim()) return m[1].trim();
+  return t;
+}
+
+function normalizeTagText(tag: string): string {
+  const t = tag.replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  return t.startsWith('#') ? t : `#${t}`;
+}
+
+function mergeTagStrings(...inputs: Array<string | undefined>): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const input of inputs) {
+    if (!input?.trim()) continue;
+    for (const raw of input.split(/\s+/)) {
+      const t = normalizeTagText(raw);
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out.join(' ');
+}
+
+async function fallbackAuthorAndTagsFromHtml(context: RuleContext): Promise<{
+  author?: string;
+  tags?: string;
+}> {
+  if (context.contentType !== 'html') return {};
+
+  const authorRules = [
+    'p.gray a[href*="authorarticle"]@text',
+    '.gray a[href*="authorarticle"]@text',
+    'a[href*="authorarticle"]@text',
+  ];
+  for (const r of authorRules) {
+    const v = normalizeAuthorText((await analyzeString(r, context)).trim());
+    if (v) {
+      const tags = await analyzeStringList('p.gray a[href*="tagarticle"]@text', context);
+      const normalized = Array.from(
+        new Set(tags.map(normalizeTagText).filter(Boolean)),
+      ).join(' ');
+      return { author: v, tags: normalized || undefined };
+    }
+  }
+
+  const tags = await analyzeStringList('a[href*="tagarticle"]@text', context);
+  const normalized = Array.from(
+    new Set(tags.map(normalizeTagText).filter(Boolean)),
+  ).join(' ');
+  return { tags: normalized || undefined };
 }
 
 function getRuleBaseBeforeReplace(ruleText: string | undefined): string | undefined {
@@ -182,11 +242,11 @@ async function analyzeBookInfoFromBody(
   const authorFromRule = await safeAnalyze(rule.author);
   const authorRawFromBaseRule = await safeAnalyze(getRuleBaseBeforeReplace(rule.author));
   const rawAuthor =
-    authorRawFromBaseRule.trim() ||
     authorFromRule.trim() ||
+    authorRawFromBaseRule.trim() ||
     (ruleResult?.author != null ? String(ruleResult.author) : '');
   const authorSplit = splitAuthorAndInlineTags(rawAuthor);
-  const author = authorSplit.author;
+  let author = normalizeAuthorText(authorSplit.author);
 
   const intro = await resolveBookInfoIntro(source, rule.intro, context, {
     ruleResult,
@@ -248,10 +308,21 @@ async function analyzeBookInfoFromBody(
 
   const tagsFromResult = typeof ruleResult?.tags === 'string' ? ruleResult.tags.trim() : '';
   const mergedInlineTags = authorSplit.inlineTags.join(' ');
-  const mergedTags = [tagsFromResult, mergedInlineTags]
+  let mergedTags = [tagsFromResult, mergedInlineTags]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(' ');
+
+  // 仅在规则未命中时启用轻量兜底，避免书源特化清洗影响通用语义。
+  if (!author || !mergedTags) {
+    const htmlFallback = await fallbackAuthorAndTagsFromHtml(context);
+    if (!author && htmlFallback.author) {
+      author = htmlFallback.author;
+    }
+    if (!mergedTags && htmlFallback.tags) {
+      mergedTags = mergeTagStrings(mergedTags, htmlFallback.tags);
+    }
+  }
 
   return {
     bookUrl,
@@ -322,6 +393,7 @@ async function getBookInfoFromDataUrl(
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,
   });
+  await assertLoginCheckPassed(source, responseText, detailUrl);
 
   let response: { code?: number; data?: unknown; msg?: string };
   try {
@@ -376,6 +448,7 @@ export async function getBookInfo(
       concurrentRate: source.concurrentRate,
       timeout: 30000,
     });
+    await assertLoginCheckPassed(source, html, bookUrl);
 
     return analyzeBookInfoFromBody(source, bookUrl, bookUrl, html, options);
   } catch (error) {

@@ -7,16 +7,92 @@
 
 import { evaluateXPath } from 'fontoxpath';
 import { DOMParser } from '@xmldom/xmldom';
+import { mergeRulePartsSync } from '@/lib/rule-engine/rule-analyzer';
+import * as cheerio from 'cheerio';
 
-/**
- * 解析XPath规则
- */
-export function parseXPath(xpath: string, html: string, _baseUrl?: string): string[] {
+function simpleXPathParentToCss(parentXPath: string): string | null {
+  const m = parentXPath
+    .trim()
+    .match(/^\/\/([a-zA-Z*][\w-]*)(?:\[@(class|id)=['"]([^'"]+)['"]\])?$/);
+  if (!m) return null;
+  const tag = m[1] || '*';
+  const attr = m[2];
+  const value = m[3];
+  if (!attr) return tag;
+  if (attr === 'id') return `${tag}#${value}`;
+  const classes = value
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return `${tag}${classes.map((x) => `.${x}`).join('')}`;
+}
+
+function parseTextNodeIndexWithCheerio(
+  parentXPath: string,
+  index: number,
+  html: string,
+): string[] {
+  const selector = simpleXPathParentToCss(parentXPath);
+  if (!selector) return [];
+  const $ = cheerio.load(html, { xml: false });
+  const out: string[] = [];
+  $(selector).each((_, el) => {
+    const textNodes = $(el)
+      .contents()
+      .toArray()
+      .filter((node) => node.type === 'text')
+      .map((node) => (node.data ?? '').replace(/\s+/g, ' ').trim())
+      .filter((text) => text.length > 0);
+    const picked = textNodes[index - 1];
+    if (picked) out.push(picked);
+  });
+  return out;
+}
+
+function parseTextNodeIndexXPath(
+  xpath: string,
+  html: string,
+): string[] | null {
+  const m = xpath.trim().match(/^(.*)\/text\(\)\[(\d+)\]\s*$/);
+  if (!m) return null;
+  const parentXPath = m[1]?.trim();
+  const index = Number.parseInt(m[2] || '0', 10);
+  if (!parentXPath || !Number.isFinite(index) || index <= 0) return [];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const parentNodes = evaluateXPath(parentXPath, doc, null, {
+    language: 'XPath3.1',
+    returnType: 'ALL',
+  });
+  const asArray = Array.isArray(parentNodes) ? parentNodes : [parentNodes];
+  const out: string[] = [];
+  for (const node of asArray) {
+    if (!node || typeof node !== 'object' || !('childNodes' in node)) continue;
+    const textNodes = Array.from((node as Node).childNodes)
+      .filter((child) => child.nodeType === 3)
+      .map((child) => (child.textContent ?? '').replace(/\s+/g, ' ').trim())
+      .filter((text) => text.length > 0);
+    const picked = textNodes[index - 1];
+    if (picked != null) {
+      out.push(picked);
+    }
+  }
+  if (out.length > 0) return out;
+  // HTML 片段在 xmldom/fontoxpath 下可能出现节点树不完整，退化到 CSS 父节点 + 直系文本节点。
+  return parseTextNodeIndexWithCheerio(parentXPath, index, html);
+}
+
+function parseXPathSingle(xpath: string, html: string, _baseUrl?: string): string[] {
   if (!xpath || !html) {
     return [];
   }
 
   try {
+    const textNodeIndexed = parseTextNodeIndexXPath(xpath, html);
+    if (textNodeIndexed) {
+      return textNodeIndexed;
+    }
     // 使用DOMParser解析HTML
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -53,6 +129,18 @@ export function parseXPath(xpath: string, html: string, _baseUrl?: string): stri
     console.error('XPath解析错误:', error, '规则:', xpath);
     return [];
   }
+}
+
+/**
+ * 解析XPath规则（支持 Legado && / || / %%）
+ */
+export function parseXPath(xpath: string, html: string, baseUrl?: string): string[] {
+  if (!xpath || !html) return [];
+  return mergeRulePartsSync(
+    xpath,
+    (part) => parseXPathSingle(part, html, baseUrl),
+    (x) => x,
+  );
 }
 
 /**

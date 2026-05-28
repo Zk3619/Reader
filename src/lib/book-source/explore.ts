@@ -4,7 +4,7 @@
  */
 
 import { get, isAbortError, post } from '@/lib/http';
-import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
+import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import type { BookSource, ExploreRule } from '@/types';
@@ -18,13 +18,15 @@ import {
   EXPLORE_UPDATE_TIME_JSON_PATHS,
   pickFirstJsonField,
 } from '@/lib/book-source/explore-json-fields';
+import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 
 function enrichJsonBookContext(
   element: string,
   contentType: 'html' | 'json' | 'text',
   baseUrl: string,
   source: BookSource,
-  debugIndex?: number
+  debugIndex?: number,
+  regexGroups?: string[],
 ): RuleContext {
   const ctx: RuleContext = {
     content: element,
@@ -33,6 +35,7 @@ function enrichJsonBookContext(
     source: source as unknown as Record<string, unknown>,
     result: element,
     ...(debugIndex !== undefined ? { _debugIndex: debugIndex } : {}),
+    ...(regexGroups?.length ? { regexGroups } : {}),
   };
   if (contentType === 'json') {
     try {
@@ -128,6 +131,7 @@ async function exploreBookViaLegadoAjax(
       ajax.method === 'POST'
         ? await post(requestUrl, body ?? '', httpOpts)
         : await get(requestUrl, httpOpts);
+    await assertLoginCheckPassed(source, html, requestUrl);
 
     const respondTime = Date.now() - startTime;
     return parseExploreBooksFromContent(source, html, requestUrl, respondTime);
@@ -162,15 +166,16 @@ async function parseExploreBooksFromContent(
     if (!bookListRule.includes('@')) {
       bookListRule = `${bookListRule}@all`;
     }
-    const bookElements = await analyzeStringList(bookListRule, context);
-    for (let i = 0; i < bookElements.length; i++) {
-      const element = bookElements[i];
+    const listItems = await analyzeListElements(bookListRule, context);
+    for (let i = 0; i < listItems.length; i++) {
+      const element = listItems[i].content;
       const elementContext = enrichJsonBookContext(
         element,
         contentType,
         exploreUrl,
         source,
-        i
+        i,
+        listItems[i].regexGroups,
       );
       const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
       if (book) bookList.push(book);
@@ -222,14 +227,14 @@ export async function exploreBook(
     console.log('[explore] 构建后的 URL:', exploreUrl.substring(0, 200), '页码:', page);
 
     // 发起请求
-    const headers = parseHeaders(source.header);
-    const html = await get(exploreUrl, {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
-      timeout: 30000,
-      signal,
+    const { fetchSourcePage } = await import('@/lib/book-source/fetch-source-page');
+    const fetched = await fetchSourcePage({
+      ruleUrl: exploreUrl,
+      source,
+      page,
+      baseUrl: source.sourceUrl,
     });
+    const html = fetched.body;
 
     console.log('[explore] 响应长度:', html.length, '前200字符:', html.substring(0, 200));
 

@@ -18,6 +18,44 @@ import {
 } from '@/lib/book-source/source-http';
 import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
 import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
+import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+
+const MAX_CONTENT_PAGES = 20;
+
+async function parseContentByRule(ruleContent: string, context: RuleContext): Promise<string> {
+  const ruleLower = ruleContent.toLowerCase();
+  if (ruleLower.includes('@html') || ruleLower.includes('@all')) {
+    return await analyzeString(ruleContent, context);
+  }
+  const results = await analyzeStringList(ruleContent, context);
+  if (results.length > 1) {
+    return results.join('\n\n');
+  }
+  return results[0] || '';
+}
+
+async function executePayAction(
+  source: BookSource,
+  chapter: BookChapter,
+  context: RuleContext,
+): Promise<boolean> {
+  const payAction = source.ruleContent?.payAction?.trim();
+  if (!payAction) return false;
+  try {
+    const actionResult = (await analyzeString(payAction, context)).trim();
+    if (!actionResult) return true;
+    const { fetchSourcePage } = await import('@/lib/book-source/fetch-source-page');
+    await fetchSourcePage({
+      ruleUrl: actionResult,
+      source,
+      baseUrl: chapter.baseUrl || source.sourceUrl,
+    });
+    return true;
+  } catch (error) {
+    console.warn('[content] payAction 执行失败:', error);
+    return false;
+  }
+}
 
 // ─── data: URL 场景 ───
 
@@ -88,6 +126,7 @@ async function getContentFromDataUrl(
       timeout: 60000,
     },
   );
+  await assertLoginCheckPassed(source, responseText, contentApiUrl);
 
   // 4. 解析响应
   const response = JSON.parse(responseText);
@@ -115,6 +154,7 @@ async function getContentFromDataUrl(
 export interface GetContentOptions {
   /** 为 true 时不应用数据库替换规则（用于章节缓存落盘） */
   skipReplaceRules?: boolean;
+  _visitedUrls?: Set<string>;
 }
 
 /**
@@ -135,6 +175,21 @@ export async function getContent(
   const rule = source.ruleContent;
 
   try {
+    const visited = options?._visitedUrls ?? new Set<string>();
+    const normalizedChapterUrl = resolveUrl(chapter.baseUrl || source.sourceUrl || '', chapter.url);
+    if (visited.has(normalizedChapterUrl)) {
+      console.warn('[content] 命中正文分页防环，停止继续抓取:', normalizedChapterUrl);
+      return null;
+    }
+    if (visited.size >= MAX_CONTENT_PAGES) {
+      console.warn('[content] 命中正文分页上限，停止继续抓取:', {
+        max: MAX_CONTENT_PAGES,
+        chapterUrl: normalizedChapterUrl,
+      });
+      return null;
+    }
+    visited.add(normalizedChapterUrl);
+
     let content: string | null = null;
 
     // ── data: URL 路径 ──
@@ -185,36 +240,24 @@ export async function getContent(
                 timeout: 60000,
               },
             );
+            await assertLoginCheckPassed(source, html, baseUrl);
           } else {
             // 如果无法解析参数，回退到 GET
             console.log('[content] 无法解析 item_id，使用 GET 请求');
-            const headers = buildSourceRequestHeaders(source, absoluteUrl);
-            html = await get(absoluteUrl, {
-              headers,
-              enableCookieJar: source.enabledCookieJar,
-              concurrentRate: source.concurrentRate,
-              timeout: 60000,
-            });
+            const { fetchChapterPageHtml } = await import('@/lib/book-source/fetch-source-page');
+            html = await fetchChapterPageHtml(source, absoluteUrl, chapter.baseUrl);
+            await assertLoginCheckPassed(source, html, absoluteUrl);
           }
         } catch (e) {
           console.warn('[content] 解析章节 URL 失败，使用 GET:', e);
-          const headers = buildSourceRequestHeaders(source, chapter.url);
-          html = await get(chapter.url, {
-            headers,
-            enableCookieJar: source.enabledCookieJar,
-            concurrentRate: source.concurrentRate,
-            timeout: 60000,
-          });
+          const { fetchChapterPageHtml } = await import('@/lib/book-source/fetch-source-page');
+          html = await fetchChapterPageHtml(source, chapter.url, chapter.baseUrl);
+          await assertLoginCheckPassed(source, html, chapter.url);
         }
       } else {
-        // 其他 URL 使用 GET
-        const headers = buildSourceRequestHeaders(source, chapter.url);
-        html = await get(chapter.url, {
-          headers,
-          enableCookieJar: source.enabledCookieJar,
-          concurrentRate: source.concurrentRate,
-          timeout: 60000,
-        });
+        const { fetchChapterPageHtml } = await import('@/lib/book-source/fetch-source-page');
+        html = await fetchChapterPageHtml(source, chapter.url, chapter.baseUrl);
+        await assertLoginCheckPassed(source, html, chapter.url);
       }
 
       const contentType = detectContentType(html);
@@ -230,25 +273,33 @@ export async function getContent(
       };
 
       // 解析正文内容
-      // 对于正文，如果规则匹配多个元素，应该合并所有结果（特别是使用@text时）
-      // 检查规则是否使用@html，如果是则用analyzeString；否则尝试analyzeStringList合并
-      if (rule.content) {
-        const ruleLower = rule.content.toLowerCase();
-        if (ruleLower.includes('@html') || ruleLower.includes('@all')) {
-          // 使用@html或@all时，只取第一个结果（通常是容器元素）
-          content = await analyzeString(rule.content, context);
-        } else {
-          // 使用@text或其他时，如果匹配多个元素，合并所有结果
-          const results = await analyzeStringList(rule.content, context);
-          if (results.length > 1) {
-            // 多个结果时，用双换行符连接（段落分隔）
-            content = results.join('\n\n');
-          } else {
-            content = results[0] || '';
+      content = rule.content ? await parseContentByRule(rule.content, context) : '';
+
+      if ((!content || !content.trim()) && rule.payAction?.trim()) {
+        const payActionExecuted = await executePayAction(source, chapter, context);
+        if (payActionExecuted && rule.content) {
+          try {
+            const retryHtml = isContentApi
+              ? html
+              : await get(resolveUrl(chapter.baseUrl || source.sourceUrl || '', chapter.url), {
+                  headers: buildSourceRequestHeaders(
+                    source,
+                    resolveUrl(chapter.baseUrl || source.sourceUrl || '', chapter.url),
+                  ),
+                  enableCookieJar: source.enabledCookieJar,
+                  timeout: 60000,
+                });
+            const retryContext: RuleContext = {
+              ...context,
+              content: retryHtml,
+              contentType: detectContentType(retryHtml),
+              result: retryHtml,
+            };
+            content = await parseContentByRule(rule.content, retryContext);
+          } catch (retryError) {
+            console.warn('[content] payAction 后重试正文解析失败:', retryError);
           }
         }
-      } else {
-        content = '';
       }
 
       // 调试：记录解析出的内容长度和预览
@@ -264,7 +315,12 @@ export async function getContent(
             const nextContent = await getContent(
               source,
               { ...chapter, url: resolveUrl(chapter.baseUrl, nextUrl) },
-              undefined
+              undefined,
+              undefined,
+              {
+                ...options,
+                _visitedUrls: visited,
+              },
             );
             if (nextContent) {
               content += '\n' + nextContent;
@@ -290,12 +346,23 @@ export async function getContent(
       content = processImageStyle(content, rule.imageStyle);
     }
 
+    if (rule.imageDecode?.trim()) {
+      const { applyImageDecode } = await import('@/lib/book-source/image-decode');
+      content = await applyImageDecode(
+        content,
+        rule.imageDecode,
+        chapter.baseUrl,
+        source,
+      );
+    }
+
     // 清理内容（传递baseUrl用于图片URL绝对路径转换）
     const beforeCleanLength = content?.length || 0;
-    content = cleanContent(content, chapter.baseUrl);
+    content = cleanContent(content, chapter.baseUrl, 'normal');
     const afterCleanLength = content?.length || 0;
     if (beforeCleanLength > 0 && afterCleanLength < beforeCleanLength * 0.5) {
       console.warn(`[content] 清理后内容长度大幅减少: ${beforeCleanLength} -> ${afterCleanLength}, 可能存在问题`);
+      content = cleanContent(content, chapter.baseUrl, 'light');
     }
 
     // 应用替换规则（从数据库获取）
@@ -339,7 +406,11 @@ function applyReplaceRegex(content: string, replaceRegex: string): string {
  * 清理正文内容
  * 参考 legado 的 HtmlFormatter.formatKeepImg 实现
  */
-function cleanContent(content: string, baseUrl: string = ''): string {
+function cleanContent(
+  content: string,
+  baseUrl: string = '',
+  mode: 'normal' | 'light' = 'normal',
+): string {
   if (!content) return '';
 
   // 1. 处理HTML实体：将多个连续的&nbsp;替换为单个空格
@@ -390,7 +461,7 @@ function cleanContent(content: string, baseUrl: string = ''): string {
   content = content.replace(/<\/?(?!img)[a-zA-Z]+(?=[ >])[^<>]*>/gi, '');
 
   // 8. 处理缩进：多个换行和空白字符替换为换行+全角空格（段落缩进）
-  content = content.replace(/\s*\n+\s*/g, '\n　　');
+  content = content.replace(/\s*\n+\s*/g, mode === 'light' ? '\n' : '\n　　');
 
   // 9. 移除开头和结尾的空白
   content = content.replace(/^[\n\s]+/, '');
@@ -412,14 +483,16 @@ function cleanContent(content: string, baseUrl: string = ''): string {
   content = content.replace(/\n{3,}/g, '\n\n');
 
   // 13. 移除常见的广告文本
-  const adPatterns = [
-    /请收藏[：:]\s*[^\n]+/g,
-    /本章完[，,。.]/g,
-    /未完待续[，,。.]/g,
-  ];
+  if (mode === 'normal') {
+    const adPatterns = [
+      /请收藏[：:]\s*[^\n]+/g,
+      /本章完[，,。.]/g,
+      /未完待续[，,。.]/g,
+    ];
 
-  for (const pattern of adPatterns) {
-    content = content.replace(pattern, '');
+    for (const pattern of adPatterns) {
+      content = content.replace(pattern, '');
+    }
   }
 
   return content.trim();
