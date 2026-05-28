@@ -9,7 +9,7 @@
  */
 
 import { get, post } from '@/lib/http';
-import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
+import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookChapter, Book } from '@/types';
 import {
@@ -23,15 +23,10 @@ import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 const MAX_CONTENT_PAGES = 20;
 
 async function parseContentByRule(ruleContent: string, context: RuleContext): Promise<string> {
-  const ruleLower = ruleContent.toLowerCase();
-  if (ruleLower.includes('@html') || ruleLower.includes('@all')) {
-    return await analyzeString(ruleContent, context);
-  }
-  const results = await analyzeStringList(ruleContent, context);
-  if (results.length > 1) {
-    return results.join('\n\n');
-  }
-  return results[0] || '';
+  const trimmed = ruleContent.trim();
+  if (!trimmed) return '';
+  // 对齐 Legado BookContent.analyzeContent：正文规则走 getString（analyzeString），非列表 getStringList
+  return (await analyzeString(trimmed, context)) || '';
 }
 
 async function executePayAction(
@@ -191,6 +186,7 @@ export async function getContent(
     visited.add(normalizedChapterUrl);
 
     let content: string | null = null;
+    let ruleContext: RuleContext | undefined;
 
     // ── data: URL 路径 ──
     if (chapter.url.startsWith('data:')) {
@@ -263,20 +259,37 @@ export async function getContent(
       const contentType = detectContentType(html);
 
       // 创建规则上下文
-      const context: RuleContext = {
+      ruleContext = {
         content: html,
         contentType,
         baseUrl: chapter.baseUrl,
         result: html,
-        source: source as unknown as Record<string, unknown>,
+        source: {
+          ...(source as unknown as Record<string, unknown>),
+          bookSourceComment:
+            source.sourceComment ??
+            (source as { bookSourceComment?: string }).bookSourceComment ??
+            '',
+          sourceComment:
+            source.sourceComment ??
+            (source as { bookSourceComment?: string }).bookSourceComment ??
+            '',
+          bookSourceUrl: source.sourceUrl,
+        },
+        book: book
+          ? ({
+              ...(book as unknown as Record<string, unknown>),
+              durChapterIndex: book.durChapterIndex ?? chapter.index,
+            } as Record<string, unknown>)
+          : undefined,
         chapter: chapter as unknown as Record<string, unknown>,
       };
 
       // 解析正文内容
-      content = rule.content ? await parseContentByRule(rule.content, context) : '';
+      content = rule.content ? await parseContentByRule(rule.content, ruleContext) : '';
 
       if ((!content || !content.trim()) && rule.payAction?.trim()) {
-        const payActionExecuted = await executePayAction(source, chapter, context);
+        const payActionExecuted = await executePayAction(source, chapter, ruleContext);
         if (payActionExecuted && rule.content) {
           try {
             const retryHtml = isContentApi
@@ -290,7 +303,7 @@ export async function getContent(
                   timeout: 60000,
                 });
             const retryContext: RuleContext = {
-              ...context,
+              ...ruleContext,
               content: retryHtml,
               contentType: detectContentType(retryHtml),
               result: retryHtml,
@@ -309,7 +322,7 @@ export async function getContent(
 
       // 处理下一页内容
       if (content && rule.nextContentUrl && nextChapterUrl) {
-        const nextUrl = await analyzeString(rule.nextContentUrl, context);
+        const nextUrl = await analyzeString(rule.nextContentUrl, ruleContext);
         if (nextUrl && nextUrl !== chapter.url) {
           try {
             const nextContent = await getContent(
@@ -336,9 +349,14 @@ export async function getContent(
       return null;
     }
 
-    // 处理正文净化（replaceRegex）
-    if (rule.replaceRegex) {
-      content = applyReplaceRegex(content, rule.replaceRegex);
+    // 处理正文净化（replaceRegex）— 对齐 Legado analyzeRule.getString(replaceRegex, content)
+    if (rule.replaceRegex?.trim() && ruleContext) {
+      content = await analyzeString(rule.replaceRegex, {
+        ...ruleContext,
+        content,
+        result: content,
+        contentType: 'text',
+      });
     }
 
     // 处理图片样式
@@ -375,30 +393,6 @@ export async function getContent(
     console.error(`获取正文内容失败 [${source.sourceName}]:`, error);
     // 抛出错误以便阅读器显示具体网络/服务器错误信息，而非仅“内容加载失败”
     throw error;
-  }
-}
-
-/**
- * 应用替换正则表达式
- * 格式：规则##正则##替换 或 规则##正则##替换###
- */
-function applyReplaceRegex(content: string, replaceRegex: string): string {
-  // 解析替换规则（格式：pattern##replacement 或 pattern##replacement###）
-  const parts = replaceRegex.split('##');
-  if (parts.length < 2) {
-    return content;
-  }
-
-  const pattern = parts[0];
-  const replacement = parts[1] || '';
-  const replaceFirst = replaceRegex.endsWith('###');
-
-  try {
-    const regex = new RegExp(pattern, replaceFirst ? '' : 'g');
-    return content.replace(regex, replacement);
-  } catch (error) {
-    console.warn('替换正则表达式无效:', pattern, error);
-    return content;
   }
 }
 
@@ -473,10 +467,19 @@ function cleanContent(
 
   // 11. 如果内容包含&符号，unescape HTML实体（如 &lt; &gt; &amp; &nbsp; 等）
   if (content.indexOf('&') > -1) {
-    // 创建一个临时div元素来unescape HTML实体（比DOMParser更可靠）
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = content;
-    content = tempDiv.textContent || tempDiv.innerText || content;
+    if (typeof document !== 'undefined') {
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      content = tempDiv.textContent || tempDiv.innerText || content;
+    } else {
+      content = content
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'");
+    }
   }
 
   // 12. 移除多余的连续换行（最多保留两个）

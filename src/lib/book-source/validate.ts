@@ -104,7 +104,10 @@ async function validateSearch(source: BookSource): Promise<SingleCheckResult> {
     const url = buildUrl(source.searchUrl, { key: '一' });
     const probe = await probeGet(url, source);
     if (!isProbeSuccess(probe)) return probe;
-    const books = await searchBook(source, '一', { useCheckKeyword: true });
+    const books = await searchBook(source, '一', {
+      useCheckKeyword: true,
+      shouldBreak: (size) => size > 0,
+    });
     if (books.length > 0) return { kind: 'success' };
     return { kind: 'search_empty', message: '搜索无结果' };
   } catch (e) {
@@ -178,7 +181,10 @@ async function validateExplore(source: BookSource): Promise<SingleCheckResult> {
 /** 取一本书的 tocUrl：优先从搜索结果（仅当 searchUrl 非脚本），否则从发现结果 */
 async function getOneBookTocUrl(source: BookSource): Promise<string | null> {
   if (source.searchUrl && source.ruleSearch && !isScriptUrl(source.searchUrl)) {
-    const books = await searchBook(source, '一', { useCheckKeyword: true });
+    const books = await searchBook(source, '一', {
+      useCheckKeyword: true,
+      shouldBreak: (size) => size > 0,
+    });
     const first = books[0];
     if (first?.tocUrl) return first.tocUrl;
     if (first?.bookUrl) return first.bookUrl;

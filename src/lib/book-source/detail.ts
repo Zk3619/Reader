@@ -217,18 +217,24 @@ async function analyzeBookInfoFromBody(
     options?.ruleResult ?? parseRuleResultObject(contextContent);
   const fetchUrl = options?.fetchUrl ?? redirectUrl;
 
+  const sessionVariables: Record<string, unknown> = {};
+
   const context: RuleContext = {
     content: contextContent,
     contentType,
     baseUrl: bookUrl,
     source: source as unknown as Record<string, unknown>,
     result: ruleResult ? JSON.stringify(ruleResult) : contextContent,
+    variables: sessionVariables,
   };
 
-  const safeAnalyze = async (ruleText: string | undefined): Promise<string> => {
+  const safeAnalyze = async (
+    ruleText: string | undefined,
+    options?: { isUrl?: boolean },
+  ): Promise<string> => {
     if (!ruleText?.trim()) return '';
     try {
-      return await analyzeString(ruleText, context);
+      return await analyzeString(ruleText, context, options);
     } catch (e) {
       console.warn('[detail] 字段规则解析失败，已跳过:', { rule: ruleText.slice(0, 80), error: e });
       return '';
@@ -248,24 +254,7 @@ async function analyzeBookInfoFromBody(
   const authorSplit = splitAuthorAndInlineTags(rawAuthor);
   let author = normalizeAuthorText(authorSplit.author);
 
-  const intro = await resolveBookInfoIntro(source, rule.intro, context, {
-    ruleResult,
-    fetchUrl,
-    bookUrl,
-    durChapterTitle: options?.durChapterTitle,
-  });
-
-  let coverUrl: string | undefined;
-  if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
-    const parsed = await safeAnalyze(rule.coverUrl);
-    if (parsed.trim()) {
-      coverUrl = resolveUrl(redirectUrl, parsed);
-    }
-  }
-  if (!coverUrl && typeof ruleResult?.thumb_url === 'string') {
-    coverUrl = ruleResult.thumb_url;
-  }
-
+  // 字段顺序对齐 Legado BookInfo.analyzeBookInfo（wordCount 在 intro 之前，供 @get:{num}）
   const kindFromRule = await safeAnalyze(rule.kind);
   const kind =
     kindFromRule.trim() ||
@@ -294,15 +283,33 @@ async function analyzeBookInfoFromBody(
       ? ruleResult.last_chapter_update_time
       : undefined);
 
+  const intro = await resolveBookInfoIntro(source, rule.intro, context, {
+    ruleResult,
+    fetchUrl,
+    bookUrl,
+    durChapterTitle: options?.durChapterTitle,
+  });
+
+  let coverUrl: string | undefined;
+  if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
+    const parsed = await safeAnalyze(rule.coverUrl);
+    if (parsed.trim()) {
+      coverUrl = resolveUrl(redirectUrl, parsed);
+    }
+  }
+  if (!coverUrl && typeof ruleResult?.thumb_url === 'string') {
+    coverUrl = ruleResult.thumb_url;
+  }
+
   if (!name.trim()) {
     return null;
   }
 
   let tocUrl = bookUrl;
   if (rule.tocUrl && !isJsRule(rule.tocUrl)) {
-    const parsedTocUrl = await safeAnalyze(rule.tocUrl);
+    const parsedTocUrl = await safeAnalyze(rule.tocUrl, { isUrl: true });
     if (parsedTocUrl.trim()) {
-      tocUrl = resolveUrl(bookUrl, parsedTocUrl);
+      tocUrl = resolveUrl(redirectUrl, parsedTocUrl);
     }
   }
 

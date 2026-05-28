@@ -8,7 +8,7 @@ import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook } from '@/lib/local-book';
 import type { Book, BookInfo } from '@/types';
 import { getBookInfo } from '@/lib/book-source/detail';
-import { getChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
+import { fetchChapterListDeduped, toNewBookChapter } from '@/lib/book-source/chapters';
 import {
   addBookType,
   BOOK_TYPE_UPDATE_ERROR,
@@ -68,7 +68,9 @@ export async function updateBookToc(bookUrl: string): Promise<string> {
     // preUpdateJs：需 AnalyzeRule 书籍上下文，Reader 暂未实现，与 Legado 行为略有不一致
 
     const tocUrl = working.tocUrl?.trim() || working.bookUrl;
-    const chapters = await getChapterList(source, tocUrl);
+    const chapters = await fetchChapterListDeduped(source, tocUrl, {
+      reverseToc: working.readConfig?.reverseToc === true,
+    });
     if (chapters.length === 0) {
       throw new Error('章节列表为空');
     }

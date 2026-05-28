@@ -5,7 +5,16 @@
 
 import { get, post } from '@/lib/http';
 import { fetchByAnalyzeUrl } from '@/lib/book-source/analyze-url';
-import { analyzeListElements, analyzeRule, analyzeString, parseRule, type RuleContext } from '@/lib/rule-engine';
+import {
+  analyzeListElements,
+  analyzeRule,
+  analyzeString,
+  type RuleContext,
+} from '@/lib/rule-engine';
+import {
+  isLikelySerializedBookDetailJson,
+  sanitizeSearchIntro,
+} from '@/lib/book-source/intro-merge';
 import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { resolveSearchRequest } from '@/lib/book-source/analyze-search-url';
@@ -13,20 +22,14 @@ import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
 import { resolveUrl, detectContentType } from '@/lib/book-source/utils';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import { resolveCheckKeyword } from '@/lib/book-source/search-keyword';
-
-function normalizeAuthorText(raw: string): string {
-  return raw
-    .replace(/^\s*作\s*者[:：\s]+/u, '')
-    .replace(/\s+著$/u, '')
-    .trim();
-}
-
-function normalizeBookNameText(raw: string): string {
-  return raw
-    .replace(/\s+作\s*者.*$/u, '')
-    .replace(/\s+\S+\s+著$/u, '')
-    .trim();
-}
+import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
+import {
+  buildPreciseSearchFilter,
+  formatWordCountLikeLegado,
+  normalizeAuthorText,
+  normalizeBookNameText,
+  shouldFallbackToDetailParsing,
+} from '@/lib/book-source/search-format';
 
 function stripHtml(raw: string | undefined): string | undefined {
   if (!raw) return raw;
@@ -71,39 +74,136 @@ async function pickFirstValue(
   return '';
 }
 
+/** 对齐 Legado getStringList(ruleKind).joinToString(",")，并剔除误当列表解析的 JSON 片段 */
+function isLikelyHtmlBlobKind(text: string): boolean {
+  const t = text.trim();
+  if (!t.startsWith('<')) return false;
+  return /<div\b|<body\b|class=["']c_row/i.test(t);
+}
+
+function isLikelyIntroSentence(token: string): boolean {
+  const t = token.trim();
+  return (
+    t.length > 36 ||
+    /[。！？；…]/.test(t) ||
+    /^(半夜|手机|我将|苏易|恭喜|一次|他帮了|外卖|相机)/.test(t)
+  );
+}
+
+function isLikelyKindTagToken(token: string): boolean {
+  const t = token.trim();
+  if (!t) return false;
+  if (isLikelyAuthorIdToken(t)) return false;
+  if (/^#/.test(t)) return true;
+  if (/^(NTL|NPH|AI生成|后宫|母子|制服|熟女|恋足)$/i.test(t)) return true;
+  if (t.length <= 16 && !/[。！？；…]/.test(t) && !isLikelyIntroSentence(t)) return true;
+  return false;
+}
+
+function normalizeKindFromRule(
+  raw: string | undefined,
+  opts?: { bookName?: string; searchKey?: string },
+): string | undefined {
+  if (!raw?.trim()) return undefined;
+  let text = raw.trim();
+  if (isLikelyHtmlBlobKind(text)) return undefined;
+  const bodyMatch = /^<body[^>]*>([\s\S]*)<\/body>$/i.exec(text);
+  if (bodyMatch?.[1]) {
+    text = bodyMatch[1].trim();
+    if (isLikelyHtmlBlobKind(text)) return undefined;
+  }
+  if (isLikelySerializedBookDetailJson(text)) {
+    return undefined;
+  }
+  const firstLine = text.split('\n').map((s) => s.trim()).find(Boolean);
+  if (!firstLine) return undefined;
+  text = firstLine;
+  const bookName = opts?.bookName?.trim();
+  const searchKey = opts?.searchKey?.trim();
+  const hasHashTags = /#\s*[^\s#,，]+/.test(text);
+  const tokens = text
+    .split(/[\n,，|｜\s]+/g)
+    .map((s) => (stripHtml(s) ?? '').trim().replace(/^#+/, ''))
+    .filter(
+      (s) =>
+        s &&
+        !isLikelySerializedBookDetailJson(s) &&
+        !(s.startsWith('{') && /"book_name"|"book_id"|"thumb_url"/.test(s)) &&
+        !isLikelyIntroSentence(s) &&
+        (!bookName || s !== bookName) &&
+        (!searchKey || s !== searchKey) &&
+        (!bookName || s.length > 12 || !bookName.includes(s)) &&
+        (!hasHashTags || isLikelyKindTagToken(s)),
+    );
+  return tokens.length > 0 ? Array.from(new Set(tokens)).join(',') : undefined;
+}
+
+function logSearchFieldDebug(
+  sourceName: string,
+  bookIndex: number,
+  field: string,
+  rule: string,
+  context: RuleContext,
+  replaced: string,
+  applied: string,
+): void {
+  const rawPreview = context.content.slice(0, 220).replace(/\s+/g, ' ').trim();
+  console.log(
+    `[search:field-debug] source=${sourceName} book#${bookIndex + 1} field=${field}\n` +
+      `rule=${rule}\n` +
+      `raw=${rawPreview}\n` +
+      `applied=${applied}\n` +
+      `replaced=${replaced}`,
+  );
+}
+
+async function analyzeLegadoStringField(
+  rule: string,
+  context: RuleContext,
+  joiner = '\n',
+): Promise<string> {
+  const results = await analyzeRule(rule, context);
+  if (results.length === 0) return '';
+  if (results.length === 1) return results[0] ?? '';
+  return results.filter((r) => r.trim()).join(joiner);
+}
+
+/** 对齐 Legado BookList：getStringList(ruleKind)?.joinToString(",") */
+async function analyzeKindField(
+  rule: string | undefined,
+  context: RuleContext,
+  opts?: { bookName?: string; searchKey?: string },
+): Promise<string> {
+  if (!rule?.trim()) return '';
+  const results = await analyzeRule(rule, context);
+  for (const part of results) {
+    const normalized = normalizeKindFromRule(part, opts);
+    if (normalized) return normalized;
+  }
+  return normalizeKindFromRule(results.filter((r) => r.trim()).join(','), opts) ?? '';
+}
+
 async function analyzeFieldWithDebug(
   field: string,
   rule: string | undefined,
   context: RuleContext,
   sourceName: string,
+  debugBookIndex: number | null,
+  joiner = '\n',
 ): Promise<string> {
   if (!rule?.trim()) return '';
-  const replaced = await analyzeString(rule, context);
-  const shouldLogDebug = typeof window !== 'undefined';
-  if (shouldLogDebug) {
-    let applied = '';
-    try {
-      const parsed = parseRule(rule);
-      if (parsed.ruleBody.trim()) {
-        const appliedResults = await analyzeRule(parsed.ruleBody, context);
-        applied = appliedResults[0] ?? '';
-      }
-    } catch (error) {
-      applied = `[error:${String(error)}]`;
-    }
-    const rawPreview = context.content.slice(0, 220).replace(/\s+/g, ' ').trim();
-    console.log(
-      `[search:field-debug] source=${sourceName} field=${field}\n` +
-        `rule=${rule}\n` +
-        `raw=${rawPreview}\n` +
-        `applied=${applied}\n` +
-        `replaced=${replaced}`,
-    );
+  const replaced = await analyzeLegadoStringField(rule, context, joiner);
+  if (debugBookIndex != null && typeof window !== 'undefined') {
+    logSearchFieldDebug(sourceName, debugBookIndex, field, rule, context, replaced, replaced);
   }
   return replaced;
 }
 
-function parseGrayMetaFromTextNodes(raw: string): { author?: string; tags?: string; intro?: string } {
+export function parseGrayMetaFromTextNodes(raw: string): {
+  author?: string;
+  tags?: string;
+  intro?: string;
+} {
   const lines = raw
     .split('\n')
     .map((x) => x.trim())
@@ -111,13 +211,37 @@ function parseGrayMetaFromTextNodes(raw: string): { author?: string; tags?: stri
   if (lines.length === 0) return {};
   const first = lines[0] ?? '';
   const second = lines.slice(1).join('\n').trim();
-  const author = first.replace(/\|.*$/u, '').trim();
+  const author = first.replace(/\s*[|｜].*$/u, '').trim();
   const tagMatches = first.match(/#[^#\s,，|｜]+/g) ?? [];
+  const tags =
+    tagMatches.length > 0 ? Array.from(new Set(tagMatches)).join(' ') : undefined;
   return {
     author: author || undefined,
-    tags: tagMatches.length > 0 ? Array.from(new Set(tagMatches)).join(' ') : undefined,
+    tags,
     intro: second || undefined,
   };
+}
+
+function isLikelyAuthorIdToken(token: string): boolean {
+  const t = token.trim();
+  return /^\d+[\s（(]/.test(t) || /^[\d（()）\s]{4,}$/u.test(t);
+}
+
+function isLikelyCorruptSearchIntro(intro: string | undefined): boolean {
+  const t = intro?.trim() ?? '';
+  if (!t) return false;
+  if (/[|｜]/.test(t) && /#/.test(t)) return true;
+  if (/^[^（(]*[)）]\s*[|｜]/.test(t)) return true;
+  return false;
+}
+
+function pickSearchAuthor(ruleAuthor: string, grayAuthor?: string): string {
+  const r = normalizeAuthorText(stripHtml(ruleAuthor) ?? '');
+  const g = normalizeAuthorText(grayAuthor ?? '');
+  if (!g) return r;
+  if (!r) return g;
+  if (g.includes(r) || r.includes(g)) return g.length >= r.length ? g : r;
+  return r;
 }
 
 export async function normalizeSearchDisplayFields(
@@ -141,11 +265,14 @@ export async function normalizeSearchDisplayFields(
   let coverUrl = raw.coverUrl;
   let kind = raw.kind;
   let latestChapterTitle = raw.latestChapterTitle;
-  const grayTextNodes = await pickFirstValue(
-    ['p.gray@textNodes', '//p[@class="gray"]@textNodes', '.gray@textNodes'],
-    context,
-  );
-  const grayMeta = parseGrayMetaFromTextNodes(grayTextNodes);
+  let grayMeta: ReturnType<typeof parseGrayMetaFromTextNodes> = {};
+  if (context.contentType !== 'json') {
+    const grayTextNodes = await pickFirstValue(
+      ['p.gray@textNodes', '//p[@class="gray"]@textNodes', '.gray@textNodes'],
+      context,
+    );
+    grayMeta = parseGrayMetaFromTextNodes(grayTextNodes);
+  }
 
   if (!coverUrl?.trim()) {
     coverUrl = await pickFirstValue(
@@ -160,11 +287,18 @@ export async function normalizeSearchDisplayFields(
     );
   }
 
+  const ruleIntro = isLikelyCorruptSearchIntro(intro) ? undefined : intro;
+  const ruleKind = normalizeKindFromRule(stripHtml(kind ?? undefined));
+  const grayKind = grayMeta.tags?.includes('#')
+    ? grayMeta.tags.trim()
+    : normalizeKindFromRule(grayMeta.tags);
   return {
-    author: normalizeAuthorText(stripHtml(author) ?? '') || normalizeAuthorText(grayMeta.author ?? ''),
-    intro: formatIntroText(intro ?? undefined) || formatIntroText(grayMeta.intro ?? undefined),
+    author: pickSearchAuthor(author, grayMeta.author),
+    intro:
+      formatIntroText(ruleIntro ?? undefined) ||
+      formatIntroText(grayMeta.intro ?? undefined),
     coverUrl,
-    kind: stripHtml(kind ?? undefined) || stripHtml(grayMeta.tags ?? undefined),
+    kind: ruleKind || grayKind || undefined,
     latestChapterTitle: stripHtml(latestChapterTitle ?? undefined),
   };
 }
@@ -178,7 +312,12 @@ export async function searchBook(
   options?: {
     /** 仅在书源校验流程启用 checkKeyWord 覆盖 */
     useCheckKeyword?: boolean;
+    /** 对齐 Legado SearchModel.filter：源内解析阶段过滤 */
+    filter?: (name: string, author: string, kind?: string) => boolean;
+    /** 对齐 Legado SearchModel.shouldBreak：满足条件提前停止 */
+    shouldBreak?: (size: number) => boolean;
   },
+  page = 1,
 ): Promise<SearchBook[]> {
   if (!source.ruleSearch || !source.searchUrl) {
     return [];
@@ -199,7 +338,7 @@ export async function searchBook(
       });
     }
 
-    const resolved = await resolveSearchRequest(source, requestKeyword, 1);
+    const resolved = await resolveSearchRequest(source, requestKeyword, page);
     const { url: searchUrl, method, headers: urlOptionHeaders, body } = resolved;
 
     const headers: Record<string, string> = {};
@@ -229,7 +368,7 @@ export async function searchBook(
         ruleUrl: resolved.ruleUrlWithOption,
         source,
         keyword: requestKeyword,
-        page: 1,
+        page,
         baseUrl: searchUrl,
         cookies: storedCookie,
         defaultWebViewDelayMs: resolved.webViewDelayMs,
@@ -278,8 +417,8 @@ export async function searchBook(
         const pattern = new RegExp(source.bookUrlPattern);
         if (pattern.test(searchUrl)) {
           // 这是详情页，直接解析为单个搜索结果
-          const book = await parseBookInfoFromDetail(source, rule, html, searchUrl, context);
-          if (book) {
+          const book = await parseBookInfoFromDetail(source, rule, html, searchUrl, context, 0);
+          if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
             return [book];
           }
         }
@@ -290,6 +429,7 @@ export async function searchBook(
 
     // 解析书籍列表
     const bookList: SearchBook[] = [];
+    const maxDebugBooks = 3;
 
     if (rule.bookList) {
       // 获取书籍列表元素
@@ -311,33 +451,66 @@ export async function searchBook(
             preview: html.trim().slice(0, 80),
           },
         );
-        const detailBook = await parseSearchBook(source, rule, context, searchUrl, respondTime);
-        if (detailBook) {
-          return [detailBook];
+        if (shouldFallbackToDetailParsing(source.bookUrlPattern)) {
+          const detailBook = await parseSearchBook(
+            source,
+            rule,
+            context,
+            searchUrl,
+            respondTime,
+            0,
+            requestKeyword,
+          );
+          if (
+            detailBook &&
+            options?.filter?.(detailBook.name, detailBook.author, detailBook.kind) !== false
+          ) {
+            return [detailBook];
+          }
         }
       }
 
-      for (const item of listItems) {
+      for (let listIndex = 0; listIndex < listItems.length; listIndex++) {
+        const item = listItems[listIndex]!;
         const element = item.content;
+        const debugBookIndex = listIndex < maxDebugBooks ? listIndex : null;
         // 保持列表根上下文的内容类型，避免片段重判导致字段串位。
-        const elementContext: RuleContext = {
-          content: element,
-          contentType: context.contentType,
-          baseUrl: searchUrl,
-          source: source as unknown as Record<string, unknown>,
-          regexGroups: item.regexGroups,
-          result: typeof item.rawValue === 'string' ? item.rawValue : element,
-        };
+        const elementContext = enrichJsonListItemContext(
+          element,
+          context.contentType ?? 'html',
+          searchUrl,
+          source as unknown as Record<string, unknown>,
+          { regexGroups: item.regexGroups },
+        );
 
-        const book = await parseSearchBook(source, rule, elementContext, searchUrl, respondTime);
-        if (book) {
+        const book = await parseSearchBook(
+          source,
+          rule,
+          elementContext,
+          searchUrl,
+          respondTime,
+          debugBookIndex,
+          requestKeyword,
+        );
+        if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
           bookList.push(book);
+          if (options?.shouldBreak?.(bookList.length) === true) {
+            break;
+          }
         }
       }
     } else {
       // 如果没有bookList规则，尝试直接解析单个书籍
-      const book = await parseSearchBook(source, rule, context, searchUrl, respondTime);
-      if (book) {
+      const book = await parseSearchBook(
+        source,
+        rule,
+        context,
+        searchUrl,
+        respondTime,
+        0,
+        requestKeyword,
+      );
+      if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
         bookList.push(book);
       }
     }
@@ -359,6 +532,31 @@ export async function searchBook(
 }
 
 /**
+ * 对齐 Legado WebBook.preciseSearchAwait（单书源）
+ * - 关键词只用书名 name
+ * - 源内过滤 name + author 全等
+ * - 命中后 shouldBreak(size > 0) 提前结束
+ */
+export async function preciseSearchBook(
+  source: BookSource,
+  name: string,
+  author: string,
+): Promise<SearchBook | null> {
+  const normalizedName = normalizeBookNameText(name);
+  const list = await searchBook(
+    source,
+    normalizedName || name,
+    {
+      filter: buildPreciseSearchFilter(name, author),
+      shouldBreak: (size) => size > 0,
+    },
+    1,
+  );
+  return list[0] ?? null;
+}
+
+
+/**
  * 从详情页解析书籍信息
  */
 async function parseBookInfoFromDetail(
@@ -366,18 +564,30 @@ async function parseBookInfoFromDetail(
   rule: SearchRule,
   _html: string,
   url: string,
-  context: RuleContext
+  context: RuleContext,
+  debugBookIndex: number | null = 0,
 ): Promise<SearchBook | null> {
   try {
-    const name = await analyzeFieldWithDebug('name', rule.name, context, source.sourceName);
-    const author = await analyzeFieldWithDebug('author', rule.author, context, source.sourceName);
-    const intro = await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName);
-    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName) || undefined;
+    const name = await analyzeFieldWithDebug('name', rule.name, context, source.sourceName, debugBookIndex);
+    const author = await analyzeFieldWithDebug('author', rule.author, context, source.sourceName, debugBookIndex);
+    const intro =
+      sanitizeSearchIntro(
+        await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName, debugBookIndex),
+      ) || undefined;
+    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName, debugBookIndex) || undefined;
     const latestChapterTitle = await analyzeFieldWithDebug(
       'lastChapter',
       rule.lastChapter,
       context,
       source.sourceName,
+      debugBookIndex,
+    ) || undefined;
+    const latestChapterUpdateTime = await analyzeFieldWithDebug(
+      'updateTime',
+      rule.updateTime,
+      context,
+      source.sourceName,
+      debugBookIndex,
     ) || undefined;
 
     const normalizedName = normalizeBookNameText(stripHtml(name) ?? '');
@@ -388,20 +598,47 @@ async function parseBookInfoFromDetail(
     // 解析bookUrl（通常是当前URL或从规则中获取）
     let bookUrl = url;
     if (rule.bookUrl) {
-      const parsedBookUrl = await analyzeFieldWithDebug('bookUrl', rule.bookUrl, context, source.sourceName);
+      const parsedBookUrl = await analyzeFieldWithDebug('bookUrl', rule.bookUrl, context, source.sourceName, debugBookIndex);
       if (parsedBookUrl) {
         bookUrl = resolveUrl(url, parsedBookUrl);
       }
     }
 
+    const kindOpts = { bookName: normalizedName };
+    let kind = rule.kind
+      ? normalizeKindFromRule(await analyzeKindField(rule.kind, context, kindOpts), kindOpts)
+      : undefined;
+    if (debugBookIndex != null && typeof window !== 'undefined' && rule.kind) {
+      const kindRaw = await analyzeRule(rule.kind, context);
+      logSearchFieldDebug(
+        source.sourceName,
+        debugBookIndex,
+        'kind',
+        rule.kind,
+        context,
+        kind ?? '',
+        `raw=[${kindRaw.length}] ${kindRaw.join(' | ')}`,
+      );
+    }
+    if (!kind?.trim() && context.contentType === 'json') {
+      kind = normalizeKindFromRule(
+        await pickFirstValue(
+          ['$.category', '$.status', '$.tags', '$.score'],
+          context,
+        ),
+        kindOpts,
+      );
+    }
+
     return {
       bookUrl,
-      name,
+      name: normalizedName,
       author: author || '',
-      kind: rule.kind ? await analyzeString(rule.kind, context) : undefined,
+      kind,
       intro,
       coverUrl: coverUrl ? resolveUrl(url, coverUrl) : undefined,
       latestChapterTitle,
+      latestChapterUpdateTime,
       tocUrl: bookUrl, // 详情页通常也是目录页
       origin: source.sourceUrl,
       originName: source.sourceName,
@@ -425,13 +662,15 @@ async function parseSearchBook(
   rule: SearchRule,
   context: RuleContext,
   baseUrl: string,
-  respondTime: number
+  respondTime: number,
+  debugBookIndex: number | null = null,
+  searchKey = '',
 ): Promise<SearchBook | null> {
   try {
-    const name = await analyzeFieldWithDebug('name', rule.name, context, source.sourceName);
+    const name = await analyzeFieldWithDebug('name', rule.name, context, source.sourceName, debugBookIndex);
     const normalizedName = normalizeBookNameText(stripHtml(name) ?? '');
-    let author = await analyzeFieldWithDebug('author', rule.author, context, source.sourceName);
-    let bookUrl = await analyzeFieldWithDebug('bookUrl', rule.bookUrl, context, source.sourceName);
+    let author = await analyzeFieldWithDebug('author', rule.author, context, source.sourceName, debugBookIndex);
+    let bookUrl = await analyzeFieldWithDebug('bookUrl', rule.bookUrl, context, source.sourceName, debugBookIndex);
 
     // 通用兜底：部分 JSON 书源存在 detail_url / book_url，但自定义 bookUrl 规则可能失效
     if (!bookUrl && context.contentType === 'json') {
@@ -458,16 +697,51 @@ async function parseSearchBook(
     }
 
     // 解析其他字段
-    let intro = await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName) || undefined;
-    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName) || undefined;
+    let intro =
+      sanitizeSearchIntro(
+        await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName, debugBookIndex),
+      ) || undefined;
+    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName, debugBookIndex) || undefined;
     let latestChapterTitle = await analyzeFieldWithDebug(
       'lastChapter',
       rule.lastChapter,
       context,
       source.sourceName,
+      debugBookIndex,
     ) || undefined;
-    let kind = await analyzeFieldWithDebug('kind', rule.kind, context, source.sourceName) || undefined;
-    const wordCount = await analyzeFieldWithDebug('wordCount', rule.wordCount, context, source.sourceName) || undefined;
+    const latestChapterUpdateTime = await analyzeFieldWithDebug(
+      'updateTime',
+      rule.updateTime,
+      context,
+      source.sourceName,
+      debugBookIndex,
+    ) || undefined;
+    const kindOpts = { bookName: normalizedName, searchKey: searchKey.trim() || undefined };
+    let kind = rule.kind
+      ? normalizeKindFromRule(await analyzeKindField(rule.kind, context, kindOpts), kindOpts)
+      : undefined;
+    if (debugBookIndex != null && typeof window !== 'undefined' && rule.kind) {
+      const kindRaw = await analyzeRule(rule.kind, context);
+      logSearchFieldDebug(
+        source.sourceName,
+        debugBookIndex,
+        'kind',
+        rule.kind,
+        context,
+        kind ?? '',
+        `raw=[${kindRaw.length}] ${kindRaw.join(' | ')}`,
+      );
+    }
+    if (!kind?.trim() && context.contentType === 'json') {
+      kind = normalizeKindFromRule(
+        await pickFirstValue(
+          ['$.category', '$.status', '$.tags', '$.score'],
+          context,
+        ),
+        kindOpts,
+      );
+    }
+    const wordCountRaw = await analyzeFieldWithDebug('wordCount', rule.wordCount, context, source.sourceName, debugBookIndex) || undefined;
 
     const normalized = await normalizeSearchDisplayFields(context, {
       author,
@@ -490,15 +764,16 @@ async function parseSearchBook(
     // 解析章节字数
     let chapterWordCount = -1;
     let chapterWordCountText: string | undefined;
-    if (wordCount) {
-      chapterWordCountText = wordCount;
+    const wordCount = formatWordCountLikeLegado(wordCountRaw);
+    if (wordCountRaw) {
+      chapterWordCountText = wordCount ?? wordCountRaw;
       // 尝试提取数字
-      const match = wordCount.match(/(\d+(?:\.\d+)?)\s*(?:万|w|k|千)?/i);
+      const match = wordCountRaw.match(/(\d+(?:\.\d+)?)\s*(?:万|w|k|千)?/i);
       if (match) {
         let num = parseFloat(match[1]);
-        if (/万|w/i.test(wordCount)) {
+        if (/万|w/i.test(wordCountRaw)) {
           num *= 10000;
-        } else if (/k|千/i.test(wordCount)) {
+        } else if (/k|千/i.test(wordCountRaw)) {
           num *= 1000;
         }
         chapterWordCount = Math.floor(num);
@@ -514,6 +789,7 @@ async function parseSearchBook(
       intro,
       coverUrl: coverUrl ? resolveUrl(baseUrl, coverUrl) : undefined,
       latestChapterTitle,
+      latestChapterUpdateTime,
       tocUrl,
       origin: source.sourceUrl,
       originName: source.sourceName,

@@ -79,24 +79,55 @@ export function collapseUrlPathSlashes(url: string): string {
 }
 
 /**
- * 解析相对URL为绝对URL
+ * 规范化待解析的相对 URL（多行拼接、误粘连的绝对地址等）
  */
-export function resolveUrl(baseUrl: string, relativeUrl: string): string {
-  if (isAbsoluteUrl(relativeUrl)) {
-    return relativeUrl;
+export function normalizeUrlRuleResult(relativeUrl: string): string {
+  let rel = relativeUrl.trim();
+  if (!rel) return rel;
+
+  const firstLine = rel
+    .split(/\r?\n+/)
+    .map((s) => s.trim())
+    .find(Boolean);
+  if (firstLine) rel = firstLine;
+
+  if (!isAbsoluteUrl(rel)) {
+    const httpsIdx = rel.search(/https?:\/?\//i);
+    if (httpsIdx > 0) {
+      rel = rel.slice(0, httpsIdx).trim();
+    }
   }
 
+  return rel;
+}
+
+/**
+ * 解析相对URL为绝对URL（对齐 Legado NetworkUtils.getAbsoluteURL）
+ */
+export function resolveUrl(baseUrl: string, relativeUrl: string): string {
+  const rel = normalizeUrlRuleResult(relativeUrl);
+  if (rel.startsWith('data:')) {
+    return rel;
+  }
+  if (isAbsoluteUrl(rel)) {
+    return rel;
+  }
+
+  const base = (baseUrl || '').split(',')[0]?.trim() || baseUrl;
+
   try {
-    const base = new URL(baseUrl);
-    return new URL(relativeUrl, base).toString();
+    return new URL(rel, base).toString();
   } catch {
-    // 如果解析失败，尝试简单拼接
-    if (relativeUrl.startsWith('/')) {
-      const base = new URL(baseUrl);
-      return `${base.protocol}//${base.host}${relativeUrl}`;
+    if (rel.startsWith('/')) {
+      try {
+        const baseObj = new URL(base);
+        return `${baseObj.protocol}//${baseObj.host}${rel}`;
+      } catch {
+        return rel;
+      }
     }
-    const basePath = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
-    return basePath + relativeUrl;
+    const basePath = base.substring(0, base.lastIndexOf('/') + 1);
+    return basePath + rel;
   }
 }
 

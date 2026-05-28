@@ -24,6 +24,120 @@ import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
 const HARD_TOC_PAGINATION_MAX_PAGES = 5000;
 
+/** 渐进加载中间结果（对齐 Legado PartialChapterList） */
+export type PartialChapterList = {
+  chapters: BookChapter[];
+  isComplete: boolean;
+};
+
+/** 与 Legado BookChapterList 一致的目录排序选项 */
+export interface GetChapterListOptions {
+  /** 对应 book.readConfig.reverseToc / Book.getReverseToc() */
+  reverseToc?: boolean;
+  /** 每加载完一页目录后回调（formatJs 仅在 isComplete 时执行） */
+  onPartial?: (partial: PartialChapterList) => void | Promise<void>;
+}
+
+type TocPartialListener = NonNullable<GetChapterListOptions['onPartial']>;
+
+type TocFetchEntry = {
+  promise: Promise<BookChapter[]>;
+  listeners: Set<TocPartialListener>;
+};
+
+const tocFetchInFlight = new Map<string, TocFetchEntry>();
+
+export function tocFetchKey(source: BookSource, tocUrl: string): string {
+  return `${source.bookSourceUrl}\0${tocUrl}`;
+}
+
+export function isChapterListFetchInFlight(source: BookSource, tocUrl: string): boolean {
+  return tocFetchInFlight.has(tocFetchKey(source, tocUrl));
+}
+
+function dispatchTocPartialListeners(
+  listeners: Set<TocPartialListener>,
+  partial: PartialChapterList,
+): void {
+  for (const listener of listeners) {
+    void Promise.resolve(listener(partial)).catch((e) => {
+      console.warn('[chapters] onPartial 失败:', e);
+    });
+  }
+}
+
+/** 同一 tocUrl 并发去重；支持多个 onPartial 订阅（详情预加载 + 后台上架） */
+export function fetchChapterListDeduped(
+  source: BookSource,
+  tocUrl: string,
+  options?: GetChapterListOptions,
+): Promise<BookChapter[]> {
+  const key = tocFetchKey(source, tocUrl);
+  const existing = tocFetchInFlight.get(key);
+  if (existing) {
+    if (options?.onPartial) existing.listeners.add(options.onPartial);
+    return existing.promise;
+  }
+
+  const listeners = new Set<TocPartialListener>();
+  if (options?.onPartial) listeners.add(options.onPartial);
+
+  const promise = getChapterList(source, tocUrl, {
+    ...options,
+    onPartial: (partial) => dispatchTocPartialListeners(listeners, partial),
+  }).finally(() => {
+    tocFetchInFlight.delete(key);
+  });
+
+  tocFetchInFlight.set(key, { promise, listeners });
+  return promise;
+}
+
+/**
+ * 解析 ruleToc.chapterList 的 `-` / `+` 前缀（Legado BookChapterList.analyzeChapterList）
+ */
+export function parseTocChapterListRule(chapterList?: string): {
+  listRule: string;
+  reverse: boolean;
+} {
+  let listRule = chapterList?.trim() ?? '';
+  let reverse = false;
+  if (listRule.startsWith('-')) {
+    reverse = true;
+    listRule = listRule.slice(1);
+  }
+  if (listRule.startsWith('+')) {
+    listRule = listRule.slice(1);
+  }
+  return { listRule, reverse };
+}
+
+/**
+ * 目录合并后的去重、正倒序与 index 编号（对齐 Legado sortAndIndex + LinkedHashSet）
+ */
+export function finalizeTocChapterOrder(
+  chapterList: BookChapter[],
+  reverse: boolean,
+  reverseToc: boolean,
+): BookChapter[] {
+  if (chapterList.length === 0) return chapterList;
+  const list = [...chapterList];
+  if (!reverse) {
+    list.reverse();
+  }
+  const seen = new Set<string>();
+  const deduped: BookChapter[] = [];
+  for (const ch of list) {
+    if (seen.has(ch.url)) continue;
+    seen.add(ch.url);
+    deduped.push(ch);
+  }
+  if (!reverseToc) {
+    deduped.reverse();
+  }
+  return deduped.map((chapter, index) => ({ ...chapter, index }));
+}
+
 function getTocPaginationSafetyOptions(): { enabled: boolean; maxPages: number } {
   const app = settingsStore.state.app;
   const enabled = app.tocPaginationSafetyEnabled !== false;
@@ -227,7 +341,8 @@ async function getChapterListFromDataUrl(
  */
 export async function getChapterList(
   source: BookSource,
-  tocUrl: string
+  tocUrl: string,
+  options?: GetChapterListOptions,
 ): Promise<BookChapter[]> {
   if (!source.ruleToc) {
     return [];
@@ -241,6 +356,24 @@ export async function getChapterList(
 
     // ── 标准 HTTP URL 路径 ──
     const rule = source.ruleToc;
+    const { listRule: tocListRule, reverse: listRuleReverse } = parseTocChapterListRule(
+      rule.chapterList,
+    );
+    const reverseToc = options?.reverseToc === true;
+    const onPartial = options?.onPartial;
+
+    /** 不 await：避免 DB/UI 回调阻塞后续分页请求（进入阅读器时卡顿的主因之一） */
+    const emitPartial = (raw: BookChapter[], isComplete: boolean) => {
+      if (!onPartial || raw.length === 0) return;
+      void (async () => {
+        let ordered = finalizeTocChapterOrder(raw, listRuleReverse, reverseToc);
+        if (isComplete) {
+          ordered = await applyFormatJs(source, rule, ordered, tocUrl);
+        }
+        ordered = ordered.map((chapter, index) => ({ ...chapter, index }));
+        await onPartial({ chapters: ordered, isComplete });
+      })();
+    };
 
     const chapters: BookChapter[] = [];
     const seenChapterUrls = new Set<string>();
@@ -248,6 +381,7 @@ export async function getChapterList(
     const pendingTocPages: string[] = [tocUrl];
     const tocSafety = getTocPaginationSafetyOptions();
     let safetyNotified = false;
+    let nextTocUrlsResolved = false;
     const { fetchSourcePage } = await import('@/lib/book-source/fetch-source-page');
 
     while (pendingTocPages.length > 0) {
@@ -324,8 +458,8 @@ export async function getChapterList(
 
       const pageChapters: BookChapter[] = [];
 
-      if (rule.chapterList) {
-        let chapterListRule = rule.chapterList;
+      if (tocListRule) {
+        let chapterListRule = tocListRule;
         if (!chapterListRule.includes('@')) {
           chapterListRule = `${chapterListRule}@all`;
         }
@@ -363,17 +497,19 @@ export async function getChapterList(
         }
       }
 
-      const finalPageChapters = await applyFormatJs(source, rule, pageChapters, currentTocUrl);
-      chapters.push(...finalPageChapters.map((chapter, idx) => ({
-        ...chapter,
-        index: chapters.length + idx,
-      })));
+      chapters.push(...pageChapters);
+      emitPartial(chapters, false);
 
-      // Legado 目录分页：nextTocUrl 可能返回单个/多个 URL（含 JS 数组）。
-      if (rule.nextTocUrl?.trim()) {
+      // Legado：nextTocUrl 仅在首屏目录解析一次（避免 baseUrl 为 6963_2.html 时拼出 6963_2.html2.html）
+      if (rule.nextTocUrl?.trim() && !nextTocUrlsResolved) {
+        nextTocUrlsResolved = true;
         try {
-          const nextRawList = await analyzeStringList(rule.nextTocUrl, context);
-          const candidates = normalizeNextTocCandidates(nextRawList, currentTocUrl);
+          const nextContext: RuleContext = {
+            ...context,
+            baseUrl: tocUrl,
+          };
+          const nextRawList = await analyzeStringList(rule.nextTocUrl, nextContext);
+          const candidates = normalizeNextTocCandidates(nextRawList, tocUrl);
           for (const n of candidates) {
             if (!seenTocPages.has(n)) pendingTocPages.push(n);
           }
@@ -383,9 +519,13 @@ export async function getChapterList(
       }
     }
 
-    // 注意：目录倒序功能通常在阅读配置中处理，这里不处理
-
-    return chapters;
+    let ordered = finalizeTocChapterOrder(chapters, listRuleReverse, reverseToc);
+    ordered = await applyFormatJs(source, rule, ordered, tocUrl);
+    ordered = ordered.map((chapter, index) => ({ ...chapter, index }));
+    if (onPartial) {
+      await onPartial({ chapters: ordered, isComplete: true });
+    }
+    return ordered;
   } catch (error) {
     console.error(`获取章节列表失败 [${source.sourceName}]:`, error);
     return [];
@@ -404,7 +544,9 @@ async function parseChapter(
 ): Promise<BookChapter | null> {
   try {
     let title = rule.chapterName ? await analyzeString(rule.chapterName, context) : '';
-    const url = rule.chapterUrl ? await analyzeString(rule.chapterUrl, context) : '';
+    const url = rule.chapterUrl
+      ? await analyzeString(rule.chapterUrl, context, { isUrl: true })
+      : '';
 
     // Legado 兼容容错：部分站点章节名规则在编码/替换后可能被清空，
     // 但章节 URL 已解析成功。此时回退到锚点文本，避免整章被丢弃。

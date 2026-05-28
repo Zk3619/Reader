@@ -94,6 +94,11 @@ export function isLikelySerializedBookDetailJson(text: string): boolean {
   return /"book_name"|"book_id"|"thumb_url"/.test(t);
 }
 
+/** 搜索/发现列表简介：剔除误解析的整段书籍 JSON */
+export function sanitizeSearchIntro(s: string | undefined): string | undefined {
+  return sanitizeIntroCandidate(s);
+}
+
 function sanitizeIntroCandidate(s: string | undefined): string | undefined {
   const t = normalizeIntro(s);
   if (!t) return undefined;

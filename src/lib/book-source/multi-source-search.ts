@@ -19,7 +19,8 @@ export interface MergedSearchBook extends SearchBook {
 }
 
 export interface MultiSourceSearchCallbacks {
-  onStart?: () => void;
+  /** @param isNewSearch 新关键词搜索为 true；加载下一页（search("")）为 false */
+  onStart?: (isNewSearch: boolean) => void;
   onResults?: (books: MergedSearchBook[]) => void;
   onFinish?: (empty: boolean, hasMore: boolean) => void;
   onError?: (message: string) => void;
@@ -122,12 +123,14 @@ function mergeSearchResults(
 async function searchOneSource(
   source: BookSource,
   keyword: string,
+  page: number,
   signal: AbortSignal,
+  filter?: (name: string, author: string, kind?: string) => boolean,
 ): Promise<SearchBook[]> {
   if (signal.aborted) return [];
   try {
     const result = await Promise.race([
-      searchBook(source, keyword),
+      searchBook(source, keyword, { filter }, page),
       new Promise<SearchBook[]>((_, reject) => {
         const t = setTimeout(() => reject(new Error('timeout')), SOURCE_TIMEOUT_MS);
         signal.addEventListener(
@@ -228,7 +231,8 @@ export class MultiSourceSearchSession {
    */
   async search(key: string, sources: BookSource[]): Promise<void> {
     const trimmed = key.trim();
-    if (trimmed) {
+    const isNewSearch = trimmed.length > 0;
+    if (isNewSearch) {
       this.abort?.abort();
       this.searchId = Date.now();
       this.searchKey = trimmed;
@@ -252,7 +256,7 @@ export class MultiSourceSearchSession {
     this.abort = new AbortController();
     const signal = this.abort.signal;
     this.searching = true;
-    this.callbacks.onStart?.();
+    this.callbacks.onStart?.(isNewSearch);
 
     const precision = isPrecisionSearchMode(this.mode);
     let roundHasResults = false;
@@ -265,7 +269,18 @@ export class MultiSourceSearchSession {
         while (this.paused && !signal.aborted) {
           await new Promise((r) => setTimeout(r, 80));
         }
-        const items = await searchOneSource(source, this.searchKey, signal);
+        const items = await searchOneSource(
+          source,
+          this.searchKey,
+          this.page,
+          signal,
+          precision
+            ? (name, author, kind) =>
+                name.includes(this.searchKey) ||
+                author.includes(this.searchKey) ||
+                (kind?.includes(this.searchKey) ?? false)
+            : undefined,
+        );
         if (signal.aborted || currentId !== this.searchId) return;
         if (items.length > 0) roundHasResults = true;
         this.results = mergeSearchResults(this.results, items, this.searchKey, precision);

@@ -19,33 +19,8 @@ import {
   pickFirstJsonField,
 } from '@/lib/book-source/explore-json-fields';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
-
-function enrichJsonBookContext(
-  element: string,
-  contentType: 'html' | 'json' | 'text',
-  baseUrl: string,
-  source: BookSource,
-  debugIndex?: number,
-  regexGroups?: string[],
-): RuleContext {
-  const ctx: RuleContext = {
-    content: element,
-    contentType,
-    baseUrl,
-    source: source as unknown as Record<string, unknown>,
-    result: element,
-    ...(debugIndex !== undefined ? { _debugIndex: debugIndex } : {}),
-    ...(regexGroups?.length ? { regexGroups } : {}),
-  };
-  if (contentType === 'json') {
-    try {
-      ctx.book = JSON.parse(element) as Record<string, unknown>;
-    } catch {
-      /* 单条书籍 JSON 解析失败时仍用字符串 content */
-    }
-  }
-  return ctx as RuleContext;
-}
+import { formatWordCountLikeLegado } from '@/lib/book-source/search-format';
+import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
 
 /** 拆分书源 lastChapter 模板中的「章节 • 时间」 */
 function splitLastChapterField(raw: string): { title?: string; embeddedTime?: string } {
@@ -169,13 +144,12 @@ async function parseExploreBooksFromContent(
     const listItems = await analyzeListElements(bookListRule, context);
     for (let i = 0; i < listItems.length; i++) {
       const element = listItems[i].content;
-      const elementContext = enrichJsonBookContext(
+      const elementContext = enrichJsonListItemContext(
         element,
         contentType,
         exploreUrl,
-        source,
-        i,
-        listItems[i].regexGroups,
+        source as unknown as Record<string, unknown>,
+        { debugIndex: i, regexGroups: listItems[i].regexGroups },
       );
       const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
       if (book) bookList.push(book);
@@ -327,7 +301,8 @@ async function parseExploreBook(
 
     const latestChapterUpdateTime = tryFormatDisplayUpdateTime(updateTimeRaw) || undefined;
     const kind = rule.kind ? await analyzeString(rule.kind, context) : undefined;
-    const wordCount = rule.wordCount ? await analyzeString(rule.wordCount, context) : undefined;
+    const wordCountRaw = rule.wordCount ? await analyzeString(rule.wordCount, context) : undefined;
+    const wordCount = formatWordCountLikeLegado(wordCountRaw);
 
     // 解析徽章字段：优先使用规则配置，若规则未配置但内容为 JSON，则尝试自动提取
     const sourceStr = rule.source
@@ -368,15 +343,15 @@ async function parseExploreBook(
     // 解析章节字数
     let chapterWordCount = -1;
     let chapterWordCountText: string | undefined;
-    if (wordCount) {
-      chapterWordCountText = wordCount;
+    if (wordCountRaw) {
+      chapterWordCountText = wordCount ?? wordCountRaw;
       // 尝试提取数字
-      const match = wordCount.match(/(\d+(?:\.\d+)?)\s*(?:万|w|k|千)?/i);
+      const match = wordCountRaw.match(/(\d+(?:\.\d+)?)\s*(?:万|w|k|千)?/i);
       if (match) {
         let num = parseFloat(match[1]);
-        if (/万|w/i.test(wordCount)) {
+        if (/万|w/i.test(wordCountRaw)) {
           num *= 10000;
-        } else if (/k|千/i.test(wordCount)) {
+        } else if (/k|千/i.test(wordCountRaw)) {
           num *= 1000;
         }
         chapterWordCount = Math.floor(num);
@@ -388,6 +363,7 @@ async function parseExploreBook(
       name,
       author: author || '',
       kind,
+      wordCount: wordCount?.trim() || undefined,
       intro,
       coverUrl: coverUrl ? resolveUrl(baseUrl, coverUrl) : undefined,
       latestChapterTitle,

@@ -4,7 +4,7 @@
  */
 
 // 搜索功能
-export { searchBook } from '@/lib/book-source/search';
+export { searchBook, preciseSearchBook } from '@/lib/book-source/search';
 
 // 发现功能
 export { exploreBook } from '@/lib/book-source/explore';
@@ -21,7 +21,14 @@ export { parseBookUrlWithOption, getNetworkBaseUrl } from '@/lib/book-source/url
 export { getBookInfo } from '@/lib/book-source/detail';
 
 // 章节列表功能
-export { getChapterList, toNewBookChapter } from '@/lib/book-source/chapters';
+export {
+  getChapterList,
+  fetchChapterListDeduped,
+  isChapterListFetchInFlight,
+  toNewBookChapter,
+  type PartialChapterList,
+  type GetChapterListOptions,
+} from '@/lib/book-source/chapters';
 
 // 书架更新目录
 export { updateBookToc, syncBookPreserveProgress } from '@/lib/book-source/update-toc';
