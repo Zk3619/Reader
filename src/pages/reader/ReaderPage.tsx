@@ -567,9 +567,9 @@ export function ReaderPage(props: ReaderPageProps) {
               class="no-drag"
               onClick={async () => {
                 try {
-                  await readerStore.loadChapter(readerStore.state.chapterIndex);
+                  await readerStore.refreshChapter();
                 } catch {
-                  // 失败时 loadChapter 已设置错误内容
+                  // 失败时 refreshChapter → loadChapter 已设置错误内容
                 }
               }}
               aria-label="刷新当前章节"

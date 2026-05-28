@@ -3,7 +3,7 @@
  * 参考 legado 阅读界面：应用阅读配置（主题、字体、间距），支持正文选中、段评气泡
  */
 
-import { Show, For, createMemo, createSignal, createEffect, onCleanup } from 'solid-js';
+import { Show, For, createMemo } from 'solid-js';
 import { readerStore } from '@/stores/reader';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -35,6 +35,9 @@ export function ReaderContent(props: ReaderContentProps) {
   const config = () => readerStore.state.config;
   const content = () => readerStore.state.content;
   const contentLoading = () => readerStore.state.contentLoading;
+  const contentFetching = () => readerStore.state.contentFetching;
+  const contentBootstrapping = () => readerStore.state.contentBootstrapping;
+  const showReaderSkeleton = () => contentFetching() || contentBootstrapping();
   const showContent = () => readerStore.state.showContent;
   const catalog = () => readerStore.state.catalog;
   const chapterIndex = () => readerStore.state.chapterIndex;
@@ -45,104 +48,6 @@ export function ReaderContent(props: ReaderContentProps) {
     const c = content();
     return c && (c.startsWith('加载失败') || c.startsWith('内容加载失败') || c.startsWith('书源不存在'));
   };
-
-  // Skeleton 显示状态管理：仅在首次打开书籍或大文件缓存过期时显示
-  const [skeletonVisible, setSkeletonVisible] = createSignal(false);
-  const [skeletonStartTime, setSkeletonStartTime] = createSignal<number | null>(null);
-  const [lastChapterIndex, setLastChapterIndex] = createSignal<number | null>(null);
-  const [_chapterSwitchStartTime, setChapterSwitchStartTime] = createSignal<number | null>(null);
-  
-  // 智能最小时长策略：
-  // - 加载时间 < 400ms：应用较短最小时长（400ms），避免闪烁
-  // - 加载时间 > 400ms：不需要最小时长，立即切换（用户已看到足够的 skeleton）
-  const getMinDuration = (elapsed: number): number => {
-    if (elapsed < 400) {
-      return 400; // 中等速度，使用较短最小时长避免闪烁
-    } else {
-      return 0; // 加载较慢，用户已看到足够 skeleton，立即切换
-    }
-  };
-  
-  // 监听加载状态和章节索引变化，管理 skeleton 的显示
-  createEffect(() => {
-    const loading = contentLoading() || (!showContent() && !content());
-    const currentIndex = chapterIndex();
-    const currentContent = content();
-    const hadContent = currentContent && currentContent.length > 0;
-    const now = Date.now();
-    
-    let timer: number | undefined;
-    let switchTimer: number | undefined;
-    
-    // 检测章节切换：章节索引变化且之前有内容
-    const prevIndex = lastChapterIndex();
-    const chapterSwitched = prevIndex !== null && prevIndex !== currentIndex && hadContent;
-    
-    if (prevIndex !== currentIndex) {
-      setLastChapterIndex(currentIndex);
-      
-      if (chapterSwitched) {
-        // 切换章节：记录开始时间，用于检测大文件缓存过期
-        setChapterSwitchStartTime(now);
-      } else {
-        setChapterSwitchStartTime(null);
-      }
-    }
-    
-    if (loading) {
-      // 开始加载：判断是否应该显示 skeleton
-      if (!hadContent && prevIndex === null) {
-        // 首次打开：显示 skeleton
-        if (!skeletonVisible()) {
-          setSkeletonVisible(true);
-          setSkeletonStartTime(now);
-        }
-      } else if (chapterSwitched) {
-        // 切换章节：立即显示 skeleton，与首次打开一致
-        if (!skeletonVisible()) {
-          setSkeletonVisible(true);
-          setSkeletonStartTime(now);
-        }
-      } else if (skeletonVisible() && skeletonStartTime() === null) {
-        setSkeletonStartTime(now);
-      }
-    } else {
-      // 加载完成：清理状态
-      const startTime = skeletonStartTime();
-      
-      if (startTime !== null && skeletonVisible()) {
-        // 使用智能最小时长
-        const elapsed = now - startTime;
-        const minDuration = getMinDuration(elapsed);
-        const remaining = Math.max(0, minDuration - elapsed);
-        
-        if (remaining > 0) {
-          timer = window.setTimeout(() => {
-            setSkeletonVisible(false);
-            setSkeletonStartTime(null);
-            setChapterSwitchStartTime(null);
-          }, remaining);
-        } else {
-          setSkeletonVisible(false);
-          setSkeletonStartTime(null);
-          setChapterSwitchStartTime(null);
-        }
-      } else {
-        // 切换章节且不需要 skeleton：清理状态
-        setChapterSwitchStartTime(null);
-      }
-    }
-    
-    // 清理函数：取消未完成的定时器
-    onCleanup(() => {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
-      if (switchTimer !== undefined) {
-        clearTimeout(switchTimer);
-      }
-    });
-  });
 
   const themeStyle = () => {
     const c = config();
@@ -186,13 +91,13 @@ export function ReaderContent(props: ReaderContentProps) {
       data-reader-content="true"
       style={themeStyle()}
     >
-      <Show when={skeletonVisible()}>
+      <Show when={showReaderSkeleton()}>
         <div class="reader-skeleton-wrapper">
           <ReaderContentSkeleton />
         </div>
       </Show>
 
-      <Show when={!skeletonVisible() && !contentLoading() && showContent() && content()}>
+      <Show when={!showReaderSkeleton() && !contentLoading() && showContent() && content()}>
         <Show
           when={!isErrorContent()}
           fallback={
@@ -203,7 +108,7 @@ export function ReaderContent(props: ReaderContentProps) {
                   <p class="text-xs text-destructive/80 wrap-break-word">{content()}</p>
                 </div>
                 <div class="flex justify-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => readerStore.loadChapter(chapterIndex())}>
+                  <Button variant="outline" size="sm" onClick={() => readerStore.refreshChapter(chapterIndex())}>
                     重试
                   </Button>
                 </div>
