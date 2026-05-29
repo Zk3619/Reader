@@ -5,7 +5,8 @@
 
 import type { BookSource } from '@/types';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
-import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import { getSourceArgsKey, getSourceUrlIdentifier } from '@/lib/js-engine/legado/source-script-shared';
+import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
 export interface ExploreSectionStyle {
@@ -102,6 +103,8 @@ export function updateExploreSourceArgument(
   } catch {
     /* ignore */
   }
+  clearExploreSectionsCache(getSourceUrlIdentifier(source));
+  bumpExploreSourceArgsVersion(getSourceUrlIdentifier(source));
 }
 
 /**

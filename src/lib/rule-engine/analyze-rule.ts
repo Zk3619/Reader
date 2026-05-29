@@ -19,6 +19,9 @@ import {
 } from '@/lib/rule-engine/regex-parser';
 import {
   detectSourceRuleMode,
+  hasEmbeddedLegadoScript,
+  isAtomicLegadoScriptRule,
+  unwrapLegadoJsSnippet,
   shieldInlineReplacementJsInPattern,
   splitLegadoReplaceTail,
   splitPutRule,
@@ -228,9 +231,7 @@ export function parseRule(rule: string): ParsedRule {
     if (ruleBody.startsWith('@js:')) {
       ruleBody = ruleBody.slice(4).trim();
     } else {
-      // 提取 <js>...</js> 中的内容
-      const jsMatch = ruleBody.match(/<js>([\s\S]*?)<\/js>/);
-      ruleBody = jsMatch ? jsMatch[1].trim() : ruleBody;
+      ruleBody = unwrapLegadoJsSnippet(ruleBody);
     }
   } else if (/\$\d{1,2}/.test(ruleBody) && !ruleBody.includes('##')) {
     mode = 'regex';
@@ -473,7 +474,15 @@ async function applyLegadoReplaceRegex(
       await prepareRule(shieldedPattern, replacementContext),
     );
     const compiledReplacement = await prepareRule(replacement, replacementContext);
-    const expandedPattern = compiledPattern.replace(/<js>\s*result\s*<\/js>/gi, '');
+    const patternWithoutResultMarker = compiledPattern.replace(
+      /<js>\s*result\s*<\/js>/gi,
+      '',
+    );
+    const expandedPattern = await expandReplacementInlineJs(
+      patternWithoutResultMarker,
+      context,
+      text,
+    );
     const expandedReplacement = await expandReplacementInlineJs(
       compiledReplacement,
       context,
@@ -490,10 +499,10 @@ async function applyLegadoReplaceRegex(
     const regex = new RegExp(expandedPattern, 'g');
     if (replaceFirst) {
       const first = text.match(regex)?.[0];
-      if (!first) return text;
-      return text.replace(first, normalizedReplacement);
+      if (!first) return text.trim();
+      return text.replace(first, normalizedReplacement).trim();
     }
-    return text.replace(regex, normalizedReplacement);
+    return text.replace(regex, normalizedReplacement).trim();
   } catch (e) {
     console.warn('替换规则执行失败:', replaceRegex, e);
     return text;
@@ -528,7 +537,7 @@ async function executeRuleByMode(
     case 'webjs':
       return runWebJsSegment(ruleBody, context);
     case 'js': {
-      const jsResult = await evalJs(ruleBody, buildRuleJsContext(context));
+      const jsResult = await evalJs(unwrapLegadoJsSnippet(ruleBody), buildRuleJsContext(context));
       if (jsResult == null) return [];
       if (Array.isArray(jsResult)) {
         return jsResult
@@ -561,25 +570,38 @@ async function executeSourceRuleSegment(
     }
   }
 
-  let workingRule = rawRule;
-  if (context.contentType !== 'json' && workingRule.includes('{{') && workingRule.includes('}}')) {
-    workingRule = await expandTemplates(workingRule, context);
+  // 先在原始规则上分离 ## 替换尾（{{}} / <js>result</js> 内 ## 不参与切分），再展开主规则
+  const tail = splitLegadoReplaceTail(rawRule);
+  let mainRule = tail.rule;
+  if (context.contentType !== 'json' && mainRule.includes('{{') && mainRule.includes('}}')) {
+    mainRule = await expandTemplates(mainRule, context);
   }
   const jsonLikeContent =
     context.contentType === 'json' ||
     (context.content.trim().startsWith('{') && inferContentType(context.content) === 'json');
-  if (jsonLikeContent && isJsonTemplateRule(workingRule)) {
-    // 勿对 {{$.x}} 先走 expandJsonInnerRules：内层 {$ 会误匹配，留下单侧 { 如 {vip}
-    const result = applyJsonTemplate(workingRule, context.content);
-    return result.trim() ? [result] : [];
+  if (jsonLikeContent && isJsonTemplateRule(mainRule)) {
+    const result = applyJsonTemplate(mainRule, context.content);
+    let results = result.trim() ? [result] : [];
+    if (tail.replaceRegex && results.length > 0) {
+      results = await Promise.all(
+        results.map((r) =>
+          applyLegadoReplaceRegex(
+            r,
+            tail.replaceRegex,
+            tail.replacement,
+            tail.replaceFirst,
+            context,
+          ),
+        ),
+      );
+    }
+    return results.filter((r) => r && r.trim().length > 0);
   }
 
-  const compiled = await prepareRule(workingRule, context);
-  const tail = splitLegadoReplaceTail(compiled);
-  const mode = detectSourceRuleMode(tail.rule, segment.mode);
+  const compiled = await prepareRule(mainRule, context);
+  const mode = detectSourceRuleMode(compiled, segment.mode);
   const firstTemplateIdx = segment.ruleStr.indexOf('{{');
   const templatePrefix = firstTemplateIdx >= 0 ? segment.ruleStr.slice(0, firstTemplateIdx) : '';
-  // 模板已展开时 workingRule 不再含 {{，仍应把展开结果当字面量（勿再走 parseCss）
   const templateShouldUseLiteralBase =
     context.contentType !== 'json' &&
     segment.ruleStr.includes('{{') &&
@@ -587,12 +609,23 @@ async function executeSourceRuleSegment(
     (firstTemplateIdx === 0 || !templatePrefix.includes('##'));
   let results: string[] = [];
 
-  // if (rule.isNotBlank() || sourceRule.replaceRegex.isEmpty())
-  if (templateShouldUseLiteralBase && mode === 'default' && tail.rule.trim()) {
-    results = [tail.rule];
-  } else if (tail.rule.trim() || !tail.replaceRegex) {
-    const body = mode === 'regex' && tail.rule.startsWith(':') ? tail.rule.slice(1).trim() : tail.rule;
+  if (templateShouldUseLiteralBase && mode === 'default' && compiled.trim()) {
+    results = [compiled];
+  } else if (compiled.trim() || !tail.replaceRegex) {
+    const body = mode === 'regex' && compiled.startsWith(':') ? compiled.slice(1).trim() : compiled;
     results = await executeRuleByMode(mode, body, context);
+    if (
+      results.length === 0 &&
+      tail.replaceRegex &&
+      !compiled.trim().startsWith(':') &&
+      !compiled.includes('@')
+    ) {
+      const base =
+        (typeof context.result === 'string' && context.result) ||
+        context.content ||
+        '';
+      if (base.trim()) results = [String(base)];
+    }
   } else if (!segment.ruleStr.includes('{{')) {
     const base =
       (typeof context.result === 'string' && context.result) ||
@@ -618,6 +651,24 @@ async function executeSourceRuleSegment(
   }
 
   return results.filter((r) => r && r.trim().length > 0);
+}
+
+function isJsonDocumentContent(content: string, contentType?: string): boolean {
+  if (contentType === 'json') return true;
+  const t = content.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return false;
+  try {
+    JSON.parse(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** bookList 如 `$.data@all`（晴天聚合 JSON 探索） */
+function isJsonPathListRule(rule: string): boolean {
+  const head = rule.trim().split('@')[0]?.trim() ?? '';
+  return head.startsWith('$.') || head.startsWith('$[');
 }
 
 /**
@@ -698,12 +749,31 @@ export async function analyzeElements(
     return directList;
   }
 
+  if (
+    isJsonDocumentContent(context.content, context.contentType) &&
+    isJsonPathListRule(compiled)
+  ) {
+    let listRule = compiled;
+    if (!listRule.includes('@')) {
+      listRule = `${listRule}@all`;
+    }
+    const viaJson = await analyzeRule(listRule, context);
+    if (viaJson.length > 0) {
+      return viaJson;
+    }
+  }
+
+  const cssList = parseCss(compiled, context.content);
+  if (cssList.length > 0) {
+    return cssList;
+  }
+
   let listRule = compiled;
   if (!listRule.includes('@')) {
     listRule = `${listRule}@all`;
   }
   const viaRule = await analyzeRule(listRule, context);
-  if (viaRule.length > 1) {
+  if (viaRule.length > 0) {
     return viaRule;
   }
 
@@ -759,14 +829,16 @@ export async function analyzeString(
   const trimmed = rule.trim();
   if (!trimmed) return '';
 
-  const { parts, op } = splitRuleByOperators(trimmed);
-  if (op === '||' && parts.length > 1) {
-    for (const part of parts) {
-      const results = await analyzeRule(part, context);
-      const hit = results.find((r) => r?.trim());
-      if (hit) return hit.trim();
+  if (!isAtomicLegadoScriptRule(trimmed) && !hasEmbeddedLegadoScript(trimmed)) {
+    const { parts, op } = splitRuleByOperators(trimmed);
+    if (op === '||' && parts.length > 1) {
+      for (const part of parts) {
+        const results = await analyzeRule(part, context);
+        const hit = results.find((r) => r?.trim());
+        if (hit) return hit.trim();
+      }
+      return '';
     }
-    return '';
   }
 
   const results = await analyzeRule(trimmed, context);

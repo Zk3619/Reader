@@ -56,6 +56,14 @@ describe('css-parser', () => {
     expect(r[0]).toContain('书名A');
   });
 
+  it('supports legado td.N index on table row', () => {
+    const tr =
+      '<tr><td>玄幻</td><td><a class="db" href="/book/1">谋臣</a></td><td>388483</td><td>连载</td></tr>';
+    expect(parseCss('td.2@text', tr)).toEqual(['388483']);
+    expect(parseCss('td.-2@text', tr)[0]?.trim()).toBe('388483');
+    expect(parseCss('td.1@a@text', tr)[0]?.trim()).toContain('谋臣');
+  });
+
   it('normalizes @text whitespace like legado jsoup', async () => {
     const sample = `
       <div class="c_row cf">
@@ -98,6 +106,74 @@ describe('jsonpath-parser', () => {
     const json = JSON.stringify({ data: { title: '嵌套标题' } });
     const r = parseJsonPath('前缀{$.data.title}后缀', json);
     expect(r[0]).toBe('前缀嵌套标题后缀');
+  });
+
+  it('strips @all extractor suffix before JSONPath query', () => {
+    const payload = JSON.stringify({
+      data: [{ book_name: '甲', author: '作者A' }, { book_name: '乙', author: '作者B' }],
+    });
+    const r = parseJsonPath('$.data@all', payload);
+    expect(r.length).toBe(2);
+    expect(r[0]).toContain('book_name');
+    expect(r[0]).toContain('甲');
+  });
+});
+
+describe('analyzeRule JSON explore (晴天聚合)', () => {
+  const listJson = JSON.stringify({
+    data: [
+      { book_name: '测试书名', author: '测试作者', book_id: 'id-1' },
+      { book_name: '第二本', author: '作者二', book_id: 'id-2' },
+    ],
+  });
+
+  it('bookList $.data@all yields per-book JSON elements', async () => {
+    const items = await analyzeRule('$.data@all', {
+      content: listJson,
+      contentType: 'json',
+    });
+    expect(items.length).toBe(2);
+    const first = JSON.parse(items[0]!);
+    expect(first.book_name).toBe('测试书名');
+  });
+
+  it('field rules $.book_name / $.author on list item', async () => {
+    const row = JSON.stringify({ book_name: '测试书名', author: '测试作者' });
+    const name = await analyzeRule('$.book_name', {
+      content: row,
+      contentType: 'json',
+    });
+    const author = await analyzeRule('$.author', {
+      content: row,
+      contentType: 'json',
+    });
+    expect(name[0]).toBe('测试书名');
+    expect(author[0]).toBe('测试作者');
+  });
+
+  it('analyzeListElements $.data@all does not treat rule as list item (explore bookList)', async () => {
+    const { analyzeListElements, analyzeString: analyzeStringFn } = await import(
+      '@/lib/rule-engine'
+    );
+    const listJson = JSON.stringify({
+      data: [
+        { book_name: '测试书名', author: '测试作者', book_id: 'id-1' },
+        { book_name: '第二本', author: '作者二', book_id: 'id-2' },
+      ],
+    });
+    const items = await analyzeListElements('$.data@all', {
+      content: listJson,
+      contentType: 'json',
+    });
+    expect(items.length).toBe(2);
+    expect(items[0]!.content).not.toBe('$.data@all');
+    const first = JSON.parse(items[0]!.content);
+    expect(first.book_name).toBe('测试书名');
+    const name = await analyzeStringFn('$.book_name', {
+      content: items[0]!.content,
+      contentType: 'json',
+    });
+    expect(name).toBe('测试书名');
   });
 });
 
@@ -234,13 +310,14 @@ describe('mixed segments', () => {
 if (result.length===0){ result; }
 result
 </js>`;
-    const out = await analyzeRule(rule, {
+    const { analyzeListElements } = await import('@/lib/rule-engine');
+    const out = await analyzeListElements(rule, {
       content: sourceHtml,
       contentType: 'html',
       baseUrl: 'https://bachashuku.org/modules/article/search.php',
     });
     expect(out.length).toBe(2);
-    expect(out[0]).toContain('novelname');
+    expect(out[0].content).toContain('novelname');
   });
 
   it('routes {{//...}} template to xpath instead of css', async () => {

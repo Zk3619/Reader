@@ -10,7 +10,10 @@ import { javaGetString, type JavaGetStringContext } from '@/lib/rule-engine/java
 import { splitSourceRule } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 import type { JsContext } from '@/lib/js-engine/quickjs-sandbox';
-import { normalizeJsRuleResult } from '@/lib/js-engine/quickjs-sandbox';
+import {
+  normalizeJsRuleResult,
+  wrapLegadoJsBodyWithImplicitReturn,
+} from '@/lib/js-engine/quickjs-sandbox';
 
 const SCRIPT_TIMEOUT_MS = 90_000;
 const MAX_AJAX_ROUNDS = 8;
@@ -72,20 +75,9 @@ const SCRIPT_BINDING_NAMES = [
   'Packages',
 ] as const;
 
-function wrapLastExpressionAsReturn(code: string): string {
-  let body = code.trim();
-  if (!body || body.includes('return ')) return body;
-  const lines = body.split(/\n/).filter((l) => l.trim());
-  const lastLine = lines[lines.length - 1]?.trim();
-  if (lastLine && !/^(var|let|const|if|for|while|function|else|\}|return\s)/.test(lastLine)) {
-    body = `${lines.slice(0, -1).join('\n')}\nreturn (${lastLine});`;
-  }
-  return body;
-}
-
 /** 对齐 evalJsFallback：显式参数 + 末行表达式自动 return（不可用 eval，否则 Illegal return） */
 function runJsSnippet(snippet: string, scope: Record<string, unknown>): unknown {
-  const body = wrapLastExpressionAsReturn(snippet);
+  const body = wrapLegadoJsBodyWithImplicitReturn(snippet);
   const fn = new Function(...SCRIPT_BINDING_NAMES, body);
   const out = fn(
     scope.result,

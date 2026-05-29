@@ -16,6 +16,7 @@ import {
   needsLegadoRuleScriptRunner,
   runLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-runner';
+import { unwrapLegadoJsSnippet } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 
 export interface JsContext {
@@ -63,10 +64,12 @@ export function isJsSandboxFallback(): boolean {
 
 export async function evalJs(code: string, context: JsContext): Promise<unknown> {
   if (!code) return null;
+  const script = unwrapLegadoJsSnippet(code);
+  if (!script) return null;
 
-  if (needsLegadoRuleScriptRunner(code)) {
+  if (needsLegadoRuleScriptRunner(script)) {
     try {
-      return await runLegadoRuleScript(code, context, context.bookSource);
+      return await runLegadoRuleScript(script, context, context.bookSource);
     } catch (e) {
       console.error('[js-engine] rule-script 执行失败:', e);
       return null;
@@ -74,18 +77,18 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
   }
 
   const needsRuleJava =
-    /\bjava\.getString\b/.test(code) ||
-    (/\bjava\.put\b/.test(code) && context.variables != null);
+    /\bjava\.getString\b/.test(script) ||
+    (/\bjava\.put\b/.test(script) && context.variables != null);
 
   try {
     await initQuickJSRuntime();
     if (!needsRuleJava && !isQuickJSFallback()) {
-      const out = await evalJsQuickJS(code, context);
+      const out = await evalJsQuickJS(script, context);
       if (out !== null) return out;
     }
-    return evalJsFallback(code, context);
+    return evalJsFallback(script, context);
   } catch (error) {
-    console.error('JS执行错误:', error, '代码:', code);
+    console.error('JS执行错误:', error, '代码:', script);
     return null;
   }
 }
@@ -110,6 +113,19 @@ async function evalJsQuickJS(code: string, context: JsContext): Promise<unknown>
   } finally {
     vm.dispose();
   }
+}
+
+/** Legado 末行表达式脚本：无 return 时自动 return(末行)；去掉末行分号避免 return(expr;); 语法错误 */
+export function wrapLegadoJsBodyWithImplicitReturn(code: string): string {
+  let body = code.trim();
+  if (!body || body.includes('return ')) return body;
+  const lines = body.split(/\n/).filter((l) => l.trim());
+  const lastLine = lines[lines.length - 1]?.trim();
+  if (!lastLine || /^(var|let|const|if|for|while|function|else|\}|return\s)/.test(lastLine)) {
+    return body;
+  }
+  const expr = lastLine.replace(/;\s*$/, '');
+  return `${lines.slice(0, -1).join('\n')}\nreturn (${expr});`;
 }
 
 function evalJsFallback(code: string, context: JsContext): unknown {
@@ -285,13 +301,10 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     java,
     JSON,
   };
-  let body = code.trim();
-  if (body && !body.includes('return ')) {
-    const lines = body.split(/\n/).filter((l) => l.trim());
-    const lastLine = lines[lines.length - 1]?.trim();
-    if (lastLine && !/^(var|let|const|if|for|while|function|else|\}|return\s)/.test(lastLine)) {
-      body = lines.slice(0, -1).join('\n') + '\nreturn (' + lastLine + ');';
-    }
+  let body = wrapLegadoJsBodyWithImplicitReturn(code);
+  const assignsResult = /\bresult\s*=/.test(code);
+  if (assignsResult && !/\breturn\b/.test(body)) {
+    body += '\n;return result;';
   }
   try {
     // 对齐 Legado Rhino：非 strict，允许书源脚本对 tag7 等隐式全局赋值

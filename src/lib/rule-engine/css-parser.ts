@@ -47,7 +47,7 @@ export function selectElementsOuterHtml(rule: string, html: string): string[] {
   if (!isValidCssSelector(selector)) return [];
 
   try {
-    const $ = cheerio.load(html, { xml: false });
+    const $ = loadHtmlForCss(html);
     const results: string[] = [];
     $(selector).each((_, element) => {
       results.push($(element).toString());
@@ -58,12 +58,24 @@ export function selectElementsOuterHtml(rule: string, html: string): string[] {
   }
 }
 
+/** Legado ElementsSingle：td.1 / td.-2 表示第 N 个 td，不是 CSS 的 class="1" */
+function isLegadoIndexedTagSelector(selector: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9]*\.-?\d+(?::(-?\d+))?(?::(-?\d+))?$/.test(selector.trim());
+}
+
+/** 可走 selectWithLegacyIndex（含 td.N / tag.N，不可交给 cheerio 当 class 选择器） */
+function usesLegacyIndexSelector(selector: string): boolean {
+  const s = selector.trim();
+  return isValidCssSelector(s) || isLegadoIndexedTagSelector(s);
+}
+
 /**
  * Legado 非 @CSS: 规则里，@ 前可能是纯文本（如分类元数据），不能交给 cheerio 当选择器。
  */
 export function isValidCssSelector(selector: string): boolean {
   const s = selector.trim();
   if (!s) return false;
+  if (isLegadoIndexedTagSelector(s)) return false;
   if (s === '*') return true;
   if (/[^\x00-\x7f]/.test(s)) return false;
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
@@ -85,6 +97,54 @@ function resolveContextElements($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
   return $('*');
 }
 
+/** HTML5 解析会丢弃 table 外的 td/tr；列表项常为裸 tr，需包一层 table 对齐 Legado/Jsoup */
+function loadHtmlForCss(html: string): cheerio.CheerioAPI {
+  const trimmed = html.trim();
+  if (/^<tr\b/i.test(trimmed) && !/<table\b/i.test(trimmed)) {
+    return cheerio.load(`<table><tbody>${trimmed}</tbody></table>`, { xml: false });
+  }
+  return cheerio.load(html, { xml: false });
+}
+
+const EXTRACTOR_KEYWORDS = new Set(['text', 'textnodes', 'owntext', 'html', 'all']);
+
+/** Legado 末段属性提取器（非 CSS 选择器） */
+const ATTR_EXTRACTOR_NAMES = new Set([
+  'href',
+  'src',
+  'alt',
+  'title',
+  'content',
+  'value',
+  'action',
+  'name',
+  'type',
+  'data',
+  'style',
+  'class',
+  'id',
+]);
+
+function isExtractorKeyword(segment: string): boolean {
+  return EXTRACTOR_KEYWORDS.has(segment.trim().toLowerCase());
+}
+
+function isAttrExtractorName(segment: string): boolean {
+  return ATTR_EXTRACTOR_NAMES.has(segment.trim().toLowerCase());
+}
+
+/**
+ * Legado @ 链末段：裸标签名（tr/td/a）、tag.x、td.1 等视为嵌套选择器，而非 @href 属性名。
+ */
+function isNestedSelectorSegment(segment: string): boolean {
+  const last = segment.trim();
+  if (!last || isExtractorKeyword(last) || isAttrExtractorName(last)) return false;
+  if (/^[.#\[:>*]/.test(last) || /\s/.test(last) || /[:\[\]()>]/.test(last)) return true;
+  if (/^(children|class|tag|id|text)(\.|$)/.test(last)) return true;
+  if (/^[a-zA-Z][a-zA-Z0-9-]*([.!:-][\w.-]*)?$/.test(last)) return true;
+  return false;
+}
+
 function isJsonDocumentContent(html: string): boolean {
   const t = html.trim();
   if (!t.startsWith('{') && !t.startsWith('[')) return false;
@@ -100,15 +160,16 @@ function parseCssSegment(rule: string, html: string): string[] {
   const normalizedRule = normalizeCssRule(rule);
   if (!normalizedRule) return [];
 
-  // JSON 列表项上误走 CSS：非选择器规则直接返回规则字面量，避免 cheerio 包一层 <body> 泄漏整段 JSON
+  // JSON 正文上误走 CSS：JSONPath（$.x）交 analyzeRule；其它非选择器勿泄漏整段 JSON
   if (isJsonDocumentContent(html)) {
     const head = normalizedRule.split('@')[0]?.trim() ?? normalizedRule;
     if (!isValidCssSelector(head)) {
+      if (/^\$\.|^\$\[/.test(head)) return [];
       return normalizedRule.trim() ? [normalizedRule.trim()] : [];
     }
   }
 
-  const $ = cheerio.load(html, { xml: false });
+  const $ = loadHtmlForCss(html);
 
   if (normalizedRule.toLowerCase().startsWith('@css:')) {
     const body = normalizedRule.slice(5).trim();
@@ -126,38 +187,33 @@ function parseCssSegment(rule: string, html: string): string[] {
   const chain = analyzer.splitRule('@');
   if (chain.length > 1) {
     const headSel = chain[0]?.trim() ?? '';
-    let elements = isValidCssSelector(headSel)
+    let elements = usesLegacyIndexSelector(headSel)
       ? selectWithLegacyIndex($, null, headSel || '*')
       : resolveContextElements($);
     const tail = chain.slice(1);
     const last = tail[tail.length - 1] || '';
-    const lowerLast = last.toLowerCase();
-    const extractorKeywords = new Set(['text', 'textnodes', 'owntext', 'html', 'all']);
-    const looksLikeSelector =
-      /^[.#\[:>*]/.test(last) ||
-      /\s/.test(last) ||
-      /[:\[\]()>]/.test(last);
+    const nestedSelectorTail = isNestedSelectorSegment(last);
 
-    // Legado 兼容：末段形如 ".c_row" / "#id" / "a:nth-child(1)" 应作为嵌套选择器，
-    // 而不是属性提取器（否则会被解释成 @.c_row 并得到空结果）。
-    const nestedCount = looksLikeSelector ? tail.length : Math.max(0, tail.length - 1);
+    // Legado 兼容：末段形如 ".c_row" / "#id" / "tr" 应作为嵌套选择器，而不是 @tr 属性。
+    const nestedCount = nestedSelectorTail ? tail.length : Math.max(0, tail.length - 1);
     for (let i = 0; i < nestedCount; i += 1) {
       elements = selectWithLegacyIndex($, elements, tail[i] || '*');
     }
 
-    const ext = looksLikeSelector
+    const ext = nestedSelectorTail
       ? '@all'
-      : extractorKeywords.has(lowerLast)
+      : isExtractorKeyword(last)
         ? `@${last}`
         : `@${last}`;
     return extractElements($, elements, ext);
   }
 
   const { rootSelector, nestedSelectors, extractor } = parseSelectorChain(normalizedRule);
-  const root = isValidCssSelector(rootSelector) ? rootSelector : '*';
-  let elements = root === '*' && !isValidCssSelector(rootSelector)
-    ? resolveContextElements($)
-    : selectWithLegacyIndex($, null, root || '*');
+  const root = usesLegacyIndexSelector(rootSelector) ? rootSelector : '*';
+  let elements =
+    root === '*' && !usesLegacyIndexSelector(rootSelector)
+      ? resolveContextElements($)
+      : selectWithLegacyIndex($, null, root || '*');
   for (const nested of nestedSelectors) {
     elements = selectWithLegacyIndex($, elements, nested);
   }
@@ -449,7 +505,7 @@ function parseSelectorChain(rule: string): {
   }
 
   let rootSelector = parts[0] || '*';
-  if (!isValidCssSelector(rootSelector)) {
+  if (!usesLegacyIndexSelector(rootSelector)) {
     rootSelector = '*';
   }
   const tail = parts.slice(1);
@@ -457,12 +513,10 @@ function parseSelectorChain(rule: string): {
     return { rootSelector, nestedSelectors: [], extractor: '@text' };
   }
 
-  const extractorKeywords = new Set(['text', 'textnodes', 'owntext', 'html', 'all']);
   const last = tail[tail.length - 1];
-  const lowerLast = last.toLowerCase();
 
   // 末段是内置提取器，直接作为 extractor
-  if (extractorKeywords.has(lowerLast)) {
+  if (isExtractorKeyword(last)) {
     return {
       rootSelector,
       nestedSelectors: tail.slice(0, -1),
@@ -470,13 +524,7 @@ function parseSelectorChain(rule: string): {
     };
   }
 
-  // 末段看起来是 CSS 选择器（如 .c_row / #id / [attr] / a:nth-child(1)）
-  const looksLikeSelector =
-    /^[.#\[:>*]/.test(last) ||
-    /\s/.test(last) ||
-    /[:\[\]()>]/.test(last);
-
-  if (looksLikeSelector) {
+  if (isNestedSelectorSegment(last)) {
     return {
       rootSelector,
       nestedSelectors: tail,

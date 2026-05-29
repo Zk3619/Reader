@@ -17,6 +17,7 @@ import {
 } from '@/lib/book-source/import-legado-archive';
 import * as sourcesDb from '@/lib/database/sources';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
+import { syncBooksOriginNameForSource } from '@/lib/bookshelf/sync-book-origin-name';
 
 export type { ImportBookSourceOptions } from '@/lib/book-source/import-booksource-merge';
 export {
@@ -154,11 +155,20 @@ export async function importSelectedBookSources(
   }
 
   let inserted = 0;
+  let syncedOriginNames = false;
   for (const incoming of allowed) {
     const existing = await sourcesDb.getSource(incoming.sourceUrl);
     const merged = mergeBookSourceForImport(incoming, existing, options);
     await sourcesDb.insertSource(merged);
     inserted += 1;
+    if (
+      existing &&
+      !options.keepName &&
+      merged.sourceName.trim() !== existing.sourceName.trim()
+    ) {
+      await syncBooksOriginNameForSource(merged.sourceUrl, merged.sourceName);
+      syncedOriginNames = true;
+    }
   }
 
   if (inserted > 0) {
@@ -166,6 +176,9 @@ export async function importSelectedBookSources(
     invalidateReplaceRulesCache();
     window.dispatchEvent(new CustomEvent('sources-refresh'));
     window.dispatchEvent(new CustomEvent('replace-rules-refresh'));
+    if (syncedOriginNames) {
+      window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+    }
   }
 
   return {

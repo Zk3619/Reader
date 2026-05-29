@@ -25,12 +25,23 @@ function flattenJsonPathResults(results: unknown[]): string[] {
   return flat.map(valueToString).filter((r) => r.trim().length > 0);
 }
 
+/** Legado JSON 列表规则常见 `$.data@all`：@ 后为提取器，不是 JSONPath 的一部分 */
+function stripJsonPathExtractor(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed.startsWith('$')) return trimmed;
+  const at = trimmed.indexOf('@');
+  if (at > 0) return trimmed.slice(0, at).trim();
+  return trimmed;
+}
+
 function parseJsonPathSingle(jsonPath: string, jsonString: string): string[] {
   if (!jsonPath || !jsonString) return [];
+  const path = stripJsonPathExtractor(jsonPath);
+  if (!path) return [];
   try {
     const json = JSON.parse(jsonString);
     const results = JSONPath({
-      path: jsonPath,
+      path,
       json,
       wrap: true,
     });

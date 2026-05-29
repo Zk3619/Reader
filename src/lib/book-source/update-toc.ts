@@ -56,6 +56,10 @@ export async function updateBookToc(bookUrl: string): Promise<string> {
 
   const oldBook = { ...book };
   let working: Book = { ...book };
+  const liveSourceName = source.sourceName.trim();
+  if (liveSourceName && working.originName.trim() !== liveSourceName) {
+    working.originName = liveSourceName;
+  }
 
   try {
     if (!working.tocUrl?.trim()) {

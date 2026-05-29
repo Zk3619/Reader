@@ -9,6 +9,8 @@
 export interface ContentRule {
   /** 正文内容规则 */
   content?: string;
+  /** 副文规则（歌词、弹幕等） */
+  subContent?: string;
   /** 标题规则（有些网站只能在正文中获取标题） */
   title?: string;
   /** 下一页正文URL规则 */
