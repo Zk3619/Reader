@@ -20,7 +20,7 @@ export function BookshelfLayoutGrid(props: {
         setContainerRef(el);
         props.ref?.(el);
       }}
-      class={cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, props.class)}
+      class={cn('grid p-1', BOOKSHELF_LAYOUT_GAP_CLASS, props.class)}
     >
       {props.children}
     </div>

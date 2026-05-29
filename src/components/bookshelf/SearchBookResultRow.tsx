@@ -40,7 +40,7 @@ export function SearchBookResultRow(props: SearchBookResultRowProps) {
   const originCount = () => getSearchResultOriginCount(props.book);
 
   return (
-    <li class={cn('w-full px-1 py-1', props.class)}>
+    <li class={cn('w-full', props.class)}>
       <Button
         variant="ghost"
         class={cn(BOOK_GROUP_CARD_BUTTON_BASE, exploreBookListCardClass())}

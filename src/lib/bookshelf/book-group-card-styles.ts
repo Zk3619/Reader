@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { getBookshelfListColumnLayout } from '@/lib/bookshelf/bookshelf-view-mode';
+import { getBookshelfListColumnLayout } from '@/lib/bookshelf/bookshelf-layout-settings';
 
 function bookshelfListIntroResponsiveClasses(
   mode: string,

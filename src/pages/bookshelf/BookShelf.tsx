@@ -17,7 +17,6 @@ import {
   createMemo,
 } from 'solid-js';
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
-import Sortable from 'sortablejs';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { bookshelfStore } from '@/stores/bookshelf';
 import { sourcesStore } from '@/stores/sources';
@@ -69,13 +68,12 @@ import {
 } from '@/lib/local-book';
 import { pinBookToBottom, pinBookToTop } from '@/lib/bookshelf/book-order';
 import {
-  bindBookshelfLayoutGap,
-  BOOKSHELF_LAYOUT_GAP_CLASS,
-} from '@/lib/bookshelf/bookshelf-layout-gap';
-import {
   getViewModeCardLayout,
-  getViewModeContainerGridClass,
-} from '@/lib/bookshelf/bookshelf-view-mode';
+  isGridViewMode,
+} from '@/lib/bookshelf/bookshelf-layout-settings';
+import { VirtualBookshelfBookGrid } from '@/components/bookshelf/VirtualBookshelfBookGrid';
+import { VirtualBookshelfBookList } from '@/components/bookshelf/VirtualBookshelfBookList';
+import type { Id } from '@thisbeyond/solid-dnd';
 import { getEffectiveTitleDisplay } from '@/lib/bookshelf/bookshelf-title-display';
 import { BookshelfCoverTitleOverlay } from '@/components/bookshelf/BookshelfCoverTitleOverlay';
 import { BookshelfGridHideTooltip } from '@/components/bookshelf/BookshelfGridHideTooltip';
@@ -512,9 +510,9 @@ export function BookShelf(props: BookShelfProps) {
 
       const toast = isLocal
         ? describeDeleteLocalBookToast(book.bookUrl, book.name, {
-            deleteFile,
-            fileDeleteFailed,
-          })
+          deleteFile,
+          fileDeleteFailed,
+        })
         : { title: '已从书架删除', description: '' };
       if (fileDeleteFailed || (deleteFile && isLocal) || isLocal) {
         showAppToast({
@@ -597,14 +595,14 @@ export function BookShelf(props: BookShelfProps) {
         if (ext !== 'txt' && ext !== 'epub') continue;
         const bookUrl =
           entry.path.startsWith('path:') ||
-          entry.path.startsWith('uri:') ||
-          entry.path.startsWith('opfs:')
+            entry.path.startsWith('uri:') ||
+            entry.path.startsWith('opfs:')
             ? entry.path
             : formatStorageRef(
-                root.kind === 'path'
-                  ? { kind: 'path', value: entry.path }
-                  : parseStorageRef(entry.path),
-              );
+              root.kind === 'path'
+                ? { kind: 'path', value: entry.path }
+                : parseStorageRef(entry.path),
+            );
         bookFiles.push(bookUrl);
       }
 
@@ -804,9 +802,9 @@ export function BookShelf(props: BookShelfProps) {
             isGroupSearchToolbar()
               ? undefined
               : (mode) => {
-                  setShelfSearchMode(mode);
-                  void saveBookshelfMainSearchMode(mode);
-                }
+                setShelfSearchMode(mode);
+                void saveBookshelfMainSearchMode(mode);
+              }
           }
           onOpenGlobalSearch={(q) => props.onOpenBookSearch?.(q)}
         />
@@ -816,7 +814,8 @@ export function BookShelf(props: BookShelfProps) {
         <Show when={showGroupPage()}>
           <BookGroupPage
             initialGroups={groups()}
-          searchQuery=""
+            searchQuery=""
+            scrollElement={bookshelfScrollRoot}
             onGroupSelect={handleGroupSelect}
             onGroupsLoaded={(g) => {
               props.onGroupsLoaded?.(g);
@@ -835,16 +834,14 @@ export function BookShelf(props: BookShelfProps) {
             showUnreadFlag={showUnreadFlag()}
             showLastUpdateTime={showLastUpdateTime()}
             sortMode={sortMode()}
+            scrollElement={bookshelfScrollRoot}
             onOpenBook={props.onOpenBook}
             onEditBook={handleEditBook}
             onDeleteBook={handleDeleteBook}
-            onBooksReorder={async (newOrderedBooks, syncState) => {
+            onBooksReorder={async (newOrderedBooks) => {
               const updates = newOrderedBooks.map((b, i) => ({ bookUrl: b.bookUrl, order: i }));
               await booksDb.updateBooksOrder(updates);
-              if (syncState) {
-                setBooks(newOrderedBooks);
-              }
-              // 拖拽排序不 setBooks：SortableJS 已重排 DOM，仅持久化顺序
+              setBooks(newOrderedBooks);
             }}
             onCoverUrlRefreshed={handleCoverUrlRefreshed}
             coverClickPreview={coverClickPreview()}
@@ -926,10 +923,11 @@ function GroupBooksView(props: {
   showUnreadFlag: boolean;
   showLastUpdateTime: boolean;
   sortMode: string;
+  scrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
-  onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
+  onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
   onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
   coverClickPreview?: boolean;
   onCoverPreview?: (book: Book) => void;
@@ -968,6 +966,7 @@ function GroupBooksView(props: {
           showUnreadFlag={props.showUnreadFlag}
           showLastUpdateTime={props.showLastUpdateTime}
           sortMode={props.sortMode}
+          scrollElement={props.scrollElement}
           onOpenBook={props.onOpenBook}
           onEditBook={props.onEditBook}
           onDeleteBook={props.onDeleteBook}
@@ -990,7 +989,7 @@ function GroupBooksView(props: {
   );
 }
 
-/** 书籍列表/网格，复用书架布局的视图模式与间距；仅当 sortMode === 'manual' 时启用 SortableJS 拖动排序 */
+/** 书籍列表/网格：虚拟列表 + solid-dnd 手动排序 */
 function BooksGrid(props: {
   books: Book[];
   viewMode: ViewMode;
@@ -998,106 +997,94 @@ function BooksGrid(props: {
   showUnreadFlag: boolean;
   showLastUpdateTime: boolean;
   sortMode: string;
+  scrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onOpenBook?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
-  onBooksReorder?: (newOrderedBooks: Book[], syncState?: boolean) => void | Promise<void>;
+  onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
   onCoverUrlRefreshed?: (bookUrl: string, newCoverUrl: string) => void;
   coverClickPreview?: boolean;
   onCoverPreview?: (book: Book) => void;
 }) {
   const manualSort = () => props.sortMode === 'manual';
+  const isGrid = () => isGridViewMode(props.viewMode);
+  const cardLayout = (): 'list' | 'compact' | 'grid' => getViewModeCardLayout(props.viewMode);
 
   const bookContextMenuActions = (): BookContextMenuActions => ({
     onEdit: (book) => props.onEditBook?.(book),
     onDelete: (book) => props.onDeleteBook?.(book),
     onPinTop: async (book) => {
       const updated = pinBookToTop(props.books, book.bookUrl);
-      if (updated) await props.onBooksReorder?.(updated, true);
+      if (updated) await props.onBooksReorder?.(updated);
     },
     onPinBottom: async (book) => {
       const updated = pinBookToBottom(props.books, book.bookUrl);
-      if (updated) await props.onBooksReorder?.(updated, true);
+      if (updated) await props.onBooksReorder?.(updated);
     },
   });
 
-  const [containerRef, setContainerRef] = createSignal<HTMLDivElement | null>(null);
-  let sortableInstance: Sortable | null = null;
+  const bookSortableEnabled = createMemo(() => manualSort());
 
-  const gridClass = createMemo(() =>
-    cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, getViewModeContainerGridClass(props.viewMode)),
-  );
-
-  const cardLayout = (): 'list' | 'compact' | 'grid' => getViewModeCardLayout(props.viewMode);
-
-  bindBookshelfLayoutGap(containerRef);
-
-  createEffect(() => {
-    const manual = props.sortMode === 'manual';
-    const container = containerRef();
-    const books = props.books;
-
-    if (!manual || !container || books.length === 0) {
-      if (sortableInstance) {
-        sortableInstance.destroy();
-        sortableInstance = null;
-      }
-      return;
-    }
-
-    if (sortableInstance && sortableInstance.el === container) return;
-
-    if (sortableInstance) {
-      sortableInstance.destroy();
-      sortableInstance = null;
-    }
-
-    sortableInstance = Sortable.create(container, {
-      animation: 150,
-      ghostClass: 'opacity-50',
-      forceFallback: true,
-      fallbackOnBody: true,
-      onEnd: (evt) => {
-        const { oldIndex, newIndex } = evt;
-        if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex || !props.onBooksReorder) return;
-        const list = [...props.books];
-        const [removed] = list.splice(oldIndex, 1);
-        list.splice(newIndex, 0, removed);
-        const newOrderedBooks = list.map((b, i) => ({ ...b, order: i }));
-        props.onBooksReorder(newOrderedBooks);
+  const bookSortable = createMemo(() => {
+    if (!bookSortableEnabled()) return undefined;
+    return {
+      enabled: bookSortableEnabled,
+      ids: () => props.books.map((b) => b.bookUrl),
+      onReorder: (ids: Id[]) => {
+        const map = new Map(props.books.map((b) => [b.bookUrl, b]));
+        const list = ids
+          .map((id) => map.get(String(id)))
+          .filter((b): b is Book => !!b);
+        if (list.length !== props.books.length) return;
+        void props.onBooksReorder?.(list.map((b, i) => ({ ...b, order: i })));
       },
-    });
-
-    onCleanup(() => {
-      if (sortableInstance) {
-        sortableInstance.destroy();
-        sortableInstance = null;
-      }
-    });
+    };
   });
 
+  const listCard = (book: Book) => (
+    <BookCardWithMenu
+      book={book}
+      layout={cardLayout()}
+      viewMode={props.viewMode}
+      titleDisplay={props.titleDisplay}
+      showUnreadFlag={props.showUnreadFlag}
+      showLastUpdateTime={props.showLastUpdateTime}
+      orderedBooks={props.books}
+      manualSort={manualSort()}
+      actions={bookContextMenuActions()}
+      onOpenBook={props.onOpenBook}
+      onCoverUrlRefreshed={props.onCoverUrlRefreshed}
+      coverClickPreview={props.coverClickPreview}
+      onCoverPreview={props.onCoverPreview}
+    />
+  );
+
   return (
-    <div ref={setContainerRef} class={gridClass()}>
-      <For each={props.books}>
-        {(book) => (
-          <BookCardWithMenu
-            book={book}
-            layout={cardLayout()}
-            viewMode={props.viewMode}
-            titleDisplay={props.titleDisplay}
-            showUnreadFlag={props.showUnreadFlag}
-            showLastUpdateTime={props.showLastUpdateTime}
-            orderedBooks={props.books}
-            manualSort={manualSort()}
-            actions={bookContextMenuActions()}
-            onOpenBook={props.onOpenBook}
-            onCoverUrlRefreshed={props.onCoverUrlRefreshed}
-            coverClickPreview={props.coverClickPreview}
-            onCoverPreview={props.onCoverPreview}
-          />
-        )}
-      </For>
-    </div>
+    <Show
+      when={isGrid()}
+      fallback={
+        <VirtualBookshelfBookList
+          books={props.books}
+          viewMode={props.viewMode}
+          showLastUpdateTime={props.showLastUpdateTime}
+          sortable={bookSortable()}
+          externalScrollElement={props.scrollElement}
+        >
+          {(book) => listCard(book)}
+        </VirtualBookshelfBookList>
+      }
+    >
+      <VirtualBookshelfBookGrid
+        books={props.books}
+        viewMode={props.viewMode}
+        bookTitleDisplay={props.titleDisplay}
+        showLastUpdateTime={props.showLastUpdateTime}
+        sortable={bookSortable()}
+        externalScrollElement={props.scrollElement}
+      >
+        {(book) => <div class="min-w-0 w-full">{listCard(book)}</div>}
+      </VirtualBookshelfBookGrid>
+    </Show>
   );
 }
 
@@ -1164,7 +1151,7 @@ function BookCardWithMenu(props: {
                           props.book,
                           props.showLastUpdateTime,
                         )))) &&
-                    'relative',
+                  'relative',
                 )}
               >
                 <Show when={props.showLastUpdateTime && props.layout === 'grid'}>

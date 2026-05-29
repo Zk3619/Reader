@@ -1,5 +1,5 @@
 /**
- * 书架管理页 PageToolbar 操作区：搜索、筛选、收藏、更多
+ * 书架管理页 PageToolbar 操作区：搜索、筛选、更多
  */
 
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
@@ -16,7 +16,6 @@ import {
 } from '@/components/shared/AppDropdownMenu';
 import {
   SearchIcon,
-  StarIcon,
   MoreIcon,
   FilterIcon,
   DownloadIcon,
@@ -168,14 +167,6 @@ export function BookshelfManagePageToolbar(props: BookshelfManagePageToolbarProp
           <TooltipContent>{props.filterTooltip || '筛选'}</TooltipContent>
         </Tooltip>
       </Show>
-
-      <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
-          <StarIcon class="h-4 w-4" />
-          <span class="sr-only">收藏</span>
-        </TooltipTrigger>
-        <TooltipContent>收藏</TooltipContent>
-      </Tooltip>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
         <Tooltip>

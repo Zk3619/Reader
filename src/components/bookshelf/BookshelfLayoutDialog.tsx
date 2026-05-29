@@ -40,7 +40,7 @@ import {
   gridViewModeOptions,
   isGridViewMode,
   isListViewMode,
-} from '@/lib/bookshelf/bookshelf-view-mode';
+} from '@/lib/bookshelf/bookshelf-layout-settings';
 import { cn } from '@/lib/utils';
 
 const sectionPanelClass =

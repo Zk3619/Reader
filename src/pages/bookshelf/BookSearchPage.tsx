@@ -67,7 +67,11 @@ import {
 } from '@/lib/bookshelf/book-group-card-styles';
 import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
-import { EXPLORE_BOOK_GRID_CLASS } from '@/pages/explore/ExploreBookCardSkeleton';
+import {
+  EXPLORE_BOOK_GRID_CLASS,
+  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
+} from '@/pages/explore/ExploreBookCardSkeleton';
+import { VirtualExploreBookGrid } from '@/components/bookshelf/VirtualExploreBookGrid';
 
 export interface BookSearchPageProps {
   initialQuery?: string;
@@ -275,8 +279,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
     void session.search('', []);
   };
 
-  const handleScroll = (e: Event) => {
-    const el = e.currentTarget as HTMLDivElement;
+  const handleScroll = (el: HTMLDivElement) => {
     if (el.scrollHeight - el.scrollTop - el.clientHeight > 80) return;
     loadMore();
   };
@@ -417,7 +420,18 @@ export function BookSearchPage(props: BookSearchPageProps) {
         </div>
       </div>
 
-      <div class={cn(mainShellPageScroll, 'px-2')} onScroll={handleScroll}>
+      <div
+        class={cn(
+          'px-2',
+          submitted() && !helpVisible()
+            ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+            : mainShellPageScroll,
+        )}
+        onScroll={(e) => {
+          if (submitted() && !helpVisible()) return;
+          handleScroll(e.currentTarget);
+        }}
+      >
         <Show when={helpVisible()}>
           <section class="pt-3">
             <Show
@@ -463,7 +477,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
               }
             >
               <h3 class="mb-2 text-xs font-medium text-muted-foreground">书架</h3>
-              <ul class={cn('mb-4', EXPLORE_BOOK_GRID_CLASS)}>
+              <ul class={cn('mb-4 p-1', EXPLORE_BOOK_GRID_CLASS)}>
                 <For each={filteredLocal()}>
                   {(book) => (
                     <li class="w-full">
@@ -561,14 +575,19 @@ export function BookSearchPage(props: BookSearchPageProps) {
         </Show>
 
         <Show when={submitted()}>
-          <section class="pb-8">
+          <section class="flex min-h-0 flex-1 flex-col pb-2">
             <Show when={!searching() && onlineResults().length === 0}>
               <p class="py-12 text-center text-sm text-muted-foreground">
                 {manualStop() ? '搜索已停止' : '暂无搜索结果'}
               </p>
             </Show>
-            <ul class={EXPLORE_BOOK_GRID_CLASS}>
-              <For each={onlineResults()}>
+            <Show when={onlineResults().length > 0}>
+              <VirtualExploreBookGrid
+                class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
+                items={onlineResults()}
+                rowHeight={EXPLORE_BOOK_GRID_ROW_HEIGHT_PX}
+                onScroll={handleScroll}
+              >
                 {(book) => (
                   <SearchBookResultRow
                     book={book}
@@ -588,10 +607,10 @@ export function BookSearchPage(props: BookSearchPageProps) {
                     }}
                   />
                 )}
-              </For>
-            </ul>
+              </VirtualExploreBookGrid>
+            </Show>
             <Show when={searching()}>
-              <p class="py-6 text-center text-sm text-muted-foreground">正在从各书源搜索…</p>
+              <p class="shrink-0 py-6 text-center text-sm text-muted-foreground">正在从各书源搜索…</p>
             </Show>
           </section>
         </Show>

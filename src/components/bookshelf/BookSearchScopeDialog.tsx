@@ -33,8 +33,9 @@ import {
   scopeDisplayNames,
   type SearchScopeTab,
 } from '@/lib/book-source/search-scope';
-import { fuzzyMatchQuery } from '@/lib/sources/filters';
+import { fuzzyMatchQuery } from '@/lib/sources/source-list-filter';
 import { cn } from '@/lib/utils';
+import { dialogVirtualListPanelWidth } from '@/lib/ui/viewport-classes';
 import type { BookSource } from '@/types';
 
 const ROW_HEIGHT = 40;
@@ -417,7 +418,10 @@ export function BookSearchScopeDialog(props: BookSearchScopeDialogProps) {
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <AppDialogContent
         layout="app"
-        class="flex h-[min(85dvh,560px)] flex-col gap-0 overflow-hidden p-0"
+        class={cn(
+          dialogVirtualListPanelWidth,
+          'flex h-[min(85dvh,560px)] flex-col gap-0 overflow-hidden p-0',
+        )}
       >
         <AppDialogHeader class="shrink-0 px-6 pt-6">
           <AppDialogTitle>搜索范围</AppDialogTitle>
@@ -436,7 +440,7 @@ export function BookSearchScopeDialog(props: BookSearchScopeDialogProps) {
             <TabsTrigger value="source">书源</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="group" class="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-[selected]:flex">
+          <TabsContent value="group" class="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-selected:flex">
             <ScopeSearchToolbar
               placeholder="搜索分组"
               searchQuery={groupSearch}
@@ -463,7 +467,7 @@ export function BookSearchScopeDialog(props: BookSearchScopeDialogProps) {
             />
           </TabsContent>
 
-          <TabsContent value="source" class="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-[selected]:flex">
+          <TabsContent value="source" class="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden data-selected:flex">
             <ScopeSearchToolbar
               placeholder="搜索书源"
               searchQuery={sourceSearch}

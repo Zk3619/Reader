@@ -16,6 +16,9 @@ import * as booksDb from '@/lib/database/books';
 import * as groupsDb from '@/lib/database/book-groups';
 import {
   formatBookshelfManageFilterSummary,
+  formatBookshelfManageToolbarDescription,
+  effectiveBookshelfManageGroupIds,
+  effectiveBookshelfManageSourceNames,
   loadBookshelfManagePrefs,
   saveBookshelfManagePrefs,
 } from '@/lib/bookshelf/bookshelf-manage-prefs';
@@ -202,18 +205,28 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
     return map;
   });
 
+  const allBookGroupIds = createMemo(() =>
+    userGroups()
+      .filter((g) => g.groupId > 0)
+      .map((g) => g.groupId),
+  );
+
   const filteredBooks = createMemo(() => {
     const q = searchQuery().trim();
     const mode = searchMode();
-    const groupIds = appliedBookGroupIds();
-    const selectedSourceNames = appliedSourceNames();
+    const effGroupIds = filterByBookGroup()
+      ? effectiveBookshelfManageGroupIds(appliedBookGroupIds(), allBookGroupIds())
+      : [];
+    const effSourceNames = filterBySource()
+      ? effectiveBookshelfManageSourceNames(appliedSourceNames(), sourceNames())
+      : [];
     const nameMap = userGroupNameMap();
     let list = books();
-    if (filterByBookGroup() && groupIds.length > 0) {
-      list = list.filter((b) => groupIds.some((gid) => gid > 0 && (b.group & gid) !== 0));
+    if (effGroupIds.length > 0) {
+      list = list.filter((b) => effGroupIds.some((gid) => gid > 0 && (b.group & gid) !== 0));
     }
-    if (filterBySource() && selectedSourceNames.length > 0) {
-      list = list.filter((b) => selectedSourceNames.includes(getBookshelfBookSourceName(b)));
+    if (effSourceNames.length > 0) {
+      list = list.filter((b) => effSourceNames.includes(getBookshelfBookSourceName(b)));
     }
     if (q) {
       list = filterBookshelfManageBooks(list, q, mode, (b) => {
@@ -233,13 +246,20 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
   const allFilteredSelected = () =>
     filteredBooks().length > 0 && filteredSelectedCount() === filteredBooks().length;
 
+  const filterSummaryOpts = () => ({
+    filterByBookGroup: filterByBookGroup(),
+    filterBySource: filterBySource(),
+    appliedBookGroupIds: appliedBookGroupIds(),
+    appliedSourceNames: appliedSourceNames(),
+    userGroupNames: userGroupNameMap(),
+    allBookGroupIds: allBookGroupIds(),
+    allSourceNames: sourceNames(),
+  });
+
   const filterConditionText = () =>
     formatBookshelfManageFilterSummary({
-      filterByBookGroup: filterByBookGroup(),
-      filterBySource: filterBySource(),
-      appliedBookGroupIds: appliedBookGroupIds(),
-      appliedSourceNames: appliedSourceNames(),
-      userGroupNames: userGroupNameMap(),
+      ...filterSummaryOpts(),
+      bookCount: filteredBooks().length,
     });
 
   const showFilterButton = () => filterByBookGroup() || filterBySource();
@@ -247,8 +267,10 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
   const pageDescription = () => {
     const n = filteredBooks().length;
     if (showFilterButton()) {
-      const cond = filterConditionText();
-      return cond ? `${cond} · 共 ${n} 本书` : `共 ${n} 本书`;
+      return formatBookshelfManageToolbarDescription({
+        ...filterSummaryOpts(),
+        bookCount: n,
+      });
     }
     return n > 0 ? `共 ${n} 本书` : undefined;
   };

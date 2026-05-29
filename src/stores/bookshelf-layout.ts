@@ -5,10 +5,12 @@
 
 import { createStore } from 'solid-js/store';
 import {
+  defaultBookshelfLayoutSettings,
   getViewModeGridColumnCount,
   isGridViewMode,
   isListViewMode,
-} from '@/lib/bookshelf/bookshelf-view-mode';
+  type BookshelfLayoutSettings,
+} from '@/lib/bookshelf/bookshelf-layout-settings';
 import {
   loadBookshelfPageLayoutSettings,
   saveBookshelfPageLayoutSettings,
@@ -23,11 +25,6 @@ export type {
 } from '@/lib/bookshelf/bookshelf-layout-settings';
 
 export { defaultBookshelfLayoutSettings } from '@/lib/bookshelf/bookshelf-layout-settings';
-
-import {
-  defaultBookshelfLayoutSettings,
-  type BookshelfLayoutSettings,
-} from '@/lib/bookshelf/bookshelf-layout-settings';
 
 /**
  * 从存储加载设置

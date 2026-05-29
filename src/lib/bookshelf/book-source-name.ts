@@ -1,4 +1,5 @@
 import { isLocalBook } from '@/lib/local-book';
+import { sourcesStore } from '@/stores/sources';
 import type { Book, BookGroup } from '@/types';
 
 /** 书架管理/筛选中本地书统一显示的来源名 */
@@ -7,6 +8,10 @@ export const LOCAL_BOOK_SOURCE_DISPLAY_NAME = '本地';
 /** 书籍在书架管理中的来源名（本地书统一为「本地」） */
 export function getBookshelfBookSourceName(book: Book): string {
   if (isLocalBook(book)) return LOCAL_BOOK_SOURCE_DISPLAY_NAME;
+  const live = sourcesStore.state.bookSources
+    .find((s) => s.sourceUrl === book.origin)
+    ?.sourceName?.trim();
+  if (live) return live;
   return book.originName?.trim() ?? '';
 }
 

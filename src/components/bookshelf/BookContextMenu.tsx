@@ -10,6 +10,7 @@ import {
   AppContextMenuSeparator,
   AppContextMenuTrigger,
 } from '@/components/shared/AppContextMenu';
+import { useSuppressClickAfterDrag } from '@/components/shared/virtual-list/use-suppress-click-after-drag';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { findBookOrderIndex } from '@/lib/bookshelf/book-order';
 import type { Book } from '@/types';
@@ -187,6 +188,7 @@ export interface BookContextMenuProps extends ParentProps {
 
 export function BookContextMenu(props: BookContextMenuProps) {
   const longPress = useBookContextMenuLongPress();
+  const shouldSuppressClickAfterDrag = useSuppressClickAfterDrag();
 
   return (
     <AppContextMenu>
@@ -197,7 +199,10 @@ export function BookContextMenu(props: BookContextMenuProps) {
         role="button"
         tabIndex={0}
         onClick={(e: MouseEvent) => {
-          if (longPress.shouldPreventClick()) {
+          if (
+            longPress.shouldPreventClick() ||
+            (props.manualSort && shouldSuppressClickAfterDrag())
+          ) {
             e.preventDefault();
             e.stopPropagation();
             return;

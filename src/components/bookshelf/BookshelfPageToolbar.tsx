@@ -1,5 +1,5 @@
 /**
- * 书架页操作区：搜索（本地过滤 + 回车全网搜索）、收藏占位、更多菜单
+ * 书架页操作区：搜索（本地过滤 + 回车全网搜索）、更多菜单
  */
 
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
@@ -16,7 +16,6 @@ import {
 } from '@/components/shared/AppDropdownMenu';
 import {
   SearchIcon,
-  StarIcon,
   MoreIcon,
   RefreshIcon,
   FolderPlusIcon,
@@ -114,14 +113,6 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
             <span class="sr-only">搜索</span>
           </TooltipTrigger>
           <TooltipContent>{isGroupSearch() ? '进入搜索页' : '进入搜索页'}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
-            <StarIcon class="h-4 w-4" />
-            <span class="sr-only">收藏</span>
-          </TooltipTrigger>
-          <TooltipContent>收藏</TooltipContent>
         </Tooltip>
 
         <Show when={props.showReloadLocal}>

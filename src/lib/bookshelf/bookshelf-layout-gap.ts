@@ -11,6 +11,14 @@ export function bookshelfLayoutGapToRem(spacing: number): string {
   return `${spacing * 0.25}rem`;
 }
 
+/** 布局 spacing → px（与 bindBookshelfLayoutGap / 虚拟行高计算同源） */
+export function bookshelfLayoutSpacingToPx(spacing: number): number {
+  const rem = spacing * 0.25;
+  if (typeof document === 'undefined') return rem * 16;
+  const root = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  return rem * (Number.isFinite(root) && root > 0 ? root : 16);
+}
+
 /** 将布局设置中的 spacing 绑定到容器，避免在 JSX 中使用内联 style */
 export function bindBookshelfLayoutGap(container: Accessor<HTMLElement | null | undefined>) {
   createEffect(() => {
