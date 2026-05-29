@@ -1,9 +1,9 @@
 /**
- * 阅读器主页面
- * 参考 legado：全屏阅读、顶部栏（返回/书名/目录/设置）、正文区、左右点击上一章/下一章、目录与设置面板
+ * 文本阅读器（BookReader）
+ * 参考 legado ReadBookActivity：全屏阅读、顶部栏、正文区、目录与设置
  */
 
-import { createSignal, Show, onMount, onCleanup, createEffect } from 'solid-js';
+import { createSignal, Show, Index, onMount, onCleanup, createEffect } from 'solid-js';
 import { readerStore } from '@/stores/reader';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -28,6 +28,28 @@ import { ReaderSettings } from '@/pages/reader/ReaderSettings';
 import { ReaderCatalog } from '@/pages/reader/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/pages/reader/ReaderCommentsDrawer';
 import { ReaderOfflineCacheDialog } from '@/components/reader/ReaderOfflineCacheDialog';
+import { ReaderMoreMenu } from '@/components/reader/ReaderMoreMenu';
+import { ReaderSearchDrawer } from '@/components/reader/ReaderSearchDrawer';
+import { ReaderBookmarksDrawer } from '@/components/reader/ReaderBookmarksDrawer';
+import { ReaderChangeSourceDialog } from '@/components/reader/ReaderChangeSourceDialog';
+import { ReaderClickRegionalOverlay } from '@/components/reader/ReaderClickRegionalOverlay';
+import { shouldShowClickActionHint } from '@/lib/reader/reader-click-hint-storage';
+import { resolveClickZone } from '@/lib/reader/reader-click-region';
+import { getHttpTTS } from '@/lib/database/http-tts';
+import {
+  startReadAloud,
+  stopReadAloud,
+  toggleReadAloudPause,
+  getReadAloudState,
+  isReadAloudSupported,
+} from '@/lib/reader/read-aloud';
+import { type ReaderClickActionId } from '@/lib/reader/reader-click-actions';
+import {
+  addReaderBookmark,
+  selectionTextFromDocument,
+  plainChapterExcerpt,
+} from '@/lib/reader/reader-bookmark';
+import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 import { isLocalBook } from '@/lib/local-book';
@@ -40,7 +62,8 @@ import {
   MoreIcon,
   ReplaceIcon,
   DownloadIcon,
-  VolumeIcon,
+  VolumeOnIcon,
+  VolumeOffIcon,
   ThemeLightIcon,
   ThemeDarkIcon,
 } from '@/components/shared/icons';
@@ -67,13 +90,16 @@ const READER_THEME_BAR: Record<number, { bg: string; text: string; border: strin
   6: { bg: 'bg-[#1e1e1e]', text: 'text-[#cfcfcf]', border: 'border-t-[#616161]' },
 };
 
-export interface ReaderPageProps {
+export interface BookReaderProps {
   onClose: () => void;
   /** 点击顶栏书名时进入书籍信息页（不传则书名不可点） */
   onOpenBookInfo?: () => void;
 }
 
-export function ReaderPage(props: ReaderPageProps) {
+/** @deprecated 使用 BookReader */
+export type ReaderPageProps = BookReaderProps;
+
+export function BookReader(props: BookReaderProps) {
   const [topBarVisible, setTopBarVisible] = createSignal(true);
   /** 沉浸模式：仅正文，隐藏顶栏/底栏/段评气泡，禁用中间点击 */
   const [immersiveMode, setImmersiveMode] = createSignal(false);
@@ -85,6 +111,15 @@ export function ReaderPage(props: ReaderPageProps) {
   const [readerMenuDrawerOpen, setReaderMenuDrawerOpen] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
+  const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [searchOpen, setSearchOpen] = createSignal(false);
+  const [bookmarksOpen, setBookmarksOpen] = createSignal(false);
+  const [contentEnterKey, setContentEnterKey] = createSignal(0);
+  const [changeSourceOpen, setChangeSourceOpen] = createSignal(false);
+  const [clickRegionalOpen, setClickRegionalOpen] = createSignal(false);
+  const [clickRegionalMarkHint, setClickRegionalMarkHint] = createSignal(false);
+  const [readAloudActive, setReadAloudActive] = createSignal(false);
+  const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
   /** 阅读进度状态栏选项行：整行可点触发 radio，仅本弹窗使用 */
   const statusBarOptionRowClass =
     'flex cursor-pointer items-center rounded-md px-2 py-1.5 hover:bg-muted/50 has-[[data-checked]]:bg-accent has-[[data-checked]]:text-accent-foreground'
@@ -182,8 +217,141 @@ export function ReaderPage(props: ReaderPageProps) {
     }
   });
 
-  const handlePrev = () => readerStore.prevChapter();
-  const handleNext = () => readerStore.nextChapter();
+  const handlePrev = () => void readerStore.prevChapter();
+  const handleNext = () => void readerStore.nextChapter();
+
+  const canUseBookmarks = () => {
+    const b = book();
+    return !!b && !readerStore.isGuestReading();
+  };
+
+  const handleAddBookmark = async () => {
+    const b = book();
+    const ch = currentChapter();
+    if (!b || !ch) return;
+    try {
+      const selected = selectionTextFromDocument();
+      await addReaderBookmark({
+        book: b,
+        chapterIndex: chapterIndex(),
+        chapterPos: chapterPos(),
+        chapterTitle: ch.title,
+        selectedText: selected || plainChapterExcerpt(content()),
+      });
+      showAppToast({ title: '已添加书签' });
+    } catch (e) {
+      showAppToast({
+        title: '添加书签失败',
+        description: e instanceof Error ? e.message : '未知错误',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleJumpBookmark = async (bm: Bookmark) => {
+    await readerStore.jumpToChapter(bm.chapterIndex);
+    readerStore.setChapterPos(bm.chapterPos);
+    requestAnimationFrame(() => {
+      if (scrollContainer) {
+        const sh = scrollContainer.scrollHeight;
+        const ch = scrollContainer.clientHeight;
+        scrollContainer.scrollTop =
+          sh > ch ? bm.chapterPos * (sh - ch) : 0;
+      }
+    });
+  };
+
+  const syncReadAloudActive = () => {
+    const st = getReadAloudState();
+    setReadAloudActive(st === 'playing' || st === 'paused');
+  };
+
+  const handleReadAloud = async () => {
+    const st = getReadAloudState();
+    if (st === 'playing' || st === 'paused') {
+      toggleReadAloudPause();
+      syncReadAloudActive();
+      showAppToast({
+        title: st === 'playing' ? '已暂停朗读' : '继续朗读',
+      });
+      return;
+    }
+    const cfg = readerStore.state.config;
+    const httpTts =
+      cfg.aloudEngine === 'httpTts' && cfg.httpTtsId != null
+        ? await getHttpTTS(cfg.httpTtsId)
+        : null;
+    if (cfg.aloudEngine === 'httpTts' && !httpTts) {
+      showAppToast({
+        title: '未配置 HttpTTS',
+        description: '请在设置 → 朗读引擎中选择在线朗读源',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (cfg.aloudEngine !== 'httpTts' && !isReadAloudSupported()) {
+      showAppToast({
+        title: '不支持朗读',
+        description: '当前环境无法使用语音合成',
+      });
+      return;
+    }
+    const ok = await startReadAloud(content(), {
+      engine: cfg.aloudEngine,
+      httpTts,
+      speakSpeed: cfg.speakSpeed,
+      onEnd: () => {
+        setReadAloudActive(false);
+        showAppToast({ title: '朗读结束' });
+      },
+      onError: (msg) => {
+        setReadAloudActive(false);
+        showAppToast({ title: '朗读失败', description: msg, variant: 'destructive' });
+      },
+    });
+    if (ok) {
+      setReadAloudActive(true);
+      showAppToast({ title: '开始朗读' });
+    }
+  };
+
+  const dualPageActive = () => {
+    const mode = readerStore.state.config.dualPage ?? 'auto';
+    if (mode === 'off') return false;
+    if (mode === 'always') return isWideScreen();
+    return isWideScreen() && window.innerWidth >= 900;
+  };
+
+  const runClickAction = (action: ReaderClickActionId) => {
+    switch (action) {
+      case 'menu':
+        toggleTopBar();
+        break;
+      case 'nextPage':
+        handleNext();
+        break;
+      case 'prevPage':
+        handlePrev();
+        break;
+      case 'nextChapter':
+        void handleNext();
+        break;
+      case 'prevChapter':
+        void handlePrev();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const pageAnim = () => readerStore.state.config.pageAnim ?? 'scroll';
+  const contentTransitionClass = () => {
+    const anim = pageAnim();
+    if (anim === 'cover') return 'reader-chapter-enter-cover';
+    if (anim === 'slide') return 'reader-chapter-enter-slide';
+    if (anim === 'none') return '';
+    return '';
+  };
 
   /** 操作栏进度条：拖动时更新本章进度并同步滚动位置 */
   const handleChapterProgressChange = (values: number[]) => {
@@ -259,9 +427,30 @@ export function ReaderPage(props: ReaderPageProps) {
     onCleanup(() => observer.disconnect());
   });
 
+  const dismissClickRegional = () => {
+    setClickRegionalOpen(false);
+    setClickRegionalMarkHint(false);
+  };
+
+  const openClickRegionalConfig = (fromFirstHint = false) => {
+    setClickRegionalMarkHint(fromFirstHint);
+    setClickRegionalOpen(true);
+  };
+
+  onMount(() => {
+    void shouldShowClickActionHint().then((show) => {
+      if (show) openClickRegionalConfig(true);
+    });
+  });
+
   onMount(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (clickRegionalOpen()) {
+          if (clickActionPickerOpen()) return;
+          dismissClickRegional();
+          return;
+        }
         setCatalogOpen(false);
         setSettingsOpen(false);
         if (immersiveMode()) setImmersiveMode(false);
@@ -270,6 +459,16 @@ export function ReaderPage(props: ReaderPageProps) {
       }
       if (e.key === 'ArrowLeft') handlePrev();
       if (e.key === 'ArrowRight') handleNext();
+      if (readerStore.state.config.volumeKeyTurnPage) {
+        if (e.key === 'ArrowUp' || e.code === 'AudioVolumeUp') {
+          e.preventDefault();
+          handlePrev();
+        }
+        if (e.key === 'ArrowDown' || e.code === 'AudioVolumeDown') {
+          e.preventDefault();
+          handleNext();
+        }
+      }
     };
     window.addEventListener('keydown', handleKey);
     onCleanup(() => window.removeEventListener('keydown', handleKey));
@@ -320,6 +519,10 @@ export function ReaderPage(props: ReaderPageProps) {
     
     // 检测章节切换：如果章节索引变化了，重置滚动位置到顶部
     if (lastChapterIndex !== -1 && lastChapterIndex !== index) {
+      const anim = readerStore.state.config.pageAnim ?? 'scroll';
+      if (anim !== 'scroll') {
+        setContentEnterKey((k) => k + 1);
+      }
       // 章节切换了，重置滚动位置到顶部
       requestAnimationFrame(() => {
         if (scrollContainer) {
@@ -399,6 +602,8 @@ export function ReaderPage(props: ReaderPageProps) {
   });
 
   onCleanup(() => {
+    stopReadAloud();
+    setReadAloudActive(false);
     // 清理定时器和监听器
     if (scrollSaveTimer !== null) {
       clearTimeout(scrollSaveTimer);
@@ -429,18 +634,21 @@ export function ReaderPage(props: ReaderPageProps) {
   const onContentClick = (e: MouseEvent) => {
     const t = e.currentTarget as HTMLElement;
     const rect = t.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const w = rect.width;
-    if (x < w * 0.2) handlePrev();
-    else if (x > w * 0.8) handleNext();
-    else {
-      if (immersiveMode()) {
-        tapStartTime = 0;
-        return;
-      }
-      const wasLongPress = tapStartTime && Date.now() - tapStartTime >= LONG_PRESS_MS;
-      if (!tapMoved && !wasLongPress) toggleTopBar();
+    const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
+    const yRatio = (e.clientY - rect.top) / Math.max(rect.height, 1);
+    const zone = resolveClickZone(xRatio, yRatio, readerStore.state.config.clickRegion);
+    const actions = readerStore.state.config.clickActions;
+    const action = actions[zone] ?? 'menu';
+    const wasLongPress = tapStartTime && Date.now() - tapStartTime >= LONG_PRESS_MS;
+    if (tapMoved || wasLongPress) {
+      tapStartTime = 0;
+      return;
     }
+    if (immersiveMode() && action === 'menu') {
+      tapStartTime = 0;
+      return;
+    }
+    runClickAction(action);
     tapStartTime = 0;
   };
 
@@ -460,13 +668,18 @@ export function ReaderPage(props: ReaderPageProps) {
               onPointerMove={onContentPointerMove}
               onClick={onContentClick}
             >
-              <ReaderContent
-                class="min-h-full"
-                onOpenComments={openComments}
-                getSegmentCommentCount={getSegmentCommentCount}
-                hideCommentBubbles={immersiveMode()}
-                applyReadWidth={() => isWideScreen() || !isMobile()}
-              />
+              <Index each={[contentEnterKey()]}>
+                {() => (
+                  <ReaderContent
+                    class={cn('min-h-full', contentTransitionClass())}
+                    onOpenComments={openComments}
+                    getSegmentCommentCount={getSegmentCommentCount}
+                    hideCommentBubbles={immersiveMode()}
+                    applyReadWidth={() => isWideScreen() || !isMobile()}
+                    dualPage={dualPageActive()}
+                  />
+                )}
+              </Index>
             </div>
           }
         >
@@ -481,13 +694,18 @@ export function ReaderPage(props: ReaderPageProps) {
                 onPointerMove={onContentPointerMove}
                 onClick={onContentClick}
               >
-                <ReaderContent
-                  class="min-h-full"
-                  onOpenComments={openComments}
-                  getSegmentCommentCount={getSegmentCommentCount}
-                  hideCommentBubbles={immersiveMode()}
-                  applyReadWidth={() => isWideScreen() || !isMobile()}
-                />
+                <Index each={[contentEnterKey()]}>
+                  {() => (
+                    <ReaderContent
+                      class={cn('min-h-full', contentTransitionClass())}
+                      onOpenComments={openComments}
+                      getSegmentCommentCount={getSegmentCommentCount}
+                      hideCommentBubbles={immersiveMode()}
+                      applyReadWidth={() => isWideScreen() || !isMobile()}
+                      dualPage={dualPageActive()}
+                    />
+                  )}
+                </Index>
               </div>
             </div>
             <div
@@ -555,10 +773,29 @@ export function ReaderPage(props: ReaderPageProps) {
         {/* 宽屏时显示：换源/刷新/缓存/更多在沉浸左侧，整体右对齐 */}
         <Show when={isWideScreen()}>
           <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="no-drag" onClick={() => {}} aria-label="换源">
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={() => {
+                const b = book();
+                if (!b || readerStore.isGuestReading() || isLocalBook(b)) {
+                  showAppToast({
+                    title: '无法换源',
+                    description: readerStore.isGuestReading()
+                      ? '试读请先加入书架'
+                      : '本地书不支持换源',
+                  });
+                  return;
+                }
+                setChangeSourceOpen(true);
+              }}
+              aria-label="换源"
+            >
               <ReplaceIcon class="size-5" />
             </TooltipTrigger>
-            <TooltipContent>换源（敬请期待）</TooltipContent>
+            <TooltipContent>换源</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button}
@@ -592,10 +829,17 @@ export function ReaderPage(props: ReaderPageProps) {
             <TooltipContent>离线缓存</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="no-drag" onClick={() => {}} aria-label="更多">
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={() => setMoreMenuOpen(true)}
+              aria-label="更多"
+            >
               <MoreIcon class="size-5" />
             </TooltipTrigger>
-            <TooltipContent>更多（敬请期待）</TooltipContent>
+            <TooltipContent>更多</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button}
@@ -641,12 +885,16 @@ export function ReaderPage(props: ReaderPageProps) {
               variant="ghost"
               size="icon"
               class="no-drag"
-              onClick={() => {}}
+              onClick={handleReadAloud}
               aria-label="朗读"
             >
-              <VolumeIcon class="size-5" size={20} />
+              {readAloudActive() ? (
+                <VolumeOffIcon class="size-5" size={20} />
+              ) : (
+                <VolumeOnIcon class="size-5" size={20} />
+              )}
             </TooltipTrigger>
-            <TooltipContent>朗读（敬请期待）</TooltipContent>
+            <TooltipContent>朗读</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button}
@@ -778,13 +1026,17 @@ export function ReaderPage(props: ReaderPageProps) {
                 variant="ghost"
                 size="sm"
                 class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-                onClick={() => {}}
+                onClick={handleReadAloud}
                 aria-label="朗读"
               >
-                <VolumeIcon class="h-4 w-4" size={16} />
+                {readAloudActive() ? (
+                  <VolumeOffIcon class="h-4 w-4" size={16} />
+                ) : (
+                  <VolumeOnIcon class="h-4 w-4" size={16} />
+                )}
                 <span>朗读</span>
               </TooltipTrigger>
-              <TooltipContent>朗读（敬请期待）</TooltipContent>
+              <TooltipContent>朗读</TooltipContent>
             </Tooltip>
             <Button
               variant="ghost"
@@ -830,7 +1082,11 @@ export function ReaderPage(props: ReaderPageProps) {
           snapPoints={[0, 1]}
           defaultSnapPoint={1}
         >
-          <AppDrawerContent class="z-100 flex h-full w-full max-w-sm flex-col" overlayClass="z-100">
+          <AppDrawerContent
+            class="z-100 flex h-full w-full max-w-sm flex-col"
+            overlayClass="z-100"
+            showNativeDragHandle={false}
+          >
             <AppDrawerHeader title="目录" />
             <AppDrawerBody>
               <Show when={catalogOpen()}>
@@ -852,10 +1108,18 @@ export function ReaderPage(props: ReaderPageProps) {
 
       {/* 阅读设置 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
       <AppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
-        <AppDrawerContent class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)} overlayClass="z-100">
+        <AppDrawerContent
+          class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
+          overlayClass="z-100"
+          showNativeDragHandle={false}
+        >
           <AppDrawerHeader title="阅读设置" />
           <AppDrawerBody class="px-4 pb-6 pt-1">
-            <ReaderSettings onClose={() => setSettingsOpen(false)} showReadWidth={() => isWideScreen() || !isMobile()} />
+            <ReaderSettings
+              onClose={() => setSettingsOpen(false)}
+              showReadWidth={() => isWideScreen() || !isMobile()}
+              onOpenClickRegionalConfig={() => openClickRegionalConfig(false)}
+            />
           </AppDrawerBody>
         </AppDrawerContent>
       </AppDrawer>
@@ -869,9 +1133,55 @@ export function ReaderPage(props: ReaderPageProps) {
         closeOnOutsideFocus={!statusBarStyleDialogOpen()}
         closeOnOutsidePointer={!statusBarStyleDialogOpen()}
       >
-        <AppDrawerContent class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)} overlayClass="z-100">
+        <AppDrawerContent
+          class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
+          overlayClass="z-100"
+          showNativeDragHandle={false}
+        >
           <AppDrawerHeader title="设置" />
           <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6">
+            <Button
+              variant="ghost"
+              class="w-full justify-start"
+              onClick={() => {
+                setReaderMenuDrawerOpen(false);
+                setSearchOpen(true);
+              }}
+            >
+              全书搜索
+            </Button>
+            <Show when={canUseBookmarks()}>
+              <Button
+                variant="ghost"
+                class="w-full justify-start"
+                onClick={() => {
+                  setReaderMenuDrawerOpen(false);
+                  void handleAddBookmark();
+                }}
+              >
+                添加书签
+              </Button>
+              <Button
+                variant="ghost"
+                class="w-full justify-start"
+                onClick={() => {
+                  setReaderMenuDrawerOpen(false);
+                  setBookmarksOpen(true);
+                }}
+              >
+                本书书签
+              </Button>
+            </Show>
+            <Button
+              variant="ghost"
+              class="w-full justify-start"
+              onClick={() => {
+                setReaderMenuDrawerOpen(false);
+                setMoreMenuOpen(true);
+              }}
+            >
+              更多选项
+            </Button>
             {/* 阅读进度状态栏的显示风格 */}
             <div class="flex items-center justify-between gap-3 py-2">
               <span class="text-sm text-foreground">阅读进度状态栏的显示风格</span>
@@ -973,6 +1283,64 @@ export function ReaderPage(props: ReaderPageProps) {
         chapterIndex={readerStore.state.chapterIndex}
         catalogSize={catalogSize()}
       />
+
+      <ReaderMoreMenu
+        open={moreMenuOpen()}
+        onOpenChange={setMoreMenuOpen}
+        canBookmark={canUseBookmarks()}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenBookmarks={() => setBookmarksOpen(true)}
+        onAddBookmark={() => void handleAddBookmark()}
+      />
+
+      <ReaderSearchDrawer
+        open={searchOpen()}
+        onOpenChange={setSearchOpen}
+        onJumpToChapter={(index) => void readerStore.jumpToChapter(index)}
+      />
+
+      <ReaderBookmarksDrawer
+        open={bookmarksOpen()}
+        onOpenChange={setBookmarksOpen}
+        book={book() ?? null}
+        onJump={(bm) => void handleJumpBookmark(bm)}
+      />
+
+      <ReaderChangeSourceDialog
+        open={changeSourceOpen()}
+        onOpenChange={setChangeSourceOpen}
+        book={book() ?? null}
+        onChanged={async (nextBook) => {
+          await readerStore.openBook(nextBook);
+        }}
+      />
+
+      <ReaderClickRegionalOverlay
+        open={clickRegionalOpen()}
+        markHintSeenOnClose={clickRegionalMarkHint()}
+        onClose={dismissClickRegional}
+        onPickerOpenChange={setClickActionPickerOpen}
+      />
+
+      <style>{`
+        @keyframes reader-cover-in {
+          from { opacity: 0.35; }
+          to { opacity: 1; }
+        }
+        @keyframes reader-slide-in {
+          from { opacity: 0.6; transform: translateX(12px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        .reader-chapter-enter-cover {
+          animation: reader-cover-in 0.28s ease-out;
+        }
+        .reader-chapter-enter-slide {
+          animation: reader-slide-in 0.32s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
+
+/** @deprecated 使用 BookReader */
+export const ReaderPage = BookReader;

@@ -103,7 +103,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
         if (isVol) {
           return (
             <div
-              class="box-border px-0"
+              class="box-border w-full min-w-0 px-0"
               style={{ height: `${CATALOG_ROW_HEIGHT_PX}px` }}
             >
               <button
@@ -130,7 +130,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
 
         return (
           <div
-            class={cn('box-border px-0', underVolume && 'pl-4')}
+            class={cn('box-border w-full min-w-0 px-0', underVolume && 'pl-4')}
             style={{ height: `${CATALOG_ROW_HEIGHT_PX}px` }}
           >
             <button

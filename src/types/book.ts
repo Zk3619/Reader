@@ -41,7 +41,7 @@ export interface Book extends BaseBook {
   customIntro?: string;
   /** 自定义字符集名称（仅适用于本地书籍） */
   charset?: string;
-  /** 类型，详见 BookType：0=文本, 1=音频, 2=图片 */
+  /** 类型：书源枚举 0–4 或 Legado BookType 位标志，见 lib/book-source/book-type */
   type: number;
   /** 自定义分组索引号 */
   group: number;

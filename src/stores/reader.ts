@@ -41,8 +41,31 @@ import {
   toNewBookChapter,
 } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
+import {
+  loadReaderUiConfig,
+  saveReaderUiConfig,
+} from '@/lib/reader/read-config-storage';
+import {
+  startReadingSession,
+  flushReadingSession,
+  tickReadingSession,
+} from '@/lib/reader/reading-session';
+import {
+  DEFAULT_CLICK_ACTIONS,
+  type ReaderClickActions,
+} from '@/lib/reader/reader-click-actions';
+import {
+  DEFAULT_CLICK_REGION,
+  type ReaderClickRegion,
+} from '@/lib/reader/reader-click-region';
+import type { ReadAloudEngine } from '@/lib/reader/read-aloud';
 import type { Book, BookChapter, BookProgress } from '@/types';
 import type { BookSource } from '@/types';
+
+/** 翻页模式（对齐 Legado PageAnim；Web 端 scroll 为默认且完整支持） */
+export type ReaderPageAnim = 'scroll' | 'cover' | 'slide' | 'none';
+export type ReaderDualPageMode = 'off' | 'auto' | 'always';
+export type ReaderImageStyle = 'default' | 'FULL' | 'CENTER';
 
 /**
  * 阅读配置
@@ -73,6 +96,24 @@ export interface ReadConfig {
   };
   /** 阅读进度状态栏显示：follow=跟随操作栏显隐，always=始终显示，never=始终隐藏 */
   statusBarDisplayStyle: 'follow' | 'always' | 'never';
+  /** 翻页动画：scroll 为纵向滚动（默认）；cover/slide 为章切换过渡 */
+  pageAnim: ReaderPageAnim;
+  /** 双页：auto=宽屏横屏，always=强制双栏 */
+  dualPage: ReaderDualPageMode;
+  /** 音量键翻页 */
+  volumeKeyTurnPage: boolean;
+  /** 九宫格点击 */
+  clickActions: ReaderClickActions;
+  /** 九宫格区域分界（可拖拽调整） */
+  clickRegion: ReaderClickRegion;
+  /** 朗读引擎 */
+  aloudEngine: ReadAloudEngine;
+  /** 选中的 HttpTTS id，null=未配置 */
+  httpTtsId: number | null;
+  /** HttpTTS 语速（Legado speechRate 0–10） */
+  speakSpeed: number;
+  /** 正文插图样式 */
+  imageStyle: ReaderImageStyle;
 }
 
 /**
@@ -92,7 +133,59 @@ const defaultConfig: ReadConfig = {
     letter: 0,
   },
   statusBarDisplayStyle: 'follow',
+  pageAnim: 'scroll',
+  dualPage: 'auto',
+  volumeKeyTurnPage: true,
+  clickActions: { ...DEFAULT_CLICK_ACTIONS },
+  clickRegion: {
+    xSplits: [...DEFAULT_CLICK_REGION.xSplits] as [number, number],
+    ySplits: [...DEFAULT_CLICK_REGION.ySplits] as [number, number],
+  },
+  aloudEngine: 'system',
+  httpTtsId: null,
+  speakSpeed: 5,
+  imageStyle: 'default',
 };
+
+let configHydrated = false;
+let configSaveTimer: number | null = null;
+
+async function hydrateReaderConfig(): Promise<void> {
+  if (configHydrated) return;
+  configHydrated = true;
+  const saved = await loadReaderUiConfig();
+  if (saved) {
+    setState('config', prev => ({
+      ...prev,
+      ...saved,
+      spacing: { ...prev.spacing, ...saved.spacing },
+      clickActions: {
+        ...DEFAULT_CLICK_ACTIONS,
+        ...saved.clickActions,
+      },
+      clickRegion: saved.clickRegion
+        ? {
+            xSplits: [
+              saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
+              saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
+            ] as [number, number],
+            ySplits: [
+              saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
+              saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
+            ] as [number, number],
+          }
+        : prev.clickRegion,
+    }));
+  }
+}
+
+function schedulePersistReaderConfig(): void {
+  if (configSaveTimer !== null) clearTimeout(configSaveTimer);
+  configSaveTimer = window.setTimeout(() => {
+    void saveReaderUiConfig(state.config);
+    configSaveTimer = null;
+  }, 300);
+}
 
 /**
  * 阅读器状态接口
@@ -375,12 +468,17 @@ export const readerStore = {
     book: Book,
     options?: { initialCatalog?: BookChapter[] },
   ): Promise<void> {
+    await hydrateReaderConfig();
     ensureChaptersUpdatedListener();
     hasEnteredContent = false;
     resetChapterContentPool(book.bookUrl);
 
     const guestReading =
       !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
+
+    if (!guestReading) {
+      startReadingSession(book);
+    }
 
     if (state.book?.bookUrl !== book.bookUrl || !state.contentLoading) {
       setState({
@@ -786,6 +884,7 @@ export const readerStore = {
     if (!book || state.guestReading) {
       return;
     }
+    tickReadingSession();
 
     const bookUrl = book.bookUrl;
     const chapterIndex = state.chapterIndex;
@@ -813,13 +912,80 @@ export const readerStore = {
    */
   setConfig(config: Partial<ReadConfig>): void {
     setState('config', prev => ({ ...prev, ...config }));
+    schedulePersistReaderConfig();
   },
 
   /**
    * 重置阅读配置为默认值
    */
   resetConfig(): void {
-    setState({ config: defaultConfig });
+    setState({ config: { ...defaultConfig } });
+    schedulePersistReaderConfig();
+  },
+
+  /** 当前书是否启用替换规则（Legado 阅读内开关） */
+  isUseReplaceRule(): boolean {
+    const book = state.book;
+    if (!book) return true;
+    return book.readConfig?.useReplaceRule !== false;
+  },
+
+  /**
+   * 切换当前书替换规则并刷新展示（不删缓存，仅重跑 display processing）
+   */
+  async setUseReplaceRule(enabled: boolean): Promise<void> {
+    if (!state.book) return;
+    const book = state.book;
+    const readConfig = { ...book.readConfig, useReplaceRule: enabled };
+    setState('book', { ...book, readConfig });
+    if (!state.guestReading) {
+      await booksDb.updateBook({ ...book, readConfig });
+    }
+    await this.reprocessDisplayedChapter();
+  },
+
+  /** 用当前缓存/raw 重新应用展示处理（替换规则开关等，不触发网络） */
+  async reprocessDisplayedChapter(index?: number): Promise<void> {
+    if (!state.book) return;
+    const idx = index ?? state.chapterIndex;
+    const book = state.book;
+    const chapter = state.catalog[idx];
+    if (!chapter) return;
+
+    if (isLocalBook(book)) {
+      setState({ contentLoading: true });
+      try {
+        const fileContent = await readLocalBookContent(book.bookUrl);
+        const raw =
+          (await getLocalContent(book, chapter, fileContent)) ?? state.content;
+        const content = await applyChapterDisplayProcessing(raw, book, null);
+        commitChapterContent(idx, content, book);
+      } finally {
+        setState({ contentLoading: false });
+      }
+      return;
+    }
+
+    const source =
+      book.origin && book.origin !== 'local'
+        ? await sourcesDb.getSource(book.origin)
+        : null;
+
+    const raw = await readCachedChapterRaw(book.bookUrl, idx);
+    if (raw?.trim()) {
+      const content = await applyChapterDisplayProcessing(raw, book, source);
+      commitChapterContent(idx, content, book);
+      return;
+    }
+
+    if (state.content) {
+      const content = await applyChapterDisplayProcessing(
+        state.content,
+        book,
+        source,
+      );
+      commitChapterContent(idx, content, book);
+    }
   },
 
   /**
@@ -854,8 +1020,12 @@ export const readerStore = {
    * 关闭书籍
    */
   async closeBook(): Promise<void> {
+    const book = state.book;
     if (!state.guestReading) {
       await this.saveProgress();
+      await flushReadingSession(book);
+    } else {
+      await flushReadingSession(null);
     }
 
     hasEnteredContent = false;

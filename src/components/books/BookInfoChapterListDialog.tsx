@@ -10,7 +10,12 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
+import {
+  dialogVirtualListPanelHeight,
+  dialogVirtualListPanelMaxHeight,
+  dialogVirtualListPanelWidth,
+  scrollGutterStableBoth,
+} from '@/lib/ui/viewport-classes';
 import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
 import {
   scrollCatalogIndexIntoView,
@@ -68,13 +73,14 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent>
+      <AppDialogContent class={dialogVirtualListPanelWidth}>
         <AppDialogHeader>
           <AppDialogTitle class="text-base">目录 · {props.bookName}</AppDialogTitle>
         </AppDialogHeader>
         <div
           class={cn(
-            'max-h-[min(70vh,520px)] min-h-[200px] overflow-hidden',
+            'flex flex-col overflow-hidden',
+            dialogVirtualListPanelHeight,
             scrollGutterStableBoth,
           )}
         >
@@ -93,7 +99,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
               }
             >
               <VirtualChapterList
-                class="max-h-[min(70vh,520px)]"
+                class={cn('min-h-0 w-full flex-1', dialogVirtualListPanelMaxHeight)}
                 count={rows().length}
                 onScrollContainer={(el) => {
                   scrollContainer = el;
@@ -108,7 +114,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
                   return (
                     <div
                       class={cn(
-                        'box-border border-b border-border/30 last:border-0',
+                        'box-border w-full min-w-0 border-b border-border/30 last:border-0',
                         chapter.isVolume && 'bg-muted/30',
                         !chapter.isVolume && underVolume && 'pl-3',
                       )}

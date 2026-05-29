@@ -123,6 +123,7 @@ export function ReaderCommentsDrawer(props: ReaderCommentsDrawerProps) {
         <AppDrawerContent
           class={cn('z-110 flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
           overlayClass="z-[110]"
+          showNativeDragHandle={false}
         >
           <AppDrawerHeader class="sr-only" showClose={false}>
             <AppDrawerTitle>段评</AppDrawerTitle>

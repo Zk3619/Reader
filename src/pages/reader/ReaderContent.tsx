@@ -5,6 +5,35 @@
 
 import { Show, For, createMemo } from 'solid-js';
 import { readerStore } from '@/stores/reader';
+import {
+  splitReaderContentBlocks,
+  applyReaderImageStyle,
+} from '@/lib/reader/reader-content-blocks';
+
+type ReaderDisplayBlock =
+  | { type: 'html'; html: string }
+  | { type: 'text'; text: string };
+
+function toDisplayBlocks(
+  raw: string,
+  chapterTitle: string | undefined,
+  imageStyle: string | undefined,
+): ReaderDisplayBlock[] {
+  const out: ReaderDisplayBlock[] = [];
+  for (const block of splitReaderContentBlocks(raw)) {
+    if (block.type === 'html') {
+      out.push({
+        type: 'html',
+        html: applyReaderImageStyle(block.html, imageStyle),
+      });
+    } else {
+      for (const text of getParagraphs(block.text, chapterTitle)) {
+        out.push({ type: 'text', text });
+      }
+    }
+  }
+  return out;
+}
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +58,8 @@ export interface ReaderContentProps {
   hideCommentBubbles?: boolean;
   /** 是否应用阅读宽度限制；窄屏+移动端应为 false（正文占满宽度） */
   applyReadWidth?: () => boolean;
+  /** 双页分栏（宽屏） */
+  dualPage?: boolean;
 }
 
 export function ReaderContent(props: ReaderContentProps) {
@@ -71,8 +102,16 @@ export function ReaderContent(props: ReaderContentProps) {
     return { 'margin-bottom': p ? `${p}em` : undefined };
   };
 
-  const paragraphs = () =>
-    getParagraphs(content() ?? '', currentChapter()?.title);
+  const imageStyleKey = () => {
+    const s = config().imageStyle;
+    if (s === 'FULL') return 'FULL';
+    if (s === 'CENTER') return 'CENTER';
+    return undefined;
+  };
+
+  const contentBlocks = createMemo(() =>
+    toDisplayBlocks(content() ?? '', currentChapter()?.title, imageStyleKey()),
+  );
 
   const getCount = (segmentIndex: number) =>
     (props.getSegmentCommentCount ?? (() => 0))(
@@ -116,7 +155,12 @@ export function ReaderContent(props: ReaderContentProps) {
             </div>
           }
         >
-          <div class="wrap-break-word reader-body">
+          <div
+            class={cn(
+              'wrap-break-word reader-body',
+              props.dualPage && 'reader-dual-page columns-2 gap-8',
+            )}
+          >
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
             <Show when={currentChapter()?.title}>
               <div class="mb-4 flex items-center justify-center gap-2">
@@ -138,61 +182,91 @@ export function ReaderContent(props: ReaderContentProps) {
                 </Show>
               </div>
             </Show>
-          {/* 段落 + 段评气泡（segmentIndex=1,2,...）；气泡紧跟段末文字后，不顶到行首/右侧 */}
-          <div class="prose prose-p:mb-4">
-            {paragraphs().map((raw, i) => {
-              const segmentIndex = i + 1;
-              const count = getCount(segmentIndex) ?? 0;
-              // 调试：检查第一段的原始内容
-              // if (i === 0) {
-              //   console.log('[渲染] 第一段原始内容:', {
-              //     index: i,
-              //     length: raw.length,
-              //     firstChar: raw.charCodeAt(0),
-              //     hasSpace: /^[ \u3000]+/.test(raw),
-              //     preview: raw.substring(0, 50),
-              //     rawPreview: Array.from(raw.substring(0, 10)).map(c => ({
-              //       char: c,
-              //       code: c.charCodeAt(0),
-              //     })),
-              //   });
-              // }
-              const html = paragraphToHtml(raw);
-              // 调试：检查第一段的 HTML
-              // if (i === 0) {
-              //   console.log('[渲染] 第一段 HTML:', {
-              //     htmlLength: html.length,
-              //     htmlPreview: html.substring(0, 50),
-              //     startsWithSpace: /^[\u3000]/.test(html),
-              //   });
-              // }
-              return (
-                <p class="reader-p" style={paragraphStyle()}>
-                  <span innerHTML={html} />
-                  <Show when={!props.hideCommentBubbles && count > 0}>
-                    {/* 使用 inline 元素包装气泡，确保它始终显示在段落末尾，不会因为换行而错位 */}
-                    <span class="inline align-baseline whitespace-nowrap ml-1">
-                      <button
-                        type="button"
-                        class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          props.onOpenComments?.(chapterIndex(), segmentIndex);
-                        }}
-                        aria-label={`本段 ${count} 条段评`}
-                      >
-                        {count}
-                      </button>
-                    </span>
-                  </Show>
-                </p>
-              );
-            })}
+          {/* 段落 / 插图块 + 段评气泡 */}
+          <div class="prose prose-p:mb-4 max-w-none">
+            <For each={contentBlocks()}>
+              {(block, blockIndex) => (
+                <ReaderBlockItem
+                  block={block}
+                  blockIndex={blockIndex()}
+                  paragraphStyle={paragraphStyle()}
+                  getCount={getCount}
+                  hideBubbles={props.hideCommentBubbles}
+                  chapterIndex={chapterIndex()}
+                  onOpenComments={props.onOpenComments}
+                />
+              )}
+            </For>
           </div>
           </div>
         </Show>
       </Show>
     </div>
+  );
+}
+
+function ReaderBlockItem(props: {
+  block: ReaderDisplayBlock;
+  blockIndex: number;
+  paragraphStyle: Record<string, string | number | undefined>;
+  getCount: (segmentIndex: number) => number;
+  hideBubbles?: boolean;
+  chapterIndex: number;
+  onOpenComments?: (chapterIndex: number, segmentIndex: number) => void;
+}) {
+  if (props.block.type === 'html') {
+    return (
+      <figure class="my-4 flex justify-center break-inside-avoid">
+        <div
+          class="reader-inline-img max-w-full [&_img]:mx-auto [&_img]:max-w-full [&_img]:h-auto"
+          innerHTML={props.block.html}
+        />
+      </figure>
+    );
+  }
+  return (
+    <ParagraphBlock
+      raw={props.block.text}
+      segmentIndex={props.blockIndex + 1}
+      paragraphStyle={props.paragraphStyle}
+      getCount={props.getCount}
+      hideBubbles={props.hideBubbles}
+      chapterIndex={props.chapterIndex}
+      onOpenComments={props.onOpenComments}
+    />
+  );
+}
+
+function ParagraphBlock(props: {
+  raw: string;
+  segmentIndex: number;
+  paragraphStyle: Record<string, string | number | undefined>;
+  getCount: (segmentIndex: number) => number;
+  hideBubbles?: boolean;
+  chapterIndex: number;
+  onOpenComments?: (chapterIndex: number, segmentIndex: number) => void;
+}) {
+  const count = () => props.getCount(props.segmentIndex) ?? 0;
+  const html = () => paragraphToHtml(props.raw);
+  return (
+    <p class="reader-p break-inside-avoid" style={props.paragraphStyle}>
+      <span innerHTML={html()} />
+      <Show when={!props.hideBubbles && count() > 0}>
+        <span class="inline align-baseline whitespace-nowrap ml-1">
+          <button
+            type="button"
+            class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onOpenComments?.(props.chapterIndex, props.segmentIndex);
+            }}
+            aria-label={`本段 ${count()} 条段评`}
+          >
+            {count()}
+          </button>
+        </span>
+      </Show>
+    </p>
   );
 }
 
