@@ -7,6 +7,17 @@ import { getDatabase } from '@/lib/database/database-core';
 import type { ReadRecord } from '@/types';
 
 /**
+ * 获取全部阅读记录（按最近阅读排序）
+ */
+export async function getAllReadRecords(): Promise<ReadRecord[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM readRecord ORDER BY lastRead DESC',
+  );
+  return rows.map((row) => mapRowToRecord(row));
+}
+
+/**
  * 获取阅读记录
  */
 export async function getReadRecord(

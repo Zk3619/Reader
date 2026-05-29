@@ -16,24 +16,37 @@ import { cn } from '@/lib/utils';
 export const EXPLORE_BOOK_GRID_CLASS =
   'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2';
 
-/** 各断点至少 3 行：1→4、md 2→6、lg 3→9、2xl 4→12 */
-function resolveSkeletonCount(): number {
-  if (typeof window === 'undefined') return 6;
-  if (window.matchMedia('(min-width: 1536px)').matches) return 12;
-  if (window.matchMedia('(min-width: 1024px)').matches) return 9;
-  if (window.matchMedia('(min-width: 768px)').matches) return 6;
-  return 4;
+/** 与 exploreBookListCardClass 的 h-44 一致 */
+export const EXPLORE_BOOK_CARD_HEIGHT_PX = 176;
+
+export const EXPLORE_BOOK_GRID_GAP_PX = 8;
+
+/** 卡片行高 + grid gap-2，供按行虚拟列表使用 */
+export const EXPLORE_BOOK_GRID_ROW_HEIGHT_PX =
+  EXPLORE_BOOK_CARD_HEIGHT_PX + EXPLORE_BOOK_GRID_GAP_PX;
+
+const EXPLORE_GRID_MEDIA_QUERIES = [
+  '(min-width: 768px)',
+  '(min-width: 1024px)',
+  '(min-width: 1536px)',
+] as const;
+
+/** 与 EXPLORE_BOOK_GRID_CLASS 断点列数对齐 */
+export function resolveExploreGridColumnCount(): number {
+  if (typeof window === 'undefined') return 1;
+  if (window.matchMedia('(min-width: 1536px)').matches) return 4;
+  if (window.matchMedia('(min-width: 1024px)').matches) return 3;
+  if (window.matchMedia('(min-width: 768px)').matches) return 2;
+  return 1;
 }
 
-/** 随窗口宽度更新骨架数量，与 EXPLORE_BOOK_GRID_CLASS 列数对齐 */
-export function useExploreSkeletonCount() {
-  const [count, setCount] = createSignal(resolveSkeletonCount());
+/** 随窗口宽度更新列数（虚拟网格、骨架屏共用） */
+export function useExploreGridColumnCount() {
+  const [cols, setCols] = createSignal(resolveExploreGridColumnCount());
 
   onMount(() => {
-    const sync = () => setCount(resolveSkeletonCount());
-    const queries = ['(min-width: 768px)', '(min-width: 1024px)', '(min-width: 1536px)'].map(
-      (q) => window.matchMedia(q),
-    );
+    const sync = () => setCols(resolveExploreGridColumnCount());
+    const queries = EXPLORE_GRID_MEDIA_QUERIES.map((q) => window.matchMedia(q));
     for (const mq of queries) {
       mq.addEventListener('change', sync);
     }
@@ -44,7 +57,13 @@ export function useExploreSkeletonCount() {
     });
   });
 
-  return count;
+  return cols;
+}
+
+/** 各断点至少 3 行骨架 */
+export function useExploreSkeletonCount() {
+  const cols = useExploreGridColumnCount();
+  return () => cols() * 3;
 }
 
 export function ExploreBookCardSkeleton() {
@@ -82,7 +101,7 @@ export function ExploreBookCardSkeleton() {
 export function ExploreBookListSkeleton() {
   const count = useExploreSkeletonCount();
   return (
-    <ul class={EXPLORE_BOOK_GRID_CLASS} aria-busy="true" aria-label="加载书籍列表">
+    <ul class={cn(EXPLORE_BOOK_GRID_CLASS, 'py-2 px-1')} aria-busy="true" aria-label="加载书籍列表">
       <For each={Array.from({ length: count() }, (_, i) => i)}>
         {() => <ExploreBookCardSkeleton />}
       </For>

@@ -25,6 +25,7 @@ import {
   shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
+import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
 import { pickDefaultExploreHubSection } from '@/lib/book-source/explore-nav-items';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
@@ -67,7 +68,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [selectedSourceUrl, setSelectedSourceUrl] = createSignal<string | null>(null);
   const [selectedSection, setSelectedSection] = createSignal<ExploreSection | null>(null);
-  const [exploreArgsVersion, setExploreArgsVersion] = createSignal(0);
+  const exploreArgsVersion = () => getExploreSourceArgsVersion(selectedSourceUrl());
   /** 与 dynamicSections 最后一次 ready 对齐的 args 版本（用于筛选变更后立即骨架屏） */
   const [loadedExploreArgsVersion, setLoadedExploreArgsVersion] = createSignal(-1);
   const [listRefreshKey, setListRefreshKey] = createSignal(0);
@@ -226,7 +227,6 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   function handleSourceChange(source: BookSource) {
     setSelectedSourceUrl(source.sourceUrl);
     setSelectedSection(null);
-    setExploreArgsVersion(0);
     setLoadedExploreArgsVersion(-1);
     setListRefreshKey(0);
     setSectionsSnapshot(null);
@@ -236,7 +236,6 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     const s = selectedSource();
     if (!s || !section.paramKey) return;
     updateExploreSourceArgument(s, section.paramKey, value);
-    setExploreArgsVersion((v) => v + 1);
     setListRefreshKey((k) => k + 1);
   }
 

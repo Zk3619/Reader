@@ -1,5 +1,5 @@
 /**
- * 探索页操作区：搜索、收藏、更多（分页偏好、书源下拉/标签）
+ * 探索页操作区：搜索、更多（分页偏好、书源下拉/标签）
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
@@ -16,7 +16,7 @@ import {
   AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { SearchIcon, StarIcon, MoreIcon, RefreshIcon, Settings2Icon } from '@/components/shared/icons';
+import { SearchIcon, MoreIcon, RefreshIcon, Settings2Icon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 
@@ -52,14 +52,6 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           <span class="sr-only">搜索</span>
         </TooltipTrigger>
         <TooltipContent>搜索</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
-          <StarIcon class="h-4 w-4" />
-          <span class="sr-only">收藏</span>
-        </TooltipTrigger>
-        <TooltipContent>收藏</TooltipContent>
       </Tooltip>
 
       <Show when={props.showRefresh}>

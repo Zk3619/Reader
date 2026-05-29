@@ -3,6 +3,7 @@
  */
 
 import { createEffect, createResource, createSignal, For, onCleanup, Show, onMount } from 'solid-js';
+import { VirtualExploreBookGrid } from '@/components/bookshelf/VirtualExploreBookGrid';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -24,10 +25,7 @@ import {
   exploreBookListBadgeClass,
   exploreBookListBadgeLastClass,
 } from '@/lib/bookshelf/book-group-card-styles';
-import {
-  EXPLORE_BOOK_GRID_CLASS,
-  ExploreBookListSkeleton,
-} from '@/pages/explore/ExploreBookCardSkeleton';
+import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
 import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -240,9 +238,8 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
     }
   };
 
-  const handleContentScroll = (e: Event & { currentTarget: HTMLDivElement }) => {
+  const handleContentScroll = (el: HTMLDivElement) => {
     if (!useScrollLoad() || !hasPagination() || loadingMore()) return;
-    const el = e.currentTarget;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distanceToBottom < 100) {
       loadMore();
@@ -258,12 +255,11 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   };
 
   return (
-    <div
-      class={cn(mainShellPageScroll, 'h-full', props.class)}
-      onScroll={handleContentScroll}
-    >
+    <div class={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden', props.class)}>
       <Show when={loading()}>
-        <ExploreBookListSkeleton />
+        <div class={cn(mainShellPageScroll, 'min-h-0 flex-1')}>
+          <ExploreBookListSkeleton />
+        </div>
       </Show>
 
       <Show when={error()}>
@@ -287,74 +283,76 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       </Show>
 
       <Show when={!loading() && !error() && books().length > 0}>
-        <ul class={EXPLORE_BOOK_GRID_CLASS}>
-          <For each={books()}>
-            {(sb) => (
-              <li class="w-full">
-                <button
-                  type="button"
-                  class={exploreBookListCardClass()}
-                  onClick={() => handleBookClick(sb)}
-                  {...bookGroupCardPressHandlers}
-                >
-                  <div class={exploreBookListCoverClass()}>
-                    <BookCoverImg
-                      src={sb.coverUrl}
-                      referer={sb.origin}
-                      source={props.source}
-                      bookUrl={sb.bookUrl}
-                      onCoverUrlRefreshed={(url) => {
-                        setAllBooks((prev) =>
-                          prev.map((b) =>
-                            b.bookUrl === sb.bookUrl ? { ...b, coverUrl: url } : b,
-                          ),
-                        );
-                      }}
-                      alt=""
-                      class="h-full w-full object-cover"
-                      loading="lazy"
-                      draggable={false}
-                      fallback={
-                        <div class="flex h-full w-full items-center justify-center">
-                          <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
-                        </div>
-                      }
-                    />
-                  </div>
-                  <div class={exploreBookListBodyClass('text-left')}>
-                    <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">{sb.name}</p>
-                    <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
-                      作者：{sb.author || '—'}
-                      <Show when={sb.chapterWordCountText ?? sb.wordCount}>
-                        <span class="ml-1">· {sb.chapterWordCountText ?? sb.wordCount}</span>
-                      </Show>
-                    </p>
-                    <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
-                      {(() => {
-                        const updateLabel = tryFormatDisplayUpdateTime(sb.latestChapterUpdateTime);
-                        return (
-                          <>
-                            最新章节：{displayChapterTitle(sb.latestChapterTitle)}
-                            <Show when={updateLabel}>
-                              <span> · {updateLabel}</span>
-                            </Show>
-                          </>
-                        );
-                      })()}
-                    </p>
-                    <ExploreBookBadgeRow book={sb} />
-                    <ExploreBookListIntro>
-                      简介：{sb.intro?.trim() || '暂无简介'}
-                    </ExploreBookListIntro>
-                  </div>
-                </button>
-              </li>
-            )}
-          </For>
-        </ul>
+        <VirtualExploreBookGrid
+          class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
+          items={books()}
+          onScroll={handleContentScroll}
+        >
+          {(sb) => (
+            <li class="w-full">
+              <button
+                type="button"
+                class={exploreBookListCardClass()}
+                onClick={() => handleBookClick(sb)}
+                {...bookGroupCardPressHandlers}
+              >
+                <div class={exploreBookListCoverClass()}>
+                  <BookCoverImg
+                    src={sb.coverUrl}
+                    referer={sb.origin}
+                    source={props.source}
+                    bookUrl={sb.bookUrl}
+                    onCoverUrlRefreshed={(url) => {
+                      setAllBooks((prev) =>
+                        prev.map((b) =>
+                          b.bookUrl === sb.bookUrl ? { ...b, coverUrl: url } : b,
+                        ),
+                      );
+                    }}
+                    alt=""
+                    class="h-full w-full object-cover"
+                    loading="lazy"
+                    draggable={false}
+                    fallback={
+                      <div class="flex h-full w-full items-center justify-center">
+                        <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
+                      </div>
+                    }
+                  />
+                </div>
+                <div class={exploreBookListBodyClass('text-left')}>
+                  <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">{sb.name}</p>
+                  <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+                    作者：{sb.author || '—'}
+                    <Show when={sb.chapterWordCountText ?? sb.wordCount}>
+                      <span class="ml-1">· {sb.chapterWordCountText ?? sb.wordCount}</span>
+                    </Show>
+                  </p>
+                  <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+                    {(() => {
+                      const updateLabel = tryFormatDisplayUpdateTime(sb.latestChapterUpdateTime);
+                      return (
+                        <>
+                          最新章节：{displayChapterTitle(sb.latestChapterTitle)}
+                          <Show when={updateLabel}>
+                            <span> · {updateLabel}</span>
+                          </Show>
+                        </>
+                      );
+                    })()}
+                  </p>
+                  <ExploreBookBadgeRow book={sb} />
+                  <ExploreBookListIntro>
+                    简介：{sb.intro?.trim() || '暂无简介'}
+                  </ExploreBookListIntro>
+                </div>
+              </button>
+            </li>
+          )}
+        </VirtualExploreBookGrid>
 
         <Show when={hasPagination() && books().length > 0 && !useScrollLoad()}>
-          <div class="mt-6 flex justify-center">
+          <div class="shrink-0 py-4 flex justify-center">
             <Button variant="outline" onClick={loadMore} disabled={loadingMore()}>
               {loadingMore() ? '加载中…' : '加载更多'}
             </Button>
@@ -362,7 +360,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
         </Show>
 
         <Show when={hasPagination() && books().length > 0 && useScrollLoad() && loadingMore()}>
-          <div class="mt-4 flex justify-center">
+          <div class="shrink-0 py-4 flex justify-center">
             <p class="text-sm text-muted-foreground">加载中…</p>
           </div>
         </Show>

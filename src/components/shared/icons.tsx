@@ -71,6 +71,7 @@ import {
   Maximize,
   Minimize,
   Volume2,
+  VolumeOff,
   ChevronUp,
   Cloud,
   Cookie,
@@ -191,7 +192,8 @@ export const BookshelfLatestChapterIcon = icon(BookMarked);
 export const BookshelfReadProgressIcon = icon(History);
 
 /** 阅读器 */
-export const VolumeIcon = icon(Volume2);
+export const VolumeOnIcon = icon(Volume2);
+export const VolumeOffIcon = icon(VolumeOff);
 export const ChevronUpIcon = icon(ChevronUp);
 /** 目录：章节尚未写入正文缓存 */
 export const ChapterUncachedIcon = icon(Cloud);

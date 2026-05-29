@@ -17,6 +17,22 @@ export const hViewport = 'h-dvh';
 /** 对话框最大宽度（85% 视口） */
 export const maxWDialog = 'max-w-[85dvw]';
 
+/**
+ * 弹窗内虚拟长列表区固定宽/高（与 dialogViewportLimits 的 w-max 配合）。
+ * 避免可视行内容变化导致弹窗宽度抖动；高度与目录弹窗历史尺寸一致。
+ */
+export const dialogVirtualListPanelWidth = 'w-[min(32rem,85dvw)] shrink-0';
+export const dialogVirtualListPanelMaxHeight = 'max-h-[min(70dvh,520px)]';
+export const dialogVirtualListPanelMinHeight = 'min-h-[200px]';
+export const dialogVirtualListPanelHeight = cn(
+  dialogVirtualListPanelMaxHeight,
+  dialogVirtualListPanelMinHeight,
+);
+export const dialogVirtualListPanelSize = cn(
+  dialogVirtualListPanelWidth,
+  dialogVirtualListPanelHeight,
+);
+
 /** 对话框最大高度（85% 视口） */
 export const maxHDialog = 'max-h-[85dvh]';
 
@@ -31,6 +47,13 @@ export const maxHViewport80 = 'max-h-[80dvh]';
 
 /** 底部抽屉面板（75% 视口） */
 export const hDrawerPanel = 'h-[75dvh]';
+
+/**
+ * 书源页右侧发现抽屉宽度：大屏约占 40% 视口宽；窄屏不超过 92dvw，且两侧共留约 8dvw 给列表透视。
+ * 覆盖 ui/drawer 侧栏默认 max-w-sm。
+ */
+export const sourcesExploreDrawerWidth =
+  'w-[min(92dvw,32rem)] max-w-none sm:w-[min(40dvw,32rem)]';
 
 /** 侧栏：顶栏 h-14 (3.5rem) 以下剩余高度 */
 export const hBelowAppHeader = 'h-[calc(100dvh-3.5rem)]';
@@ -76,11 +99,11 @@ export const pageToolbarBelowScroll = 'page-toolbar-below-scroll';
 export const pageToolbarBelowScrollTrack = 'page-toolbar-below-scroll__track';
 
 /** 主壳 `#main-content-container` > `main` 四周边距（与书架 Tab 页一致） */
-export const mainShellInset = 'p-2';
+export const mainShellInset = 'p-1';
 
 /** 侧边栏 Tab 页根容器（flex 列、占满剩余高度） */
 export const mainShellPageRoot = 'flex flex-col flex-1 min-h-0 w-full overflow-hidden';
 
 /** 侧边栏 Tab 页主内容可滚动区（书架列表、书源列表、探索书籍区等） */
 export const mainShellPageScroll =
-  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-2';
+  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1';

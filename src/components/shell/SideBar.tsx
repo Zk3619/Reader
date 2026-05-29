@@ -39,7 +39,10 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
   settings: { label: "设置", icon: SettingsIcon, description: "应用设置" },
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
-  reader: { label: "阅读器", icon: BookmarkIcon, description: "阅读书籍" },
+  "book-reader": { label: "阅读器", icon: BookmarkIcon, description: "文本阅读" },
+  "pic-reader": { label: "漫画", icon: BookmarkIcon, description: "图片阅读" },
+  "audio-player": { label: "音频", icon: BookmarkIcon, description: "音频播放" },
+  "video-player": { label: "视频", icon: BookmarkIcon, description: "视频播放" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
   "book-search": { label: "搜索", icon: BookOpenIcon, description: "搜索书架与全网书籍" },
   "bookshelf-cache": {

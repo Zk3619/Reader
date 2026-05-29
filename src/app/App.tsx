@@ -6,8 +6,8 @@ import { Navigation, type PageType } from "@/components/shell/Navigation";
 import { PageToolbar } from "@/components/shell/PageToolbar";
 import { PageToolbarTitleDropdown } from "@/components/shell/PageToolbarTitleDropdown";
 import { SourcesPageToolbar } from "@/components/sources/SourcesPageToolbar";
+import { SourcesFilterDialog } from "@/components/sources/SourcesFilterDialog";
 import { SettingsPageToolbar } from "@/components/shell/SettingsPageToolbar";
-import { SourceGroupTitleDropdown } from "@/components/sources/SourceGroupSelector";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
 import { Tray } from "@/components/shell/Tray";
@@ -16,6 +16,8 @@ import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { BookShelf } from "@/pages/bookshelf/BookShelf";
 import { BookshelfCachePage } from "@/pages/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/sources/SourcesPage";
+import { SourcesManagePage } from "@/pages/sources/SourcesManagePage";
+import { SourceEditPage } from "@/pages/sources/SourceEditPage";
 import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
 import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
@@ -23,7 +25,12 @@ import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
 import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
-import { ReaderPage } from "@/pages/reader/ReaderPage";
+import { BookReader, PicReaderPage, AudioPlayerPage, VideoPlayerPage } from "@/pages/reader";
+import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
+import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
+import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
+import { resolveReaderKind } from "@/lib/book-source/book-type";
+import { mediaReaderStore } from "@/stores/media-reader";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
 import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetworkDialog";
@@ -94,7 +101,18 @@ import { basename, extname, join, normalize } from "@tauri-apps/api/path";
 import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
 import { ImportActionDialog, type ImportAction } from "@/components/books/ImportActionDialog";
 import { ReplaceFileDialog, type ReplaceFileAction } from "@/components/books/ReplaceFileDialog";
-import { getSourceGroupLabel, normalizeSourceFilterValue, type SourceSearchMode } from "@/lib/sources/filters";
+import {
+  formatSourceListFilterSummary,
+  formatSourceListToolbarDescription,
+  buildSourceFilterGroupOptions,
+  hasEffectiveSourceListFilter,
+  EMPTY_SOURCE_LIST_FILTER,
+  shouldGroupSourcesByGroupName,
+  getEffectiveSourceListFilter,
+  type SourceSearchMode,
+  type SourceListFilterCriteria,
+} from "@/lib/sources/source-list-filter";
+import type { SourceSortMode } from "@/lib/sources/source-sort";
 import { loadSourcesPagePrefs, saveSourcesPagePrefs } from "@/lib/search/search-prefs";
 import { openSourceSettingsInApp } from "@/lib/platform/open-url";
 import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
@@ -173,15 +191,34 @@ const mockRecentBooks = [
 
 // 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
 const STANDALONE_PAGES: PageType[] = [
-  "reader",
+  "book-reader",
+  "pic-reader",
+  "audio-player",
+  "video-player",
   "explore",
   "book-info",
   "book-search",
   "remote-book",
 ];
 
+const MEDIA_READER_PAGES: PageType[] = ["pic-reader", "audio-player", "video-player"];
+
+function readerPageForKind(kind: ReturnType<typeof resolveReaderKind>): PageType {
+  switch (kind) {
+    case "pic":
+      return "pic-reader";
+    case "audio":
+      return "audio-player";
+    case "video":
+      return "video-player";
+    default:
+      return "book-reader";
+  }
+}
+
 function normalizeRestoredPage(page: string): PageType {
   if (page === "import") return "bookshelf";
+  if (page === "reader") return "book-reader";
   return page as PageType;
 }
 
@@ -204,6 +241,13 @@ function AppContent() {
   );
   const [showGroupManage, setShowGroupManage] = createSignal(false);
   const [showBookshelfManage, setShowBookshelfManage] = createSignal(false);
+  const [showSourcesManage, setShowSourcesManage] = createSignal(false);
+  /** null=关闭；'new'=新建；string=编辑该书源 URL */
+  const [sourceEditTarget, setSourceEditTarget] = createSignal<null | "new" | string>(null);
+
+  function openSourceEditor(source?: BookSource) {
+    setSourceEditTarget(source ? source.sourceUrl : "new");
+  }
   const [showBookshelfCache, setShowBookshelfCache] = createSignal(false);
   const [bookshelfCacheGroupId, setBookshelfCacheGroupId] = createSignal(-1);
   const [showBookDirectoryDialog, setShowBookDirectoryDialog] = createSignal(false);
@@ -266,21 +310,28 @@ function AppContent() {
   } | null>(null);
   const [sourceGroups, setSourceGroups] = createSignal<string[]>([]);
   const [sourceCount, setSourceCount] = createSignal(0);
-  const [currentSourceGroup, setCurrentSourceGroup] = createSignal<string | null>(
-    normalizeSourceFilterValue(readHmrData<string | null>("currentSourceGroup", null))
-  );
-
-  // 开发 HMR：持久化当前页与书源筛选，避免工具栏下拉与列表状态错位
-  createEffect(() => {
-    writeHmrData("currentPage", currentPage());
-    writeHmrData("currentSourceGroup", currentSourceGroup());
-  });
-  /** 书源页：搜索关键词（导航栏扩展输入框，在当前分组内搜索） */
+  /** 书源页：搜索关键词 */
   const [sourceSearchQuery, setSourceSearchQuery] = createSignal("");
   /** 书源页：按分组名分块显示（仅全部/筛选时有效） */
   const [sourcesGroupByGroupName, setSourcesGroupByGroupName] = createSignal(false);
   /** 书源页：搜索模式（持久化到 sources_page_prefs） */
   const [sourceSearchMode, setSourceSearchMode] = createSignal<SourceSearchMode>('name');
+  /** 书源页：排序 */
+  const [sourceSortMode, setSourceSortMode] = createSignal<SourceSortMode>('manual');
+  const [sourceSortReverse, setSourceSortReverse] = createSignal(false);
+  /** 书源页：对话框筛选 */
+  const [sourceFilterDialogOpen, setSourceFilterDialogOpen] = createSignal(false);
+  const [sourceListFilter, setSourceListFilter] = createSignal<SourceListFilterCriteria>(EMPTY_SOURCE_LIST_FILTER);
+
+  createEffect(() => {
+    writeHmrData("currentPage", currentPage());
+  });
+
+  createEffect(() => {
+    if (sourceSortMode() === 'manual' && sourceSortReverse()) {
+      setSourceSortReverse(false);
+    }
+  });
 
   createEffect(() => {
     if (currentPage() !== "sources") return;
@@ -300,19 +351,33 @@ function AppContent() {
     setCurrentPage("book-search");
   };
 
-  const sourcePageToolbarTitle = () => {
-    const label = getSourceGroupLabel(currentSourceGroup());
-    return label === "全部" ? "书源" : `书源 · ${label}`;
+  const sourcePageToolbarTitle = () => "书源";
+
+  const sourceFilterGroupOptions = () => buildSourceFilterGroupOptions(sourceGroups());
+
+  const sourcePageToolbarDescription = () => {
+    const count = sourceCount();
+    const allGroups = sourceFilterGroupOptions();
+    const filter = sourceListFilter();
+    if (hasEffectiveSourceListFilter(filter, allGroups)) {
+      return formatSourceListToolbarDescription({
+        criteria: filter,
+        allGroupNames: allGroups,
+        count,
+      });
+    }
+    return (
+      <>
+        共 {count} 个书源
+        <Show when={sourceGroups().length > 0}>
+          ，共 {sourceGroups().length} 个分组
+        </Show>
+      </>
+    );
   };
 
-  const sourcePageToolbarDescription = () => (
-    <>
-      共 {sourceCount()} 个书源
-      <Show when={currentSourceGroup() == null || currentSourceGroup() === ""}>
-        ，共 {sourceGroups().length} 个分组
-      </Show>
-    </>
-  );
+  const sourceFilterTooltip = () =>
+    formatSourceListFilterSummary(sourceListFilter(), sourceFilterGroupOptions());
 
   /** Tauri 子 WebView 叠在主界面之上时需先 hide；与内嵌浮层 z-150 对齐的 Dialog portal */
   let bookSourceImportPanelRetained = false;
@@ -761,7 +826,7 @@ function AppContent() {
   const [bookInfoContext, setBookInfoContext] = createSignal<{
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'reader' | 'bookshelf' | 'book-search';
+    fromPage: 'explore' | 'scout' | 'book-reader' | 'bookshelf' | 'book-search';
   } | null>(null);
 
   const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
@@ -774,9 +839,22 @@ function AppContent() {
     initialCatalog?: import("@/types").BookChapter[],
   ) {
     setReaderReturnPage(returnPage);
-    readerStore.setBookInitialState(book);
-    setCurrentPage("reader");
-    void readerStore.openBook(book, { initialCatalog }).catch((e) => {
+    const kind = resolveReaderKind(book);
+    const page = readerPageForKind(kind);
+
+    if (kind === "book") {
+      readerStore.setBookInitialState(book);
+      setCurrentPage(page);
+      void readerStore.openBook(book, { initialCatalog }).catch((e) => {
+        console.error("打开书籍失败:", e);
+        setCurrentPage(returnPage);
+      });
+      return;
+    }
+
+    mediaReaderStore.setBookInitialState(book, kind);
+    setCurrentPage(page);
+    void mediaReaderStore.openBook(book, kind, { initialCatalog }).catch((e) => {
       console.error("打开书籍失败:", e);
       setCurrentPage(returnPage);
     });
@@ -785,12 +863,23 @@ function AppContent() {
   async function finishCloseReader() {
     setGuestAddToShelfOpen(false);
     setGuestAddToShelfBusy(false);
+    const page = currentPage();
     setCurrentPage(readerReturnPage());
-    await readerStore.closeBook();
+    if (page === "book-reader") {
+      await readerStore.closeBook();
+    } else if (MEDIA_READER_PAGES.includes(page)) {
+      await mediaReaderStore.closeBook();
+    }
   }
 
   function requestCloseReader() {
-    if (readerStore.isGuestReading() && readerStore.state.book) {
+    const guestBook =
+      readerStore.isGuestReading() && readerStore.state.book
+        ? readerStore.state.book
+        : mediaReaderStore.state.guestReading && mediaReaderStore.state.book
+          ? mediaReaderStore.state.book
+          : null;
+    if (guestBook) {
       setGuestAddToShelfOpen(true);
       return;
     }
@@ -798,11 +887,14 @@ function AppContent() {
   }
 
   async function confirmGuestAddToShelf() {
-    const book = readerStore.state.book;
+    const book = readerStore.state.book ?? mediaReaderStore.state.book;
     if (!book || guestAddToShelfBusy()) return;
     setGuestAddToShelfBusy(true);
     try {
-      const catalog = readerStore.state.catalog;
+      const catalog =
+        readerStore.state.book?.bookUrl === book.bookUrl
+          ? readerStore.state.catalog
+          : mediaReaderStore.state.catalog;
       const saved = await addSearchBookToShelf(bookToSearchBook(book), {
         chapters: catalog.length > 0 ? catalog : undefined,
         fetchChapters: catalog.length > 0 ? false : "background",
@@ -2157,108 +2249,141 @@ function AppContent() {
                     : "hidden",
                 )}
               >
-                <PageToolbar
-                  title={sourcePageToolbarTitle()}
-                  description={sourcePageToolbarDescription()}
-                  titleSlot={
-                    <SourceGroupTitleDropdown
+                <div class="flex flex-col flex-1 min-h-0 w-full">
+                  <div
+                    class={cn(
+                      'flex flex-col flex-1 min-h-0 w-full',
+                      showSourcesManage() && 'hidden pointer-events-none',
+                    )}
+                  >
+                    <PageToolbar
                       title={sourcePageToolbarTitle()}
                       description={sourcePageToolbarDescription()}
+                      titleSlot={
+                        <PageToolbarTitleDropdown
+                          title={sourcePageToolbarTitle()}
+                          description={sourcePageToolbarDescription()}
+                          dropdownEnabled={false}
+                        />
+                      }
+                    >
+                      <SourcesPageToolbar
+                        sourceSearchQuery={sourceSearchQuery()}
+                        onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
+                        sourceSearchMode={sourceSearchMode()}
+                        onSourceSearchModeChange={persistSearchMode}
+                        sortMode={sourceSortMode()}
+                        sortReverse={sourceSortReverse()}
+                        onSortModeChange={setSourceSortMode}
+                        onSortReverseChange={setSourceSortReverse}
+                        filterTooltip={sourceFilterTooltip()}
+                        onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
+                        onOpenSourcesManage={() => setShowSourcesManage(true)}
+                        showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
+                          getEffectiveSourceListFilter(
+                            sourceListFilter(),
+                            sourceFilterGroupOptions(),
+                          ).groupNames,
+                        )}
+                        sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                        onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
+                      />
+                    </PageToolbar>
+                    <SourcesFilterDialog
+                      open={sourceFilterDialogOpen()}
+                      onOpenChange={setSourceFilterDialogOpen}
                       sourceGroups={sourceGroups()}
-                      currentSourceGroup={currentSourceGroup()}
-                      onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
+                      appliedFilter={sourceListFilter()}
+                      onApply={setSourceListFilter}
                     />
-                  }
-                >
-                  <SourcesPageToolbar
-                    sourceSearchQuery={sourceSearchQuery()}
-                    onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
-                    sourceSearchMode={sourceSearchMode()}
-                    onSourceSearchModeChange={persistSearchMode}
-                    currentSourceGroup={currentSourceGroup()}
-                    sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                    onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
-                    onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
-                    onSourcesImportLocal={() => void openLocalBookSourceImport()}
-                    onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                    onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
-                    showSourcesImportQR={isMobile()}
-                    onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
-                  />
-                </PageToolbar>
-                <SourcesPage
-                  currentSourceGroup={currentSourceGroup()}
-                  sourceSearchQuery={sourceSearchQuery()}
-                  sourceSearchMode={sourceSearchMode()}
-                  sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                  expandedSourceUrl={sourcesExpandedSourceUrl()}
-                  onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
-                  onGroupsLoaded={(g) => setSourceGroups(g)}
-                  onSourceCountChange={(n) => setSourceCount(n)}
-                  onSourceGroupChange={(g) => setCurrentSourceGroup(g)}
-                  onSourceEdit={() => showAppToast({ title: "编辑书源", description: "功能开发中", variant: "default" })}
-                  onSourceLogin={async (source) => {
-                    const url = source.loginUrl?.trim();
-                    const hasUi = !!source.loginUi?.trim();
-                    const isHttp =
-                      !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                    // 仅 http 登录、无 loginUi：与书源设置 control() 相同的全屏内嵌页（工具栏 + √）
-                    if (isHttp && !hasUi) {
-                      try {
-                        const cookies = getStoredSourceCookiesForUrl(source, url);
-                        await openSourceSettingsInApp(url, cookies, {
-                          bookSourceUrl: source.bookSourceUrl,
-                        });
-                      } catch (e) {
-                        console.error("打开登录页失败:", e);
-                        showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
-                      }
-                      return;
-                    }
-                    if (url || hasUi) {
-                      setSourceLoginDialogSource(source);
-                    }
-                  }}
-                  onSourceSearch={(source) => {
-                    openBookSearch(undefined, formatSourceScope(source));
-                  }}
-                  onSourcesNew={() => showAppToast({ title: "新建书源", description: "功能开发中", variant: "default" })}
-                  onSourcesImportLocal={() => void openLocalBookSourceImport()}
-                  onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                  onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
-                  onExploreSectionClick={async (source, section) => {
-                    if (!section.url?.trim()) {
-                      showAppToast({
-                        title: `${source.sourceName} · ${section.title}`,
-                        description: "该分类暂无链接",
-                        variant: "default",
-                      });
-                      return;
-                    }
-                    if (!shouldOpenExplorePageForSection(section)) {
-                      try {
-                        const opened = await openExploreSectionInInnerWeb(source, section);
-                        if (!opened) {
-                          showAppToast({
-                            title: "无法打开",
-                            description: section.title,
-                            variant: "destructive",
-                          });
+                    <SourcesPage
+                      sourceSearchQuery={sourceSearchQuery()}
+                      sourceSearchMode={sourceSearchMode()}
+                      sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                      filterGroupNames={sourceGroups()}
+                      appliedFilter={sourceListFilter()}
+                      sortMode={sourceSortMode()}
+                      sortReverse={sourceSortReverse()}
+                      expandedSourceUrl={sourcesExpandedSourceUrl()}
+                      onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
+                      exploreDrawerPresentationOpen={currentPage() === "sources"}
+                      onGroupsLoaded={(g) => setSourceGroups(g)}
+                      onSourceCountChange={(n) => setSourceCount(n)}
+                      onSourceEdit={(source) => openSourceEditor(source)}
+                      onSourceLogin={async (source) => {
+                        const url = source.loginUrl?.trim();
+                        const hasUi = !!source.loginUi?.trim();
+                        const isHttp =
+                          !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                        if (isHttp && !hasUi) {
+                          try {
+                            const cookies = getStoredSourceCookiesForUrl(source, url);
+                            await openSourceSettingsInApp(url, cookies, {
+                              bookSourceUrl: source.bookSourceUrl,
+                            });
+                          } catch (e) {
+                            console.error("打开登录页失败:", e);
+                            showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
+                          }
+                          return;
                         }
-                      } catch (e) {
-                        console.error("打开发现子项失败:", e);
-                        showAppToast({
-                          title: "打开失败",
-                          description: e instanceof Error ? e.message : "请稍后重试",
-                          variant: "destructive",
-                        });
-                      }
-                      return;
-                    }
-                    setExploreContext({ source, section });
-                    setCurrentPage("explore");
-                  }}
-                />
+                        if (url || hasUi) {
+                          setSourceLoginDialogSource(source);
+                        }
+                      }}
+                      onSourceSearch={(source) => {
+                        openBookSearch(undefined, formatSourceScope(source));
+                      }}
+                      onExploreSectionClick={async (source, section) => {
+                        if (!section.url?.trim()) {
+                          showAppToast({
+                            title: `${source.sourceName} · ${section.title}`,
+                            description: "该分类暂无链接",
+                            variant: "default",
+                          });
+                          return;
+                        }
+                        if (!shouldOpenExplorePageForSection(section)) {
+                          try {
+                            const opened = await openExploreSectionInInnerWeb(source, section);
+                            if (!opened) {
+                              showAppToast({
+                                title: "无法打开",
+                                description: section.title,
+                                variant: "destructive",
+                              });
+                            }
+                          } catch (e) {
+                            console.error("打开发现子项失败:", e);
+                            showAppToast({
+                              title: "打开失败",
+                              description: e instanceof Error ? e.message : "请稍后重试",
+                              variant: "destructive",
+                            });
+                          }
+                          return;
+                        }
+                        setExploreContext({ source, section });
+                        setCurrentPage("explore");
+                      }}
+                    />
+                  </div>
+
+                  <Show when={showSourcesManage()}>
+                    <SourcesManagePage
+                      onClose={() => setShowSourcesManage(false)}
+                      sourceSearchMode={sourceSearchMode()}
+                      onSourceSearchModeChange={persistSearchMode}
+                      onSourceEdit={(source) => openSourceEditor(source)}
+                      onSourcesNew={() => openSourceEditor()}
+                      onSourcesImportLocal={() => void openLocalBookSourceImport()}
+                      onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
+                      onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                      showSourcesImportQR={isMobile()}
+                      onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
+                    />
+                  </Show>
+                </div>
               </section>
 
               {/* 订阅视图 */}
@@ -2308,9 +2433,7 @@ function AppContent() {
                     }
                   />
                   <div class={mainShellPageScroll}>
-                    <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
-                      <p>书签功能开发中...</p>
-                    </div>
+                    <BookmarkPage />
                   </div>
                 </section>
               </Show>
@@ -2335,9 +2458,7 @@ function AppContent() {
                     }
                   />
                   <div class={mainShellPageScroll}>
-                    <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
-                      <p>阅读记录功能开发中...</p>
-                    </div>
+                    <ReadRecordPage />
                   </div>
                 </section>
               </Show>
@@ -2376,6 +2497,16 @@ function AppContent() {
                       <TocPaginationSafetySetting />
 
                       <SourceBlocklistSetting />
+
+                      <div class="rounded-2xl border border-border/50 bg-card p-6">
+                        <div class="mb-4">
+                          <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
+                          <p class="text-sm text-muted-foreground">
+                            管理正文替换规则，阅读器内可开关「应用替换」
+                          </p>
+                        </div>
+                        <ReplaceRulesPage />
+                      </div>
 
                       {/* 数据库备份 */}
                       <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -2482,9 +2613,9 @@ function AppContent() {
 
         {/* 独立页面（阅读器、发现、书籍信息、导入、远程书籍）- 全屏显示，在主容器外部 */}
         <Show when={isStandalonePage()}>
-          {/* 阅读器页面 */}
-          <Show when={currentPage() === "reader"}>
-            <ReaderPage
+          {/* 文本阅读器 */}
+          <Show when={currentPage() === "book-reader"}>
+            <BookReader
               onClose={requestCloseReader}
               onOpenBookInfo={async () => {
                 const book = readerStore.state.book;
@@ -2515,10 +2646,20 @@ function AppContent() {
                   chapterWordCount: 0,
                   respondTime: 0,
                 };
-                setBookInfoContext({ source, book: sb, fromPage: "reader" });
+                setBookInfoContext({ source, book: sb, fromPage: "book-reader" });
                 setCurrentPage("book-info");
               }}
             />
+          </Show>
+
+          <Show when={currentPage() === "pic-reader"}>
+            <PicReaderPage onClose={requestCloseReader} />
+          </Show>
+          <Show when={currentPage() === "audio-player"}>
+            <AudioPlayerPage onClose={requestCloseReader} />
+          </Show>
+          <Show when={currentPage() === "video-player"}>
+            <VideoPlayerPage onClose={requestCloseReader} />
           </Show>
 
           {/* 发现页：书源展开项进入，全屏独立（与阅读器同级，不在主容器内） */}
@@ -2716,6 +2857,44 @@ function AppContent() {
           payload={innerWebPayload()}
           onClose={() => setInnerWebPayload(null)}
         />
+        <Show when={sourceEditTarget() !== null}>
+          <Portal mount={document.body}>
+            <SourceEditPage
+              sourceUrl={
+                sourceEditTarget() === "new"
+                  ? undefined
+                  : (sourceEditTarget() as string)
+              }
+              onClose={() => setSourceEditTarget(null)}
+              onOpenLogin={async (source) => {
+                const url = source.loginUrl?.trim();
+                const hasUi = !!source.loginUi?.trim();
+                const isHttp =
+                  !!url && (url.startsWith("http://") || url.startsWith("https://"));
+                if (isHttp && !hasUi) {
+                  try {
+                    const cookies = getStoredSourceCookiesForUrl(source, url);
+                    await openSourceSettingsInApp(url, cookies, {
+                      bookSourceUrl: source.sourceUrl,
+                    });
+                  } catch (e) {
+                    console.error("打开登录页失败:", e);
+                    showAppToast({
+                      title: "打开失败",
+                      description: e instanceof Error ? e.message : "请稍后重试",
+                      variant: "destructive",
+                    });
+                  }
+                  return;
+                }
+                if (url || hasUi) {
+                  setSourceLoginDialogSource(source);
+                }
+              }}
+              onImportFromQr={(raw) => void identifySourcesFromQrRaw(raw)}
+            />
+          </Portal>
+        </Show>
       </div>
     );
   };

@@ -323,8 +323,7 @@
 @layer utilities {
 
   /** 书架列表/网格：间距由 bindBookshelfLayoutGap 写入 CSS 变量（默认 spacing=12 → 3rem） */
-  .bookshelf-layout-gap,
-  .bookshelf-grid-gap {
+  .bookshelf-layout-gap {
     gap: var(--bookshelf-layout-gap, 3rem);
   }
 

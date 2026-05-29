@@ -32,7 +32,7 @@ const EXPLORE_HUB_CHIP_BASE =
   'shrink-0 rounded-lg border-border/60 bg-background/80 text-sm font-medium shadow-sm';
 
 const exploreHubItemsTrackClass =
-  'flex max-h-36 flex-wrap items-center gap-2 overflow-y-auto scroll-gutter-stable-both overscroll-contain py-2';
+  'flex max-h-32 flex-wrap items-center gap-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain p-1 my-1';
 
 const exploreHubButtonClass = (selected: boolean) =>
   cn(

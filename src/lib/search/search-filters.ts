@@ -1,4 +1,4 @@
-import { fuzzyMatchQuery } from '@/lib/sources/filters';
+import { fuzzyMatchQuery } from '@/lib/sources/source-list-filter';
 import { getBookshelfBookSourceName } from '@/lib/bookshelf/book-source-name';
 import type { Book, BookGroup, BookSource } from '@/types';
 import type { SearchMode } from '@/lib/search/search-prefs';
