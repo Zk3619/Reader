@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { blurActiveElement } from '@/utils/accessibility';
 import * as sourcesDb from '@/lib/database/sources';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { fuzzyMatchQuery } from '@/lib/sources/filters';
+import { fuzzyMatchQuery } from '@/lib/sources/source-list-filter';
 import { SearchIcon } from '@/components/shared/icons';
 
 export interface SourceGroupManageDialogProps {

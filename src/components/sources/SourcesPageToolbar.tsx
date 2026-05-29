@@ -1,9 +1,9 @@
 /**
- * 书源页操作区：可展开搜索、更多菜单（新建/导入/分组/搜索模式）
+ * 书源页操作区：可展开搜索、排序、筛选、更多菜单（搜索模式 / 书源管理入口）
  */
 
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
-import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -16,34 +16,32 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   SearchIcon,
-  StarIcon,
   MoreIcon,
-  FileTextIcon,
-  FolderPlusIcon,
-  LinkIcon,
-  QrCodeIcon,
-  FolderTreeIcon,
+  FilterIcon,
+  Settings2Icon,
   XIcon,
 } from '@/components/shared/icons';
-import { isSourceFilterOrAll, type SourceSearchMode } from '@/lib/sources/filters';
+import { SourcesSortDropdown } from '@/components/sources/SourcesSortDropdown';
+import { SOURCE_PAGE_SORT_OPTIONS, type SourceSortMode } from '@/lib/sources/source-sort';
+import type { SourceSearchMode } from '@/lib/sources/source-list-filter';
 
 export interface SourcesPageToolbarProps {
   sourceSearchQuery?: string;
   onSourceSearchQueryChange?: (query: string) => void;
   sourceSearchMode?: SourceSearchMode;
   onSourceSearchModeChange?: (mode: SourceSearchMode) => void;
-  currentSourceGroup?: string | null;
+  sortMode?: SourceSortMode;
+  sortReverse?: boolean;
+  onSortModeChange?: (mode: SourceSortMode) => void;
+  onSortReverseChange?: (reverse: boolean) => void;
+  filterTooltip?: string;
+  onOpenFilterDialog?: () => void;
+  onOpenSourcesManage?: () => void;
+  showGroupByGroupNameOption?: boolean;
   sourcesGroupByGroupName?: boolean;
   onSourcesGroupByGroupNameChange?: (value: boolean) => void;
-  onSourcesNew?: () => void;
-  onSourcesImportLocal?: () => void;
-  onSourcesImportNetwork?: () => void;
-  onSourcesImportQR?: () => void;
-  showSourcesImportQR?: boolean;
-  onOpenSourceGroupManage?: () => void;
 }
 
-/** 菜单内单选指示：外圈始终可见，选中时叠加内点（对齐 RadioGroup 细线样式） */
 function MenuRadioIndicator(props: { selected: boolean }) {
   return (
     <span
@@ -64,15 +62,10 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const [sourceSearchExpanded, setSourceSearchExpanded] = createSignal(false);
   const sourceSearchQueryRef: { current: string } = { current: '' };
-  const sourceSearchModeRef: { current: SourceSearchMode } = { current: 'name' };
 
   createEffect(() => {
     sourceSearchQueryRef.current = props.sourceSearchQuery ?? '';
     if ((props.sourceSearchQuery ?? '').trim()) setSourceSearchExpanded(true);
-  });
-
-  createEffect(() => {
-    sourceSearchModeRef.current = props.sourceSearchMode ?? 'name';
   });
 
   onMount(() => {
@@ -138,12 +131,27 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
         </div>
       </Show>
 
+      <SourcesSortDropdown
+        sortMode={props.sortMode ?? 'manual'}
+        sortReverse={props.sortReverse ?? false}
+        options={SOURCE_PAGE_SORT_OPTIONS}
+        onSortModeChange={(mode) => props.onSortModeChange?.(mode)}
+        onSortReverseChange={(reverse) => props.onSortReverseChange?.(reverse)}
+      />
+
       <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
-          <StarIcon class="h-4 w-4" />
-          <span class="sr-only">收藏</span>
+        <TooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class="h-9 w-9 shrink-0"
+          type="button"
+          onClick={() => props.onOpenFilterDialog?.()}
+        >
+          <FilterIcon class="h-4 w-4" />
+          <span class="sr-only">筛选</span>
         </TooltipTrigger>
-        <TooltipContent>收藏</TooltipContent>
+        <TooltipContent>{props.filterTooltip || '筛选'}</TooltipContent>
       </Tooltip>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
@@ -161,37 +169,15 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
-          <AppDropdownMenuItem onSelect={() => props.onSourcesNew?.()}>
-            <FileTextIcon class="h-4 w-4" />
-            <span>新建书源</span>
+          <AppDropdownMenuItem onSelect={() => props.onOpenSourcesManage?.()}>
+            <Settings2Icon class="h-4 w-4" />
+            <span>书源管理</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportLocal?.())}
-          >
-            <FolderPlusIcon class="h-4 w-4" />
-            <span>本地导入</span>
-          </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportNetwork?.())}
-          >
-            <LinkIcon class="h-4 w-4" />
-            <span>网络导入</span>
-          </AppDropdownMenuItem>
-          <Show when={props.showSourcesImportQR}>
+          <Show when={props.showGroupByGroupNameOption}>
             <AppDropdownMenuItem
-              onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportQR?.())}
-            >
-              <QrCodeIcon class="h-4 w-4" />
-              <span>二维码导入</span>
-            </AppDropdownMenuItem>
-          </Show>
-          <AppDropdownMenuItem onSelect={() => props.onOpenSourceGroupManage?.()}>
-            <FolderTreeIcon class="h-4 w-4" />
-            <span>分组管理</span>
-          </AppDropdownMenuItem>
-          <Show when={isSourceFilterOrAll(props.currentSourceGroup ?? null)}>
-            <AppDropdownMenuItem
-              onSelect={() => props.onSourcesGroupByGroupNameChange?.(!props.sourcesGroupByGroupName)}
+              onSelect={() =>
+                props.onSourcesGroupByGroupNameChange?.(!props.sourcesGroupByGroupName)
+              }
               class="flex items-center gap-2"
             >
               <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
