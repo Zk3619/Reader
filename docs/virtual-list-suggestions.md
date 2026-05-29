@@ -1,4 +1,14 @@
-结合 Reader 里现有实现（`VirtualChapterList`、缓存页的 `VirtualBookshelfCacheGrid`，其余页多为 `<For>` + CSS Grid），建议**不要全部虚拟化**，而是按「数据量 × DOM 复杂度 × 交互约束」分层处理。
+结合 Reader 里现有实现，虚拟列表已统一到 `@/components/shared/virtual-list`：
+
+| 组件 | 底层 | 拖拽 |
+|------|------|------|
+| `VirtualList` | TanStack Virtual + 可选 solid-dnd | 传 `sortable` 时启用 |
+| `VirtualChapterList` | `VirtualList` | 否 |
+| `VirtualGridRowsList` | `VirtualList` | 否 |
+| `VirtualExploreBookGrid` / `VirtualBookshelfCacheGrid` | `VirtualGridRowsList` | 否 |
+| `VirtualSourceManageList` | `VirtualList` | 传 `sortable` 时启用 |
+
+建议**不要全部页面虚拟化**，仍按「数据量 × DOM 复杂度 × 交互约束」分层处理。
 
 ## 判断原则（简要）
 

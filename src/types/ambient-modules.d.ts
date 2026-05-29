@@ -27,6 +27,18 @@ declare module 'sql.js' {
   ): Promise<SqlJsStatic>;
 }
 
+/** BarcodeDetector（部分 Chromium；用于二维码扫描） */
+interface BarcodeDetectorOptions {
+  formats?: string[];
+}
+
+declare class BarcodeDetector {
+  constructor(options?: BarcodeDetectorOptions);
+  detect(
+    image: ImageBitmap | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
+  ): Promise<Array<{ rawValue?: string }>>;
+}
+
 declare module '@corvu/resizable' {
   import type { Component, ValidComponent } from 'solid-js';
 

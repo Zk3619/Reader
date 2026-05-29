@@ -4,7 +4,12 @@
  */
 
 import type { Component, ComponentProps, ParentProps } from 'solid-js';
-import { splitProps } from 'solid-js';
+import { onCleanup, splitProps } from 'solid-js';
+import {
+  useAppDrawerOverlayLock,
+  useAppDrawerPortalMount,
+  syncAppDrawerOverlayLock,
+} from '@/components/shared/app-drawer-overlay-lock';
 import type { SelectRootProps } from '@kobalte/core/select';
 
 import {
@@ -81,10 +86,18 @@ export function AppSelect<Option = string, OptGroup = never>(
   props: AppSelectProps<Option, OptGroup>
 ) {
   const [local, rest] = splitProps(props, ['onOpenChange', 'disableAccessibilityAnnounce']);
-  const handleOpenChange = mergeOpenChange(
-    local.onOpenChange,
-    local.disableAccessibilityAnnounce
-  );
+  const drawerOverlayLock = useAppDrawerOverlayLock();
+  const inAppDrawer = () => drawerOverlayLock != null;
+  const overlayReleaseRef: { current: (() => void) | undefined } = { current: undefined };
+  onCleanup(() => overlayReleaseRef.current?.());
+
+  const handleOpenChange = (open: boolean) => {
+    syncAppDrawerOverlayLock(drawerOverlayLock, open, overlayReleaseRef);
+    mergeOpenChange(
+      local.onOpenChange,
+      local.disableAccessibilityAnnounce || inAppDrawer(),
+    )(open);
+  };
   return (
     <Select
       fitViewport
@@ -119,10 +132,18 @@ type AppSelectContentProps = ComponentProps<typeof SelectContent> & {
 export const AppSelectContent: Component<AppSelectContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
   const layout = () => local.layout ?? 'plain';
+  const drawerPortalMount = useAppDrawerPortalMount();
+  const portalMount = () => drawerPortalMount() ?? undefined;
   return (
     <SelectContent
       {...rest}
-      class={cn(CONTENT_LAYOUT_CLASS[layout()], local.portalZClass, local.class)}
+      mount={portalMount()}
+      class={cn(
+        CONTENT_LAYOUT_CLASS[layout()],
+        portalMount() && 'z-60',
+        local.portalZClass,
+        local.class,
+      )}
     />
   );
 };

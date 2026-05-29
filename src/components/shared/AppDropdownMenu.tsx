@@ -4,7 +4,8 @@
  */
 
 import type { Component, ComponentProps, JSX } from 'solid-js';
-import { splitProps } from 'solid-js';
+import { onCleanup, splitProps } from 'solid-js';
+import { useAppDrawerOverlayLock, syncAppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
 
 import {
   DropdownMenu,
@@ -79,6 +80,18 @@ const CONTENT_LAYOUT_CLASS: Record<AppDropdownMenuContentLayout, string> = {
   plain: popperContentViewportScroll,
 };
 
+/**
+ * 默认相对触发器水平居中、向下展开（覆盖 Kobalte Menu 的 `bottom-start`）。
+ */
+const APP_DROPDOWN_MENU_PLACEMENT = 'bottom' as const;
+
+/**
+ * 空间不足时的翻转顺序：先向上，再左对齐（向右展开）、右对齐（向左展开）。
+ * 配合 `fitViewport` 与 Content 的 `max-h-[var(--kb-popper-content-available-height)]`，
+ * 上下均不足时 Popper 限制高度并由内容区纵向滚动。
+ */
+const APP_DROPDOWN_MENU_FLIP = 'top bottom-start bottom-end';
+
 function mergeOpenChange(
   userOnOpenChange: ((open: boolean) => void) | undefined,
   accessibilityDisabled: boolean | undefined
@@ -109,16 +122,28 @@ export const AppDropdownMenu: Component<AppDropdownMenuProps> = (props) => {
     'onOpenChange',
     'disableAccessibilityAnnounce',
     'modal',
+    'placement',
+    'flip',
   ]);
-  const handleOpenChange = mergeOpenChange(
-    local.onOpenChange,
-    local.disableAccessibilityAnnounce
-  );
+  const drawerOverlayLock = useAppDrawerOverlayLock();
+  const inAppDrawer = () => drawerOverlayLock != null;
+  const overlayReleaseRef: { current: (() => void) | undefined } = { current: undefined };
+  onCleanup(() => overlayReleaseRef.current?.());
+
+  const handleOpenChange = (open: boolean) => {
+    syncAppDrawerOverlayLock(drawerOverlayLock, open, overlayReleaseRef);
+    mergeOpenChange(
+      local.onOpenChange,
+      local.disableAccessibilityAnnounce || inAppDrawer(),
+    )(open);
+  };
   return (
     <DropdownMenu
       modal={local.modal ?? false}
       fitViewport
       overflowPadding={popperOverflowPadding}
+      placement={local.placement ?? APP_DROPDOWN_MENU_PLACEMENT}
+      flip={local.flip ?? APP_DROPDOWN_MENU_FLIP}
       {...rest}
       onOpenChange={handleOpenChange}
     />
@@ -153,16 +178,23 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
 /** 与 Trigger `as` 联用的普通按钮（如批量操作 outline 触发器） */
 export function AppDropdownMenuButtonTrigger(
   props: {
-    triggerProps: Record<string, unknown>;
+    triggerProps?: Record<string, unknown>;
     children: JSX.Element;
   } & Omit<ComponentProps<typeof Button>, 'onClick' | 'children'>
 ) {
   const [local, buttonRest] = splitProps(props, ['triggerProps', 'children']);
+  const fromTrigger = (local.triggerProps ?? {}) as Record<string, unknown>;
+  const fromRest = buttonRest as Record<string, unknown>;
+  const onClick = (fromTrigger.onClick ?? fromRest.onClick) as
+    | ((event: Event) => void)
+    | undefined;
+  const { onClick: _t, ...triggerSpread } = fromTrigger;
+  const { onClick: _r, ...restSpread } = fromRest;
   return (
     <Button
-      {...local.triggerProps}
-      {...buttonRest}
-      onClick={withBlurBefore(local.triggerProps.onClick as (() => void) | undefined)}
+      {...triggerSpread}
+      {...restSpread}
+      onClick={withBlurBefore(onClick)}
     >
       {local.children}
     </Button>
@@ -171,19 +203,26 @@ export function AppDropdownMenuButtonTrigger(
 
 export function AppDropdownMenuIconTrigger(
   props: {
-    triggerProps: Record<string, unknown>;
+    triggerProps?: Record<string, unknown>;
     children: JSX.Element;
   } & Omit<ComponentProps<typeof Button>, 'onClick' | 'children' | 'variant' | 'size'>
 ) {
   const [local, buttonRest] = splitProps(props, ['triggerProps', 'children']);
+  const fromTrigger = (local.triggerProps ?? {}) as Record<string, unknown>;
+  const fromRest = buttonRest as Record<string, unknown>;
+  const onClick = (fromTrigger.onClick ?? fromRest.onClick) as
+    | ((event: Event) => void)
+    | undefined;
+  const { onClick: _t, ...triggerSpread } = fromTrigger;
+  const { onClick: _r, class: restClass, ...restSpread } = fromRest;
   return (
     <Button
       variant="ghost"
       size="icon"
-      class={cn('h-9 w-9', buttonRest.class)}
-      {...local.triggerProps}
-      {...buttonRest}
-      onClick={withBlurBefore(local.triggerProps.onClick as (() => void) | undefined)}
+      class={cn('h-9 w-9', restClass as string | undefined)}
+      {...triggerSpread}
+      {...restSpread}
+      onClick={withBlurBefore(onClick)}
     >
       {local.children}
     </Button>

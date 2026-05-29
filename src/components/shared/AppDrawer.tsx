@@ -4,7 +4,15 @@
  */
 
 import type { Component, ComponentProps, JSX, ValidComponent } from 'solid-js';
-import { Show, splitProps } from 'solid-js';
+import {
+  createContext,
+  createMemo,
+  createSignal,
+  Show,
+  splitProps,
+  useContext,
+  type Accessor,
+} from 'solid-js';
 import type { ContentProps, DynamicProps } from '@corvu/drawer';
 import DrawerPrimitive from '@corvu/drawer';
 
@@ -22,8 +30,59 @@ import {
 import { Button } from '@/components/ui/button';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
+import {
+  AppDrawerOverlayLockContext,
+  AppDrawerPortalMountContext,
+  appDrawerBlocksOutsideDismiss,
+  type AppDrawerOverlayLock,
+} from '@/components/shared/app-drawer-overlay-lock';
 
-export const AppDrawer = Drawer;
+export type { AppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
+export {
+  AppDrawerOverlayLockContext,
+  AppDrawerPortalMountContext,
+  useAppDrawerOverlayLock,
+  useAppDrawerPortalMount,
+} from '@/components/shared/app-drawer-overlay-lock';
+
+export type AppDrawerProps = ComponentProps<typeof Drawer>;
+
+/** 根节点：抽屉内 Portal 浮层（Select 等）打开时暂停 closeOnOutsidePointer */
+export const AppDrawer: Component<AppDrawerProps> = (props) => {
+  const [local, rest] = splitProps(props, [
+    'closeOnOutsidePointer',
+    'closeOnOutsideFocus',
+    'children',
+  ]);
+  const [overlayLockCount, setOverlayLockCount] = createSignal(0);
+
+  const overlayLock: AppDrawerOverlayLock = {
+    acquire: () => {
+      setOverlayLockCount((c) => c + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        setOverlayLockCount((c) => Math.max(0, c - 1));
+      };
+    },
+  };
+
+  return (
+    <AppDrawerOverlayLockContext.Provider value={overlayLock}>
+      <Drawer
+        {...rest}
+        closeOnOutsidePointer={appDrawerBlocksOutsideDismiss(
+          overlayLockCount,
+          local.closeOnOutsidePointer,
+        )}
+        closeOnOutsideFocus={local.closeOnOutsideFocus ?? false}
+      >
+        {local.children}
+      </Drawer>
+    </AppDrawerOverlayLockContext.Provider>
+  );
+};
 export const AppDrawerTrigger = DrawerTrigger;
 export const AppDrawerClose = DrawerClose;
 export const AppDrawerTitle = DrawerTitle;
@@ -34,11 +93,20 @@ export const AppDrawerFooter = DrawerFooter;
 export const APP_DRAWER_CLOSE_BUTTON_CLASS =
   'size-9! shrink-0 p-0! inline-flex! items-center! justify-center! rounded-md text-muted-foreground hover:bg-muted hover:text-foreground';
 
+const AppDrawerNativeDragHandleContext = createContext<() => boolean>(() => false);
+
 type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> & {
   class?: string;
   children?: JSX.Element;
   /** 覆盖层 class，用于与内容区统一 z-index（如阅读器内段评需盖过 z-100） */
   overlayClass?: string;
+  /** 是否显示顶/底栏或侧栏的原生拖动手柄条，默认 false */
+  showNativeDragHandle?: boolean;
+};
+
+export type AppDrawerBodyProps = ComponentProps<'div'> & {
+  /** 覆盖 Content 上的 showNativeDragHandle；未传则继承 Content */
+  showNativeDragHandle?: boolean;
 };
 
 function isSideDrawer(side: string): boolean {
@@ -67,39 +135,56 @@ function AppDrawerBottomDragHandle() {
   return <div class="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />;
 }
 
+const AppDrawerPortalMountHost: Component<{ children: JSX.Element }> = (props) => {
+  const [portalMount, setPortalMount] = createSignal<HTMLElement | undefined>();
+  const mountAccessor: Accessor<HTMLElement | undefined> = portalMount;
+
+  return (
+    <AppDrawerPortalMountContext.Provider value={mountAccessor}>
+      <div ref={setPortalMount} class="flex min-h-0 min-w-0 flex-1 flex-col overflow-visible">
+        {props.children}
+      </div>
+    </AppDrawerPortalMountContext.Provider>
+  );
+};
+
 const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
   props: DynamicProps<T, AppDrawerContentProps<T>>,
 ) => {
   const ctx = DrawerPrimitive.useContext();
-  const [, rest] = splitProps(props as AppDrawerContentProps, [
+  const [local, rest] = splitProps(props as AppDrawerContentProps, [
     'class',
     'children',
     'overlayClass',
+    'showNativeDragHandle',
   ]);
   const side = () => ctx.side();
+  const showNativeDragHandle = createMemo(() => local.showNativeDragHandle ?? false);
 
   return (
-    <DrawerPortal>
-      <DrawerOverlay class={props.overlayClass} />
-      <DrawerPrimitive.Content
-        class={cn(
-          'fixed z-50 flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
-          side() === 'left' &&
-            'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
-          side() === 'right' &&
-            'right-0 top-0 bottom-0 h-full w-full max-w-sm rounded-l-[10px] border-r',
-          (side() === 'bottom' || side() === 'top') &&
-            'inset-x-0 bottom-0 mt-24 flex h-auto flex-col rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
-          props.class,
-        )}
-        {...rest}
-      >
-        <Show when={side() === 'bottom' || side() === 'top'}>
-          <AppDrawerBottomDragHandle />
-        </Show>
-        {props.children}
-      </DrawerPrimitive.Content>
-    </DrawerPortal>
+    <AppDrawerNativeDragHandleContext.Provider value={showNativeDragHandle}>
+      <DrawerPortal>
+        <DrawerOverlay class={local.overlayClass} />
+        <DrawerPrimitive.Content
+          class={cn(
+            'fixed z-50 flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
+            side() === 'left' &&
+              'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
+            side() === 'right' &&
+              'right-0 top-0 bottom-0 h-full w-full max-w-sm rounded-l-[10px] border-r',
+            (side() === 'bottom' || side() === 'top') &&
+              'inset-x-0 bottom-0 mt-24 flex h-auto flex-col rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
+            local.class,
+          )}
+          {...rest}
+        >
+          <Show when={showNativeDragHandle() && (side() === 'bottom' || side() === 'top')}>
+            <AppDrawerBottomDragHandle />
+          </Show>
+          <AppDrawerPortalMountHost>{local.children}</AppDrawerPortalMountHost>
+        </DrawerPrimitive.Content>
+      </DrawerPortal>
+    </AppDrawerNativeDragHandleContext.Provider>
   );
 };
 
@@ -140,31 +225,29 @@ export const AppDrawerHeader: Component<AppDrawerHeaderProps> = (props) => {
   );
 };
 
-/** 可滚动主体；侧栏抽屉时在右侧预留拖动手柄列 */
-export const AppDrawerBody: Component<ComponentProps<'div'>> = (props) => {
+/** 可滚动主体；侧栏且 showNativeDragHandle 时在边缘预留拖动手柄列 */
+export const AppDrawerBody: Component<AppDrawerBodyProps> = (props) => {
   const ctx = DrawerPrimitive.useContext();
+  const inheritedShowDragHandle = useContext(AppDrawerNativeDragHandleContext);
   const side = () => ctx.side();
-  const [local, rest] = splitProps(props, ['class', 'children']);
+  const [local, rest] = splitProps(props, ['class', 'children', 'showNativeDragHandle']);
+  const showNativeDragHandle = createMemo(
+    () => local.showNativeDragHandle ?? inheritedShowDragHandle(),
+  );
+
+  const bodyClass = cn('flex min-h-0 flex-1 flex-col overflow-hidden', local.class);
 
   return (
     <Show
-      when={isSideDrawer(side())}
+      when={isSideDrawer(side()) && showNativeDragHandle()}
       fallback={
-        <div
-          class={cn('flex min-h-0 flex-1 flex-col overflow-hidden', local.class)}
-          data-corvu-no-drag
-          {...rest}
-        >
+        <div class={bodyClass} data-corvu-no-drag {...rest}>
           {local.children}
         </div>
       }
     >
       <div class="flex min-h-0 flex-1 flex-row">
-        <div
-          class={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', local.class)}
-          data-corvu-no-drag
-          {...rest}
-        >
+        <div class={cn(bodyClass, 'min-w-0')} data-corvu-no-drag {...rest}>
           {local.children}
         </div>
         <AppDrawerSideDragStrip side={side() as 'left' | 'right'} />
