@@ -15,7 +15,6 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/shell/PageHeader';
 import {
   BookOpenIcon,
-  ChevronDownIcon,
   AddToShelfIcon,
   RemoveFromShelfIcon,
   BookCoverIcon,
@@ -30,6 +29,7 @@ import {
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
 import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
+import { mergeBookContentVariable, preferDetailContentSource } from '@/lib/book-source/utils';
 import { getReaderProgressSnapshot } from '@/lib/bookshelf/reading-progress-snapshot';
 import { formatBookshelfBookGroupNames, bookshelfBookCustomGroupIds } from '@/lib/bookshelf/book-source-name';
 import {
@@ -199,11 +199,18 @@ export interface BookInfoPageProps {
   book: SearchBook;
   /** 从发现/探索进入时已有书源，可立即加载封面 */
   source?: BookSource;
+  /** 展示方式：独立全屏页（默认）或嵌入抽屉内容区 */
+  presentation?: 'page' | 'drawer';
   onBack: () => void;
   onOpenBook: (book: Book, initialCatalog?: BookChapter[]) => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
+  const isPagePresentation = () => (props.presentation ?? 'page') === 'page';
+  /** 独立页按视口 md 分栏；抽屉始终纵向布局 */
+  const stackedLayoutVisibleClass = () => (isPagePresentation() ? 'md:hidden' : '');
+  const splitLayoutVisibleClass = () => (isPagePresentation() ? 'hidden md:flex' : 'hidden');
+  const mobileBlurVisibleClass = () => (isPagePresentation() ? 'md:hidden' : '');
   const [isInShelf, setIsInShelf] = createSignal(false);
   const [isAdding, setIsAdding] = createSignal(false);
   const [isRemoving, setIsRemoving] = createSignal(false);
@@ -211,7 +218,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
     props.source,
   );
   const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
-  const [introExpanded, setIntroExpanded] = createSignal(false);
   const [showCoverDialog, setShowCoverDialog] = createSignal(false);
   const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
   
@@ -355,12 +361,15 @@ export function BookInfoPage(props: BookInfoPageProps) {
           tocUrl: bookInfo.tocUrl || props.book.tocUrl,
           wordCount: m(props.book.wordCount, wordCountText),
           chapterWordCountText: m(props.book.chapterWordCountText, wordCountText),
-          source: m(props.book.source, bookInfo.source),
+          source: preferDetailContentSource(props.book.source, bookInfo.source),
           status: m(props.book.status, bookInfo.status),
           tab: m(props.book.tab, bookInfo.tab),
           category: m(props.book.category, bookInfo.category),
           tags: m(props.book.tags, bookInfo.tags),
           score: m(props.book.score, bookInfo.score),
+          variable: mergeBookContentVariable(props.book.variable, {
+            source: preferDetailContentSource(props.book.source, bookInfo.source),
+          }),
         };
         
         setBookData(mergedBook);
@@ -470,15 +479,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   async function openBookAtChapter(chapterIndex?: number) {
     let book: Book;
+    const detail = currentBook();
     if (isInShelf()) {
-      const base = shelfBook() ?? (await getBook(currentBook().bookUrl));
+      const base = shelfBook() ?? (await getBook(detail.bookUrl));
       if (!base) return;
-      book =
-        chapterIndex !== undefined
-          ? { ...base, durChapterIndex: chapterIndex, durChapterPos: 0 }
-          : base;
+      const mergedVariable = mergeBookContentVariable(base.variable, { source: detail.source });
+      book = {
+        ...base,
+        variable: mergedVariable ?? base.variable,
+      };
+      if (chapterIndex !== undefined) {
+        book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
+      }
     } else {
-      book = searchBookToEphemeralBook(currentBook());
+      book = searchBookToEphemeralBook(detail);
       if (chapterIndex !== undefined) {
         book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
       }
@@ -781,31 +795,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
   }
 
   /* ── 简介区块 ── */
-  /* 默认完整显示，窄屏模式下才提供收起功能（因为窄屏空间有限） */
-  function IntroSection(introProps: { collapsible?: boolean }) {
+  function IntroSection() {
     const intro = () => displayIntro();
     return (
       <Show when={intro()}>
         <div class="mt-3">
-          <div class="flex items-center justify-between mb-1.5">
-            <h3 class="text-sm font-medium text-foreground">简介</h3>
-            {/* 仅在可折叠模式（窄屏）且内容较长时显示展开/收起 */}
-            <Show when={introProps.collapsible && intro() && intro()!.length > 150}>
-              <button
-                onClick={() => setIntroExpanded(!introExpanded())}
-                class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <span>{introExpanded() ? '收起' : '展开全部'}</span>
-                <ChevronDownIcon class={cn('h-3 w-3 transition-transform duration-200', introExpanded() && 'rotate-180')} />
-              </button>
-            </Show>
-          </div>
-          <p
-            class={cn(
-              'whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground',
-              introProps.collapsible && !introExpanded() && intro() && intro()!.length > 150 && 'line-clamp-6',
-            )}
-          >
+          <h3 class="mb-1.5 text-sm font-medium text-foreground">简介</h3>
+          <p class="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
             {intro()}
           </p>
         </div>
@@ -874,10 +870,15 @@ export function BookInfoPage(props: BookInfoPageProps) {
   };
 
   return (
-    <div class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background">
-      {/* ── 窄屏：全屏模糊背景（受主题影响） ── */}
+    <div
+      class={cn(
+        'relative flex flex-col overflow-hidden bg-background',
+        isPagePresentation() ? 'fixed inset-0 z-50' : 'h-full min-h-0 w-full min-w-0',
+      )}
+    >
+      {/* ── 窄屏：模糊背景（受主题影响；抽屉内由 overflow-hidden 裁切圆角） ── */}
       <Show when={coverBackgroundSrc()}>
-        <div class="absolute inset-0 md:hidden">
+        <div class={cn('pointer-events-none absolute inset-0 overflow-hidden', mobileBlurVisibleClass())}>
           <div
             class="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-300"
             style={blurBgStyle()}
@@ -894,22 +895,23 @@ export function BookInfoPage(props: BookInfoPageProps) {
             参考 legado layout/activity_book_info.xml
             封面居中 → 弧形过渡 → 白色信息卡片
         ============================================================ */}
-        <div class="flex-1 overflow-hidden flex flex-col md:hidden">
-          {/* ── 统一页面头部（透明背景，文字颜色受主题影响） ── */}
-          <PageHeader
-            onBack={props.onBack}
-            title="书籍信息"
-            draggable={true}
-            showThemeToggle={true}
-            showWindowControls={true}
-            class={cn(
-              'bg-transparent border-transparent border-b-0 transition-colors',
-              // 保持原有的主题颜色逻辑（透明背景上的文字颜色）
-              textOnBlur(),
-            )}
-          />
+        <div class={cn('flex-1 overflow-hidden flex flex-col', stackedLayoutVisibleClass())}>
+          {/* ── 独立页：PageHeader；抽屉：透明顶栏（叠在模糊背景上） ── */}
+          <Show when={isPagePresentation()}>
+            <PageHeader
+              onBack={props.onBack}
+              title="书籍信息"
+              draggable={true}
+              showThemeToggle={true}
+              showWindowControls={true}
+              class={cn(
+                'bg-transparent border-transparent border-b-0 transition-colors',
+                textOnBlur(),
+              )}
+            />
+          </Show>
 
-          <div class="flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain">
+          <div class="bookinfo-stacked-scroll flex-1" data-tauri-no-drag>
             {/* 窄屏滚动内容：用 flex + min-h-full 保证至少占满视口，底部用填充块延伸白底到 ActionBar 消除缝隙 */}
             <div class="flex min-h-full flex-col">
             {/* 封面区域：白色卡片从封面中部开始，封面下半部分覆盖在白色背景上 */}
@@ -938,7 +940,12 @@ export function BookInfoPage(props: BookInfoPageProps) {
             </div>
 
             {/* 信息区域 — 与上方白色卡片无缝衔接 */}
-            <div class="shrink-0 bg-background px-4 pb-4 min-h-[calc(100dvh-320px)]">
+            <div
+              class={cn(
+                'shrink-0 bg-background px-4 pb-4',
+                isPagePresentation() ? 'min-h-[calc(100dvh-320px)]' : 'min-h-0',
+              )}
+            >
               <div class="pb-4">
                 <Show
                   when={loadError()}
@@ -956,7 +963,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
                   <div class="bookinfo-fade-in">
                     <NameAndBadges center class="mb-3" />
                     <DetailInfoList />
-                    <IntroSection collapsible />
+                    <IntroSection />
                   </div>
                     </Show>
                   }
@@ -996,16 +1003,18 @@ export function BookInfoPage(props: BookInfoPageProps) {
             顶部: 导航栏（占满宽度，透明背景）
             下方: 左侧封面区域（模糊背景） + 右侧信息区域（白色背景）
         ============================================================ */}
-        <div class="hidden md:flex flex-1 flex-col overflow-hidden">
+        <div class={cn('flex-1 flex-col overflow-hidden', splitLayoutVisibleClass())}>
           {/* ── 顶部导航栏（主题色背景） ── */}
-          <PageHeader
-            onBack={props.onBack}
-            title="书籍信息"
-            draggable={true}
-            showThemeToggle={true}
-            showWindowControls={true}
-            class="shrink-0"
-          />
+          <Show when={isPagePresentation()}>
+            <PageHeader
+              onBack={props.onBack}
+              title="书籍信息"
+              draggable={true}
+              showThemeToggle={true}
+              showWindowControls={true}
+              class="shrink-0"
+            />
+          </Show>
 
           {/* ── 下方内容区域：左右分栏 ── */}
           <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -1054,7 +1063,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             </div>
 
             {/* ── 右栏：详细信息（唯一可滚动区域） ── */}
-            <div class="flex min-h-0 flex-1 flex-col bg-background overflow-hidden">
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
               {/* 白色背景从顶部开始，仅此区域可滚动 */}
               <div class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain px-4 py-5">
               <Show

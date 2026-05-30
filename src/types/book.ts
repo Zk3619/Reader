@@ -94,6 +94,7 @@ export interface NewBook {
   originName?: string;
   tocUrl?: string;
   type?: number;
+  variable?: string;
 }
 
 /**

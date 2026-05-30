@@ -73,6 +73,9 @@ export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;
 
+/** Tauri 窗口拖拽拦截（遮罩/模态层，见 App.css `.app-block-drag`） */
+export const appBlockDrag = 'app-block-drag';
+
 /** 不超过锚点方向可用高度（`--kb-popper-content-available-height`），面板内纵向滚动 */
 export const popperContentViewportScroll = cn(
   'max-h-[var(--kb-popper-content-available-height)]',

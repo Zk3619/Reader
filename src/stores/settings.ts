@@ -68,6 +68,8 @@ export interface AppSettings {
   tocPaginationSafetyEnabled?: boolean;
   /** 目录分页最大抓取页数（含第一页） */
   tocPaginationMaxPages?: number;
+  /** 书籍详情展示方式：独立全屏页或右侧抽屉 */
+  bookInfoPresentation?: 'page' | 'drawer';
 }
 
 /**
@@ -86,6 +88,7 @@ const defaultAppSettings: AppSettings = {
   rememberImportAction: false,
   tocPaginationSafetyEnabled: true,
   tocPaginationMaxPages: 80,
+  bookInfoPresentation: 'page',
 };
 
 /**
@@ -295,6 +298,12 @@ export const settingsStore = {
     importKeepEnable?: boolean;
   }): Promise<void> {
     await this.updateAppSettings(options);
+  },
+
+  async setBookInfoPresentation(
+    bookInfoPresentation: 'page' | 'drawer',
+  ): Promise<void> {
+    await this.updateAppSettings({ bookInfoPresentation });
   },
 
   async setTocPaginationSafety(enabled: boolean, maxPages?: number): Promise<void> {
