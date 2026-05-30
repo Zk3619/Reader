@@ -68,6 +68,8 @@ export interface SourcesPageProps {
   onSourceEdit?: (source: BookSource) => void;
   /** 书源登录：打开该书源的登录页（仅当书源支持登录时显示） */
   onSourceLogin?: (source: BookSource) => void;
+  /** 设置书源变量 */
+  onSourceVariables?: (source: BookSource) => void;
   /** 书源搜索：使用该书源进行搜索（仅当书源支持搜索时显示） */
   onSourceSearch?: (source: BookSource) => void;
   /** 点击发现子项（分类/排行榜等），由 App 打开发现页或书籍列表 */
@@ -450,6 +452,7 @@ export function SourcesPage(props: SourcesPageProps) {
                 onSourceEdit={props.onSourceEdit}
                 onPinSource={handlePinSource}
                 onSourceLogin={props.onSourceLogin}
+                onSourceVariables={props.onSourceVariables}
                 onSourceSearch={props.onSourceSearch}
                 onSourceRefresh={handleSourceRefresh}
                 onDeleteSource={(s) => {

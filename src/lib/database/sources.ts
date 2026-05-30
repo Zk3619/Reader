@@ -388,8 +388,10 @@ function pickString(row: Record<string, unknown>, key: string): string | undefin
  * 将数据库行映射为BookSource对象
  */
 function mapRowToSource(row: Record<string, unknown>): BookSource {
+  const bookSourceUrl = String(row.bookSourceUrl ?? '');
   return {
-    sourceUrl: String(row.bookSourceUrl ?? ''),
+    sourceUrl: bookSourceUrl,
+    bookSourceUrl,
     sourceName: String(row.bookSourceName ?? ''),
     sourceGroup: row.bookSourceGroup ? String(row.bookSourceGroup) : undefined,
     sourceType: Number(row.bookSourceType ?? 0),

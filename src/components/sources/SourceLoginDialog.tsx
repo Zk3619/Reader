@@ -147,6 +147,8 @@ export interface SourceLoginDialogProps {
   onOpenChange: (open: boolean) => void;
   /** 当前要登录的书源（需配置 loginUrl 或 loginUi） */
   source: BookSource | null;
+  /** 打开书源变量编辑（对齐 Legado 设置源变量） */
+  onOpenSourceVariables?: (source: BookSource) => void;
 }
 
 /**
@@ -361,6 +363,19 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
             <p class="text-sm text-muted-foreground">
               填写后点击按钮执行登录脚本；若需打开网页（如「书源设置」），将在全屏内嵌页中打开，点右上角 √ 可同步 Cookie 并返回。
             </p>
+            <Show when={props.source && props.onOpenSourceVariables}>
+              <Button
+                type="button"
+                variant="outline"
+                class="w-full"
+                onClick={() => {
+                  const s = props.source;
+                  if (s) props.onOpenSourceVariables?.(s);
+                }}
+              >
+                设置源变量（deviceId / server 等）
+              </Button>
+            </Show>
             <Show when={isTauri()}>
               <label class="flex items-center gap-2 text-sm cursor-pointer">
                 <input

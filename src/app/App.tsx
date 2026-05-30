@@ -59,7 +59,7 @@ import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageD
 import { bookshelfStore } from "@/stores/bookshelf";
 import { readerStore } from "@/stores/reader";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
-import type { Book, BookSource, SearchBook } from "@/types";
+import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
 import { ReaderGuestAddToShelfDialog } from "@/components/reader/ReaderGuestAddToShelfDialog";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
@@ -178,13 +178,13 @@ import { importDatabase } from "@/lib/database/export-import";
 import { SourceBlocklistSetting } from "@/components/settings/SourceBlocklistSetting";
 import { InnerWebHost } from "@/pages/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
+import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
 import {
   ensureMainWindowVisible,
   isDevSplashDone,
   markDevSplashDone,
 } from "@/lib/dev/splash-session";
-import type { NewBookSource } from "@/types";
 import "@/app/App.css";
 // 窗口显示：开屏时由 SplashScreen 处理；HMR 跳过开屏时由 App onMount 补 show
 
@@ -296,6 +296,12 @@ function AppContent() {
   } | null>(null);
   /** 书源登录对话框：配置了 loginUi 时弹窗显示登录页 */
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
+  const [sourceVariableDialogSource, setSourceVariableDialogSource] =
+    createSignal<BookSource | null>(null);
+
+  function openSourceVariables(source: BookSource) {
+    setSourceVariableDialogSource(source);
+  }
   const initialInnerWeb = loadPersistedInnerWebSession();
   const [innerWebPayload, setInnerWebPayload] = createSignal<InnerWebPayload | null>(
     initialInnerWeb
@@ -2399,6 +2405,7 @@ function AppContent() {
                     onGroupsLoaded={(g) => setSourceGroups(g)}
                     onSourceCountChange={(n) => setSourceCount(n)}
                     onSourceEdit={(source) => openSourceEditor(source)}
+                    onSourceVariables={openSourceVariables}
                     onSourceLogin={async (source) => {
                       const url = source.loginUrl?.trim();
                       const hasUi = !!source.loginUi?.trim();
@@ -2466,6 +2473,7 @@ function AppContent() {
                     enableDragSort={sourceEnableDragSort()}
                     onEnableDragSortChange={persistSourceEnableDragSort}
                     onSourceEdit={(source) => openSourceEditor(source)}
+                    onSourceVariables={openSourceVariables}
                     onSourcesNew={() => openSourceEditor()}
                     onSourcesImportLocal={() => void openLocalBookSourceImport()}
                     onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
@@ -2954,6 +2962,14 @@ function AppContent() {
             if (!open) setSourceLoginDialogSource(null);
           }}
           source={sourceLoginDialogSource()}
+          onOpenSourceVariables={openSourceVariables}
+        />
+        <SourceVariableDialog
+          open={!!sourceVariableDialogSource()}
+          source={sourceVariableDialogSource()}
+          onOpenChange={(open) => {
+            if (!open) setSourceVariableDialogSource(null);
+          }}
         />
         <ReaderGuestAddToShelfDialog
           open={guestAddToShelfOpen()}
@@ -2980,6 +2996,7 @@ function AppContent() {
                   : (sourceEditTarget() as string)
               }
               onClose={() => setSourceEditTarget(null)}
+              onOpenSourceVariables={openSourceVariables}
               onOpenLogin={async (source) => {
                 const url = source.loginUrl?.trim();
                 const hasUi = !!source.loginUi?.trim();

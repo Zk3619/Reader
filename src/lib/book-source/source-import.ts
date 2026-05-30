@@ -80,6 +80,7 @@ function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
 
   const out: NewBookSource = {
     sourceUrl: trimmedUrl,
+    bookSourceUrl: trimmedUrl,
     sourceName: trimmedName,
     sourceGroup: raw.sourceGroup ?? raw.bookSourceGroup,
     sourceType: raw.sourceType ?? raw.bookSourceType,

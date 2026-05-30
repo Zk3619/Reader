@@ -158,6 +158,7 @@ interface SourceManageListItemProps {
   onToggleSelection: () => void;
   onSelectionChange: (checked: boolean) => void;
   onSourceEdit?: (source: BookSource) => void;
+  onSourceVariables?: (source: BookSource) => void;
   onPinSource: (source: BookSource) => void;
   onDeleteSource: (source: BookSource) => void;
   onEnableChange: (source: BookSource, enabled: boolean) => Promise<void>;
@@ -247,6 +248,9 @@ function SourceManageListItem(props: SourceManageListItemProps) {
             <AppContextMenuItem onSelect={() => props.onSourceEdit?.(props.source)}>
               编辑
             </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => props.onSourceVariables?.(props.source)}>
+              设置源变量
+            </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onPinSource(props.source)}>
               置顶
             </AppContextMenuItem>
@@ -270,6 +274,7 @@ export interface SourcesManagePageProps {
   enableDragSort?: boolean;
   onEnableDragSortChange?: (value: boolean) => void;
   onSourceEdit?: (source: BookSource) => void;
+  onSourceVariables?: (source: BookSource) => void;
   onSourcesNew?: () => void;
   onSourcesImportLocal?: () => void;
   onSourcesImportNetwork?: () => void;
@@ -829,6 +834,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                     setSelectedSourceUrls(next);
                   }}
                   onSourceEdit={props.onSourceEdit}
+                  onSourceVariables={props.onSourceVariables}
                   onPinSource={handlePinSource}
                   onDeleteSource={(s) => {
                     setSourceToDelete(s);

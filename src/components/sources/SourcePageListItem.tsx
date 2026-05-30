@@ -89,6 +89,7 @@ export interface SourcePageListItemProps {
   onSourceEdit?: (source: BookSource) => void;
   onPinSource: (source: BookSource) => void;
   onSourceLogin?: (source: BookSource) => void;
+  onSourceVariables?: (source: BookSource) => void;
   onSourceSearch?: (source: BookSource) => void;
   onSourceRefresh: (source: BookSource) => void;
   onDeleteSource: (source: BookSource) => void;
@@ -156,6 +157,9 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
           <AppContextMenuContent>
             <AppContextMenuItem onSelect={() => props.onSourceEdit?.(props.source)}>
               编辑
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => props.onSourceVariables?.(props.source)}>
+              设置源变量
             </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onPinSource(props.source)}>
               置顶

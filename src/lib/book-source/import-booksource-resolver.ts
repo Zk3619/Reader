@@ -18,6 +18,7 @@ import {
 import * as sourcesDb from '@/lib/database/sources';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
 import { syncBooksOriginNameForSource } from '@/lib/bookshelf/sync-book-origin-name';
+import { seedBookSourceArgsFromHeader } from '@/lib/book-source/source-variables';
 
 export type { ImportBookSourceOptions } from '@/lib/book-source/import-booksource-merge';
 export {
@@ -160,6 +161,7 @@ export async function importSelectedBookSources(
     const existing = await sourcesDb.getSource(incoming.sourceUrl);
     const merged = mergeBookSourceForImport(incoming, existing, options);
     await sourcesDb.insertSource(merged);
+    seedBookSourceArgsFromHeader(merged);
     inserted += 1;
     if (
       existing &&

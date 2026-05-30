@@ -86,6 +86,8 @@ export interface SourceEditPageProps {
   onSaved?: (source: BookSource) => void;
   /** 打开书源登录（loginUrl / loginUi） */
   onOpenLogin?: (source: BookSource) => void;
+  /** 设置书源变量（对齐 Legado 设置源变量） */
+  onOpenSourceVariables?: (source: BookSource) => void;
   /** 识别二维码导入书源（由 App 走统一导入流程） */
   onImportFromQr?: (raw: string) => void;
 }
@@ -516,6 +518,21 @@ export function SourceEditPage(props: SourceEditPageProps) {
         onClick: () => props.onOpenLogin?.(legadoEditToBookSource(draft())),
       });
     }
+    moreItems.push({
+      icon: FileTextIcon,
+      label: '设置源变量',
+      onClick: () => {
+        try {
+          props.onOpenSourceVariables?.(legadoEditToBookSource(draft()));
+        } catch {
+          showAppToast({
+            title: '无法打开',
+            description: '请先填写源域名与源名称',
+            variant: 'destructive',
+          });
+        }
+      },
+    });
     moreItems.push(
       { icon: QrCodeIcon, label: '扫码导入', onClick: () => setQrImportOpen(true) },
       { icon: QrCodeIcon, label: '分享二维码', onClick: () => setShareQrOpen(true) },
