@@ -1,6 +1,8 @@
 /**
- * Legado 登录脚本 ajax 请求体 / Cookie 修正（晴天聚合 login_api / user_api）
+ * Legado 登录脚本 ajax 请求体 / Cookie 修正（login_api / user_api 等）
  */
+
+import { resolveContentApiItemId } from '@/lib/book-source/utils';
 
 /**
  * 书源 cookie 串规范为 WebView / HTTP Cookie 头（`qttoken=…;deviceId=…`）。
@@ -20,18 +22,30 @@ export function normalizeLegadoCookieHeader(
   return `qttoken=${token};deviceId=${dev}`;
 }
 
+/** 书源脚本未拿到 key 时可能写入字面量 undefined/null，不能当作有效 token */
+export function isInvalidLegadoToken(token: string): boolean {
+  const t = String(token ?? '').trim().toLowerCase();
+  return !t || t === 'undefined' || t === 'null' || t === 'true' || t === 'false';
+}
+
 /** 从 cookie 串或裸 token 提取 qttoken / key */
 export function extractQttokenKey(cookieOrToken: string): string {
   const s = String(cookieOrToken ?? '').trim();
   if (!s) return '';
   const m = s.match(/(?:^|;)\s*qttoken=([^;]+)/i);
-  if (m) return m[1].trim();
-  if (!s.includes('=') && !s.includes(';')) return s;
+  if (m) {
+    const token = m[1].trim();
+    return isInvalidLegadoToken(token) ? '' : token;
+  }
+  if (!s.includes('=') && !s.includes(';')) {
+    return isInvalidLegadoToken(s) ? '' : s;
+  }
   for (const part of s.split(';')) {
     const trimmed = part.trim();
     if (/qttoken/i.test(trimmed)) {
       const eq = trimmed.indexOf('=');
-      return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
+      const token = eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
+      return isInvalidLegadoToken(token) ? '' : token;
     }
   }
   return '';
@@ -50,6 +64,8 @@ export function extractLegadoCookieValue(cookieStr: string, keyName: string): st
   if (key === 'device' || key === 'deviceId') {
     const m = s.match(/(?:^|;)\s*deviceId=([^;]+)/i);
     if (m?.[1]?.trim()) return m[1].trim();
+    const legacy = s.match(/(?:^|;)\s*device=([^;]+)/i);
+    if (legacy?.[1]?.trim()) return legacy[1].trim();
   }
   for (const part of s.split(';')) {
     const trimmed = part.trim();
@@ -85,8 +101,8 @@ export function mergeAjaxCookieHeaders(
 }
 
 /**
- * 晴天 user_api：服务端从 Cookie 读取 qttoken（非 JSON body）。
- * 实测带 `{"key":...}` 会返回「请求参数中未找到密钥」。
+ * user_api：服务端从 Cookie 读取 qttoken（非 JSON body）。
+ * 带 JSON body 时部分聚合服会返回「请求参数中未找到密钥」。
  */
 export function resolveUserApiCookieHeader(
   cookieStr: string,
@@ -135,15 +151,46 @@ export function normalizeControlSettingsCookieHeader(raw: string): string {
     .join('; ');
 }
 
-/** 合并两段 `name=value; …` Cookie 串（后者同名覆盖前者） */
-export function mergeLegadoCookieHeaderStrings(existing: string, incoming: string): string {
+function parseCookieHeaderParts(cookieStr: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const part of `${existing};${incoming}`.split(';')) {
+  for (const part of String(cookieStr ?? '').split(';')) {
     const t = part.trim();
     const i = t.indexOf('=');
     if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());
   }
+  return map;
+}
+
+/** 合并两段 `name=value; …` Cookie 串（后者同名覆盖前者） */
+export function mergeLegadoCookieHeaderStrings(existing: string, incoming: string): string {
+  const map = parseCookieHeaderParts(existing);
+  for (const [key, value] of parseCookieHeaderParts(incoming)) {
+    if (/^qttoken$/i.test(key) && isInvalidLegadoToken(value)) continue;
+    if ((key === 'deviceId' || key === 'device') && !value.trim()) continue;
+    map.set(key, value);
+  }
   return Array.from(map.entries())
     .map(([k, v]) => `${k}=${v}`)
     .join('; ');
+}
+
+/** ruleContent ajax：修正 /content POST 的 item_id（base64→内层 JSON + comic_id 补全） */
+export function normalizeContentApiPostBody(
+  resolvedUrl: string,
+  method: string,
+  body: string | undefined,
+): string | undefined {
+  if (method !== 'POST' || !/\/content\b/.test(resolvedUrl) || !body?.trim()) {
+    return body;
+  }
+  const trimmed = body.trim();
+  if (!trimmed.startsWith('{')) return body;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (typeof parsed.item_id !== 'string') return body;
+    parsed.item_id = resolveContentApiItemId(parsed.item_id);
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
 }

@@ -257,8 +257,9 @@ sources + '|' + tab;
 
   it('ajax 缓存键区分 POST body（/content 不同章节）', async () => {
     const { post } = await import('@/lib/http');
-    vi.mocked(post).mockImplementation(async (_url: string, body?: string) => {
-      const parsed = JSON.parse(String(body ?? '{}')) as { item_id?: string };
+    vi.mocked(post).mockImplementation(async (_url: string, body?: string | FormData) => {
+      const raw = typeof body === 'string' ? body : '{}';
+      const parsed = JSON.parse(raw) as { item_id?: string };
       if (parsed.item_id === 'ch1') {
         return JSON.stringify({ code: 0, data: { content: '<img src="a.jpg">' } });
       }
@@ -390,5 +391,131 @@ JSON.stringify({ content: content });
 
     const parsed = JSON.parse(String(out));
     expect(parsed.content).toContain('<img');
+  });
+});
+
+describe('ruleContent $.content 规则链', () => {
+  it('JS 返回聚合 API 对象时 $.content 能取 data.data.content', async () => {
+    const { analyzeString } = await import('@/lib/rule-engine');
+    const { post } = await import('@/lib/http');
+    vi.mocked(post).mockResolvedValue(
+      JSON.stringify({
+        code: 0,
+        data: { content: '<img src="https://cdn.example/m1.jpg">' },
+      }),
+    );
+
+    const payload = {
+      item_id: 'ch1',
+      sources: '全面漫画',
+      tab: '漫画',
+      title: '第1话',
+      book_id: 'b1',
+      url: '',
+    };
+    const hex = Array.from(new TextEncoder().encode(JSON.stringify(payload)))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const jsLib = `
+var host = ['https://v1.gyks.cf'];
+function getArguments(open_argument, key) {
+  try { open_argument = JSON.parse(open_argument); } catch (e) { open_argument = { server: host[0] }; }
+  return key ? open_argument[key] : open_argument;
+}
+`.trim();
+
+    const source = {
+      bookSourceName: 'test',
+      sourceName: 'test',
+      bookSourceUrl: 'test',
+      sourceUrl: 'test',
+      jsLib,
+      header: '{"User-Agent":"Mozilla/5.0"}',
+    };
+
+    const rule = `
+<js>
+result = String(java.hexDecodeToString(result));
+let res = JSON.parse(result);
+let sources = res.sources;
+let tab = res.tab;
+let item_id = res.item_id;
+let base_url = getArguments(source.getVariable(), "server") || host[0];
+let op = JSON.stringify({
+  method: "POST",
+  body: JSON.stringify({
+    html: "",
+    item_id,
+    source: sources,
+    tab,
+    tone_id: "4",
+    variable: "{\\"custom\\":\\"\\"}",
+    version: "4.11.5.1",
+  }),
+  headers: { cookie: "", "Content-Type": "application/json" },
+});
+let data = java.ajax(base_url + "/content," + op);
+try { data = JSON.parse(data); } catch (e) {}
+content = __readerExtractApiContent(data);
+data;
+</js>$.content`.trim();
+
+    const out = await analyzeString(rule, {
+      content: hex,
+      contentType: 'text',
+      baseUrl: 'https://v1.gyks.cf/',
+      result: hex,
+      source: source as never,
+      book: { variable: '{"custom":""}' },
+    });
+
+    expect(out).toContain('<img');
+  });
+
+  it('java.deviceID 抛错后走 androidId，device_type 为安卓（对齐 Legado Android）', async () => {
+    const store: Record<string, string> = {};
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    });
+
+    const code = `
+let device, device_type;
+try {
+  device = java.deviceID();
+  device_type = "苹果";
+} catch (e) {
+  try {
+    device = java.androidId();
+    device_type = "安卓";
+  } catch (e2) {
+    device = "";
+    device_type = "安卓";
+  }
+}
+JSON.stringify({ device_type, device: String(device) });
+`.trim();
+
+    const out = await runLegadoRuleScript(
+      code,
+      { result: '', baseUrl: 'https://v1.gyks.cf/', source: {} },
+      {
+        bookSourceName: 'test',
+        sourceName: 'test',
+        bookSourceUrl: 'test',
+        sourceUrl: 'test',
+      } as never,
+    );
+
+    const parsed = JSON.parse(String(out)) as { device_type: string; device: string };
+    expect(parsed.device_type).toBe('安卓');
+    expect(parsed.device.length).toBeGreaterThan(0);
+    expect(parsed.device).not.toMatch(/^web_/);
   });
 });

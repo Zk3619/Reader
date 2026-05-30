@@ -5,8 +5,9 @@
 
 import { resolveUrl } from '@/lib/book-source/utils';
 import {
-  getOrCreateAndroidId,
-  resolveAggregationServerUrl,
+  legadoJavaAndroidId,
+  legadoJavaDeviceID,
+  resolveBookSourceServerUrl,
   resolveSourceCookiesForHttp,
 } from '@/lib/book-source/source-http';
 import { requestLegadoRuleScriptHttpAsync } from '@/lib/js-engine/legado/rule-script-http';
@@ -21,7 +22,8 @@ import {
   buildRuleScriptFullBody,
   patchLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-patches';
-import { extractLegadoCookieValue } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { extractApiContent } from '@/lib/book-source/extract-api-content';
+import { legadoCookieGetKey } from '@/lib/js-engine/legado/login-script-runner';
 import { javaGetString, type JavaGetStringContext } from '@/lib/rule-engine/java-get-string';
 import { splitSourceRule } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
@@ -38,6 +40,7 @@ export function needsLegadoRuleScriptRunner(code: string): boolean {
   const t = String(code ?? '');
   return (
     /\bjava\.getString\b/.test(t) ||
+    /\bjava\.get\b/.test(t) ||
     /\bjava\.ajax\b/.test(t) ||
     /\bjava\.hexDecodeToString\b/.test(t) ||
     /\bgetArguments\b/.test(t) ||
@@ -119,7 +122,7 @@ function executeLegadoGetStringRule(
   for (const seg of segments) {
     if (seg.mode === 'js') {
       runJsSnippet(seg.ruleStr, scope, jsLib);
-      acc = scope.result == null ? '' : String(scope.result);
+      acc = scope.result == null ? '' : serializeRuleScriptResult(scope.result);
     } else {
       acc = javaGetString(seg.ruleStr, buildJavaGetStringContext(scope, ctx));
       scope.result = acc;
@@ -150,34 +153,63 @@ export function buildRuleScriptAjaxCacheKey(
   return `${method.toUpperCase()}\0${url}\0${body ?? ''}`;
 }
 
+function serializeRuleScriptResult(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
 function isEmptyContentRuleResult(result: unknown): boolean {
   if (result == null) return false;
-  try {
-    const parsed = JSON.parse(String(result).trim()) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object' || !('content' in parsed)) return false;
-    const content = parsed.content;
-    return content == null || (typeof content === 'string' && !content.trim());
-  } catch {
-    return false;
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof result === 'object' && !Array.isArray(result)) {
+    parsed = result as Record<string, unknown>;
+  } else {
+    try {
+      parsed = JSON.parse(String(result).trim()) as Record<string, unknown>;
+    } catch {
+      return false;
+    }
   }
+  if (!parsed || typeof parsed !== 'object') return false;
+  if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') return true;
+  if (extractApiContent(parsed).trim()) return false;
+  const content = parsed.content;
+  return content == null || (typeof content === 'string' && !content.trim());
 }
 
 function ruleScriptResultLooksFinal(result: unknown): boolean {
   if (result == null) return false;
+  if (typeof result === 'object') {
+    const extracted = extractApiContent(result as Record<string, unknown>);
+    if (extracted.trim()) return true;
+    const parsed = result as Record<string, unknown>;
+    if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') {
+      return false;
+    }
+    const content = parsed.content;
+    if (typeof content === 'string' && content.trim().length > 0) return true;
+    return false;
+  }
   const text = String(result).trim();
   if (!text) return false;
   if (/^[0-9a-f]+$/i.test(text) && text.length > 40) return false;
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>;
     if (parsed && typeof parsed === 'object') {
+      if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') {
+        return false;
+      }
+      if (extractApiContent(parsed).trim().length > 0) return true;
       const content = parsed.content;
       if (typeof content === 'string' && content.trim().length > 0) return true;
-      if (typeof parsed.msg === 'string' && parsed.msg.trim().length > 0) return true;
-      const nested = parsed.data;
-      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-        const inner = (nested as Record<string, unknown>).content;
-        if (typeof inner === 'string' && inner.trim().length > 0) return true;
-      }
     }
   } catch {
     return text.length > 0;
@@ -203,7 +235,12 @@ export async function runLegadoRuleScript(
   );
   const jsLib =
     typeof sourceRecord.jsLib === 'string' ? (sourceRecord.jsLib as string) : '';
-  const bookRecord = (context.book ?? {}) as Record<string, unknown>;
+  const bookRecord: Record<string, unknown> = {
+    type: 0,
+    ...(context.book && typeof context.book === 'object'
+      ? (context.book as Record<string, unknown>)
+      : {}),
+  };
   const chapterRecord = (context.chapter ?? {}) as Record<string, unknown>;
 
   const ajaxCache = new Map<string, string>();
@@ -250,12 +287,11 @@ export async function runLegadoRuleScript(
       baseUrl,
       host: hostList.length > 0 ? hostList : [baseUrl].filter(Boolean),
       getArguments,
-      book: {
-        ...bookRecord,
+      book: Object.assign(bookRecord, {
         getVariable(key?: string) {
           return readBookVariable(bookRecord, key);
         },
-      },
+      }),
       source: {
         ...sourceRecord,
         getVariable(key?: string) {
@@ -284,7 +320,7 @@ export async function runLegadoRuleScript(
           const u = String(url).trim().replace(/\/+$/, '');
           let c = resolveSourceCookiesForHttp(bookSource, u).trim();
           if (c) return c;
-          const server = resolveAggregationServerUrl(bookSource);
+          const server = resolveBookSourceServerUrl(bookSource);
           if (server) return resolveSourceCookiesForHttp(bookSource, server).trim();
           return '';
         };
@@ -293,15 +329,12 @@ export async function runLegadoRuleScript(
         removeCookie() {},
         setCookie() {},
         getKey(cookieStrOrUrl: string, keyName?: string): string {
-          let s: string;
-          if (keyName != null && keyName !== '') {
-            s = getCookie(cookieStrOrUrl);
-          } else {
-            s = String(cookieStrOrUrl ?? '').trim();
-          }
-          if (!s) return '';
-          const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
-          return extractLegadoCookieValue(s, searchKey);
+          return legadoCookieGetKey(
+            new Map(),
+            getCookie,
+            cookieStrOrUrl,
+            keyName,
+          );
         },
         };
       })(),
@@ -353,10 +386,10 @@ export async function runLegadoRuleScript(
           }
         },
         deviceID() {
-          return getOrCreateAndroidId();
+          legadoJavaDeviceID();
         },
         androidId() {
-          return getOrCreateAndroidId();
+          return legadoJavaAndroidId();
         },
         getWebViewUA() {
           const hdr = bookSource?.header;

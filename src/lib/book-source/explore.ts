@@ -5,6 +5,7 @@
 
 import { get, isAbortError, post } from '@/lib/http';
 import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
+import { legadoListRuleNeedsAllSuffix } from '@/lib/rule-engine/legado-source-rule';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import type { BookSource, ExploreRule } from '@/types';
@@ -140,7 +141,7 @@ async function parseExploreBooksFromContent(
 
   if (rule.bookList) {
     let bookListRule = rule.bookList;
-    if (!bookListRule.includes('@')) {
+    if (legadoListRuleNeedsAllSuffix(bookListRule)) {
       bookListRule = `${bookListRule}@all`;
     }
     const listItems = await analyzeListElements(bookListRule, context);

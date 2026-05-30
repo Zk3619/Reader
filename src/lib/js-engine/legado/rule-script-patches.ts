@@ -1,17 +1,44 @@
 /**
- * 聚合/晴天等书源规则脚本兼容补丁
+ * 书源规则脚本兼容补丁
  * Legado Rhino 与浏览器 Function 语义差异
  */
 
 const RULE_SCRIPT_PRELUDE = `
+function __readerApiSuccess(code) {
+  if (code === undefined || code === null) return true;
+  return code === 0 || code === '0';
+}
+function __readerContentsToHtml(contents) {
+  if (!contents || !contents.length) return '';
+  var tags = [];
+  for (var i = 0; i < contents.length; i++) {
+    var item = contents[i];
+    if (typeof item === 'string' && item.trim()) {
+      tags.push('<img src="' + item.trim() + '">');
+    } else if (item && typeof item === 'object') {
+      var url = item.url || item.src || item.image || item.link;
+      if (typeof url === 'string' && url.trim()) tags.push('<img src="' + url.trim() + '">');
+    }
+  }
+  return tags.join('\\n');
+}
 function __readerExtractApiContent(data) {
   if (data == null) return '';
-  if (typeof data.content === 'string') return data.content;
-  if (data.data != null) {
-    if (typeof data.data === 'string') return data.data;
-    if (typeof data.data.content === 'string') return data.data.content;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (e) { return data; }
   }
-  if (typeof data.msg === 'string' && data.msg.trim()) return data.msg;
+  if (!__readerApiSuccess(data.code)) return '';
+  if (data.data != null) {
+    if (typeof data.data === 'string' && data.data.trim()) return data.data;
+    if (typeof data.data === 'object') {
+      if (typeof data.data.content === 'string' && data.data.content.trim()) return data.data.content;
+      var nestedHtml = __readerContentsToHtml(data.data.contents);
+      if (nestedHtml) return nestedHtml;
+    }
+  }
+  var topHtml = __readerContentsToHtml(data.contents);
+  if (topHtml) return topHtml;
+  if (typeof data.content === 'string' && data.content.trim()) return data.content;
   return '';
 }
 `.trim();
@@ -50,6 +77,10 @@ const JAVA_PUT_ITEM_ID_RE =
 const JAVA_PUT_TITLE_RE =
   /java\.put\s*\(\s*['"]title['"]\s*,\s*title\s*\)/g;
 
+/** ruleToc.chapterUrl 等脚本常用 result.source，catalog 行字段可能是 sources */
+const RESULT_SOURCE_ASSIGN_RE =
+  /(\blet\s+sources\s*=\s*)result\.source\b/g;
+
 const CONTENT_FROM_DATA_RE = /content\s*=\s*data\.content\b/g;
 
 /**
@@ -61,6 +92,10 @@ export function patchLegadoRuleScript(code: string): string {
   out = out.replace(JAVA_PUT_TAB_RE, "java.put('tab', res.tab)");
   out = out.replace(JAVA_PUT_ITEM_ID_RE, "java.put('item_id', res.item_id)");
   out = out.replace(JAVA_PUT_TITLE_RE, "java.put('title', res.title)");
+  out = out.replace(
+    RESULT_SOURCE_ASSIGN_RE,
+    "$1(result.source || result.sources || '')",
+  );
   out = out.replace(CONTENT_FROM_DATA_RE, 'content = __readerExtractApiContent(data)');
   if (/\bcontent_url\s*=/.test(out) && !/\breturn\b/.test(out)) {
     out += '\n;return content_url;';

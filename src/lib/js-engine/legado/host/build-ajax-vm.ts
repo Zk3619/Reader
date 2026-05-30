@@ -10,6 +10,7 @@ import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
   mergeLegadoCookieHeaderStrings,
+  normalizeContentApiPostBody,
   normalizeLegadoCookieHeader,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
@@ -121,6 +122,7 @@ export function bindJavaAjax(
       formKey: options.getFormKey?.(),
       argToken: options.getArgToken?.(),
     });
+    reqBody = normalizeContentApiPostBody(resolvedUrl, method, reqBody) ?? reqBody;
     if (isUserApiPost(resolvedUrl, method)) {
       const cookie = resolveUserApiCookieHeader(hdrs.Cookie ?? mergedCookie, {
         argToken: options.getArgToken?.(),

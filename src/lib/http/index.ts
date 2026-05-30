@@ -11,6 +11,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { getCookie, saveCookie } from '@/lib/http/cookie-manager';
+import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { createRateLimiter } from '@/lib/http/rate-limiter';
 import { collapseUrlPathSlashes } from '@/lib/book-source/utils';
 import { isTauri } from '@/lib/platform/detect';
@@ -288,11 +289,17 @@ async function executeRequest(
     ...headers,
   };
 
-  // 处理Cookie（使用原始 URL 用于 Cookie 管理）
+  // CookieJar + 请求头 Cookie：对齐 Legado AnalyzeUrl.setCookie（库 Cookie 先合并，urlOption/headers 同名覆盖）
   if (enableCookieJar) {
-    const cookie = await getCookie(normalizedUrl);
-    if (cookie) {
-      defaultHeaders['Cookie'] = cookie;
+    const jarCookie = await getCookie(normalizedUrl);
+    const headerCookie = String(defaultHeaders['Cookie'] ?? defaultHeaders['cookie'] ?? '').trim();
+    delete defaultHeaders['cookie'];
+    if (jarCookie && headerCookie) {
+      defaultHeaders['Cookie'] = mergeLegadoCookieHeaderStrings(jarCookie, headerCookie);
+    } else if (jarCookie) {
+      defaultHeaders['Cookie'] = jarCookie;
+    } else if (headerCookie) {
+      defaultHeaders['Cookie'] = headerCookie;
     }
   }
 

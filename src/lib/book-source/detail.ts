@@ -12,7 +12,7 @@ import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
 import {
   buildSourceRequestHeaders,
-  resolveAggregationServerUrl,
+  resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
 import { resolveUrl, detectContentType, decodeDataUrl, resolveMediaUrl } from '@/lib/book-source/utils';
 import { runBookInfoIntroScript } from '@/lib/book-source/book-info-script-runner';
@@ -380,7 +380,7 @@ async function getBookInfoFromDataUrl(
     return null;
   }
 
-  const serverUrl = resolveAggregationServerUrl(source);
+  const serverUrl = resolveBookSourceServerUrl(source);
   if (!serverUrl) {
     console.warn('[detail] 无法从书源解析详情请求地址（jsLib server / 变量）');
     return null;

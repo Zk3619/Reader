@@ -23,22 +23,9 @@ import {
   loadSourceCookieStore,
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
+import { getOrCreateAndroidId } from '@/lib/book-source/source-http';
 
 const SCRIPT_TIMEOUT_MS = 15000;
-const ANDROID_ID_KEY = 'reader_login_android_id';
-
-function getOrCreateAndroidId(): string {
-  try {
-    let id = localStorage.getItem(ANDROID_ID_KEY);
-    if (!id) {
-      id = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem(ANDROID_ID_KEY, id);
-    }
-    return id;
-  } catch {
-    return 'web_' + Date.now();
-  }
-}
 
 function createExploreCookieApi(baseUrl: string, store: Map<string, string>) {
   return {

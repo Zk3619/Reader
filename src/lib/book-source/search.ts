@@ -11,6 +11,7 @@ import {
   analyzeString,
   type RuleContext,
 } from '@/lib/rule-engine';
+import { legadoListRuleNeedsAllSuffix } from '@/lib/rule-engine/legado-source-rule';
 import {
   isLikelySerializedBookDetailJson,
   sanitizeSearchIntro,
@@ -454,7 +455,7 @@ export async function searchBook(
       // 如果规则没有提取器（如 "li"），添加 @all 提取器以获取完整HTML元素
       // 这样后续的子规则（如 ".novelname@text"）可以在完整的元素HTML上应用
       let listRule = parsedBookListRule || rawBookListRule;
-      if (!listRule.includes('@')) {
+      if (legadoListRuleNeedsAllSuffix(listRule)) {
         listRule = `${listRule}@all`;
       }
 

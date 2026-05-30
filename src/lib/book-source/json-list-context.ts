@@ -4,7 +4,7 @@
  */
 
 import type { RuleContext } from '@/lib/rule-engine';
-import { hexToUtf8 } from '@/lib/book-source/utils';
+import { coalesceSourceField, hexToUtf8 } from '@/lib/book-source/utils';
 
 function parseJsonObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -59,6 +59,14 @@ export function enrichJsonListItemContext(
     ...(extras?.regexGroups?.length ? { regexGroups: extras.regexGroups } : {}),
   };
   if (row) {
+    const sourceName = coalesceSourceField(
+      typeof row.source === 'string' ? row.source : undefined,
+      typeof row.sources === 'string' ? row.sources : undefined,
+    );
+    if (sourceName) {
+      row.source = sourceName;
+      row.sources = sourceName;
+    }
     ctx.book = row;
     ctx.result = row;
   }

@@ -5,7 +5,8 @@
 import { get as httpGet, post } from '@/lib/http';
 import {
   buildSourceRequestHeaders,
-  resolveAggregationServerUrl,
+  getOrCreateAndroidId,
+  resolveBookSourceServerUrl,
   resolveSourceCookiesForHttp,
 } from '@/lib/book-source/source-http';
 import {
@@ -38,7 +39,6 @@ import {
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
 const SCRIPT_TIMEOUT_MS = 20000;
-const ANDROID_ID_KEY = 'reader_login_android_id';
 
 function extractJsRule(rule: string): string | null {
   const s = rule.trim();
@@ -46,19 +46,6 @@ function extractJsRule(rule: string): string | null {
   const end = s.indexOf('</js>');
   if (end === -1) return null;
   return s.slice(4, end).trim();
-}
-
-function getOrCreateAndroidId(): string {
-  try {
-    let id = localStorage.getItem(ANDROID_ID_KEY);
-    if (!id) {
-      id = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem(ANDROID_ID_KEY, id);
-    }
-    return id;
-  } catch {
-    return 'web_' + Date.now();
-  }
 }
 
 function readArgToken(argsKey: string): string {
@@ -188,7 +175,7 @@ export async function runBookInfoIntroScript(
   }
 
   const baseUrl =
-    resolveAggregationServerUrl(source) ||
+    resolveBookSourceServerUrl(source) ||
     getScriptBaseUrl(source) ||
     (() => {
       try {
