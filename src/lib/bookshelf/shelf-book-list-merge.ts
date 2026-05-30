@@ -57,3 +57,45 @@ export function shelfListsSameOrderAndRefs(a: Book[], b: Book[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((book, i) => book === b[i]);
 }
+
+/** 成员与引用均未变时沿用上一数组，避免虚拟列表整表 diff */
+export function stabilizeBookListByRef(prev: Book[], next: Book[]): Book[] {
+  return shelfListsSameOrderAndRefs(prev, next) ? prev : next;
+}
+
+/** 按 bookUrl 重排并保留对象引用，仅就地更新 order 字段 */
+export function reorderBooksByUrlPreserveRefs(
+  prev: Book[],
+  orderedUrls: readonly (string | number)[],
+): Book[] {
+  const byUrl = new Map(prev.map((b) => [b.bookUrl, b]));
+  const next: Book[] = [];
+  for (let i = 0; i < orderedUrls.length; i++) {
+    const book = byUrl.get(String(orderedUrls[i]));
+    if (!book) continue;
+    if (book.order !== i) {
+      book.order = i;
+    }
+    next.push(book);
+  }
+  return next;
+}
+
+/** 就地更新 group 位掩码；配合 setBooks 返回新数组且未变项保持引用 */
+export function patchBooksGroupFieldInPlace(
+  books: Book[],
+  urls: readonly string[],
+  resolveNextGroup: (book: Book) => number,
+): Book[] | null {
+  if (urls.length === 0) return null;
+  const urlSet = new Set(urls);
+  let changed = false;
+  const next = books.map((book) => {
+    if (!urlSet.has(book.bookUrl)) return book;
+    const group = resolveNextGroup(book);
+    if (group === book.group) return book;
+    changed = true;
+    return { ...book, group };
+  });
+  return changed ? next : null;
+}

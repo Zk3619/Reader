@@ -16,14 +16,14 @@ export function getBookshelfBookSourceName(book: Book): string {
 }
 
 /** 书籍已加入的自定义分组 id（按 userGroups 顺序） */
-export function bookshelfBookCustomGroupIds(book: Book, userGroups: BookGroup[]): number[] {
+export function bookshelfBookCustomGroupIds(book: Book, userGroups: readonly BookGroup[]): number[] {
   return userGroups
     .filter((g) => g.groupId > 0 && (book.group & g.groupId) !== 0)
     .map((g) => g.groupId);
 }
 
 /** 书籍所属自定义分组名，多个以中文分号分隔；无分组时为「无」 */
-export function formatBookshelfBookGroupNames(book: Book, userGroups: BookGroup[]): string {
+export function formatBookshelfBookGroupNames(book: Book, userGroups: readonly BookGroup[]): string {
   const names = userGroups
     .filter((g) => g.groupId > 0 && (book.group & g.groupId) !== 0)
     .map((g) => g.groupName);

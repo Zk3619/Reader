@@ -1,4 +1,5 @@
 import type { Book, SearchBook } from '@/types';
+import { mergeBookContentVariable, readBookContentSource } from '@/lib/book-source/utils';
 
 /** 未上架书籍进入阅读器用的临时 Book（不写库） */
 export function searchBookToEphemeralBook(sb: SearchBook): Book {
@@ -29,11 +30,13 @@ export function searchBookToEphemeralBook(sb: SearchBook): Book {
     order: 0,
     originOrder: sb.originOrder ?? 0,
     syncTime: 0,
+    variable: mergeBookContentVariable(sb.variable, { source: sb.source }),
   };
 }
 
 /** 将书架书籍转为书籍信息页所需的 SearchBook */
 export function bookToSearchBook(book: Book): SearchBook {
+  const contentSource = readBookContentSource(book);
   return {
     bookUrl: book.bookUrl,
     name: book.name,
@@ -51,5 +54,7 @@ export function bookToSearchBook(book: Book): SearchBook {
     originOrder: book.originOrder ?? 0,
     chapterWordCount: -1,
     respondTime: 0,
+    source: contentSource || undefined,
+    variable: book.variable,
   };
 }

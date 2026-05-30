@@ -260,6 +260,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
 
   async function saveGroupManageSettings() {
     await saveGroupManagePrefs({
+      searchMode: searchMode(),
       coverClickPreview: coverClickPreview(),
       enableDragSort: enableDragSort(),
     });

@@ -10,6 +10,7 @@ import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
 import { fetchChapterListDeduped, isChapterListFetchInFlight, toNewBookChapter, type PartialChapterList } from '@/lib/book-source/chapters';
 import { resolveBookType } from '@/lib/book-source/book-type';
+import { mergeBookContentVariable } from '@/lib/book-source/utils';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
 import {
@@ -49,6 +50,7 @@ function searchBookToNewBook(sb: SearchBook): NewBook {
     origin: sb.origin,
     originName: sb.originName,
     type: resolveBookType(sb.type, sb.tab),
+    variable: mergeBookContentVariable(sb.variable, { source: sb.source }),
   };
 }
 
@@ -80,6 +82,7 @@ function newBookToBook(nb: NewBook): Book {
     order: 0,
     originOrder: 0,
     syncTime: 0,
+    variable: nb.variable,
   };
 }
 
@@ -262,6 +265,18 @@ export async function saveBookToShelf(
 
   const existingByUrl = await booksDb.getBook(bookUrl);
   if (existingByUrl) {
+    const patch = incoming.variable
+      ? (JSON.parse(incoming.variable) as { source?: string })
+      : {};
+    const mergedVariable = mergeBookContentVariable(existingByUrl.variable, patch);
+    let patched = existingByUrl;
+    if (mergedVariable && mergedVariable !== existingByUrl.variable) {
+      patched = {
+        ...existingByUrl,
+        variable: mergedVariable,
+      };
+      await booksDb.updateBook(patched);
+    }
     if (fetchMode === 'blocking') {
       const chapters = options?.chapters ?? (await fetchChaptersForBook(incoming, bookUrl));
       if (chapters.length > 0) {
@@ -272,7 +287,7 @@ export async function saveBookToShelf(
       scheduleBackgroundChapterFetch(existingByUrl);
     }
     await applyGroupMask(bookUrl, options?.groupId);
-    return existingByUrl;
+    return patched;
   }
 
   const author = incoming.author ?? '';

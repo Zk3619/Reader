@@ -178,8 +178,8 @@ export async function insertBook(book: NewBook): Promise<void> {
     `INSERT INTO books (
       bookUrl, tocUrl, origin, originName, name, author, kind,
       intro, coverUrl, charset, type, "group", latestChapterTime,
-      lastCheckTime, durChapterTime, "order"
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      lastCheckTime, durChapterTime, "order", variable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       book.bookUrl,
       book.tocUrl ?? book.bookUrl,
@@ -197,6 +197,7 @@ export async function insertBook(book: NewBook): Promise<void> {
       now, // lastCheckTime
       now, // durChapterTime：对齐 legado，写入加入书架时间
       topOrder, // order：手动排序默认插到首位
+      book.variable ?? null,
     ]
   );
 }
@@ -489,7 +490,8 @@ export async function getLastReadBook(): Promise<Book | null> {
  * 将数据库行映射为Book对象
  */
 function mapRowToBook(row: Record<string, unknown>): Book {
-  return {
+  const variable = row.variable ? String(row.variable) : undefined;
+  const base: Book = {
     bookUrl: String(row.bookUrl ?? ''),
     tocUrl: String(row.tocUrl ?? ''),
     origin: String(row.origin ?? 'loc_book'),
@@ -522,10 +524,11 @@ function mapRowToBook(row: Record<string, unknown>): Book {
     canUpdate: Boolean(row.canUpdate ?? 1),
     order: Number(row.order ?? 0),
     originOrder: Number(row.originOrder ?? 0),
-    variable: row.variable ? String(row.variable) : undefined,
+    variable,
     readConfig: row.readConfig
       ? (JSON.parse(String(row.readConfig)) as Book['readConfig'])
       : undefined,
     syncTime: Number(row.syncTime ?? 0),
   };
+  return base;
 }

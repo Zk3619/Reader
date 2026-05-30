@@ -1,11 +1,10 @@
 /**
- * 选择书籍分组（移入单选 / 加入多选）
+ * 选择书籍分组（移入 / 加入均为多选）
  */
 
 import { For, Show, createSignal, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AppDialog,
@@ -27,7 +26,7 @@ export interface BookGroupPickDialogProps {
   title: string;
   description?: string;
   groups: BookGroup[];
-  /** 打开对话框时的默认选中（仅单本书场景由父级传入） */
+  /** 打开对话框时的默认选中分组 id */
   initialGroupIds?: number[];
   onConfirm: (groupIds: number[]) => void;
   onAddGroup?: () => void;
@@ -90,16 +89,10 @@ export function BookGroupPickDialog(props: BookGroupPickDialogProps) {
 
   const pickableGroups = () => props.groups.filter((g) => g.groupId > 0);
   const allGroupIds = () => pickableGroups().map((g) => g.groupId);
-  const isAddMode = () => props.mode === 'add';
 
   createEffect(() => {
     if (!props.open) return;
-    const initial = props.initialGroupIds ?? [];
-    if (isAddMode()) {
-      setSelectedIds([...initial]);
-    } else {
-      setSelectedIds(initial.length > 0 ? [initial[0]] : []);
-    }
+    setSelectedIds([...(props.initialGroupIds ?? [])]);
   });
 
   function toggleGroupId(id: number) {
@@ -149,18 +142,16 @@ export function BookGroupPickDialog(props: BookGroupPickDialogProps) {
           </Show>
         </AppDialogHeader>
 
-        <Show when={isAddMode()}>
-          <GroupPickBulkActions
-            selectedCount={() => selectedIds().length}
-            totalCount={() => pickableGroups().length}
-            onSelectAll={() => setSelectedIds(allGroupIds())}
-            onClear={() => setSelectedIds([])}
-            onInvert={() => {
-              const cur = new Set(selectedIds());
-              setSelectedIds(allGroupIds().filter((id) => !cur.has(id)));
-            }}
-          />
-        </Show>
+        <GroupPickBulkActions
+          selectedCount={() => selectedIds().length}
+          totalCount={() => pickableGroups().length}
+          onSelectAll={() => setSelectedIds(allGroupIds())}
+          onClear={() => setSelectedIds([])}
+          onInvert={() => {
+            const cur = new Set(selectedIds());
+            setSelectedIds(allGroupIds().filter((id) => !cur.has(id)));
+          }}
+        />
 
         <div class="max-h-64 overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/20 p-1 mx-6">
           <Show
@@ -169,51 +160,21 @@ export function BookGroupPickDialog(props: BookGroupPickDialogProps) {
               <p class="px-2 py-3 text-sm text-muted-foreground">暂无自定义分组</p>
             }
           >
-            <Show
-              when={isAddMode()}
-              fallback={
-                <RadioGroup
-                  class="gap-0.5"
-                  value={
-                    selectedIds()[0] != null ? String(selectedIds()[0]) : undefined
-                  }
-                  onChange={(value) => setSelectedIds(value ? [Number(value)] : [])}
-                >
-                  <ul class="space-y-0.5">
-                    <For each={pickableGroups()}>
-                      {(g) => (
-                        <li>
-                          <RadioGroupItem
-                            value={String(g.groupId)}
-                            class={listItemClass}
-                          >
-                            <RadioGroupItemLabel class="min-w-0 flex-1 cursor-pointer truncate font-normal">
-                              {g.groupName}
-                            </RadioGroupItemLabel>
-                          </RadioGroupItem>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                </RadioGroup>
-              }
-            >
-              <ul class="space-y-0.5">
-                <For each={pickableGroups()}>
-                  {(g) => (
-                    <li>
-                      <label class={listItemClass}>
-                        <Checkbox
-                          checked={selectedIds().includes(g.groupId)}
-                          onChange={() => toggleGroupId(g.groupId)}
-                        />
-                        <span class="min-w-0 truncate">{g.groupName}</span>
-                      </label>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
+            <ul class="space-y-0.5">
+              <For each={pickableGroups()}>
+                {(g) => (
+                  <li>
+                    <label class={listItemClass}>
+                      <Checkbox
+                        checked={selectedIds().includes(g.groupId)}
+                        onChange={() => toggleGroupId(g.groupId)}
+                      />
+                      <span class="min-w-0 truncate">{g.groupName}</span>
+                    </label>
+                  </li>
+                )}
+              </For>
+            </ul>
           </Show>
         </div>
 

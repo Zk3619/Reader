@@ -44,7 +44,7 @@ export interface VirtualBookshelfManageBookListProps {
   class?: string;
   sortable?: VirtualListSortableConfig<Book>;
   renderDragOverlay?: (activeId: Id | null) => JSX.Element;
-  children: (book: Book, index: number) => JSX.Element;
+  children: (bookUrl: string) => JSX.Element;
 }
 
 export function VirtualBookshelfManageBookList(props: VirtualBookshelfManageBookListProps) {
@@ -68,8 +68,7 @@ export function VirtualBookshelfManageBookList(props: VirtualBookshelfManageBook
       getItemKey={(book) => book.bookUrl}
       sortable={sortable()}
       renderDragOverlay={props.renderDragOverlay}
-    >
-      {(book, index) => props.children(book, index)}
-    </VirtualList>
+      renderByKey={(bookUrl) => props.children(bookUrl)}
+    />
   );
 }

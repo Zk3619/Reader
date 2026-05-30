@@ -25,25 +25,20 @@ import {
 } from '@/lib/bookshelf/bookshelf-manage-prefs';
 import { filterBookshelfManageBooks } from '@/lib/search/search-filters';
 import {
+  patchBooksGroupFieldInPlace,
+  stabilizeBookListByRef,
+} from '@/lib/bookshelf/shelf-book-list-merge';
+import {
   loadBookshelfManageSubPageMode,
   saveBookshelfManageSubPageMode,
   type SearchMode,
 } from '@/lib/search/search-prefs';
 import { BookshelfManageFilterDialog } from '@/components/bookshelf/BookshelfManageFilterDialog';
-import { BookCoverImg } from '@/components/books/BookCoverImg';
 import {
   bookshelfBookCustomGroupIds,
-  formatBookshelfBookGroupNames,
   getBookshelfBookSourceName,
 } from '@/lib/bookshelf/book-source-name';
 import { cn } from '@/lib/utils';
-import {
-  bookshelfCompactCoverClass,
-  bookshelfCompactListCardClass,
-  bookshelfCompactMainClass,
-  bookshelfRowSubtitleClass,
-  bookshelfRowTitleClass,
-} from '@/lib/bookshelf/book-group-card-styles';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
@@ -51,12 +46,12 @@ import {
   BookshelfManagePageToolbar,
   BookshelfManageToolbarLeading,
 } from '@/components/bookshelf/BookshelfManagePageToolbar';
+import { BookshelfManageBookRow } from '@/components/bookshelf/BookshelfManageBookRow';
 import { BookGroupPickDialog } from '@/components/bookshelf/BookGroupPickDialog';
 import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
 import {
   BookCoverPreviewDialog,
 } from '@/components/books/BookCoverPreviewDialog';
-import { BookCoverPreviewButton } from '@/components/books/BookCoverPreviewButton';
 import {
   BookshelfManageBookDragOverlay,
   VirtualBookshelfManageBookList,
@@ -67,13 +62,6 @@ import { sourcesStore } from '@/stores/sources';
 import { BookEditDialog } from '@/components/books/BookEditDialog';
 import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  AppContextMenu,
-  AppContextMenuContent,
-  AppContextMenuItem,
-  AppContextMenuTrigger,
-} from '@/components/shared/AppContextMenu';
 import {
   AppDropdownMenu,
   AppDropdownMenuButtonTrigger,
@@ -90,7 +78,6 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { ChevronDownIcon } from '@/components/shared/icons';
-import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { getSource } from '@/lib/database/sources';
 import type { Book, BookGroup } from '@/types';
@@ -98,73 +85,6 @@ import type { Book, BookGroup } from '@/types';
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
 const BATCH_MENU_CHEVRON_CLASS =
   'h-4 w-4 shrink-0 opacity-50 transition-transform duration-200 group-data-expanded/trigger:rotate-180';
-
-const LONG_PRESS_MS = 500;
-const MOVE_THRESHOLD = 10;
-
-function useLongPressContextMenu(triggerRef: () => HTMLElement | null) {
-  let pressStartTime = 0;
-  let pressStartX = 0;
-  let pressStartY = 0;
-  let hasMoved = false;
-  let longPressTimer: number | null = null;
-  let longPressTriggered = false;
-  let contextMenuTriggered = false;
-
-  const onPointerDown = (e: MouseEvent | TouchEvent) => {
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
-    if ('button' in e && (e as MouseEvent).button !== 0) return;
-    pressStartTime = Date.now();
-    pressStartX = clientX;
-    pressStartY = clientY;
-    hasMoved = false;
-    longPressTriggered = false;
-    contextMenuTriggered = false;
-    longPressTimer = window.setTimeout(() => {
-      if (!hasMoved) longPressTriggered = true;
-    }, LONG_PRESS_MS);
-  };
-
-  const onPointerMove = (e: MouseEvent | TouchEvent) => {
-    if (pressStartTime === 0) return;
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
-    const dist = Math.sqrt((clientX - pressStartX) ** 2 + (clientY - pressStartY) ** 2);
-    if (dist > MOVE_THRESHOLD && longPressTimer !== null) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-    if (dist > MOVE_THRESHOLD) hasMoved = true;
-  };
-
-  const onPointerUp = (e: MouseEvent | TouchEvent) => {
-    if (longPressTimer !== null) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-    const el = triggerRef();
-    if (longPressTriggered && !hasMoved && el) {
-      const clientX =
-        'changedTouches' in e ? (e as TouchEvent).changedTouches[0].clientX : (e as MouseEvent).clientX;
-      const clientY =
-        'changedTouches' in e ? (e as TouchEvent).changedTouches[0].clientY : (e as MouseEvent).clientY;
-      el.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX, clientY })
-      );
-      contextMenuTriggered = true;
-      setTimeout(() => {
-        contextMenuTriggered = false;
-      }, 100);
-    }
-    pressStartTime = 0;
-    hasMoved = false;
-    longPressTriggered = false;
-  };
-
-  const shouldPreventClick = () => contextMenuTriggered;
-  return { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick };
-}
 
 export interface BookshelfManagePageProps {
   onClose?: () => void;
@@ -220,6 +140,7 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
       .map((g) => g.groupId),
   );
 
+  let filteredBooksCache: Book[] = [];
   const filteredBooks = createMemo(() => {
     const q = searchQuery().trim();
     const mode = searchMode();
@@ -246,7 +167,9 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
         return names;
       });
     }
-    return list;
+    const stabilized = stabilizeBookListByRef(filteredBooksCache, list);
+    filteredBooksCache = stabilized;
+    return stabilized;
   });
 
   const listSortableEnabled = createMemo(
@@ -278,11 +201,12 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
     try {
       const updates = orderedIds.map((id, i) => ({ bookUrl: String(id), order: i }));
       await booksDb.updateBooksOrder(updates);
-      const map = new Map(books().map((b) => [b.bookUrl, b]));
-      const reordered = orderedIds
-        .map((id) => map.get(String(id)))
-        .filter((b): b is Book => !!b);
-      setBooks(reordered.map((b, i) => ({ ...b, order: i })));
+      // 与书架网格一致：UI 顺序由 displayIds 驱动，勿 setBooks 触发整页重渲染（封面闪烁）
+      const byUrl = new Map(books().map((b) => [b.bookUrl, b]));
+      for (let i = 0; i < orderedIds.length; i++) {
+        const book = byUrl.get(String(orderedIds[i]));
+        if (book) book.order = i;
+      }
       notifyBookshelfRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : '更新顺序失败');
@@ -296,11 +220,6 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
     if (!book) return null;
     return <BookshelfManageBookDragOverlay book={book} />;
   }
-
-  const blockDragPointerProps = () =>
-    enableDragSort()
-      ? ({ onPointerDown: (e: PointerEvent) => e.stopPropagation() } as const)
-      : ({} as const);
 
   const selectedCount = () => selectedBookUrls().size;
   const filteredSelectedCount = () =>
@@ -375,14 +294,7 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
     resolveNextGroup: (book: Book) => number,
   ): void {
     if (urls.length === 0) return;
-    const urlSet = new Set(urls);
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (!urlSet.has(b.bookUrl)) return b;
-        const next = resolveNextGroup(b);
-        return next === b.group ? b : { ...b, group: next };
-      }),
-    );
+    setBooks((prev) => patchBooksGroupFieldInPlace(prev, urls, resolveNextGroup) ?? prev);
   }
 
   let bookshelfRefreshFromSelf = false;
@@ -423,10 +335,6 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
       enableDragSort: enableDragSort(),
     });
   });
-
-  function isSelected(bookUrl: string) {
-    return selectedBookUrls().has(bookUrl);
-  }
 
   function toggleBookSelection(bookUrl: string) {
     setSelectedBookUrls((prev) => {
@@ -531,17 +439,15 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
     return ids;
   }
 
-  /** 移入分组：仅当所选书恰好属于一个自定义分组时预填，否则不勾选 */
+  /** 移入分组：单本预填其全部分组；多本预填共有分组 */
   function initialGroupIdsForMove(urls: string[]): number[] {
     if (urls.length === 0) return [];
     if (urls.length === 1) {
       const book = books().find((b) => b.bookUrl === urls[0]);
       if (!book) return [];
-      const ids = bookshelfBookCustomGroupIds(book, userGroups());
-      return ids.length === 1 ? ids : [];
+      return bookshelfBookCustomGroupIds(book, userGroups());
     }
-    const common = commonCustomGroupIds(urls);
-    return common.length === 1 ? common : [];
+    return commonCustomGroupIds(urls);
   }
 
   function openGroupPick(mode: 'move' | 'add', book?: Book) {
@@ -761,191 +667,37 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
             sortable={bookListSortable()}
             renderDragOverlay={bookListSortable() ? renderBookDragOverlay : undefined}
           >
-            {(book) => {
-              let triggerEl: HTMLDivElement | null = null;
-              const { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick } =
-                useLongPressContextMenu(() => triggerEl);
-
-              return (
-                <div class="box-border flex h-full min-h-0 items-stretch py-1">
-                  <AppContextMenu>
-                    <AppContextMenuTrigger
-                      as="div"
-                      ref={(el) => {
-                        triggerEl = el;
-                      }}
-                      class={cn(
-                        bookshelfCompactListCardClass('h-16 select-none'),
-                        'min-w-0 w-full cursor-pointer text-left',
-                      )}
-                      onMouseDown={onPointerDown}
-                      onMouseMove={onPointerMove}
-                      onMouseUp={onPointerUp}
-                      onTouchStart={onPointerDown}
-                      onTouchMove={onPointerMove}
-                      onTouchEnd={onPointerUp}
-                      onClick={(e: MouseEvent) => {
-                        if (shouldPreventClick()) {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          return;
-                        }
-                        toggleBookSelection(book.bookUrl);
-                      }}
-                    >
-                      <div
-                        class="flex h-full shrink-0 items-center"
-                        onClick={(e) => e.stopPropagation()}
-                        {...blockDragPointerProps()}
-                        role="presentation"
-                      >
-                        <Checkbox
-                          checked={isSelected(book.bookUrl)}
-                          onChange={(checked: boolean) => {
-                            const next = new Set(selectedBookUrls());
-                            if (checked) next.add(book.bookUrl);
-                            else next.delete(book.bookUrl);
-                            setSelectedBookUrls(next);
-                          }}
-                          aria-label={`选择 ${book.name}`}
-                        />
-                      </div>
-                      <Show
-                        when={coverClickPreview()}
-                        fallback={
-                          <div
-                            class={bookshelfCompactCoverClass()}
-                            role="presentation"
-                            onClick={(e) => e.stopPropagation()}
-                            {...blockDragPointerProps()}
-                          >
-                            <BookCoverImg
-                              src={book.customCoverUrl || book.coverUrl}
-                              referer={book.origin}
-                              source={sourcesStore.getBookSource(book.origin)}
-                              bookUrl={book.bookUrl}
-                              alt=""
-                              class="h-full w-full object-cover"
-                              fallback={<BookCoverFallback class="h-6 w-6" />}
-                            />
-                          </div>
-                        }
-                      >
-                        <BookCoverPreviewButton
-                          class={bookshelfCompactCoverClass()}
-                          {...blockDragPointerProps()}
-                          coverUrl={book.coverUrl}
-                          customCoverUrl={book.customCoverUrl}
-                          bookUrl={book.bookUrl}
-                          origin={book.origin}
-                          source={sourcesStore.getBookSource(book.origin)}
-                          name={book.name}
-                          onPreview={() => setCoverPreviewBook(book)}
-                          fallback={<BookCoverFallback class="h-6 w-6" />}
-                        />
-                      </Show>
-                      <div class={bookshelfCompactMainClass()}>
-                        <div class="flex min-w-0 items-center gap-1 overflow-hidden">
-                          <Show
-                            when={openInfoByTitle()}
-                            fallback={
-                              <span class={bookshelfRowTitleClass(true, 'min-w-0')}>
-                                {book.name}
-                              </span>
-                            }
-                          >
-                            <button
-                              type="button"
-                              class={cn(
-                                bookshelfRowTitleClass(true, 'min-w-0 shrink text-left'),
-                                'hover:underline',
-                              )}
-                              onClick={(e: MouseEvent) => {
-                                e.stopPropagation();
-                                void handleTitleClick(book);
-                              }}
-                            >
-                              {book.name}
-                            </button>
-                          </Show>
-                          <Show when={book.author}>
-                            <span class="shrink-0 text-xs text-muted-foreground/70"> · </span>
-                            <span class={cn(bookshelfRowSubtitleClass(true), 'min-w-0')}>
-                              {book.author}
-                            </span>
-                          </Show>
-                        </div>
-                        <p class={bookshelfRowSubtitleClass(true, 'm-0 min-w-0')}>
-                          来源：{getBookshelfBookSourceName(book) || '—'}
-                        </p>
-                        <p class={bookshelfRowSubtitleClass(true, 'm-0 min-w-0')}>
-                          分组：{formatBookshelfBookGroupNames(book, userGroups())}
-                        </p>
-                      </div>
-                      <div
-                        class="flex h-full shrink-0 items-center gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                        {...blockDragPointerProps()}
-                        role="presentation"
-                      >
-                        <Button
-                          variant="default"
-                          size="sm"
-                          type="button"
-                          onClick={() => {
-                            setBookToEdit(book);
-                            setBookEditOpen(true);
-                          }}
-                        >
-                          编辑
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          type="button"
-                          onClick={() => openGroupPick('move', book)}
-                        >
-                          分组
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          type="button"
-                          onClick={() => {
-                            setBookToDelete(book);
-                            setDeleteConfirmOpen(true);
-                          }}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </AppContextMenuTrigger>
-                    <AppContextMenuContent>
-                      <AppContextMenuItem
-                        onSelect={() => {
-                          setBookToEdit(book);
-                          setBookEditOpen(true);
-                        }}
-                      >
-                        编辑
-                      </AppContextMenuItem>
-                      <AppContextMenuItem onSelect={() => openGroupPick('move', book)}>
-                        分组
-                      </AppContextMenuItem>
-                      <AppContextMenuItem
-                        class="text-destructive focus:text-destructive"
-                        onSelect={() => {
-                          setBookToDelete(book);
-                          setDeleteConfirmOpen(true);
-                        }}
-                      >
-                        删除
-                      </AppContextMenuItem>
-                    </AppContextMenuContent>
-                  </AppContextMenu>
-                </div>
-              );
-            }}
+            {(bookUrl) => (
+              <BookshelfManageBookRow
+                bookUrl={bookUrl}
+                books={books}
+                userGroups={userGroups}
+                selectedBookUrls={selectedBookUrls}
+                coverClickPreview={coverClickPreview}
+                openInfoByTitle={openInfoByTitle}
+                enableDragSort={enableDragSort}
+                onToggleSelection={(bookUrl, checked) => {
+                  setSelectedBookUrls((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add(bookUrl);
+                    else next.delete(bookUrl);
+                    return next;
+                  });
+                }}
+                onRowClick={toggleBookSelection}
+                onTitleClick={(entry) => void handleTitleClick(entry)}
+                onEdit={(entry) => {
+                  setBookToEdit(entry);
+                  setBookEditOpen(true);
+                }}
+                onGroupPick={(entry) => openGroupPick('move', entry)}
+                onDelete={(entry) => {
+                  setBookToDelete(entry);
+                  setDeleteConfirmOpen(true);
+                }}
+                onCoverPreview={setCoverPreviewBook}
+              />
+            )}
           </VirtualBookshelfManageBookList>
         </Show>
       </div>
@@ -1185,7 +937,7 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
         title={groupPickMode() === 'move' ? '移入分组' : '加入分组'}
         description={
           groupPickMode() === 'move'
-            ? '将所选书籍移到另一分组'
+            ? '设置所选书籍的分组（将替换原有分组）'
             : '将所选书籍加入所选分组'
         }
         groups={userGroups()}
