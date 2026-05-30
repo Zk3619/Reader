@@ -33,7 +33,6 @@ import {
 } from '@/lib/rule-engine/legado-source-rule';
 import { compileSourceRule } from '@/lib/rule-engine/source-rule';
 import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
-import { extractApiContent } from '@/lib/book-source/extract-api-content';
 import { evalJs } from '@/lib/js-engine';
 import { normalizeJsRuleResult, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
 import { parseWebJsListResult, runWebJs } from '@/lib/rule-engine/webjs-runner';
@@ -333,8 +332,8 @@ function extractPutVariables(rule: string, putMap: Record<string, string>): stri
 const JSON_TEMPLATE_PATH_ALIASES: Record<string, string[]> = {
   '$.last_update_time': ['$.last_chapter_update_time'],
   '$.update_time': ['$.last_chapter_update_time'],
-  /** 晴天等 JSON 条目常用 book_id，模板写 {{$.source}} */
-  '$.source': ['$.book_id'],
+  /** 目录行常用 sources；详情页少数条目仅有 book_id */
+  '$.source': ['$.sources', '$.book_id'],
 };
 
 function resolveJsonTemplatePath(pathTrim: string, jsonString: string): string {
@@ -561,17 +560,6 @@ async function executeRuleByMode(
       return parseXPath(ruleBody, context.content, context.baseUrl);
     case 'json':
       if (context.contentType !== 'json') return [];
-      if (ruleBody === '$.content' || ruleBody.startsWith('$.content@')) {
-        try {
-          const parsed = JSON.parse(context.content) as Record<string, unknown>;
-          if (parsed && typeof parsed === 'object' && 'code' in parsed) {
-            const extracted = extractApiContent(parsed);
-            if (extracted.trim()) return [extracted];
-          }
-        } catch {
-          /* fall through to JSONPath */
-        }
-      }
       return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
     case 'regex':
       return parseRegex(ruleBody, context.content);

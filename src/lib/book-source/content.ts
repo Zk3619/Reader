@@ -7,12 +7,34 @@ import { get, post } from '@/lib/http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, BookChapter, Book } from '@/types';
 import {
-  buildBookSourceApiRequestHeaders,
+  buildLegadoContentApiRequestHeaders,
   buildSourceRequestHeaders,
+  readBookSourceArgsField,
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, decodeDataUrl, normalizeDataUrlPayload, coalesceSourceField, legadoDataUrlRuleBody, isLegadoTypedDataUrl, readBookContentSource, resolveContentApiItemId } from '@/lib/book-source/utils';
+import {
+  resolveUrl,
+  detectContentType,
+  decodeDataUrl,
+  normalizeDataUrlPayload,
+  coalesceSourceField,
+  legadoDataUrlRuleBody,
+  isLegadoTypedDataUrl,
+  readBookContentSource,
+  buildContentApiItemIdCandidates,
+  extractComicIdFromAggregationBookId,
+  summarizeAggregationItemIdForDebug,
+  buildTypedChapterDataUrl,
+  extractHostListFromJsLib,
+} from '@/lib/book-source/utils';
 import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
+import { logContentImageDiagnostics } from '@/lib/book-source/content-image-debug';
+import { summarizeContentPostItemId } from '@/lib/book-source/content-post-debug';
+import {
+  traceContentFetchStart,
+  traceContentFetchDone,
+} from '@/lib/book-source/content-fetch-trace';
+import { scanImgTags } from '@/lib/reader/scan-img-tags';
 import { extractContentFromRuleOutput } from '@/lib/book-source/extract-rule-content';
 import {
   extractApiContent,
@@ -27,13 +49,56 @@ import {
   buildCatalogApiVariable,
   enrichChapterContentPayload,
   readBookCustomFromVariable,
+  resolveFreshCatalogItemId,
 } from '@/lib/book-source/chapters';
 import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
-
 const MAX_CONTENT_PAGES = 20;
 const CONTENT_API_VERSION = '4.11.5.1';
 
+function isGyksContentServerPanic(message: string): boolean {
+  return /nil pointer dereference/i.test(message);
+}
+
+function gyksServerCandidates(
+  source: BookSource,
+  primary: string,
+): string[] {
+  const out: string[] = [];
+  const push = (u: string) => {
+    const t = u.trim().replace(/\/+$/, '');
+    if (t && !out.includes(t)) out.push(t);
+  };
+  push(primary);
+  for (const h of extractHostListFromJsLib(source as unknown as Record<string, unknown>)) {
+    push(h);
+  }
+  return out;
+}
+
 export { isApiErrorText } from '@/lib/book-source/extract-api-content';
+
+/** 调试：对比 Legado 与 Reader 的 item_id 是否一致 */
+function postBodyFingerprint(body: string): string {
+  const s = body.trim();
+  if (!s) return 'empty';
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+  }
+  return `len=${s.length},hash=${(hash >>> 0).toString(16)}`;
+}
+
+function itemIdFingerprint(itemId: string): string {
+  const s = itemId.trim();
+  if (!s) return 'empty';
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+  }
+  const head = s.slice(0, 16);
+  const tail = s.slice(-16);
+  return `len=${s.length},hash=${(hash >>> 0).toString(16)},${head}…${tail}`;
+}
 
 export function buildContentApiPostBody(
   payload: Record<string, string>,
@@ -44,10 +109,17 @@ export function buildContentApiPostBody(
   // 对齐常见 ruleContent：custom 为空时 tone_id 默认 '4'（书源脚本内 if (tone_id=='') tone_id='4'）
   const toneId = custom || '4';
 
+  // 对齐 Legado ruleContent：POST 用 catalog 短名（全面漫画），不用详情 svip_ 前缀
+  const source =
+    coalesceSourceField(payload.sources, payload.source).replace(/^svip_/i, '') ||
+    coalesceSourceField(payload.sources, payload.source);
+
+  const item_id = (payload.item_id || '').trim();
+
   const body: Record<string, string> = {
     html: payload.html ?? '',
-    item_id: resolveContentApiItemId(payload.item_id || ''),
-    source: coalesceSourceField(payload.sources, payload.source),
+    item_id,
+    source,
     tab: payload.tab || '小说',
     tone_id: toneId,
     variable,
@@ -97,63 +169,144 @@ async function requestContentApiDirect(
   bookVariable?: string,
   bookUrls?: Array<string | undefined>,
 ): Promise<string | null> {
-  const serverUrl = resolveBookSourceServerUrl(source);
-  if (!serverUrl || !payload.item_id?.trim()) return null;
+  const primaryServer = resolveBookSourceServerUrl(source);
+  if (!primaryServer || !payload.item_id?.trim()) return null;
 
   const html = payload.html ?? (await resolveContentPageHtml(source, payload));
-  const enrichedPayload = await enrichChapterContentPayload(source, payload, bookUrls);
+  const enrichedPayload = await enrichChapterContentPayload(
+    source,
+    payload,
+    bookUrls,
+    bookVariable,
+  );
   const requestPayload = html ? { ...enrichedPayload, html } : enrichedPayload;
 
-  const url = `${serverUrl}/content`;
-  const body = buildContentApiPostBody(requestPayload, bookVariable);
+  const serverCandidates = gyksServerCandidates(source, primaryServer);
   const postSource = coalesceSourceField(
     requestPayload.sources,
     requestPayload.source,
   );
+
+  const rawItemId = requestPayload.item_id?.trim() ?? '';
+  const comicIdHint = extractComicIdFromAggregationBookId(
+    requestPayload.book_id ?? '',
+  );
+  const itemIdCandidates = buildContentApiItemIdCandidates(rawItemId, comicIdHint);
+  const catalogPostSource = postSource.replace(/^svip_/i, '') || postSource;
+  const sourceCandidates = [catalogPostSource];
+
   try {
-    const headers = buildBookSourceApiRequestHeaders(source, url);
-    headers['Content-Type'] = 'application/json';
-    const token = extractQttokenKey(headers.Cookie ?? '');
-    if (!token || isInvalidLegadoToken(token)) {
-      console.warn('[content] 直连 /content 缺少有效 qttoken Cookie', {
-        serverUrl,
-        sources: postSource,
-        tokenLen: token.length,
-      });
+    let lastResponseText = '';
+    let attempt = 0;
+    let lastServer = primaryServer;
+
+    for (const serverUrl of serverCandidates) {
+      const url = `${serverUrl}/content`;
+      const headers = buildLegadoContentApiRequestHeaders(source, url);
+      const token = extractQttokenKey(headers.cookie ?? headers.Cookie ?? '');
+      if (!token || isInvalidLegadoToken(token)) {
+        console.warn('[content] 直连 /content 缺少有效 qttoken Cookie', {
+          serverUrl,
+          sources: postSource,
+          tokenLen: token.length,
+        });
+      }
+
+      let serverPanic = false;
+      for (const postSourceName of sourceCandidates) {
+        for (let i = 0; i < itemIdCandidates.length; i++) {
+          const item_id = itemIdCandidates[i]!;
+          const body = buildContentApiPostBody(
+            {
+              ...requestPayload,
+              item_id,
+              sources: postSourceName,
+              source: postSourceName,
+            },
+            bookVariable,
+          );
+          if (attempt === 0 && itemIdCandidates.length > 1) {
+            console.log('[content] 直连 /content 尝试 catalog item_id', {
+              item_id_len: item_id.length,
+              item_id_fp: itemIdFingerprint(item_id),
+              attempt: i + 1,
+            });
+          }
+          const responseText = await post(url, body, {
+            headers,
+            enableCookieJar: source.enabledCookieJar,
+            timeout: 60_000,
+            legadoMinimalHeaders: true,
+          });
+          lastResponseText = responseText;
+          lastServer = serverUrl;
+          await assertLoginCheckPassed(source, responseText, url);
+          const content = extractApiContent(responseText);
+          if (content?.trim() && !isApiErrorText(content)) {
+            if (attempt > 0 || serverUrl !== primaryServer) {
+              console.log('[content] 直连 /content 回退成功', {
+                serverUrl,
+                postSource: postSourceName,
+                item_id_len: item_id.length,
+                item_id_attempt: i + 1,
+                contentLen: content.length,
+              });
+            }
+            return content;
+          }
+          const apiErr = extractApiErrorMessage(responseText);
+          if (apiErr && isGyksContentServerPanic(apiErr)) {
+            serverPanic = true;
+          }
+          attempt += 1;
+        }
+      }
+      if (!serverPanic) break;
     }
-    const responseText = await post(url, body, {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      timeout: 60_000,
+
+    const apiErr = extractApiErrorMessage(lastResponseText);
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = JSON.parse(lastResponseText) as Record<string, unknown>;
+    } catch {
+      parsed = null;
+    }
+    const lastBody = itemIdCandidates.length
+      ? (JSON.parse(
+          buildContentApiPostBody(
+            { ...requestPayload, item_id: itemIdCandidates[itemIdCandidates.length - 1]! },
+            bookVariable,
+          ),
+        ) as Record<string, unknown>)
+      : {};
+    const lastItemId =
+      typeof lastBody.item_id === 'string' ? lastBody.item_id : '';
+    console.warn('[content] 直连 /content 无正文', {
+      postSource,
+      postTab: lastBody.tab,
+      apiErr: apiErr || undefined,
+      item_id_len: lastItemId.length,
+      item_id_fp: lastItemId ? itemIdFingerprint(lastItemId) : undefined,
+      post_body_fp: postBodyFingerprint(
+        buildContentApiPostBody(
+          { ...requestPayload, item_id: lastItemId },
+          bookVariable,
+        ),
+      ),
+      item_id_candidates: itemIdCandidates.length,
+      item_id_diag: summarizeAggregationItemIdForDebug(
+        lastItemId,
+        requestPayload.book_id,
+      ),
+      source_tried: sourceCandidates,
+      serverUrl: lastServer,
+      hasQttoken: Boolean(extractQttokenKey(
+        buildLegadoContentApiRequestHeaders(source, `${lastServer}/content`).cookie ?? '',
+      )),
+      response: parsed ? summarizeApiContentResponse(parsed) : undefined,
+      bodyPreview: lastResponseText.trim().slice(0, 400),
     });
-    await assertLoginCheckPassed(source, responseText, url);
-    const content = extractApiContent(responseText);
-    if (!content?.trim()) {
-      const apiErr = extractApiErrorMessage(responseText);
-      let parsed: Record<string, unknown> | null = null;
-      try {
-        parsed = JSON.parse(responseText) as Record<string, unknown>;
-      } catch {
-        parsed = null;
-      }
-      const postBody = JSON.parse(body) as Record<string, unknown>;
-      console.warn('[content] 直连 /content 无正文', {
-        postSource,
-        postTab: postBody.tab,
-        apiErr: apiErr || undefined,
-        item_id_len: typeof postBody.item_id === 'string' ? postBody.item_id.length : 0,
-        hasQttoken: Boolean(extractQttokenKey(headers.Cookie ?? '')),
-        response: parsed ? summarizeApiContentResponse(parsed) : undefined,
-        bodyPreview: responseText.trim().slice(0, 400),
-      });
-    }
-    if (!content?.trim() || isApiErrorText(content)) {
-      if (content?.trim()) {
-        console.warn('[content] 直连 /content 返回服务端错误:', content.slice(0, 120));
-      }
-      return null;
-    }
-    return content;
+    return null;
   } catch (e) {
     console.warn('[content] 直连 /content 失败:', e);
     return null;
@@ -234,6 +387,39 @@ function buildContentRuleContext(
   contentType: 'html' | 'json' | 'text',
   baseUrl: string,
 ): RuleContext {
+  let variables: Record<string, string> | undefined;
+  try {
+    const abs = resolveUrl(chapter.baseUrl || source.sourceUrl || '', chapter.url);
+    if (isLegadoTypedDataUrl(abs)) {
+      const decoded = decodeDataUrl(abs);
+      if (decoded) {
+        const normalized = normalizeDataUrlPayload(decoded);
+        variables = {
+          book_id: normalized.book_id,
+          item_id: normalized.item_id,
+          sources: normalized.sources,
+          source: normalized.source,
+          tab: normalized.tab,
+          title: normalized.title ?? '',
+          url: normalized.url ?? '',
+        };
+      }
+    }
+    if (!variables?.book_id && book) {
+      for (const url of [book.tocUrl, book.bookUrl]) {
+        if (!url?.startsWith('data:')) continue;
+        const decoded = decodeDataUrl(url);
+        const bookId = decoded?.book_id?.trim();
+        if (bookId) {
+          variables = { ...(variables ?? {}), book_id: bookId };
+          break;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   return {
     content: body,
     contentType,
@@ -248,6 +434,7 @@ function buildContentRuleContext(
         } as Record<string, unknown>)
       : undefined,
     chapter: chapter as unknown as Record<string, unknown>,
+    variables,
   };
 }
 
@@ -310,6 +497,12 @@ export async function getContent(
     const chapterBase = chapter.baseUrl || source.sourceUrl || '';
     const absoluteUrl = resolveUrl(chapterBase, chapter.url);
 
+    traceContentFetchStart('getContent 开始', {
+      source: source.sourceName,
+      chapter: chapter.title,
+      index: chapter.index,
+    });
+
     const visited = options?._visitedUrls ?? new Set<string>();
     if (visited.has(absoluteUrl)) {
       console.warn('[content] 命中正文分页防环，停止继续抓取:', absoluteUrl);
@@ -325,8 +518,45 @@ export async function getContent(
     visited.add(absoluteUrl);
 
     const typedDataUrl = isLegadoTypedDataUrl(absoluteUrl);
-    const contentUrl = absoluteUrl;
-    const contentChapter = chapter;
+    let contentUrl = absoluteUrl;
+    let contentChapter = chapter;
+
+    if (typedDataUrl) {
+      const decoded = decodeDataUrl(absoluteUrl);
+      if (decoded?.book_id?.trim()) {
+        const payload = normalizeDataUrlPayload(decoded);
+        const merged = await enrichChapterContentPayload(
+          source,
+          payload,
+          [book?.tocUrl, book?.bookUrl],
+          book?.variable,
+        );
+        const prevId = merged.item_id?.trim() ?? '';
+        // 对齐 Legado：章节 URL 已带 item_id 时直接使用，不刷新 catalog token
+        if (!prevId) {
+          const freshId = await resolveFreshCatalogItemId(
+            source,
+            merged,
+            { title: chapter.title, index: chapter.index ?? 0 },
+            book?.variable,
+          );
+          if (freshId) {
+            const updated = normalizeDataUrlPayload({ ...merged, item_id: freshId });
+            contentUrl = buildTypedChapterDataUrl(updated);
+            contentChapter = { ...chapter, url: contentUrl };
+            console.log('[content] 章节无 item_id，已从 catalog 补全', {
+              new_len: freshId.length,
+              new_fp: itemIdFingerprint(freshId),
+            });
+          }
+        } else if (import.meta.env.DEV) {
+          console.log('[content] 使用章节 URL 内嵌 item_id（未刷新 catalog）', {
+            item_id_len: prevId.length,
+            item_id_fp: itemIdFingerprint(prevId),
+          });
+        }
+      }
+    }
 
     const { body, baseUrl, contentType } = await resolveChapterRuleBody(
       source,
@@ -338,6 +568,7 @@ export async function getContent(
       if (decoded) {
         console.log('[content] data URL 载荷:', {
           item_id_len: decoded.item_id?.length ?? 0,
+          ...summarizeContentPostItemId(decoded.item_id ?? ''),
           book_id_len: decoded.book_id?.length ?? 0,
           sources: decoded.sources || decoded.source,
           bookSource: readBookContentSource(book),
@@ -356,18 +587,31 @@ export async function getContent(
       baseUrl,
     );
 
+    // 对齐 Legado WebBook.getContentAwait：AnalyzeUrl 取 body → ruleContent 解析
     let content = extractContentFromRuleOutput(
       (await parseContentByRule(contentRule, ruleContext)) ?? '',
     );
+    if (import.meta.env.DEV && content?.includes('<img')) {
+      console.log('[content] ruleContent 解析完成', {
+        contentLen: content.length,
+        imgCount: scanImgTags(content).length,
+        path: 'ruleContent',
+      });
+    } else if (!content?.trim() && typedDataUrl) {
+      console.warn('[content] ruleContent 链未产出正文（将尝试直连 /content）', {
+        chapter: chapter.title,
+      });
+    }
     if (content?.trim() && isApiErrorText(content)) {
       console.warn('[content] 规则返回服务端错误:', content.slice(0, 120));
       content = '';
     }
 
+    // 规则脚本失败时回退直连 /content（与 ruleContent 内 java.ajax 同接口）
     if (!content?.trim() && typedDataUrl) {
-      const decoded = decodeDataUrl(contentUrl);
-      if (decoded?.item_id?.trim()) {
-        const payload = normalizeDataUrlPayload(decoded);
+      const decodedForDirect = decodeDataUrl(contentUrl);
+      if (decodedForDirect?.item_id?.trim()) {
+        const payload = normalizeDataUrlPayload(decodedForDirect);
         const viaDirect = await requestContentApiDirect(
           source,
           payload,
@@ -375,7 +619,7 @@ export async function getContent(
           [book?.tocUrl, book?.bookUrl],
         );
         if (viaDirect?.trim()) {
-          console.log('[content] 规则为空，直连 /content 成功，长度:', viaDirect.length);
+          console.log('[content] 规则未返回正文，直连 /content 回退成功，长度:', viaDirect.length);
           content = viaDirect;
         }
       }
@@ -415,13 +659,16 @@ export async function getContent(
       if (typedDataUrl) {
         const decoded = decodeDataUrl(contentUrl);
         const serverUrl = resolveBookSourceServerUrl(source) ?? '';
+        const pinnedDevice = readBookSourceArgsField(source, 'deviceId');
         console.warn('[content] 正文规则返回空内容', {
           sources: decoded?.sources || decoded?.source,
           tab: decoded?.tab,
           item_id_len: decoded?.item_id?.length ?? 0,
           book_id_len: decoded?.book_id?.length ?? 0,
           serverUrl: serverUrl || '(未配置)',
-          hint: '请确认书源已登录；若已登录请查看上方 /content API 失败原因',
+          hint: pinnedDevice
+            ? '请确认书源已登录；deviceId 已固定，若仍失败请核对 Legado 日志中的 deviceId 是否一致'
+            : '与 Legado 共用账号时，请在书源「设置源变量」中填写 "deviceId":"715526ded4651ef6"（Legado 日志值）后重新打开章节',
         });
       }
       return null;
@@ -429,14 +676,24 @@ export async function getContent(
 
     const serverUrl = resolveBookSourceServerUrl(source) ?? '';
     if (serverUrl && (typedDataUrl || isImageHeavyContent(content))) {
+      const beforeResolve = scanImgTags(content).length;
       content = resolveApiImageContent(content, serverUrl);
+      const afterResolve = scanImgTags(content).length;
+      if (import.meta.env.DEV && beforeResolve > 0 && afterResolve < beforeResolve) {
+        console.warn('[content] resolveApiImageContent 后 img 数量减少', {
+          before: beforeResolve,
+          after: afterResolve,
+        });
+      }
+    }
+    if (content?.includes('https://') && content.includes('"headers"')) {
+      const { normalizeLegadoContentImages } = await import(
+        '@/lib/js-engine/legado/parse-legado-url-options'
+      );
+      content = normalizeLegadoContentImages(content);
     }
 
-    if (content) {
-      console.log(
-        `[content] 解析出的正文长度: ${content.length}, 预览: ${content.substring(0, 200)}...`,
-      );
-    }
+    logContentImageDiagnostics(content, 'normalize后');
 
     if (content && rule.nextContentUrl && nextChapterUrl) {
       const nextUrl = await analyzeString(rule.nextContentUrl, ruleContext);
@@ -469,7 +726,13 @@ export async function getContent(
     }
 
     if (typedDataUrl && isImageHeavyContent(content)) {
-      content = processImageStyle(content, 'FULL');
+      const scriptImageStyle =
+        typeof ruleContext.book?.imageStyle === 'string'
+          ? ruleContext.book.imageStyle.trim()
+          : '';
+      const style = scriptImageStyle || 'FULL';
+      content = processImageStyle(content, style);
+      logContentImageDiagnostics(content, `processImageStyle(${style})后`);
     }
 
     // 处理正文净化（replaceRegex）— 对齐 Legado analyzeRule.getString(replaceRegex, content)
@@ -484,6 +747,9 @@ export async function getContent(
 
     if (rule.imageStyle) {
       content = processImageStyle(content, rule.imageStyle);
+      if (isImageHeavyContent(content)) {
+        logContentImageDiagnostics(content, `processImageStyle(${rule.imageStyle})后`);
+      }
     }
 
     if (rule.imageDecode?.trim()) {
@@ -501,13 +767,23 @@ export async function getContent(
     const cleanMode = isImageHeavyContent(content) ? 'image' : 'normal';
     content = cleanContent(content, contentBaseUrl, cleanMode);
     const afterCleanLength = content?.length || 0;
+    if (cleanMode === 'image') {
+      logContentImageDiagnostics(content, 'cleanContent(image)后');
+    }
     if (beforeCleanLength > 0 && afterCleanLength < beforeCleanLength * 0.5 && cleanMode !== 'image') {
       console.warn(`[content] 清理后内容长度大幅减少: ${beforeCleanLength} -> ${afterCleanLength}, 可能存在问题`);
       content = cleanContent(content, contentBaseUrl, 'light');
     }
 
-    if (book && !options?.skipReplaceRules) {
+    if (book && !options?.skipReplaceRules && !isImageHeavyContent(content)) {
       content = await processContent(content, book.name, source.sourceUrl);
+    }
+
+    if (isImageHeavyContent(content)) {
+      logContentImageDiagnostics(content, '最终正文');
+      traceContentFetchDone('getContent 完成', content, {
+        path: typedDataUrl ? 'ruleContent+dataUrl' : 'ruleContent',
+      });
     }
 
     return content;
@@ -523,6 +799,12 @@ export async function getContent(
  */
 function isImageHeavyContent(content: string): boolean {
   if (!content?.includes('<img')) return false;
+  const tagCount = scanImgTags(content).length;
+  if (tagCount > 0) {
+    const withoutImgs = content.replace(/<img[\s\S]*?>/gi, '');
+    const textOnly = withoutImgs.replace(/\s+/g, '');
+    return textOnly.length < 80 || tagCount >= 3;
+  }
   const withoutImgs = content.replace(/<img[^>]*>/gi, '').replace(/\s+/g, '');
   return withoutImgs.length < 80;
 }
@@ -553,32 +835,35 @@ function cleanContent(
   // 5. 移除HTML注释
   content = content.replace(/<!--[\s\S]*?-->/g, '');
 
-  // 6. 处理图片标签：保留img标签并转换相对URL为绝对URL
+  // 6. 处理图片标签：保留 img 并转换相对 URL（引号感知，避免隔页丢失）
   if (baseUrl) {
-    // 匹配img标签，提取src属性并转换为绝对URL
-    content = content.replace(/<img([^>]*)\ssrc\s*=\s*["']([^"']+)["']([^>]*)>/gi, (_match, before, src, after) => {
-      // 如果src不是绝对URL，转换为绝对URL
-      if (src && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
+    const absolutizeAttr = (tag: string, attr: 'src' | 'data-src'): string => {
+      const re = new RegExp(`\\s${attr}\\s*=\\s*["']([^"']+)["']`, 'i');
+      const m = tag.match(re);
+      if (!m?.[1]) return tag;
+      let src = m[1]!;
+      if (
+        src &&
+        !src.startsWith('http://') &&
+        !src.startsWith('https://') &&
+        !src.startsWith('data:')
+      ) {
         try {
           src = resolveUrl(baseUrl, src);
         } catch {
-          // 转换失败，保持原样
+          /* keep */
         }
       }
-      return `<img${before} src="${src}"${after}>`;
-    });
+      return tag.replace(re, ` ${attr}="${src}"`);
+    };
 
-    // 处理data-src属性（懒加载图片）
-    content = content.replace(/<img([^>]*)\sdata-src\s*=\s*["']([^"']+)["']([^>]*)>/gi, (_match, before, src, after) => {
-      if (src && !src.startsWith('http://') && !src.startsWith('https://') && !src.startsWith('data:')) {
-        try {
-          src = resolveUrl(baseUrl, src);
-        } catch {
-          // 转换失败，保持原样
-        }
+    for (const tag of scanImgTags(content)) {
+      let next = absolutizeAttr(tag, 'src');
+      next = absolutizeAttr(next, 'data-src');
+      if (next !== tag) {
+        content = content.replace(tag, next);
       }
-      return `<img${before} data-src="${src}"${after}>`;
-    });
+    }
   }
 
   // 7. 移除所有非img的HTML标签（保留img标签用于图片显示）
@@ -600,8 +885,8 @@ function cleanContent(
   content = content.replace(/\r\n/g, '\n');
   content = content.replace(/\r/g, '\n');
 
-  // 11. 如果内容包含&符号，unescape HTML实体（如 &lt; &gt; &amp; &nbsp; 等）
-  if (content.indexOf('&') > -1) {
+  // 11. HTML 实体解码（漫画 mode=image 须跳过：含 data-legado-headers 的 img 经 textContent 会被整段剥离）
+  if (mode !== 'image' && content.indexOf('&') > -1) {
     if (typeof document !== 'undefined') {
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = content;

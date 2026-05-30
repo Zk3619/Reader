@@ -25,6 +25,30 @@ export const LEGADO_DEVICE_ID_STORAGE_KEY = 'reader_login_android_id';
 
 const ANDROID_ID_KEY = LEGADO_DEVICE_ID_STORAGE_KEY;
 
+/** 对齐 Legado「其它设置」常用桌面 UA（聚合 gyks 与移动端书源 header 区分） */
+export const LEGADO_GYKS_DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+function isGyksAggregationHost(requestUrl: string): boolean {
+  try {
+    const host = new URL(
+      requestUrl.includes('://') ? requestUrl : `https://${requestUrl}`,
+    ).hostname;
+    return /(?:^|\.)gyks\.cf$/i.test(host);
+  } catch {
+    return false;
+  }
+}
+
+export function applyGyksAggregationUserAgent(
+  headers: Record<string, string>,
+  requestUrl: string,
+): void {
+  if (isGyksAggregationHost(requestUrl)) {
+    headers['User-Agent'] = LEGADO_GYKS_DESKTOP_UA;
+  }
+}
+
 /** 书源「清除设备」：下次登录重新生成 deviceId */
 export function resetLegadoDeviceId(): void {
   try {
@@ -67,18 +91,55 @@ export function legadoJavaDeviceID(): never {
   throw new Error('java.deviceID is not available on this platform');
 }
 
-export function legadoJavaAndroidId(): string {
+export function legadoJavaAndroidId(source?: BookSource): string {
+  return resolveBookSourceDeviceId(source);
+}
+
+/**
+ * 聚合书源 deviceId：书源变量 deviceId（与 Legado 对齐）> 本地 androidId。
+ * 与 Legado 共用账号时，请在书源变量 JSON 中设置 `"deviceId":"715526ded4651ef6"`（Legado 日志中的值）。
+ */
+export function resolveBookSourceDeviceId(source?: BookSource): string {
+  if (source) {
+    const pinned = readBookSourceArgsField(source, 'deviceId');
+    if (pinned) return pinned;
+  }
   return getOrCreateAndroidId();
 }
 
-/** 构建 qtcookie 时优先用 Cookie 里登录写入的 deviceId，再回落 androidId */
-export function resolveLegadoDeviceId(storedCookie?: string): string {
+/** 登录成功后持久化 deviceId，便于与 Legado 手动对齐 */
+export function persistBookSourceDeviceId(source: BookSource, deviceId: string): void {
+  const id = deviceId.trim();
+  if (!id) return;
+  try {
+    const key = getSourceArgsKey(source);
+    const raw = localStorage.getItem(key) ?? '{}';
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    obj.deviceId = id;
+    if (typeof obj.server === 'string' && isHttpUrl(obj.server)) {
+      obj.server = normalizeBookSourceServerUrl(obj.server);
+    }
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 构建 qtcookie：书源变量 deviceId 优先，其次 Cookie，再回落 androidId */
+export function resolveLegadoDeviceId(
+  storedCookie?: string,
+  source?: BookSource,
+): string {
+  if (source) {
+    const pinned = readBookSourceArgsField(source, 'deviceId');
+    if (pinned) return pinned;
+  }
   const raw = String(storedCookie ?? '').trim();
   const fromCookie =
     extractLegadoCookieValue(raw, 'deviceId') ||
     extractLegadoCookieValue(raw, 'device');
   if (fromCookie) return fromCookie;
-  return getOrCreateAndroidId();
+  return resolveBookSourceDeviceId(source);
 }
 
 function hostnameOf(urlOrHost: string): string | undefined {
@@ -95,7 +156,33 @@ function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test(s.trim());
 }
 
-function readSourceArgsField(source: BookSource, field: string): string {
+/** 晴天等聚合服：统一 https，避免 http 登录 Cookie 与 https API 不一致 */
+export function normalizeBookSourceServerUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (!trimmed) return trimmed;
+  try {
+    const u = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    if (u.protocol === 'http:' && /(?:^|\.)gyks\.cf$/i.test(u.hostname)) {
+      u.protocol = 'https:';
+      return u.toString().replace(/\/+$/, '');
+    }
+  } catch {
+    /* ignore */
+  }
+  return trimmed;
+}
+
+function alternateOriginScheme(url: string): string | null {
+  try {
+    const u = new URL(url.includes('://') ? url : `https://${url}`);
+    u.protocol = u.protocol === 'https:' ? 'http:' : 'https:';
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function readBookSourceArgsField(source: BookSource, field: string): string {
   try {
     const raw = localStorage.getItem(getSourceArgsKey(source));
     if (!raw?.trim()) return '';
@@ -111,7 +198,7 @@ function readSourceArgsField(source: BookSource, field: string): string {
 export function readBookSourceQttoken(source: BookSource, serverUrl: string): string {
   const fromCookie = extractQttokenKey(resolveSourceCookiesForHttp(source, serverUrl));
   if (fromCookie) return fromCookie;
-  const fromArgs = readSourceArgsField(source, 'qttoken');
+  const fromArgs = readBookSourceArgsField(source, 'qttoken');
   if (fromArgs) return extractQttokenKey(fromArgs) || fromArgs;
   try {
     const login = getStoredLoginInfo(getSourceUrlIdentifier(source));
@@ -131,7 +218,7 @@ export function resolveBookSourceServerUrl(source: BookSource): string | null {
       const obj = JSON.parse(raw) as Record<string, unknown>;
       const server = obj.server;
       if (typeof server === 'string' && isHttpUrl(server)) {
-        return server.trim().replace(/\/+$/, '');
+        return normalizeBookSourceServerUrl(server);
       }
     }
   } catch {
@@ -139,7 +226,7 @@ export function resolveBookSourceServerUrl(source: BookSource): string | null {
   }
 
   const fromJsLib = extractServerFromJsLib(source as unknown as Record<string, unknown>);
-  if (fromJsLib) return fromJsLib.replace(/\/+$/, '');
+  if (fromJsLib) return normalizeBookSourceServerUrl(fromJsLib);
 
   return null;
 }
@@ -154,6 +241,12 @@ export function resolveSourceCookiesForHttp(
   const direct = getStoredSourceCookiesForUrl(source, requestUrl).trim();
   if (direct) return direct;
 
+  const altOrigin = alternateOriginScheme(requestUrl);
+  if (altOrigin) {
+    const fromAlt = getStoredSourceCookiesForUrl(source, altOrigin).trim();
+    if (fromAlt) return fromAlt;
+  }
+
   const server = resolveBookSourceServerUrl(source);
   if (server) {
     const fromServer = getStoredSourceCookiesForUrl(source, server).trim();
@@ -162,12 +255,14 @@ export function resolveSourceCookiesForHttp(
 
   const reqHost = hostnameOf(requestUrl);
   if (reqHost) {
-    const deviceId = getOrCreateAndroidId();
     for (const [key, value] of readSourceCookieStore(source).entries()) {
       if (!value?.trim()) continue;
       const keyHost = hostnameOf(key);
       if (keyHost && keyHost === reqHost) {
-        return normalizeLegadoCookieHeader(value, deviceId);
+        return normalizeLegadoCookieHeader(
+          value,
+          resolveLegadoDeviceId(value, source),
+        );
       }
     }
   }
@@ -186,8 +281,24 @@ export function buildLegadoRuleScriptCookieHeader(
   const stored = resolveSourceCookiesForHttp(source, serverUrl).trim();
   const token = readBookSourceQttoken(source, serverUrl);
   if (!token) return '';
-  const deviceId = resolveLegadoDeviceId(stored);
+  const deviceId = resolveLegadoDeviceId(stored, source);
   return `qttoken=${token}; deviceId=${deviceId};`;
+}
+
+/**
+ * 对齐 Legado ruleContent：cookie.getKey(device) 优先，否则 java.androidId()
+ */
+export function buildLegadoRuleContentCookieHeader(
+  source: BookSource,
+  serverUrl: string,
+): string {
+  const stored = resolveSourceCookiesForHttp(source, serverUrl).trim();
+  const token =
+    extractLegadoCookieValue(stored, 'qttoken') || readBookSourceQttoken(source, serverUrl);
+  if (!token) return stored;
+  let device2 = extractLegadoCookieValue(stored, 'device');
+  if (!device2) device2 = resolveBookSourceDeviceId(source);
+  return `qttoken=${token}; deviceId=${device2};`;
 }
 
 /**
@@ -206,7 +317,7 @@ export function buildSourceRequestHeaders(
   if (cookieHeader) {
     headers.Cookie = normalizeLegadoCookieHeader(
       cookieHeader,
-      resolveLegadoDeviceId(cookieHeader),
+      resolveLegadoDeviceId(cookieHeader, source),
     );
     delete headers.cookie;
   } else if (resolveBookSourceServerUrl(source)) {
@@ -215,7 +326,45 @@ export function buildSourceRequestHeaders(
       { url: requestUrl.slice(0, 96) },
     );
   }
+  applyGyksAggregationUserAgent(headers, requestUrl);
   return headers;
+}
+
+/** 对齐 Legado ruleContent ajax op.headers：`cookie` + `Content-Type`（小写键名） */
+export function formatLegadoRuleContentAjaxHeaders(cookie: string): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const ck = cookie.trim();
+  if (ck) headers.cookie = ck;
+  return headers;
+}
+
+/**
+ * 对齐 Legado ruleContent `java.log(op)`：仅 `cookie` + `Content-Type`，不合并书源 header/Accept。
+ * 脚本已提供 cookie 时原样使用（含 `; deviceId=…;` 空格与末尾分号）。
+ */
+export function buildLegadoContentApiRequestHeaders(
+  source: BookSource | undefined,
+  requestUrl: string,
+  scriptHeaders?: Record<string, string>,
+): Record<string, string> {
+  const fromScript = String(
+    scriptHeaders?.cookie ?? scriptHeaders?.Cookie ?? '',
+  ).trim();
+  if (fromScript) {
+    const cookie = source
+      ? normalizeLegadoCookieHeader(
+          fromScript,
+          resolveLegadoDeviceId(fromScript, source),
+        )
+      : fromScript;
+    return formatLegadoRuleContentAjaxHeaders(cookie);
+  }
+  if (!source) {
+    return formatLegadoRuleContentAjaxHeaders('');
+  }
+  const server = resolveBookSourceServerUrl(source) ?? requestUrl;
+  const built = buildLegadoRuleContentCookieHeader(source, server);
+  return formatLegadoRuleContentAjaxHeaders(built);
 }
 
 /**
@@ -237,7 +386,7 @@ export function buildBookSourceApiRequestHeaders(
   );
   headers.Cookie = normalizeLegadoCookieHeader(
     mergedCookie,
-    resolveLegadoDeviceId(mergedCookie),
+    resolveLegadoDeviceId(mergedCookie, source),
   );
   return headers;
 }

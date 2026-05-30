@@ -438,14 +438,29 @@ export function isBase64EncodedJsonItemId(itemId: string): boolean {
   }
 }
 
-/** 从聚合 item_id 内层 JSON 的 baseUrl/bookurl 提取 comic_id */
+/** 从聚合 item_id 内层 JSON 的 URL 字段提取 comic_id（递归扫描所有字符串） */
 export function extractComicIdFromAggregationItemIdInner(innerJson: string): string {
   try {
-    const parsed = JSON.parse(innerJson) as Record<string, unknown>;
-    for (const key of ['baseUrl', 'bookurl', 'url', 'tocUrl']) {
-      const raw = String(parsed[key] ?? '');
-      const m = raw.match(/comic_id=(\d+)/);
-      if (m?.[1]) return m[1];
+    const parsed = JSON.parse(innerJson) as unknown;
+    const stack: unknown[] = [parsed];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (typeof cur === 'string') {
+        const m = cur.match(/comic_id=(\d+)/);
+        if (m?.[1]) return m[1];
+      } else if (Array.isArray(cur)) {
+        for (const item of cur) stack.push(item);
+      } else if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+        const rec = cur as Record<string, unknown>;
+        const direct = rec.comic_id ?? rec.comicId;
+        if (typeof direct === 'number' && direct > 0) return String(direct);
+        if (typeof direct === 'string' && /^\d+$/.test(direct.trim())) {
+          return direct.trim();
+        }
+        for (const v of Object.values(rec)) {
+          stack.push(v);
+        }
+      }
     }
   } catch {
     /* ignore */
@@ -453,36 +468,216 @@ export function extractComicIdFromAggregationItemIdInner(innerJson: string): str
   return '';
 }
 
-/**
- * 聚合漫画 catalog 的 item_id 内层 JSON 常把 url/nexurl 的 comic_id 留空；
- * 服务端 /content 需要完整 comic_id，否则 code=0 但 content 为空。
- */
-export function repairEmptyComicIdInAggregationItemId(itemId: string): string {
-  const inner = isBase64EncodedJsonItemId(itemId) ? utf8FromBase64(itemId.trim()) : itemId;
-  if (!inner.trimStart().startsWith('{')) return itemId;
-  const comicId = extractComicIdFromAggregationItemIdInner(inner);
-  if (!comicId) return inner;
-  if (!/comic_id=&|comic_id=\u0026/.test(inner)) return inner;
-  return inner
-    .replace(/comic_id=&/g, `comic_id=${comicId}&`)
-    .replace(/comic_id=\u0026/g, `comic_id=${comicId}\u0026`);
+/** 从书籍 data URL / catalog 的 book_id 载荷提取 comic_id（章节 item_id 常无 comic_id） */
+export function extractComicIdFromAggregationBookId(bookId: string): string {
+  const trimmed = (bookId ?? '').trim();
+  if (!trimmed) return '';
+  if (isBase64EncodedJsonItemId(trimmed)) {
+    try {
+      return extractComicIdFromAggregationItemIdInner(utf8FromBase64(trimmed));
+    } catch {
+      return '';
+    }
+  }
+  if (trimmed.startsWith('{')) {
+    return extractComicIdFromAggregationItemIdInner(trimmed);
+  }
+  const m = trimmed.match(/comic_id=(\d+)/);
+  return m?.[1] ?? '';
 }
 
 /**
- * 聚合 /content POST 的 item_id：
- * catalog 返回 base64 内层 JSON 时须解码后再 POST（否则已登录用户路径服务端 panic）；
- * 并修复内层 url 中空的 comic_id。
+ * 聚合漫画 catalog 的 item_id 内层 JSON 常把 url/nexurl 的 comic_id 留空；
+ * 服务端 /content 需要完整 comic_id，否则 panic 或正文为空。
  */
-export function resolveContentApiItemId(itemId: string): string {
+export function repairEmptyComicIdInAggregationItemId(
+  itemId: string,
+  comicIdHint = '',
+): string {
+  const inner = isBase64EncodedJsonItemId(itemId) ? utf8FromBase64(itemId.trim()) : itemId;
+  if (!inner.trimStart().startsWith('{')) return itemId;
+  let comicId = extractComicIdFromAggregationItemIdInner(inner);
+  if (!comicId && comicIdHint.trim()) comicId = comicIdHint.trim();
+  if (!comicId) return inner;
+  if (!/comic_id=(?=&|"|'|$)|comic_id=""|comic_id=''/.test(inner)) return inner;
+  return inner
+    .replace(/comic_id=(?=&)/g, `comic_id=${comicId}`)
+    .replace(/comic_id=&/g, `comic_id=${comicId}&`)
+    .replace(/comic_id=\u0026/g, `comic_id=${comicId}\u0026`)
+    .replace(/comic_id=""/g, `comic_id="${comicId}"`)
+    .replace(/comic_id=''/g, `comic_id='${comicId}'`);
+}
+
+const AGGREGATION_URL_FIELD_RE = /^(url|nexurl|baseUrl|baseurl)$/i;
+const AGGREGATION_API_URL_RE = /https?:\/\/|chapter|comic|getchapter|getcomic/i;
+
+function appendComicIdQueryParam(url: string, comicId: string): string {
+  const trimmed = url.trim();
+  if (!trimmed || /comic_id=\d+/.test(trimmed)) return trimmed;
+  const sep = trimmed.includes('?') ? '&' : '?';
+  return `${trimmed}${sep}comic_id=${comicId}`;
+}
+
+/** 章节 item_id 的 url 字段完全缺少 comic_id 时，用书籍 comic_id 注入（晴天 catalog 常见） */
+export function injectMissingComicIdInAggregationItemIdInner(
+  inner: string,
+  comicIdHint: string,
+): string {
+  const hint = comicIdHint.trim();
+  if (!hint || !inner.trimStart().startsWith('{')) return inner;
+
+  const afterEmpty = repairEmptyComicIdInAggregationItemId(inner, hint);
+  if (afterEmpty !== inner) return afterEmpty;
+
+  try {
+    const parsed = JSON.parse(inner) as unknown;
+    let changed = false;
+    const visit = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        if (typeof value === 'string' && AGGREGATION_URL_FIELD_RE.test(key)) {
+          if (AGGREGATION_API_URL_RE.test(value)) {
+            const next = appendComicIdQueryParam(value, hint);
+            if (next !== value) {
+              record[key] = next;
+              changed = true;
+            }
+          }
+        } else if (value && typeof value === 'object') {
+          visit(value);
+        }
+      }
+    };
+    visit(parsed);
+    if (changed) return JSON.stringify(parsed);
+  } catch {
+    /* regex fallback */
+  }
+
+  return inner.replace(
+    /"(url|nexurl|baseUrl)"\s*:\s*"(https?:[^"\\]*(?:\\.[^"\\]*)*)"/gi,
+    (match, key: string, url: string) => {
+      const decoded = url.replace(/\\u0026/g, '&');
+      if (!AGGREGATION_API_URL_RE.test(decoded) || /comic_id=\d+/.test(decoded)) {
+        return match;
+      }
+      const next = appendComicIdQueryParam(decoded, hint);
+      if (next === decoded) return match;
+      const encoded = next.replace(/&/g, '\\u0026');
+      return `"${key}":"${encoded}"`;
+    },
+  );
+}
+
+function repairAggregationItemIdInner(inner: string, comicIdHint = ''): string {
+  const hint = (comicIdHint ?? '').trim();
+  const afterInject = injectMissingComicIdInAggregationItemIdInner(inner, hint);
+  if (afterInject !== inner) return afterInject;
+  return repairEmptyComicIdInAggregationItemId(inner, hint);
+}
+
+/**
+ * 聚合 /content POST 的 item_id（对齐 Legado：POST 体为 catalog 原始 base64 字符串）。
+ * 仅在内层 JSON 存在空 comic_id 且可推断 comic_id 时重新 base64，避免 JSON.stringify 规范化改变字节导致服务端 panic。
+ */
+/** catalog item_id 内是否仍有空 comic_id 占位（章节 url 常见，即便 baseUrl 已有 comic_id） */
+export function needsContentApiItemIdRepair(itemId: string): boolean {
   const trimmed = (itemId ?? '').trim();
+  if (!trimmed) return false;
+  let inner = trimmed;
+  if (isBase64EncodedJsonItemId(trimmed)) {
+    try {
+      inner = utf8FromBase64(trimmed);
+    } catch {
+      return false;
+    }
+  }
+  if (!inner.trimStart().startsWith('{')) return false;
+  return /comic_id=(?=&|"|'|$|\)|,)|comic_id=""|comic_id=''|comic_id=\\u0026/i.test(
+    inner,
+  );
+}
+
+export function resolveContentApiItemId(itemId: string, comicIdHint = ''): string {
+  const trimmed = (itemId ?? '').trim();
+  const hint = (comicIdHint ?? '').trim();
   if (!trimmed) return '';
   if (isBase64EncodedJsonItemId(trimmed)) {
-    return repairEmptyComicIdInAggregationItemId(trimmed);
+    const inner = utf8FromBase64(trimmed);
+    const repaired = repairAggregationItemIdInner(inner, hint);
+    if (repaired === inner) return trimmed;
+    return utf8ToBase64(repaired);
   }
   if (trimmed.startsWith('{')) {
-    return repairEmptyComicIdInAggregationItemId(trimmed);
+    const repaired = repairAggregationItemIdInner(trimmed, hint);
+    if (repaired === trimmed) return trimmed;
+    return utf8ToBase64(repaired);
   }
   return trimmed;
+}
+
+/** /content 回退：修复后 base64、原始 base64、内层 JSON 字符串（部分聚合服二选一） */
+/** 调试 /content 失败：是否需补 comic_id、章节 id 等（不记录 token） */
+export function summarizeAggregationItemIdForDebug(
+  itemId: string,
+  bookIdHint = '',
+): Record<string, unknown> {
+  const comicHint = bookIdHint ? extractComicIdFromAggregationBookId(bookIdHint) : '';
+  const needsRepair = needsContentApiItemIdRepair(itemId);
+  let innerComic = '';
+  let chapterId = '';
+  try {
+    const inner = isBase64EncodedJsonItemId(itemId.trim())
+      ? utf8FromBase64(itemId.trim())
+      : itemId;
+    innerComic = extractComicIdFromAggregationItemIdInner(inner);
+    const cm = inner.match(/chapter_id=(\d+)/);
+    chapterId = cm?.[1] ?? '';
+  } catch {
+    /* ignore */
+  }
+  return {
+    needsRepair,
+    comicHint: comicHint || undefined,
+    innerComic: innerComic || undefined,
+    chapterId: chapterId || undefined,
+  };
+}
+
+export function buildContentApiItemIdCandidates(
+  itemId: string,
+  comicIdHint = '',
+): string[] {
+  const trimmed = (itemId ?? '').trim();
+  if (!trimmed) return [];
+  const hint = (comicIdHint ?? '').trim();
+  const out: string[] = [];
+  const push = (v: string) => {
+    const t = v.trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+
+  push(trimmed);
+
+  const resolved = resolveContentApiItemId(trimmed, hint);
+  if (resolved !== trimmed) push(resolved);
+
+  if (isBase64EncodedJsonItemId(trimmed)) {
+    try {
+      const inner = utf8FromBase64(trimmed);
+      const repairedInner = repairAggregationItemIdInner(inner, hint);
+      if (repairedInner !== inner) push(repairedInner);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return out;
 }
 
 /** @deprecated 使用 resolveContentApiItemId */
@@ -518,6 +713,35 @@ export function buildTypedChapterDataUrl(payload: Record<string, string>): strin
       url: normalized.url ?? '',
     }),
   )},{"type":"qingtian3"}`;
+}
+
+/**
+ * /catalog 请求的 book_id（gyks 期望与 /detail 相同的编码，勿把 base64 解码成明文 URL 再提交）
+ */
+export function buildCatalogBookIdCandidates(bookId: string): string[] {
+  const trimmed = (bookId ?? '').trim();
+  return trimmed ? [trimmed] : [];
+}
+
+/**
+ * 对齐 Legado ruleBookInfo.tocUrl JS：由详情 API data 生成 qingtian2 目录 data URL
+ */
+export function buildQingtian2TocDataUrl(
+  detail: Record<string, unknown>,
+): string | null {
+  const book_id = String(detail.book_id ?? '').trim();
+  const sources = coalesceSourceField(
+    typeof detail.source === 'string' ? detail.source : undefined,
+    typeof detail.sources === 'string' ? detail.sources : undefined,
+  );
+  const tab = String(detail.tab || '小说').trim();
+  const url = String(detail.toc_url ?? detail.url ?? '').trim();
+  if (!book_id || !sources) return null;
+  const b64 = utf8ToBase64(
+    JSON.stringify({ book_id, sources, tab, url }),
+  );
+  if (!b64) return null;
+  return `data:;base64,${b64},{"type":"qingtian2"}`;
 }
 
 /** 对齐 Legado data: URL 载荷字段（sources/source/tab/url/toc_url） */

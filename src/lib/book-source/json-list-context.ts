@@ -67,6 +67,10 @@ export function enrichJsonListItemContext(
       row.source = sourceName;
       row.sources = sourceName;
     }
+    // Legado 目录项常为 hex(JSON)；JSONPath / {{$.title}} 需要可解析的 JSON 正文
+    const jsonContent = JSON.stringify(row);
+    ctx.content = jsonContent;
+    ctx.contentType = 'json';
     ctx.book = row;
     ctx.result = row;
   }

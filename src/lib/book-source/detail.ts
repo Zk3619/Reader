@@ -6,7 +6,7 @@
  * data: URL 仅负责解码并请求 init 目标（与 Legado AnalyzeUrl 等价），不做书源专属拼装。
  */
 
-import { get } from '@/lib/http';
+import { get, post } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
@@ -14,8 +14,17 @@ import {
   buildSourceRequestHeaders,
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, decodeDataUrl, resolveMediaUrl } from '@/lib/book-source/utils';
-import { runBookInfoIntroScript } from '@/lib/book-source/book-info-script-runner';
+import {
+  resolveUrl,
+  detectContentType,
+  decodeDataUrl,
+  resolveMediaUrl,
+  buildQingtian2TocDataUrl,
+} from '@/lib/book-source/utils';
+import {
+  runBookInfoIntroScript,
+  runBookInfoTocUrlScript,
+} from '@/lib/book-source/book-info-script-runner';
 import {
   buildIntroFromDetailJson,
   preferDetailField,
@@ -303,10 +312,36 @@ async function analyzeBookInfoFromBody(
   }
 
   let tocUrl = bookUrl;
-  if (rule.tocUrl && !isJsRule(rule.tocUrl)) {
-    const parsedTocUrl = await safeAnalyze(rule.tocUrl, { isUrl: true });
-    if (parsedTocUrl.trim()) {
-      tocUrl = resolveUrl(redirectUrl, parsedTocUrl);
+  if (rule.tocUrl?.trim()) {
+    if (ruleResult) {
+      const qingtian2 = buildQingtian2TocDataUrl(ruleResult);
+      if (qingtian2) {
+        tocUrl = qingtian2;
+      } else if (isJsRule(rule.tocUrl)) {
+        const scripted = await runBookInfoTocUrlScript(
+          source,
+          ruleResult,
+          fetchUrl,
+          bookUrl,
+        );
+        if (scripted?.trim().startsWith('data:')) {
+          tocUrl = scripted.trim();
+        }
+      }
+    }
+    if (tocUrl === bookUrl && rule.tocUrl && !isJsRule(rule.tocUrl)) {
+      const parsedTocUrl = (await safeAnalyze(rule.tocUrl, { isUrl: true })).trim();
+      if (parsedTocUrl) {
+        tocUrl = resolveUrl(redirectUrl, parsedTocUrl);
+      }
+    }
+    if (tocUrl !== bookUrl) {
+      const tocPayload = decodeDataUrl(tocUrl);
+      console.log('[detail] tocUrl 已更新为目录载荷', {
+        type: tocUrl.includes('qingtian2') ? 'qingtian2' : 'other',
+        hasTocPageUrl: Boolean(tocPayload?.url?.trim()),
+        book_id_len: tocPayload?.book_id?.length ?? 0,
+      });
     }
   }
 
@@ -392,7 +427,9 @@ async function getBookInfoFromDataUrl(
   console.log('[detail] 请求详情 API:', detailUrl);
 
   const headers = buildSourceRequestHeaders(source, detailUrl);
-  const responseText = await get(detailUrl, {
+  headers['Content-Type'] = 'application/json';
+  const detailBody = JSON.stringify({ html: '' });
+  const responseText = await post(detailUrl, detailBody, {
     headers,
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,

@@ -2,6 +2,94 @@
  * Legado 书源 /content 等 JSON API 响应解析
  */
 
+import {
+  parseLegadoUrlWithOptions,
+  normalizeLegadoContentImages,
+  readLegadoHeadersFromImgTag,
+} from '@/lib/js-engine/legado/parse-legado-url-options';
+import { hexToUtf8 } from '@/lib/book-source/utils';
+import { scanImgTags, readHtmlAttr } from '@/lib/reader/scan-img-tags';
+
+const IMAGE_LIST_KEYS = [
+  'contents',
+  'images',
+  'pics',
+  'pic_list',
+  'list',
+  'urls',
+] as const;
+
+function countImagesInHtml(html: string): number {
+  return scanImgTags(html).length;
+}
+
+/** 聚合 API 有时把 HTML 正文放在 hex 字符串里（Legado 日志可见） */
+export function materializeAggregationContentBody(body: string): string {
+  const trimmed = body.trim();
+  if (!/^[0-9a-fA-F]+$/.test(trimmed) || trimmed.length < 40 || trimmed.length % 2 !== 0) {
+    return body;
+  }
+  try {
+    const decoded = hexToUtf8(trimmed);
+    if (!decoded.includes('<')) return body;
+    const decodedImgs = countImagesInHtml(decoded);
+    const rawImgs = countImagesInHtml(body);
+    return decodedImgs >= rawImgs ? decoded : body;
+  } catch {
+    return body;
+  }
+}
+
+function pickSuccessfulContentBody(parsed: Record<string, unknown>): string {
+  // 对齐 Legado ruleContent：`content = data.content`
+  if (typeof parsed.content === 'string' && parsed.content.trim()) {
+    return parsed.content;
+  }
+
+  const data = parsed.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    if (typeof nested.content === 'string' && nested.content.trim()) {
+      return nested.content;
+    }
+    for (const key of IMAGE_LIST_KEYS) {
+      const list = nested[key];
+      if (Array.isArray(list) && list.length > 0) {
+        return apiContentsToHtml(list);
+      }
+    }
+  }
+
+  for (const key of IMAGE_LIST_KEYS) {
+    const list = parsed[key];
+    if (Array.isArray(list) && list.length > 0) {
+      return apiContentsToHtml(list);
+    }
+  }
+
+  if (typeof data === 'string' && data.trim()) {
+    return data;
+  }
+
+  return '';
+}
+
+function legadoImageStringToImgTag(raw: string): string {
+  const trimmed = raw.trim();
+  if (/^<img[\s/>]/i.test(trimmed)) {
+    return normalizeLegadoContentImages(trimmed);
+  }
+  const { url, headers } = parseLegadoUrlWithOptions(trimmed);
+  if (!url) return '';
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  let attrs = `src="${esc(url)}"`;
+  if (headers) {
+    attrs += ` data-legado-headers="${esc(JSON.stringify(headers))}"`;
+  }
+  return `<img ${attrs}>`;
+}
+
 /** /content 返回的服务端错误文案，不应当作正文 */
 export function isApiErrorText(text: string): boolean {
   const t = text.trim();
@@ -18,47 +106,41 @@ export function isApiSuccessCode(code: unknown): boolean {
   return code === 0 || code === '0';
 }
 
+/** /catalog、/content 等聚合 API 失败摘要（日志用） */
+export function readAggregationApiFailure(
+  response: unknown,
+): { code: unknown; msg: string } | null {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return null;
+  }
+  const root = response as Record<string, unknown>;
+  if (!('code' in root) || isApiSuccessCode(root.code)) return null;
+  const msg =
+    (typeof root.msg === 'string' ? root.msg.trim() : '') ||
+    (typeof root.content === 'string' && !isApiErrorText(root.content)
+      ? root.content.trim()
+      : '');
+  return { code: root.code, msg: msg || `code=${String(root.code)}` };
+}
+
 /** 图片 URL 列表 → HTML img 串 */
 export function apiContentsToHtml(contents: unknown): string {
   if (!Array.isArray(contents) || contents.length === 0) return '';
   const tags: string[] = [];
   for (const item of contents) {
     if (typeof item === 'string' && item.trim()) {
-      tags.push(`<img src="${item.trim()}">`);
+      tags.push(legadoImageStringToImgTag(item.trim()));
       continue;
     }
     if (item && typeof item === 'object' && !Array.isArray(item)) {
       const row = item as Record<string, unknown>;
       const url = row.url ?? row.src ?? row.image ?? row.link;
       if (typeof url === 'string' && url.trim()) {
-        tags.push(`<img src="${url.trim()}">`);
+        tags.push(legadoImageStringToImgTag(url.trim()));
       }
     }
   }
   return tags.join('\n');
-}
-
-function pickSuccessfulContentBody(parsed: Record<string, unknown>): string {
-  const data = parsed.data;
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const nested = data as Record<string, unknown>;
-    if (typeof nested.content === 'string' && nested.content.trim()) {
-      return nested.content;
-    }
-    const fromNestedContents = apiContentsToHtml(nested.contents);
-    if (fromNestedContents) return fromNestedContents;
-  }
-  if (typeof data === 'string' && data.trim()) {
-    return data;
-  }
-
-  const fromTopContents = apiContentsToHtml(parsed.contents);
-  if (fromTopContents) return fromTopContents;
-
-  if (typeof parsed.content === 'string' && parsed.content.trim()) {
-    return parsed.content;
-  }
-  return '';
 }
 
 /**
@@ -88,8 +170,12 @@ export function extractApiContent(raw: string | Record<string, unknown>): string
   }
 
   const body = pickSuccessfulContentBody(parsed);
-  if (!body.trim() || isApiErrorText(body)) return '';
-  return body;
+  if (!body.trim() || isApiErrorText(body)) {
+    const msg = typeof parsed.msg === 'string' ? parsed.msg.trim() : '';
+    if (msg && !isApiErrorText(msg)) return msg;
+    return '';
+  }
+  return materializeAggregationContentBody(body);
 }
 
 /** 诊断 /content 响应结构（日志用，不含正文全文） */
@@ -102,6 +188,10 @@ export function summarizeApiContentResponse(
     code: parsed.code,
     msg: parsed.msg,
     contentLen: typeof parsed.content === 'string' ? parsed.content.length : undefined,
+    contentImgCount:
+      typeof parsed.content === 'string'
+        ? countImagesInHtml(parsed.content)
+        : undefined,
     contentsLen: Array.isArray(parsed.contents) ? parsed.contents.length : undefined,
   };
   if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -109,6 +199,10 @@ export function summarizeApiContentResponse(
     summary.dataKeys = Object.keys(nested);
     summary.dataContentLen =
       typeof nested.content === 'string' ? nested.content.length : undefined;
+    summary.dataContentImgCount =
+      typeof nested.content === 'string'
+        ? countImagesInHtml(nested.content)
+        : undefined;
     summary.dataContentsLen = Array.isArray(nested.contents)
       ? nested.contents.length
       : undefined;
@@ -133,42 +227,92 @@ export function extractApiErrorMessage(raw: string | Record<string, unknown>): s
     parsed = raw;
   }
   if (!parsed) return '';
-  if (isApiSuccessCode(parsed.code)) return '';
   const msg = typeof parsed.msg === 'string' ? parsed.msg.trim() : '';
+  const contentField =
+    typeof parsed.content === 'string' ? parsed.content.trim() : '';
+  if (isApiSuccessCode(parsed.code)) {
+    if (msg && isApiErrorText(msg)) return msg;
+    if (contentField && isApiErrorText(contentField)) return contentField;
+    if (!pickSuccessfulContentBody(parsed).trim()) {
+      return '响应成功但无 content/contents';
+    }
+    return '';
+  }
   if (msg) return msg;
-  const content = typeof parsed.content === 'string' ? parsed.content.trim() : '';
-  if (content && !isApiErrorText(content)) return content;
+  if (contentField && !isApiErrorText(contentField)) return contentField;
+  if (parsed.code !== undefined && parsed.code !== null) {
+    return `API code=${String(parsed.code)}`;
+  }
   return '';
 }
 
 /** 正文内相对图片 URL 补全（漫画 ident=/proxy 等） */
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+function buildResolvedImgTag(url: string, headers?: Record<string, string>): string {
+  let tag = `<img src="${escapeHtmlAttr(url)}"`;
+  if (headers && Object.keys(headers).length > 0) {
+    tag += ` data-legado-headers="${escapeHtmlAttr(JSON.stringify(headers))}"`;
+  }
+  tag += '>';
+  return tag;
+}
+
 export function resolveApiImageContent(content: string, baseUrl: string): string {
   if (!content?.trim() || !baseUrl?.trim()) return content;
   const base = baseUrl.replace(/\/+$/, '');
 
   let out = content.replace(/ident="/g, `ident="${base}`);
 
-  out = out.replace(
-    /<img([^>]*)\ssrc\s*=\s*["']([^"']+)["']([^>]*)>/gi,
-    (_match, before, src, after) => {
-      let resolved = src.trim();
-      if (
-        resolved &&
-        !/^https?:\/\//i.test(resolved) &&
-        !resolved.startsWith('data:') &&
-        !resolved.startsWith('blob:')
-      ) {
-        try {
-          resolved = resolved.startsWith('/')
-            ? `${base}${resolved}`
-            : new URL(resolved, `${base}/`).toString();
-        } catch {
-          /* keep original */
-        }
+  if (
+    out.includes('"headers"') ||
+    out.includes("'headers'") ||
+    out.includes('data-legado-headers')
+  ) {
+    out = normalizeLegadoContentImages(out);
+  }
+
+  for (const tag of scanImgTags(out)) {
+    const fromTag = readLegadoHeadersFromImgTag(tag);
+    const rawSrc =
+      readHtmlAttr(tag, 'src') ||
+      readHtmlAttr(tag, 'data-src') ||
+      readHtmlAttr(tag, 'data-original') ||
+      '';
+    if (!rawSrc.trim()) continue;
+
+    const parsed = parseLegadoUrlWithOptions(rawSrc.trim());
+    let url = (parsed.url || rawSrc.trim()).trim();
+    if (
+      url &&
+      !/^https?:\/\//i.test(url) &&
+      !url.startsWith('data:') &&
+      !url.startsWith('blob:')
+    ) {
+      try {
+        url = url.startsWith('/')
+          ? `${base}${url}`
+          : new URL(url, `${base}/`).toString();
+      } catch {
+        /* keep original */
       }
-      return `<img${before} src="${resolved}"${after}>`;
-    },
-  );
+    }
+
+    const headers = fromTag ?? parsed.headers;
+    const nextTag = buildResolvedImgTag(url, headers);
+    if (nextTag !== tag) {
+      out = out.replace(tag, nextTag);
+    }
+  }
+
+  if (out.includes('"headers"') || out.includes("'headers'")) {
+    out = normalizeLegadoContentImages(out);
+  }
 
   return out;
 }

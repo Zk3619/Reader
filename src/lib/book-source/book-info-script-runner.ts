@@ -118,6 +118,16 @@ function ensureIntroScriptReturns(script: string): string {
   return `${body}\nreturn info;`;
 }
 
+function ensureTocUrlScriptReturns(script: string): string {
+  const body = script.trim();
+  if (/\breturn\s+/.test(body)) return body;
+  const tplMatch = body.match(/\n(`data:;base64,[\s\S]+`)\s*;?\s*$/);
+  if (tplMatch) {
+    return body.slice(0, tplMatch.index) + `\nreturn ${tplMatch[1]};`;
+  }
+  return `${body}\nreturn '';`;
+}
+
 async function requestInScript(
   resolvedUrl: string,
   call: { method?: string; body?: string; headers?: Record<string, string>; source: BookSource },
@@ -154,23 +164,20 @@ async function requestInScript(
   return httpGet(resolvedUrl, common);
 }
 
-/**
- * 执行 ruleBookInfo.intro 的 Legado JS（result = 详情 API 的 data 对象）
- */
-export async function runBookInfoIntroScript(
+async function runBookInfoLegadoFieldScript(
   source: BookSource,
   detailData: Record<string, unknown>,
   detailUrl: string,
   bookUrl: string,
-  options?: { durChapterTitle?: string },
+  scriptContent: string,
+  options: {
+    ensureReturns: (script: string) => string;
+    durChapterTitle?: string;
+  },
 ): Promise<string | undefined> {
-  const introRule = source.ruleBookInfo?.intro;
-  const scriptContent = introRule ? extractJsRule(introRule) : null;
-  if (!scriptContent) return undefined;
-
   await initQuickJSRuntime();
   if (isQuickJSFallback()) {
-    console.warn('[book-info-script] QuickJS 不可用，跳过 Legado 简介脚本');
+    console.warn('[book-info-script] QuickJS 不可用，跳过 Legado 字段脚本');
     return undefined;
   }
 
@@ -198,15 +205,11 @@ export async function runBookInfoIntroScript(
   const cookieApi = createCookieApi(source, baseUrl, hostList, cookieStore);
   const sourceVars = createSourceVariableHandlers(source, argsKey);
 
-  const durTitle = options?.durChapterTitle ?? '';
+  const durTitle = options.durChapterTitle ?? '';
   const loginInfo = readSourceLoginInfoMap(source);
 
-  const body = ensureIntroScriptReturns(scriptContent);
-  const fullScript = [
-    jsLib ? jsLib + '\n' : '',
-    EXPLORE_JSLIB_CONTEXT_SHIM,
-    body,
-  ].join('\n');
+  const body = options.ensureReturns(scriptContent);
+  const fullScript = [jsLib ? jsLib + '\n' : '', EXPLORE_JSLIB_CONTEXT_SHIM, body].join('\n');
 
   const injector = createExploreInjector({
     baseUrl,
@@ -243,6 +246,9 @@ if (typeof globalThis.java === 'object' && globalThis.java) {
   globalThis.java.get = function(k) {
     return globalThis.__readerPutStore[String(k)] || '';
   };
+  globalThis.java.base64Encode = function(s) {
+    return globalThis.btoa(unescape(encodeURIComponent(String(s))));
+  };
 }`,
         );
         setGlobalJson(vm, 'result', detailData);
@@ -276,18 +282,74 @@ globalThis.book.setUseReplaceRule = function(v){
       return t || undefined;
     }
     if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
-    if (typeof raw === 'object') {
-      const o = raw as Record<string, unknown>;
-      if ('book_name' in o || 'book_id' in o) {
-        console.warn(
-          '[book-info-script] 脚本返回了详情 JSON 对象而非简介文本，将使用字段回退',
-        );
-        return undefined;
-      }
-    }
-    return JSON.stringify(raw);
+    return undefined;
   } catch (e) {
-    console.warn('[book-info-script] 简介脚本执行失败:', e);
+    console.warn('[book-info-script] 字段脚本执行失败:', e);
     return undefined;
   }
+}
+
+/**
+ * 执行 ruleBookInfo.tocUrl 的 Legado JS（result = 详情 API 的 data 对象）
+ */
+export async function runBookInfoTocUrlScript(
+  source: BookSource,
+  detailData: Record<string, unknown>,
+  detailUrl: string,
+  bookUrl: string,
+): Promise<string | undefined> {
+  const tocRule = source.ruleBookInfo?.tocUrl;
+  const scriptContent = tocRule ? extractJsRule(tocRule) : null;
+  if (!scriptContent) return undefined;
+  return runBookInfoLegadoFieldScript(source, detailData, detailUrl, bookUrl, scriptContent, {
+    ensureReturns: ensureTocUrlScriptReturns,
+  });
+}
+
+/**
+ * 执行 ruleBookInfo.intro 的 Legado JS（result = 详情 API 的 data 对象）
+ */
+export async function runBookInfoIntroScript(
+  source: BookSource,
+  detailData: Record<string, unknown>,
+  detailUrl: string,
+  bookUrl: string,
+  options?: { durChapterTitle?: string },
+): Promise<string | undefined> {
+  const introRule = source.ruleBookInfo?.intro;
+  const scriptContent = introRule ? extractJsRule(introRule) : null;
+  if (!scriptContent) return undefined;
+
+  const raw = await runBookInfoLegadoFieldScript(
+    source,
+    detailData,
+    detailUrl,
+    bookUrl,
+    scriptContent,
+    {
+      ensureReturns: ensureIntroScriptReturns,
+      durChapterTitle: options?.durChapterTitle,
+    },
+  );
+  if (raw == null) return undefined;
+  if (typeof raw === 'object') {
+    console.warn(
+      '[book-info-script] 简介脚本返回非字符串，将使用字段回退',
+    );
+    return undefined;
+  }
+  const t = String(raw).trim();
+  if (!t) return undefined;
+  try {
+    const parsed = JSON.parse(t) as Record<string, unknown>;
+    if ('book_name' in parsed || 'book_id' in parsed) {
+      console.warn(
+        '[book-info-script] 脚本返回了详情 JSON 对象而非简介文本，将使用字段回退',
+      );
+      return undefined;
+    }
+  } catch {
+    /* plain intro text */
+  }
+  return t;
 }

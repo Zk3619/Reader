@@ -13,6 +13,7 @@ import {
   getEnabledRulesByTitleScope,
 } from '@/lib/database/replace-rules';
 import type { ReplaceRule } from '@/types';
+import { scanImgTags, upsertImgTagStyle } from '@/lib/reader/scan-img-tags';
 
 /** 对齐 Legado ContentProcessor.upReplaceRules：导入书源后使替换规则缓存失效 */
 export function invalidateReplaceRulesCache(): void {
@@ -125,32 +126,31 @@ export function processImageStyle(
     return content;
   }
 
-  // 查找所有img标签
-  const imgRegex = /<img[^>]+>/gi;
-  
-  return content.replace(imgRegex, (imgTag) => {
-    // 根据imageStyle添加样式
-    let style = '';
-    
-    switch (imageStyle.toUpperCase()) {
-      case 'FULL':
-        // 最大宽度
-        style = 'style="max-width: 100%; height: auto;"';
-        break;
-      case 'CENTER':
-        // 居中
-        style = 'style="display: block; margin: 0 auto; max-width: 100%;"';
-        break;
-      default:
-        // 默认：大小居中
-        style = 'style="max-width: 100%; height: auto; display: block; margin: 0 auto;"';
-    }
+  let styleAttr = '';
+  switch (imageStyle.toUpperCase()) {
+    case 'FULL':
+      styleAttr = 'style="max-width: 100%; height: auto;"';
+      break;
+    case 'CENTER':
+      styleAttr = 'style="display: block; margin: 0 auto; max-width: 100%;"';
+      break;
+    default:
+      styleAttr =
+        'style="max-width: 100%; height: auto; display: block; margin: 0 auto;"';
+  }
 
-    // 如果img标签已有style属性，替换它；否则添加style属性
-    if (imgTag.includes('style=')) {
-      return imgTag.replace(/style="[^"]*"/i, style);
-    } else {
-      return imgTag.replace(/>$/, ` ${style}>`);
-    }
-  });
+  const tags = scanImgTags(content);
+  if (tags.length === 0) return content;
+
+  let out = '';
+  let lastIndex = 0;
+  for (const tag of tags) {
+    const idx = content.indexOf(tag, lastIndex);
+    if (idx < 0) continue;
+    out += content.slice(lastIndex, idx);
+    out += upsertImgTagStyle(tag, styleAttr);
+    lastIndex = idx + tag.length;
+  }
+  out += content.slice(lastIndex);
+  return out;
 }
