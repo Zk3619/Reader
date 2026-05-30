@@ -6,7 +6,7 @@ import { PageHeader, type PageHeaderAction } from '@/components/shell/PageHeader
 import { withBlurBefore } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 import { CheckIcon, RefreshIcon } from '@/components/shared/icons';
-import { InnerWebMoreMenu } from '@/pages/inner-web/InnerWebMoreMenu';
+import { InnerWebMoreMenu } from '@/components/inner-web/InnerWebMoreMenu';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
 export interface InnerWebHeaderProps {

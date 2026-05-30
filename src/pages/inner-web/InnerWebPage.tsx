@@ -35,7 +35,7 @@ import {
 } from '@/lib/http/inner-web-proxy-session';
 import { setActiveWebProxySessionId } from '@/lib/platform/inner-web';
 import { isInnerWebPanelMaskVisible } from '@/lib/platform/inner-web-panel-overlay';
-import { InnerWebHeader } from '@/pages/inner-web/InnerWebHeader';
+import { InnerWebHeader } from '@/components/inner-web/InnerWebHeader';
 
 const INNER_WEB_YUEDU_CHANNEL = 'reader-inner-web-yuedu';
 
