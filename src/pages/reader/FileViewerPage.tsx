@@ -1,9 +1,9 @@
 /**
- * 纯图片阅读（漫画）
- * 对齐 Legado ReadMangaActivity：纵向滚动、章内多图、目录切换
+ * 文件阅读（PDF 等）
+ * 对齐 Legado 网络文件 / WebFile 章节
  */
 
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import { mediaReaderStore } from '@/stores/media-reader';
 import { MediaReaderShell } from '@/components/reader/MediaReaderShell';
 import { MediaReaderCatalog } from '@/components/reader/MediaReaderCatalog';
@@ -16,20 +16,23 @@ import {
 } from '@/components/shared/AppDrawer';
 import { Button } from '@/components/ui/button';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
-import { cn } from '@/lib/utils';
 
-export interface PicReaderPageProps {
+export interface FileViewerPageProps {
   onClose: () => void;
 }
 
-export function PicReaderPage(props: PicReaderPageProps) {
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(\?|$)/i.test(url);
+}
+
+export function FileViewerPage(props: FileViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
 
   const book = () => mediaReaderStore.state.book;
   const catalog = () => mediaReaderStore.state.catalog;
   const chapterIndex = () => mediaReaderStore.state.chapterIndex;
-  const urls = () => mediaReaderStore.state.mediaUrls;
+  const url = () => mediaReaderStore.state.primaryUrl;
   const loading = () => mediaReaderStore.state.loading;
   const error = () => mediaReaderStore.state.error;
 
@@ -51,7 +54,7 @@ export function PicReaderPage(props: PicReaderPageProps) {
         onRefresh={() => void mediaReaderStore.refreshChapter()}
         loading={loading()}
         footer={
-          <div class="flex items-center justify-between gap-2 px-4 py-2">
+          <div class="flex items-center justify-center gap-3 px-4 py-2">
             <Button
               variant="outline"
               size="sm"
@@ -74,14 +77,14 @@ export function PicReaderPage(props: PicReaderPageProps) {
           </div>
         }
       >
-        <div class="h-full overflow-y-auto scroll-gutter-stable-both bg-black/90">
+        <div class="flex h-full flex-col bg-muted/30">
           <Show when={loading()}>
-            <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+            <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
               加载中…
             </div>
           </Show>
           <Show when={!loading() && error()}>
-            <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
+            <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p class="text-sm text-destructive">{error()}</p>
               <Button
                 size="sm"
@@ -92,20 +95,44 @@ export function PicReaderPage(props: PicReaderPageProps) {
               </Button>
             </div>
           </Show>
-          <Show when={!loading() && !error()}>
-            <div class="mx-auto flex w-full max-w-3xl flex-col">
-              <For each={urls()}>
-                {(src) => (
-                  <img
-                    src={src}
-                    alt=""
-                    class={cn('block w-full h-auto bg-neutral-900')}
-                    loading="lazy"
-                    decoding="async"
+          <Show when={!loading() && url()}>
+            {(fileUrl) => (
+              <>
+                <Show
+                  when={isPdfUrl(fileUrl())}
+                  fallback={
+                    <div class="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+                      <p class="text-center text-sm text-muted-foreground">
+                        当前格式请在浏览器中打开或下载
+                      </p>
+                      <div class="flex flex-wrap justify-center gap-2">
+                        <a
+                          class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+                          href={fileUrl()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          打开链接
+                        </a>
+                        <a
+                          class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium"
+                          href={fileUrl()}
+                          download=""
+                        >
+                          下载
+                        </a>
+                      </div>
+                    </div>
+                  }
+                >
+                  <iframe
+                    title={chapterTitle()}
+                    src={fileUrl()}
+                    class="min-h-0 flex-1 w-full border-0"
                   />
-                )}
-              </For>
-            </div>
+                </Show>
+              </>
+            )}
           </Show>
         </div>
       </MediaReaderShell>

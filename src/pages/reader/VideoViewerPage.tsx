@@ -1,6 +1,6 @@
 /**
- * 视频播放页
- * 对齐 Legado VideoPlayerActivity：章节即视频地址
+ * 视频阅读
+ * 对齐 Legado VideoPlayerActivity
  */
 
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js';
@@ -17,11 +17,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 
-export interface VideoPlayerPageProps {
+export interface VideoViewerPageProps {
   onClose: () => void;
 }
 
-export function VideoPlayerPage(props: VideoPlayerPageProps) {
+export function VideoViewerPage(props: VideoViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
 
@@ -149,3 +149,6 @@ export function VideoPlayerPage(props: VideoPlayerPageProps) {
     </>
   );
 }
+
+/** @deprecated 使用 VideoViewerPage */
+export const VideoPlayerPage = VideoViewerPage;

@@ -1,6 +1,6 @@
 /**
- * 音频播放页
- * 对齐 Legado AudioPlayActivity：章节即音轨、HTML5 播放
+ * 音频阅读
+ * 对齐 Legado AudioPlayActivity
  */
 
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js';
@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 
-export interface AudioPlayerPageProps {
+export interface AudioViewerPageProps {
   onClose: () => void;
 }
 
@@ -29,7 +29,7 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function AudioPlayerPage(props: AudioPlayerPageProps) {
+export function AudioViewerPage(props: AudioViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [playing, setPlaying] = createSignal(false);
@@ -198,3 +198,6 @@ export function AudioPlayerPage(props: AudioPlayerPageProps) {
     </>
   );
 }
+
+/** @deprecated 使用 AudioViewerPage */
+export const AudioPlayerPage = AudioViewerPage;

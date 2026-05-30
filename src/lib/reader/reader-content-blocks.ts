@@ -31,6 +31,22 @@ export function splitReaderContentBlocks(raw: string): ReaderContentBlock[] {
   return blocks.length > 0 ? blocks : [{ type: 'text', text: raw }];
 }
 
+export function parseImgTagsFromHtml(html: string): string[] {
+  const urls: string[] = [];
+  const re = /<img[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const tag = m[0];
+    const src =
+      tag.match(/\ssrc\s*=\s*["']([^"']+)["']/i)?.[1] ||
+      tag.match(/\sdata-src\s*=\s*["']([^"']+)["']/i)?.[1] ||
+      tag.match(/\sdata-original\s*=\s*["']([^"']+)["']/i)?.[1] ||
+      '';
+    if (src.trim()) urls.push(src.trim());
+  }
+  return urls;
+}
+
 export function applyReaderImageStyle(
   html: string,
   imageStyle?: string,

@@ -441,6 +441,7 @@ export const readerStore = {
     const rawIndex = book.durChapterIndex ?? 0;
     void fetchChapterListDeduped(source, book.tocUrl, {
       reverseToc: book.readConfig?.reverseToc === true,
+      bookVariable: book.variable,
       onPartial: (partial) => {
         if (partial.chapters.length === 0) return;
         if (state.book?.bookUrl !== book.bookUrl) return;
@@ -515,6 +516,7 @@ export const readerStore = {
       if (catalogToUse.length === 0 && source && book.tocUrl) {
         await fetchChapterListDeduped(source, book.tocUrl, {
           reverseToc,
+          bookVariable: book.variable,
           onPartial: async (partial) => {
             if (partial.chapters.length === 0) return;
             if (state.book?.bookUrl !== book.bookUrl) return;

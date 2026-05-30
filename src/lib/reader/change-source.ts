@@ -66,6 +66,7 @@ export async function applyChangeSource(
   const tocUrl = info.tocUrl?.trim() || hit.tocUrl || hit.bookUrl;
   const chapters = await fetchChapterListDeduped(source, tocUrl, {
     reverseToc: oldBook.readConfig?.reverseToc === true,
+    bookVariable: oldBook.variable,
   });
   if (chapters.length === 0) throw new Error('新源目录为空');
 

@@ -3,12 +3,16 @@
  * 参考 legado 阅读界面：应用阅读配置（主题、字体、间距），支持正文选中、段评气泡
  */
 
-import { Show, For, createMemo } from 'solid-js';
+import { Show, For, createMemo, createSignal, createEffect } from 'solid-js';
 import { readerStore } from '@/stores/reader';
 import {
   splitReaderContentBlocks,
   applyReaderImageStyle,
+  parseImgTagsFromHtml,
 } from '@/lib/reader/reader-content-blocks';
+import { ReaderInlineImg } from '@/components/reader/ReaderInlineImg';
+import { getSource } from '@/lib/database/sources';
+import type { BookSource } from '@/types';
 
 type ReaderDisplayBlock =
   | { type: 'html'; html: string }
@@ -65,6 +69,23 @@ export interface ReaderContentProps {
 export function ReaderContent(props: ReaderContentProps) {
   const config = () => readerStore.state.config;
   const content = () => readerStore.state.content;
+  const book = () => readerStore.state.book;
+  const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
+
+  createEffect(() => {
+    const origin = book()?.origin;
+    if (!origin || origin === 'local') {
+      setBookSource(null);
+      return;
+    }
+    let cancelled = false;
+    void getSource(origin).then((s) => {
+      if (!cancelled) setBookSource(s ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
   const contentLoading = () => readerStore.state.contentLoading;
   const contentFetching = () => readerStore.state.contentFetching;
   const contentBootstrapping = () => readerStore.state.contentBootstrapping;
@@ -194,6 +215,9 @@ export function ReaderContent(props: ReaderContentProps) {
                   hideBubbles={props.hideCommentBubbles}
                   chapterIndex={chapterIndex()}
                   onOpenComments={props.onOpenComments}
+                  imageStyle={imageStyleKey()}
+                  referer={book()?.origin}
+                  source={bookSource()}
                 />
               )}
             </For>
@@ -213,14 +237,25 @@ function ReaderBlockItem(props: {
   hideBubbles?: boolean;
   chapterIndex: number;
   onOpenComments?: (chapterIndex: number, segmentIndex: number) => void;
+  imageStyle?: string;
+  referer?: string;
+  source?: BookSource | null;
 }) {
   if (props.block.type === 'html') {
+    const styledHtml = applyReaderImageStyle(props.block.html, props.imageStyle);
+    const imgUrls = parseImgTagsFromHtml(styledHtml);
     return (
-      <figure class="my-4 flex justify-center break-inside-avoid">
-        <div
-          class="reader-inline-img max-w-full [&_img]:mx-auto [&_img]:max-w-full [&_img]:h-auto"
-          innerHTML={props.block.html}
-        />
+      <figure class="my-4 flex flex-col items-center gap-2 break-inside-avoid">
+        <For each={imgUrls}>
+          {(src) => (
+            <ReaderInlineImg
+              src={src}
+              referer={props.referer}
+              source={props.source}
+              imageStyle={props.imageStyle}
+            />
+          )}
+        </For>
       </figure>
     );
   }

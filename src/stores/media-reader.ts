@@ -1,5 +1,5 @@
 /**
- * 图片 / 音频 / 视频阅读器状态
+ * 图片 / 音频 / 视频 / 文件阅读器状态
  * 对齐 Legado ReadManga / AudioPlay / VideoPlay 的章节与进度模型（Web 简化版）
  */
 
@@ -14,12 +14,17 @@ import {
 } from '@/lib/chapter-cache/storage';
 import { fetchChapterListDeduped, toNewBookChapter } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
-import { parseMediaUrls, parsePrimaryMediaUrl } from '@/lib/media/parse-media-urls';
-import type { ReaderKind } from '@/lib/book-source/book-type';
+import { MediaKind } from '@/lib/book-source/book-type';
+import { flowImages } from '@/lib/media/flow-images';
+import { parsePrimaryMediaUrl } from '@/lib/media/parse-media-urls';
+import {
+  dispatchMediaTextFallback,
+  ReaderMediaMessages,
+} from '@/lib/reader/reader-media-messages';
 import type { Book, BookChapter } from '@/types';
 
 export interface MediaReaderState {
-  kind: ReaderKind | null;
+  kind: MediaKind | null;
   book: Book | null;
   catalog: BookChapter[];
   chapterIndex: number;
@@ -65,25 +70,86 @@ async function persistCatalogToDb(
   await updateBookChapterMeta(book.bookUrl, chapters);
 }
 
-function applyMediaFromRaw(raw: string, kind: ReaderKind): void {
-  if (kind === 'pic') {
-    const urls = parseMediaUrls(raw, 'image');
+function dispatchTextFallbackIfNeeded(kind: MediaKind): void {
+  const book = state.book;
+  if (!book) return;
+  dispatchMediaTextFallback({
+    bookUrl: book.bookUrl,
+    chapterIndex: state.chapterIndex,
+    fromKind: kind,
+  });
+}
+
+function applyMediaFromRaw(
+  raw: string,
+  kind: MediaKind,
+  chapter?: BookChapter,
+): void {
+  if (kind === MediaKind.image) {
+    const urls = flowImages(raw, chapter?.url ?? chapter?.baseUrl ?? '');
+    if (urls.length > 0) {
+      setState({
+        rawContent: raw,
+        mediaUrls: urls,
+        primaryUrl: urls[0] ?? null,
+        error: null,
+      });
+      return;
+    }
+    if (!raw.trim()) {
+      setState({
+        rawContent: raw,
+        mediaUrls: [],
+        primaryUrl: null,
+        error: ReaderMediaMessages.emptyContent,
+      });
+      return;
+    }
     setState({
       rawContent: raw,
-      mediaUrls: urls,
-      primaryUrl: urls[0] ?? null,
-      error: urls.length === 0 ? '本章未解析到图片地址' : null,
+      mediaUrls: [],
+      primaryUrl: null,
+      error: null,
+      loading: false,
     });
+    dispatchTextFallbackIfNeeded(kind);
     return;
   }
-  const mediaKind = kind === 'audio' ? 'audio' : 'video';
-  const primary = parsePrimaryMediaUrl(raw, mediaKind);
-  setState({
-    rawContent: raw,
-    mediaUrls: primary ? [primary] : [],
-    primaryUrl: primary,
-    error: primary ? null : '本章未解析到播放地址',
-  });
+
+  if (
+    kind === MediaKind.audio ||
+    kind === MediaKind.video ||
+    kind === MediaKind.file
+  ) {
+    const primary = parsePrimaryMediaUrl(raw, kind);
+    if (primary) {
+      setState({
+        rawContent: raw,
+        mediaUrls: [primary],
+        primaryUrl: primary,
+        error: null,
+      });
+      return;
+    }
+    if (!raw.trim()) {
+      setState({
+        rawContent: raw,
+        mediaUrls: [],
+        primaryUrl: null,
+        error: ReaderMediaMessages.emptyContent,
+      });
+      return;
+    }
+    setState({
+      rawContent: raw,
+      mediaUrls: [],
+      primaryUrl: null,
+      error: null,
+      loading: false,
+    });
+    dispatchTextFallbackIfNeeded(kind);
+    return;
+  }
 }
 
 async function loadChapterRaw(
@@ -123,7 +189,7 @@ export const mediaReaderStore = {
     return state;
   },
 
-  setBookInitialState(book: Book, kind: ReaderKind): void {
+  setBookInitialState(book: Book, kind: MediaKind): void {
     setState({
       kind,
       book,
@@ -134,7 +200,7 @@ export const mediaReaderStore = {
 
   async openBook(
     book: Book,
-    kind: ReaderKind,
+    kind: MediaKind,
     options?: { initialCatalog?: BookChapter[] },
   ): Promise<void> {
     const guestReading =
@@ -163,6 +229,7 @@ export const mediaReaderStore = {
     if (catalogToUse.length === 0 && source && book.tocUrl) {
       await fetchChapterListDeduped(source, book.tocUrl, {
         reverseToc,
+        bookVariable: book.variable,
         onPartial: async (partial) => {
           if (partial.chapters.length === 0) return;
           if (state.book?.bookUrl !== book.bookUrl) return;
@@ -199,6 +266,7 @@ export const mediaReaderStore = {
     const book = state.book;
     const kind = state.kind;
     if (!book || !kind) throw new Error('未打开书籍');
+    if (kind === MediaKind.text) throw new Error('文本书籍请使用文本阅读器');
 
     if (index < 0 || index >= state.catalog.length) {
       throw new Error('章节索引超出范围');
@@ -217,7 +285,7 @@ export const mediaReaderStore = {
         index,
         options?.forceRefresh === true,
       );
-      applyMediaFromRaw(raw, kind);
+      applyMediaFromRaw(raw, kind, chapter);
       setState({ loading: false });
       await mediaReaderStore.saveProgress();
     } catch (e) {

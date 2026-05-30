@@ -4,6 +4,7 @@
  */
 
 import type { Book } from '@/types';
+import { inferTabFromBook } from '@/lib/book-source/utils';
 
 /** 更新目录失败 */
 export const BOOK_TYPE_UPDATE_ERROR = 0b10000;
@@ -30,7 +31,26 @@ export const BookSourceType = {
   video: 4,
 } as const;
 
-export type ReaderKind = 'book' | 'pic' | 'audio' | 'video';
+/** 与 BookSourceType 枚举键名对齐的媒体种类 */
+export const MediaKind = {
+  text: 'text',
+  image: 'image',
+  audio: 'audio',
+  video: 'video',
+  file: 'file',
+} as const;
+
+export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
+
+/** @deprecated 使用 MediaKind */
+export type ReaderKind = MediaKind;
+
+/** 聚合书源 tab 与 Legado 媒体类型的映射 */
+const TAB_TO_BOOK_TYPE: Record<string, number> = {
+  漫画: BookType.image,
+  听书: BookType.audio,
+  短剧: BookType.video,
+};
 
 export function hasBookType(type: number, flag: number): boolean {
   return (type & flag) > 0;
@@ -64,6 +84,16 @@ export function bookTypeFromSourceType(sourceType: number): number {
   }
 }
 
+/** 结合 tab（漫画/听书/短剧）与书源 type 得到有效书籍 type */
+export function resolveBookType(
+  sourceType: number,
+  tab?: string,
+): number {
+  const fromTab = tab?.trim() ? TAB_TO_BOOK_TYPE[tab.trim()] : undefined;
+  if (fromTab != null) return fromTab;
+  return bookTypeFromSourceType(sourceType);
+}
+
 export function isBookAudio(type: number): boolean {
   return type === BookSourceType.audio || hasBookType(type, BookType.audio);
 }
@@ -77,19 +107,52 @@ export function isBookVideo(type: number, origin: string): boolean {
   return type === BookSourceType.video || hasBookType(type, BookType.video);
 }
 
+export function isBookFile(type: number): boolean {
+  return type === BookSourceType.file || hasBookType(type, BookType.webFile);
+}
+
+export function mediaKindFromSourceType(sourceType: number): MediaKind {
+  switch (sourceType) {
+    case BookSourceType.audio:
+      return MediaKind.audio;
+    case BookSourceType.image:
+      return MediaKind.image;
+    case BookSourceType.video:
+      return MediaKind.video;
+    case BookSourceType.file:
+      return MediaKind.file;
+    default:
+      return MediaKind.text;
+  }
+}
+
 /** 本地导入书在 Reader 中 type=4（与 Legado 的 local 位不同，靠 origin 区分） */
 export function isReaderLocalBookType(_type: number, origin: string): boolean {
   return isLocalOrigin(origin);
 }
 
 /**
- * 根据书籍 type / origin 决定打开哪种阅读界面（对齐 Legado startActivityForBook）
+ * 根据书籍 type / tab / origin 决定媒体种类（对齐 Legado startActivityForBook）
  */
-export function resolveReaderKind(book: Pick<Book, 'type' | 'origin'>): ReaderKind {
+export function resolveMediaKind(
+  book: Pick<Book, 'type' | 'origin' | 'bookUrl' | 'tocUrl'> & { tab?: string },
+): MediaKind {
   const { type, origin } = book;
-  if (isReaderLocalBookType(type, origin)) return 'book';
-  if (isBookVideo(type, origin)) return 'video';
-  if (isBookAudio(type)) return 'audio';
-  if (isBookImage(type)) return 'pic';
-  return 'book';
+  if (isReaderLocalBookType(type, origin)) return MediaKind.text;
+
+  const tab = book.tab?.trim() || inferTabFromBook(book);
+  const effectiveType = tab ? resolveBookType(type, tab) : type;
+
+  if (isBookVideo(effectiveType, origin)) return MediaKind.video;
+  if (isBookAudio(effectiveType)) return MediaKind.audio;
+  if (isBookImage(effectiveType)) return MediaKind.image;
+  if (isBookFile(effectiveType)) return MediaKind.file;
+  return MediaKind.text;
+}
+
+/** @deprecated 使用 resolveMediaKind */
+export function resolveReaderKind(
+  book: Pick<Book, 'type' | 'origin' | 'bookUrl' | 'tocUrl'> & { tab?: string },
+): MediaKind {
+  return resolveMediaKind(book);
 }

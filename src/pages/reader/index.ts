@@ -3,9 +3,10 @@
  */
 
 export { BookReader, ReaderPage, type BookReaderProps, type ReaderPageProps } from '@/pages/reader/BookReaderPage';
-export { PicReaderPage } from '@/pages/reader/PicReaderPage';
-export { AudioPlayerPage } from '@/pages/reader/AudioPlayerPage';
-export { VideoPlayerPage } from '@/pages/reader/VideoPlayerPage';
+export { ImageViewerPage, PicReaderPage } from '@/pages/reader/ImageViewerPage';
+export { AudioViewerPage, AudioPlayerPage } from '@/pages/reader/AudioViewerPage';
+export { VideoViewerPage, VideoPlayerPage } from '@/pages/reader/VideoViewerPage';
+export { FileViewerPage } from '@/pages/reader/FileViewerPage';
 export { ReaderContent } from '@/pages/reader/ReaderContent';
 export { ReaderSettings } from '@/pages/reader/ReaderSettings';
 export { ReaderCatalog } from '@/pages/reader/ReaderCatalog';
