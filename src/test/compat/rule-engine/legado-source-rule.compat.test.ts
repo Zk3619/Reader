@@ -41,6 +41,17 @@ let tab = result.tab || '小说';
     expect(wrapped).not.toMatch(/return \(.*;\);/);
   });
 
+  it('wrapLegadoJsBodyWithImplicitReturn 仍包装含嵌套 return 的正文脚本末行', () => {
+    const wrapped = wrapLegadoJsBodyWithImplicitReturn(`
+function checkEnv() {
+  return true;
+}
+var islyc = checkEnv();
+let data = JSON.stringify({ content: '<img>' });
+data;`.trim());
+    expect(wrapped.trimEnd()).toMatch(/return\s*\(\s*data\s*\)\s*;?\s*$/);
+  });
+
   it('analyzeString resolves css@href + @js cover (|| inside js)', async () => {
     const tr =
       '<tr><td><a class="db nw" href="https://bachashuku.org/book/25650.html">谋臣</a></td></tr>';
@@ -110,9 +121,9 @@ data;
 });
 
 describe('analyzeString <js>…</js>$.content chain', () => {
-  it('extracts manga contents via api helper after js segment', async () => {
+  it('$.content 仅取脚本包装后的 content 字段', async () => {
     const rule = `<js>
-JSON.stringify({ code: 0, contents: ['https://cdn.example/a.jpg'] });
+JSON.stringify({ content: '<img src="https://cdn.example/a.jpg">' });
 </js>$.content`;
     const hexBody = '7b22626f6f6b5f6964223a22626964227d';
     const out = await analyzeString(rule, {

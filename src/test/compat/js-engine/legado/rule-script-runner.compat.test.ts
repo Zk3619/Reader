@@ -326,7 +326,7 @@ if (sources == '卷') {
     expect(String(out)).toContain('qingtian3');
   });
 
-  it('聚合 /content 响应支持 data.data.content', async () => {
+  it('聚合 /content 顶层 content 可被规则脚本读取', async () => {
     const payload = {
       item_id: 'ch1',
       sources: '全面漫画',
@@ -351,7 +351,7 @@ function getArguments(open_argument, key) {
     vi.mocked(post).mockResolvedValue(
       JSON.stringify({
         code: 0,
-        data: { content: '<img src="https://cdn.example/m1.jpg">' },
+        content: '<img src="https://cdn.example/m1.jpg">',
       }),
     );
 
@@ -395,13 +395,13 @@ JSON.stringify({ content: content });
 });
 
 describe('ruleContent $.content 规则链', () => {
-  it('JS 返回聚合 API 对象时 $.content 能取 data.data.content', async () => {
+  it('ruleContent 链：content=data.content 后 $.content 取 HTML', async () => {
     const { analyzeString } = await import('@/lib/rule-engine');
     const { post } = await import('@/lib/http');
     vi.mocked(post).mockResolvedValue(
       JSON.stringify({
         code: 0,
-        data: { content: '<img src="https://cdn.example/m1.jpg">' },
+        content: '<img src="https://cdn.example/m1.jpg">',
       }),
     );
 
@@ -457,8 +457,8 @@ let op = JSON.stringify({
 });
 let data = java.ajax(base_url + "/content," + op);
 try { data = JSON.parse(data); } catch (e) {}
-content = __readerExtractApiContent(data);
-data;
+content = data.content;
+JSON.stringify({ content: content });
 </js>$.content`.trim();
 
     const out = await analyzeString(rule, {
@@ -471,6 +471,99 @@ data;
     });
 
     expect(out).toContain('<img');
+  });
+
+  it('content=data.content 时仅取顶层 content 字段', async () => {
+    const { analyzeString } = await import('@/lib/rule-engine');
+    const { post } = await import('@/lib/http');
+    vi.mocked(post).mockResolvedValue(
+      JSON.stringify({
+        code: 0,
+        content:
+          '<img src="https://cdn.example/1.webp"><img src="https://cdn.example/3.webp">',
+        contents: [
+          'https://cdn.example/1.webp',
+          'https://cdn.example/2.webp',
+          'https://cdn.example/3.webp',
+          'https://cdn.example/4.webp',
+        ],
+        data: {
+          content:
+            '<img src="https://cdn.example/1.webp"><img src="https://cdn.example/3.webp">',
+        },
+      }),
+    );
+
+    const payload = {
+      item_id: 'ch1',
+      sources: 'G社漫画',
+      tab: '漫画',
+      title: '第5话',
+      book_id: 'b1',
+      url: '',
+    };
+    const hex = Array.from(new TextEncoder().encode(JSON.stringify(payload)))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const jsLib = `
+var host = ['https://v1.gyks.cf'];
+function getArguments(open_argument, key) {
+  try { open_argument = JSON.parse(open_argument); } catch (e) { open_argument = { server: host[0] }; }
+  return key ? open_argument[key] : open_argument;
+}
+`.trim();
+
+    const source = {
+      bookSourceName: 'test',
+      sourceName: 'test',
+      bookSourceUrl: 'test',
+      sourceUrl: 'test',
+      jsLib,
+      header: '{"User-Agent":"Mozilla/5.0"}',
+    };
+
+    const rule = `
+<js>
+result = String(java.hexDecodeToString(result));
+let res = JSON.parse(result);
+let sources = res.sources;
+let tab = res.tab;
+let item_id = res.item_id;
+let base_url = getArguments(source.getVariable(), "server") || host[0];
+let op = JSON.stringify({
+  method: "POST",
+  body: JSON.stringify({
+    html: "",
+    item_id,
+    source: sources,
+    tab,
+    tone_id: "4",
+    variable: "{\\"custom\\":\\"\\"}",
+    version: "4.11.5.1",
+  }),
+  headers: { cookie: "", "Content-Type": "application/json" },
+});
+let data = java.ajax(base_url + "/content," + op);
+try { data = JSON.parse(data); } catch (e) {}
+content = data.content;
+JSON.stringify({ content: content });
+</js>$.content`.trim();
+
+    const out = await analyzeString(rule, {
+      content: hex,
+      contentType: 'text',
+      baseUrl: 'https://v1.gyks.cf/',
+      result: hex,
+      source: source as never,
+      book: { variable: '{"custom":""}' },
+    });
+
+    expect(out).toContain('1.webp');
+    expect(out).toContain('3.webp');
+    expect(out).not.toContain('2.webp');
+    expect(out).not.toContain('4.webp');
+    expect((out.match(/<img\b/gi) ?? []).length).toBe(2);
   });
 
   it('java.deviceID 抛错后走 androidId，device_type 为安卓（对齐 Legado Android）', async () => {

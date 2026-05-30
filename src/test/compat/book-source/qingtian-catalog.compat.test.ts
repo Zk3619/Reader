@@ -9,7 +9,16 @@ import {
   buildContentApiPostBody,
   isApiErrorText,
 } from '@/lib/book-source/content';
-import { normalizeDataUrlPayload } from '@/lib/book-source/utils';
+import {
+  extractApiErrorMessage,
+  readAggregationApiFailure,
+} from '@/lib/book-source/extract-api-content';
+import {
+  buildCatalogBookIdCandidates,
+  buildQingtian2TocDataUrl,
+  normalizeDataUrlPayload,
+  decodeDataUrl,
+} from '@/lib/book-source/utils';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { isLikelyUnresolvedRuleResult } from '@/lib/book-source/utils';
 
@@ -32,6 +41,42 @@ vi.mock('@/lib/http', () => {
 });
 
 describe('Legado catalog API 解析', () => {
+  it('readAggregationApiFailure 识别 catalog code=400', () => {
+    expect(readAggregationApiFailure({ code: 400, msg: 'bad book' })).toEqual({
+      code: 400,
+      msg: 'bad book',
+    });
+    expect(readAggregationApiFailure({ code: 0, data: [] })).toBeNull();
+  });
+
+  it('extractApiErrorMessage 成功但无正文时有提示', () => {
+    expect(extractApiErrorMessage({ code: 0, data: null })).toBe(
+      '响应成功但无 content/contents',
+    );
+  });
+
+  it('buildCatalogBookIdCandidates 仅保留原始 book_id', () => {
+    const url = 'https://manhuafree.com/manga/example';
+    const b64 = Buffer.from(url, 'utf8').toString('base64');
+    expect(buildCatalogBookIdCandidates(b64)).toEqual([b64]);
+  });
+
+  it('buildQingtian2TocDataUrl 生成带 toc_url 的目录载荷', () => {
+    const url = 'https://manhuafree.com/manga/x';
+    const book_id = Buffer.from(url, 'utf8').toString('base64');
+    const toc = buildQingtian2TocDataUrl({
+      book_id,
+      source: 'G社漫画',
+      tab: '漫画',
+      toc_url: 'https://manhuafree.com/manga/x/catalog',
+    });
+    expect(toc).toContain('qingtian2');
+    const payload = decodeDataUrl(toc!);
+    expect(payload?.sources).toBe('G社漫画');
+    expect(payload?.url).toBe('https://manhuafree.com/manga/x/catalog');
+    expect(payload?.book_id).toBe(book_id);
+  });
+
   it('extractCatalogChapterRows 接受 code=0 且 data 为数组', () => {
     const rows = extractCatalogChapterRows({
       code: 0,
@@ -152,8 +197,56 @@ describe('Legado catalog API 解析', () => {
     expect(body.book_id).toBeUndefined();
   });
 
-  it('resolveContentApiItemId 解码 base64 并补全 url 内空 comic_id', async () => {
-    const { resolveContentApiItemId, utf8ToBase64 } = await import('@/lib/book-source/utils');
+  it('injectMissingComicId 为无 comic_id 参数的章节 url 注入', async () => {
+    const {
+      injectMissingComicIdInAggregationItemIdInner,
+      resolveContentApiItemId,
+      utf8FromBase64,
+      utf8ToBase64,
+    } = await import('@/lib/book-source/utils');
+    const chapterInner = JSON.stringify({
+      baseUrl: 'https://api-cdn.kaimanhua.com/comic-api/v2/comic/getchapterdata',
+      url: 'https://api-cdn.kaimanhua.com/comic-api/v2/comic/getchapterdata?chapter_id=99',
+      t: 'search',
+    });
+    const injected = injectMissingComicIdInAggregationItemIdInner(chapterInner, '106663');
+    expect(injected).toContain('comic_id=106663');
+    const b64 = utf8ToBase64(chapterInner);
+    const resolved = resolveContentApiItemId(b64, '106663');
+    expect(resolved).not.toBe(b64);
+    expect(utf8FromBase64(resolved)).toContain('comic_id=106663');
+  });
+
+  it('resolveContentApiItemId 用 book_id 提示补全章节 item_id 空 comic_id', async () => {
+    const {
+      resolveContentApiItemId,
+      extractComicIdFromAggregationBookId,
+      utf8FromBase64,
+      utf8ToBase64,
+    } = await import('@/lib/book-source/utils');
+    const bookInner = JSON.stringify({
+      url: 'https://api.example.com/comic/getcomicdata?comic_id=106663',
+      t: 'search',
+    });
+    const bookId = utf8ToBase64(bookInner);
+    const chapterInner = JSON.stringify({
+      baseUrl: 'https://api.example.com/v2/chapter',
+      url: 'https://api.example.com/chapter?comic_id=&chapter_id=1',
+    });
+    const itemB64 = utf8ToBase64(chapterInner);
+    expect(extractComicIdFromAggregationBookId(bookId)).toBe('106663');
+    const resolved = resolveContentApiItemId(
+      itemB64,
+      extractComicIdFromAggregationBookId(bookId),
+    );
+    expect(utf8FromBase64(resolved)).toContain('comic_id=106663');
+    expect(utf8FromBase64(resolved)).not.toContain('comic_id=&');
+  });
+
+  it('resolveContentApiItemId 保持 base64 并补全内层空 comic_id', async () => {
+    const { resolveContentApiItemId, utf8FromBase64, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
     const inner = JSON.stringify({
       baseUrl:
         'https://api.example.com/comic/getcomicdata?comic_id=106663&client-type=android',
@@ -162,9 +255,68 @@ describe('Legado catalog API 解析', () => {
     });
     const b64 = utf8ToBase64(inner);
     const resolved = resolveContentApiItemId(b64);
-    expect(resolved.startsWith('{')).toBe(true);
-    expect(resolved).toContain('comic_id=106663');
-    expect(resolved).not.toContain('comic_id=&');
+    expect(resolved.startsWith('eyJ')).toBe(true);
+    const decoded = utf8FromBase64(resolved);
+    expect(decoded).toContain('comic_id=106663');
+    expect(decoded).not.toContain('comic_id=&');
+  });
+
+  it('resolveContentApiItemId 无需修复时语义不变', async () => {
+    const { resolveContentApiItemId, utf8FromBase64, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const inner = JSON.stringify({ baseUrl: 'https://api.example.com?comic_id=1', url: '' });
+    const b64 = utf8ToBase64(inner);
+    const resolved = resolveContentApiItemId(b64);
+    expect(resolved).toBe(b64);
+    expect(JSON.parse(utf8FromBase64(resolved))).toEqual(JSON.parse(inner));
+  });
+
+  it('buildContentApiItemIdCandidates baseUrl 有 comic_id 但章节 url 为空时追加修复候选', async () => {
+    const { buildContentApiItemIdCandidates, utf8FromBase64, utf8ToBase64 } =
+      await import('@/lib/book-source/utils');
+    const inner = JSON.stringify({
+      baseUrl: 'https://api.example.com?comic_id=106663',
+      url: 'https://api.example.com/ch?comic_id=&chapter_id=1',
+    });
+    const b64 = utf8ToBase64(inner);
+    const candidates = buildContentApiItemIdCandidates(b64, '106663');
+    expect(candidates[0]).toBe(b64);
+    expect(candidates.length).toBeGreaterThan(1);
+    expect(utf8FromBase64(candidates[1]!)).toContain('comic_id=106663');
+    expect(candidates[1]).not.toContain('comic_id=&');
+  });
+
+  it('needsContentApiItemIdRepair 内层无 comic_id 时为 true', async () => {
+    const { needsContentApiItemIdRepair, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const b64 = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/ch?comic_id=&chapter_id=1',
+      }),
+    );
+    expect(needsContentApiItemIdRepair(b64)).toBe(true);
+  });
+
+  it('normalizeContentApiPostBody 已含 comic_id 的 item_id 保持原样', async () => {
+    const { normalizeContentApiPostBody } = await import(
+      '@/lib/js-engine/legado/normalize-legado-ajax-body'
+    );
+    const { utf8ToBase64 } = await import('@/lib/book-source/utils');
+    const b64 = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/ch?comic_id=106663&chapter_id=1',
+      }),
+    );
+    const raw = JSON.stringify({ item_id: b64, source: '全面漫画', tab: '漫画' });
+    const out = normalizeContentApiPostBody('https://v1.gyks.cf/content', 'POST', raw, {
+      comicIdHint: '106663',
+      repairItemId: true,
+    });
+    const parsed = JSON.parse(out ?? '{}') as Record<string, string>;
+    expect(parsed.item_id).toBe(b64);
+    expect(parsed.source).toBe('全面漫画');
   });
 
   it('normalizeContentApiPostBody 解码 /content 的 base64 item_id', async () => {
@@ -190,14 +342,16 @@ describe('Legado catalog API 解析', () => {
       'https://v1.gyks.cf/content',
       'POST',
       raw,
+      { comicIdHint: '99', repairItemId: true },
     );
     const parsed = JSON.parse(normalized ?? '{}') as Record<string, string>;
-    expect(parsed.item_id.startsWith('{')).toBe(true);
-    expect(parsed.item_id).toContain('comic_id=99');
+    expect(parsed.item_id.startsWith('eyJ')).toBe(true);
+    const { utf8FromBase64 } = await import('@/lib/book-source/utils');
+    expect(utf8FromBase64(parsed.item_id)).toContain('comic_id=99');
     expect(parsed.source).toBe('全面漫画');
   });
 
-  it('buildContentApiPostBody 解码 item_id 后 POST', async () => {
+  it('buildContentApiPostBody 保持 catalog 原始 item_id（对齐 Legado）', async () => {
     const { utf8ToBase64 } = await import('@/lib/book-source/utils');
     const inner = JSON.stringify({
       baseUrl: 'https://api.example.com?comic_id=7',
@@ -212,9 +366,9 @@ describe('Legado catalog API 解析', () => {
         tab: '漫画',
       }),
     ) as Record<string, string>;
-    expect(body.item_id).toContain('comic_id=7');
-    expect(body.item_id.startsWith('{')).toBe(true);
+    expect(body.item_id).toBe(b64);
     expect(body.source).toBe('全面漫画');
+    expect(body.sources).toBeUndefined();
   });
 
   it('isApiErrorText 识别服务端 Go panic 文案', () => {
@@ -269,7 +423,7 @@ describe('Legado catalog API 解析', () => {
     expect(coalesceSourceField(undefined, 'svip_书旗')).toBe('svip_书旗');
   });
 
-  it('enrichChapterContentPayload 仅补 book_id，不改 source', async () => {
+  it('enrichChapterContentPayload 仅补 book_id，不改 catalog source', async () => {
     const enriched = await enrichChapterContentPayload(
       {
         bookSourceName: 'test',
@@ -279,13 +433,148 @@ describe('Legado catalog API 解析', () => {
       } as never,
       {
         book_id: 'abc',
-        sources: 'svip_全面漫画',
+        sources: '全面漫画',
         tab: '漫画',
         item_id: 'item-token',
         title: '第1话',
       },
+      undefined,
+      JSON.stringify({ source: 'svip_全面漫画' }),
     );
-    expect(enriched.sources).toBe('svip_全面漫画');
+    expect(enriched.sources).toBe('全面漫画');
     expect(enriched.item_id).toBe('item-token');
+  });
+
+  it('buildContentApiPostBody 正文 POST 用 catalog 短名（不用 svip_）', () => {
+    const body = JSON.parse(
+      buildContentApiPostBody(
+        {
+          item_id: 'ch1',
+          sources: '全面漫画',
+          tab: '漫画',
+          book_id: 'bk-1',
+        },
+        JSON.stringify({ source: 'svip_全面漫画' }),
+      ),
+    ) as Record<string, string>;
+    expect(body.source).toBe('全面漫画');
+    expect(body.sources).toBeUndefined();
+    expect(body.book_id).toBeUndefined();
+  });
+
+  it('buildContentApiItemIdCandidates 先试 catalog 原始 item_id', async () => {
+    const { buildContentApiItemIdCandidates, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const raw = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/chapter?comic_id=&chapter_id=1',
+      }),
+    );
+    const candidates = buildContentApiItemIdCandidates(raw, '106663');
+    expect(candidates[0]).toBe(raw);
+    expect(candidates.length).toBeGreaterThan(1);
+  });
+
+  it('buildLegadoContentApiRequestHeaders 仅 cookie 与 Content-Type', async () => {
+    const { buildLegadoContentApiRequestHeaders } = await import(
+      '@/lib/book-source/source-http'
+    );
+    const headers = buildLegadoContentApiRequestHeaders(
+      undefined,
+      'https://v1.gyks.cf/content',
+      { cookie: 'qttoken=abc; deviceId=dev123;' },
+    );
+    expect(headers['content-type']).toBe('application/json');
+    expect(headers.cookie).toBe('qttoken=abc; deviceId=dev123;');
+    expect(headers.Cookie).toBeUndefined();
+    expect(headers.Referer).toBeUndefined();
+    expect(headers['User-Agent']).toBeUndefined();
+    expect(headers.Accept).toBeUndefined();
+  });
+
+  it('buildLegadoContentApiRequestHeaders 用书源变量 deviceId 规范化脚本 cookie', async () => {
+    const store: Record<string, string> = {};
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    });
+    const { buildLegadoContentApiRequestHeaders } = await import(
+      '@/lib/book-source/source-http'
+    );
+    const { getSourceArgsKey } = await import(
+      '@/lib/js-engine/legado/source-script-shared'
+    );
+    const source = { bookSourceUrl: 'test-qingtian-headers' } as import('@/types').BookSource;
+    localStorage.setItem(
+      getSourceArgsKey(source),
+      JSON.stringify({ deviceId: '715526ded4651ef6' }),
+    );
+    const headers = buildLegadoContentApiRequestHeaders(
+      source,
+      'https://v1.gyks.cf/content',
+      { cookie: 'qttoken=abc; deviceId=wrong000000000000;' },
+    );
+    expect(headers.cookie).toBe('qttoken=abc; deviceId=715526ded4651ef6;');
+  });
+
+  it('buildContentApiPostBody 默认保持 catalog 原始 item_id（不自动修复）', async () => {
+    const { utf8ToBase64 } = await import('@/lib/book-source/utils');
+    const bookId = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/comic/getcomicdata?comic_id=106663',
+        t: 'search',
+      }),
+    );
+    const chapterInner = JSON.stringify({
+      baseUrl: 'https://api.example.com/chapter',
+      url: 'https://api.example.com/chapter?comic_id=&chapter_id=1',
+    });
+    const itemB64 = utf8ToBase64(chapterInner);
+    const body = JSON.parse(
+      buildContentApiPostBody({
+        book_id: bookId,
+        item_id: itemB64,
+        sources: '全面漫画',
+        tab: '漫画',
+      }),
+    ) as Record<string, string>;
+    expect(body.item_id).toBe(itemB64);
+    expect(body.sources).toBeUndefined();
+  });
+
+  it('needsContentApiItemIdRepair 仅在空 comic_id 时为 true', async () => {
+    const { needsContentApiItemIdRepair, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const broken = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/ch?comic_id=&id=1',
+      }),
+    );
+    const fixed = utf8ToBase64(
+      JSON.stringify({
+        url: 'https://api.example.com/ch?comic_id=106663&id=1',
+      }),
+    );
+    expect(needsContentApiItemIdRepair(broken)).toBe(true);
+    expect(needsContentApiItemIdRepair(fixed)).toBe(false);
+  });
+
+  it('extractApiContent 支持 data.data.images 漫画列表', async () => {
+    const { extractApiContent } = await import('@/lib/book-source/extract-api-content');
+    const html = extractApiContent(
+      JSON.stringify({
+        code: 0,
+        data: { images: ['https://cdn.example/a.jpg', 'https://cdn.example/b.jpg'] },
+      }),
+    );
+    expect(html).toContain('<img src="https://cdn.example/a.jpg">');
+    expect(html).toContain('<img src="https://cdn.example/b.jpg">');
   });
 });
