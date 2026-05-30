@@ -11,7 +11,10 @@
 
 import * as cheerio from 'cheerio';
 import { joinElementTextNodes } from '@/lib/rule-engine/legado-dom-text';
-import { isLikelyJavaScriptRule } from '@/lib/rule-engine/legado-source-rule';
+import {
+  isLikelyJavaScriptRule,
+  stripLegadoRuleModePrefix,
+} from '@/lib/rule-engine/legado-source-rule';
 import { mergeRulePartsSync, RuleAnalyzer } from '@/lib/rule-engine/rule-analyzer';
 
 /**
@@ -38,7 +41,7 @@ export function parseCss(rule: string, html: string): string[] {
  * 规则可为 `selector` 或 `selector@all`。
  */
 export function selectElementsOuterHtml(rule: string, html: string): string[] {
-  const trimmed = rule.trim();
+  const trimmed = stripLegadoRuleModePrefix(rule.trim());
   if (!trimmed || !html || isLikelyJavaScriptRule(trimmed)) return [];
 
   const allSuffix = trimmed.match(/^(.+?)@all$/i);
@@ -176,12 +179,18 @@ function parseCssSegment(rule: string, html: string): string[] {
 
   if (normalizedRule.toLowerCase().startsWith('@css:')) {
     const body = normalizedRule.slice(5).trim();
-    const lastAt = body.lastIndexOf('@');
+    const allSuffix = body.match(/^(.+?)@all$/i);
+    const bodyCore = (allSuffix ? allSuffix[1] : body).trim();
+    const lastAt = bodyCore.lastIndexOf('@');
     if (lastAt > 0) {
-      const selector = body.slice(0, lastAt).trim();
-      const extractor = `@${body.slice(lastAt + 1)}`;
+      const selector = bodyCore.slice(0, lastAt).trim();
+      const extractor = `@${bodyCore.slice(lastAt + 1)}`;
       const elements = $(selector);
       return extractElements($, elements, extractor);
+    }
+    if (bodyCore && isValidCssSelector(bodyCore)) {
+      const elements = $(bodyCore);
+      return extractElements($, elements, allSuffix ? '@all' : '@text');
     }
   }
 
@@ -249,7 +258,7 @@ function extractElements(
 }
 
 function normalizeCssRule(rule: string): string {
-  const trimmed = rule.trim();
+  const trimmed = stripLegadoRuleModePrefix(rule.trim());
   if (!trimmed) return '';
   const head = trimmed.split('@')[0]?.trim() ?? trimmed;
   if (!isValidCssSelector(head)) {

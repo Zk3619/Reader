@@ -403,6 +403,27 @@ export function splitLegadoReplaceTail(rule: string): {
   };
 }
 
+const LEGADO_MODE_PREFIX_RE = /^@(css|json|xpath|js|webjs):/i;
+
+/** 去掉 Legado 模式前缀（@css: / @json: 等）后的规则体 */
+export function stripLegadoRuleModePrefix(rule: string): string {
+  const trimmed = rule.trim();
+  const m = trimmed.match(LEGADO_MODE_PREFIX_RE);
+  return m ? trimmed.slice(m[0].length).trim() : trimmed;
+}
+
+/**
+ * 列表规则是否应自动补 @all。
+ * @css:.item 里的 @ 是模式前缀，不能阻止补 @all。
+ */
+export function legadoListRuleNeedsAllSuffix(rule: string): boolean {
+  const trimmed = rule.trim();
+  if (!trimmed) return false;
+  if (/@all$/i.test(trimmed)) return false;
+  const body = stripLegadoRuleModePrefix(trimmed);
+  return !body.includes('@');
+}
+
 /**
  * 识别解析模式（对齐 Legado SourceRule init，不含 Js/Regex 特例）
  */

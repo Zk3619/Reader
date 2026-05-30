@@ -7,12 +7,22 @@
 import type { QuickJSContext } from 'quickjs-emscripten';
 import { invoke } from '@tauri-apps/api/core';
 import { get as httpGet, post, request as httpRequest } from '@/lib/http';
-import { deleteCookie } from '@/lib/http/cookie-manager';
+import { deleteCookie, getCookie } from '@/lib/http/cookie-manager';
+import {
+  getOrCreateAndroidId,
+  legadoJavaAndroidId,
+  legadoJavaDeviceID,
+  resetLegadoDeviceId,
+} from '@/lib/book-source/source-http';
+import { patchLegadoLoginUrlScript } from '@/lib/js-engine/legado/login-script-patches';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { openLegadoBrowserInApp, openSourceSettingsInApp } from '@/lib/platform/open-url';
 import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobalJson } from '@/lib/js-engine/core/runtime';
 import {
+  extractLegadoCookieValue,
+  extractQttokenKey,
+  isInvalidLegadoToken,
   isUserApiPost,
   mergeAjaxCookieHeaders,
   normalizeControlSettingsCookieHeader,
@@ -28,6 +38,7 @@ import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from '@/lib/js-eng
 import {
   getScriptBaseUrl,
   getSourceUrlIdentifier,
+  hostsFromJsLib,
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
   storageKey,
@@ -36,10 +47,48 @@ import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 const SCRIPT_TIMEOUT_MS = 20000;
+const MAX_LOGIN_SUSPEND_ROUNDS = 32;
+
+function isLogoutLoginAction(action: string): boolean {
+  return /^\s*logout\s*\(\s*\)\s*$/i.test(action.trim());
+}
+
+function isClearDeviceLoginAction(action: string): boolean {
+  return /^\s*clearDevice\s*\(\s*\)\s*$/i.test(action.trim());
+}
+
+function normalizeToastText(msg: unknown): string {
+  const text = msg == null ? '' : String(msg).trim();
+  if (!text || text === 'undefined' || text === 'null') return '';
+  return text;
+}
+
+/** 对齐 propagateLegadoCookieToStore：删除同一 server 在 store 中的全部键 */
+function removeCookiesForUrlInStore(
+  store: Map<string, string>,
+  url: string,
+  baseUrl?: string,
+): void {
+  const k = String(url ?? '').trim();
+  if (!k) return;
+  const toDelete = new Set<string>([k]);
+  if (baseUrl?.trim()) toDelete.add(baseUrl.trim());
+  try {
+    const origin = new URL(k.includes('://') ? k : `https://${k}`).origin;
+    toDelete.add(origin);
+    for (const key of store.keys()) {
+      if (key === origin || key.startsWith(`${origin}/`) || key.replace(/\/+$/, '') === origin) {
+        toDelete.add(key);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  for (const key of toDelete) store.delete(key);
+}
 /** startBrowserAwait 挂起索引（与 ajax writeIndex 区分，避免写入 ajax 回放队列） */
 const BROWSER_SUSPEND_WRITE_INDEX = -1;
 const STORAGE_PREFIX_LOGIN = 'reader_source_login_';
-const ANDROID_ID_KEY = 'reader_login_android_id';
 
 const LOG_TAG = '[login-script]';
 
@@ -277,19 +326,6 @@ function isOpenableUrl(url: string): boolean {
   return /^(https?:|data:)/i.test((url ?? '').trim());
 }
 
-function getOrCreateAndroidId(): string {
-  try {
-    let id = localStorage.getItem(ANDROID_ID_KEY);
-    if (!id) {
-      id = 'web_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem(ANDROID_ID_KEY, id);
-    }
-    return id;
-  } catch {
-    return 'web_' + Date.now();
-  }
-}
-
 /**
  * 仅同步清除 localStorage 中的 cookie/login 键（与 runLoginScript 使用相同 key）。
  * 用于「退出登录」时先立即清空，避免异步或后续脚本再写回。
@@ -312,31 +348,32 @@ export function clearSourceLoginStateLocalStorageOnly(source: BookSource): void 
 }
 
 /**
- * 清除该书源在本地的登录态（cookie、登录信息缓存），用于「退出登录」。
- * 会清除：1) localStorage 中的 reader_source_cookies_xxx / reader_source_login_xxx；
- * 2) HTTP cookie-manager 中该书源 baseUrl 对应域的 cookie（避免启用 cookieJar 时仍带旧 cookie）。
+ * 清除该书源在本地的登录态（cookie、登录信息、args.qttoken/密钥）。
+ * 书源 Cookie 存在 Reader 的 localStorage（非浏览器 Cookie），须显式清除。
  */
-export async function clearSourceLoginState(source: BookSource): Promise<void> {
+export async function clearSourceLoginState(
+  source: BookSource,
+  options?: { resetDeviceId?: boolean },
+): Promise<void> {
   if (!source || typeof source !== 'object') {
     console.warn(LOG_TAG, 'clearSourceLoginState: source 无效', source);
     return;
   }
   const src = source as Record<string, unknown>;
-  const sourceUrl = String(
-    source.sourceUrl ?? src.bookSourceUrl ?? src.sourceUrl ?? ''
-  ).trim();
+  const sourceUrl = getSourceUrlIdentifier(source);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
   const loginKey = storageKey(STORAGE_PREFIX_LOGIN, sourceUrl);
+  const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
 
   console.warn(LOG_TAG, 'clearSourceLoginState 开始', {
     cookiesKey,
     sourceUrl: sourceUrl.slice(0, 60),
+    resetDeviceId: Boolean(options?.resetDeviceId),
   });
 
   try {
     localStorage.removeItem(cookiesKey);
     localStorage.removeItem(loginKey);
-    const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
     const rawArgs = localStorage.getItem(argsKey);
     if (rawArgs) {
       const obj = JSON.parse(rawArgs) as Record<string, string>;
@@ -349,13 +386,21 @@ export async function clearSourceLoginState(source: BookSource): Promise<void> {
     console.warn(LOG_TAG, 'clearSourceLoginState localStorage 失败', e);
   }
 
-  try {
-    const baseUrl = getScriptBaseUrl(source);
-    if (baseUrl && /^https?:\/\//i.test(baseUrl)) {
-      await deleteCookie(baseUrl);
+  if (options?.resetDeviceId) {
+    resetLegadoDeviceId();
+  }
+
+  const hosts = new Set<string>();
+  const baseUrl = getScriptBaseUrl(source);
+  if (baseUrl) hosts.add(baseUrl);
+  for (const h of hostsFromJsLib(src.jsLib)) hosts.add(h);
+
+  for (const host of hosts) {
+    try {
+      if (/^https?:\/\//i.test(host)) await deleteCookie(host);
+    } catch (e) {
+      console.warn(LOG_TAG, 'clearSourceLoginState deleteCookie 失败', host, e);
     }
-  } catch (e) {
-    console.warn(LOG_TAG, 'clearSourceLoginState deleteCookie 失败', e);
   }
 }
 
@@ -454,6 +499,315 @@ export interface RunLoginScriptOptions {
 /**
  * 执行书源登录脚本：先运行 loginUrl 定义 login/register 等，再执行 action
  */
+/** 最近一次 login_api HTTP 响应（含 Set-Cookie），供登录结束后写入书源 cookie 表 */
+let lastLoginApiHttpCapture: { url: string; body: string; setCookie: string } | null = null;
+
+function resetLoginApiHttpCapture(): void {
+  lastLoginApiHttpCapture = null;
+}
+
+function readSetCookieHeader(headers: Record<string, string>): string {
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === 'set-cookie' && v) return v;
+  }
+  return '';
+}
+
+function extractLoginKeyFromJson(json: Record<string, unknown>): string {
+  const pick = (v: unknown): string => {
+    if (v == null || v === '') return '';
+    const s = String(v).trim();
+    return isInvalidLegadoToken(s) ? '' : s;
+  };
+  let keyVal = pick(json.key);
+  if (!keyVal) keyVal = pick(json.token);
+  if (!keyVal) keyVal = pick(json.accessToken);
+  if (!keyVal) keyVal = pick(json.cookie);
+  if (!keyVal && typeof json.data === 'string') keyVal = pick(json.data);
+  if (!keyVal && json.data && typeof json.data === 'object' && json.data !== null) {
+    const d = json.data as Record<string, unknown>;
+    keyVal = pick(d.key) || pick(d.token) || pick(d['密钥']);
+  }
+  if (!keyVal) keyVal = pick(json['密钥']);
+  return keyVal;
+}
+
+function formatLegadoQttokenCookie(tokenOrCookie: string, deviceId: string): string {
+  const raw = String(tokenOrCookie ?? '').trim();
+  if (!raw) return '';
+  if (/qttoken=/i.test(raw) || /^[a-zA-Z0-9_-]+=/.test(raw)) {
+    return normalizeLegadoCookieHeader(raw, deviceId);
+  }
+  return normalizeLegadoCookieHeader(`qttoken=${raw};deviceId=${deviceId}`, deviceId);
+}
+
+function propagateLegadoCookieToStore(
+  cookieStore: Map<string, string>,
+  targetUrl: string,
+  cookieValue: string,
+  baseUrl?: string,
+): void {
+  const trimmed = String(cookieValue ?? '').trim();
+  if (!trimmed || !extractQttokenKey(trimmed)) return;
+  cookieStore.set(targetUrl, trimmed);
+  try {
+    cookieStore.set(new URL(targetUrl).origin, trimmed);
+  } catch {
+    /* ignore */
+  }
+  const controlBase = targetUrl.replace(/\/control\/?$/i, '');
+  if (controlBase && controlBase !== targetUrl) {
+    cookieStore.set(controlBase, trimmed);
+  }
+  if (baseUrl) cookieStore.set(baseUrl, trimmed);
+}
+
+function sanitizeLegadoCookieValue(value: string, deviceId: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return '';
+  const token = extractQttokenKey(trimmed);
+  if (!token) return '';
+  return formatLegadoQttokenCookie(trimmed, deviceId);
+}
+
+export function legadoCookieGetKey(
+  _store: Map<string, string>,
+  getCookieFn: (url: string) => string,
+  cookieStrOrUrl: string,
+  keyName?: string,
+): string {
+  let s: string;
+  if (keyName != null && keyName !== '') {
+    s = getCookieFn(cookieStrOrUrl);
+  } else {
+    s = String(cookieStrOrUrl ?? '').trim();
+  }
+  if (!s) return '';
+  const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
+  if (searchKey === 'qttoken') {
+    const token = extractQttokenKey(s);
+    return token;
+  }
+  return extractLegadoCookieValue(s, searchKey);
+}
+
+function sanitizeLegadoCookieStore(cookieStore: Map<string, string>, deviceId: string): void {
+  for (const [key, value] of Array.from(cookieStore.entries())) {
+    const cleaned = sanitizeLegadoCookieValue(value, deviceId);
+    if (!cleaned) cookieStore.delete(key);
+    else if (cleaned !== value) cookieStore.set(key, cleaned);
+  }
+}
+
+function applyLoginKeyToStore(
+  cookieStore: Map<string, string>,
+  baseUrl: string,
+  keyVal: string,
+  deviceId: string,
+): void {
+  const cookieValue = formatLegadoQttokenCookie(keyVal, deviceId);
+  if (!cookieValue) return;
+  propagateLegadoCookieToStore(cookieStore, baseUrl, cookieValue, baseUrl);
+}
+
+function persistQttokenToArgsAndLoginInfo(
+  keyVal: string,
+  formValues: Record<string, string>,
+  loginKey: string,
+  argsKey: string,
+): void {
+  const token = extractQttokenKey(keyVal) || keyVal;
+  if (!token) return;
+  try {
+    const rawArgs = localStorage.getItem(argsKey) ?? '{}';
+    const args = (JSON.parse(rawArgs) as Record<string, string>) || {};
+    args.qttoken = token;
+    localStorage.setItem(argsKey, JSON.stringify(args));
+  } catch {
+    /* ignore */
+  }
+  try {
+    const rawLogin = localStorage.getItem(loginKey) ?? JSON.stringify(formValues);
+    const login = (JSON.parse(rawLogin) as Record<string, string>) || { ...formValues };
+    login['密钥'] = token;
+    localStorage.setItem(loginKey, JSON.stringify(login));
+  } catch {
+    /* ignore */
+  }
+}
+
+function applySetCookieHeaderToStore(
+  cookieStore: Map<string, string>,
+  baseUrl: string,
+  setCookieHeader: string,
+  deviceId: string,
+): boolean {
+  const header = String(setCookieHeader ?? '').trim();
+  if (!header) return false;
+  const parts = header.split(/,(?=[^;]+=)/);
+  let applied = false;
+  for (const part of parts) {
+    const nv = part.trim().split(';')[0]?.trim() ?? '';
+    const eq = nv.indexOf('=');
+    if (eq <= 0) continue;
+    const name = nv.slice(0, eq).trim();
+    const value = nv.slice(eq + 1).trim();
+    if (!name || isInvalidLegadoToken(value)) continue;
+    if (/^qttoken$/i.test(name)) {
+      applyLoginKeyToStore(cookieStore, baseUrl, value, deviceId);
+      applied = true;
+    }
+  }
+  return applied;
+}
+
+async function syncLegadoCookieStoreFromHttpJar(
+  source: BookSource,
+  baseUrl: string,
+  cookieStore: Map<string, string>,
+): Promise<void> {
+  if (!source.enabledCookieJar) return;
+  const deviceId = getOrCreateAndroidId();
+  const urls = new Set<string>([baseUrl]);
+  try {
+    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getSourceUrlIdentifier(source)));
+    if (raw) {
+      const server = (JSON.parse(raw) as Record<string, unknown>).server;
+      if (typeof server === 'string' && server.trim()) urls.add(server.trim());
+    }
+  } catch {
+    /* ignore */
+  }
+  for (const u of urls) {
+    try {
+      const jar = (await getCookie(u))?.trim();
+      if (!jar) continue;
+      const cleaned = sanitizeLegadoCookieValue(jar, deviceId);
+      if (cleaned) propagateLegadoCookieToStore(cookieStore, u, cleaned, baseUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function verifyLegadoUserApiSession(
+  source: BookSource,
+  serverUrl: string,
+  cookieStore: Map<string, string>,
+): Promise<boolean> {
+  const deviceId = getOrCreateAndroidId();
+  const stored =
+    cookieStore.get(serverUrl) ||
+    cookieStore.get(`${serverUrl}/`) ||
+    cookieStore.get(new URL(serverUrl).origin);
+  if (!stored?.trim()) return false;
+
+  const url = `${serverUrl.replace(/\/+$/, '')}/user_api`;
+  try {
+    const headers = mergeSourceHeaders(source, {
+      Cookie: normalizeLegadoCookieHeader(stored, deviceId),
+    });
+    const response = await httpRequest(url, {
+      method: 'POST',
+      headers,
+      enableCookieJar: source.enabledCookieJar,
+      allowNon2xx: true,
+      timeout: 12_000,
+    });
+    const text = await response.text();
+    const json = JSON.parse(text) as { id?: unknown; msg?: string };
+    const ok = json.id != null;
+    console.warn(LOG_TAG, 'user_api 登录校验', {
+      ok,
+      msg: typeof json.msg === 'string' ? json.msg.slice(0, 80) : undefined,
+    });
+    return ok;
+  } catch (e) {
+    console.warn(LOG_TAG, 'user_api 登录校验失败', e);
+    return false;
+  }
+}
+
+function resolveLoginServerUrl(source: BookSource, baseUrl: string): string {
+  try {
+    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getSourceUrlIdentifier(source)));
+    if (raw) {
+      const server = (JSON.parse(raw) as Record<string, unknown>).server;
+      if (typeof server === 'string' && /^https?:\/\//i.test(server.trim())) {
+        return server.trim().replace(/\/+$/, '');
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return baseUrl.replace(/\/+$/, '');
+}
+
+async function finalizeLegadoLoginCookies(options: {
+  source: BookSource;
+  baseUrl: string;
+  cookieStore: Map<string, string>;
+  formValues: Record<string, string>;
+  loginKey: string;
+  argsKey: string;
+  isLoginAction: boolean;
+}): Promise<void> {
+  const { source, baseUrl, cookieStore, formValues, loginKey, argsKey, isLoginAction } = options;
+  const deviceId = getOrCreateAndroidId();
+  const serverUrl = resolveLoginServerUrl(source, baseUrl);
+
+  if (isLoginAction && lastLoginApiHttpCapture) {
+    const { body, setCookie, url } = lastLoginApiHttpCapture;
+    let keyFromApi = '';
+    try {
+      const json = JSON.parse(body) as Record<string, unknown>;
+      const code = json.code;
+      if (code === 0 || code === '0') {
+        keyFromApi = extractLoginKeyFromJson(json);
+      }
+      console.warn(LOG_TAG, 'login_api 解析', {
+        url: url.slice(0, 80),
+        bodyLen: body.length,
+        jsonKeys: Object.keys(json),
+        keyLen: keyFromApi.length,
+        hasValidKey: Boolean(keyFromApi),
+      });
+    } catch {
+      /* ignore */
+    }
+
+    let keyVal = keyFromApi || resolveLoginFormKey(formValues, loginKey, argsKey);
+
+    if (keyVal) {
+      applyLoginKeyToStore(cookieStore, serverUrl, keyVal, deviceId);
+      persistQttokenToArgsAndLoginInfo(keyVal, formValues, loginKey, argsKey);
+    } else if (setCookie) {
+      applySetCookieHeaderToStore(cookieStore, serverUrl, setCookie, deviceId);
+    }
+
+    let sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
+    if (!sessionOk) {
+      const formKey = resolveLoginFormKey(formValues, loginKey, argsKey);
+      if (formKey && formKey !== keyVal) {
+        applyLoginKeyToStore(cookieStore, serverUrl, formKey, deviceId);
+        persistQttokenToArgsAndLoginInfo(formKey, formValues, loginKey, argsKey);
+        sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
+      }
+    }
+
+    if (!sessionOk) {
+      console.warn(LOG_TAG, 'login 后 user_api 未通过，/content 可能失败', {
+        serverUrl,
+        hadValidApiKey: Boolean(keyFromApi),
+        hint: '请填写登录表单「密钥」后重新登录，或确认晴天账号已开通',
+      });
+    }
+  }
+
+  await syncLegadoCookieStoreFromHttpJar(source, baseUrl, cookieStore);
+  sanitizeLegadoCookieStore(cookieStore, deviceId);
+}
+
 function parseLoginKeyFromResponse(
   result: string,
   baseUrl: string,
@@ -463,31 +817,9 @@ function parseLoginKeyFromResponse(
   if (!result || !baseUrl || !/login|signin|auth/i.test(resolvedUrl)) return;
   try {
     const json = JSON.parse(result) as Record<string, unknown>;
-    let keyVal = '';
-    if (typeof json.key === 'string') keyVal = json.key;
-    else if (typeof json.token === 'string') keyVal = json.token;
-    else if (typeof json.accessToken === 'string') keyVal = json.accessToken;
-    else if (typeof json.cookie === 'string') keyVal = json.cookie;
-    else if (typeof json.data === 'string') keyVal = json.data;
-    else if (json.data && typeof json.data === 'object' && json.data !== null) {
-      const d = json.data as Record<string, unknown>;
-      keyVal =
-        typeof d.key === 'string'
-          ? d.key
-          : typeof d.token === 'string'
-            ? d.token
-            : typeof d['密钥'] === 'string'
-              ? (d['密钥'] as string)
-              : '';
-    }
-    if (!keyVal && typeof json['密钥'] === 'string') keyVal = json['密钥'] as string;
+    const keyVal = extractLoginKeyFromJson(json);
     if (keyVal) {
-      const deviceId = getOrCreateAndroidId();
-      const cookieValue =
-        /qttoken=/.test(keyVal) || /^[a-zA-Z0-9_-]+=/.test(keyVal)
-          ? keyVal
-          : `qttoken=${keyVal};deviceId=${deviceId}`;
-      cookieStore.set(baseUrl, cookieValue);
+      applyLoginKeyToStore(cookieStore, baseUrl, keyVal, getOrCreateAndroidId());
     }
   } catch {
     /* ignore */
@@ -597,13 +929,29 @@ function resolveLoginFormKey(
 async function tryRunLoginScriptQuickJS(
   source: BookSource,
   options: RunLoginScriptOptions,
-  keys: { loginKey: string; argsKey: string; cookiesKey: string; baseUrl: string; loginUrlScript: string }
+  keys: {
+    loginKey: string;
+    argsKey: string;
+    cookiesKey: string;
+    baseUrl: string;
+    loginUrlScript: string;
+    skipLoginPersistence?: boolean;
+    isClearDeviceAction?: boolean;
+  },
 ): Promise<boolean> {
   await initQuickJSRuntime();
   if (isQuickJSFallback()) return false;
 
   const { formValues, action, onToast } = options;
-  const { loginKey, argsKey, cookiesKey, baseUrl, loginUrlScript } = keys;
+  const {
+    loginKey,
+    argsKey,
+    cookiesKey,
+    baseUrl,
+    loginUrlScript,
+    skipLoginPersistence = false,
+    isClearDeviceAction = false,
+  } = keys;
   const sourceUrl = getSourceUrlIdentifier(source);
 
   let suppressResumeToast = false;
@@ -612,11 +960,13 @@ async function tryRunLoginScriptQuickJS(
 
   const toast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
-    if (typeof msg === 'string' && onToast) onToast(msg, false);
+    const text = normalizeToastText(msg);
+    if (text && onToast) onToast(text, false);
   };
   const longToast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
-    if (typeof msg === 'string' && onToast) onToast(msg, true);
+    const text = normalizeToastText(msg);
+    if (text && onToast) onToast(text, true);
   };
 
   const cookieStore = new Map<string, string>();
@@ -648,28 +998,25 @@ async function tryRunLoginScriptQuickJS(
         });
         return;
       }
-      this._store.set(url || baseUrl, value);
+      const cleaned = sanitizeLegadoCookieValue(value, getOrCreateAndroidId());
+      if (!cleaned) {
+        console.warn(LOG_TAG, 'skip setCookie: invalid qttoken', {
+          url: (url || baseUrl).slice(0, 80),
+        });
+        return;
+      }
+      propagateLegadoCookieToStore(this._store, url || baseUrl, cleaned, baseUrl);
     },
     removeCookie(url: string): void {
-      this._store.delete(url || baseUrl);
+      removeCookiesForUrlInStore(this._store, url || baseUrl, baseUrl);
     },
     getKey(cookieStrOrUrl: string, keyName?: string): string {
-      let s: string;
-      if (keyName != null && keyName !== '') {
-        s = this.getCookie(cookieStrOrUrl);
-      } else {
-        s = String(cookieStrOrUrl ?? '').trim();
-      }
-      if (!s) return '';
-      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
-      for (const part of s.split(';')) {
-        const trimmed = part.trim();
-        if (trimmed.includes(searchKey)) {
-          const eq = trimmed.indexOf('=');
-          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
-        }
-      }
-      return '';
+      return legadoCookieGetKey(
+        this._store,
+        (u) => this.getCookie(u),
+        cookieStrOrUrl,
+        keyName,
+      );
     },
   };
 
@@ -691,14 +1038,16 @@ async function tryRunLoginScriptQuickJS(
   const resolveFormKey = () => resolveLoginFormKey(formValues, loginKey, argsKey);
 
   const refreshResultGlobal = (vm: QuickJSContext) => {
-    setGlobalJson(vm, 'result', formValues);
+    if (!skipLoginPersistence) setGlobalJson(vm, 'result', formValues);
   };
 
   try {
-    try {
-      localStorage.setItem(loginKey, JSON.stringify(formValues));
-    } catch {
-      /* ignore */
+    if (!skipLoginPersistence) {
+      try {
+        localStorage.setItem(loginKey, JSON.stringify(formValues));
+      } catch {
+        /* ignore */
+      }
     }
 
     suppressResumeToast = true;
@@ -759,6 +1108,7 @@ async function tryRunLoginScriptQuickJS(
             }
           },
           putLoginInfo: (jsonStr) => {
+            if (skipLoginPersistence) return;
             try {
               localStorage.setItem(loginKey, jsonStr);
             } catch (e) {
@@ -792,6 +1142,7 @@ async function tryRunLoginScriptQuickJS(
               }
             },
             putLoginInfo: (jsonStr: string) => {
+              if (skipLoginPersistence) return false;
               try {
                 localStorage.setItem(loginKey, jsonStr);
                 return true;
@@ -810,8 +1161,8 @@ async function tryRunLoginScriptQuickJS(
               return args[0];
             },
             getLastAjaxDuration: () => lastAjaxDurationMs,
-            androidId: getOrCreateAndroidId,
-            deviceID: getOrCreateAndroidId,
+            androidId: legadoJavaAndroidId,
+            deviceID: legadoJavaDeviceID,
             timeFormat: (timestampMs) => {
               const d = new Date(timestampMs);
               if (isNaN(d.getTime())) return '';
@@ -938,11 +1289,14 @@ async function tryRunLoginScriptQuickJS(
         }
         if (/\/login_api\b/.test(url)) {
           try {
-            const json = JSON.parse(body) as { code?: number; msg?: string };
+            const json = JSON.parse(body) as { code?: number; msg?: string; key?: unknown };
+            const parsedKey = extractLoginKeyFromJson(json as Record<string, unknown>);
             console.warn(LOG_TAG, 'login_api 响应', {
               code: json.code,
               msg: json.msg,
               bodyLen: body.length,
+              hasValidKey: Boolean(parsedKey),
+              keyLen: parsedKey.length,
             });
           } catch {
             console.warn(LOG_TAG, 'login_api 响应非 JSON', {
@@ -974,16 +1328,48 @@ async function tryRunLoginScriptQuickJS(
       await Promise.all(pending.splice(0, pending.length));
     }
 
-    try {
-      const obj: Record<string, string> = {};
-      cookieStore.forEach((v, k) => {
-        obj[k] = v;
-      });
-      if (Object.keys(obj).length > 0) {
-        localStorage.setItem(cookiesKey, JSON.stringify(obj));
+    if (skipLoginPersistence) {
+      cookieStore.clear();
+      try {
+        localStorage.removeItem(cookiesKey);
+        localStorage.removeItem(loginKey);
+        const rawArgs = localStorage.getItem(argsKey);
+        if (rawArgs) {
+          const obj = JSON.parse(rawArgs) as Record<string, string>;
+          if (obj && typeof obj === 'object') {
+            delete obj.qttoken;
+            localStorage.setItem(argsKey, JSON.stringify(obj));
+          }
+        }
+      } catch {
+        /* ignore */
       }
-    } catch (e) {
-      console.warn(LOG_TAG, 'QuickJS persist cookies failed', e);
+    } else {
+      const isLoginAction = /login\s*\(\s*true\s*\)/.test(actionTrim);
+      await finalizeLegadoLoginCookies({
+        source,
+        baseUrl,
+        cookieStore,
+        formValues,
+        loginKey,
+        argsKey,
+        isLoginAction,
+      });
+
+      try {
+        const obj: Record<string, string> = {};
+        cookieStore.forEach((v, k) => {
+          obj[k] = v;
+        });
+        if (Object.keys(obj).length > 0) {
+          localStorage.setItem(cookiesKey, JSON.stringify(obj));
+        }
+      } catch (e) {
+        console.warn(LOG_TAG, 'QuickJS persist cookies failed', e);
+      }
+    }
+    if (isClearDeviceAction) {
+      resetLegadoDeviceId();
     }
 
     console.warn(LOG_TAG, 'runLoginScript QuickJS 完成');
@@ -1000,8 +1386,9 @@ export async function runLoginScript(
 ): Promise<void> {
   const { formValues, action, onToast } = options;
   const baseUrl = getScriptBaseUrl(source);
-  const loginUrlScript = (source.loginUrl ?? '').trim();
+  const loginUrlScript = patchLegadoLoginUrlScript((source.loginUrl ?? '').trim());
   if (!loginUrlScript) return;
+  resetLoginApiHttpCapture();
   console.warn(LOG_TAG, 'runLoginScript', { action: action?.slice(0, 50), baseUrl: baseUrl?.slice(0, 60) });
 
   const sourceUrl = getSourceUrlIdentifier(source);
@@ -1009,28 +1396,17 @@ export async function runLoginScript(
   const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
 
-  // 若本次是退出登录，先清空 localStorage 再加载，这样无论对话框是否为新代码都能清掉 cookie
-  const isLogoutAction = /^\s*logout\s*\(\s*\)\s*$/.test((action ?? '').trim());
+  const actionTrimEarly = (action ?? '').trim();
+  const isLogoutAction = isLogoutLoginAction(actionTrimEarly);
+  const isClearDeviceAction = isClearDeviceLoginAction(actionTrimEarly);
+  /** 仅退出登录：禁止 putLoginInfo 写回密钥，结束时清空 cookie 存储 */
+  const skipLoginPersistence = isLogoutAction;
+
   if (isLogoutAction) {
-    try {
-      localStorage.removeItem(cookiesKey);
-      localStorage.removeItem(loginKey);
-      const rawArgs = localStorage.getItem(argsKey);
-      if (rawArgs) {
-        const obj = JSON.parse(rawArgs) as Record<string, string>;
-        if (obj && typeof obj === 'object') {
-          delete obj.qttoken;
-          localStorage.setItem(argsKey, JSON.stringify(obj));
-        }
-      }
-      console.warn(LOG_TAG, 'runLoginScript(logout) 已清除 localStorage', { cookiesKey, argsKey });
-    } catch (e) {
-      console.warn(LOG_TAG, 'runLoginScript(logout) 清除 localStorage 失败', e);
-    }
     try {
       await clearSourceLoginState(source);
     } catch (e) {
-      console.warn(LOG_TAG, 'runLoginScript(logout) 清除 HTTP Cookie 失败', e);
+      console.warn(LOG_TAG, 'runLoginScript(logout) 清除登录态失败', e);
     }
   }
 
@@ -1041,6 +1417,8 @@ export async function runLoginScript(
       loginKey,
       argsKey,
       cookiesKey,
+      skipLoginPersistence,
+      isClearDeviceAction,
     })
   ) {
     return;
@@ -1061,11 +1439,13 @@ export async function runLoginScript(
 
   const toast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
-    if (typeof msg === 'string' && onToast) onToast(msg, false);
+    const text = normalizeToastText(msg);
+    if (text && onToast) onToast(text, false);
   };
   const longToast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
-    if (typeof msg === 'string' && onToast) onToast(msg, true);
+    const text = normalizeToastText(msg);
+    if (text && onToast) onToast(text, true);
   };
 
   const cookieStore = new Map<string, string>();
@@ -1104,35 +1484,28 @@ export async function runLoginScript(
         return;
       }
       const k = url || baseUrl;
-      this._store.set(k, value);
+      const cleaned = sanitizeLegadoCookieValue(value, getOrCreateAndroidId());
+      if (!cleaned) {
+        console.warn(LOG_TAG, 'skip setCookie: invalid qttoken', { key: k });
+        return;
+      }
+      propagateLegadoCookieToStore(this._store, k, cleaned, baseUrl);
       console.warn(LOG_TAG, 'cookie.setCookie', {
         key: k,
-        valuePreview: String(value ?? '').slice(0, 120),
+        valuePreview: cleaned.replace(/qttoken=([^;]+)/, 'qttoken=***').slice(0, 120),
       });
     },
     removeCookie(url: string): void {
-      const k = url || baseUrl;
-      this._store.delete(k);
+      removeCookiesForUrlInStore(this._store, url || baseUrl, baseUrl);
     },
     /** 单参数：从 cookie 字符串中取 qttoken 值；两参数：cookie.getKey(url, keyName) 取该 url 下 cookie 中指定 key 的值（晴天聚合 loginqt 等用） */
     getKey(cookieStrOrUrl: string, keyName?: string): string {
-      let s: string;
-      if (keyName != null && keyName !== '') {
-        s = this.getCookie(cookieStrOrUrl);
-      } else {
-        s = String(cookieStrOrUrl ?? '').trim();
-      }
-      if (!s) return '';
-      const parts = s.split(';');
-      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
-      for (const part of parts) {
-        const trimmed = part.trim();
-        if (trimmed.includes(searchKey)) {
-          const eq = trimmed.indexOf('=');
-          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
-        }
-      }
-      return '';
+      return legadoCookieGetKey(
+        this._store,
+        (u) => this.getCookie(u),
+        cookieStrOrUrl,
+        keyName,
+      );
     },
   };
 
@@ -1192,6 +1565,7 @@ export async function runLoginScript(
     },
 
     putLoginInfo(jsonStr: string) {
+      if (skipLoginPersistence) return;
       try {
         localStorage.setItem(loginKey, jsonStr);
       } catch (e) {
@@ -1236,10 +1610,10 @@ export async function runLoginScript(
       },
       /** Legado 设备 ID，本端用 localStorage 持久化一个固定字符串 */
       androidId(): string {
-        return getOrCreateAndroidId();
+        return legadoJavaAndroidId();
       },
       deviceID(): string {
-        return getOrCreateAndroidId();
+        legadoJavaDeviceID();
       },
       /** 时间戳（ms）格式化为 yyyy-MM-dd HH:mm:ss，供 checkStatus 等显示 */
       timeFormat(timestampMs: number): string {
@@ -1588,21 +1962,31 @@ export async function runLoginScript(
   const runPromise = (async () => {
     try {
       scopeObj.result = formValues;
-      (scopeObj.putLoginInfo as (s: string) => void)(JSON.stringify(formValues));
+      if (!skipLoginPersistence) {
+        (scopeObj.putLoginInfo as (s: string) => void)(JSON.stringify(formValues));
+      }
 
       scopeObj._ajaxResults = [];
       scopeObj._ajaxReadIndex = 0;
       scopeObj._ajaxWriteIndex = 0;
       suppressResumeToast = false;
       browserAwaitDone = false;
+      let suspendRounds = 0;
       while (true) {
         try {
           scopeObj.result = formValues;
-          (scopeObj.putLoginInfo as (s: string) => void)(JSON.stringify(formValues));
+          if (!skipLoginPersistence) {
+            (scopeObj.putLoginInfo as (s: string) => void)(JSON.stringify(formValues));
+          }
           run(scopeObj, replayScript);
           break;
         } catch (e) {
           if (e instanceof SuspendScript) {
+            suspendRounds += 1;
+            if (suspendRounds > MAX_LOGIN_SUSPEND_ROUNDS) {
+              if (onToast) onToast('登录脚本 ajax 轮次过多，已中止', true);
+              break;
+            }
             suppressResumeToast = true;
             let result = '';
             disarmLoginTimeout();
@@ -1645,34 +2029,9 @@ export async function runLoginScript(
               });
               try {
                 const json = JSON.parse(result) as Record<string, unknown>;
-                let keyVal = '';
-                if (typeof json.key === 'string') keyVal = json.key;
-                else if (typeof json.token === 'string') keyVal = json.token;
-                else if (typeof json.accessToken === 'string') keyVal = json.accessToken;
-                else if (typeof json.cookie === 'string') keyVal = json.cookie;
-                else if (typeof json.data === 'string') keyVal = json.data;
-                else if (json.data && typeof json.data === 'object' && json.data !== null) {
-                  const d = json.data as Record<string, unknown>;
-                  keyVal =
-                    typeof d.key === 'string'
-                      ? d.key
-                      : typeof d.token === 'string'
-                        ? d.token
-                        : typeof (d as Record<string, unknown>)['密钥'] === 'string'
-                          ? (d as Record<string, unknown>)['密钥'] as string
-                          : '';
-                }
-                if (!keyVal && typeof (json as Record<string, unknown>)['密钥'] === 'string') {
-                  keyVal = (json as Record<string, unknown>)['密钥'] as string;
-                }
+                const keyVal = extractLoginKeyFromJson(json);
                 if (keyVal) {
-                  // 晴天聚合等：服务器与 getKey() 认 qttoken=xxx;deviceId=yyy，与书源 login 内 setCookie 格式一致
-                  const deviceId = getOrCreateAndroidId();
-                  const cookieValue =
-                    /qttoken=/.test(keyVal) || /^[a-zA-Z0-9_-]+=/.test(keyVal)
-                      ? keyVal
-                      : `qttoken=${keyVal};deviceId=${deviceId}`;
-                  cookieStore.set(baseUrl, cookieValue);
+                  applyLoginKeyToStore(cookieStore, baseUrl, keyVal, getOrCreateAndroidId());
                   console.warn(LOG_TAG, '从登录响应写入 cookie', {
                     url: e.resolvedUrl.slice(0, 80),
                     keyPreview: keyVal.slice(0, 40),
@@ -1719,24 +2078,55 @@ export async function runLoginScript(
       }
       if (round > 0) console.warn(LOG_TAG, 'pending 已全部完成', { rounds: round });
     } finally {
-      try {
-        const obj: Record<string, string> = {};
-        cookieStore.forEach((v, k) => {
-          obj[k] = v;
-        });
-        const entries = Object.entries(obj);
-        if (entries.length > 0) {
-          console.warn(LOG_TAG, 'persist cookies to storage', {
-            key: cookiesKey,
-            count: entries.length,
-            keys: entries.map(([k]) => k).slice(0, 10),
-          });
-          localStorage.setItem(cookiesKey, JSON.stringify(obj));
-        } else {
-          console.warn(LOG_TAG, 'persist cookies skipped (empty)', { key: cookiesKey });
+      if (skipLoginPersistence) {
+        cookieStore.clear();
+        try {
+          localStorage.removeItem(cookiesKey);
+          localStorage.removeItem(loginKey);
+          const rawArgs = localStorage.getItem(argsKey);
+          if (rawArgs) {
+            const obj = JSON.parse(rawArgs) as Record<string, string>;
+            if (obj && typeof obj === 'object') {
+              delete obj.qttoken;
+              localStorage.setItem(argsKey, JSON.stringify(obj));
+            }
+          }
+        } catch (e) {
+          console.warn(LOG_TAG, 'logout/clearDevice 清理 localStorage 失败', e);
         }
-      } catch (e) {
-        console.warn(LOG_TAG, 'persist cookies failed', e);
+      } else {
+        const isLoginAction = /login\s*\(\s*true\s*\)/.test((action ?? '').trim());
+        await finalizeLegadoLoginCookies({
+          source,
+          baseUrl,
+          cookieStore,
+          formValues,
+          loginKey,
+          argsKey,
+          isLoginAction,
+        });
+        try {
+          const obj: Record<string, string> = {};
+          cookieStore.forEach((v, k) => {
+            obj[k] = v;
+          });
+          const entries = Object.entries(obj);
+          if (entries.length > 0) {
+            console.warn(LOG_TAG, 'persist cookies to storage', {
+              key: cookiesKey,
+              count: entries.length,
+              keys: entries.map(([k]) => k).slice(0, 10),
+            });
+            localStorage.setItem(cookiesKey, JSON.stringify(obj));
+          } else {
+            console.warn(LOG_TAG, 'persist cookies skipped (empty)', { key: cookiesKey });
+          }
+        } catch (e) {
+          console.warn(LOG_TAG, 'persist cookies failed', e);
+        }
+      }
+      if (isClearDeviceAction) {
+        resetLegadoDeviceId();
       }
     }
   })();
@@ -1810,20 +2200,38 @@ async function requestInScript(
         cookiePreview: String(cookieHdr).replace(/qttoken=([^;]+)/, 'qttoken=***').slice(0, 80),
       });
     }
-    const text =
-      postBody != null && postBody !== ''
-        ? await post(url, postBody, common)
-        : await httpRequest(url, { ...common, method: 'POST' }).then((r) => r.text());
     if (/\/login_api\b/.test(url)) {
+      const response =
+        postBody != null && postBody !== ''
+          ? await httpRequest(url, { ...common, method: 'POST', body: postBody })
+          : await httpRequest(url, { ...common, method: 'POST' });
+      const text = await response.text();
+      lastLoginApiHttpCapture = {
+        url,
+        body: text,
+        setCookie: readSetCookieHeader(response.headers),
+      };
       try {
-        const json = JSON.parse(text) as { code?: number; msg?: string };
-        console.warn(LOG_TAG, 'login_api HTTP 响应', { code: json.code, msg: json.msg });
+        const json = JSON.parse(text) as { code?: number; msg?: string; key?: unknown };
+        const parsedKey = extractLoginKeyFromJson(json as Record<string, unknown>);
+        console.warn(LOG_TAG, 'login_api HTTP 响应', {
+          code: json.code,
+          msg: json.msg,
+          hasValidKey: Boolean(parsedKey),
+          keyLen: parsedKey.length,
+          hasSetCookie: Boolean(lastLoginApiHttpCapture.setCookie),
+        });
       } catch {
         console.warn(LOG_TAG, 'login_api HTTP 响应非 JSON', {
           preview: text.slice(0, 120),
         });
       }
+      return text;
     }
+    const text =
+      postBody != null && postBody !== ''
+        ? await post(url, postBody, common)
+        : await httpRequest(url, { ...common, method: 'POST' }).then((r) => r.text());
     return text;
   }
   return httpGet(url, common);

@@ -21,6 +21,7 @@ import {
   detectSourceRuleMode,
   hasEmbeddedLegadoScript,
   isAtomicLegadoScriptRule,
+  legadoListRuleNeedsAllSuffix,
   unwrapLegadoJsSnippet,
   shieldInlineReplacementJsInPattern,
   splitLegadoReplaceTail,
@@ -32,6 +33,7 @@ import {
 } from '@/lib/rule-engine/legado-source-rule';
 import { compileSourceRule } from '@/lib/rule-engine/source-rule';
 import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
+import { extractApiContent } from '@/lib/book-source/extract-api-content';
 import { evalJs } from '@/lib/js-engine';
 import { normalizeJsRuleResult, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
 import { parseWebJsListResult, runWebJs } from '@/lib/rule-engine/webjs-runner';
@@ -79,6 +81,34 @@ export interface RuleContext {
   chapter?: Record<string, unknown>;
   /** 当前正则捕获组（$1/$2） */
   regexGroups?: string[];
+}
+
+/** 规则链下一段的 content：对象须 JSON 化，供 $.content 等 JSONPath 使用 */
+function serializeJsSegmentResult(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function inferContentTypeFromSerialized(value: string): 'html' | 'json' | 'text' {
+  const t = value.trim();
+  if (!t) return 'text';
+  if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+    try {
+      JSON.parse(t);
+      return 'json';
+    } catch {
+      return 'text';
+    }
+  }
+  return inferContentType(t);
 }
 
 function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
@@ -531,6 +561,17 @@ async function executeRuleByMode(
       return parseXPath(ruleBody, context.content, context.baseUrl);
     case 'json':
       if (context.contentType !== 'json') return [];
+      if (ruleBody === '$.content' || ruleBody.startsWith('$.content@')) {
+        try {
+          const parsed = JSON.parse(context.content) as Record<string, unknown>;
+          if (parsed && typeof parsed === 'object' && 'code' in parsed) {
+            const extracted = extractApiContent(parsed);
+            if (extracted.trim()) return [extracted];
+          }
+        } catch {
+          /* fall through to JSONPath */
+        }
+      }
       return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
     case 'regex':
       return parseRegex(ruleBody, context.content);
@@ -541,10 +582,10 @@ async function executeRuleByMode(
       if (jsResult == null) return [];
       if (Array.isArray(jsResult)) {
         return jsResult
-          .map((x) => (x == null ? '' : String(x)))
+          .map((x) => serializeJsSegmentResult(x))
           .filter((x) => x.trim().length > 0);
       }
-      const s = String(jsResult);
+      const s = serializeJsSegmentResult(jsResult);
       return s.trim() ? [s] : [];
     }
     default:
@@ -754,7 +795,7 @@ export async function analyzeElements(
     isJsonPathListRule(compiled)
   ) {
     let listRule = compiled;
-    if (!listRule.includes('@')) {
+    if (legadoListRuleNeedsAllSuffix(listRule)) {
       listRule = `${listRule}@all`;
     }
     const viaJson = await analyzeRule(listRule, context);
@@ -769,7 +810,7 @@ export async function analyzeElements(
   }
 
   let listRule = compiled;
-  if (!listRule.includes('@')) {
+  if (legadoListRuleNeedsAllSuffix(listRule)) {
     listRule = `${listRule}@all`;
   }
   const viaRule = await analyzeRule(listRule, context);
@@ -809,7 +850,7 @@ export async function analyzeRule(
     lastResults = await executeSourceRuleSegment(seg, subContext);
     if (lastResults.length > 0) {
       currentContent = lastResults.join('\n');
-      currentType = inferContentType(currentContent);
+      currentType = inferContentTypeFromSerialized(currentContent);
     }
   }
 

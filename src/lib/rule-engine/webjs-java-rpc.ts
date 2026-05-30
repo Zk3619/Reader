@@ -8,7 +8,16 @@ import { request } from '@/lib/http';
 import { evalJs } from '@/lib/js-engine';
 import { analyzeString } from '@/lib/rule-engine/analyze-rule';
 import type { RunWebJsOptions } from '@/lib/rule-engine/webjs-script';
-import { isTauri } from '@/lib/platform/detect';
+import { isMobile, isTauri } from '@/lib/platform/detect';
+
+function isWebViewJavaRpc(funName: string): boolean {
+  return funName === 'webViewAwait' || funName === 'webViewGetSourceAwait';
+}
+
+/** 桌面 Tauri 后台 WebView；移动端 webView* 走 iframe 本地 RPC */
+function shouldInvokeRustWebJsRpc(funName: string): boolean {
+  return isTauri() && !(isMobile() && isWebViewJavaRpc(funName));
+}
 
 export interface WebJsRpcContext {
   baseUrl: string;
@@ -255,6 +264,7 @@ export function installWebJsRpcDispatcher(ctx: WebJsRpcContext): () => void {
 
 /** Tauri 后台 WebView 内：优先 invoke，否则走本地 dispatcher */
 export function buildWebJsRpcInvokeShim(): string {
+  const mobileWebViewUsesIframe = isMobile();
   return `
 (function(){
   if (window.__READER_JAVA_RPC_SHIM__) return;
@@ -281,7 +291,8 @@ export function buildWebJsRpcInvokeShim(): string {
         requestId: id
       };
       var inv = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
-      if (inv) {
+      var skipRustForWebView = ${mobileWebViewUsesIframe} && (funName === 'webViewAwait' || funName === 'webViewGetSourceAwait');
+      if (inv && !skipRustForWebView) {
         inv('webjs_java_rpc', { params: payload }).then(function(res) {
           delete pending[id];
           resolve(res == null ? '' : String(res));
@@ -336,7 +347,7 @@ export async function invokeWebJsJavaRpcFromMain(
   if (params.funName === 'getStringAwait') {
     return executeWebJsJavaRpc(params.funName, params.args, ctx);
   }
-  if (isTauri()) {
+  if (shouldInvokeRustWebJsRpc(params.funName)) {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<string>('webjs_java_rpc', {
       params: {

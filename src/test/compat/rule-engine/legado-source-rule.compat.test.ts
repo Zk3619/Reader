@@ -95,4 +95,32 @@ describe('splitSourceRule inline <js>result</js>', () => {
     expect(segments[0]?.ruleStr).toContain('<js>result</js>');
     expect(segments[0]?.ruleStr).not.toMatch(/^result$/m);
   });
+
+  it('splits <js>…</js>$.content into js then json path (Legado ruleContent)', () => {
+    const rule = `<js>
+let data = JSON.stringify({ code: 0, content: 'hello' });
+data;
+</js>$.content`;
+    const segments = splitSourceRule(rule);
+    expect(segments).toHaveLength(2);
+    expect(segments[0]?.mode).toBe('js');
+    expect(segments[1]?.mode).toBe('default');
+    expect(segments[1]?.ruleStr).toBe('$.content');
+  });
+});
+
+describe('analyzeString <js>…</js>$.content chain', () => {
+  it('extracts manga contents via api helper after js segment', async () => {
+    const rule = `<js>
+JSON.stringify({ code: 0, contents: ['https://cdn.example/a.jpg'] });
+</js>$.content`;
+    const hexBody = '7b22626f6f6b5f6964223a22626964227d';
+    const out = await analyzeString(rule, {
+      content: hexBody,
+      contentType: 'text',
+      baseUrl: 'https://v1.gyks.cf',
+      result: hexBody,
+    });
+    expect(out).toContain('<img src="https://cdn.example/a.jpg">');
+  });
 });
