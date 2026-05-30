@@ -94,6 +94,12 @@ export interface ReadConfig {
     /** 字间距 */
     letter: number;
   };
+  /** 正文与边界留白（px）；双页时 center 为列间中缝间距 */
+  contentInset: {
+    left: number;
+    right: number;
+    center: number;
+  };
   /** 阅读进度状态栏显示：follow=跟随操作栏显隐，always=始终显示，never=始终隐藏 */
   statusBarDisplayStyle: 'follow' | 'always' | 'never';
   /** 翻页动画：scroll 为纵向滚动（默认）；cover/slide 为章切换过渡 */
@@ -132,6 +138,11 @@ const defaultConfig: ReadConfig = {
     line: 0.8,
     letter: 0,
   },
+  contentInset: {
+    left: 16,
+    right: 16,
+    center: 32,
+  },
   statusBarDisplayStyle: 'follow',
   pageAnim: 'scroll',
   dualPage: 'auto',
@@ -150,6 +161,25 @@ const defaultConfig: ReadConfig = {
 let configHydrated = false;
 let configSaveTimer: number | null = null;
 
+/** 合并持久化边距；兼容旧版 middleLeft + middleRight */
+function mergeContentInset(
+  prev: ReadConfig['contentInset'],
+  saved: Partial<ReadConfig['contentInset']> & {
+    middleLeft?: number;
+    middleRight?: number;
+  },
+): ReadConfig['contentInset'] {
+  let center = saved.center;
+  if (center == null && (saved.middleLeft != null || saved.middleRight != null)) {
+    center = (saved.middleLeft ?? 0) + (saved.middleRight ?? 0);
+  }
+  return {
+    left: saved.left ?? prev.left,
+    right: saved.right ?? prev.right,
+    center: center ?? prev.center,
+  };
+}
+
 async function hydrateReaderConfig(): Promise<void> {
   if (configHydrated) return;
   configHydrated = true;
@@ -159,6 +189,10 @@ async function hydrateReaderConfig(): Promise<void> {
       ...prev,
       ...saved,
       spacing: { ...prev.spacing, ...saved.spacing },
+      contentInset: mergeContentInset(
+        prev.contentInset,
+        saved.contentInset ?? (saved as { middleLeft?: number; middleRight?: number }),
+      ),
       clickActions: {
         ...DEFAULT_CLICK_ACTIONS,
         ...saved.clickActions,

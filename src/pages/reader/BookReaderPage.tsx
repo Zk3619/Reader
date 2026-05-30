@@ -57,7 +57,6 @@ import {
   ChevronLeftIcon,
   ListIcon,
   SettingsIcon,
-  ImmersiveIcon,
   RefreshIcon,
   MoreIcon,
   ReplaceIcon,
@@ -68,11 +67,7 @@ import {
   ThemeDarkIcon,
 } from '@/components/shared/icons';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import {
-  showAppToast,
-  showImmersiveEnterToast,
-  shouldShowImmersiveEnterToast,
-} from '@/components/shared/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { Separator } from '@/components/ui/separator';
 
@@ -101,8 +96,6 @@ export type ReaderPageProps = BookReaderProps;
 
 export function BookReader(props: BookReaderProps) {
   const [topBarVisible, setTopBarVisible] = createSignal(true);
-  /** 沉浸模式：仅正文，隐藏顶栏/底栏/段评气泡，禁用中间点击 */
-  const [immersiveMode, setImmersiveMode] = createSignal(false);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   /** 目录列表滚动位置缓存（关闭时保存，再次打开时恢复），换书时清零 */
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
@@ -172,10 +165,10 @@ export function BookReader(props: BookReaderProps) {
     const style = readerStore.state.config.statusBarDisplayStyle;
     if (style === 'always') return true;
     if (style === 'never') return false;
-    return topBarVisible() && !immersiveMode();
+    return topBarVisible();
   };
-  /** 底栏操作栏是否显示（窄屏且顶栏可见且非沉浸） */
-  const operationBarVisible = () => !isWideScreen() && topBarVisible() && !immersiveMode();
+  /** 底栏操作栏是否显示（窄屏且顶栏可见） */
+  const operationBarVisible = () => !isWideScreen() && topBarVisible();
   /** 底栏：本章字数展示（优先章节 wordCount，否则按正文长度） */
   const chapterWordCountText = () => {
     const ch = currentChapter();
@@ -453,8 +446,7 @@ export function BookReader(props: BookReaderProps) {
         }
         setCatalogOpen(false);
         setSettingsOpen(false);
-        if (immersiveMode()) setImmersiveMode(false);
-        else if (commentsOpen()) setPanelClosing(true);
+        if (commentsOpen()) setPanelClosing(true);
         else if (!catalogOpen() && !settingsOpen()) setTopBarVisible((v) => !v);
       }
       if (e.key === 'ArrowLeft') handlePrev();
@@ -486,20 +478,20 @@ export function BookReader(props: BookReaderProps) {
 
   const handleScroll = () => {
     if (!scrollContainer || isRestoringScroll) return;
-    
+
     // 计算滚动位置（相对于内容顶部）
     const scrollTop = scrollContainer.scrollTop;
     const scrollHeight = scrollContainer.scrollHeight;
     const clientHeight = scrollContainer.clientHeight;
-    
+
     // 计算阅读位置（0-1之间的比例）
-    const pos = scrollHeight > clientHeight 
+    const pos = scrollHeight > clientHeight
       ? Math.max(0, Math.min(1, scrollTop / (scrollHeight - clientHeight)))
       : 0;
-    
+
     // 更新阅读位置
     readerStore.setChapterPos(pos);
-    
+
     // 防抖保存：延迟500ms后保存
     if (scrollSaveTimer !== null) {
       clearTimeout(scrollSaveTimer);
@@ -514,9 +506,9 @@ export function BookReader(props: BookReaderProps) {
   createEffect(() => {
     const index = chapterIndex(); // 监听章节索引变化
     const contentShown = showContent(); // 监听内容显示状态
-    
+
     if (!contentShown) return;
-    
+
     // 检测章节切换：如果章节索引变化了，重置滚动位置到顶部
     if (lastChapterIndex !== -1 && lastChapterIndex !== index) {
       const anim = readerStore.state.config.pageAnim ?? 'scroll';
@@ -533,22 +525,22 @@ export function BookReader(props: BookReaderProps) {
       lastChapterIndex = index;
       return;
     }
-    
+
     // 更新章节索引记录
     lastChapterIndex = index;
-    
+
     // 只在首次打开书籍时恢复滚动位置
     if (hasRestoredInitialScroll) return;
-    
+
     const pos = readerStore.state.chapterPos;
-    
+
     // 延迟恢复滚动位置，确保内容已完全渲染
     // 使用双重 requestAnimationFrame 确保 DOM 完全渲染
     let retryCount = 0;
     const maxRetries = 10; // 最多重试 10 次（约 160ms）
-    
+
     isRestoringScroll = true;
-    
+
     const restoreScroll = () => {
       if (!scrollContainer) {
         // 如果 scrollContainer 还没绑定，再等待一下
@@ -560,17 +552,17 @@ export function BookReader(props: BookReaderProps) {
         }
         return;
       }
-      
+
       const scrollHeight = scrollContainer.scrollHeight;
       const clientHeight = scrollContainer.clientHeight;
-      
+
       // 如果内容还没渲染完（scrollHeight 为 0 或很小），再等待一下
       if (scrollHeight <= 0 && retryCount < maxRetries) {
         retryCount++;
         requestAnimationFrame(restoreScroll);
         return;
       }
-      
+
       // 如果内容高度足够，恢复滚动位置
       if (scrollHeight > clientHeight && pos > 0) {
         // pos 是 0-1 之间的比例
@@ -580,12 +572,12 @@ export function BookReader(props: BookReaderProps) {
         // 如果内容高度不足或没有保存的位置，重置到顶部
         scrollContainer.scrollTop = 0;
       }
-      
+
       // 标记已恢复初始滚动位置（仅恢复一次）
       hasRestoredInitialScroll = true;
       isRestoringScroll = false;
     };
-    
+
     requestAnimationFrame(() => {
       requestAnimationFrame(restoreScroll);
     });
@@ -644,10 +636,6 @@ export function BookReader(props: BookReaderProps) {
       tapStartTime = 0;
       return;
     }
-    if (immersiveMode() && action === 'menu') {
-      tapStartTime = 0;
-      return;
-    }
     runClickAction(action);
     tapStartTime = 0;
   };
@@ -663,7 +651,7 @@ export function BookReader(props: BookReaderProps) {
               ref={(el) => {
                 if (el) scrollContainer = el;
               }}
-              class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both"
+              class="reader-text-scroll absolute inset-0 overflow-y-auto"
               onPointerDown={onContentPointerDown}
               onPointerMove={onContentPointerMove}
               onClick={onContentClick}
@@ -674,8 +662,7 @@ export function BookReader(props: BookReaderProps) {
                     class={cn('min-h-full', contentTransitionClass())}
                     onOpenComments={openComments}
                     getSegmentCommentCount={getSegmentCommentCount}
-                    hideCommentBubbles={immersiveMode()}
-                    applyReadWidth={() => isWideScreen() || !isMobile()}
+                    applyReadWidth={() => false}
                     dualPage={dualPageActive()}
                   />
                 )}
@@ -689,7 +676,7 @@ export function BookReader(props: BookReaderProps) {
                 ref={(el) => {
                   if (el) scrollContainer = el;
                 }}
-                class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both"
+                class="reader-text-scroll absolute inset-0 overflow-y-auto"
                 onPointerDown={onContentPointerDown}
                 onPointerMove={onContentPointerMove}
                 onClick={onContentClick}
@@ -700,8 +687,7 @@ export function BookReader(props: BookReaderProps) {
                       class={cn('min-h-full', contentTransitionClass())}
                       onOpenComments={openComments}
                       getSegmentCommentCount={getSegmentCommentCount}
-                      hideCommentBubbles={immersiveMode()}
-                      applyReadWidth={() => isWideScreen() || !isMobile()}
+                      applyReadWidth={() => false}
                       dualPage={dualPageActive()}
                     />
                   )}
@@ -732,7 +718,7 @@ export function BookReader(props: BookReaderProps) {
         class={cn(
           'reader-top-bar absolute left-0 right-0 top-0 z-10 flex h-14 items-center gap-2 border-b border-border/50 bg-background/95 px-4 backdrop-blur',
           'safe-area-inset-top',
-          (!topBarVisible() || immersiveMode()) && 'reader-bar-hidden'
+          !topBarVisible() && 'reader-bar-hidden'
         )}
         data-tauri-drag-region
       >
@@ -770,101 +756,7 @@ export function BookReader(props: BookReaderProps) {
           </Tooltip>
         </Show>
         <div class="min-w-0 flex-1" data-tauri-drag-region />
-        {/* 宽屏时显示：换源/刷新/缓存/更多在沉浸左侧，整体右对齐 */}
         <Show when={isWideScreen()}>
-          <Tooltip>
-            <TooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="no-drag"
-              onClick={() => {
-                const b = book();
-                if (!b || readerStore.isGuestReading() || isLocalBook(b)) {
-                  showAppToast({
-                    title: '无法换源',
-                    description: readerStore.isGuestReading()
-                      ? '试读请先加入书架'
-                      : '本地书不支持换源',
-                  });
-                  return;
-                }
-                setChangeSourceOpen(true);
-              }}
-              aria-label="换源"
-            >
-              <ReplaceIcon class="size-5" />
-            </TooltipTrigger>
-            <TooltipContent>换源</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as={Button}
-              variant="ghost"
-              size="icon"
-              class="no-drag"
-              onClick={async () => {
-                try {
-                  await readerStore.refreshChapter();
-                } catch {
-                  // 失败时 refreshChapter → loadChapter 已设置错误内容
-                }
-              }}
-              aria-label="刷新当前章节"
-            >
-              <RefreshIcon class="size-5" />
-            </TooltipTrigger>
-            <TooltipContent>刷新</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="no-drag"
-              onClick={openOfflineCacheDialog}
-              aria-label="离线缓存"
-            >
-              <DownloadIcon class="size-5" />
-            </TooltipTrigger>
-            <TooltipContent>离线缓存</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="no-drag"
-              onClick={() => setMoreMenuOpen(true)}
-              aria-label="更多"
-            >
-              <MoreIcon class="size-5" />
-            </TooltipTrigger>
-            <TooltipContent>更多</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as={Button}
-              variant="ghost"
-              size="icon"
-              class={cn('no-drag', immersiveMode() && 'text-primary')}
-              onClick={() => {
-                const next = !immersiveMode();
-                setImmersiveMode(next);
-                if (next) {
-                  if (commentsOpen()) {
-                    setPanelClosing(true);
-                    setCommentsOpen(false);
-                  }
-                  if (shouldShowImmersiveEnterToast()) {
-                    showImmersiveEnterToast();
-                  }
-                }
-              }}
-              aria-label={immersiveMode() ? '退出沉浸阅读' : '进入沉浸阅读'}
-            >
-              <ImmersiveIcon class="size-5" />
-            </TooltipTrigger>
-            <TooltipContent>{immersiveMode() ? '退出沉浸阅读' : '沉浸'}</TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger as={Button}
               variant="ghost"
@@ -921,7 +813,79 @@ export function BookReader(props: BookReaderProps) {
             <TooltipContent>设置</TooltipContent>
           </Tooltip>
         </Show>
-        {/* 窗口控制左侧分割线：仅桌面端（Tauri 且非移动端）显示 */}
+        <div class="flex shrink-0 items-center gap-0.5 no-drag">
+          <Tooltip>
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={() => {
+                const b = book();
+                if (!b || readerStore.isGuestReading() || isLocalBook(b)) {
+                  showAppToast({
+                    title: '无法换源',
+                    description: readerStore.isGuestReading()
+                      ? '试读请先加入书架'
+                      : '本地书不支持换源',
+                  });
+                  return;
+                }
+                setChangeSourceOpen(true);
+              }}
+              aria-label="换源"
+            >
+              <ReplaceIcon class="size-5" />
+            </TooltipTrigger>
+            <TooltipContent>换源</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={async () => {
+                try {
+                  await readerStore.refreshChapter();
+                } catch {
+                  // 失败时 refreshChapter → loadChapter 已设置错误内容
+                }
+              }}
+              aria-label="刷新当前章节"
+            >
+              <RefreshIcon class="size-5" />
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={openOfflineCacheDialog}
+              aria-label="离线缓存"
+            >
+              <DownloadIcon class="size-5" />
+            </TooltipTrigger>
+            <TooltipContent>离线缓存</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="no-drag"
+              onClick={() => setMoreMenuOpen(true)}
+              aria-label="更多"
+            >
+              <MoreIcon class="size-5" />
+            </TooltipTrigger>
+            <TooltipContent>更多</TooltipContent>
+          </Tooltip>
+        </div>
+        {/* 主题切换左侧分割线：仅桌面端（Tauri 且非移动端）显示 */}
         <Show when={isTauri() && !isMobile()}>
           <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
         </Show>
@@ -935,13 +899,13 @@ export function BookReader(props: BookReaderProps) {
                 size="default"
                 class="h-9 w-9 rounded-md hover:bg-muted transition-colors p-0"
               >
-            <Show
-              when={isDark()}
-              fallback={<ThemeLightIcon class="h-4 w-4" size={16} />}
-            >
-              <ThemeDarkIcon class="h-4 w-4" size={16} />
-            </Show>
-            <span class="sr-only">{isDark() ? '切换到浅色模式' : '切换到深色模式'}</span>
+                <Show
+                  when={isDark()}
+                  fallback={<ThemeLightIcon class="h-4 w-4" size={16} />}
+                >
+                  <ThemeDarkIcon class="h-4 w-4" size={16} />
+                </Show>
+                <span class="sr-only">{isDark() ? '切换到浅色模式' : '切换到深色模式'}</span>
               </Toggle>
             </TooltipTrigger>
             <TooltipContent>{isDark() ? '切换到浅色模式' : '切换到深色模式'}</TooltipContent>
@@ -978,7 +942,7 @@ export function BookReader(props: BookReaderProps) {
             <span>全书 {bookProgressPercent()}%</span>
           </div>
         </div>
-        {/* 底部操作栏：仅窄屏存在 DOM，显隐随顶栏/沉浸并用过渡收起 */}
+        {/* 底部操作栏：仅窄屏存在 DOM，显隐随顶栏过渡收起 */}
         <Show when={!isWideScreen()}>
           <div
             class={cn(
@@ -986,80 +950,80 @@ export function BookReader(props: BookReaderProps) {
               !operationBarVisible() && 'reader-bar-hidden'
             )}
           >
-          <div class="flex items-center gap-2">
-            <Button variant="ghost" size="sm" class="shrink-0 text-xs no-drag" onClick={handlePrev} aria-label="上一章">
-              上一章
-            </Button>
-            <div class="min-w-0 flex-1 px-1">
-              <Slider
-                value={[chapterPos()]}
-                minValue={0}
-                maxValue={1}
-                step={0.01}
-                onChange={handleChapterProgressChange}
-                class="py-2"
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+            <div class="flex items-center gap-2">
+              <Button variant="ghost" size="sm" class="shrink-0 text-xs no-drag" onClick={handlePrev} aria-label="上一章">
+                上一章
+              </Button>
+              <div class="min-w-0 flex-1 px-1">
+                <Slider
+                  value={[chapterPos()]}
+                  minValue={0}
+                  maxValue={1}
+                  step={0.01}
+                  onChange={handleChapterProgressChange}
+                  class="py-2"
+                >
+                  <SliderTrack>
+                    <SliderFill />
+                    <SliderThumb />
+                  </SliderTrack>
+                </Slider>
+              </div>
+              <Button variant="ghost" size="sm" class="shrink-0 text-xs no-drag" onClick={handleNext} aria-label="下一章">
+                下一章
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" class="shrink-0 text-xs no-drag" onClick={handleNext} aria-label="下一章">
-              下一章
-            </Button>
-          </div>
-          <div class="flex items-center justify-around pt-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-              onClick={() => setCatalogOpen(true)}
-              aria-label="目录"
-            >
-              <ListIcon class="h-4 w-4" />
-              <span>目录</span>
-            </Button>
-            <Tooltip>
-              <TooltipTrigger
-                as={Button}
+            <div class="flex items-center justify-around pt-1">
+              <Button
                 variant="ghost"
                 size="sm"
                 class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-                onClick={handleReadAloud}
-                aria-label="朗读"
+                onClick={() => setCatalogOpen(true)}
+                aria-label="目录"
               >
-                {readAloudActive() ? (
-                  <VolumeOffIcon class="h-4 w-4" size={16} />
-                ) : (
-                  <VolumeOnIcon class="h-4 w-4" size={16} />
-                )}
-                <span>朗读</span>
-              </TooltipTrigger>
-              <TooltipContent>朗读</TooltipContent>
-            </Tooltip>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="界面（字号、间距、配色）"
-            >
-              <span class="text-sm font-normal leading-none" aria-hidden="true">Aa</span>
-              <span>界面</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
-              onClick={() => setReaderMenuDrawerOpen(true)}
-              aria-label="设置"
-            >
-              <SettingsIcon class="h-4 w-4" />
-              <span>设置</span>
-            </Button>
+                <ListIcon class="h-4 w-4" />
+                <span>目录</span>
+              </Button>
+              <Tooltip>
+                <TooltipTrigger
+                  as={Button}
+                  variant="ghost"
+                  size="sm"
+                  class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
+                  onClick={handleReadAloud}
+                  aria-label="朗读"
+                >
+                  {readAloudActive() ? (
+                    <VolumeOffIcon class="h-4 w-4" size={16} />
+                  ) : (
+                    <VolumeOnIcon class="h-4 w-4" size={16} />
+                  )}
+                  <span>朗读</span>
+                </TooltipTrigger>
+                <TooltipContent>朗读</TooltipContent>
+              </Tooltip>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="界面（字号、间距、配色）"
+              >
+                <span class="text-sm font-normal leading-none" aria-hidden="true">Aa</span>
+                <span>界面</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="flex flex-col items-center gap-0.5 rounded-md px-3 py-1.5 text-xs no-drag"
+                onClick={() => setReaderMenuDrawerOpen(true)}
+                aria-label="设置"
+              >
+                <SettingsIcon class="h-4 w-4" />
+                <span>设置</span>
+              </Button>
+            </div>
           </div>
-        </div>
         </Show>
       </div>
 
@@ -1114,7 +1078,7 @@ export function BookReader(props: BookReaderProps) {
           showNativeDragHandle={false}
         >
           <AppDrawerHeader title="阅读设置" />
-          <AppDrawerBody class="px-4 pb-6 pt-1">
+          <AppDrawerBody class="px-4 pb-6 pt-1 overflow-y-auto scroll-gutter-stable-both">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
               showReadWidth={() => isWideScreen() || !isMobile()}
@@ -1139,6 +1103,7 @@ export function BookReader(props: BookReaderProps) {
           showNativeDragHandle={false}
         >
           <AppDrawerHeader title="设置" />
+          {/* 阻止内部拖拽使用 data-corvu-no-drag 或 disableDragClose */}
           <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6">
             <Button
               variant="ghost"
@@ -1215,63 +1180,63 @@ export function BookReader(props: BookReaderProps) {
             <AppDialogTitle>阅读进度状态栏的显示风格</AppDialogTitle>
           </AppDialogHeader>
           <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-          <RadioGroup
-            value={readerStore.state.config.statusBarDisplayStyle}
-            onChange={(value) => {
-              readerStore.setConfig({ statusBarDisplayStyle: value as 'follow' | 'always' | 'never' });
-              setStatusBarStyleDialogOpen(false);
-            }}
-            class="flex flex-col gap-2"
-          >
-            <div
-              class={statusBarOptionRowClass}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  triggerStatusBarOptionRadio(e.currentTarget)
-                }
+            <RadioGroup
+              value={readerStore.state.config.statusBarDisplayStyle}
+              onChange={(value) => {
+                readerStore.setConfig({ statusBarDisplayStyle: value as 'follow' | 'always' | 'never' });
+                setStatusBarStyleDialogOpen(false);
               }}
+              class="flex flex-col gap-2"
             >
-              <RadioGroupItem value="follow" class="w-full">
-                <RadioGroupItemLabel>跟随操作栏</RadioGroupItemLabel>
-              </RadioGroupItem>
-            </div>
-            <div
-              class={statusBarOptionRowClass}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  triggerStatusBarOptionRadio(e.currentTarget)
-                }
-              }}
-            >
-              <RadioGroupItem value="always" class="w-full">
-                <RadioGroupItemLabel>始终显示</RadioGroupItemLabel>
-              </RadioGroupItem>
-            </div>
-            <div
-              class={statusBarOptionRowClass}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  triggerStatusBarOptionRadio(e.currentTarget)
-                }
-              }}
-            >
-              <RadioGroupItem value="never" class="w-full">
-                <RadioGroupItemLabel>始终隐藏</RadioGroupItemLabel>
-              </RadioGroupItem>
-            </div>
-          </RadioGroup>
+              <div
+                class={statusBarOptionRowClass}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    triggerStatusBarOptionRadio(e.currentTarget)
+                  }
+                }}
+              >
+                <RadioGroupItem value="follow" class="w-full">
+                  <RadioGroupItemLabel>跟随操作栏</RadioGroupItemLabel>
+                </RadioGroupItem>
+              </div>
+              <div
+                class={statusBarOptionRowClass}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    triggerStatusBarOptionRadio(e.currentTarget)
+                  }
+                }}
+              >
+                <RadioGroupItem value="always" class="w-full">
+                  <RadioGroupItemLabel>始终显示</RadioGroupItemLabel>
+                </RadioGroupItem>
+              </div>
+              <div
+                class={statusBarOptionRowClass}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    triggerStatusBarOptionRadio(e.currentTarget)
+                  }
+                }}
+              >
+                <RadioGroupItem value="never" class="w-full">
+                  <RadioGroupItemLabel>始终隐藏</RadioGroupItemLabel>
+                </RadioGroupItem>
+              </div>
+            </RadioGroup>
           </div>
         </AppDialogContent>
       </AppDialog>

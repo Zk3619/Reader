@@ -53,6 +53,14 @@ export function ReaderSettings(props: ReaderSettingsProps) {
     });
   };
 
+  const setContentInset = (key: keyof ReadConfig['contentInset'], value: number) => {
+    readerStore.setConfig({
+      contentInset: { ...config().contentInset, [key]: value },
+    });
+  };
+
+  const dualPageMiddleVisible = () => config().dualPage !== 'off';
+
   return (
     <div class="flex flex-1 flex-col gap-6 overflow-y-auto scroll-gutter-stable-both py-4">
       {/* 主题 */}
@@ -150,6 +158,78 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             )}
           </For>
         </div>
+      </div>
+
+      {/* 边距：正文与视口/列边界留白 */}
+      <div class="space-y-4">
+        <div>
+          <Label>边距</Label>
+          <p class="mt-1 text-xs text-muted-foreground">
+            正文与左右边界的间距；双页时可设置列间中心间距。
+          </p>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">左侧</Label>
+            <span class="text-sm text-muted-foreground">{config().contentInset.left}px</span>
+          </div>
+          <Slider
+            value={[config().contentInset.left]}
+            minValue={0}
+            maxValue={80}
+            step={2}
+            onChange={(values: number[]) =>
+              setContentInset('left', values[0] ?? config().contentInset.left)
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">右侧</Label>
+            <span class="text-sm text-muted-foreground">{config().contentInset.right}px</span>
+          </div>
+          <Slider
+            value={[config().contentInset.right]}
+            minValue={0}
+            maxValue={80}
+            step={2}
+            onChange={(values: number[]) =>
+              setContentInset('right', values[0] ?? config().contentInset.right)
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <Show when={dualPageMiddleVisible()}>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <Label class="text-sm font-normal">中心间距</Label>
+              <span class="text-sm text-muted-foreground">{config().contentInset.center}px</span>
+            </div>
+            <Slider
+              value={[config().contentInset.center]}
+              minValue={0}
+              maxValue={120}
+              step={2}
+              onChange={(values: number[]) =>
+                setContentInset('center', values[0] ?? config().contentInset.center)
+              }
+            >
+              <SliderTrack>
+                <SliderFill />
+                <SliderThumb />
+              </SliderTrack>
+            </Slider>
+          </div>
+        </Show>
       </div>
 
       {/* 插图样式 */}

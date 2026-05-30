@@ -101,8 +101,11 @@ export function ReaderContent(props: ReaderContentProps) {
     return c && (c.startsWith('加载失败') || c.startsWith('内容加载失败') || c.startsWith('书源不存在'));
   };
 
+  const contentInset = () => config().contentInset ?? { left: 16, right: 16, center: 32 };
+
   const themeStyle = () => {
     const c = config();
+    const inset = contentInset();
     const fontFamily = c.font === 0 || !c.customFontName
       ? 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)'
       : c.customFontName;
@@ -113,7 +116,17 @@ export function ReaderContent(props: ReaderContentProps) {
       'letter-spacing': c.spacing.letter ? `${c.spacing.letter}em` : undefined,
       'font-family': fontFamily,
       'max-width': useReadWidth ? `${c.readWidth}px` : undefined,
+      'padding-left': `${inset.left}px`,
+      'padding-right': `${inset.right}px`,
     } as Record<string, string | number | undefined>;
+  };
+
+  const bodyStyle = () => {
+    if (!props.dualPage) return undefined;
+    const inset = contentInset();
+    return {
+      'column-gap': inset.center > 0 ? `${inset.center}px` : undefined,
+    } as Record<string, string | undefined>;
   };
 
   const paragraphStyle = () => {
@@ -143,7 +156,7 @@ export function ReaderContent(props: ReaderContentProps) {
   return (
     <div
       class={cn(
-        'reader-content mx-auto min-h-full w-full px-6 py-8 selection:bg-primary/20',
+        'reader-content min-h-full w-full px-0 py-8 selection:bg-primary/20',
         themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
         themeClasses[config().theme]?.text ?? themeClasses[0].text,
         props.class
@@ -179,8 +192,9 @@ export function ReaderContent(props: ReaderContentProps) {
           <div
             class={cn(
               'wrap-break-word reader-body',
-              props.dualPage && 'reader-dual-page columns-2 gap-8',
+              props.dualPage && 'reader-dual-page columns-2',
             )}
+            style={bodyStyle()}
           >
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
             <Show when={currentChapter()?.title}>
