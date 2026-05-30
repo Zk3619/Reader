@@ -427,6 +427,7 @@ describe('rule expression consistency', () => {
   it('recognizes legacy rule operators as rule expressions', () => {
     expect(isRuleExpression('$.data&&@js:result')).toBe(true);
     expect(isRuleExpression('//div[@id="x"]')).toBe(true);
+    expect(isRuleExpression('.cover_m@img@src')).toBe(true);
     expect(isRuleExpression('result + 1')).toBe(false);
   });
 });

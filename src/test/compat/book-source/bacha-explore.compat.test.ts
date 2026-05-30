@@ -1,14 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { exploreBook } from '@/lib/book-source/explore';
 import { formatWordCountLikeLegado } from '@/lib/book-source/search-format';
+import { readFixture } from '@/test/helpers/fixtures';
 import { analyzeListElements, analyzeString, parseCss, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const exploreHtml = readFileSync(join(__dir, '../../../../tmp-explore.html'), 'utf8');
+const exploreHtml = readFixture('bacha', 'explore.html');
 
 const BACHA_SOURCE: BookSource = {
   bookSourceName: '八叉测试',
@@ -73,7 +70,13 @@ describe('八叉 explore 规则（本地 HTML）', () => {
   });
 
   it('单行应解析书名、作者、封面、字数', async () => {
-    const tr = exploreHtml.match(/<tr>[\s\S]*?谋臣[\s\S]*?<\/tr>/)?.[0];
+    const items = await analyzeListElements(BACHA_SOURCE.ruleExplore!.bookList!, {
+      content: exploreHtml,
+      contentType: 'html',
+      baseUrl: exploreUrl,
+      source: BACHA_SOURCE as unknown as Record<string, unknown>,
+    });
+    const tr = items.find((i) => i.content.includes('谋臣'))?.content;
     expect(tr).toBeTruthy();
     const ctx = rowContext(tr!);
     const rule = BACHA_SOURCE.ruleExplore!;
