@@ -32,6 +32,21 @@ function normalizeUrl(url: string): string {
   // 去除首尾空格
   let cleaned = url.trim();
 
+  if (/^(data:|blob:|javascript:|file:|about:|legado:|yuedu:)/i.test(cleaned)) {
+    return cleaned;
+  }
+
+  // 已是 __reader_http：仅解析为绝对地址，避免 URLSearchParams 重写 target 查询串
+  if (cleaned.includes('__reader_http')) {
+    try {
+      const base =
+        typeof window !== 'undefined' ? window.location.href : 'http://127.0.0.1/';
+      return new URL(cleaned, base).href;
+    } catch {
+      return cleaned;
+    }
+  }
+
   // 同源代理路径（如 /__reader_http?target=…），勿补 https:// 以免变成 https://__reader_http
   if (cleaned.startsWith('/') && typeof window !== 'undefined') {
     try {

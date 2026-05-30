@@ -7,8 +7,20 @@ import { isTauri } from '@/lib/platform/detect';
 
 const PROXY_SEGMENT = '__reader_http';
 
+/** 不可经 HTTP 代理拉取的 URL 方案（含晴天章节 data: 载荷） */
+const NON_HTTP_FETCH_SCHEMES =
+  /^(data:|blob:|javascript:|file:|about:|legado:|yuedu:)/i;
+
+export function isHttpFetchableUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed || NON_HTTP_FETCH_SCHEMES.test(trimmed)) return false;
+  return /^https?:\/\//i.test(trimmed);
+}
+
 /** 请求头中携带 Cookie 的键（代理会转为上游 Cookie 头） */
 export const WEB_PROXY_COOKIE_HEADER = 'X-Reader-Cookie';
+
+export { LEGADO_FORWARD_HEADERS_HEADER } from '@/lib/http/legado-forward-headers';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -74,6 +86,7 @@ export function shouldUseWebHttpProxy(
 ): boolean {
   if (!isWebHttpProxyNeeded()) return false;
   if (isReaderHttpProxyUrl(targetUrl)) return false;
+  if (!isHttpFetchableUrl(targetUrl)) return false;
   if (headersNeedWebHttpProxy(headers)) return true;
   return isCrossOriginHttpUrl(targetUrl);
 }

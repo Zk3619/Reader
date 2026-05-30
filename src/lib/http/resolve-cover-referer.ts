@@ -55,9 +55,9 @@ export function isCrossOriginImageReferer(
   return Boolean(coverHost && refHost && coverHost !== refHost);
 }
 
-/** 正文插图可用的 Referer：Legado 指定且与图同站时才保留 */
+/** 正文插图原始 Referer（Legado 每图 headers，可为跨站阅读页） */
 export function resolveInlineImageReferer(
-  imageUrl: string,
+  _imageUrl: string,
   legadoHeaders?: Record<string, string> | null,
 ): string | undefined {
   if (!legadoHeaders) return undefined;
@@ -65,9 +65,46 @@ export function resolveInlineImageReferer(
     legadoHeaders.Referer ??
     legadoHeaders.referer ??
     legadoHeaders.REFERER;
-  if (!legadoRef?.trim()) return undefined;
-  if (isCrossOriginImageReferer(imageUrl, legadoRef)) return undefined;
-  return legadoRef.trim();
+  return legadoRef?.trim() || undefined;
+}
+
+/** Web 代理默认 Referer：优先 Legado 指定，否则图床同源 */
+export function resolveProxiedImageReferer(
+  imageUrl: string,
+  legadoHeaders?: Record<string, string> | null,
+): string | undefined {
+  const normalized = normalizeImageUrl(imageUrl);
+  const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
+  if (legadoRef) return legadoRef;
+  try {
+    return `${new URL(normalized).origin}/`;
+  } catch {
+    return undefined;
+  }
+}
+
+export type ProxiedRefererAttempt = string | 'none';
+
+/** 403 时按序尝试：Legado Referer（含 Cookie 等透传）→ 图床同源 → 无 Referer */
+export function buildProxiedImageRefererAttempts(
+  imageUrl: string,
+  legadoHeaders?: Record<string, string> | null,
+): ProxiedRefererAttempt[] {
+  const normalized = normalizeImageUrl(imageUrl);
+  const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
+  const attempts: ProxiedRefererAttempt[] = [];
+  const add = (v: ProxiedRefererAttempt) => {
+    if (!attempts.includes(v)) attempts.push(v);
+  };
+  if (legadoRef) add(legadoRef);
+  try {
+    const cdn = `${new URL(normalized).origin}/`;
+    if (cdn !== legadoRef) add(cdn);
+  } catch {
+    /* ignore */
+  }
+  add('none');
+  return attempts;
 }
 
 function readSourceArgs(source: BookSource): Record<string, unknown> | undefined {
@@ -258,13 +295,18 @@ export function resolveCoverRequestHeaders(
     }
   }
 
+  const legadoReferer =
+    extraHeaders?.Referer ??
+    extraHeaders?.referer ??
+    extraHeaders?.REFERER;
+
   if (extraHeaders) {
     for (const [k, v] of Object.entries(extraHeaders)) {
       if (v?.trim()) headers[k] = v.trim();
     }
   }
 
-  if (normalizedCover.startsWith('http')) {
+  if (normalizedCover.startsWith('http') && !legadoReferer?.trim()) {
     const ref = headers.Referer ?? headers.referer ?? headers.REFERER;
     if (isCrossOriginImageReferer(normalizedCover, ref)) {
       delete headers.Referer;

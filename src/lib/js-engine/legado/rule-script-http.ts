@@ -11,7 +11,7 @@ import {
 import {
   summarizeContentPostBody,
 } from '@/lib/book-source/content-post-debug';
-import { scanImgTags } from '@/lib/reader/scan-img-tags';
+import { scanImgTags } from '@/lib/media/text/scan-img-tags';
 import {
   buildLegadoContentApiRequestHeaders,
   buildLegadoRuleScriptCookieHeader,
@@ -102,10 +102,10 @@ export async function requestLegadoRuleScriptHttpAsync(
     options.method === 'POST' && /\/content\b/.test(url);
   const headers = isContentPost
     ? buildLegadoContentApiRequestHeaders(
-        options.source,
-        url,
-        options.headers,
-      )
+      options.source,
+      url,
+      options.headers,
+    )
     : buildRuleScriptRequestHeaders(url, { ...options, body });
   const reqOpts = {
     headers,

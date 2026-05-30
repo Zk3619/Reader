@@ -3,14 +3,60 @@
  * 用于正文图片、部分 ajax 封面等。
  */
 
-import { readHtmlAttr } from '@/lib/reader/scan-img-tags';
+import { readHtmlAttr } from '@/lib/media/text/scan-img-tags';
 
 export type LegadoUrlWithOptions = {
   url: string;
   headers?: Record<string, string>;
+  /** Legado 单图 JSON：`click` 或 `js` 字段（如 showCmt(...)） */
+  click?: string;
+  /** Legado 单图 JSON：`style` 字段（text / TEXT / full / single） */
+  legadoStyle?: string;
 };
 
 const IMAGE_EXT_RE = /\.(?:webp|jpe?g|png|gif|avif|bmp)/i;
+
+/** 对齐 Legado AnalyzeUrl.paramPattern `\s*,\s*(?=\{)` */
+function splitLegadoTrailingJsonOptions(input: string): {
+  url: string;
+  options: Record<string, unknown> | null;
+} {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\s*,\s*(?=\{)/);
+  if (!match || match.index == null) {
+    return { url: trimmed, options: null };
+  }
+  const url = trimmed.slice(0, match.index).trim();
+  const jsonStart = trimmed.indexOf('{', match.index);
+  if (jsonStart < 0) {
+    return { url: trimmed, options: null };
+  }
+  try {
+    const options = JSON.parse(trimmed.slice(jsonStart)) as Record<string, unknown>;
+    return { url, options };
+  } catch {
+    return { url: trimmed, options: null };
+  }
+}
+
+function pickLegadoImageJsonOptions(
+  options: Record<string, unknown> | null,
+): Pick<LegadoUrlWithOptions, 'headers' | 'click' | 'legadoStyle'> {
+  if (!options) return {};
+  const headers = normalizeHeaderRecord(options.headers);
+  const clickRaw = options.click ?? options.js;
+  const click =
+    typeof clickRaw === 'string' && clickRaw.trim() ? clickRaw.trim() : undefined;
+  const legadoStyle =
+    typeof options.style === 'string' && options.style.trim()
+      ? options.style.trim()
+      : undefined;
+  return {
+    headers,
+    click,
+    legadoStyle,
+  };
+}
 
 function normalizeHeaderRecord(raw: unknown): Record<string, string> | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
@@ -21,6 +67,17 @@ function normalizeHeaderRecord(raw: unknown): Record<string, string> | undefined
     if (s) out[k] = s;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function mergeLegadoUrlParts(
+  url: string,
+  picked: Pick<LegadoUrlWithOptions, 'headers' | 'click' | 'legadoStyle'>,
+): LegadoUrlWithOptions {
+  const out: LegadoUrlWithOptions = { url };
+  if (picked.headers) out.headers = picked.headers;
+  if (picked.click) out.click = picked.click;
+  if (picked.legadoStyle) out.legadoStyle = picked.legadoStyle;
+  return out;
 }
 
 /** 为 parse 补逗号：`url.webp{"headers":…}` → `url.webp,{"headers":…}` */
@@ -37,6 +94,13 @@ function ensureCommaBeforeHeadersJson(raw: string): string {
 export function parseLegadoUrlWithOptions(input: string): LegadoUrlWithOptions {
   const trimmed = ensureCommaBeforeHeadersJson((input ?? '').trim());
   if (!trimmed) return { url: '' };
+
+  /** 晴天段评 SVG：`data:image/svg+xml;base64,... ,{"click":"showCmt(...)"}` */
+  if (/^data:/i.test(trimmed)) {
+    const { url, options } = splitLegadoTrailingJsonOptions(trimmed);
+    return mergeLegadoUrlParts(url, pickLegadoImageJsonOptions(options));
+  }
+
   if (!/^https?:\/\//i.test(trimmed)) {
     return { url: trimmed };
   }
@@ -53,9 +117,8 @@ export function parseLegadoUrlWithOptions(input: string): LegadoUrlWithOptions {
   const jsonPart = trimmed.slice(jsonStart).replace(/^,/, '').trim();
   try {
     const opts = JSON.parse(jsonPart) as Record<string, unknown>;
-    const headers = normalizeHeaderRecord(opts.headers);
     if (urlPart) {
-      return headers ? { url: urlPart, headers } : { url: urlPart };
+      return mergeLegadoUrlParts(urlPart, pickLegadoImageJsonOptions(opts));
     }
   } catch {
     /* ignore */
@@ -71,11 +134,17 @@ function escapeHtmlAttr(value: string): string {
 }
 
 function legadoImageSpanToImgTag(rawLegado: string): string {
-  const { url, headers } = parseLegadoUrlWithOptions(rawLegado);
-  if (!url) return '';
-  let tag = `<img src="${escapeHtmlAttr(url)}"`;
-  if (headers) {
-    tag += ` data-legado-headers="${escapeHtmlAttr(JSON.stringify(headers))}"`;
+  const parsed = parseLegadoUrlWithOptions(rawLegado);
+  if (!parsed.url) return '';
+  let tag = `<img src="${escapeHtmlAttr(parsed.url)}"`;
+  if (parsed.headers) {
+    tag += ` data-legado-headers="${escapeHtmlAttr(JSON.stringify(parsed.headers))}"`;
+  }
+  if (parsed.click) {
+    tag += ` data-legado-click="${escapeHtmlAttr(parsed.click)}"`;
+  }
+  if (parsed.legadoStyle) {
+    tag += ` data-legado-style="${escapeHtmlAttr(parsed.legadoStyle)}"`;
   }
   tag += '>';
   return tag;

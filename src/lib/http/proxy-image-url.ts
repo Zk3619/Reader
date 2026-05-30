@@ -9,7 +9,12 @@ import {
   isWebHttpProxyNeeded,
   resolveWebHttpProxyPath,
 } from '@/lib/http/web-http-proxy';
-import { normalizeImageUrl, resolveCoverReferer, resolveInlineImageReferer } from '@/lib/http/resolve-cover-referer';
+import { pickLegadoHeader } from '@/lib/http/legado-forward-headers';
+import {
+  normalizeImageUrl,
+  resolveCoverReferer,
+  resolveProxiedImageReferer,
+} from '@/lib/http/resolve-cover-referer';
 
 const NON_PROXY_SCHEMES = /^(data:|blob:|javascript:|file:|about:)/i;
 
@@ -18,19 +23,9 @@ export type ProxiedImageUrlOptions = {
   source?: BookSource | null;
   /** Legado 正文图 `data-legado-headers` / URL 后缀中的请求头 */
   legadoImageHeaders?: Record<string, string> | null;
+  /** 强制 Referer（403 重试）；`none` = 不传 Referer */
+  refererOverride?: string | 'none' | null;
 };
-
-function pickLegadoHeader(
-  headers: Record<string, string> | null | undefined,
-  name: string,
-): string | undefined {
-  if (!headers) return undefined;
-  const lower = name.toLowerCase();
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === lower && v?.trim()) return v.trim();
-  }
-  return undefined;
-}
 
 function isImageResourceUrl(url: string): boolean {
   return /\.(?:webp|jpe?g|png|gif|avif|bmp|svg)(?:\?|#|$)/i.test(url);
@@ -59,30 +54,45 @@ export function toProxiedImageUrl(
   const proxyPath = resolveWebHttpProxyPath();
   const params = new URLSearchParams({ target: trimmed });
 
-  const legadoReferer = resolveInlineImageReferer(trimmed, options?.legadoImageHeaders);
   const legadoUa = pickLegadoHeader(options?.legadoImageHeaders, 'User-Agent');
 
-  if (legadoReferer) {
-    params.set('referer', legadoReferer);
-  } else {
-    const resolvedReferer =
-      (options?.referer?.trim() && /^https?:\/\//i.test(options.referer.trim())
-        ? options.referer.trim()
-        : undefined) ??
-      resolveCoverReferer(options?.referer, options?.source ?? null, trimmed);
-    if (resolvedReferer) {
-      try {
-        const sameHost =
-          new URL(resolvedReferer).hostname === new URL(trimmed).hostname;
-        if (sameHost) {
-          params.set('referer', resolvedReferer);
-        }
-      } catch {
-        /* 跨域 CDN 图：不传 Referer，对齐浏览器地址栏直链 */
-      }
-    }
-    if (isImageResourceUrl(trimmed) && !params.has('referer')) {
+  if (options?.refererOverride !== undefined && options.refererOverride !== null) {
+    if (options.refererOverride === 'none') {
       params.set('referer', 'none');
+    } else if (options.refererOverride.trim()) {
+      params.set('referer', options.refererOverride.trim());
+    }
+  } else {
+    const proxiedReferer = resolveProxiedImageReferer(
+      trimmed,
+      options?.legadoImageHeaders,
+    );
+    if (proxiedReferer) {
+      params.set('referer', proxiedReferer);
+    } else {
+      const resolvedReferer =
+        (options?.referer?.trim() && /^https?:\/\//i.test(options.referer.trim())
+          ? options.referer.trim()
+          : undefined) ??
+        resolveCoverReferer(options?.referer, options?.source ?? null, trimmed);
+      if (resolvedReferer) {
+        try {
+          const sameHost =
+            new URL(resolvedReferer).hostname === new URL(trimmed).hostname;
+          if (sameHost) {
+            params.set('referer', resolvedReferer);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (isImageResourceUrl(trimmed) && !params.has('referer')) {
+        try {
+          params.set('referer', `${new URL(trimmed).origin}/`);
+        } catch {
+          params.set('referer', 'none');
+        }
+      }
     }
   }
 

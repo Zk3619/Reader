@@ -3,6 +3,7 @@
  * 对齐 Legado AnalyzeRule.evalJS bindings：src、java.getString(含嵌套 <js>)、java.ajax 同步语义
  */
 
+import { extractApiContent } from '@/lib/book-source/extract-api-content';
 import { resolveUrl } from '@/lib/book-source/utils';
 import {
   legadoJavaAndroidId,
@@ -151,6 +152,21 @@ export function buildRuleScriptAjaxCacheKey(
   body?: string,
 ): string {
   return `${method.toUpperCase()}\0${url}\0${body ?? ''}`;
+}
+
+/** ajax 已拿到 /content 但 paraFor* 抛错时，从缓存提取正文 */
+function tryContentFromRuleScriptAjaxCache(
+  ajaxCache: Map<string, string>,
+): string | null {
+  for (const body of ajaxCache.values()) {
+    const text = body.trim();
+    if (!text) continue;
+    const extracted = extractApiContent(text);
+    if (extracted?.trim()) {
+      return extracted;
+    }
+  }
+  return null;
 }
 
 function serializeRuleScriptResult(value: unknown): string {
@@ -352,10 +368,33 @@ export async function runLegadoRuleScript(
   const legadoBookId = chapterVars.book_id || '';
   const legadoUrl = chapterVars.url || String(chapterRecord.url ?? '');
 
+  const legadoMemory = new Map<string, unknown>();
+  const legadoCache = {
+    put(key: string, value: unknown) {
+      legadoMemory.set(String(key), value);
+    },
+    get(key: string) {
+      return legadoMemory.has(String(key)) ? legadoMemory.get(String(key)) : null;
+    },
+    remove(key: string) {
+      legadoMemory.delete(String(key));
+    },
+    putMemory(key: string, value: unknown) {
+      legadoMemory.set(String(key), value);
+    },
+    getFromMemory(key: string) {
+      const v = legadoMemory.get(String(key));
+      return v === undefined ? 0 : v;
+    },
+  };
+
   const buildScope = (): Record<string, unknown> => {
     const scope: Record<string, unknown> = {
       result: initialResult,
       src: ruleContent,
+      /** 对齐 Legado 规则隐式绑定：data: 章节 hex 载荷或 AnalyzeUrl 正文 */
+      content: ruleContent,
+      cache: legadoCache,
       baseUrl,
       host: hostList.length > 0 ? hostList : [baseUrl].filter(Boolean),
       // 对齐 Legado 规则脚本隐式绑定（ruleContent 在解析 res 前会 java.put('sources', sources)）
@@ -598,6 +637,17 @@ export async function runLegadoRuleScript(
         return finishRuleScript(scope.result);
       }
 
+      const hexLike =
+        typeof scope.result === 'string' &&
+        /^[0-9a-f]+$/i.test(scope.result.trim()) &&
+        scope.result.trim().length > 40;
+      if (hexLike && ajaxCache.size > 0) {
+        const fromAjax = tryContentFromRuleScriptAjaxCache(ajaxCache);
+        if (fromAjax) {
+          return finishRuleScript(fromAjax);
+        }
+      }
+
       if (scope.result !== undefined && String(scope.result).length > 0) {
         const emptyContentPayload = isEmptyContentRuleResult(scope.result);
         if (
@@ -614,9 +664,17 @@ export async function runLegadoRuleScript(
       }
 
       if (!hadAjax || ajaxCache.size === prevCacheSize) {
+        const fromAjax = tryContentFromRuleScriptAjaxCache(ajaxCache);
+        if (fromAjax) {
+          return finishRuleScript(fromAjax);
+        }
         return finishRuleScript(scope.result ?? null);
       }
       prevCacheSize = ajaxCache.size;
+    }
+    const fromAjax = tryContentFromRuleScriptAjaxCache(ajaxCache);
+    if (fromAjax) {
+      return finishRuleScript(fromAjax);
     }
     return null;
   })();

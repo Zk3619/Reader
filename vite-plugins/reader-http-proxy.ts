@@ -5,6 +5,10 @@ import type { Connect, Plugin } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { injectHtmlForInnerWeb } from './inner-web-inject-snippet';
 import {
+  decodeLegadoForwardHeaders,
+  LEGADO_FORWARD_HEADERS_HEADER,
+} from '../src/lib/http/legado-forward-headers';
+import {
   normalizeProxyTarget,
   rewriteCssAssetUrls,
   rewriteHtmlAssetUrls,
@@ -13,6 +17,7 @@ import {
 
 const PROXY_PATH = '/__reader_http';
 const COOKIE_HEADER = 'x-reader-cookie';
+const LEGADO_HDR_LOWER = LEGADO_FORWARD_HEADERS_HEADER.toLowerCase();
 const SESSION_TTL_MS = 30 * 60 * 1000;
 
 const HOP_BY_HOP = new Set([
@@ -29,6 +34,7 @@ const HOP_BY_HOP = new Set([
 /** 浏览器发往 localhost 的头，转发书源时需替换或丢弃 */
 const STRIP_REQUEST_HEADERS = new Set<string>(HOP_BY_HOP);
 STRIP_REQUEST_HEADERS.add(COOKIE_HEADER);
+STRIP_REQUEST_HEADERS.add(LEGADO_HDR_LOWER);
 STRIP_REQUEST_HEADERS.add('host');
 STRIP_REQUEST_HEADERS.add('origin');
 STRIP_REQUEST_HEADERS.add('referer');
@@ -145,6 +151,51 @@ function collectUpstreamSetCookies(headers: Headers): string[] {
 const DEFAULT_BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const MAX_UPSTREAM_REDIRECTS = 10;
+
+function isLikelyImageTarget(target: string): boolean {
+  return /\.(?:webp|jpe?g|png|gif|avif|bmp|svg)(?:\?|#|$)/i.test(target);
+}
+
+function resolveRedirectLocation(location: string, baseUrl: string): string {
+  return new URL(location.trim(), baseUrl).href;
+}
+
+function looksLikeCloudflareChallenge(buf: Buffer, contentType: string): boolean {
+  if (!contentType.toLowerCase().includes('text/html') && buf.length > 0) {
+    const head = buf.subarray(0, Math.min(buf.length, 2048)).toString('utf8');
+    if (!/just a moment|cf-chl|challenge-platform/i.test(head)) {
+      return false;
+    }
+  }
+  const text = buf.subarray(0, Math.min(buf.length, 4096)).toString('utf8').toLowerCase();
+  return (
+    text.includes('just a moment') ||
+    text.includes('cf-chl') ||
+    text.includes('challenge-platform')
+  );
+}
+
+/** 服务端自行跟随重定向，避免把相对 Location（/kk/…）原样交给浏览器变成 localhost/kk */
+async function fetchUpstreamFollowingRedirects(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  let current = url;
+  for (let hop = 0; hop <= MAX_UPSTREAM_REDIRECTS; hop++) {
+    const res = await fetch(current, { ...init, redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) {
+      return res;
+    }
+    const location = res.headers.get('location');
+    if (!location?.trim() || hop === MAX_UPSTREAM_REDIRECTS) {
+      return res;
+    }
+    current = resolveRedirectLocation(location, current);
+  }
+  throw new Error('upstream redirect limit exceeded');
+}
+
 function resolveUpstreamReferer(
   targetUrl: URL,
   session: InnerWebSession | undefined,
@@ -187,6 +238,21 @@ async function forwardToTarget(
     }
   }
 
+  const legadoExtra = decodeLegadoForwardHeaders(req.headers[LEGADO_HDR_LOWER]);
+  const reservedLegado = new Set([
+    'referer',
+    'user-agent',
+    'cookie',
+    'host',
+    'origin',
+    'connection',
+    'content-length',
+  ]);
+  for (const [key, value] of Object.entries(legadoExtra)) {
+    if (reservedLegado.has(key.toLowerCase())) continue;
+    upstreamHeaders.set(key, value);
+  }
+
   const referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
   if (referer) {
     let origin = targetUrl.origin;
@@ -208,11 +274,26 @@ async function forwardToTarget(
   upstreamHeaders.delete('user-agent');
   upstreamHeaders.set('Host', targetUrl.host);
 
-  const cookie = req.headers[COOKIE_HEADER];
-  if (cookie) {
-    upstreamHeaders.set('Cookie', Array.isArray(cookie) ? cookie.join('; ') : cookie);
+  const legadoCookie =
+    legadoExtra.Cookie ?? legadoExtra.cookie ?? '';
+  const proxyCookie = req.headers[COOKIE_HEADER];
+  const proxyCookieStr = proxyCookie
+    ? Array.isArray(proxyCookie)
+      ? proxyCookie.join('; ')
+      : String(proxyCookie)
+    : '';
+  let mergedCookie = '';
+  if (legadoCookie.trim() && proxyCookieStr.trim()) {
+    mergedCookie = mergeSemicolonCookieStrings(legadoCookie.trim(), proxyCookieStr.trim());
+  } else if (legadoCookie.trim()) {
+    mergedCookie = legadoCookie.trim();
+  } else if (proxyCookieStr.trim()) {
+    mergedCookie = proxyCookieStr.trim();
   } else if (session?.cookies) {
-    upstreamHeaders.set('Cookie', session.cookies);
+    mergedCookie = session.cookies;
+  }
+  if (mergedCookie) {
+    upstreamHeaders.set('Cookie', mergedCookie);
   }
 
   const method = (req.method ?? 'GET').toUpperCase();
@@ -227,11 +308,10 @@ async function forwardToTarget(
     }
   }
 
-  const upstream = await fetch(target, {
+  const upstream = await fetchUpstreamFollowingRedirects(target, {
     method,
     headers: upstreamHeaders,
     body: body?.length ? new Uint8Array(body) : undefined,
-    redirect: 'follow',
   });
 
   if (session && sessionId) {
@@ -242,7 +322,25 @@ async function forwardToTarget(
     }
   }
 
-  res.statusCode = upstream.status;
+  let statusCode = upstream.status;
+  const ctHeader = upstream.headers.get('content-type') ?? '';
+  let buf = Buffer.from(await upstream.arrayBuffer());
+
+  let cfChallenge = false;
+  if (
+    isLikelyImageTarget(target) &&
+    looksLikeCloudflareChallenge(buf, ctHeader)
+  ) {
+    cfChallenge = true;
+    statusCode = 403;
+    buf = Buffer.from('Cloudflare challenge (use Tauri or browser direct img)', 'utf8');
+  }
+
+  res.statusCode = statusCode;
+  if (cfChallenge) {
+    res.setHeader('X-Reader-Cf-Challenge', '1');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  }
   upstream.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
     if (STRIP_RESPONSE_HEADERS.has(lower)) return;
@@ -253,9 +351,7 @@ async function forwardToTarget(
     res.setHeader('X-Reader-Session-Cookie', session.cookies);
   }
 
-  const ct = upstream.headers.get('content-type') ?? '';
-  let buf = Buffer.from(await upstream.arrayBuffer());
-
+  const ct = ctHeader;
   const rewriteBase = upstream.url || target;
   const shouldRewriteBody =
     buf.length > 0 &&
@@ -441,7 +537,12 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
     const target = parsed.searchParams.get('target');
     if (!target || !/^https?:\/\//i.test(target)) {
       res.statusCode = 400;
-      res.end('missing or invalid target');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end(
+        target?.trim().startsWith('data:')
+          ? 'data: URLs cannot be proxied; decode locally'
+          : 'missing or invalid target',
+      );
       return;
     }
 

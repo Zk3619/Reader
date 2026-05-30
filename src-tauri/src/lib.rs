@@ -27,6 +27,18 @@ const CONFIG_FILE: &str = "config.json";
 const PORTABLE_MARKER_FILE: &str = "reader.json";
 const PORTABLE_MARKER_FILES: &[&str] = &["portable", "reader.portable", ".portable"];
 
+/** 日志预览：按字节上限截断，但不切断 UTF-8 多字节字符 */
+fn truncate_utf8_preview(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 #[derive(serde::Deserialize)]
 struct PortableMarkerConfig {
     #[serde(rename = "dataDir")]
@@ -339,11 +351,10 @@ async fn download_binary(
 
     if request_url.path().ends_with("/content") {
         if let Ok(text) = std::str::from_utf8(&data) {
-            let preview_len = text.len().min(600);
             eprintln!(
                 "[download_binary] /content 响应预览 ({} 字节): {}",
                 text.len(),
-                &text[..preview_len]
+                truncate_utf8_preview(text, 600)
             );
         }
     }

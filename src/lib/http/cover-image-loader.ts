@@ -17,12 +17,26 @@ import {
   isSignedCoverUrl,
   isSignedImageUrlExpired,
 } from '@/lib/http/signed-cover-url';
-import { WEB_PROXY_COOKIE_HEADER } from '@/lib/http/web-http-proxy';
 import {
+  encodeLegadoForwardHeaders,
+  pickLegadoHeader,
+} from '@/lib/http/legado-forward-headers';
+import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import {
+  LEGADO_FORWARD_HEADERS_HEADER,
+  WEB_PROXY_COOKIE_HEADER,
+} from '@/lib/http/web-http-proxy';
+import {
+  buildProxiedImageRefererAttempts,
   describeCoverRequestHeaders,
   normalizeImageUrl,
   resolveCoverRequestHeaders,
 } from '@/lib/http/resolve-cover-referer';
+import {
+  isCloudflareHeavyCdnUrl,
+  looksLikeCloudflareChallengeHtml,
+  shouldPreferDirectBrowserImage,
+} from '@/lib/http/cf-protected-cdn';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
 import { withReaderInlineImageFetchSlot } from '@/lib/http/reader-inline-image-queue';
 import type { BookSource } from '@/types';
@@ -102,8 +116,11 @@ export function isCrossOriginCoverUrl(url: string): boolean {
 
 export function shouldFetchCoverAsBlob(url: string): boolean {
   if (isLikelyUnresolvedRuleResult(url)) return false;
+  if (shouldPreferDirectBrowserImage(url)) return false;
   return isCrossOriginCoverUrl(url);
 }
+
+export { shouldPreferDirectBrowserImage } from '@/lib/http/cf-protected-cdn';
 
 function isBlockedCoverUrl(url: string): boolean {
   const t = url.trim();
@@ -147,9 +164,29 @@ async function maybeRefreshCoverUrl(
 
 type CoverImageBytes = { bytes: ArrayBuffer; mime: string };
 
-async function fetchCoverImageBytes(
+function describeImageFetchForLog(
   normalized: string,
-  options?: CoverImageLoadOptions,
+  fetchUrl: string,
+): { file: string; proxyTargetFile?: string; proxyTargetOk: boolean } {
+  const file = normalized.split('/').pop()?.split('?')[0] ?? normalized;
+  try {
+    const u = new URL(fetchUrl, 'http://127.0.0.1/');
+    const target = u.searchParams.get('target') ?? '';
+    const proxyTargetFile = target.split('/').pop()?.split('?')[0];
+    return {
+      file,
+      proxyTargetFile,
+      proxyTargetOk: !target || target === normalized,
+    };
+  } catch {
+    return { file, proxyTargetOk: fetchUrl === normalized };
+  }
+}
+
+async function fetchCoverImageBytesOnce(
+  normalized: string,
+  options: CoverImageLoadOptions | undefined,
+  refererOverride?: string | 'none',
 ): Promise<CoverImageBytes | null> {
   const headers = resolveCoverRequestHeaders(
     options?.referer,
@@ -167,10 +204,23 @@ async function fetchCoverImageBytes(
         referer: options?.referer,
         source: options?.source,
         legadoImageHeaders: options?.legadoImageHeaders,
+        refererOverride,
       }) ?? normalized;
-    const cookie = headers.Cookie ?? headers.cookie;
+    const headerCookie = headers.Cookie ?? headers.cookie ?? '';
+    const legadoCookie =
+      pickLegadoHeader(options?.legadoImageHeaders, 'Cookie') ??
+      pickLegadoHeader(options?.legadoImageHeaders, 'cookie') ??
+      '';
+    const cookie =
+      headerCookie && legadoCookie
+        ? mergeLegadoCookieHeaderStrings(headerCookie, legadoCookie)
+        : headerCookie || legadoCookie;
     if (cookie) {
       proxyHeaders[WEB_PROXY_COOKIE_HEADER] = cookie;
+    }
+    const legadoFwd = encodeLegadoForwardHeaders(options?.legadoImageHeaders);
+    if (legadoFwd) {
+      proxyHeaders[LEGADO_FORWARD_HEADERS_HEADER] = legadoFwd;
     }
   }
 
@@ -193,10 +243,25 @@ async function fetchCoverImageBytes(
       const exp = isSignedCoverUrl(normalized)
         ? isSignedImageUrlExpired(normalized)
         : false;
+      const ct =
+        response.headers['content-type'] ??
+        response.headers['Content-Type'] ??
+        '';
+      let cfChallenge = false;
+      if (ct.toLowerCase().includes('text/html')) {
+        try {
+          const text = await response.text();
+          cfChallenge = looksLikeCloudflareChallengeHtml(text);
+        } catch {
+          /* ignore */
+        }
+      }
       console.warn('[cover] 加载失败', {
         status: response.status,
-        url: normalized.slice(0, 96),
         signedExpired: exp,
+        refererOverride: refererOverride ?? '(default)',
+        cfChallenge: cfChallenge || isCloudflareHeavyCdnUrl(normalized),
+        ...describeImageFetchForLog(normalized, fetchUrl),
         ...describeCoverRequestHeaders(headers),
       });
     }
@@ -216,6 +281,24 @@ async function fetchCoverImageBytes(
 
   const mime = contentType.split(';')[0]?.trim() || 'image/jpeg';
   return { bytes: buf, mime };
+}
+
+async function fetchCoverImageBytes(
+  normalized: string,
+  options?: CoverImageLoadOptions,
+): Promise<CoverImageBytes | null> {
+  if (!isTauri() && isCrossOriginCoverUrl(normalized)) {
+    const attempts = buildProxiedImageRefererAttempts(
+      normalized,
+      options?.legadoImageHeaders,
+    );
+    for (const ref of attempts) {
+      const data = await fetchCoverImageBytesOnce(normalized, options, ref);
+      if (data) return data;
+    }
+    return null;
+  }
+  return fetchCoverImageBytesOnce(normalized, options);
 }
 
 async function persistCoverToDisk(
@@ -294,7 +377,7 @@ function scheduleBackgroundCoverUpdate(
     if (fresh !== normalized) {
       await patchCoverDiskMetaLastUrl(bookUrl, fresh);
     }
-  })().catch(() => {});
+  })().catch(() => { });
 }
 
 /** 手动重试前清除内存 blob 缓存，避免沿用过期条目 */
@@ -346,7 +429,7 @@ export async function loadCoverImageObjectUrl(
         );
         return objectUrl;
       }
-      void deleteCoverFromDisk(bookUrlTrim).catch(() => {});
+      void deleteCoverFromDisk(bookUrlTrim).catch(() => { });
     }
   }
 
