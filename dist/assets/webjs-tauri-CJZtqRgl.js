@@ -1,4 +1,4 @@
-import{i as c,a as s,l as o,m as u}from"./index-BSTYxegu.js";function _(e,r){const a=u(),i=o(e);return`
+import{i as c,a as s,l as o,m as u}from"./index-CaSLgMqn.js";function _(e,r){const a=o(),i=u(e);return`
 (async function() {
   ${a.replace(/`/g,"\\`")}
   try {

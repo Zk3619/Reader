@@ -21,6 +21,7 @@ import { SourceEditPage } from "@/pages/sources/SourceEditPage";
 import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
 import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
+import { BookInfoDrawer } from "@/pages/book-info/BookInfoDrawer";
 import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
 import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
@@ -73,6 +74,7 @@ import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
 import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
 import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
 import { TocPaginationSafetySetting } from "@/components/settings/TocPaginationSafetySetting";
+import { BookInfoPresentationSetting } from "@/components/settings/BookInfoPresentationSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
@@ -845,6 +847,44 @@ function AppContent() {
     book: SearchBook;
     fromPage: 'explore' | 'scout' | 'text-viewer' | 'bookshelf' | 'book-search';
   } | null>(null);
+  const [bookInfoDrawerOpen, setBookInfoDrawerOpen] = createSignal(false);
+
+  const bookInfoUsesDrawer = () =>
+    (settingsStore.state.app.bookInfoPresentation ?? 'page') === 'drawer';
+
+  function closeBookInfo() {
+    const ctx = bookInfoContext();
+    setBookInfoDrawerOpen(false);
+    setBookInfoContext(null);
+    if (!bookInfoUsesDrawer() && ctx) {
+      setCurrentPage(ctx.fromPage ?? 'explore');
+    }
+  }
+
+  function openBookInfo(params: {
+    source: BookSource;
+    book: SearchBook;
+    fromPage: 'explore' | 'scout' | 'text-viewer' | 'bookshelf' | 'book-search';
+  }) {
+    setBookInfoContext(params);
+    if (bookInfoUsesDrawer()) {
+      setBookInfoDrawerOpen(true);
+    } else {
+      setCurrentPage('book-info');
+    }
+  }
+
+  function openBookFromBookInfo(book: Book, catalog?: import("@/types").BookChapter[]) {
+    const ctx = bookInfoContext();
+    const returnPage = bookInfoUsesDrawer()
+      ? ((ctx?.fromPage ?? currentPage()) as PageType)
+      : ('book-info' as PageType);
+    if (bookInfoUsesDrawer()) {
+      setBookInfoDrawerOpen(false);
+      setBookInfoContext(null);
+    }
+    openReaderPage(book, returnPage, catalog);
+  }
 
   const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
   const [guestAddToShelfOpen, setGuestAddToShelfOpen] = createSignal(false);
@@ -1185,8 +1225,8 @@ function AppContent() {
               : await fs.getFileSize(fileInfo.bookUrl);
             const targetSize = safRoot
               ? (
-                  await readBytes(parseStorageRef(targetPath))
-                ).byteLength
+                await readBytes(parseStorageRef(targetPath))
+              ).byteLength
               : await fs.getFileSize(targetPath);
             isSameSize = sourceSize === targetSize;
 
@@ -2194,474 +2234,474 @@ function AppContent() {
             isStandalonePage() && "hidden pointer-events-none",
           )}
         >
-            {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
-            <main class={cn("flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
-              {/* 书架：保持挂载，切走再回保留分组/列表状态 */}
-              <section
-                class={cn(
-                  mainShellPageRoot,
-                  currentPage() === "bookshelf"
-                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    : "hidden",
-                )}
-              >
-                <div class="flex flex-col flex-1 min-h-0 w-full">
-                  <div
-                    class={cn(
-                      'flex flex-col flex-1 min-h-0 w-full',
-                      (showGroupManage() ||
-                        showBookshelfManage() ||
-                        showBookshelfCache()) &&
-                        'hidden pointer-events-none',
-                    )}
-                  >
-                    <BookShelf
-                      active={() => currentPage() === "bookshelf"}
-                      onPageChange={setCurrentPage}
-                      onOpenGroupManage={() => setShowGroupManage(true)}
-                      onOpenBookshelfManage={() => setShowBookshelfManage(true)}
-                      onImportLocal={handleBookshelfImportLocal}
-                      onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                      onOpenBook={(book) => openReaderPage(book, "bookshelf")}
-                      onOpenBookshelfCache={(groupId) => {
-                        setBookshelfCacheGroupId(groupId);
-                        setShowBookshelfCache(true);
-                      }}
-                      onOpenBookSearch={(q) => openBookSearch(q)}
-                    />
-                  </div>
-
-                  <Show when={showGroupManage()}>
-                    <BookGroupManage onClose={() => setShowGroupManage(false)} />
-                  </Show>
-
-                  <Show when={showBookshelfManage()}>
-                    <BookshelfManagePage
-                      onClose={() => setShowBookshelfManage(false)}
-                      onOpenBook={(book) => openReaderPage(book, "bookshelf")}
-                      onOpenBookInfo={async (book) => {
-                        const source = await getSource(book.origin);
-                        if (!source) {
-                          showAppToast({
-                            title: "无法打开详情",
-                            description: "未找到对应书源",
-                            variant: "destructive",
-                          });
-                          return;
-                        }
-                        setBookInfoContext({
-                          source,
-                          book: bookToSearchBook(book),
-                          fromPage: "bookshelf",
-                        });
-                        setCurrentPage("book-info");
-                      }}
-                    />
-                  </Show>
-
-                  <Show when={showBookshelfCache()}>
-                    <BookshelfCachePage
-                      groupId={bookshelfCacheGroupId()}
-                      groupName={bookshelfStore.state.currentGroupName}
-                      onBack={() => setShowBookshelfCache(false)}
-                    />
-                  </Show>
+          {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
+          <main class={cn("flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
+            {/* 书架：保持挂载，切走再回保留分组/列表状态 */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                currentPage() === "bookshelf"
+                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                  : "hidden",
+              )}
+            >
+              <div class="flex flex-col flex-1 min-h-0 w-full">
+                <div
+                  class={cn(
+                    'flex flex-col flex-1 min-h-0 w-full',
+                    (showGroupManage() ||
+                      showBookshelfManage() ||
+                      showBookshelfCache()) &&
+                    'hidden pointer-events-none',
+                  )}
+                >
+                  <BookShelf
+                    active={() => currentPage() === "bookshelf"}
+                    onPageChange={setCurrentPage}
+                    onOpenGroupManage={() => setShowGroupManage(true)}
+                    onOpenBookshelfManage={() => setShowBookshelfManage(true)}
+                    onImportLocal={handleBookshelfImportLocal}
+                    onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
+                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                    onOpenBookshelfCache={(groupId) => {
+                      setBookshelfCacheGroupId(groupId);
+                      setShowBookshelfCache(true);
+                    }}
+                    onOpenBookSearch={(q) => openBookSearch(q)}
+                  />
                 </div>
-              </section>
 
-              {/* 探索页：保持挂载保留状态；active 门控避免隐藏时触发发现请求 */}
-              <section
-                class={cn(
-                  mainShellPageRoot,
-                  currentPage() === "scout"
-                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    : "hidden",
-                )}
-              >
-                <ExplorePage
-                  active={() => currentPage() === "scout"}
-                  onOpenBook={(book) => openReaderPage(book, "scout")}
-                  onOpenBookInfo={(source, book) => {
-                    setBookInfoContext({ source, book, fromPage: "scout" });
-                    setCurrentPage("book-info");
-                  }}
-                />
-              </section>
+                <Show when={showGroupManage()}>
+                  <BookGroupManage onClose={() => setShowGroupManage(false)} />
+                </Show>
 
-              {/* 书源视图：保持挂载，切到发现页再返回时不重载展开的发现脚本 */}
-              <section
-                class={cn(
-                  mainShellPageRoot,
-                  currentPage() === "sources"
-                    ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    : "hidden",
-                )}
-              >
-                <div class="flex flex-col flex-1 min-h-0 w-full">
-                  <div
-                    class={cn(
-                      'flex flex-col flex-1 min-h-0 w-full',
-                      showSourcesManage() && 'hidden pointer-events-none',
-                    )}
-                  >
-                    <PageToolbar
-                      title={sourcePageToolbarTitle()}
-                      description={sourcePageToolbarDescription()}
-                      titleSlot={
-                        <PageToolbarTitleDropdown
-                          title={sourcePageToolbarTitle()}
-                          description={sourcePageToolbarDescription()}
-                          dropdownEnabled={false}
-                        />
+                <Show when={showBookshelfManage()}>
+                  <BookshelfManagePage
+                    onClose={() => setShowBookshelfManage(false)}
+                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                    onOpenBookInfo={async (book) => {
+                      const source = await getSource(book.origin);
+                      if (!source) {
+                        showAppToast({
+                          title: "无法打开详情",
+                          description: "未找到对应书源",
+                          variant: "destructive",
+                        });
+                        return;
                       }
-                    >
-                      <SourcesPageToolbar
-                        sourceSearchQuery={sourceSearchQuery()}
-                        onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
-                        sourceSearchMode={sourceSearchMode()}
-                        onSourceSearchModeChange={persistSearchMode}
-                        sortMode={sourceSortMode()}
-                        sortReverse={sourceSortReverse()}
-                        onSortModeChange={setSourceSortMode}
-                        onSortReverseChange={setSourceSortReverse}
-                        filterTooltip={sourceFilterTooltip()}
-                        onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
-                        onOpenSourcesManage={() => setShowSourcesManage(true)}
-                        showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
-                          getEffectiveSourceListFilter(
-                            sourceListFilter(),
-                            sourceFilterGroupOptions(),
-                          ).groupNames,
-                        )}
-                        sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                        onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
-                        enableDragSort={sourceEnableDragSort()}
-                        onEnableDragSortChange={persistSourceEnableDragSort}
+                      openBookInfo({
+                        source,
+                        book: bookToSearchBook(book),
+                        fromPage: "bookshelf",
+                      });
+                    }}
+                  />
+                </Show>
+
+                <Show when={showBookshelfCache()}>
+                  <BookshelfCachePage
+                    groupId={bookshelfCacheGroupId()}
+                    groupName={bookshelfStore.state.currentGroupName}
+                    onBack={() => setShowBookshelfCache(false)}
+                  />
+                </Show>
+              </div>
+            </section>
+
+            {/* 探索页：保持挂载保留状态；active 门控避免隐藏时触发发现请求 */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                currentPage() === "scout"
+                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                  : "hidden",
+              )}
+            >
+              <ExplorePage
+                active={() => currentPage() === "scout"}
+                onOpenBook={(book) => openReaderPage(book, "scout")}
+                onOpenBookInfo={(source, book) => {
+                  openBookInfo({ source, book, fromPage: "scout" });
+                }}
+              />
+            </section>
+
+            {/* 书源视图：保持挂载，切到发现页再返回时不重载展开的发现脚本 */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                currentPage() === "sources"
+                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
+                  : "hidden",
+              )}
+            >
+              <div class="flex flex-col flex-1 min-h-0 w-full">
+                <div
+                  class={cn(
+                    'flex flex-col flex-1 min-h-0 w-full',
+                    showSourcesManage() && 'hidden pointer-events-none',
+                  )}
+                >
+                  <PageToolbar
+                    title={sourcePageToolbarTitle()}
+                    description={sourcePageToolbarDescription()}
+                    titleSlot={
+                      <PageToolbarTitleDropdown
+                        title={sourcePageToolbarTitle()}
+                        description={sourcePageToolbarDescription()}
+                        dropdownEnabled={false}
                       />
-                    </PageToolbar>
-                    <SourcesFilterDialog
-                      open={sourceFilterDialogOpen()}
-                      onOpenChange={setSourceFilterDialogOpen}
-                      sourceGroups={sourceGroups()}
-                      appliedFilter={sourceListFilter()}
-                      onApply={setSourceListFilter}
-                    />
-                    <SourcesPage
+                    }
+                  >
+                    <SourcesPageToolbar
                       sourceSearchQuery={sourceSearchQuery()}
+                      onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
                       sourceSearchMode={sourceSearchMode()}
-                      sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                      filterGroupNames={sourceGroups()}
-                      appliedFilter={sourceListFilter()}
+                      onSourceSearchModeChange={persistSearchMode}
                       sortMode={sourceSortMode()}
                       sortReverse={sourceSortReverse()}
+                      onSortModeChange={setSourceSortMode}
+                      onSortReverseChange={setSourceSortReverse}
+                      filterTooltip={sourceFilterTooltip()}
+                      onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
+                      onOpenSourcesManage={() => setShowSourcesManage(true)}
+                      showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
+                        getEffectiveSourceListFilter(
+                          sourceListFilter(),
+                          sourceFilterGroupOptions(),
+                        ).groupNames,
+                      )}
+                      sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                      onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
                       enableDragSort={sourceEnableDragSort()}
-                      expandedSourceUrl={sourcesExpandedSourceUrl()}
-                      onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
-                      exploreDrawerPresentationOpen={currentPage() === "sources"}
-                      onGroupsLoaded={(g) => setSourceGroups(g)}
-                      onSourceCountChange={(n) => setSourceCount(n)}
-                      onSourceEdit={(source) => openSourceEditor(source)}
-                      onSourceLogin={async (source) => {
-                        const url = source.loginUrl?.trim();
-                        const hasUi = !!source.loginUi?.trim();
-                        const isHttp =
-                          !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                        if (isHttp && !hasUi) {
-                          try {
-                            const cookies = getStoredSourceCookiesForUrl(source, url);
-                            await openSourceSettingsInApp(url, cookies, {
-                              bookSourceUrl: source.bookSourceUrl,
-                            });
-                          } catch (e) {
-                            console.error("打开登录页失败:", e);
-                            showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
-                          }
-                          return;
-                        }
-                        if (url || hasUi) {
-                          setSourceLoginDialogSource(source);
-                        }
-                      }}
-                      onSourceSearch={(source) => {
-                        openBookSearch(undefined, formatSourceScope(source));
-                      }}
-                      onExploreSectionClick={async (source, section) => {
-                        if (!section.url?.trim()) {
-                          showAppToast({
-                            title: `${source.sourceName} · ${section.title}`,
-                            description: "该分类暂无链接",
-                            variant: "default",
+                      onEnableDragSortChange={persistSourceEnableDragSort}
+                    />
+                  </PageToolbar>
+                  <SourcesFilterDialog
+                    open={sourceFilterDialogOpen()}
+                    onOpenChange={setSourceFilterDialogOpen}
+                    sourceGroups={sourceGroups()}
+                    appliedFilter={sourceListFilter()}
+                    onApply={setSourceListFilter}
+                  />
+                  <SourcesPage
+                    sourceSearchQuery={sourceSearchQuery()}
+                    sourceSearchMode={sourceSearchMode()}
+                    sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                    filterGroupNames={sourceGroups()}
+                    appliedFilter={sourceListFilter()}
+                    sortMode={sourceSortMode()}
+                    sortReverse={sourceSortReverse()}
+                    enableDragSort={sourceEnableDragSort()}
+                    expandedSourceUrl={sourcesExpandedSourceUrl()}
+                    onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
+                    exploreDrawerPresentationOpen={currentPage() === "sources"}
+                    onGroupsLoaded={(g) => setSourceGroups(g)}
+                    onSourceCountChange={(n) => setSourceCount(n)}
+                    onSourceEdit={(source) => openSourceEditor(source)}
+                    onSourceLogin={async (source) => {
+                      const url = source.loginUrl?.trim();
+                      const hasUi = !!source.loginUi?.trim();
+                      const isHttp =
+                        !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                      if (isHttp && !hasUi) {
+                        try {
+                          const cookies = getStoredSourceCookiesForUrl(source, url);
+                          await openSourceSettingsInApp(url, cookies, {
+                            bookSourceUrl: source.bookSourceUrl,
                           });
-                          return;
+                        } catch (e) {
+                          console.error("打开登录页失败:", e);
+                          showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
                         }
-                        if (!shouldOpenExplorePageForSection(section)) {
-                          try {
-                            const opened = await openExploreSectionInInnerWeb(source, section);
-                            if (!opened) {
-                              showAppToast({
-                                title: "无法打开",
-                                description: section.title,
-                                variant: "destructive",
-                              });
-                            }
-                          } catch (e) {
-                            console.error("打开发现子项失败:", e);
+                        return;
+                      }
+                      if (url || hasUi) {
+                        setSourceLoginDialogSource(source);
+                      }
+                    }}
+                    onSourceSearch={(source) => {
+                      openBookSearch(undefined, formatSourceScope(source));
+                    }}
+                    onExploreSectionClick={async (source, section) => {
+                      if (!section.url?.trim()) {
+                        showAppToast({
+                          title: `${source.sourceName} · ${section.title}`,
+                          description: "该分类暂无链接",
+                          variant: "default",
+                        });
+                        return;
+                      }
+                      if (!shouldOpenExplorePageForSection(section)) {
+                        try {
+                          const opened = await openExploreSectionInInnerWeb(source, section);
+                          if (!opened) {
                             showAppToast({
-                              title: "打开失败",
-                              description: e instanceof Error ? e.message : "请稍后重试",
+                              title: "无法打开",
+                              description: section.title,
                               variant: "destructive",
                             });
                           }
-                          return;
+                        } catch (e) {
+                          console.error("打开发现子项失败:", e);
+                          showAppToast({
+                            title: "打开失败",
+                            description: e instanceof Error ? e.message : "请稍后重试",
+                            variant: "destructive",
+                          });
                         }
-                        setExploreContext({ source, section });
-                        setCurrentPage("explore");
-                      }}
-                    />
-                  </div>
+                        return;
+                      }
+                      setExploreContext({ source, section });
+                      setCurrentPage("explore");
+                    }}
+                  />
+                </div>
 
-                  <Show when={showSourcesManage()}>
-                    <SourcesManagePage
-                      onClose={() => setShowSourcesManage(false)}
-                      sourceSearchMode={sourceSearchMode()}
-                      onSourceSearchModeChange={persistSearchMode}
-                      enableDragSort={sourceEnableDragSort()}
-                      onEnableDragSortChange={persistSourceEnableDragSort}
-                      onSourceEdit={(source) => openSourceEditor(source)}
-                      onSourcesNew={() => openSourceEditor()}
-                      onSourcesImportLocal={() => void openLocalBookSourceImport()}
-                      onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                      onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
-                      showSourcesImportQR={isMobile()}
-                      onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
+                <Show when={showSourcesManage()}>
+                  <SourcesManagePage
+                    onClose={() => setShowSourcesManage(false)}
+                    sourceSearchMode={sourceSearchMode()}
+                    onSourceSearchModeChange={persistSearchMode}
+                    enableDragSort={sourceEnableDragSort()}
+                    onEnableDragSortChange={persistSourceEnableDragSort}
+                    onSourceEdit={(source) => openSourceEditor(source)}
+                    onSourcesNew={() => openSourceEditor()}
+                    onSourcesImportLocal={() => void openLocalBookSourceImport()}
+                    onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
+                    onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                    showSourcesImportQR={isMobile()}
+                    onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
+                  />
+                </Show>
+              </div>
+            </section>
+
+            {/* 订阅视图 */}
+            <Show when={currentPage() === "subscription"}>
+              <section
+                class={cn(
+                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                  mainShellPageRoot,
+                )}
+              >
+                <PageToolbar
+                  title="订阅"
+                  description="管理你的订阅内容"
+                  titleSlot={
+                    <PageToolbarTitleDropdown
+                      title="订阅"
+                      description="管理你的订阅内容"
+                      dropdownEnabled={false}
                     />
-                  </Show>
+                  }
+                />
+                <div class={mainShellPageScroll}>
+                  <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
+                    <p>订阅功能开发中...</p>
+                  </div>
                 </div>
               </section>
+            </Show>
 
-              {/* 订阅视图 */}
-              <Show when={currentPage() === "subscription"}>
-                <section
-                  class={cn(
-                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                    mainShellPageRoot,
-                  )}
+            {/* 书签视图 */}
+            <Show when={currentPage() === "bookmark"}>
+              <section
+                class={cn(
+                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                  mainShellPageRoot,
+                )}
+              >
+                <PageToolbar
+                  title="书签"
+                  description="查看你的书签"
+                  titleSlot={
+                    <PageToolbarTitleDropdown
+                      title="书签"
+                      description="查看你的书签"
+                      dropdownEnabled={false}
+                    />
+                  }
+                />
+                <div class={mainShellPageScroll}>
+                  <BookmarkPage />
+                </div>
+              </section>
+            </Show>
+
+            {/* 记录视图 */}
+            <Show when={currentPage() === "record"}>
+              <section
+                class={cn(
+                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                  mainShellPageRoot,
+                )}
+              >
+                <PageToolbar
+                  title="阅读记录"
+                  description="查看你的阅读历史"
+                  titleSlot={
+                    <PageToolbarTitleDropdown
+                      title="阅读记录"
+                      description="查看你的阅读历史"
+                      dropdownEnabled={false}
+                    />
+                  }
+                />
+                <div class={mainShellPageScroll}>
+                  <ReadRecordPage />
+                </div>
+              </section>
+            </Show>
+
+
+            {/* 设置视图 */}
+            <Show when={currentPage() === "settings"}>
+              <section
+                class={cn(
+                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
+                  mainShellPageRoot,
+                )}
+              >
+                <PageToolbar
+                  title="设置"
+                  description="自定义你的阅读体验"
+                  titleSlot={
+                    <PageToolbarTitleDropdown
+                      title="设置"
+                      description="自定义你的阅读体验"
+                      dropdownEnabled={false}
+                    />
+                  }
                 >
-                  <PageToolbar
-                    title="订阅"
-                    description="管理你的订阅内容"
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title="订阅"
-                        description="管理你的订阅内容"
-                        dropdownEnabled={false}
-                      />
-                    }
-                  />
-                  <div class={mainShellPageScroll}>
-                    <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
-                      <p>订阅功能开发中...</p>
+                  <SettingsPageToolbar />
+                </PageToolbar>
+
+                <div class={mainShellPageScroll}>
+                  <div class="w-full max-w-4xl mx-auto space-y-4">
+                    <BooksStorageSetting />
+
+                    <CoverCacheSetting />
+
+                    <ChapterCacheSetting />
+
+                    <TocPaginationSafetySetting />
+
+                    <BookInfoPresentationSetting />
+
+                    <SourceBlocklistSetting />
+
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <div class="mb-4">
+                        <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
+                        <p class="text-sm text-muted-foreground">
+                          管理正文替换规则，阅读器内可开关「应用替换」
+                        </p>
+                      </div>
+                      <ReplaceRulesPage />
                     </div>
-                  </div>
-                </section>
-              </Show>
 
-              {/* 书签视图 */}
-              <Show when={currentPage() === "bookmark"}>
-                <section
-                  class={cn(
-                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                    mainShellPageRoot,
-                  )}
-                >
-                  <PageToolbar
-                    title="书签"
-                    description="查看你的书签"
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title="书签"
-                        description="查看你的书签"
-                        dropdownEnabled={false}
-                      />
-                    }
-                  />
-                  <div class={mainShellPageScroll}>
-                    <BookmarkPage />
-                  </div>
-                </section>
-              </Show>
+                    {/* 数据库备份 */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <div class="mb-4">
+                        <h3 class="mb-2 font-semibold text-foreground">💾 数据备份</h3>
+                        <p class="text-sm text-muted-foreground">
+                          导出数据库备份文件，或从备份文件恢复数据
+                        </p>
+                      </div>
+                      <DatabaseBackup />
+                    </div>
+                    {/* Tauri 命令测试 */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <h3 class="mb-4 font-semibold text-foreground">🔧 Tauri 命令测试</h3>
+                      <div class="flex flex-col gap-4">
+                        <Button onClick={testTauriCommand} variant="default">
+                          测试 Tauri invoke
+                        </Button>
+                        <Show when={greetMsg()}>
+                          <div class="rounded-xl bg-success/10 p-4 text-sm text-success-foreground">
+                            <span class="font-medium">响应结果：</span> {greetMsg()}
+                          </div>
+                        </Show>
+                      </div>
+                    </div>
 
-              {/* 记录视图 */}
-              <Show when={currentPage() === "record"}>
-                <section
-                  class={cn(
-                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                    mainShellPageRoot,
-                  )}
-                >
-                  <PageToolbar
-                    title="阅读记录"
-                    description="查看你的阅读历史"
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title="阅读记录"
-                        description="查看你的阅读历史"
-                        dropdownEnabled={false}
-                      />
-                    }
-                  />
-                  <div class={mainShellPageScroll}>
-                    <ReadRecordPage />
-                  </div>
-                </section>
-              </Show>
+                    {/* 按钮变体展示 */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <h3 class="mb-4 font-semibold text-foreground">🎨 Button 组件变体</h3>
+                      <div class="flex flex-wrap gap-3">
+                        <Button variant="default">Default</Button>
+                        <Button variant="secondary">Secondary</Button>
+                        <Button variant="destructive">Destructive</Button>
+                        <Button variant="outline">Outline</Button>
+                        <Button variant="ghost">Ghost</Button>
+                        <Button variant="link">Link</Button>
+                      </div>
+                    </div>
 
+                    {/* 按钮尺寸展示 */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <h3 class="mb-4 font-semibold text-foreground">📐 Button 尺寸</h3>
+                      <div class="flex flex-wrap items-center gap-3">
+                        <Button size="sm">Small</Button>
+                        <Button size="default">Default</Button>
+                        <Button size="lg">Large</Button>
+                        <Button size="icon">🔔</Button>
+                      </div>
+                    </div>
 
-              {/* 设置视图 */}
-              <Show when={currentPage() === "settings"}>
-                <section
-                  class={cn(
-                    'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                    mainShellPageRoot,
-                  )}
-                >
-                  <PageToolbar
-                    title="设置"
-                    description="自定义你的阅读体验"
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title="设置"
-                        description="自定义你的阅读体验"
-                        dropdownEnabled={false}
-                      />
-                    }
-                  >
-                    <SettingsPageToolbar />
-                  </PageToolbar>
+                    {/* 主题切换（浅色 / 跟随系统 / 深色，左键循环、右键或长按选一项） */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <h3 class="font-semibold text-foreground">主题</h3>
+                          <p class="text-sm text-muted-foreground">浅色、跟随系统或深色；左键循环切换，右键或长按选择</p>
+                        </div>
+                        <ThemeSwitch withTooltip={false} />
+                      </div>
+                    </div>
 
-                  <div class={mainShellPageScroll}>
-                    <div class="w-full max-w-4xl mx-auto space-y-4">
-                      <BooksStorageSetting />
+                    <ShellLayoutSetting />
 
-                      <CoverCacheSetting />
-
-                      <ChapterCacheSetting />
-
-                      <TocPaginationSafetySetting />
-
-                      <SourceBlocklistSetting />
-
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <div class="mb-4">
-                          <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
+                    {/* 减少动效 */}
+                    <div class="rounded-2xl border border-border/50 bg-card p-6">
+                      <div class="flex items-center justify-between gap-4">
+                        <div class="space-y-0.5">
+                          <h3 class="font-semibold text-foreground">减少动效</h3>
                           <p class="text-sm text-muted-foreground">
-                            管理正文替换规则，阅读器内可开关「应用替换」
+                            关闭或缩短动画与过渡，适合对动效敏感或追求性能的用户
                           </p>
                         </div>
-                        <ReplaceRulesPage />
+                        <Switch
+                          checked={settingsStore.state.app.reduceMotion}
+                          onChange={(v) => settingsStore.setReduceMotion(!!v)}
+                        >
+                          <SwitchControl class="data-disabled:cursor-not-allowed">
+                            <SwitchThumb />
+                          </SwitchControl>
+                          <SwitchLabel class="sr-only">减少动效</SwitchLabel>
+                        </Switch>
                       </div>
+                    </div>
 
-                      {/* 数据库备份 */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <div class="mb-4">
-                          <h3 class="mb-2 font-semibold text-foreground">💾 数据备份</h3>
-                          <p class="text-sm text-muted-foreground">
-                            导出数据库备份文件，或从备份文件恢复数据
-                          </p>
-                        </div>
-                        <DatabaseBackup />
-                      </div>
-                      {/* Tauri 命令测试 */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <h3 class="mb-4 font-semibold text-foreground">🔧 Tauri 命令测试</h3>
-                        <div class="flex flex-col gap-4">
-                          <Button onClick={testTauriCommand} variant="default">
-                            测试 Tauri invoke
-                          </Button>
-                          <Show when={greetMsg()}>
-                            <div class="rounded-xl bg-success/10 p-4 text-sm text-success-foreground">
-                              <span class="font-medium">响应结果：</span> {greetMsg()}
-                            </div>
-                          </Show>
-                        </div>
-                      </div>
-
-                      {/* 按钮变体展示 */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <h3 class="mb-4 font-semibold text-foreground">🎨 Button 组件变体</h3>
-                        <div class="flex flex-wrap gap-3">
-                          <Button variant="default">Default</Button>
-                          <Button variant="secondary">Secondary</Button>
-                          <Button variant="destructive">Destructive</Button>
-                          <Button variant="outline">Outline</Button>
-                          <Button variant="ghost">Ghost</Button>
-                          <Button variant="link">Link</Button>
-                        </div>
-                      </div>
-
-                      {/* 按钮尺寸展示 */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <h3 class="mb-4 font-semibold text-foreground">📐 Button 尺寸</h3>
-                        <div class="flex flex-wrap items-center gap-3">
-                          <Button size="sm">Small</Button>
-                          <Button size="default">Default</Button>
-                          <Button size="lg">Large</Button>
-                          <Button size="icon">🔔</Button>
-                        </div>
-                      </div>
-
-                      {/* 主题切换（浅色 / 跟随系统 / 深色，左键循环、右键或长按选一项） */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <div class="flex items-center justify-between">
-                          <div>
-                            <h3 class="font-semibold text-foreground">主题</h3>
-                            <p class="text-sm text-muted-foreground">浅色、跟随系统或深色；左键循环切换，右键或长按选择</p>
-                          </div>
-                          <ThemeSwitch withTooltip={false} />
-                        </div>
-                      </div>
-
-                      <ShellLayoutSetting />
-
-                      {/* 减少动效 */}
-                      <div class="rounded-2xl border border-border/50 bg-card p-6">
-                        <div class="flex items-center justify-between gap-4">
-                          <div class="space-y-0.5">
-                            <h3 class="font-semibold text-foreground">减少动效</h3>
-                            <p class="text-sm text-muted-foreground">
-                              关闭或缩短动画与过渡，适合对动效敏感或追求性能的用户
-                            </p>
-                          </div>
-                          <Switch
-                            checked={settingsStore.state.app.reduceMotion}
-                            onChange={(v) => settingsStore.setReduceMotion(!!v)}
-                          >
-                            <SwitchControl class="data-disabled:cursor-not-allowed">
-                              <SwitchThumb />
-                            </SwitchControl>
-                            <SwitchLabel class="sr-only">减少动效</SwitchLabel>
-                          </Switch>
-                        </div>
-                      </div>
-
-                      {/* 技术栈信息 */}
-                      <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6">
-                        <h3 class="mb-3 font-semibold text-foreground">⚡ 技术栈</h3>
-                        <div class="flex flex-wrap gap-2">
-                          <For each={["Tauri 2.0", "SolidJS", "TailwindCSS v4", "solid-ui", "Kobalte"]}>
-                            {(tech) => (
-                              <span class="rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
-                                {tech}
-                              </span>
-                            )}
-                          </For>
-                        </div>
+                    {/* 技术栈信息 */}
+                    <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6">
+                      <h3 class="mb-3 font-semibold text-foreground">⚡ 技术栈</h3>
+                      <div class="flex flex-wrap gap-2">
+                        <For each={["Tauri 2.0", "SolidJS", "TailwindCSS v4", "solid-ui", "Kobalte"]}>
+                          {(tech) => (
+                            <span class="rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
+                              {tech}
+                            </span>
+                          )}
+                        </For>
                       </div>
                     </div>
                   </div>
-                </section>
-              </Show>
-            </main>
+                </div>
+              </section>
+            </Show>
+          </main>
         </div>
 
         {/* 独立页面（阅读器、发现、书籍信息、导入、远程书籍）- 全屏显示，在主容器外部 */}
@@ -2699,8 +2739,7 @@ function AppContent() {
                   chapterWordCount: 0,
                   respondTime: 0,
                 };
-                setBookInfoContext({ source, book: sb, fromPage: "text-viewer" });
-                setCurrentPage("book-info");
+                openBookInfo({ source, book: sb, fromPage: "text-viewer" });
               }}
             />
           </Show>
@@ -2732,29 +2771,29 @@ function AppContent() {
                   }}
                   onOpenBook={(book) => openReaderPage(book, "explore")}
                   onOpenBookInfo={(source, book) => {
-                    setBookInfoContext({ source, book, fromPage: "explore" });
-                    setCurrentPage("book-info");
+                    openBookInfo({ source, book, fromPage: "explore" });
                   }}
                 />
               );
             }}
           </Show>
 
-          {/* 书籍信息页 */}
-          <Show when={currentPage() === "book-info" && bookInfoContext()}>
+          {/* 书籍信息页（独立页面模式） */}
+          <Show
+            when={
+              currentPage() === "book-info" && !bookInfoUsesDrawer()
+                ? bookInfoContext()
+                : undefined
+            }
+          >
             {(ctx) => {
-              const { book, source, fromPage } = ctx();
+              const { book, source } = ctx();
               return (
                 <BookInfoPage
                   book={book}
                   source={source}
-                  onBack={() => {
-                    setBookInfoContext(null);
-                    setCurrentPage(fromPage ?? "explore");
-                  }}
-                  onOpenBook={(book, catalog) =>
-                    openReaderPage(book, "book-info", catalog)
-                  }
+                  onBack={closeBookInfo}
+                  onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
                 />
               );
             }}
@@ -2771,8 +2810,7 @@ function AppContent() {
               }}
               onOpenBook={(book) => openReaderPage(book, "bookshelf")}
               onOpenBookInfo={(source, book) => {
-                setBookInfoContext({ source, book, fromPage: "book-search" });
-                setCurrentPage("book-info");
+                openBookInfo({ source, book, fromPage: "book-search" });
               }}
               onAddedToShelf={() => window.dispatchEvent(new CustomEvent("bookshelf-refresh"))}
             />
@@ -2786,6 +2824,26 @@ function AppContent() {
             />
           </Show>
 
+        </Show>
+
+        {/* 书籍信息抽屉（抽屉模式，覆盖在当前页面之上） */}
+        <Show when={bookInfoUsesDrawer() ? bookInfoContext() : undefined}>
+          {(ctx) => {
+            const { book, source } = ctx();
+            return (
+              <BookInfoDrawer
+                open={bookInfoDrawerOpen()}
+                onOpenChange={(open) => {
+                  if (!open) closeBookInfo();
+                  else setBookInfoDrawerOpen(true);
+                }}
+                book={book}
+                source={source}
+                onBack={closeBookInfo}
+                onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
+              />
+            );
+          }}
         </Show>
 
         {/* 书籍目录选择弹窗 */}
