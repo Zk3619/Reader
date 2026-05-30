@@ -135,46 +135,54 @@ pub async fn webjs_java_rpc(
             eval_js_snippet(&code).map_err(|e| e.to_string())
         }
         "webViewAwait" | "webViewGetSourceAwait" => {
-            use crate::backstage_webview::{run_backstage_webjs_impl, BackstageWebJsParams};
-            let bw = BackstageWebJsParams {
-                request_id: uuid::Uuid::new_v4().to_string(),
-                url: {
-                    let u = arg(&params, 1);
-                    if u.starts_with("http") {
-                        Some(u)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                use crate::backstage_webview::{run_backstage_webjs_impl, BackstageWebJsParams};
+                let bw = BackstageWebJsParams {
+                    request_id: uuid::Uuid::new_v4().to_string(),
+                    url: {
+                        let u = arg(&params, 1);
+                        if u.starts_with("http") {
+                            Some(u)
+                        } else {
+                            None
+                        }
+                    },
+                    html: {
+                        let h = arg(&params, 0);
+                        if h.is_empty() {
+                            None
+                        } else {
+                            Some(h)
+                        }
+                    },
+                    base_url: params.base_url.clone(),
+                    script: arg(&params, 2),
+                    bridge_script: None,
+                    cookies: params.cookies.clone(),
+                    headers_json: params.headers_json.clone(),
+                    delay_ms: Some(if fun == "webViewGetSourceAwait" {
+                        arg(&params, 5).parse().unwrap_or(0)
+                    } else {
+                        arg(&params, 4).parse().unwrap_or(0)
+                    }),
+                    timeout_ms: Some(60_000),
+                    prior_result: None,
+                    source_regex: if fun == "webViewGetSourceAwait" {
+                        let r = arg(&params, 3);
+                        if r.is_empty() { None } else { Some(r) }
                     } else {
                         None
-                    }
-                },
-                html: {
-                    let h = arg(&params, 0);
-                    if h.is_empty() {
-                        None
-                    } else {
-                        Some(h)
-                    }
-                },
-                base_url: params.base_url.clone(),
-                script: arg(&params, 2),
-                bridge_script: None,
-                cookies: params.cookies.clone(),
-                headers_json: params.headers_json.clone(),
-                delay_ms: Some(if fun == "webViewGetSourceAwait" {
-                    arg(&params, 5).parse().unwrap_or(0)
-                } else {
-                    arg(&params, 4).parse().unwrap_or(0)
-                }),
-                timeout_ms: Some(60_000),
-                prior_result: None,
-                source_regex: if fun == "webViewGetSourceAwait" {
-                    let r = arg(&params, 3);
-                    if r.is_empty() { None } else { Some(r) }
-                } else {
-                    None
-                },
-                override_url_regex: None,
-            };
-            run_backstage_webjs_impl(app, bw).await
+                    },
+                    override_url_regex: None,
+                };
+                run_backstage_webjs_impl(app, bw).await
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                let _ = app;
+                Err("移动端请使用 iframe WebJs".to_string())
+            }
         }
         "decryptStrAwait" => Ok(arg(&params, 3)),
         "encryptBase64Await" | "encryptHexAwait" | "createSignHexAwait" => Ok(arg(&params, 3)),

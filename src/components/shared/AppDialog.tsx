@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { dialogViewportLimits } from '@/lib/ui/viewport-classes';
+import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
 import {
   clearFocusBeforeModal,
   prepareForAppDialogOpen,
@@ -50,6 +50,7 @@ const AppDialogOverlay: Component<{ class?: string }> = (props) => (
   <DialogPrimitive.Overlay
     class={cn(
       'fixed inset-0 z-50 bg-background/80 data-expanded:animate-in data-closed:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0',
+      appBlockDrag,
       props.class
     )}
   />
@@ -142,6 +143,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
         }}
         class={cn(
           APP_DIALOG_CONTENT_BASE_CLASS,
+          appBlockDrag,
           portalZ(),
           layout() === 'app' && `${dialogViewportLimits} flex flex-col overflow-hidden p-0`,
           (props as AppDialogContentProps<T>).class

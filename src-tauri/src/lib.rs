@@ -309,6 +309,17 @@ async fn download_binary(
         .map_err(|e| format!("读取响应数据失败: {}", e))?
         .to_vec();
 
+    if request_url.path().ends_with("/content") {
+        if let Ok(text) = std::str::from_utf8(&data) {
+            let preview_len = text.len().min(600);
+            eprintln!(
+                "[download_binary] /content 响应预览 ({} 字节): {}",
+                text.len(),
+                &text[..preview_len]
+            );
+        }
+    }
+
     Ok(DownloadResponse {
         data,
         status,

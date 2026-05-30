@@ -137,6 +137,11 @@ function groupItemsIntoRows(items: LoginUiItem[]): LoginUiItem[][] {
   return rows;
 }
 
+/** 退出登录后清空表单中的密钥字段 */
+function isLogoutFormAction(action: string): boolean {
+  return /^\s*logout\s*\(\s*\)\s*$/i.test(action.trim());
+}
+
 export interface SourceLoginDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -304,8 +309,16 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
         }
       } else {
         await runLoginScript(source, { formValues: formValues(), action, onToast });
-        const stored = getStoredLoginInfo(source.sourceUrl ?? '');
-        if (Object.keys(stored).length > 0) setFormValues(stored);
+        if (isLogoutFormAction(action)) {
+          setFormValues((prev) => {
+            const next = { ...prev };
+            if ('密钥' in next) next['密钥'] = '';
+            return next;
+          });
+        } else {
+          const stored = getStoredLoginInfo(source.sourceUrl ?? '');
+          if (Object.keys(stored).length > 0) setFormValues(stored);
+        }
       }
     } catch (e) {
       console.error('登录脚本执行失败:', e);

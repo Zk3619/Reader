@@ -36,6 +36,7 @@ import {
   appDrawerBlocksOutsideDismiss,
   type AppDrawerOverlayLock,
 } from '@/components/shared/app-drawer-overlay-lock';
+import { appBlockDrag } from '@/lib/ui/viewport-classes';
 
 export type { AppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
 export {
@@ -95,6 +96,9 @@ export const APP_DRAWER_CLOSE_BUTTON_CLASS =
 
 const AppDrawerNativeDragHandleContext = createContext<() => boolean>(() => false);
 
+/** 顶/底抽屉内容区默认最大高度（侧栏抽屉占满高度，不限制） */
+const APP_DRAWER_MAX_HEIGHT_CLASS = 'max-h-[80dvh]';
+
 type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> & {
   class?: string;
   children?: JSX.Element;
@@ -107,6 +111,11 @@ type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> &
 export type AppDrawerBodyProps = ComponentProps<'div'> & {
   /** 覆盖 Content 上的 showNativeDragHandle；未传则继承 Content */
   showNativeDragHandle?: boolean;
+  /**
+   * 为 true 时 body 不参与抽屉拖拽关闭（等同 data-corvu-no-drag）。
+   * 侧栏且 showNativeDragHandle 时内容区默认 true（拖拽由边缘把手承担）。
+   */
+  disableDragClose?: boolean;
 };
 
 function isSideDrawer(side: string): boolean {
@@ -164,10 +173,12 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
   return (
     <AppDrawerNativeDragHandleContext.Provider value={showNativeDragHandle}>
       <DrawerPortal>
-        <DrawerOverlay class={local.overlayClass} />
+        <DrawerOverlay class={cn(appBlockDrag, local.overlayClass)} />
         <DrawerPrimitive.Content
           class={cn(
             'fixed z-50 flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
+            appBlockDrag,
+            (side() === 'bottom' || side() === 'top') && APP_DRAWER_MAX_HEIGHT_CLASS,
             side() === 'left' &&
               'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
             side() === 'right' &&
@@ -225,15 +236,30 @@ export const AppDrawerHeader: Component<AppDrawerHeaderProps> = (props) => {
   );
 };
 
-/** 可滚动主体；侧栏且 showNativeDragHandle 时在边缘预留拖动手柄列 */
+/**
+ * 可滚动主体；侧栏且 showNativeDragHandle 时在边缘预留拖动手柄列。
+ * 默认可参与抽屉拖拽关闭；整页滚动等场景传 disableDragClose，或在内部滚动区单独标记。
+ */
 export const AppDrawerBody: Component<AppDrawerBodyProps> = (props) => {
   const ctx = DrawerPrimitive.useContext();
   const inheritedShowDragHandle = useContext(AppDrawerNativeDragHandleContext);
   const side = () => ctx.side();
-  const [local, rest] = splitProps(props, ['class', 'children', 'showNativeDragHandle']);
+  const [local, rest] = splitProps(props, [
+    'class',
+    'children',
+    'showNativeDragHandle',
+    'disableDragClose',
+  ]);
   const showNativeDragHandle = createMemo(
     () => local.showNativeDragHandle ?? inheritedShowDragHandle(),
   );
+  const disableDragClose = createMemo(
+    () =>
+      local.disableDragClose ??
+      (isSideDrawer(side()) && showNativeDragHandle()),
+  );
+  const noDragProps = () =>
+    disableDragClose() ? ({ 'data-corvu-no-drag': '' } as const) : {};
 
   const bodyClass = cn('flex min-h-0 flex-1 flex-col overflow-hidden', local.class);
 
@@ -241,13 +267,13 @@ export const AppDrawerBody: Component<AppDrawerBodyProps> = (props) => {
     <Show
       when={isSideDrawer(side()) && showNativeDragHandle()}
       fallback={
-        <div class={bodyClass} data-corvu-no-drag {...rest}>
+        <div class={bodyClass} {...noDragProps()} {...rest}>
           {local.children}
         </div>
       }
     >
       <div class="flex min-h-0 flex-1 flex-row">
-        <div class={cn(bodyClass, 'min-w-0')} data-corvu-no-drag {...rest}>
+        <div class={cn(bodyClass, 'min-w-0')} {...noDragProps()} {...rest}>
           {local.children}
         </div>
         <AppDrawerSideDragStrip side={side() as 'left' | 'right'} />

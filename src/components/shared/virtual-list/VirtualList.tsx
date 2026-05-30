@@ -3,9 +3,9 @@
  * 行使用 translateY 绝对定位（TanStack 默认），容器需有明确宽度。
  */
 
-import { createVirtualizer } from '@tanstack/solid-virtual';
+import { createVirtualizer, type Virtualizer } from '@tanstack/solid-virtual';
 import { useDragDropContext } from '@thisbeyond/solid-dnd';
-import { For, createEffect, createMemo, onCleanup, onMount, type Accessor, type JSX } from 'solid-js';
+import { For, Show, createEffect, createMemo, onCleanup, onMount, type Accessor, type JSX } from 'solid-js';
 import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import { VirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
@@ -13,6 +13,7 @@ import { VirtualListSortableShell } from '@/components/shared/virtual-list/Virtu
 import type {
   VirtualListRowMeta,
   VirtualListSortableConfig,
+  VirtualListDragStyle,
 } from '@/components/shared/virtual-list/types';
 import type { Id } from '@thisbeyond/solid-dnd';
 import {
@@ -28,6 +29,11 @@ import {
   reorderItemsByIds,
   useVirtualListSortableDisplayIds,
 } from '@/components/shared/virtual-list/virtual-list-sortable-display-order';
+import {
+  stabilizeListByRef,
+  stabilizePrimitiveList,
+  stabilizeReorderedListById,
+} from '@/components/shared/virtual-list/stabilize-list-ref';
 
 const DEFAULT_OVERSCAN = 8;
 
@@ -51,7 +57,13 @@ export interface VirtualListProps<T> {
   sortable?: VirtualListSortableConfig<T>;
   /** 拖拽浮层；未提供则不显示 DragOverlay 内容 */
   renderDragOverlay?: (activeId: Id | null) => JSX.Element;
-  children: (item: T, index: number, meta: VirtualListRowMeta) => JSX.Element;
+  /** 实体 key 模式下行渲染（按 id 挂载，避免排序后 item 引用变化 remount） */
+  renderByKey?: (
+    itemKey: string,
+    index: Accessor<number>,
+    size: Accessor<number>,
+  ) => JSX.Element;
+  children?: (item: T, index: number, meta: VirtualListRowMeta) => JSX.Element;
 }
 
 function resolveEstimateSize(
@@ -60,14 +72,167 @@ function resolveEstimateSize(
   return typeof estimate === 'number' ? () => estimate : estimate;
 }
 
-/** 滚动容器；在 Sortable 上下文中拖拽时刷新布局以驱动位移动画 */
+/** 行内订阅 item 变化，避免虚拟窗口 reconcile 时快照过期 */
+function VirtualListRowContent<T>(props: {
+  item: Accessor<T>;
+  index: number;
+  size: Accessor<number>;
+  render: VirtualListProps<T>['children'];
+}) {
+  return <>{props.render!(props.item(), props.index, { size: props.size() })}</>;
+}
+
+/** 按 entityKey 稳定挂载行内容（组件实例随 For each 保留，不依赖 item 引用） */
+function VirtualListEntityRowSlot(props: {
+  entityKey: string;
+  flatIndex: Accessor<number>;
+  rowSize: Accessor<number>;
+  renderByKey: (
+    itemKey: string,
+    index: Accessor<number>,
+    size: Accessor<number>,
+  ) => JSX.Element;
+}) {
+  return (
+    <>{props.renderByKey(props.entityKey, props.flatIndex, props.rowSize)}</>
+  );
+}
+
+/** 按实体 id 挂载可见行（与 VirtualGridRowsList 内层 For 一致），排序时 DOM 随实体迁移而非槽位 remount */
+function VirtualListEntityVisibleRow<T>(props: {
+  entityKey: string;
+  virtualizer: Virtualizer<HTMLDivElement, Element>;
+  renderedItems: Accessor<readonly T[]>;
+  resolveRowId: (item: T, index: number) => Id;
+  estimateSize: (index: number) => number;
+  rowSortable: Accessor<boolean>;
+  dragStyle?: VirtualListDragStyle;
+  render?: VirtualListProps<T>['children'];
+  renderByKey?: VirtualListProps<T>['renderByKey'];
+}) {
+  const flatIndex = createMemo(() => {
+    const items = props.renderedItems();
+    for (let i = 0; i < items.length; i++) {
+      if (String(props.resolveRowId(items[i]!, i)) === props.entityKey) return i;
+    }
+    return -1;
+  });
+
+  const virtualRow = createMemo(() => {
+    const index = flatIndex();
+    if (index < 0) return undefined;
+    return props.virtualizer.getVirtualItems().find((row) => row.index === index);
+  });
+
+  const item = () => {
+    const index = flatIndex();
+    if (index < 0) return undefined;
+    return props.renderedItems()[index];
+  };
+
+  const rowSize = () => virtualRow()?.size ?? props.estimateSize(Math.max(0, flatIndex()));
+
+  const rowBody = () =>
+    props.renderByKey ? (
+      <VirtualListEntityRowSlot
+        entityKey={props.entityKey}
+        flatIndex={flatIndex}
+        rowSize={rowSize}
+        renderByKey={props.renderByKey}
+      />
+    ) : (
+      <Show when={item()}>
+        {(currentItem) => (
+          <VirtualListRowContent
+            item={currentItem}
+            index={flatIndex()}
+            size={rowSize}
+            render={props.render!}
+          />
+        )}
+      </Show>
+    );
+
+  return (
+    <div
+      class="absolute left-0 w-full min-w-0"
+      style={{
+        top: `${virtualRow()?.start ?? 0}px`,
+        height: `${rowSize()}px`,
+      }}
+    >
+      <Show when={props.rowSortable()} fallback={rowBody()}>
+        <VirtualListSortableRow
+          id={props.entityKey}
+          enabled
+          dragStyle={props.dragStyle}
+          class="h-full w-full min-w-0"
+        >
+          {rowBody()}
+        </VirtualListSortableRow>
+      </Show>
+    </div>
+  );
+}
+
+/** 按槽位 index 挂载可见行（网格行 / 无实体 key 场景） */
+function VirtualListIndexVisibleRow<T>(props: {
+  index: number;
+  virtualizer: Virtualizer<HTMLDivElement, Element>;
+  renderedItems: Accessor<readonly T[]>;
+  resolveRowId: (item: T, index: number) => Id;
+  estimateSize: (index: number) => number;
+  rowSortable: Accessor<boolean>;
+  useEntitySortableKeys: boolean;
+  dragStyle?: VirtualListDragStyle;
+  render: VirtualListProps<T>['children'];
+}) {
+  const virtualRow = createMemo(() =>
+    props.virtualizer.getVirtualItems().find((row) => row.index === props.index),
+  );
+
+  const item = () => props.renderedItems()[props.index]!;
+  const sortableId = () => String(props.resolveRowId(item(), props.index));
+  const rowSize = () => virtualRow()?.size ?? props.estimateSize(props.index);
+
+  const rowContent = (
+    <VirtualListRowContent
+      item={item}
+      index={props.index}
+      size={rowSize}
+      render={props.render}
+    />
+  );
+
+  return (
+    <div
+      class="absolute left-0 w-full min-w-0"
+      style={{
+        top: `${virtualRow()?.start ?? 0}px`,
+        height: `${rowSize()}px`,
+      }}
+    >
+      <Show when={props.rowSortable()} fallback={rowContent}>
+        <VirtualListSortableRow
+          id={props.useEntitySortableKeys ? sortableId() : props.index}
+          enabled
+          dragStyle={props.dragStyle}
+          class="h-full w-full min-w-0"
+        >
+          {rowContent}
+        </VirtualListSortableRow>
+      </Show>
+    </div>
+  );
+}
+
+/** 滚动容器；拖拽时刷新布局以驱动位移动画（scroll 由 virtualizer 自行订阅，勿每帧 measure） */
 function VirtualListScrollHost(props: {
   class?: string;
   useExternalScroll: boolean;
   setScrollEl: (el: HTMLDivElement) => void;
   onScrollContainer?: (el: HTMLDivElement) => void;
   onScroll?: (el: HTMLDivElement) => void;
-  onMeasure: () => void;
   children: JSX.Element;
 }) {
   const ctx = useDragDropContext();
@@ -83,7 +248,6 @@ function VirtualListScrollHost(props: {
       class={props.class}
       onScroll={(e) => {
         if (props.useExternalScroll) return;
-        props.onMeasure();
         props.onScroll?.(e.currentTarget);
         if (ctx?.[0].active.draggable) {
           ctx[1].recomputeLayouts();
@@ -95,7 +259,11 @@ function VirtualListScrollHost(props: {
   );
 }
 
-export function VirtualList<T>(props: VirtualListProps<T>) {
+/**
+ * 列表主体：须在 SortableShell 的 displayIds Provider 内渲染，
+ * 与 VirtualGridRowsList 的 GridListContent 一致。
+ */
+function VirtualListCore<T>(props: VirtualListProps<T>) {
   const overscan = () => props.overscan ?? DEFAULT_OVERSCAN;
   const estimate = createMemo(() => resolveEstimateSize(props.estimateSize));
   const pinnedVirtualIndex = useVirtualListDragPinIndex();
@@ -117,12 +285,26 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
     return index;
   };
 
+  let renderedItemsCache: readonly T[] = [];
   const renderedItems = createMemo(() => {
     const raw = props.items();
     const ids = displayIds();
-    if (ids.length === 0 || ids.length !== raw.length) return raw;
-    return reorderItemsByIds(raw, ids, (item, index) => rowId(item, index));
+    let next: readonly T[];
+    if (ids.length === 0 || ids.length !== raw.length) {
+      next = raw;
+    } else {
+      next = reorderItemsByIds(raw, ids, (item, index) => rowId(item, index));
+    }
+    const itemId = (entry: T) => String(rowId(entry, 0));
+    next = stabilizeReorderedListById(renderedItemsCache, next, itemId);
+    const stabilized = stabilizeListByRef(renderedItemsCache, next);
+    renderedItemsCache = stabilized;
+    return stabilized;
   });
+
+  const sortableCfg = () => props.sortable;
+  const useEntitySortableKeys = () =>
+    !!sortableCfg() && !!props.getItemKey;
 
   const virtualizer = createVirtualizer({
     get count() {
@@ -137,9 +319,32 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
         pinnedVirtualIndex(),
         renderedItems().length,
       ),
-    getItemKey: props.getItemKey
-      ? (i) => String(props.getItemKey!(renderedItems()[i]!, i))
-      : undefined,
+    getItemKey: (i) => {
+      if (useEntitySortableKeys()) return String(i);
+      if (props.getItemKey) {
+        return String(props.getItemKey!(renderedItems()[i]!, i));
+      }
+      return String(i);
+    },
+  });
+
+  let visibleIndicesCache: readonly number[] = [];
+  const visibleIndices = createMemo(() => {
+    const next = virtualizer.getVirtualItems().map((row) => row.index);
+    const stabilized = stabilizePrimitiveList(visibleIndicesCache, next);
+    visibleIndicesCache = stabilized;
+    return stabilized;
+  });
+
+  let visibleEntityKeysCache: readonly string[] = [];
+  const visibleEntityKeys = createMemo(() => {
+    const items = renderedItems();
+    const next = visibleIndices().map((index) =>
+      String(rowId(items[index]!, index)),
+    );
+    const stabilized = stabilizePrimitiveList(visibleEntityKeysCache, next);
+    visibleEntityKeysCache = stabilized;
+    return stabilized;
   });
 
   const isRowSortable = (item: T, index: number): boolean => {
@@ -148,64 +353,11 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
     return cfg.isSortable ? cfg.isSortable(item, index) : true;
   };
 
-  const listBody = () => (
-    <VirtualListScrollHost
-      useExternalScroll={useExternalScroll()}
-      class={cn(
-        'min-w-0 w-full',
-        useExternalScroll() ? 'flex-1' : cn('flex-1 overflow-y-auto py-1', scrollGutterStableBoth),
-        props.listInnerClass,
-        props.class,
-      )}
-      setScrollEl={(el) => {
-        scrollEl = el;
-      }}
-      onScrollContainer={props.onScrollContainer}
-      onScroll={props.onScroll}
-      onMeasure={() => virtualizer.measure()}
-    >
-      <div
-        class="relative w-full min-w-0"
-        style={{ height: `${virtualizer.getTotalSize()}px` }}
-      >
-        <For each={virtualizer.getVirtualItems()}>
-          {(virtualRow) => {
-            const index = virtualRow.index;
-            const item = () => renderedItems()[index]!;
-            const size = virtualRow.size;
-            const sortable = sortableEnabled() && isRowSortable(item(), index);
-            const id = rowId(item(), index);
-
-            return (
-              <div
-                class="absolute left-0 w-full min-w-0"
-                style={{
-                  top: `${virtualRow.start}px`,
-                  height: `${size}px`,
-                }}
-              >
-                <VirtualListSortableRow
-                  id={id}
-                  enabled={sortable}
-                  dragStyle={props.sortable?.dragStyle}
-                  class="h-full w-full min-w-0"
-                >
-                  {props.children(item(), index, { size })}
-                </VirtualListSortableRow>
-              </div>
-            );
-          }}
-        </For>
-      </div>
-    </VirtualListScrollHost>
-  );
-
   createEffect(() => {
     const external = props.externalScrollElement?.();
     if (!external) return;
     props.onScrollContainer?.(external);
     const handleScroll = () => {
-      virtualizer.measure();
       props.onScroll?.(external);
     };
     external.addEventListener('scroll', handleScroll, { passive: true });
@@ -222,44 +374,139 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
     virtualizer.measure();
   });
 
-  const sortableCfg = props.sortable;
-  if (!sortableCfg) {
-    return listBody();
-  }
+  return (
+    <VirtualListScrollHost
+      useExternalScroll={useExternalScroll()}
+      class={cn(
+        'min-w-0 w-full',
+        useExternalScroll() ? 'flex-1' : cn('flex-1 overflow-y-auto py-1', scrollGutterStableBoth),
+        props.listInnerClass,
+        props.class,
+      )}
+      setScrollEl={(el) => {
+        scrollEl = el;
+      }}
+      onScrollContainer={props.onScrollContainer}
+      onScroll={props.onScroll}
+    >
+      <div
+        class="relative w-full min-w-0"
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+      >
+        <Show
+          when={useEntitySortableKeys()}
+          fallback={
+            <For each={visibleIndices()}>
+              {(index) => (
+                <VirtualListIndexVisibleRow
+                  index={index}
+                  virtualizer={virtualizer}
+                  renderedItems={renderedItems}
+                  resolveRowId={rowId}
+                  estimateSize={(i) => estimate()(i)}
+                  rowSortable={() => {
+                    const items = renderedItems();
+                    const item = items[index];
+                    if (!item) return false;
+                    return sortableEnabled() && isRowSortable(item, index);
+                  }}
+                  useEntitySortableKeys={false}
+                  dragStyle={sortableCfg()?.dragStyle}
+                  render={props.children}
+                />
+              )}
+            </For>
+          }
+        >
+          <For each={visibleEntityKeys()}>
+            {(entityKey) => (
+              <VirtualListEntityVisibleRow
+                entityKey={entityKey}
+                virtualizer={virtualizer}
+                renderedItems={renderedItems}
+                resolveRowId={rowId}
+                estimateSize={(i) => estimate()(i)}
+                rowSortable={() => {
+                  const items = renderedItems();
+                  for (let i = 0; i < items.length; i++) {
+                    if (String(rowId(items[i]!, i)) !== entityKey) continue;
+                    return sortableEnabled() && isRowSortable(items[i]!, i);
+                  }
+                  return false;
+                }}
+                dragStyle={sortableCfg()?.dragStyle}
+                render={props.children}
+                renderByKey={props.renderByKey}
+              />
+            )}
+          </For>
+        </Show>
+      </div>
+    </VirtualListScrollHost>
+  );
+}
+
+function VirtualListWithSortable<T>(props: VirtualListProps<T>) {
+  const sortableConfig = props.sortable!;
+  let scrollEl: HTMLDivElement | undefined;
+  let remeasureVirtualList: (() => void) | undefined;
+
+  const resolveScrollElement = () => {
+    const external = props.externalScrollElement?.();
+    if (external) return external;
+    return scrollEl ?? null;
+  };
+
+  const estimate = createMemo(() => resolveEstimateSize(props.estimateSize));
 
   const resolveTargetIndex: VirtualSortableTargetResolver = ({
-    scrollEl,
+    scrollEl: scrollHost,
     pointerX,
     pointerY,
   }) => {
-    const { contentY } = pointerScrollContentCoords(scrollEl, pointerX, pointerY);
+    const { contentY } = pointerScrollContentCoords(scrollHost, pointerX, pointerY);
     return resolveSortableIndexFromContentOffset(
       contentY,
-      renderedItems().length,
+      props.items().length,
       (i) => estimate()(i),
     );
   };
 
   return (
     <VirtualListSortableShell
-      enabled={sortableEnabled}
-      ids={sortableCfg.ids}
-      onReorder={sortableCfg.onReorder}
-      persistOnly={() => sortableCfg.persistOnly ?? false}
-      dragStyle={sortableCfg.dragStyle}
+      enabled={() => sortableConfig.enabled()}
+      ids={sortableConfig.ids}
+      onReorder={sortableConfig.onReorder}
+      persistOnly={() => sortableConfig.persistOnly ?? false}
+      dragStyle={sortableConfig.dragStyle}
       scrollContainer={() => resolveScrollElement() ?? undefined}
       resolveTargetIndex={() => resolveTargetIndex}
       resolvePinnedVirtualIndex={() => (activeId) => {
-        const items = renderedItems();
-        for (let i = 0; i < items.length; i++) {
-          if (String(rowId(items[i]!, i)) === String(activeId)) return i;
-        }
-        return undefined;
+        const ids = sortableConfig.ids();
+        const index = ids.findIndex((id) => String(id) === String(activeId));
+        return index >= 0 ? index : undefined;
       }}
-      onAfterAutoScroll={() => virtualizer.measure()}
+      onAfterAutoScroll={() => remeasureVirtualList?.()}
       renderOverlay={props.renderDragOverlay}
     >
-      {listBody()}
+      <VirtualListCore
+        {...props}
+        onScrollContainer={(el) => {
+          scrollEl = el;
+          props.onScrollContainer?.(el);
+        }}
+        onVirtualizerReady={(api) => {
+          remeasureVirtualList = () => api.measure();
+          props.onVirtualizerReady?.(api);
+        }}
+      />
     </VirtualListSortableShell>
   );
+}
+
+export function VirtualList<T>(props: VirtualListProps<T>) {
+  if (props.sortable) {
+    return <VirtualListWithSortable {...props} />;
+  }
+  return <VirtualListCore {...props} />;
 }

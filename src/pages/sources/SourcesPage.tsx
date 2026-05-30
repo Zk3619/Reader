@@ -206,7 +206,7 @@ export function SourcesPage(props: SourcesPageProps) {
 
   const listGroupMode = (): SourceManageGroupMode =>
     props.sourcesGroupByGroupName &&
-    shouldGroupSourcesByGroupName(props.appliedFilter?.groupNames ?? [])
+      shouldGroupSourcesByGroupName(props.appliedFilter?.groupNames ?? [])
       ? 'by-group'
       : 'flat';
 

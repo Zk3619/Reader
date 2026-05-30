@@ -21,7 +21,7 @@ import {
 import { VirtualListDragPinContext } from '@/components/shared/virtual-list/virtual-list-drag-pin';
 import {
   VirtualListSortableDisplayIdsContext,
-  mergeSortableDisplayIds,
+  syncSortableDisplayIds,
 } from '@/components/shared/virtual-list/virtual-list-sortable-display-order';
 
 function SortableReorderBridge(props: {
@@ -159,10 +159,7 @@ function SortableDisplayIdsSync(props: {
     if (dnd?.[0].active.draggableId) return;
 
     props.setDisplayIds((prev) => {
-      if (prev.length === 0) return [...external];
-      const next = props.persistOnly()
-        ? mergeSortableDisplayIds(prev, external)
-        : [...external];
+      const next = syncSortableDisplayIds(prev, external, props.persistOnly());
       if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
         return prev;
       }
