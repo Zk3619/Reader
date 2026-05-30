@@ -1,6 +1,6 @@
 import { Show, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { ChevronLeftIcon, ListIcon, RefreshIcon } from '@/components/shared/icons';
+import { ChevronLeftIcon, ImageIcon, ListIcon, RefreshIcon } from '@/components/shared/icons';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,8 @@ export interface MediaReaderShellProps {
   onClose: () => void;
   onOpenCatalog?: () => void;
   onRefresh?: () => void;
+  /** 仅重试本章加载失败的图片，不重新拉取章节正文 */
+  onRetryFailedImages?: () => void;
   loading?: boolean;
   children: JSX.Element;
   footer?: JSX.Element;
@@ -34,6 +36,17 @@ export function MediaReaderShell(props: MediaReaderShellProps) {
             <p class="truncate text-xs text-muted-foreground">{props.subtitle}</p>
           </Show>
         </div>
+        <Show when={props.onRetryFailedImages}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={props.onRetryFailedImages}
+            disabled={props.loading}
+            aria-label="重试失败图片"
+          >
+            <ImageIcon class="h-5 w-5" />
+          </Button>
+        </Show>
         <Show when={props.onRefresh}>
           <Button
             variant="ghost"

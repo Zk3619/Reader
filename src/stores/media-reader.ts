@@ -11,6 +11,7 @@ import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-
 import {
   fetchAndCacheChapterContent,
   readCachedChapterRaw,
+  deleteCachedChapter,
 } from '@/lib/chapter-cache/storage';
 import { fetchChapterListDeduped, toNewBookChapter } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
@@ -21,6 +22,10 @@ import {
   dispatchMediaTextFallback,
   ReaderMediaMessages,
 } from '@/lib/reader/reader-media-messages';
+import {
+  warnChapterCacheHit,
+  logChapterForceRefresh,
+} from '@/lib/book-source/content-fetch-trace';
 import type { Book, BookChapter } from '@/types';
 
 export interface MediaReaderState {
@@ -159,9 +164,17 @@ async function loadChapterRaw(
   index: number,
   forceRefresh: boolean,
 ): Promise<string> {
+  if (forceRefresh) {
+    logChapterForceRefresh(index, chapter.title);
+    await deleteCachedChapter(book.bookUrl, index);
+  }
+
   if (!forceRefresh) {
     const cached = await readCachedChapterRaw(book.bookUrl, index);
-    if (cached?.trim()) return cached;
+    if (cached?.trim()) {
+      warnChapterCacheHit(index, cached, chapter.title);
+      return cached;
+    }
   }
 
   if (isLocalBook(book)) {

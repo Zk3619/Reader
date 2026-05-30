@@ -8,7 +8,7 @@ import { readerStore } from '@/stores/reader';
 import {
   splitReaderContentBlocks,
   applyReaderImageStyle,
-  parseImgTagsFromHtml,
+  parseImgRefsFromHtml,
 } from '@/lib/reader/reader-content-blocks';
 import { ReaderInlineImg } from '@/components/reader/ReaderInlineImg';
 import { getSource } from '@/lib/database/sources';
@@ -257,13 +257,14 @@ function ReaderBlockItem(props: {
 }) {
   if (props.block.type === 'html') {
     const styledHtml = applyReaderImageStyle(props.block.html, props.imageStyle);
-    const imgUrls = parseImgTagsFromHtml(styledHtml);
+    const imgRefs = parseImgRefsFromHtml(styledHtml);
     return (
       <figure class="my-4 flex flex-col items-center gap-2 break-inside-avoid">
-        <For each={imgUrls}>
-          {(src) => (
+        <For each={imgRefs}>
+          {(ref) => (
             <ReaderInlineImg
-              src={src}
+              src={ref.url}
+              legadoImageHeaders={ref.legadoHeaders}
               referer={props.referer}
               source={props.source}
               imageStyle={props.imageStyle}

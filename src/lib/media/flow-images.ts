@@ -1,48 +1,57 @@
-/**
- * 从正文 HTML 提取图片 URL
- * 对齐 Legado BookHelp.flowImages + AppPattern.imgPattern
- */
-
-import { resolveUrl } from '@/lib/book-source/utils';
-
-/** Legado AppPattern.imgPattern */
-const IMG_PATTERN = /<img[^>]*src="([^"]*(?:"[^>]+\})?)"[^>]*>/gi;
-
-function dedupeOrdered(urls: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const u of urls) {
-    const t = u.trim();
-    if (!t || seen.has(t)) continue;
-    seen.add(t);
-    out.push(t);
-  }
-  return out;
-}
-
-/**
- * 从章节正文中 flow 出图片绝对 URL 列表（Legado flowImages）
- * @param content 章节正文 HTML
- * @param chapterUrl 用于相对路径转绝对路径（Legado NetworkUtils.getAbsoluteURL(chapter.url, src)）
- */
-export function flowImages(content: string, chapterUrl = ''): string[] {
-  if (!content?.trim()) return [];
-
-  const urls: string[] = [];
-  const re = new RegExp(IMG_PATTERN.source, 'gi');
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    const src = m[1]?.trim();
-    if (!src) continue;
-    const abs =
-      chapterUrl && !/^https?:\/\//i.test(src) && !src.startsWith('data:')
-        ? resolveUrl(chapterUrl, src)
-        : src;
-    urls.push(abs);
-  }
-  return dedupeOrdered(urls);
-}
-
-export function countFlowImages(content: string, chapterUrl = ''): number {
-  return flowImages(content, chapterUrl).length;
-}
+/**
+ * 从正文 HTML 提取图片 URL
+ * 对齐 Legado BookHelp.flowImages + AppPattern.imgPattern
+ */
+
+import { resolveUrl } from '@/lib/book-source/utils';
+import {
+  parseImgRefsFromHtml,
+  type ReaderInlineImageRef,
+} from '@/lib/reader/reader-content-blocks';
+
+function dedupeOrderedRefs(refs: ReaderInlineImageRef[]): ReaderInlineImageRef[] {
+  const out: ReaderInlineImageRef[] = [];
+  for (const ref of refs) {
+    const t = ref.url.trim();
+    if (!t) continue;
+    const prev = out[out.length - 1];
+    if (prev?.url.trim() === t) continue;
+    out.push(ref);
+  }
+  return out;
+}
+
+/**
+ * 从章节正文中 flow 出图片（含 Legado headers）
+ */
+export function flowImageRefs(
+  content: string,
+  chapterUrl = '',
+): ReaderInlineImageRef[] {
+  if (!content?.trim()) return [];
+
+  const refs = parseImgRefsFromHtml(content).map((ref) => {
+    const src = ref.url.trim();
+    if (
+      chapterUrl &&
+      !/^https?:\/\//i.test(src) &&
+      !src.startsWith('data:')
+    ) {
+      return { ...ref, url: resolveUrl(chapterUrl, src) };
+    }
+    return ref;
+  });
+
+  return dedupeOrderedRefs(refs);
+}
+
+/**
+ * 从章节正文中 flow 出图片绝对 URL 列表（Legado flowImages）
+ */
+export function flowImages(content: string, chapterUrl = ''): string[] {
+  return flowImageRefs(content, chapterUrl).map((r) => r.url);
+}
+
+export function countFlowImages(content: string, chapterUrl = ''): number {
+  return flowImages(content, chapterUrl).length;
+}
