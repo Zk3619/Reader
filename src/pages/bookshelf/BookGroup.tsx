@@ -123,6 +123,11 @@ function GroupListCover(props: {
   const canPreview = () =>
     !!props.coverClickPreview && !!info().url && !imageFailed();
 
+  const coverDragBlockProps = () =>
+    props.coverClickPreview
+      ? ({ onPointerDown: (e: PointerEvent) => e.stopPropagation() } as const)
+      : ({} as const);
+
   const coverContent = () => {
     const preview = info();
     if (!props.group.cover?.trim()) {
@@ -178,6 +183,7 @@ function GroupListCover(props: {
           class={coverClass()}
           role="presentation"
           onClick={(e) => e.stopPropagation()}
+          {...coverDragBlockProps()}
         >
           {coverContent()}
         </div>
@@ -192,6 +198,7 @@ function GroupListCover(props: {
           e.stopPropagation();
           props.onCoverPreview?.();
         }}
+        {...coverDragBlockProps()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -375,7 +382,7 @@ export function BookGroup(props: BookGroupProps = {}) {
   let sortableInstance: Sortable | null = null;
 
   createEffect(() => {
-    const manual = sortMode() === 'manual';
+    const manual = sortMode() === 'manual' && bookshelfLayoutStore.settings.enableDragSort;
     const view = viewMode();
     if (hasSearchQuery() || isGridViewMode(view)) {
       if (sortableInstance) {
@@ -448,6 +455,7 @@ export function BookGroup(props: BookGroupProps = {}) {
   const groupSortableEnabled = createMemo(
     () =>
       sortMode() === 'manual' &&
+      bookshelfLayoutStore.settings.enableDragSort &&
       !hasSearchQuery() &&
       isGridViewMode(viewMode()) &&
       !loading() &&

@@ -11,7 +11,7 @@ import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDro
 import type { GroupStyle } from '@/stores/bookshelf-layout';
 import type { BookGroup } from '@/types';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
-import { BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
+import { DefaultGroupCoverIcon, BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 
 const groupMenuItemClass =
   'min-h-12 cursor-pointer gap-3 rounded-md px-2.5 py-2.5';
@@ -24,7 +24,14 @@ function GroupCoverThumb(props: { group: BookGroup }) {
       {(() => {
         const inf = info();
         const failed = imageError();
-        if (!props.group.cover?.trim() || inf.type === 'invalid' || (inf.url && failed)) {
+        if (!props.group.cover?.trim()) {
+          return (
+            <span class="flex h-full w-full items-center justify-center text-muted-foreground">
+              <DefaultGroupCoverIcon group={props.group} class="h-3.5 w-3.5" size={14} />
+            </span>
+          );
+        }
+        if (inf.type === 'invalid' || (inf.url && failed)) {
           return (
             <span class="flex h-full w-full items-center justify-center text-muted-foreground">
               <BookCoverPlaceholderIcon class="h-3.5 w-3.5" size={14} />

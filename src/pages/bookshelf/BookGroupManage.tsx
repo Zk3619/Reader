@@ -9,8 +9,7 @@
  * 4. 对于默认分组，禁止删除和修改名称
  */
 
-import { createSignal, For, Show, onMount, onCleanup, batch, createEffect, createMemo } from 'solid-js';
-import Sortable from 'sortablejs';
+import { createSignal, For, Show, onMount, batch, createMemo } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
@@ -34,11 +33,22 @@ import { BookGroupId } from '@/types';
 import type { BookGroup } from '@/types';
 import { BookGroupFormDialog } from '@/components/bookshelf/BookGroupFormDialog';
 import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
+import {
+  BookGroupManageListDragOverlay,
+  VirtualBookGroupManageList,
+} from '@/components/bookshelf/VirtualBookGroupManageList';
+import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
+import type { Id } from '@thisbeyond/solid-dnd';
 import { BookshelfIcon, GripVerticalIcon, SearchIcon } from '@/components/shared/icons';
 import {
-  loadGroupManageCoverClickPreview,
-  saveGroupManageCoverClickPreview,
+  loadGroupManagePrefs,
+  saveGroupManagePrefs,
 } from '@/lib/bookshelf/bookshelf-manage-prefs';
+import {
+  loadGroupManageSubPageMode,
+  saveGroupManageSubPageMode,
+  type SearchMode,
+} from '@/lib/search/search-prefs';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
@@ -47,9 +57,7 @@ import {
   BookGroupManagePageToolbar,
   BookGroupManageToolbarLeading,
 } from '@/components/bookshelf/BookGroupManagePageToolbar';
-import { BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
-// 注意：不使用 Key 组件，因为 SortableJS 已经移动了 DOM
-// 我们需要让 SolidJS 根据数据顺序重新渲染，而不是阻止它
+import { DefaultGroupCoverIcon, BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 
 export interface BookGroupManageProps {
   onClose?: () => void;
@@ -96,14 +104,26 @@ function GroupManageListCover(props: {
   onCoverError: (groupId: number) => void;
   coverClickPreview?: boolean;
   onCoverPreview?: () => void;
+  blockDragFromCover?: boolean;
 }) {
   const info = () => getCoverPreviewInfo(props.group.cover);
   const imageFailed = () => props.coverImageErrorIds.has(props.group.groupId);
   const canPreview = () =>
     !!props.coverClickPreview && !!info().url && !imageFailed();
+  const coverDragBlockProps = () =>
+    props.blockDragFromCover
+      ? ({ onPointerDown: (e: PointerEvent) => e.stopPropagation() } as const)
+      : ({} as const);
 
   const coverContent = () => {
     const preview = info();
+    if (!props.group.cover?.trim()) {
+      return (
+        <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
+          <DefaultGroupCoverIcon group={props.group} class="h-4 w-4" size={16} />
+        </span>
+      );
+    }
     if (preview.type === 'invalid' || (preview.url && imageFailed())) {
       return (
         <span class="flex h-full w-full items-center justify-center text-muted-foreground" aria-hidden>
@@ -141,6 +161,7 @@ function GroupManageListCover(props: {
           class={bookshelfCompactCoverClass('text-lg')}
           role="presentation"
           onClick={(e) => e.stopPropagation()}
+          {...coverDragBlockProps()}
         >
           {coverContent()}
         </div>
@@ -155,6 +176,7 @@ function GroupManageListCover(props: {
           e.stopPropagation();
           props.onCoverPreview?.();
         }}
+        {...coverDragBlockProps()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -179,141 +201,92 @@ export function BookGroupManage(props: BookGroupManageProps) {
   // 封面图片加载失败的 groupId 集合，用于显示默认图标
   const [coverImageErrorIds, setCoverImageErrorIds] = createSignal<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [searchMode, setSearchMode] = createSignal<SearchMode>('name');
   const [coverClickPreview, setCoverClickPreview] = createSignal(true);
+  const [enableDragSort, setEnableDragSort] = createSignal(true);
   const [coverPreviewGroup, setCoverPreviewGroup] = createSignal<BookGroup | null>(null);
-  // SortableJS 实例
-  let sortableInstance: Sortable | null = null;
-  let sortableContainer: HTMLDivElement | null = null;
 
   const filteredGroups = createMemo(() =>
-    filterBookGroups(groups(), searchQuery(), getGroupDisplayName),
+    filterBookGroups(groups(), searchQuery(), getGroupDisplayName, searchMode()),
   );
 
-  // 加载分组数据
+  const listSortableEnabled = createMemo(
+    () =>
+      enableDragSort() &&
+      !searchQuery().trim() &&
+      filteredGroups().length === groups().length,
+  );
+
+  const groupListSortable = createMemo((): VirtualListSortableConfig<BookGroup> | undefined => {
+    if (!enableDragSort()) return undefined;
+    return {
+      enabled: listSortableEnabled,
+      ids: () => filteredGroups().map((g) => g.groupId),
+      onReorder: handleGroupsReorder,
+      persistOnly: true,
+    };
+  });
+
+  async function handleGroupsReorder(orderedIds: Id[]) {
+    try {
+      const map = new Map(groups().map((g) => [g.groupId, g]));
+      const reordered = orderedIds
+        .map((id) => map.get(Number(id)))
+        .filter((g): g is BookGroup => !!g);
+      if (reordered.length !== groups().length) return;
+      const updated = reordered.map((group, index) => ({ ...group, order: index }));
+      await groupsDb.updateGroupsOrder(
+        updated.map((g) => ({ groupId: g.groupId, order: g.order })),
+      );
+      setGroups(updated);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : '更新顺序失败';
+      setError(errorMsg);
+      await loadGroups();
+    }
+  }
+
+  function renderGroupDragOverlay(activeId: Id | null) {
+    if (activeId == null) return null;
+    const group = groups().find((g) => g.groupId === Number(activeId));
+    if (!group) return null;
+    return <BookGroupManageListDragOverlay group={group} />;
+  }
+
+  const blockDragPointerProps = () =>
+    enableDragSort()
+      ? ({ onPointerDown: (e: PointerEvent) => e.stopPropagation() } as const)
+      : ({} as const);
+
+  async function saveGroupManageSettings() {
+    await saveGroupManagePrefs({
+      coverClickPreview: coverClickPreview(),
+      enableDragSort: enableDragSort(),
+    });
+  }
+
   async function handleCoverClickPreviewChange(value: boolean) {
     setCoverClickPreview(value);
-    await saveGroupManageCoverClickPreview(value);
+    await saveGroupManageSettings();
+  }
+
+  async function handleEnableDragSortChange(value: boolean) {
+    setEnableDragSort(value);
+    await saveGroupManageSettings();
+  }
+
+  async function handleSearchModeChange(mode: SearchMode) {
+    setSearchMode(mode);
+    await saveGroupManageSubPageMode(mode);
   }
 
   onMount(() => {
-    void loadGroupManageCoverClickPreview().then((v) => {
-      setCoverClickPreview(v);
+    void loadGroupManagePrefs().then((p) => {
+      setCoverClickPreview(p.coverClickPreview);
+      setEnableDragSort(p.enableDragSort);
     });
+    void loadGroupManageSubPageMode().then(setSearchMode);
     loadGroups();
-
-    onCleanup(() => {
-      if (sortableInstance) {
-        sortableInstance.destroy();
-        sortableInstance = null;
-      }
-    });
-  });
-
-  // 初始化 SortableJS 的函数
-  function initSortable(container: HTMLDivElement) {
-    // 如果已经存在实例且是同一个容器，跳过
-    if (sortableInstance && sortableInstance.el === container) {
-      return;
-    }
-
-    if (sortableInstance) {
-      console.log('销毁旧的 SortableJS 实例');
-      try {
-        sortableInstance.destroy();
-      } catch (e) {
-        console.warn('销毁 SortableJS 实例时出错:', e);
-      }
-      sortableInstance = null;
-    }
-
-    setTimeout(() => {
-      if (sortableInstance) {
-        console.log('SortableJS 已在其他地方初始化，跳过');
-        return;
-      }
-
-      const dragHandles = container.querySelectorAll('.drag-handle');
-      console.log('初始化 SortableJS', {
-        container,
-        dragHandlesCount: dragHandles.length,
-        groupsCount: groups().length,
-        loading: loading(),
-      });
-
-      if (dragHandles.length === 0) {
-        console.warn('未找到拖拽手柄元素！请检查 .drag-handle 类名是否正确。');
-        return;
-      }
-
-      if (groups().length === 0) {
-        console.warn('分组数据为空，跳过 SortableJS 初始化');
-        return;
-      }
-
-      try {
-        sortableInstance = Sortable.create(container, {
-          animation: 150,
-          handle: '.drag-handle',
-          ghostClass: 'opacity-50',
-          chosenClass: 'sortable-chosen',
-          dragClass: 'sortable-drag',
-          forceFallback: true,
-          fallbackOnBody: true,
-          fallbackTolerance: 0,
-          fallbackOffset: { x: 0, y: 0 },
-          preventOnFilter: false,
-          emptyInsertThreshold: 0,
-          swapThreshold: 0.65,
-          onStart: (evt) => {
-            console.log('拖拽开始', {
-              oldIndex: evt.oldIndex,
-              item: evt.item,
-              from: evt.from,
-            });
-          },
-          onMove: () => true,
-          onEnd: async (evt) => {
-            console.log('拖拽结束', {
-              oldIndex: evt.oldIndex,
-              newIndex: evt.newIndex,
-              item: evt.item,
-            });
-            const { oldIndex, newIndex } = evt;
-            if (oldIndex !== undefined && newIndex !== undefined && oldIndex !== newIndex) {
-              await handleSortEnd(oldIndex, newIndex);
-            }
-          },
-        });
-        console.log('SortableJS 初始化成功！', sortableInstance);
-      } catch (error) {
-        console.error('SortableJS 初始化失败:', error);
-      }
-    }, 100);
-  }
-
-  let isInitialized = false;
-  createEffect(() => {
-    const groupsData = groups();
-    const isLoading = loading();
-    const hasSearch = searchQuery().trim().length > 0;
-
-    if (hasSearch) {
-      if (sortableInstance) {
-        sortableInstance.destroy();
-        sortableInstance = null;
-        isInitialized = false;
-      }
-      return;
-    }
-
-    if (!isInitialized && sortableContainer && !isLoading && groupsData.length > 0) {
-      setTimeout(() => {
-        if (sortableContainer && !isLoading && groupsData.length > 0 && !sortableInstance) {
-          initSortable(sortableContainer);
-          isInitialized = true;
-        }
-      }, 150);
-    }
   });
 
   async function loadGroups() {
@@ -373,63 +346,6 @@ export function BookGroupManage(props: BookGroupManageProps) {
     setFormDialogMode('add');
     setFormDialogGroup(null);
     setFormDialogOpen(true);
-  }
-
-  async function handleSortEnd(oldIndex: number, newIndex: number) {
-    try {
-      const container = sortableContainer;
-      if (!container) {
-        console.error('sortableContainer 不存在');
-        return;
-      }
-
-      const currentOrder: number[] = [];
-      Array.from(container.children).forEach((child) => {
-        const groupId = parseInt((child as HTMLElement).getAttribute('data-group-id') || '0');
-        if (groupId) {
-          currentOrder.push(groupId);
-        }
-      });
-
-      if (currentOrder.length === 0) {
-        const currentGroups = groups();
-        const newGroups = [...currentGroups];
-        const [moved] = newGroups.splice(oldIndex, 1);
-        newGroups.splice(newIndex, 0, moved);
-
-        const updatedGroups = newGroups.map((group, index) => ({
-          ...group,
-          order: index,
-        }));
-
-        await groupsDb.updateGroupsOrder(
-          updatedGroups.map(g => ({ groupId: g.groupId, order: g.order }))
-        );
-        return;
-      }
-
-      const currentGroups = groups();
-      const groupMap = new Map(currentGroups.map(g => [g.groupId, g]));
-
-      const updatedGroups = currentOrder
-        .map((groupId) => groupMap.get(groupId))
-        .filter((group): group is BookGroup => group !== undefined)
-        .map((group, index) => ({
-          ...group,
-          order: index,
-        }));
-
-      await groupsDb.updateGroupsOrder(
-        updatedGroups.map(g => ({ groupId: g.groupId, order: g.order }))
-      );
-
-      console.log('数据库顺序已更新:', updatedGroups.map(g => g.groupId));
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : '更新顺序失败';
-      setError(errorMsg);
-      console.error('更新分组顺序失败:', e);
-      await loadGroups();
-    }
   }
 
   async function applyOrderUpdate(updated: BookGroup[] | null) {
@@ -509,13 +425,17 @@ export function BookGroupManage(props: BookGroupManageProps) {
         <BookGroupManagePageToolbar
           searchQuery={searchQuery()}
           onSearchQueryChange={setSearchQuery}
+          searchMode={searchMode()}
+          onSearchModeChange={handleSearchModeChange}
           coverClickPreview={coverClickPreview()}
           onCoverClickPreviewChange={handleCoverClickPreviewChange}
+          enableDragSort={enableDragSort()}
+          onEnableDragSortChange={handleEnableDragSortChange}
           onAdd={handleAdd}
         />
       </PageToolbar>
 
-      <div class={cn(mainShellPageScroll, 'space-y-6 w-full')}>
+      <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 w-full flex-col')}>
         <Show when={error()}>
           <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             {error()}
@@ -548,28 +468,26 @@ export function BookGroupManage(props: BookGroupManageProps) {
               </div>
             }
           >
-            <div
-              ref={(el) => {
-                sortableContainer = el;
-              }}
-              class="space-y-2"
+            <VirtualBookGroupManageList
+              groups={filteredGroups()}
+              sortable={groupListSortable()}
+              renderDragOverlay={groupListSortable() ? renderGroupDragOverlay : undefined}
             >
-              <For each={filteredGroups()}>
-                {(group) => {
-                  const isDefault = isDefaultBookGroup(group.groupId);
-                  const dragEnabled = () => !searchQuery().trim();
+              {(group) => {
+                const isDefault = isDefaultBookGroup(group.groupId);
+                const showDragHandle = () => listSortableEnabled();
 
-                  return (
+                return (
+                  <div class="box-border flex h-full min-h-0 items-stretch py-1">
                     <GroupContextMenu
                       group={group}
                       orderGroups={groups()}
                       actions={groupContextMenuActions}
                       withLongPress
-                      data-group-id={group.groupId}
-                      class={bookshelfCompactListCardClass('select-none')}
+                      class={bookshelfCompactListCardClass('h-16 select-none')}
                     >
-                      <Show when={dragEnabled()}>
-                        <div class="drag-handle flex h-full items-center cursor-move text-muted-foreground hover:text-foreground select-none">
+                      <Show when={showDragHandle()}>
+                        <div class="flex h-full cursor-grab items-center text-muted-foreground hover:text-foreground active:cursor-grabbing">
                           <GripVerticalIcon class="h-4 w-4" size={16} />
                         </div>
                       </Show>
@@ -582,6 +500,7 @@ export function BookGroupManage(props: BookGroupManageProps) {
                         }
                         coverClickPreview={coverClickPreview()}
                         onCoverPreview={() => setCoverPreviewGroup(group)}
+                        blockDragFromCover={enableDragSort() && coverClickPreview()}
                       />
 
                       <div class={bookshelfCompactMainClass()}>
@@ -603,7 +522,8 @@ export function BookGroupManage(props: BookGroupManageProps) {
                       <div
                         class="flex h-full items-center gap-3"
                         onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        {...blockDragPointerProps()}
                       >
                         <div class="flex items-center gap-2">
                           <Label for={`show-${group.groupId}`} class="text-sm">
@@ -627,20 +547,17 @@ export function BookGroupManage(props: BookGroupManageProps) {
                             e.preventDefault();
                             handleEdit(group);
                           }}
-                          onMouseDown={(e: MouseEvent) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                          }}
+                          onPointerDown={(e: PointerEvent) => e.stopPropagation()}
                           type="button"
                         >
                           编辑
                         </Button>
                       </div>
                     </GroupContextMenu>
-                  );
-                }}
-              </For>
-            </div>
+                  </div>
+                );
+              }}
+            </VirtualBookGroupManageList>
           </Show>
         </Show>
 

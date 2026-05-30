@@ -40,6 +40,8 @@ export interface BookshelfLayoutSettings {
   showPendingUpdateCount: boolean;
   showQuickScrollbar: boolean;
   coverClickPreview: boolean;
+  /** 是否允许书架/分组页拖拽排序（仍需 sortMode=manual） */
+  enableDragSort: boolean;
 }
 
 export const defaultBookshelfLayoutSettings: BookshelfLayoutSettings = {
@@ -53,6 +55,7 @@ export const defaultBookshelfLayoutSettings: BookshelfLayoutSettings = {
   showPendingUpdateCount: false,
   showQuickScrollbar: false,
   coverClickPreview: true,
+  enableDragSort: true,
 };
 
 export const listViewModeOptions: { value: ViewMode; label: string }[] = [

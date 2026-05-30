@@ -56,6 +56,7 @@ export function VirtualBookshelfGroupGrid(props: VirtualBookshelfGroupGridProps)
     if (!group) return null;
     return (
       <BookshelfGroupGridDragOverlay
+        group={group}
         title={props.getGroupDisplayName(group)}
         subtitle={`${props.getGroupBookCount(group)} 本书`}
       />

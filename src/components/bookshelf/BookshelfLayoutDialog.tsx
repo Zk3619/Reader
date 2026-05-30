@@ -228,7 +228,18 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                   setLocalSettings({ ...localSettings(), showQuickScrollbar: checked })
                 }
               />
+              <SettingToggleRow
+                id="enable-drag-sort"
+                label="启用拖拽排序"
+                checked={localSettings().enableDragSort}
+                onChange={(checked) =>
+                  setLocalSettings({ ...localSettings(), enableDragSort: checked })
+                }
+              />
             </div>
+            <p class="text-xs text-muted-foreground">
+              拖拽排序需在「书籍排序」中选择「手动排序」后生效；关闭后书架页与分组页均不可拖拽调整顺序。
+            </p>
           </section>
 
           <div class="grid gap-4 sm:grid-cols-2">

@@ -9,6 +9,7 @@ export interface BookshelfManagePrefs {
   filterBySource: boolean;
   openBookInfoByClickTitle: boolean;
   coverClickPreview: boolean;
+  enableDragSort: boolean;
 }
 
 export const DEFAULT_BOOKSHELF_MANAGE_PREFS: BookshelfManagePrefs = {
@@ -16,6 +17,21 @@ export const DEFAULT_BOOKSHELF_MANAGE_PREFS: BookshelfManagePrefs = {
   filterBySource: false,
   openBookInfoByClickTitle: false,
   coverClickPreview: true,
+  enableDragSort: true,
+};
+
+import type { SearchMode } from '@/lib/search/search-prefs';
+
+export interface GroupManagePrefs {
+  searchMode: SearchMode;
+  coverClickPreview: boolean;
+  enableDragSort: boolean;
+}
+
+export const DEFAULT_GROUP_MANAGE_PREFS: GroupManagePrefs = {
+  searchMode: 'name',
+  coverClickPreview: true,
+  enableDragSort: true,
 };
 
 export async function loadBookshelfManagePrefs(): Promise<BookshelfManagePrefs> {
@@ -34,6 +50,7 @@ export async function loadBookshelfManagePrefs(): Promise<BookshelfManagePrefs> 
       legacy?.coverClickPreview === undefined
         ? child.coverClickPreview
         : child.coverClickPreview && legacy.coverClickPreview !== false,
+    enableDragSort: child.enableDragSort !== false,
   };
 }
 
@@ -49,25 +66,40 @@ export async function saveBookshelfManagePrefs(prefs: BookshelfManagePrefs): Pro
         filterBySource: prefs.filterBySource,
         openBookInfoByClickTitle: prefs.openBookInfoByClickTitle,
         coverClickPreview: prefs.coverClickPreview,
+        enableDragSort: prefs.enableDragSort,
       },
     },
   });
 }
 
-export async function loadGroupManageCoverClickPreview(): Promise<boolean> {
+export async function loadGroupManagePrefs(): Promise<GroupManagePrefs> {
   const pagePrefs = await loadBookshelfPagePrefs();
-  return pagePrefs.children.groupManage.coverClickPreview !== false;
+  const child = pagePrefs.children.groupManage;
+  return {
+    searchMode: child.searchMode,
+    coverClickPreview: child.coverClickPreview !== false,
+    enableDragSort: child.enableDragSort !== false,
+  };
 }
 
-export async function saveGroupManageCoverClickPreview(value: boolean): Promise<void> {
+export async function saveGroupManagePrefs(prefs: GroupManagePrefs): Promise<void> {
   const pagePrefs = await loadBookshelfPagePrefs();
   await saveBookshelfPagePrefs({
     ...pagePrefs,
     children: {
       ...pagePrefs.children,
-      groupManage: { ...pagePrefs.children.groupManage, coverClickPreview: value },
+      groupManage: { ...pagePrefs.children.groupManage, ...prefs },
     },
   });
+}
+
+export async function loadGroupManageCoverClickPreview(): Promise<boolean> {
+  return (await loadGroupManagePrefs()).coverClickPreview;
+}
+
+export async function saveGroupManageCoverClickPreview(value: boolean): Promise<void> {
+  const prefs = await loadGroupManagePrefs();
+  await saveGroupManagePrefs({ ...prefs, coverClickPreview: value });
 }
 
 /** 全不选与全选均视为该维度不限制 */

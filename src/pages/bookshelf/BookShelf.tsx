@@ -36,6 +36,7 @@ import { exportBookshelfJson } from '@/lib/bookshelf/export-bookshelf';
 import { ImportBookshelfDialog } from '@/components/bookshelf/ImportBookshelfDialog';
 import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroup';
+import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookEditDialog } from '@/components/books/BookEditDialog';
 import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
@@ -841,7 +842,6 @@ export function BookShelf(props: BookShelfProps) {
             onBooksReorder={async (newOrderedBooks) => {
               const updates = newOrderedBooks.map((b, i) => ({ bookUrl: b.bookUrl, order: i }));
               await booksDb.updateBooksOrder(updates);
-              setBooks(newOrderedBooks);
             }}
             onCoverUrlRefreshed={handleCoverUrlRefreshed}
             coverClickPreview={coverClickPreview()}
@@ -1007,6 +1007,7 @@ function BooksGrid(props: {
   onCoverPreview?: (book: Book) => void;
 }) {
   const manualSort = () => props.sortMode === 'manual';
+  const enableDragSort = () => bookshelfLayoutStore.settings.enableDragSort;
   const isGrid = () => isGridViewMode(props.viewMode);
   const cardLayout = (): 'list' | 'compact' | 'grid' => getViewModeCardLayout(props.viewMode);
 
@@ -1023,7 +1024,7 @@ function BooksGrid(props: {
     },
   });
 
-  const bookSortableEnabled = createMemo(() => manualSort());
+  const bookSortableEnabled = createMemo(() => manualSort() && enableDragSort());
 
   const bookSortable = createMemo(() => {
     if (!bookSortableEnabled()) return undefined;
@@ -1038,6 +1039,7 @@ function BooksGrid(props: {
         if (list.length !== props.books.length) return;
         void props.onBooksReorder?.(list.map((b, i) => ({ ...b, order: i })));
       },
+      persistOnly: true,
     };
   });
 
@@ -1174,9 +1176,7 @@ function BookCardWithMenu(props: {
                   alt=""
                   class="h-full w-full object-cover"
                   draggable={false}
-                  fallback={
-                    <span class="flex h-full w-full items-center justify-center text-2xl">📖</span>
-                  }
+                  fallback={<BookCoverFallback class="h-8 w-8" />}
                 />
                 <Show when={effectiveTitleDisplay() === 'overlay'}>
                   <BookshelfCoverTitleOverlay

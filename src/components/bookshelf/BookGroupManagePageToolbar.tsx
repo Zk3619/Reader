@@ -21,11 +21,28 @@ import {
   ChevronLeftIcon,
   XIcon,
 } from '@/components/shared/icons';
+import type { SearchMode } from '@/lib/search/search-prefs';
+
+function MenuRadioIndicator(props: { selected: boolean }) {
+  return (
+    <span
+      class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-primary pointer-events-none"
+      aria-hidden
+    >
+      <span class={props.selected ? 'h-2 w-2 rounded-full bg-primary' : 'hidden'} />
+    </span>
+  );
+}
+
 export interface BookGroupManagePageToolbarProps {
   searchQuery?: string;
   onSearchQueryChange?: (query: string) => void;
+  searchMode?: SearchMode;
+  onSearchModeChange?: (mode: SearchMode) => void;
   coverClickPreview?: boolean;
   onCoverClickPreviewChange?: (value: boolean) => void;
+  enableDragSort?: boolean;
+  onEnableDragSortChange?: (value: boolean) => void;
   onAdd: () => void;
 }
 
@@ -152,6 +169,20 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem
+            onSelect={() => props.onSearchModeChange?.('name')}
+            class="flex items-center gap-2"
+          >
+            <MenuRadioIndicator selected={(props.searchMode ?? 'name') === 'name'} />
+            <span>常规搜索</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => props.onSearchModeChange?.('fuzzy')}
+            class="flex items-center gap-2"
+          >
+            <MenuRadioIndicator selected={props.searchMode === 'fuzzy'} />
+            <span>模糊搜索</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
             onSelect={() => props.onCoverClickPreviewChange?.(!props.coverClickPreview)}
             class="flex items-center gap-2"
           >
@@ -159,6 +190,15 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
               <Checkbox checked={!!props.coverClickPreview} aria-label="封面点击预览" />
             </span>
             <span>封面点击预览</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
+            class="flex items-center gap-2"
+          >
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
+            </span>
+            <span>拖拽排序</span>
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>

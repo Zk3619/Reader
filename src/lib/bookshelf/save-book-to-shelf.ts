@@ -8,12 +8,8 @@
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
-import {
-  fetchChapterListDeduped,
-  isChapterListFetchInFlight,
-  toNewBookChapter,
-  type PartialChapterList,
-} from '@/lib/book-source/chapters';
+import { fetchChapterListDeduped, isChapterListFetchInFlight, toNewBookChapter, type PartialChapterList } from '@/lib/book-source/chapters';
+import { resolveBookType } from '@/lib/book-source/book-type';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
 import {
@@ -52,7 +48,7 @@ function searchBookToNewBook(sb: SearchBook): NewBook {
     coverUrl: sb.coverUrl,
     origin: sb.origin,
     originName: sb.originName,
-    type: sb.type,
+    type: resolveBookType(sb.type, sb.tab),
   };
 }
 
@@ -220,6 +216,7 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
     const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
       reverseToc: book.readConfig?.reverseToc === true,
       onPartial,
+      bookVariable: book.variable,
     });
     if (chapters.length === 0) return;
     await persistChapters(book.bookUrl, chapters);

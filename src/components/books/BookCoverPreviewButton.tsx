@@ -4,7 +4,7 @@
 
 import type { JSX } from 'solid-js';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
-import { BookCoverIcon } from '@/components/shared/icons';
+import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { BookSource } from '@/types';
@@ -21,6 +21,7 @@ export function BookCoverPreviewButton(props: {
   class?: string;
   imgClass?: string;
   fallback?: JSX.Element;
+  onPointerDown?: (e: PointerEvent) => void;
 }) {
   const hasCover = () => !!(props.customCoverUrl?.trim() || props.coverUrl?.trim());
 
@@ -29,6 +30,10 @@ export function BookCoverPreviewButton(props: {
       type="button"
       variant="ghost"
       disabled={!hasCover()}
+      onPointerDown={(e: PointerEvent) => {
+        props.onPointerDown?.(e);
+        e.stopPropagation();
+      }}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
         if (hasCover()) props.onPreview();
@@ -48,11 +53,7 @@ export function BookCoverPreviewButton(props: {
         alt=""
         class={props.imgClass ?? 'h-full w-full object-cover'}
         fallback={
-          props.fallback ?? (
-            <span class="flex h-full w-full items-center justify-center">
-              <BookCoverIcon class="h-6 w-6 text-muted-foreground" />
-            </span>
-          )
+          props.fallback ?? <BookCoverFallback class="h-6 w-6" />
         }
       />
     </Button>

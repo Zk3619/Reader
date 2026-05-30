@@ -4,7 +4,10 @@
 
 import { Show } from 'solid-js';
 import type { Book } from '@/types';
+import type { BookGroup } from '@/types';
+import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
+import { BookGroupCoverFace } from '@/components/bookshelf/BookGroupCoverFace';
 import {
   bookGroupGridCoverClass,
   bookGroupGridSubtitleClass,
@@ -35,11 +38,7 @@ export function BookshelfBookGridDragOverlay(props: {
             alt=""
             class="h-full w-full object-cover"
             draggable={false}
-            fallback={
-              <span class="flex h-full w-full items-center justify-center text-2xl">
-                📖
-              </span>
-            }
+            fallback={<BookCoverFallback class="h-8 w-8" />}
           />
         </div>
         <div class="flex w-full min-w-0 flex-col items-center gap-0.5">
@@ -56,6 +55,7 @@ export function BookshelfBookGridDragOverlay(props: {
 }
 
 export function BookshelfGroupGridDragOverlay(props: {
+  group: BookGroup;
   title: string;
   subtitle: string;
 }) {
@@ -66,12 +66,8 @@ export function BookshelfGroupGridDragOverlay(props: {
           'flex w-max max-w-[min(85vw,12rem)] flex-col items-center gap-1.5 rounded-xl border border-border/50 bg-card p-2 text-sm shadow-lg',
         )}
       >
-        <div
-          class={bookGroupGridCoverClass(
-            'flex h-24 w-full items-center justify-center bg-linear-to-br from-muted to-accent/30 text-3xl',
-          )}
-        >
-          📚
+        <div class={bookGroupGridCoverClass('h-24 w-full overflow-hidden')}>
+          <BookGroupCoverFace group={props.group} emojiClass="text-3xl" iconClass="h-10 w-10" />
         </div>
         <div class="flex w-full min-w-0 flex-col items-center gap-0.5">
           <span class={bookGroupGridTitleClass()}>{props.title}</span>

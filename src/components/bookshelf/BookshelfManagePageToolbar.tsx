@@ -40,6 +40,8 @@ export interface BookshelfManagePageToolbarProps {
   onOpenBookInfoByClickTitleChange?: (value: boolean) => void;
   coverClickPreview?: boolean;
   onCoverClickPreviewChange?: (value: boolean) => void;
+  enableDragSort?: boolean;
+  onEnableDragSortChange?: (value: boolean) => void;
   onExportAllUseBookSource?: () => void;
 }
 
@@ -233,6 +235,15 @@ export function BookshelfManagePageToolbar(props: BookshelfManagePageToolbarProp
               <Checkbox checked={!!props.coverClickPreview} aria-label="封面点击预览" />
             </span>
             <span>封面点击预览</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
+            class="flex items-center gap-2"
+          >
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
+            </span>
+            <span>拖拽排序</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
             onSelect={() => props.onSearchModeChange?.('name')}

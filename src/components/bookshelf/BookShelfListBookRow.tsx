@@ -14,6 +14,7 @@ import {
   bookshelfRowSubtitleClass,
   bookshelfRowTitleClass,
 } from '@/lib/bookshelf/book-group-card-styles';
+import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverPreviewButton } from '@/components/books/BookCoverPreviewButton';
 import {
@@ -23,6 +24,10 @@ import {
 } from '@/components/bookshelf/BookShelfReadingMeta';
 import { cn } from '@/lib/utils';
 import type { ViewMode } from '@/stores/bookshelf-layout';
+
+function blockSortableDragFromCover(e: PointerEvent) {
+  e.stopPropagation();
+}
 
 export function getBookshelfListItemIntro(book: Book): string {
   const raw = book.customIntro?.trim() || book.intro?.trim();
@@ -49,6 +54,11 @@ export function BookShelfListBookRow(props: {
   const coverClass = () =>
     isCompact() ? bookshelfCompactCoverClass() : bookshelfListCoverClass('rounded-lg');
 
+  const coverDragBlockProps = () =>
+    props.coverClickPreview
+      ? ({ onPointerDown: blockSortableDragFromCover } as const)
+      : ({} as const);
+
   const coverBlock = () => (
     <Show
       when={props.coverClickPreview}
@@ -70,14 +80,7 @@ export function BookShelfListBookRow(props: {
             class="h-full w-full object-cover"
             draggable={false}
             fallback={
-              <span
-                class={cn(
-                  'flex h-full w-full items-center justify-center',
-                  isCompact() ? 'text-lg' : 'text-2xl',
-                )}
-              >
-                📖
-              </span>
+              <BookCoverFallback class={isCompact() ? 'h-5 w-5' : 'h-8 w-8'} />
             }
           />
         </div>
@@ -85,6 +88,7 @@ export function BookShelfListBookRow(props: {
     >
       <BookCoverPreviewButton
         class={coverClass()}
+        {...coverDragBlockProps()}
         coverUrl={props.book.coverUrl}
         customCoverUrl={props.book.customCoverUrl}
         bookUrl={props.book.bookUrl}
@@ -96,14 +100,7 @@ export function BookShelfListBookRow(props: {
           props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
         }
         fallback={
-          <span
-            class={cn(
-              'flex h-full w-full items-center justify-center',
-              isCompact() ? 'text-lg' : 'text-2xl',
-            )}
-          >
-            📖
-          </span>
+          <BookCoverFallback class={isCompact() ? 'h-5 w-5' : 'h-8 w-8'} />
         }
       />
     </Show>

@@ -3,7 +3,7 @@
  * 根据 mode 自动切换为「添加」或「编辑」模式
  */
 
-import { createSignal, Show, createEffect, onCleanup } from 'solid-js';
+import { createSignal, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -25,15 +25,12 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
-import { AspectRatio } from '@/components/ui/aspect-ratio';
+import { FormCoverPreview } from '@/components/shared/FormCoverPreview';
 import { cn } from '@/lib/utils';
-import { ImageIcon, AlertCircleIcon } from '@/components/shared/icons';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
+import { pickLocalImageAsDataUrl } from '@/lib/platform/image-data-url';
 import * as groupsDb from '@/lib/database/book-groups';
 import type { BookGroup } from '@/types';
-import { pickFile } from '@/lib/platform/fs/pick-file';
-import { readBytes } from '@/lib/platform/fs/read-write';
-import { isUserCancelled } from '@/lib/platform/fs/errors';
 
 export type BookGroupFormMode = 'add' | 'edit';
 
@@ -49,125 +46,6 @@ export const bookSortOptions = [
 
 function isDefaultGroup(groupId: number): boolean {
   return groupId < 0;
-}
-
-const COVER_ASPECT_WIDTH = 3;
-const COVER_ASPECT_HEIGHT = 4;
-
-function GroupCoverPreview(props: {
-  cover: () => string | undefined;
-  onPickCover: () => void | Promise<void>;
-  /** md+ 横向布局：高度与右侧栏一致，宽度按 3:4 比例推算 */
-  matchSiblingHeight?: boolean;
-}) {
-  const previewInfo = () => getCoverPreviewInfo(props.cover());
-  const [imageError, setImageError] = createSignal(false);
-  const [matchedWidth, setMatchedWidth] = createSignal<number>();
-  const [matchHeightFrame, setMatchHeightFrame] = createSignal<HTMLDivElement>();
-
-  createEffect(() => {
-    if (!props.matchSiblingHeight) return;
-    const el = matchHeightFrame();
-    if (!el) return;
-
-    const syncWidth = () => {
-      const height = el.clientHeight;
-      if (height > 0) {
-        setMatchedWidth((height * COVER_ASPECT_WIDTH) / COVER_ASPECT_HEIGHT);
-      }
-    };
-
-    syncWidth();
-    const observer = new ResizeObserver(syncWidth);
-    observer.observe(el);
-    onCleanup(() => {
-      observer.disconnect();
-      setMatchedWidth(undefined);
-    });
-  });
-
-  const frameClass = cn(
-    'shrink-0 overflow-hidden rounded-lg border bg-muted',
-    props.matchSiblingHeight ? 'h-full' : 'w-full',
-  );
-
-  const previewBody = (
-    <button
-      type="button"
-      onClick={props.onPickCover}
-      class="flex h-full w-full items-center justify-center transition-colors hover:bg-muted/80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-    >
-      <Show
-        when={props.cover()}
-        fallback={
-          <div class="flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-            <ImageIcon class="h-8 w-8" size={32} />
-            <span>点击选择封面</span>
-          </div>
-        }
-      >
-        {(() => {
-          const info = previewInfo();
-          const cover = props.cover();
-          if (!info.isValid) {
-            return (
-              <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
-                <AlertCircleIcon class="h-8 w-8" size={32} />
-                <span class="text-center px-2">
-                  {info.type === 'invalid' && cover?.startsWith('http') ? 'URL 格式错误' : '无效的输入'}
-                </span>
-              </div>
-            );
-          }
-          if (info.type === 'emoji') {
-            return (
-              <div class="flex h-full w-full items-center justify-center text-6xl">
-                {cover}
-              </div>
-            );
-          }
-          if (info.url && !imageError()) {
-            return (
-              <img
-                src={info.url}
-                alt="封面预览"
-                class="h-full w-full object-cover"
-                onError={() => setImageError(true)}
-              />
-            );
-          }
-          if (imageError()) {
-            return (
-              <div class="flex flex-col items-center justify-center gap-2 text-sm text-destructive">
-                <AlertCircleIcon class="h-8 w-8" size={32} />
-                <span class="text-center px-2">图片加载失败</span>
-              </div>
-            );
-          }
-          return null;
-        })()}
-      </Show>
-    </button>
-  );
-
-  return (
-    <Show
-      when={props.matchSiblingHeight}
-      fallback={
-        <AspectRatio ratio={3 / 4} class={frameClass}>
-          {previewBody}
-        </AspectRatio>
-      }
-    >
-      <div
-        ref={setMatchHeightFrame}
-        class={frameClass}
-        style={{ width: matchedWidth() ? `${matchedWidth()}px` : undefined }}
-      >
-        {previewBody}
-      </div>
-    </Show>
-  );
 }
 
 export interface BookGroupFormDialogProps {
@@ -220,29 +98,18 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
   /** 仅默认分组（系统分组）不可修改名称，用户添加的分组可修改 */
   const nameDisabled = () => isEdit() && initialGroup() && isDefaultGroup(initialGroup()!.groupId);
 
-  async function selectLocalImage(): Promise<string | null> {
+  async function pickCoverFromLocal() {
     try {
-      const picked = await pickFile({
-        filters: [
-          {
-            name: 'Images',
-            extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'],
-          },
-        ],
-      });
-      const fileData = await readBytes(picked.ref);
-      const extension = picked.fileName.split('.').pop()?.toLowerCase() || 'png';
-      const mimeType = `image/${extension === 'jpg' ? 'jpeg' : extension === 'svg' ? 'svg+xml' : extension}`;
-      const uint8Array = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
-      const base64 = btoa(String.fromCharCode(...uint8Array));
-      return `data:${mimeType};base64,${base64}`;
+      const dataUrl = await pickLocalImageAsDataUrl();
+      if (dataUrl) setForm({ ...form(), cover: dataUrl });
     } catch (error) {
-      if (isUserCancelled(error)) return null;
       console.error('选择本地图片失败:', error);
       props.onError('选择本地图片失败');
-      return null;
     }
   }
+
+  const options = () => bookSortOptions.map((o) => String(o.value));
+  const cover = () => form().cover;
 
   function handleOpenChange(open: boolean) {
     if (open) {
@@ -315,14 +182,6 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
     props.onOpenChange(false);
   }
 
-  async function pickCoverFromLocal() {
-    const dataUrl = await selectLocalImage();
-    if (dataUrl) setForm({ ...form(), cover: dataUrl });
-  }
-
-  const options = () => bookSortOptions.map((o) => String(o.value));
-  const cover = () => form().cover;
-
   return (
     <AppDialog open={props.open} onOpenChange={handleOpenChange}>
       <AppDialogContent>
@@ -338,10 +197,10 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
         </AppDialogHeader>
 
         <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-          <div class="flex flex-col gap-4 md:flex-row md:gap-6">
-            {/* md+：左侧封面预览，高度与右侧表单一致 */}
-            <div class="hidden min-h-0 shrink-0 self-stretch md:block">
-              <GroupCoverPreview cover={cover} onPickCover={pickCoverFromLocal} matchSiblingHeight />
+          <div class="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
+            {/* md+：左侧封面预览 */}
+            <div class="hidden shrink-0 md:block md:w-64">
+              <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
             </div>
 
             <div class="min-w-0 flex-1 space-y-4">
@@ -380,7 +239,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
 
                 {/* 小于 md：封面预览在输入框下方 */}
                 <div class="md:hidden">
-                  <GroupCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
+                  <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
                 </div>
               </div>
 
