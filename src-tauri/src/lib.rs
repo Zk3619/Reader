@@ -182,6 +182,8 @@ struct DownloadResponse {
 
 /// 下载二进制文件
 /// 直接使用 reqwest 库，避免 Tauri HTTP 插件在处理非 UTF-8 响应时的问题
+///
+/// `use_okhttp_user_agent`：对齐 Legado ruleContent ajax（仅 cookie + Content-Type）时使用 OkHttp 默认 UA，勿用桌面 Chrome
 #[tauri::command]
 async fn download_binary(
     url: String,
@@ -189,6 +191,7 @@ async fn download_binary(
     headers: Option<HashMap<String, String>>,
     body: Option<String>,
     timeout_ms: Option<u64>,
+    use_okhttp_user_agent: Option<bool>,
 ) -> Result<DownloadResponse, String> {
     // 规范化 URL，确保跨平台兼容性
     // 使用 reqwest 的 URL 解析功能（reqwest 内部使用 url crate）
@@ -223,15 +226,40 @@ async fn download_binary(
     // 信任所有证书：许多书源网站使用的证书不在 Mozilla CA 列表中（UnknownIssuer 错误）
     // 参考 legado 项目使用 SSLHelper.unsafeTrustManager 信任所有证书的做法
     // 注意：桌面端使用 native-tls（支持此功能），移动端使用 rustls-tls（可能不完全支持，但 Tauri HTTP 插件已处理）
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    const OKHTTP_UA: &str = "okhttp/4.9.1";
+
+    let has_custom_ua = headers
+        .as_ref()
+        .map(|hdrs| {
+            hdrs.keys()
+                .any(|k| k.eq_ignore_ascii_case("user-agent"))
+        })
+        .unwrap_or(false);
+
+    let mut client_builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(60000)))
         .connect_timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::limited(10))
         .gzip(true)
         .brotli(true)
         .deflate(true)
-        .danger_accept_invalid_certs(true) // 信任所有证书，以兼容各种书源网站
+        .danger_accept_invalid_certs(true); // 信任所有证书，以兼容各种书源网站
+
+    if !has_custom_ua {
+        let ua = if use_okhttp_user_agent.unwrap_or(false) {
+            OKHTTP_UA
+        } else {
+            CHROME_UA
+        };
+        client_builder = client_builder.user_agent(ua);
+    }
+
+    if use_okhttp_user_agent.unwrap_or(false) {
+        client_builder = client_builder.http1_only();
+    }
+
+    let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 

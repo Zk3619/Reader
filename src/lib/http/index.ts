@@ -146,6 +146,8 @@ export interface RequestOptions {
   allowNon2xx?: boolean;
   /** 外部取消（如探索页切换分类）；与 timeout 合并，用户取消时保留 AbortError */
   signal?: AbortSignal;
+  /** 对齐 Legado ruleContent ajax：仅使用传入 headers（不加 Accept 等浏览器默认头） */
+  legadoMinimalHeaders?: boolean;
 }
 
 /**
@@ -199,6 +201,7 @@ async function fetchViaDownloadBinary(
   headers: Record<string, string>,
   body: string | undefined,
   timeout: number,
+  useOkHttpUserAgent = false,
 ): Promise<Response> {
   const result = await invoke<DownloadBinaryResult>('download_binary', {
     url: normalizedUrl,
@@ -206,6 +209,7 @@ async function fetchViaDownloadBinary(
     headers,
     body,
     timeoutMs: timeout,
+    useOkhttpUserAgent: useOkHttpUserAgent,
   });
 
   const data = new Uint8Array(result.data);
@@ -271,6 +275,7 @@ async function executeRequest(
     followRedirects = true,
     enableCookieJar = false,
     signal: userSignal,
+    legadoMinimalHeaders = false,
   } = options;
 
   if (userSignal?.aborted) {
@@ -281,13 +286,16 @@ async function executeRequest(
 
   // 设置默认User-Agent
   // 注意：Connection 和 Keep-Alive 是 fetch 规范禁止的 headers，由 HTTP 客户端自动管理
-  const defaultHeaders: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Cache-Control': 'no-cache',
-    ...headers,
-  };
+  const defaultHeaders: Record<string, string> = legadoMinimalHeaders
+    ? { ...headers }
+    : {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: '*/*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        ...headers,
+      };
 
   // CookieJar + 请求头 Cookie：对齐 Legado AnalyzeUrl.setCookie（库 Cookie 先合并，urlOption/headers 同名覆盖）
   if (enableCookieJar) {
@@ -310,6 +318,20 @@ async function executeRequest(
     }
   });
 
+  if (legadoMinimalHeaders) {
+    const cookie = String(
+      defaultHeaders.Cookie ?? defaultHeaders.cookie ?? '',
+    ).trim();
+    const contentType = String(
+      defaultHeaders['Content-Type'] ?? defaultHeaders['content-type'] ?? 'application/json',
+    ).trim();
+    for (const key of Object.keys(defaultHeaders)) {
+      delete defaultHeaders[key];
+    }
+    defaultHeaders['content-type'] = contentType || 'application/json';
+    if (cookie) defaultHeaders.cookie = cookie;
+  }
+
   try {
     let response: Response;
 
@@ -325,6 +347,7 @@ async function executeRequest(
             defaultHeaders,
             bodyForRust,
             timeout,
+            legadoMinimalHeaders,
           ),
           userSignal,
         );
@@ -486,6 +509,7 @@ async function executeRequest(
               defaultHeaders,
               bodyForRust,
               timeout,
+              legadoMinimalHeaders,
             ),
             userSignal,
           );

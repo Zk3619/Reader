@@ -148,12 +148,18 @@ const DEFAULT_BROWSER_UA =
 function resolveUpstreamReferer(
   targetUrl: URL,
   session: InnerWebSession | undefined,
-  refererOverride?: string
-): string {
+  refererOverride?: string,
+): string | undefined {
+  if (refererOverride === 'none') {
+    return undefined;
+  }
   if (refererOverride && /^https?:\/\//i.test(refererOverride)) {
     return refererOverride;
   }
-  return session?.target ?? `${targetUrl.origin}/`;
+  if (session?.target) {
+    return session.target;
+  }
+  return `${targetUrl.origin}/`;
 }
 
 async function forwardToTarget(
@@ -161,7 +167,8 @@ async function forwardToTarget(
   req: IncomingMessage,
   res: ServerResponse,
   sessionId?: string,
-  refererOverride?: string
+  refererOverride?: string,
+  userAgentOverride?: string,
 ): Promise<void> {
   target = normalizeProxyTarget(target);
 
@@ -181,19 +188,25 @@ async function forwardToTarget(
   }
 
   const referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
-  let origin = targetUrl.origin;
-  try {
-    origin = new URL(referer).origin;
-  } catch {
-    /* keep target origin */
+  if (referer) {
+    let origin = targetUrl.origin;
+    try {
+      origin = new URL(referer).origin;
+    } catch {
+      /* keep target origin */
+    }
+    upstreamHeaders.set('Origin', origin);
+    upstreamHeaders.set('Referer', referer);
   }
 
+  const userAgent =
+    userAgentOverride?.trim() ||
+    upstreamHeaders.get('user-agent') ||
+    upstreamHeaders.get('User-Agent') ||
+    DEFAULT_BROWSER_UA;
+  upstreamHeaders.set('User-Agent', userAgent);
+  upstreamHeaders.delete('user-agent');
   upstreamHeaders.set('Host', targetUrl.host);
-  upstreamHeaders.set('Origin', origin);
-  upstreamHeaders.set('Referer', referer);
-  if (!upstreamHeaders.has('user-agent') && !upstreamHeaders.has('User-Agent')) {
-    upstreamHeaders.set('User-Agent', DEFAULT_BROWSER_UA);
-  }
 
   const cookie = req.headers[COOKIE_HEADER];
   if (cookie) {
@@ -435,10 +448,22 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
     const proxySessionId = parsed.searchParams.get('session') ?? undefined;
     const refererParam = parsed.searchParams.get('referer') ?? undefined;
     const refererOverride =
-      refererParam && /^https?:\/\//i.test(refererParam) ? refererParam : undefined;
+      refererParam === 'none'
+        ? 'none'
+        : refererParam && /^https?:\/\//i.test(refererParam)
+          ? refererParam
+          : undefined;
+    const userAgentOverride = parsed.searchParams.get('userAgent') ?? undefined;
 
     try {
-      await forwardToTarget(target, req, res, proxySessionId, refererOverride);
+      await forwardToTarget(
+        target,
+        req,
+        res,
+        proxySessionId,
+        refererOverride,
+        userAgentOverride ?? undefined,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('[reader-http-proxy]', target, msg);

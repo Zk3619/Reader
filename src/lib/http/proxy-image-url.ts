@@ -9,14 +9,32 @@ import {
   isWebHttpProxyNeeded,
   resolveWebHttpProxyPath,
 } from '@/lib/http/web-http-proxy';
-import { normalizeImageUrl, resolveCoverReferer } from '@/lib/http/resolve-cover-referer';
+import { normalizeImageUrl, resolveCoverReferer, resolveInlineImageReferer } from '@/lib/http/resolve-cover-referer';
 
 const NON_PROXY_SCHEMES = /^(data:|blob:|javascript:|file:|about:)/i;
 
 export type ProxiedImageUrlOptions = {
   referer?: string | null;
   source?: BookSource | null;
+  /** Legado 正文图 `data-legado-headers` / URL 后缀中的请求头 */
+  legadoImageHeaders?: Record<string, string> | null;
 };
+
+function pickLegadoHeader(
+  headers: Record<string, string> | null | undefined,
+  name: string,
+): string | undefined {
+  if (!headers) return undefined;
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === lower && v?.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function isImageResourceUrl(url: string): boolean {
+  return /\.(?:webp|jpe?g|png|gif|avif|bmp|svg)(?:\?|#|$)/i.test(url);
+}
 
 function isAlreadyProxied(url: string): boolean {
   return isReaderHttpProxyUrl(url);
@@ -40,14 +58,38 @@ export function toProxiedImageUrl(
   }
   const proxyPath = resolveWebHttpProxyPath();
   const params = new URLSearchParams({ target: trimmed });
-  const referer =
-    (options?.referer?.trim() && /^https?:\/\//i.test(options.referer.trim())
-      ? options.referer.trim()
-      : undefined) ??
-    resolveCoverReferer(options?.referer, options?.source ?? null, trimmed);
-  if (referer) {
-    params.set('referer', referer);
+
+  const legadoReferer = resolveInlineImageReferer(trimmed, options?.legadoImageHeaders);
+  const legadoUa = pickLegadoHeader(options?.legadoImageHeaders, 'User-Agent');
+
+  if (legadoReferer) {
+    params.set('referer', legadoReferer);
+  } else {
+    const resolvedReferer =
+      (options?.referer?.trim() && /^https?:\/\//i.test(options.referer.trim())
+        ? options.referer.trim()
+        : undefined) ??
+      resolveCoverReferer(options?.referer, options?.source ?? null, trimmed);
+    if (resolvedReferer) {
+      try {
+        const sameHost =
+          new URL(resolvedReferer).hostname === new URL(trimmed).hostname;
+        if (sameHost) {
+          params.set('referer', resolvedReferer);
+        }
+      } catch {
+        /* 跨域 CDN 图：不传 Referer，对齐浏览器地址栏直链 */
+      }
+    }
+    if (isImageResourceUrl(trimmed) && !params.has('referer')) {
+      params.set('referer', 'none');
+    }
   }
+
+  if (legadoUa) {
+    params.set('userAgent', legadoUa);
+  }
+
   return `${proxyPath}?${params.toString()}`;
 }
 

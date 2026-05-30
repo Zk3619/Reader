@@ -24,22 +24,39 @@ import {
   resolveCoverRequestHeaders,
 } from '@/lib/http/resolve-cover-referer';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
+import { withReaderInlineImageFetchSlot } from '@/lib/http/reader-inline-image-queue';
 import type { BookSource } from '@/types';
 import type { CoverCacheMeta } from '@/lib/cover/cover-disk-cache';
 
 const MAX_CACHE = 128;
 const cache = new Map<string, string>();
 
+/** 正文/漫画插图默认自动重试次数（不含首次，共 1 + N 次请求） */
+export const READER_INLINE_IMAGE_DEFAULT_RETRIES = 3;
+
+/** 正文插图重试基础间隔（毫秒），实际延迟指数退避 */
+export const READER_INLINE_IMAGE_RETRY_DELAY_MS = 900;
+
 export type CoverImageLoadOptions = {
   referer?: string | null;
   source?: BookSource | null;
+  /** Legado 正文图 `url,{"headers":{...}}` 中的请求头 */
+  legadoImageHeaders?: Record<string, string> | null;
   /** 用于签名封面过期时从书源刷新 thumb_url */
   bookUrl?: string | null;
   onCoverUrlRefreshed?: (newUrl: string) => void;
+  /** 失败后额外重试次数（0 = 仅请求一次） */
+  maxRetries?: number;
+  /** 重试间隔基数（毫秒） */
+  retryDelayMs?: number;
+  /** 单次请求超时（毫秒） */
+  timeoutMs?: number;
   /** 内部：禁止再次触发刷新，避免循环 */
   _refreshAttempted?: boolean;
   /** 内部：磁盘命中后后台更新，避免重复调度 */
   _backgroundRefreshScheduled?: boolean;
+  /** 经正文插图并发池拉取（漫画 image-viewer 等） */
+  readerInlineQueue?: boolean;
 };
 
 export {
@@ -138,6 +155,7 @@ async function fetchCoverImageBytes(
     options?.referer,
     options?.source,
     normalized,
+    options?.legadoImageHeaders,
   );
 
   let fetchUrl = normalized;
@@ -146,8 +164,9 @@ async function fetchCoverImageBytes(
   if (!isTauri() && isCrossOriginCoverUrl(normalized)) {
     fetchUrl =
       toProxiedImageUrl(normalized, {
-        referer: headers.Referer ?? options?.referer,
+        referer: options?.referer,
         source: options?.source,
+        legadoImageHeaders: options?.legadoImageHeaders,
       }) ?? normalized;
     const cookie = headers.Cookie ?? headers.cookie;
     if (cookie) {
@@ -155,13 +174,19 @@ async function fetchCoverImageBytes(
     }
   }
 
-  const response = await request(fetchUrl, {
-    method: 'GET',
-    headers: isTauri() ? headers : proxyHeaders,
-    allowNon2xx: true,
-    timeout: 20000,
-    enableCookieJar: options?.source?.enabledCookieJar ?? false,
-  });
+  const doRequest = () =>
+    request(fetchUrl, {
+      method: 'GET',
+      headers: isTauri() ? headers : proxyHeaders,
+      allowNon2xx: true,
+      timeout: options?.timeoutMs ?? 20_000,
+      enableCookieJar: options?.source?.enabledCookieJar ?? false,
+      concurrentRate: options?.source?.concurrentRate ?? undefined,
+    });
+
+  const response = options?.readerInlineQueue
+    ? await withReaderInlineImageFetchSlot(doRequest)
+    : await doRequest();
 
   if (!response.ok) {
     if (import.meta.env.DEV) {
@@ -205,12 +230,36 @@ async function persistCoverToDisk(
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchCoverImageBytesWithRetry(
+  normalized: string,
+  options?: CoverImageLoadOptions,
+): Promise<CoverImageBytes | null> {
+  const maxRetries = Math.max(0, options?.maxRetries ?? 0);
+  const baseDelay = options?.retryDelayMs ?? READER_INLINE_IMAGE_RETRY_DELAY_MS;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      await sleep(baseDelay * attempt);
+    }
+    const data = await fetchCoverImageBytes(normalized, options);
+    if (data) return data;
+  }
+  return null;
+}
+
 async function fetchAndCacheCover(
   normalized: string,
   options: CoverImageLoadOptions | undefined,
   memoryKey: string,
 ): Promise<string | null> {
-  const data = await fetchCoverImageBytes(normalized, options);
+  const data =
+    (options?.maxRetries ?? 0) > 0
+      ? await fetchCoverImageBytesWithRetry(normalized, options)
+      : await fetchCoverImageBytes(normalized, options);
   if (!data) return null;
 
   const objectUrl = blobUrlFromBytes(data.bytes, data.mime);
@@ -246,6 +295,21 @@ function scheduleBackgroundCoverUpdate(
       await patchCoverDiskMetaLastUrl(bookUrl, fresh);
     }
   })().catch(() => {});
+}
+
+/** 手动重试前清除内存 blob 缓存，避免沿用过期条目 */
+export function evictCoverImageMemoryCache(
+  url: string,
+  source?: BookSource | null,
+): void {
+  const normalized = normalizeImageUrl(url);
+  const sourceId = source?.sourceUrl ?? source?.sourceName;
+  const key = cacheKey(normalized, sourceId);
+  const existing = cache.get(key);
+  if (existing) {
+    URL.revokeObjectURL(existing);
+    cache.delete(key);
+  }
 }
 
 export async function loadCoverImageObjectUrl(

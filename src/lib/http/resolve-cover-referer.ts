@@ -5,6 +5,7 @@
 
 import type { BookSource } from '@/types';
 import { parseHeaders } from '@/lib/book-source/utils';
+import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
 import {
   cookieStorageKeyToOrigin,
   getStoredSourceCookiesForCover,
@@ -16,9 +17,10 @@ import {
   getSourceArgsKey,
 } from '@/lib/js-engine/legado/source-script-shared';
 
-/** 规范化封面地址（协议相对 //…） */
+/** 规范化封面地址（协议相对 //…；剥离 Legado ,{"headers":…} 后缀） */
 export function normalizeImageUrl(url: string): string {
-  const trimmed = url.trim();
+  const { url: bare } = parseLegadoUrlWithOptions(url.trim());
+  const trimmed = bare.trim();
   if (trimmed.startsWith('//') && typeof window !== 'undefined') {
     return `${window.location.protocol}${trimmed}`;
   }
@@ -40,6 +42,32 @@ function hostnameOf(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** 图片 URL 与 Referer 是否跨站（CDN 图常因错误 Referer 返回 403/防盗图） */
+export function isCrossOriginImageReferer(
+  imageUrl: string,
+  referer?: string | null,
+): boolean {
+  if (!referer?.trim()) return false;
+  const coverHost = hostnameOf(normalizeImageUrl(imageUrl));
+  const refHost = hostnameOf(referer.trim());
+  return Boolean(coverHost && refHost && coverHost !== refHost);
+}
+
+/** 正文插图可用的 Referer：Legado 指定且与图同站时才保留 */
+export function resolveInlineImageReferer(
+  imageUrl: string,
+  legadoHeaders?: Record<string, string> | null,
+): string | undefined {
+  if (!legadoHeaders) return undefined;
+  const legadoRef =
+    legadoHeaders.Referer ??
+    legadoHeaders.referer ??
+    legadoHeaders.REFERER;
+  if (!legadoRef?.trim()) return undefined;
+  if (isCrossOriginImageReferer(imageUrl, legadoRef)) return undefined;
+  return legadoRef.trim();
 }
 
 function readSourceArgs(source: BookSource): Record<string, unknown> | undefined {
@@ -184,6 +212,7 @@ export function resolveCoverRequestHeaders(
   bookOrigin?: string | null,
   source?: BookSource | null,
   coverUrl?: string | null,
+  extraHeaders?: Record<string, string> | null,
 ): Record<string, string> {
   const parsed = parseHeaders(source?.header);
   const headers: Record<string, string> = { ...parsed };
@@ -226,6 +255,22 @@ export function resolveCoverRequestHeaders(
     const cookieHeader = getStoredSourceCookiesForCover(source, normalizedCover);
     if (cookieHeader) {
       headers.Cookie = cookieHeader;
+    }
+  }
+
+  if (extraHeaders) {
+    for (const [k, v] of Object.entries(extraHeaders)) {
+      if (v?.trim()) headers[k] = v.trim();
+    }
+  }
+
+  if (normalizedCover.startsWith('http')) {
+    const ref = headers.Referer ?? headers.referer ?? headers.REFERER;
+    if (isCrossOriginImageReferer(normalizedCover, ref)) {
+      delete headers.Referer;
+      delete headers.referer;
+      delete headers.REFERER;
+      delete headers.Origin;
     }
   }
 
