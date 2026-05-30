@@ -53,6 +53,8 @@ export interface SourcesManagePageToolbarProps {
   onSourcesImportQR?: () => void;
   showSourcesImportQR?: boolean;
   onOpenSourceGroupManage?: () => void;
+  enableDragSort?: boolean;
+  onEnableDragSortChange?: (value: boolean) => void;
 }
 
 function MenuRadioIndicator(props: { selected: boolean }) {
@@ -252,6 +254,15 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
               />
             </span>
             <span>按域名分组显示</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
+            class="flex items-center gap-2"
+          >
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
+            </span>
+            <span>拖拽排序</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem
             onSelect={() => props.onSourceSearchModeChange?.('name')}

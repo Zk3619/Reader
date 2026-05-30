@@ -27,7 +27,10 @@ import {
 } from '@/lib/book-source/explore-sections';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
-import { pickDefaultExploreHubSection } from '@/lib/book-source/explore-nav-items';
+import {
+  isExploreSectionInNav,
+  resolveDefaultExploreNavSelection,
+} from '@/lib/book-source/explore-nav-items';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
 import {
   explorePageLayoutStore,
@@ -45,6 +48,8 @@ import { ExplorePageToolbar } from '@/components/explore/ExplorePageToolbar';
 import { ExploreSectionsPanel } from '@/components/explore/ExploreSectionsPanel';
 import { ExploreSourcePageContent } from '@/pages/explore/ExploreSourcePageContent';
 
+const EXPLORE_PAGE_TITLE = '探索';
+
 export interface ExplorePageProps {
   /** 为 false 时保留 UI 状态但不拉取发现分类/书籍列表（侧边栏隐藏态） */
   active?: boolean | Accessor<boolean>;
@@ -56,12 +61,6 @@ function sourceHasExplore(source: BookSource): boolean {
   if (source.enableExplore === false) return false;
   return !!(source.exploreUrl?.trim() || source.ruleExplore);
 }
-
-function sectionsMatch(a: ExploreSection, b: ExploreSection): boolean {
-  return a.title === b.title && (a.url ?? '') === (b.url ?? '');
-}
-
-const EXPLORE_PAGE_TITLE = '探索';
 
 export const ExplorePage: Component<ExplorePageProps> = (props) => {
   const isActive = createMemo(() => readShellPageActive(props.active));
@@ -199,10 +198,14 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     const secs = sections();
     if (!s || secs.length === 0 || sectionsLoading()) return;
     const sel = untrack(selectedSection);
-    if (sel && secs.some((x) => sectionsMatch(x, sel))) return;
-    const next = pickDefaultExploreHubSection(secs);
+    if (isExploreSectionInNav(secs, sel)) return;
+
+    const { section: next, argumentUpdate } = resolveDefaultExploreNavSelection(secs, sel);
+    if (argumentUpdate) {
+      updateExploreSourceArgument(s, argumentUpdate.paramKey, argumentUpdate.value);
+      return;
+    }
     setSelectedSection(next);
-    // 与 handleSectionSelect 一致：refreshKey 保持 0，pageCacheStore 才能在再次进入时命中
     if (next?.url?.trim()) setListRefreshKey(0);
   });
 

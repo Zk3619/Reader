@@ -40,6 +40,8 @@ export interface SourcesPageToolbarProps {
   showGroupByGroupNameOption?: boolean;
   sourcesGroupByGroupName?: boolean;
   onSourcesGroupByGroupNameChange?: (value: boolean) => void;
+  enableDragSort?: boolean;
+  onEnableDragSortChange?: (value: boolean) => void;
 }
 
 function MenuRadioIndicator(props: { selected: boolean }) {
@@ -186,6 +188,15 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
               <span>按分组名显示</span>
             </AppDropdownMenuItem>
           </Show>
+          <AppDropdownMenuItem
+            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
+            class="flex items-center gap-2"
+          >
+            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
+            </span>
+            <span>拖拽排序</span>
+          </AppDropdownMenuItem>
           <AppDropdownMenuItem
             onSelect={() => props.onSourceSearchModeChange?.('name')}
             class="flex items-center gap-2"

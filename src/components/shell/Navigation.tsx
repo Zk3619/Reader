@@ -43,10 +43,11 @@ export type PageType =
   | "record"
   | "settings"
   | "remote-book"
-  | "book-reader"
-  | "pic-reader"
-  | "audio-player"
-  | "video-player"
+  | "text-viewer"
+  | "image-viewer"
+  | "audio-viewer"
+  | "video-viewer"
+  | "file-viewer"
   | "book-info";
 
 interface NavigationProps {
@@ -64,10 +65,11 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
   settings: { label: "设置", icon: SettingsIcon, description: "应用设置" },
   "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
-  "book-reader": { label: "文本", icon: BookmarkIcon, description: "文本阅读" },
-  "pic-reader": { label: "漫画", icon: BookmarkIcon, description: "图片阅读" },
-  "audio-player": { label: "听书", icon: BookmarkIcon, description: "音频播放" },
-  "video-player": { label: "视频", icon: BookmarkIcon, description: "视频播放" },
+  "text-viewer": { label: "文本", icon: BookmarkIcon, description: "文本阅读" },
+  "image-viewer": { label: "漫画", icon: BookmarkIcon, description: "图片阅读" },
+  "audio-viewer": { label: "听书", icon: BookmarkIcon, description: "音频播放" },
+  "video-viewer": { label: "视频", icon: BookmarkIcon, description: "视频播放" },
+  "file-viewer": { label: "文件", icon: BookmarkIcon, description: "文件阅读" },
   "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
   "book-search": { label: "搜索", icon: BookOpenIcon, description: "搜索书架与全网书籍" },
   "bookshelf-cache": {
@@ -81,10 +83,11 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
 const NAV_HIDDEN_PAGES: PageType[] = [
   "explore",
   "remote-book",
-  "book-reader",
-  "pic-reader",
-  "audio-player",
-  "video-player",
+  "text-viewer",
+  "image-viewer",
+  "audio-viewer",
+  "video-viewer",
+  "file-viewer",
   "book-info",
   "book-search",
   "bookshelf-cache",

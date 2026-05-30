@@ -267,6 +267,8 @@ export interface SourcesManagePageProps {
   onClose?: () => void;
   sourceSearchMode?: SourceSearchMode;
   onSourceSearchModeChange?: (mode: SourceSearchMode) => void;
+  enableDragSort?: boolean;
+  onEnableDragSortChange?: (value: boolean) => void;
   onSourceEdit?: (source: BookSource) => void;
   onSourcesNew?: () => void;
   onSourcesImportLocal?: () => void;
@@ -391,6 +393,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
 
   const listSortableEnabled = createMemo(
     () =>
+      (props.enableDragSort ?? true) &&
       sortMode() === 'manual' &&
       groupMode() === 'flat' &&
       !searchQuery().trim() &&
@@ -400,10 +403,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
 
   const sortableSourceIds = createMemo(() => filteredSources().map((s) => s.sourceUrl));
 
-  /** 仅平铺 + 手动排序模式才挂载拖拽上下文 */
+  /** 平铺 + 手动排序 + 拖拽开关开启时挂载拖拽上下文 */
   const sourceListSortable = createMemo(():
     | VirtualListSortableConfig<SourceManageListRow>
     | undefined => {
+    if (!(props.enableDragSort ?? true)) return undefined;
     if (sortMode() !== 'manual' || groupMode() !== 'flat') return undefined;
     return {
       enabled: listSortableEnabled,
@@ -741,6 +745,8 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
           onSourcesImportQR={props.onSourcesImportQR}
           showSourcesImportQR={props.showSourcesImportQR}
           onOpenSourceGroupManage={props.onOpenSourceGroupManage}
+          enableDragSort={props.enableDragSort ?? true}
+          onEnableDragSortChange={props.onEnableDragSortChange}
         />
       </PageToolbar>
 

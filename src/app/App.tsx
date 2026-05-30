@@ -25,11 +25,27 @@ import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
 import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
-import { BookReader, PicReaderPage, AudioPlayerPage, VideoPlayerPage } from "@/pages/reader";
+import {
+  BookReader,
+  ImageViewerPage,
+  AudioViewerPage,
+  VideoViewerPage,
+  FileViewerPage,
+} from "@/pages/reader";
 import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
 import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
 import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
-import { resolveReaderKind } from "@/lib/book-source/book-type";
+import {
+  READER_MEDIA_TEXT_FALLBACK_EVENT,
+  type ReaderMediaTextFallbackDetail,
+} from "@/lib/reader/reader-media-messages";
+import { MediaKind, resolveMediaKind } from "@/lib/book-source/book-type";
+import {
+  mediaViewerPageForKind,
+  NON_TEXT_MEDIA_VIEWER_PAGES,
+  normalizeMediaViewerPage,
+  type MediaViewerPage,
+} from "@/lib/book-source/media-viewer";
 import { mediaReaderStore } from "@/stores/media-reader";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
@@ -191,34 +207,25 @@ const mockRecentBooks = [
 
 // 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
 const STANDALONE_PAGES: PageType[] = [
-  "book-reader",
-  "pic-reader",
-  "audio-player",
-  "video-player",
+  "text-viewer",
+  "image-viewer",
+  "audio-viewer",
+  "video-viewer",
+  "file-viewer",
   "explore",
   "book-info",
   "book-search",
   "remote-book",
 ];
 
-const MEDIA_READER_PAGES: PageType[] = ["pic-reader", "audio-player", "video-player"];
-
-function readerPageForKind(kind: ReturnType<typeof resolveReaderKind>): PageType {
-  switch (kind) {
-    case "pic":
-      return "pic-reader";
-    case "audio":
-      return "audio-player";
-    case "video":
-      return "video-player";
-    default:
-      return "book-reader";
-  }
+function isMediaViewerPage(page: PageType): page is MediaViewerPage {
+  return (NON_TEXT_MEDIA_VIEWER_PAGES as PageType[]).includes(page);
 }
 
 function normalizeRestoredPage(page: string): PageType {
   if (page === "import") return "bookshelf";
-  if (page === "reader") return "book-reader";
+  const viewer = normalizeMediaViewerPage(page);
+  if (viewer) return viewer;
   return page as PageType;
 }
 
@@ -316,6 +323,8 @@ function AppContent() {
   const [sourcesGroupByGroupName, setSourcesGroupByGroupName] = createSignal(false);
   /** 书源页：搜索模式（持久化到 sources_page_prefs） */
   const [sourceSearchMode, setSourceSearchMode] = createSignal<SourceSearchMode>('name');
+  /** 书源页：拖拽排序开关（持久化到 sources_page_prefs） */
+  const [sourceEnableDragSort, setSourceEnableDragSort] = createSignal(true);
   /** 书源页：排序 */
   const [sourceSortMode, setSourceSortMode] = createSignal<SourceSortMode>('manual');
   const [sourceSortReverse, setSourceSortReverse] = createSignal(false);
@@ -335,12 +344,20 @@ function AppContent() {
 
   createEffect(() => {
     if (currentPage() !== "sources") return;
-    void loadSourcesPagePrefs().then((p) => setSourceSearchMode(p.searchMode));
+    void loadSourcesPagePrefs().then((p) => {
+      setSourceSearchMode(p.searchMode);
+      setSourceEnableDragSort(p.enableDragSort);
+    });
   });
 
   const persistSearchMode = (mode: SourceSearchMode) => {
     setSourceSearchMode(mode);
-    void saveSourcesPagePrefs({ searchMode: mode });
+    void loadSourcesPagePrefs().then((p) => saveSourcesPagePrefs({ ...p, searchMode: mode }));
+  };
+
+  const persistSourceEnableDragSort = (value: boolean) => {
+    setSourceEnableDragSort(value);
+    void loadSourcesPagePrefs().then((p) => saveSourcesPagePrefs({ ...p, enableDragSort: value }));
   };
 
   const openBookSearch = (query?: string, scope?: string) => {
@@ -826,7 +843,7 @@ function AppContent() {
   const [bookInfoContext, setBookInfoContext] = createSignal<{
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'book-reader' | 'bookshelf' | 'book-search';
+    fromPage: 'explore' | 'scout' | 'text-viewer' | 'bookshelf' | 'book-search';
   } | null>(null);
 
   const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
@@ -839,10 +856,10 @@ function AppContent() {
     initialCatalog?: import("@/types").BookChapter[],
   ) {
     setReaderReturnPage(returnPage);
-    const kind = resolveReaderKind(book);
-    const page = readerPageForKind(kind);
+    const kind = resolveMediaKind(book);
+    const page = mediaViewerPageForKind(kind);
 
-    if (kind === "book") {
+    if (kind === MediaKind.text) {
       readerStore.setBookInitialState(book);
       setCurrentPage(page);
       void readerStore.openBook(book, { initialCatalog }).catch((e) => {
@@ -860,14 +877,45 @@ function AppContent() {
     });
   }
 
+  function openTextViewerFromMediaFallback(detail: ReaderMediaTextFallbackDetail) {
+    const book = mediaReaderStore.state.book;
+    const catalog = mediaReaderStore.state.catalog;
+    if (!book || book.bookUrl !== detail.bookUrl) return;
+
+    const returnPage = readerReturnPage();
+    void mediaReaderStore.closeBook().then(() => {
+      readerStore.setBookInitialState(book);
+      setCurrentPage("text-viewer");
+      void readerStore
+        .openBook(book, { initialCatalog: catalog.length > 0 ? catalog : undefined })
+        .then(() => readerStore.loadChapter(detail.chapterIndex))
+        .catch((e) => {
+          console.error("回退文本阅读器失败:", e);
+          setCurrentPage(returnPage);
+        });
+    });
+  }
+
+  onMount(() => {
+    const onMediaTextFallback = (event: Event) => {
+      openTextViewerFromMediaFallback(
+        (event as CustomEvent<ReaderMediaTextFallbackDetail>).detail,
+      );
+    };
+    window.addEventListener(READER_MEDIA_TEXT_FALLBACK_EVENT, onMediaTextFallback);
+    onCleanup(() => {
+      window.removeEventListener(READER_MEDIA_TEXT_FALLBACK_EVENT, onMediaTextFallback);
+    });
+  });
+
   async function finishCloseReader() {
     setGuestAddToShelfOpen(false);
     setGuestAddToShelfBusy(false);
     const page = currentPage();
     setCurrentPage(readerReturnPage());
-    if (page === "book-reader") {
+    if (page === "text-viewer") {
       await readerStore.closeBook();
-    } else if (MEDIA_READER_PAGES.includes(page)) {
+    } else if (isMediaViewerPage(page)) {
       await mediaReaderStore.closeBook();
     }
   }
@@ -2287,6 +2335,8 @@ function AppContent() {
                         )}
                         sourcesGroupByGroupName={sourcesGroupByGroupName()}
                         onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
+                        enableDragSort={sourceEnableDragSort()}
+                        onEnableDragSortChange={persistSourceEnableDragSort}
                       />
                     </PageToolbar>
                     <SourcesFilterDialog
@@ -2304,6 +2354,7 @@ function AppContent() {
                       appliedFilter={sourceListFilter()}
                       sortMode={sourceSortMode()}
                       sortReverse={sourceSortReverse()}
+                      enableDragSort={sourceEnableDragSort()}
                       expandedSourceUrl={sourcesExpandedSourceUrl()}
                       onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
                       exploreDrawerPresentationOpen={currentPage() === "sources"}
@@ -2374,6 +2425,8 @@ function AppContent() {
                       onClose={() => setShowSourcesManage(false)}
                       sourceSearchMode={sourceSearchMode()}
                       onSourceSearchModeChange={persistSearchMode}
+                      enableDragSort={sourceEnableDragSort()}
+                      onEnableDragSortChange={persistSourceEnableDragSort}
                       onSourceEdit={(source) => openSourceEditor(source)}
                       onSourcesNew={() => openSourceEditor()}
                       onSourcesImportLocal={() => void openLocalBookSourceImport()}
@@ -2614,7 +2667,7 @@ function AppContent() {
         {/* 独立页面（阅读器、发现、书籍信息、导入、远程书籍）- 全屏显示，在主容器外部 */}
         <Show when={isStandalonePage()}>
           {/* 文本阅读器 */}
-          <Show when={currentPage() === "book-reader"}>
+          <Show when={currentPage() === "text-viewer"}>
             <BookReader
               onClose={requestCloseReader}
               onOpenBookInfo={async () => {
@@ -2646,20 +2699,23 @@ function AppContent() {
                   chapterWordCount: 0,
                   respondTime: 0,
                 };
-                setBookInfoContext({ source, book: sb, fromPage: "book-reader" });
+                setBookInfoContext({ source, book: sb, fromPage: "text-viewer" });
                 setCurrentPage("book-info");
               }}
             />
           </Show>
 
-          <Show when={currentPage() === "pic-reader"}>
-            <PicReaderPage onClose={requestCloseReader} />
+          <Show when={currentPage() === "image-viewer"}>
+            <ImageViewerPage onClose={requestCloseReader} />
           </Show>
-          <Show when={currentPage() === "audio-player"}>
-            <AudioPlayerPage onClose={requestCloseReader} />
+          <Show when={currentPage() === "audio-viewer"}>
+            <AudioViewerPage onClose={requestCloseReader} />
           </Show>
-          <Show when={currentPage() === "video-player"}>
-            <VideoPlayerPage onClose={requestCloseReader} />
+          <Show when={currentPage() === "video-viewer"}>
+            <VideoViewerPage onClose={requestCloseReader} />
+          </Show>
+          <Show when={currentPage() === "file-viewer"}>
+            <FileViewerPage onClose={requestCloseReader} />
           </Show>
 
           {/* 发现页：书源展开项进入，全屏独立（与阅读器同级，不在主容器内） */}

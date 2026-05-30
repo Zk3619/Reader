@@ -29,17 +29,22 @@ import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
 import { SourcePageListItem } from '@/components/sources/SourcePageListItem';
 import {
   buildSourceManageListRows,
+  SourceManageListDragOverlay,
   VirtualSourceManageList,
+  type SourceManageListRow,
 } from '@/components/sources/VirtualSourceManageList';
 import {
   SOURCE_PAGE_LIST_ROW_HEIGHT_PX,
   isFirstGroupHeaderRow,
 } from '@/components/sources/source-list-layout';
+import type { Id } from '@thisbeyond/solid-dnd';
+import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   filterSourcesByCriteria,
   buildSourceFilterGroupOptions,
   getEffectiveSourceListFilter,
+  hasEffectiveSourceListFilter,
   type SourceListFilterCriteria,
   EMPTY_SOURCE_LIST_FILTER,
   shouldGroupSourcesByGroupName,
@@ -84,6 +89,8 @@ export interface SourcesPageProps {
   sortMode?: SourceSortMode;
   /** 反向排序（手动排序时无效） */
   sortReverse?: boolean;
+  /** 拖拽排序开关（持久化于 sources_page_prefs） */
+  enableDragSort?: boolean;
 }
 
 export function SourcesPage(props: SourcesPageProps) {
@@ -204,6 +211,66 @@ export function SourcesPage(props: SourcesPageProps) {
       : 'flat';
 
   const listRows = createMemo(() => buildSourceManageListRows(displayGroups(), listGroupMode()));
+
+  const isFilterEmpty = () =>
+    !hasEffectiveSourceListFilter(
+      props.appliedFilter ?? EMPTY_SOURCE_LIST_FILTER,
+      filterGroupOptions(),
+    );
+
+  const listSortableEnabled = createMemo(
+    () =>
+      (props.enableDragSort ?? true) &&
+      (props.sortMode ?? 'manual') === 'manual' &&
+      listGroupMode() === 'flat' &&
+      !(props.sourceSearchQuery ?? '').trim() &&
+      isFilterEmpty() &&
+      filteredSources().length === sources().length,
+  );
+
+  const sourceListSortable = createMemo(():
+    | VirtualListSortableConfig<SourceManageListRow>
+    | undefined => {
+    if (!(props.enableDragSort ?? true)) return undefined;
+    if ((props.sortMode ?? 'manual') !== 'manual' || listGroupMode() !== 'flat') return undefined;
+    return {
+      enabled: listSortableEnabled,
+      ids: () => filteredSources().map((s) => s.sourceUrl),
+      onReorder: handleSourcesReorder,
+    };
+  });
+
+  async function handleSourcesReorder(orderedIds: Id[]) {
+    try {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await sourcesDb.updateSourceOrder(String(orderedIds[i]), i);
+      }
+      window.dispatchEvent(new CustomEvent('sources-refresh'));
+      await loadSources();
+    } catch (e) {
+      showAppToast({
+        title: '排序失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
+  function renderSourceDragOverlay(activeId: Id | null) {
+    if (activeId == null) return null;
+    const url = String(activeId);
+    const row = listRows().find(
+      (r): r is Extract<SourceManageListRow, { type: 'source' }> =>
+        r.type === 'source' && r.source.sourceUrl === url,
+    );
+    if (!row) return null;
+    return (
+      <SourceManageListDragOverlay
+        source={row.source}
+        showGroupBadge={row.showGroupBadge}
+      />
+    );
+  }
 
   const expandedSource = () => {
     const url = expandedSourceUrl();
@@ -355,6 +422,8 @@ export function SourcesPage(props: SourcesPageProps) {
           rows={listRows()}
           sourceRowHeightPx={SOURCE_PAGE_LIST_ROW_HEIGHT_PX}
           class="min-h-0 flex-1 px-1 pb-4"
+          sortable={sourceListSortable()}
+          renderDragOverlay={sourceListSortable() ? renderSourceDragOverlay : undefined}
         >
           {(row, index) => {
             if (row.type === 'header') {
