@@ -13,7 +13,7 @@ import { BottomBar } from "@/components/shell/BottomBar";
 import { Tray } from "@/components/shell/Tray";
 import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
-import { BookShelf } from "@/pages/bookshelf/BookShelf";
+import { BookShelf } from "@/pages/bookshelf/BookShelfPage";
 import { BookshelfCachePage } from "@/pages/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/sources/SourcesPage";
 import { SourcesManagePage } from "@/pages/sources/SourcesManagePage";
@@ -22,7 +22,7 @@ import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
 import { ExplorePage } from "@/pages/explore/ExplorePage";
 import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
 import { BookInfoDrawer } from "@/pages/book-info/BookInfoDrawer";
-import { BookGroupManage } from "@/pages/bookshelf/BookGroupManage";
+import { BookGroupManage } from "@/pages/bookshelf/BookGroupManagePage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
 import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
@@ -32,14 +32,14 @@ import {
   AudioViewerPage,
   VideoViewerPage,
   FileViewerPage,
-} from "@/pages/reader";
+} from "@/pages/viewer";
 import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
 import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
 import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
 import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
-} from "@/lib/reader/reader-media-messages";
+} from "@/lib/media/text/reader-media-messages";
 import { MediaKind, resolveMediaKind } from "@/lib/book-source/book-type";
 import {
   mediaViewerPageForKind,
@@ -47,7 +47,7 @@ import {
   normalizeMediaViewerPage,
   type MediaViewerPage,
 } from "@/lib/book-source/media-viewer";
-import { mediaReaderStore } from "@/stores/media-reader";
+import { mediaReaderStore } from "@/stores/media-viewer";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
 import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetworkDialog";
@@ -60,7 +60,7 @@ import { bookshelfStore } from "@/stores/bookshelf";
 import { readerStore } from "@/stores/reader";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
-import { ReaderGuestAddToShelfDialog } from "@/components/reader/ReaderGuestAddToShelfDialog";
+import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/ReaderGuestAddToShelfDialog";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
@@ -87,7 +87,7 @@ import { initDatabase } from "@/lib/database";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
-import { hasBook } from "@/lib/database/books";
+import { getBook, hasBook } from "@/lib/database/books";
 import {
   importLocalBook,
   importLocalBookFromContent,
@@ -176,7 +176,7 @@ import {
 } from "@/lib/book-source/import-network-sidecar";
 import { importDatabase } from "@/lib/database/export-import";
 import { SourceBlocklistSetting } from "@/components/settings/SourceBlocklistSetting";
-import { InnerWebHost } from "@/pages/inner-web/InnerWebHost";
+import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
@@ -342,6 +342,31 @@ function AppContent() {
 
   createEffect(() => {
     writeHmrData("currentPage", currentPage());
+  });
+
+  /** DEV HMR：页面仍停在媒体阅读器但 store 已重置时，尝试从缓存会话恢复或退回书架 */
+  createEffect(() => {
+    const page = currentPage();
+    if (!isMediaViewerPage(page)) return;
+    if (mediaReaderStore.state.book || mediaReaderStore.state.loading) return;
+
+    const session = readHmrData<{ bookUrl: string; kind: MediaKind } | null>(
+      "mediaViewerSession",
+      null,
+    );
+    if (session?.bookUrl) {
+      void getBook(session.bookUrl).then((book) => {
+        if (!book || mediaReaderStore.state.book) return;
+        mediaReaderStore.setBookInitialState(book, session.kind);
+        void mediaReaderStore.openBook(book, session.kind).catch((e) => {
+          console.error("HMR 恢复媒体阅读器失败:", e);
+          setCurrentPage(readerReturnPage());
+        });
+      });
+      return;
+    }
+
+    setCurrentPage(readerReturnPage());
   });
 
   createEffect(() => {
@@ -916,6 +941,7 @@ function AppContent() {
     }
 
     mediaReaderStore.setBookInitialState(book, kind);
+    writeHmrData("mediaViewerSession", { bookUrl: book.bookUrl, kind });
     setCurrentPage(page);
     void mediaReaderStore.openBook(book, kind, { initialCatalog }).catch((e) => {
       console.error("打开书籍失败:", e);
@@ -929,12 +955,14 @@ function AppContent() {
     if (!book || book.bookUrl !== detail.bookUrl) return;
 
     const returnPage = readerReturnPage();
+    const initialCatalog = catalog.length > 0 ? catalog : undefined;
+    const chapterIndex = detail.chapterIndex;
+    setCurrentPage("text-viewer");
     void mediaReaderStore.closeBook().then(() => {
       readerStore.setBookInitialState(book);
-      setCurrentPage("text-viewer");
       void readerStore
-        .openBook(book, { initialCatalog: catalog.length > 0 ? catalog : undefined })
-        .then(() => readerStore.loadChapter(detail.chapterIndex))
+        .openBook(book, { initialCatalog })
+        .then(() => readerStore.loadChapter(chapterIndex))
         .catch((e) => {
           console.error("回退文本阅读器失败:", e);
           setCurrentPage(returnPage);
@@ -963,6 +991,7 @@ function AppContent() {
       await readerStore.closeBook();
     } else if (isMediaViewerPage(page)) {
       await mediaReaderStore.closeBook();
+      writeHmrData("mediaViewerSession", null);
     }
   }
 
