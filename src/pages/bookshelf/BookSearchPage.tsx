@@ -65,13 +65,13 @@ import {
   exploreBookListCardClass,
   exploreBookListCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
-import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
+import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 import {
   EXPLORE_BOOK_GRID_CLASS,
   EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
-} from '@/pages/explore/ExploreBookCardSkeleton';
-import { VirtualExploreBookGrid } from '@/components/bookshelf/VirtualExploreBookGrid';
+} from '@/components/explore/ExploreBookCardSkeleton';
+import { VirtualExploreBookGrid } from '@/components/explore/VirtualExploreBookGrid';
 
 export interface BookSearchPageProps {
   initialQuery?: string;

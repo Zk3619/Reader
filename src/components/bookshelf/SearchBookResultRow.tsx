@@ -16,7 +16,7 @@ import {
   exploreBookListCardClass,
   exploreBookListCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
-import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
+import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 import {
   buildBadgeTooltipText,

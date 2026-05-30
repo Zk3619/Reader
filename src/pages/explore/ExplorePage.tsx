@@ -26,7 +26,7 @@ import {
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
-import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
+import { ExploreBookListSkeleton } from '@/components/explore/ExploreBookCardSkeleton';
 import {
   isExploreSectionInNav,
   resolveDefaultExploreNavSelection,
@@ -46,7 +46,7 @@ import {
 } from '@/components/explore/ExploreSourceNav';
 import { ExplorePageToolbar } from '@/components/explore/ExplorePageToolbar';
 import { ExploreSectionsPanel } from '@/components/explore/ExploreSectionsPanel';
-import { ExploreSourcePageContent } from '@/pages/explore/ExploreSourcePageContent';
+import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
 
 const EXPLORE_PAGE_TITLE = '探索';
 

@@ -9,7 +9,7 @@ import {
   EXPLORE_BOOK_GRID_CLASS,
   EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
   useExploreGridColumnCount,
-} from '@/pages/explore/ExploreBookCardSkeleton';
+} from '@/components/explore/ExploreBookCardSkeleton';
 import { cn } from '@/lib/utils';
 
 export interface VirtualExploreBookGridProps<T> {

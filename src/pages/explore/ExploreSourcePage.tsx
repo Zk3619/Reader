@@ -10,7 +10,7 @@ import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import { pageCacheStore } from '@/stores/page-cache';
-import { ExploreSourcePageContent } from '@/pages/explore/ExploreSourcePageContent';
+import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
 
 export interface ExploreSourcePageProps {
   source: BookSource;

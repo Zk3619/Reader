@@ -35,7 +35,7 @@ import { BookGroupId } from '@/types';
 import { exportBookshelfJson } from '@/lib/bookshelf/export-bookshelf';
 import { ImportBookshelfDialog } from '@/components/bookshelf/ImportBookshelfDialog';
 import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
-import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroup';
+import { BookGroup as BookGroupPage } from '@/pages/bookshelf/BookGroupPage';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookEditDialog } from '@/components/books/BookEditDialog';

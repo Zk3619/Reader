@@ -3,7 +3,7 @@
  */
 
 import { createEffect, createResource, createSignal, For, onCleanup, Show, onMount } from 'solid-js';
-import { VirtualExploreBookGrid } from '@/components/bookshelf/VirtualExploreBookGrid';
+import { VirtualExploreBookGrid } from '@/components/explore/VirtualExploreBookGrid';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -25,8 +25,8 @@ import {
   exploreBookListBadgeClass,
   exploreBookListBadgeLastClass,
 } from '@/lib/bookshelf/book-group-card-styles';
-import { ExploreBookListSkeleton } from '@/pages/explore/ExploreBookCardSkeleton';
-import { ExploreBookListIntro } from '@/pages/explore/ExploreBookListIntro';
+import { ExploreBookListSkeleton } from '@/components/explore/ExploreBookCardSkeleton';
+import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {

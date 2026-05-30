@@ -9,7 +9,7 @@ import {
   EXPLORE_BOOK_GRID_CLASS,
   EXPLORE_BOOK_GRID_GAP_PX,
   useExploreGridColumnCount,
-} from '@/pages/explore/ExploreBookCardSkeleton';
+} from '@/components/explore/ExploreBookCardSkeleton';
 import { CACHE_BOOK_CARD_HEIGHT_PX } from '@/components/bookshelf/BookshelfCacheBookCard';
 import { cn } from '@/lib/utils';
 import type { Book } from '@/types';
