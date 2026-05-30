@@ -44,28 +44,30 @@ import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import {
   loadReaderUiConfig,
   saveReaderUiConfig,
-} from '@/lib/reader/read-config-storage';
+} from '@/lib/media/text/read-config-storage';
 import {
   startReadingSession,
   flushReadingSession,
   tickReadingSession,
-} from '@/lib/reader/reading-session';
+} from '@/lib/media/text/reading-session';
 import {
   DEFAULT_CLICK_ACTIONS,
   type ReaderClickActions,
-} from '@/lib/reader/reader-click-actions';
+} from '@/lib/media/text/reader-click-actions';
 import {
   DEFAULT_CLICK_REGION,
   type ReaderClickRegion,
-} from '@/lib/reader/reader-click-region';
-import type { ReadAloudEngine } from '@/lib/reader/read-aloud';
-import type { Book, BookChapter, BookProgress } from '@/types';
-import type { BookSource } from '@/types';
+} from '@/lib/media/text/reader-click-region';
+import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
+import type { Book, BookChapter, BookProgress, BookSource } from '@/types';
+import {
+  migrateReaderImageStyle,
+} from '@/lib/js-engine/legado/legado-image-options';
 
 /** 翻页模式（对齐 Legado PageAnim；Web 端 scroll 为默认且完整支持） */
 export type ReaderPageAnim = 'scroll' | 'cover' | 'slide' | 'none';
 export type ReaderDualPageMode = 'off' | 'auto' | 'always';
-export type ReaderImageStyle = 'default' | 'FULL' | 'CENTER';
+export type ReaderImageStyle = 'DEFAULT' | 'FULL' | 'TEXT' | 'SINGLE';
 
 /**
  * 阅读配置
@@ -155,7 +157,7 @@ const defaultConfig: ReadConfig = {
   aloudEngine: 'system',
   httpTtsId: null,
   speakSpeed: 5,
-  imageStyle: 'default',
+  imageStyle: 'DEFAULT',
 };
 
 let configHydrated = false;
@@ -199,16 +201,17 @@ async function hydrateReaderConfig(): Promise<void> {
       },
       clickRegion: saved.clickRegion
         ? {
-            xSplits: [
-              saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
-              saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
-            ] as [number, number],
-            ySplits: [
-              saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
-              saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
-            ] as [number, number],
-          }
+          xSplits: [
+            saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
+            saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
+          ] as [number, number],
+          ySplits: [
+            saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
+            saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
+          ] as [number, number],
+        }
         : prev.clickRegion,
+      imageStyle: migrateReaderImageStyle(saved.imageStyle),
     }));
   }
 }

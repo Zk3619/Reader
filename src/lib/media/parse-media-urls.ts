@@ -3,7 +3,8 @@
  * 对齐 Legado：音频与视频章节正文多为直链或少量 HTML
  */
 
-export type MediaUrlKind = 'image' | 'audio' | 'video' | 'file';
+/** 与 MediaKind 对齐；text 章节正文不作为 URL 列表解析 */
+export type MediaUrlKind = 'text' | 'image' | 'audio' | 'video' | 'file';
 
 const IMG_SRC_RE = /<img[^>]+src=["']([^"']+)["']/gi;
 const SOURCE_SRC_RE = /<source[^>]+src=["']([^"']+)["']/gi;
@@ -64,6 +65,7 @@ function looksLikeMediaUrl(url: string, kind: MediaUrlKind): boolean {
 export function parseMediaUrls(raw: string, kind: MediaUrlKind): string[] {
   const text = raw?.trim() ?? '';
   if (!text) return [];
+  if (kind === 'text') return [];
 
   const urls: string[] = [];
 
@@ -108,7 +110,7 @@ export function parseMediaUrls(raw: string, kind: MediaUrlKind): string[] {
 /** 音频 / 视频 / 文件章节通常只有一个主 URL */
 export function parsePrimaryMediaUrl(
   raw: string,
-  kind: 'audio' | 'video' | 'file',
+  kind: Exclude<MediaUrlKind, 'text' | 'image'>,
 ): string | null {
   const list = parseMediaUrls(raw, kind);
   return list[0] ?? null;

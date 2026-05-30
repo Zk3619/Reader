@@ -12,6 +12,7 @@ import type { Book, BookChapter } from '@/types';
 import type { ChapterCacheSettings } from '@/lib/chapter-cache/settings';
 
 const inflight = new Set<string>();
+const MAX_PREFETCH_INFLIGHT = 2;
 
 function taskKey(bookUrl: string, index: number): string {
   return `${bookUrl}#${index}`;
@@ -67,6 +68,7 @@ export async function prefetchChaptersOnRead(
   if (!source?.enabled) return;
 
   for (const index of targets) {
+    if (inflight.size >= MAX_PREFETCH_INFLIGHT) break;
     const key = taskKey(book.bookUrl, index);
     if (inflight.has(key)) continue;
     const existing = await readCachedChapterRaw(book.bookUrl, index);
