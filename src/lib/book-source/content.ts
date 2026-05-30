@@ -19,7 +19,9 @@ import {
   normalizeDataUrlPayload,
   coalesceSourceField,
   legadoDataUrlRuleBody,
-  isLegadoTypedDataUrl,
+  legadoHexEncodeBytes,
+  decodeDataUriBase64Payload,
+  splitLegadoUrlOptions,
   readBookContentSource,
   buildContentApiItemIdCandidates,
   extractComicIdFromAggregationBookId,
@@ -27,6 +29,113 @@ import {
   buildTypedChapterDataUrl,
   extractHostListFromJsLib,
 } from '@/lib/book-source/utils';
+
+/** 章节 URL 为 Legado data: 载荷（含或不含 ,{"type":...}） */
+function isDataChapterUrl(url: string): boolean {
+  return /^data:/i.test(url.trim());
+}
+
+function decodeChapterDataPayload(
+  chapterBase: string,
+  chapterUrl: string,
+): Record<string, string> | null {
+  try {
+    const abs = resolveUrl(chapterBase, chapterUrl);
+    return decodeDataUrl(abs);
+  } catch {
+    return null;
+  }
+}
+
+/** 目录缓存错误时章节 URL 可能为「来源:标题」而非 data: 载荷 */
+async function tryRepairChapterDataUrl(
+  source: BookSource,
+  chapter: BookChapter,
+  book: Book | undefined,
+  chapterBase: string,
+): Promise<{ url: string; chapter: BookChapter } | null> {
+  const absoluteUrl = resolveUrl(chapterBase, chapter.url);
+  if (/^https?:\/\//i.test(absoluteUrl.trim())) return null;
+
+  if (isDataChapterUrl(absoluteUrl)) {
+    const decoded = decodeChapterDataPayload(chapterBase, chapter.url);
+    if (decoded?.item_id?.trim()) return null;
+  }
+
+  let bookPayload: Record<string, string> | null = null;
+  for (const u of [book?.tocUrl, book?.bookUrl]) {
+    if (!u?.startsWith('data:')) continue;
+    const d = decodeDataUrl(resolveUrl(chapterBase, u));
+    if (d?.book_id?.trim()) {
+      bookPayload = normalizeDataUrlPayload(d);
+      break;
+    }
+  }
+  if (!bookPayload?.book_id) return null;
+
+  const titleMatch = chapter.title.trim().match(/^([^:：]+)[:：]\s*(.+)$/);
+  const sourcesLabel =
+    titleMatch?.[1]?.trim() ||
+    coalesceSourceField(bookPayload.sources, bookPayload.source);
+  const chapterTitle = titleMatch?.[2]?.trim() || chapter.title.trim();
+
+  let merged = normalizeDataUrlPayload({
+    ...bookPayload,
+    item_id: '',
+    sources: sourcesLabel || bookPayload.sources,
+    source: sourcesLabel || bookPayload.source,
+    tab: bookPayload.tab || '小说',
+    title: chapterTitle,
+    url: bookPayload.url ?? bookPayload.toc_url ?? '',
+  });
+
+  merged = await enrichChapterContentPayload(
+    source,
+    merged,
+    [book?.tocUrl, book?.bookUrl],
+    book?.variable,
+  );
+
+  if (!merged.item_id?.trim()) {
+    const freshId = await resolveFreshCatalogItemId(
+      source,
+      merged,
+      { title: chapter.title, index: chapter.index ?? 0 },
+      book?.variable,
+    );
+    if (!freshId) return null;
+    merged = normalizeDataUrlPayload({ ...merged, item_id: freshId });
+  }
+
+  const contentUrl = buildTypedChapterDataUrl(merged);
+  console.log('[content] 已从书籍 data URL + catalog 修复章节 URL', {
+    chapter: chapter.title,
+    item_id_len: merged.item_id?.length ?? 0,
+    sources: merged.sources || merged.source,
+    tab: merged.tab,
+  });
+  return { url: contentUrl, chapter: { ...chapter, url: contentUrl } };
+}
+
+/** data: 章节且能解析出 item_id 时可直连 /content */
+async function tryDirectContentApiForChapter(
+  source: BookSource,
+  contentUrl: string,
+  chapterBase: string,
+  chapterUrl: string,
+  book?: Book,
+): Promise<string | null> {
+  if (!isDataChapterUrl(contentUrl)) return null;
+  const decoded = decodeChapterDataPayload(chapterBase, chapterUrl);
+  if (!decoded?.item_id?.trim()) return null;
+  const payload = normalizeDataUrlPayload(decoded);
+  return requestContentApiDirect(
+    source,
+    payload,
+    book?.variable,
+    [book?.tocUrl, book?.bookUrl],
+  );
+}
 import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
 import { logContentImageDiagnostics } from '@/lib/book-source/content-image-debug';
 import { summarizeContentPostItemId } from '@/lib/book-source/content-post-debug';
@@ -34,7 +143,7 @@ import {
   traceContentFetchStart,
   traceContentFetchDone,
 } from '@/lib/book-source/content-fetch-trace';
-import { scanImgTags } from '@/lib/reader/scan-img-tags';
+import { scanImgTags } from '@/lib/media/text/scan-img-tags';
 import { extractContentFromRuleOutput } from '@/lib/book-source/extract-rule-content';
 import {
   extractApiContent,
@@ -273,11 +382,11 @@ async function requestContentApiDirect(
     }
     const lastBody = itemIdCandidates.length
       ? (JSON.parse(
-          buildContentApiPostBody(
-            { ...requestPayload, item_id: itemIdCandidates[itemIdCandidates.length - 1]! },
-            bookVariable,
-          ),
-        ) as Record<string, unknown>)
+        buildContentApiPostBody(
+          { ...requestPayload, item_id: itemIdCandidates[itemIdCandidates.length - 1]! },
+          bookVariable,
+        ),
+      ) as Record<string, unknown>)
       : {};
     const lastItemId =
       typeof lastBody.item_id === 'string' ? lastBody.item_id : '';
@@ -371,6 +480,18 @@ async function resolveChapterRuleBody(
   if (hexBody != null) {
     return { body: hexBody, baseUrl: absoluteUrl, contentType: 'text' };
   }
+  if (/^data:/i.test(absoluteUrl.trim())) {
+    const { urlNoOption } = splitLegadoUrlOptions(absoluteUrl);
+    const bytes = decodeDataUriBase64Payload(urlNoOption);
+    if (bytes?.length) {
+      return {
+        body: legadoHexEncodeBytes(bytes),
+        baseUrl: absoluteUrl,
+        contentType: 'text',
+      };
+    }
+    return { body: '', baseUrl: absoluteUrl, contentType: 'text' };
+  }
   const html = await fetchChapterPageBody(source, chapter, chapterBase, absoluteUrl);
   return {
     body: html,
@@ -390,7 +511,7 @@ function buildContentRuleContext(
   let variables: Record<string, string> | undefined;
   try {
     const abs = resolveUrl(chapter.baseUrl || source.sourceUrl || '', chapter.url);
-    if (isLegadoTypedDataUrl(abs)) {
+    if (isDataChapterUrl(abs)) {
       const decoded = decodeDataUrl(abs);
       if (decoded) {
         const normalized = normalizeDataUrlPayload(decoded);
@@ -428,10 +549,10 @@ function buildContentRuleContext(
     source: source as unknown as Record<string, unknown>,
     book: book
       ? ({
-          ...(book as unknown as Record<string, unknown>),
-          durChapterIndex: book.durChapterIndex ?? chapter.index,
-          variable: book.variable,
-        } as Record<string, unknown>)
+        ...(book as unknown as Record<string, unknown>),
+        durChapterIndex: book.durChapterIndex ?? chapter.index,
+        variable: book.variable,
+      } as Record<string, unknown>)
       : undefined,
     chapter: chapter as unknown as Record<string, unknown>,
     variables,
@@ -517,12 +638,22 @@ export async function getContent(
     }
     visited.add(absoluteUrl);
 
-    const typedDataUrl = isLegadoTypedDataUrl(absoluteUrl);
     let contentUrl = absoluteUrl;
     let contentChapter = chapter;
 
-    if (typedDataUrl) {
-      const decoded = decodeDataUrl(absoluteUrl);
+    const repaired = await tryRepairChapterDataUrl(
+      source,
+      chapter,
+      book,
+      chapterBase,
+    );
+    if (repaired) {
+      contentUrl = repaired.url;
+      contentChapter = repaired.chapter;
+    }
+
+    if (isDataChapterUrl(contentUrl)) {
+      const decoded = decodeDataUrl(contentUrl);
       if (decoded?.book_id?.trim()) {
         const payload = normalizeDataUrlPayload(decoded);
         const merged = await enrichChapterContentPayload(
@@ -563,7 +694,7 @@ export async function getContent(
       contentChapter,
       chapterBase,
     );
-    if (typedDataUrl) {
+    if (isDataChapterUrl(contentUrl)) {
       const decoded = decodeDataUrl(contentUrl);
       if (decoded) {
         console.log('[content] data URL 载荷:', {
@@ -597,7 +728,7 @@ export async function getContent(
         imgCount: scanImgTags(content).length,
         path: 'ruleContent',
       });
-    } else if (!content?.trim() && typedDataUrl) {
+    } else if (!content?.trim() && isDataChapterUrl(contentUrl)) {
       console.warn('[content] ruleContent 链未产出正文（将尝试直连 /content）', {
         chapter: chapter.title,
       });
@@ -608,20 +739,17 @@ export async function getContent(
     }
 
     // 规则脚本失败时回退直连 /content（与 ruleContent 内 java.ajax 同接口）
-    if (!content?.trim() && typedDataUrl) {
-      const decodedForDirect = decodeDataUrl(contentUrl);
-      if (decodedForDirect?.item_id?.trim()) {
-        const payload = normalizeDataUrlPayload(decodedForDirect);
-        const viaDirect = await requestContentApiDirect(
-          source,
-          payload,
-          book?.variable,
-          [book?.tocUrl, book?.bookUrl],
-        );
-        if (viaDirect?.trim()) {
-          console.log('[content] 规则未返回正文，直连 /content 回退成功，长度:', viaDirect.length);
-          content = viaDirect;
-        }
+    if (!content?.trim()) {
+      const viaDirect = await tryDirectContentApiForChapter(
+        source,
+        contentUrl,
+        chapterBase,
+        contentChapter.url,
+        book,
+      );
+      if (viaDirect?.trim()) {
+        console.log('[content] 规则未返回正文，直连 /content 回退成功，长度:', viaDirect.length);
+        content = viaDirect;
       }
     }
 
@@ -633,13 +761,13 @@ export async function getContent(
           const retryHtml = isContentApi
             ? body
             : await get(resolveUrl(chapterBase, chapter.url), {
-                headers: buildSourceRequestHeaders(
-                  source,
-                  resolveUrl(chapterBase, chapter.url),
-                ),
-                enableCookieJar: source.enabledCookieJar,
-                timeout: 60_000,
-              });
+              headers: buildSourceRequestHeaders(
+                source,
+                resolveUrl(chapterBase, chapter.url),
+              ),
+              enableCookieJar: source.enabledCookieJar,
+              timeout: 60_000,
+            });
           const retryContext: RuleContext = {
             ...ruleContext,
             content: retryHtml,
@@ -656,8 +784,8 @@ export async function getContent(
     }
 
     if (!content?.trim()) {
-      if (typedDataUrl) {
-        const decoded = decodeDataUrl(contentUrl);
+      if (isDataChapterUrl(contentUrl)) {
+        const decoded = decodeChapterDataPayload(chapterBase, contentChapter.url);
         const serverUrl = resolveBookSourceServerUrl(source) ?? '';
         const pinnedDevice = readBookSourceArgsField(source, 'deviceId');
         console.warn('[content] 正文规则返回空内容', {
@@ -675,7 +803,7 @@ export async function getContent(
     }
 
     const serverUrl = resolveBookSourceServerUrl(source) ?? '';
-    if (serverUrl && (typedDataUrl || isImageHeavyContent(content))) {
+    if (serverUrl && (isDataChapterUrl(contentUrl) || isImageHeavyContent(content))) {
       const beforeResolve = scanImgTags(content).length;
       content = resolveApiImageContent(content, serverUrl);
       const afterResolve = scanImgTags(content).length;
@@ -725,7 +853,7 @@ export async function getContent(
       return null;
     }
 
-    if (typedDataUrl && isImageHeavyContent(content)) {
+    if (isDataChapterUrl(contentUrl) && isImageHeavyContent(content)) {
       const scriptImageStyle =
         typeof ruleContext.book?.imageStyle === 'string'
           ? ruleContext.book.imageStyle.trim()
@@ -781,10 +909,10 @@ export async function getContent(
 
     if (isImageHeavyContent(content)) {
       logContentImageDiagnostics(content, '最终正文');
-      traceContentFetchDone('getContent 完成', content, {
-        path: typedDataUrl ? 'ruleContent+dataUrl' : 'ruleContent',
-      });
     }
+    traceContentFetchDone('getContent 完成', content, {
+      path: isDataChapterUrl(contentUrl) ? 'ruleContent+dataUrl' : 'ruleContent',
+    });
 
     return content;
   } catch (error) {

@@ -3,7 +3,7 @@
  * DEV 或 localStorage「reader_content_trace=1」时输出详细日志
  */
 
-import { scanImgTags } from '@/lib/reader/scan-img-tags';
+import { scanImgTags } from '@/lib/media/text/scan-img-tags';
 
 export function isContentFetchTraceEnabled(): boolean {
   if (import.meta.env.DEV) return true;
@@ -14,7 +14,12 @@ export function isContentFetchTraceEnabled(): boolean {
   }
 }
 
-function summarizeRawContent(content: string): Record<string, unknown> {
+interface RawContentSummary {
+  contentLen: number;
+  imgCount: number;
+}
+
+function summarizeRawContent(content: string): RawContentSummary {
   const trimmed = content.trim();
   const imgCount = trimmed.includes('<img') ? scanImgTags(trimmed).length : 0;
   return {

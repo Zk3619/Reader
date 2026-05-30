@@ -103,12 +103,22 @@ export async function pushSourceCookiesToWebviews(
   }
   if (!merged) return;
 
+  const { invoke } = await import('@tauri-apps/api/core');
+
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
     await invoke('set_cookies_for_backstage_webview', { url: pageUrl, cookies: merged });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // backstage WebView 仅在 WebJs 登录等场景懒创建，内嵌页打开前未创建属预期
+    if (!msg.includes('后台 WebView 未创建')) {
+      console.warn('[source-cookie-pool] 推送 backstage Cookie 失败', e);
+    }
+  }
+
+  try {
     await invoke('set_cookies_for_inner_web', { url: pageUrl, cookies: merged });
   } catch (e) {
-    console.warn('[source-cookie-pool] 推送 WebView Cookie 失败', e);
+    console.warn('[source-cookie-pool] 推送 inner-web Cookie 失败', e);
   }
 }
 

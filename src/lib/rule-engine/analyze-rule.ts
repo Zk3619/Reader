@@ -817,7 +817,12 @@ export async function analyzeRule(
   rule: string,
   context: RuleContext
 ): Promise<string[]> {
-  if (!rule || !context.content) {
+  if (!rule) {
+    return [];
+  }
+  const allowEmptyEntry =
+    isAtomicLegadoScriptRule(rule) || hasEmbeddedLegadoScript(rule);
+  if (!allowEmptyEntry && !context.content) {
     return [];
   }
 

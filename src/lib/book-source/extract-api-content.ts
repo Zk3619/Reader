@@ -8,7 +8,7 @@ import {
   readLegadoHeadersFromImgTag,
 } from '@/lib/js-engine/legado/parse-legado-url-options';
 import { hexToUtf8 } from '@/lib/book-source/utils';
-import { scanImgTags, readHtmlAttr } from '@/lib/reader/scan-img-tags';
+import { scanImgTags, readHtmlAttr } from '@/lib/media/text/scan-img-tags';
 
 const IMAGE_LIST_KEYS = [
   'contents',
@@ -254,10 +254,21 @@ function escapeHtmlAttr(value: string): string {
     .replace(/</g, '&lt;');
 }
 
-function buildResolvedImgTag(url: string, headers?: Record<string, string>): string {
+function buildResolvedImgTag(
+  url: string,
+  headers?: Record<string, string>,
+  click?: string,
+  legadoStyle?: string,
+): string {
   let tag = `<img src="${escapeHtmlAttr(url)}"`;
   if (headers && Object.keys(headers).length > 0) {
     tag += ` data-legado-headers="${escapeHtmlAttr(JSON.stringify(headers))}"`;
+  }
+  if (click) {
+    tag += ` data-legado-click="${escapeHtmlAttr(click)}"`;
+  }
+  if (legadoStyle) {
+    tag += ` data-legado-style="${escapeHtmlAttr(legadoStyle)}"`;
   }
   tag += '>';
   return tag;
@@ -304,7 +315,13 @@ export function resolveApiImageContent(content: string, baseUrl: string): string
     }
 
     const headers = fromTag ?? parsed.headers;
-    const nextTag = buildResolvedImgTag(url, headers);
+    const click = parsed.click;
+    const nextTag = buildResolvedImgTag(
+      url,
+      headers,
+      click,
+      parsed.legadoStyle,
+    );
     if (nextTag !== tag) {
       out = out.replace(tag, nextTag);
     }

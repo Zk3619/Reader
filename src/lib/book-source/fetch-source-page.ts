@@ -3,7 +3,13 @@
  */
 
 import type { BookSource } from '@/types';
-import { buildUrl } from '@/lib/book-source/utils';
+import {
+  buildUrl,
+  legadoDataUrlRuleBody,
+  splitLegadoUrlOptions,
+  decodeDataUriBase64Payload,
+  legadoHexEncodeBytes,
+} from '@/lib/book-source/utils';
 import { fetchByAnalyzeUrl } from '@/lib/book-source/analyze-url';
 import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
 import { splitUrlAndOption, URL_OPTION_SPLIT } from '@/lib/book-source/analyze-url-option';
@@ -61,6 +67,16 @@ export async function fetchChapterPageHtml(
   baseUrl?: string,
 ): Promise<string> {
   const trimmed = chapterUrl.trim();
+  if (/^data:/i.test(trimmed)) {
+    const hex = legadoDataUrlRuleBody(trimmed);
+    if (hex != null) return hex;
+    const { urlNoOption } = splitLegadoUrlOptions(trimmed);
+    const bytes = decodeDataUriBase64Payload(urlNoOption);
+    if (bytes?.length) {
+      return legadoHexEncodeBytes(bytes);
+    }
+    return '';
+  }
   if (URL_OPTION_SPLIT.test(trimmed)) {
     const { body } = await fetchSourcePage({
       ruleUrl: trimmed,

@@ -547,6 +547,24 @@ async function fetchCatalogChapterRows(
 /**
  * 打开章节前拉取最新 catalog item_id（内嵌上游 token 可能随目录缓存过期）
  */
+/** 目录标题与章节标题对齐（支持「来源:章节名」与纯章节名） */
+export function catalogChapterTitleMatches(
+  chapterTitle: string,
+  catalogTitle: string,
+): boolean {
+  const a = chapterTitle.trim();
+  const b = catalogTitle.trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const stripSourcePrefix = (t: string) => {
+    const m = t.match(/^([^:：]+)[:：]\s*(.+)$/);
+    return m ? m[2].trim() : t;
+  };
+  const aCore = stripSourcePrefix(a);
+  const bCore = stripSourcePrefix(b);
+  return aCore === bCore || aCore === b || a === bCore;
+}
+
 export async function resolveFreshCatalogItemId(
   source: BookSource,
   payload: Record<string, string>,
@@ -559,7 +577,8 @@ export async function resolveFreshCatalogItemId(
   const title = match.title?.trim();
   if (title) {
     for (const row of rows) {
-      if (String(row.title ?? '').trim() === title) {
+      const rowTitle = String(row.title ?? '').trim();
+      if (catalogChapterTitleMatches(title, rowTitle)) {
         const id = normalizeCatalogScalarField(row.item_id).trim();
         if (id) return id;
       }

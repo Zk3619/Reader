@@ -2,8 +2,8 @@
  * 漫画 / 图片集正文调试：统计 img 数量并打印前 N 条 URL
  */
 
-import { scanImgTags } from '@/lib/reader/scan-img-tags';
-import { parseImgRefsFromHtml } from '@/lib/reader/reader-content-blocks';
+import { scanImgTags } from '@/lib/media/text/scan-img-tags';
+import { parseImgRefsFromHtml } from '@/lib/media/text/reader-content-blocks';
 
 export type ContentImageSample = {
   index: number;

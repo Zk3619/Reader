@@ -13,7 +13,7 @@ import {
   getEnabledRulesByTitleScope,
 } from '@/lib/database/replace-rules';
 import type { ReplaceRule } from '@/types';
-import { scanImgTags, upsertImgTagStyle } from '@/lib/reader/scan-img-tags';
+import { scanImgTags, upsertImgTagStyle } from '@/lib/media/text/scan-img-tags';
 
 /** 对齐 Legado ContentProcessor.upReplaceRules：导入书源后使替换规则缓存失效 */
 export function invalidateReplaceRulesCache(): void {
@@ -131,9 +131,13 @@ export function processImageStyle(
     case 'FULL':
       styleAttr = 'style="max-width: 100%; height: auto;"';
       break;
-    case 'CENTER':
-      styleAttr = 'style="display: block; margin: 0 auto; max-width: 100%;"';
+    case 'TEXT':
+      return content;
+    case 'SINGLE':
+      styleAttr =
+        'style="display: block; margin: 0 auto; max-width: 100%; max-height: 80vh; object-fit: contain;"';
       break;
+    case 'CENTER':
     default:
       styleAttr =
         'style="max-width: 100%; height: auto; display: block; margin: 0 auto;"';
