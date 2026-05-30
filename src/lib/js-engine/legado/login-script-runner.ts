@@ -12,6 +12,10 @@ import {
   getOrCreateAndroidId,
   legadoJavaAndroidId,
   legadoJavaDeviceID,
+  normalizeBookSourceServerUrl,
+  persistBookSourceDeviceId,
+  resolveBookSourceDeviceId,
+  resolveLegadoDeviceId,
   resetLegadoDeviceId,
 } from '@/lib/book-source/source-http';
 import { patchLegadoLoginUrlScript } from '@/lib/js-engine/legado/login-script-patches';
@@ -440,7 +444,7 @@ export function getStoredSourceCookiesForUrl(
       ? resolveUrl(baseUrl, targetUrl.trim())
       : targetUrl.trim();
   const raw = getScriptCookieForUrl(cookieObj, resolved, baseUrl, options);
-  return normalizeLegadoCookieHeader(raw, getOrCreateAndroidId());
+  return normalizeLegadoCookieHeader(raw, resolveLegadoDeviceId(raw, source));
 }
 
 /** 合并该书源 cookie 表中所有域（如聚合站 + 番茄登录域） */
@@ -549,17 +553,27 @@ function propagateLegadoCookieToStore(
 ): void {
   const trimmed = String(cookieValue ?? '').trim();
   if (!trimmed || !extractQttokenKey(trimmed)) return;
-  cookieStore.set(targetUrl, trimmed);
-  try {
-    cookieStore.set(new URL(targetUrl).origin, trimmed);
-  } catch {
-    /* ignore */
-  }
+  const write = (key: string) => {
+    const k = String(key ?? '').trim();
+    if (!k) return;
+    cookieStore.set(k, trimmed);
+    try {
+      cookieStore.set(new URL(k.includes('://') ? k : `https://${k}`).origin, trimmed);
+    } catch {
+      /* ignore */
+    }
+  };
+  write(targetUrl);
+  write(normalizeBookSourceServerUrl(targetUrl));
   const controlBase = targetUrl.replace(/\/control\/?$/i, '');
   if (controlBase && controlBase !== targetUrl) {
-    cookieStore.set(controlBase, trimmed);
+    write(controlBase);
+    write(normalizeBookSourceServerUrl(controlBase));
   }
-  if (baseUrl) cookieStore.set(baseUrl, trimmed);
+  if (baseUrl?.trim()) {
+    write(baseUrl);
+    write(normalizeBookSourceServerUrl(baseUrl));
+  }
 }
 
 function sanitizeLegadoCookieValue(value: string, deviceId: string): string {
@@ -575,6 +589,7 @@ export function legadoCookieGetKey(
   getCookieFn: (url: string) => string,
   cookieStrOrUrl: string,
   keyName?: string,
+  source?: BookSource,
 ): string {
   let s: string;
   if (keyName != null && keyName !== '') {
@@ -582,8 +597,11 @@ export function legadoCookieGetKey(
   } else {
     s = String(cookieStrOrUrl ?? '').trim();
   }
-  if (!s) return '';
   const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
+  if (searchKey === 'device' || searchKey === 'deviceId') {
+    return resolveLegadoDeviceId(s, source);
+  }
+  if (!s) return '';
   if (searchKey === 'qttoken') {
     const token = extractQttokenKey(s);
     return token;
@@ -695,7 +713,6 @@ async function verifyLegadoUserApiSession(
   serverUrl: string,
   cookieStore: Map<string, string>,
 ): Promise<boolean> {
-  const deviceId = getOrCreateAndroidId();
   const stored =
     cookieStore.get(serverUrl) ||
     cookieStore.get(`${serverUrl}/`) ||
@@ -705,7 +722,7 @@ async function verifyLegadoUserApiSession(
   const url = `${serverUrl.replace(/\/+$/, '')}/user_api`;
   try {
     const headers = mergeSourceHeaders(source, {
-      Cookie: normalizeLegadoCookieHeader(stored, deviceId),
+      Cookie: normalizeLegadoCookieHeader(stored, resolveLegadoDeviceId(stored)),
     });
     const response = await httpRequest(url, {
       method: 'POST',
@@ -753,7 +770,7 @@ async function finalizeLegadoLoginCookies(options: {
   isLoginAction: boolean;
 }): Promise<void> {
   const { source, baseUrl, cookieStore, formValues, loginKey, argsKey, isLoginAction } = options;
-  const deviceId = getOrCreateAndroidId();
+  const deviceId = resolveBookSourceDeviceId(source);
   const serverUrl = resolveLoginServerUrl(source, baseUrl);
 
   if (isLoginAction && lastLoginApiHttpCapture) {
@@ -781,6 +798,7 @@ async function finalizeLegadoLoginCookies(options: {
     if (keyVal) {
       applyLoginKeyToStore(cookieStore, serverUrl, keyVal, deviceId);
       persistQttokenToArgsAndLoginInfo(keyVal, formValues, loginKey, argsKey);
+      persistBookSourceDeviceId(source, deviceId);
     } else if (setCookie) {
       applySetCookieHeaderToStore(cookieStore, serverUrl, setCookie, deviceId);
     }
@@ -1087,7 +1105,7 @@ async function tryRunLoginScriptQuickJS(
           },
           getArgToken: () => readArgToken(argsKey),
           getFormKey: resolveFormKey,
-          getDeviceId: () => getOrCreateAndroidId(),
+          getDeviceId: () => resolveBookSourceDeviceId(source),
           getArgument: (key) => {
             try {
               const raw = localStorage.getItem(argsKey);

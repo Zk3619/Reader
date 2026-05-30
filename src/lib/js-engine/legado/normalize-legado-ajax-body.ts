@@ -2,7 +2,11 @@
  * Legado 登录脚本 ajax 请求体 / Cookie 修正（login_api / user_api 等）
  */
 
-import { resolveContentApiItemId } from '@/lib/book-source/utils';
+import {
+  coalesceSourceField,
+  needsContentApiItemIdRepair,
+  resolveContentApiItemId,
+} from '@/lib/book-source/utils';
 
 /**
  * 书源 cookie 串规范为 WebView / HTTP Cookie 头（`qttoken=…;deviceId=…`）。
@@ -15,11 +19,17 @@ export function normalizeLegadoCookieHeader(
   const raw = String(cookieStr ?? '').trim();
   if (!raw) return '';
   const token = extractQttokenKey(raw);
-  const dev = String(deviceId ?? '').trim() || 'web_reader';
   if (!token) return raw;
+  const dev = String(deviceId ?? '').trim();
+  // 显式 deviceId（含书源变量固定值）须覆盖规则脚本 cookie 里已有的 androidId
+  // 对齐 Legado ruleContent：`qttoken=…; deviceId=…;`（分号后空格 + 末尾分号）
+  if (dev) {
+    return `qttoken=${token}; deviceId=${dev};`;
+  }
+  const fallbackDev = 'web_reader';
   if (/qttoken=/i.test(raw) && /deviceId=/i.test(raw)) return raw;
-  if (/qttoken=/i.test(raw)) return `${raw};deviceId=${dev}`;
-  return `qttoken=${token};deviceId=${dev}`;
+  if (/qttoken=/i.test(raw)) return `${raw};deviceId=${fallbackDev}`;
+  return `qttoken=${token};deviceId=${fallbackDev}`;
 }
 
 /** 书源脚本未拿到 key 时可能写入字面量 undefined/null，不能当作有效 token */
@@ -174,11 +184,35 @@ export function mergeLegadoCookieHeaderStrings(existing: string, incoming: strin
     .join('; ');
 }
 
-/** ruleContent ajax：修正 /content POST 的 item_id（base64→内层 JSON + comic_id 补全） */
+/** Legado 正文 POST 用 catalog 短名（全面漫画），不用详情 svip_ 前缀 */
+function catalogSourceForContentPost(name: string): string {
+  const t = name.trim();
+  if (!t) return t;
+  return /^svip_(.+)$/i.test(t) ? t.replace(/^svip_/i, '') : t;
+}
+
+/** 对齐 Legado ruleContent params：仅 source（catalog 短名），不带 sources 字段 */
+export function applyContentApiPostEnrichment(parsed: Record<string, unknown>): void {
+  const raw = coalesceSourceField(
+    typeof parsed.sources === 'string' ? parsed.sources : undefined,
+    typeof parsed.source === 'string' ? parsed.source : undefined,
+  );
+  const catalog = catalogSourceForContentPost(raw);
+  if (catalog) {
+    parsed.source = catalog;
+  }
+  delete parsed.sources;
+}
+
+/**
+ * ruleContent ajax：默认保持 catalog 原始 item_id（对齐 Legado）；
+ * repairItemId: true 时仅在显式开启且有空 comic_id 时修复。
+ */
 export function normalizeContentApiPostBody(
   resolvedUrl: string,
   method: string,
   body: string | undefined,
+  options?: { comicIdHint?: string; repairItemId?: boolean },
 ): string | undefined {
   if (method !== 'POST' || !/\/content\b/.test(resolvedUrl) || !body?.trim()) {
     return body;
@@ -187,8 +221,17 @@ export function normalizeContentApiPostBody(
   if (!trimmed.startsWith('{')) return body;
   try {
     const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    if (typeof parsed.item_id !== 'string') return body;
-    parsed.item_id = resolveContentApiItemId(parsed.item_id);
+    applyContentApiPostEnrichment(parsed);
+    if (
+      options?.repairItemId === true &&
+      typeof parsed.item_id === 'string' &&
+      needsContentApiItemIdRepair(parsed.item_id)
+    ) {
+      parsed.item_id = resolveContentApiItemId(
+        parsed.item_id,
+        options?.comicIdHint ?? '',
+      );
+    }
     return JSON.stringify(parsed);
   } catch {
     return body;

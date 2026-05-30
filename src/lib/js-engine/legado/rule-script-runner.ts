@@ -17,12 +17,12 @@ import {
   createSourceVariableHandlers,
   hostsFromJsLib,
   getSourceArgsKey,
+  readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
 import {
   buildRuleScriptFullBody,
   patchLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-patches';
-import { extractApiContent } from '@/lib/book-source/extract-api-content';
 import { legadoCookieGetKey } from '@/lib/js-engine/legado/login-script-runner';
 import { javaGetString, type JavaGetStringContext } from '@/lib/rule-engine/java-get-string';
 import { splitSourceRule } from '@/lib/rule-engine/legado-source-rule';
@@ -166,37 +166,89 @@ function serializeRuleScriptResult(value: unknown): string {
   return String(value);
 }
 
-function isEmptyContentRuleResult(result: unknown): boolean {
-  if (result == null) return false;
+/** /catalog 等：code=0 且 data 为章节数组，不是「空正文」 */
+function isLegadoCatalogTocApiResult(result: unknown): boolean {
   let parsed: Record<string, unknown> | null = null;
-  if (typeof result === 'object' && !Array.isArray(result)) {
+  if (typeof result === 'object' && result != null && !Array.isArray(result)) {
     parsed = result as Record<string, unknown>;
-  } else {
+  } else if (typeof result === 'string') {
+    const text = result.trim();
+    if (!text.startsWith('{')) return false;
     try {
-      parsed = JSON.parse(String(result).trim()) as Record<string, unknown>;
+      parsed = JSON.parse(text) as Record<string, unknown>;
     } catch {
       return false;
     }
   }
   if (!parsed || typeof parsed !== 'object') return false;
-  if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') return true;
-  if (extractApiContent(parsed).trim()) return false;
+  if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') return false;
+  const data = parsed.data;
+  if (Array.isArray(data) && data.length > 0) return true;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    for (const key of ['data', 'list', 'items', 'chapters']) {
+      const rows = nested[key];
+      if (Array.isArray(rows) && rows.length > 0) return true;
+    }
+  }
+  return false;
+}
+
+function readRuleScriptContentField(parsed: Record<string, unknown>): string {
   const content = parsed.content;
-  return content == null || (typeof content === 'string' && !content.trim());
+  return typeof content === 'string' ? content.trim() : '';
+}
+
+function isLegadoRuleScriptChapterEntryPayload(result: unknown): boolean {
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof result === 'object' && result != null && !Array.isArray(result)) {
+    parsed = result as Record<string, unknown>;
+  } else {
+    const text = String(result ?? '').trim();
+    if (!text || (/^[0-9a-f]+$/i.test(text) && text.length > 40)) return false;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+  const hasChapterKeys =
+    ('item_id' in parsed || 'book_id' in parsed) &&
+    ('sources' in parsed || 'source' in parsed || 'tab' in parsed);
+  return hasChapterKeys && !readRuleScriptContentField(parsed);
+}
+
+function isEmptyContentRuleResult(result: unknown): boolean {
+  if (result == null) return false;
+  if (isLegadoCatalogTocApiResult(result)) return false;
+  if (isLegadoRuleScriptChapterEntryPayload(result)) return true;
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof result === 'object' && !Array.isArray(result)) {
+    parsed = result as Record<string, unknown>;
+  } else {
+    const text = String(result).trim();
+    if (/^[0-9a-f]+$/i.test(text) && text.length > 40) return true;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return true;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+  if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') return true;
+  return !readRuleScriptContentField(parsed);
 }
 
 function ruleScriptResultLooksFinal(result: unknown): boolean {
   if (result == null) return false;
+  if (isLegadoCatalogTocApiResult(result)) return true;
   if (typeof result === 'object') {
-    const extracted = extractApiContent(result as Record<string, unknown>);
-    if (extracted.trim()) return true;
     const parsed = result as Record<string, unknown>;
     if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') {
       return false;
     }
-    const content = parsed.content;
-    if (typeof content === 'string' && content.trim().length > 0) return true;
-    return false;
+    return readRuleScriptContentField(parsed).length > 0;
   }
   const text = String(result).trim();
   if (!text) return false;
@@ -207,12 +259,10 @@ function ruleScriptResultLooksFinal(result: unknown): boolean {
       if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') {
         return false;
       }
-      if (extractApiContent(parsed).trim().length > 0) return true;
-      const content = parsed.content;
-      if (typeof content === 'string' && content.trim().length > 0) return true;
+      return readRuleScriptContentField(parsed).length > 0;
     }
   } catch {
-    return text.length > 0;
+    return false;
   }
   return false;
 }
@@ -235,13 +285,27 @@ export async function runLegadoRuleScript(
   );
   const jsLib =
     typeof sourceRecord.jsLib === 'string' ? (sourceRecord.jsLib as string) : '';
+  const chapterRecord = (context.chapter ?? {}) as Record<string, unknown>;
   const bookRecord: Record<string, unknown> = {
     type: 0,
     ...(context.book && typeof context.book === 'object'
       ? (context.book as Record<string, unknown>)
       : {}),
   };
-  const chapterRecord = (context.chapter ?? {}) as Record<string, unknown>;
+  const tabForBookType = String(
+    (context.variables as Record<string, string> | undefined)?.tab ??
+      chapterRecord.tab ??
+      '',
+  ).trim();
+  if (tabForBookType === '漫画') {
+    bookRecord.type = 64;
+  } else if (tabForBookType === '小说') {
+    bookRecord.type = 8;
+  } else if (tabForBookType === '听书') {
+    bookRecord.type = 32;
+  } else if (tabForBookType === '短剧') {
+    bookRecord.type = 16;
+  }
 
   const ajaxCache = new Map<string, string>();
   let pending: Promise<void>[] = [];
@@ -280,12 +344,25 @@ export async function runLegadoRuleScript(
       ? createSourceVariableHandlers(bookSource, getSourceArgsKey(bookSource))
       : null;
 
+  const chapterVars = (context.variables ?? {}) as Record<string, string>;
+  const legadoSources =
+    chapterVars.sources || chapterVars.source || String(chapterRecord.sources ?? chapterRecord.source ?? '');
+  const legadoTab = chapterVars.tab || String(chapterRecord.tab ?? '');
+  const legadoTitle = chapterVars.title || String(chapterRecord.title ?? '');
+  const legadoBookId = chapterVars.book_id || '';
+  const legadoUrl = chapterVars.url || String(chapterRecord.url ?? '');
+
   const buildScope = (): Record<string, unknown> => {
     const scope: Record<string, unknown> = {
       result: initialResult,
       src: ruleContent,
       baseUrl,
       host: hostList.length > 0 ? hostList : [baseUrl].filter(Boolean),
+      // 对齐 Legado 规则脚本隐式绑定（ruleContent 在解析 res 前会 java.put('sources', sources)）
+      sources: legadoSources,
+      tab: legadoTab,
+      book_id: legadoBookId,
+      url: legadoUrl,
       getArguments,
       book: Object.assign(bookRecord, {
         getVariable(key?: string) {
@@ -294,6 +371,9 @@ export async function runLegadoRuleScript(
       }),
       source: {
         ...sourceRecord,
+        ...(bookSource
+          ? { getLoginInfoMap: () => readSourceLoginInfoMap(bookSource) }
+          : {}),
         getVariable(key?: string) {
           if (sourceVariableHandlers) {
             return sourceVariableHandlers.getVariable(key);
@@ -312,7 +392,7 @@ export async function runLegadoRuleScript(
         },
       },
       chapter: chapterRecord,
-      title: chapterRecord.title ?? '',
+      title: legadoTitle || String(chapterRecord.title ?? ''),
       JSON,
       cookie: (() => {
         const getCookie = (url: string) => {
@@ -334,6 +414,7 @@ export async function runLegadoRuleScript(
             getCookie,
             cookieStrOrUrl,
             keyName,
+            bookSource,
           );
         },
         };
@@ -389,7 +470,7 @@ export async function runLegadoRuleScript(
           legadoJavaDeviceID();
         },
         androidId() {
-          return legadoJavaAndroidId();
+          return legadoJavaAndroidId(bookSource);
         },
         getWebViewUA() {
           const hdr = bookSource?.header;
@@ -406,7 +487,11 @@ export async function runLegadoRuleScript(
         },
         toast() {},
         longToast() {},
-        log() {},
+        log(...args: unknown[]) {
+          if (import.meta.env.DEV) {
+            console.log('[rule-script]', ...args);
+          }
+        },
         getString(rule: string) {
           const hit = executeLegadoGetStringRule(String(rule ?? ''), scope, context, jsLib);
           scope.result = hit;
@@ -470,6 +555,19 @@ export async function runLegadoRuleScript(
     return scope;
   };
 
+  const syncBookScopeBack = (): void => {
+    if (context.book && typeof context.book === 'object') {
+      const target = context.book as Record<string, unknown>;
+      if (bookRecord.imageStyle != null) target.imageStyle = bookRecord.imageStyle;
+      if (bookRecord.type != null) target.type = bookRecord.type;
+    }
+  };
+
+  const finishRuleScript = (result: unknown): unknown => {
+    syncBookScopeBack();
+    return result;
+  };
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('规则脚本执行超时')), SCRIPT_TIMEOUT_MS);
   });
@@ -497,7 +595,7 @@ export async function runLegadoRuleScript(
       }
 
       if (ruleScriptResultLooksFinal(scope.result)) {
-        return scope.result;
+        return finishRuleScript(scope.result);
       }
 
       if (scope.result !== undefined && String(scope.result).length > 0) {
@@ -511,12 +609,12 @@ export async function runLegadoRuleScript(
           continue;
         }
         if (!emptyContentPayload) {
-          return scope.result;
+          return finishRuleScript(scope.result);
         }
       }
 
       if (!hadAjax || ajaxCache.size === prevCacheSize) {
-        return scope.result ?? null;
+        return finishRuleScript(scope.result ?? null);
       }
       prevCacheSize = ajaxCache.size;
     }

@@ -3,6 +3,7 @@
  */
 
 import type { BookSource } from '@/types';
+import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
 
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
@@ -62,10 +63,18 @@ export function getScriptBaseUrl(source: BookSource): string {
   return firstHostFromJsLib((source as Record<string, unknown>).jsLib);
 }
 
-/** Legado 书源唯一标识（可为名称非 URL） */
-export function getSourceUrlIdentifier(source: BookSource): string {
+/**
+ * Legado 书源唯一键：BookSource.getKey() → bookSourceUrl（可为名称非 URL）
+ * 变量 / Cookie / 登录信息均按此键隔离，不得优先 sourceUrl 以免与 Legado 存储错位。
+ */
+export function getLegadoSourceKey(source: BookSource): string {
   const src = source as Record<string, unknown>;
-  return String(source.sourceUrl ?? src.bookSourceUrl ?? src.sourceUrl ?? '').trim();
+  return String(src.bookSourceUrl ?? source.sourceUrl ?? '').trim();
+}
+
+/** @deprecated 命名历史原因；请使用 getLegadoSourceKey */
+export function getSourceUrlIdentifier(source: BookSource): string {
+  return getLegadoSourceKey(source);
 }
 
 export function getSourceArgsKey(source: BookSource): string {
@@ -111,6 +120,20 @@ export function loadSourceCookieStore(cookiesKey: string): Map<string, string> {
   return store;
 }
 
+function normalizeSourceArgsVariableJson(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{')) return raw;
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    if (typeof obj.server === 'string' && obj.server.trim()) {
+      obj.server = normalizeBookSourceServerUrl(obj.server);
+    }
+    return JSON.stringify(obj);
+  } catch {
+    return raw;
+  }
+}
+
 export function createSourceVariableHandlers(
   source: BookSource,
   argsKey: string
@@ -122,7 +145,7 @@ export function createSourceVariableHandlers(
     getVariable(_key?: string) {
       try {
         const raw = localStorage.getItem(argsKey);
-        if (raw != null && raw !== '') return raw;
+        if (raw != null && raw !== '') return normalizeSourceArgsVariableJson(raw);
       } catch {
         /* ignore */
       }

@@ -23,7 +23,7 @@ import {
   loadSourceCookieStore,
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
-import { getOrCreateAndroidId } from '@/lib/book-source/source-http';
+import { resolveBookSourceDeviceId } from '@/lib/book-source/source-http';
 
 const SCRIPT_TIMEOUT_MS = 15000;
 
@@ -116,7 +116,7 @@ async function tryRunExploreScriptQuickJS(
     sourceUrl,
     host: hostList,
     resolveUrl,
-    getOrCreateDeviceId: getOrCreateAndroidId,
+    getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
     cookie: cookieApi,
     source: {
       ...sourceVars,
@@ -213,8 +213,8 @@ async function runExploreScriptLegacy(
         console.warn('[explore-script]', ...args);
         return args[0];
       },
-      androidId: getOrCreateAndroidId,
-      deviceID: getOrCreateAndroidId,
+      androidId: () => resolveBookSourceDeviceId(source),
+      deviceID: () => resolveBookSourceDeviceId(source),
       qread() {},
       startBrowser(_url?: string) {},
       getCookie(url: string) {

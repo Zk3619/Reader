@@ -118,10 +118,10 @@ async function evalJsQuickJS(code: string, context: JsContext): Promise<unknown>
 /** Legado 末行表达式脚本：无 return 时自动 return(末行)；去掉末行分号避免 return(expr;); 语法错误 */
 export function wrapLegadoJsBodyWithImplicitReturn(code: string): string {
   let body = code.trim();
-  if (!body || body.includes('return ')) return body;
+  if (!body) return body;
   const lines = body.split(/\n/).filter((l) => l.trim());
-  const lastLine = lines[lines.length - 1]?.trim();
-  if (!lastLine || /^(var|let|const|if|for|while|function|else|\}|return\s)/.test(lastLine)) {
+  const lastLine = (lines[lines.length - 1]?.trim() ?? '').replace(/^;+/, '').trim();
+  if (!lastLine || /^(var|let|const|if|for|while|function|else|\}|return\b)/.test(lastLine)) {
     return body;
   }
   const expr = lastLine.replace(/;\s*$/, '');
