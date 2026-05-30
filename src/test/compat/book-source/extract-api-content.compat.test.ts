@@ -5,7 +5,7 @@ import {
   isApiErrorText,
   resolveApiImageContent,
 } from '@/lib/book-source/extract-api-content';
-import { scanImgTags } from '@/lib/reader/scan-img-tags';
+import { scanImgTags } from '@/lib/media/text/scan-img-tags';
 
 describe('extractApiContent', () => {
   it('无顶层 content 时回退 data.data.content', () => {

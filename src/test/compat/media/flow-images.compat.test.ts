@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowImages, countFlowImages } from '@/lib/media/flow-images';
+import { flowImages, countFlowImages } from '@/lib/media/image/flow-images';
 
 describe('flowImages', () => {
   it('对齐 Legado BookHelp.flowImages 提取 img src', () => {

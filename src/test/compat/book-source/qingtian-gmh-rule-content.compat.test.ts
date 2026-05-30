@@ -29,7 +29,9 @@ vi.mock('@/lib/http', () => ({
 
 function loadQingtianSource(): BookSource {
   const sources = JSON.parse(readProjectFile('examples/shareBookSource(1).json')) as BookSource[];
-  const source = sources.find((s) => s.bookSourceName?.includes('晴天'));
+  const source = sources.find((s) =>
+    String(s.bookSourceName ?? s.sourceName ?? '').includes('晴天'),
+  );
   if (!source) throw new Error('未找到晴天书源');
   return source;
 }

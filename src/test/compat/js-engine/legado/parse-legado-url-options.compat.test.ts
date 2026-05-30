@@ -39,4 +39,16 @@ describe('parseLegadoUrlWithOptions', () => {
     expect(raw).toContain('https://cdn.example/a.webp');
     expect(parseLegadoUrlWithOptions(raw!).headers?.['User-Agent']).toBe('UA');
   });
+
+  it('剥离 data:image Legado 段评 JSON 后缀', () => {
+    const svgB64 = 'PHN2ZyB3aWR0aD0iMTAwIj48L3N2Zz4=';
+    const raw =
+      `data:image/svg+xml;base64,${svgB64},` +
+      `{"click":"showCmt('https://cmt.example/p1', '番茄', 1)","style":"text"}`;
+    const parsed = parseLegadoUrlWithOptions(raw);
+    expect(parsed.url).toBe(`data:image/svg+xml;base64,${svgB64}`);
+    expect(parsed.click).toContain('showCmt');
+    expect(parsed.legadoStyle).toBe('text');
+    expect(parsed.headers).toBeUndefined();
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowImageRefs, flowImages } from '@/lib/media/flow-images';
+import { flowImageRefs, flowImages } from '@/lib/media/image/flow-images';
 
 /** 模拟 cleanContent(mode=image) 在浏览器中误用 textContent 后的结果 */
 function simulateBrokenBrowserEntityDecode(html: string): string {

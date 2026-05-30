@@ -15,4 +15,15 @@ describe('debug qingtian rule tail', () => {
     const wrapped = wrapLegadoJsBodyWithImplicitReturn(patchLegadoRuleScript(raw));
     expect(wrapped.trimEnd()).toMatch(/return\s*\(\s*data\s*\)\s*;?\s*$/);
   });
+
+  it('ajax 首轮空响应时 content 赋值为空串而非 undefined', () => {
+    const patched = patchLegadoRuleScript('content = data.content');
+    expect(patched).toContain("data.content != null ? String(data.content) : ''");
+  });
+
+  it('hex 载荷为空时 res = JSON.parse(result) 不抛错', () => {
+    const patched = patchLegadoRuleScript('} else {\n    res = JSON.parse(result);\n}');
+    expect(patched).toContain('return {}');
+    expect(patched).not.toMatch(/\bres\s*=\s*JSON\.parse\s*\(\s*result\s*\)/);
+  });
 });

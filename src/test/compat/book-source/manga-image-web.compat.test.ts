@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiContentsToHtml } from '@/lib/book-source/extract-api-content';
-import { flowImageRefs } from '@/lib/media/flow-images';
+import { flowImageRefs } from '@/lib/media/image/flow-images';
 
 describe('apiContentsToHtml', () => {
   it('已是 img 标签时不二次包裹', () => {
@@ -36,7 +36,7 @@ describe('flowImageRefs', () => {
 });
 
 describe('toProxiedImageUrl', () => {
-  it('Web 漫画图携带 Legado UA 且 omit Referer', async () => {
+  it('Web 漫画图携带 Legado UA 且默认 CDN 同源 Referer', async () => {
     vi.stubGlobal('window', {
       location: { origin: 'http://127.0.0.1:5173', href: 'http://127.0.0.1:5173/' },
     });
@@ -45,11 +45,12 @@ describe('toProxiedImageUrl', () => {
       legadoImageHeaders: { 'User-Agent': 'LegadoAndroidUA' },
     });
     expect(url).toContain('userAgent=LegadoAndroidUA');
-    expect(url).toContain('referer=none');
+    expect(url).toContain('referer=https%3A%2F%2Ff40-1-4.g-mh.online%2F');
+    expect(url).not.toContain('referer=none');
     vi.unstubAllGlobals();
   });
 
-  it('Legado 跨站 Referer 仍 omit（对齐浏览器直链）', async () => {
+  it('Legado 跨站 Referer 作为首选（并透传完整 headers）', async () => {
     vi.stubGlobal('window', {
       location: { origin: 'http://127.0.0.1:5173', href: 'http://127.0.0.1:5173/' },
     });
@@ -61,8 +62,7 @@ describe('toProxiedImageUrl', () => {
       },
     });
     expect(url).toContain('userAgent=LegadoAndroidUA');
-    expect(url).toContain('referer=none');
-    expect(url).not.toContain('manhuafree');
+    expect(url).toContain('manhuafree');
     vi.unstubAllGlobals();
   });
 });

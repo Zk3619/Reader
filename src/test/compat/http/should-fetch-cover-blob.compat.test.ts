@@ -1,0 +1,14 @@
+import { describe, expect, it, vi } from 'vitest';
+
+describe('shouldFetchCoverAsBlob', () => {
+  it('g-mh 纯 Web 不走 blob 代理', async () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'http://127.0.0.1:5173', href: 'http://127.0.0.1:5173/' },
+    });
+    const { shouldFetchCoverAsBlob } = await import('@/lib/http/cover-image-loader');
+    const url =
+      'https://f40-1-4.g-mh.online/kk/moshirenhuangfanyouqinggeweinturuzuo-ir660596/1/MjFjOGExM2RfMV81_5.webp';
+    expect(shouldFetchCoverAsBlob(url)).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
