@@ -3,7 +3,7 @@
  * 对齐 Legado：音频与视频章节正文多为直链或少量 HTML
  */
 
-export type MediaUrlKind = 'image' | 'audio' | 'video';
+export type MediaUrlKind = 'image' | 'audio' | 'video' | 'file';
 
 const IMG_SRC_RE = /<img[^>]+src=["']([^"']+)["']/gi;
 const SOURCE_SRC_RE = /<source[^>]+src=["']([^"']+)["']/gi;
@@ -36,10 +36,24 @@ function extractByRegex(html: string, re: RegExp): string[] {
 function looksLikeMediaUrl(url: string, kind: MediaUrlKind): boolean {
   const lower = url.toLowerCase();
   if (kind === 'image') {
-    return /\.(jpe?g|png|gif|webp|bmp|avif)(\?|$)/i.test(lower) || lower.includes('image');
+    return (
+      /\.(jpe?g|png|gif|webp|bmp|avif)(\?|$)/i.test(lower) ||
+      lower.includes('image') ||
+      lower.includes('/pic/') ||
+      lower.includes('/img/') ||
+      lower.includes('comic') ||
+      lower.includes('manga')
+    );
   }
   if (kind === 'audio') {
     return /\.(mp3|m4a|aac|ogg|wav|flac|opus)(\?|$)/i.test(lower) || lower.includes('audio');
+  }
+  if (kind === 'file') {
+    return (
+      /\.(pdf|epub|zip|rar|7z|cbz|cbr|mobi|azw3?|txt|docx?)(\?|$)/i.test(lower) ||
+      lower.includes('/file/') ||
+      lower.includes('download')
+    );
   }
   return /\.(mp4|m3u8|webm|mkv|mov)(\?|$)/i.test(lower) || lower.includes('video') || lower.includes('m3u8');
 }
@@ -58,8 +72,10 @@ export function parseMediaUrls(raw: string, kind: MediaUrlKind): string[] {
   } else if (kind === 'audio') {
     urls.push(...extractByRegex(text, AUDIO_SRC_RE));
     urls.push(...extractByRegex(text, SOURCE_SRC_RE));
-  } else {
+  } else if (kind === 'video') {
     urls.push(...extractByRegex(text, VIDEO_SRC_RE));
+    urls.push(...extractByRegex(text, SOURCE_SRC_RE));
+  } else {
     urls.push(...extractByRegex(text, SOURCE_SRC_RE));
   }
 
@@ -78,11 +94,22 @@ export function parseMediaUrls(raw: string, kind: MediaUrlKind): string[] {
     urls.push(text.split(/\s+/)[0]!);
   }
 
+  // 漫画 CDN 常见无扩展名 URL：若正文几乎全是 URL 行则全部纳入
+  if (urls.length === 0 && kind === 'image') {
+    const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length > 0 && lines.every((l) => l.startsWith('http'))) {
+      urls.push(...lines);
+    }
+  }
+
   return dedupeOrdered(urls);
 }
 
-/** 音频 / 视频章节通常只有一个主 URL */
-export function parsePrimaryMediaUrl(raw: string, kind: 'audio' | 'video'): string | null {
+/** 音频 / 视频 / 文件章节通常只有一个主 URL */
+export function parsePrimaryMediaUrl(
+  raw: string,
+  kind: 'audio' | 'video' | 'file',
+): string | null {
   const list = parseMediaUrls(raw, kind);
   return list[0] ?? null;
 }

@@ -19,10 +19,15 @@ import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { resolveSearchRequest } from '@/lib/book-source/analyze-search-url';
 import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType } from '@/lib/book-source/utils';
+import { resolveUrl, detectContentType, resolveMediaUrl } from '@/lib/book-source/utils';
+import { resolveBookType } from '@/lib/book-source/book-type';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import { resolveCheckKeyword } from '@/lib/book-source/search-keyword';
-import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
+import { enrichJsonListItemContext, parseJsonListItemRecord } from '@/lib/book-source/json-list-context';
+import {
+  COVER_JSON_PATHS,
+  pickFirstJsonField,
+} from '@/lib/book-source/explore-json-fields';
 import {
   buildPreciseSearchFilter,
   formatWordCountLikeLegado,
@@ -161,7 +166,11 @@ async function analyzeLegadoStringField(
   rule: string,
   context: RuleContext,
   joiner = '\n',
+  options?: { isUrl?: boolean },
 ): Promise<string> {
+  if (options?.isUrl) {
+    return (await analyzeString(rule, context, { isUrl: true })).trim();
+  }
   const results = await analyzeRule(rule, context);
   if (results.length === 0) return '';
   if (results.length === 1) return results[0] ?? '';
@@ -190,9 +199,10 @@ async function analyzeFieldWithDebug(
   sourceName: string,
   debugBookIndex: number | null,
   joiner = '\n',
+  options?: { isUrl?: boolean },
 ): Promise<string> {
   if (!rule?.trim()) return '';
-  const replaced = await analyzeLegadoStringField(rule, context, joiner);
+  const replaced = await analyzeLegadoStringField(rule, context, joiner, options);
   if (debugBookIndex != null && typeof window !== 'undefined') {
     logSearchFieldDebug(sourceName, debugBookIndex, field, rule, context, replaced, replaced);
   }
@@ -266,7 +276,9 @@ export async function normalizeSearchDisplayFields(
   let kind = raw.kind;
   let latestChapterTitle = raw.latestChapterTitle;
   let grayMeta: ReturnType<typeof parseGrayMetaFromTextNodes> = {};
-  if (context.contentType !== 'json') {
+  const jsonRow = parseJsonListItemRecord(context.content);
+  const isJsonItem = context.contentType === 'json' || jsonRow != null;
+  if (!isJsonItem) {
     const grayTextNodes = await pickFirstValue(
       ['p.gray@textNodes', '//p[@class="gray"]@textNodes', '.gray@textNodes'],
       context,
@@ -274,14 +286,20 @@ export async function normalizeSearchDisplayFields(
     grayMeta = parseGrayMetaFromTextNodes(grayTextNodes);
   }
 
-  if (!coverUrl?.trim()) {
+  if (!coverUrl?.trim() && isJsonItem) {
+    const jsonContext =
+      jsonRow && context.contentType !== 'json'
+        ? { ...context, contentType: 'json' as const, book: jsonRow, result: jsonRow }
+        : context;
+    coverUrl = await pickFirstJsonField(jsonContext, COVER_JSON_PATHS);
+  }
+
+  if (!coverUrl?.trim() && context.contentType === 'html' && !jsonRow) {
     coverUrl = await pickFirstValue(
       [
-        '.cover_m@img@src',
-        '.cover_m@img@data-src',
-        '.cover_m@img@data-original',
         'img@src',
         'img@data-src',
+        'img@data-original',
       ],
       context,
     );
@@ -574,7 +592,16 @@ async function parseBookInfoFromDetail(
       sanitizeSearchIntro(
         await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName, debugBookIndex),
       ) || undefined;
-    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName, debugBookIndex) || undefined;
+    let coverUrl =
+      (await analyzeFieldWithDebug(
+        'coverUrl',
+        rule.coverUrl,
+        context,
+        source.sourceName,
+        debugBookIndex,
+        '\n',
+        { isUrl: true },
+      )) || undefined;
     const latestChapterTitle = await analyzeFieldWithDebug(
       'lastChapter',
       rule.lastChapter,
@@ -636,13 +663,13 @@ async function parseBookInfoFromDetail(
       author: author || '',
       kind,
       intro,
-      coverUrl: coverUrl ? resolveUrl(url, coverUrl) : undefined,
+      coverUrl: resolveMediaUrl(url, coverUrl),
       latestChapterTitle,
       latestChapterUpdateTime,
       tocUrl: bookUrl, // 详情页通常也是目录页
       origin: source.sourceUrl,
       originName: source.sourceName,
-      type: source.sourceType,
+      type: resolveBookType(source.sourceType),
       time: Date.now(),
       originOrder: source.customOrder,
       chapterWordCount: -1,
@@ -701,7 +728,16 @@ async function parseSearchBook(
       sanitizeSearchIntro(
         await analyzeFieldWithDebug('intro', rule.intro, context, source.sourceName, debugBookIndex),
       ) || undefined;
-    let coverUrl = await analyzeFieldWithDebug('coverUrl', rule.coverUrl, context, source.sourceName, debugBookIndex) || undefined;
+    let coverUrl =
+      (await analyzeFieldWithDebug(
+        'coverUrl',
+        rule.coverUrl,
+        context,
+        source.sourceName,
+        debugBookIndex,
+        '\n',
+        { isUrl: true },
+      )) || undefined;
     let latestChapterTitle = await analyzeFieldWithDebug(
       'lastChapter',
       rule.lastChapter,
@@ -787,13 +823,13 @@ async function parseSearchBook(
       kind,
       wordCount: wordCount?.trim() || undefined,
       intro,
-      coverUrl: coverUrl ? resolveUrl(baseUrl, coverUrl) : undefined,
+      coverUrl: resolveMediaUrl(baseUrl, coverUrl),
       latestChapterTitle,
       latestChapterUpdateTime,
       tocUrl,
       origin: source.sourceUrl,
       originName: source.sourceName,
-      type: source.sourceType,
+      type: resolveBookType(source.sourceType),
       time: Date.now(),
       originOrder: source.customOrder,
       chapterWordCount,

@@ -102,6 +102,78 @@ export function formatExploreSelectOptionLabel(title: string, paramKey?: string)
   return title;
 }
 
+function sectionsMatch(a: ExploreSection, b: ExploreSection): boolean {
+  return a.title === b.title && (a.url ?? '') === (b.url ?? '');
+}
+
+/** 当前选中分类是否仍属于该书源的导航项（含下拉子项） */
+export function isExploreSectionInNav(
+  sections: ExploreSection[],
+  selected: ExploreSection | null | undefined,
+): boolean {
+  if (!selected) return false;
+  const items = buildExploreSectionNavItems(sections);
+  for (const item of items) {
+    if (item.kind === 'button' && sectionsMatch(item.section, selected)) return true;
+    if (item.kind === 'select' && item.options.some((o) => sectionsMatch(o, selected))) return true;
+  }
+  for (const section of sections) {
+    if (sectionsMatch(section, selected)) return true;
+    if (section.children?.some((c) => sectionsMatch(c, selected))) return true;
+  }
+  return false;
+}
+
+export type ExploreNavAutoSelection = {
+  section: ExploreSection | null;
+  /** 需先写入书源变量再重载分类 */
+  argumentUpdate?: { paramKey: string; value: string };
+};
+
+/**
+ * 探索 hub 默认选中：导航区第一个可选项（按钮或下拉首项）。
+ * 若首项为书源变量筛选且当前值未对齐，返回 argumentUpdate。
+ */
+export function resolveDefaultExploreNavSelection(
+  sections: ExploreSection[],
+  selectedSection?: ExploreSection | null,
+): ExploreNavAutoSelection {
+  const items = buildExploreSectionNavItems(sections);
+  if (items.length === 0) {
+    return { section: pickDefaultExploreHubSection(sections) };
+  }
+
+  const first = items[0]!;
+  if (first.kind === 'button') {
+    return { section: first.section };
+  }
+
+  const opt = first.options[0];
+  if (!opt) {
+    return { section: pickDefaultExploreHubSection(sections) };
+  }
+
+  if (first.filterSection?.paramKey) {
+    const current = getExploreArgumentSelectValue(first, selectedSection);
+    if (current !== opt.title) {
+      return {
+        section: shouldOpenExplorePageForSection(opt) ? opt : pickDefaultExploreHubSection(sections),
+        argumentUpdate: { paramKey: first.filterSection.paramKey, value: opt.title },
+      };
+    }
+    if (shouldOpenExplorePageForSection(opt)) {
+      return { section: opt };
+    }
+    return { section: pickDefaultExploreHubSection(sections) };
+  }
+
+  if (shouldOpenExplorePageForSection(opt)) {
+    return { section: opt };
+  }
+
+  return { section: pickDefaultExploreHubSection(sections) };
+}
+
 function pickFirstExploreHubListSection(
   sections: ExploreSection[],
   skipArgumentSelect: boolean,

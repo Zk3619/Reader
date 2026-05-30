@@ -130,7 +130,10 @@ function isExtractorKeyword(segment: string): boolean {
 }
 
 function isAttrExtractorName(segment: string): boolean {
-  return ATTR_EXTRACTOR_NAMES.has(segment.trim().toLowerCase());
+  const s = segment.trim().toLowerCase();
+  if (ATTR_EXTRACTOR_NAMES.has(s)) return true;
+  if (s.startsWith('data-')) return true;
+  return false;
 }
 
 /**
@@ -164,8 +167,8 @@ function parseCssSegment(rule: string, html: string): string[] {
   if (isJsonDocumentContent(html)) {
     const head = normalizedRule.split('@')[0]?.trim() ?? normalizedRule;
     if (!isValidCssSelector(head)) {
-      if (/^\$\.|^\$\[/.test(head)) return [];
-      return normalizedRule.trim() ? [normalizedRule.trim()] : [];
+      // JSON 列表项上误走 CSS：JSONPath 由 analyzeRule 处理；其它规则视为未命中，勿泄漏整段 JSON 或规则字面量
+      return [];
     }
   }
 

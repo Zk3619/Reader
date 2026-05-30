@@ -37,15 +37,49 @@ export function extractQttokenKey(cookieOrToken: string): string {
   return '';
 }
 
-/** 合并脚本 headers.cookie 与存储 Cookie，统一为 HTTP Cookie 头 */
+/** 从 Cookie 串取指定键（对齐 Legado cookie.getKey；device 匹配 deviceId） */
+export function extractLegadoCookieValue(cookieStr: string, keyName: string): string {
+  const s = String(cookieStr ?? '').trim();
+  if (!s) return '';
+  const key = String(keyName ?? '').trim();
+  if (!key || key === 'qttoken') {
+    const token = extractQttokenKey(s);
+    if (token) return token;
+    if (!key) return '';
+  }
+  if (key === 'device' || key === 'deviceId') {
+    const m = s.match(/(?:^|;)\s*deviceId=([^;]+)/i);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  for (const part of s.split(';')) {
+    const trimmed = part.trim();
+    if (trimmed.includes(key)) {
+      const eq = trimmed.indexOf('=');
+      return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
+    }
+  }
+  return '';
+}
+
+/**
+ * 合并脚本 headers.cookie 与存储 Cookie，统一为 HTTP Cookie 头。
+ * 对齐 Legado：库 Cookie 先合并，规则 ajax 里的 cookie 同名键覆盖前者。
+ */
 export function mergeAjaxCookieHeaders(
   headers: Record<string, string>,
   cookieFromStore: string
 ): Record<string, string> {
   const hdrs = { ...headers };
-  const fromHeader = String(hdrs.Cookie ?? hdrs.cookie ?? '').trim();
+  const fromHeader = mergeLegadoCookieHeaderStrings(
+    String(hdrs.Cookie ?? '').trim(),
+    String(hdrs.cookie ?? '').trim(),
+  );
   delete hdrs.cookie;
-  const merged = String(cookieFromStore ?? '').trim() || fromHeader;
+  const fromStore = String(cookieFromStore ?? '').trim();
+  const merged =
+    fromStore && fromHeader
+      ? mergeLegadoCookieHeaderStrings(fromStore, fromHeader)
+      : fromStore || fromHeader;
   if (merged) hdrs.Cookie = merged;
   return hdrs;
 }

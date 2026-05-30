@@ -10,17 +10,88 @@
 
 import { get, post } from '@/lib/http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
-import type { BookSource } from '@/types';
-import type { BookChapter, Book } from '@/types';
+import type { BookSource, ContentRule, BookChapter, Book } from '@/types';
 import {
   buildSourceRequestHeaders,
   resolveAggregationServerUrl,
 } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
+import { resolveUrl, detectContentType, decodeDataUrl, jsonToHex, normalizeDataUrlPayload } from '@/lib/book-source/utils';
 import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
+import { extractContentFromRuleOutput } from '@/lib/book-source/extract-rule-content';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import {
+  buildQingtianCatalogVariable,
+  readBookCustomFromVariable,
+} from '@/lib/book-source/chapters';
 
 const MAX_CONTENT_PAGES = 20;
+const AGGREGATION_CONTENT_API_VERSION = '4.11.5.1';
+
+/** 聚合 /content 返回的服务端错误文案，不应当作正文 */
+export function isAggregationApiErrorText(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return (
+    /正文处理异常/i.test(t) ||
+    /nil pointer dereference/i.test(t) ||
+    /invalid memory address/i.test(t)
+  );
+}
+
+export function buildAggregationContentPostBody(
+  payload: Record<string, string>,
+  bookVariable?: string,
+): string {
+  const custom = readBookCustomFromVariable(bookVariable);
+  const variable = buildQingtianCatalogVariable(bookVariable);
+  let toneId = custom;
+  if (!toneId) toneId = '4';
+
+  const body: Record<string, string> = {
+    html: '',
+    item_id: payload.item_id || '',
+    source: payload.sources || payload.source || '',
+    tab: payload.tab || '小说',
+    tone_id: toneId,
+    variable,
+    version: AGGREGATION_CONTENT_API_VERSION,
+  };
+  return JSON.stringify(body);
+}
+
+/** 规则脚本失败时直连聚合 /content（对齐 Legado ruleContent 请求体） */
+async function requestAggregationContentDirect(
+  source: BookSource,
+  payload: Record<string, string>,
+  bookVariable?: string,
+): Promise<string | null> {
+  const serverUrl = resolveAggregationServerUrl(source);
+  if (!serverUrl || !payload.item_id?.trim()) return null;
+
+  const url = `${serverUrl}/content`;
+  const body = buildAggregationContentPostBody(payload, bookVariable);
+  try {
+    const headers = buildSourceRequestHeaders(source, url);
+    headers['Content-Type'] = 'application/json';
+    const responseText = await post(url, body, {
+      headers,
+      enableCookieJar: source.enabledCookieJar,
+      timeout: 60_000,
+    });
+    await assertLoginCheckPassed(source, responseText, url);
+    const content = extractContentFromRuleOutput(responseText);
+    if (!content?.trim() || isAggregationApiErrorText(content)) {
+      if (content?.trim()) {
+        console.warn('[content] 直连 /content 返回服务端错误:', content.slice(0, 120));
+      }
+      return null;
+    }
+    return content;
+  } catch (e) {
+    console.warn('[content] 直连 /content 失败:', e);
+    return null;
+  }
+}
 
 async function parseContentByRule(ruleContent: string, context: RuleContext): Promise<string> {
   const trimmed = ruleContent.trim();
@@ -56,92 +127,90 @@ async function executePayAction(
 
 /**
  * 处理 data: URL 场景的正文获取
- * 模拟 legado ruleContent.content 中 JS 规则的行为：
+ * 对齐 Legado AnalyzeUrl(type!=null) → hex 载荷 + ruleContent.content JS：
  *   1. 解码 data URL → 提取 item_id / sources / tab 等
- *   2. 从 jsLib 获取 server 地址
- *   3. POST ${server}/content 并携带参数
- *   4. 从返回的 JSON 中提取正文内容
+ *   2. JSON → hex（Legado 传给正文规则的 result）
+ *   3. 执行 ruleContent.content（含 java.ajax('/content') 与漫画 img 拼接）
  */
 async function getContentFromDataUrl(
   source: BookSource,
   chapter: BookChapter,
-): Promise<string | null> {
-  // 1. 解码 data URL
-  const payload = decodeDataUrl(chapter.url);
-  if (!payload) {
+  book?: Book,
+  rule?: ContentRule,
+): Promise<{ content: string | null; ruleContext: RuleContext }> {
+  const decoded = decodeDataUrl(chapter.url);
+  if (!decoded) {
     console.warn('[content] 无法解码 data URL');
-    return null;
+    return { content: null, ruleContext: { content: '', contentType: 'text' } };
   }
   console.log('[content] data URL 载荷:', {
-    item_id: payload.item_id,
-    sources: payload.sources,
-    tab: payload.tab,
-    title: payload.title,
+    item_id: decoded.item_id,
+    sources: decoded.sources || decoded.source,
+    tab: decoded.tab,
+    title: decoded.title,
   });
 
-  const itemId = payload.item_id;
-  if (!itemId) {
-    console.warn('[content] data URL 中没有 item_id');
-    return null;
+  const contentRule = rule?.content?.trim();
+  if (!contentRule) {
+    console.warn('[content] 无正文规则');
+    return { content: null, ruleContext: { content: '', contentType: 'text' } };
   }
 
-  // 2. 确定 server 地址（优先用户所选线路 getArgument('server')）
-  const serverUrl = resolveAggregationServerUrl(source);
-  if (!serverUrl) {
-    console.warn('[content] 无法从书源获取 server 地址');
-    return null;
-  }
+  const serverUrl = resolveAggregationServerUrl(source) ?? '';
+  const payload = normalizeDataUrlPayload(decoded);
+  const hexResult = jsonToHex(JSON.stringify(payload));
 
-  // 3. 构建正文 API 请求（模拟 ruleContent.content 中的 java.ajax 调用）
-  const sources = payload.sources || payload.source || '';
-  const tab = payload.tab || '';
-
-  // 根据书源规则，某些情况下需要添加 review=1 查询参数，但参数主要在 body 中
-  let contentApiUrl = `${serverUrl}/content`;
-
-  const body = {
-    html: '',
-    item_id: itemId,
-    source: sources,
-    tab: tab,
-    tone_id: '4',
-    variable: JSON.stringify({ custom: '' }),
-    version: '4.11.5.1',
+  const ruleContext: RuleContext = {
+    content: hexResult,
+    contentType: 'text',
+    baseUrl: chapter.baseUrl || serverUrl || source.sourceUrl || '',
+    result: hexResult,
+    source: source as unknown as Record<string, unknown>,
+    book: book
+      ? ({
+          ...(book as unknown as Record<string, unknown>),
+          durChapterIndex: book.durChapterIndex ?? chapter.index,
+          variable: book.variable,
+        } as Record<string, unknown>)
+      : undefined,
+    chapter: chapter as unknown as Record<string, unknown>,
   };
 
-  console.log('[content] 请求正文 API:', contentApiUrl, 'body:', JSON.stringify(body));
-
-  const headers = buildSourceRequestHeaders(source, contentApiUrl);
-  const responseText = await post(
-    contentApiUrl,
-    JSON.stringify(body),
-    {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      timeout: 60000,
-    },
+  let content = extractContentFromRuleOutput(
+    (await parseContentByRule(contentRule, ruleContext)) ?? '',
   );
-  await assertLoginCheckPassed(source, responseText, contentApiUrl);
-
-  // 4. 解析响应
-  const response = JSON.parse(responseText);
-
-  // API 可能返回 { content: "..." } 或 { data: { content: "..." } }
-  let content = '';
-  if (typeof response.content === 'string') {
-    content = response.content;
-  } else if (response.data && typeof response.data.content === 'string') {
-    content = response.data.content;
-  } else if (typeof response === 'string') {
-    content = response;
+  if (content?.trim() && isAggregationApiErrorText(content)) {
+    console.warn('[content] 规则返回服务端错误:', content.slice(0, 120));
+    content = '';
   }
 
-  if (!content || content.trim().length === 0) {
-    console.warn('[content] 正文 API 返回空内容');
-    return null;
+  if (!content?.trim()) {
+    const viaDirect = await requestAggregationContentDirect(
+      source,
+      payload,
+      book?.variable,
+    );
+    if (viaDirect?.trim()) {
+      console.log('[content] 规则为空，直连 /content 成功，长度:', viaDirect.length);
+      content = viaDirect;
+    }
   }
 
-  return content;
+  if (!content?.trim()) {
+    console.warn('[content] 正文规则返回空内容', {
+      sources: payload.sources,
+      tab: payload.tab,
+      item_id_len: payload.item_id?.length ?? 0,
+      book_id: payload.book_id || '(无)',
+      serverUrl: serverUrl || '(未配置)',
+    });
+    return { content: null, ruleContext };
+  }
+
+  console.log(
+    `[content] 解析正文长度: ${content.length}, 预览: ${content.substring(0, 200)}...`,
+  );
+  return { content, ruleContext };
 }
 
 // ─── 主入口 ───
@@ -190,7 +259,9 @@ export async function getContent(
 
     // ── data: URL 路径 ──
     if (chapter.url.startsWith('data:')) {
-      content = await getContentFromDataUrl(source, chapter);
+      const dataResult = await getContentFromDataUrl(source, chapter, book, rule);
+      content = dataResult.content;
+      ruleContext = dataResult.ruleContext;
     } else {
       // ── 标准 HTTP URL 路径 ──
       console.log('[content] 标准 HTTP 路径，章节 URL:', chapter.url);
@@ -376,9 +447,10 @@ export async function getContent(
 
     // 清理内容（传递baseUrl用于图片URL绝对路径转换）
     const beforeCleanLength = content?.length || 0;
-    content = cleanContent(content, chapter.baseUrl, 'normal');
+    const cleanMode = isImageHeavyContent(content) ? 'image' : 'normal';
+    content = cleanContent(content, chapter.baseUrl, cleanMode);
     const afterCleanLength = content?.length || 0;
-    if (beforeCleanLength > 0 && afterCleanLength < beforeCleanLength * 0.5) {
+    if (beforeCleanLength > 0 && afterCleanLength < beforeCleanLength * 0.5 && cleanMode !== 'image') {
       console.warn(`[content] 清理后内容长度大幅减少: ${beforeCleanLength} -> ${afterCleanLength}, 可能存在问题`);
       content = cleanContent(content, chapter.baseUrl, 'light');
     }
@@ -397,13 +469,22 @@ export async function getContent(
 }
 
 /**
+ * 判断正文是否以图片为主（漫画章节）
+ */
+function isImageHeavyContent(content: string): boolean {
+  if (!content?.includes('<img')) return false;
+  const withoutImgs = content.replace(/<img[^>]*>/gi, '').replace(/\s+/g, '');
+  return withoutImgs.length < 80;
+}
+
+/**
  * 清理正文内容
  * 参考 legado 的 HtmlFormatter.formatKeepImg 实现
  */
 function cleanContent(
   content: string,
   baseUrl: string = '',
-  mode: 'normal' | 'light' = 'normal',
+  mode: 'normal' | 'light' | 'image' = 'normal',
 ): string {
   if (!content) return '';
 
@@ -455,7 +536,11 @@ function cleanContent(
   content = content.replace(/<\/?(?!img)[a-zA-Z]+(?=[ >])[^<>]*>/gi, '');
 
   // 8. 处理缩进：多个换行和空白字符替换为换行+全角空格（段落缩进）
-  content = content.replace(/\s*\n+\s*/g, mode === 'light' ? '\n' : '\n　　');
+  if (mode === 'image') {
+    content = content.replace(/\s*\n+\s*/g, '\n');
+  } else {
+    content = content.replace(/\s*\n+\s*/g, mode === 'light' ? '\n' : '\n　　');
+  }
 
   // 9. 移除开头和结尾的空白
   content = content.replace(/^[\n\s]+/, '');

@@ -14,7 +14,7 @@ import {
   buildSourceRequestHeaders,
   resolveAggregationServerUrl,
 } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
+import { resolveUrl, detectContentType, decodeDataUrl, resolveMediaUrl } from '@/lib/book-source/utils';
 import { runBookInfoIntroScript } from '@/lib/book-source/book-info-script-runner';
 import {
   buildIntroFromDetailJson,
@@ -292,10 +292,7 @@ async function analyzeBookInfoFromBody(
 
   let coverUrl: string | undefined;
   if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
-    const parsed = await safeAnalyze(rule.coverUrl);
-    if (parsed.trim()) {
-      coverUrl = resolveUrl(redirectUrl, parsed);
-    }
+    coverUrl = resolveMediaUrl(redirectUrl, await safeAnalyze(rule.coverUrl, { isUrl: true }));
   }
   if (!coverUrl && typeof ruleResult?.thumb_url === 'string') {
     coverUrl = ruleResult.thumb_url;

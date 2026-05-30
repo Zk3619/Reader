@@ -4,6 +4,7 @@
  */
 
 import { refreshBookCoverUrl } from '@/lib/book-source/refresh-book-cover';
+import { isLikelyUnresolvedRuleResult } from '@/lib/book-source/utils';
 import {
   deleteCoverFromDisk,
   patchCoverDiskMetaLastUrl,
@@ -82,9 +83,24 @@ export function isCrossOriginCoverUrl(url: string): boolean {
   }
 }
 
-/** 跨域封面必须经 fetch/blob，不可直连 */
 export function shouldFetchCoverAsBlob(url: string): boolean {
+  if (isLikelyUnresolvedRuleResult(url)) return false;
   return isCrossOriginCoverUrl(url);
+}
+
+function isBlockedCoverUrl(url: string): boolean {
+  const t = url.trim();
+  if (!t || isLikelyUnresolvedRuleResult(t)) return true;
+  try {
+    const u = new URL(t);
+    const path = u.pathname.toLowerCase();
+    if (path.includes('@') && !path.match(/\.(jpe?g|png|gif|webp|avif|bmp|svg)$/i)) {
+      return true;
+    }
+  } catch {
+    return !t.startsWith('data:');
+  }
+  return false;
 }
 
 async function maybeRefreshCoverUrl(
@@ -94,7 +110,9 @@ async function maybeRefreshCoverUrl(
   if (!options?.source || !options?.bookUrl?.trim()) {
     return normalized;
   }
-  if (options._refreshAttempted || !isSignedImageUrlExpired(normalized)) {
+  const needsRefresh =
+    isLikelyUnresolvedRuleResult(normalized) || isSignedImageUrlExpired(normalized);
+  if (options._refreshAttempted || !needsRefresh) {
     return normalized;
   }
 
@@ -235,6 +253,10 @@ export async function loadCoverImageObjectUrl(
   options?: CoverImageLoadOptions,
 ): Promise<string | null> {
   let normalized = normalizeImageUrl(url);
+  if (isBlockedCoverUrl(normalized)) {
+    normalized = await maybeRefreshCoverUrl(normalized, options);
+    if (isBlockedCoverUrl(normalized)) return null;
+  }
   const sourceId = options?.source?.sourceUrl ?? options?.source?.sourceName;
   const bookUrlTrim = options?.bookUrl?.trim();
 
@@ -277,7 +299,7 @@ export async function loadCoverImageObjectUrl(
       options?.source &&
       bookUrlTrim &&
       !options._refreshAttempted &&
-      isSignedCoverUrl(normalized)
+      (isSignedCoverUrl(normalized) || isLikelyUnresolvedRuleResult(normalized))
     ) {
       const fresh = await refreshBookCoverUrl(options.source, bookUrlTrim);
       if (fresh && fresh !== normalized) {

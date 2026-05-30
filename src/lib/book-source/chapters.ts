@@ -8,17 +8,27 @@
  *    构建 ${server}/catalog?book_id=... 请求后解析（模拟 legado ruleToc.chapterList init）
  */
 
-import { post } from '@/lib/http';
+import { get, post } from '@/lib/http';
 import { analyzeListElements, analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
+import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import type { BookSource, TocRule } from '@/types';
 import type { BookChapter, NewBookChapter } from '@/types';
 import {
   buildSourceRequestHeaders,
   resolveAggregationServerUrl,
 } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, decodeDataUrl } from '@/lib/book-source/utils';
+import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  resolveUrl,
+  detectContentType,
+  decodeDataUrl,
+  jsonToHex,
+  normalizeChapterDataUrl,
+  normalizeDataUrlPayload,
+} from '@/lib/book-source/utils';
 import { settingsStore } from '@/stores/settings';
 import { evalJs } from '@/lib/js-engine';
+import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
@@ -36,6 +46,8 @@ export interface GetChapterListOptions {
   reverseToc?: boolean;
   /** 每加载完一页目录后回调（formatJs 仅在 isComplete 时执行） */
   onPartial?: (partial: PartialChapterList) => void | Promise<void>;
+  /** 书架书籍 variable（对齐 Legado book.getVariable('custom')） */
+  bookVariable?: string;
 }
 
 type TocPartialListener = NonNullable<GetChapterListOptions['onPartial']>;
@@ -240,97 +252,360 @@ async function applyFormatJs(
 
 // ─── data: URL 场景 ───
 
+/** 对齐 Legado book.getVariable('custom')：从 book.variable JSON 取 custom 字段 */
+export function readBookCustomFromVariable(bookVariable?: string): string {
+  let raw = (bookVariable ?? '').trim();
+  if (!raw || raw === 'null') return '';
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const custom = parsed.custom;
+      return custom == null ? '' : String(custom);
+    } catch {
+      return '';
+    }
+  }
+  return raw;
+}
+
+/** 对齐 Legado ruleToc.chapterList 中 variable 参数 */
+export function buildQingtianCatalogVariable(bookVariable?: string): string {
+  return JSON.stringify({ custom: readBookCustomFromVariable(bookVariable) });
+}
+
+function withJsonPostHeaders(
+  headers: Record<string, string>,
+  body: string,
+): Record<string, string> {
+  const next = { ...headers };
+  const trimmed = body.trim();
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    next['Content-Type'] ??= 'application/json';
+  }
+  return next;
+}
+
+async function fetchQingtianDetailData(
+  source: BookSource,
+  payload: Record<string, string>,
+): Promise<Record<string, unknown> | null> {
+  const bookId = payload.book_id?.trim();
+  if (!bookId) return null;
+
+  const serverUrl = resolveAggregationServerUrl(source);
+  if (!serverUrl) return null;
+
+  const sources = (payload.sources || payload.source || '').trim();
+  const tab = (payload.tab || '小说').trim();
+  const detailUrl =
+    `${serverUrl}/detail?book_id=${encodeURIComponent(bookId)}` +
+    `&source=${encodeURIComponent(sources)}` +
+    `&tab=${encodeURIComponent(tab)}`;
+  const headers = buildSourceRequestHeaders(source, detailUrl);
+
+  let responseText = '';
+  try {
+    responseText = await get(detailUrl, {
+      headers,
+      enableCookieJar: source.enabledCookieJar,
+      timeout: 15000,
+    });
+    await assertLoginCheckPassed(source, responseText, detailUrl);
+  } catch {
+    return null;
+  }
+
+  try {
+    const response = JSON.parse(responseText) as {
+      code?: number | string;
+      data?: Record<string, unknown>;
+    };
+    if ((response.code === 0 || response.code === '0') && response.data) {
+      return response.data;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** 当 data URL 缺少 url 时，从 /detail 响应补全 toc_url（catalog 常见前置） */
+export async function enrichQingtianTocPayloadFromDetail(
+  source: BookSource,
+  payload: Record<string, string>,
+): Promise<Record<string, string>> {
+  const normalized = normalizeDataUrlPayload(payload);
+  if (normalized.url.trim()) return normalized;
+
+  const detail = await fetchQingtianDetailData(source, normalized);
+  if (!detail) return normalized;
+
+  const tocUrl = String(detail.toc_url ?? detail.url ?? '').trim();
+  if (!tocUrl) return normalized;
+
+  return { ...normalized, url: tocUrl, toc_url: tocUrl };
+}
+
+/** 从晴天 /catalog 响应中提取章节行 */
+export function extractCatalogChapterRows(response: unknown): Record<string, string>[] | null {
+  if (!response || typeof response !== 'object') return null;
+  const root = response as Record<string, unknown>;
+  const code = root.code;
+  if (code !== 0 && code !== '0') return null;
+
+  const data = root.data;
+  if (Array.isArray(data)) {
+    return data.filter((row) => row && typeof row === 'object') as Record<string, string>[];
+  }
+  if (data && typeof data === 'object') {
+    const nested = data as Record<string, unknown>;
+    for (const key of ['data', 'list', 'items', 'chapters']) {
+      const rows = nested[key];
+      if (Array.isArray(rows)) {
+        return rows.filter((row) => row && typeof row === 'object') as Record<string, string>[];
+      }
+    }
+  }
+  return null;
+}
+
+function mapCatalogRowsToChapters(
+  rows: Record<string, string>[],
+  bookId: string,
+  sources: string,
+  tab: string,
+  tocUrl: string,
+): BookChapter[] {
+  return rows.map((item, index) => {
+    const chapterPayload = {
+      book_id: bookId,
+      item_id: item.item_id || '',
+      title: item.title || '',
+      sources: item.source || sources,
+      tab: item.tab || tab,
+      url: item.toc_url || '',
+    };
+    const chapterDataUrl = `data:;base64,${btoa(
+      String.fromCharCode(...new TextEncoder().encode(JSON.stringify(chapterPayload))),
+    )},{"type":"qingtian3"}`;
+
+    return {
+      url: chapterDataUrl,
+      title: (item.title || '').trim(),
+      isVolume: false,
+      baseUrl: tocUrl,
+      bookUrl: '',
+      index,
+      isVip: false,
+      isPay: false,
+      wordCount: undefined,
+    } satisfies BookChapter;
+  });
+}
+
+async function fetchCatalogHtmlForPayload(
+  source: BookSource,
+  payload: Record<string, string>,
+): Promise<string> {
+  const pageUrl = (payload.url || payload.toc_url || '').trim();
+  if (!pageUrl) return '';
+
+  let proxy = '';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(getSourceArgsKey(source));
+      if (raw) {
+        const args = JSON.parse(raw) as Record<string, unknown>;
+        proxy = typeof args.proxy === 'string' ? args.proxy : '';
+      }
+    }
+  } catch {
+    proxy = '';
+  }
+  // 对齐 Legado ruleToc.chapterList：仅 proxy=本地 时抓取原站目录页 HTML
+  if (proxy !== '本地') return '';
+
+  try {
+    const headers = buildSourceRequestHeaders(source, pageUrl);
+    return await get(pageUrl, {
+      headers,
+      enableCookieJar: source.enabledCookieJar,
+      timeout: 30000,
+    });
+  } catch {
+    return '';
+  }
+}
+
+async function requestQingtianCatalog(
+  source: BookSource,
+  payload: Record<string, string>,
+  bookVariable?: string,
+): Promise<Record<string, string>[] | null> {
+  const bookId = payload.book_id?.trim();
+  if (!bookId) return null;
+
+  const serverUrl = resolveAggregationServerUrl(source);
+  if (!serverUrl) return null;
+
+  const sources = (payload.sources || payload.source || '').trim();
+  if (!sources) {
+    console.warn('[chapters] 目录 API 缺少 source/sources');
+    return null;
+  }
+  const tab = (payload.tab || '小说').trim();
+  const variable = buildQingtianCatalogVariable(bookVariable);
+  const html = await fetchCatalogHtmlForPayload(source, payload);
+
+  const catalogQuery =
+    `${serverUrl}/catalog?book_id=${encodeURIComponent(bookId)}` +
+    `&source=${encodeURIComponent(sources)}` +
+    `&tab=${encodeURIComponent(tab)}` +
+    `&variable=${encodeURIComponent(variable)}`;
+  const ajaxArg = `${catalogQuery},${JSON.stringify({ method: 'POST', body: { html } })}`;
+  const parsed = parseAjaxArgs(ajaxArg);
+  if (!parsed?.urlStr) return null;
+
+  const postBody = parsed.body ?? JSON.stringify({ html: '' });
+  const headers = withJsonPostHeaders(
+    {
+      ...buildSourceRequestHeaders(source, parsed.urlStr),
+      ...parsed.headers,
+    },
+    postBody,
+  );
+  const responseText =
+    parsed.method === 'POST'
+      ? await post(parsed.urlStr, postBody, {
+          headers,
+          enableCookieJar: source.enabledCookieJar,
+          timeout: 30000,
+        })
+      : await get(parsed.urlStr, {
+          headers,
+          enableCookieJar: source.enabledCookieJar,
+          timeout: 30000,
+        });
+  await assertLoginCheckPassed(source, responseText, parsed.urlStr);
+
+  let response: unknown;
+  try {
+    response = JSON.parse(responseText);
+  } catch {
+    console.warn('[chapters] 目录 API 响应非 JSON');
+    return null;
+  }
+
+  const rows = extractCatalogChapterRows(response);
+  if (!rows) {
+    const msg =
+      response && typeof response === 'object' && 'msg' in response
+        ? String((response as Record<string, unknown>).msg ?? '').trim()
+        : '';
+    console.warn('[chapters] 目录 API 返回异常:', msg || response);
+    return null;
+  }
+  return rows;
+}
+
+async function getChapterListFromDataUrlViaRule(
+  source: BookSource,
+  tocUrl: string,
+  payload: Record<string, string>,
+  options?: GetChapterListOptions,
+): Promise<BookChapter[]> {
+  const rule = source.ruleToc;
+  if (!rule?.chapterList?.includes('<js>')) return [];
+
+  const serverUrl = resolveAggregationServerUrl(source) ?? '';
+  const hexResult = jsonToHex(JSON.stringify(payload));
+  const bookVariable = options?.bookVariable?.trim();
+  const context: RuleContext = {
+    content: hexResult,
+    contentType: 'text',
+    baseUrl: serverUrl,
+    source: source as unknown as Record<string, unknown>,
+    result: hexResult,
+    book: bookVariable ? { variable: bookVariable, custom: bookVariable } : undefined,
+  };
+
+  const { listRule, reverse } = parseTocChapterListRule(rule.chapterList);
+  const listItems = await analyzeListElements(listRule, context);
+  if (listItems.length === 0) return [];
+
+  const chapters: BookChapter[] = [];
+  for (let i = 0; i < listItems.length; i++) {
+    const item = listItems[i]!;
+    const elementContext = enrichJsonListItemContext(
+      item.content,
+      detectContentType(item.content),
+      tocUrl,
+      source as unknown as Record<string, unknown>,
+      { regexGroups: item.regexGroups },
+    );
+    const chapter = await parseChapter(source, rule, elementContext, tocUrl, i);
+    if (chapter) chapters.push(chapter);
+  }
+
+  if (chapters.length === 0) return [];
+  const ordered = finalizeTocChapterOrder(
+    chapters,
+    reverse,
+    options?.reverseToc === true,
+  );
+  return await applyFormatJs(source, rule, ordered, tocUrl);
+}
+
 /**
  * 处理 data: URL 场景的章节列表获取
- * 模拟 legado ruleToc.chapterList 中 JS 规则的行为：
- *   1. 解码 data URL → 提取 book_id / sources / tab
- *   2. 从 jsLib 获取 server 地址
- *   3. POST ${server}/catalog?book_id=...&source=...&tab=...
- *   4. 解析返回的 JSON data 数组为 BookChapter[]
+ * 优先走 ruleToc.chapterList（对齐 Legado），失败时回退 catalog API。
  */
 async function getChapterListFromDataUrl(
   source: BookSource,
   tocUrl: string,
+  options?: GetChapterListOptions,
 ): Promise<BookChapter[]> {
-  // 1. 解码 data URL
-  const payload = decodeDataUrl(tocUrl);
-  if (!payload) {
+  const decoded = decodeDataUrl(tocUrl);
+  if (!decoded) {
     console.warn('[chapters] 无法解码 data URL');
     return [];
   }
-  console.log('[chapters] data URL 载荷:', payload);
 
-  const bookId = payload.book_id;
+  const payload = normalizeDataUrlPayload(decoded);
+
+  const bookId = payload.book_id?.trim();
   if (!bookId) {
     console.warn('[chapters] data URL 中没有 book_id');
     return [];
   }
 
-  // 2. 确定 server 地址（优先用户所选线路）
-  const serverUrl = resolveAggregationServerUrl(source);
-  if (!serverUrl) {
-    console.warn('[chapters] 无法从书源获取 server 地址');
-    return [];
+  const resolvedPayload = await enrichQingtianTocPayloadFromDetail(source, payload);
+
+  try {
+    const viaRule = await getChapterListFromDataUrlViaRule(
+      source,
+      tocUrl,
+      resolvedPayload,
+      options,
+    );
+    if (viaRule.length > 0) {
+      console.log('[chapters] data URL 规则解析章节数:', viaRule.length);
+      return viaRule;
+    }
+  } catch (e) {
+    console.warn('[chapters] data URL 规则解析失败，回退 catalog API:', e);
   }
 
-  // 3. 构建目录 API URL（模拟 ruleToc.chapterList 中的 java.ajax 调用）
-  const sources = payload.sources || payload.source || '';
-  const tab = payload.tab || '';
-  const catalogUrl = `${serverUrl}/catalog?book_id=${encodeURIComponent(bookId)}&source=${encodeURIComponent(sources)}&tab=${encodeURIComponent(tab)}`;
-  console.log('[chapters] 请求目录 API:', catalogUrl);
+  const rows = await requestQingtianCatalog(source, resolvedPayload, options?.bookVariable);
+  if (!rows) return [];
 
-  // 4. POST 请求（书源规则用 POST + body: { html: "" }）
-  const headers = buildSourceRequestHeaders(source, catalogUrl);
-  const responseText = await post(
-    catalogUrl,
-    JSON.stringify({ html: '' }),
-    {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      timeout: 30000,
-    },
-  );
-  await assertLoginCheckPassed(source, responseText, catalogUrl);
-
-  const response = JSON.parse(responseText);
-  if (response.code !== 0 || !response.data || !Array.isArray(response.data)) {
-    console.warn('[chapters] 目录 API 返回异常:', response.msg || response);
-    return [];
-  }
-
-  console.log('[chapters] 获取到章节数:', response.data.length);
-
-  // 5. 将 API 响应映射为 BookChapter[]
-  const chapters: BookChapter[] = response.data.map(
-    (item: Record<string, string>, index: number) => {
-      // 构建章节内容 URL：与书源 chapterUrl 规则一致，用 data: URL 编码
-      const chapterPayload = {
-        book_id: bookId,
-        item_id: item.item_id || '',
-        title: item.title || '',
-        sources: item.source || sources,
-        tab: item.tab || tab,
-        url: item.toc_url || '',
-      };
-      const chapterDataUrl = `data:;base64,${btoa(
-        String.fromCharCode(...new TextEncoder().encode(JSON.stringify(chapterPayload))),
-      )},{"type":"qingtian3"}`;
-
-      return {
-        url: chapterDataUrl,
-        title: (item.title || '').trim(),
-        isVolume: false,
-        baseUrl: tocUrl,
-        bookUrl: '', // 由调用方设置
-        index,
-        isVip: false,
-        isPay: false,
-        wordCount: undefined,
-      } satisfies BookChapter;
-    },
-  );
-
-  return chapters;
+  console.log('[chapters] catalog API 章节数:', rows.length);
+  const sources = (resolvedPayload.sources || resolvedPayload.source || '').trim();
+  const tab = (resolvedPayload.tab || '小说').trim();
+  return mapCatalogRowsToChapters(rows, bookId, sources, tab, tocUrl);
 }
 
 // ─── 标准 HTTP URL 场景 ───
@@ -351,7 +626,7 @@ export async function getChapterList(
   try {
     // ── data: URL 路径 ──
     if (tocUrl.startsWith('data:')) {
-      return await getChapterListFromDataUrl(source, tocUrl);
+      return await getChapterListFromDataUrl(source, tocUrl, options);
     }
 
     // ── 标准 HTTP URL 路径 ──
@@ -544,9 +819,19 @@ async function parseChapter(
 ): Promise<BookChapter | null> {
   try {
     let title = rule.chapterName ? await analyzeString(rule.chapterName, context) : '';
-    const url = rule.chapterUrl
+    let url = rule.chapterUrl
       ? await analyzeString(rule.chapterUrl, context, { isUrl: true })
       : '';
+    url = normalizeChapterDataUrl(url);
+
+    if (!title && context.result && typeof context.result === 'object' && !Array.isArray(context.result)) {
+      const row = context.result as Record<string, unknown>;
+      const sourceLabel = String(row.source ?? row.sources ?? '').trim();
+      const rowTitle = String(row.title ?? '').trim();
+      if (sourceLabel || rowTitle) {
+        title = sourceLabel && rowTitle ? `${sourceLabel}:${rowTitle}` : sourceLabel || rowTitle;
+      }
+    }
 
     // Legado 兼容容错：部分站点章节名规则在编码/替换后可能被清空，
     // 但章节 URL 已解析成功。此时回退到锚点文本，避免整章被丢弃。

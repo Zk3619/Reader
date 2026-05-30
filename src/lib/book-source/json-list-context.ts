@@ -4,21 +4,40 @@
  */
 
 import type { RuleContext } from '@/lib/rule-engine';
+import { hexToUtf8 } from '@/lib/book-source/utils';
+
+function parseJsonObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
 
 /** 将列表项 JSON 字符串解析为对象，供 result / book 使用 */
 export function parseJsonListItemRecord(
   element: string,
 ): Record<string, unknown> | null {
   const trimmed = element.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return parseJsonObjectRecord(parsed);
+    } catch {
+      return null;
+    }
   }
+
+  if (/^[0-9a-f]+$/i.test(trimmed) && trimmed.length >= 20) {
+    try {
+      const decoded = hexToUtf8(trimmed);
+      const parsed = JSON.parse(decoded) as unknown;
+      return parseJsonObjectRecord(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 export function enrichJsonListItemContext(
@@ -28,21 +47,20 @@ export function enrichJsonListItemContext(
   source: Record<string, unknown>,
   extras?: { regexGroups?: string[]; debugIndex?: number },
 ): RuleContext {
+  const row = parseJsonListItemRecord(element);
+  const effectiveContentType: 'html' | 'json' | 'text' = row ? 'json' : contentType;
   const ctx: RuleContext = {
     content: element,
-    contentType,
+    contentType: effectiveContentType,
     baseUrl,
     source,
     result: element,
     ...(extras?.debugIndex !== undefined ? { _debugIndex: extras.debugIndex } : {}),
     ...(extras?.regexGroups?.length ? { regexGroups: extras.regexGroups } : {}),
   };
-  if (contentType === 'json') {
-    const row = parseJsonListItemRecord(element);
-    if (row) {
-      ctx.book = row;
-      ctx.result = row;
-    }
+  if (row) {
+    ctx.book = row;
+    ctx.result = row;
   }
   return ctx;
 }

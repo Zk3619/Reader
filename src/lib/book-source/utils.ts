@@ -3,6 +3,8 @@
  * 对应 legado 项目的 URL构建和变量处理
  */
 
+import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
+
 /**
  * 构建URL（替换变量）
  * 支持 {{key}} 和 {key} 两种格式
@@ -101,6 +103,27 @@ export function normalizeUrlRuleResult(relativeUrl: string): string {
   return rel;
 }
 
+/** 规则未展开或仍为 Legado @ 链时，不应拼成可请求的 http URL */
+export function isLikelyUnresolvedRuleResult(value: string): boolean {
+  const t = value.trim();
+  if (!t) return false;
+  return isRuleExpression(t);
+}
+
+/**
+ * 解析封面/媒体相对 URL；未命中规则或仍为规则字面量时返回 undefined
+ * 对齐 Legado getString(..., isUrl = true) + getAbsoluteURL
+ */
+export function resolveMediaUrl(
+  baseUrl: string,
+  relativeUrl: string | undefined | null,
+): string | undefined {
+  const rel = normalizeUrlRuleResult(relativeUrl ?? '');
+  if (!rel || isLikelyUnresolvedRuleResult(rel)) return undefined;
+  if (rel.startsWith('data:')) return rel;
+  return resolveUrl(baseUrl, rel);
+}
+
 /**
  * 解析相对URL为绝对URL（对齐 Legado NetworkUtils.getAbsoluteURL）
  */
@@ -151,6 +174,107 @@ export function detectContentType(content: string): 'html' | 'json' | 'text' {
 }
 
 // ─── data: URL 工具（用于晴天聚合等书源） ───
+
+/** UTF-8 JSON 字符串 → Legado AnalyzeUrl data: 响应用的 hex 载荷 */
+export function jsonToHex(json: string): string {
+  return Array.from(new TextEncoder().encode(json))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** hex 载荷 → UTF-8 字符串（对齐 java.hexDecodeToString） */
+export function hexToUtf8(hex: string): string {
+  const text = String(hex ?? '').trim();
+  if (!text) return '';
+  const bytes = new Uint8Array(
+    (text.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)),
+  );
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+/**
+ * 将规则输出的章节 URL 规范为 Legado data: URL（聚合书源 chapterUrl 常见形态）
+ */
+export function normalizeChapterDataUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('data:')) return trimmed;
+
+  const tryWrapBase64Payload = (payload: string): string | null => {
+    const b64 = payload.trim();
+    if (!b64 || /\s/.test(b64)) return null;
+    return `data:;base64,${b64},{"type":"qingtian3"}`;
+  };
+
+  if (/^[0-9a-f]+$/i.test(trimmed) && trimmed.length >= 20) {
+    try {
+      const decoded = hexToUtf8(trimmed);
+      if (decoded.startsWith('{')) {
+        const b64 =
+          typeof btoa !== 'undefined'
+            ? btoa(unescape(encodeURIComponent(decoded)))
+            : '';
+        if (b64) return `data:;base64,${b64},{"type":"qingtian3"}`;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const b64 =
+        typeof btoa !== 'undefined'
+          ? btoa(unescape(encodeURIComponent(trimmed)))
+          : '';
+      if (b64) return `data:;base64,${b64},{"type":"qingtian3"}`;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  const wrapped = tryWrapBase64Payload(trimmed);
+  if (wrapped) return wrapped;
+
+  return trimmed;
+}
+
+/** 对齐 Legado data: URL 载荷字段（sources/source/tab/url/toc_url） */
+export function normalizeDataUrlPayload(
+  payload: Record<string, string>,
+): Record<string, string> {
+  const sources = (payload.sources || payload.source || '').trim();
+  const tab = (payload.tab || '小说').trim();
+  const url = (payload.url || payload.toc_url || '').trim();
+  return {
+    ...payload,
+    book_id: (payload.book_id || '').trim(),
+    item_id: (payload.item_id || '').trim(),
+    sources,
+    source: sources,
+    tab,
+    url,
+    toc_url: url,
+  };
+}
+
+/** @deprecated 使用 normalizeDataUrlPayload */
+export const normalizeQingtianPayload = normalizeDataUrlPayload;
+/** @deprecated 使用 normalizeDataUrlPayload */
+export const normalizeQingtianTocPayload = normalizeDataUrlPayload;
+
+/** 从书籍 data: URL 推断 tab（漫画/小说等） */
+export function inferTabFromBook(
+  book: Pick<{ bookUrl?: string; tocUrl?: string }, 'bookUrl' | 'tocUrl'>,
+): string | undefined {
+  for (const url of [book.tocUrl, book.bookUrl]) {
+    if (!url?.startsWith('data:')) continue;
+    const payload = decodeDataUrl(url);
+    const tab = payload?.tab?.trim();
+    if (tab) return tab;
+  }
+  return undefined;
+}
 
 /**
  * 解码 data: URL 中 base64 编码的 JSON 载荷

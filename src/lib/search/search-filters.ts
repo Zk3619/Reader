@@ -65,9 +65,21 @@ export function filterBookSources(sources: BookSource[], query: string, mode: Se
   });
 }
 
-/** 分组管理：固定常规，仅匹配分组名 */
-export function filterBookGroups(groups: BookGroup[], query: string, displayName: (g: BookGroup) => string): BookGroup[] {
-  const q = query.trim().toLowerCase();
+/** 分组管理：常规=分组名包含；模糊=分组名字符序匹配 */
+export function filterBookGroups(
+  groups: BookGroup[],
+  query: string,
+  displayName: (g: BookGroup) => string,
+  mode: SearchMode = 'name',
+): BookGroup[] {
+  const q = query.trim();
   if (!q) return groups;
-  return groups.filter((g) => displayName(g).toLowerCase().includes(q));
+  const qLower = q.toLowerCase();
+  return groups.filter((g) => {
+    const name = displayName(g);
+    if (mode === 'fuzzy') {
+      return fuzzyMatchQuery(q, name);
+    }
+    return name.toLowerCase().includes(qLower);
+  });
 }

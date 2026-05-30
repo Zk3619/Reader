@@ -5,19 +5,21 @@
 
 import type { BookSource } from '@/types';
 import {
+  getStoredLoginInfo,
   getStoredSourceCookiesForUrl,
   getStoredSourceCookiesMerged,
   readSourceCookieStore,
 } from '@/lib/js-engine/legado/login-script-runner';
-import { normalizeLegadoCookieHeader } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { normalizeLegadoCookieHeader, extractQttokenKey, mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
   getSourceArgsKey,
+  getSourceUrlIdentifier,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { extractServerFromJsLib, parseHeaders } from '@/lib/book-source/utils';
 
 const ANDROID_ID_KEY = 'reader_login_android_id';
 
-function getOrCreateAndroidId(): string {
+export function getOrCreateAndroidId(): string {
   try {
     let id = localStorage.getItem(ANDROID_ID_KEY);
     if (!id) {
@@ -42,6 +44,34 @@ function hostnameOf(urlOrHost: string): string | undefined {
 
 function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test(s.trim());
+}
+
+function readSourceArgsField(source: BookSource, field: string): string {
+  try {
+    const raw = localStorage.getItem(getSourceArgsKey(source));
+    if (!raw?.trim()) return '';
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const v = obj[field];
+    return v == null ? '' : String(v).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Cookie 表 → args.qttoken → loginInfo.密钥 */
+export function readAggregationQttoken(source: BookSource, serverUrl: string): string {
+  const fromCookie = extractQttokenKey(resolveSourceCookiesForHttp(source, serverUrl));
+  if (fromCookie) return fromCookie;
+  const fromArgs = readSourceArgsField(source, 'qttoken');
+  if (fromArgs) return extractQttokenKey(fromArgs) || fromArgs;
+  try {
+    const login = getStoredLoginInfo(getSourceUrlIdentifier(source));
+    const key = login['密钥']?.trim();
+    if (key) return extractQttokenKey(key) || key;
+  } catch {
+    /* ignore */
+  }
+  return '';
 }
 
 /** 与 Legado login：getArgument('server') || host[0] */
@@ -105,16 +135,41 @@ export function resolveSourceCookiesForHttp(
   return getStoredSourceCookiesMerged(source);
 }
 
+/**
+ * 对齐 Legado ruleContent：cookie.getKey(server,'qttoken') + deviceId
+ */
+export function buildAggregationQtCookieHeader(
+  source: BookSource,
+  serverUrl: string,
+): string {
+  const token = readAggregationQttoken(source, serverUrl);
+  if (!token) return '';
+  const stored = resolveSourceCookiesForHttp(source, serverUrl).trim();
+  const deviceId = getOrCreateAndroidId();
+  let device2 = deviceId;
+  const dm = stored.match(/(?:^|;)\s*deviceId=([^;]+)/i);
+  if (dm?.[1]?.trim()) device2 = dm[1].trim();
+  return `qttoken=${token}; deviceId=${device2};`;
+}
+
 /** 书源 header + 已登录 Cookie（供 catalog/content/detail 等直连 API） */
 export function buildSourceRequestHeaders(
   source: BookSource,
   requestUrl: string,
 ): Record<string, string> {
   const headers = parseHeaders(source.header);
+  const server = resolveAggregationServerUrl(source);
+  const qtCookie =
+    server && /\/content\b|\/catalog\b|\/detail\b/i.test(requestUrl)
+      ? buildAggregationQtCookieHeader(source, server)
+      : '';
   const stored = resolveSourceCookiesForHttp(source, requestUrl);
-  const cookieHeader = mergeCookieHeader(stored, headers.Cookie ?? headers.cookie);
+  const cookieHeader = mergeLegadoCookieHeaderStrings(
+    stored,
+    mergeLegadoCookieHeaderStrings(qtCookie, headers.Cookie ?? headers.cookie ?? ''),
+  );
   if (cookieHeader) {
-    headers.Cookie = cookieHeader;
+    headers.Cookie = normalizeLegadoCookieHeader(cookieHeader, getOrCreateAndroidId());
     delete headers.cookie;
   } else if (resolveAggregationServerUrl(source)) {
     console.warn(

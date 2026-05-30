@@ -14,6 +14,7 @@ const DEFAULT_MANAGE_PREFS: BookshelfManagePrefs = {
   filterBySource: false,
   openBookInfoByClickTitle: false,
   coverClickPreview: true,
+  enableDragSort: true,
 };
 
 const BOOKSHELF_PAGE_PREFS_KEY = 'bookshelf_page_prefs';
@@ -41,7 +42,13 @@ interface BookshelfManageChildPrefs extends BookshelfManagePrefs {
 interface BookshelfChildrenPrefs {
   search: { searchMode: SearchMode };
   manage: BookshelfManageChildPrefs;
-  groupManage: { coverClickPreview: boolean };
+  groupManage: GroupManageChildPrefs;
+}
+
+interface GroupManageChildPrefs {
+  searchMode: SearchMode;
+  coverClickPreview: boolean;
+  enableDragSort: boolean;
 }
 
 export interface BookshelfPagePrefs {
@@ -55,6 +62,7 @@ export interface BookshelfPagePrefs {
 
 interface SourcesPagePrefs {
   searchMode: SearchMode;
+  enableDragSort: boolean;
 }
 
 const DEFAULT_BOOKSHELF_PAGE_PREFS: BookshelfPagePrefs = {
@@ -64,12 +72,13 @@ const DEFAULT_BOOKSHELF_PAGE_PREFS: BookshelfPagePrefs = {
   children: {
     search: { searchMode: 'name' },
     manage: { searchMode: 'name', ...DEFAULT_MANAGE_PREFS },
-    groupManage: { coverClickPreview: true },
+    groupManage: { searchMode: 'name', coverClickPreview: true, enableDragSort: true },
   },
 };
 
 const DEFAULT_SOURCES_PAGE_PREFS: SourcesPagePrefs = {
   searchMode: 'name',
+  enableDragSort: true,
 };
 
 const GROUP_STYLES: GroupStyle[] = ['dropdown', 'tabs', 'normal'];
@@ -123,6 +132,7 @@ function normalizeLayoutSettings(raw: unknown): BookshelfLayoutSettings {
     showPendingUpdateCount: obj.showPendingUpdateCount === true,
     showQuickScrollbar: obj.showQuickScrollbar === true,
     coverClickPreview: obj.coverClickPreview !== false,
+    enableDragSort: obj.enableDragSort !== false,
   };
 }
 
@@ -134,6 +144,7 @@ function normalizeManageChild(raw: unknown, searchModeFallback: SearchMode): Boo
     filterBySource: obj.filterBySource === true,
     openBookInfoByClickTitle: obj.openBookInfoByClickTitle === true,
     coverClickPreview: obj.coverClickPreview !== false,
+    enableDragSort: obj.enableDragSort !== false,
   };
 }
 
@@ -162,14 +173,21 @@ function normalizeBookshelfPagePrefs(raw: unknown): BookshelfPagePrefs {
     children: {
       search: { searchMode: normalizeSearchMode(searchChild.searchMode ?? searchMode) },
       manage: normalizeManageChild(manageChild, searchMode),
-      groupManage: { coverClickPreview: groupManageChild.coverClickPreview !== false },
+      groupManage: {
+        searchMode: normalizeSearchMode(groupManageChild.searchMode ?? searchMode),
+        coverClickPreview: groupManageChild.coverClickPreview !== false,
+        enableDragSort: groupManageChild.enableDragSort !== false,
+      },
     },
   };
 }
 
 function normalizeSourcesPagePrefs(raw: unknown): SourcesPagePrefs {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  return { searchMode: normalizeSearchMode(obj.searchMode) };
+  return {
+    searchMode: normalizeSearchMode(obj.searchMode),
+    enableDragSort: obj.enableDragSort !== false,
+  };
 }
 
 export async function loadBookshelfPagePrefs(): Promise<BookshelfPagePrefs> {
@@ -302,6 +320,22 @@ export async function saveBookshelfManageSubPageMode(mode: SearchMode): Promise<
     children: {
       ...prefs.children,
       manage: { ...prefs.children.manage, searchMode: mode },
+    },
+  });
+}
+
+export async function loadGroupManageSubPageMode(): Promise<SearchMode> {
+  const prefs = await loadBookshelfPagePrefs();
+  return prefs.children.groupManage.searchMode;
+}
+
+export async function saveGroupManageSubPageMode(mode: SearchMode): Promise<void> {
+  const prefs = await loadBookshelfPagePrefs();
+  await saveBookshelfPagePrefs({
+    ...prefs,
+    children: {
+      ...prefs.children,
+      groupManage: { ...prefs.children.groupManage, searchMode: mode },
     },
   });
 }

@@ -11,8 +11,10 @@ import type { BookSource, ExploreRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { isLegadoAjaxBookListExploreUrl } from '@/lib/book-source/explore-legado-ajax';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
-import { buildUrl, parseHeaders, resolveUrl, detectContentType } from '@/lib/book-source/utils';
+import { buildUrl, parseHeaders, resolveUrl, detectContentType, resolveMediaUrl } from '@/lib/book-source/utils';
+import { resolveBookType } from '@/lib/book-source/book-type';
 import {
+  COVER_JSON_PATHS,
   EXPLORE_INTRO_JSON_PATHS,
   EXPLORE_LAST_CHAPTER_JSON_PATHS,
   EXPLORE_UPDATE_TIME_JSON_PATHS,
@@ -275,7 +277,12 @@ async function parseExploreBook(
       intro = await pickFirstJsonField(context, EXPLORE_INTRO_JSON_PATHS);
     }
 
-    const coverUrl = rule.coverUrl ? await analyzeString(rule.coverUrl, context) : undefined;
+    let coverUrl = rule.coverUrl
+      ? await analyzeString(rule.coverUrl, context, { isUrl: true })
+      : undefined;
+    if (!coverUrl?.trim() && context.contentType === 'json') {
+      coverUrl = await pickFirstJsonField(context, COVER_JSON_PATHS);
+    }
     let latestChapterTitle = rule.lastChapter
       ? await analyzeString(rule.lastChapter, context)
       : undefined;
@@ -365,13 +372,13 @@ async function parseExploreBook(
       kind,
       wordCount: wordCount?.trim() || undefined,
       intro,
-      coverUrl: coverUrl ? resolveUrl(baseUrl, coverUrl) : undefined,
+      coverUrl: resolveMediaUrl(baseUrl, coverUrl),
       latestChapterTitle,
       latestChapterUpdateTime,
       tocUrl,
       origin: source.sourceUrl,
       originName: source.sourceName,
-      type: source.sourceType,
+      type: resolveBookType(source.sourceType, tab),
       time: Date.now(),
       originOrder: source.customOrder,
       chapterWordCount,
