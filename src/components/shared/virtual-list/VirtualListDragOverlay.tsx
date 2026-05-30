@@ -18,6 +18,8 @@ export interface VirtualListDragOverlayProps {
   class?: string;
   style?: JSX.CSSProperties;
   scrollContainer?: Accessor<HTMLDivElement | undefined>;
+  /** 自动滚动后触发（如 virtualizer.measure），使新行挂载参与位移动画 */
+  onAfterAutoScroll?: () => void;
   children: (active: { id: Id }) => JSX.Element;
 }
 
@@ -25,8 +27,7 @@ export function VirtualListDragOverlay(props: VirtualListDragOverlayProps) {
   const ctx = useDragDropContext();
   if (!ctx) return null;
 
-  const [state, { setOverlay, onDragStart, onDragMove, onDragEnd, recomputeLayouts }] =
-    ctx;
+  const [state, { setOverlay, onDragStart, onDragMove, onDragEnd }] = ctx;
 
   const [position, setPosition] = createSignal<{ left: number; top: number } | null>(
     null,
@@ -88,7 +89,7 @@ export function VirtualListDragOverlay(props: VirtualListDragOverlayProps) {
 
     if (delta !== 0) {
       scroll.scrollTop = clamp(scroll.scrollTop + delta, 0, maxScroll);
-      recomputeLayouts();
+      props.onAfterAutoScroll?.();
       updateOverlayPosition();
     }
 
@@ -153,7 +154,6 @@ export function VirtualListDragOverlay(props: VirtualListDragOverlayProps) {
       };
     }
 
-    // 首帧尚未量到尺寸：保持挂载以便测量，勿用 display:none
     const x = sensor?.coordinates.current.x ?? 0;
     const y = sensor?.coordinates.current.y ?? 0;
     return {

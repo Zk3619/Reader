@@ -1,4 +1,9 @@
-import { createSortable, useDragDropContext, type Id } from '@thisbeyond/solid-dnd';
+import {
+  createSortable,
+  useDragDropContext,
+  useSortableContext,
+  type Id,
+} from '@thisbeyond/solid-dnd';
 import { Show, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import type { VirtualListDragStyle } from '@/components/shared/virtual-list/types';
@@ -28,7 +33,65 @@ export function VirtualListSortableRow(props: VirtualListSortableRowProps) {
   );
 }
 
+function VirtualListSortableRowPlain(props: {
+  dragStyle?: VirtualListDragStyle;
+  class?: string;
+  style?: JSX.CSSProperties;
+  children: JSX.Element;
+}) {
+  return (
+    <div
+      class={cn(props.dragStyle?.rowClass, props.class)}
+      style={props.style}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/** 仅在 DragDropProvider + SortableProvider 内挂载；避免 HMR/时序导致 createSortable 崩溃 */
 function VirtualListSortableRowInner(props: {
+  id: Id;
+  dragStyle?: VirtualListDragStyle;
+  class?: string;
+  style?: JSX.CSSProperties;
+  children: JSX.Element;
+}) {
+  const dnd = useDragDropContext();
+  const sortableCtx = useSortableContext();
+
+  if (import.meta.env.DEV && (!dnd || !sortableCtx)) {
+    console.warn(
+      `[VirtualListSortableRow] id=${String(props.id)} 缺少 DragDropProvider/SortableProvider，拖拽已降级为静态行`,
+    );
+  }
+
+  return (
+    <Show
+      when={dnd && sortableCtx}
+      fallback={
+        <VirtualListSortableRowPlain
+          dragStyle={props.dragStyle}
+          class={props.class}
+          style={props.style}
+        >
+          {props.children}
+        </VirtualListSortableRowPlain>
+      }
+    >
+      <VirtualListSortableRowDnd
+        id={props.id}
+        dragStyle={props.dragStyle}
+        class={props.class}
+        style={props.style}
+      >
+        {props.children}
+      </VirtualListSortableRowDnd>
+    </Show>
+  );
+}
+
+function VirtualListSortableRowDnd(props: {
   id: Id;
   dragStyle?: VirtualListDragStyle;
   class?: string;

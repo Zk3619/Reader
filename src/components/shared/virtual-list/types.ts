@@ -36,6 +36,11 @@ export interface VirtualListSortableConfig<T> {
   /** 当前行是否可拖拽（如分组标题行返回 false） */
   isSortable?: (item: T, index: number) => boolean;
   onReorder: (ids: Id[]) => void | Promise<void>;
+  /**
+   * 为 true 时 dragEnd 的 onReorder 仅用于持久化（如写 DB），
+   * 不在回调内重排外层 items；展示顺序由虚拟列表 displayIds 维护。
+   */
+  persistOnly?: boolean;
   dragStyle?: VirtualListDragStyle;
 }
 

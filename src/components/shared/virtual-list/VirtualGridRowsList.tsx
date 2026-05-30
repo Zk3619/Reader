@@ -16,6 +16,15 @@ import {
   type VirtualListSortableConfig,
 } from '@/components/shared/virtual-list/types';
 import type { Id } from '@thisbeyond/solid-dnd';
+import type { VirtualSortableTargetResolver } from '@/components/shared/virtual-list/virtual-sortable-collision';
+import {
+  reorderItemsByIds,
+  useVirtualListSortableDisplayIds,
+} from '@/components/shared/virtual-list/virtual-list-sortable-display-order';
+import {
+  pointerScrollContentCoords,
+  resolveGridSortableIndexFromContentOffset,
+} from '@/components/shared/virtual-list/virtual-sortable-coordinates';
 import {
   buildVirtualGridRowLayoutMetrics,
   readGridGapPx,
@@ -86,6 +95,7 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
 
   let scrollContainer: HTMLDivElement | undefined;
   let sampleRowEl: HTMLUListElement | undefined;
+  let remeasureVirtualList: (() => void) | undefined;
 
   const scrollContainerAccessor = () =>
     props.externalScrollElement?.() ?? scrollContainer;
@@ -187,10 +197,10 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     onCleanup(() => ro.disconnect());
   });
 
-  const rowSlice = (rowIndex: number): readonly T[] => {
+  const rowSlice = (rowIndex: number, items: readonly T[]): readonly T[] => {
     const cols = Math.max(1, props.colCount());
     const start = rowIndex * cols;
-    return resolveItems(props.items).slice(start, start + cols);
+    return items.slice(start, start + cols);
   };
 
   const sortableEnabled = () => props.sortable?.enabled() ?? false;
@@ -224,7 +234,7 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     props.onScrollContainer?.(el);
   };
 
-  const listBody = () => (
+  const listBody = (orderedItems: Accessor<readonly T[]>) => () => (
     <VirtualList
       class={cn('h-full min-h-0', props.class)}
       listInnerClass={props.listInnerClass}
@@ -236,6 +246,9 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
       externalScrollElement={props.externalScrollElement}
       onScrollContainer={handleScrollContainer}
       onScroll={props.onScroll}
+      onVirtualizerReady={(api) => {
+        remeasureVirtualList = () => api.measure();
+      }}
     >
       {(rowIndex) => {
         const lastRow = rowIndex >= rowIndices().length - 1;
@@ -261,17 +274,18 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
                 : undefined),
             }}
           >
-            <For each={rowSlice(rowIndex)}>
+            <For each={rowSlice(rowIndex, orderedItems())}>
               {(item, i) => {
-                const index = rowIndex * Math.max(1, props.colCount()) + i();
-                const id = itemSortableId(item, index);
-                const cell = props.children(item, index);
+                const flatIndex =
+                  rowIndex * Math.max(1, props.colCount()) + i();
+                const id = itemSortableId(item, flatIndex);
+                const cell = props.children(item, flatIndex);
                 const cfg = sortableCfg();
                 if (!cfg || !sortableEnabled()) {
                   return cell;
                 }
                 const enabled =
-                  cfg.isSortable?.(item, index) ?? true;
+                  cfg.isSortable?.(item, flatIndex) ?? true;
                 return (
                   <VirtualListSortableRow
                     id={id}
@@ -290,16 +304,53 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     </VirtualList>
   );
 
+  const GridListContent = () => {
+    const displayIds = useVirtualListSortableDisplayIds();
+    const orderedItems = createMemo(() => {
+      const raw = resolveItems(props.items);
+      const ids = displayIds();
+      if (ids.length === 0 || ids.length !== raw.length) return raw;
+      return reorderItemsByIds(raw, ids, (item, index) => itemSortableId(item, index));
+    });
+    return listBody(orderedItems)();
+  };
+
   const shell = sortableCfg();
   if (!shell) {
-    return listBody();
+    const staticItems = createMemo(() => resolveItems(props.items));
+    return listBody(staticItems)();
   }
+
+  const resolveTargetIndex: VirtualSortableTargetResolver = ({
+    scrollEl,
+    pointerX,
+    pointerY,
+  }) => {
+    const items = resolveItems(props.items);
+    const cols = Math.max(1, props.colCount());
+    const metrics = layoutMetrics();
+    const { contentX, contentY } = pointerScrollContentCoords(
+      scrollEl,
+      pointerX,
+      pointerY,
+    );
+    return resolveGridSortableIndexFromContentOffset(
+      contentX,
+      contentY,
+      items.length,
+      cols,
+      rowSlotHeightPx,
+      metrics?.colWidth ?? 0,
+      metrics?.gapPx ?? interRowGapPx(),
+    );
+  };
 
   return (
     <VirtualListSortableShell
       enabled={sortableEnabled}
       ids={shell.ids}
       onReorder={shell.onReorder}
+      persistOnly={() => shell.persistOnly ?? false}
       dragStyle={{
         ...shell.dragStyle,
         overlayStyle: {
@@ -308,9 +359,12 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
         },
       }}
       scrollContainer={scrollContainerAccessor}
+      resolveTargetIndex={() => resolveTargetIndex}
+      gridColCount={props.colCount}
+      onAfterAutoScroll={() => remeasureVirtualList?.()}
       renderOverlay={props.renderDragOverlay}
     >
-      {listBody()}
+      <GridListContent />
     </VirtualListSortableShell>
   );
 }
