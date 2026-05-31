@@ -15,6 +15,12 @@ import {
   setInnerWebSessionActive,
 } from '@/lib/platform/inner-web-tauri';
 import { useInnerWebIframe, useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
+import {
+  applyInnerWebSessionBodyClasses,
+  clearInnerWebSessionBodyClasses,
+  resolveInnerWebPresentation,
+  type InnerWebPresentation,
+} from '@/lib/platform/inner-web-presentation';
 
 export interface InnerWebPayload {
   title: string;
@@ -30,6 +36,14 @@ export interface InnerWebPayload {
   initialCookies?: string;
   /** 用于 Cookie 池双向同步的书源 URL（bookSourceUrl） */
   bookSourceUrl?: string;
+  /** 浮层展示配置（段评等为底部 drawer preset） */
+  presentation?: InnerWebPresentation;
+  /** 内容加载中（先开抽屉/顶栏，再异步填充 html） */
+  loading?: boolean;
+  /** 纯 Web：优先 __reader_http/doc 代理（页内 fetch 劫持），段评等动态页须开启 */
+  useProxyDocument?: boolean;
+  /** 创建代理会话时附带的书源请求头（User-Agent 等） */
+  proxyForwardHeaders?: Record<string, string>;
 }
 
 export interface InnerWebCloseResult {
@@ -40,6 +54,7 @@ export interface InnerWebCloseResult {
 
 type OpenFn = (payload: InnerWebPayload) => void;
 type CloseFn = () => void;
+type PatchFn = (payload: InnerWebPayload) => void;
 
 const INNER_WEB_SESSION_STORAGE_KEY = 'reader_inner_web_session_v1';
 export const INNER_WEB_REFRESH_EVENT = 'reader-inner-web-refresh';
@@ -51,6 +66,7 @@ export type ReaderBooksourceImportNetworkDetail = { url: string };
 
 let openEmbedded: OpenFn | null = null;
 let closeOverlay: CloseFn | null = null;
+let patchEmbedded: PatchFn | null = null;
 let refreshGuardInstalled = false;
 
 let pendingAwait: {
@@ -100,6 +116,30 @@ export function registerInnerWebOpener(fn: OpenFn): void {
 /** 由 App 根组件注册：关闭浮层 */
 export function registerInnerWebClose(fn: CloseFn): void {
   closeOverlay = fn;
+}
+
+/** 由 App 根组件注册：更新已打开的 inner-web payload（段评异步加载 html 等） */
+export function registerInnerWebPatch(fn: PatchFn): void {
+  patchEmbedded = fn;
+}
+
+function normalizeInnerWebPayload(payload: InnerWebPayload): InnerWebPayload | null {
+  const html = payload.html?.trim() || undefined;
+  const url = payload.url?.trim() || undefined;
+  if (!html && !url) return null;
+  return {
+    title: payload.title || '网页',
+    html,
+    url,
+    showConfirm: payload.showConfirm,
+    cookieSyncUrl: payload.cookieSyncUrl?.trim() || url || undefined,
+    initialCookies: payload.initialCookies?.trim() || undefined,
+    bookSourceUrl: payload.bookSourceUrl?.trim() || undefined,
+    presentation: payload.presentation,
+    loading: payload.loading,
+    useProxyDocument: payload.useProxyDocument,
+    proxyForwardHeaders: payload.proxyForwardHeaders,
+  };
 }
 
 function persistInnerWebSession(payload: InnerWebPayload): void {
@@ -167,7 +207,15 @@ export function applyRestoredInnerWebSession(payload: InnerWebPayload): void {
 
 function setSessionActive(active: boolean, payload?: InnerWebPayload): void {
   if (typeof document !== 'undefined') {
-    document.body.classList.toggle('reader-inner-web-session', active);
+    if (active && payload) {
+      applyInnerWebSessionBodyClasses(
+        resolveInnerWebPresentation(payload.presentation, {
+          showConfirm: payload.showConfirm,
+        }),
+      );
+    } else if (!active) {
+      clearInnerWebSessionBodyClasses();
+    }
   }
   if (active) {
     installInnerWebRefreshGuard();
@@ -191,31 +239,51 @@ async function dismissOverlay(): Promise<void> {
   }
   await waitPointerGestureEnd();
   clearInnerWebSessionStorage();
-  document.body.classList.remove('reader-inner-web-session');
+  clearInnerWebSessionBodyClasses();
   await setInnerWebSessionActive(false);
   closeOverlay?.();
+  pendingDismissResolve?.();
+  pendingDismissResolve = null;
+}
+
+function isDrawerInnerWebSession(payload?: InnerWebPayload | null): boolean {
+  const p = payload ?? loadPersistedInnerWebSession();
+  if (!p) return false;
+  return (
+    resolveInnerWebPresentation(p.presentation, { showConfirm: p.showConfirm }).layout ===
+    'drawer'
+  );
+}
+
+let pendingDismissResolve: (() => void) | null = null;
+
+/** corvu 抽屉关闭过渡时长（对齐 AppDrawer `duration-300`） */
+export const INNER_WEB_DRAWER_TRANSITION_MS = 300;
+
+let innerWebDrawerAnimatedDismiss: (() => void) | null = null;
+
+/** 关闭 inner-web：drawer 先播 corvu 动画，全屏直接 dismiss */
+function requestInnerWebDismiss(): Promise<void> {
+  if (isDrawerInnerWebSession() && innerWebDrawerAnimatedDismiss) {
+    return new Promise((resolve) => {
+      pendingDismissResolve = resolve;
+      innerWebDrawerAnimatedDismiss!();
+    });
+  }
+  return dismissOverlay();
 }
 
 export function openInnerWeb(payload: InnerWebPayload): boolean {
   if (!openEmbedded) return false;
-  const html = payload.html?.trim() || undefined;
-  const url = payload.url?.trim() || undefined;
-  if (!html && !url) return false;
+  const normalized = normalizeInnerWebPayload(payload);
+  if (!normalized) return false;
+  const { html, url } = normalized;
   try {
     if (useInnerWebIframe({ url, html })) {
       if (url?.startsWith('http')) {
         void startInnerWebBridge(url);
       }
     }
-    const normalized: InnerWebPayload = {
-      title: payload.title || '网页',
-      html,
-      url,
-      showConfirm: payload.showConfirm,
-      cookieSyncUrl: payload.cookieSyncUrl?.trim() || url || undefined,
-      initialCookies: payload.initialCookies?.trim() || undefined,
-      bookSourceUrl: payload.bookSourceUrl?.trim() || undefined,
-    };
     persistInnerWebSession(normalized);
     const syncUrl = normalized.cookieSyncUrl ?? url ?? '';
     if (normalized.bookSourceUrl && syncUrl.startsWith('http')) {
@@ -239,6 +307,17 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
     console.error('[inner-web] openInnerWeb failed', e);
     return false;
   }
+}
+
+/** 更新当前 inner-web 会话（须已打开）；用于段评等先开 UI 再注入 html */
+export function updateInnerWebPayload(partial: Partial<InnerWebPayload>): boolean {
+  const current = loadPersistedInnerWebSession();
+  if (!current || !patchEmbedded) return false;
+  const merged = normalizeInnerWebPayload({ ...current, ...partial, title: partial.title ?? current.title });
+  if (!merged) return false;
+  persistInnerWebSession(merged);
+  patchEmbedded(merged);
+  return true;
 }
 
 /**
@@ -386,16 +465,27 @@ export async function confirmInnerWebClose(
 
   session?.resolve({ confirmed: true, cookies, url });
   pendingAwait = null;
-  await dismissOverlay();
+  await requestInnerWebDismiss();
 }
 
 /** 返回或取消：不确认 */
 export function cancelInnerWebClose(): void {
   pendingAwait?.resolve({ confirmed: false, cookies: '', url: '' });
   pendingAwait = null;
-  void dismissOverlay();
+  void requestInnerWebDismiss();
 }
 
 export function isInnerWebAwaiting(): boolean {
   return pendingAwait != null;
+}
+
+/** 由 InnerWebDrawerShell 注册：关闭 inner-web 时先播放抽屉动画 */
+export function setInnerWebDrawerAnimatedDismiss(handler: (() => void) | null): void {
+  innerWebDrawerAnimatedDismiss = handler;
+}
+
+/** 抽屉关闭动画结束后清空会话（由 InnerWebDrawerShell 在过渡完成后调用） */
+export function completeInnerWebDrawerDismiss(): void {
+  innerWebDrawerAnimatedDismiss = null;
+  void dismissOverlay();
 }

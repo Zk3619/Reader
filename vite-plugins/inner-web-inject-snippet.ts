@@ -1,20 +1,107 @@
-/**
- * 注入到代理 HTML 的脚本：伪造 document.cookie，并将同源 API 请求走 __reader_http。
- */
+import { resolveInnerWebDocumentBaseUrl } from './inner-web-document-html';
+import {
+  extractProxiedDocumentQuery,
+  patchProxiedDocumentLocationQuery,
+} from './inner-web-proxied-query';
+
+export { extractProxiedDocumentQuery, patchProxiedDocumentLocationQuery };
+
 export function buildInnerWebInjectScript(options: {
   targetOrigin: string;
   targetPageUrl: string;
+  /** 被代理的真实文档 URL（session.target） */
+  documentTargetUrl?: string;
+  /** 真实文档 query，不含 `?` */
+  documentQuery?: string;
   cookie: string;
   sessionId: string;
   proxyPath: string;
 }): string {
   const { targetOrigin, targetPageUrl, cookie, sessionId, proxyPath } = options;
+  const documentTargetUrl = options.documentTargetUrl ?? targetPageUrl;
+  const documentQuery = options.documentQuery ?? '';
   const channel = 'reader-inner-web';
   return `(function(){
+var NativeUSP=window.URLSearchParams;
+var DOC_TARGET=${JSON.stringify(documentTargetUrl)};
+var DOC_QUERY=${JSON.stringify(documentQuery)};
+var PROXY_ORIGIN=window.location.origin;
+var PROXY_BASE=${JSON.stringify(proxyPath)};
+function docSearchString(){
+  if(!DOC_QUERY)return'';
+  return DOC_QUERY.charAt(0)==='?'?DOC_QUERY:'?'+DOC_QUERY;
+}
+function queryFromDocTarget(){
+  if(DOC_QUERY)return DOC_QUERY;
+  try{
+    var sp=new NativeUSP(window.location.search);
+    var t=sp.get('target');
+    if(!t&&DOC_TARGET)t=DOC_TARGET;
+    if(!t)return'';
+    var i=t.indexOf('?');
+    return i>=0?t.slice(i+1):'';
+  }catch(e){return'';}
+}
+function isProxyFrameSearch(s){
+  var t=String(s||'');
+  return /(?:^|[?&])target=/.test(t)&&/(?:^|[?&])session=/.test(t);
+}
+function needsQueryFix(s){
+  if(!s||!String(s).trim())return true;
+  return isProxyFrameSearch(s);
+}
+function queryFromProxyLocationSearch(s){
+  try{
+    var raw=String(s||'');
+    if(raw.charAt(0)==='?')raw=raw.slice(1);
+    var sp=new NativeUSP(raw);
+    var t=sp.get('target');
+    if(!t)return'';
+    var i=t.indexOf('?');
+    return i>=0?t.slice(i+1):'';
+  }catch(e){return'';}
+}
+function PatchedUSP(init){
+  var s=init===undefined||init===null?'':String(init);
+  if(needsQueryFix(s)){
+    var q=queryFromDocTarget();
+    if(!q)q=queryFromProxyLocationSearch(s);
+    if(q)s=q.charAt(0)==='?'?q.slice(1):q;
+  }
+  return new NativeUSP(s);
+}
+PatchedUSP.prototype=NativeUSP.prototype;
+window.URLSearchParams=PatchedUSP;
+function patchDocumentLocation(){
+  if(!DOC_TARGET)return;
+  try{
+    var loc=window.location;
+    var docUrl=new URL(DOC_TARGET);
+    var searchVal=docSearchString()||docUrl.search;
+    var proto=Location.prototype;
+    function patchGetter(name,val){
+      var d=Object.getOwnPropertyDescriptor(proto,name)||Object.getOwnPropertyDescriptor(loc,name);
+      if(!d||!d.get)return;
+      Object.defineProperty(proto,name,{
+        configurable:true,
+        enumerable:d.enumerable!==false,
+        get:function(){return this===loc?val:d.get.call(this);},
+        set:d.set
+      });
+    }
+    patchGetter('search',searchVal);
+    patchGetter('href',DOC_TARGET);
+    patchGetter('pathname',docUrl.pathname);
+    patchGetter('host',docUrl.host);
+    patchGetter('hostname',docUrl.hostname);
+    patchGetter('origin',docUrl.origin);
+    patchGetter('protocol',docUrl.protocol+':');
+  }catch(e){}
+}
+patchDocumentLocation();
 var ORIGIN=${JSON.stringify(targetOrigin)};
 var PAGE=${JSON.stringify(targetPageUrl)};
 var SESSION=${JSON.stringify(sessionId)};
-var PROXY=${JSON.stringify(proxyPath)};
 var CHANNEL=${JSON.stringify(channel)};
 var store=${JSON.stringify(cookie)};
 function mergeCookie(prev,add){
@@ -45,7 +132,8 @@ function shouldProxy(url){
   try{return new URL(url,PAGE).origin===ORIGIN;}catch(e){return false;}
 }
 function proxyEndpoint(){
-  return new URL(PROXY,window.location.href).href;
+  if(PROXY_BASE.indexOf('http')===0)return PROXY_BASE;
+  return PROXY_ORIGIN+(PROXY_BASE.charAt(0)==='/'?PROXY_BASE:'/'+PROXY_BASE);
 }
 function proxyUrl(url){
   var abs=resolveToTarget(url);
@@ -78,7 +166,12 @@ function buildProxyInit(input,init,url){
   }
   try{
     var abs=resolveToTarget(url);
-    if(String(o.method||'GET').toUpperCase()==='POST'&&abs.indexOf('/user_api')!==-1){
+    var methodUpper=String(o.method||'GET').toUpperCase();
+    if(methodUpper==='GET'||methodUpper==='HEAD'){
+      var hs=o.headers;
+      if(hs&&hs.delete){hs.delete('Content-Type');hs.delete('content-type');}
+    }
+    if(methodUpper==='POST'&&abs.indexOf('/user_api')!==-1){
       delete o.body;
       var hs=o.headers;
       if(hs&&hs.delete){hs.delete('Content-Type');hs.delete('content-type');}
@@ -150,27 +243,37 @@ syncParent();
 })();`;
 }
 
+/** @deprecated 使用 patchProxiedDocumentLocationQuery */
+export const patchParagraphReviewEmbeddedQuery = patchProxiedDocumentLocationQuery;
+
 export function injectHtmlForInnerWeb(
   html: string,
   targetUrl: string,
   cookie: string,
   sessionId: string,
-  proxyPath: string
+  proxyPath: string,
+  documentTargetUrl?: string,
 ): string {
-  const origin = new URL(targetUrl).origin;
+  const docUrl = documentTargetUrl?.trim() || targetUrl;
+  const origin = new URL(docUrl).origin;
+  const pageBase = resolveInnerWebDocumentBaseUrl(docUrl);
+  const docQuery = extractProxiedDocumentQuery(docUrl);
+  const patched = patchProxiedDocumentLocationQuery(html, docUrl);
   const snippet = `<script>${buildInnerWebInjectScript({
     targetOrigin: origin,
-    targetPageUrl: targetUrl,
+    targetPageUrl: pageBase,
+    documentTargetUrl: docUrl,
+    documentQuery: docQuery,
     cookie,
     sessionId,
     proxyPath,
   })}</script>`;
-  const baseTag = `<base href="${targetUrl}">`;
-  if (/<head[\s>]/i.test(html)) {
-    return html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}${snippet}`);
+  const baseTag = `<base href="${pageBase}">`;
+  if (/<head[\s>]/i.test(patched)) {
+    return patched.replace(/<head([^>]*)>/i, `<head$1>${baseTag}${snippet}`);
   }
-  if (/<html[\s>]/i.test(html)) {
-    return html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}${snippet}</head>`);
+  if (/<html[\s>]/i.test(patched)) {
+    return patched.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}${snippet}</head>`);
   }
-  return `<!DOCTYPE html><html><head>${baseTag}${snippet}</head><body>${html}</body></html>`;
+  return `<!DOCTYPE html><html><head>${baseTag}${snippet}</head><body>${patched}</body></html>`;
 }

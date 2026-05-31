@@ -7,7 +7,7 @@ import { injectHtmlForInnerWeb } from './inner-web-inject-snippet';
 import {
   decodeLegadoForwardHeaders,
   LEGADO_FORWARD_HEADERS_HEADER,
-} from '../src/lib/http/legado-forward-headers';
+} from './legado-forward-headers';
 import {
   normalizeProxyTarget,
   rewriteCssAssetUrls,
@@ -48,6 +48,7 @@ STRIP_RESPONSE_HEADERS.add('content-length');
 type InnerWebSession = {
   target: string;
   cookies: string;
+  forwardHeaders?: Record<string, string>;
   createdAt: number;
 };
 
@@ -252,6 +253,13 @@ async function forwardToTarget(
     if (reservedLegado.has(key.toLowerCase())) continue;
     upstreamHeaders.set(key, value);
   }
+  // iframe 导航无 Legado 头：用创建 session 时写入的书源 UA 等
+  for (const [key, value] of Object.entries(session?.forwardHeaders ?? {})) {
+    if (reservedLegado.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (upstreamHeaders.has(key) || upstreamHeaders.has(lower)) continue;
+    upstreamHeaders.set(key, value);
+  }
 
   const referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
   if (referer) {
@@ -272,6 +280,14 @@ async function forwardToTarget(
     DEFAULT_BROWSER_UA;
   upstreamHeaders.set('User-Agent', userAgent);
   upstreamHeaders.delete('user-agent');
+  // 内嵌页 session：页内 fetch 无书源 UA，须用创建 session 时的 forwardHeaders
+  if (sessionId && session?.forwardHeaders && !userAgentOverride?.trim()) {
+    const fhUa =
+      session.forwardHeaders['User-Agent'] ?? session.forwardHeaders['user-agent'];
+    if (fhUa?.trim()) {
+      upstreamHeaders.set('User-Agent', fhUa.trim());
+    }
+  }
   upstreamHeaders.set('Host', targetUrl.host);
 
   const legadoCookie =
@@ -306,6 +322,10 @@ async function forwardToTarget(
       upstreamHeaders.delete('content-type');
       upstreamHeaders.delete('Content-Type');
     }
+  } else {
+    // 段评等 GET 带 Content-Type: application/json 会被部分上游拒绝
+    upstreamHeaders.delete('content-type');
+    upstreamHeaders.delete('Content-Type');
   }
 
   const upstream = await fetchUpstreamFollowingRedirects(target, {
@@ -377,7 +397,8 @@ async function forwardToTarget(
         rewriteBase,
         session.cookies,
         sessionId,
-        PROXY_PATH
+        PROXY_PATH,
+        session?.target ?? target,
       );
     }
 
@@ -461,6 +482,7 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
         const body = JSON.parse((await readBody(req)).toString('utf8')) as {
           target?: string;
           cookies?: string;
+          forwardHeaders?: string;
         };
         const target = String(body.target ?? '').trim();
         const cookies = String(body.cookies ?? '').trim();
@@ -472,6 +494,7 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
         innerWebSessions.set(sessionId, {
           target,
           cookies,
+          forwardHeaders: decodeLegadoForwardHeaders(body.forwardHeaders),
           createdAt: Date.now(),
         });
         sendJson(res, 200, { sessionId });
@@ -490,41 +513,7 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
         return;
       }
       try {
-        const upstream = await fetch(session.target, {
-          method: 'GET',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            Cookie: session.cookies,
-          },
-          redirect: 'follow',
-        });
-        const setLines = collectUpstreamSetCookies(upstream.headers);
-        if (setLines.length > 0) {
-          session.cookies = mergeCookieHeader(session.cookies, setLines);
-          innerWebSessions.set(sessionId, session);
-        }
-        const ct = upstream.headers.get('content-type') ?? '';
-        const raw = await upstream.text();
-        if (!ct.includes('text/html') && !raw.trimStart().startsWith('<')) {
-          res.statusCode = upstream.status;
-          res.setHeader('Content-Type', ct || 'text/plain');
-          res.end(raw);
-          return;
-        }
-        const proxyBase = resolveProxyBase(req);
-        const rewritten = rewriteHtmlAssetUrls(raw, session.target, proxyBase, sessionId);
-        const injected = injectHtmlForInnerWeb(
-          rewritten,
-          session.target,
-          session.cookies,
-          sessionId,
-          PROXY_PATH
-        );
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(injected);
+        await forwardToTarget(session.target, req, res, sessionId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         res.statusCode = 502;
@@ -534,7 +523,20 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
       return;
     }
 
-    const target = parsed.searchParams.get('target');
+    const proxySessionId = parsed.searchParams.get('session') ?? undefined;
+    const session = proxySessionId ? innerWebSessions.get(proxySessionId) : undefined;
+    let target = parsed.searchParams.get('target') ?? '';
+    if (session?.target?.startsWith('http')) {
+      try {
+        const sessionPath = new URL(session.target).pathname;
+        const reqPath = target ? new URL(target).pathname : '';
+        if (sessionPath.includes('get_para_review') && reqPath.includes('get_para_review')) {
+          target = session.target;
+        }
+      } catch {
+        if (!/^https?:\/\//i.test(target)) target = session.target;
+      }
+    }
     if (!target || !/^https?:\/\//i.test(target)) {
       res.statusCode = 400;
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -546,7 +548,6 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
       return;
     }
 
-    const proxySessionId = parsed.searchParams.get('session') ?? undefined;
     const refererParam = parsed.searchParams.get('referer') ?? undefined;
     const refererOverride =
       refererParam === 'none'

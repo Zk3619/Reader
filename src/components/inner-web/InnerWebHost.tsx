@@ -1,17 +1,25 @@
 /**
- * 内嵌网页浮层宿主：挂到 body，层级高于 Dialog，低于 Toast
+ * 内嵌网页浮层宿主：全屏层或四向抽屉（段评 preset 等）
  */
 
-import { Show } from 'solid-js';
+import { Show, createMemo } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import type { InnerWebPayload } from '@/lib/platform/inner-web';
 import { useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
+import {
+  resolveInnerWebPresentation,
+} from '@/lib/platform/inner-web-presentation';
 import { cn } from '@/lib/utils';
+import {
+  InnerWebDrawerShell,
+  idleInnerWebDrawerResolved,
+} from '@/components/inner-web/InnerWebDrawerShell';
 import { InnerWebPage } from '@/pages/inner-web/InnerWebPage';
 
 export interface InnerWebHostProps {
   payload: InnerWebPayload | null | undefined;
-  onClose: () => void;
+  /** 由 registerInnerWebClose 清空 payload；页面内返回走 cancelInnerWebClose */
+  onClose?: () => void;
 }
 
 export function InnerWebHost(props: InnerWebHostProps) {
@@ -21,24 +29,42 @@ export function InnerWebHost(props: InnerWebHostProps) {
     return Boolean(p.html?.trim() || p.url?.trim());
   };
 
+  const resolved = createMemo(() => {
+    const p = props.payload;
+    if (!p) return idleInnerWebDrawerResolved();
+    return resolveInnerWebPresentation(p.presentation, { showConfirm: p.showConfirm });
+  });
+
+  const isDrawerLayout = () => hasContent() && resolved().layout === 'drawer';
+
   return (
-    <Show when={hasContent()}>
+    <>
       <Portal mount={document.body}>
-        <div
-          class={cn(
-            'reader-inner-web-layer fixed inset-0 flex flex-col bg-background',
-            useInnerWebTauriPanel({
-              url: props.payload?.url,
-              html: props.payload?.html,
-            }) && 'reader-inner-web-layer--panel'
-          )}
-          role="dialog"
-          aria-modal="true"
-          aria-label={props.payload?.title ?? '内嵌网页'}
-        >
-          <InnerWebPage payload={props.payload!} onBack={props.onClose} />
-        </div>
+        <InnerWebDrawerShell open={isDrawerLayout()} resolved={resolved()}>
+          <Show when={isDrawerLayout()}>
+            <InnerWebPage payload={props.payload!} resolved={resolved()} />
+          </Show>
+        </InnerWebDrawerShell>
       </Portal>
-    </Show>
+
+      <Show when={hasContent() && resolved().layout !== 'drawer'}>
+        <Portal mount={document.body}>
+          <div
+            class={cn(
+              'reader-inner-web-layer fixed inset-0 flex flex-col bg-background',
+              useInnerWebTauriPanel({
+                url: props.payload?.url,
+                html: props.payload?.html,
+              }) && 'reader-inner-web-layer--panel',
+            )}
+            role="dialog"
+            aria-modal="true"
+            aria-label={props.payload?.title ?? '内嵌网页'}
+          >
+            <InnerWebPage payload={props.payload!} resolved={resolved()} />
+          </div>
+        </Portal>
+      </Show>
+    </>
   );
 }

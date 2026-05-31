@@ -29,9 +29,7 @@ export function encodeLegadoForwardHeaders(
     return Buffer.from(json, 'utf8').toString('base64');
   }
   const bytes = new TextEncoder().encode(json);
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
+  return btoa(String.fromCharCode(...Array.from(bytes)));
 }
 
 export function decodeLegadoForwardHeaders(

@@ -3,6 +3,7 @@
  */
 
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { encodeLegadoForwardHeaders } from '@/lib/http/legado-forward-headers';
 import { isTauri } from '@/lib/platform/detect';
 
 const PROXY_SEGMENT = '__reader_http';
@@ -28,12 +29,19 @@ export function shouldUseInnerWebDocumentProxy(
 
 export async function createInnerWebProxySession(
   targetUrl: string,
-  cookies: string
+  cookies: string,
+  forwardHeaders?: Record<string, string>,
 ): Promise<string> {
+  const body: { target: string; cookies: string; forwardHeaders?: string } = {
+    target: targetUrl.trim(),
+    cookies: cookies.trim(),
+  };
+  const encoded = encodeLegadoForwardHeaders(forwardHeaders);
+  if (encoded) body.forwardHeaders = encoded;
   const res = await fetch(`${proxyPath()}/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target: targetUrl.trim(), cookies: cookies.trim() }),
+    body: JSON.stringify(body),
     credentials: 'same-origin',
   });
   if (!res.ok) {
@@ -46,8 +54,13 @@ export async function createInnerWebProxySession(
   return json.sessionId;
 }
 
-export function buildInnerWebDocumentProxyUrl(sessionId: string): string {
-  return `${proxyPath()}/doc?session=${encodeURIComponent(sessionId)}`;
+/** iframe 导航：与页内 fetch 劫持同走 ?target=&session=（/doc 缺 Referer 等，段评页会空白） */
+export function buildInnerWebDocumentProxyUrl(
+  sessionId: string,
+  targetUrl: string,
+): string {
+  const trimmed = targetUrl.trim();
+  return `${proxyPath()}?target=${encodeURIComponent(trimmed)}&session=${encodeURIComponent(sessionId)}`;
 }
 
 export async function readInnerWebProxySessionCookies(sessionId: string): Promise<string> {
