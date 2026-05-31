@@ -3,7 +3,7 @@
  */
 
 import { getStorage, setStorage } from '@/lib/platform/storage';
-import type { ReadConfig } from '@/stores/reader';
+import type { TextViewerUiConfig as ReadConfig } from '@/lib/media/text/reader-ui-config';
 
 const STORAGE_KEY = 'reader_ui_config_v1';
 
