@@ -11,7 +11,7 @@ import { BookCoverIcon, ExportIcon, PlayIcon, SquareIcon } from '@/components/sh
 import { Trash2 } from 'lucide-solid';
 import {
   bookGroupCompactCardClass,
-  bookGroupCompactCoverClass,
+  bookshelfCompactCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { chapterCacheDownloadStore } from '@/lib/chapter-cache';
 import { cn } from '@/lib/utils';
@@ -55,7 +55,7 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
           'h-16 min-h-16 cursor-default gap-2.5',
         )}
       >
-        <div class={bookGroupCompactCoverClass('h-12 w-9')}>
+        <div class={bookshelfCompactCoverClass('h-12 w-9')}>
           <BookCoverImg
             src={book().customCoverUrl || book().coverUrl}
             referer={book().origin}

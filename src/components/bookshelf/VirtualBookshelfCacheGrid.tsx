@@ -36,6 +36,7 @@ export function VirtualBookshelfCacheGrid<T extends { book: Pick<Book, 'bookUrl'
       gridClass={EXPLORE_BOOK_GRID_CLASS}
       rowUlClass="pb-2"
       overscan={2}
+      getItemKey={(entry) => entry.book.bookUrl}
     >
       {props.children}
     </VirtualGridRowsList>

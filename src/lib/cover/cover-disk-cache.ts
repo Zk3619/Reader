@@ -38,6 +38,27 @@ const COVER_BIN_FILE = 'cover.bin';
 const COVER_META_FILE = 'meta.json';
 const HASH_DIR_RE = /^[a-f0-9]{64}$/i;
 
+/** 已迁移的 hash，避免列表滚动时反复 plugin-fs exists */
+const legacyMigrationDone = new Set<string>();
+let cachedCoverCacheRoot: string | null = null;
+/** 按 hash 缓存绝对路径，避免每次 read 多次 path|join */
+const diskPathsByHash = new Map<string, { binPath: string; metaPath: string }>();
+
+async function resolveDiskPaths(
+  root: string,
+  hash: string,
+): Promise<{ binPath: string; metaPath: string }> {
+  const cached = diskPathsByHash.get(hash);
+  if (cached) return cached;
+  const entry = await diskEntryDir(root, hash);
+  const next = {
+    binPath: await join(entry, COVER_BIN_FILE),
+    metaPath: await join(entry, COVER_META_FILE),
+  };
+  diskPathsByHash.set(hash, next);
+  return next;
+}
+
 type CoverDiskFs = Awaited<ReturnType<typeof getFileSystem>>;
 
 function diskHashFromMeta(meta: CoverCacheMeta): Promise<string> {
@@ -57,11 +78,13 @@ export async function getCoverCacheKey(bookUrl: string): Promise<string> {
 }
 
 async function ensureDiskCacheDir(): Promise<string> {
+  if (cachedCoverCacheRoot) return cachedCoverCacheRoot;
   const dir = await getCoverCacheDirectory();
   const fs = await getFileSystem();
   if (!(await fs.exists(dir))) {
     await fs.mkdir(dir, true);
   }
+  cachedCoverCacheRoot = dir;
   return dir;
 }
 
@@ -100,11 +123,15 @@ async function migrateLegacyFlatEntry(
   root: string,
   hash: string,
 ): Promise<boolean> {
+  if (legacyMigrationDone.has(hash)) return false;
   const legacyBin = await legacyFlatBinPath(root, hash);
   const legacyMeta = await legacyFlatMetaPath(root, hash);
   const hasLegacy =
     (await fs.exists(legacyBin)) || (await fs.exists(legacyMeta));
-  if (!hasLegacy) return false;
+  if (!hasLegacy) {
+    legacyMigrationDone.add(hash);
+    return false;
+  }
 
   await ensureEntryDir(root, hash);
   const binPath = await diskBinPath(root, hash);
@@ -121,6 +148,7 @@ async function migrateLegacyFlatEntry(
 
   if (await fs.exists(legacyBin)) await fs.remove(legacyBin);
   if (await fs.exists(legacyMeta)) await fs.remove(legacyMeta);
+  legacyMigrationDone.add(hash);
   return true;
 }
 
@@ -320,6 +348,7 @@ async function deleteCacheEntryByHash(hash: string): Promise<void> {
     const entry = await diskEntryDir(root, hash);
     if (await fs.exists(entry)) {
       await fs.remove(entry, true);
+      invalidateEstimatedCacheBytes();
     }
     const legacyBin = await legacyFlatBinPath(root, hash);
     const legacyMeta = await legacyFlatMetaPath(root, hash);
@@ -330,11 +359,48 @@ async function deleteCacheEntryByHash(hash: string): Promise<void> {
   await webDeleteRecord(hash);
 }
 
+/** 估算缓存总字节，避免每次 write 全目录 list（探索列表批量 network-fetch 时会打穿 plugin-fs） */
+let estimatedCacheTotalBytes: number | null = null;
+let lastFullEvictScanAt = 0;
+const FULL_EVICT_SCAN_INTERVAL_MS = 60_000;
+
+function bumpEstimatedCacheBytes(delta: number): void {
+  if (estimatedCacheTotalBytes == null) return;
+  estimatedCacheTotalBytes = Math.max(0, estimatedCacheTotalBytes + delta);
+}
+
+function invalidateEstimatedCacheBytes(): void {
+  estimatedCacheTotalBytes = null;
+}
+
 /** 写入前按 savedAt 淘汰最旧条目，直到有空间 */
 async function evictIfNeeded(incomingBytes: number): Promise<void> {
+  const estimate = estimatedCacheTotalBytes;
+  if (
+    estimate != null &&
+    estimate + incomingBytes <= MAX_COVER_CACHE_BYTES
+  ) {
+    estimatedCacheTotalBytes = estimate + incomingBytes;
+    return;
+  }
+
+  const now = Date.now();
+  if (
+    estimate != null &&
+    now - lastFullEvictScanAt < FULL_EVICT_SCAN_INTERVAL_MS
+  ) {
+    estimatedCacheTotalBytes = estimate + incomingBytes;
+    return;
+  }
+
+  lastFullEvictScanAt = now;
   const metas = await listAllCacheMetas();
   let total = metas.reduce((sum, m) => sum + m.byteSize, 0);
-  if (total + incomingBytes <= MAX_COVER_CACHE_BYTES) return;
+  estimatedCacheTotalBytes = total;
+  if (total + incomingBytes <= MAX_COVER_CACHE_BYTES) {
+    estimatedCacheTotalBytes = total + incomingBytes;
+    return;
+  }
 
   const sorted = [...metas].sort((a, b) => a.savedAt - b.savedAt);
   for (const meta of sorted) {
@@ -343,6 +409,7 @@ async function evictIfNeeded(incomingBytes: number): Promise<void> {
     await deleteCacheEntryByHash(hash);
     total -= meta.byteSize;
   }
+  estimatedCacheTotalBytes = total + incomingBytes;
 }
 
 export async function readCoverFromDisk(
@@ -356,10 +423,9 @@ export async function readCoverFromDisk(
   try {
     if (isTauri()) {
       const fs = await getFileSystem();
-      const root = await getCoverCacheDirectory();
-      await migrateLegacyFlatEntry(fs, root, hash);
-      const binPath = await diskBinPath(root, hash);
-      const metaPath = await diskMetaPath(root, hash);
+      const root = await ensureDiskCacheDir();
+      const { binPath, metaPath } = await resolveDiskPaths(root, hash);
+      // 列表批量读盘不做 legacy 迁移（每次 6+ exists）；迁移留给写入或维护任务
       if (!(await fs.exists(binPath))) {
         return null;
       }
@@ -478,6 +544,8 @@ export async function writeCoverToDisk(
     await fs.writeTextFile(metaPath, JSON.stringify(meta));
     try {
       await fs.writeFile(binPath, bytes);
+      bumpEstimatedCacheBytes(bytes.byteLength);
+      legacyMigrationDone.add(hash);
     } catch (e) {
       await fs.remove(metaPath).catch(() => {});
       throw e;

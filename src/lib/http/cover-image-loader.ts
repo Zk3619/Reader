@@ -39,11 +39,101 @@ import {
 } from '@/lib/http/cf-protected-cdn';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
 import { withReaderInlineImageFetchSlot } from '@/lib/http/reader-inline-image-queue';
+import { coverLoadTrace } from '@/lib/http/cover-load-trace';
+import {
+  canRefreshCoverUrlForBook,
+  clearCoverLoadFailure,
+  isCoverLoadFailureCached,
+  markCoverUrlRefreshAttempted,
+  registerCoverLoadAttempt,
+  rememberCoverLoadFailure,
+  resetCoverLoadAttempts,
+} from '@/lib/http/cover-load-guard';
 import type { BookSource } from '@/types';
 import type { CoverCacheMeta } from '@/lib/cover/cover-disk-cache';
+import { isCoverLoadScrollIdle } from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
 
-const MAX_CACHE = 128;
+/** Web 以内存为主；Tauri 列表滚动易触发 L1 淘汰后反复读盘（plugin-fs 桥接开销大） */
+const MAX_CACHE = isTauri() ? 2048 : 128;
 const cache = new Map<string, string>();
+/** 按 bookUrl 索引 blob，coverUrl 键被淘汰后仍可同步 peek，避免重复 readCoverFromDisk */
+const blobByBookUrl = new Map<string, string>();
+
+/** 同一封面并发加载合并为单次网络/磁盘请求 */
+const coverLoadInflight = new Map<string, Promise<string | null>>();
+/** 同一 bookUrl 并发读盘合并 */
+const coverDiskReadInflight = new Map<
+  string,
+  ReturnType<typeof readCoverFromDisk>
+>();
+/** 读盘未命中后短时内不再打 plugin-fs（虚拟列表 remount 风暴） */
+const coverDiskMissUntil = new Map<string, number>();
+/** 已确认无 cover.bin，后续不再 exists（每书 1 次 plugin 而非 N 次） */
+const coverDiskKnownAbsent = new Set<string>();
+const COVER_DISK_MISS_TTL_MS = isTauri() ? 300_000 : 60_000;
+const MAX_COVER_DISK_CONCURRENT = isTauri() ? 2 : 6;
+let coverDiskActive = 0;
+const coverDiskWaiters: Array<() => void> = [];
+
+async function withCoverDiskSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (coverDiskActive >= MAX_COVER_DISK_CONCURRENT) {
+    await new Promise<void>((resolve) => {
+      coverDiskWaiters.push(resolve);
+    });
+  }
+  coverDiskActive += 1;
+  try {
+    return await fn();
+  } finally {
+    coverDiskActive -= 1;
+    const next = coverDiskWaiters.shift();
+    if (next) next();
+  }
+}
+/** 同一本书合并为单次 load（不同 coverUrl 也复用，避免滚动风暴） */
+const coverLoadByBookUrl = new Map<string, Promise<string | null>>();
+
+const MAX_COVER_NETWORK_CONCURRENT = 4;
+let coverNetworkActive = 0;
+const coverNetworkWaiters: Array<() => void> = [];
+
+/** Tauri 下列表快滑时限制同时进行中的封面 load 条数（含读盘），避免 plugin 队列挂起 */
+const MAX_COVER_LOADS_IN_FLIGHT = isTauri() ? 8 : 32;
+let coverLoadsInFlight = 0;
+const coverLoadSlotWaiters: Array<() => void> = [];
+
+async function acquireCoverLoadSlot(): Promise<void> {
+  if (coverLoadsInFlight < MAX_COVER_LOADS_IN_FLIGHT) {
+    coverLoadsInFlight += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    coverLoadSlotWaiters.push(resolve);
+  });
+  coverLoadsInFlight += 1;
+}
+
+function releaseCoverLoadSlot(): void {
+  coverLoadsInFlight = Math.max(0, coverLoadsInFlight - 1);
+  const next = coverLoadSlotWaiters.shift();
+  if (next) next();
+}
+
+async function withCoverNetworkSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (coverNetworkActive >= MAX_COVER_NETWORK_CONCURRENT) {
+    await new Promise<void>((resolve) => {
+      coverNetworkWaiters.push(resolve);
+    });
+  }
+  coverNetworkActive += 1;
+  try {
+    return await fn();
+  } finally {
+    coverNetworkActive -= 1;
+    const next = coverNetworkWaiters.shift();
+    if (next) next();
+  }
+}
 
 /** 正文/漫画插图默认自动重试次数（不含首次，共 1 + N 次请求） */
 export const READER_INLINE_IMAGE_DEFAULT_RETRIES = 3;
@@ -71,7 +161,26 @@ export type CoverImageLoadOptions = {
   _backgroundRefreshScheduled?: boolean;
   /** 经正文插图并发池拉取（漫画 image-viewer 等） */
   readerInlineQueue?: boolean;
+  /** 虚拟列表：跳过 L2 读盘，仅 L1 + 网络（避免 exists 风暴） */
+  skipDiskRead?: boolean;
 };
+
+/** 无真实封面：占位图 URL / 空 / 未解析规则 */
+export function isNoCoverImageUrl(url: string | null | undefined): boolean {
+  const t = url?.trim();
+  if (!t) return true;
+  if (isLikelyUnresolvedRuleResult(t)) return true;
+  const lower = t.toLowerCase();
+  if (
+    /(?:^|[/\\])(?:no[_-]?cover|default[_-]?cover|cover[_-]?default|empty)(?:\.|$)/i.test(
+      lower,
+    ) ||
+    /(?:nocover|no-cover|default_cover|placeholder)/i.test(lower)
+  ) {
+    return true;
+  }
+  return false;
+}
 
 export {
   clearAllCoverCache,
@@ -83,13 +192,25 @@ function cacheKey(url: string, sourceId?: string): string {
   return `${url}\0${sourceId ?? ''}`;
 }
 
+function unlinkBlobUrl(blobUrl: string): void {
+  URL.revokeObjectURL(blobUrl);
+  for (const [book, url] of blobByBookUrl) {
+    if (url === blobUrl) blobByBookUrl.delete(book);
+  }
+}
+
 function trimCache(): void {
   while (cache.size > MAX_CACHE) {
     const first = cache.keys().next().value;
     if (first == null) break;
     const blobUrl = cache.get(first);
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
     cache.delete(first);
+    if (!blobUrl) continue;
+    for (const [book, url] of blobByBookUrl) {
+      if (url === blobUrl) blobByBookUrl.delete(book);
+    }
+    // Tauri 虚拟列表会反复挂载同一 bookUrl；revoke 后 peek 仍返回死链 → 海量 blob 请求
+    if (!isTauri()) URL.revokeObjectURL(blobUrl);
   }
 }
 
@@ -97,10 +218,35 @@ function blobUrlFromBytes(bytes: ArrayBuffer, mime: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
-function rememberInMemoryCache(key: string, objectUrl: string): string {
+function rememberInMemoryCache(
+  key: string,
+  objectUrl: string,
+  bookUrl?: string | null,
+): string {
   cache.set(key, objectUrl);
+  const book = bookUrl?.trim();
+  if (book) blobByBookUrl.set(book, objectUrl);
   trimCache();
   return objectUrl;
+}
+
+function resolveSourceId(source?: BookSource | null): string | undefined {
+  return source?.sourceUrl ?? source?.sourceName;
+}
+
+function peekMemoryBlob(
+  normalized: string,
+  sourceId?: string,
+  bookUrl?: string | null,
+): string | null {
+  const hit = cache.get(cacheKey(normalized, sourceId));
+  if (hit) return hit;
+  const book = bookUrl?.trim();
+  if (!book) return null;
+  const byBook = blobByBookUrl.get(book);
+  if (!byBook) return null;
+  rememberInMemoryCache(cacheKey(normalized, sourceId), byBook, book);
+  return byBook;
 }
 
 export function isCrossOriginCoverUrl(url: string): boolean {
@@ -118,6 +264,64 @@ export function shouldFetchCoverAsBlob(url: string): boolean {
   if (isLikelyUnresolvedRuleResult(url)) return false;
   if (shouldPreferDirectBrowserImage(url)) return false;
   return isCrossOriginCoverUrl(url);
+}
+
+export type CoverImagePeekOptions = Pick<
+  CoverImageLoadOptions,
+  'referer' | 'source' | 'bookUrl'
+>;
+
+/** 同步读取 L1 内存 blob URL；虚拟列表行 remount 时避免重复拉取（含 bookUrl 二级索引） */
+export function peekCoverImageObjectUrl(
+  url: string,
+  options?: CoverImagePeekOptions,
+): string | null {
+  const raw = url?.trim();
+  if (!raw) return null;
+  const normalized = normalizeImageUrl(raw);
+  if (!normalized || !shouldFetchCoverAsBlob(normalized)) return null;
+  return peekMemoryBlob(normalized, resolveSourceId(options?.source), options?.bookUrl);
+}
+
+async function readCoverFromDiskDeduped(bookUrl: string) {
+  const key = bookUrl.trim();
+  if (!key) return null;
+
+  if (coverDiskKnownAbsent.has(key)) {
+    coverLoadTrace('failure-cached', { bookUrl: key, note: 'disk-absent' });
+    return null;
+  }
+
+  if (isTauri() && !isCoverLoadScrollIdle()) {
+    coverLoadTrace('scroll-defer', { bookUrl: key, note: 'disk-idle' });
+    return null;
+  }
+
+  const missUntil = coverDiskMissUntil.get(key);
+  if (missUntil && missUntil > Date.now()) {
+    coverLoadTrace('failure-cached', { bookUrl: key, note: 'disk-miss-ttl' });
+    return null;
+  }
+  if (missUntil) coverDiskMissUntil.delete(key);
+
+  const existing = coverDiskReadInflight.get(key);
+  if (existing) return existing;
+
+  const promise = withCoverDiskSlot(() => readCoverFromDisk(key))
+    .then((result) => {
+      if (!result) {
+        coverDiskKnownAbsent.add(key);
+        coverDiskMissUntil.set(key, Date.now() + COVER_DISK_MISS_TTL_MS);
+      } else {
+        coverDiskKnownAbsent.delete(key);
+      }
+      return result;
+    })
+    .finally(() => {
+      coverDiskReadInflight.delete(key);
+    });
+  coverDiskReadInflight.set(key, promise);
+  return promise;
 }
 
 export { shouldPreferDirectBrowserImage } from '@/lib/http/cf-protected-cdn';
@@ -141,7 +345,8 @@ async function maybeRefreshCoverUrl(
   normalized: string,
   options?: CoverImageLoadOptions,
 ): Promise<string> {
-  if (!options?.source || !options?.bookUrl?.trim()) {
+  const bookUrlTrim = options?.bookUrl?.trim();
+  if (!options?.source || !bookUrlTrim) {
     return normalized;
   }
   const needsRefresh =
@@ -149,16 +354,23 @@ async function maybeRefreshCoverUrl(
   if (options._refreshAttempted || !needsRefresh) {
     return normalized;
   }
+  if (!canRefreshCoverUrlForBook(bookUrlTrim)) {
+    return normalized;
+  }
 
-  const fresh = await refreshBookCoverUrl(
-    options.source,
-    options.bookUrl.trim(),
-  );
+  markCoverUrlRefreshAttempted(bookUrlTrim);
+
+  coverLoadTrace('url-refresh', {
+    bookUrl: bookUrlTrim,
+    coverUrl: normalized,
+    note: 'maybeRefreshCoverUrl',
+  });
+
+  const fresh = await refreshBookCoverUrl(options.source, bookUrlTrim);
   if (!fresh || fresh === normalized) {
     return normalized;
   }
 
-  options.onCoverUrlRefreshed?.(fresh);
   return normalizeImageUrl(fresh);
 }
 
@@ -224,19 +436,27 @@ async function fetchCoverImageBytesOnce(
     }
   }
 
-  const doRequest = () =>
-    request(fetchUrl, {
-      method: 'GET',
-      headers: isTauri() ? headers : proxyHeaders,
-      allowNon2xx: true,
-      timeout: options?.timeoutMs ?? 20_000,
-      enableCookieJar: options?.source?.enabledCookieJar ?? false,
-      concurrentRate: options?.source?.concurrentRate ?? undefined,
-    });
+  coverLoadTrace('network-fetch', {
+    bookUrl: options?.bookUrl,
+    coverUrl: normalized,
+    note: describeImageFetchForLog(normalized, fetchUrl).file,
+  });
 
-  const response = options?.readerInlineQueue
-    ? await withReaderInlineImageFetchSlot(doRequest)
-    : await doRequest();
+  const response = await withCoverNetworkSlot(async () => {
+    const doRequest = () =>
+      request(fetchUrl, {
+        method: 'GET',
+        headers: isTauri() ? headers : proxyHeaders,
+        allowNon2xx: true,
+        timeout: options?.timeoutMs ?? 20_000,
+        enableCookieJar: options?.source?.enabledCookieJar ?? false,
+        concurrentRate: options?.source?.concurrentRate ?? undefined,
+      });
+
+    return options?.readerInlineQueue
+      ? await withReaderInlineImageFetchSlot(doRequest)
+      : await doRequest();
+  });
 
   if (!response.ok) {
     if (import.meta.env.DEV) {
@@ -301,20 +521,104 @@ async function fetchCoverImageBytes(
   return fetchCoverImageBytesOnce(normalized, options);
 }
 
-async function persistCoverToDisk(
-  bookUrl: string,
-  coverUrl: string,
-  data: CoverImageBytes,
-): Promise<void> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 列表场景：仅 path 变化不算新图（避免 CDN 带参 URL 触发 disk-miss + network-fetch） */
+function coverResourceKey(url: string): string {
+  const n = normalizeImageUrl(url);
+  if (!n || !/^https?:\/\//i.test(n)) return n;
   try {
-    await writeCoverToDisk(bookUrl, coverUrl, data.bytes, data.mime);
+    const u = new URL(n);
+    return `${u.origin}${u.pathname}`;
   } catch {
-    /* 写入失败不影响展示 */
+    return n;
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function diskCoverMatchesRequest(
+  disk: { bytes: ArrayBuffer; meta: CoverCacheMeta },
+  normalized: string,
+): boolean {
+  const diskUrl = normalizeImageUrl(disk.meta.lastCoverUrl ?? '');
+  if (!diskUrl || diskUrl === normalized) return true;
+  if (isSignedImageUrlExpired(diskUrl) || isSignedImageUrlExpired(normalized)) {
+    return false;
+  }
+  return coverResourceKey(diskUrl) === coverResourceKey(normalized);
+}
+
+const pendingDiskPersist = new Map<
+  string,
+  { coverUrl: string; bytes: ArrayBuffer; mime: string }
+>();
+let diskPersistFlushTimer: ReturnType<typeof setTimeout> | undefined;
+const diskWriteByBook = new Map<string, Promise<void>>();
+
+function queueDiskPersistFlushWhenIdle(): void {
+  if (diskPersistFlushTimer != null) return;
+  const tick = () => {
+    if (!isCoverLoadScrollIdle()) {
+      diskPersistFlushTimer = setTimeout(tick, 250);
+      return;
+    }
+    diskPersistFlushTimer = undefined;
+    void flushPendingDiskPersist();
+  };
+  diskPersistFlushTimer = setTimeout(tick, 250);
+}
+
+async function flushPendingDiskPersist(): Promise<void> {
+  const batch = [...pendingDiskPersist.entries()];
+  pendingDiskPersist.clear();
+  const slice = isTauri() ? batch.slice(0, 4) : batch;
+  if (isTauri() && batch.length > slice.length) {
+    for (const [bookUrl, item] of batch.slice(slice.length)) {
+      pendingDiskPersist.set(bookUrl, item);
+    }
+    queueDiskPersistFlushWhenIdle();
+  }
+  for (const [bookUrl, item] of slice) {
+    const key = bookUrl.trim();
+    if (!key) continue;
+    const prev = diskWriteByBook.get(key);
+    const run = (async () => {
+      if (prev) await prev.catch(() => {});
+      await writeCoverToDisk(key, item.coverUrl, item.bytes, item.mime);
+    })().finally(() => {
+      if (diskWriteByBook.get(key) === run) diskWriteByBook.delete(key);
+    });
+    diskWriteByBook.set(key, run);
+    await run.catch(() => {});
+  }
+  if (isTauri() && pendingDiskPersist.size > 0) {
+    queueDiskPersistFlushWhenIdle();
+  }
+}
+
+function schedulePersistCoverToDisk(
+  bookUrl: string,
+  coverUrl: string,
+  data: CoverImageBytes,
+): void {
+  const key = bookUrl.trim();
+  if (!key) return;
+  pendingDiskPersist.set(key, {
+    coverUrl,
+    bytes: data.bytes,
+    mime: data.mime,
+  });
+  if (isTauri() && !isCoverLoadScrollIdle()) {
+    coverLoadTrace('scroll-defer', {
+      bookUrl: key,
+      coverUrl,
+      note: 'disk-write-idle',
+    });
+    queueDiskPersistFlushWhenIdle();
+    return;
+  }
+  void flushPendingDiskPersist();
 }
 
 async function fetchCoverImageBytesWithRetry(
@@ -339,6 +643,15 @@ async function fetchAndCacheCover(
   options: CoverImageLoadOptions | undefined,
   memoryKey: string,
 ): Promise<string | null> {
+  if (isTauri() && !isCoverLoadScrollIdle()) {
+    coverLoadTrace('scroll-defer', {
+      bookUrl: options?.bookUrl,
+      coverUrl: normalized,
+      note: 'network-idle',
+    });
+    return null;
+  }
+
   const data =
     (options?.maxRetries ?? 0) > 0
       ? await fetchCoverImageBytesWithRetry(normalized, options)
@@ -346,11 +659,13 @@ async function fetchAndCacheCover(
   if (!data) return null;
 
   const objectUrl = blobUrlFromBytes(data.bytes, data.mime);
-  rememberInMemoryCache(memoryKey, objectUrl);
+  rememberInMemoryCache(memoryKey, objectUrl, options?.bookUrl);
 
   const bookUrl = options?.bookUrl?.trim();
   if (bookUrl) {
-    void persistCoverToDisk(bookUrl, normalized, data);
+    clearCoverLoadFailure(bookUrl, normalized, options?.source?.sourceUrl ?? options?.source?.sourceName);
+    resetCoverLoadAttempts(bookUrl);
+    schedulePersistCoverToDisk(bookUrl, normalized, data);
   }
 
   return objectUrl;
@@ -370,9 +685,10 @@ function scheduleBackgroundCoverUpdate(
   }
 
   void (async () => {
+    if (!canRefreshCoverUrlForBook(bookUrl)) return;
     const fresh = await maybeRefreshCoverUrl(normalized, {
       ...options,
-      _refreshAttempted: false,
+      _refreshAttempted: true,
     });
     if (fresh !== normalized) {
       await patchCoverDiskMetaLastUrl(bookUrl, fresh);
@@ -390,37 +706,95 @@ export function evictCoverImageMemoryCache(
   const key = cacheKey(normalized, sourceId);
   const existing = cache.get(key);
   if (existing) {
-    URL.revokeObjectURL(existing);
+    unlinkBlobUrl(existing);
     cache.delete(key);
   }
+  clearCoverLoadFailure(undefined, normalized, sourceId);
 }
 
-export async function loadCoverImageObjectUrl(
+/** 加载失败冷却中（虚拟列表 remount 时直接走 fallback，不再请求） */
+export function isCoverImageLoadBlocked(
+  bookUrl: string | null | undefined,
+  coverUrl: string,
+  source?: BookSource | null,
+): boolean {
+  const normalized = normalizeImageUrl(coverUrl.trim());
+  if (!normalized || !shouldFetchCoverAsBlob(normalized)) return false;
+  const sourceId = source?.sourceUrl ?? source?.sourceName;
+  return isCoverLoadFailureCached(bookUrl, normalized, sourceId);
+}
+
+function failCoverLoad(
+  bookUrl: string | undefined,
+  coverUrl: string,
+  sourceId?: string,
+): null {
+  rememberCoverLoadFailure(bookUrl, coverUrl, sourceId);
+  return null;
+}
+
+async function loadCoverImageObjectUrlInner(
   url: string,
   options?: CoverImageLoadOptions,
 ): Promise<string | null> {
-  let normalized = normalizeImageUrl(url);
-  if (isBlockedCoverUrl(normalized)) {
-    normalized = await maybeRefreshCoverUrl(normalized, options);
-    if (isBlockedCoverUrl(normalized)) return null;
-  }
+  const initialNormalized = normalizeImageUrl(url);
+  let normalized = initialNormalized;
   const sourceId = options?.source?.sourceUrl ?? options?.source?.sourceName;
   const bookUrlTrim = options?.bookUrl?.trim();
+
+  const notifyCoverUrlIfChanged = () => {
+    if (
+      options?.onCoverUrlRefreshed &&
+      normalized !== initialNormalized
+    ) {
+      options.onCoverUrlRefreshed(normalized);
+    }
+  };
+
+  if (isCoverLoadFailureCached(bookUrlTrim, normalized, sourceId)) {
+    coverLoadTrace('failure-cached', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+    });
+    return null;
+  }
+
+  if (isBlockedCoverUrl(normalized)) {
+    normalized = await maybeRefreshCoverUrl(normalized, options);
+    if (isBlockedCoverUrl(normalized)) {
+      return failCoverLoad(bookUrlTrim, normalized, sourceId);
+    }
+  }
 
   const memoryKeyFor = (u: string) => cacheKey(u, sourceId);
 
   let key = memoryKeyFor(normalized);
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    coverLoadTrace('memory-hit', { bookUrl: bookUrlTrim, coverUrl: normalized });
+    return cached;
+  }
 
-  if (bookUrlTrim) {
-    const disk = await readCoverFromDisk(bookUrlTrim);
+  const memoryBeforeDisk = peekMemoryBlob(normalized, sourceId, bookUrlTrim);
+  if (memoryBeforeDisk) {
+    coverLoadTrace('memory-hit', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+      note: 'before disk',
+    });
+    return memoryBeforeDisk;
+  }
+
+  if (bookUrlTrim && !options?.skipDiskRead) {
+    const disk = await readCoverFromDiskDeduped(bookUrlTrim);
     if (disk) {
-      const diskUrl = normalizeImageUrl(disk.meta.lastCoverUrl ?? '');
-      const urlMatches = !diskUrl || diskUrl === normalized;
-      if (urlMatches) {
+      if (diskCoverMatchesRequest(disk, normalized)) {
         const objectUrl = blobUrlFromBytes(disk.bytes, disk.meta.mime);
-        rememberInMemoryCache(key, objectUrl);
+        rememberInMemoryCache(key, objectUrl, bookUrlTrim);
+        clearCoverLoadFailure(bookUrlTrim, normalized, sourceId);
+        resetCoverLoadAttempts(bookUrlTrim);
+        coverLoadTrace('disk-hit', { bookUrl: bookUrlTrim, coverUrl: normalized });
+        notifyCoverUrlIfChanged();
         scheduleBackgroundCoverUpdate(
           bookUrlTrim,
           normalized,
@@ -429,14 +803,28 @@ export async function loadCoverImageObjectUrl(
         );
         return objectUrl;
       }
+      coverLoadTrace('disk-miss', {
+        bookUrl: bookUrlTrim,
+        coverUrl: normalized,
+        note: 'disk url mismatch',
+      });
       void deleteCoverFromDisk(bookUrlTrim).catch(() => { });
+    } else {
+      coverLoadTrace('disk-miss', { bookUrl: bookUrlTrim, coverUrl: normalized });
     }
   }
 
   normalized = await maybeRefreshCoverUrl(normalized, options);
   key = memoryKeyFor(normalized);
   const cachedAfterRefresh = cache.get(key);
-  if (cachedAfterRefresh) return cachedAfterRefresh;
+  if (cachedAfterRefresh) {
+    coverLoadTrace('memory-hit', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+      note: 'after url refresh',
+    });
+    return cachedAfterRefresh;
+  }
 
   try {
     let objectUrl = await fetchAndCacheCover(normalized, options, key);
@@ -446,22 +834,115 @@ export async function loadCoverImageObjectUrl(
       options?.source &&
       bookUrlTrim &&
       !options._refreshAttempted &&
+      canRefreshCoverUrlForBook(bookUrlTrim) &&
       (isSignedCoverUrl(normalized) || isLikelyUnresolvedRuleResult(normalized))
     ) {
+      markCoverUrlRefreshAttempted(bookUrlTrim);
+      coverLoadTrace('url-refresh', {
+        bookUrl: bookUrlTrim,
+        coverUrl: normalized,
+        note: 'refreshBookCoverUrl retry fetch',
+      });
       const fresh = await refreshBookCoverUrl(options.source, bookUrlTrim);
       if (fresh && fresh !== normalized) {
-        options.onCoverUrlRefreshed?.(fresh);
         const retryUrl = normalizeImageUrl(fresh);
         objectUrl = await loadCoverImageObjectUrl(retryUrl, {
           ...options,
           _refreshAttempted: true,
         });
-        return objectUrl;
+        if (objectUrl) {
+          normalized = retryUrl;
+          clearCoverLoadFailure(bookUrlTrim, retryUrl, sourceId);
+          resetCoverLoadAttempts(bookUrlTrim);
+          notifyCoverUrlIfChanged();
+          return objectUrl;
+        }
+        return failCoverLoad(bookUrlTrim, retryUrl, sourceId);
       }
     }
 
+    if (!objectUrl) {
+      return failCoverLoad(bookUrlTrim, normalized, sourceId);
+    }
+    clearCoverLoadFailure(bookUrlTrim, normalized, sourceId);
+    resetCoverLoadAttempts(bookUrlTrim);
+    notifyCoverUrlIfChanged();
     return objectUrl;
   } catch {
+    return failCoverLoad(bookUrlTrim, normalized, sourceId);
+  }
+}
+
+export async function loadCoverImageObjectUrl(
+  url: string,
+  options?: CoverImageLoadOptions,
+): Promise<string | null> {
+  const raw = url?.trim();
+  if (!raw) return null;
+  let normalized = normalizeImageUrl(raw);
+  if (!shouldFetchCoverAsBlob(normalized)) return null;
+
+  const sourceId = options?.source?.sourceUrl ?? options?.source?.sourceName;
+  const bookUrlTrim = options?.bookUrl?.trim();
+
+  if (isCoverLoadFailureCached(bookUrlTrim, normalized, sourceId)) {
+    coverLoadTrace('failure-cached', { bookUrl: bookUrlTrim, coverUrl: normalized });
     return null;
   }
+
+  const peeked = peekCoverImageObjectUrl(normalized, options);
+  if (peeked) {
+    coverLoadTrace('memory-hit', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+      note: 'loadCover entry peek',
+    });
+    return peeked;
+  }
+
+  if (bookUrlTrim) {
+    const byBook = coverLoadByBookUrl.get(bookUrlTrim);
+    if (byBook) {
+      coverLoadTrace('inflight-join', {
+        bookUrl: bookUrlTrim,
+        coverUrl: normalized,
+        note: 'by-bookUrl',
+      });
+      return byBook;
+    }
+  }
+
+  if (registerCoverLoadAttempt(bookUrlTrim, normalized, sourceId)) {
+    coverLoadTrace('failure-cached', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+      note: 'attempt-limit',
+    });
+    return null;
+  }
+
+  const inflightKey = `${cacheKey(normalized, sourceId)}\0${bookUrlTrim ?? ''}`;
+  const existing = coverLoadInflight.get(inflightKey);
+  if (existing) {
+    coverLoadTrace('inflight-join', {
+      bookUrl: bookUrlTrim,
+      coverUrl: normalized,
+    });
+    return existing;
+  }
+
+  const run = (async () => {
+    await acquireCoverLoadSlot();
+    try {
+      return await loadCoverImageObjectUrlInner(url, options);
+    } finally {
+      releaseCoverLoadSlot();
+      coverLoadInflight.delete(inflightKey);
+      if (bookUrlTrim) coverLoadByBookUrl.delete(bookUrlTrim);
+    }
+  })();
+
+  if (bookUrlTrim) coverLoadByBookUrl.set(bookUrlTrim, run);
+  coverLoadInflight.set(inflightKey, run);
+  return run;
 }
