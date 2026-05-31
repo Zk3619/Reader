@@ -22,7 +22,11 @@ import {
   AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { SearchBookResultRow } from '../../components/bookshelf/SearchBookResultRow';
+import { SearchBookGridProvider,
+  renderSearchBookGridCell,
+} from '@/components/bookshelf/SearchBookGridContext';
+import { createSearchBooksStore } from '@/components/bookshelf/search-books-store';
+import { clearCoverSession } from '@/lib/http/cover-session';
 import { SearchHistoryChip } from '@/components/bookshelf/SearchHistoryChip';
 import { BookSearchScopeDialog } from '@/components/bookshelf/BookSearchScopeDialog';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
@@ -105,7 +109,8 @@ export function BookSearchPage(props: BookSearchPageProps) {
   const [submitted, setSubmitted] = createSignal(false);
   const [localBooks, setLocalBooks] = createSignal<Book[]>([]);
   const [history, setHistory] = createSignal<SearchKeyword[]>([]);
-  const [onlineResults, setOnlineResults] = createSignal<MergedSearchBook[]>([]);
+  const searchBooksStore = createSearchBooksStore();
+  const onlineBooks = searchBooksStore.orderedBooks;
   const [searching, setSearching] = createSignal(false);
   const [hasMore, setHasMore] = createSignal(false);
   const [manualStop, setManualStop] = createSignal(false);
@@ -212,10 +217,11 @@ export function BookSearchPage(props: BookSearchPageProps) {
       onStart: (isNewSearch) => {
         setSearching(true);
         if (isNewSearch) {
-          setOnlineResults([]);
+          searchBooksStore.clear();
+          clearCoverSession();
         }
       },
-      onResults: (books) => setOnlineResults(books),
+      onResults: (books) => searchBooksStore.replaceAll(books),
       onFinish: (empty, more) => {
         setSearching(false);
         setHasMore(more);
@@ -299,6 +305,19 @@ export function BookSearchPage(props: BookSearchPageProps) {
     return sources.find((s) => s.sourceUrl === url) ?? null;
   };
 
+  const openSearchResult = async (book: MergedSearchBook) => {
+    const source = await resolveSourceForBook(book);
+    if (!source) {
+      showAppToast({
+        title: '无法打开详情',
+        description: '未找到对应书源',
+        variant: 'destructive',
+      });
+      return;
+    }
+    props.onOpenBookInfo(source, book);
+  };
+
   const resolveSourceForShelfBook = async (book: Book): Promise<BookSource | null> => {
     const cached = sourceMap()[book.origin];
     if (cached) return cached;
@@ -336,7 +355,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
                   if (!submitted()) setHelpVisible(true);
                 }}
                 onFocus={() => {
-                  if (!submitted() || onlineResults().length === 0) setHelpVisible(true);
+                  if (!submitted() || onlineBooks().length === 0) setHelpVisible(true);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -576,38 +595,29 @@ export function BookSearchPage(props: BookSearchPageProps) {
 
         <Show when={submitted()}>
           <section class="flex min-h-0 flex-1 flex-col pb-2">
-            <Show when={!searching() && onlineResults().length === 0}>
+            <Show when={!searching() && onlineBooks().length === 0}>
               <p class="py-12 text-center text-sm text-muted-foreground">
                 {manualStop() ? '搜索已停止' : '暂无搜索结果'}
               </p>
             </Show>
-            <Show when={onlineResults().length > 0}>
-              <VirtualExploreBookGrid
-                class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
-                items={onlineResults()}
-                rowHeight={EXPLORE_BOOK_GRID_ROW_HEIGHT_PX}
-                onScroll={handleScroll}
+            <Show when={onlineBooks().length > 0}>
+              <SearchBookGridProvider
+                value={{
+                  store: searchBooksStore,
+                  onShelf: (b) => isSearchBookOnShelf(b, shelfKeys()),
+                  sourceForBook: (b) => sourceMap()[b.origin] ?? null,
+                  onOpen: openSearchResult,
+                }}
               >
-                {(book) => (
-                  <SearchBookResultRow
-                    book={book}
-                    onShelf={isSearchBookOnShelf(book, shelfKeys())}
-                    source={sourceMap()[book.origin] ?? null}
-                    onOpen={async () => {
-                      const source = await resolveSourceForBook(book);
-                      if (!source) {
-                        showAppToast({
-                          title: '无法打开详情',
-                          description: '未找到对应书源',
-                          variant: 'destructive',
-                        });
-                        return;
-                      }
-                      props.onOpenBookInfo(source, book);
-                    }}
-                  />
-                )}
-              </VirtualExploreBookGrid>
+                <VirtualExploreBookGrid
+                  class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
+                  items={onlineBooks}
+                  rowHeight={EXPLORE_BOOK_GRID_ROW_HEIGHT_PX}
+                  onScroll={handleScroll}
+                  getItemKey={(book) => book.bookUrl}
+                  renderEntityByKey={renderSearchBookGridCell}
+                />
+              </SearchBookGridProvider>
             </Show>
             <Show when={searching()}>
               <p class="shrink-0 py-6 text-center text-sm text-muted-foreground">正在从各书源搜索…</p>

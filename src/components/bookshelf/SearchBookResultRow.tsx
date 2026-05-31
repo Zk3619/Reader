@@ -65,6 +65,7 @@ export function SearchBookResultRow(props: SearchBookResultRowProps) {
             alt=""
             class="h-full w-full object-cover"
             draggable={false}
+            deferLoadUntilVisible
             fallback={
               <div class="flex h-full w-full items-center justify-center">
                 <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
