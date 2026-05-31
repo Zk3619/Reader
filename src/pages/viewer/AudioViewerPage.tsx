@@ -4,7 +4,7 @@
  */
 
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js';
-import { mediaReaderStore } from '@/stores/media-viewer';
+import { viewerStore } from '@/stores/viewer';
 import {
   MediaViewerShell,
   MediaViewerShellMain,
@@ -44,12 +44,12 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
 
   let audioEl: HTMLAudioElement | undefined;
 
-  const book = () => mediaReaderStore.state.book;
-  const catalog = () => mediaReaderStore.state.catalog;
-  const chapterIndex = () => mediaReaderStore.state.chapterIndex;
-  const url = () => mediaReaderStore.state.primaryUrl;
-  const loading = () => mediaReaderStore.state.loading;
-  const error = () => mediaReaderStore.state.error;
+  const book = () => viewerStore.state.book;
+  const catalog = () => viewerStore.state.catalog;
+  const chapterIndex = () => viewerStore.state.chapterIndex;
+  const url = () => viewerStore.state.primaryUrl;
+  const loading = () => viewerStore.state.loading;
+  const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
 
@@ -57,7 +57,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     const src = url();
     if (!audioEl || !src) return;
     audioEl.src = src;
-    const saved = mediaReaderStore.state.chapterPos;
+    const saved = viewerStore.state.chapterPos;
     if (saved > 0 && saved < 36000) {
       audioEl.currentTime = saved;
     }
@@ -66,8 +66,8 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
 
   onCleanup(() => {
     if (audioEl) {
-      mediaReaderStore.setChapterPos(audioEl.currentTime);
-      void mediaReaderStore.saveProgress();
+      viewerStore.setChapterPos(audioEl.currentTime);
+      void viewerStore.saveProgress();
       audioEl.pause();
     }
   });
@@ -75,8 +75,8 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const goChapter = async (delta: number) => {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
-    if (audioEl) mediaReaderStore.setChapterPos(audioEl.currentTime);
-    await mediaReaderStore.loadChapter(next);
+    if (audioEl) viewerStore.setChapterPos(audioEl.currentTime);
+    await viewerStore.loadChapter(next);
   };
 
   return (
@@ -102,7 +102,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                 class="mt-3"
                 size="sm"
                 variant="outline"
-                onClick={() => void mediaReaderStore.refreshChapter()}
+                onClick={() => void viewerStore.refreshChapter()}
               >
                 重试
               </Button>
@@ -117,7 +117,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               onTimeUpdate={() => {
                 if (!audioEl) return;
                 setCurrentTime(audioEl.currentTime);
-                mediaReaderStore.setChapterPos(audioEl.currentTime);
+                viewerStore.setChapterPos(audioEl.currentTime);
               }}
               onLoadedMetadata={() => {
                 if (audioEl) setDuration(audioEl.duration);
@@ -182,11 +182,11 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               onClose={props.onClose}
               onOpenCatalog={() => setCatalogOpen(true)}
               onRefresh={() => {
-                if (!mediaReaderStore.isOpen()) {
+                if (!viewerStore.isOpen()) {
                   showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
                   return;
                 }
-                void mediaReaderStore.refreshChapter();
+                void viewerStore.refreshChapter();
               }}
               loading={loading()}
             />
@@ -207,7 +207,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {
                 setCatalogOpen(false);
-                void mediaReaderStore.loadChapter(index);
+                void viewerStore.loadChapter(index);
               }}
             />
           </AppDrawerBody>
@@ -216,6 +216,3 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     </>
   );
 }
-
-/** @deprecated 使用 AudioViewerPage */
-export const AudioPlayerPage = AudioViewerPage;

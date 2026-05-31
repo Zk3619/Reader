@@ -1,5 +1,5 @@
 import { createSignal, Index, Show, createEffect, createMemo, onCleanup, onMount } from 'solid-js';
-import { mediaReaderStore } from '@/stores/media-viewer';
+import { viewerStore } from '@/stores/viewer';
 import {
   MANGA_SCROLL_ROOT_ATTR,
   ReaderInlineImg,
@@ -43,11 +43,11 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
 
   let scrollRootEl: HTMLDivElement | undefined;
 
-  const book = () => mediaReaderStore.state.book;
-  const catalog = () => mediaReaderStore.state.catalog;
-  const chapterIndex = () => mediaReaderStore.state.chapterIndex;
-  const rawContent = () => mediaReaderStore.state.rawContent;
-  const mediaUrls = () => mediaReaderStore.state.mediaUrls;
+  const book = () => viewerStore.state.book;
+  const catalog = () => viewerStore.state.catalog;
+  const chapterIndex = () => viewerStore.state.chapterIndex;
+  const rawContent = () => viewerStore.state.rawContent;
+  const mediaUrls = () => viewerStore.state.mediaUrls;
   type MangaPageItem = ReaderInlineImageRef & { slot: string; page: number };
   const imageList = createMemo((): MangaPageItem[] => {
     const idx = chapterIndex();
@@ -63,8 +63,8 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       page: i + 1,
     }));
   });
-  const loading = () => mediaReaderStore.state.loading;
-  const error = () => mediaReaderStore.state.error;
+  const loading = () => viewerStore.state.loading;
+  const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
   const totalPages = () => imageList().length;
@@ -92,7 +92,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       }
     });
     setViewPage(bestPage);
-    mediaReaderStore.setChapterPos(bestPage - 1);
+    viewerStore.setChapterPos(bestPage - 1);
   };
 
   onMount(() => {
@@ -146,19 +146,19 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   const goChapter = async (delta: number) => {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
-    if (!mediaReaderStore.isOpen()) {
+    if (!viewerStore.isOpen()) {
       showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
       return;
     }
-    await mediaReaderStore.loadChapter(next);
+    await viewerStore.loadChapter(next);
   };
 
   const refreshChapter = () => {
-    if (!mediaReaderStore.isOpen()) {
+    if (!viewerStore.isOpen()) {
       showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
       return;
     }
-    void mediaReaderStore.refreshChapter().catch((e) => {
+    void viewerStore.refreshChapter().catch((e) => {
       console.error('[image-viewer] 刷新本章失败', e);
     });
   };
@@ -261,7 +261,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {
                 setCatalogOpen(false);
-                void mediaReaderStore.loadChapter(index);
+                void viewerStore.loadChapter(index);
               }}
             />
           </AppDrawerBody>
@@ -270,6 +270,3 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     </>
   );
 }
-
-/** @deprecated 使用 ImageViewerPage */
-export const PicReaderPage = ImageViewerPage;

@@ -3,7 +3,7 @@
  */
 
 import { Show } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
@@ -27,11 +27,11 @@ export interface ReaderMoreMenuProps {
 }
 
 export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
-  const replaceEnabled = () => readerStore.isUseReplaceRule();
+  const replaceEnabled = () => textViewerStore.isUseReplaceRule();
 
   const handleToggleReplace = async (enabled: boolean) => {
     try {
-      await readerStore.setUseReplaceRule(enabled);
+      await textViewerStore.setUseReplaceRule(enabled);
     } catch (e) {
       console.error(e);
     }

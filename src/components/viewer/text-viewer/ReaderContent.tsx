@@ -4,7 +4,7 @@
  */
 
 import { Show, For, createMemo, createSignal, createEffect } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import {
   buildReaderDisplayBlocks,
   applyReaderImageStyle,
@@ -95,9 +95,9 @@ export interface ReaderContentProps {
 }
 
 export function ReaderContent(props: ReaderContentProps) {
-  const config = () => readerStore.state.config;
-  const content = () => readerStore.state.content;
-  const book = () => readerStore.state.book;
+  const config = () => textViewerStore.state.config;
+  const content = () => textViewerStore.state.content;
+  const book = () => textViewerStore.state.book;
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
 
   createEffect(() => {
@@ -114,13 +114,13 @@ export function ReaderContent(props: ReaderContentProps) {
       cancelled = true;
     };
   });
-  const contentLoading = () => readerStore.state.contentLoading;
-  const contentFetching = () => readerStore.state.contentFetching;
-  const contentBootstrapping = () => readerStore.state.contentBootstrapping;
+  const contentLoading = () => textViewerStore.state.contentLoading;
+  const contentFetching = () => textViewerStore.state.contentFetching;
+  const contentBootstrapping = () => textViewerStore.state.contentBootstrapping;
   const showReaderSkeleton = () => contentFetching() || contentBootstrapping();
-  const showContent = () => readerStore.state.showContent;
-  const catalog = () => readerStore.state.catalog;
-  const chapterIndex = () => readerStore.state.chapterIndex;
+  const showContent = () => textViewerStore.state.showContent;
+  const catalog = () => textViewerStore.state.catalog;
+  const chapterIndex = () => textViewerStore.state.chapterIndex;
   const currentChapter = () => catalog()[chapterIndex()];
   
   // 检测是否为错误内容（以"加载失败"开头）
@@ -219,7 +219,7 @@ export function ReaderContent(props: ReaderContentProps) {
                   <p class="text-xs text-destructive/80 wrap-break-word">{content()}</p>
                 </div>
                 <div class="flex justify-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => readerStore.refreshChapter(chapterIndex())}>
+                  <Button variant="outline" size="sm" onClick={() => textViewerStore.refreshChapter(chapterIndex())}>
                     重试
                   </Button>
                 </div>

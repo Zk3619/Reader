@@ -3,7 +3,7 @@
  */
 
 import { createSignal, For, Show } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import { searchBookContent, type BookSearchHit } from '@/lib/media/text/book-content-search';
 import { plainTextForAloud } from '@/lib/media/text/read-aloud';
 import { Button } from '@/components/ui/button';
@@ -30,8 +30,8 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
   const [activeIndex, setActiveIndex] = createSignal(0);
 
   const runSearch = async () => {
-    const book = readerStore.state.book;
-    const catalog = readerStore.state.catalog;
+    const book = textViewerStore.state.book;
+    const catalog = textViewerStore.state.catalog;
     const kw = keyword().trim();
     if (!book || !kw) {
       setHits([]);
@@ -39,9 +39,9 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
     }
     setSearching(true);
     try {
-      const currentPlain = plainTextForAloud(readerStore.state.content);
+      const currentPlain = plainTextForAloud(textViewerStore.state.content);
       const results = await searchBookContent(book, catalog, kw, {
-        startIndex: readerStore.state.chapterIndex,
+        startIndex: textViewerStore.state.chapterIndex,
         currentChapterPlain: currentPlain,
       });
       setHits(results);

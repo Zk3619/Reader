@@ -4,7 +4,7 @@
  */
 
 import { createSignal, Show } from 'solid-js';
-import { mediaReaderStore } from '@/stores/media-viewer';
+import { viewerStore } from '@/stores/viewer';
 import {
   MediaViewerShell,
   MediaViewerShellMain,
@@ -37,19 +37,19 @@ export function FileViewerPage(props: FileViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
 
-  const book = () => mediaReaderStore.state.book;
-  const catalog = () => mediaReaderStore.state.catalog;
-  const chapterIndex = () => mediaReaderStore.state.chapterIndex;
-  const url = () => mediaReaderStore.state.primaryUrl;
-  const loading = () => mediaReaderStore.state.loading;
-  const error = () => mediaReaderStore.state.error;
+  const book = () => viewerStore.state.book;
+  const catalog = () => viewerStore.state.catalog;
+  const chapterIndex = () => viewerStore.state.chapterIndex;
+  const url = () => viewerStore.state.primaryUrl;
+  const loading = () => viewerStore.state.loading;
+  const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
 
   const goChapter = async (delta: number) => {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
-    await mediaReaderStore.loadChapter(next);
+    await viewerStore.loadChapter(next);
   };
 
   return (
@@ -68,7 +68,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void mediaReaderStore.refreshChapter()}
+                onClick={() => void viewerStore.refreshChapter()}
               >
                 重试
               </Button>
@@ -122,11 +122,11 @@ export function FileViewerPage(props: FileViewerPageProps) {
               onClose={props.onClose}
               onOpenCatalog={() => setCatalogOpen(true)}
               onRefresh={() => {
-                if (!mediaReaderStore.isOpen()) {
+                if (!viewerStore.isOpen()) {
                   showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
                   return;
                 }
-                void mediaReaderStore.refreshChapter();
+                void viewerStore.refreshChapter();
               }}
               loading={loading()}
             />
@@ -157,7 +157,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {
                 setCatalogOpen(false);
-                void mediaReaderStore.loadChapter(index);
+                void viewerStore.loadChapter(index);
               }}
             />
           </AppDrawerBody>

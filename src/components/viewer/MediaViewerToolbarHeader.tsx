@@ -15,7 +15,7 @@ export interface MediaViewerToolbarHeaderProps {
   loading?: boolean;
 }
 
-/** 图片 / 音频 / 视频 / 文件阅读器默认顶栏内容 */
+/** 图片 / 音频 / 视频 / 文件阅读器默认顶栏内�?*/
 export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
   return (
     <>

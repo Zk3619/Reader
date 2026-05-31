@@ -1,5 +1,5 @@
 import { createEffect, createMemo } from 'solid-js';
-import { mediaReaderStore } from '@/stores/media-viewer';
+import { viewerStore } from '@/stores/viewer';
 import {
   scrollCatalogIndexIntoView,
   VirtualChapterList,
@@ -15,8 +15,8 @@ export interface MediaViewerCatalogProps {
 }
 
 export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
-  const catalog = () => mediaReaderStore.state.catalog;
-  const chapterIndex = () => mediaReaderStore.state.chapterIndex;
+  const catalog = () => viewerStore.state.catalog;
+  const chapterIndex = () => viewerStore.state.chapterIndex;
   const rows = createMemo(() => buildChapterRowMetas(catalog()));
 
   let scrollContainer: HTMLDivElement | undefined;
@@ -86,9 +86,3 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
     </VirtualChapterList>
   );
 }
-
-/** @deprecated 使用 MediaViewerCatalog */
-export type MediaReaderCatalogProps = MediaViewerCatalogProps;
-
-/** @deprecated 使用 MediaViewerCatalog */
-export const MediaReaderCatalog = MediaViewerCatalog;

@@ -4,7 +4,7 @@
  */
 
 import { createSignal, Show, Index, onMount, onCleanup, createEffect } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import { Button } from '@/components/ui/button';
 import {
   AppDrawer,
@@ -81,9 +81,6 @@ export interface BookReaderProps {
   onOpenBookInfo?: () => void;
 }
 
-/** @deprecated 使用 BookReader */
-export type ReaderPageProps = BookReaderProps;
-
 export function BookReader(props: BookReaderProps) {
   const [topBarVisible, setTopBarVisible] = createSignal(true);
   const [catalogOpen, setCatalogOpen] = createSignal(false);
@@ -122,11 +119,11 @@ export function BookReader(props: BookReaderProps) {
   let tapStartY = 0;
   let tapMoved = false;
 
-  const book = () => readerStore.state.book;
-  const catalogSize = () => readerStore.state.catalog.length;
+  const book = () => textViewerStore.state.book;
+  const catalogSize = () => textViewerStore.state.catalog.length;
   const canOfflineCache = () => {
     const b = book();
-    if (!b || readerStore.isGuestReading()) return false;
+    if (!b || textViewerStore.isGuestReading()) return false;
     return !isLocalBook(b);
   };
 
@@ -134,7 +131,7 @@ export function BookReader(props: BookReaderProps) {
     if (!canOfflineCache()) {
       showAppToast({
         title: '无法离线缓存',
-        description: readerStore.isGuestReading()
+        description: textViewerStore.isGuestReading()
           ? '试读书籍请先加入书架'
           : '本地书籍无需缓存',
         variant: 'default',
@@ -143,16 +140,16 @@ export function BookReader(props: BookReaderProps) {
     }
     setOfflineCacheDialogOpen(true);
   };
-  const catalog = () => readerStore.state.catalog;
-  const chapterIndex = () => readerStore.state.chapterIndex;
+  const catalog = () => textViewerStore.state.catalog;
+  const chapterIndex = () => textViewerStore.state.chapterIndex;
   const currentChapter = () => catalog()[chapterIndex()];
-  const showContent = () => readerStore.state.showContent;
-  const content = () => readerStore.state.content;
-  const chapterPos = () => readerStore.state.chapterPos;
+  const showContent = () => textViewerStore.state.showContent;
+  const content = () => textViewerStore.state.content;
+  const chapterPos = () => textViewerStore.state.chapterPos;
 
   /** 阅读进度状态栏是否显示（仅控制状态栏，不绑操作栏） */
   const statusBarVisible = () => {
-    const style = readerStore.state.config.statusBarDisplayStyle;
+    const style = textViewerStore.state.config.statusBarDisplayStyle;
     if (style === 'always') return true;
     if (style === 'never') return false;
     return topBarVisible();
@@ -178,10 +175,10 @@ export function BookReader(props: BookReaderProps) {
 
   /** 窄屏且移动端：底栏仅在「状态栏始终显示」时使用阅读器主题配色，其他情况用应用级主题 */
   const isNarrowAndMobile = () => !isWideScreen() && isMobile();
-  const readerTheme = () => readerStore.state.config.theme ?? 0;
+  const readerTheme = () => textViewerStore.state.config.theme ?? 0;
   const bottomBarThemeClasses = () => {
     if (!isNarrowAndMobile()) return null;
-    if (readerStore.state.config.statusBarDisplayStyle !== 'always') return null;
+    if (textViewerStore.state.config.statusBarDisplayStyle !== 'always') return null;
     const t = READER_THEME_BAR[readerTheme()] ?? READER_THEME_BAR[0];
     return `border-t ${t.border} ${t.bg} ${t.text}`;
   };
@@ -200,12 +197,12 @@ export function BookReader(props: BookReaderProps) {
     }
   });
 
-  const handlePrev = () => void readerStore.prevChapter();
-  const handleNext = () => void readerStore.nextChapter();
+  const handlePrev = () => void textViewerStore.prevChapter();
+  const handleNext = () => void textViewerStore.nextChapter();
 
   const canUseBookmarks = () => {
     const b = book();
-    return !!b && !readerStore.isGuestReading();
+    return !!b && !textViewerStore.isGuestReading();
   };
 
   const handleAddBookmark = async () => {
@@ -232,8 +229,8 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const handleJumpBookmark = async (bm: Bookmark) => {
-    await readerStore.jumpToChapter(bm.chapterIndex);
-    readerStore.setChapterPos(bm.chapterPos);
+    await textViewerStore.jumpToChapter(bm.chapterIndex);
+    textViewerStore.setChapterPos(bm.chapterPos);
     requestAnimationFrame(() => {
       if (scrollContainer) {
         const sh = scrollContainer.scrollHeight;
@@ -259,7 +256,7 @@ export function BookReader(props: BookReaderProps) {
       });
       return;
     }
-    const cfg = readerStore.state.config;
+    const cfg = textViewerStore.state.config;
     const httpTts =
       cfg.aloudEngine === 'httpTts' && cfg.httpTtsId != null
         ? await getHttpTTS(cfg.httpTtsId)
@@ -299,7 +296,7 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const dualPageActive = () => {
-    const mode = readerStore.state.config.dualPage ?? 'auto';
+    const mode = textViewerStore.state.config.dualPage ?? 'auto';
     if (mode === 'off') return false;
     if (mode === 'always') return isWideScreen();
     return isWideScreen() && window.innerWidth >= 900;
@@ -327,7 +324,7 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
-  const pageAnim = () => readerStore.state.config.pageAnim ?? 'scroll';
+  const pageAnim = () => textViewerStore.state.config.pageAnim ?? 'scroll';
   const contentTransitionClass = () => {
     const anim = pageAnim();
     if (anim === 'cover') return 'reader-chapter-enter-cover';
@@ -339,7 +336,7 @@ export function BookReader(props: BookReaderProps) {
   /** 操作栏进度条：拖动时更新本章进度并同步滚动位置 */
   const handleChapterProgressChange = (values: number[]) => {
     const p = Math.max(0, Math.min(1, values[0] ?? 0));
-    readerStore.setChapterPos(p);
+    textViewerStore.setChapterPos(p);
     if (scrollContainer) {
       const sh = scrollContainer.scrollHeight;
       const ch = scrollContainer.clientHeight;
@@ -441,7 +438,7 @@ export function BookReader(props: BookReaderProps) {
       }
       if (e.key === 'ArrowLeft') handlePrev();
       if (e.key === 'ArrowRight') handleNext();
-      if (readerStore.state.config.volumeKeyTurnPage) {
+      if (textViewerStore.state.config.volumeKeyTurnPage) {
         if (e.key === 'ArrowUp' || e.code === 'AudioVolumeUp') {
           e.preventDefault();
           handlePrev();
@@ -480,14 +477,14 @@ export function BookReader(props: BookReaderProps) {
       : 0;
 
     // 更新阅读位置
-    readerStore.setChapterPos(pos);
+    textViewerStore.setChapterPos(pos);
 
     // 防抖保存：延迟500ms后保存
     if (scrollSaveTimer !== null) {
       clearTimeout(scrollSaveTimer);
     }
     scrollSaveTimer = window.setTimeout(() => {
-      readerStore.saveProgress().catch(console.error);
+      textViewerStore.saveProgress().catch(console.error);
       scrollSaveTimer = null;
     }, 500);
   };
@@ -501,7 +498,7 @@ export function BookReader(props: BookReaderProps) {
 
     // 检测章节切换：如果章节索引变化了，重置滚动位置到顶部
     if (lastChapterIndex !== -1 && lastChapterIndex !== index) {
-      const anim = readerStore.state.config.pageAnim ?? 'scroll';
+      const anim = textViewerStore.state.config.pageAnim ?? 'scroll';
       if (anim !== 'scroll') {
         setContentEnterKey((k) => k + 1);
       }
@@ -509,7 +506,7 @@ export function BookReader(props: BookReaderProps) {
       requestAnimationFrame(() => {
         if (scrollContainer) {
           scrollContainer.scrollTop = 0;
-          readerStore.setChapterPos(0);
+          textViewerStore.setChapterPos(0);
         }
       });
       lastChapterIndex = index;
@@ -522,7 +519,7 @@ export function BookReader(props: BookReaderProps) {
     // 只在首次打开书籍时恢复滚动位置
     if (hasRestoredInitialScroll) return;
 
-    const pos = readerStore.state.chapterPos;
+    const pos = textViewerStore.state.chapterPos;
 
     // 延迟恢复滚动位置，确保内容已完全渲染
     // 使用双重 requestAnimationFrame 确保 DOM 完全渲染
@@ -622,8 +619,8 @@ export function BookReader(props: BookReaderProps) {
     const rect = t.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
     const yRatio = (e.clientY - rect.top) / Math.max(rect.height, 1);
-    const zone = resolveClickZone(xRatio, yRatio, readerStore.state.config.clickRegion);
-    const actions = readerStore.state.config.clickActions;
+    const zone = resolveClickZone(xRatio, yRatio, textViewerStore.state.config.clickRegion);
+    const actions = textViewerStore.state.config.clickActions;
     const action = actions[zone] ?? 'menu';
     const wasLongPress = tapStartTime && Date.now() - tapStartTime >= LONG_PRESS_MS;
     if (tapMoved || wasLongPress) {
@@ -726,10 +723,10 @@ export function BookReader(props: BookReaderProps) {
             onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
             onChangeSource={() => {
               const b = book();
-              if (!b || readerStore.isGuestReading() || isLocalBook(b)) {
+              if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
                 showAppToast({
                   title: '无法换源',
-                  description: readerStore.isGuestReading()
+                  description: textViewerStore.isGuestReading()
                     ? '试读请先加入书架'
                     : '本地书不支持换源',
                 });
@@ -738,7 +735,7 @@ export function BookReader(props: BookReaderProps) {
               setChangeSourceOpen(true);
             }}
             onRefreshChapter={() => {
-              void readerStore.refreshChapter().catch(() => undefined);
+              void textViewerStore.refreshChapter().catch(() => undefined);
             }}
             onOpenOfflineCache={openOfflineCacheDialog}
             onOpenMoreMenu={() => setMoreMenuOpen(true)}
@@ -804,7 +801,7 @@ export function BookReader(props: BookReaderProps) {
                   initialScrollTop={catalogScrollTop()}
                   onScrollTop={setCatalogScrollTop}
                   onSelectChapter={(index: number) => {
-                    readerStore.jumpToChapter(index);
+                    textViewerStore.jumpToChapter(index);
                     setCatalogOpen(false);
                   }}
                   onClose={() => setCatalogOpen(false)}
@@ -900,9 +897,9 @@ export function BookReader(props: BookReaderProps) {
                 class="rounded-lg bg-muted px-3 py-1.5 text-sm text-foreground hover:bg-muted/80"
                 onClick={() => setStatusBarStyleDialogOpen(true)}
               >
-                {readerStore.state.config.statusBarDisplayStyle === 'follow'
+                {textViewerStore.state.config.statusBarDisplayStyle === 'follow'
                   ? '跟随操作栏'
-                  : readerStore.state.config.statusBarDisplayStyle === 'always'
+                  : textViewerStore.state.config.statusBarDisplayStyle === 'always'
                     ? '始终显示'
                     : '始终隐藏'}
               </button>
@@ -926,9 +923,9 @@ export function BookReader(props: BookReaderProps) {
           </AppDialogHeader>
           <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
             <RadioGroup
-              value={readerStore.state.config.statusBarDisplayStyle}
+              value={textViewerStore.state.config.statusBarDisplayStyle}
               onChange={(value) => {
-                readerStore.setConfig({ statusBarDisplayStyle: value as 'follow' | 'always' | 'never' });
+                textViewerStore.setConfig({ statusBarDisplayStyle: value as 'follow' | 'always' | 'never' });
                 setStatusBarStyleDialogOpen(false);
               }}
               class="flex flex-col gap-2"
@@ -990,7 +987,7 @@ export function BookReader(props: BookReaderProps) {
         open={offlineCacheDialogOpen()}
         onOpenChange={setOfflineCacheDialogOpen}
         book={book() ?? null}
-        chapterIndex={readerStore.state.chapterIndex}
+        chapterIndex={textViewerStore.state.chapterIndex}
         catalogSize={catalogSize()}
       />
 
@@ -1006,7 +1003,7 @@ export function BookReader(props: BookReaderProps) {
       <ReaderSearchDrawer
         open={searchOpen()}
         onOpenChange={setSearchOpen}
-        onJumpToChapter={(index) => void readerStore.jumpToChapter(index)}
+        onJumpToChapter={(index) => void textViewerStore.jumpToChapter(index)}
       />
 
       <ReaderBookmarksDrawer
@@ -1021,7 +1018,7 @@ export function BookReader(props: BookReaderProps) {
         onOpenChange={setChangeSourceOpen}
         book={book() ?? null}
         onChanged={async (nextBook) => {
-          await readerStore.openBook(nextBook);
+          await textViewerStore.openBook(nextBook);
         }}
       />
 
@@ -1051,6 +1048,3 @@ export function BookReader(props: BookReaderProps) {
     </>
   );
 }
-
-/** @deprecated 使用 BookReader */
-export const ReaderPage = BookReader;

@@ -1,11 +1,10 @@
 /**
- * 阅读器模块导出
- */
+ * Viewer 模块导出（text / image / audio / video / file�? */
 
-export { BookReader, ReaderPage, type BookReaderProps, type ReaderPageProps } from '@/pages/viewer/TextViewerPage';
-export { ImageViewerPage, PicReaderPage } from '@/pages/viewer/ImageViewerPage';
-export { AudioViewerPage, AudioPlayerPage } from '@/pages/viewer/AudioViewerPage';
-export { VideoViewerPage, VideoPlayerPage } from '@/pages/viewer/VideoViewerPage';
+export { BookReader, type BookReaderProps } from '@/pages/viewer/TextViewerPage';
+export { ImageViewerPage } from '@/pages/viewer/ImageViewerPage';
+export { AudioViewerPage } from '@/pages/viewer/AudioViewerPage';
+export { VideoViewerPage } from '@/pages/viewer/VideoViewerPage';
 export { FileViewerPage } from '@/pages/viewer/FileViewerPage';
 export { ReaderContent } from '@/components/viewer/text-viewer/ReaderContent';
 export { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';

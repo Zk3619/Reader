@@ -6,7 +6,7 @@
  */
 
 import { createEffect, createMemo } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
 import {
   scrollCatalogIndexIntoView,
@@ -29,11 +29,11 @@ export interface ReaderCatalogProps {
 }
 
 export function ReaderCatalog(props: ReaderCatalogProps) {
-  const catalog = () => readerStore.state.catalog;
-  const chapterIndex = () => readerStore.state.chapterIndex;
-  const bookUrl = () => readerStore.state.book?.bookUrl;
+  const catalog = () => textViewerStore.state.catalog;
+  const chapterIndex = () => textViewerStore.state.chapterIndex;
+  const bookUrl = () => textViewerStore.state.book?.bookUrl;
   const showCacheHint = () => {
-    const book = readerStore.state.book;
+    const book = textViewerStore.state.book;
     return Boolean(book && !isLocalBook(book));
   };
   const { cached: cachedIndices } = useCachedChapterIndices(

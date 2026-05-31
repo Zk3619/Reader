@@ -4,13 +4,13 @@
  */
 
 import { For, Show, onMount, createSignal } from 'solid-js';
-import {
-  readerStore,
-  type ReadConfig,
-  type ReaderPageAnim,
-  type ReaderDualPageMode,
-  type ReaderImageStyle,
-} from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
+import type {
+  TextViewerUiConfig as ReadConfig,
+  TextViewerPageAnim as ReaderPageAnim,
+  TextViewerDualPageMode as ReaderDualPageMode,
+  TextViewerImageStyle as ReaderImageStyle,
+} from '@/lib/media/text/reader-ui-config';
 import { READER_IMAGE_STYLE_LABELS } from '@/lib/js-engine/legado/legado-image-options';
 import { getAllHttpTTS } from '@/lib/database/http-tts';
 import type { HttpTTS } from '@/types';
@@ -37,7 +37,7 @@ export interface ReaderSettingsProps {
 }
 
 export function ReaderSettings(props: ReaderSettingsProps) {
-  const config = () => readerStore.state.config;
+  const config = () => textViewerStore.state.config;
   const [httpTtsList, setHttpTtsList] = createSignal<HttpTTS[]>([]);
 
   onMount(() => {
@@ -45,17 +45,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
   });
 
   const setConfig = (patch: Partial<ReadConfig>) => {
-    readerStore.setConfig(patch);
+    textViewerStore.setConfig(patch);
   };
 
   const setSpacing = (key: keyof ReadConfig['spacing'], value: number) => {
-    readerStore.setConfig({
+    textViewerStore.setConfig({
       spacing: { ...config().spacing, [key]: value },
     });
   };
 
   const setContentInset = (key: keyof ReadConfig['contentInset'], value: number) => {
-    readerStore.setConfig({
+    textViewerStore.setConfig({
       contentInset: { ...config().contentInset, [key]: value },
     });
   };
@@ -423,7 +423,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         variant="outline"
         class="w-full"
         onClick={() => {
-          readerStore.resetConfig();
+          textViewerStore.resetConfig();
           props.onClose?.();
         }}
       >

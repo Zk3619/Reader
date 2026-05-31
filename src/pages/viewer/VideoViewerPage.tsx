@@ -4,7 +4,7 @@
  */
 
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js';
-import { mediaReaderStore } from '@/stores/media-viewer';
+import { viewerStore } from '@/stores/viewer';
 import {
   MediaViewerShell,
   MediaViewerShellMain,
@@ -35,12 +35,12 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
 
   let videoEl: HTMLVideoElement | undefined;
 
-  const book = () => mediaReaderStore.state.book;
-  const catalog = () => mediaReaderStore.state.catalog;
-  const chapterIndex = () => mediaReaderStore.state.chapterIndex;
-  const url = () => mediaReaderStore.state.primaryUrl;
-  const loading = () => mediaReaderStore.state.loading;
-  const error = () => mediaReaderStore.state.error;
+  const book = () => viewerStore.state.book;
+  const catalog = () => viewerStore.state.catalog;
+  const chapterIndex = () => viewerStore.state.chapterIndex;
+  const url = () => viewerStore.state.primaryUrl;
+  const loading = () => viewerStore.state.loading;
+  const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
 
@@ -48,7 +48,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
     const src = url();
     if (!videoEl || !src) return;
     videoEl.src = src;
-    const saved = mediaReaderStore.state.chapterPos;
+    const saved = viewerStore.state.chapterPos;
     if (saved > 0 && saved < 86400) {
       videoEl.currentTime = saved;
     }
@@ -57,8 +57,8 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
 
   onCleanup(() => {
     if (videoEl) {
-      mediaReaderStore.setChapterPos(videoEl.currentTime);
-      void mediaReaderStore.saveProgress();
+      viewerStore.setChapterPos(videoEl.currentTime);
+      void viewerStore.saveProgress();
       videoEl.pause();
     }
   });
@@ -66,8 +66,8 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
   const goChapter = async (delta: number) => {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
-    if (videoEl) mediaReaderStore.setChapterPos(videoEl.currentTime);
-    await mediaReaderStore.loadChapter(next);
+    if (videoEl) viewerStore.setChapterPos(videoEl.currentTime);
+    await viewerStore.loadChapter(next);
   };
 
   return (
@@ -85,7 +85,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
                 class="mt-3"
                 size="sm"
                 variant="outline"
-                onClick={() => void mediaReaderStore.refreshChapter()}
+                onClick={() => void viewerStore.refreshChapter()}
               >
                 重试
               </Button>
@@ -98,7 +98,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               controls
               playsinline
               onTimeUpdate={() => {
-                if (videoEl) mediaReaderStore.setChapterPos(videoEl.currentTime);
+                if (videoEl) viewerStore.setChapterPos(videoEl.currentTime);
               }}
               onEnded={() => void goChapter(1)}
             />
@@ -112,11 +112,11 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               onClose={props.onClose}
               onOpenCatalog={() => setCatalogOpen(true)}
               onRefresh={() => {
-                if (!mediaReaderStore.isOpen()) {
+                if (!viewerStore.isOpen()) {
                   showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
                   return;
                 }
-                void mediaReaderStore.refreshChapter();
+                void viewerStore.refreshChapter();
               }}
               loading={loading()}
             />
@@ -147,7 +147,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {
                 setCatalogOpen(false);
-                void mediaReaderStore.loadChapter(index);
+                void viewerStore.loadChapter(index);
               }}
             />
           </AppDrawerBody>
@@ -156,6 +156,3 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
     </>
   );
 }
-
-/** @deprecated 使用 VideoViewerPage */
-export const VideoPlayerPage = VideoViewerPage;

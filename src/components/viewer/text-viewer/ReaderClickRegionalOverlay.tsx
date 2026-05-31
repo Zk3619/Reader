@@ -4,7 +4,7 @@
  */
 
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import {
   READER_CLICK_ZONES,
   CLICK_ACTION_LABELS,
@@ -45,7 +45,7 @@ export interface ReaderClickRegionalOverlayProps {
 function ensureMenuRegion(actions: ReaderClickActions) {
   const hasMenu = Object.values(actions).some((a) => a === 'menu');
   if (!hasMenu) {
-    readerStore.setConfig({
+    textViewerStore.setConfig({
       clickActions: { ...actions, mc: 'menu' },
     });
     showAppToast({ title: '已自动将中间区域设为菜单' });
@@ -59,7 +59,7 @@ function ReaderClickActionPickerDialog(props: {
 }) {
   const current = () =>
     props.zone
-      ? getClickActionForZone(readerStore.state.config.clickActions, props.zone)
+      ? getClickActionForZone(textViewerStore.state.config.clickActions, props.zone)
       : 'menu';
 
   return (
@@ -129,14 +129,14 @@ function DividerHandle(props: {
 
 export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProps) {
   const [region, setRegion] = createSignal<ReaderClickRegion>(
-    clampClickRegion(readerStore.state.config.clickRegion),
+    clampClickRegion(textViewerStore.state.config.clickRegion),
   );
   const [pickingZone, setPickingZone] = createSignal<ReaderClickZone | null>(null);
   let gridEl: HTMLDivElement | undefined;
 
   createEffect(() => {
     if (props.open) {
-      setRegion(clampClickRegion(readerStore.state.config.clickRegion));
+      setRegion(clampClickRegion(textViewerStore.state.config.clickRegion));
     }
   });
 
@@ -147,16 +147,16 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
   const persistRegion = (next: ReaderClickRegion) => {
     const clamped = clampClickRegion(next);
     setRegion(clamped);
-    readerStore.setConfig({ clickRegion: clamped });
+    textViewerStore.setConfig({ clickRegion: clamped });
   };
 
   const labelFor = (zone: ReaderClickZone) =>
-    CLICK_ACTION_LABELS[getClickActionForZone(readerStore.state.config.clickActions, zone)];
+    CLICK_ACTION_LABELS[getClickActionForZone(textViewerStore.state.config.clickActions, zone)];
 
   const setClickAction = (zone: ReaderClickZone, action: ReaderClickActionId) => {
-    readerStore.setConfig({
+    textViewerStore.setConfig({
       clickActions: {
-        ...readerStore.state.config.clickActions,
+        ...textViewerStore.state.config.clickActions,
         [zone]: action,
       },
     });
@@ -188,7 +188,7 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
   };
 
   const handleClose = () => {
-    ensureMenuRegion(readerStore.state.config.clickActions);
+    ensureMenuRegion(textViewerStore.state.config.clickActions);
     if (props.markHintSeenOnClose) void markClickActionHintShown();
     props.onClose();
   };
@@ -283,14 +283,14 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  readerStore.setConfig({
+                  textViewerStore.setConfig({
                     clickActions: { ...DEFAULT_CLICK_ACTIONS },
                     clickRegion: clampClickRegion({
                       xSplits: [1 / 3, 2 / 3],
                       ySplits: [1 / 3, 2 / 3],
                     }),
                   });
-                  setRegion(clampClickRegion(readerStore.state.config.clickRegion));
+                  setRegion(clampClickRegion(textViewerStore.state.config.clickRegion));
                 }}
               >
                 恢复默认
@@ -317,7 +317,7 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
 }
 
 export function resetClickRegionalConfig(): void {
-  readerStore.setConfig({
+  textViewerStore.setConfig({
     clickActions: { ...DEFAULT_CLICK_ACTIONS },
     clickRegion: clampClickRegion({
       xSplits: [1 / 3, 2 / 3],

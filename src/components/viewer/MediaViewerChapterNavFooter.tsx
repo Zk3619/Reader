@@ -4,7 +4,7 @@ export interface MediaViewerChapterNavFooterProps {
   chapterIndex: number;
   catalogLength: number;
   loading?: boolean;
-  /** 中间附加信息（如漫画页码） */
+  /** 中间附加信息（如漫画页码�?*/
   center?: import('solid-js').JSX.Element;
   onPrev: () => void;
   onNext: () => void;
@@ -20,7 +20,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
         disabled={props.chapterIndex <= 0 || props.loading}
         onClick={props.onPrev}
       >
-        上一章
+        上一�?
       </Button>
       <div class="flex min-w-0 flex-col items-center gap-0.5 text-center">
         <span class="text-xs text-muted-foreground">
@@ -36,7 +36,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
         disabled={props.chapterIndex >= props.catalogLength - 1 || props.loading}
         onClick={props.onNext}
       >
-        下一章
+        下一�?
       </Button>
     </div>
   );

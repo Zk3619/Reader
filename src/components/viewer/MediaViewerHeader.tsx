@@ -5,9 +5,9 @@ import type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
 
 export interface MediaViewerHeaderProps {
   children: JSX.Element;
-  /** fixed：占位顶栏（流式布局）；overlay：悬浮于主内容之上 */
+  /** fixed：占位顶栏（流式布局）；overlay：悬浮于主内容之�?*/
   placement?: ViewerChromePlacement;
-  /** 不传则 overlay 时跟随 MediaViewerShell 的 headerVisible */
+  /** 不传�?overlay 时跟�?MediaViewerShell �?headerVisible */
   visible?: boolean;
   class?: string;
 }
