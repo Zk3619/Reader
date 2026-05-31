@@ -34,6 +34,11 @@ import {
   stabilizePrimitiveList,
   stabilizeReorderedListById,
 } from '@/components/shared/virtual-list/stabilize-list-ref';
+import {
+  createVirtualListScrollCoalesce,
+  setCoverLoadScrollIdleProbe,
+  VirtualListScrollCoalesceContext,
+} from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
 
 const DEFAULT_OVERSCAN = 8;
 
@@ -142,14 +147,12 @@ function VirtualListEntityVisibleRow<T>(props: {
       />
     ) : (
       <Show when={item()}>
-        {(currentItem) => (
-          <VirtualListRowContent
-            item={currentItem}
-            index={flatIndex()}
-            size={rowSize}
-            render={props.render!}
-          />
-        )}
+        <VirtualListRowContent
+          item={item as Accessor<T>}
+          index={flatIndex()}
+          size={rowSize}
+          render={props.render!}
+        />
       </Show>
     );
 
@@ -226,6 +229,19 @@ function VirtualListIndexVisibleRow<T>(props: {
   );
 }
 
+/** 仅 scrollTop 实际变化时才算「在滚动」，避免内容增高触发的 scroll 事件误伤封面加载 */
+function markScrollIfPositionChanged(
+  el: HTMLDivElement,
+  lastScrollTopRef: { current: number | null },
+  markScrolling: () => void,
+): boolean {
+  const top = el.scrollTop;
+  if (lastScrollTopRef.current === top) return false;
+  lastScrollTopRef.current = top;
+  markScrolling();
+  return true;
+}
+
 /** 滚动容器；拖拽时刷新布局以驱动位移动画（scroll 由 virtualizer 自行订阅，勿每帧 measure） */
 function VirtualListScrollHost(props: {
   class?: string;
@@ -233,9 +249,11 @@ function VirtualListScrollHost(props: {
   setScrollEl: (el: HTMLDivElement) => void;
   onScrollContainer?: (el: HTMLDivElement) => void;
   onScroll?: (el: HTMLDivElement) => void;
+  markScrolling: () => void;
   children: JSX.Element;
 }) {
   const ctx = useDragDropContext();
+  const lastScrollTopRef = { current: null as number | null };
 
   return (
     <div
@@ -243,12 +261,15 @@ function VirtualListScrollHost(props: {
         props.setScrollEl(el);
         if (!props.useExternalScroll) {
           props.onScrollContainer?.(el);
+          lastScrollTopRef.current = el.scrollTop;
         }
       }}
       class={props.class}
       onScroll={(e) => {
         if (props.useExternalScroll) return;
-        props.onScroll?.(e.currentTarget);
+        const el = e.currentTarget;
+        markScrollIfPositionChanged(el, lastScrollTopRef, props.markScrolling);
+        props.onScroll?.(el);
         if (ctx?.[0].active.draggable) {
           ctx[1].recomputeLayouts();
         }
@@ -264,6 +285,11 @@ function VirtualListScrollHost(props: {
  * 与 VirtualGridRowsList 的 GridListContent 一致。
  */
 function VirtualListCore<T>(props: VirtualListProps<T>) {
+  const scrollCoalesce = createVirtualListScrollCoalesce();
+  onMount(() => {
+    setCoverLoadScrollIdleProbe(() => scrollCoalesce.isScrollIdle());
+  });
+  onCleanup(() => setCoverLoadScrollIdleProbe(null));
   const overscan = () => props.overscan ?? DEFAULT_OVERSCAN;
   const estimate = createMemo(() => resolveEstimateSize(props.estimateSize));
   const pinnedVirtualIndex = useVirtualListDragPinIndex();
@@ -290,7 +316,9 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
     const raw = props.items();
     const ids = displayIds();
     let next: readonly T[];
-    if (ids.length === 0 || ids.length !== raw.length) {
+    const useDisplayOrder =
+      sortableEnabled() && ids.length > 0 && ids.length === raw.length;
+    if (!useDisplayOrder) {
       next = raw;
     } else {
       next = reorderItemsByIds(raw, ids, (item, index) => rowId(item, index));
@@ -353,11 +381,18 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
     return cfg.isSortable ? cfg.isSortable(item, index) : true;
   };
 
+  const externalLastScrollTop = { current: null as number | null };
   createEffect(() => {
     const external = props.externalScrollElement?.();
     if (!external) return;
     props.onScrollContainer?.(external);
+    externalLastScrollTop.current = external.scrollTop;
     const handleScroll = () => {
+      markScrollIfPositionChanged(
+        external,
+        externalLastScrollTop,
+        () => scrollCoalesce.markScrolling(),
+      );
       props.onScroll?.(external);
     };
     external.addEventListener('scroll', handleScroll, { passive: true });
@@ -375,6 +410,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
   });
 
   return (
+    <VirtualListScrollCoalesceContext.Provider value={scrollCoalesce}>
     <VirtualListScrollHost
       useExternalScroll={useExternalScroll()}
       class={cn(
@@ -388,6 +424,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
       }}
       onScrollContainer={props.onScrollContainer}
       onScroll={props.onScroll}
+      markScrolling={() => scrollCoalesce.markScrolling()}
     >
       <div
         class="relative w-full min-w-0"
@@ -443,6 +480,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
         </Show>
       </div>
     </VirtualListScrollHost>
+    </VirtualListScrollCoalesceContext.Provider>
   );
 }
 
@@ -505,8 +543,10 @@ function VirtualListWithSortable<T>(props: VirtualListProps<T>) {
 }
 
 export function VirtualList<T>(props: VirtualListProps<T>) {
-  if (props.sortable) {
-    return <VirtualListWithSortable {...props} />;
-  }
-  return <VirtualListCore {...props} />;
+  const sortableConfig = () => props.sortable;
+  return (
+    <Show when={sortableConfig()} fallback={<VirtualListCore {...props} />}>
+      {(cfg) => <VirtualListWithSortable {...props} sortable={cfg()} />}
+    </Show>
+  );
 }

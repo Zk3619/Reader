@@ -42,10 +42,18 @@ export function mergeSortableDisplayIds(
   return [...kept, ...appended];
 }
 
-function sameMemberSet(a: readonly Id[], b: readonly Id[]): boolean {
+export function idsSameOrder(a: readonly Id[], b: readonly Id[]): boolean {
+  return a.length === b.length && a.every((id, i) => String(id) === String(b[i]));
+}
+
+export function sameIdMemberSet(a: readonly Id[], b: readonly Id[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a.map(String));
   return b.every((id) => set.has(String(id)));
+}
+
+function sameMemberSet(a: readonly Id[], b: readonly Id[]): boolean {
+  return sameIdMemberSet(a, b);
 }
 
 /**

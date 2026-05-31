@@ -6,9 +6,23 @@
  * - `sortable`：按网格单元（书/分组）拖拽，ids 为平铺顺序
  */
 
-import { For, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from 'solid-js';
-import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
-import { VirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  type Accessor,
+  type JSX,
+} from 'solid-js';
+import {
+  stabilizePrimitiveList,
+  stabilizeReorderedListById,
+} from '@/components/shared/virtual-list/stabilize-list-ref';
+import {
+  VirtualGridListBody,
+  type VirtualGridListBodyProps,
+} from '@/components/shared/virtual-list/VirtualGridListBody';
 import { VirtualListSortableShell } from '@/components/shared/virtual-list/VirtualListSortableRoot';
 import {
   DEFAULT_VIRTUAL_LIST_DRAG_STYLE,
@@ -32,7 +46,6 @@ import {
   type VirtualGridResponsiveRowHeightConfig,
 } from '@/components/shared/virtual-list/virtual-grid-row-layout';
 import { roundVirtualGridPx } from '@/components/shared/virtual-list/virtual-grid-measure';
-import { cn } from '@/lib/utils';
 
 function resolveItems<T>(items: Accessor<readonly T[]> | readonly T[]): readonly T[] {
   return typeof items === 'function' ? items() : items;
@@ -73,9 +86,15 @@ export interface VirtualGridRowsListProps<T> {
   /** 额外布局依赖（如书架 spacing），变化时 remeasure */
   remeasureDeps?: Accessor<unknown>;
   getItemKey?: (item: T, index: number) => string | number;
+  /**
+   * 与 VirtualList.renderByKey 一致：按实体 key 渲染单元格，避免 item 引用变化导致 remount。
+   * 须同时提供 getItemKey。
+   */
+  renderByKey?: (itemKey: string, flatIndex: Accessor<number>) => JSX.Element;
+  renderEntityByKey?: (entityKey: string) => JSX.Element;
   sortable?: VirtualListSortableConfig<T>;
   renderDragOverlay?: (activeId: Id | null) => JSX.Element;
-  children: (item: T, index: number) => JSX.Element;
+  children?: (item: T, index: number) => JSX.Element;
 }
 
 const DEFAULT_FIXED_ROW_HEIGHT = 184;
@@ -128,11 +147,15 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
 
   const [measuredRowHeightPx, setMeasuredRowHeightPx] = createSignal<number | null>(null);
 
+  let rowIndicesCache: readonly number[] = [];
   const rowIndices = createMemo(() => {
     const cols = Math.max(1, props.colCount());
     const len = resolveItems(props.items).length;
     const count = Math.max(0, Math.ceil(len / cols));
-    return Array.from({ length: count }, (_, i) => i);
+    const next = Array.from({ length: count }, (_, i) => i);
+    const stabilized = stabilizePrimitiveList(rowIndicesCache, next);
+    rowIndicesCache = stabilized;
+    return stabilized;
   });
 
   const interRowGapPx = () => {
@@ -160,15 +183,14 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     return estimatedRowSlotPx(rowIndex);
   };
 
-  const layoutRevision = createMemo(() => ({
-    mode: rowHeightMode(),
-    width: containerWidth(),
-    cols: props.colCount(),
-    height: rowSlotHeightPx(0),
-    gap: interRowGapPx(),
-    measured: measuredRowHeightPx(),
-    deps: props.remeasureDeps?.(),
-  }));
+  const layoutRevision = createMemo(() => {
+    const mode = rowHeightMode();
+    const w = containerWidth();
+    const cols = props.colCount();
+    const measured = measuredRowHeightPx();
+    const deps = props.remeasureDeps?.();
+    return `${mode}|${w}|${cols}|${rowSlotHeightPx(0)}|${interRowGapPx()}|${measured ?? ''}|${deps ?? ''}`;
+  });
 
   const syncSampleRowHeight = () => {
     const el = sampleRowEl;
@@ -197,12 +219,6 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     onCleanup(() => ro.disconnect());
   });
 
-  const rowSlice = (rowIndex: number, items: readonly T[]): readonly T[] => {
-    const cols = Math.max(1, props.colCount());
-    const start = rowIndex * cols;
-    return items.slice(start, start + cols);
-  };
-
   const sortableEnabled = () => props.sortable?.enabled() ?? false;
 
   const itemSortableId = (item: T, index: number): Id => {
@@ -210,7 +226,48 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     return index;
   };
 
-  const sortableCfg = createMemo(() => {
+  const useEntityCellKeys = () => !!props.getItemKey;
+
+  let stabilizedItemsCache: readonly T[] = [];
+  const stabilizeItems = (raw: readonly T[]): readonly T[] => {
+    if (!props.getItemKey) return raw;
+    const next = stabilizeReorderedListById(stabilizedItemsCache, raw, (item) =>
+      String(props.getItemKey!(item, 0)),
+    );
+    stabilizedItemsCache = next;
+    return next;
+  };
+
+  const rowEntityKeysCache = new Map<number, readonly string[]>();
+  const rowEntityKeys = (rowIndex: number, items: readonly T[]): readonly string[] => {
+    const cols = Math.max(1, props.colCount());
+    const start = rowIndex * cols;
+    const next = items.slice(start, start + cols).map((item, i) =>
+      String(itemSortableId(item, start + i)),
+    );
+    const prev = rowEntityKeysCache.get(rowIndex);
+    const stabilized = prev ? stabilizePrimitiveList(prev, next) : next;
+    rowEntityKeysCache.set(rowIndex, stabilized);
+    return stabilized;
+  };
+
+  let lastRowEntityListLen = -1;
+  let lastRowEntityColCount = -1;
+  createEffect(() => {
+    const len = resolveItems(props.items).length;
+    const cols = props.colCount();
+    if (len !== lastRowEntityListLen) {
+      lastRowEntityListLen = len;
+      rowEntityKeysCache.clear();
+      stabilizedItemsCache = [];
+    }
+    if (cols !== lastRowEntityColCount) {
+      lastRowEntityColCount = cols;
+      rowEntityKeysCache.clear();
+    }
+  });
+
+  const sortableShell = createMemo(() => {
     const cfg = props.sortable;
     if (!cfg) return undefined;
     return {
@@ -234,92 +291,58 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     props.onScrollContainer?.(el);
   };
 
-  const listBody = (orderedItems: Accessor<readonly T[]>) => () => (
-    <VirtualList
-      class={cn('h-full min-h-0', props.class)}
-      listInnerClass={props.listInnerClass}
-      items={rowIndices}
-      estimateSize={(rowIndex) => rowSlotHeightPx(rowIndex)}
-      remeasureWhen={layoutRevision}
-      overscan={props.overscan ?? 2}
-      getItemKey={(rowIndex) => rowIndex}
-      externalScrollElement={props.externalScrollElement}
-      onScrollContainer={handleScrollContainer}
-      onScroll={props.onScroll}
-      onVirtualizerReady={(api) => {
-        remeasureVirtualList = () => api.measure();
-      }}
-    >
-      {(rowIndex) => {
-        const lastRow = rowIndex >= rowIndices().length - 1;
-        const gapVar = props.rowGapCssVar;
-        return (
-          <ul
-            ref={(el) => {
-              if (rowIndex === 0) sampleRowEl = el;
-            }}
-            class={cn(
-              props.gridClass,
-              props.rowUlClass,
-              usesRowGapPadding() && 'box-border items-start',
-            )}
-            style={{
-              ...(rowHeightMode() === 'responsive'
-                ? {
-                  'grid-template-columns': `repeat(${Math.max(1, props.colCount())}, minmax(0, 1fr))`,
-                }
-                : undefined),
-              ...(gapVar && !lastRow
-                ? { 'padding-bottom': `var(--${gapVar})` }
-                : undefined),
-            }}
-          >
-            <For each={rowSlice(rowIndex, orderedItems())}>
-              {(item, i) => {
-                const flatIndex =
-                  rowIndex * Math.max(1, props.colCount()) + i();
-                const id = itemSortableId(item, flatIndex);
-                const cell = props.children(item, flatIndex);
-                const cfg = sortableCfg();
-                if (!cfg || !sortableEnabled()) {
-                  return cell;
-                }
-                const enabled =
-                  cfg.isSortable?.(item, flatIndex) ?? true;
-                return (
-                  <VirtualListSortableRow
-                    id={id}
-                    enabled={enabled}
-                    dragStyle={cfg.dragStyle}
-                    class="min-w-0 w-full touch-none"
-                  >
-                    {cell}
-                  </VirtualListSortableRow>
-                );
-              }}
-            </For>
-          </ul>
-        );
-      }}
-    </VirtualList>
-  );
+  const buildGridListBodyProps = (
+    orderedItems: Accessor<readonly T[]>,
+  ): VirtualGridListBodyProps<T> => ({
+    orderedItems,
+    rowIndices,
+    colCount: props.colCount,
+    rowHeightMode,
+    rowSlotHeightPx,
+    layoutRevision,
+    overscan: props.overscan,
+    class: props.class,
+    listInnerClass: props.listInnerClass,
+    gridClass: props.gridClass,
+    rowUlClass: props.rowUlClass,
+    rowGapCssVar: props.rowGapCssVar,
+    usesRowGapPadding,
+    externalScrollElement: props.externalScrollElement,
+    onScrollContainer: handleScrollContainer,
+    onScroll: props.onScroll,
+    onVirtualizerReady: (api: { measure: () => void }) => {
+      remeasureVirtualList = () => api.measure();
+    },
+    onSampleRowRef: (rowIndex: number, el: HTMLUListElement) => {
+      if (rowIndex === 0) sampleRowEl = el;
+    },
+    useEntityCellKeys,
+    rowEntityKeys,
+    itemSortableId,
+    sortableShell,
+    sortableEnabled,
+    getItemKey: props.getItemKey,
+    renderByKey: props.renderByKey,
+    renderEntityByKey: props.renderEntityByKey,
+    children: props.children,
+  });
 
   const GridListContent = () => {
     const displayIds = useVirtualListSortableDisplayIds();
     const orderedItems = createMemo(() => {
       const raw = resolveItems(props.items);
       const ids = displayIds();
-      if (ids.length === 0 || ids.length !== raw.length) return raw;
-      return reorderItemsByIds(raw, ids, (item, index) => itemSortableId(item, index));
+      const useDisplayOrder =
+        sortableEnabled() && ids.length > 0 && ids.length === raw.length;
+      const next = !useDisplayOrder
+        ? raw
+        : reorderItemsByIds(raw, ids, (item, index) => itemSortableId(item, index));
+      return stabilizeItems(next);
     });
-    return listBody(orderedItems)();
+    return <VirtualGridListBody {...buildGridListBodyProps(orderedItems)} />;
   };
 
-  const shell = sortableCfg();
-  if (!shell) {
-    const staticItems = createMemo(() => resolveItems(props.items));
-    return listBody(staticItems)();
-  }
+  const staticItems = createMemo(() => stabilizeItems(resolveItems(props.items)));
 
   const resolveTargetIndex: VirtualSortableTargetResolver = ({
     scrollEl,
@@ -346,25 +369,32 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
   };
 
   return (
-    <VirtualListSortableShell
-      enabled={sortableEnabled}
-      ids={shell.ids}
-      onReorder={shell.onReorder}
-      persistOnly={() => shell.persistOnly ?? false}
-      dragStyle={{
-        ...shell.dragStyle,
-        overlayStyle: {
-          ...VIRTUAL_LIST_DRAG_OVERLAY_FIT_STYLE,
-          ...shell.dragStyle?.overlayStyle,
-        },
+    <Show when={sortableShell()} fallback={<VirtualGridListBody {...buildGridListBodyProps(staticItems)} />}>
+      {(shell) => {
+        const cfg = shell();
+        return (
+        <VirtualListSortableShell
+          enabled={sortableEnabled}
+          ids={cfg.ids}
+          onReorder={cfg.onReorder}
+          persistOnly={() => cfg.persistOnly ?? false}
+          dragStyle={{
+            ...cfg.dragStyle,
+            overlayStyle: {
+              ...VIRTUAL_LIST_DRAG_OVERLAY_FIT_STYLE,
+              ...cfg.dragStyle?.overlayStyle,
+            },
+          }}
+          scrollContainer={scrollContainerAccessor}
+          resolveTargetIndex={() => resolveTargetIndex}
+          gridColCount={props.colCount}
+          onAfterAutoScroll={() => remeasureVirtualList?.()}
+          renderOverlay={props.renderDragOverlay}
+        >
+          <GridListContent />
+        </VirtualListSortableShell>
+        );
       }}
-      scrollContainer={scrollContainerAccessor}
-      resolveTargetIndex={() => resolveTargetIndex}
-      gridColCount={props.colCount}
-      onAfterAutoScroll={() => remeasureVirtualList?.()}
-      renderOverlay={props.renderDragOverlay}
-    >
-      <GridListContent />
-    </VirtualListSortableShell>
+    </Show>
   );
 }

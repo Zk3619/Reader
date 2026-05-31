@@ -23,3 +23,14 @@ export {
   type VirtualListSortableConfig,
 } from '@/components/shared/virtual-list/types';
 export { virtualListScrollToIndex } from '@/components/shared/virtual-list/scroll-into-view';
+export {
+  createVirtualListScrollCoalesce,
+  isCoverLoadScrollIdle,
+  runWhenVirtualListScrollIdle,
+  setCoverLoadScrollIdleProbe,
+  useVirtualListScrollCoalesce,
+  useVirtualListScrollIdle,
+  VirtualListScrollCoalesceContext,
+  type VirtualListScrollCoalesce,
+} from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
+export { VirtualGridListBody } from '@/components/shared/virtual-list/VirtualGridListBody';

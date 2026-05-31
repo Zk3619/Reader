@@ -8,7 +8,7 @@ import {
   type Id,
 } from '@thisbeyond/solid-dnd';
 import { VirtualListDragOverlay } from '@/components/shared/virtual-list/VirtualListDragOverlay';
-import { Show, createMemo, createSignal, createEffect, type Accessor, type JSX, type Setter } from 'solid-js';
+import { Show, createMemo, createSignal, createEffect, on, type Accessor, type JSX, type Setter } from 'solid-js';
 import {
   VIRTUAL_LIST_DRAG_OVERLAY_FIT_STYLE,
   type VirtualListDragStyle,
@@ -21,6 +21,8 @@ import {
 import { VirtualListDragPinContext } from '@/components/shared/virtual-list/virtual-list-drag-pin';
 import {
   VirtualListSortableDisplayIdsContext,
+  idsSameOrder,
+  sameIdMemberSet,
   syncSortableDisplayIds,
 } from '@/components/shared/virtual-list/virtual-list-sortable-display-order';
 
@@ -29,6 +31,7 @@ function SortableReorderBridge(props: {
   onDragFinalize?: () => void;
   persistOnly: Accessor<boolean>;
   setDisplayIds: Setter<Id[]>;
+  setDisplayIdsAuthoritative: (value: boolean) => void;
 }) {
   const sortable = useSortableContext();
   const dnd = useDragDropContext();
@@ -58,6 +61,7 @@ function SortableReorderBridge(props: {
       // persistOnly：拖拽中仅靠 transform 预览，松手后再提交展示顺序
       if (props.persistOnly()) {
         props.setDisplayIds([...sorted]);
+        props.setDisplayIdsAuthoritative(true);
       }
       void props.onReorder([...sorted]);
     }
@@ -148,24 +152,75 @@ export interface VirtualListSortableRootProps {
 
 /** 非拖拽时同步 displayIds（外部 ids 变化 / persistOnly 合并增删） */
 function SortableDisplayIdsSync(props: {
+  enabled: Accessor<boolean>;
   externalIds: Accessor<Id[]>;
   persistOnly: Accessor<boolean>;
   setDisplayIds: Setter<Id[]>;
+  displayIdsAuthoritative: Accessor<boolean>;
+  setDisplayIdsAuthoritative: (value: boolean) => void;
+  isDragActive: Accessor<boolean>;
 }) {
-  const dnd = useDragDropContext();
+  let wasEnabled = false;
+  let lastExternalKey = '';
 
-  createEffect(() => {
-    const external = props.externalIds();
-    if (dnd?.[0].active.draggableId) return;
+  createEffect(
+    on(
+      () => {
+        const external = props.externalIds();
+        return `${props.enabled() ? '1' : '0'}\0${external.map(String).join('\0')}`;
+      },
+      () => {
+        if (props.isDragActive()) return;
 
-    props.setDisplayIds((prev) => {
-      const next = syncSortableDisplayIds(prev, external, props.persistOnly());
-      if (prev.length === next.length && prev.every((id, i) => id === next[i])) {
-        return prev;
-      }
-      return next;
-    });
-  });
+        const external = props.externalIds();
+        const enabled = props.enabled();
+        const externalKey = external.map(String).join('\0');
+        const externalChanged = externalKey !== lastExternalKey;
+        lastExternalKey = externalKey;
+
+        if (!enabled) {
+          wasEnabled = false;
+          props.setDisplayIdsAuthoritative(false);
+          props.setDisplayIds((prev) => {
+            const next = [...external];
+            if (idsSameOrder(prev, next)) return prev;
+            return next;
+          });
+          return;
+        }
+
+        if (!wasEnabled) {
+          wasEnabled = true;
+          props.setDisplayIdsAuthoritative(false);
+          props.setDisplayIds([...external]);
+          return;
+        }
+
+        if (props.displayIdsAuthoritative() && !externalChanged) {
+          return;
+        }
+
+        if (externalChanged) {
+          props.setDisplayIdsAuthoritative(false);
+        }
+
+        props.setDisplayIds((prev) => {
+          if (
+            props.persistOnly() &&
+            prev.length > 0 &&
+            prev.length === external.length &&
+            sameIdMemberSet(prev, external) &&
+            !idsSameOrder(prev, external)
+          ) {
+            return [...external];
+          }
+          const next = syncSortableDisplayIds(prev, external, props.persistOnly());
+          if (idsSameOrder(prev, next)) return prev;
+          return next;
+        });
+      },
+    ),
+  );
 
   return null;
 }
@@ -173,11 +228,15 @@ function SortableDisplayIdsSync(props: {
 export function VirtualListSortableRoot(props: VirtualListSortableRootProps) {
   const coordinateSession = createVirtualSortableCoordinateSession();
   const persistOnly = () => props.persistOnly?.() ?? false;
+  const dnd = useDragDropContext();
+  const isDragActive = () => !!dnd?.[0].active.draggableId;
 
   const [displayIds, setDisplayIds] = createSignal<Id[]>([]);
+  const [displayIdsAuthoritative, setDisplayIdsAuthoritative] = createSignal(false);
 
   const sortableProviderIds = createMemo((): Id[] => {
     const external = props.ids();
+    if (!props.enabled()) return external;
     if (!persistOnly()) return external;
     const display = displayIds();
     if (display.length === external.length) return display;
@@ -203,14 +262,19 @@ export function VirtualListSortableRoot(props: VirtualListSortableRootProps) {
             <DragDropSensors />
             <SortableProvider ids={sortableProviderIds()}>
               <SortableDisplayIdsSync
+                enabled={props.enabled}
                 externalIds={props.ids}
                 persistOnly={persistOnly}
                 setDisplayIds={setDisplayIds}
+                displayIdsAuthoritative={displayIdsAuthoritative}
+                setDisplayIdsAuthoritative={setDisplayIdsAuthoritative}
+                isDragActive={isDragActive}
               />
               <SortableReorderBridge
                 onReorder={props.onReorder}
                 persistOnly={persistOnly}
                 setDisplayIds={setDisplayIds}
+                setDisplayIdsAuthoritative={setDisplayIdsAuthoritative}
                 onDragFinalize={() => setPinnedVirtualIndex(undefined)}
               />
               <VirtualSortablePointerBridge session={coordinateSession} />
@@ -242,11 +306,12 @@ export function VirtualListSortableRoot(props: VirtualListSortableRootProps) {
   );
 }
 
-/** 仅在 enabled 时挂载 DnD 根，避免无效上下文 */
+/**
+ * 始终挂载 DnD 根（含 DragDropProvider / SortableProvider）。
+ * 勿用 Show 按 enabled 拆树：首次启用时列表行会先以 sortable 渲染而 Provider 尚未挂上，
+ * 导致 VirtualListSortableRow 永久降级为静态行直至整页重挂载。
+ * enabled 仅由 VirtualListCore 的 rowSortable / createSortable 控制是否参与拖拽。
+ */
 export function VirtualListSortableShell(props: VirtualListSortableRootProps) {
-  return (
-    <Show when={props.enabled()} fallback={props.children}>
-      <VirtualListSortableRoot {...props} />
-    </Show>
-  );
+  return <VirtualListSortableRoot {...props} />;
 }

@@ -17,7 +17,10 @@ export function stabilizePrimitiveList<T extends string | number>(
   return next;
 }
 
-/** 重排后按 id 沿用 prev 中的 item 引用，避免仅顺序变化时子树 remount */
+/**
+ * 重排后按 id 沿用 prev 中的 item 引用，避免仅顺序变化时子树 remount。
+ * 仅当 next 中仍是同一对象引用时才沿用；字段更新（如 coverUrl）必须采用 next 中的新对象。
+ */
 export function stabilizeReorderedListById<T>(
   prev: readonly T[],
   next: readonly T[],
@@ -25,7 +28,10 @@ export function stabilizeReorderedListById<T>(
 ): readonly T[] {
   if (prev.length === 0) return next;
   const prevById = new Map(prev.map((item) => [getId(item), item]));
-  const merged = next.map((item) => prevById.get(getId(item)) ?? item);
+  const merged = next.map((item) => {
+    const old = prevById.get(getId(item));
+    return old && old === item ? old : item;
+  });
   if (merged.every((item, i) => item === next[i])) return next;
   return merged;
 }
