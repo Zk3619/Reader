@@ -6,7 +6,6 @@ import { vi } from 'vitest';
  */
 vi.mock('@/components/shared/AppToasts', () => ({
   showAppToast: vi.fn(),
-  showScriptToast: vi.fn(),
   DEFAULT_TOAST_DURATION: 3000,
   appToastHostStyle: {},
   createAppToastIcons: () => ({}),
