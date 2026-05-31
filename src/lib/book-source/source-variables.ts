@@ -6,7 +6,7 @@
 import type { BookSource, NewBookSource } from '@/types';
 import {
   getSourceArgsKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
@@ -59,7 +59,7 @@ export function writeBookSourceVariableJson(source: BookSource, text: string): v
   const trimmed = text.trim();
   if (!trimmed) {
     localStorage.removeItem(getSourceArgsKey(source));
-    bumpExploreSourceArgsVersion(getSourceUrlIdentifier(source));
+    bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
     return;
   }
   let parsed: unknown;
@@ -73,7 +73,7 @@ export function writeBookSourceVariableJson(source: BookSource, text: string): v
   }
   const obj = normalizeArgsObject(parsed as Record<string, unknown>);
   localStorage.setItem(getSourceArgsKey(source), JSON.stringify(obj));
-  bumpExploreSourceArgsVersion(getSourceUrlIdentifier(source));
+  bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
 }
 
 /**
@@ -105,7 +105,7 @@ export function seedBookSourceArgsFromHeader(source: BookSource | NewBookSource)
   }
   if (!changed) return;
   localStorage.setItem(key, JSON.stringify(normalizeArgsObject(existing)));
-  bumpExploreSourceArgsVersion(getSourceUrlIdentifier(asBook));
+  bumpExploreSourceArgsVersion(getLegadoSourceKey(asBook));
 }
 
 export function formatBookSourceVariableComment(source: BookSource): string {

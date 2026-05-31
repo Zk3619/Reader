@@ -343,6 +343,3 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   );
 };
 
-/** @deprecated 使用 ExplorePage */
-export const ScoutPage = ExplorePage;
-export type ScoutPageProps = ExplorePageProps;

@@ -811,6 +811,14 @@ textarea {
   -webkit-app-region: drag;
 }
 
+/*
+ * inner-web 打开时禁用 #root 内拖拽区（阅读器顶栏等）。
+ * 抽屉 Portal 在 body 层，不在 #root 内；避免点击抽屉顶栏时命中下层 drag region。
+ */
+body.reader-inner-web-session #root [data-tauri-drag-region] {
+  -webkit-app-region: no-drag !important;
+}
+
 /* 模态层拦截 Tauri 顶栏 drag（AppDrawer / AppDialog） */
 .app-block-drag {
   -webkit-app-region: no-drag !important;
@@ -992,6 +1000,26 @@ li[role="status"].toast-animated[data-closed],
   z-index: 150;
 }
 
+/* 非全屏：主界面锁定；center 额外半透明，drawer 仅 corvu 遮罩 */
+body.reader-inner-web-session--drawer:not(.reader-inner-web-session--allow-root) #root,
+body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+  opacity: 0.42;
+  transition: opacity var(--reader-inner-web-anim-ms, 320ms) ease;
+}
+
+body.reader-inner-web-session--allow-root #root {
+  pointer-events: auto;
+  -webkit-user-select: auto;
+  user-select: auto;
+  opacity: 1;
+}
+
 /* Tauri 桌面子 WebView：锁定主界面，仅浮层可交互 */
 body.reader-inner-web-session #root {
   pointer-events: none;
@@ -999,6 +1027,7 @@ body.reader-inner-web-session #root {
   user-select: none;
 }
 
+body.reader-inner-web-session .reader-inner-web-layer-root,
 body.reader-inner-web-session .reader-inner-web-layer {
   pointer-events: auto;
   -webkit-user-select: auto;
@@ -1019,6 +1048,183 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
 .reader-inner-web-layer--panel .reader-inner-web-toolbar-host {
   position: relative;
   z-index: 1;
+}
+
+/* Inner-Web 抽屉（@corvu）须高于阅读器 z-100 层；内容须高于遮罩 */
+body.reader-inner-web-session--drawer [data-corvu-drawer-overlay] {
+  z-index: 150 !important;
+}
+
+body.reader-inner-web-session--drawer [data-corvu-drawer-content] {
+  z-index: 151 !important;
+}
+
+/* 抽屉打开时锁定 body 滚动，避免滚动条占位导致右侧留白 */
+body.reader-inner-web-session--drawer {
+  overflow: hidden;
+}
+
+/* 段评等紧凑顶栏 */
+.reader-inner-web-header--compact[data-page-header] {
+  min-height: 2.75rem;
+}
+
+/* 抽屉/居中：内嵌顶栏（非全屏 flex 顶栏语义），去掉 safe-area */
+.reader-inner-web-header--embedded[data-page-header] {
+  position: relative;
+  z-index: auto;
+}
+
+.reader-inner-web-header--embedded[data-page-header].safe-area-inset-top {
+  padding-top: 0;
+}
+
+/* --- Inner-Web 入场动画 --- */
+@keyframes reader-inner-web-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-up-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-left-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-right-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-down-in {
+  from {
+    transform: translateY(-100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-zoom-in {
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.reader-inner-web-animate-fade .reader-inner-web-panel {
+  animation: reader-inner-web-fade-in var(--reader-inner-web-anim-ms, 200ms) ease;
+}
+
+.reader-inner-web-animate-fade .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 200ms) ease;
+}
+
+.reader-inner-web-animate-slide-up .reader-inner-web-panel {
+  animation: reader-inner-web-slide-up-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-up .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-slide-down .reader-inner-web-panel {
+  animation: reader-inner-web-slide-down-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-down .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-slide-left .reader-inner-web-panel {
+  animation: reader-inner-web-slide-left-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-right .reader-inner-web-panel {
+  animation: reader-inner-web-slide-right-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-left .reader-inner-web-backdrop,
+.reader-inner-web-animate-slide-right .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-zoom .reader-inner-web-panel {
+  animation: reader-inner-web-zoom-in var(--reader-inner-web-anim-ms, 280ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reader-inner-web-animate-zoom .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 240ms) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .reader-inner-web-animate-fade .reader-inner-web-panel,
+  .reader-inner-web-animate-fade .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-up .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-up .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-down .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-down .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-left .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-left .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-right .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-right .reader-inner-web-backdrop,
+  .reader-inner-web-animate-zoom .reader-inner-web-panel,
+  .reader-inner-web-animate-zoom .reader-inner-web-backdrop {
+    animation: none;
+  }
+
+  body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+    transition: none;
+  }
 }
 
 /* Sonner：挂到 body，高于 Dialog（z-110），模态打开时仍可点击 */
@@ -1319,10 +1525,12 @@ body.reader-inner-web-session .reader-inner-web-overlay-portal {
     width: 100%;
     left: 0%;
   }
+
   50% {
     width: var(--search-loop-min-width);
     left: calc((100% - var(--search-loop-min-width)) / 2);
   }
+
   100% {
     width: 100%;
     left: 0%;

@@ -17,7 +17,7 @@ import {
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
   getSourceArgsKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { extractServerFromJsLib, parseHeaders } from '@/lib/book-source/utils';
 
@@ -201,7 +201,7 @@ export function readBookSourceQttoken(source: BookSource, serverUrl: string): st
   const fromArgs = readBookSourceArgsField(source, 'qttoken');
   if (fromArgs) return extractQttokenKey(fromArgs) || fromArgs;
   try {
-    const login = getStoredLoginInfo(getSourceUrlIdentifier(source));
+    const login = getStoredLoginInfo(getLegadoSourceKey(source));
     const key = login['密钥']?.trim();
     if (key) return extractQttokenKey(key) || key;
   } catch {

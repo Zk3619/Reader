@@ -49,6 +49,7 @@ export function VirtualBookshelfGroupGrid(props: VirtualBookshelfGroupGridProps)
     cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, getViewModeContainerGridClass(props.viewMode));
 
   const groupById = createMemo(() => new Map(items().map((g) => [g.groupId, g])));
+  const sortableDragActive = () => props.sortable?.enabled() ?? false;
 
   const renderDragOverlay = (activeId: Id | null) => {
     if (activeId == null) return null;
@@ -86,7 +87,7 @@ export function VirtualBookshelfGroupGrid(props: VirtualBookshelfGroupGridProps)
       externalScrollElement={props.externalScrollElement}
       getItemKey={(group) => group.groupId}
       sortable={props.sortable}
-      renderDragOverlay={props.sortable ? renderDragOverlay : undefined}
+      renderDragOverlay={sortableDragActive() ? renderDragOverlay : undefined}
       onScrollContainer={setScrollRoot}
     >
       {props.children}

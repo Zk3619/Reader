@@ -27,7 +27,7 @@ import {
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
   readSourceLoginInfoMap,
@@ -104,7 +104,7 @@ function createSearchCookieApi(baseUrl: string, store: Map<string, string>): Sea
 
 function buildSearchInjectParams(source: BookSource, _keyword: string, _page: number) {
   const baseUrl = getScriptBaseUrl(source);
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
   const jsLib =
@@ -465,5 +465,3 @@ export async function evalSearchUrlExpression(
   return legacy !== '' ? legacy : prevResult;
 }
 
-/** @deprecated 使用 evalSearchUrlExpression */
-export const evalSearchUrlJs = evalSearchUrlExpression;

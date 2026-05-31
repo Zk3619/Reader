@@ -6,7 +6,7 @@ import type { BookSource } from '@/types';
 import {
   getScriptBaseUrl,
   getSourceCookiesKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
 } from '@/lib/js-engine/legado/source-script-shared';
@@ -34,7 +34,7 @@ export function buildSearchTemplateContext(
   const hosts = hostList.length > 0 ? hostList : baseUrl ? [baseUrl] : [];
   return {
     baseUrl,
-    sourceUrl: getSourceUrlIdentifier(source),
+    sourceUrl: getLegadoSourceKey(source),
     hosts,
     keyword,
     page,

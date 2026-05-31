@@ -217,15 +217,14 @@ export function BookGroupManage(props: BookGroupManageProps) {
       filteredGroups().length === groups().length,
   );
 
-  const groupListSortable = createMemo((): VirtualListSortableConfig<BookGroup> | undefined => {
-    if (!enableDragSort()) return undefined;
-    return {
+  const groupListSortable = createMemo(
+    (): VirtualListSortableConfig<BookGroup> => ({
       enabled: listSortableEnabled,
       ids: () => filteredGroups().map((g) => g.groupId),
       onReorder: handleGroupsReorder,
       persistOnly: true,
-    };
-  });
+    }),
+  );
 
   async function handleGroupsReorder(orderedIds: Id[]) {
     try {

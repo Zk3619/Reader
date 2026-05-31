@@ -1,7 +1,7 @@
-import { readerStore } from '@/stores/reader';
+import { viewerStore } from '@/stores/viewer';
 import type { Book } from '@/types';
 
-/** 加入书架时可携带的阅读进度（如从阅读器/详情页带着进度上架） */
+/** 加入书架时可携带的阅读进度（如从阅读�?详情页带着进度上架�?*/
 export type ShelfReadingProgressInput = Pick<
   Book,
   | 'durChapterIndex'
@@ -11,10 +11,9 @@ export type ShelfReadingProgressInput = Pick<
 >;
 
 /**
- * 若当前阅读器正在读同一本书，取快照用于加入书架。
- */
+ * 若当前阅读器正在读同一本书，取快照用于加入书架�? */
 export function getReaderProgressSnapshot(bookUrl: string): ShelfReadingProgressInput | null {
-  const state = readerStore.state;
+  const state = viewerStore.state;
   const book = state.book;
   if (!book || book.bookUrl !== bookUrl || state.catalog.length === 0) {
     return null;

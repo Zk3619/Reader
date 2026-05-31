@@ -1,13 +1,13 @@
 /**
- * æ?ç´¢å?³é?®è¯æ?°æ®è®¿é?®å¯¹è±¡
- * å¯¹åº? legado é¡¹ç?®ç?? SearchKeywordDao.kt
+ * æœç´¢å…³é”®è¯æ•°æ®è®¿é—®å¯¹è±¡
+ * å¯¹é½ legado é¡¹ç›®çš„ SearchKeywordDao.kt
  */
 
 import { getDatabase } from '@/lib/database/database-core';
 import type { SearchKeyword } from '@/types';
 
 /**
- * è?·å?æ??æ??æ?ç´¢å?³é?®è¯ï¼?æ??ä½¿ç?¨æ¬¡æ?°å??æ?¶é?´æ??åºï¼?
+ * è·å–æ‰€æœ‰æœç´¢å…³é”®è¯ï¼ŒæŒ‰æœ€åä½¿ç”¨æ—¶é—´å€’åº
  */
 export async function getAllSearchKeywords(): Promise<SearchKeyword[]> {
   const db = await getDatabase();
@@ -17,7 +17,7 @@ export async function getAllSearchKeywords(): Promise<SearchKeyword[]> {
   return rows.map(row => mapRowToKeyword(row));
 }
 
-/** ??????????? Legado SearchKeywordDao.flowSearch? */
+/** æ¨¡ç³Šæœç´¢å…³é”®è¯ï¼Œå¯¹é½ Legado SearchKeywordDao.flowSearch */
 export async function searchSearchKeywords(key: string): Promise<SearchKeyword[]> {
   const q = key.trim();
   const db = await getDatabase();
@@ -33,7 +33,7 @@ export async function searchSearchKeywords(key: string): Promise<SearchKeyword[]
 }
 
 /**
- * è?·å?æ?ç´¢å?³é?®è¯
+ * è·å–å•ä¸ªæœç´¢å…³é”®è¯
  */
 export async function getSearchKeyword(
   word: string
@@ -47,20 +47,20 @@ export async function getSearchKeyword(
 }
 
 /**
- * æ?å?¥æ??æ?´æ?°æ?ç´¢å?³é?®è¯
+ * æ’å…¥æˆ–æ›´æ–°æœç´¢å…³é”®è¯
  */
 export async function upsertSearchKeyword(word: string): Promise<void> {
   const db = await getDatabase();
   const existing = await getSearchKeyword(word);
   
   if (existing) {
-    // æ?´æ?°ä½¿ç?¨æ¬¡æ?°å??æ?¶é?´
+    // å¢åŠ ä½¿ç”¨æ¬¡æ•°å¹¶æ›´æ–°æ—¶é—´
     await db.execute(
       'UPDATE search_keywords SET usage = usage + 1, lastUseTime = ? WHERE word = ?',
       [Date.now(), word]
     );
   } else {
-    // æ?å?¥æ?°å?³é?®è¯
+    // æ’å…¥æ–°å…³é”®è¯
     await db.execute(
       'INSERT INTO search_keywords (word, usage, lastUseTime) VALUES (?, ?, ?)',
       [word, 1, Date.now()]
@@ -69,7 +69,7 @@ export async function upsertSearchKeyword(word: string): Promise<void> {
 }
 
 /**
- * å? é?¤æ?ç´¢å?³é?®è¯
+ * åˆ é™¤æœç´¢å…³é”®è¯
  */
 export async function deleteSearchKeyword(word: string): Promise<void> {
   const db = await getDatabase();
@@ -77,7 +77,7 @@ export async function deleteSearchKeyword(word: string): Promise<void> {
 }
 
 /**
- * æ¸?ç©ºæ??æ??æ?ç´¢å?³é?®è¯
+ * æ¸…ç©ºæ‰€æœ‰æœç´¢å…³é”®è¯
  */
 export async function clearSearchKeywords(): Promise<void> {
   const db = await getDatabase();
@@ -85,7 +85,7 @@ export async function clearSearchKeywords(): Promise<void> {
 }
 
 /**
- * å°?æ?°æ®åº?è¡?æ? å°?ä¸ºSearchKeywordå¯¹è±¡
+ * å°†æ•°æ®åº“è¡Œæ˜ å°„ä¸º SearchKeyword å¯¹è±¡
  */
 function mapRowToKeyword(row: Record<string, unknown>): SearchKeyword {
   return {

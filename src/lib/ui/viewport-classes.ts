@@ -48,6 +48,9 @@ export const maxHViewport80 = 'max-h-[80dvh]';
 /** 底部抽屉面板（75% 视口） */
 export const hDrawerPanel = 'h-[75dvh]';
 
+/** Inner-Web 底/顶抽屉默认高度（段评 preset 等为 72dvh） */
+export const hInnerWebDrawerPanel = 'h-[72dvh]';
+
 /**
  * 书源页右侧发现抽屉宽度：大屏约占 40% 视口宽；窄屏不超过 92dvw，且两侧共留约 8dvw 给列表透视。
  * 覆盖 ui/drawer 侧栏默认 max-w-sm。
@@ -75,6 +78,9 @@ export const popperOverflowPadding = 32;
 
 /** Tauri 窗口拖拽拦截（遮罩/模态层，见 App.css `.app-block-drag`） */
 export const appBlockDrag = 'app-block-drag';
+
+/** 浮层遮罩 scrim（半透明 + Tauri 拖拽拦截，供 inner-web / 居中卡片等） */
+export const appOverlayScrim = cn(appBlockDrag, 'bg-background/40');
 
 /** 不超过锚点方向可用高度（`--kb-popper-content-available-height`），面板内纵向滚动 */
 export const popperContentViewportScroll = cn(

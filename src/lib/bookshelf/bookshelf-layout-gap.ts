@@ -4,8 +4,6 @@ import { bookshelfLayoutStore } from '@/stores/bookshelf-layout';
 /** 书架列表/网格动态间距（由 bindBookshelfLayoutGap 写入 --bookshelf-layout-gap） */
 export const BOOKSHELF_LAYOUT_GAP_CLASS = 'bookshelf-layout-gap';
 
-/** @deprecated 使用 BOOKSHELF_LAYOUT_GAP_CLASS */
-export const BOOKSHELF_GRID_GAP_CLASS = BOOKSHELF_LAYOUT_GAP_CLASS;
 
 export function bookshelfLayoutGapToRem(spacing: number): string {
   return `${spacing * 0.25}rem`;
@@ -34,5 +32,3 @@ export function bindBookshelfLayoutGap(container: Accessor<HTMLElement | null | 
   });
 }
 
-/** @deprecated 使用 bindBookshelfLayoutGap */
-export const bindBookshelfGridGap = bindBookshelfLayoutGap;

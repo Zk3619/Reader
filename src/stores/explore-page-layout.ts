@@ -12,7 +12,7 @@ export interface ExplorePageLayoutSettings {
   sourceTabsEnabled: boolean;
 }
 
-/** @deprecated 旧版单选样式，仅用于迁移 */
+/** 旧版单选样式，仅用于迁移 */
 type LegacySourceNavStyle = 'normal' | 'dropdown' | 'tabs';
 
 type StoredExplorePageLayout = ExplorePageLayoutSettings & {

@@ -56,6 +56,7 @@ export function VirtualBookshelfBookList(props: VirtualBookshelfBookListProps) {
     cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, getViewModeContainerGridClass(props.viewMode));
 
   const bookByUrl = createMemo(() => new Map(items().map((b) => [b.bookUrl, b])));
+  const sortableDragActive = () => props.sortable?.enabled() ?? false;
 
   const renderDragOverlay = (activeId: Id | null) => {
     if (activeId == null) return null;
@@ -76,7 +77,7 @@ export function VirtualBookshelfBookList(props: VirtualBookshelfBookListProps) {
 
   const remeasureSpacing = () => bookshelfLayoutStore.settings.spacing;
 
-  const listBody = () => (
+  return (
     <Show
       when={colCount() > 1}
       fallback={
@@ -90,7 +91,7 @@ export function VirtualBookshelfBookList(props: VirtualBookshelfBookListProps) {
           externalScrollElement={props.externalScrollElement}
           getItemKey={(book) => book.bookUrl}
           sortable={props.sortable}
-          renderDragOverlay={props.sortable ? renderDragOverlay : undefined}
+          renderDragOverlay={sortableDragActive() ? renderDragOverlay : undefined}
           onScrollContainer={(el) => {
             setScrollRoot(el);
             props.onScrollContainer?.(el);
@@ -118,7 +119,7 @@ export function VirtualBookshelfBookList(props: VirtualBookshelfBookListProps) {
         externalScrollElement={props.externalScrollElement}
         getItemKey={(book) => book.bookUrl}
         sortable={props.sortable}
-        renderDragOverlay={props.sortable ? renderDragOverlay : undefined}
+        renderDragOverlay={sortableDragActive() ? renderDragOverlay : undefined}
         onScrollContainer={(el) => {
           setScrollRoot(el);
           props.onScrollContainer?.(el);
@@ -131,6 +132,4 @@ export function VirtualBookshelfBookList(props: VirtualBookshelfBookListProps) {
       </VirtualGridRowsList>
     </Show>
   );
-
-  return listBody();
 }

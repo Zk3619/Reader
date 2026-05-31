@@ -13,7 +13,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { showAppToast, showScriptToast } from '@/components/shared/AppToasts';
+import { showAppToast, normalizeScriptToastText } from '@/components/shared/AppToasts';
 import {
   runLoginScript,
   runLoginScriptRust,
@@ -285,7 +285,12 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
       if (/^脚本执行/.test(text)) return;
       // longToast / checkStatus 等：多行框线排版，需 pre-wrap + 等宽字体
       if (long || text.includes('\n')) {
-        showScriptToast(text);
+        showAppToast({
+        description: normalizeScriptToastText(text),
+        script: true,
+        variant: 'plain',
+        id: 'reader-script-toast',
+      });
         return;
       }
       showAppToast({ description: text, variant: 'plain' });

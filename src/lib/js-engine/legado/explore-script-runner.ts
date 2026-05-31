@@ -18,7 +18,7 @@ import {
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
   readSourceLoginInfoMap,
@@ -95,7 +95,7 @@ async function tryRunExploreScriptQuickJS(
   if (isQuickJSFallback()) return null;
 
   const baseUrl = getScriptBaseUrl(source);
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
   const jsLib =

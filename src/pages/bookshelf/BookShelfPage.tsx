@@ -75,6 +75,7 @@ import {
 import { VirtualBookshelfBookGrid } from '@/components/bookshelf/VirtualBookshelfBookGrid';
 import { VirtualBookshelfBookList } from '@/components/bookshelf/VirtualBookshelfBookList';
 import type { Id } from '@thisbeyond/solid-dnd';
+import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
 import { getEffectiveTitleDisplay } from '@/lib/bookshelf/bookshelf-title-display';
 import { BookshelfCoverTitleOverlay } from '@/components/bookshelf/BookshelfCoverTitleOverlay';
 import { BookshelfGridHideTooltip } from '@/components/bookshelf/BookshelfGridHideTooltip';
@@ -102,7 +103,7 @@ import { BookshelfGroupNav, BookshelfGroupTitleDropdown } from '@/components/boo
 import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolbar';
 import type { PageType } from '@/components/shell/Navigation';
 import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
-import { readerStore } from '@/stores/reader';
+import { textViewerStore } from '@/stores/viewer';
 import {
   loadBookshelfMainSearchMode,
   saveBookshelfMainSearchMode,
@@ -323,6 +324,7 @@ export function BookShelf(props: BookShelfProps) {
     const list = books();
     const idx = list.findIndex((b) => b.bookUrl === bookUrl);
     if (idx < 0) return;
+    if (list[idx]!.coverUrl === newCoverUrl) return;
     const updated: Book = { ...list[idx], coverUrl: newCoverUrl };
     try {
       await booksDb.updateBook(updated);
@@ -408,12 +410,12 @@ export function BookShelf(props: BookShelfProps) {
         },
         onBookDone: (bookUrl, error, requestedUrl) => {
           void patchBookInShelf(bookUrl, requestedUrl);
-          const open = readerStore.state.book;
+          const open = textViewerStore.state.book;
           const openUrls = new Set(
             [bookUrl, requestedUrl, open?.bookUrl].filter((u): u is string => Boolean(u)),
           );
           if (open && openUrls.has(open.bookUrl) && !error) {
-            void readerStore.loadCatalog(bookUrl);
+            void textViewerStore.loadCatalog(bookUrl);
           }
         },
         onAllDone: (result) => {
@@ -1025,12 +1027,13 @@ function BooksGrid(props: {
   });
 
   const bookSortableEnabled = createMemo(() => manualSort() && enableDragSort());
+  const bookSortableIds = createMemo(() => props.books.map((b) => b.bookUrl));
 
-  const bookSortable = createMemo(() => {
-    if (!bookSortableEnabled()) return undefined;
-    return {
+  /** 始终传入 sortable，首屏即挂 SortableShell；仅 enabled 控制是否 createSortable */
+  const bookSortable = createMemo(
+    (): VirtualListSortableConfig<Book> => ({
       enabled: bookSortableEnabled,
-      ids: () => props.books.map((b) => b.bookUrl),
+      ids: () => bookSortableIds(),
       onReorder: (ids: Id[]) => {
         const map = new Map(props.books.map((b) => [b.bookUrl, b]));
         const list = ids
@@ -1040,8 +1043,8 @@ function BooksGrid(props: {
         void props.onBooksReorder?.(list.map((b, i) => ({ ...b, order: i })));
       },
       persistOnly: true,
-    };
-  });
+    }),
+  );
 
   const listCard = (book: Book) => (
     <BookCardWithMenu

@@ -537,7 +537,6 @@ export async function getFileSystem(): Promise<FileSystemAdapter> {
 
 /**
  * 便捷方法：读取文件
- * @deprecated 优先使用 `readBytes(parseStorageRef(bookUrl))`（`@/lib/platform/fs`）
  */
 export async function readFile(path: string): Promise<ArrayBuffer> {
   const trimmed = path.trim();

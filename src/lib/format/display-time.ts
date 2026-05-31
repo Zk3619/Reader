@@ -48,7 +48,3 @@ export function tryFormatDisplayUpdateTime(raw: string | number | undefined | nu
   return formatDateFromMs(ms);
 }
 
-/** @deprecated 请优先使用 tryFormatDisplayUpdateTime */
-export function formatDisplayUpdateTime(raw: string | number | undefined | null): string {
-  return tryFormatDisplayUpdateTime(raw);
-}

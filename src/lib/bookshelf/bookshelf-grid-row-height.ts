@@ -33,10 +33,3 @@ export function estimateBookshelfGridCardHeight(
   return cardH + rowPad;
 }
 
-/** @deprecated 使用 estimateBookshelfGridCardHeight；行高请另加 gap */
-export function estimateBookshelfGridRowHeight(
-  metrics: VirtualGridRowLayoutMetrics,
-  options?: BookshelfGridRowHeightOptions,
-): number {
-  return estimateBookshelfGridCardHeight(metrics, options) + metrics.gapPx;
-}

@@ -241,13 +241,29 @@ export function onlineBookNeedsChapterRepair(book: Book): boolean {
   return (book.totalChapterNum ?? 0) <= 0 || !book.latestChapterTitle?.trim();
 }
 
+const CHAPTER_REPAIR_MAX_CONCURRENT = 2;
+let chapterRepairActive = 0;
+const chapterRepairQueue: Book[] = [];
+
+function pumpChapterRepairQueue(): void {
+  while (chapterRepairActive < CHAPTER_REPAIR_MAX_CONCURRENT && chapterRepairQueue.length > 0) {
+    const book = chapterRepairQueue.shift()!;
+    chapterRepairActive += 1;
+    void fetchAndPersistChaptersForBook(book).finally(() => {
+      chapterRepairActive -= 1;
+      pumpChapterRepairQueue();
+    });
+  }
+}
+
 /** 书架加载后后台补救（加入书架时拉目录中断、进程退出等） */
 export function scheduleShelfChapterRepairs(books: Book[]): void {
   for (const book of books) {
-    if (onlineBookNeedsChapterRepair(book)) {
-      scheduleBackgroundChapterFetch(book);
-    }
+    if (!onlineBookNeedsChapterRepair(book)) continue;
+    if (chapterRepairQueue.some((b) => b.bookUrl === book.bookUrl)) continue;
+    chapterRepairQueue.push(book);
   }
+  pumpChapterRepairQueue();
 }
 
 /**

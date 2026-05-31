@@ -187,15 +187,14 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
       filteredBooks().length === books().length,
   );
 
-  const bookListSortable = createMemo((): VirtualListSortableConfig<Book> | undefined => {
-    if (!enableDragSort()) return undefined;
-    return {
+  const bookListSortable = createMemo(
+    (): VirtualListSortableConfig<Book> => ({
       enabled: listSortableEnabled,
       ids: () => filteredBooks().map((b) => b.bookUrl),
       onReorder: handleBooksReorder,
       persistOnly: true,
-    };
-  });
+    }),
+  );
 
   async function handleBooksReorder(orderedIds: Id[]) {
     try {

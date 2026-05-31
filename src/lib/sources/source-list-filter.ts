@@ -6,14 +6,6 @@ import type { BookSource } from '@/types';
 
 export type { SearchMode as SourceSearchMode } from '@/lib/search/search-prefs';
 
-/** @deprecated 旧标题下拉 id，仅作兼容迁移 */
-export const SOURCE_FILTER_ENABLED = '__filter:enabled__';
-export const SOURCE_FILTER_DISABLED = '__filter:disabled__';
-export const SOURCE_FILTER_NEED_LOGIN = '__filter:need_login__';
-export const SOURCE_FILTER_UNGROUPED = '__filter:ungrouped__';
-export const SOURCE_FILTER_EXPLORE_ENABLED = '__filter:explore_enabled__';
-export const SOURCE_FILTER_EXPLORE_DISABLED = '__filter:explore_disabled__';
-
 export type SourceEnabledFilter = 'enabled' | 'disabled';
 
 export type SourceSpecialFilter = 'need_login' | 'explore_enabled' | 'explore_disabled';
@@ -45,8 +37,8 @@ export const SOURCE_SPECIAL_FILTER_OPTIONS: { value: SourceSpecialFilter; label:
 
 /** 将旧 discover 筛选项 id 规范为 explore */
 export function normalizeSourceFilterValue(value: string | null): string | null {
-  if (value === '__filter:discover_enabled__') return SOURCE_FILTER_EXPLORE_ENABLED;
-  if (value === '__filter:discover_disabled__') return SOURCE_FILTER_EXPLORE_DISABLED;
+  if (value === '__filter:discover_enabled__') return '__filter:explore_enabled__';
+  if (value === '__filter:discover_disabled__') return '__filter:explore_disabled__';
   return value;
 }
 
@@ -57,20 +49,6 @@ export function shouldGroupSourcesByGroupName(groupNames: string[]): boolean {
   return groupNames[0] === UNGROUPED_SOURCE_LABEL;
 }
 
-/** @deprecated 使用 shouldGroupSourcesByGroupName */
-export function isSourceFilterOrAll(value: string | null): boolean {
-  if (value == null || value === '') return true;
-  const normalized = normalizeSourceFilterValue(value);
-  const specials = [
-    SOURCE_FILTER_ENABLED,
-    SOURCE_FILTER_DISABLED,
-    SOURCE_FILTER_NEED_LOGIN,
-    SOURCE_FILTER_UNGROUPED,
-    SOURCE_FILTER_EXPLORE_ENABLED,
-    SOURCE_FILTER_EXPLORE_DISABLED,
-  ] as const;
-  return specials.includes(normalized as (typeof specials)[number]);
-}
 
 /** 筛选弹窗中的全部分组选项（含「未分组」） */
 export function buildSourceFilterGroupOptions(sourceGroups: string[]): string[] {
@@ -265,15 +243,3 @@ export function filterSourcesByCriteria(
   });
 }
 
-/** @deprecated 使用 filterSourcesByCriteria */
-export function filterSourcesByDialogCriteria(
-  sources: BookSource[],
-  selectedGroups: string[],
-  selectedEnabled: SourceEnabledFilter[],
-): BookSource[] {
-  return filterSourcesByCriteria(sources, {
-    groupNames: selectedGroups,
-    enabledStates: selectedEnabled,
-    specialFilters: [],
-  });
-}

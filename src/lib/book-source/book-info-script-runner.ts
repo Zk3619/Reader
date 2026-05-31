@@ -33,7 +33,7 @@ import {
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
   readSourceLoginInfoMap,
@@ -191,7 +191,7 @@ async function runBookInfoLegadoFieldScript(
         return detailUrl;
       }
     })();
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
   const jsLib =

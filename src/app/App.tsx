@@ -47,7 +47,6 @@ import {
   normalizeMediaViewerPage,
   type MediaViewerPage,
 } from "@/lib/book-source/media-viewer";
-import { mediaReaderStore } from "@/stores/media-viewer";
 import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
 import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
 import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetworkDialog";
@@ -57,7 +56,7 @@ import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog"
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
-import { readerStore } from "@/stores/reader";
+import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
 import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/ReaderGuestAddToShelfDialog";
@@ -137,6 +136,7 @@ import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
 import {
   registerInnerWebOpener,
   registerInnerWebClose,
+  registerInnerWebPatch,
   loadPersistedInnerWebSession,
   applyRestoredInnerWebSession,
   shouldSuppressLoginDialogDismiss,
@@ -348,7 +348,7 @@ function AppContent() {
   createEffect(() => {
     const page = currentPage();
     if (!isMediaViewerPage(page)) return;
-    if (mediaReaderStore.state.book || mediaReaderStore.state.loading) return;
+    if (viewerStore.state.book || viewerStore.state.loading) return;
 
     const session = readHmrData<{ bookUrl: string; kind: MediaKind } | null>(
       "mediaViewerSession",
@@ -356,9 +356,9 @@ function AppContent() {
     );
     if (session?.bookUrl) {
       void getBook(session.bookUrl).then((book) => {
-        if (!book || mediaReaderStore.state.book) return;
-        mediaReaderStore.setBookInitialState(book, session.kind);
-        void mediaReaderStore.openBook(book, session.kind).catch((e) => {
+        if (!book || viewerStore.state.book) return;
+        viewerStore.setBookInitialState(book, session.kind);
+        void viewerStore.openBook(book, session.kind).catch((e) => {
           console.error("HMR 恢复媒体阅读器失败:", e);
           setCurrentPage(readerReturnPage());
         });
@@ -931,38 +931,38 @@ function AppContent() {
     const page = mediaViewerPageForKind(kind);
 
     if (kind === MediaKind.text) {
-      readerStore.setBookInitialState(book);
+      textViewerStore.setBookInitialState(book);
       setCurrentPage(page);
-      void readerStore.openBook(book, { initialCatalog }).catch((e) => {
+      void textViewerStore.openBook(book, { initialCatalog }).catch((e) => {
         console.error("打开书籍失败:", e);
         setCurrentPage(returnPage);
       });
       return;
     }
 
-    mediaReaderStore.setBookInitialState(book, kind);
+    viewerStore.setBookInitialState(book, kind);
     writeHmrData("mediaViewerSession", { bookUrl: book.bookUrl, kind });
     setCurrentPage(page);
-    void mediaReaderStore.openBook(book, kind, { initialCatalog }).catch((e) => {
+    void viewerStore.openBook(book, kind, { initialCatalog }).catch((e) => {
       console.error("打开书籍失败:", e);
       setCurrentPage(returnPage);
     });
   }
 
   function openTextViewerFromMediaFallback(detail: ReaderMediaTextFallbackDetail) {
-    const book = mediaReaderStore.state.book;
-    const catalog = mediaReaderStore.state.catalog;
+    const book = viewerStore.state.book;
+    const catalog = viewerStore.state.catalog;
     if (!book || book.bookUrl !== detail.bookUrl) return;
 
     const returnPage = readerReturnPage();
     const initialCatalog = catalog.length > 0 ? catalog : undefined;
     const chapterIndex = detail.chapterIndex;
     setCurrentPage("text-viewer");
-    void mediaReaderStore.closeBook().then(() => {
-      readerStore.setBookInitialState(book);
-      void readerStore
+    void viewerStore.closeBook().then(() => {
+      textViewerStore.setBookInitialState(book);
+      void textViewerStore
         .openBook(book, { initialCatalog })
-        .then(() => readerStore.loadChapter(chapterIndex))
+        .then(() => textViewerStore.loadChapter(chapterIndex))
         .catch((e) => {
           console.error("回退文本阅读器失败:", e);
           setCurrentPage(returnPage);
@@ -988,19 +988,19 @@ function AppContent() {
     const page = currentPage();
     setCurrentPage(readerReturnPage());
     if (page === "text-viewer") {
-      await readerStore.closeBook();
+      await textViewerStore.closeBook();
     } else if (isMediaViewerPage(page)) {
-      await mediaReaderStore.closeBook();
+      await viewerStore.closeBook();
       writeHmrData("mediaViewerSession", null);
     }
   }
 
   function requestCloseReader() {
     const guestBook =
-      readerStore.isGuestReading() && readerStore.state.book
-        ? readerStore.state.book
-        : mediaReaderStore.state.guestReading && mediaReaderStore.state.book
-          ? mediaReaderStore.state.book
+      textViewerStore.isGuestReading() && textViewerStore.state.book
+        ? textViewerStore.state.book
+        : viewerStore.state.guestReading && viewerStore.state.book
+          ? viewerStore.state.book
           : null;
     if (guestBook) {
       setGuestAddToShelfOpen(true);
@@ -1010,14 +1010,14 @@ function AppContent() {
   }
 
   async function confirmGuestAddToShelf() {
-    const book = readerStore.state.book ?? mediaReaderStore.state.book;
+    const book = textViewerStore.state.book ?? viewerStore.state.book;
     if (!book || guestAddToShelfBusy()) return;
     setGuestAddToShelfBusy(true);
     try {
       const catalog =
-        readerStore.state.book?.bookUrl === book.bookUrl
-          ? readerStore.state.catalog
-          : mediaReaderStore.state.catalog;
+        textViewerStore.state.book?.bookUrl === book.bookUrl
+          ? textViewerStore.state.catalog
+          : viewerStore.state.catalog;
       const saved = await addSearchBookToShelf(bookToSearchBook(book), {
         chapters: catalog.length > 0 ? catalog : undefined,
         fetchChapters: catalog.length > 0 ? false : "background",
@@ -1085,7 +1085,7 @@ function AppContent() {
           title: "导入成功",
           description: `已导入《${result.book.name}》，共 ${result.chapterCount} 章`,
           variant: "success",
-          showProgress: true,
+          progress: true,
         });
         window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
       }
@@ -1496,7 +1496,7 @@ function AppContent() {
           title: "恢复成功",
           description: `已恢复《${result.book.name}》，共 ${result.chapterCount} 章`,
           variant: "success",
-          showProgress: true,
+          progress: true,
         });
         window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
       }
@@ -1667,7 +1667,7 @@ function AppContent() {
           title: "导入成功",
           description: `已导入《${result.book.name}》，共 ${result.chapterCount} 章`,
           variant: "success",
-          showProgress: true,
+          progress: true,
         });
         window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
       }
@@ -1734,6 +1734,9 @@ function AppContent() {
 
   onMount(() => {
     registerInnerWebOpener((payload) => {
+      setInnerWebPayload(payload);
+    });
+    registerInnerWebPatch((payload) => {
       setInnerWebPayload(payload);
     });
     registerInnerWebClose(() => {
@@ -2748,7 +2751,7 @@ function AppContent() {
             <BookReader
               onClose={requestCloseReader}
               onOpenBookInfo={async () => {
-                const book = readerStore.state.book;
+                const book = textViewerStore.state.book;
                 if (!book) return;
                 if (book.origin === "local") {
                   showAppToast({ title: "书籍信息", description: "本地书籍暂无书籍信息页", variant: "default" });
@@ -3002,7 +3005,7 @@ function AppContent() {
         />
         <ReaderGuestAddToShelfDialog
           open={guestAddToShelfOpen()}
-          bookName={readerStore.state.book?.name ?? ""}
+          bookName={textViewerStore.state.book?.name ?? ""}
           adding={guestAddToShelfBusy()}
           onOpenChange={(open) => {
             if (!open && !guestAddToShelfBusy()) {

@@ -463,29 +463,27 @@ export function BookGroup(props: BookGroupProps = {}) {
       filteredGroups().length > 0,
   );
 
-  const groupSortable = createMemo(() => {
-    if (!groupSortableEnabled()) return undefined;
-    return {
-      enabled: groupSortableEnabled,
-      ids: () => filteredGroups().map((g) => g.groupId),
-      onReorder: async (ids: Id[]) => {
-        const map = new Map(filteredGroups().map((g) => [g.groupId, g]));
-        const reordered = ids
-          .map((id) => map.get(Number(id)))
-          .filter((g): g is BookGroup => !!g);
-        if (reordered.length !== filteredGroups().length) return;
-        const nextVisible = reordered.map((g, i) => ({ ...g, order: i }));
-        await groupsDb.updateGroupsOrder(
-          nextVisible.map((g) => ({ groupId: g.groupId, order: g.order })),
-        );
-        const visibleIds = new Set(nextVisible.map((g) => g.groupId));
-        const rest = groups().filter((g) => !visibleIds.has(g.groupId));
-        const merged = [...nextVisible, ...rest].sort((a, b) => a.order - b.order);
-        setGroups(merged.filter((g) => g.show));
-        props.onGroupsLoaded?.(merged.filter((g) => g.show));
-      },
-    };
-  });
+  const groupSortable = createMemo(() => ({
+    enabled: groupSortableEnabled,
+    ids: () => filteredGroups().map((g) => g.groupId),
+    onReorder: async (ids: Id[]) => {
+      const map = new Map(filteredGroups().map((g) => [g.groupId, g]));
+      const reordered = ids
+        .map((id) => map.get(Number(id)))
+        .filter((g): g is BookGroup => !!g);
+      if (reordered.length !== filteredGroups().length) return;
+      const nextVisible = reordered.map((g, i) => ({ ...g, order: i }));
+      await groupsDb.updateGroupsOrder(
+        nextVisible.map((g) => ({ groupId: g.groupId, order: g.order })),
+      );
+      const visibleIds = new Set(nextVisible.map((g) => g.groupId));
+      const rest = groups().filter((g) => !visibleIds.has(g.groupId));
+      const merged = [...nextVisible, ...rest].sort((a, b) => a.order - b.order);
+      setGroups(merged.filter((g) => g.show));
+      props.onGroupsLoaded?.(merged.filter((g) => g.show));
+    },
+    persistOnly: true,
+  }));
 
   // 与书源页一致：有父级数据则直接用，不重复请求
   onMount(async () => {

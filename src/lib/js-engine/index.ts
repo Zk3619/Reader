@@ -38,5 +38,5 @@ export {
 export { extractExploreScript, runExploreScript } from '@/lib/js-engine/legado/explore-script-runner';
 export {
   getScriptBaseUrl,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
 } from '@/lib/js-engine/legado/source-script-shared';

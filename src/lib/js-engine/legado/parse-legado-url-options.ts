@@ -276,10 +276,6 @@ export function normalizeLegadoContentImages(content: string): string {
   return out;
 }
 
-/** @deprecated 使用 normalizeLegadoContentImages */
-export function normalizeLegadoImagesInHtml(html: string): string {
-  return normalizeLegadoContentImages(html);
-}
 
 /** 从 img 标签属性读取 Legado 请求头（若存在） */
 export function readLegadoHeadersFromImgTag(tag: string): Record<string, string> | undefined {

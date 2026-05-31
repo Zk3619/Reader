@@ -111,10 +111,6 @@ export function bookshelfCompactCoverClass(...extra: Parameters<typeof cn>) {
   return bookshelfListCoverClass('book-group-card-cover-motion--compact', ...extra);
 }
 
-/** @deprecated 使用 bookshelfCompactCoverClass；保留别名供管理页等传入固定尺寸 */
-export function bookGroupCompactCoverClass(...extra: Parameters<typeof cn>) {
-  return bookshelfCompactCoverClass(...extra);
-}
 
 /** 书架页标准列表书籍卡片 */
 export function bookshelfListCardClass(...extra: Parameters<typeof cn>) {

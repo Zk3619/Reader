@@ -42,9 +42,6 @@ export const MediaKind = {
 
 export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 
-/** @deprecated 使用 MediaKind */
-export type ReaderKind = MediaKind;
-
 /** 聚合书源 tab 与 Legado 媒体类型的映射 */
 const TAB_TO_BOOK_TYPE: Record<string, number> = {
   漫画: BookType.image,
@@ -150,9 +147,3 @@ export function resolveMediaKind(
   return MediaKind.text;
 }
 
-/** @deprecated 使用 resolveMediaKind */
-export function resolveReaderKind(
-  book: Pick<Book, 'type' | 'origin' | 'bookUrl' | 'tocUrl'> & { tab?: string },
-): MediaKind {
-  return resolveMediaKind(book);
-}

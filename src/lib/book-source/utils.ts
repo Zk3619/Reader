@@ -680,10 +680,6 @@ export function buildContentApiItemIdCandidates(
   return out;
 }
 
-/** @deprecated 使用 resolveContentApiItemId */
-export function normalizeContentApiItemId(itemId: string): string {
-  return resolveContentApiItemId(itemId);
-}
 
 /** 章节 data URL 载荷缺 book_id 时，从书籍 data URL 补全（对齐 Legado book_id 上下文） */
 export function mergeBookIdFromBookUrls(
@@ -762,11 +758,6 @@ export function normalizeDataUrlPayload(
     toc_url: url,
   };
 }
-
-/** @deprecated 使用 normalizeDataUrlPayload */
-export const normalizeQingtianPayload = normalizeDataUrlPayload;
-/** @deprecated 使用 normalizeDataUrlPayload */
-export const normalizeQingtianTocPayload = normalizeDataUrlPayload;
 
 /** 从书籍 data: URL 推断 tab（漫画/小说等） */
 export function inferTabFromBook(

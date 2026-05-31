@@ -10,14 +10,14 @@ import {
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { readSourceCookieStore } from '@/lib/js-engine/legado/login-script-runner';
 import {
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   storageKey,
   STORAGE_PREFIX_COOKIES,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { getActiveWebProxySessionId } from '@/lib/platform/inner-web';
 
 function writeSourceCookieStore(source: BookSource, store: Map<string, string>): void {
-  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getSourceUrlIdentifier(source));
+  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getLegadoSourceKey(source));
   const obj: Record<string, string> = {};
   store.forEach((v, k) => {
     obj[k] = v;

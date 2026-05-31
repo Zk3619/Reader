@@ -366,7 +366,3 @@ export async function mkdirRef(ref: StorageRef, recursive = true): Promise<void>
   }
 }
 
-/** @deprecated 使用 readBytes(StorageRef) */
-export async function readPath(pathOrRef: string): Promise<ArrayBuffer> {
-  return readBytes(parseStorageRef(pathOrRef));
-}

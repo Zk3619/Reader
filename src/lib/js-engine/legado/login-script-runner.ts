@@ -41,7 +41,7 @@ import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
 import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from '@/lib/js-engine/legado/script-wrap';
 import {
   getScriptBaseUrl,
-  getSourceUrlIdentifier,
+  getLegadoSourceKey,
   hostsFromJsLib,
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
@@ -208,7 +208,7 @@ function getScriptCookieForUrl(
 /** 与书源脚本 cookie 表一致（键可为 origin 或 fanqienovel.com 等裸 host） */
 export function readSourceCookieStore(source: BookSource): Map<string, string> {
   const store = new Map<string, string>();
-  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getSourceUrlIdentifier(source));
+  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getLegadoSourceKey(source));
   try {
     const raw = localStorage.getItem(cookiesKey);
     if (!raw) return store;
@@ -296,7 +296,7 @@ export function getStoredSourceCookiesForCover(
   }
 
   try {
-    const login = getStoredLoginInfo(getSourceUrlIdentifier(source));
+    const login = getStoredLoginInfo(getLegadoSourceKey(source));
     const manual = String(login['手动填写番茄token(可不填)'] ?? '').trim();
     if (manual) {
       const cookiePart = /sessionid=/i.test(manual)
@@ -364,7 +364,7 @@ export async function clearSourceLoginState(
     return;
   }
   const src = source as Record<string, unknown>;
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
   const loginKey = storageKey(STORAGE_PREFIX_LOGIN, sourceUrl);
   const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
@@ -421,7 +421,7 @@ export function getStoredSourceCookiesForUrl(
   targetUrl: string,
   options?: StoredSourceCookiesOptions,
 ): string {
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
   const store = new Map<string, string>();
   try {
@@ -449,7 +449,7 @@ export function getStoredSourceCookiesForUrl(
 
 /** 合并该书源 cookie 表中所有域（如聚合站 + 番茄登录域） */
 export function getStoredSourceCookiesMerged(source: BookSource): string {
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
   let merged = '';
   try {
@@ -688,7 +688,7 @@ async function syncLegadoCookieStoreFromHttpJar(
   const deviceId = getOrCreateAndroidId();
   const urls = new Set<string>([baseUrl]);
   try {
-    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getSourceUrlIdentifier(source)));
+    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source)));
     if (raw) {
       const server = (JSON.parse(raw) as Record<string, unknown>).server;
       if (typeof server === 'string' && server.trim()) urls.add(server.trim());
@@ -747,7 +747,7 @@ async function verifyLegadoUserApiSession(
 
 function resolveLoginServerUrl(source: BookSource, baseUrl: string): string {
   try {
-    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getSourceUrlIdentifier(source)));
+    const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source)));
     if (raw) {
       const server = (JSON.parse(raw) as Record<string, unknown>).server;
       if (typeof server === 'string' && /^https?:\/\//i.test(server.trim())) {
@@ -970,7 +970,7 @@ async function tryRunLoginScriptQuickJS(
     skipLoginPersistence = false,
     isClearDeviceAction = false,
   } = keys;
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
 
   let suppressResumeToast = false;
   const isWaitingToast = (msg?: string) =>
@@ -1409,7 +1409,7 @@ export async function runLoginScript(
   resetLoginApiHttpCapture();
   console.warn(LOG_TAG, 'runLoginScript', { action: action?.slice(0, 50), baseUrl: baseUrl?.slice(0, 60) });
 
-  const sourceUrl = getSourceUrlIdentifier(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const loginKey = storageKey(STORAGE_PREFIX_LOGIN, sourceUrl);
   const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);

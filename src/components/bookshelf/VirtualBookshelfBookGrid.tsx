@@ -51,6 +51,7 @@ export function VirtualBookshelfBookGrid(props: VirtualBookshelfBookGridProps) {
     cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS, getViewModeContainerGridClass(props.viewMode));
 
   const bookByUrl = createMemo(() => new Map(items().map((b) => [b.bookUrl, b])));
+  const sortableDragActive = () => props.sortable?.enabled() ?? false;
 
   const renderDragOverlay = (activeId: Id | null) => {
     if (activeId == null) return null;
@@ -84,12 +85,17 @@ export function VirtualBookshelfBookGrid(props: VirtualBookshelfBookGridProps) {
       externalScrollElement={props.externalScrollElement}
       getItemKey={(book) => book.bookUrl}
       sortable={props.sortable}
-      renderDragOverlay={props.sortable ? renderDragOverlay : undefined}
+      renderDragOverlay={sortableDragActive() ? renderDragOverlay : undefined}
       onScrollContainer={(el) => {
         setScrollRoot(el);
         props.onScrollContainer?.(el);
       }}
       onScroll={props.onScroll}
+      renderByKey={(bookUrl, index) => {
+        const book = bookByUrl().get(bookUrl);
+        if (!book) return null;
+        return <div class="min-w-0 w-full">{props.children(book, index())}</div>;
+      }}
     >
       {props.children}
     </VirtualGridRowsList>

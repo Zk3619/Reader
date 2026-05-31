@@ -96,8 +96,6 @@ export function appToastHostStyle(): Record<string, string> {
   }
 }
 
-const READER_SCRIPT_TOAST_ID = "reader-script-toast"
-
 /** 书架批量更新目录进行中的 toast（数值进度条；完成后须 dismiss） */
 export const UPDATE_TOC_TOAST_ID = "reader-update-toc-toast"
 
@@ -152,12 +150,10 @@ export function createAppToastIcons(): ToastIcons {
 
 function resolveProgress(
   progress: ToastProgressInput | undefined,
-  showProgress: boolean | undefined,
   duration: number,
 ): ResolvedToastProgress | null {
   if (progress === undefined || progress === false) {
-    if (!showProgress) return null
-    return { mode: "duration", ms: duration }
+    return null
   }
   if (progress === true) return { mode: "duration", ms: duration }
   if (typeof progress === "number") {
@@ -354,21 +350,6 @@ export function normalizeScriptToastText(text: string): string {
 }
 
 /**
- * 书源脚本 longToast / checkStatus 等多行框线输出（固定 id 替换上一条）。
- * @deprecated 请使用 showAppToast({ script: true, ... })；保留别名便于书源登录等调用。
- */
-export function showScriptToast(text: string) {
-  const body = normalizeScriptToastText(text)
-  if (!body) return
-  showAppToast({
-    description: body,
-    script: true,
-    variant: "plain",
-    id: READER_SCRIPT_TOAST_ID,
-  })
-}
-
-/**
  * 通用 Toast 通知函数
  */
 export function showAppToast(props: {
@@ -378,8 +359,6 @@ export function showAppToast(props: {
   variant?: ToastVariant
   duration?: number
   persistent?: boolean
-  /** @deprecated 使用 progress: true */
-  showProgress?: boolean
   progress?: ToastProgressInput
   /** 固定 id，用于脚本 toast 等需要替换上一条的场景 */
   id?: string | number
@@ -397,7 +376,7 @@ export function showAppToast(props: {
         persistent: props.persistent,
         id: props.id,
         script: props.script,
-        progress: resolveProgress(props.progress, props.showProgress, childDuration),
+        progress: resolveProgress(props.progress, childDuration),
       }),
     )
     return
@@ -405,7 +384,7 @@ export function showAppToast(props: {
 
   const variant = normalizeVariant(props.variant)
   const duration = props.persistent ? Number.POSITIVE_INFINITY : (props.duration ?? DEFAULT_TOAST_DURATION)
-  const progress = resolveProgress(props.progress, props.showProgress, duration)
+  const progress = resolveProgress(props.progress, duration)
 
   const hasTitle = props.title != null && props.title !== ""
   const hasDescField = props.description != null && props.description !== ""

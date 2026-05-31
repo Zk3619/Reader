@@ -11,7 +11,13 @@ import {
 } from '@/lib/book-source/source-http';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import { getSourceArgsKey, getScriptBaseUrl } from '@/lib/js-engine/legado/source-script-shared';
-import { openInnerWeb } from '@/lib/platform/inner-web';
+import { shouldUseInnerWebDocumentProxy } from '@/lib/http/inner-web-proxy-session';
+import { openInnerWeb, updateInnerWebPayload } from '@/lib/platform/inner-web';
+import { injectInnerWebBaseTag } from '@/lib/platform/inner-web-document-html';
+import {
+  INNER_WEB_PRESETS,
+  createInnerWebPresentation,
+} from '@/lib/platform/inner-web-presentation';
 import { showAppToast } from '@/components/shared/AppToasts';
 
 function readServerFromSourceArgs(source: BookSource): string | undefined {
@@ -57,7 +63,9 @@ function looksLikeParagraphReviewHtml(body: string): boolean {
 const LOG_TAG = '[para-review]';
 
 /**
- * 点击段评 SVG（showCmt）→ 拉取段评页并在 InnerWeb 打开（不走 Reader 段评抽屉）
+ * 点击段评 SVG（showCmt）→ 先开 InnerWeb 抽屉并显示占位，await 段评页请求后关闭占位
+ * - 纯 Web + Cookie：InnerWebPage 走 __reader_http 代理 doc
+ * - 无 Cookie / 代理不可用：预取 HTML + srcdoc
  */
 export async function openParagraphReviewFromClick(
   click: string,
@@ -72,17 +80,9 @@ export async function openParagraphReviewFromClick(
     return;
   }
 
-  console.log(LOG_TAG, 'parsed', {
-    reviewUrl: parsed.reviewUrl,
-    sources: parsed.sources,
-    ydv: parsed.ydv,
-    bookSource: source.bookSourceUrl,
-  });
-
   let absoluteUrl: string;
   try {
     absoluteUrl = resolveParagraphReviewUrl(parsed.reviewUrl, source);
-    console.log(LOG_TAG, 'absoluteUrl', absoluteUrl);
   } catch (e) {
     console.warn(LOG_TAG, 'resolve URL failed', e);
     showAppToast({
@@ -95,36 +95,50 @@ export async function openParagraphReviewFromClick(
   const cookies = getStoredSourceCookiesForUrl(source, absoluteUrl);
   const title = `${parsed.sources || '段评'}段评`;
   const headers = buildSourceRequestHeaders(source, absoluteUrl);
-  console.log(LOG_TAG, 'request', {
-    title,
-    hasCookie: Boolean(cookies?.trim()),
-    headerKeys: Object.keys(headers),
-  });
-
-  let html: string | undefined;
-  try {
-    const body = await get(absoluteUrl, { headers });
-    console.log(LOG_TAG, 'GET ok', { len: body.length, preview: body.slice(0, 120) });
-    if (looksLikeParagraphReviewHtml(body)) {
-      html = body;
-    }
-  } catch (e) {
-    console.warn(LOG_TAG, 'GET failed, open URL only', e);
-  }
+  const useDocumentProxy = shouldUseInnerWebDocumentProxy(absoluteUrl, cookies);
 
   try {
-    await openInnerWeb({
+    const opened = openInnerWeb({
       title,
       url: absoluteUrl,
-      html,
       cookieSyncUrl: absoluteUrl,
       initialCookies: cookies,
       bookSourceUrl: source.bookSourceUrl,
-      showConfirm: true,
+      presentation: createInnerWebPresentation(INNER_WEB_PRESETS.paragraphReview),
+      useProxyDocument: useDocumentProxy,
+      proxyForwardHeaders: useDocumentProxy ? headers : undefined,
+      loading: true,
     });
-    console.log(LOG_TAG, 'inner web opened');
+    if (!opened) {
+      showAppToast({ title: '打开段评页失败', variant: 'destructive' });
+      return;
+    }
   } catch (e) {
     console.error(LOG_TAG, 'open inner web failed', e);
     showAppToast({ title: '打开段评页失败', variant: 'destructive' });
+    return;
+  }
+
+  try {
+    const body = await get(absoluteUrl, { headers });
+    console.log(LOG_TAG, 'GET ok', { len: body.length, preview: body.slice(0, 120) });
+    const patch: {
+      loading: false;
+      html?: string;
+      useProxyDocument?: false;
+    } = { loading: false };
+    if (!useDocumentProxy) {
+      patch.useProxyDocument = false;
+      if (looksLikeParagraphReviewHtml(body)) {
+        patch.html = injectInnerWebBaseTag(body, absoluteUrl);
+      }
+    }
+    if (!updateInnerWebPayload(patch)) {
+      console.warn(LOG_TAG, 'updateInnerWebPayload failed');
+    }
+  } catch (e) {
+    console.warn(LOG_TAG, 'GET failed', e);
+    updateInnerWebPayload({ loading: false, useProxyDocument: false });
+    showAppToast({ title: '加载段评失败', variant: 'destructive' });
   }
 }

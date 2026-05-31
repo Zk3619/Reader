@@ -72,21 +72,17 @@ export function getLegadoSourceKey(source: BookSource): string {
   return String(src.bookSourceUrl ?? source.sourceUrl ?? '').trim();
 }
 
-/** @deprecated 命名历史原因；请使用 getLegadoSourceKey */
-export function getSourceUrlIdentifier(source: BookSource): string {
-  return getLegadoSourceKey(source);
-}
 
 export function getSourceArgsKey(source: BookSource): string {
-  return storageKey(STORAGE_PREFIX_ARGS, getSourceUrlIdentifier(source));
+  return storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source));
 }
 
 export function getSourceCookiesKey(source: BookSource): string {
-  return storageKey(STORAGE_PREFIX_COOKIES, getSourceUrlIdentifier(source));
+  return storageKey(STORAGE_PREFIX_COOKIES, getLegadoSourceKey(source));
 }
 
 export function getSourceLoginKey(source: BookSource): string {
-  return storageKey(STORAGE_PREFIX_LOGIN, getSourceUrlIdentifier(source));
+  return storageKey(STORAGE_PREFIX_LOGIN, getLegadoSourceKey(source));
 }
 
 /** 读取书源登录表单 JSON（供 getLoginInfoMap） */
