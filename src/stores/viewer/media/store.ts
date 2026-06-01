@@ -147,6 +147,12 @@ export const viewerStore = {
     ) {
       await deleteCachedChapter(state.book.bookUrl, idx);
     }
+    if (state.kind === MediaKind.video) {
+      const { invalidateCurrentVideoChapterCache } = await import(
+        '@/stores/viewer/media/video'
+      );
+      invalidateCurrentVideoChapterCache();
+    }
     await viewerStore.loadChapter(idx, { forceRefresh: true });
   },
 

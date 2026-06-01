@@ -10,9 +10,9 @@ export type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
 export interface MediaViewerShellProps {
   children: JSX.Element;
   class?: string;
-  /** 顶栏显隐；不传则 Shell 内部管理（点击主区可切换�?*/
+  /** 顶栏显隐；不传则 Shell 内部管理（点击主区可切换）*/
   headerVisible?: boolean;
-  /** 底栏显隐；不传则与顶栏一�?*/
+  /** 底栏显隐；不传则与顶栏一致 */
   footerVisible?: boolean;
   onHeaderVisibleChange?: (visible: boolean) => void;
   /** 点击 MediaViewerShellMain 切换 overlay 顶底栏；文本阅读器请设为 false */

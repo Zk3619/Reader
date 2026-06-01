@@ -1,9 +1,11 @@
 /**
- * Audio Viewer：章�?raw �?音频 URL
+ * Audio Viewer：章节 raw → 解析 URL → 代理/可播放地址
  */
 
+import * as sourcesDb from '@/lib/database/sources';
 import { MediaKind } from '@/lib/book-source/book-type';
-import { parsePrimaryMediaUrl } from '@/lib/media/parse-media-urls';
+import { parseParsedAudioUrls } from '@/lib/media/audio/parsed-audio-url';
+import { resolveAudioPlaybackList } from '@/lib/media/audio/resolve-audio-playback';
 import {
   dispatchMediaTextFallback,
   ReaderMediaMessages,
@@ -16,50 +18,96 @@ import {
 } from '@/stores/viewer/media/chapter';
 import type { Book, BookChapter } from '@/types';
 
+let playbackRevoke: (() => void) | null = null;
+
+export function revokeAudioPlaybackUrls(): void {
+  playbackRevoke?.();
+  playbackRevoke = null;
+}
+
 export function setAudioBookInitialState(book: Book): void {
   setMediaBookInitialState(book, MediaKind.audio);
 }
 
-export function applyAudioFromRaw(
+export async function applyAudioFromRaw(
   raw: string,
   chapterIndex: number,
-  _chapter?: BookChapter,
+  chapter?: BookChapter,
   options?: { allowTextFallback?: boolean },
-): void {
+): Promise<void> {
   const allowTextFallback = options?.allowTextFallback === true;
-  const primary = parsePrimaryMediaUrl(raw, MediaKind.audio);
-  if (primary) {
-    setState({
-      rawContent: raw,
-      mediaUrls: [primary],
-      primaryUrl: primary,
-      error: null,
-    });
-    return;
-  }
-  if (!raw.trim()) {
+  const parsed = parseParsedAudioUrls(raw);
+
+  if (parsed.length === 0) {
+    revokeAudioPlaybackUrls();
+    if (import.meta.env.DEV && raw.trim()) {
+      console.warn('[audio] 正文未解析出 URL，前 200 字:', raw.trim().slice(0, 200));
+    }
+    if (!raw.trim()) {
+      setState({
+        rawContent: raw,
+        mediaUrls: [],
+        primaryUrl: null,
+        error: ReaderMediaMessages.emptyContent,
+      });
+      return;
+    }
     setState({
       rawContent: raw,
       mediaUrls: [],
       primaryUrl: null,
-      error: ReaderMediaMessages.emptyContent,
+      error: raw.trim().startsWith('@js:')
+        ? '音频地址需由书源规则解析，当前未得到有效播放链接'
+        : '未识别到可播放的音频地址',
+    });
+    if (allowTextFallback && state.book) {
+      dispatchMediaTextFallback({
+        bookUrl: state.book.bookUrl,
+        chapterIndex,
+        fromKind: MediaKind.audio,
+      });
+    }
+    return;
+  }
+
+  const book = state.book;
+  const source =
+    book?.origin && book.origin !== 'local'
+      ? await sourcesDb.getSource(book.origin)
+      : undefined;
+
+  revokeAudioPlaybackUrls();
+  const { urls, revokeAll } = await resolveAudioPlaybackList(parsed, {
+    source: source ?? undefined,
+    chapter,
+    book: book ?? undefined,
+  });
+  playbackRevoke = revokeAll;
+
+  if (urls.length === 0) {
+    setState({
+      rawContent: raw,
+      mediaUrls: [],
+      primaryUrl: null,
+      error: '音频已解析但拉流失败（CDN 403 或网络错误），请刷新或重新登录书源',
     });
     return;
   }
-  setState({
-    rawContent: raw,
-    mediaUrls: [],
-    primaryUrl: null,
-    error: null,
-    loading: false,
-  });
-  if (allowTextFallback && state.book) {
-    dispatchMediaTextFallback({
-      bookUrl: state.book.bookUrl,
-      chapterIndex,
-      fromKind: MediaKind.audio,
+
+  if (import.meta.env.DEV) {
+    console.log('[audio] 可播放地址', {
+      count: urls.length,
+      first: urls[0]?.slice(0, 48),
+      blob: urls[0]?.startsWith('blob:'),
     });
   }
+
+  setState({
+    rawContent: raw,
+    mediaUrls: urls,
+    primaryUrl: urls[0] ?? null,
+    error: null,
+  });
 }
 
 export async function loadAudioChapter(

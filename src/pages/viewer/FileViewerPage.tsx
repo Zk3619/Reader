@@ -132,7 +132,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
             />
           </MediaViewerHeader>
 
-          <MediaViewerFooter placement="overlay">
+          <MediaViewerFooter placement="overlay" collapseTarget="bottom-bar">
             <MediaViewerChapterNavFooter
               chapterIndex={chapterIndex()}
               catalogLength={catalog().length}

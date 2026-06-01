@@ -26,7 +26,7 @@ export type ApplyMediaFromRawFn = (
   chapterIndex: number,
   chapter: BookChapter | undefined,
   options: { allowTextFallback: boolean },
-) => void;
+) => void | Promise<void>;
 
 let chapterLoadSeq = 0;
 let allowMediaTextFallback = false;
@@ -34,6 +34,9 @@ let allowMediaTextFallback = false;
 export function resetMediaChapterSession(): void {
   chapterLoadSeq = 0;
   allowMediaTextFallback = false;
+  void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrls());
+  void import('@/stores/viewer/media/video').then((m) => m.revokeVideoPlaybackUrls());
+  void import('@/lib/media/video/video-chapter-cache').then((m) => m.clearVideoChapterCache());
 }
 
 export function beginMediaChapterSession(): void {
@@ -200,7 +203,7 @@ export async function loadMediaChapterWithApply(
       options?.forceRefresh === true,
     );
     if (seq !== chapterLoadSeq) return;
-    applyFromRaw(raw, index, chapter, { allowTextFallback });
+    await applyFromRaw(raw, index, chapter, { allowTextFallback });
     if (seq !== chapterLoadSeq) return;
     setState({ loading: false });
     allowMediaTextFallback = false;

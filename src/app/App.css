@@ -192,14 +192,12 @@
     }
   }
 
-  /* 阅读器顶栏/底栏显隐动画 */
-  --reader-bar-duration: 0.25s;
+  /* 阅读器顶栏/底栏显隐动画（顶栏与底栏统一时长） */
+  --reader-bar-duration: 0.28s;
   --reader-bar-easing: cubic-bezier(0, 0, 0.58, 1);
   --reader-bar-transition: var(--reader-bar-duration) var(--reader-bar-easing);
   --reader-top-bar-height: 3.5rem;
   --reader-footer-max-height: 20rem;
-  --reader-footer-duration: 0.5s;
-  --reader-footer-hide-duration: 0.18s;
   /** 与 ::-webkit-scrollbar 宽高一致，供横滚区块轴预留 */
   --reader-scrollbar-size: 16px;
 }
@@ -531,9 +529,9 @@
   max-height: var(--reader-footer-max-height);
   overflow: hidden;
   transition:
-    max-height var(--reader-footer-duration) var(--reader-bar-easing),
-    padding var(--reader-footer-duration) var(--reader-bar-easing),
-    border-width var(--reader-footer-duration) var(--reader-bar-easing);
+    max-height var(--reader-bar-duration) var(--reader-bar-easing),
+    padding var(--reader-bar-duration) var(--reader-bar-easing),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing);
 }
 
 .reader-footer.reader-bar-hidden {
@@ -543,7 +541,6 @@
   padding-bottom: 0;
   border-top-width: 0;
   pointer-events: none;
-  transition-duration: var(--reader-footer-hide-duration);
 }
 
 .reader-bottom-bar,
@@ -551,9 +548,9 @@
   min-height: 0;
   overflow: hidden;
   transition:
-    max-height var(--reader-footer-hide-duration) var(--reader-bar-easing),
-    padding var(--reader-footer-hide-duration) var(--reader-bar-easing),
-    border-width var(--reader-footer-hide-duration) var(--reader-bar-easing);
+    max-height var(--reader-bar-duration) var(--reader-bar-easing),
+    padding var(--reader-bar-duration) var(--reader-bar-easing),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing);
 }
 
 .reader-bottom-bar.reader-bar-hidden,

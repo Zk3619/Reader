@@ -1,0 +1,56 @@
+/* Reader 视频阅读器 — ArtPlayer 主题覆写（影院暗色 + 紫琥珀强调） */
+
+.reader-artplayer-stage .art-video-player {
+  --art-theme: #a78bfa;
+  --art-hover-color: #c4b5fd;
+  --art-loaded-color: rgba(167, 139, 250, 0.28);
+  --art-progress-color: #a78bfa;
+  --art-hover-bg-color: rgba(15, 23, 42, 0.72);
+  --art-control-height: 46px;
+  --art-bottom-height: 52px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.reader-artplayer-stage .art-video-player .art-bottom {
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.88) 0%,
+    rgba(0, 0, 0, 0.45) 55%,
+    transparent 100%
+  ) !important;
+}
+
+.reader-artplayer-stage .art-video-player .art-control-progress-inner {
+  background: linear-gradient(90deg, #7c3aed 0%, #a78bfa 45%, #f59e0b 100%) !important;
+}
+
+.reader-artplayer-stage .art-video-player .art-progress-loaded {
+  background: rgba(196, 181, 253, 0.35) !important;
+}
+
+.reader-artplayer-stage .art-video-player .art-control-volume-inner {
+  background: linear-gradient(180deg, #f59e0b 0%, #a78bfa 100%) !important;
+}
+
+.reader-artplayer-stage .art-video-player .art-state {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.reader-artplayer-stage .art-video-player .art-notice {
+  border-radius: 0.5rem;
+  background: rgba(15, 23, 42, 0.85) !important;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+
+.reader-artplayer-stage .art-danmuku {
+  pointer-events: none;
+}
+
+.reader-artplayer-stage .art-danmuku-emitter {
+  border-radius: 9999px !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  background: rgba(15, 23, 42, 0.75) !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}

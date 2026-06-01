@@ -49,6 +49,7 @@ import {
 } from '@/lib/media/text/reader-bookmark';
 import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
+import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
 import { isMobile } from '@/lib/platform/detect';
 import { isLocalBook } from '@/lib/local-book';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -611,10 +612,7 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const onContentClick = (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('.reader-legado-cmt-img, [data-legado-cmt], .reader-comment-bubble')) {
-      return;
-    }
+    if (isMediaViewerInteractiveClick(e.target)) return;
     const t = e.currentTarget as HTMLElement;
     const rect = t.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
@@ -633,41 +631,16 @@ export function BookReader(props: BookReaderProps) {
 
   return (
     <>
-    <MediaViewerShell
-      tapToToggleBars={false}
-      headerVisible={topBarVisible()}
-      onHeaderVisibleChange={setTopBarVisible}
-      footerVisible={statusBarVisible() || operationBarVisible()}
-    >
-      <MediaViewerShellMain tapToToggleBars={false}>
-        <Show
-          when={isWideScreen() && (commentsOpen() || panelClosing())}
-          fallback={
-            <div
-              ref={(el) => {
-                if (el) scrollContainer = el;
-              }}
-              class="reader-text-scroll absolute inset-0 overflow-y-auto"
-              onPointerDown={onContentPointerDown}
-              onPointerMove={onContentPointerMove}
-              onClick={onContentClick}
-            >
-              <Index each={[contentEnterKey()]}>
-                {() => (
-                  <ReaderContent
-                    class={cn('min-h-full', contentTransitionClass())}
-                    onOpenComments={openComments}
-                    getSegmentCommentCount={getSegmentCommentCount}
-                    applyReadWidth={() => false}
-                    dualPage={dualPageActive()}
-                  />
-                )}
-              </Index>
-            </div>
-          }
-        >
-          <div class="flex min-h-0 flex-1">
-            <div class="relative min-w-0 flex-1 overflow-hidden">
+      <MediaViewerShell
+        tapToToggleBars={false}
+        headerVisible={topBarVisible()}
+        onHeaderVisibleChange={setTopBarVisible}
+        footerVisible={statusBarVisible() || operationBarVisible()}
+      >
+        <MediaViewerShellMain tapToToggleBars={false}>
+          <Show
+            when={isWideScreen() && (commentsOpen() || panelClosing())}
+            fallback={
               <div
                 ref={(el) => {
                   if (el) scrollContainer = el;
@@ -689,85 +662,110 @@ export function BookReader(props: BookReaderProps) {
                   )}
                 </Index>
               </div>
-            </div>
-            <div
-              class={cn(
-                'reader-comments-panel flex shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background transition-[width] duration-300 ease-out',
-                (panelEntering() || panelClosing()) ? 'w-0 border-l-0' : 'w-80'
-              )}
-              onTransitionEnd={handleCommentsPanelTransitionEnd}
-            >
-              <div class="flex h-full min-w-80 flex-col">
-                <ReaderCommentsDrawer
-                  segment={commentsSegment()}
-                  onClose={handleCloseComments}
-                  embedded
-                />
+            }
+          >
+            <div class="flex min-h-0 flex-1">
+              <div class="relative min-w-0 flex-1 overflow-hidden">
+                <div
+                  ref={(el) => {
+                    if (el) scrollContainer = el;
+                  }}
+                  class="reader-text-scroll absolute inset-0 overflow-y-auto"
+                  onPointerDown={onContentPointerDown}
+                  onPointerMove={onContentPointerMove}
+                  onClick={onContentClick}
+                >
+                  <Index each={[contentEnterKey()]}>
+                    {() => (
+                      <ReaderContent
+                        class={cn('min-h-full', contentTransitionClass())}
+                        onOpenComments={openComments}
+                        getSegmentCommentCount={getSegmentCommentCount}
+                        applyReadWidth={() => false}
+                        dualPage={dualPageActive()}
+                      />
+                    )}
+                  </Index>
+                </div>
+              </div>
+              <div
+                class={cn(
+                  'reader-comments-panel flex shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background transition-[width] duration-300 ease-out',
+                  (panelEntering() || panelClosing()) ? 'w-0 border-l-0' : 'w-80'
+                )}
+                onTransitionEnd={handleCommentsPanelTransitionEnd}
+              >
+                <div class="flex h-full min-w-80 flex-col">
+                  <ReaderCommentsDrawer
+                    segment={commentsSegment()}
+                    onClose={handleCloseComments}
+                    embedded
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        </Show>
+          </Show>
 
-        <MediaViewerHeader placement="overlay" visible={topBarVisible()}>
-          <TextViewerToolbarHeader
-            bookName={book()?.name ?? ''}
-            onClose={props.onClose}
-            onOpenBookInfo={props.onOpenBookInfo}
-            isWideScreen={isWideScreen()}
-            readAloudActive={readAloudActive()}
-            isDark={isDark()}
-            onToggleTheme={toggleTheme}
-            onOpenCatalog={() => setCatalogOpen(true)}
-            onReadAloud={handleReadAloud}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
-            onChangeSource={() => {
-              const b = book();
-              if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
-                showAppToast({
-                  title: '无法换源',
-                  description: textViewerStore.isGuestReading()
-                    ? '试读请先加入书架'
-                    : '本地书不支持换源',
-                });
-                return;
-              }
-              setChangeSourceOpen(true);
-            }}
-            onRefreshChapter={() => {
-              void textViewerStore.refreshChapter().catch(() => undefined);
-            }}
-            onOpenOfflineCache={openOfflineCacheDialog}
-            onOpenMoreMenu={() => setMoreMenuOpen(true)}
-          />
-        </MediaViewerHeader>
+          <MediaViewerHeader placement="overlay" visible={topBarVisible()}>
+            <TextViewerToolbarHeader
+              bookName={book()?.name ?? ''}
+              onClose={props.onClose}
+              onOpenBookInfo={props.onOpenBookInfo}
+              isWideScreen={isWideScreen()}
+              readAloudActive={readAloudActive()}
+              isDark={isDark()}
+              onToggleTheme={toggleTheme}
+              onOpenCatalog={() => setCatalogOpen(true)}
+              onReadAloud={handleReadAloud}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+              onChangeSource={() => {
+                const b = book();
+                if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
+                  showAppToast({
+                    title: '无法换源',
+                    description: textViewerStore.isGuestReading()
+                      ? '试读请先加入书架'
+                      : '本地书不支持换源',
+                  });
+                  return;
+                }
+                setChangeSourceOpen(true);
+              }}
+              onRefreshChapter={() => {
+                void textViewerStore.refreshChapter().catch(() => undefined);
+              }}
+              onOpenOfflineCache={openOfflineCacheDialog}
+              onOpenMoreMenu={() => setMoreMenuOpen(true)}
+            />
+          </MediaViewerHeader>
 
-        <MediaViewerFooter
-          placement="overlay"
-          visible={statusBarVisible() || operationBarVisible()}
-        >
-          <TextViewerChromeFooter
-            isWideScreen={isWideScreen()}
-            statusBarVisible={statusBarVisible()}
-            operationBarVisible={operationBarVisible()}
-            bottomBarThemeClasses={bottomBarThemeClasses()}
-            chapterTitle={currentChapter()?.title ?? ''}
-            chapterWordCountText={chapterWordCountText()}
-            chapterProgressPercent={chapterProgressPercent()}
-            bookProgressPercent={bookProgressPercent()}
-            chapterPos={chapterPos()}
-            onChapterProgressChange={handleChapterProgressChange}
-            onPrevChapter={handlePrev}
-            onNextChapter={handleNext}
-            onOpenCatalog={() => setCatalogOpen(true)}
-            onReadAloud={handleReadAloud}
-            readAloudActive={readAloudActive()}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
-          />
-        </MediaViewerFooter>
-      </MediaViewerShellMain>
-    </MediaViewerShell>
+          <MediaViewerFooter
+            placement="overlay"
+            visible={statusBarVisible() || operationBarVisible()}
+          >
+            <TextViewerChromeFooter
+              isWideScreen={isWideScreen()}
+              statusBarVisible={statusBarVisible()}
+              operationBarVisible={operationBarVisible()}
+              bottomBarThemeClasses={bottomBarThemeClasses()}
+              chapterTitle={currentChapter()?.title ?? ''}
+              chapterWordCountText={chapterWordCountText()}
+              chapterProgressPercent={chapterProgressPercent()}
+              bookProgressPercent={bookProgressPercent()}
+              chapterPos={chapterPos()}
+              onChapterProgressChange={handleChapterProgressChange}
+              onPrevChapter={handlePrev}
+              onNextChapter={handleNext}
+              onOpenCatalog={() => setCatalogOpen(true)}
+              onReadAloud={handleReadAloud}
+              readAloudActive={readAloudActive()}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+            />
+          </MediaViewerFooter>
+        </MediaViewerShellMain>
+      </MediaViewerShell>
 
       {/* 窄屏段评 Drawer */}
       <Show when={!isWideScreen()}>

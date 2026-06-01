@@ -1,42 +1,68 @@
+import { splitProps } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 
 export interface MediaViewerChapterNavFooterProps {
   chapterIndex: number;
   catalogLength: number;
   loading?: boolean;
-  /** 中间附加信息（如漫画页码�?*/
+  /** 中间附加信息（如漫画页码）*/
   center?: import('solid-js').JSX.Element;
+  /** 不传 overlay 时跟 MediaViewerShell footerVisible */
+  visible?: boolean;
   onPrev: () => void;
   onNext: () => void;
 }
 
-/** 媒体阅读器通用章节切换底栏 */
+/** 媒体阅读器通用章节切换底栏（显隐动画与文本 reader-bottom-bar 一致） */
 export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterProps) {
+  const [local] = splitProps(props, [
+    'chapterIndex',
+    'catalogLength',
+    'loading',
+    'center',
+    'visible',
+    'onPrev',
+    'onNext',
+  ]);
+  const shell = useMediaViewerShellOptional();
+  const visible = () => {
+    if (local.visible !== undefined) return local.visible;
+    if (shell) return shell.footerVisible();
+    return true;
+  };
+
   return (
-    <div class="reader-bottom-bar flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom">
+    <div
+      class={cn(
+        'reader-bottom-bar flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom',
+        !visible() && 'reader-bar-hidden',
+      )}
+    >
       <Button
         variant="outline"
         size="sm"
-        disabled={props.chapterIndex <= 0 || props.loading}
-        onClick={props.onPrev}
+        disabled={local.chapterIndex <= 0 || local.loading}
+        onClick={local.onPrev}
       >
-        上一�?
+        上一章
       </Button>
       <div class="flex min-w-0 flex-col items-center gap-0.5 text-center">
         <span class="text-xs text-muted-foreground">
-          {props.catalogLength > 0
-            ? `${props.chapterIndex + 1} / ${props.catalogLength} 章`
+          {local.catalogLength > 0
+            ? `${local.chapterIndex + 1} / ${local.catalogLength} 章`
             : ''}
         </span>
-        {props.center}
+        {local.center}
       </div>
       <Button
         variant="outline"
         size="sm"
-        disabled={props.chapterIndex >= props.catalogLength - 1 || props.loading}
-        onClick={props.onNext}
+        disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
+        onClick={local.onNext}
       >
-        下一�?
+        下一章
       </Button>
     </div>
   );

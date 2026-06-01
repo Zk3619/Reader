@@ -15,6 +15,14 @@ export interface ReadConfig {
   useReplaceRule?: boolean;
   /** 本地书自定义目录正则（legado 风格），如 "^\s*第[一二三四五六七八九十百千\\d]+章\\s*.*$" */
   tocRule?: string;
+  /** 音频片头跳过秒数（Legado openCredits） */
+  openCredits?: number;
+  /** 音频片尾跳过秒数（Legado closeCredits） */
+  closeCredits?: number;
+  /** 音频播放模式 0–3（Legado playMode） */
+  playMode?: number;
+  /** 音频播放速度（Legado playSpeed） */
+  playSpeed?: number;
   /** 其他阅读配置... */
   [key: string]: unknown;
 }
