@@ -335,7 +335,16 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     loadSources();
   });
 
+  let sourcesRefreshFromSelf = false;
+
+  function notifySourcesRefresh() {
+    sourcesRefreshFromSelf = true;
+    window.dispatchEvent(new CustomEvent('sources-refresh'));
+    sourcesRefreshFromSelf = false;
+  }
+
   const handler = () => {
+    if (sourcesRefreshFromSelf) return;
     loadGroups();
     loadSources();
   };
@@ -418,6 +427,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       enabled: listSortableEnabled,
       ids: sortableSourceIds,
       onReorder: handleSourcesReorder,
+      persistOnly: true,
     };
   });
 
@@ -426,14 +436,19 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       for (let i = 0; i < orderedIds.length; i++) {
         await sourcesDb.updateSourceOrder(String(orderedIds[i]), i);
       }
-      window.dispatchEvent(new CustomEvent('sources-refresh'));
-      await loadSources();
+      const byUrl = new Map(sources().map((s) => [s.sourceUrl, s]));
+      for (let i = 0; i < orderedIds.length; i++) {
+        const source = byUrl.get(String(orderedIds[i]));
+        if (source) source.customOrder = i;
+      }
+      notifySourcesRefresh();
     } catch (e) {
       showAppToast({
         title: '排序失败',
         description: e instanceof Error ? e.message : '请稍后重试',
         variant: 'destructive',
       });
+      await loadSources();
     }
   }
 
@@ -500,7 +515,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
   }
 
   function handleGroupModeChange(mode: SourceManageGroupMode) {
-    setGroupMode((prev) => (prev === mode ? 'flat' : mode));
+    setGroupMode(mode);
   }
 
   async function handlePinSource(source: BookSource) {

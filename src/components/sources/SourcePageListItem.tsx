@@ -1,8 +1,9 @@
 /**
- * 书源页列表行：点击打开发现 Drawer，无拖拽/多选。
+ * 书源页列表行：点击打开发现 Drawer；拖拽排序结束后抑制误触点击。
  */
 
 import { Show } from 'solid-js';
+import { useSuppressClickAfterDrag } from '@/components/shared/virtual-list/use-suppress-click-after-drag';
 import type { BookSource } from '@/types';
 import { cn } from '@/lib/utils';
 import {
@@ -101,6 +102,10 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
   let triggerEl: HTMLDivElement | null = null;
   const { onPointerDown, onPointerMove, onPointerUp, shouldPreventClick } =
     useLongPressContextMenu(() => triggerEl);
+  const shouldPreventClickAfterDrag = useSuppressClickAfterDrag();
+
+  const shouldBlockRowClick = () =>
+    shouldPreventClick() || shouldPreventClickAfterDrag();
 
   return (
     <div class="box-border h-full pb-2">
@@ -123,7 +128,7 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
               props.expanded && 'bg-accent/20',
             )}
             onClick={(e: MouseEvent) => {
-              if (shouldPreventClick()) {
+              if (shouldBlockRowClick()) {
                 e.preventDefault();
                 e.stopPropagation();
                 return;

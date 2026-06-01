@@ -141,7 +141,16 @@ export function SourcesPage(props: SourcesPageProps) {
     loadSources();
   });
 
+  let sourcesRefreshFromSelf = false;
+
+  function notifySourcesRefresh() {
+    sourcesRefreshFromSelf = true;
+    window.dispatchEvent(new CustomEvent('sources-refresh'));
+    sourcesRefreshFromSelf = false;
+  }
+
   const handler = () => {
+    if (sourcesRefreshFromSelf) return;
     loadGroups();
     loadSources();
   };
@@ -239,6 +248,7 @@ export function SourcesPage(props: SourcesPageProps) {
       enabled: listSortableEnabled,
       ids: () => filteredSources().map((s) => s.sourceUrl),
       onReorder: handleSourcesReorder,
+      persistOnly: true,
     };
   });
 
@@ -247,14 +257,19 @@ export function SourcesPage(props: SourcesPageProps) {
       for (let i = 0; i < orderedIds.length; i++) {
         await sourcesDb.updateSourceOrder(String(orderedIds[i]), i);
       }
-      window.dispatchEvent(new CustomEvent('sources-refresh'));
-      await loadSources();
+      const byUrl = new Map(sources().map((s) => [s.sourceUrl, s]));
+      for (let i = 0; i < orderedIds.length; i++) {
+        const source = byUrl.get(String(orderedIds[i]));
+        if (source) source.customOrder = i;
+      }
+      notifySourcesRefresh();
     } catch (e) {
       showAppToast({
         title: '排序失败',
         description: e instanceof Error ? e.message : '请稍后重试',
         variant: 'destructive',
       });
+      await loadSources();
     }
   }
 

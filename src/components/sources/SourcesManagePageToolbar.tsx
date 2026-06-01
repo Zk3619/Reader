@@ -6,12 +6,12 @@ import { createSignal, createEffect, onMount, Show } from 'solid-js';
 import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
   AppDropdownMenuIconTrigger,
   AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import {
@@ -171,6 +171,10 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
         options={props.sortOptions}
         onSortModeChange={props.onSortModeChange}
         onSortReverseChange={props.onSortReverseChange}
+        groupMode={props.groupMode}
+        onGroupModeChange={props.onGroupModeChange}
+        enableDragSort={props.enableDragSort}
+        onEnableDragSortChange={props.onEnableDragSortChange}
       />
 
       <Tooltip>
@@ -231,39 +235,7 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
             <FolderTreeIcon class="h-4 w-4" />
             <span>分组管理</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => props.onGroupModeChange('by-group')}
-            class="flex items-center gap-2"
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox
-                checked={props.groupMode === 'by-group'}
-                aria-label="按书源分组显示"
-              />
-            </span>
-            <span>按书源分组显示</span>
-          </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => props.onGroupModeChange('by-domain')}
-            class="flex items-center gap-2"
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox
-                checked={props.groupMode === 'by-domain'}
-                aria-label="按域名分组显示"
-              />
-            </span>
-            <span>按域名分组显示</span>
-          </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
-            class="flex items-center gap-2"
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
-            </span>
-            <span>拖拽排序</span>
-          </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
           <AppDropdownMenuItem
             onSelect={() => props.onSourceSearchModeChange?.('name')}
             class="flex items-center gap-2"

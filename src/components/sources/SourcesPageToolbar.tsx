@@ -11,9 +11,9 @@ import {
   AppDropdownMenuContent,
   AppDropdownMenuIconTrigger,
   AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   SearchIcon,
   MoreIcon,
@@ -139,6 +139,11 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
         options={SOURCE_PAGE_SORT_OPTIONS}
         onSortModeChange={(mode) => props.onSortModeChange?.(mode)}
         onSortReverseChange={(reverse) => props.onSortReverseChange?.(reverse)}
+        showGroupByGroupNameOption={props.showGroupByGroupNameOption}
+        sourcesGroupByGroupName={props.sourcesGroupByGroupName}
+        onSourcesGroupByGroupNameChange={props.onSourcesGroupByGroupNameChange}
+        enableDragSort={props.enableDragSort}
+        onEnableDragSortChange={props.onEnableDragSortChange}
       />
 
       <Tooltip>
@@ -175,28 +180,7 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             <Settings2Icon class="h-4 w-4" />
             <span>书源管理</span>
           </AppDropdownMenuItem>
-          <Show when={props.showGroupByGroupNameOption}>
-            <AppDropdownMenuItem
-              onSelect={() =>
-                props.onSourcesGroupByGroupNameChange?.(!props.sourcesGroupByGroupName)
-              }
-              class="flex items-center gap-2"
-            >
-              <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-                <Checkbox checked={!!props.sourcesGroupByGroupName} aria-label="按分组名显示" />
-              </span>
-              <span>按分组名显示</span>
-            </AppDropdownMenuItem>
-          </Show>
-          <AppDropdownMenuItem
-            onSelect={() => props.onEnableDragSortChange?.(!props.enableDragSort)}
-            class="flex items-center gap-2"
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox checked={!!props.enableDragSort} aria-label="拖拽排序" />
-            </span>
-            <span>拖拽排序</span>
-          </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
           <AppDropdownMenuItem
             onSelect={() => props.onSourceSearchModeChange?.('name')}
             class="flex items-center gap-2"
