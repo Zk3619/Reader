@@ -152,6 +152,23 @@ export function isUserApiPost(resolvedUrl: string, method: string): boolean {
   return method.toUpperCase() === 'POST' && /\/user_api\b/.test(resolvedUrl);
 }
 
+/** 内嵌 WebView √ 同步时尝试读取的 URL 键（页 URL、去末段路径、origin） */
+export function legadoInnerWebCookieSyncUrls(pageUrl: string): string[] {
+  const u = pageUrl.trim();
+  if (!u.startsWith('http')) return [];
+  const out = new Set<string>([u]);
+  try {
+    out.add(new URL(u).origin);
+  } catch {
+    /* ignore */
+  }
+  const parent = u.replace(/\/[^/]+\/?$/, '');
+  if (parent.startsWith('http') && parent !== u) {
+    out.add(parent.replace(/\/$/, '') || parent);
+  }
+  return [...out];
+}
+
 /** WebView 读出 `a=1;b=2` → 书源 applyCookieSettings 使用的 `; ` 分隔 */
 export function normalizeControlSettingsCookieHeader(raw: string): string {
   return String(raw ?? '')

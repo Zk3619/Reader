@@ -7,7 +7,10 @@ import { isTauri } from '@/lib/platform/detect';
 import {
   readInnerWebProxySessionCookies,
 } from '@/lib/http/inner-web-proxy-session';
-import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import {
+  legadoInnerWebCookieSyncUrls,
+  mergeLegadoCookieHeaderStrings,
+} from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { readSourceCookieStore } from '@/lib/js-engine/legado/login-script-runner';
 import {
   getLegadoSourceKey,
@@ -15,6 +18,7 @@ import {
   STORAGE_PREFIX_COOKIES,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { getActiveWebProxySessionId } from '@/lib/platform/inner-web';
+import { getInnerWebCookiesUseMainWebview } from '@/lib/platform/inner-web-cookie-webview';
 
 function writeSourceCookieStore(source: BookSource, store: Map<string, string>): void {
   const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, getLegadoSourceKey(source));
@@ -49,11 +53,15 @@ function mergeHeaderIntoStore(
 async function readTauriJar(
   command: string,
   url: string,
+  useMainWebview = false,
 ): Promise<string> {
   if (!isTauri() || !url.startsWith('http')) return '';
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    const jar = await invoke<string>(command, { url });
+    const jar = await invoke<string>(command, {
+      url,
+      ...(useMainWebview ? { useMainWebview: true } : {}),
+    });
     return jar?.trim() ?? '';
   } catch {
     return '';
@@ -75,11 +83,15 @@ export async function pullSourceCookiesIntoStore(
   }
 
   if (isTauri()) {
-    const jars = await Promise.all([
+    const useMain = getInnerWebCookiesUseMainWebview();
+    const jobs: Promise<string>[] = [
       readTauriJar('get_backstage_webview_cookies_for_url', pageUrl),
-      readTauriJar('get_inner_web_panel_cookies_for_url', pageUrl),
-      readTauriJar('get_webview_cookies_for_url', pageUrl),
-    ]);
+    ];
+    if (!useMain) {
+      jobs.push(readTauriJar('get_inner_web_panel_cookies_for_url', pageUrl));
+    }
+    jobs.push(readTauriJar('get_webview_cookies_for_url', pageUrl, useMain));
+    const jars = await Promise.all(jobs);
     for (const jar of jars) {
       if (jar) mergeHeaderIntoStore(store, pageUrl, sourceUrl, jar);
     }
@@ -116,10 +128,31 @@ export async function pushSourceCookiesToWebviews(
   }
 
   try {
-    await invoke('set_cookies_for_inner_web', { url: pageUrl, cookies: merged });
+    const useMain = getInnerWebCookiesUseMainWebview();
+    await invoke('set_cookies_for_inner_web', {
+      url: pageUrl,
+      cookies: merged,
+      ...(useMain ? { useMainWebview: true } : {}),
+    });
   } catch (e) {
     console.warn('[source-cookie-pool] 推送 inner-web Cookie 失败', e);
   }
+}
+
+/** 将 √ 后合并好的 Cookie 头写入书源表（多 URL 键，供 applyCookieSettings / HTTP 读取） */
+export function persistSourceCookieHeaderForPage(
+  source: BookSource,
+  pageUrl: string,
+  cookieHeader: string,
+): void {
+  const trimmed = cookieHeader.trim();
+  if (!trimmed) return;
+  const store = readSourceCookieStore(source);
+  const sourceUrl = source.sourceUrl ?? '';
+  for (const target of legadoInnerWebCookieSyncUrls(pageUrl)) {
+    mergeHeaderIntoStore(store, target, sourceUrl, trimmed);
+  }
+  writeSourceCookieStore(source, store);
 }
 
 /** 双向合并：拉取各端 → 写表 → 推回各 WebView */

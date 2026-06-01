@@ -146,25 +146,51 @@ function createBrowserCookieSyncGuard(baseUrl: string): BrowserCookieSyncGuard {
 }
 
 function syncWebViewCookiesToStore(
-  store: { setCookie: (url: string, value: string) => void },
+  store: {
+    getCookie: (url: string) => string;
+    setCookie: (url: string, value: string) => void;
+    _store?: Map<string, string>;
+  },
   baseUrl: string,
   resolved: string,
   cookies: string,
   guard?: BrowserCookieSyncGuard
 ): void {
-  const trimmed = normalizeControlSettingsCookieHeader(cookies.trim());
-  if (!trimmed) return;
-  try {
-    store.setCookie(new URL(resolved).origin, trimmed);
-  } catch {
-    /* ignore */
+  const incoming = normalizeControlSettingsCookieHeader(cookies.trim());
+  if (!incoming) {
+    console.warn(LOG_TAG, '内嵌页 √ 未读到设置 Cookie，保留脚本表原值', {
+      resolved: resolved.slice(0, 80),
+    });
+    return;
   }
-  store.setCookie(resolved, trimmed);
-  const controlBase = resolved.replace(/\/control\/?$/i, '');
-  if (controlBase && controlBase !== resolved) {
-    store.setCookie(controlBase, trimmed);
+  if (!isAuthOnlyLegadoCookieHeader(incoming)) {
+    console.warn(LOG_TAG, '内嵌页 √ 同步 WebView Cookie（含非登录键）', {
+      resolved: resolved.slice(0, 80),
+      preview: incoming.replace(/qttoken=([^;]+)/i, 'qttoken=***').slice(0, 160),
+    });
   }
-  if (baseUrl) store.setCookie(baseUrl, trimmed);
+
+  if (store._store instanceof Map) {
+    mergePlainCookieHeaderIntoStore(store._store, resolved, incoming, baseUrl);
+  } else {
+    const targets = new Set<string>([resolved]);
+    const controlBase = resolved.replace(/\/control\/?$/i, '');
+    if (controlBase && controlBase !== resolved) targets.add(controlBase);
+    try {
+      targets.add(new URL(resolved).origin);
+    } catch {
+      /* ignore */
+    }
+    if (baseUrl?.trim()) targets.add(baseUrl.trim());
+
+    for (const target of targets) {
+      const existing = getScriptCookieForUrl(store, target, baseUrl);
+      const merged = existing
+        ? mergeLegadoCookieHeaderStrings(existing, incoming)
+        : incoming;
+      store.setCookie(target, merged);
+    }
+  }
   guard?.recordSync(resolved);
 }
 
@@ -177,32 +203,54 @@ function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
   return baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
 }
 
-function getScriptCookieForUrl(
-  cookieObj: { getCookie: (url: string) => string },
+/** 从脚本 Cookie 表按 URL 回退读取（勿经 cookieObj.getCookie，避免与 getScriptCookieForUrl 互调） */
+function getCookieFromStore(
+  store: Map<string, string>,
   resolved: string,
   baseUrl: string,
-  options?: { omitBaseUrlFallback?: boolean }
+  options?: { omitBaseUrlFallback?: boolean },
 ): string {
+  const read = (u: string) => (u?.trim() ? store.get(u.trim()) ?? '' : '');
   const controlBase = resolved.replace(/\/control\/?$/i, '');
   let cookieStr =
-    cookieObj.getCookie(resolved) ||
-    (controlBase && controlBase !== resolved ? cookieObj.getCookie(controlBase) : '');
+    read(resolved) ||
+    (controlBase && controlBase !== resolved ? read(controlBase) : '');
   if (!cookieStr && !options?.omitBaseUrlFallback && baseUrl) {
-    cookieStr = cookieObj.getCookie(baseUrl);
+    cookieStr = read(baseUrl);
+  }
+  if (
+    !cookieStr &&
+    resolved.startsWith('http') &&
+    !/\/control\/?$/i.test(resolved)
+  ) {
+    const withControl = `${resolved.replace(/\/+$/, '')}/control`;
+    cookieStr = read(withControl);
   }
   if (!cookieStr && resolved.startsWith('http')) {
     try {
       const u = new URL(resolved);
       cookieStr =
-        cookieObj.getCookie(u.origin) ||
-        cookieObj.getCookie(u.hostname) ||
-        cookieObj.getCookie(`https://${u.hostname}`) ||
+        read(u.origin) ||
+        read(u.hostname) ||
+        read(`https://${u.hostname}`) ||
         '';
     } catch {
       /* ignore */
     }
   }
   return cookieStr;
+}
+
+function getScriptCookieForUrl(
+  cookieObj: { getCookie: (url: string) => string; _store?: Map<string, string> },
+  resolved: string,
+  baseUrl: string,
+  options?: { omitBaseUrlFallback?: boolean },
+): string {
+  if (cookieObj._store instanceof Map) {
+    return getCookieFromStore(cookieObj._store, resolved, baseUrl, options);
+  }
+  return cookieObj.getCookie(resolved) || '';
 }
 
 /** 与书源脚本 cookie 表一致（键可为 origin 或 fanqienovel.com 等裸 host） */
@@ -319,10 +367,10 @@ function cookiesForInnerWeb(
   resolved: string,
   baseUrl: string
 ): string {
-  return normalizeLegadoCookieHeader(
-    getScriptCookieForUrl(cookieObj, resolved, baseUrl),
-    getOrCreateAndroidId()
-  );
+  const raw = getScriptCookieForUrl(cookieObj, resolved, baseUrl).trim();
+  if (!raw) return '';
+  if (isPlainCookieHeader(raw)) return raw;
+  return normalizeLegadoCookieHeader(raw, getOrCreateAndroidId());
 }
 
 /** 是否可在应用内打开（http(s) 或 data:，用于 startBrowser） */
@@ -437,13 +485,16 @@ export function getStoredSourceCookiesForUrl(
   } catch {
     /* ignore */
   }
-  const cookieObj = { getCookie: (url: string) => store.get(url) ?? '' };
   const baseUrl = getScriptBaseUrl(source);
   const resolved =
     baseUrl && !targetUrl.trim().startsWith('data:')
       ? resolveUrl(baseUrl, targetUrl.trim())
       : targetUrl.trim();
-  const raw = getScriptCookieForUrl(cookieObj, resolved, baseUrl, options);
+  const raw = getCookieFromStore(store, resolved, baseUrl, options);
+  if (!raw.trim()) return '';
+  if (isPlainCookieHeader(raw) && !isAuthOnlyLegadoCookieHeader(raw)) {
+    return normalizeControlSettingsCookieHeader(raw);
+  }
   return normalizeLegadoCookieHeader(raw, resolveLegadoDeviceId(raw, source));
 }
 
@@ -581,7 +632,146 @@ function sanitizeLegadoCookieValue(value: string, deviceId: string): string {
   if (!trimmed) return '';
   const token = extractQttokenKey(trimmed);
   if (!token) return '';
+  if (isPlainCookieHeader(trimmed) && !isAuthOnlyLegadoCookieHeader(trimmed)) {
+    const authPart = formatLegadoQttokenCookie(trimmed, deviceId);
+    if (!authPart) return '';
+    const settingsParts: string[] = [];
+    for (const [key, val] of parseCookieHeaderPartsLocal(trimmed)) {
+      const lk = key.toLowerCase();
+      if (lk !== 'qttoken' && lk !== 'deviceid' && lk !== 'device') {
+        settingsParts.push(`${key}=${val}`);
+      }
+    }
+    const settingsStr = settingsParts.join('; ');
+    return settingsStr
+      ? mergeLegadoCookieHeaderStrings(authPart, settingsStr)
+      : authPart;
+  }
   return formatLegadoQttokenCookie(trimmed, deviceId);
+}
+
+function persistScriptCookieStoreToLocal(
+  cookieStore: Map<string, string>,
+  cookiesKey: string,
+): void {
+  try {
+    const obj: Record<string, string> = {};
+    cookieStore.forEach((v, k) => {
+      obj[k] = v;
+    });
+    if (Object.keys(obj).length > 0) {
+      localStorage.setItem(cookiesKey, JSON.stringify(obj));
+    }
+  } catch (e) {
+    console.warn(LOG_TAG, 'persist cookies failed', e);
+  }
+}
+
+/** @internal compat tests */
+export function sanitizeLegadoCookieValueForStore(
+  value: string,
+  deviceId: string,
+): string {
+  return sanitizeLegadoCookieValue(value, deviceId);
+}
+
+function parseCookieHeaderPartsLocal(cookieStr: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const part of String(cookieStr ?? '').split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());
+  }
+  return map;
+}
+
+/** Legado 登录态 Cookie 通常仅 qttoken / deviceId（对齐 CookieStore 单键登录与书源设置多键并存） */
+function isAuthOnlyLegadoCookieHeader(cookieStr: string): boolean {
+  const map = parseCookieHeaderPartsLocal(cookieStr);
+  if (map.size === 0) return true;
+  for (const key of map.keys()) {
+    const lk = key.toLowerCase();
+    if (lk !== 'qttoken' && lk !== 'deviceid' && lk !== 'device') return false;
+  }
+  return true;
+}
+
+/**
+ * 书源脚本 objectToCookieString / WebView 读出的多键 `name=value; …` 串。
+ * 含 qttoken 时若还有其它键，仍按整段合并（勿走 propagate 仅写 token）。
+ */
+function isPlainCookieHeader(value: string): boolean {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return false;
+  if (!/=/.test(trimmed)) return false;
+  return !extractQttokenKey(trimmed) || !isAuthOnlyLegadoCookieHeader(trimmed);
+}
+
+function mergePlainCookieHeaderIntoStore(
+  store: Map<string, string>,
+  targetUrl: string,
+  cookieHeader: string,
+  baseUrl?: string,
+): void {
+  const incoming = normalizeControlSettingsCookieHeader(cookieHeader);
+  if (!incoming) return;
+  const targets = new Set<string>();
+  const k = targetUrl.trim();
+  if (!k) return;
+  targets.add(k);
+  const controlBase = k.replace(/\/control\/?$/i, '');
+  if (controlBase && controlBase !== k) targets.add(controlBase);
+  try {
+    targets.add(new URL(k.includes('://') ? k : `https://${k}`).origin);
+  } catch {
+    /* ignore */
+  }
+  if (baseUrl?.trim()) targets.add(baseUrl.trim());
+
+  for (const t of targets) {
+    const existing = getCookieFromStore(store, t, baseUrl ?? '');
+    store.set(
+      t,
+      existing ? mergeLegadoCookieHeaderStrings(existing, incoming) : incoming,
+    );
+  }
+}
+
+function setCookieInScriptStore(
+  store: Map<string, string>,
+  url: string,
+  value: string,
+  baseUrl: string,
+  guard?: BrowserCookieSyncGuard,
+): void {
+  if (guard?.shouldSkipOverwrite(url)) {
+    console.warn(LOG_TAG, '跳过 setCookie（control 重放阶段，避免 getVariable 旧值覆盖内嵌页同步结果）', {
+      url: (url || baseUrl).slice(0, 80),
+    });
+    return;
+  }
+  const k = url || baseUrl;
+  const raw = String(value ?? '').trim();
+  if (!raw) return;
+
+  if (isPlainCookieHeader(raw)) {
+    mergePlainCookieHeaderIntoStore(store, k, raw, baseUrl);
+  }
+
+  const cleaned = sanitizeLegadoCookieValue(raw, getOrCreateAndroidId());
+  if (cleaned) {
+    if (isAuthOnlyLegadoCookieHeader(raw)) {
+      propagateLegadoCookieToStore(store, k, cleaned, baseUrl);
+    } else {
+      mergePlainCookieHeaderIntoStore(store, k, cleaned, baseUrl);
+    }
+    return;
+  }
+  if (isPlainCookieHeader(raw)) return;
+
+  console.warn(LOG_TAG, 'skip setCookie: invalid qttoken', {
+    url: k.slice(0, 80),
+  });
 }
 
 export function legadoCookieGetKey(
@@ -1007,23 +1197,10 @@ async function tryRunLoginScriptQuickJS(
   const cookieObj = {
     _store: cookieStore,
     getCookie(url: string): string {
-      return this._store.get(url || baseUrl) ?? '';
+      return getCookieFromStore(this._store, url || baseUrl, baseUrl);
     },
     setCookie(url: string, value: string): void {
-      if (browserCookieGuard.shouldSkipOverwrite(url)) {
-        console.warn(LOG_TAG, 'skip setCookie after startBrowserAwait sync', {
-          url: (url || baseUrl).slice(0, 80),
-        });
-        return;
-      }
-      const cleaned = sanitizeLegadoCookieValue(value, getOrCreateAndroidId());
-      if (!cleaned) {
-        console.warn(LOG_TAG, 'skip setCookie: invalid qttoken', {
-          url: (url || baseUrl).slice(0, 80),
-        });
-        return;
-      }
-      propagateLegadoCookieToStore(this._store, url || baseUrl, cleaned, baseUrl);
+      setCookieInScriptStore(this._store, url, value, baseUrl, browserCookieGuard);
     },
     removeCookie(url: string): void {
       removeCookiesForUrlInStore(this._store, url || baseUrl, baseUrl);
@@ -1031,7 +1208,7 @@ async function tryRunLoginScriptQuickJS(
     getKey(cookieStrOrUrl: string, keyName?: string): string {
       return legadoCookieGetKey(
         this._store,
-        (u) => this.getCookie(u),
+        (u) => getCookieFromStore(this._store, u, baseUrl),
         cookieStrOrUrl,
         keyName,
       );
@@ -1267,7 +1444,11 @@ async function tryRunLoginScriptQuickJS(
               ...innerWebPoolOpts(source),
             })
               .then((r) => {
-                if (r.confirmed && r.cookies) {
+                console.warn(LOG_TAG, 'startBrowserAwait 已关闭', {
+                  confirmed: r.confirmed,
+                  cookieLen: (r.cookies ?? '').length,
+                });
+                if (r.confirmed && r.cookies?.trim()) {
                   syncWebViewCookiesToStore(
                     cookieObj,
                     baseUrl,
@@ -1275,6 +1456,9 @@ async function tryRunLoginScriptQuickJS(
                     r.cookies,
                     browserCookieGuard
                   );
+                  persistScriptCookieStoreToLocal(cookieStore, cookiesKey);
+                } else if (r.confirmed) {
+                  console.warn(LOG_TAG, 'startBrowserAwait √ 但 cookies 为空，未写入脚本表');
                 }
                 return '';
               })
@@ -1491,27 +1675,19 @@ export async function runLoginScript(
   const cookieObj = {
     _store: cookieStore,
     getCookie(url: string): string {
-      const k = url || baseUrl;
-      return this._store.get(k) ?? '';
+      return getCookieFromStore(this._store, url || baseUrl, baseUrl);
     },
     setCookie(url: string, value: string): void {
-      if (browserCookieGuard.shouldSkipOverwrite(url)) {
-        console.warn(LOG_TAG, 'skip setCookie after startBrowserAwait sync', {
-          url: (url || baseUrl).slice(0, 80),
-        });
-        return;
-      }
       const k = url || baseUrl;
-      const cleaned = sanitizeLegadoCookieValue(value, getOrCreateAndroidId());
-      if (!cleaned) {
-        console.warn(LOG_TAG, 'skip setCookie: invalid qttoken', { key: k });
-        return;
+      const before = getCookieFromStore(this._store, k, baseUrl);
+      setCookieInScriptStore(this._store, url, value, baseUrl, browserCookieGuard);
+      const after = getCookieFromStore(this._store, k, baseUrl);
+      if (after && after !== before) {
+        console.warn(LOG_TAG, 'cookie.setCookie', {
+          key: k,
+          valuePreview: after.replace(/qttoken=([^;]+)/, 'qttoken=***').slice(0, 120),
+        });
       }
-      propagateLegadoCookieToStore(this._store, k, cleaned, baseUrl);
-      console.warn(LOG_TAG, 'cookie.setCookie', {
-        key: k,
-        valuePreview: cleaned.replace(/qttoken=([^;]+)/, 'qttoken=***').slice(0, 120),
-      });
     },
     removeCookie(url: string): void {
       removeCookiesForUrlInStore(this._store, url || baseUrl, baseUrl);
@@ -1520,7 +1696,7 @@ export async function runLoginScript(
     getKey(cookieStrOrUrl: string, keyName?: string): string {
       return legadoCookieGetKey(
         this._store,
-        (u) => this.getCookie(u),
+        (u) => getCookieFromStore(this._store, u, baseUrl),
         cookieStrOrUrl,
         keyName,
       );
@@ -1680,7 +1856,11 @@ export async function runLoginScript(
           ...innerWebPoolOpts(source),
         })
           .then((r) => {
-            if (r.confirmed && r.cookies) {
+            console.warn(LOG_TAG, 'startBrowserAwait 已关闭', {
+              confirmed: r.confirmed,
+              cookieLen: (r.cookies ?? '').length,
+            });
+            if (r.confirmed && r.cookies?.trim()) {
               syncWebViewCookiesToStore(
                 cookieObj,
                 baseUrl,
@@ -1688,8 +1868,10 @@ export async function runLoginScript(
                 r.cookies,
                 browserCookieGuard
               );
+              persistScriptCookieStoreToLocal(cookieStore, cookiesKey);
+            } else if (r.confirmed) {
+              console.warn(LOG_TAG, 'startBrowserAwait √ 但 cookies 为空，未写入脚本表');
             }
-            console.warn(LOG_TAG, 'startBrowserAwait 已关闭', { confirmed: r.confirmed });
             return '';
           })
           .catch((e) => {
