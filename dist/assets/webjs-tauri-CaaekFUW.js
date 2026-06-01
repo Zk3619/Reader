@@ -1,4 +1,4 @@
-import{i as c,a as s,q as o,t as u}from"./index-ChazQRJu.js";function _(e,r){const a=o(),i=u(e);return`
+import{i as c,a as s,q as o,t as u}from"./index-BJyKM90A.js";function _(e,r){const a=o(),i=u(e);return`
 (async function() {
   ${a.replace(/`/g,"\\`")}
   try {
