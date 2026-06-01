@@ -12,3 +12,21 @@ describe('shouldFetchCoverAsBlob', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('shouldFetchReaderInlineImageAsBlob', () => {
+  it('g-mh + Legado Referer 时正文图须可 blob 拉取', async () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'http://127.0.0.1:5173', href: 'http://127.0.0.1:5173/' },
+    });
+    const { shouldFetchReaderInlineImageAsBlob } = await import(
+      '@/lib/http/cover-image-loader'
+    );
+    const url =
+      'https://f40-1-4.g-mh.online/kk/moshirenhuangfanyouqinggeweinturuzuo-ir660596/1/MjFjOGExM2RfMV81_5.webp';
+    const headers = { Referer: 'https://manhuafree.com/', 'User-Agent': 'LegadoUA' };
+    expect(
+      shouldFetchReaderInlineImageAsBlob(url, { legadoImageHeaders: headers }),
+    ).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});

@@ -17,7 +17,7 @@ import {
   loadCoverImageObjectUrl,
   READER_INLINE_IMAGE_DEFAULT_RETRIES,
   READER_INLINE_IMAGE_RETRY_DELAY_MS,
-  shouldFetchCoverAsBlob,
+  shouldFetchReaderInlineImageAsBlob,
   shouldPreferDirectBrowserImage,
 } from '@/lib/http/cover-image-loader';
 import { resolveDirectBrowserImageReferrerPolicy } from '@/lib/http/cf-protected-cdn';
@@ -118,24 +118,26 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
 
   const usesBlobFetch = () => {
     const norm = normalizedSrc();
-    if (forceBlobFetch()) return Boolean(norm && !norm.startsWith('data:'));
-    return Boolean(norm && !norm.startsWith('data:') && shouldFetchCoverAsBlob(norm));
+    if (!norm || norm.startsWith('data:')) return false;
+    return shouldFetchReaderInlineImageAsBlob(norm, {
+      legadoImageHeaders: legadoImage().headers,
+      forceBlob: forceBlobFetch(),
+    });
   };
 
   const directImgSrc = () => {
     const norm = normalizedSrc();
     if (!norm || norm.startsWith('data:')) return norm || undefined;
     if (usesBlobFetch()) return undefined;
+    const proxiedOpts = {
+      referer: props.referer,
+      source: props.source,
+      legadoImageHeaders: legadoImage().headers,
+    };
     if (shouldPreferDirectBrowserImage(norm)) {
       return norm;
     }
-    return (
-      toProxiedImageUrl(norm, {
-        referer: props.referer,
-        source: props.source,
-        legadoImageHeaders: legadoImage().headers,
-      }) ?? norm
-    );
+    return toProxiedImageUrl(norm, proxiedOpts) ?? norm;
   };
 
   const imgReferrerPolicy = () =>
@@ -305,7 +307,11 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
             setStatusHint('');
           } else {
             setPhase('error');
-            setStatusHint(`加载失败，已自动重试 ${READER_INLINE_IMAGE_DEFAULT_RETRIES} 次`);
+            setStatusHint(
+              shouldPreferDirectBrowserImage(norm)
+                ? '图床在纯 Web 下无法加载（Cloudflare/防盗链）；请使用桌面版 Tauri 阅读'
+                : `加载失败，已自动重试 ${READER_INLINE_IMAGE_DEFAULT_RETRIES} 次`,
+            );
           }
         });
 

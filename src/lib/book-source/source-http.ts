@@ -353,9 +353,9 @@ export function buildLegadoContentApiRequestHeaders(
   if (fromScript) {
     const cookie = source
       ? normalizeLegadoCookieHeader(
-          fromScript,
-          resolveLegadoDeviceId(fromScript, source),
-        )
+        fromScript,
+        resolveLegadoDeviceId(fromScript, source),
+      )
       : fromScript;
     return formatLegadoRuleContentAjaxHeaders(cookie);
   }

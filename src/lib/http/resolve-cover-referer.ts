@@ -85,8 +85,36 @@ export function resolveProxiedImageReferer(
 
 export type ProxiedRefererAttempt = string | 'none';
 
-/** 403 时按序尝试：Legado Referer（含 Cookie 等透传）→ 图床同源 → 无 Referer */
+/** 403 时按序尝试 Referer；跨站 Legado Referer 常失败，先试图床同源 */
 export function buildProxiedImageRefererAttempts(
+  imageUrl: string,
+  legadoHeaders?: Record<string, string> | null,
+): ProxiedRefererAttempt[] {
+  const normalized = normalizeImageUrl(imageUrl);
+  const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
+  const attempts: ProxiedRefererAttempt[] = [];
+  const add = (v: ProxiedRefererAttempt) => {
+    if (!attempts.includes(v)) attempts.push(v);
+  };
+  let cdn: string | undefined;
+  try {
+    cdn = `${new URL(normalized).origin}/`;
+  } catch {
+    /* ignore */
+  }
+  if (legadoRef && isCrossOriginImageReferer(normalized, legadoRef)) {
+    if (cdn) add(cdn);
+    add(legadoRef);
+  } else {
+    if (legadoRef) add(legadoRef);
+    if (cdn && cdn !== legadoRef) add(cdn);
+  }
+  add('none');
+  return attempts;
+}
+
+/** 浏览器 fetch 可设 referrer：优先 Legado 指定 Referer，再图床同源 */
+export function buildBrowserImageRefererAttempts(
   imageUrl: string,
   legadoHeaders?: Record<string, string> | null,
 ): ProxiedRefererAttempt[] {
@@ -313,6 +341,15 @@ export function resolveCoverRequestHeaders(
       delete headers.referer;
       delete headers.REFERER;
       delete headers.Origin;
+    }
+    if (!headers.Referer && !headers.referer && !headers.REFERER) {
+      try {
+        const cdnOrigin = `${new URL(normalizedCover).origin}/`;
+        headers.Referer = cdnOrigin;
+        headers.Origin = new URL(normalizedCover).origin;
+      } catch {
+        /* ignore */
+      }
     }
   }
 

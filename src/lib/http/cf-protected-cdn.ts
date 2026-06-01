@@ -48,6 +48,89 @@ export function resolveDirectBrowserImageReferrerPolicy(
   return 'no-referrer';
 }
 
+export type BrowserFetchedImageBytes = { bytes: ArrayBuffer; mime: string };
+
+/** CDN 防盗占位图常为极小 webp（真漫画页一般远大于此） */
+export function isLikelyMangaAntiHotlinkPlaceholder(
+  bytes: ArrayBuffer,
+  mime: string,
+): boolean {
+  const n = bytes.byteLength;
+  if (n === 0) return true;
+  const lower = mime.toLowerCase();
+  if (lower.includes('webp') || lower.includes('avif')) return n < 16_000;
+  if (lower.includes('png')) return n < 12_000;
+  if (lower.includes('jpeg') || lower.includes('jpg')) return n < 10_000;
+  return n < 10_000;
+}
+
+async function verifyBrowserFetchedImage(
+  bytes: ArrayBuffer,
+  mime: string,
+): Promise<boolean> {
+  if (isLikelyMangaAntiHotlinkPlaceholder(bytes, mime)) return false;
+  if (typeof createImageBitmap === 'undefined') return true;
+  try {
+    const blob = new Blob([bytes], { type: mime || 'image/webp' });
+    const bmp = await createImageBitmap(blob);
+    const ok = bmp.width >= 180 && bmp.height >= 180;
+    bmp.close();
+    return ok;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 纯 Web：用浏览器 fetch 拉图（TLS 指纹与 Legado 客户端更接近，可设 referrer）。
+ * Node __reader_http 代理易被 CF 403。
+ */
+export async function fetchImageBytesViaBrowser(
+  url: string,
+  refererOverride?: string | 'none',
+): Promise<BrowserFetchedImageBytes | null> {
+  if (typeof window === 'undefined' || isTauri()) return null;
+  const normalized = normalizeImageUrl(url);
+  if (!normalized || !/^https?:\/\//i.test(normalized)) return null;
+
+  const init: RequestInit = {
+    method: 'GET',
+    mode: 'cors',
+    credentials: 'omit',
+    cache: 'default',
+  };
+  if (refererOverride === 'none') {
+    init.referrerPolicy = 'no-referrer';
+  } else if (refererOverride?.trim()) {
+    init.referrer = refererOverride.trim();
+  }
+
+  try {
+    const response = await fetch(normalized, init);
+    if (!response.ok) return null;
+
+    const ct = (response.headers.get('content-type') ?? '').toLowerCase();
+    if (ct.includes('text/html')) {
+      try {
+        const text = await response.clone().text();
+        if (looksLikeCloudflareChallengeHtml(text)) return null;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    const buf = await response.arrayBuffer();
+    if (buf.byteLength === 0) return null;
+
+    const mime = ct.split(';')[0]?.trim() || 'image/jpeg';
+    if (!(await verifyBrowserFetchedImage(buf, mime))) return null;
+    return { bytes: buf, mime };
+  } catch {
+    return null;
+  }
+}
+
 /** 响应体是否为 Cloudflare 人机挑战页（非图片） */
 export function looksLikeCloudflareChallengeHtml(
   snippet: string,
