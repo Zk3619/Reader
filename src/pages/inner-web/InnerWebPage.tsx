@@ -1,24 +1,29 @@
 /**
  * 内嵌网页：专用工具栏 + 内容区
- * - Tauri 桌面 https：主窗口内子 WebView + 专用工具栏
- * - Tauri 桌面 data:/HTML：同上（navigation 使用 data:text/html;base64，并注入 yuedu 一键导入 IPC）
+ * - Tauri 桌面（panel / auto）：主窗口内子 WebView + 专用工具栏
+ * - Tauri 桌面（iframe 或 auto 回退）：iframe + ensure_inner_web_iframe_scripts 跨域 Cookie 桥
  * - 纯 Web / 移动端：https 或 data 仍用 iframe + postMessage 桥
  */
 
-import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import type { InnerWebPayload } from '@/lib/platform/inner-web';
 import {
   cancelInnerWebClose,
   confirmInnerWebClose,
   INNER_WEB_REFRESH_EVENT,
+  setInnerWebCookiesUseMainWebview,
   READER_BOOKSOURCE_IMPORT_NETWORK_EVENT,
   suppressLoginDialogDismiss,
   updateInnerWebPayload,
   type ReaderBooksourceImportNetworkDetail,
 } from '@/lib/platform/inner-web';
 import { startInnerWebBridge, stopInnerWebBridge } from '@/lib/platform/inner-web-bridge';
-import { useInnerWebIframe, useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
+import {
+  markInnerWebPanelSessionFallback,
+  useInnerWebIframe,
+  useInnerWebTauriPanel,
+} from '@/lib/platform/inner-web-mode';
 import {
   closeInnerWebTauriPanel,
   focusInnerWebTauriPanel,
@@ -39,7 +44,7 @@ import { isInnerWebPanelMaskVisible } from '@/lib/platform/inner-web-panel-overl
 import type { ResolvedInnerWebPresentation } from '@/lib/platform/inner-web-presentation';
 import {
   injectInnerWebBaseTag,
-  shouldPreferInnerWebUrlOverHtml,
+  shouldUseInnerWebSrcdoc,
 } from '@/lib/platform/inner-web-document-html';
 import { InnerWebHeader } from '@/components/inner-web/InnerWebHeader';
 import { useInnerWebDrawerClosing } from '@/components/inner-web/InnerWebDrawerShell';
@@ -69,7 +74,8 @@ function injectYueduBooksourceBridge(frame: HTMLIFrameElement): void {
 }
 
 export interface InnerWebPageProps {
-  payload: InnerWebPayload;
+  /** 关闭动画 / dismiss 期间可能短暂为 null */
+  payload: InnerWebPayload | null | undefined;
   /** 展示配置（drawer 时控制顶栏与高度） */
   resolved?: ResolvedInnerWebPresentation;
 }
@@ -85,34 +91,40 @@ function measureContentRect(el: HTMLElement): InnerWebPanelRect {
 }
 
 export function InnerWebPage(props: InnerWebPageProps) {
-  const payload = () => props.payload;
+  const payload = () => props.payload ?? null;
+  /** 挂载时的 payload，供 √ 确认与标题在 teardown 期间使用 */
   const snap = props.payload;
-  const panelMode = useInnerWebTauriPanel({ url: snap.url, html: snap.html });
-  const iframeMode = useInnerWebIframe({ url: snap.url, html: snap.html });
-  const pageUrl = () => payload().url?.trim() ?? '';
-  const initialCookies = () => payload().initialCookies?.trim() ?? '';
-  const isLoading = () => Boolean(payload().loading);
+  const content = () => {
+    const p = payload();
+    return { url: p?.url, html: p?.html };
+  };
+  const panelMode = createMemo(() => useInnerWebTauriPanel(content()));
+  const iframeMode = createMemo(() => useInnerWebIframe(content()));
+  const pageUrl = () => payload()?.url?.trim() ?? '';
+  const initialCookies = () => payload()?.initialCookies?.trim() ?? '';
+  const isLoading = () => Boolean(payload()?.loading);
   const [proxyFailed, setProxyFailed] = createSignal(false);
   const [iframeSrc, setIframeSrc] = createSignal<string | undefined>();
   const useHtmlContent = () => {
     const p = payload();
-    const html = p.html?.trim();
-    if (!html) return false;
-    // 段评等动态页：纯 Web 代理 doc 须保留 fetch 劫持，禁止切到 srcdoc
-    if (p.useProxyDocument && !proxyFailed()) return false;
-    return !shouldPreferInnerWebUrlOverHtml(p.url, p.html);
+    if (!p) return false;
+    return shouldUseInnerWebSrcdoc(pageUrl(), p.html, {
+      useProxyDocument: p.useProxyDocument,
+      proxyFailed: proxyFailed(),
+    });
   };
   /** 代理 doc 就绪前禁止回退到书源直连 URL */
   const iframeDocumentSrc = () => {
     const src = iframeSrc();
     if (src) return src;
     const p = payload();
-    if (p.useProxyDocument && !proxyFailed()) return undefined;
+    if (!p || (p.useProxyDocument && !proxyFailed())) return undefined;
     const url = pageUrl();
     return url.startsWith('http') ? url : undefined;
   };
   const embeddedHtml = () => {
     const p = payload();
+    if (!p) return '';
     const html = p.html?.trim() ?? '';
     if (!html) return '';
     return injectInnerWebBaseTag(html, pageUrl());
@@ -121,9 +133,9 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const drawerClosing = useInnerWebDrawerClosing();
   /** 代理 doc URL 尚未创建完成（勿因 html 回退缓存提前结束等待） */
   const waitingForProxySrc = () => {
-    if (!iframeMode) return false;
+    if (!iframeMode()) return false;
     const p = payload();
-    if (!p.useProxyDocument || proxyFailed()) return false;
+    if (!p || !p.useProxyDocument || proxyFailed()) return false;
     return !iframeSrc();
   };
   /** 加载遮罩（不阻止 iframe 挂载，避免 onLoad 无法触发） */
@@ -134,16 +146,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
   };
   /** iframe 可挂载：代理 URL 就绪，或 srcdoc，或无代理直连 */
   const canMountIframe = () => {
-    if (!iframeMode || drawerClosing()) return false;
+    if (!iframeMode() || drawerClosing()) return false;
     if (waitingForProxySrc()) return false;
     if (useHtmlContent()) return true;
     if (iframeDocumentSrc()) return true;
     return false;
   };
   const showConfirm = () =>
-    props.resolved ? props.resolved.header.showConfirm : Boolean(snap.showConfirm);
+    props.resolved ? props.resolved.header.showConfirm : Boolean(snap?.showConfirm);
   const showWindowControls = () =>
-    props.resolved ? props.resolved.header.showWindowControls : panelMode;
+    props.resolved ? props.resolved.header.showWindowControls : panelMode();
 
   const [confirmLoading, setConfirmLoading] = createSignal(false);
   const [iframeEl, setIframeEl] = createSignal<HTMLIFrameElement | undefined>();
@@ -154,11 +166,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
 
   /** srcdoc iframe：用于校验 yuedu:// postMessage 来源 */
   let yueduBridgeIframe: HTMLIFrameElement | undefined;
+  /** 合并短时间内的重复 sync（createEffect 与 payload 更新） */
+  let panelSyncInflight: Promise<void> | null = null;
+  let panelSyncKey = '';
+  let panelSyncGeneration = 0;
 
   createEffect(() => {
     const url = pageUrl();
-    if (!iframeMode || !url.startsWith('http') || proxyFailed() || iframeSrc()) return;
+    if (!iframeMode() || !url.startsWith('http') || proxyFailed() || iframeSrc()) return;
     const p = payload();
+    if (!p) return;
     const cookies = initialCookies();
     const wantProxy =
       Boolean(p.useProxyDocument) ||
@@ -200,31 +217,69 @@ export function InnerWebPage(props: InnerWebPageProps) {
     })();
   });
 
-  const syncTauriPanel = async (rect?: InnerWebPanelRect) => {
-    const el = contentEl();
-    if (!el || !panelMode) return;
-    const r = rect ?? measureContentRect(el);
-    const cookies = initialCookies();
-    try {
-      if (pageUrl().startsWith('http')) {
-        await openInnerWebTauriPanel({ url: pageUrl(), cookies, rect: r });
-      } else if (useHtmlContent()) {
-        await openInnerWebTauriPanel({ html: embeddedHtml(), cookies, rect: r });
-      } else {
-        return;
-      }
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          void focusInnerWebTauriPanel();
-        });
-      });
-    } catch (e) {
-      console.warn('[InnerWebPage] openInnerWebTauriPanel failed', e);
+  const fallbackPanelToIframe = (reason: unknown) => {
+    console.warn('[InnerWebPage] 原生内嵌 WebView 不可用，回退 iframe', reason);
+    markInnerWebPanelSessionFallback();
+    setInnerWebCookiesUseMainWebview(true);
+    panelSyncInflight = null;
+    panelSyncKey = '';
+    void closeInnerWebTauriPanel();
+    const url = pageUrl();
+    if (url.startsWith('http')) {
+      void startInnerWebBridge(url);
     }
   };
 
+  const syncTauriPanel = (rect?: InnerWebPanelRect) => {
+    const el = contentEl();
+    if (!el || !panelMode()) return;
+    const r = rect ?? measureContentRect(el);
+    const cookies = initialCookies();
+    const nav =
+      pageUrl().startsWith('http')
+        ? `url:${pageUrl()}`
+        : useHtmlContent()
+          ? `html:${embeddedHtml().length}`
+          : '';
+    if (!nav) return;
+    const key = `${nav}\0${cookies}\0${r.x},${r.y},${r.width},${r.height}`;
+    if (panelSyncInflight && panelSyncKey === key) {
+      return panelSyncInflight;
+    }
+    panelSyncKey = key;
+    const generation = ++panelSyncGeneration;
+
+    const job = (async () => {
+      try {
+        if (pageUrl().startsWith('http')) {
+          await openInnerWebTauriPanel({ url: pageUrl(), cookies, rect: r });
+        } else if (useHtmlContent()) {
+          await openInnerWebTauriPanel({ html: embeddedHtml(), cookies, rect: r });
+        } else {
+          return;
+        }
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            void focusInnerWebTauriPanel();
+          });
+        });
+      } catch (e) {
+        if (generation === panelSyncGeneration) {
+          fallbackPanelToIframe(e);
+        }
+      } finally {
+        if (generation === panelSyncGeneration) {
+          panelSyncInflight = null;
+        }
+      }
+    })();
+
+    panelSyncInflight = job;
+    return job;
+  };
+
   const handleRefresh = () => {
-    if (panelMode) {
+    if (panelMode()) {
       void reloadInnerWebTauriPanel();
       return;
     }
@@ -238,7 +293,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
         const proxyUrl = buildInnerWebDocumentProxyUrl(webProxySessionId, pageUrl());
         setIframeSrc(proxyUrl);
         el.src = proxyUrl;
-      } else if (snap.url) {
+      } else if (snap?.url) {
         el.src = snap.url;
       }
     })();
@@ -266,12 +321,18 @@ export function InnerWebPage(props: InnerWebPageProps) {
     };
     window.addEventListener('message', onYueduBooksourceImport);
 
-    if (iframeMode && pageUrl().startsWith('http')) {
-      void startInnerWebBridge(pageUrl());
+    if (iframeMode()) {
+      setInnerWebCookiesUseMainWebview(true);
+      void closeInnerWebTauriPanel();
+      if (pageUrl().startsWith('http')) {
+        void startInnerWebBridge(pageUrl());
+      }
+    } else {
+      setInnerWebCookiesUseMainWebview(false);
     }
 
     createEffect(() => {
-      if (!panelMode) return;
+      if (!panelMode()) return;
       const el = contentEl();
       if (!el) return;
       if (useHtmlContent() && isLoading()) return;
@@ -279,26 +340,26 @@ export function InnerWebPage(props: InnerWebPageProps) {
     });
 
     createEffect(() => {
-      if (!panelMode || !isDrawer() || !drawerClosing()) return;
+      if (!panelMode() || !isDrawer() || !drawerClosing()) return;
       void closeInnerWebTauriPanel();
     });
 
     createEffect(() => {
-      if (!proxyFailed() || !payload().html?.trim()) return;
-      if (payload().loading) {
+      const p = payload();
+      if (!proxyFailed() || !p?.html?.trim()) return;
+      if (p.loading) {
         updateInnerWebPayload({ loading: false });
       }
     });
 
-    if (panelMode) {
-      const attachPanel = () => {
+    if (panelMode()) {
+      const attachResizeObserver = () => {
         if (cancelled) return;
         const el = contentEl();
         if (!el) {
-          requestAnimationFrame(attachPanel);
+          requestAnimationFrame(attachResizeObserver);
           return;
         }
-        void syncTauriPanel();
         if (typeof ResizeObserver !== 'undefined') {
           resizeObserver = new ResizeObserver(() => {
             void repositionInnerWebTauriPanel(measureContentRect(el));
@@ -306,11 +367,13 @@ export function InnerWebPage(props: InnerWebPageProps) {
           resizeObserver.observe(el);
         }
       };
-      requestAnimationFrame(attachPanel);
+      requestAnimationFrame(attachResizeObserver);
     }
 
     onCleanup(() => {
       cancelled = true;
+      panelSyncInflight = null;
+      panelSyncKey = '';
       window.removeEventListener(INNER_WEB_REFRESH_EVENT, onRefreshKey);
       window.removeEventListener('message', onYueduBooksourceImport);
       resizeObserver?.disconnect();
@@ -322,7 +385,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
         setActiveWebProxySessionId(null);
         webProxySessionId = undefined;
       }
-      if (panelMode) {
+      if (panelMode()) {
         void closeInnerWebTauriPanel();
       }
     });
@@ -331,12 +394,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const reinjectCookies = async () => {
     const cookies = initialCookies();
     if (!pageUrl().startsWith('http') || !cookies || !isTauri()) return;
-    if (panelMode) {
+    if (panelMode()) {
       await syncTauriPanel();
       return;
     }
     try {
-      await invoke<string>('set_cookies_for_inner_web', { url: pageUrl(), cookies });
+      await invoke<string>('set_cookies_for_inner_web', {
+        url: pageUrl(),
+        cookies,
+        useMainWebview: true,
+      });
     } catch (e) {
       console.warn('[InnerWebPage] 重新注入 Cookie 失败', e);
     }
@@ -366,7 +433,8 @@ export function InnerWebPage(props: InnerWebPageProps) {
     suppressLoginDialogDismiss();
     setConfirmLoading(true);
     try {
-      await confirmInnerWebClose(snap.cookieSyncUrl, snap.bookSourceUrl);
+      const p = payload() ?? snap;
+      await confirmInnerWebClose(p?.cookieSyncUrl ?? p?.url, p?.bookSourceUrl);
     } finally {
       setConfirmLoading(false);
     }
@@ -381,7 +449,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
     >
       <div class="reader-inner-web-toolbar-host shrink-0">
         <InnerWebHeader
-          title={snap.title}
+          title={snap?.title ?? '内嵌网页'}
           onBack={handleBack}
           onConfirm={handleConfirm}
           onRefresh={handleRefresh}
@@ -389,8 +457,8 @@ export function InnerWebPage(props: InnerWebPageProps) {
           confirmLoading={confirmLoading()}
           showWindowControls={showWindowControls()}
           blurBeforeAction={false}
-          pageUrl={pageUrl() || snap.url}
-          cookieSyncUrl={snap.cookieSyncUrl}
+          pageUrl={pageUrl() || snap?.url}
+          cookieSyncUrl={snap?.cookieSyncUrl}
           class={cn(
             isDrawer() && 'reader-inner-web-header--embedded',
             props.resolved?.header.compact && 'reader-inner-web-header--compact',
@@ -415,7 +483,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
             <p class="text-sm text-muted-foreground">加载中…</p>
           </div>
         </Show>
-        <Show when={panelMode}>
+        <Show when={panelMode()}>
           <div
             class="absolute inset-0 bg-background"
             classList={{ 'bg-muted/30': isInnerWebPanelMaskVisible() }}
@@ -442,7 +510,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
                 <iframe
                   ref={setIframeEl}
                   class="reader-inner-web-iframe absolute inset-0 h-full w-full border-0 bg-background"
-                  title={snap.title}
+                  title={snap?.title ?? '内嵌网页'}
                   src={iframeDocumentSrc()}
                   allow="fullscreen"
                   referrerpolicy="no-referrer-when-downgrade"
@@ -454,7 +522,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
             <iframe
               ref={setIframeEl}
               class="reader-inner-web-iframe absolute inset-0 h-full w-full border-0 bg-background"
-              title={snap.title}
+              title={snap?.title ?? '内嵌网页'}
               srcdoc={embeddedHtml()}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
               onLoad={handleIframeLoad}

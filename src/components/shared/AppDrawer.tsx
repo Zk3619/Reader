@@ -34,6 +34,7 @@ import {
   AppDrawerOverlayLockContext,
   AppDrawerPortalMountContext,
   appDrawerBlocksOutsideDismiss,
+  preventCorvuOutsidePointerForAppToast,
   type AppDrawerOverlayLock,
 } from '@/components/shared/app-drawer-overlay-lock';
 import { appBlockDrag } from '@/lib/ui/viewport-classes';
@@ -54,6 +55,7 @@ export const AppDrawer: Component<AppDrawerProps> = (props) => {
     'closeOnOutsidePointer',
     'closeOnOutsideFocus',
     'children',
+    'onOutsidePointer',
   ]);
   const [overlayLockCount, setOverlayLockCount] = createSignal(0);
 
@@ -78,6 +80,10 @@ export const AppDrawer: Component<AppDrawerProps> = (props) => {
           local.closeOnOutsidePointer,
         )}
         closeOnOutsideFocus={local.closeOnOutsideFocus ?? false}
+        onOutsidePointer={(event) => {
+          preventCorvuOutsidePointerForAppToast(event);
+          local.onOutsidePointer?.(event);
+        }}
       >
         {local.children}
       </Drawer>

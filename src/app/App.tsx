@@ -78,6 +78,7 @@ import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
+import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderModeSetting";
 import { cn } from "@/lib/utils";
 import { mainShellInset, mainShellPageRoot, mainShellPageScroll } from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
@@ -2702,6 +2703,8 @@ function AppContent() {
                     </div>
 
                     <ShellLayoutSetting />
+
+                    <InnerWebRenderModeSetting />
 
                     {/* 减少动效 */}
                     <div class="rounded-2xl border border-border/50 bg-card p-6">

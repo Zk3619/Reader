@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
+import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
 import {
   clearFocusBeforeModal,
   prepareForAppDialogOpen,
@@ -123,8 +124,13 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
     'overlayClass',
     'layout',
     'onOpenAutoFocus',
+    'onPointerDownOutside',
+    'onInteractOutside',
   ]);
   const userOnOpenAutoFocus = () => (props as AppDialogContentProps<T>).onOpenAutoFocus;
+  const userOnPointerDownOutside = () =>
+    (props as AppDialogContentProps<T>).onPointerDownOutside;
+  const userOnInteractOutside = () => (props as AppDialogContentProps<T>).onInteractOutside;
   const layout = () => (props as AppDialogContentProps<T>).layout ?? 'app';
   const portalZ = () => (props as AppDialogContentProps<T>).portalZClass;
   const overlayCls = () => (props as AppDialogContentProps<T>).overlayClass;
@@ -140,6 +146,14 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
           releasePageFocus();
           const dialog = e.currentTarget as HTMLElement | undefined;
           dialog?.focus({ preventScroll: true });
+        }}
+        onPointerDownOutside={(e) => {
+          preventOverlayDismissForAppToast(e);
+          userOnPointerDownOutside()?.(e);
+        }}
+        onInteractOutside={(e) => {
+          preventOverlayDismissForAppToast(e);
+          userOnInteractOutside()?.(e);
         }}
         class={cn(
           APP_DIALOG_CONTENT_BASE_CLASS,

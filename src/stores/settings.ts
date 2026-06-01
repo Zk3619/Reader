@@ -11,6 +11,10 @@
 
 import { createStore } from 'solid-js/store';
 import type { ShellLayoutPreference } from '@/lib/shell/layout';
+import {
+  onInnerWebSessionEnded,
+  resetInnerWebPanelRuntimeAvailability,
+} from '@/lib/platform/inner-web-mode';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 /**
@@ -70,6 +74,11 @@ export interface AppSettings {
   tocPaginationMaxPages?: number;
   /** 书籍详情展示方式：独立全屏页或右侧抽屉 */
   bookInfoPresentation?: 'page' | 'drawer';
+  /**
+   * Tauri 桌面内嵌网页承载方式：原生子 WebView / iframe / 自动（panel 失败回退 iframe）
+   * 纯 Web 与移动端忽略此项。
+   */
+  innerWebRenderMode?: 'auto' | 'tauri-panel' | 'iframe';
 }
 
 /**
@@ -89,6 +98,7 @@ const defaultAppSettings: AppSettings = {
   tocPaginationSafetyEnabled: true,
   tocPaginationMaxPages: 80,
   bookInfoPresentation: 'page',
+  innerWebRenderMode: 'auto',
 };
 
 /**
@@ -304,6 +314,14 @@ export const settingsStore = {
     bookInfoPresentation: 'page' | 'drawer',
   ): Promise<void> {
     await this.updateAppSettings({ bookInfoPresentation });
+  },
+
+  async setInnerWebRenderMode(
+    innerWebRenderMode: 'auto' | 'tauri-panel' | 'iframe',
+  ): Promise<void> {
+    resetInnerWebPanelRuntimeAvailability();
+    onInnerWebSessionEnded();
+    await this.updateAppSettings({ innerWebRenderMode });
   },
 
   async setTocPaginationSafety(enabled: boolean, maxPages?: number): Promise<void> {

@@ -37,12 +37,17 @@ export function InnerWebHost(props: InnerWebHostProps) {
 
   const isDrawerLayout = () => hasContent() && resolved().layout === 'drawer';
 
+  const usesTauriPanel = createMemo(() => {
+    const p = props.payload;
+    return useInnerWebTauriPanel({ url: p?.url, html: p?.html });
+  });
+
   return (
     <>
       <Portal mount={document.body}>
         <InnerWebDrawerShell open={isDrawerLayout()} resolved={resolved()}>
           <Show when={isDrawerLayout()}>
-            <InnerWebPage payload={props.payload!} resolved={resolved()} />
+            <InnerWebPage payload={props.payload} resolved={resolved()} />
           </Show>
         </InnerWebDrawerShell>
       </Portal>
@@ -52,16 +57,13 @@ export function InnerWebHost(props: InnerWebHostProps) {
           <div
             class={cn(
               'reader-inner-web-layer fixed inset-0 flex flex-col bg-background',
-              useInnerWebTauriPanel({
-                url: props.payload?.url,
-                html: props.payload?.html,
-              }) && 'reader-inner-web-layer--panel',
+              usesTauriPanel() && 'reader-inner-web-layer--panel',
             )}
             role="dialog"
             aria-modal="true"
             aria-label={props.payload?.title ?? '内嵌网页'}
           >
-            <InnerWebPage payload={props.payload!} resolved={resolved()} />
+            <InnerWebPage payload={props.payload} resolved={resolved()} />
           </div>
         </Portal>
       </Show>

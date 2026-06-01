@@ -29,6 +29,16 @@ export function isAppFloatingOverlayTarget(target: EventTarget | null | undefine
   );
 }
 
+/** 是否点击在应用 Toast 层（`.reader-toast-host` / solid-sonner） */
+export function isAppToastTarget(target: EventTarget | null | undefined): boolean {
+  if (!(target instanceof Element)) return false;
+  return !!(
+    target.closest('.reader-toast-host') ||
+    target.closest('[data-sonner-toaster]') ||
+    target.closest('[data-sonner-toast]')
+  );
+}
+
 export function preventDrawerDismissForFloatingOverlay(event: {
   target?: EventTarget | null;
   detail?: { originalEvent?: Event };
@@ -36,6 +46,25 @@ export function preventDrawerDismissForFloatingOverlay(event: {
 }): void {
   const target = event.detail?.originalEvent?.target ?? event.target;
   if (isAppFloatingOverlayTarget(target)) {
+    event.preventDefault();
+  }
+}
+
+/** Kobalte Dialog：Toast 交互不应触发 outside dismiss */
+export function preventOverlayDismissForAppToast(event: {
+  target?: EventTarget | null;
+  detail?: { originalEvent?: Event };
+  preventDefault: () => void;
+}): void {
+  const target = event.detail?.originalEvent?.target ?? event.target;
+  if (isAppToastTarget(target)) {
+    event.preventDefault();
+  }
+}
+
+/** corvu Drawer / Dialog：Toast 交互不应触发 outside dismiss */
+export function preventCorvuOutsidePointerForAppToast(event: PointerEvent): void {
+  if (isAppToastTarget(event.target)) {
     event.preventDefault();
   }
 }
