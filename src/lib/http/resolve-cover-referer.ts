@@ -68,71 +68,91 @@ export function resolveInlineImageReferer(
   return legadoRef?.trim() || undefined;
 }
 
-/** Web 代理默认 Referer：优先 Legado 指定，否则图床同源 */
+/** Web 代理默认 Referer：Legado 指定 → 章节页 → 图床同源 */
 export function resolveProxiedImageReferer(
   imageUrl: string,
   legadoHeaders?: Record<string, string> | null,
+  pageReferer?: string | null,
 ): string | undefined {
   const normalized = normalizeImageUrl(imageUrl);
   const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
   if (legadoRef) return legadoRef;
+  const page = normalizeHttpReferer(pageReferer);
+  if (page) return page;
+  return cdnOriginReferer(normalized);
+}
+
+export type ProxiedRefererAttempt = string | 'none';
+
+/** 章节页 / 书籍 origin：Legado 图未带 Referer 时补全阅读页 referrer */
+export type ImageRefererFetchContext = {
+  pageReferer?: string | null;
+};
+
+export function normalizeHttpReferer(value?: string | null): string | undefined {
+  const t = value?.trim();
+  if (!t || !/^https?:\/\//i.test(t)) return undefined;
+  return t;
+}
+
+/** 正文图无 Legado Referer 时，用章节页 URL 补全（避免被剥成 CDN 同源后出防盗图） */
+export function enrichLegadoImageHeadersForFetch(
+  imageUrl: string,
+  legadoHeaders?: Record<string, string> | null,
+  pageReferer?: string | null,
+): Record<string, string> | null {
+  const page = normalizeHttpReferer(pageReferer);
+  const base = legadoHeaders ? { ...legadoHeaders } : page ? {} : null;
+  if (!base) return null;
+  if (!resolveInlineImageReferer(imageUrl, base) && page) {
+    base.Referer = page;
+  }
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+function cdnOriginReferer(imageUrl: string): string | undefined {
   try {
-    return `${new URL(normalized).origin}/`;
+    return `${new URL(normalizeImageUrl(imageUrl)).origin}/`;
   } catch {
     return undefined;
   }
 }
 
-export type ProxiedRefererAttempt = string | 'none';
-
-/** 403 时按序尝试 Referer；跨站 Legado Referer 常失败，先试图床同源 */
+/** 代理 / 浏览器按序尝试的 Referer（Legado 指定 → 章节页 → 图床同源） */
 export function buildProxiedImageRefererAttempts(
   imageUrl: string,
   legadoHeaders?: Record<string, string> | null,
+  ctx?: ImageRefererFetchContext,
 ): ProxiedRefererAttempt[] {
   const normalized = normalizeImageUrl(imageUrl);
   const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
+  const pageRef = normalizeHttpReferer(ctx?.pageReferer);
+  const cdn = cdnOriginReferer(normalized);
   const attempts: ProxiedRefererAttempt[] = [];
   const add = (v: ProxiedRefererAttempt) => {
     if (!attempts.includes(v)) attempts.push(v);
   };
-  let cdn: string | undefined;
-  try {
-    cdn = `${new URL(normalized).origin}/`;
-  } catch {
-    /* ignore */
-  }
-  if (legadoRef && isCrossOriginImageReferer(normalized, legadoRef)) {
-    if (cdn) add(cdn);
-    add(legadoRef);
-  } else {
-    if (legadoRef) add(legadoRef);
-    if (cdn && cdn !== legadoRef) add(cdn);
-  }
+
+  if (legadoRef) add(legadoRef);
+  if (pageRef && pageRef !== legadoRef) add(pageRef);
+  if (cdn && cdn !== legadoRef && cdn !== pageRef) add(cdn);
   add('none');
   return attempts;
 }
 
-/** 浏览器 fetch 可设 referrer：优先 Legado 指定 Referer，再图床同源 */
-export function buildBrowserImageRefererAttempts(
-  imageUrl: string,
+/** 有阅读页 / Legado Referer 时勿试 referer=none */
+export function filterProxiedImageRefererAttempts(
+  attempts: ProxiedRefererAttempt[],
   legadoHeaders?: Record<string, string> | null,
+  pageReferer?: string | null,
 ): ProxiedRefererAttempt[] {
-  const normalized = normalizeImageUrl(imageUrl);
-  const legadoRef = resolveInlineImageReferer(normalized, legadoHeaders);
-  const attempts: ProxiedRefererAttempt[] = [];
-  const add = (v: ProxiedRefererAttempt) => {
-    if (!attempts.includes(v)) attempts.push(v);
-  };
-  if (legadoRef) add(legadoRef);
-  try {
-    const cdn = `${new URL(normalized).origin}/`;
-    if (cdn !== legadoRef) add(cdn);
-  } catch {
-    /* ignore */
-  }
-  add('none');
-  return attempts;
+  const hasCustomRef = Boolean(
+    resolveInlineImageReferer('', legadoHeaders) ||
+      normalizeHttpReferer(pageReferer),
+  );
+  if (!hasCustomRef) return attempts;
+  const filtered = attempts.filter((a) => a !== 'none');
+  return filtered.length > 0 ? filtered : attempts;
 }
 
 function readSourceArgs(source: BookSource): Record<string, unknown> | undefined {
@@ -297,8 +317,12 @@ export function resolveCoverRequestHeaders(
   const normalizedCover = coverUrl?.trim()
     ? normalizeImageUrl(coverUrl)
     : '';
+  const explicitPageReferer = normalizeHttpReferer(bookOrigin);
 
   let referer = resolveCoverReferer(bookOrigin, source, normalizedCover || null);
+  if (explicitPageReferer && normalizedCover.startsWith('http')) {
+    referer = explicitPageReferer;
+  }
   if (headerReferer?.trim() && normalizedCover.startsWith('http')) {
     const h = hostnameOf(headerReferer.trim());
     const c = hostnameOf(normalizedCover);
@@ -335,20 +359,34 @@ export function resolveCoverRequestHeaders(
   }
 
   if (normalizedCover.startsWith('http') && !legadoReferer?.trim()) {
-    const ref = headers.Referer ?? headers.referer ?? headers.REFERER;
-    if (isCrossOriginImageReferer(normalizedCover, ref)) {
-      delete headers.Referer;
-      delete headers.referer;
-      delete headers.REFERER;
-      delete headers.Origin;
-    }
-    if (!headers.Referer && !headers.referer && !headers.REFERER) {
+    if (
+      explicitPageReferer &&
+      isCrossOriginImageReferer(normalizedCover, explicitPageReferer)
+    ) {
+      headers.Referer = explicitPageReferer;
       try {
-        const cdnOrigin = `${new URL(normalizedCover).origin}/`;
-        headers.Referer = cdnOrigin;
-        headers.Origin = new URL(normalizedCover).origin;
+        headers.Origin = new URL(explicitPageReferer).origin;
       } catch {
         /* ignore */
+      }
+    } else {
+      const ref = headers.Referer ?? headers.referer ?? headers.REFERER;
+      if (isCrossOriginImageReferer(normalizedCover, ref)) {
+        delete headers.Referer;
+        delete headers.referer;
+        delete headers.REFERER;
+        delete headers.Origin;
+      }
+      if (!headers.Referer && !headers.referer && !headers.REFERER) {
+        const cdnOrigin = cdnOriginReferer(normalizedCover);
+        if (cdnOrigin) {
+          headers.Referer = cdnOrigin;
+          try {
+            headers.Origin = new URL(normalizedCover).origin;
+          } catch {
+            /* ignore */
+          }
+        }
       }
     }
   }

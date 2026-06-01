@@ -66,6 +66,7 @@ export function toProxiedImageUrl(
     const proxiedReferer = resolveProxiedImageReferer(
       trimmed,
       options?.legadoImageHeaders,
+      options?.referer,
     );
     if (proxiedReferer) {
       params.set('referer', proxiedReferer);

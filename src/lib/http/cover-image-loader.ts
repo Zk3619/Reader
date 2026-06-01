@@ -27,18 +27,17 @@ import {
   WEB_PROXY_COOKIE_HEADER,
 } from '@/lib/http/web-http-proxy';
 import {
-  buildBrowserImageRefererAttempts,
   buildProxiedImageRefererAttempts,
   describeCoverRequestHeaders,
   normalizeImageUrl,
+  enrichLegadoImageHeadersForFetch,
+  filterProxiedImageRefererAttempts,
   resolveCoverRequestHeaders,
 } from '@/lib/http/resolve-cover-referer';
+import type { ImageRefererFetchContext } from '@/lib/http/resolve-cover-referer';
 import {
-  fetchImageBytesViaBrowser,
-  isCloudflareHeavyCdnUrl,
-  isLikelyMangaAntiHotlinkPlaceholder,
+  verifyFetchedImageBytes,
   looksLikeCloudflareChallengeHtml,
-  shouldPreferDirectBrowserImage,
 } from '@/lib/http/cf-protected-cdn';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
 import { withReaderInlineImageFetchSlot } from '@/lib/http/reader-inline-image-queue';
@@ -55,6 +54,7 @@ import {
 import type { BookSource } from '@/types';
 import type { CoverCacheMeta } from '@/lib/cover/cover-disk-cache';
 import { isCoverLoadScrollIdle } from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
+import { parseImgRefsFromHtml } from '@/lib/media/text/reader-content-blocks';
 
 /** Web 以内存为主；Tauri 列表滚动易触发 L1 淘汰后反复读盘（plugin-fs 桥接开销大） */
 const MAX_CACHE = isTauri() ? 2048 : 128;
@@ -275,29 +275,35 @@ export function hasLegadoImageFetchHeaders(
   );
 }
 
-/** 正文/漫画插图是否经 fetch→blob（含 CF 图床 + Legado headers 场景） */
+/** 正文/漫画插图是否经 fetch→blob（跨域须走 __reader_http 携带 Legado 头） */
 export function shouldFetchReaderInlineImageAsBlob(
   url: string,
   options?: {
     legadoImageHeaders?: Record<string, string> | null;
-    /** 用户重试或直连被拒后的 blob 拉取 */
     forceBlob?: boolean;
   },
 ): boolean {
   const normalized = normalizeImageUrl(url);
   if (!normalized || normalized.startsWith('data:')) return false;
   if (options?.forceBlob) return true;
-  if (shouldFetchCoverAsBlob(normalized)) return true;
-  return (
-    shouldPreferDirectBrowserImage(normalized) &&
-    hasLegadoImageFetchHeaders(options?.legadoImageHeaders)
-  );
+  return shouldFetchCoverAsBlob(normalized);
 }
 
 export function shouldFetchCoverAsBlob(url: string): boolean {
   if (isLikelyUnresolvedRuleResult(url)) return false;
-  if (shouldPreferDirectBrowserImage(url)) return false;
   return isCrossOriginCoverUrl(url);
+}
+
+/** 纯 Web：跨域且带 Legado 头的正文图须代理（浏览器无法伪造阅读页 Referer） */
+export function needsWebProxiedLegadoImage(
+  normalized: string,
+  legadoImageHeaders?: Record<string, string> | null,
+): boolean {
+  return (
+    !isTauri() &&
+    isCrossOriginCoverUrl(normalized) &&
+    hasLegadoImageFetchHeaders(legadoImageHeaders)
+  );
 }
 
 export type CoverImagePeekOptions = Pick<
@@ -364,8 +370,6 @@ async function readCoverFromDiskDeduped(bookUrl: string) {
   coverDiskReadInflight.set(key, promise);
   return promise;
 }
-
-export { shouldPreferDirectBrowserImage } from '@/lib/http/cf-protected-cdn';
 
 function isBlockedCoverUrl(url: string): boolean {
   const t = url.trim();
@@ -462,11 +466,12 @@ async function fetchCoverImageBytesOnce(
   options: CoverImageLoadOptions | undefined,
   refererOverride?: string | 'none',
 ): Promise<CoverImageBytes | null> {
+  const opts = enrichCoverImageLoadOptions(normalized, options);
   const headers = resolveCoverRequestHeaders(
-    options?.referer,
-    options?.source,
+    opts?.referer,
+    opts?.source,
     normalized,
-    options?.legadoImageHeaders,
+    opts?.legadoImageHeaders,
   );
 
   if (isTauri() && refererOverride !== undefined) {
@@ -479,15 +484,15 @@ async function fetchCoverImageBytesOnce(
   if (!isTauri() && isCrossOriginCoverUrl(normalized)) {
     fetchUrl =
       toProxiedImageUrl(normalized, {
-        referer: options?.referer,
-        source: options?.source,
-        legadoImageHeaders: options?.legadoImageHeaders,
+        referer: opts?.referer,
+        source: opts?.source,
+        legadoImageHeaders: opts?.legadoImageHeaders,
         refererOverride,
       }) ?? normalized;
     const headerCookie = headers.Cookie ?? headers.cookie ?? '';
     const legadoCookie =
-      pickLegadoHeader(options?.legadoImageHeaders, 'Cookie') ??
-      pickLegadoHeader(options?.legadoImageHeaders, 'cookie') ??
+      pickLegadoHeader(opts?.legadoImageHeaders, 'Cookie') ??
+      pickLegadoHeader(opts?.legadoImageHeaders, 'cookie') ??
       '';
     const cookie =
       headerCookie && legadoCookie
@@ -496,7 +501,7 @@ async function fetchCoverImageBytesOnce(
     if (cookie) {
       proxyHeaders[WEB_PROXY_COOKIE_HEADER] = cookie;
     }
-    const legadoFwd = encodeLegadoForwardHeaders(options?.legadoImageHeaders);
+    const legadoFwd = encodeLegadoForwardHeaders(opts?.legadoImageHeaders);
     if (legadoFwd) {
       proxyHeaders[LEGADO_FORWARD_HEADERS_HEADER] = legadoFwd;
     }
@@ -546,7 +551,7 @@ async function fetchCoverImageBytesOnce(
         status: response.status,
         signedExpired: exp,
         refererOverride: refererOverride ?? '(default)',
-        cfChallenge: cfChallenge || isCloudflareHeavyCdnUrl(normalized),
+        cfChallenge,
         ...describeImageFetchForLog(normalized, fetchUrl),
         ...describeCoverRequestHeaders(headers),
       });
@@ -566,11 +571,12 @@ async function fetchCoverImageBytesOnce(
   if (buf.byteLength === 0) return null;
 
   const mime = contentType.split(';')[0]?.trim() || 'image/jpeg';
-  if (isLikelyMangaAntiHotlinkPlaceholder(buf, mime)) {
+  if (!(await verifyFetchedImageBytes(buf, mime))) {
     if (import.meta.env.DEV) {
-      console.warn('[cover] 疑似防盗占位图，继续尝试其它 Referer', {
+      console.warn('[cover] 响应不像有效图片（空包或无法解码），继续尝试其它 Referer', {
         ...describeImageFetchForLog(normalized, fetchUrl),
         bytes: buf.byteLength,
+        mime,
         refererOverride: refererOverride ?? '(default)',
       });
     }
@@ -579,35 +585,68 @@ async function fetchCoverImageBytesOnce(
   return { bytes: buf, mime };
 }
 
+function imageRefererFetchContext(
+  options?: CoverImageLoadOptions,
+): ImageRefererFetchContext {
+  return { pageReferer: options?.referer };
+}
+
+function enrichCoverImageLoadOptions(
+  normalized: string,
+  options?: CoverImageLoadOptions,
+): CoverImageLoadOptions | undefined {
+  if (!options) return options;
+  const legadoImageHeaders = enrichLegadoImageHeadersForFetch(
+    normalized,
+    options.legadoImageHeaders,
+    options.referer,
+  );
+  if (!legadoImageHeaders) return options;
+  return { ...options, legadoImageHeaders };
+}
+
+/** 跨域 Legado 正文图：__reader_http 由 Node 设置 Referer / UA（勿转发浏览器指纹头） */
+async function fetchProxiedLegadoImageBytes(
+  normalized: string,
+  options?: CoverImageLoadOptions,
+): Promise<CoverImageBytes | null> {
+  const opts = enrichCoverImageLoadOptions(normalized, options);
+  const refCtx = imageRefererFetchContext(opts);
+
+  const proxyAttempts = filterProxiedImageRefererAttempts(
+    buildProxiedImageRefererAttempts(
+      normalized,
+      opts?.legadoImageHeaders,
+      refCtx,
+    ),
+    opts?.legadoImageHeaders,
+    refCtx.pageReferer,
+  );
+  for (const ref of proxyAttempts) {
+    const data = await fetchCoverImageBytesOnce(normalized, opts, ref);
+    if (data) return data;
+  }
+  return null;
+}
+
 async function fetchCoverImageBytes(
   normalized: string,
   options?: CoverImageLoadOptions,
 ): Promise<CoverImageBytes | null> {
   if (isCrossOriginCoverUrl(normalized)) {
-    if (!isTauri() && isCloudflareHeavyCdnUrl(normalized)) {
-      const browserAttempts = buildBrowserImageRefererAttempts(
-        normalized,
-        options?.legadoImageHeaders,
-      );
-      for (const ref of browserAttempts) {
-        const runBrowser = () => fetchImageBytesViaBrowser(normalized, ref);
-        const browser = options?.readerInlineQueue
-          ? await withReaderInlineImageFetchSlot(runBrowser)
-          : await runBrowser();
-        if (browser) {
-          coverLoadTrace('network-fetch', {
-            bookUrl: options?.bookUrl,
-            coverUrl: normalized,
-            note: describeImageFetchForLog(normalized, ref).file,
-          });
-          return browser;
-        }
-      }
+    if (needsWebProxiedLegadoImage(normalized, options?.legadoImageHeaders)) {
+      return fetchProxiedLegadoImageBytes(normalized, options);
     }
 
-    const proxyAttempts = buildProxiedImageRefererAttempts(
-      normalized,
+    const refCtx = imageRefererFetchContext(options);
+    const proxyAttempts = filterProxiedImageRefererAttempts(
+      buildProxiedImageRefererAttempts(
+        normalized,
+        options?.legadoImageHeaders,
+        refCtx,
+      ),
       options?.legadoImageHeaders,
+      refCtx.pageReferer,
     );
     for (const ref of proxyAttempts) {
       const data = await fetchCoverImageBytesOnce(normalized, options, ref);
@@ -791,6 +830,19 @@ function scheduleBackgroundCoverUpdate(
       await patchCoverDiskMetaLastUrl(bookUrl, fresh);
     }
   })().catch(() => { });
+}
+
+/**
+ * 刷新本章后清除正文内联图的失败冷却与内存 blob，避免旧版校验误杀后 30 分钟内一直 failure-cached。
+ */
+export function clearChapterInlineImageLoadFailures(
+  html: string,
+  source?: BookSource | null,
+): void {
+  if (!html.trim()) return;
+  for (const ref of parseImgRefsFromHtml(html)) {
+    evictCoverImageMemoryCache(ref.url, source);
+  }
 }
 
 /** 手动重试前清除内存 blob 缓存，避免沿用过期条目 */

@@ -227,17 +227,8 @@ async function forwardToTarget(
   const session = sessionId ? innerWebSessions.get(sessionId) : undefined;
   const targetUrl = new URL(target);
 
+  // 勿把浏览器 sec-ch-ua / sec-fetch-* 等转发到上游（易触发 Cloudflare 挑战）
   const upstreamHeaders = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value == null) continue;
-    const lower = key.toLowerCase();
-    if (STRIP_REQUEST_HEADERS.has(lower)) continue;
-    if (Array.isArray(value)) {
-      value.forEach((v) => upstreamHeaders.append(key, v));
-    } else {
-      upstreamHeaders.set(key, value);
-    }
-  }
 
   const legadoExtra = decodeLegadoForwardHeaders(req.headers[LEGADO_HDR_LOWER]);
   const reservedLegado = new Set([
@@ -261,7 +252,21 @@ async function forwardToTarget(
     upstreamHeaders.set(key, value);
   }
 
-  const referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
+  let referer = resolveUpstreamReferer(targetUrl, session, refererOverride);
+  const legadoRef =
+    legadoExtra.Referer ??
+    legadoExtra.referer ??
+    legadoExtra.REFERER;
+  if (!referer && refererOverride === 'none' && legadoRef?.trim()) {
+    referer = legadoRef.trim();
+  }
+  if (
+    isLikelyImageTarget(target) &&
+    legadoRef?.trim() &&
+    referer === `${targetUrl.origin}/`
+  ) {
+    referer = legadoRef.trim();
+  }
   if (referer) {
     let origin = targetUrl.origin;
     try {
@@ -273,22 +278,27 @@ async function forwardToTarget(
     upstreamHeaders.set('Referer', referer);
   }
 
+  const legadoUa =
+    legadoExtra['User-Agent'] ??
+    legadoExtra['user-agent'] ??
+    session?.forwardHeaders?.['User-Agent'] ??
+    session?.forwardHeaders?.['user-agent'];
   const userAgent =
     userAgentOverride?.trim() ||
-    upstreamHeaders.get('user-agent') ||
-    upstreamHeaders.get('User-Agent') ||
+    legadoUa?.trim() ||
     DEFAULT_BROWSER_UA;
   upstreamHeaders.set('User-Agent', userAgent);
-  upstreamHeaders.delete('user-agent');
-  // 内嵌页 session：页内 fetch 无书源 UA，须用创建 session 时的 forwardHeaders
-  if (sessionId && session?.forwardHeaders && !userAgentOverride?.trim()) {
-    const fhUa =
-      session.forwardHeaders['User-Agent'] ?? session.forwardHeaders['user-agent'];
-    if (fhUa?.trim()) {
-      upstreamHeaders.set('User-Agent', fhUa.trim());
-    }
-  }
   upstreamHeaders.set('Host', targetUrl.host);
+  upstreamHeaders.set('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
+
+  if (isLikelyImageTarget(target)) {
+    upstreamHeaders.set(
+      'Accept',
+      'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    );
+  } else {
+    upstreamHeaders.set('Accept', '*/*');
+  }
 
   const legadoCookie =
     legadoExtra.Cookie ?? legadoExtra.cookie ?? '';
