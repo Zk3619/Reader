@@ -99,6 +99,12 @@ export async function loadChapterRaw(
     chapter,
     next?.url,
   );
+  if (forceRefresh && raw?.trim()) {
+    const { clearChapterInlineImageLoadFailures } = await import(
+      '@/lib/http/cover-image-loader'
+    );
+    clearChapterInlineImageLoadFailures(raw, source);
+  }
   return raw ?? '';
 }
 

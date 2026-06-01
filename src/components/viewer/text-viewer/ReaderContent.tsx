@@ -122,6 +122,11 @@ export function ReaderContent(props: ReaderContentProps) {
   const catalog = () => textViewerStore.state.catalog;
   const chapterIndex = () => textViewerStore.state.chapterIndex;
   const currentChapter = () => catalog()[chapterIndex()];
+  const chapterPageReferer = () => {
+    const ch = currentChapter();
+    const u = ch?.url ?? ch?.baseUrl ?? book()?.origin;
+    return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : undefined;
+  };
   
   // 检测是否为错误内容（以"加载失败"开头）
   const isErrorContent = () => {
@@ -270,7 +275,7 @@ export function ReaderContent(props: ReaderContentProps) {
                   onLegadoCommentClick={handleLegadoCommentClick}
                   fontSizePx={fontSizePx()}
                   imageStyle={imageStyleKey()}
-                  referer={book()?.origin}
+                  referer={chapterPageReferer()}
                   source={bookSource()}
                 />
               )}

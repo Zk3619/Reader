@@ -333,6 +333,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       const durTitle = shelfBook()?.durChapterTitle?.trim() ?? '';
       const bookInfo = await getBookInfo(source, bookUrl, {
         durChapterTitle: durTitle || undefined,
+        bookVariable: props.book.variable,
       });
 
       if (bookInfo) {

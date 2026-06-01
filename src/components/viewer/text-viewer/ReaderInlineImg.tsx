@@ -18,9 +18,9 @@ import {
   READER_INLINE_IMAGE_DEFAULT_RETRIES,
   READER_INLINE_IMAGE_RETRY_DELAY_MS,
   shouldFetchReaderInlineImageAsBlob,
-  shouldPreferDirectBrowserImage,
 } from '@/lib/http/cover-image-loader';
-import { resolveDirectBrowserImageReferrerPolicy } from '@/lib/http/cf-protected-cdn';
+import { isCrossOriginCoverUrl } from '@/lib/http/cover-image-loader';
+import { isTauri } from '@/lib/platform/detect';
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
 import {
@@ -134,14 +134,8 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
       source: props.source,
       legadoImageHeaders: legadoImage().headers,
     };
-    if (shouldPreferDirectBrowserImage(norm)) {
-      return norm;
-    }
     return toProxiedImageUrl(norm, proxiedOpts) ?? norm;
   };
-
-  const imgReferrerPolicy = () =>
-    resolveDirectBrowserImageReferrerPolicy(legadoImage().headers);
 
   const displaySrc = () => {
     const norm = normalizedSrc();
@@ -308,8 +302,8 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
           } else {
             setPhase('error');
             setStatusHint(
-              shouldPreferDirectBrowserImage(norm)
-                ? '图床在纯 Web 下无法加载（Cloudflare/防盗链）；请使用桌面版 Tauri 阅读'
+              !isTauri() && isCrossOriginCoverUrl(norm)
+                ? '跨域图片加载失败（可尝试桌面版 Tauri 或刷新本章）'
                 : `加载失败，已自动重试 ${READER_INLINE_IMAGE_DEFAULT_RETRIES} 次`,
             );
           }
@@ -323,19 +317,8 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
   );
 
   const handleImgError = () => {
-    const norm = normalizedSrc();
-    if (norm && shouldPreferDirectBrowserImage(norm) && !forceBlobFetch()) {
-      setForceBlobFetch(true);
-      setLoadGeneration((g) => g + 1);
-      setStatusHint('直连被拒，改走代理重试…');
-      return;
-    }
     setPhase('error');
-    setStatusHint(
-      norm && shouldPreferDirectBrowserImage(norm)
-        ? '图床 Cloudflare 拦截；纯 Web 建议用 Tauri 阅读'
-        : '图片显示失败，点击重试',
-    );
+    setStatusHint('图片显示失败，点击重试');
   };
 
   /** 占位区勿合并 props.class（含 block 会覆盖 flex，导致加载图标不居中） */
@@ -358,7 +341,7 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
       class={styleClass()}
       style={inlineStyle()}
       decoding="async"
-      referrerPolicy={imgReferrerPolicy()}
+      referrerPolicy="no-referrer"
       onLoad={handleImgLoad}
       onError={handleImgError}
     />

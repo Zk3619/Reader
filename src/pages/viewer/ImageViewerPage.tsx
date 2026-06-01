@@ -67,6 +67,11 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
+  const chapterPageReferer = () => {
+    const ch = catalog()[chapterIndex()];
+    const u = ch?.url ?? ch?.baseUrl ?? book()?.origin;
+    return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : undefined;
+  };
   const totalPages = () => imageList().length;
 
   const updateViewPageFromScroll = () => {
@@ -204,6 +209,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                         <ReaderInlineImg
                           src={item().url}
                           legadoImageHeaders={item().legadoHeaders}
+                          referer={chapterPageReferer()}
                           source={bookSource()}
                           imageStyle="FULL"
                           class="block w-full bg-neutral-900"
