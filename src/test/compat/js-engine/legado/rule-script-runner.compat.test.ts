@@ -13,6 +13,14 @@ vi.mock('@/lib/http', () => ({
   post: vi.fn(async () => ''),
 }));
 
+vi.mock('@/lib/platform/open-url', () => ({
+  openLegadoBrowserInApp: vi.fn(async () => ({
+    confirmed: true,
+    cookies: 'qttoken=test',
+    url: 'https://example.com/',
+  })),
+}));
+
 describe('rule-script-runner', () => {
   it('八叉 content 规则可解析正文', async () => {
     const source = JSON.parse(readProjectFile('examples/shareBookSource.json')).find(
@@ -564,6 +572,32 @@ JSON.stringify({ content: content });
     expect(out).not.toContain('2.webp');
     expect(out).not.toContain('4.webp');
     expect((out.match(/<img\b/gi) ?? []).length).toBe(2);
+  });
+
+  it('startBrowserAwait 挂起恢复后 StrResponse.body() 可用', async () => {
+    const { openLegadoBrowserInApp } = await import('@/lib/platform/open-url');
+    const openMock = vi.mocked(openLegadoBrowserInApp);
+    openMock.mockClear();
+
+    const code = `
+let html = java.startBrowserAwait('https://example.com/verify', '验证').body();
+html + '-ok';
+`.trim();
+
+    const out = await runLegadoRuleScript(
+      code,
+      { result: '', baseUrl: 'https://v1.gyks.cf/', source: {} },
+      {
+        bookSourceName: 'test',
+        sourceName: 'test',
+        bookSourceUrl: 'https://v1.gyks.cf/',
+        sourceUrl: 'https://v1.gyks.cf/',
+      } as never,
+    );
+
+    expect(out).toBe('-ok');
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(openMock.mock.calls[0]?.[3]).toMatchObject({ awaitClose: true });
   });
 
   it('java.deviceID 抛错后走 androidId，device_type 为安卓（对齐 Legado Android）', async () => {

@@ -5,7 +5,7 @@
 
 import { isTauri } from '@/lib/platform/detect';
 
-/** get_para_review ??base ?????????? `/para_review` ??? API */
+/** get_para_review 页将 base 设为站点根，避免相对 `/para_review` 等 API 路径错误 */
 export function resolveInnerWebDocumentBaseUrl(pageUrl: string): string {
   const trimmed = pageUrl.trim();
   if (!/^https?:\/\//i.test(trimmed)) return trimmed;
@@ -20,7 +20,7 @@ export function resolveInnerWebDocumentBaseUrl(pageUrl: string): string {
   }
 }
 
-/** ? <head> ?? <base href>????? API/??????? */
+/** 在 <head> 内注入 <base href>，修正相对 API/资源路径 */
 export function injectInnerWebBaseTag(html: string, pageUrl: string): string {
   const baseHref = resolveInnerWebDocumentBaseUrl(pageUrl);
   const baseTag = `<base href="${baseHref}">`;

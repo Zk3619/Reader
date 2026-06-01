@@ -33,6 +33,12 @@ import {
   normalizeJsRuleResult,
   wrapLegadoJsBodyWithImplicitReturn,
 } from '@/lib/js-engine/quickjs-sandbox';
+import {
+  createRuleScriptBrowserHandlers,
+  createRuleScriptBrowserState,
+  isRuleScriptBrowserSuspend,
+} from '@/lib/js-engine/legado/rule-script-browser';
+import type { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 const SCRIPT_TIMEOUT_MS = 90_000;
 const MAX_AJAX_ROUNDS = 8;
@@ -43,6 +49,8 @@ export function needsLegadoRuleScriptRunner(code: string): boolean {
     /\bjava\.getString\b/.test(t) ||
     /\bjava\.get\b/.test(t) ||
     /\bjava\.ajax\b/.test(t) ||
+    /\bjava\.startBrowser\b/.test(t) ||
+    /\bjava\.startBrowserAwait\b/.test(t) ||
     /\bjava\.hexDecodeToString\b/.test(t) ||
     /\bgetArguments\b/.test(t) ||
     /\bsrc\.match\b/.test(t) ||
@@ -325,6 +333,7 @@ export async function runLegadoRuleScript(
 
   const ajaxCache = new Map<string, string>();
   let pending: Promise<void>[] = [];
+  const browserState = createRuleScriptBrowserState();
   /** Legado 多轮 ajax 重跑时仍保留规则入口 result（如 data: tocUrl 的 hex 载荷） */
   const initialResult = normalizeJsRuleResult(context.result);
 
@@ -389,6 +398,12 @@ export async function runLegadoRuleScript(
   };
 
   const buildScope = (): Record<string, unknown> => {
+    const browserHandlers = createRuleScriptBrowserHandlers({
+      bookSource,
+      baseUrl,
+      state: browserState,
+      pending,
+    });
     const scope: Record<string, unknown> = {
       result: initialResult,
       src: ruleContent,
@@ -526,6 +541,9 @@ export async function runLegadoRuleScript(
         },
         toast() {},
         longToast() {},
+        qread() {
+          throw new Error('qread unavailable');
+        },
         log(...args: unknown[]) {
           if (import.meta.env.DEV) {
             console.log('[rule-script]', ...args);
@@ -589,6 +607,8 @@ export async function runLegadoRuleScript(
           pending.push(p);
           return '';
         },
+        startBrowser: browserHandlers.startBrowser,
+        startBrowserAwait: browserHandlers.startBrowserAwait,
       },
     };
     return scope;
@@ -618,11 +638,21 @@ export async function runLegadoRuleScript(
       const scope = buildScope();
 
       let runError: unknown;
+      let browserSuspend: SuspendScript | null = null;
       try {
         runJsSnippet(script, scope, jsLib);
       } catch (e) {
-        runError = e;
-        console.warn('[rule-script] 执行报错:', e);
+        if (isRuleScriptBrowserSuspend(e)) {
+          browserSuspend = e;
+        } else {
+          runError = e;
+          console.warn('[rule-script] 执行报错:', e);
+        }
+      }
+
+      if (browserSuspend) {
+        await browserSuspend.promise;
+        continue;
       }
 
       const hadAjax = pending.length > 0;
