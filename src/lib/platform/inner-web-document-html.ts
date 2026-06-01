@@ -1,7 +1,9 @@
 /**
- * ?? iframe ? HTML ???? Web / srcdoc ?????
- * ????? API ? `/para_review`?base ???????? query ? get_para_review URL?
+ * 内嵌 iframe / HTML 文档处理（纯 Web srcdoc、Tauri 直连 URL 等）。
+ * 段评 API 如 `/get_para_review`：base 指向站点根，避免 query 留在 get_para_review URL 上。
  */
+
+import { isTauri } from '@/lib/platform/detect';
 
 /** get_para_review ??base ?????????? `/para_review` ??? API */
 export function resolveInnerWebDocumentBaseUrl(pageUrl: string): string {
@@ -31,7 +33,24 @@ export function injectInnerWebBaseTag(html: string, pageUrl: string): string {
   return `<!DOCTYPE html><html><head>${baseTag}</head><body>${html}</body></html>`;
 }
 
-/** iframe ? http(s) url ?? base ?? url???? HTML ? srcdoc??? API ??????? */
+/**
+ * 是否用 srcdoc 展示预取 HTML。
+ * Tauri 且有 http(s) URL 时走直连导航（panel/iframe src），避免 srcdoc/null 源跨域字体与 API。
+ */
+export function shouldUseInnerWebSrcdoc(
+  pageUrl: string | undefined,
+  html: string | undefined,
+  options?: { useProxyDocument?: boolean; proxyFailed?: boolean },
+): boolean {
+  const h = html?.trim() ?? '';
+  if (!h) return false;
+  if (options?.useProxyDocument && !options?.proxyFailed) return false;
+  const u = pageUrl?.trim() ?? '';
+  if (isTauri() && /^https?:/i.test(u)) return false;
+  return !shouldPreferInnerWebUrlOverHtml(u, h);
+}
+
+/** iframe 有 http(s) url 且无 base 时优先 url；有 HTML 且已注入 base 时用 srcdoc */
 export function shouldPreferInnerWebUrlOverHtml(
   url: string | undefined,
   html: string | undefined,

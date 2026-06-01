@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { mergeInnerWebProxySessionCookies } from '@/lib/http/inner-web-proxy-session';
 import { isTauri } from '@/lib/platform/detect';
+import { getInnerWebCookiesUseMainWebview } from '@/lib/platform/inner-web-cookie-webview';
 
 export const INNER_WEB_MESSAGE_CHANNEL = 'reader-inner-web';
 
@@ -65,7 +66,11 @@ async function handleMethod(
       }
       const url = String(args?.url ?? '').trim();
       if (!url.startsWith('http') || !cookie) return true;
-      await invoke('sync_document_cookies_for_inner_web', { url, cookies: cookie });
+      await invoke('sync_document_cookies_for_inner_web', {
+        url,
+        cookies: cookie,
+        ...(getInnerWebCookiesUseMainWebview() ? { useMainWebview: true } : {}),
+      });
       return true;
     }
     case 'getCookies': {
@@ -81,8 +86,13 @@ async function handleMethod(
       }
       const url = String(args?.url ?? '').trim();
       if (!url.startsWith('http')) return '';
-      return invoke<string>('get_webview_cookies_for_url', { url });
+      return invoke<string>('get_webview_cookies_for_url', {
+        url,
+        ...(getInnerWebCookiesUseMainWebview() ? { useMainWebview: true } : {}),
+      });
     }
+    case 'readDocumentCookie':
+      return String(args?.cookie ?? '');
     default:
       throw new Error(`未知方法: ${method}`);
   }

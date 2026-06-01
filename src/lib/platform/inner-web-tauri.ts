@@ -20,6 +20,18 @@ export interface InnerWebPanelRect {
   height: number;
 }
 
+/** 串行化 open/close，避免并发 add_child 报 label already exists */
+let panelOpQueue: Promise<void> = Promise.resolve();
+
+function runSerializedPanelOp<T>(fn: () => Promise<T>): Promise<T> {
+  const run = panelOpQueue.then(fn, fn);
+  panelOpQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export async function setInnerWebSessionActive(active: boolean): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -51,13 +63,16 @@ export async function openInnerWebTauriPanel(
       ? htmlToDataDocumentUrl(appendYueduTauriPanelBridgeToHtml(htmlRaw))
       : '';
   if (!navigationUrl.startsWith('http') && !navigationUrl.startsWith('data:text/html')) return;
-  await invoke('open_inner_web_panel', {
-    url: navigationUrl,
-    cookies: opts.cookies.trim(),
-    x: opts.rect.x,
-    y: opts.rect.y,
-    width: opts.rect.width,
-    height: opts.rect.height,
+
+  await runSerializedPanelOp(async () => {
+    await invoke('open_inner_web_panel', {
+      url: navigationUrl,
+      cookies: opts.cookies.trim(),
+      x: opts.rect.x,
+      y: opts.rect.y,
+      width: opts.rect.width,
+      height: opts.rect.height,
+    });
   });
 }
 
@@ -82,9 +97,11 @@ export async function reloadInnerWebTauriPanel(): Promise<void> {
 
 export async function closeInnerWebTauriPanel(): Promise<void> {
   if (!isTauri()) return;
-  try {
-    await invoke('close_inner_web_panel');
-  } catch (e) {
-    console.warn('[inner-web-tauri] close_inner_web_panel failed', e);
-  }
+  await runSerializedPanelOp(async () => {
+    try {
+      await invoke('close_inner_web_panel');
+    } catch (e) {
+      console.warn('[inner-web-tauri] close_inner_web_panel failed', e);
+    }
+  });
 }

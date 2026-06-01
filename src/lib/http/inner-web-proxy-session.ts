@@ -4,7 +4,8 @@
 
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { encodeLegadoForwardHeaders } from '@/lib/http/legado-forward-headers';
-import { isTauri } from '@/lib/platform/detect';
+import { isMobile, isTauri } from '@/lib/platform/detect';
+import { resolveInnerWebUsesTauriPanel } from '@/lib/platform/inner-web-mode';
 
 const PROXY_SEGMENT = '__reader_http';
 
@@ -22,9 +23,14 @@ export function shouldUseInnerWebDocumentProxy(
   pageUrl: string,
   initialCookies?: string
 ): boolean {
-  if (isTauri() || typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return false;
   if (!pageUrl.trim().startsWith('http')) return false;
-  return Boolean(initialCookies?.trim());
+  if (!initialCookies?.trim()) return false;
+  // Tauri 桌面 panel 由原生 WebView 注入 Cookie；仅 iframe 回退等场景走同源代理
+  if (isTauri() && !isMobile()) {
+    if (resolveInnerWebUsesTauriPanel({ url: pageUrl })) return false;
+  }
+  return true;
 }
 
 export async function createInnerWebProxySession(

@@ -48,7 +48,12 @@
 
   window.addEventListener('message', function (ev) {
     var d = ev.data;
-    if (!d || d.channel !== CHANNEL || !d.id) return;
+    if (!d || d.channel !== CHANNEL) return;
+    if (d.method === 'readDocumentCookie' && d.id) {
+      replyToParent(d.id, { result: document.cookie || '' });
+      return;
+    }
+    if (!d.id) return;
     var p = pending.get(d.id);
     if (!p) return;
     pending.delete(d.id);

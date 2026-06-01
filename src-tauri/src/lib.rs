@@ -513,6 +513,15 @@ pub(crate) fn apply_http_cookies_to_webview(
 const INNER_WEB_PANEL_LABEL: &str = "reader-inner-web";
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+const INNER_WEB_PANEL_INIT_SCRIPT: &str = include_str!("../scripts/inner_web_panel_bootstrap.js");
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn inner_web_panel_command_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Clone, Copy)]
 struct InnerWebPanelRect {
     x: f64,
@@ -583,15 +592,21 @@ fn try_focus_inner_web_surface(app: &tauri::AppHandle) -> bool {
     false
 }
 
-/// 内嵌 https 面板或主 WebView（Cookie 读写优先面板）
+/// 内嵌 Cookie 读写目标：`use_main_webview` 为 true 时固定主 WebView（iframe 模式），
+/// 避免残留 panel 抢走 iframe `document.cookie` 的同步。
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn webview_for_inner_web_cookies(app: &tauri::AppHandle) -> Result<tauri::Webview, String> {
+fn webview_for_inner_web_cookies(
+    app: &tauri::AppHandle,
+    use_main_webview: bool,
+) -> Result<tauri::Webview, String> {
     use tauri::Manager;
-    if let Some(w) = app.get_webview(INNER_WEB_PANEL_LABEL) {
-        return Ok(w);
-    }
-    if let Some(w) = app.get_webview(INNER_WEB_CHILD_LABEL) {
-        return Ok(w);
+    if !use_main_webview {
+        if let Some(w) = app.get_webview(INNER_WEB_PANEL_LABEL) {
+            return Ok(w);
+        }
+        if let Some(w) = app.get_webview(INNER_WEB_CHILD_LABEL) {
+            return Ok(w);
+        }
     }
     app.get_webview("main")
         .ok_or_else(|| "主 WebView 不存在".to_string())
@@ -604,13 +619,14 @@ async fn set_cookies_for_inner_web(
     app: tauri::AppHandle,
     url: String,
     cookies: String,
+    use_main_webview: Option<bool>,
 ) -> Result<String, String> {
     let url = url.trim().to_string();
     let cookies_str = cookies.trim().to_string();
     if url.is_empty() || !url.starts_with("http") {
         return Err("URL 无效".to_string());
     }
-    let window = webview_for_inner_web_cookies(&app)?;
+    let window = webview_for_inner_web_cookies(&app, use_main_webview.unwrap_or(false))?;
     apply_http_cookies_to_webview(&window, &url, &cookies_str)?;
     Ok(url)
 }
@@ -621,13 +637,14 @@ async fn set_cookies_for_inner_web(
 async fn get_webview_cookies_for_url(
     app: tauri::AppHandle,
     url: String,
+    use_main_webview: Option<bool>,
 ) -> Result<String, String> {
     let url = url.trim();
     if url.is_empty() || !url.starts_with("http") {
         return Err("URL 无效".to_string());
     }
     let parsed_url = url::Url::parse(url).map_err(|e| e.to_string())?;
-    let window = webview_for_inner_web_cookies(&app)?;
+    let window = webview_for_inner_web_cookies(&app, use_main_webview.unwrap_or(false))?;
 
     let cookies = window
         .cookies_for_url(parsed_url)
@@ -669,6 +686,21 @@ async fn get_inner_web_panel_cookies_for_url(
     Ok(parts.join("; "))
 }
 
+/// √ 前强制把 panel 页 `document.cookie` 刷入 Cookie 罐（立即应用后、读罐前调用）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn flush_inner_web_panel_document_cookie(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) else {
+        return Ok(());
+    };
+    let _ = panel.eval(
+        "try{window.__READER_INNER_WEB_PANEL_FLUSH__&&window.__READER_INNER_WEB_PANEL_FLUSH__();}catch(e){}",
+    );
+    Ok(())
+}
+
 /// iframe 内 document.cookie 变更时，由主窗口 postMessage 桥接写入 WebView Cookie 罐
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -676,13 +708,14 @@ async fn sync_document_cookies_for_inner_web(
     app: tauri::AppHandle,
     url: String,
     cookies: String,
+    use_main_webview: Option<bool>,
 ) -> Result<(), String> {
     let url = url.trim();
     let cookies_str = cookies.trim();
     if url.is_empty() || !url.starts_with("http") || cookies_str.is_empty() {
         return Ok(());
     }
-    let window = webview_for_inner_web_cookies(&app)?;
+    let window = webview_for_inner_web_cookies(&app, use_main_webview.unwrap_or(false))?;
     apply_http_cookies_to_webview(&window, url, cookies_str)?;
     Ok(())
 }
@@ -701,6 +734,8 @@ async fn open_inner_web_panel(
 ) -> Result<(), String> {
     use tauri::webview::WebviewBuilder;
     use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
+
+    let _guard = inner_web_panel_command_lock().lock().await;
 
     let url = url.trim().to_string();
     let cookies_str = cookies.trim().to_string();
@@ -729,12 +764,25 @@ async fn open_inner_web_panel(
         // WebView2 会拦截已加载页再跳 data: 顶层导航；data: 时改为重建子 WebView。
         if ok_data {
             panel.close().map_err(|e| e.to_string())?;
+            // close() 后 label 异步释放，立即 add_child 会报 already exists
+            for _ in 0..40 {
+                if app.get_webview(INNER_WEB_PANEL_LABEL).is_none() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            if app.get_webview(INNER_WEB_PANEL_LABEL).is_some() {
+                return Err(format!(
+                    "a webview with label `{INNER_WEB_PANEL_LABEL}` already exists"
+                ));
+            }
         } else {
             let nav = format!(
                 "window.location.replace({});",
                 serde_json::to_string(&url).unwrap()
             );
             panel.eval(&nav).map_err(|e| e.to_string())?;
+            let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
             let _ = panel.set_focus();
             return Ok(());
         }
@@ -748,6 +796,7 @@ async fn open_inner_web_panel(
     let panel = window
         .add_child(
             WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(target_url))
+                .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
                 .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
                 .focused(true),
             pos,
@@ -814,6 +863,8 @@ async fn reload_inner_web_panel(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn close_inner_web_panel(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
+
+    let _guard = inner_web_panel_command_lock().lock().await;
 
     if let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) {
         panel.close().map_err(|e| e.to_string())?;
@@ -889,6 +940,7 @@ async fn open_inner_web_child_window(
         INNER_WEB_CHILD_LABEL,
         WebviewUrl::External(target_url),
     )
+    .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
     .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
     .parent(&parent)
     .map_err(|e| e.to_string())?
@@ -1371,6 +1423,8 @@ pub fn run() {
             get_webview_cookies_for_url,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             get_inner_web_panel_cookies_for_url,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            flush_inner_web_panel_document_cookie,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             sync_document_cookies_for_inner_web,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
