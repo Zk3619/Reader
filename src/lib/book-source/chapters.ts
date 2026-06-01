@@ -282,7 +282,7 @@ export function buildCatalogApiVariable(bookVariable?: string): string {
   return JSON.stringify({ custom: readBookCustomFromVariable(bookVariable) });
 }
 
-function withJsonPostHeaders(
+export function withJsonPostHeaders(
   headers: Record<string, string>,
   body: string,
 ): Record<string, string> {

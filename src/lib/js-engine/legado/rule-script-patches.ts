@@ -3,6 +3,11 @@
  * Legado Rhino 与浏览器 Function 语义差异
  */
 
+import {
+  EXPLORE_JSLIB_THIS_BIND_SHIM,
+  GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
+} from '@/lib/js-engine/legado/source-script-shared';
+
 /**
  * jsLib 中 processCatalogList 常在 java.ajax 之后立刻 JSON.parse；
  * Web 端 ajax 首轮为空，须跳过解析以便多轮重跑拿到响应。
@@ -131,7 +136,9 @@ export function buildRuleScriptFullBody(
   return [
     jsLib.trim(),
     PROCESS_CATALOG_LIST_SHIM,
+    EXPLORE_JSLIB_THIS_BIND_SHIM,
     RULE_SCRIPT_JSLIB_THIS_BIND_SHIM,
+    GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
     patchedSnippet,
   ]
     .filter(Boolean)

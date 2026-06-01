@@ -829,7 +829,9 @@ export function extractHostListFromJsLib(source: Record<string, unknown>): strin
   const jsLib = source.jsLib as string | undefined;
   if (!jsLib) return [];
 
-  const hostArrayMatch = jsLib.match(/var\s+host\s*=\s*\[([^\]]+)\]/);
+  const hostArrayMatch = jsLib.match(
+    /(?:var|let)\s+hosts?\s*=\s*\[([^\]]+)\]/,
+  );
   if (!hostArrayMatch) return [];
 
   const urls: string[] = [];

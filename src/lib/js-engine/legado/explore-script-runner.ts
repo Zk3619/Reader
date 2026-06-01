@@ -12,9 +12,10 @@ import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import {
+  buildLegadoExploreScriptBundle,
+  createLegadoGetArguments,
+  createLegadoScriptCache,
   createSourceVariableHandlers,
-  ensureExploreScriptSetsResult,
-  EXPLORE_JSLIB_CONTEXT_SHIM,
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
@@ -23,7 +24,11 @@ import {
   loadSourceCookieStore,
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
-import { resolveBookSourceDeviceId } from '@/lib/book-source/source-http';
+import {
+  readBookSourceQttoken,
+  resolveBookSourceDeviceId,
+  resolveBookSourceServerUrl,
+} from '@/lib/book-source/source-http';
 
 const SCRIPT_TIMEOUT_MS = 15000;
 
@@ -78,15 +83,6 @@ export function extractExploreScript(exploreUrl: string | undefined): string | n
   return s.slice(4, end).trim();
 }
 
-function buildExploreFullScript(scriptContent: string, jsLib: string): string {
-  const body = ensureExploreScriptSetsResult(scriptContent);
-  return [
-    jsLib ? jsLib + '\n' : '',
-    EXPLORE_JSLIB_CONTEXT_SHIM,
-    body,
-  ].join('\n');
-}
-
 async function tryRunExploreScriptQuickJS(
   scriptContent: string,
   source: BookSource
@@ -109,14 +105,16 @@ async function tryRunExploreScriptQuickJS(
   const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
   const sourceVars = createSourceVariableHandlers(source, argsKey);
 
-  const fullScript = buildExploreFullScript(scriptContent, jsLib);
+  const fullScript = buildLegadoExploreScriptBundle(jsLib, scriptContent);
 
+  const serverForToken = resolveBookSourceServerUrl(source) ?? baseUrl;
   const injector = createExploreInjector({
     baseUrl,
     sourceUrl,
     host: hostList,
     resolveUrl,
     getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
+    getArgToken: () => readBookSourceQttoken(source, serverForToken),
     cookie: cookieApi,
     source: {
       ...sourceVars,
@@ -184,6 +182,9 @@ async function runExploreScriptLegacy(
       ? ((source as Record<string, unknown>).jsLib as string)
       : '';
 
+  const hosts = hostsFromJsLib(jsLib);
+  const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
+
   const cookieStore = loadSourceCookieStore(cookiesKey);
   const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
   const sourceVars = createSourceVariableHandlers(source, argsKey);
@@ -197,6 +198,10 @@ async function runExploreScriptLegacy(
     Date: PatchedDate,
     result: undefined,
     baseUrl,
+    host: hostList,
+    cache: createLegadoScriptCache(),
+    getArguments: createLegadoGetArguments(hostList[0] || baseUrl),
+    bhost: () => hostList[0] || baseUrl || '',
     cookie: cookieApi,
     cookieRef: cookieApi,
 
@@ -303,7 +308,7 @@ async function runExploreScriptLegacy(
     },
   };
 
-  const fullScript = buildExploreFullScript(scriptContent, jsLib);
+  const fullScript = buildLegadoExploreScriptBundle(jsLib, scriptContent);
 
   const run = new Function(
     '__scope__',

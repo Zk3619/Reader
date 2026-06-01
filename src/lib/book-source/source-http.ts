@@ -16,8 +16,11 @@ import {
   normalizeLegadoCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
+  firstHostFromJsLib,
   getSourceArgsKey,
   getLegadoSourceKey,
+  normalizeServerFieldsInSourceArgs,
+  readServerUrlFromSourceArgs,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { extractServerFromJsLib, parseHeaders } from '@/lib/book-source/utils';
 
@@ -116,9 +119,7 @@ export function persistBookSourceDeviceId(source: BookSource, deviceId: string):
     const raw = localStorage.getItem(key) ?? '{}';
     const obj = JSON.parse(raw) as Record<string, unknown>;
     obj.deviceId = id;
-    if (typeof obj.server === 'string' && isHttpUrl(obj.server)) {
-      obj.server = normalizeBookSourceServerUrl(obj.server);
-    }
+    normalizeServerFieldsInSourceArgs(obj);
     localStorage.setItem(key, JSON.stringify(obj));
   } catch {
     /* ignore */
@@ -150,10 +151,6 @@ function hostnameOf(urlOrHost: string): string | undefined {
   } catch {
     return s.replace(/^https?:\/\//i, '').split('/')[0] || undefined;
   }
-}
-
-function isHttpUrl(s: string): boolean {
-  return /^https?:\/\//i.test(s.trim());
 }
 
 /** 晴天等聚合服：统一 https，避免 http 登录 Cookie 与 https API 不一致 */
@@ -210,23 +207,25 @@ export function readBookSourceQttoken(source: BookSource, serverUrl: string): st
   return '';
 }
 
-/** 与 Legado login：getArgument('server') || host[0] */
+/** 与 Legado：getArgument('server') || getVariable('线路') || hosts[0] */
 export function resolveBookSourceServerUrl(source: BookSource): string | null {
   try {
     const raw = localStorage.getItem(getSourceArgsKey(source));
     if (raw) {
       const obj = JSON.parse(raw) as Record<string, unknown>;
-      const server = obj.server;
-      if (typeof server === 'string' && isHttpUrl(server)) {
-        return normalizeBookSourceServerUrl(server);
-      }
+      const fromArgs = readServerUrlFromSourceArgs(obj);
+      if (fromArgs) return fromArgs;
     }
   } catch {
     /* ignore */
   }
 
-  const fromJsLib = extractServerFromJsLib(source as unknown as Record<string, unknown>);
+  const src = source as unknown as Record<string, unknown>;
+  const fromJsLib = extractServerFromJsLib(src);
   if (fromJsLib) return normalizeBookSourceServerUrl(fromJsLib);
+
+  const firstHost = firstHostFromJsLib(src.jsLib);
+  if (firstHost) return normalizeBookSourceServerUrl(firstHost);
 
   return null;
 }
@@ -351,6 +350,13 @@ export function buildLegadoContentApiRequestHeaders(
     scriptHeaders?.cookie ?? scriptHeaders?.Cookie ?? '',
   ).trim();
   if (fromScript) {
+    if (source && !extractQttokenKey(fromScript)) {
+      const server = resolveBookSourceServerUrl(source) ?? requestUrl;
+      const built = buildLegadoRuleContentCookieHeader(source, server);
+      if (built.trim()) {
+        return formatLegadoRuleContentAjaxHeaders(built);
+      }
+    }
     const cookie = source
       ? normalizeLegadoCookieHeader(
         fromScript,

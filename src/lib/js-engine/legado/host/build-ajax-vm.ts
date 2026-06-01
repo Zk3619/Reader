@@ -16,6 +16,7 @@ import {
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
+import { LEGADO_AJAX_PENDING_JSON } from '@/lib/js-engine/legado/source-script-shared';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 export type AjaxRequestFn = (resolvedUrl: string, call: {
@@ -111,6 +112,14 @@ export function bindJavaAjax(
     if (hdrs.Cookie?.trim()) {
       const deviceId = options.getDeviceId?.();
       hdrs.Cookie = normalizeLegadoCookieHeader(hdrs.Cookie, deviceId);
+    } else if (options.getArgToken?.()) {
+      const tok = options.getArgToken()!.trim();
+      if (tok) {
+        hdrs.Cookie = normalizeLegadoCookieHeader(
+          `qttoken=${tok};`,
+          options.getDeviceId?.(),
+        );
+      }
     }
 
     let reqBody = body;
@@ -156,7 +165,7 @@ export function bindJavaAjax(
         if (callback) callback('');
       });
       rt.pending.push(p);
-      return vm.newString('');
+      return vm.newString(LEGADO_AJAX_PENDING_JSON);
     }
 
     const writeIdx = coordinator.writeIndex;

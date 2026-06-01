@@ -6,6 +6,7 @@ import { get as httpGet, post } from '@/lib/http';
 import {
   buildSourceRequestHeaders,
   getOrCreateAndroidId,
+  readBookSourceQttoken,
   resolveBookSourceServerUrl,
   resolveSourceCookiesForHttp,
 } from '@/lib/book-source/source-http';
@@ -29,7 +30,7 @@ import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import {
   createSourceVariableHandlers,
-  EXPLORE_JSLIB_CONTEXT_SHIM,
+  buildLegadoExploreScriptBundle,
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
@@ -46,16 +47,6 @@ function extractJsRule(rule: string): string | null {
   const end = s.indexOf('</js>');
   if (end === -1) return null;
   return s.slice(4, end).trim();
-}
-
-function readArgToken(argsKey: string): string {
-  try {
-    const raw = localStorage.getItem(argsKey);
-    if (!raw) return '';
-    return String((JSON.parse(raw) as Record<string, string>).qttoken ?? '').trim();
-  } catch {
-    return '';
-  }
 }
 
 function createCookieApi(
@@ -209,7 +200,7 @@ async function runBookInfoLegadoFieldScript(
   const loginInfo = readSourceLoginInfoMap(source);
 
   const body = options.ensureReturns(scriptContent);
-  const fullScript = [jsLib ? jsLib + '\n' : '', EXPLORE_JSLIB_CONTEXT_SHIM, body].join('\n');
+  const fullScript = buildLegadoExploreScriptBundle(jsLib, body);
 
   const injector = createExploreInjector({
     baseUrl,
@@ -217,7 +208,7 @@ async function runBookInfoLegadoFieldScript(
     host: hostList,
     resolveUrl,
     getOrCreateDeviceId: getOrCreateAndroidId,
-    getArgToken: () => readArgToken(argsKey),
+    getArgToken: () => readBookSourceQttoken(source, baseUrl),
     getFormKey: () => String(loginInfo['密钥'] ?? '').trim(),
     cookie: cookieApi,
     source: {

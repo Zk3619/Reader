@@ -9,6 +9,33 @@ export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
 export const STORAGE_PREFIX_LOGIN = 'reader_source_login_';
 
+/**
+ * 书源变量 JSON 里表示「当前聚合服务器」的字段名。
+ * Legado 常见 `server`；光遇/晴天聚合等用 `线路`（与 jsLib BaseUrl 一致）。
+ */
+export const LEGADO_SERVER_ARG_KEYS = ['server', '线路'] as const;
+
+/** 规范化 args 对象中的服务器 URL 字段（gyks http→https 等） */
+export function normalizeServerFieldsInSourceArgs(obj: Record<string, unknown>): void {
+  for (const key of LEGADO_SERVER_ARG_KEYS) {
+    const v = obj[key];
+    if (typeof v === 'string' && v.trim()) {
+      obj[key] = normalizeBookSourceServerUrl(v);
+    }
+  }
+}
+
+/** 从书源变量 JSON 读取第一个有效的服务器 URL */
+export function readServerUrlFromSourceArgs(obj: Record<string, unknown>): string | null {
+  for (const key of LEGADO_SERVER_ARG_KEYS) {
+    const v = obj[key];
+    if (typeof v === 'string' && isHttpUrl(v)) {
+      return normalizeBookSourceServerUrl(v);
+    }
+  }
+  return null;
+}
+
 function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test((s ?? '').trim());
 }
@@ -121,9 +148,7 @@ function normalizeSourceArgsVariableJson(raw: string): string {
   if (!trimmed.startsWith('{')) return raw;
   try {
     const obj = JSON.parse(trimmed) as Record<string, unknown>;
-    if (typeof obj.server === 'string' && obj.server.trim()) {
-      obj.server = normalizeBookSourceServerUrl(obj.server);
-    }
+    normalizeServerFieldsInSourceArgs(obj);
     return JSON.stringify(obj);
   } catch {
     return raw;
@@ -162,6 +187,81 @@ export function createSourceVariableHandlers(
  * Legado 发现脚本常以 `JSON.stringify(finalData)` 作为末尾表达式返回值，
  * QuickJS 路径只读 global.result，需补赋值。
  */
+/** 光遇聚合等书源 jsLib 中依赖 Legado Rhino `this` 的函数名（须在 CONTEXT_SHIM 之前绑定） */
+const EXPLORE_JSLIB_THIS_BIND_TARGETS = [
+  'getCloudSettings',
+  '_getParsedVariable',
+  'getLoginInfo',
+  'deleteVariable',
+  'getVariable',
+  'setVariable',
+  'BaseUrl',
+  'switchToNextLine',
+  'ste',
+  'parseBadMap',
+  'findItemIndex',
+  'checkEnv',
+  'getFqToken',
+  'getToken',
+  'removeAllCookies',
+  'setAllCookies',
+  'request',
+  'parseJsonSafely',
+  'removeAllImgTags',
+  'paraForAndroid',
+  'createSvg',
+  'showCmt',
+  'paraForiOS',
+  'show',
+  'createFilter',
+  'createLoginFilter',
+  'renderVersionPage',
+  'toggleLogs',
+  'compareVersions',
+  'fetchVersionData',
+  'showError',
+  'getSvgSettings',
+  'initCustomStyles',
+  'htmlEscape',
+  'htmlUnescape',
+  'updateHiddenSettings',
+  'getNextStyleName',
+  'addCustomStyle',
+  'getSelectedStyleName',
+  'deleteCustomStyle',
+] as const;
+
+function buildExploreJsLibThisBindLines(): string {
+  const lines = [
+    '(function __readerBindExploreJsLibThis() {',
+    '  var __ctx = {};',
+    '  try {',
+    '    Object.defineProperties(__ctx, {',
+    '      java: { get: function() { return java; }, configurable: true },',
+    '      cache: { get: function() { return cache; }, configurable: true },',
+    '      source: { get: function() { return source; }, configurable: true },',
+    '    });',
+    '  } catch (e) {}',
+  ];
+  for (const name of EXPLORE_JSLIB_THIS_BIND_TARGETS) {
+    lines.push(
+      `  if (typeof ${name} === 'function') {`,
+      `    var __readerOrig_${name} = ${name};`,
+      `    ${name} = function() { return __readerOrig_${name}.apply(__ctx, arguments); };`,
+      `    __ctx.${name} = ${name};`,
+      '  }',
+    );
+  }
+  lines.push('})();');
+  return lines.join('\n');
+}
+
+/**
+ * jsLib 中 getVariable / BaseUrl / request 等使用 `this.java`、`this.source`；
+ * 浏览器 Function + eval 下须显式 bind（对齐 rule-script-patches）。
+ */
+export const EXPLORE_JSLIB_THIS_BIND_SHIM = buildExploreJsLibThisBindLines();
+
 /**
  * jsLib 中 setArguments / getFanqieCookie 依赖 Legado 的 this 绑定；
  * Web/QuickJS/with 作用域下需改为使用全局 source、cookie、java。
@@ -191,6 +291,184 @@ getFanqieCookie = function() {
   }
 };
 `;
+
+/**
+ * 光遇 jsLib request() 在 java.ajax 返回空或非 JSON 时会同步递归 index+1 扫完全部线路。
+ * Web 端 ajax 异步/挂起首轮常为空，须禁止同步扫线，改由宿主多轮重跑 + switchToNextLine。
+ */
+export const GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM = `
+(function __readerGyksRequestNoSyncFailover() {
+  if (typeof request !== 'function') return;
+  var __ctx = {};
+  try {
+    Object.defineProperties(__ctx, {
+      java: { get: function() { return java; }, configurable: true },
+      cache: { get: function() { return cache; }, configurable: true },
+      source: { get: function() { return source; }, configurable: true },
+    });
+  } catch (e) {}
+  function __readerBindCtxFn(orig) {
+    if (typeof orig !== 'function') return;
+    return function() { return orig.apply(__ctx, arguments); };
+  }
+  if (typeof BaseUrl === 'function') {
+    var __readerOrigBaseUrl = BaseUrl;
+    __ctx.BaseUrl = __readerBindCtxFn(__readerOrigBaseUrl);
+  }
+  if (typeof getToken === 'function') {
+    var __readerOrigGetToken = getToken;
+    __ctx.getToken = __readerBindCtxFn(__readerOrigGetToken);
+  }
+  if (typeof getVariable === 'function') {
+    var __readerOrigGetVariable = getVariable;
+    __ctx.getVariable = __readerBindCtxFn(__readerOrigGetVariable);
+  }
+  if (typeof switchToNextLine === 'function') {
+    var __readerOrigSwitchLine = switchToNextLine;
+    __ctx.switchToNextLine = __readerBindCtxFn(__readerOrigSwitchLine);
+  }
+  function __readerResolveBaseUrl() {
+    if (__ctx.BaseUrl) return String(__ctx.BaseUrl()).replace(/\\/+$/, '');
+    if (typeof bhost === 'function') {
+      try { return String(bhost()).replace(/\\/+$/, ''); } catch (e3) {}
+    }
+    if (typeof host !== 'undefined' && host && host[0]) {
+      return String(host[0]).replace(/\\/+$/, '');
+    }
+    if (typeof baseUrl === 'string' && baseUrl) {
+      return String(baseUrl).replace(/\\/+$/, '');
+    }
+    return '';
+  }
+  function __readerRequestImpl(url, method, body, req) {
+    if (method == undefined) method = 'GET';
+    if (body == undefined) body = {};
+    if (req == undefined) req = true;
+    var urla = url;
+    if (!String(url).includes('http')) {
+      var base = __readerResolveBaseUrl();
+      urla = base + url;
+    }
+    var javaRef = __ctx.java || (typeof java !== 'undefined' ? java : null);
+    if (!javaRef) return '';
+    var device = '';
+    try {
+      device = javaRef.androidId();
+    } catch (e1) {
+      try {
+        device = javaRef.deviceID();
+      } catch (e2) {}
+    }
+    var qttoken = __ctx.getToken ? __ctx.getToken() : '';
+    var options = {
+      method: method,
+      headers: {
+        cookie: 'qttoken=' + qttoken + ';deviceId=' + device + ';',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    };
+    urla = urla + ',' + JSON.stringify(options);
+    if (req === false) return urla;
+    javaRef.log(urla);
+    var startTime = new Date().getTime();
+    var data = '';
+    var requestTimedOut = false;
+    var requestFailed = false;
+    try {
+      data = javaRef.ajax(urla);
+      var parsed = JSON.parse(data);
+      if (parsed && parsed.__readerAjaxPending) return '';
+    } catch (error) {
+      requestFailed = true;
+    } finally {
+      var duration = new Date().getTime() - startTime;
+      var timeout = __ctx.getVariable ? (__ctx.getVariable('超时时间') || '5') : '5';
+      timeout = parseInt(timeout, 10) * 1000;
+      if (!requestFailed && duration > timeout) requestTimedOut = true;
+    }
+    if (requestTimedOut) {
+      var timeoutSwitch = __ctx.getVariable ? (__ctx.getVariable('超时自动切换') || 'true') : 'true';
+      if (timeoutSwitch !== 'false' && __ctx.switchToNextLine) {
+        javaRef.log('检测到当前线路较慢，已切换线路');
+        __ctx.switchToNextLine('⚠️当前线路较慢');
+      }
+      return data;
+    }
+    if (requestFailed) {
+      try {
+        var cloud = __ctx.getVariable && __ctx.getVariable('云端配置');
+        var hostsbk = (cloud && cloud['hosts']) || (typeof hosts !== 'undefined' ? hosts : []);
+        var autoSwitch = __ctx.getVariable ? (__ctx.getVariable('自动切换') || 'true') : 'true';
+        if (hostsbk.length > 1 && autoSwitch !== 'false' && __ctx.switchToNextLine) {
+          __ctx.switchToNextLine('❌线路报错');
+        }
+      } catch (e3) {}
+      return '';
+    }
+    return data;
+  }
+  request = function() {
+    return __readerRequestImpl.apply(__ctx, arguments);
+  };
+  __ctx.request = request;
+})();
+`.trim();
+
+/** ajax 等待中占位 JSON（与 rule-script-runner 一致，避免 request() JSON.parse 失败扫线） */
+export const LEGADO_AJAX_PENDING_JSON =
+  '{"code":0,"msg":"","content":"","data":{"content":""},"__readerAjaxPending":true}';
+
+/** jsLib + this 绑定 + 发现页兼容 shim + 用户脚本 */
+export function buildLegadoExploreScriptBundle(jsLib: string, scriptContent: string): string {
+  const body = ensureExploreScriptSetsResult(scriptContent);
+  return [
+    jsLib ? jsLib + '\n' : '',
+    EXPLORE_JSLIB_THIS_BIND_SHIM,
+    EXPLORE_JSLIB_CONTEXT_SHIM,
+    GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
+    body,
+  ].join('\n');
+}
+
+/** Legado getArguments(open_argument, key) */
+export function createLegadoGetArguments(
+  fallbackServer?: string,
+): (openArgument: string, key?: string) => unknown {
+  return (openArgument: string, key?: string) => {
+    try {
+      const obj = JSON.parse(openArgument) as Record<string, unknown>;
+      return key != null && key !== '' ? obj[key] : obj;
+    } catch {
+      if (key != null && key !== '') {
+        const k = String(key).trim().toLowerCase();
+        if (k === 'server') return fallbackServer ?? '';
+        return '';
+      }
+      return {};
+    }
+  };
+}
+
+/** jsLib 中 cache.put / cache.get */
+export function createLegadoScriptCache(): {
+  put: (key: string, value: unknown) => void;
+  get: (key: string) => unknown;
+  remove: (key: string) => void;
+} {
+  const legadoMemory = new Map<string, unknown>();
+  return {
+    put(key: string, value: unknown) {
+      legadoMemory.set(String(key), value);
+    },
+    get(key: string) {
+      return legadoMemory.has(String(key)) ? legadoMemory.get(String(key)) : null;
+    },
+    remove(key: string) {
+      legadoMemory.delete(String(key));
+    },
+  };
+}
 
 export function ensureExploreScriptSetsResult(script: string): string {
   const s = script.trimEnd();

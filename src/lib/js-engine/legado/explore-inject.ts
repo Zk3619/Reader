@@ -99,7 +99,15 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       bindVmFunction(vm, javaObj, 'toast', () => {});
       bindVmFunction(vm, javaObj, 'longToast', () => {});
       bindVmFunction(vm, javaObj, 'log', (...args) => {
-        console.warn('[explore-script]', ...args.map((a) => vm.dump(a)));
+        const parts = args.map((a) => vm.dump(a));
+        const msg = parts.map((p) => String(p ?? '')).join(' ');
+        if (msg.includes('线路报错，自动切换下一个')) {
+          if (import.meta.env.DEV) {
+            console.debug('[explore-script]', msg);
+          }
+        } else if (import.meta.env.DEV) {
+          console.log('[explore-script]', ...parts);
+        }
         return vm.newString('');
       });
       bindVmFunction(vm, javaObj, 'androidId', () => vm.newString(ctx.getOrCreateDeviceId()));

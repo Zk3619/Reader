@@ -6,14 +6,23 @@
  * data: URL 仅负责解码并请求 init 目标（与 Legado AnalyzeUrl 等价），不做书源专属拼装。
  */
 
-import { get, post } from '@/lib/http';
+import { get, post, HttpError } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource } from '@/types';
 import type { BookInfo } from '@/types';
 import {
+  buildBookSourceApiRequestHeaders,
   buildSourceRequestHeaders,
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
+import {
+  buildCatalogApiVariable,
+  withJsonPostHeaders,
+} from '@/lib/book-source/chapters';
+import {
+  getScriptBaseUrl,
+  hostsFromJsLib,
+} from '@/lib/js-engine/legado/source-script-shared';
 import {
   resolveUrl,
   detectContentType,
@@ -393,6 +402,40 @@ async function analyzeBookInfoFromBody(
   };
 }
 
+function listDetailApiServerCandidates(source: BookSource): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (url: string | null | undefined) => {
+    const trimmed = (url ?? '').trim().replace(/\/+$/, '');
+    if (!trimmed || !/^https?:\/\//i.test(trimmed) || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+  add(resolveBookSourceServerUrl(source));
+  add(getScriptBaseUrl(source));
+  const jsLib = (source as Record<string, unknown>).jsLib;
+  for (const h of hostsFromJsLib(jsLib)) add(h);
+  return out;
+}
+
+/** 对齐 ruleBookInfo.init：/detail?...&variable= + POST { html } */
+function buildDetailApiUrl(
+  serverUrl: string,
+  bookId: string,
+  sources: string,
+  tab: string,
+  bookVariable?: string,
+): string {
+  const base = serverUrl.replace(/\/+$/, '');
+  const variable = encodeURIComponent(buildCatalogApiVariable(bookVariable));
+  return (
+    `${base}/detail?book_id=${encodeURIComponent(bookId)}` +
+    `&source=${encodeURIComponent(sources)}` +
+    `&tab=${encodeURIComponent(tab)}` +
+    `&variable=${variable}`
+  );
+}
+
 /**
  * data: URL：解码载荷并请求详情（等同 Legado ruleBookInfo.init 的服务器分支），
  * 再交给统一规则解析。
@@ -400,7 +443,7 @@ async function analyzeBookInfoFromBody(
 async function getBookInfoFromDataUrl(
   source: BookSource,
   bookUrl: string,
-  options?: { durChapterTitle?: string },
+  options?: { durChapterTitle?: string; bookVariable?: string },
 ): Promise<BookInfo | null> {
   const payload = decodeDataUrl(bookUrl);
   if (!payload) {
@@ -415,25 +458,52 @@ async function getBookInfoFromDataUrl(
     return null;
   }
 
-  const serverUrl = resolveBookSourceServerUrl(source);
-  if (!serverUrl) {
-    console.warn('[detail] 无法从书源解析详情请求地址（jsLib server / 变量）');
+  const servers = listDetailApiServerCandidates(source);
+  if (servers.length === 0) {
+    console.warn('[detail] 无法从书源解析详情请求地址（jsLib server / 线路 / hosts）');
     return null;
   }
 
   const sources = payload.sources || payload.source || '';
   const tab = payload.tab || '';
-  const detailUrl = `${serverUrl}/detail?book_id=${encodeURIComponent(bookId)}&source=${encodeURIComponent(sources)}&tab=${encodeURIComponent(tab)}`;
-  console.log('[detail] 请求详情 API:', detailUrl);
-
-  const headers = buildSourceRequestHeaders(source, detailUrl);
-  headers['Content-Type'] = 'application/json';
   const detailBody = JSON.stringify({ html: '' });
-  const responseText = await post(detailUrl, detailBody, {
-    headers,
+  const requestCommon = {
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,
-  });
+  };
+
+  let detailUrl = '';
+  let responseText = '';
+  let lastError: unknown;
+
+  for (const serverUrl of servers) {
+    detailUrl = buildDetailApiUrl(serverUrl, bookId, sources, tab, options?.bookVariable);
+    console.log('[detail] 请求详情 API:', detailUrl);
+    const headers = withJsonPostHeaders(
+      buildBookSourceApiRequestHeaders(source, detailUrl),
+      detailBody,
+    );
+    try {
+      responseText = await post(detailUrl, detailBody, { headers, ...requestCommon });
+      lastError = undefined;
+      break;
+    } catch (e) {
+      lastError = e;
+      const retryable =
+        e instanceof HttpError && (e.status === 502 || e.status === 503 || e.status === 504);
+      if (retryable && servers.indexOf(serverUrl) < servers.length - 1) {
+        console.warn('[detail] 详情 API 网关错误，尝试下一条线路', {
+          status: e.status,
+          server: serverUrl,
+        });
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  if (lastError) throw lastError;
+
   await assertLoginCheckPassed(source, responseText, detailUrl);
 
   let response: { code?: number; data?: unknown; msg?: string };
@@ -471,7 +541,7 @@ async function getBookInfoFromDataUrl(
 export async function getBookInfo(
   source: BookSource,
   bookUrl: string,
-  options?: { durChapterTitle?: string },
+  options?: { durChapterTitle?: string; bookVariable?: string },
 ): Promise<BookInfo | null> {
   if (!source.ruleBookInfo) {
     return null;

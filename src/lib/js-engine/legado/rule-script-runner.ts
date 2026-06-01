@@ -15,6 +15,7 @@ import { requestLegadoRuleScriptHttpAsync } from '@/lib/js-engine/legado/rule-sc
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import {
   EXPLORE_JSLIB_CONTEXT_SHIM,
+  LEGADO_AJAX_PENDING_JSON,
   createSourceVariableHandlers,
   hostsFromJsLib,
   getSourceArgsKey,
@@ -260,6 +261,10 @@ function isEmptyContentRuleResult(result: unknown): boolean {
     }
   }
   if (!parsed || typeof parsed !== 'object') return false;
+  if (parsed.__readerAjaxPending === true) return true;
+  if (!('code' in parsed)) {
+    return !Object.values(parsed).some((v) => typeof v === 'string' && v.trim().length > 0);
+  }
   if ('code' in parsed && parsed.code !== 0 && parsed.code !== '0') return true;
   return !readRuleScriptContentField(parsed);
 }
@@ -412,6 +417,7 @@ export async function runLegadoRuleScript(
       cache: legadoCache,
       baseUrl,
       host: hostList.length > 0 ? hostList : [baseUrl].filter(Boolean),
+      bhost: () => (hostList[0] || baseUrl || '').replace(/\/+$/, ''),
       // 对齐 Legado 规则脚本隐式绑定（ruleContent 在解析 res 前会 java.put('sources', sources)）
       sources: legadoSources,
       tab: legadoTab,
@@ -545,6 +551,13 @@ export async function runLegadoRuleScript(
           throw new Error('qread unavailable');
         },
         log(...args: unknown[]) {
+          const msg = args.map((a) => String(a ?? '')).join(' ');
+          if (msg.includes('线路报错，自动切换下一个')) {
+            if (import.meta.env.DEV) {
+              console.debug('[rule-script]', msg);
+            }
+            return;
+          }
           if (import.meta.env.DEV) {
             console.log('[rule-script]', ...args);
           }
@@ -605,7 +618,7 @@ export async function runLegadoRuleScript(
             });
 
           pending.push(p);
-          return '';
+          return LEGADO_AJAX_PENDING_JSON;
         },
         startBrowser: browserHandlers.startBrowser,
         startBrowserAwait: browserHandlers.startBrowserAwait,
@@ -633,9 +646,10 @@ export async function runLegadoRuleScript(
 
   const runPromise = (async () => {
     let prevCacheSize = -1;
+    let scope = buildScope();
     for (let round = 0; round < MAX_AJAX_ROUNDS; round++) {
       pending = [];
-      const scope = buildScope();
+      scope = buildScope();
 
       let runError: unknown;
       let browserSuspend: SuspendScript | null = null;
@@ -694,7 +708,11 @@ export async function runLegadoRuleScript(
       }
 
       if (!hadAjax || ajaxCache.size === prevCacheSize) {
-        const fromAjax = tryContentFromRuleScriptAjaxCache(ajaxCache);
+        const scopeResultEmpty =
+          scope.result == null || String(scope.result).trim() === '';
+        const fromAjax = scopeResultEmpty
+          ? tryContentFromRuleScriptAjaxCache(ajaxCache)
+          : null;
         if (fromAjax) {
           return finishRuleScript(fromAjax);
         }
@@ -702,11 +720,15 @@ export async function runLegadoRuleScript(
       }
       prevCacheSize = ajaxCache.size;
     }
-    const fromAjax = tryContentFromRuleScriptAjaxCache(ajaxCache);
+    const scopeResultEmpty =
+      scope.result == null || String(scope.result).trim() === '';
+    const fromAjax = scopeResultEmpty
+      ? tryContentFromRuleScriptAjaxCache(ajaxCache)
+      : null;
     if (fromAjax) {
       return finishRuleScript(fromAjax);
     }
-    return null;
+    return finishRuleScript(scope.result ?? null);
   })();
 
   return Promise.race([runPromise, timeoutPromise]);

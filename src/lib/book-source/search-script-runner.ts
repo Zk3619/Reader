@@ -23,6 +23,7 @@ import {
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import {
   createSourceVariableHandlers,
+  buildLegadoExploreScriptBundle,
   EXPLORE_JSLIB_CONTEXT_SHIM,
   getScriptBaseUrl,
   getSourceArgsKey,
@@ -49,7 +50,7 @@ export function isScriptSearchUrl(searchUrl: string | undefined): boolean {
 }
 
 function buildSearchFullScript(scriptContent: string, jsLib: string): string {
-  return [jsLib ? jsLib + '\n' : '', EXPLORE_JSLIB_CONTEXT_SHIM, scriptContent].join('\n');
+  return buildLegadoExploreScriptBundle(jsLib, scriptContent);
 }
 
 type SearchCookieApi = {
