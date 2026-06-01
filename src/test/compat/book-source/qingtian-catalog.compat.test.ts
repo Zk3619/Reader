@@ -523,6 +523,35 @@ describe('Legado catalog API 解析', () => {
     expect(headers.cookie).toBe('qttoken=abc; deviceId=715526ded4651ef6;');
   });
 
+  it('buildLegadoContentApiRequestHeaders 脚本 cookie 空 qttoken 时回落书源登录 token', async () => {
+    const store: Record<string, string> = {};
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    });
+    const { buildLegadoContentApiRequestHeaders } = await import(
+      '@/lib/book-source/source-http'
+    );
+    const { getSourceArgsKey } = await import(
+      '@/lib/js-engine/legado/source-script-shared'
+    );
+    const source = { bookSourceUrl: 'test-qingtian-empty-token' } as import('@/types').BookSource;
+    const argsKey = getSourceArgsKey(source);
+    localStorage.setItem(argsKey, JSON.stringify({ qttoken: 'stored-token-xyz' }));
+    const headers = buildLegadoContentApiRequestHeaders(
+      source,
+      'https://v1.gyks.cf/content',
+      { cookie: 'qttoken=;deviceId=862770e338544ffb;' },
+    );
+    expect(headers.cookie).toContain('qttoken=stored-token-xyz');
+    expect(headers.cookie).not.toMatch(/qttoken=;/);
+  });
+
   it('buildContentApiPostBody 默认保持 catalog 原始 item_id（不自动修复）', async () => {
     const { utf8ToBase64 } = await import('@/lib/book-source/utils');
     const bookId = utf8ToBase64(

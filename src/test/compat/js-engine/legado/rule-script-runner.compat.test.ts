@@ -645,4 +645,44 @@ JSON.stringify({ device_type, device: String(device) });
     expect(parsed.device.length).toBeGreaterThan(0);
     expect(parsed.device).not.toMatch(/^web_/);
   });
+
+  it('光遇 request shim 可解析 BaseUrl 并拼接相对路径', async () => {
+    const jsLib = `
+var hosts = ['https://v1.gyks.cf'];
+function getVariable(key) {
+  if (key === '线路') return 'https://v1.gyks.cf';
+  if (key === '云端配置') return { hosts: hosts };
+  if (key === '自动切换') return 'true';
+  return '5';
+}
+function BaseUrl() {
+  return String(this.getVariable('线路') || hosts[0]).replace(/\\/$/, '');
+}
+function getToken() {
+  return 'test-token';
+}
+function request() {
+  return '';
+}
+`.trim();
+
+    const out = await runLegadoRuleScript(
+      'result = request("/catalog", "POST", { html: "" }, false);',
+      {
+        result: '',
+        baseUrl: 'https://v1.gyks.cf/',
+        source: { jsLib },
+      },
+      {
+        bookSourceName: 'test',
+        sourceName: 'test',
+        bookSourceUrl: 'test',
+        sourceUrl: 'test',
+        jsLib,
+      } as never,
+    );
+
+    expect(String(out)).toMatch(/^https:\/\/v1\.gyks\.cf\/catalog,/);
+    expect(String(out)).toContain('test-token');
+  });
 });
