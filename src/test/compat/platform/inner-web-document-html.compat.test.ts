@@ -1,12 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/platform/detect', () => ({
+  isTauri: vi.fn(() => false),
+  isMobile: vi.fn(() => false),
+}));
 import {
   extractProxiedDocumentQuery,
   patchProxiedDocumentLocationQuery,
 } from '@/lib/platform/inner-web-proxied-query';
+import { isTauri } from '@/lib/platform/detect';
 import {
   injectInnerWebBaseTag,
   resolveInnerWebDocumentBaseUrl,
   shouldPreferInnerWebUrlOverHtml,
+  shouldUseInnerWebSrcdoc,
 } from '@/lib/platform/inner-web-document-html';
 
 describe('extractProxiedDocumentQuery', () => {
@@ -110,5 +117,20 @@ describe('injectInnerWebBaseTag', () => {
       'https://v1.gyks.cf/get_para_review?book_id=1',
     );
     expect(out).toContain('<base href="https://v1.gyks.cf/">');
+  });
+});
+
+describe('shouldUseInnerWebSrcdoc', () => {
+  const url = 'https://v1.gyks.cf/get_para_review?book_id=1';
+  const html = '<html><head><base href="https://v1.gyks.cf/"></head></html>';
+
+  it('Tauri + http URL 不用 srcdoc（避免跨域子资源）', () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    expect(shouldUseInnerWebSrcdoc(url, html)).toBe(false);
+    vi.mocked(isTauri).mockReturnValue(false);
+  });
+
+  it('纯 Web 有 base 时仍用 srcdoc', () => {
+    expect(shouldUseInnerWebSrcdoc(url, html)).toBe(true);
   });
 });
