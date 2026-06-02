@@ -1427,29 +1427,23 @@ fn encode_form_urlencoded_gbk(fields: String) -> Result<String, String> {
     Ok(parts.join("&"))
 }
 
-#[cfg(debug_assertions)]
-fn prevent_default() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_prevent_default::Flags;
-
-    tauri_plugin_prevent_default::Builder::new()
-        .with_flags(Flags::all().difference(Flags::DEV_TOOLS | Flags::RELOAD))
-        .build()
+/// 禁用除 DevTools、整页刷新外的快捷键（开发与发布构建一致）。
+fn prevent_default_disabled_flags() -> Flags {
+    Flags::all().difference(Flags::DEV_TOOLS | Flags::RELOAD)
 }
 
-#[cfg(not(debug_assertions))]
-fn prevent_default() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    tauri_plugin_prevent_default::init()
-}
-
-/// Windows 下使用 PlatformOptions；其他平台仅使用默认 Builder
+/// 只注册一个 prevent-default 插件，避免重复注入 keydown 拦截脚本。
 #[cfg(target_os = "windows")]
-fn platform_prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri_plugin_prevent_default::Builder::new()
+        .with_flags(prevent_default_disabled_flags())
         .platform(
             PlatformOptions::new()
                 .general_autofill(true)
                 .password_autosave(false)
-                .browser_accelerator_keys(false)
+                // WebView2 层也需放行 F5/Ctrl+R/F12 与 DevTools（仅 JS flags 不够）
+                .browser_accelerator_keys(true)
+                .dev_tools(true)
                 .default_context_menus(false)
                 .default_script_dialogs(false),
         )
@@ -1457,8 +1451,10 @@ fn platform_prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn platform_prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    tauri_plugin_prevent_default::Builder::new().build()
+fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri_plugin_prevent_default::Builder::new()
+        .with_flags(prevent_default_disabled_flags())
+        .build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1479,18 +1475,7 @@ pub fn run() {
                 .level(tauri_plugin_log::log::LevelFilter::Info)
                 .build(),
         )
-        .plugin(prevent_default())
-        .plugin(platform_prevent_default_plugin())
-        .plugin(
-            // 开发时允许 RELOAD，否则会拦截 F5/整页刷新，导致 Vite 热更新/轮询重载无效
-            tauri_plugin_prevent_default::Builder::new()
-                .with_flags(if cfg!(debug_assertions) {
-                    Flags::all().difference(Flags::DEV_TOOLS | Flags::RELOAD)
-                } else {
-                    Flags::all()
-                })
-                .build(),
-        );
+        .plugin(prevent_default_plugin());
 
     // 桌面平台专用插件和命令
     #[cfg(not(target_os = "android"))]
