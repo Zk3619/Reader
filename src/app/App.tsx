@@ -85,7 +85,7 @@ import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderM
 import { cn } from "@/lib/utils";
 import { mainShellInset, mainShellPageRoot, mainShellPageScroll } from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
-import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons } from "@/components/shared/AppToasts";
+import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons, getAppToastVisibleLimit } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
@@ -3162,17 +3162,14 @@ function AppContent() {
           payload={innerWebPayload()}
           onClose={() => setInnerWebPayload(null)}
         />
-        <Show when={sourceEditTarget() !== null}>
-          <Portal mount={document.body}>
-            <SourceEditPage
-              sourceUrl={
-                sourceEditTarget() === "new"
-                  ? undefined
-                  : (sourceEditTarget() as string)
-              }
-              onClose={() => setSourceEditTarget(null)}
-              onOpenSourceVariables={openSourceVariables}
-              onOpenLogin={async (source) => {
+        <Show when={sourceEditTarget()} keyed>
+          {(target) => (
+            <Portal mount={document.body}>
+              <SourceEditPage
+                sourceUrl={target === "new" ? undefined : (target as string)}
+                onClose={() => setSourceEditTarget(null)}
+                onOpenSourceVariables={openSourceVariables}
+                onOpenLogin={async (source) => {
                 const url = source.loginUrl?.trim();
                 const hasUi = !!source.loginUi?.trim();
                 const isHttp =
@@ -3197,9 +3194,10 @@ function AppContent() {
                   setSourceLoginDialogSource(source);
                 }
               }}
-              onImportFromQr={(raw) => void identifySourcesFromQrRaw(raw)}
-            />
-          </Portal>
+                onImportFromQr={(raw) => void identifySourcesFromQrRaw(raw)}
+              />
+            </Portal>
+          )}
         </Show>
       </div>
     );
@@ -3219,9 +3217,10 @@ const appSidebarStyle = {
   "--sidebar-width-icon": "3rem",
 } as const;
 
-function App() {
-  const toastIcons = createAppToastIcons();
+/** 模块级单例，避免 App 重渲染时 Toaster icons 引用变化导致整棵 Toaster 重建 */
+const appToastIcons = createAppToastIcons();
 
+function App() {
   return (
     <SidebarProvider style={appSidebarStyle}>
       <AppContent />
@@ -3232,9 +3231,11 @@ function App() {
             duration={DEFAULT_TOAST_DURATION}
             theme="system"
             position="bottom-right"
+            expand={getAppToastVisibleLimit() > 1}
+            visibleToasts={getAppToastVisibleLimit()}
             closeButton
             richColors={false}
-            icons={toastIcons}
+            icons={appToastIcons}
             swipeDirections={["bottom", "right"]}
             class="z-200"
           />

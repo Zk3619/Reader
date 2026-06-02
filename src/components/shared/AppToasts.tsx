@@ -8,6 +8,7 @@ import { createSignal, onCleanup, onMount } from "solid-js"
 import { toast, type ExternalToast, type ToasterProps } from "solid-sonner"
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
+import { isMobile } from "@/lib/platform/detect"
 import { cn } from "@/lib/utils"
 
 const KEY_PERMANENT = "reader.immersiveToastDismissed"
@@ -99,8 +100,116 @@ export function appToastHostStyle(): Record<string, string> {
 /** 书架批量更新目录进行中的 toast（数值进度条；完成后须 dismiss） */
 export const UPDATE_TOC_TOAST_ID = "reader-update-toc-toast"
 
+const DESKTOP_MAX_VISIBLE_TOASTS = 3
+
+/** 脚本通知 toast id 前缀（用于流式槽位分组与批量收起） */
+export const SCRIPT_NOTICE_TOAST_ID_PREFIX = 'reader-script-notice:'
+
+let toastSlotSerial = 0
+let mobileActiveToastId: string | number | undefined
+const desktopToastIds: (string | number)[] = []
+let mobileActiveScriptToastId: string | number | undefined
+const desktopScriptToastIds: (string | number)[] = []
+
+function isScriptNoticeToastId(id: string | number): boolean {
+  return String(id).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)
+}
+
+/** Sonner `visibleToasts`：移动端 1 条，桌面端 3 条 */
+export function getAppToastVisibleLimit(): number {
+  return isMobile() ? 1 : DESKTOP_MAX_VISIBLE_TOASTS
+}
+
+function isToastSlotExempt(id: string | number): boolean {
+  return id === UPDATE_TOC_TOAST_ID
+}
+
+function releaseToastSlot(id: string | number): void {
+  if (isToastSlotExempt(id)) return
+  if (isScriptNoticeToastId(id)) {
+    if (mobileActiveScriptToastId === id) mobileActiveScriptToastId = undefined
+    const sIdx = desktopScriptToastIds.indexOf(id)
+    if (sIdx >= 0) desktopScriptToastIds.splice(sIdx, 1)
+    return
+  }
+  if (mobileActiveToastId === id) mobileActiveToastId = undefined
+  const idx = desktopToastIds.indexOf(id)
+  if (idx >= 0) desktopToastIds.splice(idx, 1)
+}
+
+function syncToastQueue(queue: (string | number)[]): void {
+  const active = new Set(toast.getToasts().map((t) => t.id))
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (!active.has(queue[i]!)) {
+      queue.splice(i, 1)
+    }
+  }
+}
+
+function claimStreamToastSlot(
+  id: string | number,
+  mobileActive: { current: string | number | undefined },
+  desktopQueue: (string | number)[],
+): void {
+  const limit = getAppToastVisibleLimit()
+
+  if (isMobile()) {
+    if (mobileActive.current != null && mobileActive.current !== id) {
+      const prev = mobileActive.current
+      toast.dismiss(prev)
+      releaseToastSlot(prev)
+    }
+    mobileActive.current = id
+    return
+  }
+
+  syncToastQueue(desktopQueue)
+  if (!desktopQueue.includes(id)) {
+    desktopQueue.push(id)
+  }
+  while (desktopQueue.length > limit) {
+    const oldest = desktopQueue.shift()
+    if (oldest != null && oldest !== id) {
+      toast.dismiss(oldest)
+      releaseToastSlot(oldest)
+    }
+  }
+}
+
+/**
+ * 流式槽位：新通知插入队尾并上顶；满员时 dismiss 队首（视觉最上方/最旧）再入队。
+ * 移动端上限 1（新条顶替当前条并退场）；桌面端上限 3。
+ */
+function claimToastSlot(requestedId?: string | number): string | number {
+  const id =
+    requestedId ?? `reader-app-toast-${Date.now()}-${++toastSlotSerial}`
+
+  if (isToastSlotExempt(id)) {
+    return id
+  }
+
+  if (isScriptNoticeToastId(id)) {
+    claimStreamToastSlot(id, { get current() { return mobileActiveScriptToastId }, set current(v) { mobileActiveScriptToastId = v } }, desktopScriptToastIds)
+    return id
+  }
+
+  claimStreamToastSlot(id, { get current() { return mobileActiveToastId }, set current(v) { mobileActiveToastId = v } }, desktopToastIds)
+  return id
+}
+
 export function dismissAppToast(id?: string | number) {
   toast.dismiss(id)
+  if (id != null) releaseToastSlot(id)
+}
+
+/** 收起所有脚本通知总线弹出的 toast（如关闭登录弹窗） */
+export function dismissScriptNoticeToasts(): void {
+  for (const t of toast.getToasts()) {
+    const id = t.id
+    if (id != null && String(id).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)) {
+      dismissAppToast(id)
+    }
+  }
 }
 
 const valueProgressFills = new Map<string | number, HTMLDivElement>()
@@ -137,14 +246,47 @@ function normalizeVariant(variant?: ToastVariant): ResolvedToastVariant {
 
 type ToastIcons = NonNullable<ToasterProps["icons"]>
 
-/** 须在 App 根组件 render 内调用，供 Toaster icons 使用（勿在 async 回调里创建 JSX） */
+const TOAST_ICON_CLASS = "size-5 shrink-0"
+
+/** 每条 toast 须单独创建 icon，不可复用 Toaster 级同一 JSX（Solid 会挪 DOM，堆叠时仅最新一条有图标） */
+export function createAppToastIcon(
+  variant: "success" | "info" | "warning" | "error",
+): JSX.Element {
+  switch (variant) {
+    case "success":
+      return (
+        <CircleCheck
+          class={cn(TOAST_ICON_CLASS, "text-emerald-600 dark:text-emerald-500")}
+          aria-hidden
+        />
+      )
+    case "info":
+      return <Info class={cn(TOAST_ICON_CLASS, "text-sky-600 dark:text-sky-500")} aria-hidden />
+    case "warning":
+      return (
+        <TriangleAlert
+          class={cn(TOAST_ICON_CLASS, "text-amber-600 dark:text-amber-500")}
+          aria-hidden
+        />
+      )
+    case "error":
+      return <CircleAlert class={cn(TOAST_ICON_CLASS, "text-destructive")} aria-hidden />
+  }
+}
+
+function resolvePerToastIcon(variant: ResolvedToastVariant): JSX.Element | null {
+  if (variant === "plain") return null
+  if (variant === "default") return createAppToastIcon("info")
+  return createAppToastIcon(variant)
+}
+
+/** 供 Toaster 默认 icons（单条 toast 仍应走 resolvePerToastIcon 注入独立 icon） */
 export function createAppToastIcons(): ToastIcons {
-  const cls = "size-5 shrink-0"
   return {
-    success: <CircleCheck class={cn(cls, "text-emerald-600 dark:text-emerald-500")} aria-hidden />,
-    info: <Info class={cn(cls, "text-sky-600 dark:text-sky-500")} aria-hidden />,
-    warning: <TriangleAlert class={cn(cls, "text-amber-600 dark:text-amber-500")} aria-hidden />,
-    error: <CircleAlert class={cn(cls, "text-destructive")} aria-hidden />,
+    success: createAppToastIcon("success"),
+    info: createAppToastIcon("info"),
+    warning: createAppToastIcon("warning"),
+    error: createAppToastIcon("error"),
   }
 }
 
@@ -201,7 +343,7 @@ function toastOptions(props: {
   const hasProgress = props.progress != null
 
   const options: ExternalToast = {
-    id: props.id,
+    ...(props.id != null ? { id: props.id } : {}),
     duration,
     closeButton: true,
     class: cn(
@@ -365,6 +507,8 @@ export function showAppToast(props: {
   /** 书源脚本等多行等宽排版 */
   script?: boolean
 }) {
+  const toastId = claimToastSlot(props.id)
+
   if (props.children) {
     const childDuration = props.persistent
       ? Number.POSITIVE_INFINITY
@@ -374,7 +518,7 @@ export function showAppToast(props: {
       toastOptions({
         duration: props.duration,
         persistent: props.persistent,
-        id: props.id,
+        id: toastId,
         script: props.script,
         progress: resolveProgress(props.progress, childDuration),
       }),
@@ -396,7 +540,7 @@ export function showAppToast(props: {
     description: undefined,
     duration: props.duration,
     persistent: props.persistent,
-    id: props.id,
+    id: toastId,
     script: props.script,
     progress,
     noIcon,
@@ -408,7 +552,7 @@ export function showAppToast(props: {
     description: hasDescField ? props.description : undefined,
     script: props.script,
     progress,
-    toastId: props.id,
+    toastId,
   })
 
   if (hasTitle) {
@@ -417,16 +561,17 @@ export function showAppToast(props: {
   } else if (hasDescField) {
     toastMessage = props.description!
     toastDescription = progress
-      ? lazyDescriptionBody({ script: props.script, progress, toastId: props.id })
+      ? lazyDescriptionBody({ script: props.script, progress, toastId })
       : undefined
   } else {
     toastMessage = " "
-    toastDescription = lazyDescriptionBody({ script: props.script, progress, toastId: props.id })
+    toastDescription = lazyDescriptionBody({ script: props.script, progress, toastId })
   }
 
   if (toastMessage === "" || (toastMessage === " " && !toastDescription)) return
 
-  const payload = { ...options, description: toastDescription }
+  const perToastIcon = resolvePerToastIcon(variant)
+  const payload = { ...options, description: toastDescription, icon: perToastIcon }
 
   switch (variant) {
     case "plain":

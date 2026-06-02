@@ -73,6 +73,7 @@ export interface VirtualGridRowsListProps<T> {
   onScroll?: (el: HTMLDivElement) => void;
   /** 传给 VirtualList.listInnerClass（书架网格整体 p-1，避免每行重复） */
   listInnerClass?: string;
+  scrollFooter?: JSX.Element;
   /**
    * 行间纵向间距 CSS 变量名（不含 `--`），与 `.bookshelf-layout-gap` 的 gap 同源；
    * 非末行 ul 使用 padding-bottom 承载行距，虚拟行高与实测 ul.offsetHeight 一致。
@@ -303,6 +304,7 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     overscan: props.overscan,
     class: props.class,
     listInnerClass: props.listInnerClass,
+    scrollFooter: props.scrollFooter,
     gridClass: props.gridClass,
     rowUlClass: props.rowUlClass,
     rowGapCssVar: props.rowGapCssVar,

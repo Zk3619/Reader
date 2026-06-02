@@ -22,6 +22,7 @@ export type VirtualGridListBodyProps<T> = {
   overscan?: number;
   class?: string;
   listInnerClass?: string;
+  scrollFooter?: JSX.Element;
   gridClass: string;
   rowUlClass?: string;
   rowGapCssVar?: string;
@@ -137,6 +138,7 @@ export function VirtualGridListBody<T>(props: VirtualGridListBodyProps<T>) {
       onScrollContainer={props.onScrollContainer}
       onScroll={props.onScroll}
       onVirtualizerReady={props.onVirtualizerReady}
+      scrollFooter={props.scrollFooter}
     >
       {(rowIndex) => {
         const lastRow = rowIndex >= props.rowIndices().length - 1;

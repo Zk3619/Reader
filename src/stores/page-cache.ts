@@ -4,7 +4,7 @@
  */
 
 import { createStore } from 'solid-js/store';
-import type { SearchBook } from '@/types';
+import type { BookChapter, SearchBook } from '@/types';
 
 interface ExplorePageCache {
   sourceId: string;
@@ -12,12 +12,16 @@ interface ExplorePageCache {
   books: SearchBook[];
   page: number;
   allBooks: SearchBook[];
+  /** false 表示已加载至末页，滚动加载不应再触发 */
+  hasMore?: boolean;
   timestamp: number;
 }
 
 interface BookInfoCache {
   bookUrl: string;
   book: SearchBook;
+  /** 详情页预加载的目录（重进时同步恢复，避免目录行闪「加载中」） */
+  chapters?: BookChapter[];
   timestamp: number;
 }
 
@@ -61,7 +65,8 @@ export const pageCacheStore = {
     sectionUrl: string,
     books: SearchBook[],
     page: number = 1,
-    allBooks: SearchBook[] = []
+    allBooks: SearchBook[] = [],
+    hasMore: boolean = true,
   ): void {
     const key = getExploreCacheKey(sourceId, sectionUrl);
     setState('explore', (prev) => {
@@ -72,6 +77,7 @@ export const pageCacheStore = {
         books,
         page,
         allBooks,
+        hasMore,
         timestamp: Date.now(),
       });
       return newMap;
@@ -107,6 +113,20 @@ export const pageCacheStore = {
     }
   },
 
+  /** 清除某书源下全部分类列表页缓存（删除书源时调用） */
+  clearExploreCacheForSource(sourceId: string): void {
+    const id = sourceId.trim();
+    if (!id) return;
+    const prefix = `${id}:`;
+    setState('explore', (prev) => {
+      const newMap = new Map(prev);
+      for (const key of newMap.keys()) {
+        if (key.startsWith(prefix)) newMap.delete(key);
+      }
+      return newMap;
+    });
+  },
+
   // 书籍信息页缓存
   getBookInfoCache(bookUrl: string): BookInfoCache | null {
     const key = getBookInfoCacheKey(bookUrl);
@@ -117,13 +137,31 @@ export const pageCacheStore = {
     return null;
   },
 
-  setBookInfoCache(bookUrl: string, book: SearchBook): void {
+  setBookInfoCache(bookUrl: string, book: SearchBook, chapters?: BookChapter[]): void {
     const key = getBookInfoCacheKey(bookUrl);
     setState('bookInfo', (prev) => {
       const newMap = new Map(prev);
+      const existing = newMap.get(key);
       newMap.set(key, {
         bookUrl,
         book,
+        chapters: chapters ?? existing?.chapters,
+        timestamp: Date.now(),
+      });
+      return newMap;
+    });
+  },
+
+  setBookInfoTocCache(bookUrl: string, chapters: BookChapter[]): void {
+    if (chapters.length === 0) return;
+    const key = getBookInfoCacheKey(bookUrl);
+    setState('bookInfo', (prev) => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(key);
+      if (!existing) return prev;
+      newMap.set(key, {
+        ...existing,
+        chapters,
         timestamp: Date.now(),
       });
       return newMap;

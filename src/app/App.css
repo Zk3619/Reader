@@ -192,11 +192,12 @@
     }
   }
 
-  /* 阅读器顶栏/底栏显隐动画（顶栏与底栏统一时长） */
-  --reader-bar-duration: 0.28s;
-  --reader-bar-easing: cubic-bezier(0, 0, 0.58, 1);
+  /* 阅读器顶栏/底栏显隐动画（overlay 用位移+淡入淡出，fixed 用 max-height 折叠） */
+  --reader-bar-duration: 0.4s;
+  --reader-bar-easing: cubic-bezier(0.22, 1, 0.36, 1);
   --reader-bar-transition: var(--reader-bar-duration) var(--reader-bar-easing);
   --reader-top-bar-height: 3.5rem;
+  --reader-bottom-bar-height: 4rem;
   --reader-footer-max-height: 20rem;
   /** 与 ::-webkit-scrollbar 宽高一致，供横滚区块轴预留 */
   --reader-scrollbar-size: 16px;
@@ -510,22 +511,70 @@
 
 /* ── 以下为从 Reader-old 迁移的样式 ── */
 
-/* 顶栏与底栏：只做高度收起/展开 */
+/* overlay 悬浮栏：底栏位移+透明度；顶栏仅透明度（transform 会破坏 Tauri -webkit-app-region: drag） */
+.reader-chrome-overlay-panel {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--reader-bar-duration) ease-out,
+    visibility 0s linear 0s;
+}
+
+.reader-chrome-overlay-panel--top {
+  transition:
+    opacity var(--reader-bar-duration) ease-out,
+    visibility 0s linear 0s;
+}
+
+.reader-chrome-overlay-panel--top.reader-chrome-overlay-panel--hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity calc(var(--reader-bar-duration) * 0.92) ease-in,
+    visibility 0s linear var(--reader-bar-duration);
+}
+
+.reader-chrome-overlay-panel--bottom {
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing),
+    opacity var(--reader-bar-duration) ease-out,
+    visibility 0s linear 0s;
+}
+
+.reader-chrome-overlay-panel--bottom.reader-chrome-overlay-panel--hidden {
+  opacity: 0;
+  transform: translate3d(0, 100%, 0);
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing),
+    opacity calc(var(--reader-bar-duration) * 0.92) ease-in,
+    visibility 0s linear var(--reader-bar-duration);
+}
+
+/* fixed 占位栏：max-height 折叠（流式布局） */
 .reader-top-bar {
   min-height: 0;
+  max-height: calc(var(--reader-top-bar-height) + var(--safe-area-top-effective));
   overflow: hidden;
   transition:
-    height var(--reader-bar-duration) var(--reader-bar-easing),
+    max-height var(--reader-bar-duration) var(--reader-bar-easing),
+    opacity var(--reader-bar-duration) ease-out,
     padding var(--reader-bar-duration) var(--reader-bar-easing),
     border-width var(--reader-bar-duration) var(--reader-bar-easing);
 }
 
 .reader-top-bar.reader-bar-hidden {
+  max-height: 0 !important;
   height: 0 !important;
   min-height: 0;
   padding-top: 0;
   padding-bottom: 0;
   border-bottom-width: 0;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -535,6 +584,7 @@
   overflow: hidden;
   transition:
     max-height var(--reader-bar-duration) var(--reader-bar-easing),
+    opacity var(--reader-bar-duration) ease-out,
     padding var(--reader-bar-duration) var(--reader-bar-easing),
     border-width var(--reader-bar-duration) var(--reader-bar-easing);
 }
@@ -545,6 +595,7 @@
   padding-top: 0;
   padding-bottom: 0;
   border-top-width: 0;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -554,6 +605,7 @@
   overflow: hidden;
   transition:
     max-height var(--reader-bar-duration) var(--reader-bar-easing),
+    opacity var(--reader-bar-duration) ease-out,
     padding var(--reader-bar-duration) var(--reader-bar-easing),
     border-width var(--reader-bar-duration) var(--reader-bar-easing);
 }
@@ -564,11 +616,36 @@
   padding-top: 0 !important;
   padding-bottom: 0 !important;
   border-width: 0 !important;
+  opacity: 0;
   pointer-events: none;
 }
 
 .reader-bottom-bar {
-  max-height: 4rem;
+  max-height: var(--reader-bottom-bar-height);
+}
+
+.reader-bottom-bar.safe-area-inset-bottom {
+  max-height: calc(var(--reader-bottom-bar-height) + var(--safe-area-bottom-effective));
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .reader-chrome-overlay-panel,
+  .reader-top-bar,
+  .reader-footer,
+  .reader-bottom-bar,
+  .reader-control-bar {
+    transition-duration: 0.01ms !important;
+  }
+
+  .reader-chrome-overlay-panel--top.reader-chrome-overlay-panel--hidden,
+  .reader-chrome-overlay-panel--bottom.reader-chrome-overlay-panel--hidden {
+    transform: none;
+  }
+
+  .reader-chrome-overlay-panel--bottom {
+    transform: none;
+  }
 }
 
 .reader-control-bar {
@@ -1230,10 +1307,15 @@ body.reader-inner-web-session--drawer {
 }
 
 /* Sonner：挂到 body，高于 Dialog（z-110），模态打开时仍可点击 */
+/* 勿用 inset:0 全屏锚点，首次 toast 会触发整页合成层重绘导致闪烁 */
 .reader-toast-host {
   position: fixed;
-  inset: 0;
+  right: 0;
+  bottom: 0;
   z-index: 200;
+  width: 0;
+  height: 0;
+  overflow: visible;
   pointer-events: none;
 }
 

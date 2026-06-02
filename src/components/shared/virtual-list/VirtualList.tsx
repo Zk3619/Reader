@@ -53,6 +53,8 @@ export interface VirtualListProps<T> {
   onScroll?: (el: HTMLDivElement) => void;
   /** 列表外壳 padding（加在滚动宿主层；行绝对定位时内层 relative 的 padding 不生效） */
   listInnerClass?: string;
+  /** 滚动容器内、虚拟列表之后的底部内容（如加载更多占位） */
+  scrollFooter?: JSX.Element;
   /** 使用外部滚动容器（书架主滚动区等），避免双层滚动 */
   externalScrollElement?: Accessor<HTMLDivElement | null | undefined>;
   /** 布局依赖变化时重新 measure（如响应式网格列宽/行高） */
@@ -479,6 +481,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
           </For>
         </Show>
       </div>
+      {props.scrollFooter}
     </VirtualListScrollHost>
     </VirtualListScrollCoalesceContext.Provider>
   );

@@ -77,7 +77,7 @@ export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
  * 滚动区末尾留白：避免末项贴齐滚动容器底边。
  * 主壳 Tab 页在桌面无底栏时由 App.css + data-shell-bottom-bar 注入；其余用于下方无底栏/DialogFooter 的滚动容器。
  */
-export const scrollEdgeBottomInset = 'mb-2';
+export const scrollEdgeBottomInset = 'my-2';
 
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;
