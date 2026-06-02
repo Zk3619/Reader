@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { BookSource } from '@/types';
-import { resolveExploreAuthor, resolveExploreParseRule } from '@/lib/book-source/explore';
+import {
+  resolveExploreAuthor,
+  resolveExploreParseRule,
+  exploreBook,
+} from '@/lib/book-source/explore';
 import { analyzeListElements, analyzeString, analyzeRule } from '@/lib/rule-engine';
 
 const BANZHU_HTML = `
@@ -79,4 +83,34 @@ describe('explore ruleExplore → ruleSearch fallback', () => {
     });
     expect(results[0]).toBe('123');
   });
+
+  it('@text/@href 规则在 dd 行上可回退提取 a 文本与 href', async () => {
+    const source = {
+      ...SOURCE,
+      ruleExplore: {
+        bookList: 'dd',
+        name: '@text',
+        bookUrl: '@href',
+      },
+      sourceUrl: 'https://example.com',
+      exploreUrl: 'https://example.com/x.html',
+    } as unknown as BookSource;
+    const html = '<dl><dd><a href="/book/1.html">测试书名</a></dd></dl>';
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(html, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    try {
+      const list = await exploreBook(source, 1, source.exploreUrl);
+      expect(list.length).toBe(1);
+      expect(list[0]?.name).toBe('测试书名');
+      expect(list[0]?.bookUrl).toContain('/book/1.html');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
 });

@@ -19,6 +19,7 @@ export async function applyImageDecode(
   imageDecode: string,
   baseUrl: string,
   source?: BookSource,
+  options?: { onScriptToast?: (msg?: unknown, level?: unknown) => void },
 ): Promise<string> {
   const rule = imageDecode.trim();
   if (!rule || !html.includes('<img')) return html;
@@ -45,6 +46,7 @@ export async function applyImageDecode(
       baseUrl,
       result: absUrl,
       source: source as unknown as Record<string, unknown>,
+      onScriptToast: options?.onScriptToast,
     };
 
     let decoded = absUrl;
@@ -55,6 +57,8 @@ export async function applyImageDecode(
           result: absUrl,
           baseUrl,
           source: source as unknown as Record<string, unknown>,
+          bookSource: source,
+          onScriptToast: options?.onScriptToast,
         });
         const vStr = v == null ? '' : String(v).trim();
         decoded = vStr || absUrl;

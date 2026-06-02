@@ -20,6 +20,7 @@ import { splitUrlAndOption, URL_OPTION_SPLIT } from '@/lib/book-source/analyze-u
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 import { get, HttpError } from '@/lib/http';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import type { ScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import {
   isCloudflareBlockedResponse,
   resolveCloudflareViaInnerWeb,
@@ -35,6 +36,8 @@ export interface FetchSourcePageParams {
   baseUrl?: string;
   /** 占位符：除 page 外 */
   placeholders?: Record<string, string>;
+  /** 统一脚本通知总线（toast + HTML 限流拦截） */
+  scriptNotice?: ScriptNoticeBus;
 }
 
 /**
@@ -88,6 +91,8 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
       page,
       baseUrl: resolveBookSourceRequestOrigin(params.source) || params.baseUrl,
       cookies: resolveSourceCookiesForHttp(params.source, pageUrl),
+      scriptNotice: params.scriptNotice,
+      onScriptToast: params.scriptNotice?.onScriptToast,
     };
   };
 
@@ -147,6 +152,7 @@ export async function fetchChapterPageHtml(
   source: BookSource,
   chapterUrl: string,
   baseUrl?: string,
+  scriptNotice?: ScriptNoticeBus,
 ): Promise<string> {
   const trimmed = chapterUrl.trim();
   if (/^data:/i.test(trimmed)) {
@@ -164,6 +170,7 @@ export async function fetchChapterPageHtml(
       ruleUrl: trimmed,
       source,
       baseUrl,
+      scriptNotice,
     });
     return body;
   }

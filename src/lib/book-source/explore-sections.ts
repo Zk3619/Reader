@@ -5,6 +5,7 @@
 
 import type { BookSource } from '@/types';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
+import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import { getSourceArgsKey, getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 
@@ -259,7 +260,7 @@ export function getExploreSections(source: BookSource): ExploreSection[] {
 const exploreSectionsMemCache = new Map<string, ExploreSection[]>();
 
 function exploreSectionsCacheKey(source: BookSource, argsVersion: number): string {
-  return `${source.sourceUrl}\0${argsVersion}`;
+  return `${getLegadoSourceKey(source)}\0${argsVersion}`;
 }
 
 /** 清除某书源的发现脚本缓存（书源更新后可选调用） */
@@ -288,7 +289,10 @@ export async function getExploreSectionsAsync(
     if (hit) return hit;
 
     try {
-      const sections = await runExploreScript(script, source);
+      const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
+      const sections = await runExploreScript(script, source, {
+        onScriptToast: noticeBus.onScriptToast,
+      });
       if (sections.length > 0) {
         exploreSectionsMemCache.set(cacheKey, sections);
         return sections;

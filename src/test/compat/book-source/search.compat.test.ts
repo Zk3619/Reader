@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { resolveCheckKeyword } from '@/lib/book-source/search-keyword';
-import { normalizeSearchDisplayFields } from '@/lib/book-source/search';
+import {
+  normalizeSearchDisplayFields,
+  parseSearchThrottleAlertMessage,
+} from '@/lib/book-source/search';
 import type { RuleContext } from '@/lib/rule-engine';
 
 describe('search checkKeyWord compatibility', () => {
@@ -78,5 +81,27 @@ describe('search display normalization', () => {
       latestChapterTitle: '',
     });
     expect(out.kind).toBe('#后宫 #母子 #制服');
+  });
+});
+
+describe('search throttle alert detection', () => {
+  it('parses alert("搜索间隔: 30 秒") and returns message', () => {
+    const html = '<script>alert("搜索间隔: 30 秒");window.history.go(-1);</script>';
+    expect(parseSearchThrottleAlertMessage(html)).toBe('搜索间隔: 30 秒');
+  });
+
+  it('parses java.toast("搜索间隔: 30 秒") and returns message', () => {
+    const html = '<script>java.toast("搜索间隔: 30 秒");window.history.go(-1);</script>';
+    expect(parseSearchThrottleAlertMessage(html)).toBe('搜索间隔: 30 秒');
+  });
+
+  it('parses plain throttle text without alert call', () => {
+    const html = '<div>搜索过于频繁，请稍后再搜索</div>';
+    expect(parseSearchThrottleAlertMessage(html)).toContain('搜索过于频繁');
+  });
+
+  it('ignores unrelated alert text', () => {
+    const html = '<script>alert("加入收藏失败");</script>';
+    expect(parseSearchThrottleAlertMessage(html)).toBeUndefined();
   });
 });

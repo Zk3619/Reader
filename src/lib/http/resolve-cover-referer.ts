@@ -16,6 +16,7 @@ import {
   getScriptBaseUrl,
   getSourceArgsKey,
 } from '@/lib/js-engine/legado/source-script-shared';
+import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 
 /** 规范化封面地址（协议相对 //…；剥离 Legado ,{"headers":…} 后缀） */
 export function normalizeImageUrl(url: string): string {
@@ -299,7 +300,13 @@ export function resolveCoverRequestHeaders(
   coverUrl?: string | null,
   extraHeaders?: Record<string, string> | null,
 ): Record<string, string> {
-  const parsed = parseHeaders(source?.header);
+  const normalizedCover = coverUrl?.trim()
+    ? normalizeImageUrl(coverUrl)
+    : '';
+  const parsed =
+    source && normalizedCover.startsWith('http')
+      ? buildSourceRequestHeaders(source, normalizedCover)
+      : parseHeaders(source?.header);
   const headers: Record<string, string> = { ...parsed };
 
   const headerReferer =
@@ -314,9 +321,6 @@ export function resolveCoverRequestHeaders(
     delete headers.cookie;
   }
 
-  const normalizedCover = coverUrl?.trim()
-    ? normalizeImageUrl(coverUrl)
-    : '';
   const explicitPageReferer = normalizeHttpReferer(bookOrigin);
 
   let referer = resolveCoverReferer(bookOrigin, source, normalizedCover || null);

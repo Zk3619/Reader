@@ -42,6 +42,10 @@ import { getBook, hasBook, updateBooksGroupMask } from '@/lib/database/books';
 import { getAllGroups } from '@/lib/database/book-groups';
 import { getBookInfo } from '@/lib/book-source/detail';
 import { fetchChapterListDeduped } from '@/lib/book-source/chapters';
+import {
+  getBookInfoTocSessionCache,
+  setBookInfoTocSessionCache,
+} from '@/lib/book-info/book-info-toc-cache';
 import { getSource } from '@/lib/database/sources';
 import { getChapterList as getDbChapterList } from '@/lib/database/chapters';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -193,6 +197,18 @@ function isOnlineSearchBook(book: Pick<SearchBook, 'origin'>): boolean {
   return o !== 'local' && !o.startsWith('local::');
 }
 
+function resolveInitialPreloadedChapters(
+  cacheKey: string | undefined,
+  cachedBook: ReturnType<typeof pageCacheStore.getBookInfoCache>,
+): BookChapter[] | null {
+  if (!cacheKey) return null;
+  const fromPage = cachedBook?.chapters;
+  if (fromPage && fromPage.length > 0) return fromPage;
+  const fromSession = getBookInfoTocSessionCache(cacheKey);
+  if (fromSession && fromSession.length > 0) return fromSession;
+  return null;
+}
+
 /* ─── 主组件 ─── */
 
 export interface BookInfoPageProps {
@@ -238,7 +254,9 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [isLoading, setIsLoading] = createSignal(needsRefresh && !cachedBook);
   const [loadError, setLoadError] = createSignal<string | null>(null);
   /** 对齐 legado：详情页后台预加载目录，加入书架时直接写入 */
-  const [preloadedChapters, setPreloadedChapters] = createSignal<BookChapter[] | null>(null);
+  const [preloadedChapters, setPreloadedChapters] = createSignal<BookChapter[] | null>(
+    resolveInitialPreloadedChapters(bookUrl, cachedBook),
+  );
   const [tocLoading, setTocLoading] = createSignal(false);
   const [tocLoadError, setTocLoadError] = createSignal<string | null>(null);
   const [shelfBook, setShelfBook] = createSignal<Book | null>(null);
@@ -275,28 +293,46 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setShelfBook((await getBook(url)) ?? null);
   };
 
+  const commitPreloadedChapters = (book: SearchBook, chapters: BookChapter[]) => {
+    if (chapters.length === 0) return;
+    setPreloadedChapters(chapters);
+    const key = book.tocUrl || book.bookUrl;
+    if (!key) return;
+    setBookInfoTocSessionCache(key, chapters);
+    if (pageCacheStore.getBookInfoCache(key)) {
+      pageCacheStore.setBookInfoTocCache(key, chapters);
+    } else {
+      pageCacheStore.setBookInfoCache(key, book, chapters);
+    }
+  };
+
   const preloadChapterList = async (book: SearchBook, source: BookSource) => {
     if (book.origin === 'local' || book.origin.startsWith('local::')) return;
     const tocUrl = book.tocUrl || book.bookUrl;
     if (!tocUrl) return;
-    setTocLoading(true);
     setTocLoadError(null);
+
+    if (preloadedChapters()?.length) {
+      return;
+    }
+
     try {
       const inDb = await getDbChapterList(book.bookUrl);
       if (inDb.length > 0) {
-        setPreloadedChapters(inDb);
+        commitPreloadedChapters(book, inDb);
         return;
       }
+      setTocLoading(true);
       const list = await fetchChapterListDeduped(source, tocUrl, {
         onPartial: async (partial) => {
           if (partial.chapters.length > 0) {
-            setPreloadedChapters(partial.chapters);
+            commitPreloadedChapters(book, partial.chapters);
             setTocLoading(false);
           }
         },
       });
       if (list.length > 0) {
-        setPreloadedChapters(list);
+        commitPreloadedChapters(book, list);
       } else if (!preloadedChapters()?.length) {
         setTocLoadError('目录为空');
       }
@@ -383,7 +419,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
         // 保存到缓存
         if (bookUrl) {
-          pageCacheStore.setBookInfoCache(bookUrl, mergedBook);
+          pageCacheStore.setBookInfoCache(bookUrl, mergedBook, preloadedChapters() ?? undefined);
         }
         void preloadChapterList(mergedBook, source);
       } else {
@@ -413,6 +449,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
       setBookSource(source ?? undefined);
     }
 
+    if (isOnlineSearchBook(props.book) && !preloadedChapters()?.length) {
+      const inDb = await getDbChapterList(props.book.bookUrl);
+      if (inDb.length > 0) {
+        commitPreloadedChapters(props.book, inDb);
+      }
+    }
+
     const bookUrl = props.book.tocUrl || props.book.bookUrl;
 
     console.log('[BookInfo] 刷新检查:', {
@@ -424,7 +467,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
     await loadBookInfo();
     const source = bookSource();
-    if (source && !needsRefresh) {
+    if (source && !preloadedChapters()?.length) {
       void preloadChapterList(currentBook(), source);
     }
   });
@@ -565,7 +608,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
   };
 
   const tocRowText = () => {
-    if (tocLoading()) return '加载中…';
     const chapters = preloadedChapters();
     const sb = shelfBook();
     const prefix = currentBook().source || originDisplayName();
@@ -573,6 +615,9 @@ export function BookInfoPage(props: BookInfoPageProps) {
       const idx = sb?.durChapterIndex ?? 0;
       const ch = chapters[Math.min(Math.max(idx, 0), chapters.length - 1)];
       return `${prefix}:${ch?.title || '第1章'}`;
+    }
+    if (tocLoading()) {
+      return '加载中…';
     }
     if (tocLoadError()) return '加载失败';
     return '暂无目录';
@@ -646,7 +691,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setBookData((b) => {
       const next = { ...b, coverUrl: fresh };
       const key = cacheBookInfoKey();
-      if (key) pageCacheStore.setBookInfoCache(key, next);
+      if (key) pageCacheStore.setBookInfoCache(key, next, preloadedChapters() ?? undefined);
       return next;
     });
   };

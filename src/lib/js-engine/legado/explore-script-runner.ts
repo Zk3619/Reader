@@ -8,9 +8,12 @@ import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { mapRawExploreItem, type ExploreSection } from '@/lib/book-source/explore-sections';
 import { evalCodeVoid, initQuickJSRuntime, isQuickJSFallback } from '@/lib/js-engine/core/runtime';
-import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
+import { createExploreInjector, flushExploreScriptToastBuffer } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
+import {
+  createLegadoScriptCookieApi,
+} from '@/lib/js-engine/legado/login-script-runner';
 import {
   buildLegadoExploreScriptBundle,
   createLegadoGetArguments,
@@ -32,46 +35,9 @@ import {
 
 const SCRIPT_TIMEOUT_MS = 15000;
 
-function createExploreCookieApi(baseUrl: string, store: Map<string, string>) {
-  return {
-    getCookie(url: string): string {
-      const k = url || baseUrl;
-      let s = store.get(k) ?? '';
-      if (!s && k.startsWith('http')) {
-        try {
-          s = store.get(new URL(k).origin) ?? '';
-        } catch {
-          /* ignore */
-        }
-      }
-      return s;
-    },
-    setCookie(url: string, value: string): void {
-      store.set(url || baseUrl, value);
-    },
-    removeCookie(url: string): void {
-      store.delete(url || baseUrl);
-    },
-    getKey(cookieStrOrUrl: string, keyName?: string): string {
-      let s: string;
-      if (keyName != null && keyName !== '') {
-        s = this.getCookie(cookieStrOrUrl);
-      } else {
-        s = String(cookieStrOrUrl ?? '').trim();
-      }
-      if (!s) return '';
-      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
-      for (const part of s.split(';')) {
-        const trimmed = part.trim();
-        if (trimmed.includes(searchKey)) {
-          const eq = trimmed.indexOf('=');
-          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
-        }
-      }
-      return '';
-    },
-  };
-}
+export type ExploreScriptRunOptions = {
+  onScriptToast?: (msg?: unknown, level?: unknown) => void;
+};
 
 /** 从 exploreUrl 中提取 <js>...</js> 内的脚本内容 */
 export function extractExploreScript(exploreUrl: string | undefined): string | null {
@@ -85,7 +51,8 @@ export function extractExploreScript(exploreUrl: string | undefined): string | n
 
 async function tryRunExploreScriptQuickJS(
   scriptContent: string,
-  source: BookSource
+  source: BookSource,
+  options?: ExploreScriptRunOptions,
 ): Promise<ExploreSection[] | null> {
   await initQuickJSRuntime();
   if (isQuickJSFallback()) return null;
@@ -102,12 +69,13 @@ async function tryRunExploreScriptQuickJS(
   const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
 
   const cookieStore = loadSourceCookieStore(cookiesKey);
-  const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
+  const cookieApi = createLegadoScriptCookieApi(source, baseUrl, cookieStore, { hostList });
   const sourceVars = createSourceVariableHandlers(source, argsKey);
 
   const fullScript = buildLegadoExploreScriptBundle(jsLib, scriptContent);
 
   const serverForToken = resolveBookSourceServerUrl(source) ?? baseUrl;
+  const toastBuffer: Array<{ msg: unknown; level: unknown }> = [];
   const injector = createExploreInjector({
     baseUrl,
     sourceUrl,
@@ -120,6 +88,7 @@ async function tryRunExploreScriptQuickJS(
       ...sourceVars,
       getLoginInfoMap: () => readSourceLoginInfoMap(source),
     },
+    scriptToastBuffer: toastBuffer,
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
 
@@ -135,6 +104,9 @@ async function tryRunExploreScriptQuickJS(
         evalCodeVoid(vm, 'globalThis.result = undefined;');
       },
     });
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(toastBuffer, options?.onScriptToast);
+    }, 0);
     const sections = parseScriptResult(raw);
     if (sections.length === 0 && raw != null) {
       const preview =
@@ -155,9 +127,10 @@ async function tryRunExploreScriptQuickJS(
  */
 export async function runExploreScript(
   scriptContent: string,
-  source: BookSource
+  source: BookSource,
+  options?: ExploreScriptRunOptions,
 ): Promise<ExploreSection[]> {
-  const quick = await tryRunExploreScriptQuickJS(scriptContent, source);
+  const quick = await tryRunExploreScriptQuickJS(scriptContent, source, options);
   if (quick != null && quick.length > 0) {
     console.log('[explore-script] QuickJS final:', quick.length, 'sections');
     return quick;
@@ -166,13 +139,14 @@ export async function runExploreScript(
     console.warn('[explore-script] QuickJS 返回 0 条，降级 Function');
   }
 
-  return runExploreScriptLegacy(scriptContent, source);
+  return runExploreScriptLegacy(scriptContent, source, options);
 }
 
 /** Function + with 降级路径 */
 async function runExploreScriptLegacy(
   scriptContent: string,
-  source: BookSource
+  source: BookSource,
+  options?: ExploreScriptRunOptions,
 ): Promise<ExploreSection[]> {
   const baseUrl = getScriptBaseUrl(source);
   const argsKey = getSourceArgsKey(source);
@@ -186,8 +160,18 @@ async function runExploreScriptLegacy(
   const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
 
   const cookieStore = loadSourceCookieStore(cookiesKey);
-  const cookieApi = createExploreCookieApi(baseUrl, cookieStore);
+  const cookieApi = createLegadoScriptCookieApi(source, baseUrl, cookieStore, { hostList });
   const sourceVars = createSourceVariableHandlers(source, argsKey);
+
+  const safeScriptToast = (msg?: unknown, level?: unknown) => {
+    queueMicrotask(() => {
+      try {
+        options?.onScriptToast?.(msg, level);
+      } catch (e) {
+        console.warn('[explore-script] toast failed', e);
+      }
+    });
+  };
 
   const ajaxCache = new Map<string, string>();
   const ajaxDurationCache = new Map<string, number>();
@@ -212,8 +196,12 @@ async function runExploreScriptLegacy(
     },
 
     java: {
-      toast(_msg?: string) {},
-      longToast(_msg?: string) {},
+      toast(msg?: string, level?: string) {
+        safeScriptToast(msg, level ?? 'info');
+      },
+      longToast(msg?: string) {
+        safeScriptToast(msg, 'warning');
+      },
       log(...args: unknown[]) {
         console.warn('[explore-script]', ...args);
         return args[0];
@@ -305,6 +293,12 @@ async function runExploreScriptLegacy(
         pending.push(p);
         return '';
       },
+    },
+    toast(msg?: string, level?: string) {
+      safeScriptToast(msg, level ?? 'info');
+    },
+    longToast(msg?: string) {
+      safeScriptToast(msg, 'warning');
     },
   };
 

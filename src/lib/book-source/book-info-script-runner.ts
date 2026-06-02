@@ -26,7 +26,7 @@ import {
   isQuickJSFallback,
   setGlobalJson,
 } from '@/lib/js-engine/core/runtime';
-import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
+import { createExploreInjector, flushExploreScriptToastBuffer } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import {
   createSourceVariableHandlers,
@@ -164,6 +164,7 @@ async function runBookInfoLegadoFieldScript(
   options: {
     ensureReturns: (script: string) => string;
     durChapterTitle?: string;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
   },
 ): Promise<string | undefined> {
   await initQuickJSRuntime();
@@ -202,6 +203,7 @@ async function runBookInfoLegadoFieldScript(
   const body = options.ensureReturns(scriptContent);
   const fullScript = buildLegadoExploreScriptBundle(jsLib, body);
 
+  const toastBuffer: Array<{ msg: unknown; level: unknown }> = [];
   const injector = createExploreInjector({
     baseUrl,
     sourceUrl,
@@ -217,6 +219,7 @@ async function runBookInfoLegadoFieldScript(
     },
     request: (resolvedUrl, call) =>
       requestInScript(resolvedUrl, { ...call, source }, source),
+    scriptToastBuffer: toastBuffer,
   });
 
   try {
@@ -267,6 +270,10 @@ globalThis.book.setUseReplaceRule = function(v){
       },
     });
 
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(toastBuffer, options.onScriptToast);
+    }, 0);
+
     if (raw == null) return undefined;
     if (typeof raw === 'string') {
       const t = raw.trim();
@@ -288,12 +295,14 @@ export async function runBookInfoTocUrlScript(
   detailData: Record<string, unknown>,
   detailUrl: string,
   bookUrl: string,
+  options?: { onScriptToast?: (msg?: unknown, level?: unknown) => void },
 ): Promise<string | undefined> {
   const tocRule = source.ruleBookInfo?.tocUrl;
   const scriptContent = tocRule ? extractJsRule(tocRule) : null;
   if (!scriptContent) return undefined;
   return runBookInfoLegadoFieldScript(source, detailData, detailUrl, bookUrl, scriptContent, {
     ensureReturns: ensureTocUrlScriptReturns,
+    onScriptToast: options?.onScriptToast,
   });
 }
 
@@ -305,7 +314,10 @@ export async function runBookInfoIntroScript(
   detailData: Record<string, unknown>,
   detailUrl: string,
   bookUrl: string,
-  options?: { durChapterTitle?: string },
+  options?: {
+    durChapterTitle?: string;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  },
 ): Promise<string | undefined> {
   const introRule = source.ruleBookInfo?.intro;
   const scriptContent = introRule ? extractJsRule(introRule) : null;
@@ -320,6 +332,7 @@ export async function runBookInfoIntroScript(
     {
       ensureReturns: ensureIntroScriptReturns,
       durChapterTitle: options?.durChapterTitle,
+      onScriptToast: options?.onScriptToast,
     },
   );
   if (raw == null) return undefined;

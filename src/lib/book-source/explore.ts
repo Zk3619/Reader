@@ -27,6 +27,10 @@ import {
   normalizeAuthorText,
 } from '@/lib/book-source/search-format';
 import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
+import {
+  createScriptNoticeBus,
+  isScriptNoticeBlockedError,
+} from '@/lib/book-source/rate-limit-guard';
 
 /** 拆分书源 lastChapter 模板中的「章节 • 时间」 */
 function splitLastChapterField(raw: string): { title?: string; embeddedTime?: string } {
@@ -88,6 +92,40 @@ function exploreAuthorLooksInvalid(author: string): boolean {
   return false;
 }
 
+async function fallbackExploreName(
+  rawName: string,
+  nameRule: string | undefined,
+  context: RuleContext,
+): Promise<string> {
+  if (rawName.trim()) return rawName;
+  const rule = nameRule?.trim() ?? '';
+  if (rule !== '@text') return rawName;
+  for (const r of ['a@text', 'a@ownText', '@title', 'a@title']) {
+    const v = (await analyzeString(r, context)).trim();
+    if (v) return v;
+  }
+  return rawName;
+}
+
+async function fallbackExploreBookUrl(
+  rawUrl: string,
+  bookUrlRule: string | undefined,
+  context: RuleContext,
+): Promise<string> {
+  if (rawUrl.trim()) return rawUrl;
+  const rule = bookUrlRule?.trim() ?? '';
+  if (rule !== '@href') return rawUrl;
+
+  for (const r of ['a@href', '@data-href', '@data-url', 'a@data-href', 'a@data-url']) {
+    const v = (await analyzeString(r, context, { isUrl: true })).trim();
+    if (v) return v;
+  }
+
+  const m = context.content.match(/\shref\s*=\s*["']([^"']+)["']/i);
+  if (m?.[1]?.trim()) return m[1].trim();
+  return rawUrl;
+}
+
 /** ##作者…## 等纯替换规则失败时，回退常见 author 选择器 */
 export async function resolveExploreAuthor(
   rule: string | undefined,
@@ -125,6 +163,7 @@ async function exploreBookViaLegadoAjax(
   rawUrl: string,
   signal?: AbortSignal,
 ): Promise<SearchBook[]> {
+  const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
   const ajax = parseAjaxArgs(rawUrl.trim());
   if (!ajax || !resolveExploreParseRule(source)) return [];
 
@@ -169,7 +208,13 @@ async function exploreBookViaLegadoAjax(
     await assertLoginCheckPassed(source, html, requestUrl);
 
     const respondTime = Date.now() - startTime;
-    return parseExploreBooksFromContent(source, html, requestUrl, respondTime);
+    return parseExploreBooksFromContent(
+      source,
+      html,
+      requestUrl,
+      respondTime,
+      noticeBus.onScriptToast,
+    );
   } catch (error) {
     if (isAbortError(error)) throw error;
     console.error(`[explore] Legado ajax 书单列失败 [${source.sourceName}]:`, error);
@@ -181,10 +226,11 @@ async function parseExploreBooksFromContent(
   source: BookSource,
   html: string,
   exploreUrl: string,
-  respondTime: number
+  respondTime: number,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Promise<SearchBook[]> {
-  const rule = resolveExploreParseRule(source);
-  if (!rule) return [];
+  const primaryRule = resolveExploreParseRule(source);
+  if (!primaryRule) return [];
 
   const contentType = detectContentType(html);
   const context: RuleContext = {
@@ -192,33 +238,39 @@ async function parseExploreBooksFromContent(
     contentType,
     baseUrl: exploreUrl,
     source: source as unknown as Record<string, unknown>,
+    onScriptToast,
   };
 
   const bookList: SearchBook[] = [];
-
-  if (rule.bookList) {
-    let bookListRule = rule.bookList;
-    if (legadoListRuleNeedsAllSuffix(bookListRule)) {
-      bookListRule = `${bookListRule}@all`;
+  const parseWithRule = async (rule: ExploreRule | SearchRule): Promise<SearchBook[]> => {
+    const parsed: SearchBook[] = [];
+    if (rule.bookList) {
+      let bookListRule = rule.bookList;
+      if (legadoListRuleNeedsAllSuffix(bookListRule)) {
+        bookListRule = `${bookListRule}@all`;
+      }
+      const listItems = await analyzeListElements(bookListRule, context);
+      for (let i = 0; i < listItems.length; i++) {
+        const element = listItems[i].content;
+        const elementContext = enrichJsonListItemContext(
+          element,
+          contentType,
+          exploreUrl,
+          source as unknown as Record<string, unknown>,
+          { debugIndex: i, regexGroups: listItems[i].regexGroups },
+        );
+        elementContext.onScriptToast = onScriptToast;
+        const book = await parseExploreBook(source, rule as ExploreRule, elementContext, exploreUrl, respondTime);
+        if (book) parsed.push(book);
+      }
+    } else {
+      const book = await parseExploreBook(source, rule as ExploreRule, context, exploreUrl, respondTime);
+      if (book) parsed.push(book);
     }
-    const listItems = await analyzeListElements(bookListRule, context);
-    for (let i = 0; i < listItems.length; i++) {
-      const element = listItems[i].content;
-      const elementContext = enrichJsonListItemContext(
-        element,
-        contentType,
-        exploreUrl,
-        source as unknown as Record<string, unknown>,
-        { debugIndex: i, regexGroups: listItems[i].regexGroups },
-      );
-      const book = await parseExploreBook(source, rule, elementContext, exploreUrl, respondTime);
-      if (book) bookList.push(book);
-    }
-  } else {
-    const book = await parseExploreBook(source, rule, context, exploreUrl, respondTime);
-    if (book) bookList.push(book);
-  }
+    return parsed;
+  };
 
+  bookList.push(...await parseWithRule(primaryRule));
   return bookList;
 }
 
@@ -228,6 +280,7 @@ export async function exploreBook(
   exploreUrlOverride?: string,
   options?: ExploreBookOptions,
 ): Promise<SearchBook[]> {
+  const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
   const signal = options?.signal;
   let baseUrl = exploreUrlOverride ?? source.exploreUrl;
   const parseRule = resolveExploreParseRule(source);
@@ -278,18 +331,37 @@ export async function exploreBook(
 
     // 发起请求
     const { fetchSourcePage } = await import('@/lib/book-source/fetch-source-page');
-    const fetched = await fetchSourcePage({
-      ruleUrl: exploreUrl,
-      source,
-      page,
-      baseUrl: resolveBookSourceRequestOrigin(source) || source.sourceUrl,
-    });
-    const html = fetched.body;
+    let html: string;
+    try {
+      const fetched = await fetchSourcePage({
+        ruleUrl: exploreUrl,
+        source,
+        page,
+        baseUrl: resolveBookSourceRequestOrigin(source) || source.sourceUrl,
+        scriptNotice: noticeBus,
+      });
+      html = fetched.body;
+    } catch (e) {
+      if (isScriptNoticeBlockedError(e)) {
+        console.warn('[explore] 命中频率限制提示，停止本次解析', {
+          url: exploreUrl.slice(0, 120),
+          throttleMessage: e.notice.message,
+        });
+        return [];
+      }
+      throw e;
+    }
 
     console.log('[explore] 响应长度:', html.length, '前200字符:', html.substring(0, 200));
 
     const respondTime = Date.now() - startTime;
-    const bookList = await parseExploreBooksFromContent(source, html, exploreUrl, respondTime);
+    const bookList = await parseExploreBooksFromContent(
+      source,
+      html,
+      exploreUrl,
+      respondTime,
+      noticeBus.onScriptToast,
+    );
     console.log('[explore] 最终解析到书籍数:', bookList.length);
     return bookList;
   } catch (error) {
@@ -310,9 +382,11 @@ async function parseExploreBook(
   respondTime: number
 ): Promise<SearchBook | null> {
   try {
-    const name = rule.name ? await analyzeString(rule.name, context) : '';
+    let name = rule.name ? await analyzeString(rule.name, context) : '';
     const author = rule.author ? await resolveExploreAuthor(rule.author, context) : '';
-    const bookUrl = rule.bookUrl ? await analyzeString(rule.bookUrl, context) : '';
+    let bookUrl = rule.bookUrl ? await analyzeString(rule.bookUrl, context) : '';
+    name = await fallbackExploreName(name, rule.name, context);
+    bookUrl = await fallbackExploreBookUrl(bookUrl, rule.bookUrl, context);
 
     // 调试日志（仅前3个）
     const debugIndex = (context as unknown as { _debugIndex?: number })._debugIndex;

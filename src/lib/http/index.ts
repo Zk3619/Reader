@@ -24,8 +24,17 @@ import {
 import { isTauri } from '@/lib/platform/detect';
 import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
 import { isAbortError, mergeAbortSignals, raceWithAbortSignal } from '@/lib/http/abort';
+import { decodeBookSourceResponseBytes } from '@/lib/book-source/response-charset';
 
 export { isAbortError } from '@/lib/http/abort';
+
+async function bytesToHttpResponseText(
+  data: ArrayBuffer | Uint8Array,
+  contentEncoding?: string | null,
+): Promise<string> {
+  const raw = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return decodeBookSourceResponseBytes(raw, undefined, contentEncoding);
+}
 
 /**
  * 规范化 URL，确保跨平台兼容性
@@ -264,15 +273,17 @@ async function fetchViaDownloadBinary(
     url: result.url,
     text: async () => {
       if (cachedText === null) {
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+        const ce =
+          result.headers['content-encoding'] ?? result.headers['Content-Encoding'];
+        cachedText = await bytesToHttpResponseText(cachedArrayBuffer, ce);
       }
       return cachedText;
     },
     json: async () => {
       if (cachedText === null) {
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+        const ce =
+          result.headers['content-encoding'] ?? result.headers['Content-Encoding'];
+        cachedText = await bytesToHttpResponseText(cachedArrayBuffer, ce);
       }
       return JSON.parse(cachedText);
     },
@@ -448,10 +459,16 @@ async function executeRequest(
           text: async () => {
             if (cachedText === null) {
               if (cachedArrayBuffer !== null) {
-                const decoder = new TextDecoder('utf-8', { fatal: false });
-                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+                cachedText = await bytesToHttpResponseText(
+                  cachedArrayBuffer,
+                  responseHeaders.get('content-encoding'),
+                );
               } else {
-                cachedText = await tauriResponse.text();
+                const ab = await tauriResponse.arrayBuffer();
+                cachedText = await bytesToHttpResponseText(
+                  ab,
+                  responseHeaders.get('content-encoding'),
+                );
               }
             }
             return cachedText;
@@ -459,10 +476,16 @@ async function executeRequest(
           json: async () => {
             if (cachedText === null) {
               if (cachedArrayBuffer !== null) {
-                const decoder = new TextDecoder('utf-8', { fatal: false });
-                cachedText = decoder.decode(new Uint8Array(cachedArrayBuffer));
+                cachedText = await bytesToHttpResponseText(
+                  cachedArrayBuffer,
+                  responseHeaders.get('content-encoding'),
+                );
               } else {
-                cachedText = await tauriResponse.text();
+                const ab = await tauriResponse.arrayBuffer();
+                cachedText = await bytesToHttpResponseText(
+                  ab,
+                  responseHeaders.get('content-encoding'),
+                );
               }
             }
             return JSON.parse(cachedText);
@@ -612,14 +635,19 @@ async function executeRequest(
         if (isTauriResponse) {
           return (response as any).text();
         }
-        return response.text();
+        const ab = await response.arrayBuffer();
+        return bytesToHttpResponseText(ab, response.headers.get('content-encoding'));
       },
       json: async <T = any>() => {
         if (isTauriResponse) {
           const jsonData = await (response as any).json();
           return jsonData as T;
         }
-        return response.json() as Promise<T>;
+        const text = await bytesToHttpResponseText(
+          await response.arrayBuffer(),
+          response.headers.get('content-encoding'),
+        );
+        return JSON.parse(text) as T;
       },
       arrayBuffer: async () => {
         if (isTauriResponse) {

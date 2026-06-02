@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { parseCss } from '@/lib/rule-engine/css-parser';
 
 describe('css parser legado compatibility', () => {
+  it('tag!0 excludes a single index (Legado li!0 header skip)', () => {
+    const html = `<ul><li>header</li><li>book</li></ul>`;
+    expect(parseCss('tag.ul@tag.li!0@text', html)).toEqual(['book']);
+  });
+
   it('returns merged outerHtml for @html and removes script/style', () => {
     const html = `
       <div class="item"><span>A</span><script>alert(1)</script></div>

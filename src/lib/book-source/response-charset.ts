@@ -2,6 +2,8 @@
  * 书源 HTTP 响应 charset（AnalyzeUrl charset=gbk 等）
  */
 
+import { maybeDecompressHttpBody } from '@/lib/http/decompress-body';
+
 export function isGbkLikeCharset(charset?: string): boolean {
   const cs = charset?.trim().toLowerCase();
   return cs === 'gbk' || cs === 'gb2312' || cs === 'gb18030';
@@ -10,9 +12,11 @@ export function isGbkLikeCharset(charset?: string): boolean {
 export async function decodeBookSourceResponseBytes(
   data: ArrayBuffer | Uint8Array,
   charset?: string,
+  contentEncoding?: string | null,
 ): Promise<string> {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  if (bytes.length === 0) return '';
+  const raw = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (raw.length === 0) return '';
+  const bytes = maybeDecompressHttpBody(raw, contentEncoding);
 
   if (isGbkLikeCharset(charset)) {
     try {

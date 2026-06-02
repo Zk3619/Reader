@@ -13,7 +13,7 @@ import {
   isQuickJSFallback,
 } from '@/lib/js-engine/core/runtime';
 import { AjaxCoordinator } from '@/lib/js-engine/legado/host/ajax-coordinator';
-import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
+import { createExploreInjector, flushExploreScriptToastBuffer } from '@/lib/js-engine/legado/explore-inject';
 import type { LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import {
@@ -21,6 +21,9 @@ import {
   trySyncEvalSearchTemplate,
 } from '@/lib/book-source/search-url-template-sync';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
+import {
+  createLegadoScriptCookieApi,
+} from '@/lib/js-engine/legado/login-script-runner';
 import {
   createSourceVariableHandlers,
   buildLegadoExploreScriptBundle,
@@ -53,56 +56,6 @@ function buildSearchFullScript(scriptContent: string, jsLib: string): string {
   return buildLegadoExploreScriptBundle(jsLib, scriptContent);
 }
 
-type SearchCookieApi = {
-  getCookie: (url: string) => string;
-  setCookie: (url: string, value: string) => void;
-  removeCookie: (url: string) => void;
-  removecookie: (url: string) => void;
-  getKey: (cookieStrOrUrl: string, keyName?: string) => string;
-};
-
-function createSearchCookieApi(baseUrl: string, store: Map<string, string>): SearchCookieApi {
-  const api = {
-    getCookie(url: string): string {
-      const k = url || baseUrl;
-      let s = store.get(k) ?? '';
-      if (!s && k.startsWith('http')) {
-        try {
-          s = store.get(new URL(k).origin) ?? '';
-        } catch {
-          /* ignore */
-        }
-      }
-      return s;
-    },
-    setCookie(url: string, value: string): void {
-      store.set(url || baseUrl, value);
-    },
-    removeCookie(url: string): void {
-      store.delete(url || baseUrl);
-    },
-    getKey(cookieStrOrUrl: string, keyName?: string): string {
-      let s: string;
-      if (keyName != null && keyName !== '') {
-        s = this.getCookie(cookieStrOrUrl);
-      } else {
-        s = String(cookieStrOrUrl ?? '').trim();
-      }
-      if (!s) return '';
-      const searchKey = keyName != null && keyName !== '' ? keyName : 'qttoken';
-      for (const part of s.split(';')) {
-        const trimmed = part.trim();
-        if (trimmed.includes(searchKey)) {
-          const eq = trimmed.indexOf('=');
-          return eq >= 0 ? trimmed.slice(eq + 1).trim() : '';
-        }
-      }
-      return '';
-    },
-  };
-  return { ...api, removecookie: (url: string) => api.removeCookie(url) };
-}
-
 function buildSearchInjectParams(source: BookSource, _keyword: string, _page: number) {
   const baseUrl = getScriptBaseUrl(source);
   const sourceUrl = getLegadoSourceKey(source);
@@ -115,7 +68,7 @@ function buildSearchInjectParams(source: BookSource, _keyword: string, _page: nu
   const hostList = hostsFromJsLib(jsLib);
   const hosts = hostList.length > 0 ? hostList : baseUrl ? [baseUrl] : [];
   const cookieStore = loadSourceCookieStore(cookiesKey);
-  const cookieApi = createSearchCookieApi(baseUrl, cookieStore);
+  const cookieApi = createLegadoScriptCookieApi(source, baseUrl, cookieStore, { hostList: hosts });
   const sourceVars = createSourceVariableHandlers(source, argsKey);
 
   return {
@@ -163,6 +116,7 @@ async function runSearchJsFullQuickJS(
   source: BookSource,
   keyword: string,
   page: number,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Promise<string | null> {
   await initQuickJSRuntime();
   if (isQuickJSFallback()) return null;
@@ -170,6 +124,7 @@ async function runSearchJsFullQuickJS(
   const p = buildSearchInjectParams(source, keyword, page);
   const fullScript = buildSearchFullScript(scriptContent, p.jsLib);
 
+  const toastBuffer: Array<{ msg: unknown; level: unknown }> = [];
   const injector = createExploreInjector({
     baseUrl: p.baseUrl,
     sourceUrl: p.sourceUrl,
@@ -185,6 +140,7 @@ async function runSearchJsFullQuickJS(
     searchKey: keyword,
     searchPage: page,
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+    scriptToastBuffer: toastBuffer,
   });
 
   try {
@@ -198,6 +154,9 @@ async function runSearchJsFullQuickJS(
         evalCodeVoid(vm, 'globalThis.result = undefined;');
       },
     });
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(toastBuffer, onScriptToast);
+    }, 0);
     return scriptResultToString(raw);
   } catch (e) {
     console.warn('[search-script] 整段脚本 QuickJS 失败，降级 Function', e);
@@ -226,6 +185,7 @@ function buildLegacyScope(
   source: BookSource,
   keyword: string,
   page: number,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Record<string, unknown> {
   const p = buildSearchInjectParams(source, keyword, page);
   const ajaxCache = new Map<string, string>();
@@ -262,6 +222,12 @@ function buildLegacyScope(
     },
     java: {
       ...buildLegacyJavaApi(),
+      toast(msg?: unknown, level?: unknown) {
+        onScriptToast?.(msg, level ?? 'info');
+      },
+      longToast(msg?: unknown) {
+        onScriptToast?.(msg, 'warning');
+      },
       log(...args: unknown[]) {
         console.warn('[search-script]', ...args);
       },
@@ -333,9 +299,10 @@ async function runSearchJsFullLegacy(
   source: BookSource,
   keyword: string,
   page: number,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Promise<string> {
   const p = buildSearchInjectParams(source, keyword, page);
-  const scopeObj = buildLegacyScope(source, keyword, page);
+  const scopeObj = buildLegacyScope(source, keyword, page, onScriptToast);
   const fullScript = buildSearchFullScript(scriptContent, p.jsLib);
 
   const run = new Function(
@@ -453,10 +420,12 @@ export async function runSearchUrlScript(
   source: BookSource,
   keyword: string,
   page = 1,
+  options?: { onScriptToast?: (msg?: unknown, level?: unknown) => void },
 ): Promise<string> {
-  const quick = await runSearchJsFullQuickJS(scriptContent, source, keyword, page);
+  const onScriptToast = options?.onScriptToast;
+  const quick = await runSearchJsFullQuickJS(scriptContent, source, keyword, page, onScriptToast);
   if (quick != null && quick.trim()) return quick.trim();
-  return (await runSearchJsFullLegacy(scriptContent, source, keyword, page)).trim();
+  return (await runSearchJsFullLegacy(scriptContent, source, keyword, page, onScriptToast)).trim();
 }
 
 /**

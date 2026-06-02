@@ -81,6 +81,8 @@ export interface RuleContext {
   chapter?: Record<string, unknown>;
   /** 当前正则捕获组（$1/$2） */
   regexGroups?: string[];
+  /** 脚本 toast 回调（java.toast/toast） */
+  onScriptToast?: (msg?: unknown, level?: unknown) => void;
 }
 
 /** 规则链下一段的 content：对象须 JSON 化，供 $.content 等 JSONPath 使用 */
@@ -132,6 +134,7 @@ function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
     ruleContentType: context.contentType,
     variables: context.variables,
     bookSource: context.source as BookSource | undefined,
+    onScriptToast: context.onScriptToast,
   };
 }
 
@@ -475,6 +478,7 @@ async function expandReplacementInlineJs(
         book: context.book,
         source: context.source,
         chapter: context.chapter,
+        onScriptToast: context.onScriptToast,
       });
       out += jsValue == null ? '' : String(jsValue);
     }

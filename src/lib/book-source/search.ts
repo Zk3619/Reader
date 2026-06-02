@@ -57,6 +57,12 @@ import {
   normalizeBookNameText,
   shouldFallbackToDetailParsing,
 } from '@/lib/book-source/search-format';
+import {
+  createScriptNoticeBus,
+  parseRateLimitMessageFromHtml,
+} from '@/lib/book-source/rate-limit-guard';
+
+export const parseSearchThrottleAlertMessage = parseRateLimitMessageFromHtml;
 
 function stripHtml(raw: string | undefined): string | undefined {
   if (!raw) return raw;
@@ -356,6 +362,7 @@ export async function searchBook(
   },
   page = 1,
 ): Promise<SearchBook[]> {
+  const noticeBus = createScriptNoticeBus(source.sourceName, '搜索');
   if (!source.ruleSearch || !source.searchUrl) {
     return [];
   }
@@ -375,7 +382,9 @@ export async function searchBook(
       });
     }
 
-    const resolved = await resolveSearchRequest(source, requestKeyword, page);
+    const resolved = await resolveSearchRequest(source, requestKeyword, page, {
+      onScriptToast: noticeBus.onScriptToast,
+    });
     const typedDataSearchUrl = resolved.ruleUrlWithOption;
     const isTypedDataSearch = isLegadoTypedDataUrl(typedDataSearchUrl);
     let searchUrl = alignUrlToBookSourceRequestOrigin(resolved.url, source);
@@ -424,6 +433,7 @@ export async function searchBook(
           baseUrl: searchUrl,
           cookies: storedCookie,
           defaultWebViewDelayMs: resolved.webViewDelayMs,
+          scriptNotice: noticeBus,
         });
         await assertLoginCheckPassed(source, fetched.body, fetched.url || searchUrl);
         return fetched.body;
@@ -507,6 +517,16 @@ export async function searchBook(
 
     const contentType = detectContentType(html);
     const respondTime = Date.now() - startTime;
+    if (contentType === 'html') {
+      const notice = noticeBus.consumeHtmlNotice(html);
+      if (notice && noticeBus.shouldBlockOnNotice(notice)) {
+        console.warn(`[search] 命中搜索频率限制 [${source.sourceName}]`, {
+          url: searchUrl.slice(0, 120),
+          throttleMessage: notice.message,
+        });
+        return [];
+      }
+    }
 
     const rawBookListRule = rule.bookList?.trim() ?? '';
     const { listRule: parsedBookListRule, reverse: reverseBookList } = parseBookListRule(rawBookListRule);
@@ -531,6 +551,7 @@ export async function searchBook(
       contentType,
       baseUrl: isTypedDataSearch ? searchRuleBaseUrl : searchUrl,
       source: source as unknown as Record<string, unknown>,
+      onScriptToast: noticeBus.onScriptToast,
     };
 
     // 检查是否是详情页（bookUrlPattern匹配）
@@ -604,6 +625,7 @@ export async function searchBook(
           source as unknown as Record<string, unknown>,
           { regexGroups: item.regexGroups },
         );
+        elementContext.onScriptToast = noticeBus.onScriptToast;
 
         const book = await parseSearchBook(
           source,

@@ -6,6 +6,7 @@ import type { QuickJSContext, QuickJSHandle } from 'quickjs-emscripten';
 import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
 import type { LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
 import { bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
+import { invokeQuickJsStringCallback } from '@/lib/js-engine/legado/host/invoke-vm-callback';
 import {
   isUserApiPost,
   mergeAjaxCookieHeaders,
@@ -55,17 +56,28 @@ export function bindJavaAjax(
   bindVmFunction(vm, javaObj, 'ajax', (...args) => {
     const urlArg = args[0] ? vm.dump(args[0]) : '';
     let optionsOrCb: Record<string, unknown> | ((body: string) => void) | undefined;
-    let cb: ((body: string) => void) | undefined;
+    let cb: ((body: string) => void) | null = null;
+    let vmCallbackHandle: QuickJSHandle | undefined;
 
     if (args[1]) {
-      const d = vm.dump(args[1]);
-      if (typeof d === 'function') {
-        optionsOrCb = d as (body: string) => void;
-      } else if (d && typeof d === 'object') {
-        optionsOrCb = d as Record<string, unknown>;
-        if (args[2]) {
-          const d2 = vm.dump(args[2]);
-          if (typeof d2 === 'function') cb = d2 as (body: string) => void;
+      const t1 = vm.typeof(args[1]);
+      if (t1 === 'function') {
+        vmCallbackHandle = args[1];
+      } else {
+        const d = vm.dump(args[1]);
+        if (typeof d === 'function') {
+          optionsOrCb = d as (body: string) => void;
+        } else if (d && typeof d === 'object') {
+          optionsOrCb = d as Record<string, unknown>;
+          if (args[2]) {
+            const t2 = vm.typeof(args[2]);
+            if (t2 === 'function') {
+              vmCallbackHandle = args[2];
+            } else {
+              const d2 = vm.dump(args[2]);
+              if (typeof d2 === 'function') cb = d2 as (body: string) => void;
+            }
+          }
         }
       }
     }
@@ -73,7 +85,7 @@ export function bindJavaAjax(
     const parsed = parseAjaxArgs(
       urlArg as string | Record<string, unknown>,
       optionsOrCb,
-      cb
+      cb ?? undefined
     );
     if (!parsed) {
       return vm.newString('');
@@ -82,15 +94,23 @@ export function bindJavaAjax(
     const { urlStr, method, body, headers, callback } = parsed;
     const resolvedUrl = options.resolveUrl(options.baseUrl, urlStr);
 
-    const cached = coordinator.getCachedResponse(resolvedUrl, options.applyDuration);
-    if (cached !== undefined) {
+    const runCallback = (text: string) => {
+      if (vmCallbackHandle) {
+        invokeQuickJsStringCallback(vm, vmCallbackHandle, text);
+        return;
+      }
       if (callback) {
         try {
-          callback(cached);
+          callback(text);
         } catch {
           /* ignore */
         }
       }
+    };
+
+    const cached = coordinator.getCachedResponse(resolvedUrl, options.applyDuration);
+    if (cached !== undefined) {
+      runCallback(cached);
       return vm.newString(cached ?? '');
     }
 
@@ -151,18 +171,12 @@ export function bindJavaAjax(
         const durationMs = Date.now() - requestStart;
         coordinator.recordDuration(resolvedUrl, durationMs, options.applyDuration);
         coordinator.cache.set(resolvedUrl, text);
-        if (callback) {
-          try {
-            callback(text);
-          } catch {
-            /* ignore */
-          }
-        }
+        runCallback(text);
       }).catch(() => {
         const durationMs = Date.now() - requestStart;
         coordinator.recordDuration(resolvedUrl, durationMs, options.applyDuration);
         coordinator.cache.set(resolvedUrl, '');
-        if (callback) callback('');
+        runCallback('');
       });
       rt.pending.push(p);
       return vm.newString(LEGADO_AJAX_PENDING_JSON);

@@ -12,6 +12,7 @@ import type {
   ContentRule,
 } from '@/types/rule';
 import * as sourcesDb from '@/lib/database/sources';
+import { purgeBookSourceSession } from '@/lib/book-source/purge-source-session';
 import { parseBookSourceJson } from '@/lib/book-source/source-import';
 import { autoCompleteRule } from '@/lib/book-source/rule-complete';
 import type { BookSourceEditField } from '@/lib/book-source/book-source-edit-config';
@@ -330,6 +331,15 @@ export async function saveLegadoEditSource(
   });
 
   if (originalUrl && originalUrl !== normalized.sourceUrl) {
+    const previous = await sourcesDb.getSource(originalUrl);
+    if (previous) {
+      await purgeBookSourceSession(previous);
+    } else {
+      await purgeBookSourceSession({
+        sourceUrl: originalUrl,
+        bookSourceUrl: originalUrl,
+      } as BookSource);
+    }
     await sourcesDb.deleteSource(originalUrl);
   }
 

@@ -55,7 +55,12 @@ export function injectRhinoLegadoShims(vm: QuickJSContext): void {
             var v = globalThis.__readerCacheStore[String(k)];
             return v === undefined ? null : v;
           },
-          remove: function(k) { delete globalThis.__readerCacheStore[String(k)]; }
+          remove: function(k) { delete globalThis.__readerCacheStore[String(k)]; },
+          putMemory: function(k, v) { globalThis.__readerCacheStore[String(k)] = v; },
+          getFromMemory: function(k) {
+            var v = globalThis.__readerCacheStore[String(k)];
+            return v === undefined ? 0 : v;
+          }
         };
       }
       if (!globalThis.java) globalThis.java = {};

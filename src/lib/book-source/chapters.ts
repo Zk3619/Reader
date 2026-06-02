@@ -38,6 +38,11 @@ import { settingsStore } from '@/stores/settings';
 import { evalJs, type JsContext } from '@/lib/js-engine';
 import { runLegadoRuleScript } from '@/lib/js-engine/legado/rule-script-runner';
 import { enrichJsonListItemContext, readJsonListItemField } from '@/lib/book-source/json-list-context';
+import {
+  consumeHtmlRateLimitNotice,
+  createScriptNoticeBus,
+  isScriptNoticeBlockedError,
+} from '@/lib/book-source/rate-limit-guard';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
@@ -57,6 +62,8 @@ export interface GetChapterListOptions {
   onPartial?: (partial: PartialChapterList) => void | Promise<void>;
   /** 书架书籍 variable（对齐 Legado book.getVariable('custom')） */
   bookVariable?: string;
+  /** 脚本 toast 回调（内部透传） */
+  onScriptToast?: (msg?: unknown, level?: unknown) => void;
 }
 
 type TocPartialListener = NonNullable<GetChapterListOptions['onPartial']>;
@@ -64,6 +71,8 @@ type TocPartialListener = NonNullable<GetChapterListOptions['onPartial']>;
 type TocFetchEntry = {
   promise: Promise<BookChapter[]>;
   listeners: Set<TocPartialListener>;
+  /** 已发出的最近一批目录，供晚加入的 onPartial 订阅方回放 */
+  lastPartial: PartialChapterList | null;
 };
 
 const tocFetchInFlight = new Map<string, TocFetchEntry>();
@@ -96,22 +105,38 @@ export function fetchChapterListDeduped(
   const key = tocFetchKey(source, tocUrl);
   const existing = tocFetchInFlight.get(key);
   if (existing) {
-    if (options?.onPartial) existing.listeners.add(options.onPartial);
+    if (options?.onPartial) {
+      existing.listeners.add(options.onPartial);
+      if (existing.lastPartial) {
+        void Promise.resolve(options.onPartial(existing.lastPartial)).catch((e) => {
+          console.warn('[chapters] onPartial 回放失败:', e);
+        });
+      }
+    }
     return existing.promise;
   }
 
   const listeners = new Set<TocPartialListener>();
   if (options?.onPartial) listeners.add(options.onPartial);
 
-  const promise = getChapterList(source, tocUrl, {
+  const entry: TocFetchEntry = {
+    promise: Promise.resolve([]),
+    listeners,
+    lastPartial: null,
+  };
+
+  entry.promise = getChapterList(source, tocUrl, {
     ...options,
-    onPartial: (partial) => dispatchTocPartialListeners(listeners, partial),
+    onPartial: (partial) => {
+      entry.lastPartial = partial;
+      dispatchTocPartialListeners(listeners, partial);
+    },
   }).finally(() => {
     tocFetchInFlight.delete(key);
   });
 
-  tocFetchInFlight.set(key, { promise, listeners });
-  return promise;
+  tocFetchInFlight.set(key, entry);
+  return entry.promise;
 }
 
 /**
@@ -131,6 +156,26 @@ export function parseTocChapterListRule(chapterList?: string): {
     listRule = listRule.slice(1);
   }
   return { listRule, reverse };
+}
+
+/**
+ * 兼容部分站点目录 XPath 使用位置谓词（如 [2]）导致命中为空：
+ * 首次无结果时回退为“去掉位置谓词”再试一次。
+ */
+export function buildRelaxedTocXPathListRule(listRule: string): string | undefined {
+  const trimmed = listRule.trim();
+  if (!trimmed) return undefined;
+
+  const hasAllSuffix = /@all$/i.test(trimmed);
+  const body = hasAllSuffix ? trimmed.replace(/@all$/i, '').trim() : trimmed;
+  const xpathBody = /^@xpath:/i.test(body) ? body.slice(7).trim() : body;
+  if (!xpathBody.startsWith('//')) return undefined;
+  if (!/\[\d+\]/.test(xpathBody)) return undefined;
+
+  const relaxedBody = xpathBody.replace(/\[\d+\]/g, '');
+  if (!relaxedBody || relaxedBody === xpathBody) return undefined;
+  const rebuilt = /^@xpath:/i.test(body) ? `@xpath:${relaxedBody}` : relaxedBody;
+  return hasAllSuffix ? `${rebuilt}@all` : rebuilt;
 }
 
 /**
@@ -197,6 +242,7 @@ async function applyPreUpdateJs(
   rule: TocRule,
   html: string,
   currentTocUrl: string,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Promise<string> {
   const preUpdateJs = rule.preUpdateJs?.trim();
   if (!preUpdateJs) return html;
@@ -207,6 +253,7 @@ async function applyPreUpdateJs(
       baseUrl: currentTocUrl,
       result: html,
       source: source as unknown as Record<string, unknown>,
+      onScriptToast,
     };
     const output = await analyzeString(preUpdateJs, context);
     const next = output.trim();
@@ -222,6 +269,7 @@ async function applyFormatJs(
   rule: TocRule,
   chapters: BookChapter[],
   currentTocUrl: string,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): Promise<BookChapter[]> {
   const formatJs = rule.formatJs?.trim();
   if (!formatJs || chapters.length === 0) return chapters;
@@ -230,6 +278,8 @@ async function applyFormatJs(
       result: chapters,
       baseUrl: currentTocUrl,
       source: source as unknown as Record<string, unknown>,
+      bookSource: source,
+      onScriptToast,
     });
     if (!Array.isArray(jsResult)) return chapters;
 
@@ -692,6 +742,7 @@ async function getChapterListFromDataUrlViaRule(
       tab: payload.tab ?? '',
       sources: payload.sources || payload.source || '',
     },
+    onScriptToast: options?.onScriptToast,
   };
 
   const scriptResult = await runLegadoRuleScript(
@@ -742,6 +793,7 @@ async function getChapterListFromDataUrlViaRule(
         rule,
         finalizeTocChapterOrder(mapped, reverse, options?.reverseToc === true),
         tocUrl,
+        options?.onScriptToast,
       );
     }
   }
@@ -808,7 +860,7 @@ async function getChapterListFromDataUrlViaRule(
     reverse,
     options?.reverseToc === true,
   );
-  return await applyFormatJs(source, rule, ordered, tocUrl);
+  return await applyFormatJs(source, rule, ordered, tocUrl, options?.onScriptToast);
 }
 
 /**
@@ -890,9 +942,14 @@ export async function getChapterList(
   }
 
   try {
+    const noticeBus = createScriptNoticeBus(source.sourceName, '目录');
+    const mergedOptions: GetChapterListOptions = {
+      ...options,
+      onScriptToast: options?.onScriptToast ?? noticeBus.onScriptToast,
+    };
     // ── data: URL 路径 ──
     if (tocUrl.startsWith('data:')) {
-      return await getChapterListFromDataUrl(source, tocUrl, options);
+      return await getChapterListFromDataUrl(source, tocUrl, mergedOptions);
     }
 
     // ── 标准 HTTP URL 路径 ──
@@ -900,8 +957,8 @@ export async function getChapterList(
     const { listRule: tocListRule, reverse: listRuleReverse } = parseTocChapterListRule(
       rule.chapterList,
     );
-    const reverseToc = options?.reverseToc === true;
-    const onPartial = options?.onPartial;
+    const reverseToc = mergedOptions.reverseToc === true;
+    const onPartial = mergedOptions.onPartial;
 
     /** 不 await：避免 DB/UI 回调阻塞后续分页请求（进入阅读器时卡顿的主因之一） */
     const emitPartial = (raw: BookChapter[], isComplete: boolean) => {
@@ -909,7 +966,13 @@ export async function getChapterList(
       void (async () => {
         let ordered = finalizeTocChapterOrder(raw, listRuleReverse, reverseToc);
         if (isComplete) {
-          ordered = await applyFormatJs(source, rule, ordered, tocUrl);
+          ordered = await applyFormatJs(
+            source,
+            rule,
+            ordered,
+            tocUrl,
+            mergedOptions.onScriptToast,
+          );
         }
         ordered = ordered.map((chapter, index) => ({ ...chapter, index }));
         await onPartial({ chapters: ordered, isComplete });
@@ -954,12 +1017,35 @@ export async function getChapterList(
       seenTocPages.add(currentTocUrl);
 
       console.log('[chapters] 请求目录 URL:', currentTocUrl);
-      const fetched = await fetchSourcePage({
-        ruleUrl: currentTocUrl,
+      let fetchedBody: string;
+      try {
+        const fetched = await fetchSourcePage({
+          ruleUrl: currentTocUrl,
+          source,
+          baseUrl: source.sourceUrl,
+          scriptNotice: noticeBus,
+        });
+        fetchedBody = fetched.body;
+      } catch (e) {
+        if (isScriptNoticeBlockedError(e)) {
+          console.warn('[chapters] 命中频率限制提示，停止本次目录解析', {
+            tocUrl: currentTocUrl.slice(0, 120),
+            throttleMessage: e.notice.message,
+          });
+          break;
+        }
+        throw e;
+      }
+      const html = await applyPreUpdateJs(
         source,
-        baseUrl: source.sourceUrl,
-      });
-      const html = await applyPreUpdateJs(source, rule, fetched.body, currentTocUrl);
+        rule,
+        fetchedBody,
+        currentTocUrl,
+        mergedOptions.onScriptToast,
+      );
+      if (consumeHtmlRateLimitNotice(noticeBus, html)) {
+        break;
+      }
       const contentType = detectContentType(html);
       console.log(
         '[chapters] 目录 API 响应类型:',
@@ -995,6 +1081,7 @@ export async function getChapterList(
         contentType: detectContentType(contextContent),
         baseUrl: currentTocUrl,
         source: source as unknown as Record<string, unknown>,
+        onScriptToast: mergedOptions.onScriptToast,
       };
 
       const pageChapters: BookChapter[] = [];
@@ -1005,7 +1092,31 @@ export async function getChapterList(
           chapterListRule = `${chapterListRule}@all`;
         }
 
-        const listItems = await analyzeListElements(chapterListRule, context);
+        let listItems = await analyzeListElements(chapterListRule, context);
+        if (listItems.length === 0) {
+          const split = splitTocChapterListJsRule(chapterListRule);
+          if (split?.tailRule?.trim()) {
+            let tailRule = split.tailRule.trim();
+            if (legadoListRuleNeedsAllSuffix(tailRule)) {
+              tailRule = `${tailRule}@all`;
+            }
+            console.log('[chapters] chapterList 0 命中，尝试跳过 <js> 段直解析 tailRule:', {
+              original: chapterListRule,
+              tailRule,
+            });
+            listItems = await analyzeListElements(tailRule, context);
+          }
+        }
+        if (listItems.length === 0) {
+          const relaxedRule = buildRelaxedTocXPathListRule(chapterListRule);
+          if (relaxedRule && relaxedRule !== chapterListRule) {
+            console.log('[chapters] chapterList 0 命中，尝试去掉 XPath 序号谓词回退:', {
+              original: chapterListRule,
+              relaxed: relaxedRule,
+            });
+            listItems = await analyzeListElements(relaxedRule, context);
+          }
+        }
         console.log('[chapters] 提取到章节元素数:', listItems.length);
 
         for (const item of listItems) {
@@ -1016,6 +1127,7 @@ export async function getChapterList(
             source as unknown as Record<string, unknown>,
             { regexGroups: item.regexGroups },
           );
+          elementContext.onScriptToast = mergedOptions.onScriptToast;
 
           const chapter = await parseChapter(
             source,
@@ -1060,7 +1172,13 @@ export async function getChapterList(
     }
 
     let ordered = finalizeTocChapterOrder(chapters, listRuleReverse, reverseToc);
-    ordered = await applyFormatJs(source, rule, ordered, tocUrl);
+    ordered = await applyFormatJs(
+      source,
+      rule,
+      ordered,
+      tocUrl,
+      mergedOptions.onScriptToast,
+    );
     ordered = ordered.map((chapter, index) => ({ ...chapter, index }));
     if (onPartial) {
       await onPartial({ chapters: ordered, isComplete: true });

@@ -14,11 +14,15 @@ import {
   legadoJavaDeviceID,
   normalizeBookSourceServerUrl,
   persistBookSourceDeviceId,
+  readBookSourceQttoken,
   resolveBookSourceDeviceId,
+  resolveBookSourceServerUrl,
   resolveLegadoDeviceId,
   resetLegadoDeviceId,
 } from '@/lib/book-source/source-http';
 import { patchLegadoLoginUrlScript } from '@/lib/js-engine/legado/login-script-patches';
+import { resolveLoginScriptOnToast } from '@/lib/book-source/rate-limit-guard';
+import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { resolveUrl, stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { openLegadoBrowserInApp, openSourceSettingsInApp } from '@/lib/platform/open-url';
@@ -46,6 +50,9 @@ import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from '@/lib/js-eng
 import {
   getScriptBaseUrl,
   getLegadoSourceKey,
+  getSourceArgsKey,
+  getSourceCookiesKey,
+  getSourceLoginKey,
   hostsFromJsLib,
   normalizeServerFieldsInSourceArgs,
   STORAGE_PREFIX_ARGS,
@@ -270,7 +277,7 @@ function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
 }
 
 /** 从脚本 Cookie 表按 URL 回退读取（勿经 cookieObj.getCookie，避免与 getScriptCookieForUrl 互调） */
-function getCookieFromStore(
+export function getCookieFromStore(
   store: Map<string, string>,
   resolved: string,
   baseUrl: string,
@@ -317,6 +324,83 @@ function getScriptCookieForUrl(
     return getCookieFromStore(cookieObj._store, resolved, baseUrl, options);
   }
   return cookieObj.getCookie(resolved) || '';
+}
+
+/** 发现/搜索等脚本共用：与登录脚本一致的 cookie 读写（含 /control 等回退键） */
+export function createLegadoScriptCookieApi(
+  source: BookSource,
+  baseUrl: string,
+  store: Map<string, string>,
+  options?: { hostList?: string[] },
+): {
+  getCookie: (url: string) => string;
+  setCookie: (url: string, value: string) => void;
+  removeCookie: (url: string) => void;
+  removecookie: (url: string) => void;
+  getKey: (cookieStrOrUrl: string, keyName?: string) => string;
+} {
+  const hostList = options?.hostList ?? [];
+  const cookiesStorageKey = getSourceCookiesKey(source);
+  const syncStoreFromLocalStorage = (): void => {
+    try {
+      const raw = localStorage.getItem(cookiesStorageKey);
+      if (!raw) return;
+      const obj = JSON.parse(raw) as Record<string, string>;
+      if (!obj || typeof obj !== 'object') return;
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === 'string') store.set(k, v);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  const getCookieFn = (url: string): string => {
+    syncStoreFromLocalStorage();
+    const seeds = [(url || baseUrl).trim(), baseUrl.trim(), ...hostList.map((h) => h.trim())].filter(
+      Boolean,
+    );
+    const seen = new Set<string>();
+    for (const k of seeds) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const persisted = getStoredSourceCookiesForUrl(source, k);
+      if (persisted) return persisted;
+      const fromMemory = getCookieFromStore(store, k, baseUrl);
+      if (fromMemory) return fromMemory;
+    }
+    const merged = getStoredSourceCookiesMerged(source).trim();
+    if (merged && extractQttokenKey(merged)) return merged;
+    const server = resolveBookSourceServerUrl(source) ?? baseUrl;
+    const token = readBookSourceQttoken(source, server || baseUrl);
+    if (token) {
+      const deviceId = resolveBookSourceDeviceId(source);
+      return normalizeLegadoCookieHeader(`qttoken=${token}; deviceId=${deviceId};`, deviceId);
+    }
+    return '';
+  };
+  return {
+    getCookie: getCookieFn,
+    setCookie(url: string, value: string): void {
+      store.set(url || baseUrl, value);
+    },
+    removeCookie(url: string): void {
+      store.delete(url || baseUrl);
+    },
+    removecookie(url: string): void {
+      store.delete(url || baseUrl);
+    },
+    getKey(cookieStrOrUrl: string, keyName?: string): string {
+      return legadoCookieGetKey(store, getCookieFn, cookieStrOrUrl, keyName, source);
+    },
+  };
+}
+
+function notifyBookSourceLoginPersisted(source: BookSource): void {
+  try {
+    bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
+  } catch {
+    /* ignore */
+  }
 }
 
 /** 与书源脚本 cookie 表一致（键可为 origin 或 fanqienovel.com 等裸 host） */
@@ -1284,7 +1368,8 @@ async function tryRunLoginScriptQuickJS(
   await initQuickJSRuntime();
   if (isQuickJSFallback()) return false;
 
-  const { formValues, action, onToast } = options;
+  const { formValues, action } = options;
+  const onToast = resolveLoginScriptOnToast(source, options.onToast);
   const {
     loginKey,
     argsKey,
@@ -1706,6 +1791,7 @@ async function tryRunLoginScriptQuickJS(
         if (Object.keys(obj).length > 0) {
           localStorage.setItem(cookiesKey, JSON.stringify(obj));
         }
+        notifyBookSourceLoginPersisted(source);
       } catch (e) {
         console.warn(LOG_TAG, 'QuickJS persist cookies failed', e);
       }
@@ -1726,7 +1812,8 @@ export async function runLoginScript(
   source: BookSource,
   options: RunLoginScriptOptions
 ): Promise<void> {
-  const { formValues, action, onToast } = options;
+  const { formValues, action } = options;
+  const onToast = resolveLoginScriptOnToast(source, options.onToast);
   const baseUrl = getScriptBaseUrl(source);
   const loginUrlScript = patchLegadoLoginUrlScript((source.loginUrl ?? '').trim());
   if (!loginUrlScript) return;
@@ -2463,6 +2550,7 @@ export async function runLoginScript(
           } else {
             console.warn(LOG_TAG, 'persist cookies skipped (empty)', { key: cookiesKey });
           }
+          notifyBookSourceLoginPersisted(source);
         } catch (e) {
           console.warn(LOG_TAG, 'persist cookies failed', e);
         }
@@ -2611,17 +2699,17 @@ export async function runLoginScriptRust(
   source: BookSource,
   options: RunLoginScriptOptions
 ): Promise<RunLoginScriptRustOutput> {
-  const { formValues, action, onToast } = options;
+  const { formValues, action } = options;
+  const onToast = resolveLoginScriptOnToast(source, options.onToast);
   const baseUrl = getScriptBaseUrl(source);
   const loginUrlScript = (source.loginUrl ?? '').trim();
   if (!loginUrlScript) {
     return { toasts: [], argsJson: '{}', loginInfoJson: '{}', urlsToOpen: [], urlCookies: [], cookiesJson: '{}' };
   }
 
-  const sourceUrl = source.sourceUrl ?? '';
-  const loginKey = storageKey(STORAGE_PREFIX_LOGIN, sourceUrl);
-  const argsKey = storageKey(STORAGE_PREFIX_ARGS, sourceUrl);
-  const cookiesKey = storageKey(STORAGE_PREFIX_COOKIES, sourceUrl);
+  const loginKey = getSourceLoginKey(source);
+  const argsKey = getSourceArgsKey(source);
+  const cookiesKey = getSourceCookiesKey(source);
 
   const argsJson = (() => {
     try {
@@ -2671,6 +2759,7 @@ export async function runLoginScriptRust(
     if (output.argsJson != null) localStorage.setItem(argsKey, output.argsJson);
     if (output.loginInfoJson != null) localStorage.setItem(loginKey, output.loginInfoJson);
     if (output.cookiesJson != null) localStorage.setItem(cookiesKey, output.cookiesJson);
+    notifyBookSourceLoginPersisted(source);
   } catch (e) {
     console.warn(LOG_TAG, 'persist args/loginInfo/cookies failed', e);
   }

@@ -13,12 +13,15 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { showAppToast, normalizeScriptToastText } from '@/components/shared/AppToasts';
+import { showAppToast } from '@/components/shared/AppToasts';
+import { dismissScriptNoticeToasts } from '@/lib/book-source/rate-limit-guard';
 import {
   runLoginScript,
   runLoginScriptRust,
   getStoredLoginInfo,
 } from '@/lib/js-engine';
+import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
+import { clearExploreSectionsCache } from '@/lib/book-source/explore-sections';
 import { isTauri } from '@/lib/platform/detect';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import { appDialogScrollBodyNoFooter } from '@/lib/ui/viewport-classes';
@@ -236,13 +239,14 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
 
   createEffect(() => {
     if (!props.open) {
+      dismissScriptNoticeToasts();
       setFormValues({});
       return;
     }
     // 打开对话框时从 localStorage 预填邮箱、密码等
     const source = props.source;
-    if (source?.sourceUrl != null) {
-      const stored = getStoredLoginInfo(source.sourceUrl);
+    if (source) {
+      const stored = getStoredLoginInfo(getLegadoSourceKey(source));
       if (Object.keys(stored).length > 0) setFormValues(stored);
     }
   });
@@ -279,26 +283,9 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
       return;
     }
     setRunning(true);
-    const onToast = (msg: string, long?: boolean) => {
-      const text = msg?.trim() ?? '';
-      if (!text) return;
-      // 框架层「脚本执行」提示，非书源脚本输出
-      if (/^脚本执行/.test(text)) return;
-      // longToast / checkStatus 等：多行框线排版，需 pre-wrap + 等宽字体
-      if (long || text.includes('\n')) {
-        showAppToast({
-        description: normalizeScriptToastText(text),
-        script: true,
-        variant: 'plain',
-        id: 'reader-script-toast',
-      });
-        return;
-      }
-      showAppToast({ description: text, variant: 'plain' });
-    };
     try {
       if (useRustEngine()) {
-        const out = await runLoginScriptRust(source, { formValues: formValues(), action, onToast });
+        const out = await runLoginScriptRust(source, { formValues: formValues(), action });
         if (out?.loginInfoJson) {
           try {
             const parsed = JSON.parse(out.loginInfoJson) as Record<string, unknown>;
@@ -316,7 +303,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
           }
         }
       } else {
-        await runLoginScript(source, { formValues: formValues(), action, onToast });
+        await runLoginScript(source, { formValues: formValues(), action });
         if (isLogoutFormAction(action)) {
           setFormValues((prev) => {
             const next = { ...prev };
@@ -324,9 +311,12 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
             return next;
           });
         } else {
-          const stored = getStoredLoginInfo(source.sourceUrl ?? '');
+          const stored = getStoredLoginInfo(getLegadoSourceKey(source));
           if (Object.keys(stored).length > 0) setFormValues(stored);
         }
+      }
+      if (!isLogoutFormAction(action)) {
+        clearExploreSectionsCache(getLegadoSourceKey(source));
       }
     } catch (e) {
       console.error('登录脚本执行失败:', e);

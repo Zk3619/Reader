@@ -13,6 +13,10 @@ import {
 } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import * as sourcesDb from '@/lib/database/sources';
+import {
+  deleteBookSourceWithSessionPurge,
+  purgeBookSourceSession,
+} from '@/lib/book-source/purge-source-session';
 import type { BookSource } from '@/types';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
@@ -535,7 +539,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     const source = sourceToDelete();
     if (!source) return;
     try {
-      await sourcesDb.deleteSource(source.sourceUrl);
+      await deleteBookSourceWithSessionPurge(source);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
       showAppToast({ title: '已删除书源', description: `「${source.sourceName}」已删除`, variant: 'default' });
       setSourceToDelete(null);
@@ -582,7 +586,13 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     setBatchDeleteCount(0);
     if (urls.length === 0) return;
     try {
-      for (const url of urls) await sourcesDb.deleteSource(url);
+      for (const url of urls) {
+        const source = sources().find((s) => s.sourceUrl === url);
+        if (source) {
+          await purgeBookSourceSession(source);
+        }
+        await sourcesDb.deleteSource(url);
+      }
       window.dispatchEvent(new CustomEvent('sources-refresh'));
       showAppToast({ title: '已删除', description: `已删除 ${urls.length} 个书源`, variant: 'default' });
       clearSelection();

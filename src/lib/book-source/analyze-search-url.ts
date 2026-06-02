@@ -203,6 +203,7 @@ export async function resolveSearchRequest(
   source: BookSource,
   keyword: string,
   page = 1,
+  noticeOptions?: { onScriptToast?: (msg?: unknown, level?: unknown) => void },
 ): Promise<ResolvedSearchRequest> {
   const rawSearchUrl = source.searchUrl?.trim();
   if (!rawSearchUrl) {
@@ -213,7 +214,9 @@ export async function resolveSearchRequest(
   if (isScriptSearchUrl(rawSearchUrl)) {
     const script = extractSearchScript(rawSearchUrl);
     if (!script) throw new Error('searchUrl 脚本无效');
-    ruleUrl = await runSearchUrlScript(script, source, keyword, page);
+    ruleUrl = await runSearchUrlScript(script, source, keyword, page, {
+      onScriptToast: noticeOptions?.onScriptToast,
+    });
   } else {
     ruleUrl = await analyzeEmbeddedJsBlocks(rawSearchUrl, source, keyword, page);
   }

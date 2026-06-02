@@ -160,6 +160,11 @@ import {
 import { extractQttokenKey, isInvalidLegadoToken } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import {
+  createScriptNoticeBus,
+  isScriptNoticeBlockedError,
+  type ScriptNoticeBus,
+} from '@/lib/book-source/rate-limit-guard';
+import {
   buildCatalogApiVariable,
   enrichChapterContentPayload,
   readBookCustomFromVariable,
@@ -432,6 +437,7 @@ async function fetchChapterPageBody(
   chapter: BookChapter,
   chapterBase: string,
   absoluteUrl: string,
+  scriptNotice?: ScriptNoticeBus,
 ): Promise<string> {
   const isContentApi = absoluteUrl.includes('/content');
   if (isContentApi) {
@@ -466,7 +472,12 @@ async function fetchChapterPageBody(
   }
 
   const { fetchChapterPageHtml } = await import('@/lib/book-source/fetch-source-page');
-  const html = await fetchChapterPageHtml(source, absoluteUrl, chapter.baseUrl || chapterBase);
+  const html = await fetchChapterPageHtml(
+    source,
+    absoluteUrl,
+    chapter.baseUrl || chapterBase,
+    scriptNotice,
+  );
   await assertLoginCheckPassed(source, html, absoluteUrl);
   return html;
 }
@@ -479,6 +490,7 @@ async function resolveChapterRuleBody(
   source: BookSource,
   chapter: BookChapter,
   chapterBase: string,
+  scriptNotice?: ScriptNoticeBus,
 ): Promise<{ body: string; baseUrl: string; contentType: 'html' | 'json' | 'text' }> {
   const absoluteUrl = resolveUrl(chapterBase, chapter.url);
   const hexBody = legadoDataUrlRuleBody(absoluteUrl);
@@ -497,12 +509,25 @@ async function resolveChapterRuleBody(
     }
     return { body: '', baseUrl: absoluteUrl, contentType: 'text' };
   }
-  const html = await fetchChapterPageBody(source, chapter, chapterBase, absoluteUrl);
-  return {
-    body: html,
-    baseUrl: absoluteUrl,
-    contentType: detectContentType(html),
-  };
+  try {
+    const html = await fetchChapterPageBody(
+      source,
+      chapter,
+      chapterBase,
+      absoluteUrl,
+      scriptNotice,
+    );
+    return {
+      body: html,
+      baseUrl: absoluteUrl,
+      contentType: detectContentType(html),
+    };
+  } catch (e) {
+    if (isScriptNoticeBlockedError(e)) {
+      return { body: '', baseUrl: absoluteUrl, contentType: 'text' };
+    }
+    throw e;
+  }
 }
 
 function buildContentRuleContext(
@@ -512,6 +537,7 @@ function buildContentRuleContext(
   body: string,
   contentType: 'html' | 'json' | 'text',
   baseUrl: string,
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
 ): RuleContext {
   let variables: Record<string, string> | undefined;
   try {
@@ -561,6 +587,7 @@ function buildContentRuleContext(
       : undefined,
     chapter: chapter as unknown as Record<string, unknown>,
     variables: variables ?? {},
+    onScriptToast,
   };
 }
 
@@ -599,6 +626,7 @@ async function executePayAction(
   source: BookSource,
   chapter: BookChapter,
   context: RuleContext,
+  scriptNotice?: ScriptNoticeBus,
 ): Promise<boolean> {
   const payAction = source.ruleContent?.payAction?.trim();
   if (!payAction) return false;
@@ -610,6 +638,7 @@ async function executePayAction(
       ruleUrl: actionResult,
       source,
       baseUrl: chapter.baseUrl || source.sourceUrl,
+      scriptNotice,
     });
     return true;
   } catch (error) {
@@ -624,6 +653,8 @@ export interface GetContentOptions {
   /** 为 true 时不应用数据库替换规则（用于章节缓存落盘） */
   skipReplaceRules?: boolean;
   _visitedUrls?: Set<string>;
+  /** 正文分页递归时复用同一通知总线 */
+  scriptNotice?: ScriptNoticeBus;
 }
 
 /**
@@ -645,6 +676,8 @@ export async function getContent(
   const contentRule = rule.content!.trim();
 
   try {
+    const noticeBus = options?.scriptNotice ?? createScriptNoticeBus(source.sourceName, '正文');
+    const onScriptToast = noticeBus.onScriptToast;
     const chapterBase = chapter.baseUrl || source.sourceUrl || '';
     const absoluteUrl = resolveUrl(chapterBase, chapter.url);
 
@@ -723,7 +756,11 @@ export async function getContent(
       source,
       contentChapter,
       chapterBase,
+      noticeBus,
     );
+    if (!body.trim()) {
+      return null;
+    }
     if (isDataChapterUrl(contentUrl)) {
       const decoded = decodeDataUrl(contentUrl);
       if (decoded) {
@@ -746,6 +783,7 @@ export async function getContent(
       body,
       contentType,
       baseUrl,
+      onScriptToast,
     );
 
     // 对齐 Legado WebBook.getContentAwait：AnalyzeUrl 取 body → ruleContent 解析
@@ -786,7 +824,12 @@ export async function getContent(
 
     const isContentApi = absoluteUrl.includes('/content');
     if ((!content || !content.trim()) && rule.payAction?.trim()) {
-      const payActionExecuted = await executePayAction(source, chapter, ruleContext);
+      const payActionExecuted = await executePayAction(
+        source,
+        chapter,
+        ruleContext,
+        noticeBus,
+      );
       if (payActionExecuted && contentRule) {
         try {
           const retryHtml = isContentApi
@@ -804,6 +847,7 @@ export async function getContent(
             content: retryHtml,
             contentType: detectContentType(retryHtml),
             result: retryHtml,
+            onScriptToast,
           };
           content = extractContentFromRuleOutput(
             (await parseContentByRule(contentRule, retryContext)) ?? '',
@@ -876,6 +920,7 @@ export async function getContent(
             {
               ...options,
               _visitedUrls: visited,
+              scriptNotice: noticeBus,
             },
           );
           if (nextContent) {
@@ -908,6 +953,7 @@ export async function getContent(
         content,
         result: content,
         contentType: 'text',
+        onScriptToast,
       });
     }
 
@@ -925,6 +971,7 @@ export async function getContent(
         rule.imageDecode,
         chapter.baseUrl || chapterBase,
         source,
+        { onScriptToast },
       );
     }
 

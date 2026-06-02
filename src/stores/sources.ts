@@ -12,6 +12,9 @@
 import { createStore } from 'solid-js/store';
 import * as sourcesDb from '@/lib/database/sources';
 import * as rssSourcesDb from '@/lib/database/rss-sources';
+import {
+  purgeBookSourceSession,
+} from '@/lib/book-source/purge-source-session';
 import type { BookSource, RssSource } from '@/types';
 
 /**
@@ -213,6 +216,10 @@ export const sourcesStore = {
    */
   async deleteBookSource(sourceUrl: string): Promise<void> {
     try {
+      const source = await sourcesDb.getSource(sourceUrl);
+      if (source) {
+        await purgeBookSourceSession(source);
+      }
       await sourcesDb.deleteSource(sourceUrl);
       setState('bookSources', sources =>
         sources.filter(s => s.sourceUrl !== sourceUrl)

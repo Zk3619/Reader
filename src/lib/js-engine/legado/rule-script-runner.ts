@@ -534,6 +534,12 @@ export async function runLegadoRuleScript(
       chapter: chapterRecord,
       title: legadoTitle || String(chapterRecord.title ?? ''),
       JSON,
+      toast(msg?: unknown, level?: unknown) {
+        context.onScriptToast?.(msg, level ?? 'info');
+      },
+      longToast(msg?: unknown) {
+        context.onScriptToast?.(msg, 'warning');
+      },
       cookie: cookieApi,
       Packages: {
         java: {
@@ -601,8 +607,12 @@ export async function runLegadoRuleScript(
           }
           return 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36';
         },
-        toast() {},
-        longToast() {},
+        toast(msg?: unknown, level?: unknown) {
+          context.onScriptToast?.(msg, level ?? 'info');
+        },
+        longToast(msg?: unknown) {
+          context.onScriptToast?.(msg, 'warning');
+        },
         qread() {
           throw new Error('qread unavailable');
         },

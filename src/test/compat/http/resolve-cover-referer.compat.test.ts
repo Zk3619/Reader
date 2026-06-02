@@ -42,6 +42,7 @@ describe('resolveCoverRequestHeaders', () => {
     });
     expect(headers.Referer).toBe('https://manhuafree.com/');
   });
+
 });
 
 describe('buildProxiedImageRefererAttempts', () => {

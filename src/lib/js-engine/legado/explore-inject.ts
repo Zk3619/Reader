@@ -11,6 +11,23 @@ import { injectDateShimVm } from '@/lib/js-engine/legado/host/date-vm';
 import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
 import { injectRhinoLegadoShims } from '@/lib/js-engine/legado/host/rhino-shim-vm';
 
+export type ScriptToastEntry = { msg: unknown; level: unknown };
+
+/** VM 结束后将缓冲 toast 刷到 UI（须在 QuickJS eval 完全结束之后调用） */
+export function flushExploreScriptToastBuffer(
+  buffer: ScriptToastEntry[],
+  onScriptToast?: (msg?: unknown, level?: unknown) => void,
+): void {
+  if (!onScriptToast || buffer.length === 0) return;
+  for (const t of buffer) {
+    try {
+      onScriptToast(t.msg, t.level);
+    } catch (e) {
+      console.warn('[explore-script] toast failed', e);
+    }
+  }
+}
+
 export interface ExploreInjectContext {
   baseUrl: string;
   sourceUrl: string;
@@ -33,6 +50,10 @@ export interface ExploreInjectContext {
     getLoginInfoMap: () => Record<string, string>;
     getKey?: () => string;
   };
+  /** VM 执行期间仅写入此数组，禁止同步调 Solid toast */
+  scriptToastBuffer?: ScriptToastEntry[];
+  /** 无 buffer 时的降级（搜索脚本等）；仍须避免在 VM 内同步调 UI */
+  onToast?: (msg?: unknown, level?: unknown) => void;
   request: AjaxRequestFn;
   /** 搜索 URL 脚本：关键词与页码 */
   searchKey?: string;
@@ -41,6 +62,20 @@ export interface ExploreInjectContext {
 
 export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector {
   return (vm: QuickJSContext, rt: LegadoRunRuntime) => {
+    const captureScriptToast = (msg?: unknown, level?: unknown) => {
+      if (ctx.scriptToastBuffer) {
+        ctx.scriptToastBuffer.push({ msg, level });
+        return;
+      }
+      if (!ctx.onToast) return;
+      queueMicrotask(() => {
+        try {
+          ctx.onToast!(msg, level);
+        } catch (e) {
+          console.warn('[explore-script] toast failed', e);
+        }
+      });
+    };
     const dateVm = injectDateShimVm(vm);
     rt.applyAjaxDuration = dateVm.applyAjaxDuration;
     injectLegadoEncodingUtils(vm);
@@ -96,8 +131,12 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
     });
 
     bindGlobalVmObject(vm, 'java', (javaObj) => {
-      bindVmFunction(vm, javaObj, 'toast', () => {});
-      bindVmFunction(vm, javaObj, 'longToast', () => {});
+      bindVmFunction(vm, javaObj, 'toast', (msg, level) => {
+        captureScriptToast(vm.dump(msg), vm.dump(level));
+      });
+      bindVmFunction(vm, javaObj, 'longToast', (msg) => {
+        captureScriptToast(vm.dump(msg), 'warning');
+      });
       bindVmFunction(vm, javaObj, 'log', (...args) => {
         const parts = args.map((a) => vm.dump(a));
         const msg = parts.map((p) => String(p ?? '')).join(' ');
@@ -112,8 +151,8 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       });
       bindVmFunction(vm, javaObj, 'androidId', () => vm.newString(ctx.getOrCreateDeviceId()));
       bindVmFunction(vm, javaObj, 'deviceID', () => vm.newString(ctx.getOrCreateDeviceId()));
-      bindVmFunction(vm, javaObj, 'qread', () => {});
-      bindVmFunction(vm, javaObj, 'startBrowser', () => {});
+      bindVmFunction(vm, javaObj, 'qread', () => { });
+      bindVmFunction(vm, javaObj, 'startBrowser', () => { });
       bindVmFunction(vm, javaObj, 'getCookie', (u) =>
         vm.newString(ctx.cookie.getCookie(String(vm.dump(u))))
       );
@@ -134,20 +173,26 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
     evalCodeVoid(
       vm,
       'globalThis.java.base64Encode = globalThis.__readerB64Enc;\n' +
-        'globalThis.java.base64Decode = globalThis.__readerB64Dec;\n' +
-        'globalThis.java.hexDecodeToString = globalThis.__readerHexDec;\n' +
-        'if (typeof globalThis.getArguments !== "function") {\n' +
-        '  function getArguments(a, k) {\n' +
-        '    try { a = JSON.parse(a); } catch(e) { a = {}; }\n' +
-        '    return k ? a[k] : a;\n' +
-        '  }\n' +
-        '}\n' +
-        'if (typeof globalThis.bhost !== "function") {\n' +
-        '  globalThis.bhost = function() {\n' +
-        '    try { return (globalThis.host && globalThis.host[0]) || globalThis.baseUrl || ""; }\n' +
-        '    catch (e) { return globalThis.baseUrl || ""; }\n' +
-        '  };\n' +
-        '}'
+      'globalThis.java.base64Decode = globalThis.__readerB64Dec;\n' +
+      'globalThis.java.hexDecodeToString = globalThis.__readerHexDec;\n' +
+      'if (typeof globalThis.getArguments !== "function") {\n' +
+      '  function getArguments(a, k) {\n' +
+      '    try { a = JSON.parse(a); } catch(e) { a = {}; }\n' +
+      '    return k ? a[k] : a;\n' +
+      '  }\n' +
+      '}\n' +
+      'if (typeof globalThis.bhost !== "function") {\n' +
+      '  globalThis.bhost = function() {\n' +
+      '    try { return (globalThis.host && globalThis.host[0]) || globalThis.baseUrl || ""; }\n' +
+      '    catch (e) { return globalThis.baseUrl || ""; }\n' +
+      '  };\n' +
+      '}\n' +
+      'if (typeof globalThis.toast !== "function") {\n' +
+      '  globalThis.toast = function(msg, level) { return globalThis.java.toast(msg, level); };\n' +
+      '}\n' +
+      'if (typeof globalThis.longToast !== "function") {\n' +
+      '  globalThis.longToast = function(msg) { return globalThis.java.longToast(msg); };\n' +
+      '}'
     );
   };
 }

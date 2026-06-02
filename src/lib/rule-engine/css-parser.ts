@@ -140,7 +140,7 @@ function selectByCssHead(
 }
 
 /** HTML5 解析会丢弃 table 外的 td/tr；列表项常为裸 tr，需包一层 table 对齐 Legado/Jsoup */
-function loadHtmlForCss(html: string): cheerio.CheerioAPI {
+export function loadHtmlForCss(html: string): cheerio.CheerioAPI {
   const trimmed = html.trim();
   if (/^<tr\b/i.test(trimmed) && !/<table\b/i.test(trimmed)) {
     return cheerio.load(`<table><tbody>${trimmed}</tbody></table>`, { xml: false });
@@ -346,6 +346,9 @@ function applyLegacyIndex<T>(
   if (Number.isNaN(start)) return items;
   const boundedStart = Math.max(0, Math.min(all.length - 1, start));
   if (rawEnd == null || rawEnd === '') {
+    if (splitMode === '!') {
+      return $(all.filter((_, i) => i !== boundedStart) as any) as cheerio.Cheerio<T>;
+    }
     return $(all[boundedStart] as any) as cheerio.Cheerio<T>;
   }
   const end = normalizeIndex(all.length, parseInt(rawEnd, 10));

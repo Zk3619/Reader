@@ -4,6 +4,9 @@
 
 import { createSignal, createEffect, createResource, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import {
+  deleteBookSourceWithSessionPurge,
+} from '@/lib/book-source/purge-source-session';
 import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 import {
@@ -17,6 +20,7 @@ import {
   type ExploreSection,
 } from '@/lib/book-source/explore-sections';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
+import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, sourcesExploreDrawerWidth } from '@/lib/ui/viewport-classes';
 import {
@@ -298,7 +302,10 @@ export function SourcesPage(props: SourcesPageProps) {
     const url = expandedSourceUrl();
     return url ? sources().find((s) => s.sourceUrl === url) ?? null : null;
   };
-  const exploreArgsVersion = () => getExploreSourceArgsVersion(expandedSource()?.sourceUrl);
+  const exploreArgsVersion = () => {
+    const s = expandedSource();
+    return s ? getExploreSourceArgsVersion(getLegadoSourceKey(s)) : 0;
+  };
   const [loadedExploreArgsVersion, setLoadedExploreArgsVersion] = createSignal(-1);
   const [dynamicSections, { refetch: refetchExploreSections }] = createResource(
     () => {
@@ -366,17 +373,19 @@ export function SourcesPage(props: SourcesPageProps) {
     const url = expandedSourceUrl();
     if (!url) return;
     try {
-      clearExploreSectionsCache(url);
-      await loadSources();
       const s = expandedSource();
       if (!s) return;
-      if (isExploreUrlScript(s.exploreUrl)) {
+      clearExploreSectionsCache(getLegadoSourceKey(s));
+      await loadSources();
+      const fresh = expandedSource();
+      if (!fresh) return;
+      if (isExploreUrlScript(fresh.exploreUrl)) {
         setLoadedExploreArgsVersion(-1);
         await refetchExploreSections();
       }
       showAppToast({
         title: '已刷新',
-        description: `「${s.sourceName}」发现分类已重新加载`,
+        description: `「${fresh.sourceName}」发现分类已重新加载`,
         variant: 'default',
       });
     } catch (e) {
@@ -424,7 +433,7 @@ export function SourcesPage(props: SourcesPageProps) {
     const source = sourceToDelete();
     if (!source) return;
     try {
-      await sourcesDb.deleteSource(source.sourceUrl);
+      await deleteBookSourceWithSessionPurge(source);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
       showAppToast({ title: '已删除书源', description: `「${source.sourceName}」已删除`, variant: 'default' });
       setSourceToDelete(null);

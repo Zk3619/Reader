@@ -468,6 +468,8 @@ export function createLegadoScriptCache(): {
   put: (key: string, value: unknown) => void;
   get: (key: string) => unknown;
   remove: (key: string) => void;
+  putMemory: (key: string, value: unknown) => void;
+  getFromMemory: (key: string) => unknown;
 } {
   const legadoMemory = new Map<string, unknown>();
   return {
@@ -479,6 +481,13 @@ export function createLegadoScriptCache(): {
     },
     remove(key: string) {
       legadoMemory.delete(String(key));
+    },
+    putMemory(key: string, value: unknown) {
+      legadoMemory.set(String(key), value);
+    },
+    getFromMemory(key: string) {
+      const v = legadoMemory.get(String(key));
+      return v === undefined ? 0 : v;
     },
   };
 }

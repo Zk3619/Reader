@@ -29,6 +29,10 @@ import {
 } from '@/lib/book-source/analyze-url-post';
 import { parseXPath } from '@/lib/rule-engine/xpath-parser';
 import { parseJsonPath } from '@/lib/rule-engine/jsonpath-parser';
+import {
+  ScriptNoticeBlockedError,
+  type ScriptNoticeBus,
+} from '@/lib/book-source/rate-limit-guard';
 
 export type { AnalyzeUrlOption } from '@/lib/book-source/analyze-url-option';
 export { parseAnalyzeUrlOption, splitUrlAndOption } from '@/lib/book-source/analyze-url-option';
@@ -42,6 +46,10 @@ export interface FetchByAnalyzeUrlParams {
   baseUrl?: string;
   cookies?: string;
   defaultWebViewDelayMs?: number;
+  /** 脚本 toast 回调（java.toast / toast） */
+  onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  /** 拉取完成后解析 HTML 限流提示；命中 rate_limit 时抛出 ScriptNoticeBlockedError */
+  scriptNotice?: ScriptNoticeBus;
 }
 
 export interface FetchByAnalyzeUrlResult {
@@ -52,12 +60,20 @@ export interface FetchByAnalyzeUrlResult {
 
 async function runOptionJs(
   js: string,
-  ctx: { url: string; result: string; baseUrl: string; source?: BookSource },
+  ctx: {
+    url: string;
+    result: string;
+    baseUrl: string;
+    source?: BookSource;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  },
 ): Promise<string> {
   const out = await evalJs(js, {
     result: ctx.result,
     baseUrl: ctx.baseUrl,
     source: ctx.source as unknown as Record<string, unknown>,
+    bookSource: ctx.source,
+    onScriptToast: ctx.onScriptToast,
   });
   const text = out == null ? '' : String(out);
   return text.trim() ? text : ctx.result;
@@ -65,7 +81,12 @@ async function runOptionJs(
 
 async function resolveTemplateInUrlRule(
   rule: string,
-  ctx: { html?: string; baseUrl: string; source?: BookSource },
+  ctx: {
+    html?: string;
+    baseUrl: string;
+    source?: BookSource;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  },
 ): Promise<string> {
   if (!rule.includes('{{')) return rule;
   const html = ctx.html ?? '';
@@ -87,6 +108,8 @@ async function resolveTemplateInUrlRule(
           result: html,
           baseUrl: ctx.baseUrl,
           source: ctx.source as unknown as Record<string, unknown>,
+          bookSource: ctx.source,
+          onScriptToast: ctx.onScriptToast,
         });
         v = x == null ? '' : String(x);
       }
@@ -100,7 +123,12 @@ async function resolveTemplateInUrlRule(
 
 async function resolveInlineJsInUrlRule(
   rule: string,
-  ctx: { html?: string; baseUrl: string; source?: BookSource },
+  ctx: {
+    html?: string;
+    baseUrl: string;
+    source?: BookSource;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  },
 ): Promise<string> {
   const input = rule.trim();
   if (!input) return '';
@@ -115,6 +143,8 @@ async function resolveInlineJsInUrlRule(
       result: seed,
       baseUrl: ctx.baseUrl,
       source: ctx.source as unknown as Record<string, unknown>,
+      bookSource: ctx.source,
+      onScriptToast: ctx.onScriptToast,
     });
     return out == null ? '' : String(out).trim();
   }
@@ -127,6 +157,8 @@ async function resolveInlineJsInUrlRule(
       result: before || ctx.html || '',
       baseUrl: ctx.baseUrl,
       source: ctx.source as unknown as Record<string, unknown>,
+      bookSource: ctx.source,
+      onScriptToast: ctx.onScriptToast,
     });
     return out == null ? '' : String(out).trim();
   }
@@ -237,21 +269,33 @@ async function fetchHttpWithRetry(
 }
 
 /** 按 Legado AnalyzeUrl 拉取页面正文 */
+function finishAnalyzeUrlBody(
+  body: string,
+  scriptNotice?: ScriptNoticeBus,
+): string {
+  if (!scriptNotice || !body.trim()) return body;
+  const notice = scriptNotice.consumeHtmlNotice(body);
+  if (notice && scriptNotice.shouldBlockOnNotice(notice)) {
+    throw new ScriptNoticeBlockedError(notice);
+  }
+  return body;
+}
+
 export async function fetchByAnalyzeUrl(
   params: FetchByAnalyzeUrlParams,
 ): Promise<FetchByAnalyzeUrlResult> {
   const keyword = params.keyword ?? '';
   const page = params.page ?? 1;
-  const rawRuleUrl = await resolveTemplateInUrlRule(params.ruleUrl, {
+  const onScriptToast =
+    params.onScriptToast ?? params.scriptNotice?.onScriptToast;
+  const jsCtx = {
     html: params.html,
     baseUrl: params.baseUrl || '',
     source: params.source,
-  });
-  const preprocessedRuleUrl = await resolveInlineJsInUrlRule(rawRuleUrl, {
-    html: params.html,
-    baseUrl: params.baseUrl || '',
-    source: params.source,
-  });
+    onScriptToast,
+  };
+  const rawRuleUrl = await resolveTemplateInUrlRule(params.ruleUrl, jsCtx);
+  const preprocessedRuleUrl = await resolveInlineJsInUrlRule(rawRuleUrl, jsCtx);
   const { urlPart, optionsJson } = splitUrlAndOption(preprocessedRuleUrl);
   const option = parseAnalyzeUrlOption(optionsJson);
 
@@ -264,6 +308,7 @@ export async function fetchByAnalyzeUrl(
       result: url,
       baseUrl,
       source: params.source,
+      onScriptToast,
     });
   }
 
@@ -353,8 +398,13 @@ export async function fetchByAnalyzeUrl(
       result: body,
       baseUrl,
       source: params.source,
+      onScriptToast,
     });
   }
 
-  return { body, url, usedWebView };
+  return {
+    body: finishAnalyzeUrlBody(body, params.scriptNotice),
+    url,
+    usedWebView,
+  };
 }

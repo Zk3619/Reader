@@ -32,6 +32,8 @@ export interface JsContext {
   variables?: Record<string, unknown>;
   /** 用于 java.ajax 请求头/Cookie（正文解密等） */
   bookSource?: BookSource;
+  /** 脚本 toast 回调（java.toast/toast） */
+  onScriptToast?: (msg?: unknown, level?: unknown) => void;
 }
 
 const fallbackScopedStore = new Map<string, Map<string, unknown>>();
@@ -78,7 +80,9 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
 
   const needsRuleJava =
     /\bjava\.getString\b/.test(script) ||
-    (/\bjava\.put\b/.test(script) && context.variables != null);
+    (/\bjava\.put\b/.test(script) && context.variables != null) ||
+    /\bjava\.(?:toast|longToast)\b/.test(script) ||
+    /(?:^|[^.\w])(?:toast|longToast)\s*\(/m.test(script);
 
   try {
     await initQuickJSRuntime();
@@ -231,8 +235,12 @@ function evalJsFallback(code: string, context: JsContext): unknown {
       }
     },
     log(..._args: unknown[]) {},
-    toast(..._args: unknown[]) {},
-    longToast(..._args: unknown[]) {},
+    toast(...args: unknown[]) {
+      context.onScriptToast?.(args[0], 'info');
+    },
+    longToast(...args: unknown[]) {
+      context.onScriptToast?.(args[0], 'warning');
+    },
     put(key: string, val: unknown) {
       const k = String(key);
       fallbackStore.set(k, val);
@@ -299,6 +307,12 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     source: context.source ?? {},
     chapter: context.chapter ?? {},
     java,
+    toast(msg?: unknown, level?: unknown) {
+      context.onScriptToast?.(msg, level ?? 'info');
+    },
+    longToast(msg?: unknown) {
+      context.onScriptToast?.(msg, 'warning');
+    },
     JSON,
   };
   let body = wrapLegadoJsBodyWithImplicitReturn(code);

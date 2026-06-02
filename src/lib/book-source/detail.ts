@@ -39,6 +39,10 @@ import {
   preferDetailField,
 } from '@/lib/book-source/intro-merge';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import {
+  consumeHtmlRateLimitNotice,
+  createScriptNoticeBus,
+} from '@/lib/book-source/rate-limit-guard';
 import { normalizeBookNameText } from '@/lib/book-source/search-format';
 
 function isJsRule(rule: string | undefined | null): boolean {
@@ -174,6 +178,7 @@ async function resolveBookInfoIntro(
     fetchUrl: string;
     bookUrl: string;
     durChapterTitle?: string;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
   },
 ): Promise<string | undefined> {
   if (!rule?.trim()) {
@@ -195,7 +200,10 @@ async function resolveBookInfoIntro(
       options.ruleResult,
       options.fetchUrl,
       options.bookUrl,
-      { durChapterTitle: options.durChapterTitle },
+      {
+        durChapterTitle: options.durChapterTitle,
+        onScriptToast: options.onScriptToast,
+      },
     );
     if (scripted?.trim()) return scripted;
     return buildIntroFromDetailJson(options.ruleResult);
@@ -272,6 +280,24 @@ function buildBookRuleContext(
   };
 }
 
+function isInvalidTocNavigationUrl(url: string): boolean {
+  const t = url.trim().toLowerCase();
+  if (!t) return true;
+  if (t === '#' || t === '#/' || t.startsWith('#')) return true;
+  if (t.startsWith('javascript:')) return true;
+  if (t.startsWith('about:') || t.startsWith('mailto:') || t.startsWith('tel:')) return true;
+  if (t.includes('history.go(') || t.includes('void(0)')) return true;
+  return false;
+}
+
+function normalizeBookInfoTocUrl(candidate: string, fallbackBookUrl: string): string {
+  const trimmed = candidate.trim();
+  if (!trimmed || isInvalidTocNavigationUrl(trimmed)) return fallbackBookUrl;
+  if (trimmed.startsWith('data:')) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return fallbackBookUrl;
+}
+
 /**
  * 对齐 BookInfo.analyzeBookInfo：对已有 body 应用 ruleBookInfo 各字段
  */
@@ -286,6 +312,7 @@ async function analyzeBookInfoFromBody(
     durChapterTitle?: string;
     book?: Record<string, unknown>;
     bookVariable?: string;
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
   },
 ): Promise<BookInfo | null> {
   const rule = source.ruleBookInfo;
@@ -301,6 +328,7 @@ async function analyzeBookInfoFromBody(
         contentType,
         baseUrl: bookUrl,
         source: source as unknown as Record<string, unknown>,
+        onScriptToast: options?.onScriptToast,
       });
       if (initResult) {
         contextContent = initResult;
@@ -325,6 +353,7 @@ async function analyzeBookInfoFromBody(
     result: ruleResult ? JSON.stringify(ruleResult) : contextContent,
     variables: sessionVariables,
     book: buildBookRuleContext(bookUrl, options),
+    onScriptToast: options?.onScriptToast,
   };
 
   const safeAnalyze = async (
@@ -397,6 +426,7 @@ async function analyzeBookInfoFromBody(
     fetchUrl,
     bookUrl,
     durChapterTitle: options?.durChapterTitle,
+    onScriptToast: options?.onScriptToast,
   });
   if (!intro?.trim()) {
     const fromBook = bookSnapshotString(context.book, 'intro');
@@ -431,16 +461,18 @@ async function analyzeBookInfoFromBody(
           ruleResult,
           fetchUrl,
           bookUrl,
+          { onScriptToast: options?.onScriptToast },
         );
-        if (scripted?.trim().startsWith('data:')) {
-          tocUrl = scripted.trim();
+        const normalizedScripted = normalizeBookInfoTocUrl(scripted ?? '', bookUrl);
+        if (normalizedScripted !== bookUrl) {
+          tocUrl = normalizedScripted;
         }
       }
     }
     if (tocUrl === bookUrl && rule.tocUrl && !isJsRule(rule.tocUrl)) {
       const parsedTocUrl = (await safeAnalyze(rule.tocUrl, { isUrl: true })).trim();
       if (parsedTocUrl) {
-        tocUrl = resolveUrl(redirectUrl, parsedTocUrl);
+        tocUrl = normalizeBookInfoTocUrl(resolveUrl(redirectUrl, parsedTocUrl), bookUrl);
       }
     }
     if (tocUrl !== bookUrl) {
@@ -542,7 +574,9 @@ function buildDetailApiUrl(
 async function getBookInfoFromDataUrl(
   source: BookSource,
   bookUrl: string,
-  options?: GetBookInfoOptions,
+  options?: GetBookInfoOptions & {
+    onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  },
 ): Promise<BookInfo | null> {
   const payload = decodeDataUrl(bookUrl);
   if (!payload) {
@@ -631,6 +665,9 @@ async function getBookInfoFromDataUrl(
     ruleResult: d,
     fetchUrl: detailUrl,
     durChapterTitle: options?.durChapterTitle,
+    book: options?.book,
+    bookVariable: options?.bookVariable,
+    onScriptToast: options?.onScriptToast,
   });
 }
 
@@ -647,8 +684,12 @@ export async function getBookInfo(
   }
 
   try {
+    const noticeBus = createScriptNoticeBus(source.sourceName, '详情');
+    const onScriptToast = noticeBus.onScriptToast;
+    const parseOptions = { ...options, onScriptToast };
+
     if (bookUrl.startsWith('data:')) {
-      return await getBookInfoFromDataUrl(source, bookUrl, options);
+      return await getBookInfoFromDataUrl(source, bookUrl, parseOptions);
     }
 
     const headers = buildSourceRequestHeaders(source, bookUrl);
@@ -659,8 +700,11 @@ export async function getBookInfo(
       timeout: 30000,
     });
     await assertLoginCheckPassed(source, html, bookUrl);
+    if (consumeHtmlRateLimitNotice(noticeBus, html)) {
+      return null;
+    }
 
-    return analyzeBookInfoFromBody(source, bookUrl, bookUrl, html, options);
+    return analyzeBookInfoFromBody(source, bookUrl, bookUrl, html, parseOptions);
   } catch (error) {
     console.error(`获取书籍详情失败 [${source.sourceName}]:`, error);
     return null;

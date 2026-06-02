@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 开发 / preview：纯 Web HTTP 代理 + 内嵌页文档代理（注入 Cookie / fetch 劫持）
  */
 import type { Connect, Plugin } from 'vite';
@@ -14,6 +14,7 @@ import {
   rewriteHtmlAssetUrls,
   shouldRewriteProxiedBody,
 } from './rewrite-origin-urls';
+import { gunzipSync } from 'fflate';
 
 const PROXY_PATH = '/__reader_http';
 const COOKIE_HEADER = 'x-reader-cookie';
@@ -104,6 +105,24 @@ function inferHtmlCharsetFromMeta(buffer: Buffer): string | null {
   );
   const raw = (match?.[1] || match?.[2] || '').trim();
   return raw ? raw.toLowerCase() : null;
+}
+
+/** 书源常返回 gzip 但未标 Content-Encoding；Node fetch 不会自动解压 */
+function maybeGunzipProxyBuffer(buf: Buffer, contentEncoding?: string | null): Buffer {
+  const enc = contentEncoding?.trim().toLowerCase() ?? '';
+  const u8 = new Uint8Array(buf);
+  const isGzip = u8.length >= 2 && u8[0] === 0x1f && u8[1] === 0x8b;
+  if (!enc.includes('gzip') && !isGzip) return buf;
+  try {
+    const out = gunzipSync(u8);
+    const head = Buffer.from(out.subarray(0, Math.min(64, out.length))).toString('utf8').trimStart();
+    if (head.startsWith('<') || head.startsWith('{') || head.startsWith('[')) {
+      return Buffer.from(out);
+    }
+  } catch {
+    /* keep original */
+  }
+  return buf;
 }
 
 function decodeBufferWithCharset(buffer: Buffer, contentType: string): string {
@@ -240,6 +259,7 @@ async function forwardToTarget(
   const targetUrl = new URL(target);
 
   // 勿把浏览器 sec-ch-ua / sec-fetch-* 等转发到上游（易触发 Cloudflare 挑战）
+  // 勿把浏览器 sec-ch-ua / sec-fetch-* 等转发到上游（易触发 Cloudflare 挑战）
   const upstreamHeaders = new Headers();
 
   const legadoExtra = decodeLegadoForwardHeaders(req.headers[LEGADO_HDR_LOWER]);
@@ -256,6 +276,7 @@ async function forwardToTarget(
     if (reservedLegado.has(key.toLowerCase())) continue;
     upstreamHeaders.set(key, value);
   }
+  // iframe 导航无 Legado 头：用创建 session 时写入的书源 UA 等
   // iframe 导航无 Legado 头：用创建 session 时写入的书源 UA 等
   for (const [key, value] of Object.entries(session?.forwardHeaders ?? {})) {
     if (reservedLegado.has(key.toLowerCase())) continue;
@@ -366,7 +387,8 @@ async function forwardToTarget(
 
   let statusCode = upstream.status;
   const ctHeader = upstream.headers.get('content-type') ?? '';
-  let buf = Buffer.from(await upstream.arrayBuffer());
+  let buf: Buffer = Buffer.from(await upstream.arrayBuffer());
+  buf = maybeGunzipProxyBuffer(buf, upstream.headers.get('content-encoding'));
 
   let cfChallenge = false;
   if (looksLikeCloudflareChallenge(buf, ctHeader)) {
@@ -618,3 +640,4 @@ export function readerHttpProxy(): Plugin {
     },
   };
 }
+

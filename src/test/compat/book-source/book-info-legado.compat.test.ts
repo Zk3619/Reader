@@ -3,6 +3,8 @@ import { analyzeString } from '@/lib/rule-engine';
 import { evalJs } from '@/lib/js-engine';
 import { javaGetString } from '@/lib/rule-engine/java-get-string';
 import { normalizeUrlRuleResult, resolveUrl } from '@/lib/book-source/utils';
+import { getBookInfo } from '@/lib/book-source/detail';
+import type { BookSource } from '@/types';
 
 /** 八叉详情页结构简化（与 shareBookSource ruleBookInfo 字段对应） */
 const BACHA_DETAIL_HTML = `
@@ -155,5 +157,38 @@ tag7
       ruleContentType: 'html',
     });
     expect(String(title)).toContain('老婆的性感开发之旅');
+  });
+
+  it('ruleBookInfo.tocUrl 为 javascript:history.go 时应回退 bookUrl', async () => {
+    const html = `
+      <div class="cataloginfo"><h1>测试书</h1></div>
+      <div>章节目录<a href="javascript:history.go(-1);">目录</a></div>
+    `;
+    const source = {
+      sourceName: '测试源',
+      sourceUrl: 'https://example.com',
+      bookSourceUrl: 'https://example.com',
+      enabledCookieJar: true,
+      sourceType: 0,
+      ruleBookInfo: {
+        name: '.cataloginfo@h1@text',
+        tocUrl: 'text.章节目录@a@href',
+      },
+    } as unknown as BookSource;
+    const bookUrl = 'https://example.com/book/1';
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(html, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    try {
+      const info = await getBookInfo(source, bookUrl);
+      expect(info).toBeTruthy();
+      expect(info?.tocUrl).toBe(bookUrl);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
