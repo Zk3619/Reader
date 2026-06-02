@@ -162,7 +162,8 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const waitingForProxySrc = () => {
     if (!iframeMode()) return false;
     const p = payload();
-    if (!p || p.cloudflareVerification || !p.useProxyDocument || proxyFailed()) return false;
+    if (!p || !p.useProxyDocument || proxyFailed()) return false;
+    if (p.cloudflareVerification && isTauri()) return false;
     return !iframeSrc();
   };
   /** 加载遮罩（不阻止 iframe 挂载，避免 onLoad 无法触发） */
@@ -202,13 +203,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const url = pageUrl();
     if (!iframeMode() || !url.startsWith('http') || proxyFailed() || iframeSrc()) return;
     const p = payload();
-    if (!p || p.cloudflareVerification) return;
+    if (!p) return;
+    if (p.cloudflareVerification && isTauri()) return;
     const cookies = initialCookies();
     const wantProxy =
       Boolean(p.useProxyDocument) ||
       shouldUseInnerWebDocumentProxy(url, cookies);
-    const sessionCookies = (cookies || (wantProxy ? ' ' : '')).trim();
-    if (!wantProxy || !sessionCookies) return;
+    const sessionCookies = cookies.trim();
+    if (!wantProxy) return;
+    if (!sessionCookies && !p.cloudflareVerification) return;
 
     const key = `${url}\0${sessionCookies}`;
     if (proxyBootstrapReadyKey === key || proxyBootstrapInflightKey === key) return;
@@ -218,8 +221,9 @@ export function InnerWebPage(props: InnerWebPageProps) {
       try {
         const sessionId = await createInnerWebProxySession(
           url,
-          sessionCookies,
+          sessionCookies || '',
           p.proxyForwardHeaders,
+          { cloudflareChallenge: cfVerify() && !isTauri() },
         );
         if (proxyBootstrapInflightKey !== key) {
           void deleteInnerWebProxySession(sessionId);
@@ -233,6 +237,9 @@ export function InnerWebPage(props: InnerWebPageProps) {
         if (proxyBootstrapInflightKey !== key) return;
         console.warn('[InnerWebPage] 内嵌页文档代理失败，回退 srcdoc/直连', e);
         setProxyFailed(true);
+        if (p.cloudflareVerification && !isTauri()) {
+          return;
+        }
         updateInnerWebPayload({ useProxyDocument: false });
         if (!p.html?.trim()) {
           setIframeSrc(url);

@@ -37,10 +37,17 @@ export async function createInnerWebProxySession(
   targetUrl: string,
   cookies: string,
   forwardHeaders?: Record<string, string>,
+  options?: { cloudflareChallenge?: boolean },
 ): Promise<string> {
-  const body: { target: string; cookies: string; forwardHeaders?: string } = {
+  const body: {
+    target: string;
+    cookies: string;
+    forwardHeaders?: string;
+    cloudflareChallenge?: boolean;
+  } = {
     target: targetUrl.trim(),
     cookies: cookies.trim(),
+    cloudflareChallenge: options?.cloudflareChallenge === true,
   };
   const encoded = encodeLegadoForwardHeaders(forwardHeaders);
   if (encoded) body.forwardHeaders = encoded;

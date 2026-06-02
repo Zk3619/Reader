@@ -45,10 +45,22 @@ const STRIP_RESPONSE_HEADERS = new Set<string>(HOP_BY_HOP);
 STRIP_RESPONSE_HEADERS.add('content-encoding');
 STRIP_RESPONSE_HEADERS.add('content-length');
 
+/** 内嵌 iframe 经同源代理加载时，上游 framing 策略会误拦 localhost 父页 */
+const STRIP_INNER_WEB_FRAMING_HEADERS = new Set([
+  'x-frame-options',
+  'content-security-policy',
+  'content-security-policy-report-only',
+  'cross-origin-embedder-policy',
+  'cross-origin-opener-policy',
+  'cross-origin-resource-policy',
+]);
+
 type InnerWebSession = {
   target: string;
   cookies: string;
   forwardHeaders?: Record<string, string>;
+  /** 纯 Web CF 验证：子资源浏览器直连书源域 */
+  cloudflareChallenge?: boolean;
   createdAt: number;
 };
 
@@ -376,6 +388,7 @@ async function forwardToTarget(
     const lower = key.toLowerCase();
     if (STRIP_RESPONSE_HEADERS.has(lower)) return;
     if (sessionId && lower === 'set-cookie') return;
+    if (STRIP_INNER_WEB_FRAMING_HEADERS.has(lower)) return;
     res.setHeader(key, value);
   });
   if (sessionId && session?.cookies) {
@@ -400,16 +413,17 @@ async function forwardToTarget(
     if (
       !isCss &&
       sessionId &&
-      session?.cookies &&
+      session &&
       (ct.toLowerCase().includes('text/html') || rewritten.trimStart().startsWith('<'))
     ) {
       rewritten = injectHtmlForInnerWeb(
         rewritten,
         rewriteBase,
-        session.cookies,
+        session.cookies ?? '',
         sessionId,
         PROXY_PATH,
         session?.target ?? target,
+        session.cloudflareChallenge === true,
       );
     }
 
@@ -494,11 +508,12 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
           target?: string;
           cookies?: string;
           forwardHeaders?: string;
+          cloudflareChallenge?: boolean;
         };
         const target = String(body.target ?? '').trim();
         const cookies = String(body.cookies ?? '').trim();
-        if (!target.startsWith('http') || !cookies) {
-          sendJson(res, 400, { error: 'invalid target or cookies' });
+        if (!target.startsWith('http')) {
+          sendJson(res, 400, { error: 'invalid target' });
           return;
         }
         const sessionId = newSessionId();
@@ -506,6 +521,7 @@ function createProxyMiddleware(): Connect.NextHandleFunction {
           target,
           cookies,
           forwardHeaders: decodeLegadoForwardHeaders(body.forwardHeaders),
+          cloudflareChallenge: body.cloudflareChallenge === true,
           createdAt: Date.now(),
         });
         sendJson(res, 200, { sessionId });

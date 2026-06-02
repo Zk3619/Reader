@@ -6,6 +6,21 @@ import {
 
 export { extractProxiedDocumentQuery, patchProxiedDocumentLocationQuery };
 
+/** CF 验证页放宽 CSP，允许书源域 img/script 等在 localhost 代理页加载 */
+export const INNER_WEB_CF_RELAX_CSP_META =
+  `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; img-src 'self' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: blob:; connect-src 'self' https: http: blob:; frame-src 'self' https: http:; style-src 'self' 'unsafe-inline' https: http:;">`;
+
+/** CF 挑战页 CSP 仅允许 img-src 'self'（localhost），须移除 meta 才能让书源域资源加载 */
+export function stripInnerWebCspMetaTags(html: string): string {
+  return html.replace(
+    /<meta\b[^>]*http-equiv\s*=\s*["']?(?:Content-Security-Policy(?:-Report-Only)?)["']?[^>]*>/gi,
+    '',
+  ).replace(
+    /<meta\b[^>]*content\s*=\s*["'][^"']*Content-Security-Policy[^"']*["'][^>]*http-equiv[^>]*>/gi,
+    '',
+  );
+}
+
 export function buildInnerWebInjectScript(options: {
   targetOrigin: string;
   targetPageUrl: string;
@@ -16,15 +31,19 @@ export function buildInnerWebInjectScript(options: {
   cookie: string;
   sessionId: string;
   proxyPath: string;
+  /** 纯 Web Cloudflare 验证：子资源浏览器直连书源域 */
+  cloudflareChallenge?: boolean;
 }): string {
   const { targetOrigin, targetPageUrl, cookie, sessionId, proxyPath } = options;
   const documentTargetUrl = options.documentTargetUrl ?? targetPageUrl;
   const documentQuery = options.documentQuery ?? '';
+  const cloudflareChallenge = options.cloudflareChallenge === true;
   const channel = 'reader-inner-web';
   return `(function(){
 var NativeUSP=window.URLSearchParams;
 var DOC_TARGET=${JSON.stringify(documentTargetUrl)};
 var DOC_QUERY=${JSON.stringify(documentQuery)};
+var CF_CHALLENGE=${JSON.stringify(cloudflareChallenge)};
 var PROXY_ORIGIN=window.location.origin;
 var PROXY_BASE=${JSON.stringify(proxyPath)};
 function docSearchString(){
@@ -98,7 +117,7 @@ function patchDocumentLocation(){
     patchGetter('protocol',docUrl.protocol+':');
   }catch(e){}
 }
-patchDocumentLocation();
+if(!CF_CHALLENGE)patchDocumentLocation();
 var ORIGIN=${JSON.stringify(targetOrigin)};
 var PAGE=${JSON.stringify(targetPageUrl)};
 var SESSION=${JSON.stringify(sessionId)};
@@ -125,11 +144,65 @@ function syncParent(){
     window.parent.postMessage({channel:CHANNEL,id:'sync',method:'syncDocumentCookie',args:{sessionId:SESSION,cookie:store}},'*');
   }catch(e){}
 }
+function isAlreadyProxied(url){
+  return String(url).indexOf('__reader_http')!==-1;
+}
+function isProxyFrameUrl(url){
+  try{
+    var u=new URL(String(url), PROXY_ORIGIN);
+    return u.origin===PROXY_ORIGIN && u.pathname.indexOf('__reader_http')>=0;
+  }catch(e){return false;}
+}
+function canonicalizeProxyHistoryUrl(raw){
+  var s=String(raw);
+  var marker='__reader_http';
+  var idx=s.indexOf(marker);
+  if(idx<0)return null;
+  var rest=s.slice(idx+marker.length);
+  if(rest.charAt(0)==='?')return proxyEndpoint()+rest;
+  if(rest.charAt(0)==='/'&&rest.charAt(1)==='?')return proxyEndpoint()+rest.slice(1);
+  return null;
+}
 function resolveToTarget(url){
-  return new URL(url,PAGE).href;
+  var s=String(url);
+  if(isProxyFrameUrl(s)){
+    try{
+      var t=new URL(String(s), PROXY_ORIGIN).searchParams.get('target');
+      if(t)return t;
+    }catch(e){}
+  }
+  var canon=canonicalizeProxyHistoryUrl(s);
+  if(canon){
+    try{
+      var t2=new URL(canon, PROXY_ORIGIN).searchParams.get('target');
+      if(t2)return t2;
+    }catch(e){}
+  }
+  return new URL(s,PAGE).href;
+}
+function isBrowserDirectPath(abs){
+  try{return new URL(abs).pathname.indexOf('/cdn-cgi/')!==-1;}catch(e){return false;}
+}
+function shouldProxySameOrigin(url){
+  try{
+    var abs=resolveToTarget(String(url));
+    if(isAlreadyProxied(abs))return false;
+    if(isBrowserDirectPath(abs))return false;
+    return new URL(abs).origin===ORIGIN;
+  }catch(e){return false;}
+}
+function shouldProxyRequest(url){
+  if(shouldProxySameOrigin(url))return true;
+  if(CF_CHALLENGE){
+    try{
+      var abs=resolveToTarget(String(url));
+      if(isBrowserDirectPath(abs))return true;
+    }catch(e){}
+  }
+  return false;
 }
 function shouldProxy(url){
-  try{return new URL(url,PAGE).origin===ORIGIN;}catch(e){return false;}
+  return shouldProxySameOrigin(url);
 }
 function proxyEndpoint(){
   if(PROXY_BASE.indexOf('http')===0)return PROXY_BASE;
@@ -137,12 +210,109 @@ function proxyEndpoint(){
 }
 function proxyUrl(url){
   var abs=resolveToTarget(url);
+  var canon=canonicalizeProxyHistoryUrl(abs);
+  if(canon)return canon;
+  canon=canonicalizeProxyHistoryUrl(String(url));
+  if(canon)return canon;
+  if(isProxyFrameUrl(abs))return new URL(String(abs), PROXY_ORIGIN).href;
   if(abs.indexOf('/webfonts/')!==-1&&abs.indexOf('/static/webfonts/')===-1){
     abs=abs.replace(ORIGIN+'/webfonts/',ORIGIN+'/static/webfonts/');
   }
   var out=proxyEndpoint()+'?target='+encodeURIComponent(abs);
   if(SESSION)out+='&session='+encodeURIComponent(SESSION);
   return out;
+}
+function rewriteHistoryUrl(url){
+  if(url==null||url==='')return url;
+  try{
+    var s=String(url);
+    if(s.charAt(0)==='#'||/^javascript:/i.test(s))return url;
+    if(isProxyFrameUrl(s))return new URL(s, PROXY_ORIGIN).href;
+    var canon=canonicalizeProxyHistoryUrl(s);
+    if(canon)return canon;
+    var abs=resolveToTarget(s);
+    if(isProxyFrameUrl(abs))return new URL(String(abs), PROXY_ORIGIN).href;
+    canon=canonicalizeProxyHistoryUrl(abs);
+    if(canon)return canon;
+    if(new URL(abs).origin===ORIGIN)return proxyUrl(abs);
+    return url;
+  }catch(e){return url;}
+}
+function patchHistoryApi(){
+  var rp=history.replaceState.bind(history);
+  history.replaceState=function(state,title,url){
+    return rp(state,title,url===undefined?url:rewriteHistoryUrl(url));
+  };
+  var pp=history.pushState.bind(history);
+  history.pushState=function(state,title,url){
+    return pp(state,title,url===undefined?url:rewriteHistoryUrl(url));
+  };
+}
+patchHistoryApi();
+function patchLocationNavigate(){
+  var loc=Location.prototype;
+  var rawAssign=loc.assign;
+  if(rawAssign){
+    loc.assign=function(url){return rawAssign.call(this,rewriteHistoryUrl(url));};
+  }
+  var rawReplace=loc.replace;
+  if(rawReplace){
+    loc.replace=function(url){return rawReplace.call(this,rewriteHistoryUrl(url));};
+  }
+}
+patchLocationNavigate();
+if(CF_CHALLENGE){
+  function stripRuntimeCspMetas(){
+    try{
+      document.querySelectorAll('meta[http-equiv="Content-Security-Policy"], meta[http-equiv="Content-Security-Policy-Report-Only"]').forEach(function(m){m.remove();});
+    }catch(e){}
+  }
+  stripRuntimeCspMetas();
+  if(typeof MutationObserver!=='undefined'){
+    new MutationObserver(stripRuntimeCspMetas).observe(document.documentElement,{childList:true,subtree:true});
+  }
+}
+function maybeProxyResourceUrl(url){
+  if(url==null||url==='')return url;
+  try{
+    var s=String(url);
+    if(s.charAt(0)==='#'||/^javascript:/i.test(s)||/^data:/i.test(s)||/^blob:/i.test(s))return url;
+    var abs=resolveToTarget(s);
+    if(shouldProxy(abs))return proxyUrl(abs);
+    if(abs.startsWith('http'))return abs;
+    return url;
+  }catch(e){return url;}
+}
+function patchElementUrlProperty(proto,prop){
+  var desc=Object.getOwnPropertyDescriptor(proto,prop);
+  if(!desc||!desc.set)return;
+  Object.defineProperty(proto,prop,{
+    configurable:true,
+    enumerable:desc.enumerable!==false,
+    get:desc.get,
+    set:function(v){desc.set.call(this,maybeProxyResourceUrl(v));}
+  });
+}
+function patchDynamicResources(){
+  patchElementUrlProperty(HTMLScriptElement.prototype,'src');
+  if(typeof HTMLLinkElement!=='undefined'){
+    patchElementUrlProperty(HTMLLinkElement.prototype,'href');
+  }
+  if(typeof HTMLImageElement!=='undefined'){
+    patchElementUrlProperty(HTMLImageElement.prototype,'src');
+  }
+  var rawSetAttribute=Element.prototype.setAttribute;
+  Element.prototype.setAttribute=function(name,value){
+    var n=String(name).toLowerCase();
+    if(n==='src'||n==='href')value=maybeProxyResourceUrl(value);
+    return rawSetAttribute.call(this,name,value);
+  };
+}
+patchDynamicResources();
+function withDirectInit(init){
+  var o=Object.assign({},init||{});
+  if(!o.credentials)o.credentials='include';
+  return o;
 }
 function withCookie(init){
   init=init||{};
@@ -189,20 +359,30 @@ function applySessionCookieHeader(r){
 var rawFetch=window.fetch.bind(window);
 window.fetch=function(input,init){
   var url=typeof input==='string'?input:(input&&input.url);
-  if(url&&shouldProxy(url))return rawFetch(proxyUrl(url),buildProxyInit(input,init,url)).then(applySessionCookieHeader);
+  if(url){
+    var abs=resolveToTarget(String(url));
+    if(shouldProxyRequest(abs))return rawFetch(proxyUrl(url),buildProxyInit(input,init,url)).then(applySessionCookieHeader);
+    if(abs.startsWith('http'))return rawFetch(abs,withDirectInit(init));
+  }
   return rawFetch(input,init);
 };
 var XO=XMLHttpRequest.prototype.open;
 var XS=XMLHttpRequest.prototype.send;
 XMLHttpRequest.prototype.open=function(m,u){
   this.__readerMethod=m;
-  this.__readerUrl=u;
-  return XO.apply(this,arguments);
+  var abs=resolveToTarget(String(u));
+  this.__readerProxied=shouldProxyRequest(abs);
+  if(this.__readerProxied){
+    this.__readerUrl=u;
+    return XO.call(this,m,'about:blank');
+  }
+  this.withCredentials=true;
+  return XO.call(this,m,abs.startsWith('http')?abs:u);
 };
 XMLHttpRequest.prototype.send=function(body){
   var self=this;
-  var u=self.__readerUrl;
-  if(u&&shouldProxy(u)){
+  if(self.__readerProxied){
+    var u=self.__readerUrl;
     var m=(self.__readerMethod||'GET').toUpperCase();
     var init={method:m};
     if(!(m==='POST'&&resolveToTarget(u).indexOf('/user_api')!==-1))init.body=body;
@@ -253,12 +433,16 @@ export function injectHtmlForInnerWeb(
   sessionId: string,
   proxyPath: string,
   documentTargetUrl?: string,
+  cloudflareChallenge?: boolean,
 ): string {
   const docUrl = documentTargetUrl?.trim() || targetUrl;
   const origin = new URL(docUrl).origin;
   const pageBase = resolveInnerWebDocumentBaseUrl(docUrl);
   const docQuery = extractProxiedDocumentQuery(docUrl);
-  const patched = patchProxiedDocumentLocationQuery(html, docUrl);
+  let patched = patchProxiedDocumentLocationQuery(html, docUrl);
+  if (cloudflareChallenge) {
+    patched = stripInnerWebCspMetaTags(patched);
+  }
   const snippet = `<script>${buildInnerWebInjectScript({
     targetOrigin: origin,
     targetPageUrl: pageBase,
@@ -267,13 +451,15 @@ export function injectHtmlForInnerWeb(
     cookie,
     sessionId,
     proxyPath,
+    cloudflareChallenge,
   })}</script>`;
-  const baseTag = `<base href="${pageBase}">`;
+  const baseTag = cloudflareChallenge ? '' : `<base href="${pageBase}">`;
+  const cfCspTag = cloudflareChallenge ? INNER_WEB_CF_RELAX_CSP_META : '';
   if (/<head[\s>]/i.test(patched)) {
-    return patched.replace(/<head([^>]*)>/i, `<head$1>${baseTag}${snippet}`);
+    return patched.replace(/<head([^>]*)>/i, `<head$1>${cfCspTag}${baseTag}${snippet}`);
   }
   if (/<html[\s>]/i.test(patched)) {
-    return patched.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}${snippet}</head>`);
+    return patched.replace(/<html([^>]*)>/i, `<html$1><head>${cfCspTag}${baseTag}${snippet}</head>`);
   }
-  return `<!DOCTYPE html><html><head>${baseTag}${snippet}</head><body>${patched}</body></html>`;
+  return `<!DOCTYPE html><html><head>${cfCspTag}${baseTag}${snippet}</head><body>${patched}</body></html>`;
 }

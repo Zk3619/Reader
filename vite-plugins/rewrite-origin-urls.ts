@@ -21,6 +21,20 @@ export function normalizeProxyTarget(target: string): string {
   return normalizeSiteAssetUrl(target);
 }
 
+/** Cloudflare 挑战脚本须由浏览器直连书源域，经 Node 代理无法完成人机校验 */
+export function isBrowserDirectOriginAsset(absolute: string): boolean {
+  try {
+    return /\/cdn-cgi\//i.test(new URL(absolute).pathname);
+  } catch {
+    return false;
+  }
+}
+
+export type ProxiedAssetRewriteOptions = {
+  /** CF 验证会话：书源子资源由浏览器直连，仅首屏 HTML 走代理 */
+  browserDirectSameOrigin?: boolean;
+};
+
 /**
  * @param resolveBaseUrl 当前被改写的文档 URL（如 CSS 文件地址），用于解析 ../webfonts 等相对路径
  */
@@ -28,7 +42,8 @@ export function toProxiedAssetUrl(
   rawUrl: string,
   resolveBaseUrl: string,
   proxyBase: string,
-  sessionId?: string
+  sessionId?: string,
+  options?: ProxiedAssetRewriteOptions,
 ): string {
   const trimmed = rawUrl.trim();
   if (
@@ -59,6 +74,10 @@ export function toProxiedAssetUrl(
       return trimmed;
     }
 
+    if (isBrowserDirectOriginAsset(absolute) || options?.browserDirectSameOrigin) {
+      return absolute;
+    }
+
     let out = `${proxyBase}?target=${encodeURIComponent(absolute)}`;
     if (sessionId) {
       out += `&session=${encodeURIComponent(sessionId)}`;
@@ -69,10 +88,11 @@ export function toProxiedAssetUrl(
   }
 }
 
-/** 跳过 script/style 块，避免破坏内联 JS/CSS */
+/** 跳过 script/style 块内联正文，但须改写外链 script src / link href */
 function rewriteHtmlOutsideProtectedBlocks(
   html: string,
-  rewrite: (chunk: string) => string
+  rewrite: (chunk: string) => string,
+  rewriteProtected?: (block: string) => string,
 ): string {
   const blockRe =
     /<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>/gi;
@@ -81,11 +101,31 @@ function rewriteHtmlOutsideProtectedBlocks(
   let match: RegExpExecArray | null;
   while ((match = blockRe.exec(html)) !== null) {
     out += rewrite(html.slice(last, match.index));
-    out += match[0];
+    out += rewriteProtected ? rewriteProtected(match[0]) : match[0];
     last = match.index + match[0].length;
   }
   out += rewrite(html.slice(last));
   return out;
+}
+
+/** 仅改写块起始标签上的 src/href（不动内联 JS/CSS 正文） */
+function rewriteTagOpeningAssetUrls(
+  block: string,
+  pageUrl: string,
+  proxyBase: string,
+  sessionId?: string,
+  options?: ProxiedAssetRewriteOptions,
+): string {
+  const openEnd = block.indexOf('>');
+  if (openEnd < 0) return block;
+  const openTag = block.slice(0, openEnd + 1);
+  const rest = block.slice(openEnd + 1);
+  const rewrittenOpen = openTag.replace(
+    /\s(href|src)=(['"])([^'"]+)\2/gi,
+    (_match, attr: string, quote: string, url: string) =>
+      ` ${attr}=${quote}${toProxiedAssetUrl(url, pageUrl, proxyBase, sessionId, options)}${quote}`,
+  );
+  return rewrittenOpen + rest;
 }
 
 /** @param cssFileUrl 被代理的 CSS 完整 URL（相对 url() 以此为基准） */
@@ -93,19 +133,20 @@ export function rewriteCssAssetUrls(
   css: string,
   cssFileUrl: string,
   proxyBase: string,
-  sessionId?: string
+  sessionId?: string,
+  options?: ProxiedAssetRewriteOptions,
 ): string {
   // 先处理 ../webfonts/，避免通用正则与 format("woff2") 组合时漏匹配
   let out = css.replace(
     /url\(\s*\.\.\/webfonts\/([^'")]+)\)/gi,
     (_match, file: string) =>
-      `url(${toProxiedAssetUrl(`../webfonts/${file}`, cssFileUrl, proxyBase, sessionId)})`
+      `url(${toProxiedAssetUrl(`../webfonts/${file}`, cssFileUrl, proxyBase, sessionId, options)})`
   );
 
   out = out.replace(
     /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
     (_match, quote: string, path: string) => {
-      const proxied = toProxiedAssetUrl(path, cssFileUrl, proxyBase, sessionId);
+      const proxied = toProxiedAssetUrl(path, cssFileUrl, proxyBase, sessionId, options);
       const q = quote || '';
       return `url(${q}${proxied}${q})`;
     }
@@ -119,26 +160,31 @@ export function rewriteHtmlAssetUrls(
   html: string,
   pageUrl: string,
   proxyBase: string,
-  sessionId?: string
+  sessionId?: string,
+  options?: ProxiedAssetRewriteOptions,
 ): string {
-  return rewriteHtmlOutsideProtectedBlocks(html, (chunk) => {
+  return rewriteHtmlOutsideProtectedBlocks(
+    html,
+    (chunk) => {
     let out = chunk.replace(
       /\s(href|src|action|poster)=(['"])([^'"]+)\2/gi,
       (_match, attr: string, quote: string, url: string) =>
-        ` ${attr}=${quote}${toProxiedAssetUrl(url, pageUrl, proxyBase, sessionId)}${quote}`
+        ` ${attr}=${quote}${toProxiedAssetUrl(url, pageUrl, proxyBase, sessionId, options)}${quote}`
     );
 
     out = out.replace(
       /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi,
       (_match, quote: string, path: string) => {
-        const proxied = toProxiedAssetUrl(path, pageUrl, proxyBase, sessionId);
+        const proxied = toProxiedAssetUrl(path, pageUrl, proxyBase, sessionId, options);
         const q = quote || '';
         return `url(${q}${proxied}${q})`;
       }
     );
 
     return out;
-  });
+    },
+    (block) => rewriteTagOpeningAssetUrls(block, pageUrl, proxyBase, sessionId, options),
+  );
 }
 
 export function shouldRewriteProxiedBody(contentType: string): boolean {

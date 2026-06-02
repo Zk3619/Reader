@@ -169,8 +169,11 @@ export async function resolveCloudflareViaInnerWeb(options: {
     cookieSyncUrl: verifyUrl,
     initialCookies: initialCookies || undefined,
     bookSourceUrl: sourceKey,
-    /** 勿走 Node 代理（易被 CF 硬拦截）；Tauri 用原生 panel，纯 Web 用直连 iframe */
-    useProxyDocument: false,
+    /**
+     * Tauri：原生 panel 直连站点（可读 HttpOnly cf_clearance）。
+     * 纯 Web：须走 __reader_http 同源代理，否则 X-Frame-Options 会拦截直连 iframe。
+     */
+    useProxyDocument: !isTauri(),
     cloudflareVerification: true,
     proxyForwardHeaders: forward,
   });
