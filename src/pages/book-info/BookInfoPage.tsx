@@ -813,8 +813,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
   /* ── 底部操作栏 ── */
   function ActionBar() {
     return (
-      <div class="shrink-0 border-t border-border/40 bg-background md:bg-background">
-        <div class="flex h-[50px] items-center gap-2 px-4 safe-area-inset-bottom">
+      <div class="shrink-0 border-t border-border/40 bg-background safe-area-inset-bottom md:bg-background">
+        <div class="flex h-[50px] items-center gap-2 px-4">
           <Show
             when={isInShelf()}
             fallback={

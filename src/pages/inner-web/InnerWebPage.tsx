@@ -6,6 +6,7 @@
  */
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { invoke } from '@tauri-apps/api/core';
 import type { InnerWebPayload } from '@/lib/platform/inner-web';
 import {
@@ -20,6 +21,7 @@ import {
 } from '@/lib/platform/inner-web';
 import { startInnerWebBridge, stopInnerWebBridge } from '@/lib/platform/inner-web-bridge';
 import {
+  isBookSourceControlUrl,
   markInnerWebPanelSessionFallback,
   useInnerWebIframe,
   useInnerWebTauriPanel,
@@ -32,14 +34,18 @@ import {
   reloadInnerWebTauriPanel,
   type InnerWebPanelRect,
 } from '@/lib/platform/inner-web-tauri';
-import { isTauri } from '@/lib/platform/detect';
+import { isMobile, isTauri } from '@/lib/platform/detect';
 import {
   buildInnerWebDocumentProxyUrl,
   createInnerWebProxySession,
   deleteInnerWebProxySession,
   shouldUseInnerWebDocumentProxy,
 } from '@/lib/http/inner-web-proxy-session';
-import { setActiveWebProxySessionId } from '@/lib/platform/inner-web';
+import {
+  getActiveWebProxySessionId,
+  setActiveWebProxySessionId,
+} from '@/lib/platform/inner-web';
+import { resolveInnerWebCookiesUseMainWebview } from '@/lib/platform/inner-web-cookie-webview';
 import { isInnerWebPanelMaskVisible } from '@/lib/platform/inner-web-panel-overlay';
 import type { ResolvedInnerWebPresentation } from '@/lib/platform/inner-web-presentation';
 import {
@@ -98,9 +104,30 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const p = payload();
     return { url: p?.url, html: p?.html };
   };
-  const panelMode = createMemo(() => useInnerWebTauriPanel(content()));
-  const iframeMode = createMemo(() => useInnerWebIframe(content()));
   const pageUrl = () => payload()?.url?.trim() ?? '';
+  const cfVerify = () => Boolean(payload()?.cloudflareVerification);
+  const controlSettings = () => isBookSourceControlUrl(pageUrl());
+  /** CF / 书源 control：Tauri 桌面用原生 panel，Cookie 与书源表同 WebView 读写 */
+  const panelMode = createMemo(() => {
+    const c = content();
+    if (
+      (cfVerify() || controlSettings()) &&
+      isTauri() &&
+      !isMobile() &&
+      pageUrl().startsWith('http')
+    ) {
+      return true;
+    }
+    return useInnerWebTauriPanel(c);
+  });
+  const iframeMode = createMemo(() => {
+    if (cfVerify() || controlSettings()) {
+      if (isTauri() && !isMobile()) return false;
+      const c = content();
+      return Boolean(c.url || c.html);
+    }
+    return useInnerWebIframe(content());
+  });
   const initialCookies = () => payload()?.initialCookies?.trim() ?? '';
   const isLoading = () => Boolean(payload()?.loading);
   const [proxyFailed, setProxyFailed] = createSignal(false);
@@ -135,7 +162,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const waitingForProxySrc = () => {
     if (!iframeMode()) return false;
     const p = payload();
-    if (!p || !p.useProxyDocument || proxyFailed()) return false;
+    if (!p || p.cloudflareVerification || !p.useProxyDocument || proxyFailed()) return false;
     return !iframeSrc();
   };
   /** 加载遮罩（不阻止 iframe 挂载，避免 onLoad 无法触发） */
@@ -175,14 +202,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const url = pageUrl();
     if (!iframeMode() || !url.startsWith('http') || proxyFailed() || iframeSrc()) return;
     const p = payload();
-    if (!p) return;
+    if (!p || p.cloudflareVerification) return;
     const cookies = initialCookies();
     const wantProxy =
       Boolean(p.useProxyDocument) ||
       shouldUseInnerWebDocumentProxy(url, cookies);
-    if (!wantProxy || !cookies) return;
+    const sessionCookies = (cookies || (wantProxy ? ' ' : '')).trim();
+    if (!wantProxy || !sessionCookies) return;
 
-    const key = `${url}\0${cookies}`;
+    const key = `${url}\0${sessionCookies}`;
     if (proxyBootstrapReadyKey === key || proxyBootstrapInflightKey === key) return;
     proxyBootstrapInflightKey = key;
 
@@ -190,7 +218,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
       try {
         const sessionId = await createInnerWebProxySession(
           url,
-          cookies,
+          sessionCookies,
           p.proxyForwardHeaders,
         );
         if (proxyBootstrapInflightKey !== key) {
@@ -251,10 +279,26 @@ export function InnerWebPage(props: InnerWebPageProps) {
 
     const job = (async () => {
       try {
+        const p = payload();
+        /** CF：勿覆盖 panel UA，使 clearance 与 WebView2 真实 TLS UA 一致 */
+        const ua = cfVerify()
+          ? undefined
+          : (p?.proxyForwardHeaders?.['User-Agent'] ??
+            p?.proxyForwardHeaders?.['user-agent']);
         if (pageUrl().startsWith('http')) {
-          await openInnerWebTauriPanel({ url: pageUrl(), cookies, rect: r });
+          await openInnerWebTauriPanel({
+            url: pageUrl(),
+            cookies,
+            rect: r,
+            userAgent: ua?.trim() || undefined,
+          });
         } else if (useHtmlContent()) {
-          await openInnerWebTauriPanel({ html: embeddedHtml(), cookies, rect: r });
+          await openInnerWebTauriPanel({
+            html: embeddedHtml(),
+            cookies,
+            rect: r,
+            userAgent: ua?.trim() || undefined,
+          });
         } else {
           return;
         }
@@ -321,14 +365,20 @@ export function InnerWebPage(props: InnerWebPageProps) {
     };
     window.addEventListener('message', onYueduBooksourceImport);
 
+    const p0 = payload() ?? snap;
+    setInnerWebCookiesUseMainWebview(
+      p0?.cloudflareVerification
+        ? false
+        : resolveInnerWebCookiesUseMainWebview({
+            iframeMode: iframeMode(),
+            useProxyDocument: p0?.useProxyDocument,
+          }),
+    );
     if (iframeMode()) {
-      setInnerWebCookiesUseMainWebview(true);
       void closeInnerWebTauriPanel();
       if (pageUrl().startsWith('http')) {
         void startInnerWebBridge(pageUrl());
       }
-    } else {
-      setInnerWebCookiesUseMainWebview(false);
     }
 
     createEffect(() => {
@@ -380,10 +430,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
       stopInnerWebBridge();
       proxyBootstrapInflightKey = null;
       proxyBootstrapReadyKey = null;
-      if (webProxySessionId) {
-        void deleteInnerWebProxySession(webProxySessionId);
-        setActiveWebProxySessionId(null);
-        webProxySessionId = undefined;
+      const sid = webProxySessionId;
+      webProxySessionId = undefined;
+      if (sid) {
+        window.setTimeout(() => {
+          void deleteInnerWebProxySession(sid);
+          if (getActiveWebProxySessionId() === sid) {
+            setActiveWebProxySessionId(null);
+          }
+        }, 1200);
       }
       if (panelMode()) {
         void closeInnerWebTauriPanel();
@@ -425,6 +480,11 @@ export function InnerWebPage(props: InnerWebPageProps) {
     suppressLoginDialogDismiss();
     cancelInnerWebClose();
   };
+
+  useBackHandler(() => () => {
+    handleBack();
+    return true;
+  });
 
   const handleConfirm = async (e?: Event) => {
     e?.preventDefault();

@@ -37,7 +37,6 @@ export function TextViewerChromeFooter(props: TextViewerChromeFooterProps) {
       <div
         class={cn(
           'reader-bottom-bar flex h-9 shrink-0 items-center justify-between gap-3 px-4 text-xs',
-          props.isWideScreen && 'safe-area-inset-bottom',
           props.bottomBarThemeClasses ??
             'border-t border-border/50 bg-background/95 text-muted-foreground backdrop-blur',
           !props.statusBarVisible && 'reader-bar-hidden',
@@ -62,7 +61,7 @@ export function TextViewerChromeFooter(props: TextViewerChromeFooterProps) {
       <Show when={!props.isWideScreen}>
         <div
           class={cn(
-            'reader-control-bar flex shrink-0 flex-col border-t border-border/50 bg-background/95 px-3 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom',
+            'reader-control-bar flex shrink-0 flex-col border-t border-border/50 bg-background/95 px-3 py-2 text-muted-foreground backdrop-blur',
             !props.operationBarVisible && 'reader-bar-hidden',
           )}
         >

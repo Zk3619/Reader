@@ -47,6 +47,8 @@ export interface ExploreSourcePageContentProps {
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
   class?: string;
+  /** 书籍网格滚动区 class；默认 mainShellPageScroll（移动壳层有底栏；桌面无底栏时由 App.css 加末尾留白） */
+  listScrollClass?: string;
 }
 
 export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
@@ -247,7 +249,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       <Show when={!loading() && !error() && books().length > 0}>
         <ExploreBookGridProvider value={exploreGridCtx()}>
           <VirtualExploreBookGrid
-            class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
+            class={cn(props.listScrollClass ?? mainShellPageScroll, 'min-h-0 flex-1')}
             items={books}
             onScroll={handleContentScroll}
             getItemKey={(sb) => sb.bookUrl}

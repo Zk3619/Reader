@@ -506,7 +506,7 @@ export function SourcesPage(props: SourcesPageProps) {
           showNativeDragHandle={false}
         >
           <AppDrawerHeader title={expandedSource()?.sourceName ?? '发现'} />
-          <AppDrawerBody class="overflow-y-auto scroll-gutter-stable-both px-3 pb-4 pt-1">
+          <AppDrawerBody class="overflow-y-auto scroll-gutter-stable-both px-3 pb-2 pt-1 mb-4">
             <Show when={expandedSource()}>
               {(source) => (
                 <SourceExploreDrawerContent

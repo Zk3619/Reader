@@ -3,6 +3,7 @@
  */
 
 import { createSignal, Show, For, onMount, createMemo, type JSX } from 'solid-js';
+import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import {
   PageHeader,
   type PageHeaderAction,
@@ -170,6 +171,14 @@ export function SourceEditPage(props: SourceEditPageProps) {
     }
     props.onClose();
   }
+
+  useBackHandler(() => () => {
+    if (isDirty()) {
+      if (!confirm('有未保存的修改，确定离开吗？')) return true;
+    }
+    props.onClose();
+    return true;
+  });
 
   async function handleSave() {
     setSaving(true);
@@ -461,7 +470,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
           )}
         </For>
       </TabsList>
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1">
+      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 mb-4">
         <For each={BOOK_SOURCE_EDIT_SECTIONS}>
           {(section) => (
             <TabsContent value={section.key} class="mt-0 space-y-4 pb-8">
@@ -576,7 +585,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         class="border-b"
       />
 
-      <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-2">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-2 safe-area-page-bottom">
         <Show
           when={!loading()}
           fallback={
@@ -673,7 +682,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
             when={sourceGroups().length > 0}
             fallback={<p class="text-sm text-muted-foreground">暂无已有分组，请直接在源分组中输入</p>}
           >
-            <ul class="max-h-60 space-y-1 overflow-y-auto">
+            <ul class="max-h-60 space-y-1 overflow-y-auto mb-2">
               <For each={sourceGroups()}>
                 {(g) => (
                   <li>

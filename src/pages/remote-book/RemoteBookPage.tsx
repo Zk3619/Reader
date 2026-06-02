@@ -5,6 +5,7 @@
  */
 
 import { createSignal, Show, For, onMount } from 'solid-js';
+import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -127,6 +128,14 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
       await loadRemoteBooks(prevPath);
     }
   };
+
+  useBackHandler(() => {
+    if (pathHistory().length <= 0) return undefined;
+    return () => {
+      void goBack();
+      return true;
+    };
+  });
 
   // 切换选择
   const toggleSelection = (path: string) => {
@@ -396,7 +405,7 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
       </div>
 
       {/* 文件列表 */}
-      <div class="flex-1 overflow-auto scroll-gutter-stable-both px-2 py-4">
+      <div class="flex-1 overflow-auto scroll-gutter-stable-both px-2 pt-4 pb-2 mb-4 safe-area-page-bottom">
         <Show
           when={!isLoading()}
           fallback={

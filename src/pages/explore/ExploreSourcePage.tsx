@@ -11,6 +11,7 @@ import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import { pageCacheStore } from '@/stores/page-cache';
 import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
+import { standalonePageScroll } from '@/lib/ui/viewport-classes';
 
 export interface ExploreSourcePageProps {
   source: BookSource;
@@ -65,7 +66,8 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
         class="border-b"
       />
       <ExploreSourcePageContent
-        class="min-h-0 flex-1 py-4 px-1"
+        class="min-h-0 flex-1 px-1 pt-4 pb-2"
+        listScrollClass={standalonePageScroll}
         source={props.source}
         section={props.section}
         refreshKey={refreshKey()}

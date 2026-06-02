@@ -205,7 +205,7 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
           </Show>
 
           {/* 分组列表 */}
-          <div class="min-h-0 overflow-y-auto overscroll-contain contain-layout">
+          <div class="min-h-0 overflow-y-auto overscroll-contain contain-layout mb-4">
             <Show when={loading()}>
               <div class="px-4 py-8 text-center text-sm text-muted-foreground">加载中...</div>
             </Show>

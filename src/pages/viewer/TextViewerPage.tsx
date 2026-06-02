@@ -379,11 +379,8 @@ export function BookReader(props: BookReaderProps) {
     setPanelClosing(false);
   };
 
-  /** 段评数量（mock：暂无数据源时按章节/段返回 0；可改为接口） */
-  const getSegmentCommentCount = (_chapterIndex: number, segmentIndex: number) => {
-    if (segmentIndex <= 1) return 3; // 演示：章节标题与第一段显示气泡
-    return 0;
-  };
+  /** 段评数量：无数据源时恒为 0，不渲染正文内数字气泡；接入后在此返回真实计数 */
+  const getSegmentCommentCount = (_chapterIndex: number, _segmentIndex: number) => 0;
 
   createEffect(() => {
     if (!panelEntering()) return;
@@ -818,7 +815,7 @@ export function BookReader(props: BookReaderProps) {
           showNativeDragHandle={false}
         >
           <AppDrawerHeader title="阅读设置" />
-          <AppDrawerBody class="px-4 pb-6 pt-1 overflow-y-auto scroll-gutter-stable-both">
+          <AppDrawerBody class="px-4 pb-2 pt-1 overflow-y-auto scroll-gutter-stable-both mb-4">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
               showReadWidth={() => isWideScreen() || !isMobile()}
@@ -844,7 +841,7 @@ export function BookReader(props: BookReaderProps) {
         >
           <AppDrawerHeader title="设置" />
           {/* 阻止内部拖拽使用 data-corvu-no-drag 或 disableDragClose */}
-          <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-6">
+          <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-2 mb-4">
             <Button
               variant="ghost"
               class="w-full justify-start"
@@ -919,7 +916,7 @@ export function BookReader(props: BookReaderProps) {
           <AppDialogHeader>
             <AppDialogTitle>阅读进度状态栏的显示风格</AppDialogTitle>
           </AppDialogHeader>
-          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 pt-4 pb-2 contain-layout mb-4">
             <RadioGroup
               value={textViewerStore.state.config.statusBarDisplayStyle}
               onChange={(value) => {

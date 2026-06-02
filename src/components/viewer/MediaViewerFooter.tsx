@@ -37,7 +37,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
   return (
     <div
       class={cn(
-        'reader-footer flex flex-col',
+        'reader-footer flex flex-col safe-area-inset-bottom',
         placement() === 'overlay' && 'absolute bottom-0 left-0 right-0 z-10',
         placement() === 'fixed' && 'shrink-0 border-t border-border',
         collapseTarget() === 'footer' && !visible() && 'reader-bar-hidden',

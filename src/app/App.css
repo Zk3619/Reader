@@ -451,6 +451,11 @@
   scrollbar-gutter: stable both-edges;
 }
 
+/* 主壳 Tab 滚动区：桌面壳层无底栏时末尾留白（与 scrollEdgeBottomInset / mb-4 一致） */
+#main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
+  margin-bottom: 1rem;
+}
+
 /*
  * 书籍详情纵向布局：滚动条浮于内容之上，不预留两侧 gutter。
  * 用于 BookInfoPage 窄屏/抽屉纵向区与 BookInfoDrawer 内容滚动。
@@ -1490,21 +1495,43 @@ body.reader-inner-web-session--drawer {
   transition-delay: 0s !important;
 }
 
+:root {
+  --app-bar-height: 3.5rem;
+  --safe-area-top-effective: env(safe-area-inset-top, 0px);
+  --safe-area-bottom-effective: env(safe-area-inset-bottom, 0px);
+  --keyboard-inset-bottom: 0px;
+}
+
 .safe-area-inset-top {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--safe-area-top-effective);
+}
+
+/** 主壳 fixed 区域：顶/底栏高度 + 安全区（与 Navigation / BottomBar 外层 padding 一致） */
+.inset-top-app-bar {
+  top: calc(var(--app-bar-height) + var(--safe-area-top-effective));
+}
+
+.inset-bottom-app-bar {
+  bottom: calc(var(--app-bar-height) + var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
 }
 
 .safe-area-inset-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+.safe-area-page-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+html.keyboard-open .reader-footer.safe-area-inset-bottom,
+html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
 }
 
 @media (pointer: coarse) and (hover: none) {
-  .safe-area-inset-top {
-    padding-top: var(--mobile-safe-top);
-  }
-
-  .safe-area-inset-bottom {
-    padding-bottom: var(--mobile-safe-bottom);
+  :root {
+    --safe-area-top-effective: var(--mobile-safe-top);
+    --safe-area-bottom-effective: var(--mobile-safe-bottom);
   }
 
   .safe-area-min-height-bottom {

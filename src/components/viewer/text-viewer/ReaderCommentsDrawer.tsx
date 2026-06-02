@@ -67,13 +67,13 @@ function CommentsPanelContent(props: {
         <AppDrawerCloseButton onClick={props.onClose} aria-label="关闭段评" />
       </div>
       {/* 加 data-corvu-no-drag：此处仅滚动段评列表，不触发抽屉拖拽；拖拽仅作用于顶部把手/标题栏 */}
-      <div class="flex-1 overflow-y-auto scroll-gutter-stable-both p-2" data-corvu-no-drag>
+      <div class="flex-1 overflow-y-auto scroll-gutter-stable-both py-2 px-2 mb-4" data-corvu-no-drag>
         <Show
           when={comments().length > 0}
           fallback={
             <div class="flex flex-col items-center justify-center gap-2 py-6 text-center text-sm text-muted-foreground">
               <p>暂无段评</p>
-              <p class="text-xs">当前为占位入口，数字仅作演示；接入数据源后将显示真实评论。</p>
+              <p class="text-xs">段评列表占位面板；接入数据源后将显示真实评论。</p>
             </div>
           }
         >

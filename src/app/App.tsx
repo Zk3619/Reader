@@ -10,6 +10,10 @@ import { SourcesFilterDialog } from "@/components/sources/SourcesFilterDialog";
 import { SettingsPageToolbar } from "@/components/shell/SettingsPageToolbar";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
+import {
+  AppBackNavigationBridge,
+  type BackLayerDefinition,
+} from "@/components/shell/AppBackNavigationBridge";
 import { Tray } from "@/components/shell/Tray";
 import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
@@ -133,7 +137,7 @@ import {
 import type { SourceSortMode } from "@/lib/sources/source-sort";
 import { loadSourcesPagePrefs, saveSourcesPagePrefs } from "@/lib/search/search-prefs";
 import { openSourceSettingsInApp } from "@/lib/platform/open-url";
-import { getStoredSourceCookiesForUrl } from "@/lib/js-engine";
+import { getStoredSourceCookiesForInnerWeb } from "@/lib/js-engine";
 import {
   registerInnerWebOpener,
   registerInnerWebClose,
@@ -2176,6 +2180,112 @@ function AppContent() {
 
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
 
+  const getOpenBackLayers = (): BackLayerDefinition[] => {
+    const layers: BackLayerDefinition[] = [];
+
+    const push = (id: string, open: boolean, close: () => void) => {
+      if (open) layers.push({ id, close });
+    };
+
+    push("source-edit", sourceEditTarget() !== null, () => setSourceEditTarget(null));
+    push("inner-web", Boolean(innerWebPayload()), () => setInnerWebPayload(null));
+    push("source-login", Boolean(sourceLoginDialogSource()), () => setSourceLoginDialogSource(null));
+    push(
+      "source-variable",
+      Boolean(sourceVariableDialogSource()),
+      () => setSourceVariableDialogSource(null),
+    );
+    push("guest-add-shelf", guestAddToShelfOpen(), () => setGuestAddToShelfOpen(false));
+    push(
+      "import-source-select",
+      showImportSourceSelectDialog(),
+      () => setShowImportSourceSelectDialog(false),
+    );
+    push(
+      "source-group-manage",
+      showSourceGroupManageDialog(),
+      () => setShowSourceGroupManageDialog(false),
+    );
+    push(
+      "import-source-network",
+      showImportSourceNetworkDialog(),
+      () => setShowImportSourceNetworkDialog(false),
+    );
+    push(
+      "import-source-local",
+      showImportSourceLocalDialog(),
+      () => setShowImportSourceLocalDialog(false),
+    );
+    push(
+      "import-source-qr",
+      showImportSourceQrDialog(),
+      () => setShowImportSourceQrDialog(false),
+    );
+    push(
+      "import-book-local",
+      showImportBookLocalDialog(),
+      () => setShowImportBookLocalDialog(false),
+    );
+    push(
+      "add-book-url",
+      showAddBookByUrlDialog(),
+      () => setShowAddBookByUrlDialog(false),
+    );
+    push(
+      "book-directory",
+      showBookDirectoryDialog(),
+      () => setShowBookDirectoryDialog(false),
+    );
+    push(
+      "import-action",
+      showImportActionDialog(),
+      () => setShowImportActionDialog(false),
+    );
+    push(
+      "replace-file",
+      showReplaceFileDialog(),
+      () => setShowReplaceFileDialog(false),
+    );
+    push(
+      "source-filter",
+      sourceFilterDialogOpen(),
+      () => setSourceFilterDialogOpen(false),
+    );
+    push("sources-manage", showSourcesManage(), () => setShowSourcesManage(false));
+    push("group-manage", showGroupManage(), () => setShowGroupManage(false));
+    push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
+    push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
+    push("book-info-drawer", bookInfoDrawerOpen(), () => {
+      setBookInfoDrawerOpen(false);
+      setBookInfoContext(null);
+    });
+
+    const page = currentPage();
+    if (page === "text-viewer" || page === "image-viewer" || page === "audio-viewer" || page === "video-viewer" || page === "file-viewer") {
+      push(`viewer-${page}`, true, () => requestCloseReader());
+    }
+    if (page === "explore" && exploreContext()) {
+      push("explore", true, () => {
+        setExploreContext(null);
+        setCurrentPage("sources");
+      });
+    }
+    if (page === "book-info" && !bookInfoUsesDrawer() && bookInfoContext()) {
+      push("book-info", true, () => closeBookInfo());
+    }
+    if (page === "book-search") {
+      push("book-search", true, () => {
+        setBookSearchContext(null);
+        setCurrentPage("bookshelf");
+      });
+    }
+    if (page === "remote-book") {
+      push("remote-book", true, () => setCurrentPage("bookshelf"));
+    }
+
+    return layers;
+  };
+
   const AppChrome = () => {
     const shell = useShellLayout();
     const showTopNav = () => !isStandalonePage() && shell().showTopNavigation;
@@ -2191,7 +2301,7 @@ function AppContent() {
           <div
             class={cn(
               "fixed left-0 right-0 z-50 bg-destructive/90 p-4 text-center text-destructive-foreground",
-              showTopNav() ? "top-14" : "top-0 safe-area-inset-top"
+              showTopNav() ? "inset-top-app-bar" : "top-0 safe-area-inset-top"
             )}
           >
             <p class="font-medium">数据库初始化失败: {dbError()}</p>
@@ -2236,7 +2346,7 @@ function AppContent() {
           <div
             class={cn(
               "fixed bottom-0 left-0 z-40",
-              showTopNav() ? "top-14" : "top-0",
+              showTopNav() ? "inset-top-app-bar" : "top-0",
               isStandalonePage() && "hidden pointer-events-none",
             )}
           >
@@ -2261,15 +2371,16 @@ function AppContent() {
         {/* 主容器 - 独立页时仅 hidden，保持挂载以保留书架/探索/书源状态 */}
         <div
           id="main-content-container"
+          data-shell-bottom-bar={showBottomBar() ? 'visible' : 'hidden'}
           class={cn(
             "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
-            showTopNav() ? "top-14" : "top-0",
+            showTopNav() ? "inset-top-app-bar" : "top-0",
             shell().showSidebar
               ? state() === "expanded"
                 ? "left-(--sidebar-width)"
                 : "left-(--sidebar-width-icon)"
               : "left-0",
-            showBottomBar() && "bottom-14",
+            showBottomBar() && "inset-bottom-app-bar",
             isStandalonePage() && "hidden pointer-events-none",
           )}
         >
@@ -2446,7 +2557,7 @@ function AppContent() {
                         !!url && (url.startsWith('http://') || url.startsWith('https://'));
                       if (isHttp && !hasUi) {
                         try {
-                          const cookies = getStoredSourceCookiesForUrl(source, url);
+                          const cookies = getStoredSourceCookiesForInnerWeb(source, url);
                           await openSourceSettingsInApp(url, cookies, {
                             bookSourceUrl: source.bookSourceUrl,
                           });
@@ -3039,7 +3150,7 @@ function AppContent() {
                   !!url && (url.startsWith("http://") || url.startsWith("https://"));
                 if (isHttp && !hasUi) {
                   try {
-                    const cookies = getStoredSourceCookiesForUrl(source, url);
+                    const cookies = getStoredSourceCookiesForInnerWeb(source, url);
                     await openSourceSettingsInApp(url, cookies, {
                       bookSourceUrl: source.sourceUrl,
                     });
@@ -3067,6 +3178,7 @@ function AppContent() {
 
   return (
     <ShellLayoutProvider windowWidth={windowWidth}>
+      <AppBackNavigationBridge getOpenLayers={getOpenBackLayers} />
       <AppChrome />
     </ShellLayoutProvider>
   );

@@ -25,17 +25,16 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
   return (
     <header
       class={cn(
-        placement() === 'overlay' &&
-          'reader-top-bar absolute left-0 right-0 top-0 z-10 flex h-14 items-center gap-2 border-b border-border/50 bg-background/95 px-4 backdrop-blur safe-area-inset-top',
-        placement() === 'fixed' &&
-          'reader-top-bar flex h-14 shrink-0 items-center gap-2 border-b border-border/50 bg-background/95 px-4 backdrop-blur safe-area-inset-top',
+        'reader-top-bar flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
+        placement() === 'overlay' && 'absolute left-0 right-0 top-0 z-10',
+        placement() === 'fixed' && 'shrink-0',
         !visible() && 'reader-bar-hidden',
         local.class,
       )}
       data-tauri-drag-region
       onClick={(e) => e.stopPropagation()}
     >
-      {local.children}
+      <div class="flex h-14 items-center gap-2 px-4">{local.children}</div>
     </header>
   );
 }

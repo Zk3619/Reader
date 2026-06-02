@@ -107,7 +107,7 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
               {loading() ? '搜索中…' : '搜索'}
             </Button>
           </div>
-          <div class="min-h-0 overflow-y-auto scroll-gutter-stable-both">
+          <div class="min-h-0 overflow-y-auto scroll-gutter-stable-both mb-4">
             <Show when={loading()}>
               <div class="px-4 py-8 text-center text-sm text-muted-foreground">搜索中…</div>
             </Show>

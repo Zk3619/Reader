@@ -36,7 +36,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
   return (
     <div
       class={cn(
-        'reader-bottom-bar flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom',
+        'reader-bottom-bar flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur',
         !visible() && 'reader-bar-hidden',
       )}
     >

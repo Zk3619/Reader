@@ -35,7 +35,6 @@ import {
   loadBookshelfSearchSubPageMode,
   saveBookshelfSearchSubPageMode,
   type SearchMode,
-  isPrecisionSearchMode,
 } from '@/lib/search/search-prefs';
 import { buildShelfMembershipKeys, isSearchBookOnShelf } from '@/lib/bookshelf/shelf-membership';
 import {
@@ -59,7 +58,7 @@ import { getEnabledSources } from '@/lib/database/sources';
 import { getSource } from '@/lib/database/sources';
 import { bookToSearchBook } from '@/lib/bookshelf/book-to-search-book';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { standalonePageScroll } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import type { Book, BookSource, SearchBook, SearchKeyword } from '@/types';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
@@ -76,6 +75,9 @@ import {
   EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
 } from '@/components/explore/ExploreBookCardSkeleton';
 import { VirtualExploreBookGrid } from '@/components/explore/VirtualExploreBookGrid';
+
+/** 结果少于一屏时自动翻页（对齐 Legado #5251：不够高则滚不到底） */
+const SEARCH_AUTO_LOAD_MIN_COUNT = 18;
 
 export interface BookSearchPageProps {
   initialQuery?: string;
@@ -118,6 +120,28 @@ export function BookSearchPage(props: BookSearchPageProps) {
   const [sourceMap, setSourceMap] = createSignal<Record<string, BookSource>>({});
   const [scopeDialogOpen, setScopeDialogOpen] = createSignal(false);
   const session = new MultiSourceSearchSession();
+
+  const loadNextSearchPage = async () => {
+    if (manualStop() || !session.getHasMore()) {
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const sources = await resolveSearchScopeSources(scope());
+    await session.search('', sources);
+  };
+
+  const maybeAutoLoadNextSearchPage = (resultCount: number, more: boolean) => {
+    if (!more || manualStop()) {
+      setSearching(false);
+      return;
+    }
+    if (resultCount < SEARCH_AUTO_LOAD_MIN_COUNT) {
+      void loadNextSearchPage();
+      return;
+    }
+    setSearching(false);
+  };
 
   onMount(async () => {
     const mode = await loadBookshelfSearchSubPageMode();
@@ -223,12 +247,36 @@ export function BookSearchPage(props: BookSearchPageProps) {
       },
       onResults: (books) => searchBooksStore.replaceAll(books),
       onFinish: (empty, more) => {
-        setSearching(false);
         setHasMore(more);
-        if (empty && !isPrecisionSearchMode(searchMode()) && !scope().trim()) {
+        maybeAutoLoadNextSearchPage(searchBooksStore.orderedBooks().length, more);
+        if (empty && searchMode() === 'name' && !scope().trim()) {
           showAppToast({
             title: '搜索结果为空',
             description: '可尝试切换为模糊或扩展搜索模式',
+            variant: 'default',
+          });
+        } else if (empty && searchMode() === 'fuzzy' && !scope().trim()) {
+          showAppToast({
+            title: '搜索结果为空',
+            description: '可尝试切换为扩展搜索（含分类、简介）',
+            variant: 'default',
+          });
+        } else if (empty && searchMode() === 'extended' && !scope().trim()) {
+          showAppToast({
+            title: '搜索结果为空',
+            description: '可尝试切换为不过滤搜索（展示书源返回的全部结果）',
+            variant: 'default',
+          });
+        } else if (empty && searchMode() === 'unfiltered' && !scope().trim()) {
+          showAppToast({
+            title: '搜索结果为空',
+            description: '书源未返回结果，可更换关键词或扩大书源范围',
+            variant: 'default',
+          });
+        } else if (empty && !scope().trim()) {
+          showAppToast({
+            title: '搜索结果为空',
+            description: '可尝试更换关键词或扩大书源范围',
             variant: 'default',
           });
         } else if (empty && scope().trim()) {
@@ -264,14 +312,12 @@ export function BookSearchPage(props: BookSearchPageProps) {
       if (session.isSearching()) {
         setSearching(true);
       } else {
-        const sources = await resolveSearchScopeSources(scope());
-        void session.search('', sources);
+        void loadNextSearchPage();
       }
       return;
     }
     if (hasMore() && submitted()) {
-      const sources = await resolveSearchScopeSources(scope());
-      void session.search('', sources);
+      void loadNextSearchPage();
       return;
     }
     showAppToast({
@@ -282,7 +328,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
 
   const loadMore = () => {
     if (manualStop() || searching() || !hasMore()) return;
-    void session.search('', []);
+    void loadNextSearchPage();
   };
 
   const handleScroll = (el: HTMLDivElement) => {
@@ -428,6 +474,10 @@ export function BookSearchPage(props: BookSearchPageProps) {
                   <MenuRadioIndicator selected={searchMode() === 'extended'} />
                   <span>扩展搜索</span>
                 </AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => persistMode('unfiltered')}>
+                  <MenuRadioIndicator selected={searchMode() === 'unfiltered'} />
+                  <span>不过滤搜索</span>
+                </AppDropdownMenuItem>
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
@@ -443,8 +493,8 @@ export function BookSearchPage(props: BookSearchPageProps) {
         class={cn(
           'px-2',
           submitted() && !helpVisible()
-            ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-            : mainShellPageScroll,
+            ? 'flex min-h-0 flex-1 flex-col overflow-hidden safe-area-page-bottom'
+            : cn(standalonePageScroll, 'safe-area-page-bottom'),
         )}
         onScroll={(e) => {
           if (submitted() && !helpVisible()) return;
@@ -610,7 +660,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
                 }}
               >
                 <VirtualExploreBookGrid
-                  class={cn(mainShellPageScroll, 'min-h-0 flex-1')}
+                  class={cn(standalonePageScroll, 'min-h-0 flex-1')}
                   items={onlineBooks}
                   rowHeight={EXPLORE_BOOK_GRID_ROW_HEIGHT_PX}
                   onScroll={handleScroll}
@@ -620,7 +670,11 @@ export function BookSearchPage(props: BookSearchPageProps) {
               </SearchBookGridProvider>
             </Show>
             <Show when={searching()}>
-              <p class="shrink-0 py-6 text-center text-sm text-muted-foreground">正在从各书源搜索…</p>
+              <p class="shrink-0 py-6 text-center text-sm text-muted-foreground">
+                {session.getPage() > 1
+                  ? `正在加载第 ${session.getPage()} 页搜索结果…`
+                  : '正在从各书源搜索…'}
+              </p>
             </Show>
           </section>
         </Show>

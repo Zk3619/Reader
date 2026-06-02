@@ -45,7 +45,7 @@ export function ReaderBookmarksDrawer(props: ReaderBookmarksDrawerProps) {
         showNativeDragHandle={false}
       >
         <AppDrawerHeader title="本书书签" />
-        <AppDrawerBody class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both px-4 pb-6">
+        <AppDrawerBody class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 mb-4">
           <Show when={bookmarks.loading}>
             <p class="text-sm text-muted-foreground">加载中…</p>
           </Show>

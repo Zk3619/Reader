@@ -80,7 +80,7 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
         showNativeDragHandle={false}
       >
         <AppDrawerHeader title="全书搜索" />
-        <AppDrawerBody class="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-6">
+        <AppDrawerBody class="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-2">
           <form
             class="flex gap-2"
             onSubmit={(e) => {
@@ -115,7 +115,7 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
               </span>
             </div>
           </Show>
-          <ul class="min-h-0 flex-1 space-y-2 overflow-y-auto scroll-gutter-stable-both">
+          <ul class="min-h-0 flex-1 space-y-2 overflow-y-auto scroll-gutter-stable-both mb-4">
             <For each={hits()}>
               {(hit, i) => (
                 <li>

@@ -108,9 +108,9 @@ export function SideBar(props: SideBarProps) {
   return (
     <Sidebar
       collapsible="icon"
-      class="h-[calc(100dvh-3.5rem)] top-14 bottom-0 border-r border-sidebar-border"
+      class="inset-top-app-bar bottom-0 border-r border-sidebar-border"
     >
-      <SidebarContent class="h-full overflow-y-auto">
+      <SidebarContent class="h-full overflow-y-auto mb-4">
         {/* 主菜单 */}
         <SidebarGroup>
           <SidebarGroupContent>

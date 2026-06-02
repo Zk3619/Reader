@@ -205,7 +205,7 @@ export function SourceDebugPanel(props: SourceDebugPanelProps) {
         </div>
       </Show>
 
-      <div class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
+      <div class="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-muted/30 pt-3 px-3 pb-2 mb-4 font-mono text-xs leading-relaxed">
         <Show when={logs().length > 0} fallback={<p class="text-muted-foreground">调试日志将显示在这里</p>}>
           <For each={logs()}>
             {(line) => (

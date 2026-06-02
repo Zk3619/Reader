@@ -31,6 +31,7 @@ import {
   popperContentViewportPanel,
   popperContentViewportScroll,
   popperOverflowPadding,
+  scrollEdgeBottomInset,
   scrollGutterStableBoth,
 } from '@/lib/ui/viewport-classes';
 import {
@@ -61,8 +62,9 @@ export const APP_DROPDOWN_MENU_CONTENT_MIN = 'min-w-40';
 
 /** 标题下拉内可滚动列表容器 */
 export const APP_DROPDOWN_MENU_TITLE_LIST_CLASS = cn(
-  'flex min-h-0 flex-1 w-full min-w-0 flex-col gap-2 p-3 overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth
+  'flex min-h-0 flex-1 w-full min-w-0 flex-col gap-2 p-2 overflow-y-auto overflow-x-hidden overscroll-contain',
+  scrollGutterStableBoth,
+  scrollEdgeBottomInset,
 );
 
 export type AppDropdownMenuContentLayout =

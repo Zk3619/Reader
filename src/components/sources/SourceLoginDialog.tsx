@@ -21,6 +21,7 @@ import {
 } from '@/lib/js-engine';
 import { isTauri } from '@/lib/platform/detect';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
+import { appDialogScrollBodyNoFooter } from '@/lib/ui/viewport-classes';
 import JSON5 from 'json5';
 import type { BookSource } from '@/types';
 
@@ -361,7 +362,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <div class={appDialogScrollBodyNoFooter}>
         {/* loginUi 为 JSON 表单（如晴天聚合），渲染表单并执行登录脚本 */}
         <Show when={useFormMode()}>
           <div class="flex flex-col gap-4">

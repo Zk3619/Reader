@@ -192,14 +192,15 @@ export function PageHeader(props: PageHeaderProps) {
   return (
     <header
       class={cn(
-        'flex h-14 shrink-0 items-center gap-3 border-b border-border/50 bg-background/95 px-4 backdrop-blur',
-        'safe-area-inset-top',
+        'flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
         pinToTop && 'z-20',
         !pinToTop && props.sticky && 'sticky top-0 z-10',
         props.class
       )}
+      data-page-header
       data-tauri-drag-region={props.draggable}
     >
+      <div class="flex h-14 items-center gap-3 px-4">
       {/* 返回按钮 */}
       <Show when={props.onBack}>
         <Button
@@ -310,6 +311,7 @@ export function PageHeader(props: PageHeaderProps) {
           </Show>
         </div>
       </Show>
+      </div>
     </header>
   );
 }
