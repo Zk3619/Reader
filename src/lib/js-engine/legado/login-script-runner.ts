@@ -24,16 +24,19 @@ import type { BookSource } from '@/types';
 import { openLegadoBrowserInApp, openSourceSettingsInApp } from '@/lib/platform/open-url';
 import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobalJson } from '@/lib/js-engine/core/runtime';
 import {
+  applyLegadoAggregationApiHeaders,
   extractLegadoCookieValue,
   extractQttokenKey,
   isInvalidLegadoToken,
   isUserApiPost,
+  legadoAggregationApiHtmlHint,
   mergeAjaxCookieHeaders,
+  mergeLegadoCookieHeaderStrings,
   normalizeControlSettingsCookieHeader,
   normalizeLegadoCookieHeader,
-  mergeLegadoCookieHeaderStrings,
   normalizeUserApiPostBody,
   parseControlSettingsCookieMap,
+  parseLegadoApiJsonResponse,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { createLoginInjector } from '@/lib/js-engine/legado/login-inject';
@@ -1009,9 +1012,12 @@ async function verifyLegadoUserApiSession(
 
   const url = `${serverUrl.replace(/\/+$/, '')}/user_api`;
   try {
-    const headers = mergeSourceHeaders(source, {
-      Cookie: normalizeLegadoCookieHeader(stored, resolveLegadoDeviceId(stored)),
-    });
+    const headers = applyLegadoAggregationApiHeaders(
+      url,
+      mergeSourceHeaders(source, {
+        Cookie: normalizeLegadoCookieHeader(stored, resolveLegadoDeviceId(stored)),
+      }),
+    );
     const response = await httpRequest(url, {
       method: 'POST',
       headers,
@@ -1020,7 +1026,14 @@ async function verifyLegadoUserApiSession(
       timeout: 12_000,
     });
     const text = await response.text();
-    const json = JSON.parse(text) as { id?: unknown; msg?: string };
+    const json = parseLegadoApiJsonResponse(text);
+    if (!json) {
+      console.warn(LOG_TAG, 'user_api 登录校验失败：响应非 JSON', {
+        preview: text.slice(0, 120),
+        hint: text.trim().startsWith('<') ? legadoAggregationApiHtmlHint() : undefined,
+      });
+      return false;
+    }
     const ok = json.id != null;
     console.warn(LOG_TAG, 'user_api 登录校验', {
       ok,
@@ -1064,21 +1077,25 @@ async function finalizeLegadoLoginCookies(options: {
   if (isLoginAction && lastLoginApiHttpCapture) {
     const { body, setCookie, url } = lastLoginApiHttpCapture;
     let keyFromApi = '';
-    try {
-      const json = JSON.parse(body) as Record<string, unknown>;
-      const code = json.code;
+    const loginJson = parseLegadoApiJsonResponse(body);
+    if (loginJson) {
+      const code = loginJson.code;
       if (code === 0 || code === '0') {
-        keyFromApi = extractLoginKeyFromJson(json);
+        keyFromApi = extractLoginKeyFromJson(loginJson);
       }
       console.warn(LOG_TAG, 'login_api 解析', {
         url: url.slice(0, 80),
         bodyLen: body.length,
-        jsonKeys: Object.keys(json),
+        jsonKeys: Object.keys(loginJson),
         keyLen: keyFromApi.length,
         hasValidKey: Boolean(keyFromApi),
       });
-    } catch {
-      /* ignore */
+    } else if (body.trim().startsWith('<')) {
+      console.warn(LOG_TAG, 'login_api 返回 HTML 而非 JSON', {
+        url: url.slice(0, 80),
+        bodyPreview: body.slice(0, 120),
+        hint: legadoAggregationApiHtmlHint(),
+      });
     }
 
     let keyVal = keyFromApi || resolveLoginFormKey(formValues, loginKey, argsKey);
@@ -1091,13 +1108,29 @@ async function finalizeLegadoLoginCookies(options: {
       applySetCookieHeaderToStore(cookieStore, serverUrl, setCookie, deviceId);
     }
 
-    let sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
-    if (!sessionOk) {
-      const formKey = resolveLoginFormKey(formValues, loginKey, argsKey);
-      if (formKey && formKey !== keyVal) {
-        applyLoginKeyToStore(cookieStore, serverUrl, formKey, deviceId);
-        persistQttokenToArgsAndLoginInfo(formKey, formValues, loginKey, argsKey);
-        sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
+    const storedForVerify =
+      cookieStore.get(serverUrl) ||
+      cookieStore.get(`${serverUrl}/`) ||
+      (() => {
+        try {
+          return cookieStore.get(new URL(serverUrl).origin);
+        } catch {
+          return undefined;
+        }
+      })();
+    const hasSessionMaterial =
+      Boolean(keyVal) || Boolean(extractQttokenKey(storedForVerify ?? ''));
+
+    let sessionOk = false;
+    if (hasSessionMaterial) {
+      sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
+      if (!sessionOk) {
+        const formKey = resolveLoginFormKey(formValues, loginKey, argsKey);
+        if (formKey && formKey !== keyVal) {
+          applyLoginKeyToStore(cookieStore, serverUrl, formKey, deviceId);
+          persistQttokenToArgsAndLoginInfo(formKey, formValues, loginKey, argsKey);
+          sessionOk = await verifyLegadoUserApiSession(source, serverUrl, cookieStore);
+        }
       }
     }
 
@@ -1105,7 +1138,10 @@ async function finalizeLegadoLoginCookies(options: {
       console.warn(LOG_TAG, 'login 后 user_api 未通过，/content 可能失败', {
         serverUrl,
         hadValidApiKey: Boolean(keyFromApi),
-        hint: '请填写登录表单「密钥」后重新登录，或确认晴天账号已开通',
+        skippedVerify: !hasSessionMaterial,
+        hint: !keyFromApi && body.trim().startsWith('<')
+          ? legadoAggregationApiHtmlHint()
+          : '请填写登录表单「密钥」后重新登录，或确认晴天账号已开通',
       });
     }
   }
@@ -1590,9 +1626,9 @@ async function tryRunLoginScriptQuickJS(
           parseLoginKeyFromResponse(body, baseUrl, cookieStore, url);
         }
         if (/\/login_api\b/.test(url)) {
-          try {
-            const json = JSON.parse(body) as { code?: number; msg?: string; key?: unknown };
-            const parsedKey = extractLoginKeyFromJson(json as Record<string, unknown>);
+          const json = parseLegadoApiJsonResponse(body);
+          if (json) {
+            const parsedKey = extractLoginKeyFromJson(json);
             console.warn(LOG_TAG, 'login_api 响应', {
               code: json.code,
               msg: json.msg,
@@ -1600,22 +1636,26 @@ async function tryRunLoginScriptQuickJS(
               hasValidKey: Boolean(parsedKey),
               keyLen: parsedKey.length,
             });
-          } catch {
+          } else {
             console.warn(LOG_TAG, 'login_api 响应非 JSON', {
               bodyPreview: body.slice(0, 120),
+              hint: body.trim().startsWith('<') ? legadoAggregationApiHtmlHint() : undefined,
             });
           }
         }
         if (/\/user_api\b/.test(url)) {
-          try {
-            const json = JSON.parse(body) as { code?: number; msg?: string; id?: unknown };
+          const json = parseLegadoApiJsonResponse(body);
+          if (json) {
             console.warn(LOG_TAG, 'user_api 响应', {
               code: json.code,
               msg: json.msg,
               hasId: json.id != null,
             });
-          } catch {
-            console.warn(LOG_TAG, 'user_api 响应非 JSON', { bodyPreview: body.slice(0, 120) });
+          } else {
+            console.warn(LOG_TAG, 'user_api 响应非 JSON', {
+              bodyPreview: body.slice(0, 120),
+              hint: body.trim().startsWith('<') ? legadoAggregationApiHtmlHint() : undefined,
+            });
           }
         }
         if (/login|signin|auth/i.test(url)) {
@@ -2465,7 +2505,10 @@ async function requestInScript(
     source: BookSource;
   }
 ): Promise<string> {
-  const headers = mergeSourceHeaders(options.source, options.headers);
+  const headers = applyLegadoAggregationApiHeaders(
+    url,
+    mergeSourceHeaders(options.source, options.headers),
+  );
   if (
     options.method === 'POST' &&
     typeof options.body === 'string' &&
@@ -2513,9 +2556,9 @@ async function requestInScript(
         body: text,
         setCookie: readSetCookieHeader(response.headers),
       };
-      try {
-        const json = JSON.parse(text) as { code?: number; msg?: string; key?: unknown };
-        const parsedKey = extractLoginKeyFromJson(json as Record<string, unknown>);
+      const json = parseLegadoApiJsonResponse(text);
+      if (json) {
+        const parsedKey = extractLoginKeyFromJson(json);
         console.warn(LOG_TAG, 'login_api HTTP 响应', {
           code: json.code,
           msg: json.msg,
@@ -2523,9 +2566,10 @@ async function requestInScript(
           keyLen: parsedKey.length,
           hasSetCookie: Boolean(lastLoginApiHttpCapture.setCookie),
         });
-      } catch {
+      } else {
         console.warn(LOG_TAG, 'login_api HTTP 响应非 JSON', {
           preview: text.slice(0, 120),
+          hint: text.trim().startsWith('<') ? legadoAggregationApiHtmlHint() : undefined,
         });
       }
       return text;

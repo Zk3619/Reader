@@ -158,6 +158,60 @@ export function isUserApiPost(resolvedUrl: string, method: string): boolean {
   return method.toUpperCase() === 'POST' && /\/user_api\b/.test(resolvedUrl);
 }
 
+/** 晴天 / 光遇聚合等：login_api、user_api */
+export function isLegadoAggregationApiUrl(resolvedUrl: string): boolean {
+  return /\/(login_api|user_api)\b/i.test(resolvedUrl);
+}
+
+function headerHasName(headers: Record<string, string>, name: string): boolean {
+  const lower = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
+}
+
+/**
+ * 聚合 API 需声明 Accept，否则部分线路（尤其 IP 镜像）会返回 HTML 首页而非 JSON。
+ */
+export function applyLegadoAggregationApiHeaders(
+  resolvedUrl: string,
+  headers: Record<string, string>,
+): Record<string, string> {
+  if (!isLegadoAggregationApiUrl(resolvedUrl)) return headers;
+  const out = { ...headers };
+  if (!headerHasName(out, 'Accept')) {
+    out.Accept = 'application/json';
+  }
+  if (!headerHasName(out, 'X-Requested-With')) {
+    out['X-Requested-With'] = 'XMLHttpRequest';
+  }
+  try {
+    const origin = new URL(resolvedUrl).origin;
+    if (!headerHasName(out, 'Origin')) out.Origin = origin;
+    if (!headerHasName(out, 'Referer')) out.Referer = `${origin}/`;
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+/** 解析聚合 API JSON；HTML / 空 / 畸形时返回 null（避免 JSON.parse 抛错） */
+export function parseLegadoApiJsonResponse(text: string): Record<string, unknown> | null {
+  const t = String(text ?? '').trim();
+  if (!t || t.startsWith('<')) return null;
+  if (!t.startsWith('{') && !t.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(t) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function legadoAggregationApiHtmlHint(): string {
+  return '接口返回了网页而非 JSON，请检查书源「线路/服务器」是否可用（可尝试 HTTPS 线路如 v1.gyks.cf）';
+}
+
 /** 内嵌 WebView √ 同步时尝试读取的 URL 键（页 URL、去末段路径、origin） */
 export function legadoInnerWebCookieSyncUrls(pageUrl: string): string[] {
   const u = pageUrl.trim();

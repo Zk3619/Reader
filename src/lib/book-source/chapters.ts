@@ -37,7 +37,7 @@ import {
 import { settingsStore } from '@/stores/settings';
 import { evalJs, type JsContext } from '@/lib/js-engine';
 import { runLegadoRuleScript } from '@/lib/js-engine/legado/rule-script-runner';
-import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
+import { enrichJsonListItemContext, readJsonListItemField } from '@/lib/book-source/json-list-context';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
@@ -1009,14 +1009,13 @@ export async function getChapterList(
         console.log('[chapters] 提取到章节元素数:', listItems.length);
 
         for (const item of listItems) {
-          const elementContext: RuleContext = {
-            content: item.content,
-            contentType: context.contentType,
-            baseUrl: currentTocUrl,
-            source: source as unknown as Record<string, unknown>,
-            regexGroups: item.regexGroups,
-            result: typeof item.rawValue === 'string' ? item.rawValue : item.content,
-          };
+          const elementContext = enrichJsonListItemContext(
+            item.content,
+            context.contentType ?? detectContentType(item.content),
+            currentTocUrl,
+            source as unknown as Record<string, unknown>,
+            { regexGroups: item.regexGroups },
+          );
 
           const chapter = await parseChapter(
             source,
@@ -1089,6 +1088,13 @@ async function parseChapter(
       ? await analyzeString(rule.chapterUrl, context, { isUrl: true })
       : '';
     url = normalizeChapterDataUrl(url);
+
+    if (!title.trim() && rule.chapterName) {
+      title = readJsonListItemField(context, rule.chapterName);
+    }
+    if (!url.trim() && rule.chapterUrl) {
+      url = normalizeChapterDataUrl(readJsonListItemField(context, rule.chapterUrl));
+    }
 
     if (!title && context.result && typeof context.result === 'object' && !Array.isArray(context.result)) {
       const row = context.result as Record<string, unknown>;

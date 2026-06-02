@@ -62,6 +62,16 @@ function looksLikeHtml(text: string): boolean {
 }
 
 /**
+ * legado 常见写法：bookSourceUrl 末尾拼接 `##标记`（如图标/备注），
+ * 实际请求基址应只保留 URL 本体。
+ */
+function normalizeSourceBaseUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const marker = trimmed.indexOf('##');
+  return marker >= 0 ? trimmed.slice(0, marker).trim() : trimmed;
+}
+
+/**
  * 将单条书源项（legado 或本项目格式）规范为 NewBookSource
  */
 function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
@@ -70,7 +80,7 @@ function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
   if (!sourceUrl || typeof sourceUrl !== 'string' || !sourceName || typeof sourceName !== 'string') {
     return null;
   }
-  const trimmedUrl = String(sourceUrl).trim();
+  const trimmedUrl = normalizeSourceBaseUrl(String(sourceUrl));
   const trimmedName = String(sourceName).trim();
   if (!trimmedUrl || !trimmedName) return null;
 

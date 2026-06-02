@@ -63,7 +63,10 @@ export async function updateBookToc(bookUrl: string): Promise<string> {
 
   try {
     if (!working.tocUrl?.trim()) {
-      const info = await getBookInfo(source, working.bookUrl);
+      const info = await getBookInfo(source, working.bookUrl, {
+        book: working as unknown as Record<string, unknown>,
+        bookVariable: working.variable,
+      });
       if (!info) {
         throw new Error('获取书籍信息失败');
       }

@@ -37,12 +37,30 @@ import {
 import {
   createRuleScriptBrowserHandlers,
   createRuleScriptBrowserState,
+  createLegadoStrResponse,
   isRuleScriptBrowserSuspend,
+  rethrowDeferredRuleScriptSuspend,
 } from '@/lib/js-engine/legado/rule-script-browser';
-import type { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+import { createLegadoJsoupScopeBindings } from '@/lib/js-engine/legado/legado-jsoup';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 const SCRIPT_TIMEOUT_MS = 90_000;
 const MAX_AJAX_ROUNDS = 8;
+const POST_SUSPEND_WRITE_INDEX = -3;
+
+function parseHeaderObject(headers: unknown): Record<string, string> {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (value == null) continue;
+    out[String(key)] = String(value);
+  }
+  return out;
+}
+
+function isRuleScriptPostSuspend(e: unknown): e is SuspendScript {
+  return e instanceof SuspendScript && e.writeIndex === POST_SUSPEND_WRITE_INDEX;
+}
 
 export function needsLegadoRuleScriptRunner(code: string): boolean {
   const t = String(code ?? '');
@@ -50,6 +68,9 @@ export function needsLegadoRuleScriptRunner(code: string): boolean {
     /\bjava\.getString\b/.test(t) ||
     /\bjava\.get\b/.test(t) ||
     /\bjava\.ajax\b/.test(t) ||
+    /\bjava\.post\b/.test(t) ||
+    /\bjava\.encodeURI\b/.test(t) ||
+    /\borg\.jsoup\b/.test(t) ||
     /\bjava\.startBrowser\b/.test(t) ||
     /\bjava\.startBrowserAwait\b/.test(t) ||
     /\bjava\.hexDecodeToString\b/.test(t) ||
@@ -111,6 +132,7 @@ function runJsSnippet(
     .join('\n');
   const fn = new Function('__scope__', 'with (__scope__) {\n' + fullBody + '\n}');
   const out = fn(scope);
+  rethrowDeferredRuleScriptSuspend(scope);
   if (out !== undefined && out !== null) {
     scope.result = out;
   }
@@ -244,6 +266,38 @@ function isLegadoRuleScriptChapterEntryPayload(result: unknown): boolean {
   return hasChapterKeys && !readRuleScriptContentField(parsed);
 }
 
+/** 脚本未改写 result 时勿把章节页 HTML 当作规则输出（常见于脚本抛错或仅 ajax 挂起） */
+function isUnmodifiedRuleScriptInput(
+  result: unknown,
+  initialResult: unknown,
+  ruleContent: string,
+): boolean {
+  const ruleInputText =
+    typeof ruleContent === 'string' ? ruleContent : String(ruleContent ?? '');
+  const baseline =
+    typeof initialResult === 'string' ? initialResult : ruleInputText;
+  if (result == null || result !== baseline) return false;
+  const text = String(result).trim();
+  const input = ruleInputText.trim();
+  if (!text || !input) return false;
+  if (text === input) return true;
+  if (text.startsWith('<') && input.startsWith('<') && text.length >= 500 && input.length >= 500) {
+    return true;
+  }
+  return false;
+}
+
+function finishRuleScriptResult(
+  result: unknown,
+  initialResult: unknown,
+  ruleContent: string,
+): unknown {
+  if (isUnmodifiedRuleScriptInput(result, initialResult, ruleContent)) {
+    return null;
+  }
+  return result;
+}
+
 function isEmptyContentRuleResult(result: unknown): boolean {
   if (result == null) return false;
   if (isLegadoCatalogTocApiResult(result)) return false;
@@ -254,10 +308,11 @@ function isEmptyContentRuleResult(result: unknown): boolean {
   } else {
     const text = String(result).trim();
     if (/^[0-9a-f]+$/i.test(text) && text.length > 40) return true;
+    if (text.startsWith('<') && text.length >= 500) return false;
     try {
       parsed = JSON.parse(text) as Record<string, unknown>;
     } catch {
-      return true;
+      return text.length < 80;
     }
   }
   if (!parsed || typeof parsed !== 'object') return false;
@@ -337,10 +392,16 @@ export async function runLegadoRuleScript(
   }
 
   const ajaxCache = new Map<string, string>();
+  const postCache = new Map<string, string>();
   let pending: Promise<void>[] = [];
   const browserState = createRuleScriptBrowserState();
   /** Legado 多轮 ajax 重跑时仍保留规则入口 result（如 data: tocUrl 的 hex 载荷） */
   const initialResult = normalizeJsRuleResult(context.result);
+  const ruleInputText =
+    typeof ruleContent === 'string' ? ruleContent : String(ruleContent ?? '');
+  /** 章节 HTML 规则脚本里 result 须为字符串，避免 .match 在对象上失败 */
+  const scriptResultBinding =
+    typeof initialResult === 'string' ? initialResult : ruleInputText;
 
   const baseUrl = context.baseUrl || String(sourceRecord.bookSourceUrl ?? sourceRecord.sourceUrl ?? '');
   const hostList = hostsFromJsLib(sourceRecord.jsLib);
@@ -403,14 +464,33 @@ export async function runLegadoRuleScript(
   };
 
   const buildScope = (): Record<string, unknown> => {
-    const browserHandlers = createRuleScriptBrowserHandlers({
-      bookSource,
-      baseUrl,
-      state: browserState,
-      pending,
-    });
+    let browserHandlers: ReturnType<typeof createRuleScriptBrowserHandlers>;
+    const resolveRuleScriptCookie = (url: string): string => {
+      if (!bookSource) return '';
+      const u = String(url).trim().replace(/\/+$/, '');
+      let c = resolveSourceCookiesForHttp(bookSource, u).trim();
+      if (c) return c;
+      const server = resolveBookSourceServerUrl(bookSource);
+      if (server) return resolveSourceCookiesForHttp(bookSource, server).trim();
+      return '';
+    };
+    const cookieApi = {
+      getCookie: resolveRuleScriptCookie,
+      removeCookie() {},
+      setCookie() {},
+      getKey(cookieStrOrUrl: string, keyName?: string): string {
+        return legadoCookieGetKey(
+          new Map(),
+          resolveRuleScriptCookie,
+          cookieStrOrUrl,
+          keyName,
+          bookSource,
+        );
+      },
+    };
     const scope: Record<string, unknown> = {
-      result: initialResult,
+      ...createLegadoJsoupScopeBindings(),
+      result: scriptResultBinding,
       src: ruleContent,
       /** 对齐 Legado 规则隐式绑定：data: 章节 hex 载荷或 AnalyzeUrl 正文 */
       content: ruleContent,
@@ -454,31 +534,7 @@ export async function runLegadoRuleScript(
       chapter: chapterRecord,
       title: legadoTitle || String(chapterRecord.title ?? ''),
       JSON,
-      cookie: (() => {
-        const getCookie = (url: string) => {
-          if (!bookSource) return '';
-          const u = String(url).trim().replace(/\/+$/, '');
-          let c = resolveSourceCookiesForHttp(bookSource, u).trim();
-          if (c) return c;
-          const server = resolveBookSourceServerUrl(bookSource);
-          if (server) return resolveSourceCookiesForHttp(bookSource, server).trim();
-          return '';
-        };
-        return {
-        getCookie,
-        removeCookie() {},
-        setCookie() {},
-        getKey(cookieStrOrUrl: string, keyName?: string): string {
-          return legadoCookieGetKey(
-            new Map(),
-            getCookie,
-            cookieStrOrUrl,
-            keyName,
-            bookSource,
-          );
-        },
-        };
-      })(),
+      cookie: cookieApi,
       Packages: {
         java: {
           lang: {
@@ -567,6 +623,10 @@ export async function runLegadoRuleScript(
           scope.result = hit;
           return hit;
         },
+        /** 对齐 Legado / explore-script-runner：脚本常用 java.getCookie(url) */
+        getCookie(url: string) {
+          return cookieApi.getCookie(url);
+        },
         ajax(urlArg: unknown, optionsArg?: unknown) {
           let ajaxInput = '';
           if (typeof urlArg === 'string') {
@@ -620,10 +680,73 @@ export async function runLegadoRuleScript(
           pending.push(p);
           return LEGADO_AJAX_PENDING_JSON;
         },
-        startBrowser: browserHandlers.startBrowser,
-        startBrowserAwait: browserHandlers.startBrowserAwait,
+        post(urlArg: unknown, bodyArg?: unknown, headersArg?: unknown) {
+          const urlRaw = String(urlArg ?? '').trim();
+          if (!urlRaw) return createLegadoStrResponse('');
+          const resolved = /^https?:\/\//i.test(urlRaw)
+            ? urlRaw
+            : resolveUrl(baseUrl, urlRaw);
+          const body =
+            bodyArg == null
+              ? ''
+              : typeof bodyArg === 'string'
+                ? bodyArg
+                : JSON.stringify(bodyArg);
+          const headers = parseHeaderObject(headersArg);
+          const cacheKey = buildRuleScriptAjaxCacheKey(resolved, 'POST', body);
+          const cached = postCache.get(cacheKey);
+          if (cached !== undefined) {
+            return createLegadoStrResponse(cached);
+          }
+          const p = requestLegadoRuleScriptHttpAsync(resolved, {
+            method: 'POST',
+            headers,
+            body,
+            source: bookSource,
+          })
+            .then((text) => {
+              postCache.set(cacheKey, String(text ?? ''));
+            })
+            .catch((e) => {
+              console.warn('[rule-script] post failed:', resolved, e);
+              postCache.set(cacheKey, '');
+            });
+          pending.push(p);
+          throw new SuspendScript(
+            p.then(() => ''),
+            POST_SUSPEND_WRITE_INDEX,
+            resolved,
+            Date.now(),
+          );
+        },
+        encodeURI(value: unknown) {
+          return encodeURI(String(value ?? ''));
+        },
+        encodeURIComponent(value: unknown) {
+          return encodeURIComponent(String(value ?? ''));
+        },
+        startBrowser(url: unknown, title?: unknown) {
+          browserHandlers.startBrowser(
+            String(url ?? ''),
+            title == null ? undefined : String(title),
+          );
+        },
+        startBrowserAwait(url: unknown, title?: unknown) {
+          return browserHandlers.startBrowserAwait(
+            String(url ?? ''),
+            title == null ? undefined : String(title),
+          );
+        },
       },
     };
+    browserHandlers = createRuleScriptBrowserHandlers({
+      bookSource,
+      baseUrl,
+      state: browserState,
+      pending,
+      variables: context.variables as Record<string, unknown> | undefined,
+      scope,
+    });
     return scope;
   };
 
@@ -637,7 +760,7 @@ export async function runLegadoRuleScript(
 
   const finishRuleScript = (result: unknown): unknown => {
     syncBookScopeBack();
-    return result;
+    return finishRuleScriptResult(result, initialResult, ruleContent);
   };
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -658,6 +781,8 @@ export async function runLegadoRuleScript(
       } catch (e) {
         if (isRuleScriptBrowserSuspend(e)) {
           browserSuspend = e;
+        } else if (isRuleScriptPostSuspend(e)) {
+          browserSuspend = e;
         } else {
           runError = e;
           console.warn('[rule-script] 执行报错:', e);
@@ -670,8 +795,13 @@ export async function runLegadoRuleScript(
       }
 
       const hadAjax = pending.length > 0;
-      if (runError && !hadAjax && round === 0) {
-        throw runError;
+      if (runError) {
+        if (isUnmodifiedRuleScriptInput(scope.result, initialResult, ruleContent)) {
+          return finishRuleScript(null);
+        }
+        if (!hadAjax && round === 0) {
+          throw runError;
+        }
       }
       if (hadAjax) {
         await Promise.all(pending);

@@ -144,7 +144,12 @@ import {
   traceContentFetchDone,
 } from '@/lib/book-source/content-fetch-trace';
 import { scanImgTags } from '@/lib/media/text/scan-img-tags';
-import { extractContentFromRuleOutput } from '@/lib/book-source/extract-rule-content';
+import {
+  extractContentFromRuleOutput,
+  formatLegadoBrowserPlaceholderForReader,
+  isLegadoBrowserPlaceholderContent,
+  LEGADO_BROWSER_PLACEHOLDER_RE,
+} from '@/lib/book-source/extract-rule-content';
 import {
   extractApiContent,
   extractApiErrorMessage,
@@ -555,8 +560,33 @@ function buildContentRuleContext(
       } as Record<string, unknown>)
       : undefined,
     chapter: chapter as unknown as Record<string, unknown>,
-    variables,
+    variables: variables ?? {},
   };
+}
+
+/** 规则返回占位文案且脚本曾打开内嵌页时，对齐 Legado 再次展示播放页 */
+async function maybeOpenRuleContentEmbeddedBrowser(
+  source: BookSource,
+  book: Book | undefined,
+  content: string,
+  ruleContext: RuleContext,
+): Promise<void> {
+  const url = String(ruleContext.variables?.__readerLastBrowserUrl ?? '').trim();
+  if (!url.startsWith('http')) return;
+  const trimmed = content.trim();
+  if (!trimmed) return;
+  if (trimmed.includes('<img') && scanImgTags(trimmed).length >= 3) return;
+  if (!LEGADO_BROWSER_PLACEHOLDER_RE.test(trimmed) && trimmed.length > 300) return;
+
+  const { openLegadoBrowserInApp } = await import('@/lib/platform/open-url');
+  const { resolveSourceCookiesForHttp } = await import('@/lib/book-source/source-http');
+  const cookieStr = resolveSourceCookiesForHttp(source, url);
+  const title = book?.name ?? source.sourceName;
+  const poolUrl = (source.bookSourceUrl ?? source.sourceUrl)?.trim();
+  void openLegadoBrowserInApp(url, cookieStr, title, {
+    awaitClose: false,
+    ...(poolUrl ? { bookSourceUrl: poolUrl } : {}),
+  });
 }
 
 async function parseContentByRule(ruleContent: string, context: RuleContext): Promise<string> {
@@ -722,6 +752,7 @@ export async function getContent(
     let content = extractContentFromRuleOutput(
       (await parseContentByRule(contentRule, ruleContext)) ?? '',
     );
+    await maybeOpenRuleContentEmbeddedBrowser(source, book, content, ruleContext);
     if (import.meta.env.DEV && content?.includes('<img')) {
       console.log('[content] ruleContent 解析完成', {
         contentLen: content.length,
@@ -780,6 +811,13 @@ export async function getContent(
         } catch (retryError) {
           console.warn('[content] payAction 后重试正文解析失败:', retryError);
         }
+      }
+    }
+
+    if (!content?.trim()) {
+      const browserUrl = String(ruleContext.variables?.__readerLastBrowserUrl ?? '').trim();
+      if (browserUrl.startsWith('http')) {
+        content = formatLegadoBrowserPlaceholderForReader('请在内嵌页中观看；若未弹出播放页，请点击重试。');
       }
     }
 
@@ -892,8 +930,13 @@ export async function getContent(
 
     const contentBaseUrl = chapter.baseUrl || chapterBase;
     const beforeCleanLength = content?.length || 0;
+    const browserPlaceholder = isLegadoBrowserPlaceholderContent(content);
     const cleanMode = isImageHeavyContent(content) ? 'image' : 'normal';
-    content = cleanContent(content, contentBaseUrl, cleanMode);
+    content = cleanContent(
+      content,
+      contentBaseUrl,
+      browserPlaceholder ? 'light' : cleanMode,
+    );
     const afterCleanLength = content?.length || 0;
     if (cleanMode === 'image') {
       logContentImageDiagnostics(content, 'cleanContent(image)后');
@@ -903,7 +946,12 @@ export async function getContent(
       content = cleanContent(content, contentBaseUrl, 'light');
     }
 
-    if (book && !options?.skipReplaceRules && !isImageHeavyContent(content)) {
+    if (
+      book &&
+      !options?.skipReplaceRules &&
+      !isImageHeavyContent(content) &&
+      !browserPlaceholder
+    ) {
       content = await processContent(content, book.name, source.sourceUrl);
     }
 

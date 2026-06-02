@@ -35,4 +35,10 @@ describe('extractContentFromRuleOutput', () => {
       extractContentFromRuleOutput(JSON.stringify({ msg: '书源版本过低' })),
     ).toBe('书源版本过低');
   });
+
+  it('startBrowserAwait 占位文案保留为可读段落', () => {
+    const out = extractContentFromRuleOutput('请刷新尝试播放');
+    expect(out).toContain('请刷新尝试播放');
+    expect(out).toMatch(/^<p>/);
+  });
 });

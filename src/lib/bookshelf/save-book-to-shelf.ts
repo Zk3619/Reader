@@ -112,6 +112,39 @@ async function persistChapters(bookUrl: string, chapters: BookChapter[]): Promis
   await chaptersDb.insertChapters(chapters.map((ch) => toNewBookChapter(ch, bookUrl)));
 }
 
+/** 书架/分组页监听：新书上架或迁移后刷新列表与计数 */
+export function notifyBookshelfRefresh(): void {
+  window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+}
+
+function schedulePersistChaptersToShelf(bookUrl: string, chapters: BookChapter[]): void {
+  if (chapters.length === 0) return;
+  void (async () => {
+    try {
+      await persistChapters(bookUrl, chapters);
+      await updateBookChapterMeta(bookUrl, chapters);
+      notifyShelfBookMeta(bookUrl);
+      notifyChaptersUpdated(bookUrl, chapters, true);
+    } catch (e) {
+      console.warn('[saveBookToShelf] 后台写入目录失败:', e);
+    }
+  })();
+}
+
+async function persistChaptersForSave(
+  bookUrl: string,
+  chapters: BookChapter[],
+  fetchMode: 'none' | 'blocking' | 'background',
+): Promise<void> {
+  if (chapters.length === 0) return;
+  if (fetchMode === 'blocking') {
+    await persistChapters(bookUrl, chapters);
+    await updateBookChapterMeta(bookUrl, chapters);
+    return;
+  }
+  schedulePersistChaptersToShelf(bookUrl, chapters);
+}
+
 /** 目录写入后同步 totalChapterNum / latestChapterTitle（本地导入、在线拉目录共用） */
 export async function updateBookChapterMeta(bookUrl: string, chapters: BookChapter[]): Promise<void> {
   if (chapters.length === 0) return;
@@ -171,16 +204,17 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
 
   const count = await chaptersDb.getChapterCount(book.bookUrl);
   const tocInFlight = isChapterListFetchInFlight(source, book.tocUrl);
-  if (count > 0 && !tocInFlight) {
+  if (count > 0) {
     const saved = await booksDb.getBook(book.bookUrl);
-    if (saved && !shelfBookNeedsChapterMeta(saved)) {
-      return;
-    }
-    if (saved && shelfBookNeedsChapterMeta(saved)) {
-      const chapters = await chaptersDb.getChapterList(book.bookUrl);
-      if (chapters.length > 0) {
-        await updateBookChapterMeta(book.bookUrl, chapters);
+    if (saved) {
+      const existing = await chaptersDb.getChapterList(book.bookUrl);
+      if (existing.length > 0 && shelfBookNeedsChapterMeta(saved)) {
+        await updateBookChapterMeta(book.bookUrl, existing);
         notifyShelfBookMeta(book.bookUrl);
+      }
+      const afterMeta = await booksDb.getBook(book.bookUrl);
+      if (afterMeta && !shelfBookNeedsChapterMeta(afterMeta) && !tocInFlight) {
+        return;
       }
     }
   }
@@ -295,12 +329,11 @@ export async function saveBookToShelf(
     }
     if (fetchMode === 'blocking') {
       const chapters = options?.chapters ?? (await fetchChaptersForBook(incoming, bookUrl));
-      if (chapters.length > 0) {
-        await persistChapters(bookUrl, chapters);
-        await updateBookChapterMeta(bookUrl, chapters);
-      }
+      await persistChaptersForSave(bookUrl, chapters, 'blocking');
     } else if (fetchMode === 'background') {
       scheduleBackgroundChapterFetch(existingByUrl);
+    } else if (options?.chapters && options.chapters.length > 0) {
+      schedulePersistChaptersToShelf(bookUrl, options.chapters);
     }
     await applyGroupMask(bookUrl, options?.groupId);
     return patched;
@@ -334,10 +367,7 @@ export async function saveBookToShelf(
     const oldUrl = existingByName.bookUrl;
     await booksDb.replaceBookUrl(oldUrl, targetBook);
     if (chapters && chapters.length > 0) {
-      await persistChapters(targetBook.bookUrl, chapters);
-      if (fetchMode === 'blocking') {
-        await updateBookChapterMeta(targetBook.bookUrl, chapters);
-      }
+      await persistChaptersForSave(targetBook.bookUrl, chapters, fetchMode);
     }
   } else if (isOnline) {
     if (!(await sourcesDb.getSource(incoming.origin))) {
@@ -346,10 +376,7 @@ export async function saveBookToShelf(
     }
     await booksDb.insertBook(incoming);
     if (chapters && chapters.length > 0) {
-      await persistChapters(bookUrl, chapters);
-      if (fetchMode === 'blocking') {
-        await updateBookChapterMeta(bookUrl, chapters);
-      }
+      await persistChaptersForSave(bookUrl, chapters, fetchMode);
     }
   } else {
     await booksDb.insertBook(incoming);
@@ -361,7 +388,15 @@ export async function saveBookToShelf(
     saved = mergeShelfReadingProgress(saved, options.readingProgress);
     await booksDb.updateBook(saved);
   }
-  if (saved && fetchMode === 'background' && isOnline) {
+  notifyBookshelfRefresh();
+
+  let skipBackgroundFetch = false;
+  if ((options?.chapters?.length ?? 0) > 0 && isOnline) {
+    const source = await sourcesDb.getSource(incoming.origin);
+    const tocUrl = incoming.tocUrl || bookUrl;
+    skipBackgroundFetch = !source || !isChapterListFetchInFlight(source, tocUrl);
+  }
+  if (saved && fetchMode === 'background' && isOnline && !skipBackgroundFetch) {
     scheduleBackgroundChapterFetch(saved);
   }
   return saved;

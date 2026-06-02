@@ -31,6 +31,7 @@ import {
   unshieldInlineReplacementJsInPattern,
   type LegadoSourceRuleSegment,
 } from '@/lib/rule-engine/legado-source-rule';
+import { readJsonListItemField } from '@/lib/book-source/json-list-context';
 import { compileSourceRule } from '@/lib/rule-engine/source-rule';
 import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
 import { evalJs } from '@/lib/js-engine';
@@ -566,6 +567,8 @@ async function executeRuleByMode(
         if (ruleBody.startsWith('$.') || ruleBody.startsWith('$[')) {
           return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
         }
+        const fieldValue = readJsonListItemField(context, ruleBody);
+        if (fieldValue) return [fieldValue];
         // {{$.x}} 模板展开后的元数据（如 已完结,0分,tags）不是 CSS，勿对 JSON 正文做 select
         const literal = ruleBody.trim();
         return literal ? [literal] : [];
@@ -833,7 +836,10 @@ export async function analyzeElements(
     }
   }
 
-  const cssList = parseCss(compiled, context.content);
+  const cssList =
+    detectSourceRuleMode(compiled) === 'xpath'
+      ? []
+      : parseCss(compiled, context.content);
   if (cssList.length > 0) {
     return cssList;
   }

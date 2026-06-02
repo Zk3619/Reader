@@ -122,7 +122,10 @@ async function tocDebug(
     log(onLog, start, '', 1, false);
   } else {
     log(onLog, start, '︾开始解析详情页');
-    const info = await getBookInfo(source, book.bookUrl);
+    const info = await getBookInfo(source, book.bookUrl, {
+      book: book as unknown as Record<string, unknown>,
+      bookVariable: book.variable,
+    });
     if (debugCancelled) return;
     if (!info) {
       log(onLog, start, '︽详情页解析失败', -1);

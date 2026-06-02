@@ -39,6 +39,7 @@ import {
   preferDetailField,
 } from '@/lib/book-source/intro-merge';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import { normalizeBookNameText } from '@/lib/book-source/search-format';
 
 function isJsRule(rule: string | undefined | null): boolean {
   return !!rule?.trim().startsWith('<js>');
@@ -78,6 +79,48 @@ function normalizeAuthorText(author: string): string {
   return t;
 }
 
+/** 剔除明显不是作者名的抓取结果（导航/标签云/整页文本），不做站点关键词表 */
+function isPlausibleDetailAuthor(author: string): boolean {
+  const t = author.trim();
+  if (!t) return false;
+  if (t.length > 80) return false;
+  if (/[<>\n\r]/.test(t)) return false;
+  if (/https?:\/\//i.test(t)) return false;
+  const parts = t.split(/[,，、\s|/]+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 4) return false;
+  if (parts.length >= 3 && parts.every((p) => p.length <= 6)) return false;
+  return true;
+}
+
+async function fallbackAuthorAndTagsFromHtml(context: RuleContext): Promise<{
+  author?: string;
+  tags?: string;
+}> {
+  if (context.contentType !== 'html') return {};
+
+  const authorRules = [
+    'p.gray a[href*="authorarticle"]@text',
+    '.gray a[href*="authorarticle"]@text',
+    'a[href*="authorarticle"]@text',
+  ];
+  for (const r of authorRules) {
+    const v = normalizeAuthorText((await analyzeString(r, context)).trim());
+    if (v && isPlausibleDetailAuthor(v)) {
+      const tags = await analyzeStringList('p.gray a[href*="tagarticle"]@text', context);
+      const normalized = Array.from(
+        new Set(tags.map(normalizeTagText).filter(Boolean)),
+      ).join(' ');
+      return { author: v, tags: normalized || undefined };
+    }
+  }
+
+  const tags = await analyzeStringList('a[href*="tagarticle"]@text', context);
+  const normalized = Array.from(
+    new Set(tags.map(normalizeTagText).filter(Boolean)),
+  ).join(' ');
+  return { tags: normalized || undefined };
+}
+
 function normalizeTagText(tag: string): string {
   const t = tag.replace(/\s+/g, ' ').trim();
   if (!t) return '';
@@ -97,35 +140,6 @@ function mergeTagStrings(...inputs: Array<string | undefined>): string {
     }
   }
   return out.join(' ');
-}
-
-async function fallbackAuthorAndTagsFromHtml(context: RuleContext): Promise<{
-  author?: string;
-  tags?: string;
-}> {
-  if (context.contentType !== 'html') return {};
-
-  const authorRules = [
-    'p.gray a[href*="authorarticle"]@text',
-    '.gray a[href*="authorarticle"]@text',
-    'a[href*="authorarticle"]@text',
-  ];
-  for (const r of authorRules) {
-    const v = normalizeAuthorText((await analyzeString(r, context)).trim());
-    if (v) {
-      const tags = await analyzeStringList('p.gray a[href*="tagarticle"]@text', context);
-      const normalized = Array.from(
-        new Set(tags.map(normalizeTagText).filter(Boolean)),
-      ).join(' ');
-      return { author: v, tags: normalized || undefined };
-    }
-  }
-
-  const tags = await analyzeStringList('a[href*="tagarticle"]@text', context);
-  const normalized = Array.from(
-    new Set(tags.map(normalizeTagText).filter(Boolean)),
-  ).join(' ');
-  return { tags: normalized || undefined };
 }
 
 function getRuleBaseBeforeReplace(ruleText: string | undefined): string | undefined {
@@ -194,6 +208,70 @@ async function resolveBookInfoIntro(
     : undefined;
 }
 
+export interface GetBookInfoOptions {
+  durChapterTitle?: string;
+  bookVariable?: string;
+  /** 搜索/书架侧已有字段，供 ruleBookInfo 中 {{book.*}} 与 @js 使用 */
+  book?: Record<string, unknown>;
+}
+
+function bookSnapshotString(
+  book: Record<string, unknown> | undefined,
+  key: string,
+): string {
+  const value = book?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function cleanDetailPageTitle(raw: string): string {
+  const t = raw.trim();
+  if (!t) return '';
+  const bookTitle = t.match(/[《〈]([^》〉]+)[》〉]/);
+  if (bookTitle?.[1]?.trim()) return normalizeBookNameText(bookTitle[1]);
+  const beforeSite = t.split(/[-_|]/)[0]?.trim() ?? t;
+  return normalizeBookNameText(beforeSite);
+}
+
+async function fallbackNameFromHtml(context: RuleContext): Promise<string> {
+  if (context.contentType !== 'html') return '';
+  const rules = [
+    'meta[property="og:title"]@content',
+    'meta[name="og:title"]@content',
+    'h1@text',
+    'h3@text',
+  ];
+  for (const rule of rules) {
+    const raw = (await analyzeString(rule, context)).trim();
+    const name = cleanDetailPageTitle(raw);
+    if (name) return name;
+  }
+  return '';
+}
+
+function buildBookRuleContext(
+  bookUrl: string,
+  options?: Pick<GetBookInfoOptions, 'book' | 'bookVariable'>,
+): Record<string, unknown> {
+  const snapshot = options?.book ?? {};
+  const variable = options?.bookVariable?.trim();
+  return {
+    ...snapshot,
+    bookUrl:
+      typeof snapshot.bookUrl === 'string' && snapshot.bookUrl.trim()
+        ? snapshot.bookUrl
+        : bookUrl,
+    ...(variable
+      ? {
+        variable,
+        custom:
+          typeof snapshot.custom === 'string' && snapshot.custom.trim()
+            ? snapshot.custom
+            : variable,
+      }
+      : {}),
+  };
+}
+
 /**
  * 对齐 BookInfo.analyzeBookInfo：对已有 body 应用 ruleBookInfo 各字段
  */
@@ -206,6 +284,8 @@ async function analyzeBookInfoFromBody(
     ruleResult?: Record<string, unknown>;
     fetchUrl?: string;
     durChapterTitle?: string;
+    book?: Record<string, unknown>;
+    bookVariable?: string;
   },
 ): Promise<BookInfo | null> {
   const rule = source.ruleBookInfo;
@@ -244,6 +324,7 @@ async function analyzeBookInfoFromBody(
     source: source as unknown as Record<string, unknown>,
     result: ruleResult ? JSON.stringify(ruleResult) : contextContent,
     variables: sessionVariables,
+    book: buildBookRuleContext(bookUrl, options),
   };
 
   const safeAnalyze = async (
@@ -260,22 +341,31 @@ async function analyzeBookInfoFromBody(
   };
 
   const nameFromRule = await safeAnalyze(rule.name);
-  const name =
+  let name =
     nameFromRule.trim() ||
+    bookSnapshotString(context.book, 'name') ||
     (ruleResult?.book_name != null ? String(ruleResult.book_name) : '');
+  if (!name.trim()) {
+    name = await fallbackNameFromHtml(context);
+  }
   const authorFromRule = await safeAnalyze(rule.author);
   const authorRawFromBaseRule = await safeAnalyze(getRuleBaseBeforeReplace(rule.author));
   const rawAuthor =
     authorFromRule.trim() ||
     authorRawFromBaseRule.trim() ||
+    bookSnapshotString(context.book, 'author') ||
     (ruleResult?.author != null ? String(ruleResult.author) : '');
   const authorSplit = splitAuthorAndInlineTags(rawAuthor);
   let author = normalizeAuthorText(authorSplit.author);
+  if (author && !isPlausibleDetailAuthor(author)) {
+    author = '';
+  }
 
   // 字段顺序对齐 Legado BookInfo.analyzeBookInfo（wordCount 在 intro 之前，供 @get:{num}）
   const kindFromRule = await safeAnalyze(rule.kind);
   const kind =
     kindFromRule.trim() ||
+    bookSnapshotString(context.book, 'kind') ||
     (typeof ruleResult?.category === 'string'
       ? ruleResult.category
       : typeof ruleResult?.tags === 'string'
@@ -290,6 +380,7 @@ async function analyzeBookInfoFromBody(
   const latestFromRule = await safeAnalyze(rule.lastChapter);
   const latestChapterTitle =
     latestFromRule.trim() ||
+    bookSnapshotString(context.book, 'latestChapterTitle') ||
     (typeof ruleResult?.last_chapter_title === 'string'
       ? ruleResult.last_chapter_title
       : undefined);
@@ -301,12 +392,16 @@ async function analyzeBookInfoFromBody(
       ? ruleResult.last_chapter_update_time
       : undefined);
 
-  const intro = await resolveBookInfoIntro(source, rule.intro, context, {
+  let intro = await resolveBookInfoIntro(source, rule.intro, context, {
     ruleResult,
     fetchUrl,
     bookUrl,
     durChapterTitle: options?.durChapterTitle,
   });
+  if (!intro?.trim()) {
+    const fromBook = bookSnapshotString(context.book, 'intro');
+    if (fromBook) intro = fromBook;
+  }
 
   let coverUrl: string | undefined;
   if (rule.coverUrl && !isJsRule(rule.coverUrl)) {
@@ -314,6 +409,10 @@ async function analyzeBookInfoFromBody(
   }
   if (!coverUrl && typeof ruleResult?.thumb_url === 'string') {
     coverUrl = ruleResult.thumb_url;
+  }
+  if (!coverUrl) {
+    const fromBook = bookSnapshotString(context.book, 'coverUrl');
+    if (fromBook) coverUrl = resolveMediaUrl(redirectUrl, fromBook);
   }
 
   if (!name.trim()) {
@@ -443,7 +542,7 @@ function buildDetailApiUrl(
 async function getBookInfoFromDataUrl(
   source: BookSource,
   bookUrl: string,
-  options?: { durChapterTitle?: string; bookVariable?: string },
+  options?: GetBookInfoOptions,
 ): Promise<BookInfo | null> {
   const payload = decodeDataUrl(bookUrl);
   if (!payload) {
@@ -541,7 +640,7 @@ async function getBookInfoFromDataUrl(
 export async function getBookInfo(
   source: BookSource,
   bookUrl: string,
-  options?: { durChapterTitle?: string; bookVariable?: string },
+  options?: GetBookInfoOptions,
 ): Promise<BookInfo | null> {
   if (!source.ruleBookInfo) {
     return null;

@@ -9,10 +9,30 @@ import {
   materializeAggregationContentBody,
 } from '@/lib/book-source/extract-api-content';
 
+/** Legado ruleContent 在 startBrowserAwait 后返回的短提示，非 API 正文 */
+export const LEGADO_BROWSER_PLACEHOLDER_RE = /请.*刷新|在内嵌|内嵌页/;
+
+export function isLegadoBrowserPlaceholderContent(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.includes('<img')) return false;
+  if (LEGADO_BROWSER_PLACEHOLDER_RE.test(t)) return true;
+  return t.length <= 120 && /播放|观看|刷新/.test(t) && !/^https?:\/\//i.test(t);
+}
+
+export function formatLegadoBrowserPlaceholderForReader(text: string): string {
+  const t = text.trim();
+  if (!t) return '<p>请在内嵌页中观看。</p>';
+  if (t.startsWith('<')) return t;
+  return `<p>${t}</p>`;
+}
+
 export function extractContentFromRuleOutput(raw: string): string {
   const text = raw.trim();
   if (!text) return '';
   if (isApiErrorText(text)) return '';
+  if (isLegadoBrowserPlaceholderContent(text)) {
+    return formatLegadoBrowserPlaceholderForReader(text);
+  }
 
   // 规则链 $.content 已输出 HTML
   if (text.includes('<img') || text.includes('<p') || text.includes('<div')) {

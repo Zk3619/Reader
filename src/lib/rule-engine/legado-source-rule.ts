@@ -420,7 +420,15 @@ export function legadoListRuleNeedsAllSuffix(rule: string): boolean {
   const trimmed = rule.trim();
   if (!trimmed) return false;
   if (/@all$/i.test(trimmed)) return false;
+  const mode = detectSourceRuleMode(trimmed);
+  if (mode === 'js' || mode === 'webjs') return false;
   const body = stripLegadoRuleModePrefix(trimmed);
+  const lowerBody = body.toLowerCase();
+  if (body.startsWith('//') || lowerBody.startsWith('@xpath:')) {
+    const xpathBody = lowerBody.startsWith('@xpath:') ? body.slice(7).trim() : body;
+    const hasTrailingExtractor = /@(all|html|text|textnodes|owntext)$/i.test(xpathBody);
+    return !hasTrailingExtractor;
+  }
   return !body.includes('@');
 }
 

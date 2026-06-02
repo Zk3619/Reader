@@ -200,17 +200,14 @@ async function analyzeLegadoStringField(
 }
 
 /** 对齐 Legado BookList：getStringList(ruleKind)?.joinToString(",") */
-async function analyzeKindField(
+export async function analyzeKindField(
   rule: string | undefined,
   context: RuleContext,
   opts?: { bookName?: string; searchKey?: string },
 ): Promise<string> {
   if (!rule?.trim()) return '';
   const results = await analyzeRule(rule, context);
-  for (const part of results) {
-    const normalized = normalizeKindFromRule(part, opts);
-    if (normalized) return normalized;
-  }
+  // Legado BookList/BookInfo: getStringList(kind)?.joinToString(",")
   return normalizeKindFromRule(results.filter((r) => r.trim()).join(','), opts) ?? '';
 }
 

@@ -182,6 +182,47 @@ function tryParseJsonSections(jsonStr: string): ExploreSection[] | null {
   }
 }
 
+/** Legado exploreUrl 基础语法：换行或 && 分隔，每项为 title::url */
+const EXPLORE_KIND_SEGMENT_SPLIT = /(?:&&|\r?\n)+/;
+
+/**
+ * 解析 Legado exploreUrl 的 name::url 列表（对齐 BookSourceExtensions.exploreKinds）
+ * @see legado-own/app/src/main/java/io/legado/app/help/source/BookSourceExtensions.kt
+ */
+export function parseNameUrlExploreSections(text: string): ExploreSection[] | null {
+  const trimmed = text.trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith('[') ||
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('<js>') ||
+    trimmed.toLowerCase().startsWith('@js')
+  ) {
+    return null;
+  }
+  if (!trimmed.includes('::')) return null;
+
+  const segments = trimmed
+    .split(EXPLORE_KIND_SEGMENT_SPLIT)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return null;
+
+  const sections: ExploreSection[] = [];
+  for (const seg of segments) {
+    const idx = seg.indexOf('::');
+    if (idx < 0) {
+      sections.push({ title: seg });
+      continue;
+    }
+    const title = seg.slice(0, idx).trim();
+    const url = seg.slice(idx + 2).trim();
+    if (!title) continue;
+    sections.push({ title, url: url || undefined });
+  }
+  return sections.length > 0 ? sections : null;
+}
+
 /**
  * 从书源解析发现子项列表（分类、排行榜等）- 同步，不执行脚本
  * - 若有 exploreScreen（legado 格式 JSON 数组，项含 title/url），解析后返回
@@ -196,13 +237,15 @@ export function getExploreSections(source: BookSource): ExploreSection[] {
     if (sections) return sections;
   }
 
-  // 2. 尝试将 exploreUrl 作为 JSON 数组解析（legado 中 exploreUrl 也可以是 JSON 数组）
+  // 2. 尝试将 exploreUrl 解析为 JSON 或 Legado name::url 列表
   if (source.exploreUrl && typeof source.exploreUrl === 'string') {
     const trimmed = source.exploreUrl.trim();
-    // 只有以 [ 开头时才尝试解析为 JSON 数组，避免误解析普通 URL 或 <js> 脚本
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       const sections = tryParseJsonSections(trimmed);
       if (sections) return sections;
+    } else {
+      const nameUrlSections = parseNameUrlExploreSections(trimmed);
+      if (nameUrlSections) return nameUrlSections;
     }
   }
 

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseCss } from '@/lib/rule-engine/css-parser';
 
 describe('css parser legado compatibility', () => {
@@ -13,5 +15,11 @@ describe('css parser legado compatibility', () => {
     expect(out[0]).toContain('<div class="item"><span>B</span></div>');
     expect(out[0]).not.toContain('<script');
     expect(out[0]).not.toContain('<style');
+  });
+
+  it('未命中 .gray authorarticle 时不应泄漏 body@text', () => {
+    const html = readFileSync(join(process.cwd(), 'tmp-gugu-detail.html'), 'utf8');
+    const out = parseCss('.gray a[href*="authorarticle"]@text', html);
+    expect(out).toEqual([]);
   });
 });

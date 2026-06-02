@@ -36,4 +36,30 @@ describe('json list context', () => {
     expect(normalizeJsRuleResult(row)).toEqual({ book_id: '99', source: '七猫' });
     expect(normalizeJsRuleResult({ book_id: '1' })).toEqual({ book_id: '1' });
   });
+
+  it('readJsonListItemField 读取简单键名规则', async () => {
+    const { readJsonListItemField } = await import('@/lib/book-source/json-list-context');
+    const ctx = enrichJsonListItemContext(
+      JSON.stringify({ title: '第01集', url: '/play/1.html', source: '线路1' }),
+      'html',
+      'https://example.com/',
+      {},
+    );
+    expect(readJsonListItemField(ctx, 'title')).toBe('第01集');
+    expect(readJsonListItemField(ctx, 'url')).toBe('/play/1.html');
+    expect(readJsonListItemField(ctx, '//a/@href')).toBe('');
+  });
+
+  it('analyzeString 在 JSON 列表项上解析简单字段名', async () => {
+    const { analyzeString } = await import('@/lib/rule-engine/analyze-rule');
+    const ctx = enrichJsonListItemContext(
+      JSON.stringify({ title: '第01集', url: '/play/1.html' }),
+      'html',
+      'https://example.com/',
+      {},
+    );
+    expect(await analyzeString('title', ctx)).toBe('第01集');
+    expect(await analyzeString('url', ctx, { isUrl: true })).toBe('/play/1.html');
+    expect(await analyzeString('已完结,0分,tags', ctx)).toBe('已完结,0分,tags');
+  });
 });

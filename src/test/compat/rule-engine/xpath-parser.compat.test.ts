@@ -14,4 +14,12 @@ describe('xpath parser legado compatibility', () => {
     expect(out[0]).toBe('hello');
   });
 
+  it('degrades gracefully on dirty html payload', () => {
+    const dirtyHtml =
+      '<ul class="librarylist"><li><p class="info"><span><a href="/book_1/">圣墟</a></span></p></li></ul>' +
+      '\u0000\u0007\ufffd\ufffd';
+    const out = parseXPath('//ul[@class="librarylist"]/li//text()@all', dirtyHtml);
+    expect(out.some((x) => x.includes('圣墟'))).toBe(true);
+  });
+
 });

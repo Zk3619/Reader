@@ -122,6 +122,28 @@ result = title + '-ok';
     expect(out).toBe('章节名-ok');
   });
 
+  it('java.getCookie 与 cookie.getCookie 均可用', async () => {
+    const out = await runLegadoRuleScript(
+      [
+        'typeof java.getCookie === "function"',
+        'typeof cookie.getCookie === "function"',
+      ].join(' && '),
+      {
+        result: '',
+        baseUrl: 'https://v1.gyks.cf/',
+        source: {},
+      },
+      {
+        bookSourceName: 'test',
+        sourceName: 'test',
+        bookSourceUrl: 'https://v1.gyks.cf/',
+        sourceUrl: 'https://v1.gyks.cf/',
+      } as never,
+    );
+
+    expect(out).toBe(true);
+  });
+
   it('processCatalogList 在 ajax 首轮为空时不抛错并在第二轮解析', async () => {
     const payload = { book_id: 'abc123', sources: '全面漫画', tab: '漫画', url: '' };
     const hex = Array.from(new TextEncoder().encode(JSON.stringify(payload)))

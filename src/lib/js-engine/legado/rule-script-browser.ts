@@ -140,19 +140,34 @@ export interface RuleScriptBrowserHandlers {
   startBrowserAwait(url: string, title?: string): ReturnType<typeof createLegadoStrResponse>;
 }
 
+/** 规则脚本 startBrowser* 打开的内嵌页 URL，供正文占位提示后再次打开 */
+export const READER_LAST_BROWSER_URL_KEY = '__readerLastBrowserUrl';
+
+/** 延迟到 runJsSnippet 结束后抛出，避免书源 try/catch 吞掉 SuspendScript */
+export const READER_DEFERRED_SUSPEND_KEY = '__readerDeferredSuspend';
+
 export function createRuleScriptBrowserHandlers(options: {
   bookSource?: BookSource;
   baseUrl: string;
   state: RuleScriptBrowserState;
   pending: Promise<void>[];
+  variables?: Record<string, unknown>;
+  scope: Record<string, unknown>;
 }): RuleScriptBrowserHandlers {
-  const { bookSource, baseUrl, state, pending } = options;
+  const { bookSource, baseUrl, state, pending, variables, scope } = options;
+
+  const rememberBrowserUrl = (resolved: string) => {
+    if (variables && isOpenableBrowserUrl(resolved)) {
+      variables[READER_LAST_BROWSER_URL_KEY] = resolved;
+    }
+  };
   const poolOpts = innerWebPoolOpts(bookSource);
 
   return {
     startBrowser(url: string, title?: string) {
       const resolved = resolveRuleScriptBrowserUrl(String(url ?? ''), baseUrl);
       if (!isOpenableBrowserUrl(resolved)) return;
+      rememberBrowserUrl(resolved);
       const cookieStr = resolveRuleScriptBrowserCookies(bookSource, resolved, baseUrl);
       pending.push(
         openLegadoBrowserInApp(resolved, cookieStr, title, poolOpts).then(() => undefined),
@@ -168,6 +183,7 @@ export function createRuleScriptBrowserHandlers(options: {
         state.awaitDone = true;
         return createLegadoStrResponse('');
       }
+      rememberBrowserUrl(resolved);
       const cookieStr = resolveRuleScriptBrowserCookies(bookSource, resolved, baseUrl);
       const p = openLegadoBrowserInApp(resolved, cookieStr, title, {
         awaitClose: true,
@@ -187,9 +203,23 @@ export function createRuleScriptBrowserHandlers(options: {
             url: resolved,
           });
         });
-      throw new SuspendScript(p.then(() => ''), BROWSER_SUSPEND_WRITE_INDEX, resolved, Date.now());
+      scope[READER_DEFERRED_SUSPEND_KEY] = new SuspendScript(
+        p.then(() => ''),
+        BROWSER_SUSPEND_WRITE_INDEX,
+        resolved,
+        Date.now(),
+      );
+      return createLegadoStrResponse('');
     },
   };
+}
+
+export function rethrowDeferredRuleScriptSuspend(scope: Record<string, unknown>): void {
+  const deferred = scope[READER_DEFERRED_SUSPEND_KEY];
+  if (deferred instanceof SuspendScript) {
+    delete scope[READER_DEFERRED_SUSPEND_KEY];
+    throw deferred;
+  }
 }
 
 export function isRuleScriptBrowserSuspend(e: unknown): e is SuspendScript {

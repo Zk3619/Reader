@@ -134,7 +134,7 @@ export async function addOnlineBookByUrl(
 
   const book = await addSearchBookToShelf(bookInfoToSearchBook(info), {
     groupId: options?.groupId,
-    fetchChapters: true,
+    fetchChapters: 'background',
   });
   if (!book) {
     return { success: false, error: '加入书架失败' };

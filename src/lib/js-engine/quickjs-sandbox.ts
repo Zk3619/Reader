@@ -346,9 +346,9 @@ function injectContext(vm: QuickJSContext, context: JsContext): void {
   );
   setGlobalString(vm, 'baseUrl', context.baseUrl);
 
-  if (context.book) {
+  {
     const bookHandle = vm.newObject();
-    for (const [key, value] of Object.entries(context.book)) {
+    for (const [key, value] of Object.entries(context.book ?? {})) {
       const valueHandle = vm.newString(String(value));
       vm.setProp(bookHandle, key, valueHandle);
       valueHandle.dispose();

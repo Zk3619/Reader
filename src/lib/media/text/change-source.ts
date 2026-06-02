@@ -60,7 +60,10 @@ export async function applyChangeSource(
     throw new Error('本地书不支持换源');
   }
   const { source, searchBook: hit } = candidate;
-  const info = await getBookInfo(source, hit.bookUrl);
+  const info = await getBookInfo(source, hit.bookUrl, {
+    book: hit as unknown as Record<string, unknown>,
+    bookVariable: oldBook.variable,
+  });
   if (!info) throw new Error('获取书籍信息失败');
 
   const tocUrl = info.tocUrl?.trim() || hit.tocUrl || hit.bookUrl;

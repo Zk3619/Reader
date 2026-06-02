@@ -18,19 +18,32 @@ const XPATH_EXTRACTOR_KEYWORDS = new Set(['text', 'textnodes', 'owntext', 'html'
 const DIRECT_TEXT_CHILD_XPATH =
   /^\/\/([a-zA-Z*][\w-]*)(?:\[@(class|id)=['"]([^'"]+)['"]\])?\/text\(\)\[(\d+)\]$/;
 
-function splitXPathLegadoExtractor(rule: string): { xpath: string; extractor: string | null } {
-  const lastAt = rule.lastIndexOf('@');
-  if (lastAt <= 0) return { xpath: rule, extractor: null };
-  const xpathPart = rule.slice(0, lastAt).trim();
-  const suffix = rule.slice(lastAt + 1);
-  const suffixLower = suffix.toLowerCase();
-  if (!xpathPart.startsWith('//') && !xpathPart.startsWith('(')) {
+/** 分离 XPath 与 Legado 提取器；`[@class="a"]` 内的 `@` 不算提取器。 */
+export function splitXPathLegadoExtractor(rule: string): { xpath: string; extractor: string | null } {
+  const trimmed = rule.trim();
+  if (!trimmed.startsWith('//') && !trimmed.startsWith('(')) {
     return { xpath: rule, extractor: null };
   }
-  if (XPATH_EXTRACTOR_KEYWORDS.has(suffixLower) || /^[\w:-]+$/.test(suffix)) {
+  const lower = trimmed.toLowerCase();
+  for (const key of XPATH_EXTRACTOR_KEYWORDS) {
+    const suffix = `@${key}`;
+    if (lower.endsWith(suffix)) {
+      return { xpath: trimmed.slice(0, -suffix.length).trim(), extractor: `@${key}` };
+    }
+  }
+  const lastAt = trimmed.lastIndexOf('@');
+  if (lastAt <= 0) return { xpath: trimmed, extractor: null };
+  // XPath attribute axis: ".../@href" is part of XPath itself, not a Legado extractor.
+  const beforeAt = trimmed.slice(0, lastAt).trimEnd();
+  if (beforeAt.endsWith('/')) {
+    return { xpath: trimmed, extractor: null };
+  }
+  const xpathPart = trimmed.slice(0, lastAt).trim();
+  const suffix = trimmed.slice(lastAt + 1);
+  if (XPATH_EXTRACTOR_KEYWORDS.has(suffix.toLowerCase()) || /^[\w:-]+$/.test(suffix)) {
     return { xpath: xpathPart, extractor: `@${suffix}` };
   }
-  return { xpath: rule, extractor: null };
+  return { xpath: trimmed, extractor: null };
 }
 
 function simpleXPathToCss(xpath: string): string | null {
@@ -50,10 +63,60 @@ function simpleXPathToCss(xpath: string): string | null {
   return `${tag}${classes.map((x) => `.${x}`).join('')}`;
 }
 
+/** 按 `/` 切分 XPath 路径段（不切开 `[@class="a b"]` 内括号） */
+function splitXPathPathSegments(path: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let depth = 0;
+  for (const ch of path) {
+    if (ch === '[') depth += 1;
+    else if (ch === ']') depth = Math.max(0, depth - 1);
+    else if (ch === '/' && depth === 0) {
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) segments.push(current.trim());
+  return segments;
+}
+
+function xpathSegmentToCheerioSelector(segment: string): string | null {
+  const m = segment.match(/^([a-zA-Z*][\w-]*)(?:\[@(class|id)=['"]([^'"]+)['"]\])?$/);
+  if (!m) return null;
+  return resolveXPathElementSelector(m[1] || '*', m[2], m[3]);
+}
+
+/**
+ * 将 Legado 常见 XPath 列表路径转为 Cheerio 选择器。
+ * - `//div[@class="a"]/div` → `div.a > div`
+ * - `//div[@class="a"]//div` → `div.a div`（沿用 descendant 转换）
+ */
+function xpathPathToCheerioSelector(xpath: string): string | null {
+  const trimmed = xpath.trim();
+  if (!trimmed.startsWith('//')) return null;
+  const rest = trimmed.slice(2);
+  if (!rest) return null;
+  if (rest.includes('//')) {
+    return xpathDescendantPathToCheerioSelector(trimmed);
+  }
+  const segments = splitXPathPathSegments(rest);
+  if (segments.length === 0) return null;
+  const cssParts: string[] = [];
+  for (const seg of segments) {
+    const css = xpathSegmentToCheerioSelector(seg);
+    if (!css) return null;
+    cssParts.push(css);
+  }
+  if (cssParts.length === 1) return cssParts[0]!;
+  return cssParts.join(' > ');
+}
+
 function tryParseXPathWithLegadoExtractor(rule: string, html: string): string[] | null {
   const { xpath, extractor } = splitXPathLegadoExtractor(rule);
   if (!extractor) return null;
-  const css = simpleXPathToCss(xpath);
+  const css = simpleXPathToCss(xpath) ?? xpathPathToCheerioSelector(xpath);
   if (!css) return null;
   return parseCss(`${css}${extractor}`, html);
 }
@@ -71,6 +134,36 @@ function preprocessXPathHtmlLikeLegado(input: string): { content: string; mime: 
     return { content: html, mime: 'application/xml' };
   }
   return { content: html, mime: 'text/html' };
+}
+
+function stripIllegalXmlChars(input: string): string {
+  if (!input) return input;
+  let out = '';
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    // 允许: \t \n \r 及 >= 0x20 的可见字符；剔除 XML 非法控制字符。
+    if (code === 0x09 || code === 0x0a || code === 0x0d || code >= 0x20) {
+      out += input[i]!;
+    }
+  }
+  return out;
+}
+
+function prepareContentForXmldom(
+  content: string,
+  mime: 'text/html' | 'application/xml',
+): { content: string; mime: 'text/html' | 'application/xml' } {
+  const sanitized = stripIllegalXmlChars(content);
+  if (mime === 'application/xml') {
+    return { content: sanitized, mime };
+  }
+
+  const trimmed = sanitized.trimStart().toLowerCase();
+  if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+    return { content: sanitized, mime };
+  }
+  // 兼容 Jsoup 的“片段容错”语义：将 HTML 片段包裹为完整文档再做 XPath。
+  return { content: `<html><body>${sanitized}</body></html>`, mime };
 }
 
 function parseSimpleAttrXPathWithCheerio(xpath: string, html: string): string[] | null {
@@ -165,15 +258,21 @@ function parseXPathTrailingAllText(xpath: string, html: string): string[] | null
   if (!elementPath.startsWith('//')) return null;
 
   const $ = cheerio.load(html, { xml: false });
-  const selector = xpathDescendantPathToCheerioSelector(elementPath);
+  const selector =
+    xpathPathToCheerioSelector(elementPath) ?? xpathDescendantPathToCheerioSelector(elementPath);
   if (selector) {
-    const el = $(selector).first();
-    if (el.length) {
-      const segments = collectElementTextSegments(el);
-      const text = (segments.length > 0 ? segments.join('\n') : el.text())
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-      return text ? [text] : [];
+    const els = $(selector);
+    if (els.length >= 1) {
+      const texts: string[] = [];
+      els.each((_, node) => {
+        const el = $(node);
+        const segments = collectElementTextSegments(el);
+        const text = (segments.length > 0 ? segments.join('\n') : el.text())
+          .replace(/\s{2,}/g, ' ')
+          .trim();
+        if (text) texts.push(text);
+      });
+      return texts;
     }
   }
 
@@ -189,7 +288,7 @@ function parseXPathTrailingAllText(xpath: string, html: string): string[] | null
     }
   }
 
-  return [];
+  return null;
 }
 
 function parseXPathDirectTextChildIndex(xpath: string, html: string): string[] | null {
@@ -230,12 +329,30 @@ function parseXPathSingle(xpath: string, html: string, _baseUrl?: string): strin
     return trailingText;
   }
 
+  const { xpath: xpathQuery, extractor } = splitXPathLegadoExtractor(xpath);
+  // 兼容列表规则被自动补成 `//...//text()@all` 的场景：
+  // `@all` 在这里不应再进入 fontoxpath，而应沿用 text() 文本提取。
+  if (extractor === '@all') {
+    const normalizedTextQuery = xpathQuery.replace(/\/\/text\(\)\s*$/i, '/text()');
+    const textFromQuery = parseXPathTrailingAllText(normalizedTextQuery, html);
+    if (textFromQuery !== null) {
+      return textFromQuery;
+    }
+  }
+  if (extractor === '@all' || extractor === '@html') {
+    const css = simpleXPathToCss(xpathQuery) ?? xpathPathToCheerioSelector(xpathQuery);
+    if (css) {
+      return parseCss(`${css}${extractor}`, html);
+    }
+  }
+
   try {
     const normalized = preprocessXPathHtmlLikeLegado(html);
+    const prepared = prepareContentForXmldom(normalized.content, normalized.mime);
     const parser = new DOMParser();
-    const doc = parser.parseFromString(normalized.content, normalized.mime);
+    const doc = parser.parseFromString(prepared.content, prepared.mime);
 
-    const results = evaluateXPath(xpath, doc, null, {
+    const results = evaluateXPath(xpathQuery, doc, null, {
       language: 'XPath3.1',
       returnType: 'ALL',
     });
@@ -258,7 +375,7 @@ function parseXPathSingle(xpath: string, html: string, _baseUrl?: string): strin
       return filtered;
     }
 
-    const attrFallback = parseSimpleAttrXPathWithCheerio(xpath, normalized.content);
+    const attrFallback = parseSimpleAttrXPathWithCheerio(xpathQuery, normalized.content);
     if (attrFallback && attrFallback.length > 0) {
       return attrFallback;
     }

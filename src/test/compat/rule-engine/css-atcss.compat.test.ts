@@ -18,6 +18,7 @@ describe('@css: 规则解析', () => {
     expect(legadoListRuleNeedsAllSuffix('@css:.comic-list-item')).toBe(true);
     expect(legadoListRuleNeedsAllSuffix('@css:.item@all')).toBe(false);
     expect(legadoListRuleNeedsAllSuffix('.plain@text')).toBe(false);
+    expect(legadoListRuleNeedsAllSuffix('@js:result;')).toBe(false);
   });
 
   it('selectElementsOuterHtml 支持 @css: 列表选择器', () => {

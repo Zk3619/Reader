@@ -76,3 +76,33 @@ export function enrichJsonListItemContext(
   }
   return ctx;
 }
+
+/** 列表项为 JSON 对象时，从对象键读取简单字段规则（如 title / url） */
+export function readJsonListItemField(
+  context: RuleContext,
+  rule: string | undefined,
+): string {
+  if (!rule?.trim()) return '';
+  const trimmedRule = rule.trim();
+  if (
+    trimmedRule.startsWith('//') ||
+    trimmedRule.startsWith('$.') ||
+    trimmedRule.startsWith('$[') ||
+    trimmedRule.startsWith('@') ||
+    trimmedRule.startsWith(':') ||
+    trimmedRule.includes('##') ||
+    trimmedRule.includes('{{') ||
+    trimmedRule.includes('@')
+  ) {
+    return '';
+  }
+
+  const row =
+    context.result && typeof context.result === 'object' && !Array.isArray(context.result)
+      ? (context.result as Record<string, unknown>)
+      : parseJsonListItemRecord(String(context.content ?? ''));
+  if (!row) return '';
+
+  const value = row[trimmedRule];
+  return value == null ? '' : String(value).trim();
+}

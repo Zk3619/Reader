@@ -78,6 +78,7 @@ function usesLegacyIndexSelector(selector: string): boolean {
 export function isValidCssSelector(selector: string): boolean {
   const s = selector.trim();
   if (!s) return false;
+  if (s.startsWith('//')) return false;
   if (isLegadoIndexedTagSelector(s)) return false;
   if (s === '*') return true;
   if (/[^\x00-\x7f]/.test(s)) return false;
@@ -87,7 +88,7 @@ export function isValidCssSelector(selector: string): boolean {
     return false;
   }
   return (
-    /^[.#\[:>*a-zA-Z_][\w#.:\[\](),\s>*+~-]*$/i.test(s) ||
+    /^[.#\[:>*a-zA-Z_][\w#.:\[\](),\s>*+~\-="'=]*$/i.test(s) ||
     /^[a-zA-Z][\w-]*([.:#\[]|$)/.test(s)
   );
 }
@@ -98,6 +99,44 @@ function resolveContextElements($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
   const rootChildren = $.root().children();
   if (rootChildren.length > 0) return rootChildren;
   return $('*');
+}
+
+/** 含空格/引号/[] 的复合 CSS，不应在解析失败时回退到 body@text */
+function looksLikeCompoundCssSelector(selector: string): boolean {
+  const s = selector.trim();
+  if (!s || s === '*') return false;
+  if (/^(children|class|tag|id|text)(\.|$)/.test(s)) return false;
+  return (
+    s.startsWith('.') ||
+    s.startsWith('#') ||
+    s.startsWith('[') ||
+    /[\s"'=]/.test(s) ||
+    /^[a-zA-Z][\w-]*[\s.#\[]/.test(s)
+  );
+}
+
+function selectByCssHead(
+  $: cheerio.CheerioAPI,
+  headSel: string,
+): cheerio.Cheerio<any> {
+  const head = headSel.trim();
+  if (!head) return resolveContextElements($);
+
+  if (usesLegacyIndexSelector(head)) {
+    const legacy = selectWithLegacyIndex($, null, head);
+    if (legacy.length > 0) return legacy;
+    if (!looksLikeCompoundCssSelector(head)) return legacy;
+  }
+
+  if (looksLikeCompoundCssSelector(head) || isValidCssSelector(head)) {
+    try {
+      return $(head);
+    } catch {
+      return $('');
+    }
+  }
+
+  return resolveContextElements($);
 }
 
 /** HTML5 解析会丢弃 table 外的 td/tr；列表项常为裸 tr，需包一层 table 对齐 Legado/Jsoup */
@@ -199,9 +238,7 @@ function parseCssSegment(rule: string, html: string): string[] {
   const chain = analyzer.splitRule('@');
   if (chain.length > 1) {
     const headSel = chain[0]?.trim() ?? '';
-    let elements = usesLegacyIndexSelector(headSel)
-      ? selectWithLegacyIndex($, null, headSel || '*')
-      : resolveContextElements($);
+    let elements = selectByCssHead($, headSel || '*');
     const tail = chain.slice(1);
     const last = tail[tail.length - 1] || '';
     const nestedSelectorTail = isNestedSelectorSegment(last);
@@ -239,7 +276,7 @@ function extractElements(
 ): string[] {
   if (elements.length === 0) return [];
   if (extractor === '@html') {
-    // 对齐 Legado(Jsoup): elements.select("script/style").remove(); elements.outerHtml()
+    // 对齐 Legado(Jsoup) getResultLast("html"): 多节点合并为一段 outerHtml
     const clone = elements.clone();
     clone.find('script').remove();
     clone.find('style').remove();
@@ -486,7 +523,15 @@ function selectWithLegacyIndex<T>(
   }
   const { selector, index, end, step, splitMode } = parseSelectorWithLegacyIndex(selectorWithIndex);
   if (!isValidCssSelector(selector)) {
-    return scope ? (scope as any) : resolveContextElements($);
+    if (looksLikeCompoundCssSelector(selector)) {
+      try {
+        const matched = scope ? (scope as any).find(selector) : $(selector);
+        return matched.length > 0 ? matched : $('');
+      } catch {
+        return $('');
+      }
+    }
+    return scope ? (scope as any) : $('');
   }
   const isLegadoBuiltin = /^(children|class|tag|id|text)(\.|$)/.test(selector);
   const selected = isLegadoBuiltin
