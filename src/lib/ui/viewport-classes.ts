@@ -73,6 +73,12 @@ export const maxHTitleMenu = 'max-h-[min(24rem,calc(100dvh-11rem))]';
  */
 export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
 
+/**
+ * 滚动区末尾留白：避免末项贴齐滚动容器底边。
+ * 主壳 Tab 页在桌面无底栏时由 App.css + data-shell-bottom-bar 注入；其余用于下方无底栏/DialogFooter 的滚动容器。
+ */
+export const scrollEdgeBottomInset = 'mb-4';
+
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;
 
@@ -86,7 +92,8 @@ export const appOverlayScrim = cn(appBlockDrag, 'bg-background/40');
 export const popperContentViewportScroll = cn(
   'max-h-[var(--kb-popper-content-available-height)]',
   'overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth
+  scrollGutterStableBoth,
+  scrollEdgeBottomInset,
 );
 
 /** 标题下拉等：外层限高，内层列表滚动 */
@@ -114,5 +121,22 @@ export const mainShellInset = 'p-1';
 export const mainShellPageRoot = 'flex flex-col flex-1 min-h-0 w-full overflow-hidden';
 
 /** 侧边栏 Tab 页主内容可滚动区（书架列表、书源列表、探索书籍区等） */
-export const mainShellPageScroll =
-  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1';
+export const mainShellPageScroll = cn(
+  'main-shell-page-scroll flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1',
+);
+
+/** 独立全屏页主内容可滚动区（无底栏时保留底部安全区 + 列表末尾留白） */
+export const standalonePageScroll = cn(
+  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both safe-area-page-bottom',
+  scrollEdgeBottomInset,
+);
+
+/** 弹窗内可滚动主体（无底栏/DialogFooter 时）；含 px-6 pt-4，底边用 scrollEdgeBottomInset 替代 pb */
+export const appDialogScrollBodyNoFooter = cn(
+  'min-h-0 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-6 pt-4 pb-2',
+  scrollEdgeBottomInset,
+);
+
+/** 主壳顶/底栏 fixed 偏移（含移动端安全区） */
+export const insetTopAppBar = 'inset-top-app-bar';
+export const insetBottomAppBar = 'inset-bottom-app-bar';

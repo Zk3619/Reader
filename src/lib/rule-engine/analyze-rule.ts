@@ -378,16 +378,16 @@ async function expandTemplates(
     const innerExpr = match[1]?.trim() ?? '';
     if (innerExpr) {
       if (isRuleExpression(innerExpr)) {
-          let innerResults = await analyzeRule(innerExpr, context);
-          // 对齐 legado 容错：当内层混合规则（常见 {{xpath##...}}）失败时，
-          // 退化到其主规则部分，避免整段模板直接坍塌为空。
-          if (innerResults.length === 0 && innerExpr.includes('##')) {
-            const stripped = stripReplacementTail(innerExpr);
-            if (stripped && stripped !== innerExpr) {
-              innerResults = await analyzeRule(stripped, context);
-            }
+        let innerResults = await analyzeRule(innerExpr, context);
+        // 对齐 legado 容错：当内层混合规则（常见 {{xpath##...}}）失败时，
+        // 退化到其主规则部分，避免整段模板直接坍塌为空。
+        if (innerResults.length === 0 && innerExpr.includes('##')) {
+          const stripped = stripReplacementTail(innerExpr);
+          if (stripped && stripped !== innerExpr) {
+            innerResults = await analyzeRule(stripped, context);
           }
-          expanded += innerResults[0] ?? '';
+        }
+        expanded += innerResults[0] ?? '';
       } else {
         const jsResult = await evalJs(innerExpr, buildRuleJsContext(context));
         expanded += jsResult == null ? '' : String(jsResult);
@@ -483,6 +483,18 @@ async function expandReplacementInlineJs(
   return out;
 }
 
+/** Legado OnlyOne / Matcher.appendReplacement：展开 $1、$2、$$ */
+function expandLegadoReplacementGroups(
+  replacement: string,
+  match: RegExpExecArray,
+): string {
+  return replacement.replace(/\$(\d+)|\$\$/g, (token, groupIndex?: string) => {
+    if (token === '$$') return '$';
+    const idx = Number(groupIndex);
+    return match[idx] ?? '';
+  });
+}
+
 /** 对齐 Legado AnalyzeRule.replaceRegex */
 async function applyLegadoReplaceRegex(
   text: string,
@@ -525,12 +537,15 @@ async function applyLegadoReplaceRegex(
         .filter(Boolean);
       return parts.map((s) => `#${s.replace(/^#+/, '')}`).join(' ');
     }
-    const regex = new RegExp(expandedPattern, 'g');
     if (replaceFirst) {
-      const first = text.match(regex)?.[0];
-      if (!first) return text.trim();
-      return text.replace(first, normalizedReplacement).trim();
+      const regex = new RegExp(expandedPattern);
+      const match = regex.exec(text);
+      if (!match) return text.trim();
+      // 对齐 Legado OnlyOne（###）：只返回首处匹配的替换结果，非整段 replaceFirst
+      // 见 https://github.com/gedoor/legado/issues/2978
+      return expandLegadoReplacementGroups(normalizedReplacement, match).trim();
     }
+    const regex = new RegExp(expandedPattern, 'g');
     return text.replace(regex, normalizedReplacement).trim();
   } catch (e) {
     console.warn('替换规则执行失败:', replaceRegex, e);
@@ -559,7 +574,7 @@ async function executeRuleByMode(
     case 'xpath':
       return parseXPath(ruleBody, context.content, context.baseUrl);
     case 'json':
-      if (context.contentType !== 'json') return [];
+      if (!isJsonDocumentContent(context.content, context.contentType)) return [];
       return parseJsonPath(jsonPathWithoutExtractor(ruleBody), context.content);
     case 'regex':
       return parseRegex(ruleBody, context.content);
@@ -713,14 +728,21 @@ export async function analyzeElements(
   const segments = splitSourceRule(rule, true);
   if (segments.length > 1) {
     let current = context.content;
+    let currentType = context.contentType ?? inferContentType(current);
     let elements: string[] = [];
     for (const seg of segments) {
       if (seg.mode === 'webjs') {
-        const sub: RuleContext = { ...context, content: current, result: current };
+        const sub: RuleContext = {
+          ...context,
+          content: current,
+          contentType: currentType,
+          result: current,
+        };
         const out = await runWebJsSegment(seg.ruleStr, sub);
         if (out.length > 0) {
           elements = out;
           current = elements[0] ?? current;
+          currentType = inferContentType(current);
         }
         continue;
       }
@@ -730,33 +752,52 @@ export async function analyzeElements(
         const v = await evalJs(seg.ruleStr, buildRuleJsContext(context, jsInput));
         if (v == null) {
           current = '';
+          currentType = 'text';
           elements = [];
           continue;
         }
         if (Array.isArray(v)) {
-          elements = v.map((x) => (x == null ? '' : String(x))).filter((x) => x.trim().length > 0);
+          elements = v
+            .map((x) => serializeJsSegmentResult(x))
+            .filter((x) => x.trim().length > 0);
           current = elements[0] ?? '';
         } else {
-          current = String(v);
+          current = serializeJsSegmentResult(v);
           elements = current.trim() ? [current] : [];
         }
+        currentType = inferContentType(current);
         continue;
       }
       if (elements.length > 0) {
         const merged: string[] = [];
         for (const item of elements) {
-          const subCtx: RuleContext = { ...context, content: item, result: item };
+          const itemType = inferContentType(item);
+          const subCtx: RuleContext = {
+            ...context,
+            content: item,
+            contentType: itemType,
+            result: item,
+          };
           const compiled = await prepareRule(seg.ruleStr, subCtx);
           const next = await analyzeElements(compiled, subCtx);
           merged.push(...next);
         }
         elements = merged.filter((e) => e.trim());
       } else {
-        const compiled = await prepareRule(seg.ruleStr, { ...context, content: current, result: current });
-        const next = await analyzeElements(compiled, { ...context, content: current, result: current });
+        const segCtx: RuleContext = {
+          ...context,
+          content: current,
+          contentType: currentType,
+          result: current,
+        };
+        const compiled = await prepareRule(seg.ruleStr, segCtx);
+        const next = await analyzeElements(compiled, segCtx);
         elements = next;
       }
-      if (elements.length > 0) current = elements[0];
+      if (elements.length > 0) {
+        current = elements[0]!;
+        currentType = inferContentType(current);
+      }
     }
     return elements.filter((e) => e.trim());
   }

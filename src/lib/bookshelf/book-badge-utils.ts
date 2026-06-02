@@ -10,7 +10,7 @@ export interface SharedBadgeEntry {
 }
 
 export const BOOK_BADGE_TOOLTIP_CONTENT_CLASS =
-  'max-w-md max-h-40 overflow-y-auto whitespace-normal break-all text-xs leading-relaxed';
+  'max-w-md max-h-40 overflow-y-auto whitespace-normal break-all text-xs leading-relaxed mb-2';
 
 const EXPLORE_BADGE_KEYS = ['source', 'status', 'tab', 'category', 'tags', 'score'] as const;
 

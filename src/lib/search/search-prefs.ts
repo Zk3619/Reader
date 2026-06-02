@@ -22,17 +22,29 @@ const LEGACY_LAYOUT_KEY = 'bookshelf-layout-settings';
 const LEGACY_SHOW_GROUP_LIST_KEY = 'bookshelf_showGroupList';
 const SOURCES_PAGE_PREFS_KEY = 'sources_page_prefs';
 
-/** 搜索模式：常规 / 模糊 / 扩展（各页面对扩展字段定义不同） */
-export type SearchMode = 'name' | 'fuzzy' | 'extended';
+/** 搜索模式：常规 / 模糊 / 扩展 / 不过滤（在线搜索见 search-match.ts；各页本地扩展字段可能不同） */
+export type SearchMode = 'name' | 'fuzzy' | 'extended' | 'unfiltered';
 
 export function normalizeSearchMode(mode: unknown): SearchMode {
-  if (mode === 'fuzzy' || mode === 'extended' || mode === 'name') return mode;
+  if (
+    mode === 'fuzzy' ||
+    mode === 'extended' ||
+    mode === 'unfiltered' ||
+    mode === 'name'
+  ) {
+    return mode;
+  }
   return 'name';
 }
 
-/** 常规模式对应 Legado 精准搜索（在线多源搜索） */
+/** 常规模式：书名/作者须连续包含关键词（在线多源搜索源内过滤） */
 export function isPrecisionSearchMode(mode: SearchMode): boolean {
   return mode === 'name';
+}
+
+/** 不过滤模式：对齐 Legado 关闭「精准搜索」，展示书源返回的全部结果 */
+export function isUnfilteredSearchMode(mode: SearchMode): boolean {
+  return mode === 'unfiltered';
 }
 
 interface BookshelfManageChildPrefs extends BookshelfManagePrefs {
