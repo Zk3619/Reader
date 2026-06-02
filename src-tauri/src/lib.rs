@@ -1485,16 +1485,16 @@ pub fn run() {
         // .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         // .plugin(tauri_plugin_clipboard::init()) // 如果需要可以取消注释
-        // .plugin(
-        //     tauri_plugin_window_state::Builder::default()
-        //         .with_state_flags(
-        //             tauri_plugin_window_state::StateFlags::SIZE
-        //                 | tauri_plugin_window_state::StateFlags::POSITION
-        //                 | tauri_plugin_window_state::StateFlags::MAXIMIZED
-        //                 // | tauri_plugin_window_state::StateFlags::VISIBLE, // 不保存窗口可见性状态
-        //         )
-        //         .build(),
-        // )
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 window.show().unwrap();
@@ -1624,11 +1624,11 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|_app_handle, _event| {
             // 兜底：阻止 WebView 栈空时系统返回直接杀进程；「再按一次退出」由前端 onBackButtonPress 处理。
             // 前端无法拦截 RunEvent::ExitRequested，此逻辑不能整体搬到 JS。
             #[cfg(any(target_os = "android", target_os = "ios"))]
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            if let tauri::RunEvent::ExitRequested { api, .. } = _event {
                 api.prevent_exit();
             }
         });
