@@ -718,7 +718,6 @@ fn merge_panel_cookies_for_url(
 }
 
 /// panel bootstrap 上报的 navigator.userAgent（CF clearance 绑定此 UA）
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn store_inner_web_panel_user_agent(ua: String) -> Result<(), String> {
     let trimmed = ua.trim();
@@ -731,7 +730,6 @@ fn store_inner_web_panel_user_agent(ua: String) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 fn get_inner_web_panel_user_agent() -> Result<String, String> {
     Ok(inner_web_panel_user_agent_store()
