@@ -1,1 +1,119 @@
-[{"bookSourceComment":"作者：wwwcloger","bookSourceGroup":"洛制","bookSourceName":"咕咕番","bookSourceType":0,"bookSourceUrl":"https:\/\/www.gugu3.com\/","customButton":false,"customOrder":1,"enabled":true,"enabledCookieJar":true,"enabledExplore":true,"eventListener":false,"lastUpdateTime":"1779525058152","respondTime":180000,"ruleBookInfo":{"intro":"{{book.name + \"  简介:\"}}\n{{\/\/div[@id=\"height_limit\"]\/text()##。(?![\"'“”‘’《》〈〉［］｛｝【】〖〗〔〕『』「」。])##。\n}}"},"ruleContent":{"content":"@js:\nconst vid = result.match(\/\"url\":\"([a-z0-9-]+)\"\/)[1];\nconst time = Math.floor(Date.now() \/ 1000);\nconst url = \"https:\/\/player.gugu3.com\/admin\/mizhi_json.php\";\nconst body = \"url=\"+vid+\"&time=\"+time+\"&key=&vkey=7fd97854c62c13bd\";\nconst headers = {\n    \"Content-Type\":\"application\/x-www-form-urlencoded; charset=UTF-8\",\n    \"X-Requested-With\":\"XMLHttpRequest\",\n    \"User-Agent\":\"Mozilla\/5.0 (Linux; Android 13; Mobile) AppleWebKit\/537.36 Chrome\/120.0.0.0 Mobile Safari\/537.36\",\n    \"Referer\":\"https:\/\/player.gugu3.com\/\"\n};\n\nconst res = java.post(url, body, headers);\nconst json = JSON.parse(res.body());\nconst purl = json.url;\nconst play = \"https:\/\/api.nxvav.cn\/api\/m3u8\/artplayer.php?pip=false&url=\";\n\ntry {\n    java.startBrowserAwait(play + java.encodeURI(purl), book.name);\n    } catch {\n    \"没办法，不点右上角✓就会报错，加个try兜底\";\n}\n\"请刷新尝试播放\";"},"ruleExplore":[],"ruleSearch":{"bookList":"\/\/div[@class=\"row-right\"]\/div","bookUrl":"\/\/a[@class=\"public-list-exp\"]\/@href","checkKeyWord":"终究、与你相恋。 第二季","coverUrl":"\/\/div[@class=\"cover\"]\/@style\n@js: result.match(\/url\\([\"']?([^\"')]+)[\"']?\\)\/)[1];","intro":"\/\/span[@class=\"cor5 thumb-blurb hide2\"]\/text()","kind":"\/\/div[@class=\"thumb-else cor5 hide\"]\/span\/a\/text()","lastChapter":"\/\/span[@class=\"public-list-prb hide ft2\"]\/text()","name":"\/\/div[@class=\"thumb-txt cor4 hide\"]\/text()"},"ruleToc":{"chapterList":"@js:\nconst html = org.jsoup.Jsoup.parse(java.ajax(baseUrl));\nlet items = html.select(\"ul.anthology-list-play.size\");\nlet plist = [];\n\nfor (let n = 0; n < items.size(); n++) {\n    let item = items.get(n).select(\"li > a\");\n    for (let i = 0; i < item.size(); i++) {\n        let a = item.get(i);\n        let title = a.text();\n        let href = a.attr(\"href\");\n        let source  = \"播放路线  \" + (n + 1);\n        plist.push({\n            title: title,\n            url: href,\n            source: source\n        });\n    }\n}\n\nplist;","chapterName":"title","chapterUrl":"url","updateTime":"source"},"searchUrl":"index.php\/vod\/search\/page\/{{page}}\/wd\/{{key}}.html","weight":0}]
+[
+  {
+    "bookSourceComment": "作者：wwwcloger",
+    "bookSourceGroup": "洛制",
+    "bookSourceName": "咕咕番",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https:\/\/www.gugu3.com\/",
+    "customButton": false,
+    "customOrder": 1,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": true,
+    "eventListener": false,
+    "lastUpdateTime": "1779525058152",
+    "respondTime": 180000,
+    "ruleBookInfo": {
+      "intro": "{{book.name + \"  简介:\"}}\n{{\/\/div[@id=\"height_limit\"]\/text()##。(?![\"'“”‘’《》〈〉［］｛｝【】〖〗〔〕『』「」。])##。\n}}"
+    },
+    "ruleContent": {
+      "content": "@js:\nconst vid = result.match(\/\"url\":\"([a-z0-9-]+)\"\/)[1];\nconst time = Math.floor(Date.now() \/ 1000);\nconst url = \"https:\/\/player.gugu3.com\/admin\/mizhi_json.php\";\nconst body = \"url=\"+vid+\"&time=\"+time+\"&key=&vkey=7fd97854c62c13bd\";\nconst headers = {\n    \"Content-Type\":\"application\/x-www-form-urlencoded; charset=UTF-8\",\n    \"X-Requested-With\":\"XMLHttpRequest\",\n    \"User-Agent\":\"Mozilla\/5.0 (Linux; Android 13; Mobile) AppleWebKit\/537.36 Chrome\/120.0.0.0 Mobile Safari\/537.36\",\n    \"Referer\":\"https:\/\/player.gugu3.com\/\"\n};\n\nconst res = java.post(url, body, headers);\nconst json = JSON.parse(res.body());\nconst purl = json.url;\nconst play = \"https:\/\/api.nxvav.cn\/api\/m3u8\/artplayer.php?pip=false&url=\";\n\ntry {\n    java.startBrowserAwait(play + java.encodeURI(purl), book.name);\n    } catch {\n    \"没办法，不点右上角✓就会报错，加个try兜底\";\n}\n\"请刷新尝试播放\";"
+    },
+    "ruleExplore": [],
+    "ruleSearch": {
+      "bookList": "\/\/div[@class=\"row-right\"]\/div",
+      "bookUrl": "\/\/a[@class=\"public-list-exp\"]\/@href",
+      "checkKeyWord": "终究、与你相恋。 第二季",
+      "coverUrl": "\/\/div[@class=\"cover\"]\/@style\n@js: result.match(\/url\\([\"']?([^\"')]+)[\"']?\\)\/)[1];",
+      "intro": "\/\/span[@class=\"cor5 thumb-blurb hide2\"]\/text()",
+      "kind": "\/\/div[@class=\"thumb-else cor5 hide\"]\/span\/a\/text()",
+      "lastChapter": "\/\/span[@class=\"public-list-prb hide ft2\"]\/text()",
+      "name": "\/\/div[@class=\"thumb-txt cor4 hide\"]\/text()"
+    },
+    "ruleToc": {
+      "chapterList": "@js:\nconst html = org.jsoup.Jsoup.parse(java.ajax(baseUrl));\nlet items = html.select(\"ul.anthology-list-play.size\");\nlet plist = [];\n\nfor (let n = 0; n < items.size(); n++) {\n    let item = items.get(n).select(\"li > a\");\n    for (let i = 0; i < item.size(); i++) {\n        let a = item.get(i);\n        let title = a.text();\n        let href = a.attr(\"href\");\n        let source  = \"播放路线  \" + (n + 1);\n        plist.push({\n            title: title,\n            url: href,\n            source: source\n        });\n    }\n}\n\nplist;",
+      "chapterName": "title",
+      "chapterUrl": "url",
+      "updateTime": "source"
+    },
+    "searchUrl": "index.php\/vod\/search\/page\/{{page}}\/wd\/{{key}}.html",
+    "weight": 0
+  },
+  {
+    "bookSourceComment": "",
+    "bookSourceGroup": "",
+    "bookSourceName": "R 圣墟小说网🐶",
+    "bookSourceType": 0,
+    "bookSourceUrl": "http://www.shengxuxu.net##RosiaPng",
+    "bookUrlPattern": "http.*shengxuxu.net/book_\\d+/",
+    "concurrentRate": "",
+    "coverDecodeJs": "",
+    "customOrder": 170,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": true,
+    "enabledReview": false,
+    "exploreUrl": "总点击:: /top/allvisit.html\n排行::/top/monthvisit.html\n\n\n全部::http://www.shengxuxu.net/sort/all/{{page}}.html\n玄幻::http://www.shengxuxu.net/sort/xuanhuan/{{page}}.html\n奇幻::http://www.shengxuxu.net/sort/qihuan/{{page}}.html\n武侠::http://www.shengxuxu.net/sort/wuxia/{{page}}.html\n仙侠::http://www.shengxuxu.net/sort/xianxia/{{page}}.html\n都市::http://www.shengxuxu.net/sort/dushi/{{page}}.html\n历史::http://www.shengxuxu.net/sort/lishi/{{page}}.html\n军事::http://www.shengxuxu.net/sort/junshi/{{page}}.html\n游戏::http://www.shengxuxu.net/sort/youxi/{{page}}.html\n竞技::http://www.shengxuxu.net/sort/jingji/{{page}}.html\n科幻::http://www.shengxuxu.net/sort/kehuan/{{page}}.html\n灵异::http://www.shengxuxu.net/sort/lingyi/{{page}}.html\n同人::http://www.shengxuxu.net/sort/tongren/{{page}}.html\n女生::http://www.shengxuxu.net/sort/nvsheng/{{page}}.html\n其他::http://www.shengxuxu.net/sort/qita/{{page}}.html",
+    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 9) Mobile Safari/537.36\"}",
+    "lastUpdateTime": 1780377332842,
+    "loginCheckJs": "",
+    "loginUi": "",
+    "loginUrl": "",
+    "respondTime": 2740,
+    "ruleBookInfo": {
+      "author": "",
+      "canReName": "",
+      "coverUrl": "",
+      "init": "",
+      "intro": "",
+      "kind": "",
+      "lastChapter": "",
+      "name": "",
+      "tocUrl": "",
+      "wordCount": ""
+    },
+    "ruleContent": {
+      "content": "//div[@class='content']/text()",
+      "imageStyle": "",
+      "nextContentUrl": "",
+      "replaceRegex": "",
+      "sourceRegex": "",
+      "webJs": ""
+    },
+    "ruleExplore": {
+      "author": "//p[@class=\"info\"]/span[2]/a/text()",
+      "bookList": "//ul[@class=\"librarylist\"]/li",
+      "bookUrl": "//p[@class=\"info\"]/span[1]/a/@href",
+      "coverUrl": "//img/@src",
+      "intro": "//p[@class=\"intro\"]/text()",
+      "kind": "",
+      "lastChapter": "//p[@class=\"last\"]/a/text()",
+      "name": "//p[@class=\"info\"]/span[1]/a/text()",
+      "wordCount": ""
+    },
+    "ruleReview": {},
+    "ruleSearch": {
+      "author": "//div[2]/p/span[2]/text()",
+      "bookList": "//ul[@class='librarylist']/li",
+      "bookUrl": "//p[@class=\"info\"]/span[1]/a/@href",
+      "coverUrl": "",
+      "intro": "",
+      "kind": "",
+      "lastChapter": "//div[2]/p[3]/a/text()",
+      "name": "//p[@class=\"info\"]/span[1]/a/text()##.*《|》.*",
+      "wordCount": ""
+    },
+    "ruleToc": {
+      "chapterList": "//div[@class=\"card mt20\"][2]//ul[@class=\"dirlist clearfix\"]/li",
+      "chapterName": "//a/text()",
+      "chapterUrl": "//a/@href",
+      "isVip": "",
+      "isVolume": "",
+      "nextTocUrl": "",
+      "updateTime": ""
+    },
+    "searchUrl": "/search.html?/,{\n  \"body\": \"searchkey={{key}}\",\n  \"method\": \"POST\"\n}",
+    "variableComment": "",
+    "weight": -5
+  }
+]
