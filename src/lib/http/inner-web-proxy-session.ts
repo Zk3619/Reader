@@ -21,7 +21,7 @@ function proxyPath(): string {
 
 export function shouldUseInnerWebDocumentProxy(
   pageUrl: string,
-  initialCookies?: string
+  initialCookies?: string,
 ): boolean {
   if (typeof window === 'undefined') return false;
   if (!pageUrl.trim().startsWith('http')) return false;

@@ -357,19 +357,20 @@ async function forwardToTarget(
   let buf = Buffer.from(await upstream.arrayBuffer());
 
   let cfChallenge = false;
-  if (
-    isLikelyImageTarget(target) &&
-    looksLikeCloudflareChallenge(buf, ctHeader)
-  ) {
+  if (looksLikeCloudflareChallenge(buf, ctHeader)) {
     cfChallenge = true;
-    statusCode = 403;
-    buf = Buffer.from('Cloudflare challenge (use Tauri or browser direct img)', 'utf8');
+    if (isLikelyImageTarget(target)) {
+      statusCode = 403;
+      buf = Buffer.from('Cloudflare challenge (use Tauri or browser direct img)', 'utf8');
+    }
   }
 
   res.statusCode = statusCode;
   if (cfChallenge) {
     res.setHeader('X-Reader-Cf-Challenge', '1');
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    if (isLikelyImageTarget(target)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    }
   }
   upstream.headers.forEach((value, key) => {
     const lower = key.toLowerCase();

@@ -10,10 +10,17 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { getCookie, saveCookie } from '@/lib/http/cookie-manager';
-import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import {
+  getJarCookie,
+  mergeJarWithRequestCookie,
+  saveResponseCookies,
+} from '@/lib/http/cookie-jar';
 import { createRateLimiter } from '@/lib/http/rate-limiter';
-import { collapseUrlPathSlashes } from '@/lib/book-source/utils';
+import {
+  collapseUrlPathSlashes,
+  sanitizeHttpHeaders,
+  stripMisplacedCookieFromHttpUrl,
+} from '@/lib/book-source/utils';
 import { isTauri } from '@/lib/platform/detect';
 import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
 import { isAbortError, mergeAbortSignals, raceWithAbortSignal } from '@/lib/http/abort';
@@ -31,6 +38,7 @@ function normalizeUrl(url: string): string {
 
   // 去除首尾空格
   let cleaned = url.trim();
+  cleaned = stripMisplacedCookieFromHttpUrl(cleaned);
 
   if (/^(data:|blob:|javascript:|file:|about:|legado:|yuedu:)/i.test(cleaned)) {
     return cleaned;
@@ -312,18 +320,13 @@ async function executeRequest(
         ...headers,
       };
 
-  // CookieJar + 请求头 Cookie：对齐 Legado AnalyzeUrl.setCookie（库 Cookie 先合并，urlOption/headers 同名覆盖）
+  // CookieJar + 请求头 Cookie：对齐 Legado AnalyzeUrl.setCookie（CookieStore 先合并，header 同名覆盖）
   if (enableCookieJar) {
-    const jarCookie = await getCookie(normalizedUrl);
+    const jarCookie = await getJarCookie(normalizedUrl);
     const headerCookie = String(defaultHeaders['Cookie'] ?? defaultHeaders['cookie'] ?? '').trim();
     delete defaultHeaders['cookie'];
-    if (jarCookie && headerCookie) {
-      defaultHeaders['Cookie'] = mergeLegadoCookieHeaderStrings(jarCookie, headerCookie);
-    } else if (jarCookie) {
-      defaultHeaders['Cookie'] = jarCookie;
-    } else if (headerCookie) {
-      defaultHeaders['Cookie'] = headerCookie;
-    }
+    const merged = mergeJarWithRequestCookie(jarCookie, headerCookie);
+    if (merged) defaultHeaders['Cookie'] = merged;
   }
 
   // 移除null字符串的header
@@ -346,6 +349,12 @@ async function executeRequest(
     defaultHeaders['content-type'] = contentType || 'application/json';
     if (cookie) defaultHeaders.cookie = cookie;
   }
+
+  const safeHeaders = sanitizeHttpHeaders(defaultHeaders);
+  for (const key of Object.keys(defaultHeaders)) {
+    delete defaultHeaders[key];
+  }
+  Object.assign(defaultHeaders, safeHeaders);
 
   try {
     let response: Response;
@@ -579,12 +588,9 @@ async function executeRequest(
       }
     }
 
-    // 保存Cookie（使用规范化后的 URL）
+    // 对齐 Legado CookieManager.saveResponse：含 403 在内的所有响应都写入 Set-Cookie
     if (enableCookieJar && response.headers) {
-      const setCookieHeader = response.headers.get('Set-Cookie');
-      if (setCookieHeader) {
-        await saveCookie(normalizedUrl, setCookieHeader);
-      }
+      await saveResponseCookies(normalizedUrl, response.headers);
     }
 
     // 转换响应为统一格式
