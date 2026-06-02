@@ -451,9 +451,9 @@
   scrollbar-gutter: stable both-edges;
 }
 
-/* 主壳 Tab 滚动区：桌面壳层无底栏时末尾留白（与 scrollEdgeBottomInset / mb-4 一致） */
+/* 主壳 Tab 滚动区：桌面壳层无底栏时末尾留白（与 scrollEdgeBottomInset / mb-2 一致） */
 #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 /*

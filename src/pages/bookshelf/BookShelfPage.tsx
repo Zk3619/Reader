@@ -128,6 +128,8 @@ export interface BookShelfProps {
   onOpenBookshelfCache?: (groupId: number) => void;
   /** 进入全网搜索页 */
   onOpenBookSearch?: (query: string) => void;
+  /** 打开书籍详情页 */
+  onOpenBookInfo?: (book: Book) => void;
 }
 
 export function BookShelf(props: BookShelfProps) {
@@ -839,6 +841,7 @@ export function BookShelf(props: BookShelfProps) {
             sortMode={sortMode()}
             scrollElement={bookshelfScrollRoot}
             onOpenBook={props.onOpenBook}
+            onOpenBookInfo={props.onOpenBookInfo}
             onEditBook={handleEditBook}
             onDeleteBook={handleDeleteBook}
             onBooksReorder={async (newOrderedBooks) => {
@@ -927,6 +930,7 @@ function GroupBooksView(props: {
   sortMode: string;
   scrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onOpenBook?: (book: Book) => void;
+  onOpenBookInfo?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
@@ -970,6 +974,7 @@ function GroupBooksView(props: {
           sortMode={props.sortMode}
           scrollElement={props.scrollElement}
           onOpenBook={props.onOpenBook}
+          onOpenBookInfo={props.onOpenBookInfo}
           onEditBook={props.onEditBook}
           onDeleteBook={props.onDeleteBook}
           onBooksReorder={props.onBooksReorder}
@@ -1001,6 +1006,7 @@ function BooksGrid(props: {
   sortMode: string;
   scrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onOpenBook?: (book: Book) => void;
+  onOpenBookInfo?: (book: Book) => void;
   onEditBook?: (book: Book) => void;
   onDeleteBook?: (book: Book) => void;
   onBooksReorder?: (newOrderedBooks: Book[]) => void | Promise<void>;
@@ -1014,6 +1020,7 @@ function BooksGrid(props: {
   const cardLayout = (): 'list' | 'compact' | 'grid' => getViewModeCardLayout(props.viewMode);
 
   const bookContextMenuActions = (): BookContextMenuActions => ({
+    onViewDetails: (book) => props.onOpenBookInfo?.(book),
     onEdit: (book) => props.onEditBook?.(book),
     onDelete: (book) => props.onDeleteBook?.(book),
     onPinTop: async (book) => {

@@ -12,6 +12,7 @@ import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import { pageCacheStore } from '@/stores/page-cache';
 import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
 import { standalonePageScroll } from '@/lib/ui/viewport-classes';
+import { cn } from '@/lib/utils';
 
 export interface ExploreSourcePageProps {
   source: BookSource;
@@ -19,6 +20,7 @@ export interface ExploreSourcePageProps {
   onBack: () => void;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
+  class?: string;
 }
 
 export function ExploreSourcePage(props: ExploreSourcePageProps) {
@@ -36,7 +38,12 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
   };
 
   return (
-    <section class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background">
+    <section
+      class={cn(
+        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-background',
+        props.class,
+      )}
+    >
       <PageHeader
         onBack={props.onBack}
         title={`${props.source.sourceName} · ${props.section.title}`}

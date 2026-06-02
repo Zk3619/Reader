@@ -41,6 +41,7 @@ import {
   loadSearchScope,
   resolveSearchScopeSources,
   saveSearchScope,
+  sanitizeSearchScope,
   scopeDisplayLabel,
   scopeMenuItemLabel,
   formatSourceScope,
@@ -143,18 +144,37 @@ export function BookSearchPage(props: BookSearchPageProps) {
     setSearching(false);
   };
 
-  onMount(async () => {
-    const mode = await loadBookshelfSearchSubPageMode();
-    setSearchMode(mode);
-    const savedScope = props.initialScope ?? (await loadSearchScope());
-    setScope(savedScope);
+  const reloadShelfMembership = async () => {
     const all = await getAllBooks();
     setShelfKeys(buildShelfMembershipKeys(all));
-    const sources = await getEnabledSources();
-    setSourceMap(Object.fromEntries(sources.map((s) => [s.sourceUrl, s])));
-    if (props.initialQuery?.trim()) {
-      void submitSearch(props.initialQuery.trim());
-    }
+  };
+
+  onMount(() => {
+    const onBookshelfRefresh = () => {
+      void reloadShelfMembership();
+      props.onAddedToShelf?.();
+    };
+    window.addEventListener('bookshelf-refresh', onBookshelfRefresh);
+    onCleanup(() => window.removeEventListener('bookshelf-refresh', onBookshelfRefresh));
+
+    void (async () => {
+      const mode = await loadBookshelfSearchSubPageMode();
+      setSearchMode(mode);
+      const rawScope = props.initialScope ?? (await loadSearchScope());
+      const nextScope = props.initialScope?.trim()
+        ? rawScope
+        : await sanitizeSearchScope(rawScope);
+      setScope(nextScope);
+      if (!props.initialScope?.trim() && nextScope !== rawScope) {
+        void saveSearchScope(nextScope);
+      }
+      await reloadShelfMembership();
+      const sources = await getEnabledSources();
+      setSourceMap(Object.fromEntries(sources.map((s) => [s.sourceUrl, s])));
+      if (props.initialQuery?.trim()) {
+        void submitSearch(props.initialQuery.trim());
+      }
+    })();
   });
 
   onCleanup(() => {
@@ -165,7 +185,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
     const nextScope = props.initialScope ?? '';
     if (nextScope && nextScope !== scope()) {
       setScope(nextScope);
-      void saveSearchScope(nextScope);
+      void saveSearchScope(nextScope, { transient: true });
       if (submitted() && query().trim()) {
         void submitSearch(query().trim(), true);
       }
@@ -337,8 +357,16 @@ export function BookSearchPage(props: BookSearchPageProps) {
   };
 
   const openScope = async (newScope: string) => {
-    setScope(newScope);
-    await saveSearchScope(newScope);
+    const sanitized = await sanitizeSearchScope(newScope);
+    setScope(sanitized);
+    const result = await saveSearchScope(sanitized);
+    if (result.ok && result.persisted === 'all-normalized') {
+      showAppToast({
+        title: '搜索范围已调整为全部书源',
+        description: '选中项过多或已接近全选，已自动保存为全部书源',
+        variant: 'default',
+      });
+    }
     if (submitted() && query().trim()) {
       void submitSearch(query().trim(), true);
     }

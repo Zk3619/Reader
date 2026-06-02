@@ -19,6 +19,7 @@ const DELETE_ITEM_CLASS =
   'text-destructive focus:bg-destructive/10 focus:text-destructive';
 
 export type BookContextMenuActions = {
+  onViewDetails: (book: Book) => void;
   onEdit: (book: Book) => void;
   onDelete: (book: Book) => void;
   onPinTop: (book: Book) => void;
@@ -42,6 +43,9 @@ export function BookContextMenuContent(props: BookContextMenuContentProps) {
 
   return (
     <AppContextMenuContent>
+      <AppContextMenuItem onSelect={() => props.actions.onViewDetails(props.book)}>
+        查看详情
+      </AppContextMenuItem>
       <AppContextMenuItem onSelect={() => props.actions.onEdit(props.book)}>
         编辑
       </AppContextMenuItem>

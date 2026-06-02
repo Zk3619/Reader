@@ -1,4 +1,4 @@
-import { createSignal, createEffect, For, Show, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,6 @@ import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/Rea
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
-import type { ExploreSection } from "@/lib/book-source/explore-sections";
 import {
   openExploreSectionInInnerWeb,
   shouldOpenExplorePageForSection,
@@ -79,7 +78,7 @@ import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
 import { TocPaginationSafetySetting } from "@/components/settings/TocPaginationSafetySetting";
 import { BookInfoPresentationSetting } from "@/components/settings/BookInfoPresentationSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
+import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
 import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderModeSetting";
@@ -186,6 +185,14 @@ import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
 import {
+  createOverlayStack,
+  isOverlayPage,
+  isViewerOverlayKind,
+  normalizeShellTab,
+  type OverlayEntry,
+  type ShellTabPage,
+} from "@/lib/navigation/overlay-stack";
+import {
   ensureMainWindowVisible,
   isDevSplashDone,
   markDevSplashDone,
@@ -212,19 +219,6 @@ const mockRecentBooks = [
   },
 ];
 
-// 独立页面列表：这些页面不显示应用级导航栏（Navigation、SideBar、BottomBar），类似阅读器页面
-const STANDALONE_PAGES: PageType[] = [
-  "text-viewer",
-  "image-viewer",
-  "audio-viewer",
-  "video-viewer",
-  "file-viewer",
-  "explore",
-  "book-info",
-  "book-search",
-  "remote-book",
-];
-
 function isMediaViewerPage(page: PageType): page is MediaViewerPage {
   return (NON_TEXT_MEDIA_VIEWER_PAGES as PageType[]).includes(page);
 }
@@ -238,12 +232,24 @@ function normalizeRestoredPage(page: string): PageType {
 
 // 内部组件，用于访问 SidebarProvider 的上下文
 function AppContent() {
-  const [currentPage, setCurrentPage] = createSignal<PageType>(
-    normalizeRestoredPage(readHmrData<string>("currentPage", "bookshelf"))
+  const restoredPage = normalizeRestoredPage(readHmrData<string>("currentPage", "bookshelf"));
+  const nav = createOverlayStack(
+    isOverlayPage(restoredPage) ? "bookshelf" : normalizeShellTab(restoredPage),
   );
+  const currentPage = nav.currentPage;
+  const isStandalonePage = nav.isStandaloneVisible;
 
-  // 判断是否为独立页面
-  const isStandalonePage = () => STANDALONE_PAGES.includes(currentPage());
+  const navigateToPage = (page: PageType) => {
+    if (page === "book-search") {
+      openBookSearch();
+      return;
+    }
+    if (page === "remote-book") {
+      nav.push({ kind: "remote-book", originShell: nav.shellTab() });
+      return;
+    }
+    nav.navigateShell(page);
+  };
   const [greetMsg, setGreetMsg] = createSignal("");
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
   // 数据库初始化状态（保留用于将来显示加载状态）
@@ -295,10 +301,6 @@ function AppContent() {
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
   /** 书籍搜索页：书架/书源入口 */
-  const [bookSearchContext, setBookSearchContext] = createSignal<{
-    initialQuery?: string;
-    initialScope?: string;
-  } | null>(null);
   /** 书源登录对话框：配置了 loginUi 时弹窗显示登录页 */
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
   const [sourceVariableDialogSource, setSourceVariableDialogSource] =
@@ -365,13 +367,13 @@ function AppContent() {
         viewerStore.setBookInitialState(book, session.kind);
         void viewerStore.openBook(book, session.kind).catch((e) => {
           console.error("HMR 恢复媒体阅读器失败:", e);
-          setCurrentPage(readerReturnPage());
+          nav.pop();
         });
       });
       return;
     }
 
-    setCurrentPage(readerReturnPage());
+    nav.pop();
   });
 
   createEffect(() => {
@@ -399,11 +401,12 @@ function AppContent() {
   };
 
   const openBookSearch = (query?: string, scope?: string) => {
-    setBookSearchContext({
+    nav.push({
+      kind: "book-search",
       initialQuery: query?.trim() || undefined,
       initialScope: scope,
+      originShell: nav.shellTab(),
     });
-    setCurrentPage("book-search");
   };
 
   const sourcePageToolbarTitle = () => "书源";
@@ -870,87 +873,105 @@ function AppContent() {
     }
   };
 
-  /** 发现页上下文：从书源页点击某个分类/排行榜后进入发现页 */
-  const [exploreContext, setExploreContext] = createSignal<{
-    source: BookSource;
-    section: ExploreSection;
-  } | null>(null);
   /** 书源页展开项（切到发现页再返回时保持展开） */
   const [sourcesExpandedSourceUrl, setSourcesExpandedSourceUrl] = createSignal<string | null>(null);
-  /** 书籍信息页上下文：从发现页或阅读器进入书籍信息页 */
-  const [bookInfoContext, setBookInfoContext] = createSignal<{
+
+  const [bookInfoDrawer, setBookInfoDrawer] = createSignal<{
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'text-viewer' | 'bookshelf' | 'book-search';
+    originShell: ShellTabPage;
   } | null>(null);
   const [bookInfoDrawerOpen, setBookInfoDrawerOpen] = createSignal(false);
 
   const bookInfoUsesDrawer = () =>
     (settingsStore.state.app.bookInfoPresentation ?? 'page') === 'drawer';
 
+  const bookInfoCanContinueReading = () => {
+    if (bookInfoUsesDrawer()) {
+      return (
+        bookInfoDrawerOpen() &&
+        nav.entries().some((e) => e.kind === "text-viewer")
+      );
+    }
+    return nav.bookInfoCanContinueReading();
+  };
+
   function closeBookInfo() {
-    const ctx = bookInfoContext();
     setBookInfoDrawerOpen(false);
-    setBookInfoContext(null);
-    if (!bookInfoUsesDrawer() && ctx) {
-      setCurrentPage(ctx.fromPage ?? 'explore');
+    setBookInfoDrawer(null);
+    const top = nav.top();
+    if (top?.kind === "book-info") {
+      nav.pop();
     }
   }
 
   function openBookInfo(params: {
     source: BookSource;
     book: SearchBook;
-    fromPage: 'explore' | 'scout' | 'text-viewer' | 'bookshelf' | 'book-search';
+    originShell?: ShellTabPage;
   }) {
-    setBookInfoContext(params);
+    const originShell = params.originShell ?? nav.shellTab();
     if (bookInfoUsesDrawer()) {
+      setBookInfoDrawer({
+        source: params.source,
+        book: params.book,
+        originShell,
+      });
       setBookInfoDrawerOpen(true);
-    } else {
-      setCurrentPage('book-info');
+      return;
     }
+    nav.push({
+      kind: "book-info",
+      source: params.source,
+      book: params.book,
+      originShell,
+    });
   }
 
   function openBookFromBookInfo(book: Book, catalog?: import("@/types").BookChapter[]) {
-    const ctx = bookInfoContext();
-    const returnPage = bookInfoUsesDrawer()
-      ? ((ctx?.fromPage ?? currentPage()) as PageType)
-      : ('book-info' as PageType);
+    if (bookInfoCanContinueReading()) {
+      closeBookInfo();
+      return;
+    }
     if (bookInfoUsesDrawer()) {
       setBookInfoDrawerOpen(false);
-      setBookInfoContext(null);
+      setBookInfoDrawer(null);
     }
-    openReaderPage(book, returnPage, catalog);
+    openReaderPage(book, catalog);
   }
 
-  const [readerReturnPage, setReaderReturnPage] = createSignal<PageType>("bookshelf");
   const [guestAddToShelfOpen, setGuestAddToShelfOpen] = createSignal(false);
   const [guestAddToShelfBusy, setGuestAddToShelfBusy] = createSignal(false);
 
   function openReaderPage(
     book: Book,
-    returnPage: PageType,
     initialCatalog?: import("@/types").BookChapter[],
   ) {
-    setReaderReturnPage(returnPage);
     const kind = resolveMediaKind(book);
-    const page = mediaViewerPageForKind(kind);
+    const viewerKind = mediaViewerPageForKind(kind);
+    const existing = nav.findViewerEntry(viewerKind, book.bookUrl);
+    if (existing) {
+      nav.popToEntryId(existing.id);
+      return;
+    }
+    nav.removeViewerKinds(viewerKind);
 
     if (kind === MediaKind.text) {
       textViewerStore.setBookInitialState(book);
-      setCurrentPage(page);
+      nav.push({ kind: "text-viewer", bookUrl: book.bookUrl });
       void textViewerStore.openBook(book, { initialCatalog }).catch((e) => {
         console.error("打开书籍失败:", e);
-        setCurrentPage(returnPage);
+        nav.pop();
       });
       return;
     }
 
     viewerStore.setBookInitialState(book, kind);
     writeHmrData("mediaViewerSession", { bookUrl: book.bookUrl, kind });
-    setCurrentPage(page);
+    nav.push({ kind: viewerKind, bookUrl: book.bookUrl });
     void viewerStore.openBook(book, kind, { initialCatalog }).catch((e) => {
       console.error("打开书籍失败:", e);
-      setCurrentPage(returnPage);
+      nav.pop();
     });
   }
 
@@ -959,10 +980,14 @@ function AppContent() {
     const catalog = viewerStore.state.catalog;
     if (!book || book.bookUrl !== detail.bookUrl) return;
 
-    const returnPage = readerReturnPage();
     const initialCatalog = catalog.length > 0 ? catalog : undefined;
     const chapterIndex = detail.chapterIndex;
-    setCurrentPage("text-viewer");
+    const mediaTop = nav.top();
+    if (mediaTop && isViewerOverlayKind(mediaTop.kind) && mediaTop.kind !== "text-viewer") {
+      nav.pop();
+    }
+    nav.removeViewerKinds("text-viewer");
+    nav.push({ kind: "text-viewer", bookUrl: book.bookUrl });
     void viewerStore.closeBook().then(() => {
       textViewerStore.setBookInitialState(book);
       void textViewerStore
@@ -970,7 +995,7 @@ function AppContent() {
         .then(() => textViewerStore.loadChapter(chapterIndex))
         .catch((e) => {
           console.error("回退文本阅读器失败:", e);
-          setCurrentPage(returnPage);
+          nav.pop();
         });
     });
   }
@@ -990,11 +1015,12 @@ function AppContent() {
   async function finishCloseReader() {
     setGuestAddToShelfOpen(false);
     setGuestAddToShelfBusy(false);
-    const page = currentPage();
-    setCurrentPage(readerReturnPage());
-    if (page === "text-viewer") {
+    const top = nav.top();
+    if (!top || !isViewerOverlayKind(top.kind)) return;
+    nav.pop();
+    if (top.kind === "text-viewer") {
       await textViewerStore.closeBook();
-    } else if (isMediaViewerPage(page)) {
+    } else {
       await viewerStore.closeBook();
       writeHmrData("mediaViewerSession", null);
     }
@@ -2255,32 +2281,17 @@ function AppContent() {
     push("group-manage", showGroupManage(), () => setShowGroupManage(false));
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
-    push("book-info-drawer", bookInfoDrawerOpen(), () => {
-      setBookInfoDrawerOpen(false);
-      setBookInfoContext(null);
-    });
+    push("book-info-drawer", bookInfoDrawerOpen(), () => closeBookInfo());
 
-    const page = currentPage();
-    if (page === "text-viewer" || page === "image-viewer" || page === "audio-viewer" || page === "video-viewer" || page === "file-viewer") {
-      push(`viewer-${page}`, true, () => requestCloseReader());
-    }
-    if (page === "explore" && exploreContext()) {
-      push("explore", true, () => {
-        setExploreContext(null);
-        setCurrentPage("sources");
+    const overlayTop = nav.top();
+    if (overlayTop) {
+      push(`overlay-${overlayTop.kind}`, true, () => {
+        if (overlayTop.kind === "text-viewer" || isViewerOverlayKind(overlayTop.kind)) {
+          void finishCloseReader();
+          return;
+        }
+        nav.pop();
       });
-    }
-    if (page === "book-info" && !bookInfoUsesDrawer() && bookInfoContext()) {
-      push("book-info", true, () => closeBookInfo());
-    }
-    if (page === "book-search") {
-      push("book-search", true, () => {
-        setBookSearchContext(null);
-        setCurrentPage("bookshelf");
-      });
-    }
-    if (page === "remote-book") {
-      push("remote-book", true, () => setCurrentPage("bookshelf"));
     }
 
     return layers;
@@ -2336,7 +2347,7 @@ function AppContent() {
           <div class="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur">
             <Navigation
               currentPage={currentPage()}
-              onPageChange={setCurrentPage}
+              onPageChange={navigateToPage}
             />
           </div>
         </Show>
@@ -2352,7 +2363,7 @@ function AppContent() {
           >
             <SideBar
               currentPage={currentPage()}
-              onPageChange={setCurrentPage}
+              onPageChange={navigateToPage}
               recentBooks={mockRecentBooks}
               sidebarState={state}
               onToggleSidebar={toggleSidebar}
@@ -2364,7 +2375,7 @@ function AppContent() {
         <Show when={showBottomBar()}>
           <BottomBar
             currentPage={currentPage()}
-            onPageChange={setCurrentPage}
+            onPageChange={navigateToPage}
           />
         </Show>
 
@@ -2407,12 +2418,28 @@ function AppContent() {
                 >
                   <BookShelf
                     active={() => currentPage() === "bookshelf"}
-                    onPageChange={setCurrentPage}
+                    onPageChange={navigateToPage}
                     onOpenGroupManage={() => setShowGroupManage(true)}
                     onOpenBookshelfManage={() => setShowBookshelfManage(true)}
                     onImportLocal={handleBookshelfImportLocal}
                     onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                    onOpenBook={(book) => openReaderPage(book)}
+                    onOpenBookInfo={async (book) => {
+                      const source = await getSource(book.origin);
+                      if (!source) {
+                        showAppToast({
+                          title: "无法打开详情",
+                          description: "未找到对应书源",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      openBookInfo({
+                        source,
+                        book: bookToSearchBook(book),
+                        originShell: "bookshelf",
+                      });
+                    }}
                     onOpenBookshelfCache={(groupId) => {
                       setBookshelfCacheGroupId(groupId);
                       setShowBookshelfCache(true);
@@ -2428,7 +2455,7 @@ function AppContent() {
                 <Show when={showBookshelfManage()}>
                   <BookshelfManagePage
                     onClose={() => setShowBookshelfManage(false)}
-                    onOpenBook={(book) => openReaderPage(book, "bookshelf")}
+                    onOpenBook={(book) => openReaderPage(book)}
                     onOpenBookInfo={async (book) => {
                       const source = await getSource(book.origin);
                       if (!source) {
@@ -2442,7 +2469,7 @@ function AppContent() {
                       openBookInfo({
                         source,
                         book: bookToSearchBook(book),
-                        fromPage: "bookshelf",
+                        originShell: "bookshelf",
                       });
                     }}
                   />
@@ -2468,11 +2495,12 @@ function AppContent() {
               )}
             >
               <ExplorePage
-                active={() => currentPage() === "scout"}
-                onOpenBook={(book) => openReaderPage(book, "scout")}
+                active={() => nav.isShellActiveUnderBookInfo("scout")}
+                onOpenBook={(book) => openReaderPage(book)}
                 onOpenBookInfo={(source, book) => {
-                  openBookInfo({ source, book, fromPage: "scout" });
+                  openBookInfo({ source, book, originShell: "scout" });
                 }}
+                onOpenBookSearch={(scope) => openBookSearch(undefined, scope)}
               />
             </section>
 
@@ -2603,8 +2631,7 @@ function AppContent() {
                         }
                         return;
                       }
-                      setExploreContext({ source, section });
-                      setCurrentPage("explore");
+                      nav.push({ kind: "explore", source, section });
                     }}
                   />
                 </div>
@@ -2826,15 +2853,15 @@ function AppContent() {
                             关闭或缩短动画与过渡，适合对动效敏感或追求性能的用户
                           </p>
                         </div>
-                        <Switch
+                        <UiSwitch
                           checked={settingsStore.state.app.reduceMotion}
-                          onChange={(v) => settingsStore.setReduceMotion(!!v)}
+                          onChange={(v: boolean) => settingsStore.setReduceMotion(!!v)}
                         >
                           <SwitchControl class="data-disabled:cursor-not-allowed">
                             <SwitchThumb />
                           </SwitchControl>
                           <SwitchLabel class="sr-only">减少动效</SwitchLabel>
-                        </Switch>
+                        </UiSwitch>
                       </div>
                     </div>
 
@@ -2858,13 +2885,20 @@ function AppContent() {
           </main>
         </div>
 
-        {/* 独立页面（阅读器、发现、书籍信息、导入、远程书籍）- 全屏显示，在主容器外部 */}
+        {/* 独立页导航栈：栈内条目均保持挂载，仅栈顶可见（对齐 Legado Activity 栈） */}
         <Show when={isStandalonePage()}>
-          {/* 文本阅读器 */}
-          <Show when={currentPage() === "text-viewer"}>
-            <BookReader
-              onClose={requestCloseReader}
-              onOpenBookInfo={async () => {
+          <For each={nav.entries()}>
+            {(entry) => (
+              <div
+                class={cn(
+                  !nav.entryIsVisible(entry) && "hidden pointer-events-none",
+                )}
+              >
+                <Switch>
+                  <Match when={entry.kind === "text-viewer"}>
+                    <BookReader
+                onClose={requestCloseReader}
+                onOpenBookInfo={async () => {
                 const book = textViewerStore.state.book;
                 if (!book) return;
                 if (book.origin === "local") {
@@ -2893,95 +2927,89 @@ function AppContent() {
                   chapterWordCount: 0,
                   respondTime: 0,
                 };
-                openBookInfo({ source, book: sb, fromPage: "text-viewer" });
+                openBookInfo({ source, book: sb, originShell: nav.shellTab() });
               }}
-            />
-          </Show>
-
-          <Show when={currentPage() === "image-viewer"}>
-            <ImageViewerPage onClose={requestCloseReader} />
-          </Show>
-          <Show when={currentPage() === "audio-viewer"}>
-            <AudioViewerPage onClose={requestCloseReader} />
-          </Show>
-          <Show when={currentPage() === "video-viewer"}>
-            <VideoViewerPage onClose={requestCloseReader} />
-          </Show>
-          <Show when={currentPage() === "file-viewer"}>
-            <FileViewerPage onClose={requestCloseReader} />
-          </Show>
-
-          {/* 发现页：书源展开项进入，全屏独立（与阅读器同级，不在主容器内） */}
-          <Show when={currentPage() === "explore" && exploreContext()}>
-            {(ctx) => {
-              const { source, section } = ctx();
-              return (
-                <ExploreSourcePage
-                  source={source}
-                  section={section}
-                  onBack={() => {
-                    setExploreContext(null);
-                    setCurrentPage("sources");
-                  }}
-                  onOpenBook={(book) => openReaderPage(book, "explore")}
-                  onOpenBookInfo={(source, book) => {
-                    openBookInfo({ source, book, fromPage: "explore" });
-                  }}
-                />
-              );
-            }}
-          </Show>
-
-          {/* 书籍信息页（独立页面模式） */}
-          <Show
-            when={
-              currentPage() === "book-info" && !bookInfoUsesDrawer()
-                ? bookInfoContext()
-                : undefined
-            }
-          >
-            {(ctx) => {
-              const { book, source } = ctx();
-              return (
-                <BookInfoPage
-                  book={book}
-                  source={source}
-                  onBack={closeBookInfo}
-                  onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
-                />
-              );
-            }}
-          </Show>
-
-          <Show when={true}>
-            <BookSearchPage
-              initialQuery={bookSearchContext()?.initialQuery}
-              initialScope={bookSearchContext()?.initialScope}
-              className={cn(currentPage() === "book-search" ? "" : "hidden")}
-              onBack={() => {
-                setBookSearchContext(null);
-                setCurrentPage("bookshelf");
-              }}
-              onOpenBook={(book) => openReaderPage(book, "bookshelf")}
-              onOpenBookInfo={(source, book) => {
-                openBookInfo({ source, book, fromPage: "book-search" });
-              }}
-              onAddedToShelf={() => window.dispatchEvent(new CustomEvent("bookshelf-refresh"))}
-            />
-          </Show>
-
-          {/* 远程书籍页面 */}
-          <Show when={currentPage() === "remote-book"}>
-            <RemoteBookPage
-              onClose={() => setCurrentPage("bookshelf")}
-              groupId={bookshelfStore.state.currentGroup >= 0 ? bookshelfStore.state.currentGroup : undefined}
-            />
-          </Show>
-
+                    />
+                  </Match>
+                  <Match when={entry.kind === "image-viewer"}>
+                    <ImageViewerPage onClose={requestCloseReader} />
+                  </Match>
+                  <Match when={entry.kind === "audio-viewer"}>
+                    <AudioViewerPage onClose={requestCloseReader} />
+                  </Match>
+                  <Match when={entry.kind === "video-viewer"}>
+                    <VideoViewerPage onClose={requestCloseReader} />
+                  </Match>
+                  <Match when={entry.kind === "file-viewer"}>
+                    <FileViewerPage onClose={requestCloseReader} />
+                  </Match>
+                  <Match when={entry.kind === "explore"}>
+                    {(() => {
+                      const e = entry as Extract<OverlayEntry, { kind: "explore" }>;
+                      return (
+                    <ExploreSourcePage
+                      source={e.source}
+                      section={e.section}
+                      onBack={() => nav.pop()}
+                      onOpenBook={(book) => openReaderPage(book)}
+                      onOpenBookInfo={(source, book) => {
+                        openBookInfo({ source, book, originShell: "sources" });
+                      }}
+                    />
+                      );
+                    })()}
+                  </Match>
+                  <Match when={entry.kind === "book-info"}>
+                    {(() => {
+                      const e = entry as Extract<OverlayEntry, { kind: "book-info" }>;
+                      return (
+                    <BookInfoPage
+                      book={e.book}
+                      source={e.source}
+                      continueReading={bookInfoCanContinueReading()}
+                      onBack={closeBookInfo}
+                      onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
+                    />
+                      );
+                    })()}
+                  </Match>
+                  <Match when={entry.kind === "book-search"}>
+                    {(() => {
+                      const e = entry as Extract<OverlayEntry, { kind: "book-search" }>;
+                      return (
+                    <BookSearchPage
+                      initialQuery={e.initialQuery}
+                      initialScope={e.initialScope}
+                      onBack={() => nav.pop()}
+                      onOpenBook={(book) => openReaderPage(book)}
+                      onOpenBookInfo={(source, book) => {
+                        openBookInfo({ source, book, originShell: e.originShell });
+                      }}
+                      onAddedToShelf={() =>
+                        window.dispatchEvent(new CustomEvent("bookshelf-refresh"))
+                      }
+                    />
+                      );
+                    })()}
+                  </Match>
+                  <Match when={entry.kind === "remote-book"}>
+                    <RemoteBookPage
+                      onClose={() => nav.pop()}
+                      groupId={
+                        bookshelfStore.state.currentGroup >= 0
+                          ? bookshelfStore.state.currentGroup
+                          : undefined
+                      }
+                    />
+                  </Match>
+                </Switch>
+              </div>
+            )}
+          </For>
         </Show>
 
         {/* 书籍信息抽屉（抽屉模式，覆盖在当前页面之上） */}
-        <Show when={bookInfoUsesDrawer() ? bookInfoContext() : undefined}>
+        <Show when={bookInfoUsesDrawer() ? bookInfoDrawer() : undefined}>
           {(ctx) => {
             const { book, source } = ctx();
             return (
@@ -2993,6 +3021,7 @@ function AppContent() {
                 }}
                 book={book}
                 source={source}
+                continueReading={bookInfoCanContinueReading()}
                 onBack={closeBookInfo}
                 onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
               />
@@ -3004,7 +3033,7 @@ function AppContent() {
         <BookDirectoryDialog
           open={showBookDirectoryDialog()}
           onOpenChange={handleBookDirectoryDialogClose}
-          onOpenSettings={() => setCurrentPage("settings")}
+          onOpenSettings={() => navigateToPage("settings")}
         />
 
         {/* 导入操作选择弹窗 */}

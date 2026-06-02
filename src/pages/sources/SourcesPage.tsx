@@ -7,6 +7,7 @@ import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 import {
+  clearExploreSectionsCache,
   getExploreSections,
   getExploreSectionsAsync,
   isExploreUrlScript,
@@ -19,11 +20,15 @@ import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, sourcesExploreDrawerWidth } from '@/lib/ui/viewport-classes';
 import {
+  APP_DRAWER_CLOSE_BUTTON_CLASS,
   AppDrawer,
   AppDrawerBody,
   AppDrawerContent,
   AppDrawerHeader,
 } from '@/components/shared/AppDrawer';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { RefreshIcon } from '@/components/shared/icons';
 import { SourceExploreDrawerContent } from '@/components/sources/SourceExploreDrawerContent';
 import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
 import { SourcePageListItem } from '@/components/sources/SourcePageListItem';
@@ -357,6 +362,33 @@ export function SourcesPage(props: SourcesPageProps) {
     await refetchExploreSections();
   }
 
+  async function handleRefreshExploreDrawer() {
+    const url = expandedSourceUrl();
+    if (!url) return;
+    try {
+      clearExploreSectionsCache(url);
+      await loadSources();
+      const s = expandedSource();
+      if (!s) return;
+      if (isExploreUrlScript(s.exploreUrl)) {
+        setLoadedExploreArgsVersion(-1);
+        await refetchExploreSections();
+      }
+      showAppToast({
+        title: '已刷新',
+        description: `「${s.sourceName}」发现分类已重新加载`,
+        variant: 'default',
+      });
+    } catch (e) {
+      console.error('刷新发现分类失败:', e);
+      showAppToast({
+        title: '刷新失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
   async function handlePinSource(source: BookSource) {
     const list = sources();
     const minOrder = list.length > 0 ? Math.min(...list.map((s) => s.customOrder)) : 0;
@@ -505,7 +537,30 @@ export function SourcesPage(props: SourcesPageProps) {
           class={cn('z-50 flex h-full flex-col', sourcesExploreDrawerWidth)}
           showNativeDragHandle={false}
         >
-          <AppDrawerHeader title={expandedSource()?.sourceName ?? '发现'} />
+          <AppDrawerHeader
+            title={expandedSource()?.sourceName ?? '发现'}
+            actions={
+              <Tooltip>
+                <TooltipTrigger as="div" class="shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    class={APP_DRAWER_CLOSE_BUTTON_CLASS}
+                    disabled={drawerSectionsLoading()}
+                    aria-label="刷新发现分类"
+                    onClick={() => void handleRefreshExploreDrawer()}
+                  >
+                    <RefreshIcon
+                      class={cn('h-4 w-4', drawerSectionsLoading() && 'animate-spin')}
+                    />
+                    <span class="sr-only">刷新发现分类</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>刷新发现分类</TooltipContent>
+              </Tooltip>
+            }
+          />
           <AppDrawerBody class="overflow-y-auto scroll-gutter-stable-both px-3 pb-2 pt-1 mb-4">
             <Show when={expandedSource()}>
               {(source) => (

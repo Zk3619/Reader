@@ -215,6 +215,9 @@ export type AppDrawerHeaderProps = ComponentProps<'div'> & {
   actions?: JSX.Element;
 };
 
+/** 侧栏抽屉标题：flex 子项需 min-w-0 + truncate 才能在窄宽下省略 */
+const APP_DRAWER_HEADER_TITLE_CLASS = 'min-w-0 flex-1 truncate text-left';
+
 export const AppDrawerHeader: Component<AppDrawerHeaderProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'title', 'showClose', 'actions', 'children']);
   const hasRight = () => local.actions != null || local.showClose !== false;
@@ -226,9 +229,9 @@ export const AppDrawerHeader: Component<AppDrawerHeaderProps> = (props) => {
     >
       <Show
         when={local.title != null && local.title !== ''}
-        fallback={<div class="min-w-0 flex-1 text-left">{local.children}</div>}
+        fallback={<div class={APP_DRAWER_HEADER_TITLE_CLASS}>{local.children}</div>}
       >
-        <DrawerTitle class="min-w-0 flex-1 text-left">{local.title}</DrawerTitle>
+        <DrawerTitle class={APP_DRAWER_HEADER_TITLE_CLASS}>{local.title}</DrawerTitle>
       </Show>
       <Show when={hasRight()}>
         <div class="flex shrink-0 items-center gap-1">

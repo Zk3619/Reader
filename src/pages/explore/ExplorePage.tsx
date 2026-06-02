@@ -9,6 +9,8 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onCleanup,
+  onMount,
   Show,
   untrack,
 } from 'solid-js';
@@ -47,6 +49,7 @@ import {
 import { ExplorePageToolbar } from '@/components/explore/ExplorePageToolbar';
 import { ExploreSectionsPanel } from '@/components/explore/ExploreSectionsPanel';
 import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
+import { formatSourceScope } from '@/lib/book-source/search-scope';
 
 const EXPLORE_PAGE_TITLE = '探索';
 
@@ -55,6 +58,8 @@ export interface ExplorePageProps {
   active?: boolean | Accessor<boolean>;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo?: (source: BookSource, book: SearchBook) => void;
+  /** 进入搜索页，scope 为当前选中书源范围（name::url） */
+  onOpenBookSearch?: (scope: string) => void;
 }
 
 function sourceHasExplore(source: BookSource): boolean {
@@ -181,6 +186,14 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     void loadSources();
   });
 
+  onMount(() => {
+    const onSourcesRefresh = () => {
+      void loadSources();
+    };
+    window.addEventListener('sources-refresh', onSourcesRefresh);
+    onCleanup(() => window.removeEventListener('sources-refresh', onSourcesRefresh));
+  });
+
   createEffect(() => {
     if (!isActive()) return;
     if (!usesScriptExplore()) {
@@ -259,6 +272,12 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     setListRefreshKey((k) => k + 1);
   }
 
+  function handleOpenSearch() {
+    const s = selectedSource();
+    if (!s) return;
+    props.onOpenBookSearch?.(formatSourceScope(s));
+  }
+
   return (
     <div class={mainShellPageRoot}>
       <PageToolbar
@@ -290,6 +309,8 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
           showRefresh={!!selectedSection()?.url?.trim()}
           refreshDisabled={false}
           onRefresh={handleRefreshList}
+          searchDisabled={!selectedSource()}
+          onSearch={handleOpenSearch}
         />
       </PageToolbar>
 

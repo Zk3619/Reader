@@ -24,6 +24,8 @@ export interface ExplorePageToolbarProps {
   showRefresh?: boolean;
   refreshDisabled?: boolean;
   onRefresh?: () => void;
+  searchDisabled?: boolean;
+  onSearch?: () => void;
 }
 
 export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
@@ -47,7 +49,14 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
   return (
     <>
       <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 shrink-0">
+        <TooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class="h-9 w-9 shrink-0"
+          disabled={props.searchDisabled}
+          onClick={() => props.onSearch?.()}
+        >
           <SearchIcon class="h-4 w-4" />
           <span class="sr-only">搜索</span>
         </TooltipTrigger>

@@ -128,10 +128,19 @@ export function ReaderContent(props: ReaderContentProps) {
     return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : undefined;
   };
   
-  // 检测是否为错误内容（以"加载失败"开头）
+  const errorDetail = () => {
+    const c = content()?.trim() ?? '';
+    if (!c) return null;
+    if (c.startsWith('加载失败')) return c;
+    if (c.startsWith('书源不存在')) return c;
+    return null;
+  };
+
   const isErrorContent = () => {
-    const c = content();
-    return c && (c.startsWith('加载失败') || c.startsWith('内容加载失败') || c.startsWith('书源不存在'));
+    if (contentLoading() || !showContent()) return false;
+    const c = content()?.trim() ?? '';
+    if (!c) return true;
+    return errorDetail() != null;
   };
 
   const contentInset = () => config().contentInset ?? { left: 16, right: 16, center: 32 };
@@ -213,7 +222,7 @@ export function ReaderContent(props: ReaderContentProps) {
         </div>
       </Show>
 
-      <Show when={!showReaderSkeleton() && !contentLoading() && showContent() && content()}>
+      <Show when={!showReaderSkeleton() && !contentLoading() && showContent()}>
         <Show
           when={!isErrorContent()}
           fallback={
@@ -221,7 +230,9 @@ export function ReaderContent(props: ReaderContentProps) {
               <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-6 py-8 max-w-md w-full">
                 <div class="mb-4 text-center text-sm text-destructive">
                   <p class="font-medium mb-2 text-base">内容加载失败</p>
-                  <p class="text-xs text-destructive/80 wrap-break-word">{content()}</p>
+                  <Show when={errorDetail()}>
+                    <p class="text-xs text-destructive/80 wrap-break-word">{errorDetail()}</p>
+                  </Show>
                 </div>
                 <div class="flex justify-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => textViewerStore.refreshChapter(chapterIndex())}>

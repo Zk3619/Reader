@@ -201,6 +201,8 @@ export interface BookInfoPageProps {
   source?: BookSource;
   /** 展示方式：独立全屏页（默认）或嵌入抽屉内容区 */
   presentation?: 'page' | 'drawer';
+  /** 阅读器内打开详情且当前书仍在阅读会话中 */
+  continueReading?: boolean;
   onBack: () => void;
   onOpenBook: (book: Book, initialCatalog?: BookChapter[]) => void;
 }
@@ -334,6 +336,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       const bookInfo = await getBookInfo(source, bookUrl, {
         durChapterTitle: durTitle || undefined,
         bookVariable: props.book.variable,
+        book: props.book as unknown as Record<string, unknown>,
       });
 
       if (bookInfo) {
@@ -428,9 +431,12 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   function shelfAddOptions(chapters?: BookChapter[]) {
     const cached = chapters ?? preloadedChapters();
+    const hasCachedToc = (cached?.length ?? 0) > 0;
+    // 详情页已预加载完整目录时不再后台拉取（对齐阅读器试读加入书架）
+    const fetchChapters = hasCachedToc && !tocLoading() ? false : ('background' as const);
     return {
-      chapters: cached && cached.length > 0 ? cached : undefined,
-      fetchChapters: 'background' as const,
+      chapters: hasCachedToc && cached ? cached : undefined,
+      fetchChapters,
       readingProgress: getReaderProgressSnapshot(currentBook().bookUrl),
     };
   }
@@ -831,7 +837,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
           </Show>
           <Button variant="default" class="flex-1" onClick={handleStartReading} disabled={isAdding() || isRemoving()}>
             <BookOpenIcon class="h-4 w-4" />
-            开始阅读
+            {props.continueReading ? '继续阅读' : '开始阅读'}
           </Button>
         </div>
       </div>
@@ -845,13 +851,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
     if (isDark()) {
       return {
         'background-image': `url(${bgUrl})`,
-        filter: 'blur(40px) brightness(0.35)',
+        filter: 'blur(20px) brightness(0.45) saturate(1.05)',
         transform: 'scale(1.1)',
       };
     }
     return {
       'background-image': `url(${bgUrl})`,
-      filter: 'blur(40px) brightness(0.7) saturate(1.1)',
+      filter: 'blur(20px) brightness(0.8) saturate(1.15)',
       transform: 'scale(1.1)',
     };
   };
@@ -859,9 +865,9 @@ export function BookInfoPage(props: BookInfoPageProps) {
   // 根据主题计算遮罩层样式
   const overlayStyle = () => {
     if (isDark()) {
-      return 'bg-black/50';
+      return 'bg-black/40';
     } else {
-      return 'bg-white/60';
+      return 'bg-white/50';
     }
   };
 

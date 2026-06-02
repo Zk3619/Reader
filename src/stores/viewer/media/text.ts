@@ -484,8 +484,7 @@ export async function loadTextChapter(
     setState({ contentLoading: true, chapterIndex: index });
     try {
       const fileContent = await readLocalBookContent(book.bookUrl);
-      const content =
-        (await getLocalContent(book, chapter, fileContent)) ?? '内容加载失败';
+      const content = (await getLocalContent(book, chapter, fileContent)) ?? '';
       commitChapterContent(index, content, book);
       await saveTextProgress();
     } catch (e) {
@@ -502,7 +501,7 @@ export async function loadTextChapter(
   }
 
   if (!book.origin || book.origin === 'local') {
-    commitChapterContent(index, '内容加载失败', book);
+    commitChapterContent(index, '', book);
     await saveTextProgress();
     return;
   }
@@ -552,9 +551,7 @@ export async function loadTextChapter(
       chapter,
       nextChapterUrl,
     );
-    const content = raw
-      ? await applyChapterDisplayProcessing(raw, book, source)
-      : '内容加载失败';
+    const content = raw ? await applyChapterDisplayProcessing(raw, book, source) : '';
 
     commitChapterContent(index, content, book);
     void warmAdjacentChaptersFromCache(book, catalog, index, source);
