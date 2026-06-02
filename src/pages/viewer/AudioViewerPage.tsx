@@ -106,6 +106,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const url = () => viewerStore.state.primaryUrl;
   const mediaUrls = () => viewerStore.state.mediaUrls;
   const loading = () => viewerStore.state.loading;
+  const bootstrapping = () => viewerStore.isMediaViewerBootstrapping();
   const error = () => viewerStore.state.error;
 
   const audioConfig = createMemo(() => getAudioPlayConfig(book()));
@@ -193,7 +194,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     <>
       <MediaViewerShell>
         <MediaViewerShellMain>
-          <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6 pb-28 pt-16">
+          <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6">
             <Show when={book()?.coverUrl || book()?.customCoverUrl}>
               <img
                 src={book()?.customCoverUrl || book()?.coverUrl}
@@ -206,10 +207,10 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               {chapterTitle()}
             </p>
 
-            <Show when={loading()}>
+            <Show when={bootstrapping() || loading()}>
               <p class="text-sm text-muted-foreground">加载中…</p>
             </Show>
-            <Show when={!loading() && error()}>
+            <Show when={!bootstrapping() && !loading() && error()}>
               <div class="text-center">
                 <p class="text-sm text-destructive">{error()}</p>
                 <Button
@@ -223,7 +224,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               </div>
             </Show>
 
-            <Show when={!loading() && url()}>
+            <Show when={!bootstrapping() && !loading() && url()}>
               <div
                 class="flex w-full max-w-md flex-col items-center gap-4"
                 data-media-viewer-interactive-zone
@@ -425,6 +426,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
           <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
+              loading={bootstrapping()}
               initialScrollTop={catalogScrollTop()}
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {

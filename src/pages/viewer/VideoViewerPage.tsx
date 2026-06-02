@@ -68,6 +68,8 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
   const url = () => viewerStore.state.primaryUrl;
   const rawContent = () => viewerStore.state.rawContent;
   const loading = () => viewerStore.state.loading;
+  const bootstrapping = () => viewerStore.isMediaViewerBootstrapping();
+  const stageLoading = () => bootstrapping() || loading();
   const error = () => viewerStore.state.error;
 
   const playbackExtras = createMemo(() => parseVideoPlaybackExtrasFromRaw(rawContent()));
@@ -164,7 +166,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
           >
             <ArtPlayerStage
               containerRef={player.containerRef}
-              loading={loading}
+              loading={stageLoading}
               error={error}
               hasSrc={() => Boolean(url())}
               overlayTip={player.overlayTip}
@@ -177,45 +179,48 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
             />
           </div>
 
-          <Show when={!fullscreen.isFullscreen()}>
-            <MediaViewerHeader placement="overlay">
-              <MediaViewerToolbarHeader
-                title={book()?.name ?? ''}
-                subtitle={chapterTitle()}
-                onClose={props.onClose}
-                onOpenCatalog={() => setCatalogOpen(true)}
-                onOpenSpeed={() => {
-                  setSpeedDraft(videoConfig().playSpeed);
-                  setSpeedDialogOpen(true);
-                }}
-                onToggleFullscreen={() => void fullscreen.toggleFullscreen()}
-                isFullscreen={fullscreen.isFullscreen()}
-                onOpenVideoSettings={() => setSettingsOpen(true)}
-                playbackSpeedLabel={speedLabel()}
-                onRefresh={() => {
-                  if (!viewerStore.isOpen()) {
-                    showAppToast({
-                      title: '未打开书籍',
-                      description: '请从书架重新打开本书',
-                    });
-                    return;
-                  }
-                  void viewerStore.refreshChapter();
-                }}
-                loading={loading()}
-              />
-            </MediaViewerHeader>
+          <MediaViewerHeader placement="overlay" visible={fullscreen.isFullscreen() ? false : undefined}>
+            <MediaViewerToolbarHeader
+              title={book()?.name ?? ''}
+              subtitle={chapterTitle()}
+              onClose={props.onClose}
+              onOpenCatalog={() => setCatalogOpen(true)}
+              onOpenSpeed={() => {
+                setSpeedDraft(videoConfig().playSpeed);
+                setSpeedDialogOpen(true);
+              }}
+              onToggleFullscreen={() => void fullscreen.toggleFullscreen()}
+              isFullscreen={fullscreen.isFullscreen()}
+              onOpenVideoSettings={() => setSettingsOpen(true)}
+              playbackSpeedLabel={speedLabel()}
+              onRefresh={() => {
+                if (!viewerStore.isOpen()) {
+                  showAppToast({
+                    title: '未打开书籍',
+                    description: '请从书架重新打开本书',
+                  });
+                  return;
+                }
+                void viewerStore.refreshChapter();
+              }}
+              loading={loading()}
+            />
+          </MediaViewerHeader>
 
-            <MediaViewerFooter placement="overlay" collapseTarget="bottom-bar">
-              <MediaViewerChapterNavFooter
-                chapterIndex={chapterIndex()}
-                catalogLength={playableCatalogLength()}
-                loading={loading()}
-                onPrev={() => void goChapterDelta(-1)}
-                onNext={() => void goChapterDelta(1)}
-              />
-            </MediaViewerFooter>
-          </Show>
+          <MediaViewerFooter
+            placement="overlay"
+            collapseTarget="bottom-bar"
+            visible={fullscreen.isFullscreen() ? false : undefined}
+          >
+            <MediaViewerChapterNavFooter
+              chapterIndex={chapterIndex()}
+              catalogLength={playableCatalogLength()}
+              loading={loading()}
+              visible={fullscreen.isFullscreen() ? false : undefined}
+              onPrev={() => void goChapterDelta(-1)}
+              onNext={() => void goChapterDelta(1)}
+            />
+          </MediaViewerFooter>
 
           <Show when={fullscreen.isFullscreen()}>
             <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end gap-1 p-2">
@@ -254,6 +259,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
           <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
+              loading={bootstrapping()}
               initialScrollTop={catalogScrollTop()}
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {

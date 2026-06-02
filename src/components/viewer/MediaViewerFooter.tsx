@@ -1,4 +1,4 @@
-import { splitProps, type JSX } from 'solid-js';
+import { Show, splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
@@ -33,19 +33,36 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
     if (placement() === 'overlay' && shell) return shell.footerVisible();
     return true;
   };
+  const overlayFooterPanel = () =>
+    placement() === 'overlay' && collapseTarget() === 'footer';
 
   return (
     <div
       class={cn(
-        'reader-footer flex flex-col safe-area-inset-bottom',
-        placement() === 'overlay' && 'absolute bottom-0 left-0 right-0 z-10',
+        'reader-footer flex flex-col',
+        placement() === 'overlay' && 'pointer-events-none absolute bottom-0 left-0 right-0 z-10',
         placement() === 'fixed' && 'shrink-0 border-t border-border',
-        collapseTarget() === 'footer' && !visible() && 'reader-bar-hidden',
+        !overlayFooterPanel() && collapseTarget() === 'footer' && 'safe-area-inset-bottom',
+        !overlayFooterPanel() && collapseTarget() === 'footer' && !visible() && 'reader-bar-hidden',
+        collapseTarget() === 'bottom-bar' && !visible() && 'pointer-events-none',
         local.class,
       )}
       onClick={(e) => e.stopPropagation()}
     >
-      {local.children}
+      <Show
+        when={overlayFooterPanel()}
+        fallback={local.children}
+      >
+        <div
+          class={cn(
+            'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
+            'pointer-events-auto flex w-full flex-col safe-area-inset-bottom',
+            !visible() && 'reader-chrome-overlay-panel--hidden',
+          )}
+        >
+          {local.children}
+        </div>
+      </Show>
     </div>
   );
 }

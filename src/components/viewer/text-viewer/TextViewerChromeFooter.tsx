@@ -36,10 +36,10 @@ export function TextViewerChromeFooter(props: TextViewerChromeFooterProps) {
     <>
       <div
         class={cn(
-          'reader-bottom-bar flex h-9 shrink-0 items-center justify-between gap-3 px-4 text-xs',
+          'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom flex h-9 shrink-0 items-center justify-between gap-3 px-4 text-xs',
           props.bottomBarThemeClasses ??
             'border-t border-border/50 bg-background/95 text-muted-foreground backdrop-blur',
-          !props.statusBarVisible && 'reader-bar-hidden',
+          !props.statusBarVisible && 'reader-chrome-overlay-panel--hidden',
         )}
       >
         <Tooltip>
@@ -61,8 +61,8 @@ export function TextViewerChromeFooter(props: TextViewerChromeFooterProps) {
       <Show when={!props.isWideScreen}>
         <div
           class={cn(
-            'reader-control-bar flex shrink-0 flex-col border-t border-border/50 bg-background/95 px-3 py-2 text-muted-foreground backdrop-blur',
-            !props.operationBarVisible && 'reader-bar-hidden',
+            'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom flex shrink-0 flex-col border-t border-border/50 bg-background/95 px-3 py-2 text-muted-foreground backdrop-blur',
+            !props.operationBarVisible && 'reader-chrome-overlay-panel--hidden',
           )}
         >
           <div class="flex items-center gap-2">

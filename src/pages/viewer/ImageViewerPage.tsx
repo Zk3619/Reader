@@ -64,6 +64,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     }));
   });
   const loading = () => viewerStore.state.loading;
+  const bootstrapping = () => viewerStore.isMediaViewerBootstrapping();
   const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
@@ -177,12 +178,12 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
             class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both bg-black/90"
             {...{ [MANGA_SCROLL_ROOT_ATTR]: '' }}
           >
-            <Show when={loading()}>
+            <Show when={bootstrapping() || loading()}>
               <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
                 加载中…
               </div>
             </Show>
-            <Show when={!loading() && error()}>
+            <Show when={!bootstrapping() && !loading() && error()}>
               <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
                 <p class="text-sm whitespace-pre-wrap text-destructive">{error()}</p>
                 <Button size="sm" variant="outline" onClick={refreshChapter}>
@@ -190,7 +191,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                 </Button>
               </div>
             </Show>
-            <Show when={!loading() && !error()}>
+            <Show when={!bootstrapping() && !loading() && !error()}>
               <Show
                 when={imageList().length > 0}
                 fallback={
@@ -263,6 +264,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
           <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
+              loading={bootstrapping()}
               initialScrollTop={catalogScrollTop()}
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {

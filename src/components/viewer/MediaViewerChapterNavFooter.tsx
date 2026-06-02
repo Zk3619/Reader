@@ -15,7 +15,7 @@ export interface MediaViewerChapterNavFooterProps {
   onNext: () => void;
 }
 
-/** 媒体阅读器通用章节切换底栏（显隐动画与文本 reader-bottom-bar 一致） */
+/** 媒体阅读器通用章节切换底栏（overlay 位移+淡入淡出） */
 export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterProps) {
   const [local] = splitProps(props, [
     'chapterIndex',
@@ -36,8 +36,9 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
   return (
     <div
       class={cn(
-        'reader-bottom-bar flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur',
-        !visible() && 'reader-bar-hidden',
+        'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
+        'flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom',
+        !visible() && 'reader-chrome-overlay-panel--hidden',
       )}
     >
       <Button

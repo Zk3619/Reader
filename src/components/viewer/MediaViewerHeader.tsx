@@ -22,12 +22,29 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
     return true;
   };
 
+  if (placement() === 'overlay') {
+    return (
+      <header
+        class={cn(
+          'reader-chrome-overlay-panel reader-chrome-overlay-panel--top',
+          'absolute left-0 right-0 top-0 z-10',
+          'border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
+          !visible() && 'reader-chrome-overlay-panel--hidden',
+          local.class,
+        )}
+        data-tauri-drag-region
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div class="flex h-14 items-center gap-2 px-4">{local.children}</div>
+      </header>
+    );
+  }
+
   return (
     <header
       class={cn(
         'reader-top-bar flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
-        placement() === 'overlay' && 'absolute left-0 right-0 top-0 z-10',
-        placement() === 'fixed' && 'shrink-0',
+        'shrink-0',
         !visible() && 'reader-bar-hidden',
         local.class,
       )}

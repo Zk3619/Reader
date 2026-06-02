@@ -42,6 +42,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
   const chapterIndex = () => viewerStore.state.chapterIndex;
   const url = () => viewerStore.state.primaryUrl;
   const loading = () => viewerStore.state.loading;
+  const bootstrapping = () => viewerStore.isMediaViewerBootstrapping();
   const error = () => viewerStore.state.error;
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
@@ -57,12 +58,12 @@ export function FileViewerPage(props: FileViewerPageProps) {
       <MediaViewerShell>
         <MediaViewerShellMain>
           <div class="absolute inset-0 flex flex-col bg-muted/30">
-          <Show when={loading()}>
+          <Show when={bootstrapping() || loading()}>
             <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
               加载中…
             </div>
           </Show>
-          <Show when={!loading() && error()}>
+          <Show when={!bootstrapping() && !loading() && error()}>
             <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p class="text-sm text-destructive">{error()}</p>
               <Button
@@ -74,7 +75,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
               </Button>
             </div>
           </Show>
-          <Show when={!loading() && url()}>
+          <Show when={!bootstrapping() && !loading() && url()}>
             {(fileUrl) => (
               <>
                 <Show
@@ -153,6 +154,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
           <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
+              loading={bootstrapping()}
               initialScrollTop={catalogScrollTop()}
               onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {

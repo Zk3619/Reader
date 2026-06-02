@@ -143,7 +143,7 @@ export async function openMediaBookWithKind(
     !isLocalBook(book) && book.origin ? await sourcesDb.getSource(book.origin) : null;
 
   if (catalogToUse.length === 0 && source && book.tocUrl) {
-    await fetchChapterListDeduped(source, book.tocUrl, {
+    const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
       reverseToc,
       bookVariable: book.variable,
       onPartial: async (partial) => {
@@ -151,7 +151,7 @@ export async function openMediaBookWithKind(
         if (state.book?.bookUrl !== book.bookUrl) return;
         const idx = clampChapterIndex(rawIndex, partial.chapters.length);
         setState({ catalog: partial.chapters, chapterIndex: idx, chapterPos });
-        if (!state.rawContent && partial.chapters.length > 0) {
+        if (!state.rawContent && partial.chapters.length > 0 && !state.primaryUrl) {
           await loadChapter(idx);
         }
         if (partial.isComplete) {
@@ -159,9 +159,18 @@ export async function openMediaBookWithKind(
         }
       },
     });
+    if (state.book?.bookUrl !== book.bookUrl) return;
+
+    if (state.catalog.length === 0 && chapters.length > 0) {
+      const idx = clampChapterIndex(rawIndex, chapters.length);
+      setState({ catalog: chapters, chapterIndex: idx, chapterPos });
+    }
+
     if (state.catalog.length > 0 && !state.primaryUrl && !state.error) {
       const idx = clampChapterIndex(rawIndex, state.catalog.length);
       await loadChapter(idx);
+    } else if (state.catalog.length === 0) {
+      setState({ loading: false, error: '暂无章节' });
     }
     return;
   }
@@ -260,4 +269,12 @@ export function setMediaBookInitialState(book: Book, kind: MediaKind): void {
     loading: true,
     error: null,
   });
+}
+
+/** 目录或本章尚未就绪（非 text 阅读器） */
+export function isMediaViewerBootstrapping(): boolean {
+  const kind = state.kind;
+  if (!kind || kind === MediaKind.text || !state.book) return false;
+  if (state.error) return false;
+  return state.loading || state.catalog.length === 0;
 }

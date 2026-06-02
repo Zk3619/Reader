@@ -1,15 +1,18 @@
-import { createEffect, createMemo } from 'solid-js';
+import { createEffect, createMemo, Show } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
 import {
   scrollCatalogIndexIntoView,
   VirtualChapterList,
 } from '@/components/books/VirtualChapterList';
+import { Button } from '@/components/ui/button';
 import { buildChapterRowMetas, CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
 import { cn } from '@/lib/utils';
 
 export interface MediaViewerCatalogProps {
   onSelectChapter: (index: number) => void;
   open?: boolean;
+  /** 目录拉取中（无章节数据时显示占位） */
+  loading?: boolean;
   initialScrollTop?: number;
   onScrollTop?: (scrollTop: number) => void;
 }
@@ -45,9 +48,23 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
     });
   });
 
+  const catalogLoading = () => props.loading === true && catalog().length === 0;
+
   return (
+    <Show
+      when={!catalogLoading()}
+      fallback={
+        <p class="px-4 py-8 text-center text-sm text-muted-foreground">正在加载目录…</p>
+      }
+    >
+    <Show
+      when={rows().length > 0}
+      fallback={
+        <p class="px-4 py-8 text-center text-sm text-muted-foreground">目录为空</p>
+      }
+    >
     <VirtualChapterList
-      class="reader-catalog-scroll"
+      class="reader-catalog-scroll mb-2"
       count={rows().length}
       onScrollContainer={(el) => {
         scrollContainer = el;
@@ -68,10 +85,11 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
             class={cn('box-border w-full min-w-0 px-0', underVolume && !isVol && 'pl-4')}
             style={{ height: `${CATALOG_ROW_HEIGHT_PX}px` }}
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
               class={cn(
-                'flex h-full w-full items-center truncate rounded-md px-4 text-left text-sm transition-colors',
+                'flex h-full min-h-0 w-full justify-start rounded-md px-4 text-left text-sm font-normal transition-colors',
                 isVol && 'text-muted-foreground hover:bg-muted/80',
                 !isVol && 'hover:bg-muted/80',
                 isCurrent && 'bg-primary/10 font-medium text-primary',
@@ -79,10 +97,12 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
               onClick={() => props.onSelectChapter(index)}
             >
               <span class="min-w-0 flex-1 truncate">{chapter.title}</span>
-            </button>
+            </Button>
           </div>
         );
       }}
     </VirtualChapterList>
+    </Show>
+    </Show>
   );
 }

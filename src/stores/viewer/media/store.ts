@@ -10,7 +10,11 @@ import { isLocalBook } from '@/lib/local-book';
 import { flushReadingSession } from '@/lib/media/text/reading-session';
 import type { Book, BookChapter } from '@/types';
 import { state, setState, resetViewerState } from '@/stores/viewer/media/state';
-import { resetMediaChapterSession, saveMediaProgress } from '@/stores/viewer/media/chapter';
+import {
+  isMediaViewerBootstrapping,
+  resetMediaChapterSession,
+  saveMediaProgress,
+} from '@/stores/viewer/media/chapter';
 import {
   loadImageChapter,
   openImageBook,
@@ -193,6 +197,10 @@ export const viewerStore = {
 
   isGuestReading(): boolean {
     return state.guestReading;
+  },
+
+  isMediaViewerBootstrapping(): boolean {
+    return isMediaViewerBootstrapping();
   },
 
   async closeBook(): Promise<void> {
