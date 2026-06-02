@@ -20,6 +20,12 @@ fn login_open_pending() -> &'static Mutex<HashMap<String, (String, String)>> {
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// CF 验证 panel 实际 navigator.userAgent（与书源 header 可能不同，须与 cf_clearance 一致）
+fn inner_web_panel_user_agent_store() -> &'static Mutex<String> {
+    static STORE: OnceLock<Mutex<String>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(String::new()))
+}
+
 /// 统一配置文件名：安装版在默认目录、便携版在 exe 同目录创建，存放程序配置与数据路径（如 dataDir）
 const CONFIG_FILE: &str = "config.json";
 
@@ -465,6 +471,21 @@ async fn run_login_script_rust(
         .map_err(|e| e.to_string())?
 }
 
+/// 覆盖子 WebView navigator.userAgent（与书源 HTTP 头一致，避免 CF clearance 绑定 UA 分叉）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn apply_user_agent_override_to_webview(webview: &tauri::Webview, user_agent: &str) -> Result<(), String> {
+    let ua = user_agent.trim();
+    if ua.is_empty() {
+        return Ok(());
+    }
+    let js = format!(
+        "try{{ navigator.__defineGetter__('userAgent', function(){{ return {}; }}); }}catch(e){{}}",
+        serde_json::to_string(ua).map_err(|e| e.to_string())?
+    );
+    webview.eval(&js).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 向 Webview 注入目标 URL 域下的 Cookie
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn apply_http_cookies_to_webview(
@@ -657,6 +678,86 @@ async fn get_webview_cookies_for_url(
     Ok(parts.join("; "))
 }
 
+/// 合并 panel 在若干 URL 键上的 Cookie（含 HttpOnly 的 cf_clearance）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn merge_panel_cookies_for_url(
+    panel: &tauri::Webview,
+    url: &str,
+    seen: &mut std::collections::HashSet<String>,
+    parts: &mut Vec<String>,
+) {
+    let url = url.trim();
+    if url.is_empty() || !url.starts_with("http") {
+        return;
+    }
+    let Ok(parsed) = url::Url::parse(url) else {
+        return;
+    };
+    let origin = parsed.origin().ascii_serialization();
+    let mut urls_to_try = vec![url.to_string(), origin.clone()];
+    if !origin.ends_with('/') {
+        urls_to_try.push(format!("{origin}/"));
+    }
+    if let Some(host) = parsed.host_str() {
+        urls_to_try.push(format!("{}://{}/", parsed.scheme(), host));
+    }
+    for u in urls_to_try {
+        let Ok(parsed_u) = url::Url::parse(&u) else {
+            continue;
+        };
+        let Ok(cookies) = panel.cookies_for_url(parsed_u) else {
+            continue;
+        };
+        for c in cookies {
+            let line = format!("{}={}", c.name(), c.value());
+            if seen.insert(line.clone()) {
+                parts.push(line);
+            }
+        }
+    }
+}
+
+/// panel bootstrap 上报的 navigator.userAgent（CF clearance 绑定此 UA）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn store_inner_web_panel_user_agent(ua: String) -> Result<(), String> {
+    let trimmed = ua.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if let Ok(mut guard) = inner_web_panel_user_agent_store().lock() {
+        *guard = trimmed.to_string();
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn get_inner_web_panel_user_agent() -> Result<String, String> {
+    Ok(inner_web_panel_user_agent_store()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default())
+}
+
+/// CF 挑战后 panel 可能已跳转到镜像域；读取当前 document URL
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn get_inner_web_panel_current_url(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+
+    let panel = app
+        .get_webview(INNER_WEB_PANEL_LABEL)
+        .ok_or_else(|| "内嵌网页面板未打开".to_string())?;
+    let current = panel.url().map_err(|e| e.to_string())?;
+    let s = current.to_string();
+    if s.starts_with("http://") || s.starts_with("https://") {
+        Ok(s)
+    } else {
+        Ok(String::new())
+    }
+}
+
 /// 仅从桌面内嵌子 WebView 面板读取 Cookie（√ 同步书源设置时避免回退到主 WebView 的旧 Cookie）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -670,19 +771,13 @@ async fn get_inner_web_panel_cookies_for_url(
     if url.is_empty() || !url.starts_with("http") {
         return Err("URL 无效".to_string());
     }
-    let parsed_url = url::Url::parse(url).map_err(|e| e.to_string())?;
     let panel = app
         .get_webview(INNER_WEB_PANEL_LABEL)
         .ok_or_else(|| "内嵌网页面板未打开".to_string())?;
 
-    let cookies = panel
-        .cookies_for_url(parsed_url)
-        .map_err(|e| e.to_string())?;
-
-    let parts: Vec<String> = cookies
-        .iter()
-        .map(|c| format!("{}={}", c.name(), c.value()))
-        .collect();
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut parts: Vec<String> = Vec::new();
+    merge_panel_cookies_for_url(&panel, url, &mut seen, &mut parts);
     Ok(parts.join("; "))
 }
 
@@ -731,6 +826,7 @@ async fn open_inner_web_panel(
     y: f64,
     width: f64,
     height: f64,
+    user_agent: Option<String>,
 ) -> Result<(), String> {
     use tauri::webview::WebviewBuilder;
     use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
@@ -739,6 +835,9 @@ async fn open_inner_web_panel(
 
     let url = url.trim().to_string();
     let cookies_str = cookies.trim().to_string();
+    let panel_user_agent = user_agent
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let ok_http = url.starts_with("http://") || url.starts_with("https://");
     let ok_data = url.starts_with("data:text/html");
     if url.is_empty() || !(ok_http || ok_data) {
@@ -777,6 +876,9 @@ async fn open_inner_web_panel(
                 ));
             }
         } else {
+            if let Some(ref ua) = panel_user_agent {
+                apply_user_agent_override_to_webview(&panel, ua)?;
+            }
             let nav = format!(
                 "window.location.replace({});",
                 serde_json::to_string(&url).unwrap()
@@ -806,6 +908,9 @@ async fn open_inner_web_panel(
 
     if !cookies_str.is_empty() && ok_http {
         apply_http_cookies_to_webview(&panel, &url, &cookies_str)?;
+    }
+    if let Some(ref ua) = panel_user_agent {
+        apply_user_agent_override_to_webview(&panel, ua)?;
     }
     store_inner_web_panel_rect(x, y, w, h);
     if ok_http {
@@ -1257,6 +1362,73 @@ fn decode_gbk(data: Vec<u8>) -> Result<String, String> {
     Ok(decoded.into_owned())
 }
 
+fn encode_gbk_form_component(s: &str) -> String {
+    let (cow, _, had_errors) = GBK.encode(s);
+    if had_errors {
+        eprintln!("警告: GBK 编码时遇到一些无法转换的字符");
+    }
+    let mut out = String::with_capacity(cow.len() * 3);
+    for &b in cow.as_ref() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => {
+                out.push(b as char);
+            }
+            b' ' => out.push('+'),
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "%{:02X}", b);
+            }
+        }
+    }
+    out
+}
+
+fn decode_form_value_if_base64(value: &str) -> String {
+    if value.starts_with('<') && value.ends_with('>') && value.len() >= 2 {
+        let inner = &value[1..value.len() - 1];
+        if let Ok(decoded) = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            inner,
+        ) {
+            return String::from_utf8_lossy(&decoded).into_owned();
+        }
+    }
+    value.to_string()
+}
+
+/// Legado AnalyzeUrl：charset=gbk 时对 key=value&... 做 GBK 百分号编码（对齐 Java URLEncoder）
+#[tauri::command]
+fn encode_form_urlencoded_gbk(fields: String) -> Result<String, String> {
+    let len = fields.len();
+    let mut pos = 0usize;
+    let mut parts: Vec<String> = Vec::new();
+
+    while pos <= len {
+        let amp = fields[pos..].find('&').map(|i| pos + i).unwrap_or(len);
+        let eq = fields[pos..amp].find('=').map(|i| pos + i);
+
+        if eq.is_none() {
+            let key = fields[pos..amp].trim();
+            if !key.is_empty() {
+                parts.push(encode_gbk_form_component(key));
+            }
+        } else {
+            let eq = eq.unwrap();
+            let key = fields[pos..eq].trim();
+            let mut value = fields[eq + 1..amp].to_string();
+            value = decode_form_value_if_base64(&value);
+            parts.push(format!(
+                "{}={}",
+                encode_gbk_form_component(key),
+                encode_gbk_form_component(&value)
+            ));
+        }
+        pos = amp + 1;
+    }
+
+    Ok(parts.join("&"))
+}
+
 #[cfg(debug_assertions)]
 fn prevent_default() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     use tauri_plugin_prevent_default::Flags;
@@ -1303,6 +1475,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
@@ -1411,6 +1584,7 @@ pub fn run() {
             fetch_url_text,
             extract_zip_json_entries,
             decode_gbk,
+            encode_form_urlencoded_gbk,
             get_app_data_root,
             get_config,
             set_config,
@@ -1423,6 +1597,10 @@ pub fn run() {
             get_webview_cookies_for_url,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             get_inner_web_panel_cookies_for_url,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            get_inner_web_panel_current_url,
+            store_inner_web_panel_user_agent,
+            get_inner_web_panel_user_agent,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             flush_inner_web_panel_document_cookie,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1461,6 +1639,14 @@ pub fn run() {
             crate::backstage_webview::set_cookies_for_backstage_webview,
             crate::webjs_java_rpc::webjs_java_rpc,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // 兜底：阻止 WebView 栈空时系统返回直接杀进程；「再按一次退出」由前端 onBackButtonPress 处理。
+            // 前端无法拦截 RunEvent::ExitRequested，此逻辑不能整体搬到 JS。
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }

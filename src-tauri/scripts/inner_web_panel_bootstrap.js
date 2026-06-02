@@ -5,6 +5,20 @@
   if (window.__READER_INNER_WEB_PANEL_COOKIE__) return;
   window.__READER_INNER_WEB_PANEL_COOKIE__ = true;
 
+  try {
+    var ua = String(navigator.userAgent || '').trim();
+    if (ua) {
+      window.__READER_PANEL_UA__ = ua;
+      var inv =
+        window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      if (inv) {
+        inv('store_inner_web_panel_user_agent', { ua: ua }).catch(function () {});
+      }
+    }
+  } catch (e) {
+    /* ignore */
+  }
+
   function syncToHost() {
     try {
       var href = String(location.href || '');

@@ -3,7 +3,7 @@ node_modules/
 
 *.local
 
-# Tauri：根目录相关（构建与生成见 src-tauri/.gitignore：target/、gen/）
+# Tauri：根目录相关（构建与生成见 src-tauri/.gitignore：target/、gen/；Android 模板见该文件内 ! 规则）
 .tauri/
 
 # Env and secrets

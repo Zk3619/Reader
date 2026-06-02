@@ -21,6 +21,9 @@
     "core:window:allow-create",
     "core:webview:allow-create-webview-window",
     "core:app:allow-default-window-icon",
+    "core:app:allow-register-listener",
+    "core:app:allow-remove-listener",
+    "process:allow-exit",
     "core:window:allow-start-dragging",
     "opener:default",
     {
