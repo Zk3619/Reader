@@ -57,11 +57,13 @@ async function handleMethod(
     case 'iframeReady':
     case 'syncDocumentCookie': {
       const cookie = String(args?.cookie ?? '').trim();
+      const sessionId = String(args?.sessionId ?? '').trim();
+      // 纯 Web / Tauri 的 __reader_http 代理 iframe：只靠 sessionId 合并（注入脚本不传 url）
+      if (sessionId && cookie) {
+        await mergeInnerWebProxySessionCookies(sessionId, cookie);
+        return true;
+      }
       if (!isTauri()) {
-        const sessionId = String(args?.sessionId ?? '').trim();
-        if (sessionId && cookie) {
-          await mergeInnerWebProxySessionCookies(sessionId, cookie);
-        }
         return true;
       }
       const url = String(args?.url ?? '').trim();

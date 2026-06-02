@@ -77,6 +77,13 @@ export function isMobile(): boolean {
   return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua);
 }
 
+/** 是否 Android（含 Tauri WebView） */
+export function isAndroid(): boolean {
+  if (import.meta.env.TAURI_ENV_PLATFORM === 'android') return true;
+  if (typeof navigator === 'undefined') return false;
+  return /android/i.test(navigator.userAgent);
+}
+
 /**
  * 缓存的环境检测结果（避免重复检测）
  */

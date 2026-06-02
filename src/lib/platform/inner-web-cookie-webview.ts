@@ -20,3 +20,11 @@ export function innerWebCookieInvokeArgs(
   if (!useMainWebview) return extra;
   return { ...extra, useMainWebview: true };
 }
+
+/** iframe 且非代理文档时读主 WebView；代理会话 / Tauri panel 读子 WebView */
+export function resolveInnerWebCookiesUseMainWebview(options: {
+  iframeMode: boolean;
+  useProxyDocument?: boolean;
+}): boolean {
+  return options.iframeMode && !options.useProxyDocument;
+}

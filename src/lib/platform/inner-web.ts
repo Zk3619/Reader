@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 import { isTauri } from '@/lib/platform/detect';
 import {
   INNER_WEB_MESSAGE_CHANNEL,
@@ -15,6 +16,7 @@ import {
   setInnerWebSessionActive,
 } from '@/lib/platform/inner-web-tauri';
 import {
+  isBookSourceControlUrl,
   onInnerWebSessionEnded,
   useInnerWebIframe,
   useInnerWebTauriPanel,
@@ -22,6 +24,7 @@ import {
 import {
   getInnerWebCookiesUseMainWebview,
   innerWebCookieInvokeArgs,
+  resolveInnerWebCookiesUseMainWebview,
   setInnerWebCookiesUseMainWebview,
 } from '@/lib/platform/inner-web-cookie-webview';
 import {
@@ -58,6 +61,11 @@ export interface InnerWebPayload {
   useProxyDocument?: boolean;
   /** 创建代理会话时附带的书源请求头（User-Agent 等） */
   proxyForwardHeaders?: Record<string, string>;
+  /**
+   * Cloudflare 验证：桌面 Tauri 也强制 iframe + __reader_http 代理（读取 HttpOnly cf_clearance）。
+   * 不影响 innerWebRenderMode 的其它内嵌页。
+   */
+  cloudflareVerification?: boolean;
 }
 
 export interface InnerWebCloseResult {
@@ -139,20 +147,30 @@ export function registerInnerWebPatch(fn: PatchFn): void {
 
 function normalizeInnerWebPayload(payload: InnerWebPayload): InnerWebPayload | null {
   const html = payload.html?.trim() || undefined;
-  const url = payload.url?.trim() || undefined;
+  const rawUrl = payload.url?.trim() || undefined;
+  const url =
+    rawUrl && /^https?:/i.test(rawUrl)
+      ? stripMisplacedCookieFromHttpUrl(rawUrl)
+      : rawUrl;
   if (!html && !url) return null;
+  const rawSync = payload.cookieSyncUrl?.trim() || url || undefined;
+  const cookieSyncUrl =
+    rawSync && /^https?:/i.test(rawSync)
+      ? stripMisplacedCookieFromHttpUrl(rawSync)
+      : rawSync;
   return {
     title: payload.title || '网页',
     html,
     url,
     showConfirm: payload.showConfirm,
-    cookieSyncUrl: payload.cookieSyncUrl?.trim() || url || undefined,
+    cookieSyncUrl,
     initialCookies: payload.initialCookies?.trim() || undefined,
     bookSourceUrl: payload.bookSourceUrl?.trim() || undefined,
     presentation: payload.presentation,
     loading: payload.loading,
     useProxyDocument: payload.useProxyDocument,
     proxyForwardHeaders: payload.proxyForwardHeaders,
+    cloudflareVerification: payload.cloudflareVerification,
   };
 }
 
@@ -296,7 +314,15 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
   const { html, url } = normalized;
   try {
     const iframeMode = useInnerWebIframe({ url, html });
-    setInnerWebCookiesUseMainWebview(iframeMode);
+    const bookSourceControl = Boolean(url && isBookSourceControlUrl(url));
+    setInnerWebCookiesUseMainWebview(
+      normalized.cloudflareVerification || bookSourceControl
+        ? false
+        : resolveInnerWebCookiesUseMainWebview({
+            iframeMode,
+            useProxyDocument: normalized.useProxyDocument,
+          }),
+    );
     if (iframeMode) {
       void closeInnerWebTauriPanel();
       if (url?.startsWith('http')) {
@@ -406,19 +432,17 @@ export async function pullInnerWebDocumentCookiesFromFrames(
     try {
       const docCookie = (await requestIframeDocumentCookie(win)).trim();
       if (!docCookie) continue;
-      if (isTauri()) {
+      const sid = options?.proxySessionId ?? activeWebProxySessionId;
+      if (sid) {
+        const { mergeInnerWebProxySessionCookies } = await import(
+          '@/lib/http/inner-web-proxy-session'
+        );
+        await mergeInnerWebProxySessionCookies(sid, docCookie);
+      } else if (isTauri()) {
         await invoke(
           'sync_document_cookies_for_inner_web',
           innerWebCookieInvokeArgs({ url: trimmed, cookies: docCookie }),
         );
-      } else {
-        const sid = options?.proxySessionId ?? activeWebProxySessionId;
-        if (sid) {
-          const { mergeInnerWebProxySessionCookies } = await import(
-            '@/lib/http/inner-web-proxy-session'
-          );
-          await mergeInnerWebProxySessionCookies(sid, docCookie);
-        }
       }
       return docCookie;
     } catch (e) {
@@ -436,10 +460,69 @@ export async function pullInnerWebProxyCookiesFromIframe(
   await pullInnerWebDocumentCookiesFromFrames(pageUrl, { proxySessionId: sessionId });
 }
 
+function isValidCookieSyncUrl(url: string): boolean {
+  const u = url.trim();
+  if (!u.startsWith('http')) return false;
+  try {
+    return Boolean(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** CF / 挑战后跳转：合并初始 cookieSyncUrl、会话 url、panel 当前址等读取目标 */
+async function resolveInnerWebCookieReadTargets(pageUrl: string): Promise<string[]> {
+  const { legadoInnerWebCookieSyncUrls } = await import(
+    '@/lib/js-engine/legado/normalize-legado-ajax-body'
+  );
+  const targets = new Set<string>(legadoInnerWebCookieSyncUrls(pageUrl));
+  const session = loadPersistedInnerWebSession();
+  if (session?.url?.startsWith('http')) {
+    for (const u of legadoInnerWebCookieSyncUrls(session.url)) targets.add(u);
+  }
+  if (session?.cloudflareVerification) {
+    if (isTauri()) {
+      try {
+        const panelUrl = (await invoke<string>('get_inner_web_panel_current_url')).trim();
+        if (panelUrl.startsWith('http')) {
+          for (const u of legadoInnerWebCookieSyncUrls(panelUrl)) targets.add(u);
+        }
+      } catch (e) {
+        console.warn('[inner-web] 读取 panel 当前 URL 失败（CF Cookie 同步）', e);
+      }
+    } else if (typeof document !== 'undefined') {
+      const frame = document.querySelector(
+        'iframe.reader-inner-web-iframe',
+      ) as HTMLIFrameElement | null;
+      const src = frame?.src?.trim() ?? '';
+      if (src.startsWith('http')) {
+        for (const u of legadoInnerWebCookieSyncUrls(src)) targets.add(u);
+      }
+    }
+  }
+  return [...targets].filter(isValidCookieSyncUrl);
+}
+
+/** 从代理会话读取 Cookie（HttpOnly 的 cf_clearance 仅在此） */
+async function readProxySessionCookieHeader(
+  sessionId: string,
+  pageUrl: string,
+): Promise<string> {
+  const { normalizeControlSettingsCookieHeader } = await import(
+    '@/lib/js-engine/legado/normalize-legado-ajax-body'
+  );
+  const { readInnerWebProxySessionCookies } = await import(
+    '@/lib/http/inner-web-proxy-session'
+  );
+  await pullInnerWebProxyCookiesFromIframe(sessionId, pageUrl);
+  const raw = await readInnerWebProxySessionCookies(sessionId);
+  return normalizeControlSettingsCookieHeader(raw.trim());
+}
+
 /** 读取内嵌 WebView / iframe 当前 URL 的 Cookie（供「更多 → 查看 Cookie」、登录 √ 同步） */
 export async function readInnerWebCookies(url: string): Promise<string> {
   const trimmed = url.trim();
-  if (!trimmed.startsWith('http')) return '';
+  if (!isValidCookieSyncUrl(trimmed)) return '';
   const { normalizeControlSettingsCookieHeader, mergeLegadoCookieHeaderStrings } =
     await import('@/lib/js-engine/legado/normalize-legado-ajax-body');
   const normalize = (raw: string) => normalizeControlSettingsCookieHeader(raw.trim());
@@ -453,24 +536,17 @@ export async function readInnerWebCookies(url: string): Promise<string> {
     return out;
   };
 
-  if (activeWebProxySessionId) {
+  const proxySessionId = activeWebProxySessionId;
+  if (proxySessionId) {
     try {
-      await pullInnerWebProxyCookiesFromIframe(activeWebProxySessionId, trimmed);
-      const { readInnerWebProxySessionCookies } = await import(
-        '@/lib/http/inner-web-proxy-session'
-      );
-      const raw = await readInnerWebProxySessionCookies(activeWebProxySessionId);
-      const merged = normalize(raw);
-      if (merged) return merged;
+      const fromProxy = await readProxySessionCookieHeader(proxySessionId, trimmed);
+      if (fromProxy) return fromProxy;
     } catch (e) {
       console.warn('[inner-web] read proxy session cookies failed', e);
     }
   }
 
-  const { legadoInnerWebCookieSyncUrls } = await import(
-    '@/lib/js-engine/legado/normalize-legado-ajax-body'
-  );
-  const readTargets = legadoInnerWebCookieSyncUrls(trimmed);
+  const readTargets = await resolveInnerWebCookieReadTargets(trimmed);
   const chunks: string[] = [];
   const useMain = getInnerWebCookiesUseMainWebview();
 
@@ -492,8 +568,16 @@ export async function readInnerWebCookies(url: string): Promise<string> {
       }
     }
     for (const target of readTargets) {
-      const fromFrame = await pullInnerWebDocumentCookiesFromFrames(target);
-      if (fromFrame) chunks.push(fromFrame);
+      if (proxySessionId) {
+        const fromFrame = await pullInnerWebDocumentCookiesFromFrames(target, {
+          proxySessionId,
+        });
+        if (fromFrame) chunks.push(fromFrame);
+      } else {
+        const fromFrame = await pullInnerWebDocumentCookiesFromFrames(target);
+        if (fromFrame) chunks.push(fromFrame);
+      }
+      if (proxySessionId) continue;
       try {
         chunks.push(
           await invoke<string>(
@@ -502,17 +586,55 @@ export async function readInnerWebCookies(url: string): Promise<string> {
           ),
         );
       } catch (e) {
-        console.warn('[inner-web] get_webview_cookies_for_url failed', e);
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/URL 无效|empty host/i.test(msg)) {
+          console.warn('[inner-web] get_webview_cookies_for_url failed', msg);
+        }
       }
     }
   } else {
     for (const target of readTargets) {
-      const fromFrame = await pullInnerWebDocumentCookiesFromFrames(target);
+      const fromFrame = await pullInnerWebDocumentCookiesFromFrames(target, {
+        proxySessionId: proxySessionId ?? undefined,
+      });
       if (fromFrame) chunks.push(fromFrame);
     }
   }
 
   return mergeChunks(chunks);
+}
+
+/** √ 确认前多次读取（panel 刷新 / 代理会话落盘可能有短暂延迟） */
+export async function readInnerWebCookiesForConfirm(url: string): Promise<string> {
+  const trimmed = url.trim();
+  if (!isValidCookieSyncUrl(trimmed)) return '';
+
+  const snapSessionId = activeWebProxySessionId;
+  const attempts = snapSessionId ? 4 : 3;
+
+  for (let i = 0; i < attempts; i++) {
+    if (isTauri() && !getInnerWebCookiesUseMainWebview()) {
+      try {
+        await invoke('flush_inner_web_panel_document_cookie');
+      } catch {
+        /* panel 未打开 */
+      }
+    }
+    if (snapSessionId) {
+      try {
+        const fromProxy = await readProxySessionCookieHeader(snapSessionId, trimmed);
+        if (fromProxy.trim()) return fromProxy;
+      } catch {
+        /* retry */
+      }
+    }
+    const merged = await readInnerWebCookies(trimmed);
+    if (merged.trim()) return merged;
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, snapSessionId ? 200 : 150));
+    }
+  }
+  return '';
 }
 
 /** 用户点击 √（Legado menu_ok） */
@@ -530,37 +652,24 @@ export async function confirmInnerWebClose(
     undefined;
 
   let cookies = '';
-  if (url) {
-    cookies = await readInnerWebCookies(url);
+  if (isValidCookieSyncUrl(url)) {
+    cookies = await readInnerWebCookiesForConfirm(url);
+  }
+
+  // 读 Cookie 后再刷新 UI；√ 前 refresh 会导致 panel/iframe 重载、罐内 Cookie 暂不可读
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(INNER_WEB_REFRESH_EVENT));
   }
 
   if (url.startsWith('http') && sourceKey) {
     try {
       const { getSource } = await import('@/lib/database/sources');
-      const { mergeLegadoCookieHeaderStrings } = await import(
-        '@/lib/js-engine/legado/normalize-legado-ajax-body'
-      );
       const src = await getSource(sourceKey);
       if (src) {
-        const {
-          persistSourceCookieHeaderForPage,
-          pullSourceCookiesIntoStore,
-          pushSourceCookiesToWebviews,
-        } = await import('@/lib/book-source/source-cookie-pool');
-        const { resolveSourceCookiesForHttp } = await import('@/lib/book-source/source-http');
-        await pullSourceCookiesIntoStore(src, url);
-        const fromStore = resolveSourceCookiesForHttp(src, url).trim();
-        const fromWeb = cookies.trim();
-        // 后者覆盖前者：内嵌 WebView 读出的设置须优先于 localStorage 旧值（对齐 Legado CookieStore.setCookie）
-        if (fromStore && fromWeb) {
-          cookies = mergeLegadoCookieHeaderStrings(fromStore, fromWeb);
-        } else if (!fromWeb && fromStore) {
-          cookies = fromStore;
-        }
-        if (cookies.trim()) {
-          persistSourceCookieHeaderForPage(src, url, cookies);
-        }
-        await pushSourceCookiesToWebviews(src, url);
+        const { syncSourceCookiesAfterInnerWeb } = await import(
+          '@/lib/book-source/source-cookie-pool'
+        );
+        cookies = await syncSourceCookiesAfterInnerWeb(src, url, cookies);
       }
     } catch (e) {
       console.warn('[inner-web] cookie pool sync failed', e);

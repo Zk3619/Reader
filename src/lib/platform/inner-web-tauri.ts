@@ -52,7 +52,14 @@ export async function focusInnerWebTauriPanel(): Promise<void> {
 }
 
 export async function openInnerWebTauriPanel(
-  opts: { url?: string; html?: string; cookies: string; rect: InnerWebPanelRect }
+  opts: {
+    url?: string;
+    html?: string;
+    cookies: string;
+    rect: InnerWebPanelRect;
+    /** 书源 header 中的 User-Agent（与后续 HTTP 请求一致，避免 cf_clearance 绑定 UA 不一致） */
+    userAgent?: string;
+  },
 ): Promise<void> {
   if (!isTauri()) return;
   const httpUrl = (opts.url ?? '').trim();
@@ -65,6 +72,7 @@ export async function openInnerWebTauriPanel(
   if (!navigationUrl.startsWith('http') && !navigationUrl.startsWith('data:text/html')) return;
 
   await runSerializedPanelOp(async () => {
+    const ua = opts.userAgent?.trim();
     await invoke('open_inner_web_panel', {
       url: navigationUrl,
       cookies: opts.cookies.trim(),
@@ -72,6 +80,7 @@ export async function openInnerWebTauriPanel(
       y: opts.rect.y,
       width: opts.rect.width,
       height: opts.rect.height,
+      ...(ua ? { userAgent: ua } : {}),
     });
   });
 }

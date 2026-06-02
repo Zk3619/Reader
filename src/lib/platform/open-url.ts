@@ -4,6 +4,7 @@
  * 系统浏览器仍用 openUrlInBrowser。
  */
 
+import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 import { parseDataHtmlUrl } from '@/lib/platform/data-url';
 import { isTauri } from '@/lib/platform/detect';
 import {
@@ -14,6 +15,11 @@ import {
 } from '@/lib/platform/inner-web';
 
 const OPEN_URL_LOG = '[openUrlInApp]';
+
+function sanitizeOpenUrl(url: string): string {
+  const t = url.trim();
+  return /^https?:/i.test(t) ? stripMisplacedCookieFromHttpUrl(t) : t;
+}
 
 /** 书源登录/设置内嵌页标题（与 Legado WebViewActivity、control() 一致） */
 export const SOURCE_SETTINGS_INNER_WEB_TITLE = '书源设置';
@@ -32,10 +38,14 @@ function buildInnerWebPayload(
   title: string | undefined,
   options?: InnerWebOpenOptions,
 ): InnerWebPayload | null {
+  const safeUrl = sanitizeOpenUrl(trimmed);
+  const syncUrl = options?.cookieSyncUrl
+    ? sanitizeOpenUrl(options.cookieSyncUrl)
+    : safeUrl;
   const base: InnerWebPayload = {
     title: title ?? '网页',
     showConfirm: options?.showConfirm,
-    cookieSyncUrl: options?.cookieSyncUrl ?? trimmed,
+    cookieSyncUrl: syncUrl,
     initialCookies: options?.initialCookies,
     bookSourceUrl: options?.bookSourceUrl?.trim() || undefined,
   };
@@ -58,7 +68,7 @@ function buildInnerWebPayload(
     return null;
   }
 
-  return { ...base, url: trimmed };
+  return { ...base, url: safeUrl };
 }
 
 function resolveInnerWebUrl(
@@ -197,6 +207,33 @@ export async function openLegadoBrowserInApp(
   });
 }
 
+async function resolveSourceSettingsCookies(
+  url: string,
+  cookies: string,
+  bookSourceUrl?: string,
+): Promise<string> {
+  const passed = (cookies ?? '').trim();
+  const key = bookSourceUrl?.trim();
+  if (!key) return passed;
+  try {
+    const { getSource } = await import('@/lib/database/sources');
+    const { getStoredSourceCookiesForInnerWeb } = await import(
+      '@/lib/js-engine/legado/login-script-runner'
+    );
+    const { mergeLegadoCookieHeaderStrings } = await import(
+      '@/lib/js-engine/legado/normalize-legado-ajax-body'
+    );
+    const src = await getSource(key);
+    if (!src) return passed;
+    const stored = getStoredSourceCookiesForInnerWeb(src, url).trim();
+    if (!stored) return passed;
+    if (!passed) return stored;
+    return mergeLegadoCookieHeaderStrings(stored, passed);
+  } catch {
+    return passed;
+  }
+}
+
 /**
  * 以「书源设置」形式打开内嵌页：专用工具栏 + √ 同步 Cookie（与 loginUrl 中 control() 一致）
  */
@@ -221,11 +258,16 @@ export async function openSourceSettingsInApp(
       ? { confirmed: false, cookies: '', url: '' }
       : undefined;
   }
+  const cookieStr = await resolveSourceSettingsCookies(
+    trimmed,
+    cookies,
+    options?.bookSourceUrl,
+  );
   const poolOpts = { bookSourceUrl: options?.bookSourceUrl };
   if (options?.awaitClose) {
-    return openUrlInAppAwait(trimmed, cookies, SOURCE_SETTINGS_INNER_WEB_TITLE, poolOpts);
+    return openUrlInAppAwait(trimmed, cookieStr, SOURCE_SETTINGS_INNER_WEB_TITLE, poolOpts);
   }
-  await openUrlInAppWithCookies(trimmed, cookies, SOURCE_SETTINGS_INNER_WEB_TITLE, {
+  await openUrlInAppWithCookies(trimmed, cookieStr, SOURCE_SETTINGS_INNER_WEB_TITLE, {
     showConfirm: true,
     ...poolOpts,
   });

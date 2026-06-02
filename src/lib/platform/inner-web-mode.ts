@@ -23,6 +23,17 @@ export interface InnerWebContent {
   html?: string;
 }
 
+/** 晴天等聚合书源 `/control` 设置页（须 panel Cookie 与书源表双向同步） */
+export function isBookSourceControlUrl(url: string): boolean {
+  const u = url.trim();
+  if (!u.startsWith('http')) return false;
+  try {
+    return /\/control\/?$/i.test(new URL(u).pathname);
+  } catch {
+    return /\/control\/?$/i.test(u);
+  }
+}
+
 /** auto 模式下探测 panel 不可用后，本会话后续打开不再尝试 panel */
 let panelRuntimeBlocked = false;
 
@@ -66,6 +77,10 @@ function isTauriDesktopPanelCandidate(content: InnerWebContent): boolean {
 export function resolveInnerWebUsesTauriPanel(content: InnerWebContent): boolean {
   if (!isTauriDesktopPanelCandidate(content)) {
     return false;
+  }
+  const url = content.url?.trim() ?? '';
+  if (url && isBookSourceControlUrl(url)) {
+    return !panelSessionFallback;
   }
   if (panelSessionFallback) {
     return false;
