@@ -28,6 +28,7 @@ import {
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
+import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { ExploreBookListSkeleton } from '@/components/explore/ExploreBookCardSkeleton';
 import {
   isExploreSectionInNav,
@@ -45,8 +46,10 @@ import { PageToolbar } from '@/components/shell/PageToolbar';
 import {
   ExploreSourceNav,
   ExploreSourceTitleDropdown,
+  ExploreSourceTitlePicker,
 } from '@/components/explore/ExploreSourceNav';
 import { ExplorePageToolbar } from '@/components/explore/ExplorePageToolbar';
+import { exploreTabBarShellClass } from '@/components/explore/ExploreScrollTabsBar';
 import { ExploreSectionsPanel } from '@/components/explore/ExploreSectionsPanel';
 import { ExploreSourcePageContent } from '@/components/explore/ExploreSourcePageContent';
 import { formatSourceScope } from '@/lib/book-source/search-scope';
@@ -72,7 +75,10 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [selectedSourceUrl, setSelectedSourceUrl] = createSignal<string | null>(null);
   const [selectedSection, setSelectedSection] = createSignal<ExploreSection | null>(null);
-  const exploreArgsVersion = () => getExploreSourceArgsVersion(selectedSourceUrl());
+  const exploreArgsVersion = () => {
+    const s = selectedSource();
+    return s ? getExploreSourceArgsVersion(getLegadoSourceKey(s)) : 0;
+  };
   /** 与 dynamicSections 最后一次 ready 对齐的 args 版本（用于筛选变更后立即骨架屏） */
   const [loadedExploreArgsVersion, setLoadedExploreArgsVersion] = createSignal(-1);
   const [listRefreshKey, setListRefreshKey] = createSignal(0);
@@ -82,8 +88,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     sections: ExploreSection[];
   } | null>(null);
 
-  const sourceDropdownEnabled = () => explorePageLayoutStore.settings.sourceDropdownEnabled;
-  const sourceTabsEnabled = () => explorePageLayoutStore.settings.sourceTabsEnabled;
+  const sourceNavStyle = () => explorePageLayoutStore.settings.sourceNavStyle;
 
   const selectedSource = createMemo(() => {
     const url = selectedSourceUrl();
@@ -111,8 +116,14 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     return `${s.sourceUrl}\0${exploreArgsVersion()}`;
   };
 
+  const hasSectionsSnapshot = () => {
+    const snap = sectionsSnapshot();
+    return !!(snap && snap.key === sectionsSnapshotKey());
+  };
+
   const sectionsLoading = createMemo(() => {
     if (!isActive() || !usesScriptExplore()) return false;
+    if (hasSectionsSnapshot()) return false;
     return shouldShowExploreSectionsSkeleton(
       true,
       exploreArgsVersion(),
@@ -138,9 +149,9 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   const showSectionsSkeleton = () => sectionsLoading() && sections().length === 0;
 
   createEffect(() => {
-    if (!usesScriptExplore() || sectionsLoading()) return;
+    if (!usesScriptExplore()) return;
+    if (dynamicSections.state !== 'ready' || dynamicSections.loading) return;
     const resolved = resolveExploreSectionsFromResource(dynamicSections);
-    if (resolved.length === 0) return;
     setSectionsSnapshot({ key: sectionsSnapshotKey(), sections: resolved });
   });
 
@@ -237,8 +248,19 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     return group ? `来自分组：${group}` : undefined;
   };
 
-  const showSourceDropdown = () => sourceDropdownEnabled() && sources().length > 0;
-  const showSourceTabs = () => sourceTabsEnabled() && sources().length > 0;
+  const showSourceDropdown = () => sourceNavStyle() === 'dropdown' && sources().length > 0;
+  const showSourceTabs = () => sourceNavStyle() === 'tabs' && sources().length > 0;
+  const showSourceDialog = () => sourceNavStyle() === 'dialog' && sources().length > 0;
+
+  const dialogTitle = () => {
+    const name = selectedSource()?.sourceName?.trim();
+    return name ? `${EXPLORE_PAGE_TITLE} · ${name}` : EXPLORE_PAGE_TITLE;
+  };
+
+  const dialogDescription = () => {
+    const group = selectedSource()?.sourceGroup?.trim();
+    return group ? `来自分组：${group}` : pageDescription();
+  };
 
   function handleSourceChange(source: BookSource) {
     setSelectedSourceUrl(source.sourceUrl);
@@ -284,30 +306,46 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
         title={EXPLORE_PAGE_TITLE}
         description={pageDescription()}
         titleSlot={
-          <ExploreSourceTitleDropdown
-            title={showSourceDropdown() ? dropdownTitle() : EXPLORE_PAGE_TITLE}
-            description={showSourceDropdown() ? dropdownDescription() : pageDescription()}
-            dropdownEnabled={showSourceDropdown()}
-            sources={sources()}
-            currentSourceUrl={selectedSourceUrl()}
-            onSourceChange={handleSourceChange}
-          />
-        }
-        below={
-          showSourceTabs() ? (
-            <ExploreSourceNav
-              groupStyle="tabs"
+          <Show
+            when={showSourceDialog()}
+            fallback={
+              <ExploreSourceTitleDropdown
+                title={showSourceDropdown() ? dropdownTitle() : EXPLORE_PAGE_TITLE}
+                description={showSourceDropdown() ? dropdownDescription() : pageDescription()}
+                dropdownEnabled={showSourceDropdown()}
+                sources={sources()}
+                currentSourceUrl={selectedSourceUrl()}
+                onSourceChange={handleSourceChange}
+              />
+            }
+          >
+            <ExploreSourceTitlePicker
+              title={dialogTitle()}
+              description={dialogDescription()}
+              pickerEnabled={showSourceDialog()}
               sources={sources()}
               currentSourceUrl={selectedSourceUrl()}
               onSourceChange={handleSourceChange}
             />
+          </Show>
+        }
+        below={
+          showSourceTabs() ? (
+            <div class={cn(exploreTabBarShellClass)}>
+              <ExploreSourceNav
+                groupStyle="tabs"
+                sources={sources()}
+                currentSourceUrl={selectedSourceUrl()}
+                onSourceChange={handleSourceChange}
+              />
+            </div>
           ) : undefined
         }
         belowHorizontalWheel={showSourceTabs()}
       >
         <ExplorePageToolbar
-          showRefresh={!!selectedSection()?.url?.trim()}
-          refreshDisabled={false}
+          showRefresh={!!selectedSource()}
+          refreshDisabled={!selectedSection()?.url?.trim()}
           onRefresh={handleRefreshList}
           searchDisabled={!selectedSource()}
           onSearch={handleOpenSearch}

@@ -1,24 +1,20 @@
 /**
- * 探索页操作区：搜索、更多（分页偏好、书源下拉/标签）
+ * 探索页操作区：搜索、更多（布局偏好）
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
 import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
-import { ExplorePaginationPreferenceDialog } from '@/components/explore/ExplorePaginationPreferenceDialog';
+import { ExploreLayoutDialog } from '@/components/explore/ExploreLayoutDialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
   AppDropdownMenuIconTrigger,
   AppDropdownMenuItem,
-  AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import { SearchIcon, MoreIcon, RefreshIcon, Settings2Icon } from '@/components/shared/icons';
-import { cn } from '@/lib/utils';
-import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 
 export interface ExplorePageToolbarProps {
   showRefresh?: boolean;
@@ -30,12 +26,7 @@ export interface ExplorePageToolbarProps {
 
 export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
-  const [paginationPreferenceOpen, setPaginationPreferenceOpen] = createSignal(false);
-  const sourceDropdownEnabled = () => explorePageLayoutStore.settings.sourceDropdownEnabled;
-  const sourceTabsEnabled = () => explorePageLayoutStore.settings.sourceTabsEnabled;
-  /** 仅剩书源下拉时不可取消，保证至少勾选一项 */
-  const dropdownToggleLocked = () => sourceDropdownEnabled() && !sourceTabsEnabled();
-  const tabsToggleLocked = () => sourceTabsEnabled() && !sourceDropdownEnabled();
+  const [layoutDialogOpen, setLayoutDialogOpen] = createSignal(false);
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -73,9 +64,7 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
             disabled={props.refreshDisabled}
             onClick={() => props.onRefresh?.()}
           >
-            <RefreshIcon
-              class={cn('h-4 w-4 transition-transform', props.refreshDisabled && 'animate-spin')}
-            />
+            <RefreshIcon class="h-4 w-4" />
             <span class="sr-only">刷新</span>
           </TooltipTrigger>
           <TooltipContent>刷新列表</TooltipContent>
@@ -98,53 +87,15 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem
-            onSelect={() =>
-              openAppDialogAfterMenuDismiss(() => setPaginationPreferenceOpen(true))
-            }
+            onSelect={() => openAppDialogAfterMenuDismiss(() => setLayoutDialogOpen(true))}
           >
             <Settings2Icon class="h-4 w-4" />
-            <span>分页偏好</span>
-          </AppDropdownMenuItem>
-          <AppDropdownMenuSeparator />
-          <AppDropdownMenuItem
-            onSelect={() => {
-              if (dropdownToggleLocked()) return;
-              explorePageLayoutStore.toggleSourceDropdown();
-            }}
-            class={cn('flex items-center gap-2', dropdownToggleLocked() && 'opacity-60')}
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox
-                checked={sourceDropdownEnabled()}
-                disabled={dropdownToggleLocked()}
-                aria-label="书源下拉"
-              />
-            </span>
-            <span>书源下拉</span>
-          </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => {
-              if (tabsToggleLocked()) return;
-              explorePageLayoutStore.toggleSourceTabs();
-            }}
-            class={cn('flex items-center gap-2', tabsToggleLocked() && 'opacity-60')}
-          >
-            <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-              <Checkbox
-                checked={sourceTabsEnabled()}
-                disabled={tabsToggleLocked()}
-                aria-label="书源标签"
-              />
-            </span>
-            <span>书源标签</span>
+            <span>布局偏好</span>
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>
 
-      <ExplorePaginationPreferenceDialog
-        open={paginationPreferenceOpen()}
-        onOpenChange={setPaginationPreferenceOpen}
-      />
+      <ExploreLayoutDialog open={layoutDialogOpen()} onOpenChange={setLayoutDialogOpen} />
     </>
   );
 }

@@ -2,7 +2,7 @@
  * 发现页书籍卡片骨架屏（与 exploreBookListCardClass / 网格断点一致）
  */
 
-import { createSignal, onCleanup, onMount, For } from 'solid-js';
+import { For } from 'solid-js';
 import {
   exploreBookListCardClass,
   exploreBookListCoverClass,
@@ -10,60 +10,61 @@ import {
   exploreBookListBadgeRowClass,
   exploreBookListIntroWrapClass,
   exploreSkeletonPulseClass,
+  bookGroupGridCardClass,
+  bookGroupGridCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
+import {
+  EXPLORE_BOOK_CARD_HEIGHT_PX,
+  EXPLORE_BOOK_GRID_CLASS,
+  EXPLORE_BOOK_GRID_GAP_PX,
+  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
+  getExploreListColumnCount,
+  getExploreListGridClass,
+  resolveExploreGridColumnCount,
+  useExploreGridColumnCount,
+  useExploreResponsiveColumnCount,
+} from '@/lib/explore/explore-list-layout';
+import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 import { cn } from '@/lib/utils';
 
-export const EXPLORE_BOOK_GRID_CLASS =
-  'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2';
+export {
+  EXPLORE_BOOK_GRID_CLASS,
+  EXPLORE_BOOK_CARD_HEIGHT_PX,
+  EXPLORE_BOOK_GRID_GAP_PX,
+  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
+  resolveExploreGridColumnCount,
+  useExploreGridColumnCount,
+};
 
-/** 与 exploreBookListCardClass 的 h-44 一致 */
-export const EXPLORE_BOOK_CARD_HEIGHT_PX = 176;
-
-export const EXPLORE_BOOK_GRID_GAP_PX = 8;
-
-/** 卡片行高 + grid gap-2，供按行虚拟列表使用 */
-export const EXPLORE_BOOK_GRID_ROW_HEIGHT_PX =
-  EXPLORE_BOOK_CARD_HEIGHT_PX + EXPLORE_BOOK_GRID_GAP_PX;
-
-const EXPLORE_GRID_MEDIA_QUERIES = [
-  '(min-width: 768px)',
-  '(min-width: 1024px)',
-  '(min-width: 1536px)',
-] as const;
-
-/** 与 EXPLORE_BOOK_GRID_CLASS 断点列数对齐 */
-export function resolveExploreGridColumnCount(): number {
-  if (typeof window === 'undefined') return 1;
-  if (window.matchMedia('(min-width: 1536px)').matches) return 4;
-  if (window.matchMedia('(min-width: 1024px)').matches) return 3;
-  if (window.matchMedia('(min-width: 768px)').matches) return 2;
-  return 1;
-}
-
-/** 随窗口宽度更新列数（虚拟网格、骨架屏共用） */
-export function useExploreGridColumnCount() {
-  const [cols, setCols] = createSignal(resolveExploreGridColumnCount());
-
-  onMount(() => {
-    const sync = () => setCols(resolveExploreGridColumnCount());
-    const queries = EXPLORE_GRID_MEDIA_QUERIES.map((q) => window.matchMedia(q));
-    for (const mq of queries) {
-      mq.addEventListener('change', sync);
-    }
-    onCleanup(() => {
-      for (const mq of queries) {
-        mq.removeEventListener('change', sync);
-      }
-    });
-  });
-
-  return cols;
-}
-
-/** 各断点至少 3 行骨架 */
-export function useExploreSkeletonCount() {
-  const cols = useExploreGridColumnCount();
+function useExploreSkeletonCount() {
+  const settings = () => explorePageLayoutStore.settings;
+  const responsiveCols = useExploreResponsiveColumnCount();
+  const cols = () => {
+    if (settings().dataLayoutMode === 'default') return responsiveCols();
+    return getExploreListColumnCount(settings());
+  };
   return () => cols() * 3;
+}
+
+function ExploreBookTextSkeleton() {
+  return (
+    <li class="w-full list-none border-b border-border/30 px-3 py-2" aria-hidden="true">
+      <div class={cn(exploreSkeletonPulseClass, 'h-4 w-[60%]')} />
+      <div class={cn(exploreSkeletonPulseClass, 'mt-2 h-3 w-[40%]')} />
+    </li>
+  );
+}
+
+function ExploreBookGridSkeleton() {
+  return (
+    <li class="w-full list-none" aria-hidden="true">
+      <div class={cn(bookGroupGridCardClass(), 'pointer-events-none border-border/60 shadow-none')}>
+        <div class={cn(bookGroupGridCoverClass(), exploreSkeletonPulseClass)} />
+        <div class={cn(exploreSkeletonPulseClass, 'h-4 w-[80%]')} />
+        <div class={cn(exploreSkeletonPulseClass, 'h-3 w-[55%]')} />
+      </div>
+    </li>
+  );
 }
 
 export function ExploreBookCardSkeleton() {
@@ -100,10 +101,22 @@ export function ExploreBookCardSkeleton() {
 
 export function ExploreBookListSkeleton() {
   const count = useExploreSkeletonCount();
+  const settings = () => explorePageLayoutStore.settings;
+  const gridClass = () => getExploreListGridClass(settings());
+  const layoutMode = () => settings().dataLayoutMode;
+
   return (
-    <ul class={cn(EXPLORE_BOOK_GRID_CLASS, 'py-2 px-1')} aria-busy="true" aria-label="加载书籍列表">
+    <ul
+      class={cn(gridClass(), layoutMode() === 'text-list' ? 'py-0 px-0' : 'py-2 px-1')}
+      aria-busy="true"
+      aria-label="加载书籍列表"
+    >
       <For each={Array.from({ length: count() }, (_, i) => i)}>
-        {() => <ExploreBookCardSkeleton />}
+        {() => {
+          if (layoutMode() === 'text-list') return <ExploreBookTextSkeleton />;
+          if (layoutMode() === 'card-grid') return <ExploreBookGridSkeleton />;
+          return <ExploreBookCardSkeleton />;
+        }}
       </For>
     </ul>
   );

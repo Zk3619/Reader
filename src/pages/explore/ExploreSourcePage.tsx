@@ -3,7 +3,7 @@
  */
 
 import { createSignal } from 'solid-js';
-import { ExplorePaginationPreferenceDialog } from '@/components/explore/ExplorePaginationPreferenceDialog';
+import { ExploreLayoutDialog } from '@/components/explore/ExploreLayoutDialog';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { RefreshIcon, MoreIcon, Settings2Icon } from '@/components/shared/icons';
 import type { BookSource } from '@/types';
@@ -25,7 +25,7 @@ export interface ExploreSourcePageProps {
 
 export function ExploreSourcePage(props: ExploreSourcePageProps) {
   const [refreshKey, setRefreshKey] = createSignal(0);
-  const [paginationPreferenceOpen, setPaginationPreferenceOpen] = createSignal(false);
+  const [layoutDialogOpen, setLayoutDialogOpen] = createSignal(false);
 
   const sectionUrl = () => props.section.url ?? '';
 
@@ -64,8 +64,8 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
             dropdownItems: [
               {
                 icon: Settings2Icon,
-                label: '分页偏好',
-                onClick: () => setPaginationPreferenceOpen(true),
+                label: '布局偏好',
+                onClick: () => setLayoutDialogOpen(true),
               },
             ],
           },
@@ -81,9 +81,10 @@ export function ExploreSourcePage(props: ExploreSourcePageProps) {
         onOpenBook={props.onOpenBook}
         onOpenBookInfo={props.onOpenBookInfo}
       />
-      <ExplorePaginationPreferenceDialog
-        open={paginationPreferenceOpen()}
-        onOpenChange={setPaginationPreferenceOpen}
+      <ExploreLayoutDialog
+        open={layoutDialogOpen()}
+        onOpenChange={setLayoutDialogOpen}
+        hideSourcePreferences
       />
     </section>
   );

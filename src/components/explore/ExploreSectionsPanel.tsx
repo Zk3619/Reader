@@ -14,6 +14,17 @@ import {
   AppSelectTrigger,
   AppSelectValue,
 } from '@/components/shared/AppSelect';
+import {
+  ExploreScrollTabsBar,
+  ExploreTabsTrigger,
+  exploreTabBarShellClass,
+  exploreTabsTriggerClass,
+} from '@/components/explore/ExploreScrollTabsBar';
+import {
+  EXPLORE_SECTION_TAB_PREFIX,
+  exploreSectionTabValue,
+  parseExploreIndexedTabValue,
+} from '@/lib/explore/explore-tab-values';
 import type { BookSource } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import {
@@ -23,6 +34,7 @@ import {
   type ExploreSectionNavItem,
 } from '@/lib/book-source/explore-nav-items';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
+import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 import { cn } from '@/lib/utils';
 
 /** 探索页分类区：固定高度、内容宽度、上限宽度 */
@@ -58,6 +70,17 @@ export interface ExploreSectionsPanelProps {
   selectedSection?: ExploreSection | null;
   onSectionSelect: (section: ExploreSection) => void;
   onSelectFilterChange?: (section: ExploreSection, value: string) => void | Promise<void>;
+}
+
+function sectionTabIndex(
+  buttonItems: Extract<ExploreSectionNavItem, { kind: 'button' }>[],
+  selectedSection: ExploreSection | null | undefined,
+): number {
+  if (!selectedSection) return 0;
+  const idx = buttonItems.findIndex((item) =>
+    isSectionSelected(selectedSection, item.section),
+  );
+  return idx >= 0 ? idx : 0;
 }
 
 function isSectionSelected(a: ExploreSection | null | undefined, b: ExploreSection): boolean {
@@ -133,7 +156,12 @@ function ExploreHubLoadingSkeleton() {
     'animate-pulse rounded-lg border border-border/30 bg-muted/60',
   );
   return (
-    <div class={exploreHubItemsTrackClass}>
+    <div
+      class={cn(
+        exploreTabBarShellClass,
+        'flex flex-wrap items-center gap-1 py-1 px-4',
+      )}
+    >
       <For each={widths}>
         {(w) => <div class={cn(chipClass, w)} aria-hidden="true" />}
       </For>
@@ -148,52 +176,108 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
   });
   const navItems = () => buildExploreSectionNavItems(props.sections);
   const showNav = () => !isLoading() && !props.error && navItems().length > 0;
+  const useTabs = () => explorePageLayoutStore.settings.sectionDisplayStyle === 'tabs';
+
+  const selectItems = () => navItems().filter((item) => item.kind === 'select');
+  const buttonItems = () =>
+    navItems().filter((item): item is Extract<ExploreSectionNavItem, { kind: 'button' }> => item.kind === 'button');
+
+  const selectedTabIndex = () => sectionTabIndex(buttonItems(), props.selectedSection);
+
+  function renderStackedNavItem(item: ExploreSectionNavItem) {
+    if (item.kind === 'select') {
+      return (
+        <SelectNavItem
+          item={item}
+          selectedSection={props.selectedSection}
+          onSectionSelect={props.onSectionSelect}
+          onSelectFilterChange={props.onSelectFilterChange}
+        />
+      );
+    }
+    return (
+      <Button
+        variant="outline"
+        class={exploreHubButtonClass(isSectionSelected(props.selectedSection, item.section))}
+        onClick={() => props.onSectionSelect(item.section)}
+      >
+        <span class="min-w-0 truncate">{item.section.title}</span>
+      </Button>
+    );
+  }
 
   return (
-    <div class="shrink-0 border-b border-border/50 bg-muted/10">
+    <div class="shrink-0">
       <Show when={!props.source}>
-        <p class="py-2 text-center text-sm text-muted-foreground">请选择书源</p>
+        <p class='px-4 py-2 text-center text-sm text-muted-foreground'>
+          请选择书源
+        </p>
       </Show>
       <Show when={props.source}>
         <Show when={isLoading()}>
           <ExploreHubLoadingSkeleton />
         </Show>
         <Show when={props.error}>
-          <p class="py-2 text-center text-xs text-destructive">
+          <p
+            class='px-4 py-2 text-center text-xs text-destructive'
+          >
             {props.error instanceof Error ? props.error.message : '加载分类失败'}
           </p>
         </Show>
         <Show when={!props.error && !isLoading() && navItems().length === 0}>
-          <p class="py-2 text-center text-sm text-muted-foreground">该书源暂无可浏览的发现分类</p>
+          <p class='px-4 py-2 text-center text-sm text-muted-foreground'>
+            该书源暂无可浏览的发现分类
+          </p>
         </Show>
         <Show when={showNav()}>
-          <div class={exploreHubItemsTrackClass}>
-            <For each={navItems()}>
-              {(item) => {
-                if (item.kind === 'select') {
-                  return (
+          <Show
+            when={useTabs()}
+            fallback={
+              <div
+                class={cn(
+                  exploreTabBarShellClass,
+                  exploreHubItemsTrackClass,
+                  'my-0 max-h-none flex-wrap overflow-y-visible px-4',
+                )}
+              >
+                <For each={navItems()}>{renderStackedNavItem}</For>
+              </div>
+            }
+          >
+            <ExploreScrollTabsBar
+              value={exploreSectionTabValue(selectedTabIndex())}
+              onChange={(value) => {
+                const idx = parseExploreIndexedTabValue(value, EXPLORE_SECTION_TAB_PREFIX);
+                if (idx == null) return;
+                const section = buttonItems()[idx]?.section;
+                if (section) props.onSectionSelect(section);
+              }}
+              leading={
+                <For each={selectItems()}>
+                  {(item) => (
                     <SelectNavItem
                       item={item}
                       selectedSection={props.selectedSection}
                       onSectionSelect={props.onSectionSelect}
                       onSelectFilterChange={props.onSelectFilterChange}
                     />
-                  );
-                }
-                return (
-                  <Button
-                    variant="outline"
-                    class={exploreHubButtonClass(
-                      isSectionSelected(props.selectedSection, item.section),
-                    )}
-                    onClick={() => props.onSectionSelect(item.section)}
+                  )}
+                </For>
+              }
+            >
+              <For each={buttonItems()}>
+                {(item, index) => (
+                  <ExploreTabsTrigger
+                    value={exploreSectionTabValue(index())}
+                    class={exploreTabsTriggerClass}
+                    title={item.section.title}
                   >
-                    <span class="min-w-0 truncate">{item.section.title}</span>
-                  </Button>
-                );
-              }}
-            </For>
-          </div>
+                    {item.section.title}
+                  </ExploreTabsTrigger>
+                )}
+              </For>
+            </ExploreScrollTabsBar>
+          </Show>
         </Show>
       </Show>
     </div>

@@ -4,7 +4,10 @@
 
 import { createContext, useContext, type ParentProps } from 'solid-js';
 import { ExploreBookListCell } from '@/components/explore/ExploreBookListCell';
+import { ExploreBookTextListCell } from '@/components/explore/ExploreBookTextListCell';
+import { ExploreBookGridCardCell } from '@/components/explore/ExploreBookGridCardCell';
 import type { ExploreBooksStore } from '@/components/explore/explore-books-store';
+import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 import type { BookSource, SearchBook } from '@/types';
 
 export type ExploreBookGridContextValue = {
@@ -36,6 +39,31 @@ export function renderExploreBookGridCell(entityKey: string) {
 export function ExploreBookGridCell(props: { bookUrl: string }) {
   const ctx = useContext(ExploreBookGridContext);
   if (!ctx) return null;
+
+  const layoutMode = () => explorePageLayoutStore.settings.dataLayoutMode;
+
+  if (layoutMode() === 'text-list') {
+    return (
+      <ExploreBookTextListCell
+        bookUrl={props.bookUrl}
+        booksByUrl={ctx.store.booksByUrl}
+        onOpen={ctx.onOpen}
+      />
+    );
+  }
+
+  if (layoutMode() === 'card-grid') {
+    return (
+      <ExploreBookGridCardCell
+        bookUrl={props.bookUrl}
+        booksByUrl={ctx.store.booksByUrl}
+        source={ctx.source}
+        onOpen={ctx.onOpen}
+        onCoverUrlRefreshed={ctx.onCoverUrlRefreshed}
+      />
+    );
+  }
+
   return (
     <ExploreBookListCell
       bookUrl={props.bookUrl}

@@ -3,12 +3,17 @@
  */
 
 import { For, Show, type Accessor } from 'solid-js';
-import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import type { BookSource, SearchBook } from '@/types';
+import { Badge } from '@/components/ui/badge';
+import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 import {
+  bookshelfCompactListCardClass,
+  bookshelfCompactCoverClass,
+  bookshelfListCardClass,
+  bookshelfListCoverClass,
   exploreBookListBadgeClass,
   exploreBookListBadgeLastClass,
   exploreBookListBadgeRowClass,
@@ -16,6 +21,7 @@ import {
   exploreBookListCardClass,
   exploreBookListCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
+import { getExploreCardLayout } from '@/lib/explore/explore-list-layout';
 import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
@@ -81,61 +87,85 @@ function ExploreBookListCellContent(props: {
   const bookUrl = () => sb().bookUrl;
   const coverUrl = () => props.booksByUrl[props.bookUrl]?.coverUrl;
   const origin = () => props.booksByUrl[props.bookUrl]?.origin;
+  const settings = () => explorePageLayoutStore.settings;
+  const compactDisplay = () => settings().dataDisplayMode === 'compact';
+  const showCover = () => settings().showCover;
+  const cardLayout = () => getExploreCardLayout(settings());
+  const useBookshelfCard = () =>
+    settings().dataLayoutMode === 'card-list' && cardLayout() !== 'text';
+
+  const cardClass = () => {
+    if (!useBookshelfCard()) return exploreBookListCardClass();
+    return cardLayout() === 'compact'
+      ? bookshelfCompactListCardClass()
+      : bookshelfListCardClass();
+  };
+
+  const coverClass = () => {
+    if (!useBookshelfCard()) return exploreBookListCoverClass();
+    return cardLayout() === 'compact'
+      ? bookshelfCompactCoverClass()
+      : bookshelfListCoverClass('rounded-lg');
+  };
 
   return (
-    <li class="w-full">
+    <li class="w-full list-none">
       <button
         type="button"
-        class={exploreBookListCardClass()}
+        class={cardClass()}
         onClick={() => props.onOpen(sb())}
         {...bookGroupCardPressHandlers}
       >
-        <div class={exploreBookListCoverClass()}>
-          <BookCoverImg
-            src={coverUrl()}
-            referer={origin()}
-            source={props.source}
-            bookUrl={bookUrl()}
-            onCoverUrlRefreshed={(url) => props.onCoverUrlRefreshed(bookUrl(), url)}
-            alt=""
-            class="h-full w-full object-cover"
-            loading="lazy"
-            draggable={false}
-            deferLoadUntilVisible
-            fallback={
-              <div class="flex h-full w-full items-center justify-center">
-                <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
-              </div>
-            }
-          />
-        </div>
+        <Show when={showCover()}>
+          <div class={coverClass()}>
+            <BookCoverImg
+              src={coverUrl()}
+              referer={origin()}
+              source={props.source}
+              bookUrl={bookUrl()}
+              onCoverUrlRefreshed={(url) => props.onCoverUrlRefreshed(bookUrl(), url)}
+              alt=""
+              class="h-full w-full object-cover"
+              loading="lazy"
+              draggable={false}
+              deferLoadUntilVisible
+              fallback={
+                <div class="flex h-full w-full items-center justify-center">
+                  <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
+                </div>
+              }
+            />
+          </div>
+        </Show>
         <div class={exploreBookListBodyClass('text-left')}>
           <p class="m-0 shrink-0 truncate font-medium leading-5 text-foreground">
             {sb().name}
           </p>
-          <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
-            作者：{sb().author || '—'}
-            <Show when={sb().chapterWordCountText ?? sb().wordCount}>
-              <span class="ml-1">· {sb().chapterWordCountText ?? sb().wordCount}</span>
-            </Show>
-          </p>
-          <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
-            {(() => {
-              const updateLabel = tryFormatDisplayUpdateTime(sb().latestChapterUpdateTime);
-              return (
-                <>
-                  最新章节：{displayChapterTitle(sb().latestChapterTitle)}
-                  <Show when={updateLabel}>
-                    <span> · {updateLabel}</span>
-                  </Show>
-                </>
-              );
-            })()}
-          </p>
-          <ExploreBookBadgeRow book={sb} />
-          <ExploreBookListIntro>
-            简介：{sb().intro?.trim() || '暂无简介'}
-          </ExploreBookListIntro>
+          <Show when={!compactDisplay()}>
+            <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+              作者：{sb().author || '—'}
+              <Show when={sb().chapterWordCountText ?? sb().wordCount}>
+                <span class="ml-1">· {sb().chapterWordCountText ?? sb().wordCount}</span>
+              </Show>
+            </p>
+            <p class="m-0 shrink-0 truncate text-xs leading-5 text-muted-foreground">
+              {(() => {
+                const updateLabel = tryFormatDisplayUpdateTime(sb().latestChapterUpdateTime);
+                return (
+                  <>
+                    最新章节：{displayChapterTitle(sb().latestChapterTitle)}
+                    <Show when={updateLabel}>
+                      <span> · {updateLabel}</span>
+                    </Show>
+                  </>
+                );
+              })()}
+            </p>
+            <ExploreBookBadgeRow book={sb} />
+            <ExploreBookListIntro>
+              简介：{sb().intro?.trim() || '暂无简介'}
+            </ExploreBookListIntro>
+          </Show>
         </div>
       </button>
     </li>

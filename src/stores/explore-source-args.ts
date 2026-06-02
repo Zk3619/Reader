@@ -21,7 +21,20 @@ export function bumpExploreSourceArgsVersion(sourceUrl: string): void {
   const next = (versions.get(sourceUrl) ?? 0) + 1;
   versions.set(sourceUrl, next);
   setRevision((r) => r + 1);
-  window.dispatchEvent(
-    new CustomEvent(EXPLORE_SOURCE_ARGS_CHANGE_EVENT, { detail: { sourceUrl } }),
-  );
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(EXPLORE_SOURCE_ARGS_CHANGE_EVENT, { detail: { sourceUrl } }),
+    );
+  }
+}
+
+/** 删除书源后移除内存中的参数版本 */
+export function resetExploreSourceArgsVersion(sourceUrl: string): void {
+  if (!sourceUrl || !versions.delete(sourceUrl)) return;
+  setRevision((r) => r + 1);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(EXPLORE_SOURCE_ARGS_CHANGE_EVENT, { detail: { sourceUrl } }),
+    );
+  }
 }

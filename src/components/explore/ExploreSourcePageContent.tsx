@@ -39,6 +39,21 @@ import { pageCacheStore } from '@/stores/page-cache';
 export type { PaginationPreference } from '@/stores/explore-pagination-preference';
 export { EXPLORE_PAGINATION_PREFERENCE_KEY } from '@/stores/explore-pagination-preference';
 
+function readExplorePageCache(
+  source: BookSource,
+  sectionUrl: string,
+  refreshKey: number,
+) {
+  if (refreshKey !== 0 || !sectionUrl) return null;
+  const cacheSourceId = source.sourceId || source.sourceName;
+  if (!cacheSourceId || typeof cacheSourceId !== 'string') return null;
+  return pageCacheStore.getExploreCache(cacheSourceId, sectionUrl);
+}
+
+function buildListFetchKey(sectionUrl: string, refreshKey: number) {
+  return `${sectionUrl}\0${refreshKey}`;
+}
+
 export interface ExploreSourcePageContentProps {
   source: BookSource;
   section: ExploreSection;
@@ -52,18 +67,30 @@ export interface ExploreSourcePageContentProps {
 }
 
 export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
+  const initialSectionUrl = props.section.url ?? '';
+  const initialRefreshKey = props.refreshKey ?? 0;
+  const initialFetchKey = buildListFetchKey(initialSectionUrl, initialRefreshKey);
+  const initialCache = readExplorePageCache(props.source, initialSectionUrl, initialRefreshKey);
+
   const exploreBooks = createExploreBooksStore();
-  const [page, setPage] = createSignal(1);
+  if (initialCache) {
+    exploreBooks.replaceAll(initialCache.allBooks);
+  }
+
+  const [page, setPage] = createSignal(initialCache?.page ?? 1);
   const [loadingMore, setLoadingMore] = createSignal(false);
+  const [hasMore, setHasMore] = createSignal(initialCache?.hasMore !== false);
   const sectionUrl = () => props.section.url ?? '';
   const hasPagination = () => sectionUrl().includes('{{page}}') || sectionUrl().includes('{page}');
   const useScrollLoad = () => explorePaginationPreference() === 'scroll';
   const refreshKey = () => props.refreshKey ?? 0;
 
   /** 当前分类列表请求标识；切换分类时变更，用于丢弃过期响应 */
-  const listFetchKey = () => `${sectionUrl()}\0${refreshKey()}`;
+  const listFetchKey = () => buildListFetchKey(sectionUrl(), refreshKey());
 
-  const [committedFetchKey, setCommittedFetchKey] = createSignal<string | null>(null);
+  const [committedFetchKey, setCommittedFetchKey] = createSignal<string | null>(
+    initialCache ? initialFetchKey : null,
+  );
 
   let loadMoreAbort: AbortController | null = null;
 
@@ -75,11 +102,22 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   };
 
   createEffect(() => {
-    listFetchKey();
+    const fetchKey = listFetchKey();
     abortLoadMore();
+    clearCoverSession();
+
+    const cached = readExplorePageCache(props.source, sectionUrl(), refreshKey());
+    if (cached) {
+      exploreBooks.replaceAll(cached.allBooks);
+      setPage(cached.page);
+      setHasMore(cached.hasMore !== false);
+      setCommittedFetchKey(fetchKey);
+      return;
+    }
+
     setPage(1);
     exploreBooks.clear();
-    clearCoverSession();
+    setHasMore(true);
     setCommittedFetchKey(null);
   });
 
@@ -101,13 +139,14 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       const controller = new AbortController();
       onCleanup(() => controller.abort());
 
+      const cached = readExplorePageCache(source, sectionUrl, rk);
       const cacheSourceId = (source.sourceId || source.sourceName) as string | undefined;
-      const cached = cacheSourceId ? pageCacheStore.getExploreCache(cacheSourceId, sectionUrl) : null;
 
       if (cached && rk === 0) {
         if (!isFetchKeyCurrent(fetchKey)) return [];
         exploreBooks.replaceAll(cached.allBooks);
         setPage(cached.page);
+        setHasMore(cached.hasMore !== false);
         setCommittedFetchKey(fetchKey);
         return cached.books;
       }
@@ -120,7 +159,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
         setCommittedFetchKey(fetchKey);
 
         if (cacheSourceId) {
-          pageCacheStore.setExploreCache(cacheSourceId, sectionUrl, list, 1, list);
+          pageCacheStore.setExploreCache(cacheSourceId, sectionUrl, list, 1, list, true);
         }
 
         return list;
@@ -131,12 +170,14 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
     },
   );
 
-  const books = () =>
-    committedFetchKey() === listFetchKey() && firstPageResource.state === 'ready'
-      ? exploreBooks.orderedBooks()
-      : [];
-  const loading = () =>
-    firstPageResource.loading || committedFetchKey() !== listFetchKey();
+  const books = createMemo(() => {
+    if (committedFetchKey() !== listFetchKey()) return [];
+    return exploreBooks.orderedBooks();
+  });
+
+  /** fetchKey 已提交即可展示（含挂载/切换时从页缓存同步灌入 store），避免重进时骨架屏 */
+  const loading = createMemo(() => committedFetchKey() !== listFetchKey());
+
   const error = () =>
     committedFetchKey() === listFetchKey() ? firstPageResource.error : undefined;
 
@@ -148,15 +189,17 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       pageCacheStore.clearExploreCache(cacheSourceId, sectionUrl());
     }
     setPage(1);
+    setHasMore(true);
   };
 
   const loadMore = async () => {
-    if (!hasPagination() || loadingMore()) return;
+    if (!hasPagination() || loadingMore() || !hasMore()) return;
     const fetchKeyAtStart = listFetchKey();
     abortLoadMore();
     const controller = new AbortController();
     loadMoreAbort = controller;
     const next = page() + 1;
+    const cacheSourceId = props.source.sourceId || props.source.sourceName;
     setLoadingMore(true);
     try {
       const list = await exploreBook(props.source, next, sectionUrl(), {
@@ -166,19 +209,24 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       exploreBooks.appendAll(list);
       setPage(next);
 
-      const cacheSourceId = props.source.sourceId || props.source.sourceName;
-      if (cacheSourceId && typeof cacheSourceId === 'string') {
+      if (list.length === 0) {
+        setHasMore(false);
+        if (cacheSourceId && typeof cacheSourceId === 'string') {
+          pageCacheStore.updateExploreCache(cacheSourceId, sectionUrl(), (cache) => ({
+            ...cache,
+            hasMore: false,
+            timestamp: Date.now(),
+          }));
+        }
+      } else if (cacheSourceId && typeof cacheSourceId === 'string') {
         const updatedBooks = exploreBooks.orderedBooks();
         pageCacheStore.updateExploreCache(cacheSourceId, sectionUrl(), (cache) => ({
           ...cache,
           allBooks: [...updatedBooks],
           page: next,
+          hasMore: true,
           timestamp: Date.now(),
         }));
-      }
-
-      if (list.length === 0) {
-        showAppToast({ title: '没有更多了', variant: 'default' });
       }
     } catch (e) {
       if (isAbortError(e)) return;
@@ -197,7 +245,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
     const top = el.scrollTop;
     const scrollTopMoved = top !== lastScrollTopForLoadMore;
     lastScrollTopForLoadMore = top;
-    if (!useScrollLoad() || !hasPagination() || loadingMore()) return;
+    if (!useScrollLoad() || !hasPagination() || loadingMore() || !hasMore()) return;
     if (!scrollTopMoved) return;
     const distanceToBottom = el.scrollHeight - top - el.clientHeight;
     if (distanceToBottom < 100) {
@@ -217,6 +265,18 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
     },
     onCoverUrlRefreshed: exploreBooks.patchCoverUrl,
   }));
+
+  const scrollListFooter = createMemo(() => {
+    if (!hasPagination() || !useScrollLoad() || books().length === 0) return undefined;
+    if (!loadingMore() && hasMore()) return undefined;
+    return (
+      <div class="py-4 text-center text-sm text-muted-foreground">
+        <Show when={loadingMore()} fallback="没有更多了">
+          加载中…
+        </Show>
+      </div>
+    );
+  });
 
   return (
     <div class={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden', props.class)}>
@@ -254,10 +314,11 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
             onScroll={handleContentScroll}
             getItemKey={(sb) => sb.bookUrl}
             renderEntityByKey={renderExploreBookGridCell}
+            scrollFooter={scrollListFooter()}
           />
         </ExploreBookGridProvider>
 
-        <Show when={hasPagination() && books().length > 0 && !useScrollLoad()}>
+        <Show when={hasPagination() && books().length > 0 && !useScrollLoad() && hasMore()}>
           <div class="shrink-0 py-4 flex justify-center">
             <Button variant="outline" onClick={loadMore} disabled={loadingMore()}>
               {loadingMore() ? '加载中…' : '加载更多'}
@@ -265,9 +326,9 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
           </div>
         </Show>
 
-        <Show when={hasPagination() && books().length > 0 && useScrollLoad() && loadingMore()}>
+        <Show when={hasPagination() && books().length > 0 && !useScrollLoad() && !hasMore()}>
           <div class="shrink-0 py-4 flex justify-center">
-            <p class="text-sm text-muted-foreground">加载中…</p>
+            <p class="text-sm text-muted-foreground">没有更多了</p>
           </div>
         </Show>
       </Show>
