@@ -1,7 +1,7 @@
 PC
 1.
 
-
+检索项目，为除了@Reader/src/components/ui 的所有纵向滚动区域设立统一的 my-2， 考虑创建共享组件 AppScrollArea
 
 
 

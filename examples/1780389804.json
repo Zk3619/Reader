@@ -1,0 +1,48 @@
+[
+  {
+    "bookSourceName": "顶点小说",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https:\/\/m.terry-haass.com",
+    "customButton": false,
+    "customOrder": 1,
+    "enabled": true,
+    "enabledCookieJar": true,
+    "enabledExplore": true,
+    "eventListener": false,
+    "exploreUrl": "玄幻魔法::\/dingdiansort_1_{{page}}.html\n武侠修真::\/dingdiansort_2_{{page}}.html\n都市言情::\/dingdiansort_3_{{page}}.html\n历史军事::\/dingdiansort_4_{{page}}.html\n网游竞技::\/dingdiansort_5_{{page}}.html\n科幻灵异::\/dingdiansort_6_{{page}}.html\n侦探推理::\/dingdiansort_7_{{page}}.html\n女生言情::\/dingdiansort_8_{{page}}.html\n其他小说::\/dingdiansort_9_{{page}}.html\n最近更新::\/dingdiantop_lastupdate_{{page}}.html",
+    "header": "{\"User-Agent\":\"Mozilla\/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit\/537.36 (KHTML, like Gecko) Chrome\/120.0.0.0 Safari\/537.36\",\"Referer\":\"https:\/\/m.terry-haass.com\/\",\"Accept\":\"text\/html,application\/xhtml+xml,application\/xml;q=0.9,image\/webp,*\/*;q=0.8\",\"Accept-Language\":\"zh-CN,zh;q=0.9,en;q=0.8\",\"Accept-Encoding\":\"gzip, deflate, br\",\"Connection\":\"keep-alive\"}",
+    "lastUpdateTime": "1777441295236",
+    "respondTime": 180000,
+    "ruleBookInfo": {
+      "author": "class.infotype@p.1@text",
+      "coverUrl": "img.0@src",
+      "lastChapter": "class.infoad.0@text",
+      "name": "class.cataloginfo@h1@text",
+      "tocUrl": "text.章节目录@a@href"
+    },
+    "ruleContent": {
+      "content": "#novelcontent > p:not(:last-of-type) @text",
+      "nextContentUrl": "#novelcontent > ul > li:nth-child(4) > p > a@href"
+    },
+    "ruleExplore": {
+      "bookList": "dl dd a",
+      "bookUrl": "@href",
+      "name": "@text"
+    },
+    "ruleSearch": {
+      "author": "a.-1@text",
+      "bookList": "<js>\nif(result.includes('安全验证') || result.includes('反机器人') || result.includes('请确认您的身份')){\n    cookie.removeCookie(source.bookSourceUrl);\n    var s = java.startBrowserAwait(source.bookSourceUrl, '安全验证').body();\n    result = s;\n}\nresult;\n<\/js>\nclass.searchresult@class.sone",
+      "bookUrl": "a.0@href##javascript:sovote\\((\\d+),'([^']+)'\\);##https:\/\/m.terry-haass.com$2",
+      "checkKeyWord": "",
+      "kind": "class.author.-1@text",
+      "name": "a.0@text"
+    },
+    "ruleToc": {
+      "chapterList": "<js>\nif(result.includes('Just a moment') || result.includes('Cloudflare') || result.includes('enable JavaScript')){\n    var ajaxResult = java.ajax(baseUrl);\n    result = String(ajaxResult);\n}\nresult;\n<\/js>\nclass.zj_list@dd",
+      "chapterName": "a@text",
+      "chapterUrl": "a@href"
+    },
+    "searchUrl": "https:\/\/m.terry-haass.com\/modules\/article\/search.php?searchkey={{key}}&Submit.x=0&Submit.y=0",
+    "weight": 0
+  }
+]
