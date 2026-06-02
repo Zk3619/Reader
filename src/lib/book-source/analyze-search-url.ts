@@ -3,9 +3,18 @@
  */
 
 import type { BookSource } from '@/types';
-import { buildUrl, collapseUrlPathSlashes, resolveUrl } from '@/lib/book-source/utils';
+import {
+  buildUrl,
+  collapseUrlPathSlashes,
+  resolveUrl,
+  sanitizeHttpHeaders,
+} from '@/lib/book-source/utils';
+import {
+  alignUrlToBookSourceRequestOrigin,
+  buildSourceRequestHeaders,
+  resolveBookSourceRequestOrigin,
+} from '@/lib/book-source/source-http';
 import { getScriptBaseUrl } from '@/lib/js-engine/legado/source-script-shared';
-import { parseHeaders } from '@/lib/book-source/utils';
 import {
   evalSearchUrlExpression,
   extractSearchScript,
@@ -16,6 +25,7 @@ import {
   parseAnalyzeUrlOption,
   splitUrlAndOption,
 } from '@/lib/book-source/analyze-url-option';
+import { encodeLegadoFormBody, inferPostContentType } from '@/lib/book-source/analyze-url-post';
 
 export type ResolvedSearchRequest = {
   url: string;
@@ -24,6 +34,7 @@ export type ResolvedSearchRequest = {
   method: 'GET' | 'POST';
   headers: Record<string, string>;
   body?: string;
+  charset?: string;
   useWebView?: boolean;
   webJs?: string;
   webViewDelayMs?: number;
@@ -185,36 +196,6 @@ export async function expandHeaderTemplates(
   return out;
 }
 
-function sanitizeHttpHeaders(headers: Record<string, string>): Record<string, string> {
-  const safe: Record<string, string> = {};
-  const tokenRe = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-  for (const [rawKey, rawValue] of Object.entries(headers)) {
-    const key = rawKey.trim();
-    const value = String(rawValue ?? '').trim();
-    if (!key || !tokenRe.test(key)) continue;
-    if (key.includes('{{') || key.includes('}}') || key.includes('@')) continue;
-    if (value.includes('{{') || value.includes('}}')) continue;
-    if (value === 'null') continue;
-    safe[key] = value;
-  }
-  return safe;
-}
-
-function inferBodyContentType(body: string): 'json' | 'form' | 'text' {
-  const trimmed = body.trim();
-  if (!trimmed) return 'text';
-  if (
-    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-    (trimmed.startsWith('[') && trimmed.endsWith(']'))
-  ) {
-    return 'json';
-  }
-  if (trimmed.includes('=') && (trimmed.includes('&') || /^[^=&\s]+=[^=&\s]*$/.test(trimmed))) {
-    return 'form';
-  }
-  return 'text';
-}
-
 /**
  * 将书源 searchUrl 解析为可发起的 HTTP 请求（对齐 Legado AnalyzeUrl）
  */
@@ -243,12 +224,17 @@ export async function resolveSearchRequest(
 
   const { urlPart, optionsJson } = splitUrlAndOption(ruleUrl);
   const urlOption = parseAnalyzeUrlOption(optionsJson);
-  const base = getScriptBaseUrl(source) || source.sourceUrl || '';
+  const base =
+    resolveBookSourceRequestOrigin(source) ||
+    getScriptBaseUrl(source) ||
+    source.sourceUrl ||
+    '';
   let absoluteUrl = urlPart;
   if (!/^https?:\/\//i.test(absoluteUrl)) {
     absoluteUrl = resolveUrl(base, absoluteUrl);
   }
   absoluteUrl = collapseUrlPathSlashes(absoluteUrl);
+  absoluteUrl = alignUrlToBookSourceRequestOrigin(absoluteUrl, source);
 
   const options = urlOption;
   let body = options.body;
@@ -259,7 +245,7 @@ export async function resolveSearchRequest(
   }
 
   const sourceHeaders = await expandHeaderTemplates(
-    parseHeaders(source.header),
+    buildSourceRequestHeaders(source, absoluteUrl),
     source,
     keyword,
     page,
@@ -271,20 +257,17 @@ export async function resolveSearchRequest(
     page,
   );
   const mergedHeaders = sanitizeHttpHeaders({ ...sourceHeaders, ...optionHeaders });
-  const charset = mergedHeaders['X-UrlOption-Charset']?.trim();
+  const charset = (mergedHeaders['X-UrlOption-Charset'] ?? options.charset)?.trim();
   delete mergedHeaders['X-UrlOption-Charset'];
-  if (options.method === 'POST' && body && !Object.keys(mergedHeaders).some((h) => h.toLowerCase() === 'content-type')) {
-    const bodyType = inferBodyContentType(body);
-    if (bodyType === 'json') {
-      mergedHeaders['Content-Type'] = charset
-        ? `application/json; charset=${charset}`
-        : 'application/json';
-    } else if (bodyType === 'form') {
-      mergedHeaders['Content-Type'] = charset
-        ? `application/x-www-form-urlencoded; charset=${charset}`
-        : 'application/x-www-form-urlencoded';
-    } else if (charset) {
-      mergedHeaders['Content-Type'] = `text/plain; charset=${charset}`;
+
+  if (options.method === 'POST' && body?.trim()) {
+    const trimmed = body.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      body = await encodeLegadoFormBody(trimmed, charset);
+      if (!Object.keys(mergedHeaders).some((h) => h.toLowerCase() === 'content-type')) {
+        const ct = inferPostContentType(body, charset);
+        if (ct) mergedHeaders['Content-Type'] = ct;
+      }
     }
   }
 
@@ -297,6 +280,7 @@ export async function resolveSearchRequest(
     method: options.method === 'HEAD' ? 'GET' : options.method,
     headers: mergedHeaders,
     body,
+    charset,
     useWebView: options.useWebView,
     webJs: options.webJs,
     webViewDelayMs: options.webViewDelayMs,

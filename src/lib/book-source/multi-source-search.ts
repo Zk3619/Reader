@@ -7,10 +7,18 @@ import { isAbortError } from '@/lib/http';
 import type { BookSource } from '@/types';
 import type { SearchBook } from '@/types';
 import type { SearchMode } from '@/lib/search/search-prefs';
-import { isPrecisionSearchMode } from '@/lib/search/search-prefs';
+import {
+  buildSearchBookFilter,
+  classifySearchResult,
+  matchesSearchMode,
+  shouldIncludeOtherBucket,
+  type SearchMatchFields,
+} from '@/lib/search/search-match';
 
 const DEFAULT_CONCURRENCY = 5;
 const SOURCE_TIMEOUT_MS = 30_000;
+/** 单关键词最多自动翻页数（对齐 Legado scroll 加载，防止失控） */
+export const MAX_SEARCH_PAGES = 30;
 
 export interface MergedSearchBook extends SearchBook {
   /** 合并后的书源名（多源命中同名书） */
@@ -30,27 +38,17 @@ function bookKey(name: string, author: string): string {
   return `${name}\0${author}`;
 }
 
-function passesSourceFilter(
-  book: SearchBook,
-  searchKey: string,
-  precision: boolean,
-): boolean {
-  if (!precision) return true;
-  return (
-    book.name.includes(searchKey) ||
-    book.author.includes(searchKey) ||
-    (book.kind?.includes(searchKey) ?? false)
-  );
+function toMatchFields(book: SearchBook): SearchMatchFields {
+  return {
+    name: book.name,
+    author: book.author,
+    kind: book.kind,
+    intro: book.intro,
+  };
 }
 
-function classifyBook(
-  book: SearchBook,
-  searchKey: string,
-): 'equal' | 'tags' | 'contains' | 'other' {
-  if (book.name === searchKey || book.author === searchKey) return 'equal';
-  if (book.kind?.includes(searchKey)) return 'tags';
-  if (book.name.includes(searchKey) || book.author.includes(searchKey)) return 'contains';
-  return 'other';
+function passesSourceFilter(book: SearchBook, searchKey: string, mode: SearchMode): boolean {
+  return matchesSearchMode(toMatchFields(book), searchKey, mode);
 }
 
 function mergeOrigin(existing: MergedSearchBook, incoming: SearchBook): void {
@@ -74,7 +72,7 @@ function mergeSearchResults(
   existing: MergedSearchBook[],
   incoming: SearchBook[],
   searchKey: string,
-  precision: boolean,
+  mode: SearchMode,
 ): MergedSearchBook[] {
   const buckets: Record<'equal' | 'tags' | 'contains' | 'other', MergedSearchBook[]> = {
     equal: [],
@@ -85,7 +83,7 @@ function mergeSearchResults(
   const index = new Map<string, MergedSearchBook>();
 
   const place = (book: MergedSearchBook) => {
-    const bucket = classifyBook(book, searchKey);
+    const bucket = classifySearchResult(toMatchFields(book), searchKey, mode);
     const key = bookKey(book.name, book.author);
     index.set(key, book);
     buckets[bucket].push(book);
@@ -96,7 +94,7 @@ function mergeSearchResults(
   }
 
   for (const raw of incoming) {
-    if (!passesSourceFilter(raw, searchKey, precision)) continue;
+    if (!passesSourceFilter(raw, searchKey, mode)) continue;
     const key = bookKey(raw.name, raw.author);
     const found = index.get(key);
     if (found) {
@@ -114,8 +112,8 @@ function mergeSearchResults(
   out.push(...buckets.equal.sort(sortByOrigins));
   out.push(...buckets.tags.sort(sortByOrigins));
   out.push(...buckets.contains.sort(sortByOrigins));
-  if (!precision) {
-    out.push(...buckets.other);
+  if (shouldIncludeOtherBucket(mode)) {
+    out.push(...buckets.other.sort(sortByOrigins));
   }
   return out;
 }
@@ -125,7 +123,7 @@ async function searchOneSource(
   keyword: string,
   page: number,
   signal: AbortSignal,
-  filter?: (name: string, author: string, kind?: string) => boolean,
+  filter?: (name: string, author: string, kind?: string, intro?: string) => boolean,
 ): Promise<SearchBook[]> {
   if (signal.aborted) return [];
   try {
@@ -203,6 +201,14 @@ export class MultiSourceSearchSession {
     return this.hasMore;
   }
 
+  getPage(): number {
+    return this.page;
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   pause(): void {
     this.paused = true;
   }
@@ -242,6 +248,9 @@ export class MultiSourceSearchSession {
       this.sources = sources.filter((s) => s.enabled && s.searchUrl && s.ruleSearch);
     } else if (!this.searchKey || !this.hasMore) {
       return;
+    } else if (this.page >= MAX_SEARCH_PAGES) {
+      this.hasMore = false;
+      return;
     } else {
       this.page += 1;
     }
@@ -258,7 +267,7 @@ export class MultiSourceSearchSession {
     this.searching = true;
     this.callbacks.onStart?.(isNewSearch);
 
-    const precision = isPrecisionSearchMode(this.mode);
+    const mode = this.mode;
     let roundHasResults = false;
 
     await runPool(
@@ -274,16 +283,11 @@ export class MultiSourceSearchSession {
           this.searchKey,
           this.page,
           signal,
-          precision
-            ? (name, author, kind) =>
-                name.includes(this.searchKey) ||
-                author.includes(this.searchKey) ||
-                (kind?.includes(this.searchKey) ?? false)
-            : undefined,
+          buildSearchBookFilter(mode, this.searchKey),
         );
         if (signal.aborted || currentId !== this.searchId) return;
         if (items.length > 0) roundHasResults = true;
-        this.results = mergeSearchResults(this.results, items, this.searchKey, precision);
+        this.results = mergeSearchResults(this.results, items, this.searchKey, mode);
         this.callbacks.onResults?.([...this.results]);
       },
       signal,
@@ -291,7 +295,7 @@ export class MultiSourceSearchSession {
 
     if (currentId !== this.searchId) return;
 
-    this.hasMore = roundHasResults;
+    this.hasMore = roundHasResults && this.page < MAX_SEARCH_PAGES;
     this.searching = false;
     this.callbacks.onFinish?.(this.results.length === 0, this.hasMore);
   }

@@ -3,7 +3,7 @@
  * 对应 legado 项目的 WebBook.searchBook
  */
 
-import { get, post } from '@/lib/http';
+import { get, request, HttpError } from '@/lib/http';
 import { fetchByAnalyzeUrl } from '@/lib/book-source/analyze-url';
 import {
   analyzeListElements,
@@ -19,11 +19,32 @@ import {
 import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { resolveSearchRequest } from '@/lib/book-source/analyze-search-url';
-import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
-import { resolveUrl, detectContentType, resolveMediaUrl } from '@/lib/book-source/utils';
+import {
+  alignUrlToBookSourceRequestOrigin,
+  buildSourceRequestHeaders,
+  resolveBookSourceRequestOrigin,
+  resolveSourceCookiesForHttp,
+} from '@/lib/book-source/source-http';
+import { resolveExploreAuthor } from '@/lib/book-source/explore';
+import {
+  detectContentType,
+  isLegadoTypedDataUrl,
+  legadoDataUrlRuleBody,
+  resolveMediaUrl,
+  resolveUrl,
+} from '@/lib/book-source/utils';
 import { resolveBookType } from '@/lib/book-source/book-type';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import { resolveCheckKeyword } from '@/lib/book-source/search-keyword';
+import {
+  fetchPostHtmlViaCfWebView,
+  shouldUseCfWebViewFetch,
+} from '@/lib/book-source/cf-webview-fetch';
+import {
+  isCloudflareBlockedResponse,
+  resolveCloudflareViaInnerWeb,
+  shouldOfferCloudflareVerification,
+} from '@/lib/http/cloudflare-verification';
 import { enrichJsonListItemContext, parseJsonListItemRecord } from '@/lib/book-source/json-list-context';
 import {
   COVER_JSON_PATHS,
@@ -331,8 +352,8 @@ export async function searchBook(
   options?: {
     /** 仅在书源校验流程启用 checkKeyWord 覆盖 */
     useCheckKeyword?: boolean;
-    /** 对齐 Legado SearchModel.filter：源内解析阶段过滤 */
-    filter?: (name: string, author: string, kind?: string) => boolean;
+    /** 源内解析阶段过滤（含 intro 供扩展搜索） */
+    filter?: (name: string, author: string, kind?: string, intro?: string) => boolean;
     /** 对齐 Legado SearchModel.shouldBreak：满足条件提前停止 */
     shouldBreak?: (size: number) => boolean;
   },
@@ -358,48 +379,133 @@ export async function searchBook(
     }
 
     const resolved = await resolveSearchRequest(source, requestKeyword, page);
-    const { url: searchUrl, method, headers: urlOptionHeaders, body } = resolved;
+    const typedDataSearchUrl = resolved.ruleUrlWithOption;
+    const isTypedDataSearch = isLegadoTypedDataUrl(typedDataSearchUrl);
+    let searchUrl = alignUrlToBookSourceRequestOrigin(resolved.url, source);
+    const searchRuleBaseUrl =
+      (isTypedDataSearch
+        ? resolveBookSourceRequestOrigin(source) || source.sourceUrl
+        : searchUrl) || searchUrl;
+    const { method, headers: urlOptionHeaders, body, charset: responseCharset } = resolved;
 
-    const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(urlOptionHeaders)) {
-      const key = k.trim();
-      if (!key || key.includes('{{') || key.includes('}}') || key.includes('@')) continue;
-      if (String(v).includes('{{') || String(v).includes('}}')) continue;
-      headers[key] = String(v);
-    }
-    const storedCookie = resolveSourceCookiesForHttp(source, searchUrl).trim();
-    if (storedCookie) {
-      const existing = (headers.Cookie ?? headers.cookie ?? '').trim();
-      headers.Cookie = existing ? `${storedCookie}; ${existing}` : storedCookie;
-      delete headers.cookie;
-    }
+    const buildHttpHeaders = () => {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(urlOptionHeaders)) {
+        const key = k.trim();
+        if (!key || key.includes('{{') || key.includes('}}') || key.includes('@')) continue;
+        if (String(v).includes('{{') || String(v).includes('}}')) continue;
+        headers[key] = String(v);
+      }
+      const fromStore = buildSourceRequestHeaders(source, searchUrl);
+      return { ...fromStore, ...headers };
+    };
 
-    const httpOpts = {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
-      timeout: 30000,
+    const fetchSearchHtml = async (): Promise<string> => {
+      if (isTypedDataSearch) {
+        const hex = legadoDataUrlRuleBody(typedDataSearchUrl);
+        if (hex != null) {
+          await assertLoginCheckPassed(source, hex, searchRuleBaseUrl);
+          return hex;
+        }
+      }
+      const headers = buildHttpHeaders();
+      const storedCookie = resolveSourceCookiesForHttp(source, searchUrl).trim();
+      if (storedCookie) {
+        const existing = (headers.Cookie ?? headers.cookie ?? '').trim();
+        headers.Cookie = existing
+          ? `${storedCookie}; ${existing}`
+          : storedCookie;
+        delete headers.cookie;
+      }
+      const cookieForCf = (headers.Cookie ?? storedCookie).trim();
+      if (resolved.useWebView || resolved.webJs) {
+        const fetched = await fetchByAnalyzeUrl({
+          ruleUrl: resolved.ruleUrlWithOption.replace(resolved.url, searchUrl),
+          source,
+          keyword: requestKeyword,
+          page,
+          baseUrl: searchUrl,
+          cookies: storedCookie,
+          defaultWebViewDelayMs: resolved.webViewDelayMs,
+        });
+        await assertLoginCheckPassed(source, fetched.body, fetched.url || searchUrl);
+        return fetched.body;
+      }
+      /** 已有 cf_clearance：与发现页一致，走 WebView fetch，避免 plugin-http 403 与反复弹 CF 页 */
+      if (shouldUseCfWebViewFetch(source, cookieForCf)) {
+        if (method === 'POST') {
+          const html = await fetchPostHtmlViaCfWebView(
+            source,
+            searchUrl,
+            body ?? '',
+            headers,
+            cookieForCf,
+            responseCharset,
+          );
+          await assertLoginCheckPassed(source, html, searchUrl);
+          return html;
+        }
+      }
+      const httpOpts = {
+        headers,
+        enableCookieJar: source.enabledCookieJar,
+        concurrentRate: source.concurrentRate,
+        timeout: 30000,
+      };
+      const html =
+        method === 'POST'
+          ? await (async () => {
+              const res = await request(searchUrl, {
+                ...httpOpts,
+                method: 'POST',
+                body: body ?? '',
+              });
+              const { decodeBookSourceResponseBytes } = await import(
+                '@/lib/book-source/response-charset'
+              );
+              return decodeBookSourceResponseBytes(
+                await res.arrayBuffer(),
+                responseCharset,
+              );
+            })()
+          : await get(searchUrl, httpOpts);
+      await assertLoginCheckPassed(source, html, searchUrl);
+      return html;
+    };
+
+    const openCfPanelAndRetry = async (): Promise<string> => {
+      const verified = await resolveCloudflareViaInnerWeb({
+        url: searchUrl,
+        source,
+      });
+      if (!verified) {
+        throw new HttpError(403, 'Forbidden', searchUrl, 'Cloudflare 验证未完成');
+      }
+      searchUrl = alignUrlToBookSourceRequestOrigin(searchUrl, source);
+      return fetchSearchHtml();
     };
 
     let html: string;
-    if (resolved.useWebView || resolved.webJs) {
-      const fetched = await fetchByAnalyzeUrl({
-        ruleUrl: resolved.ruleUrlWithOption,
-        source,
-        keyword: requestKeyword,
-        page,
-        baseUrl: searchUrl,
-        cookies: storedCookie,
-        defaultWebViewDelayMs: resolved.webViewDelayMs,
-      });
-      html = fetched.body;
-      await assertLoginCheckPassed(source, html, fetched.url || searchUrl);
-    } else {
-      html =
-        method === 'POST'
-          ? await post(searchUrl, body ?? '', httpOpts)
-          : await get(searchUrl, httpOpts);
-      await assertLoginCheckPassed(source, html, searchUrl);
+    try {
+      html = await fetchSearchHtml();
+      if (isCloudflareBlockedResponse(200, html)) {
+        html = await openCfPanelAndRetry();
+      }
+    } catch (e) {
+      if (!shouldOfferCloudflareVerification(e)) throw e;
+      if (source.enabledCookieJar) {
+        try {
+          html = await fetchSearchHtml();
+          if (isCloudflareBlockedResponse(200, html)) {
+            html = await openCfPanelAndRetry();
+          }
+        } catch (retryErr) {
+          if (!shouldOfferCloudflareVerification(retryErr)) throw retryErr;
+          html = await openCfPanelAndRetry();
+        }
+      } else {
+        html = await openCfPanelAndRetry();
+      }
     }
 
     const contentType = detectContentType(html);
@@ -426,7 +532,7 @@ export async function searchBook(
     const context: RuleContext = {
       content: html,
       contentType,
-      baseUrl: searchUrl,
+      baseUrl: isTypedDataSearch ? searchRuleBaseUrl : searchUrl,
       source: source as unknown as Record<string, unknown>,
     };
 
@@ -437,7 +543,7 @@ export async function searchBook(
         if (pattern.test(searchUrl)) {
           // 这是详情页，直接解析为单个搜索结果
           const book = await parseBookInfoFromDetail(source, rule, html, searchUrl, context, 0);
-          if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
+          if (book && options?.filter?.(book.name, book.author, book.kind, book.intro) !== false) {
             return [book];
           }
         }
@@ -482,7 +588,7 @@ export async function searchBook(
           );
           if (
             detailBook &&
-            options?.filter?.(detailBook.name, detailBook.author, detailBook.kind) !== false
+            options?.filter?.(detailBook.name, detailBook.author, detailBook.kind, detailBook.intro) !== false
           ) {
             return [detailBook];
           }
@@ -511,7 +617,7 @@ export async function searchBook(
           debugBookIndex,
           requestKeyword,
         );
-        if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
+        if (book && options?.filter?.(book.name, book.author, book.kind, book.intro) !== false) {
           bookList.push(book);
           if (options?.shouldBreak?.(bookList.length) === true) {
             break;
@@ -529,7 +635,7 @@ export async function searchBook(
         0,
         requestKeyword,
       );
-      if (book && options?.filter?.(book.name, book.author, book.kind) !== false) {
+      if (book && options?.filter?.(book.name, book.author, book.kind, book.intro) !== false) {
         bookList.push(book);
       }
     }
@@ -697,7 +803,20 @@ async function parseSearchBook(
   try {
     const name = await analyzeFieldWithDebug('name', rule.name, context, source.sourceName, debugBookIndex);
     const normalizedName = normalizeBookNameText(stripHtml(name) ?? '');
-    let author = await analyzeFieldWithDebug('author', rule.author, context, source.sourceName, debugBookIndex);
+    let author = rule.author
+      ? await resolveExploreAuthor(rule.author, context)
+      : '';
+    if (debugBookIndex != null && typeof window !== 'undefined' && rule.author) {
+      logSearchFieldDebug(
+        source.sourceName,
+        debugBookIndex,
+        'author',
+        rule.author,
+        context,
+        author,
+        author,
+      );
+    }
     let bookUrl = await analyzeFieldWithDebug('bookUrl', rule.bookUrl, context, source.sourceName, debugBookIndex);
 
     // 通用兜底：部分 JSON 书源存在 detail_url / book_url，但自定义 bookUrl 规则可能失效

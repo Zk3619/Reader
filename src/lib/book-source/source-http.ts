@@ -8,11 +8,13 @@ import {
   getStoredSourceCookiesForUrl,
   getStoredSourceCookiesMerged,
   readSourceCookieStore,
+  sanitizeLegadoCookieValueForStore,
 } from '@/lib/js-engine/legado/login-script-runner';
 import {
   extractLegadoCookieValue,
   extractQttokenKey,
   mergeLegadoCookieHeaderStrings,
+  isLegadoPlaceholderCookieHeader,
   normalizeLegadoCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
@@ -21,8 +23,15 @@ import {
   getLegadoSourceKey,
   normalizeServerFieldsInSourceArgs,
   readServerUrlFromSourceArgs,
+  STORAGE_PREFIX_CF_ORIGIN,
+  STORAGE_PREFIX_CF_UA,
+  storageKey,
 } from '@/lib/js-engine/legado/source-script-shared';
-import { extractServerFromJsLib, parseHeaders } from '@/lib/book-source/utils';
+import {
+  extractServerFromJsLib,
+  parseHeaders,
+  stripMisplacedCookieFromHttpUrl,
+} from '@/lib/book-source/utils';
 
 export const LEGADO_DEVICE_ID_STORAGE_KEY = 'reader_login_android_id';
 
@@ -153,9 +162,141 @@ function hostnameOf(urlOrHost: string): string | undefined {
   }
 }
 
+function originOfHttpUrl(url: string): string | undefined {
+  const s = url.trim();
+  if (!s.startsWith('http')) return undefined;
+  try {
+    return new URL(s).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function cookieHeaderHasCfClearance(cookieHeader: string): boolean {
+  return /(?:^|;\s*)(?:cf_clearance|__cf_bm)=/i.test(cookieHeader.trim());
+}
+
+/** 书源目录域（sourceUrl / bookSourceUrl） */
+export function resolveBookSourceCatalogOrigin(source: BookSource): string {
+  const su = (source.sourceUrl ?? source.bookSourceUrl ?? '').trim();
+  if (!su?.startsWith('http')) return '';
+  return originOfHttpUrl(su) ?? su.replace(/\/+$/, '');
+}
+
+/**
+ * HTTP 请求应使用的站点 origin：CF 通过后优先镜像域（对齐 Legado bhost 换站）。
+ */
+export function getCfActiveRequestOrigin(source: BookSource): string | undefined {
+  try {
+    const key = storageKey(STORAGE_PREFIX_CF_ORIGIN, getLegadoSourceKey(source));
+    const raw = localStorage.getItem(key)?.trim();
+    if (raw?.startsWith('http')) return originOfHttpUrl(raw) ?? undefined;
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+export function setCfActiveRequestOrigin(source: BookSource, origin: string): void {
+  const o = originOfHttpUrl(origin);
+  if (!o) return;
+  try {
+    const key = storageKey(STORAGE_PREFIX_CF_ORIGIN, getLegadoSourceKey(source));
+    localStorage.setItem(key, o);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearCfActiveRequestOrigin(source: BookSource): void {
+  try {
+    localStorage.removeItem(storageKey(STORAGE_PREFIX_CF_ORIGIN, getLegadoSourceKey(source)));
+    localStorage.removeItem(storageKey(STORAGE_PREFIX_CF_UA, getLegadoSourceKey(source)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getCfActiveUserAgent(source: BookSource): string | undefined {
+  try {
+    const key = storageKey(STORAGE_PREFIX_CF_UA, getLegadoSourceKey(source));
+    const raw = localStorage.getItem(key)?.trim();
+    return raw || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function setCfActiveUserAgent(source: BookSource, userAgent: string): void {
+  const ua = userAgent.trim();
+  if (!ua) return;
+  try {
+    const key = storageKey(STORAGE_PREFIX_CF_UA, getLegadoSourceKey(source));
+    localStorage.setItem(key, ua);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function resolveBookSourceRequestOrigin(source: BookSource): string {
+  return getCfActiveRequestOrigin(source) || resolveBookSourceCatalogOrigin(source);
+}
+
+/**
+ * 发现/章节 URL 仍指向书源目录域时，改写到 CF 活跃镜像域（Cookie 与 cf_clearance 所在域）。
+ */
+export function alignUrlToBookSourceRequestOrigin(
+  url: string,
+  source: BookSource,
+): string {
+  const target = url.trim();
+  if (!target.startsWith('http')) return target;
+  const active = getCfActiveRequestOrigin(source);
+  const catalog = resolveBookSourceCatalogOrigin(source);
+  if (!active || !catalog || active === catalog) return target;
+  try {
+    const u = new URL(target);
+    const cat = new URL(catalog);
+    const act = new URL(active);
+    if (u.hostname === cat.hostname) {
+      u.protocol = act.protocol;
+      u.hostname = act.hostname;
+      return u.href;
+    }
+  } catch {
+    /* ignore */
+  }
+  return target;
+}
+
+function alignRefererToRequestOrigin(
+  headers: Record<string, string>,
+  source: BookSource,
+): void {
+  const active = getCfActiveRequestOrigin(source);
+  const catalog = resolveBookSourceCatalogOrigin(source);
+  if (!active || !catalog || active === catalog) return;
+  const refKey = headers.Referer != null ? 'Referer' : headers.referer != null ? 'referer' : '';
+  if (!refKey) return;
+  const refVal = headers[refKey]?.trim();
+  if (!refVal?.startsWith('http')) return;
+  try {
+    const ref = new URL(refVal);
+    const cat = new URL(catalog);
+    const act = new URL(active);
+    if (ref.hostname === cat.hostname) {
+      ref.protocol = act.protocol;
+      ref.hostname = act.hostname;
+      headers[refKey] = ref.href;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 晴天等聚合服：统一 https，避免 http 登录 Cookie 与 https API 不一致 */
 export function normalizeBookSourceServerUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, '');
+  const trimmed = stripMisplacedCookieFromHttpUrl(url.trim()).replace(/\/+$/, '');
   if (!trimmed) return trimmed;
   try {
     const u = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
@@ -237,10 +378,18 @@ export function resolveSourceCookiesForHttp(
   source: BookSource,
   requestUrl: string,
 ): string {
-  const direct = getStoredSourceCookiesForUrl(source, requestUrl).trim();
+  const alignedUrl = alignUrlToBookSourceRequestOrigin(requestUrl, source);
+  const direct = getStoredSourceCookiesForUrl(source, alignedUrl).trim();
+  const cfOrigin = getCfActiveRequestOrigin(source);
+  if (cfOrigin && cfOrigin !== originOfHttpUrl(alignedUrl)) {
+    const fromCf = getStoredSourceCookiesForUrl(source, cfOrigin).trim();
+    if (fromCf && cookieHeaderHasCfClearance(fromCf)) {
+      return direct ? mergeLegadoCookieHeaderStrings(fromCf, direct) : fromCf;
+    }
+  }
   if (direct) return direct;
 
-  const altOrigin = alternateOriginScheme(requestUrl);
+  const altOrigin = alternateOriginScheme(alignedUrl);
   if (altOrigin) {
     const fromAlt = getStoredSourceCookiesForUrl(source, altOrigin).trim();
     if (fromAlt) return fromAlt;
@@ -252,13 +401,13 @@ export function resolveSourceCookiesForHttp(
     if (fromServer) return fromServer;
   }
 
-  const reqHost = hostnameOf(requestUrl);
+  const reqHost = hostnameOf(alignedUrl);
   if (reqHost) {
     for (const [key, value] of readSourceCookieStore(source).entries()) {
       if (!value?.trim()) continue;
       const keyHost = hostnameOf(key);
       if (keyHost && keyHost === reqHost) {
-        return normalizeLegadoCookieHeader(
+        return sanitizeLegadoCookieValueForStore(
           value,
           resolveLegadoDeviceId(value, source),
         );
@@ -307,12 +456,18 @@ export function buildSourceRequestHeaders(
   source: BookSource,
   requestUrl: string,
 ): Record<string, string> {
+  const alignedUrl = alignUrlToBookSourceRequestOrigin(requestUrl, source);
   const headers = parseHeaders(source.header);
-  const stored = resolveSourceCookiesForHttp(source, requestUrl);
-  const cookieHeader = mergeLegadoCookieHeaderStrings(
-    stored,
-    headers.Cookie ?? headers.cookie ?? '',
-  );
+  alignRefererToRequestOrigin(headers, source);
+  const cfUa = getCfActiveUserAgent(source);
+  if (cfUa) {
+    headers['User-Agent'] = cfUa;
+    delete headers['user-agent'];
+  }
+  const stored = resolveSourceCookiesForHttp(source, alignedUrl);
+  const fromHeaderRaw = headers.Cookie ?? headers.cookie ?? '';
+  const fromHeader = isLegadoPlaceholderCookieHeader(fromHeaderRaw) ? '' : fromHeaderRaw;
+  const cookieHeader = mergeLegadoCookieHeaderStrings(stored, fromHeader);
   if (cookieHeader) {
     headers.Cookie = normalizeLegadoCookieHeader(
       cookieHeader,

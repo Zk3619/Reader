@@ -35,29 +35,96 @@ export function buildUrl(
   return url;
 }
 
+/** fetch / Headers 允许的 header 名（RFC 7230 token） */
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+function unquoteHeaderToken(token: string): string {
+  let s = token.trim();
+  while (s.length > 0 && (s.endsWith(',') || s.endsWith('}'))) {
+    s = s.slice(0, -1).trim();
+  }
+  if (s.startsWith('{')) {
+    s = s.slice(1).trim();
+  }
+  if (
+    (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) ||
+    (s.length >= 2 && s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1);
+  }
+  return s.trim();
+}
+
+function normalizeHeaderRecord(raw: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const k = unquoteHeaderToken(String(key));
+    const v = unquoteHeaderToken(String(value ?? ''));
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
+function tryParseHeaderObject(headerStr: string): Record<string, string> | null {
+  const trimmed = headerStr.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return normalizeHeaderRecord(parsed as Record<string, unknown>);
+    }
+  } catch {
+    /* Legado 常见单引号伪 JSON */
+  }
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed.replace(/'/g, '"')) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return normalizeHeaderRecord(parsed as Record<string, unknown>);
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
+}
+
+/** 去掉非法 header 名/未展开模板，避免 fetch 报 Invalid name */
+export function sanitizeHttpHeaders(headers: Record<string, string>): Record<string, string> {
+  const safe: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(headers)) {
+    const key = unquoteHeaderToken(rawKey);
+    const value = unquoteHeaderToken(String(rawValue ?? ''));
+    if (!key || !HTTP_HEADER_NAME_RE.test(key)) continue;
+    if (key.includes('{{') || key.includes('}}') || key.includes('@')) continue;
+    if (value.includes('{{') || value.includes('}}')) continue;
+    if (value === 'null') continue;
+    safe[key] = value;
+  }
+  return safe;
+}
+
 /**
  * 解析书源header
  */
 export function parseHeaders(headerStr?: string): Record<string, string> {
   if (!headerStr) return {};
 
-  try {
-    return JSON.parse(headerStr);
-  } catch {
-    // 如果解析失败，尝试按行分割
-    const headers: Record<string, string> = {};
-    headerStr.split('\n').forEach(line => {
-      const colonIndex = line.indexOf(':');
-      if (colonIndex > 0) {
-        const key = line.substring(0, colonIndex).trim();
-        const value = line.substring(colonIndex + 1).trim();
-        if (key && value) {
-          headers[key] = value;
-        }
+  const fromObject = tryParseHeaderObject(headerStr);
+  if (fromObject) return sanitizeHttpHeaders(fromObject);
+
+  const headers: Record<string, string> = {};
+  headerStr.split('\n').forEach((line) => {
+    const colonIndex = line.indexOf(':');
+    if (colonIndex > 0) {
+      const key = unquoteHeaderToken(line.substring(0, colonIndex));
+      const value = unquoteHeaderToken(line.substring(colonIndex + 1));
+      if (key && value) {
+        headers[key] = value;
       }
-    });
-    return headers;
-  }
+    }
+  });
+  return sanitizeHttpHeaders(headers);
 }
 
 /**
@@ -65,6 +132,29 @@ export function parseHeaders(headerStr?: string): Record<string, string> {
  */
 export function isAbsoluteUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
+}
+
+/**
+ * 去掉误粘在 http(s) URL 后的 Cookie 段（如 `https://v1.gyks.cf;deviceId=xxx/health`）。
+ * Legado 聚合书源偶发把 qttoken/deviceId 写入 server/线路 字段，会导致 TLS Invalid Server Name。
+ */
+export function stripMisplacedCookieFromHttpUrl(url: string): string {
+  const s = url.trim();
+  if (!/^https?:\/\//i.test(s)) return s;
+  const semi = s.indexOf(';');
+  if (semi === -1) return s;
+  const head = s.slice(0, semi);
+  const afterSemi = s.slice(semi + 1);
+  // 仅处理「origin 后紧跟 ;cookie」；已有正常路径的 URL 不动
+  if (!/^https?:\/\/[^/]+$/i.test(head)) return s;
+  const slashInCookie = afterSemi.indexOf('/');
+  const pathSuffix = slashInCookie >= 0 ? afterSemi.slice(slashInCookie) : '';
+  try {
+    const u = new URL(head);
+    return `${u.origin}${pathSuffix}`.replace(/([^:]\/)\/+/g, '$1');
+  } catch {
+    return head.replace(/\/+$/, '');
+  }
 }
 
 /** 合并路径中重复斜杠（保留 https:// 中的 //） */
@@ -133,10 +223,12 @@ export function resolveUrl(baseUrl: string, relativeUrl: string): string {
     return rel;
   }
   if (isAbsoluteUrl(rel)) {
-    return rel;
+    return stripMisplacedCookieFromHttpUrl(rel);
   }
 
-  const base = (baseUrl || '').split(',')[0]?.trim() || baseUrl;
+  const base = stripMisplacedCookieFromHttpUrl(
+    (baseUrl || '').split(',')[0]?.trim() || baseUrl,
+  );
 
   try {
     return new URL(rel, base).toString();

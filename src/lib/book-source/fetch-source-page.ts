@@ -11,11 +11,20 @@ import {
   legadoHexEncodeBytes,
 } from '@/lib/book-source/utils';
 import { fetchByAnalyzeUrl } from '@/lib/book-source/analyze-url';
-import { resolveSourceCookiesForHttp } from '@/lib/book-source/source-http';
+import {
+  alignUrlToBookSourceRequestOrigin,
+  resolveBookSourceRequestOrigin,
+  resolveSourceCookiesForHttp,
+} from '@/lib/book-source/source-http';
 import { splitUrlAndOption, URL_OPTION_SPLIT } from '@/lib/book-source/analyze-url-option';
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
-import { get } from '@/lib/http';
+import { get, HttpError } from '@/lib/http';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import {
+  isCloudflareBlockedResponse,
+  resolveCloudflareViaInnerWeb,
+  shouldOfferCloudflareVerification,
+} from '@/lib/http/cloudflare-verification';
 
 export interface FetchSourcePageParams {
   /** 完整 ruleUrl（可含 ,{UrlOption}） */
@@ -46,18 +55,91 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
   ruleUrl = buildUrl(ruleUrl, ph);
 
   const { urlPart } = splitUrlAndOption(ruleUrl);
-  const cookies = resolveSourceCookiesForHttp(params.source, urlPart);
 
-  const fetched = await fetchByAnalyzeUrl({
-    ruleUrl,
-    source: params.source,
-    keyword: params.keyword ?? '',
-    page,
-    baseUrl: params.baseUrl,
-    cookies,
-  });
-  await assertLoginCheckPassed(params.source, fetched.body, fetched.url || urlPart);
-  return fetched;
+  const resolvePageUrl = () => {
+    try {
+      const base =
+        params.baseUrl ||
+        resolveBookSourceRequestOrigin(params.source) ||
+        params.source.sourceUrl ||
+        urlPart;
+      let href = urlPart;
+      if (/^https?:\/\//i.test(urlPart)) href = urlPart;
+      else if (base?.startsWith('http')) href = new URL(urlPart, base).href;
+      else href = params.source.sourceUrl?.trim() || urlPart;
+      return alignUrlToBookSourceRequestOrigin(href, params.source);
+    } catch {
+      /* ignore */
+    }
+    const fallback = params.source.sourceUrl?.trim() || urlPart;
+    return alignUrlToBookSourceRequestOrigin(fallback, params.source);
+  };
+
+  /** 每次请求前重读书源 Cookie 池（CF √ 后须刷新，勿复用旧快照） */
+  const buildAnalyzeParams = () => {
+    const pageUrl = resolvePageUrl();
+    const { optionsJson } = splitUrlAndOption(ruleUrl);
+    const alignedRuleUrl =
+      optionsJson?.trim() ? `${pageUrl},${optionsJson}` : pageUrl;
+    return {
+      ruleUrl: alignedRuleUrl,
+      source: params.source,
+      keyword: params.keyword ?? '',
+      page,
+      baseUrl: resolveBookSourceRequestOrigin(params.source) || params.baseUrl,
+      cookies: resolveSourceCookiesForHttp(params.source, pageUrl),
+    };
+  };
+
+  const maybeRetryAfterCf = async (): Promise<{
+    body: string;
+    url: string;
+    usedWebView: boolean;
+  }> => {
+    const target = resolvePageUrl();
+    const verified = await resolveCloudflareViaInnerWeb({
+      url: target,
+      source: params.source,
+    });
+    if (!verified) {
+      throw new HttpError(
+        403,
+        'Forbidden',
+        target,
+        '需要完成 Cloudflare 验证（未完成或 Cookie 未同步）',
+      );
+    }
+    return fetchByAnalyzeUrl(buildAnalyzeParams());
+  };
+
+  try {
+    let fetched = await fetchByAnalyzeUrl(buildAnalyzeParams());
+    const pageUrl = fetched.url || urlPart;
+    if (
+      !fetched.usedWebView &&
+      isCloudflareBlockedResponse(200, fetched.body)
+    ) {
+      fetched = await maybeRetryAfterCf();
+    }
+    await assertLoginCheckPassed(params.source, fetched.body, pageUrl);
+    return fetched;
+  } catch (e) {
+    if (shouldOfferCloudflareVerification(e)) {
+      if (params.source.enabledCookieJar) {
+        try {
+          const fetched = await fetchByAnalyzeUrl(buildAnalyzeParams());
+          await assertLoginCheckPassed(params.source, fetched.body, fetched.url || urlPart);
+          return fetched;
+        } catch {
+          /* 对齐 Legado：首包 403 已写入 Set-Cookie，再试一次；仍失败则开内嵌页 */
+        }
+      }
+      const fetched = await maybeRetryAfterCf();
+      await assertLoginCheckPassed(params.source, fetched.body, fetched.url || urlPart);
+      return fetched;
+    }
+    throw e;
+  }
 }
 
 /** 章节 URL：含 UrlOption 时走 AnalyzeUrl，否则普通 GET */

@@ -4,7 +4,7 @@
  */
 
 import { get as httpGet, post } from '@/lib/http';
-import { resolveUrl } from '@/lib/book-source/utils';
+import { resolveUrl, utf8FromBase64, utf8ToBase64, hexToUtf8 } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import {
   createQuickJSContext,
@@ -205,6 +205,23 @@ async function runSearchJsFullQuickJS(
   }
 }
 
+function buildLegacyJavaApi(): Pick<
+  Record<string, unknown>,
+  'base64Encode' | 'base64Decode' | 'hexDecodeToString'
+> {
+  return {
+    base64Encode(str: unknown) {
+      return utf8ToBase64(String(str ?? ''));
+    },
+    base64Decode(str: unknown) {
+      return utf8FromBase64(String(str ?? ''));
+    },
+    hexDecodeToString(hex: unknown) {
+      return hexToUtf8(String(hex ?? ''));
+    },
+  };
+}
+
 function buildLegacyScope(
   source: BookSource,
   keyword: string,
@@ -244,6 +261,7 @@ function buildLegacyScope(
       }
     },
     java: {
+      ...buildLegacyJavaApi(),
       log(...args: unknown[]) {
         console.warn('[search-script]', ...args);
       },

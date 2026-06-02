@@ -10,7 +10,9 @@ import {
 import {
   legadoInnerWebCookieSyncUrls,
   mergeLegadoCookieHeaderStrings,
+  normalizeControlSettingsCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { isBookSourceControlUrl } from '@/lib/platform/inner-web-mode';
 import { readSourceCookieStore } from '@/lib/js-engine/legado/login-script-runner';
 import {
   getLegadoSourceKey,
@@ -84,6 +86,14 @@ export async function pullSourceCookiesIntoStore(
 
   if (isTauri()) {
     const useMain = getInnerWebCookiesUseMainWebview();
+    if (!useMain) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('flush_inner_web_panel_document_cookie');
+      } catch {
+        /* panel 未打开 */
+      }
+    }
     const jobs: Promise<string>[] = [
       readTauriJar('get_backstage_webview_cookies_for_url', pageUrl),
     ];
@@ -163,4 +173,52 @@ export async function syncSourceCookiePool(
   if (!pageUrl.startsWith('http')) return;
   await pullSourceCookiesIntoStore(source, pageUrl);
   await pushSourceCookiesToWebviews(source, pageUrl);
+}
+
+/** CF / 登录后：将书源 Cookie 头同步进 HTTP CookieJar（对齐 CookieStore.replaceCookie） */
+export async function mirrorSourceCookiesToHttpJar(
+  pageUrl: string,
+  cookieHeader: string,
+): Promise<void> {
+  const trimmed = cookieHeader.trim();
+  if (!trimmed || !pageUrl.startsWith('http')) return;
+  try {
+    const { replacePersistentCookie } = await import('@/lib/http/cookie-jar');
+    await replacePersistentCookie(pageUrl, trimmed);
+  } catch (e) {
+    console.warn('[source-cookie-pool] mirrorSourceCookiesToHttpJar failed', e);
+  }
+}
+
+/** √ 后：代理会话 / WebView → 书源表 → CookieJar */
+export async function syncSourceCookiesAfterInnerWeb(
+  source: BookSource,
+  pageUrl: string,
+  cookieHeaderFromUi?: string,
+): Promise<string> {
+  const url = pageUrl.trim();
+  if (!url.startsWith('http')) return '';
+
+  await pullSourceCookiesIntoStore(source, url);
+
+  const { resolveSourceCookiesForHttp } = await import('@/lib/book-source/source-http');
+  let merged = resolveSourceCookiesForHttp(source, url).trim();
+  const fromUi = normalizeControlSettingsCookieHeader(cookieHeaderFromUi?.trim() ?? '');
+  if (fromUi) {
+    merged = merged
+      ? mergeLegadoCookieHeaderStrings(merged, fromUi)
+      : fromUi;
+  }
+  if (merged) {
+    persistSourceCookieHeaderForPage(source, url, merged);
+    await mirrorSourceCookiesToHttpJar(url, merged);
+    if (isBookSourceControlUrl(url)) {
+      const { syncControlSettingsToSourceArgs } = await import(
+        '@/lib/js-engine/legado/login-script-runner'
+      );
+      syncControlSettingsToSourceArgs(source, merged);
+    }
+  }
+  await pushSourceCookiesToWebviews(source, url);
+  return merged;
 }

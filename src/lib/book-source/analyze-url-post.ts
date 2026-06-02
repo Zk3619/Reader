@@ -2,6 +2,10 @@
  * Legado AnalyzeUrl POST 查询串 / 表单编码（简化版 analyzeFields / analyzeQuery）
  */
 
+import { isGbkLikeCharset } from '@/lib/book-source/response-charset';
+
+export { isGbkLikeCharset };
+
 function encodeParamValue(value: string, charset = 'utf-8'): string {
   if (charset === 'escape') {
     return value;
@@ -44,6 +48,28 @@ export function encodeFormBody(fieldsTxt: string, charset?: string): string {
 /** GET 时附加到 URL 的 query（已编码） */
 export function encodeQueryString(query: string, charset?: string): string {
   return encodeFormBody(query, charset);
+}
+
+/**
+ * 对齐 Legado AnalyzeUrl POST：charset=gbk 时须 GBK 百分号编码（非 UTF-8 encodeURIComponent）
+ */
+export async function encodeLegadoFormBody(
+  fieldsTxt: string,
+  charset?: string,
+): Promise<string> {
+  if (!fieldsTxt.trim()) return fieldsTxt;
+  if (isGbkLikeCharset(charset)) {
+    try {
+      const { isTauri } = await import('@/lib/platform/detect');
+      if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<string>('encode_form_urlencoded_gbk', { fields: fieldsTxt });
+      }
+    } catch (e) {
+      console.warn('[encodeLegadoFormBody] GBK 编码失败，回退 UTF-8', e);
+    }
+  }
+  return encodeFormBody(fieldsTxt, charset);
 }
 
 /** 根据 body 形态设置 Content-Type */

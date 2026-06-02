@@ -4,11 +4,17 @@
 
 import type { BookSource } from '@/types';
 import { request } from '@/lib/http';
-import { parseHeaders, resolveUrl } from '@/lib/book-source/utils';
+import { parseHeaders, resolveUrl, sanitizeHttpHeaders } from '@/lib/book-source/utils';
+import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
+import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { extractHostListFromJsLib } from '@/lib/book-source/utils';
 import { evalJs } from '@/lib/js-engine';
 import { getScriptBaseUrl } from '@/lib/js-engine/legado/source-script-shared';
 import { runWebJs } from '@/lib/rule-engine/webjs-runner';
+import {
+  fetchPageHtmlViaCfWebView,
+  shouldUseCfWebViewFetch,
+} from '@/lib/book-source/cf-webview-fetch';
 import type { RunWebJsOptions } from '@/lib/rule-engine/webjs-script';
 import {
   parseAnalyzeUrlOption,
@@ -139,7 +145,7 @@ async function mergeSourceHeaders(
     expandHeaderTemplates(parseHeaders(source.header), source, keyword, page),
     expandHeaderTemplates(option.headers, source, keyword, page),
   ]);
-  return { ...sourceHeaders, ...optionHeaders };
+  return sanitizeHttpHeaders({ ...sourceHeaders, ...optionHeaders });
 }
 
 function applyDnsIp(headers: Record<string, string>, dnsIp?: string, requestUrl?: string): void {
@@ -197,13 +203,14 @@ async function fetchHttpOnce(
   url: string,
   option: AnalyzeUrlOption,
   headers: Record<string, string>,
+  enabledCookieJar: boolean,
 ): Promise<string> {
   const { url: finalUrl, method, body } = prepareHttpRequest(url, option, headers);
   const res = await request(finalUrl, {
     method: method === 'POST' ? 'POST' : 'GET',
     headers,
     body,
-    enableCookieJar: true,
+    enableCookieJar: enabledCookieJar,
   });
   return res.text();
 }
@@ -212,12 +219,13 @@ async function fetchHttpWithRetry(
   url: string,
   option: AnalyzeUrlOption,
   headers: Record<string, string>,
+  enabledCookieJar: boolean,
 ): Promise<string> {
   const maxAttempts = Math.max(1, (option.retry ?? 0) + 1);
   let lastError: unknown;
   for (let i = 0; i < maxAttempts; i += 1) {
     try {
-      return await fetchHttpOnce(url, option, headers);
+      return await fetchHttpOnce(url, option, headers, enabledCookieJar);
     } catch (e) {
       lastError = e;
       if (i < maxAttempts - 1) {
@@ -265,14 +273,26 @@ export async function fetchByAnalyzeUrl(
 
   url = applyServerId(url, option, params.source);
 
-  const headers = params.source
-    ? await mergeSourceHeaders(params.source, option, keyword, page)
-    : { ...option.headers };
-
-  if (params.cookies?.trim()) {
-    headers.Cookie = headers.Cookie
-      ? `${headers.Cookie}; ${params.cookies.trim()}`
-      : params.cookies.trim();
+  let headers: Record<string, string>;
+  if (params.source) {
+    const fromStore = buildSourceRequestHeaders(params.source, url);
+    const fromTemplates = await mergeSourceHeaders(params.source, option, keyword, page);
+    headers = sanitizeHttpHeaders({ ...fromStore, ...fromTemplates });
+    if (params.cookies?.trim()) {
+      const merged = mergeLegadoCookieHeaderStrings(
+        headers.Cookie ?? headers.cookie ?? '',
+        params.cookies.trim(),
+      );
+      if (merged) headers.Cookie = merged;
+      delete headers.cookie;
+    }
+  } else {
+    headers = { ...option.headers };
+    if (params.cookies?.trim()) {
+      headers.Cookie = headers.Cookie
+        ? `${headers.Cookie}; ${params.cookies.trim()}`
+        : params.cookies.trim();
+    }
   }
 
   applyDnsIp(headers, option.dnsIp, url);
@@ -309,7 +329,22 @@ export async function fetchByAnalyzeUrl(
     };
     body = await runWebJs(webOpts);
   } else if (!body) {
-    body = await fetchHttpWithRetry(url, option, headers);
+    const cookieForCf = mergeLegadoCookieHeaderStrings(
+      params.cookies?.trim() ?? '',
+      String(headers.Cookie ?? headers.cookie ?? '').trim(),
+    );
+    if (params.source && shouldUseCfWebViewFetch(params.source, cookieForCf)) {
+      usedWebView = true;
+      body = await fetchPageHtmlViaCfWebView(
+        params.source,
+        url,
+        params.cookies?.trim() ?? '',
+        headers,
+      );
+    } else {
+      const useCookieJar = params.source?.enabledCookieJar === true;
+      body = await fetchHttpWithRetry(url, option, headers, useCookieJar);
+    }
   }
 
   if (option.bodyJs) {

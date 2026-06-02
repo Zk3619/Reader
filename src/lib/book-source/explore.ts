@@ -8,7 +8,7 @@ import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule
 import { legadoListRuleNeedsAllSuffix } from '@/lib/rule-engine/legado-source-rule';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
-import type { BookSource, ExploreRule } from '@/types';
+import type { BookSource, ExploreRule, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { isLegadoAjaxBookListExploreUrl } from '@/lib/book-source/explore-legado-ajax';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
@@ -22,7 +22,10 @@ import {
   pickFirstJsonField,
 } from '@/lib/book-source/explore-json-fields';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
-import { formatWordCountLikeLegado } from '@/lib/book-source/search-format';
+import {
+  formatWordCountLikeLegado,
+  normalizeAuthorText,
+} from '@/lib/book-source/search-format';
 import { enrichJsonListItemContext } from '@/lib/book-source/json-list-context';
 
 /** 拆分书源 lastChapter 模板中的「章节 • 时间」 */
@@ -61,6 +64,60 @@ export type ExploreBookOptions = {
   signal?: AbortSignal;
 };
 
+function exploreRuleHasParseFields(rule: ExploreRule | SearchRule | undefined): boolean {
+  if (!rule) return false;
+  return Boolean(
+    rule.bookList?.trim() || rule.name?.trim() || rule.bookUrl?.trim(),
+  );
+}
+
+/**
+ * 对齐 Legado：许多书源 ruleExplore 为空，列表字段写在 ruleSearch（如第一版主 banzhu）。
+ */
+function stripHtmlFragment(raw: string | undefined): string {
+  if (!raw) return '';
+  return raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function exploreAuthorLooksInvalid(author: string): boolean {
+  const t = author.trim();
+  if (!t) return true;
+  if (/<[a-z!/]/i.test(t)) return true;
+  if (/\$1|class\s*=/i.test(t)) return true;
+  if (t.length > 64) return true;
+  return false;
+}
+
+/** ##作者…## 等纯替换规则失败时，回退常见 author 选择器 */
+export async function resolveExploreAuthor(
+  rule: string | undefined,
+  context: RuleContext,
+): Promise<string> {
+  if (!rule?.trim()) return '';
+  let author = stripHtmlFragment(await analyzeString(rule, context));
+  author = normalizeAuthorText(author);
+  if (exploreAuthorLooksInvalid(author)) {
+    for (const fallback of ['a.author@text', '.author@text', 'a.author@textNodes']) {
+      const hit = normalizeAuthorText(
+        stripHtmlFragment(await analyzeString(fallback, context)),
+      );
+      if (hit && !exploreAuthorLooksInvalid(hit)) {
+        author = hit;
+        break;
+      }
+    }
+  }
+  return exploreAuthorLooksInvalid(author) ? '' : author;
+}
+
+export function resolveExploreParseRule(source: BookSource): ExploreRule | undefined {
+  const explore = source.ruleExplore;
+  if (exploreRuleHasParseFields(explore)) return explore;
+  const search = source.ruleSearch;
+  if (exploreRuleHasParseFields(search)) return search;
+  return undefined;
+}
+
 /** Legado ajax 书单列（如晴天 `/get_book_shelf,{...}`） */
 async function exploreBookViaLegadoAjax(
   source: BookSource,
@@ -69,7 +126,7 @@ async function exploreBookViaLegadoAjax(
   signal?: AbortSignal,
 ): Promise<SearchBook[]> {
   const ajax = parseAjaxArgs(rawUrl.trim());
-  if (!ajax || !source.ruleExplore) return [];
+  if (!ajax || !resolveExploreParseRule(source)) return [];
 
   const origin = source.sourceUrl?.trim() ?? '';
   const resolved = origin ? resolveUrl(origin, ajax.urlStr) : ajax.urlStr;
@@ -126,7 +183,7 @@ async function parseExploreBooksFromContent(
   exploreUrl: string,
   respondTime: number
 ): Promise<SearchBook[]> {
-  const rule = source.ruleExplore;
+  const rule = resolveExploreParseRule(source);
   if (!rule) return [];
 
   const contentType = detectContentType(html);
@@ -173,8 +230,14 @@ export async function exploreBook(
 ): Promise<SearchBook[]> {
   const signal = options?.signal;
   let baseUrl = exploreUrlOverride ?? source.exploreUrl;
-  if (!source.ruleExplore || !baseUrl) {
-    console.warn('[explore] 缺少必要参数:', { hasRuleExplore: !!source.ruleExplore, baseUrl });
+  const parseRule = resolveExploreParseRule(source);
+  if (!parseRule || !baseUrl) {
+    console.warn('[explore] 缺少必要参数:', {
+      hasParseRule: !!parseRule,
+      hasRuleExplore: exploreRuleHasParseFields(source.ruleExplore),
+      hasRuleSearch: exploreRuleHasParseFields(source.ruleSearch),
+      baseUrl,
+    });
     return [];
   }
 
@@ -184,15 +247,22 @@ export async function exploreBook(
 
   console.log('[explore] 初始 baseUrl:', baseUrl.substring(0, 200));
 
-  // 如果是相对路径（如 /category/xuanhuan/{{page}}.html），根据 bookSourceUrl 解析为绝对 URL
-  if (baseUrl.startsWith('/') && source.sourceUrl) {
-    try {
-      const origin = new URL(source.sourceUrl).origin;
+  const { alignUrlToBookSourceRequestOrigin, resolveBookSourceRequestOrigin } =
+    await import('@/lib/book-source/source-http');
+
+  // 相对路径：优先 CF 活跃镜像域（过挑战后 panel 跳转域），否则书源 sourceUrl
+  if (baseUrl.startsWith('/')) {
+    const origin = resolveBookSourceRequestOrigin(source);
+    if (origin) {
       baseUrl = origin + baseUrl;
       console.log('[explore] 相对路径解析为绝对 URL:', baseUrl.substring(0, 200));
-    } catch (e) {
-      console.warn('[explore] 解析相对路径失败:', e);
-      // 解析失败则保持原值
+    } else if (source.sourceUrl) {
+      try {
+        baseUrl = new URL(source.sourceUrl).origin + baseUrl;
+        console.log('[explore] 相对路径解析为绝对 URL:', baseUrl.substring(0, 200));
+      } catch (e) {
+        console.warn('[explore] 解析相对路径失败:', e);
+      }
     }
   }
 
@@ -200,7 +270,10 @@ export async function exploreBook(
 
   try {
     // 构建发现 URL（支持 {{page}} 分页）
-    const exploreUrl = buildUrl(baseUrl, { page: page.toString() });
+    const exploreUrl = alignUrlToBookSourceRequestOrigin(
+      buildUrl(baseUrl, { page: page.toString() }),
+      source,
+    );
     console.log('[explore] 构建后的 URL:', exploreUrl.substring(0, 200), '页码:', page);
 
     // 发起请求
@@ -209,7 +282,7 @@ export async function exploreBook(
       ruleUrl: exploreUrl,
       source,
       page,
-      baseUrl: source.sourceUrl,
+      baseUrl: resolveBookSourceRequestOrigin(source) || source.sourceUrl,
     });
     const html = fetched.body;
 
@@ -238,7 +311,7 @@ async function parseExploreBook(
 ): Promise<SearchBook | null> {
   try {
     const name = rule.name ? await analyzeString(rule.name, context) : '';
-    const author = rule.author ? await analyzeString(rule.author, context) : '';
+    const author = rule.author ? await resolveExploreAuthor(rule.author, context) : '';
     const bookUrl = rule.bookUrl ? await analyzeString(rule.bookUrl, context) : '';
 
     // 调试日志（仅前3个）
@@ -309,7 +382,9 @@ async function parseExploreBook(
 
     const latestChapterUpdateTime = tryFormatDisplayUpdateTime(updateTimeRaw) || undefined;
     const kind = rule.kind ? await analyzeString(rule.kind, context) : undefined;
-    const wordCountRaw = rule.wordCount ? await analyzeString(rule.wordCount, context) : undefined;
+    const wordCountRaw = rule.wordCount
+      ? stripHtmlFragment(await analyzeString(rule.wordCount, context))
+      : undefined;
     const wordCount = formatWordCountLikeLegado(wordCountRaw);
 
     // 解析徽章字段：优先使用规则配置，若规则未配置但内容为 JSON，则尝试自动提取
