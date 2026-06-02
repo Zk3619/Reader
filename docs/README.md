@@ -13,6 +13,7 @@
 | [DATABASE.md](./DATABASE.md) | 数据库：兼容 Max、增量迁移、优化策略 |
 | [ROADMAP.md](./ROADMAP.md) | 分阶段实施路线与验收标准 |
 | [UI.md](./UI.md) | 顶栏/侧栏/书架响应式 UI 规范（已有） |
+| [text-viewer-latent-capabilities.md](./text-viewer-latent-capabilities.md) | 文本阅读器已实现但未启用/未接数据的段评与 UI 能力说明 |
 | [PORTABLE.md](./PORTABLE.md) | 便携模式与数据目录（已有） |
 
 ## 参考仓库（工作区根目录）

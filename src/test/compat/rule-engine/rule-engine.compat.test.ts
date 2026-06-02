@@ -151,6 +151,23 @@ describe('analyzeRule JSON explore (晴天聚合)', () => {
     expect(author[0]).toBe('测试作者');
   });
 
+  it('analyzeListElements <js> + $.data@all 在 contentType text 下仍可解析（光遇搜索）', async () => {
+    const { analyzeListElements } = await import('@/lib/rule-engine');
+    const listJson = JSON.stringify({
+      code: 0,
+      data: [{ book_name: '测试书名', author: '测试作者', book_id: 'id-1' }],
+    });
+    const items = await analyzeListElements(
+      `<js>return ${JSON.stringify(listJson)};</js>\n$.data@all`,
+      {
+        content: '7b226b6579223a22e68891e4b88de698af222c',
+        contentType: 'text',
+      },
+    );
+    expect(items.length).toBe(1);
+    expect(JSON.parse(items[0]!.content).book_name).toBe('测试书名');
+  });
+
   it('analyzeListElements $.data@all does not treat rule as list item (explore bookList)', async () => {
     const { analyzeListElements, analyzeString: analyzeStringFn } = await import(
       '@/lib/rule-engine'
@@ -334,7 +351,7 @@ result
       content: 'A A A',
       contentType: 'text',
     });
-    expect(out[0]).toContain('Z');
+    expect(out[0]).toBe('Z');
   });
 
   it('keeps replacement tail containing ## intact', async () => {
