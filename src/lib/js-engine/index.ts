@@ -24,6 +24,7 @@ export {
   clearSourceLoginStateLocalStorageOnly,
   getStoredLoginInfo,
   getStoredSourceCookiesForUrl,
+  getStoredSourceCookiesForInnerWeb,
   getStoredSourceCookiesForCover,
   getStoredSourceCookiesMerged,
   readSourceCookieStore,

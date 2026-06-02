@@ -12,6 +12,12 @@ import {
  * 书源 cookie 串规范为 WebView / HTTP Cookie 头（`qttoken=…;deviceId=…`）。
  * 晴天等书源用 `;` 无空格，须保证 deviceId 存在。
  */
+/** Legado 书源 header 中 Cookie:"1" 表示启用 Cookie 罐，非真实 Cookie */
+export function isLegadoPlaceholderCookieHeader(cookieStr: string): boolean {
+  const t = String(cookieStr ?? '').trim().toLowerCase();
+  return t === '1' || t === 'true' || t === 'false' || t === 'null';
+}
+
 export function normalizeLegadoCookieHeader(
   cookieStr: string,
   deviceId?: string
@@ -169,18 +175,60 @@ export function legadoInnerWebCookieSyncUrls(pageUrl: string): string[] {
   return [...out];
 }
 
+/** 内嵌页 document.cookie 中不属于书源 control 设置的键（含 UA 内分号会破坏 applyCookieSettings） */
+const INNER_WEB_NON_SETTING_COOKIE_KEYS =
+  /^(user-agent|cookie|referer|path|domain|expires|max-age|samesite|secure|httponly)$/i;
+
+export function isInnerWebNonSettingCookieKey(key: string): boolean {
+  return INNER_WEB_NON_SETTING_COOKIE_KEYS.test(key.trim());
+}
+
+/** 去掉 User-Agent 等会干扰晴天 applyCookieSettings 的片段 */
+export function filterControlSettingsCookieHeader(raw: string): string {
+  const kept: string[] = [];
+  for (const part of String(raw ?? '').split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i <= 0) continue;
+    const key = t.slice(0, i).trim();
+    if (isInnerWebNonSettingCookieKey(key)) continue;
+    kept.push(t);
+  }
+  return kept.join('; ');
+}
+
 /** WebView 读出 `a=1;b=2` → 书源 applyCookieSettings 使用的 `; ` 分隔 */
 export function normalizeControlSettingsCookieHeader(raw: string): string {
-  return String(raw ?? '')
+  return filterControlSettingsCookieHeader(raw)
     .split(';')
     .map((p) => p.trim())
     .filter(Boolean)
     .join('; ');
 }
 
+/** 对齐 applyCookieSettings：按 `;` 解析并 decodeURIComponent 值 */
+export function parseControlSettingsCookieMap(raw: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const part of filterControlSettingsCookieHeader(raw).split(';')) {
+    const t = part.trim();
+    const i = t.indexOf('=');
+    if (i <= 0) continue;
+    const key = t.slice(0, i).trim();
+    if (isInnerWebNonSettingCookieKey(key)) continue;
+    let value = t.slice(i + 1).trim();
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      /* 已是明文 */
+    }
+    map.set(key, value);
+  }
+  return map;
+}
+
 function parseCookieHeaderParts(cookieStr: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const part of String(cookieStr ?? '').split(';')) {
+  for (const part of filterControlSettingsCookieHeader(cookieStr).split(';')) {
     const t = part.trim();
     const i = t.indexOf('=');
     if (i > 0) map.set(t.slice(0, i).trim(), t.slice(i + 1).trim());

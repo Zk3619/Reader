@@ -4,10 +4,15 @@
 
 import type { BookSource } from '@/types';
 import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
+import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
 export const STORAGE_PREFIX_LOGIN = 'reader_source_login_';
+/** CF 挑战后 panel 实际停留的 origin（镜像域，如 banzhu77777777.net） */
+export const STORAGE_PREFIX_CF_ORIGIN = 'reader_source_cf_origin_';
+/** CF 挑战时 panel 的 navigator.userAgent（须与后续 HTTP 一致） */
+export const STORAGE_PREFIX_CF_UA = 'reader_source_cf_ua_';
 
 /**
  * 书源变量 JSON 里表示「当前聚合服务器」的字段名。
@@ -72,8 +77,19 @@ export function storageKey(prefix: string, sourceUrl: string): string {
  * sourceUrl 常为名称时从 jsLib host 等兜底。
  */
 export function getScriptBaseUrl(source: BookSource): string {
-  const u = (source.sourceUrl ?? '').trim();
-  if (u && isHttpUrl(u)) return u;
+  try {
+    const raw = localStorage.getItem(getSourceArgsKey(source));
+    if (raw) {
+      const fromArgs = readServerUrlFromSourceArgs(
+        JSON.parse(raw) as Record<string, unknown>,
+      );
+      if (fromArgs) return fromArgs;
+    }
+  } catch {
+    /* ignore */
+  }
+  const u = stripMisplacedCookieFromHttpUrl((source.sourceUrl ?? '').trim());
+  if (u && isHttpUrl(u)) return normalizeBookSourceServerUrl(u);
   const candidates = [
     (source as Record<string, unknown>).exploreUrl,
     (source as Record<string, unknown>).searchUrl,
@@ -81,13 +97,10 @@ export function getScriptBaseUrl(source: BookSource): string {
   ].filter((x): x is string => typeof x === 'string' && isHttpUrl(x));
   const first = candidates[0];
   if (first) {
-    try {
-      return new URL(first).origin;
-    } catch {
-      return first;
-    }
+    return normalizeBookSourceServerUrl(first);
   }
-  return firstHostFromJsLib((source as Record<string, unknown>).jsLib);
+  const host = firstHostFromJsLib((source as Record<string, unknown>).jsLib);
+  return host ? normalizeBookSourceServerUrl(host) : host;
 }
 
 /**
@@ -477,6 +490,13 @@ export function ensureExploreScriptSetsResult(script: string): string {
   const m = s.match(/^([\s\S]*?)^(\s*)JSON\.stringify\s*\(\s*([\w$]+)\s*\)\s*;?\s*$/m);
   if (m) {
     return `${m[1]}${m[2]}globalThis.result = JSON.stringify(${m[3]});`;
+  }
+  // 光遇 gysearch 等：末行 `data:;base64,...` 模板字符串
+  if (!/\b(?:globalThis\.)?result\s*=/.test(s)) {
+    const tail = s.match(/^([\s\S]*?)(\n\s*)(`data:[^`]*`)\s*;?\s*$/);
+    if (tail) {
+      return `${tail[1]}${tail[2]}globalThis.result = ${tail[3]};`;
+    }
   }
   return s;
 }

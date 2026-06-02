@@ -19,7 +19,7 @@ import {
   resetLegadoDeviceId,
 } from '@/lib/book-source/source-http';
 import { patchLegadoLoginUrlScript } from '@/lib/js-engine/legado/login-script-patches';
-import { resolveUrl } from '@/lib/book-source/utils';
+import { resolveUrl, stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { openLegadoBrowserInApp, openSourceSettingsInApp } from '@/lib/platform/open-url';
 import { initQuickJSRuntime, isQuickJSFallback, LEGADO_SUSPEND_MARKER, setGlobalJson } from '@/lib/js-engine/core/runtime';
@@ -33,6 +33,7 @@ import {
   normalizeLegadoCookieHeader,
   mergeLegadoCookieHeaderStrings,
   normalizeUserApiPostBody,
+  parseControlSettingsCookieMap,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { createLoginInjector } from '@/lib/js-engine/legado/login-inject';
@@ -43,6 +44,7 @@ import {
   getScriptBaseUrl,
   getLegadoSourceKey,
   hostsFromJsLib,
+  normalizeServerFieldsInSourceArgs,
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
   storageKey,
@@ -145,12 +147,63 @@ function createBrowserCookieSyncGuard(baseUrl: string): BrowserCookieSyncGuard {
   };
 }
 
+/** 将 control 页 Cookie 写回 source.getVariable()（对齐 applyCookieSettings / 发现页 getArguments） */
+export function syncControlSettingsToSourceArgs(
+  source: BookSource,
+  cookieHeader: string,
+): void {
+  const map = parseControlSettingsCookieMap(cookieHeader);
+  if (map.size === 0) return;
+  const argsKey = storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source));
+  try {
+    const raw = localStorage.getItem(argsKey) ?? '{}';
+    const obj = (JSON.parse(raw) as Record<string, string>) || {};
+    for (const [key, value] of map) {
+      const lk = key.toLowerCase();
+      if (lk === 'qttoken' || lk === 'deviceid' || lk === 'device') continue;
+      obj[key] = value;
+    }
+    normalizeServerFieldsInSourceArgs(obj);
+    localStorage.setItem(argsKey, JSON.stringify(obj));
+    console.warn(LOG_TAG, 'control 设置已同步到书源变量', {
+      keys: [...map.keys()].filter((k) => !/^qttoken$/i.test(k)).slice(0, 12),
+    });
+  } catch (e) {
+    console.warn(LOG_TAG, 'syncControlSettingsToSourceArgs failed', e);
+  }
+}
+
+function mirrorControlCookieToSourceHosts(
+  store: Map<string, string>,
+  cookieHeader: string,
+  source: BookSource,
+  anchorUrl: string,
+): void {
+  const incoming = normalizeControlSettingsCookieHeader(cookieHeader);
+  if (!incoming) return;
+  const base = getScriptBaseUrl(source);
+  const targets = new Set<string>();
+  const add = (u: string) => {
+    const t = u.trim();
+    if (t.startsWith('http')) targets.add(t);
+  };
+  add(anchorUrl);
+  const controlBase = anchorUrl.replace(/\/control\/?$/i, '');
+  if (controlBase) add(controlBase);
+  if (base) add(base);
+  for (const h of hostsFromJsLib((source as Record<string, unknown>).jsLib)) add(h);
+  for (const u of targets) {
+    mergePlainCookieHeaderIntoStore(store, u, incoming, base);
+  }
+}
+
 function syncWebViewCookiesToStore(
   store: {
     getCookie: (url: string) => string;
     setCookie: (url: string, value: string) => void;
     _store?: Map<string, string>;
   },
+  source: BookSource,
   baseUrl: string,
   resolved: string,
   cookies: string,
@@ -170,8 +223,11 @@ function syncWebViewCookiesToStore(
     });
   }
 
+  syncControlSettingsToSourceArgs(source, incoming);
+
   if (store._store instanceof Map) {
     mergePlainCookieHeaderIntoStore(store._store, resolved, incoming, baseUrl);
+    mirrorControlCookieToSourceHosts(store._store, incoming, source, resolved);
   } else {
     const targets = new Set<string>([resolved]);
     const controlBase = resolved.replace(/\/control\/?$/i, '');
@@ -197,10 +253,17 @@ function syncWebViewCookiesToStore(
 function resolveBrowserOpenUrl(raw: string, baseUrl: string): string {
   const toOpen = raw.startsWith('data:') ? raw : urlForOpen(raw);
   const t = toOpen.trim();
-  if (/^(https?:|data:|legado:|yuedu:)/i.test(t)) {
+  if (/^https?:/i.test(t)) {
+    return stripMisplacedCookieFromHttpUrl(t);
+  }
+  if (/^(data:|legado:|yuedu:)/i.test(t)) {
     return t;
   }
-  return baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
+  const resolved =
+    baseUrl && !toOpen.startsWith('data:') ? resolveUrl(baseUrl, toOpen) : toOpen;
+  return /^https?:/i.test(resolved)
+    ? stripMisplacedCookieFromHttpUrl(resolved)
+    : resolved;
 }
 
 /** 从脚本 Cookie 表按 URL 回退读取（勿经 cookieObj.getCookie，避免与 getScriptCookieForUrl 互调） */
@@ -369,7 +432,9 @@ function cookiesForInnerWeb(
 ): string {
   const raw = getScriptCookieForUrl(cookieObj, resolved, baseUrl).trim();
   if (!raw) return '';
-  if (isPlainCookieHeader(raw)) return raw;
+  if (isPlainCookieHeader(raw)) {
+    return normalizeControlSettingsCookieHeader(raw);
+  }
   return normalizeLegadoCookieHeader(raw, getOrCreateAndroidId());
 }
 
@@ -510,15 +575,31 @@ export function getStoredSourceCookiesMerged(source: BookSource): string {
     if (!obj || typeof obj !== 'object') return merged;
     for (const value of Object.values(obj)) {
       if (typeof value !== 'string' || !value.trim()) continue;
-      merged = mergeLegadoCookieHeaderStrings(
-        merged,
-        normalizeLegadoCookieHeader(value),
-      );
+      const part = normalizeStoredSourceCookieValue(value, source);
+      if (!part) continue;
+      merged = merged ? mergeLegadoCookieHeaderStrings(merged, part) : part;
     }
   } catch {
     /* ignore */
   }
   return merged;
+}
+
+/** 打开 /control 等书源设置内嵌页：合并当前 URL 键与全表，避免只注入 qttoken */
+export function getStoredSourceCookiesForInnerWeb(
+  source: BookSource,
+  targetUrl: string,
+): string {
+  const perUrl = getStoredSourceCookiesForUrl(source, targetUrl).trim();
+  const isControl = /\/control\/?$/i.test(targetUrl.trim());
+  if (!isControl) return perUrl;
+  const mergedAll = getStoredSourceCookiesMerged(source).trim();
+  if (!perUrl && !mergedAll) return '';
+  if (!perUrl) return mergedAll;
+  if (!mergedAll) return perUrl;
+  return normalizeControlSettingsCookieHeader(
+    mergeLegadoCookieHeaderStrings(mergedAll, perUrl),
+  );
 }
 
 /** 获取该书源在 localStorage 中保存的登录信息（邮箱、密码等），供登录对话框预填 */
@@ -705,6 +786,23 @@ function isPlainCookieHeader(value: string): boolean {
   if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return false;
   if (!/=/.test(trimmed)) return false;
   return !extractQttokenKey(trimmed) || !isAuthOnlyLegadoCookieHeader(trimmed);
+}
+
+/** 书源表单条 Cookie：保留 mem_* 等设置键，勿 normalizeLegado 剥除 */
+function normalizeStoredSourceCookieValue(value: string, source: BookSource): string {
+  const v = value.trim();
+  if (!v) return '';
+  if (isPlainCookieHeader(v) && !isAuthOnlyLegadoCookieHeader(v)) {
+    return normalizeControlSettingsCookieHeader(v);
+  }
+  if (isAuthOnlyLegadoCookieHeader(v)) {
+    return normalizeLegadoCookieHeader(v, resolveLegadoDeviceId(v, source));
+  }
+  const token = extractQttokenKey(v);
+  if (token) {
+    return sanitizeLegadoCookieValue(v, resolveLegadoDeviceId(v, source));
+  }
+  return normalizeControlSettingsCookieHeader(v);
 }
 
 function mergePlainCookieHeaderIntoStore(
@@ -941,13 +1039,13 @@ function resolveLoginServerUrl(source: BookSource, baseUrl: string): string {
     if (raw) {
       const server = (JSON.parse(raw) as Record<string, unknown>).server;
       if (typeof server === 'string' && /^https?:\/\//i.test(server.trim())) {
-        return server.trim().replace(/\/+$/, '');
+        return normalizeBookSourceServerUrl(server.trim());
       }
     }
   } catch {
     /* ignore */
   }
-  return baseUrl.replace(/\/+$/, '');
+  return normalizeBookSourceServerUrl(baseUrl);
 }
 
 async function finalizeLegadoLoginCookies(options: {
@@ -1297,6 +1395,7 @@ async function tryRunLoginScriptQuickJS(
               const raw = localStorage.getItem(argsKey) ?? '{}';
               const obj = (JSON.parse(raw) as Record<string, string>) || {};
               obj[key] = value;
+              normalizeServerFieldsInSourceArgs(obj);
               localStorage.setItem(argsKey, JSON.stringify(obj));
             } catch (e) {
               console.warn(LOG_TAG, 'setArgument failed:', e);
@@ -1451,6 +1550,7 @@ async function tryRunLoginScriptQuickJS(
                 if (r.confirmed && r.cookies?.trim()) {
                   syncWebViewCookiesToStore(
                     cookieObj,
+                    source,
                     baseUrl,
                     resolved,
                     r.cookies,
@@ -1782,6 +1882,7 @@ export async function runLoginScript(
         const raw = localStorage.getItem(argsKey) ?? '{}';
         const obj = (JSON.parse(raw) as Record<string, string>) || {};
         obj[key] = value;
+        normalizeServerFieldsInSourceArgs(obj);
         localStorage.setItem(argsKey, JSON.stringify(obj));
       } catch (e) {
         console.warn('[login-script] setArgument failed:', e);
@@ -1863,6 +1964,7 @@ export async function runLoginScript(
             if (r.confirmed && r.cookies?.trim()) {
               syncWebViewCookiesToStore(
                 cookieObj,
+                source,
                 baseUrl,
                 resolved,
                 r.cookies,

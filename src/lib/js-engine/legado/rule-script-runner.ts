@@ -109,7 +109,7 @@ function runJsSnippet(
   ]
     .filter(Boolean)
     .join('\n');
-  const fn = new Function('__scope__', `with (__scope__) {\n${fullBody}\n}`);
+  const fn = new Function('__scope__', 'with (__scope__) {\n' + fullBody + '\n}');
   const out = fn(scope);
   if (out !== undefined && out !== null) {
     scope.result = out;
