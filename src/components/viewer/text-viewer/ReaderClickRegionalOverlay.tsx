@@ -33,6 +33,10 @@ import { cn } from '@/lib/utils';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { XIcon } from '@/components/shared/icons';
 import { markClickActionHintShown } from '@/lib/media/text/reader-click-hint-storage';
+import {
+  APP_READER_CLICK_REGIONAL_OVERLAY_Z,
+  APP_READER_OVERLAY_DIALOG_Z,
+} from '@/lib/ui/overlay-z';
 
 export interface ReaderClickRegionalOverlayProps {
   open: boolean;
@@ -69,7 +73,11 @@ function ReaderClickActionPickerDialog(props: {
         if (!open) props.onClose();
       }}
     >
-      <AppDialogContent class="z-60 max-w-sm gap-3">
+      <AppDialogContent
+        layout="plain"
+        portalZClass={APP_READER_OVERLAY_DIALOG_Z}
+        class="max-w-sm gap-3"
+      >
         <AppDialogHeader>
           <AppDialogTitle>选择动作</AppDialogTitle>
         </AppDialogHeader>
@@ -197,7 +205,7 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
     <>
       <Show when={props.open}>
         <div
-          class="fixed inset-0 z-50 bg-background/25"
+          class={cn('fixed inset-0 bg-background/25', APP_READER_CLICK_REGIONAL_OVERLAY_Z)}
           role="dialog"
           aria-modal="true"
           aria-label="点击区域设置"
@@ -276,7 +284,7 @@ export function ReaderClickRegionalOverlay(props: ReaderClickRegionalOverlayProp
           </div>
 
           {/* 底栏浮层 */}
-          <div class="pointer-events-none absolute inset-x-0 bottom-0 z-30 pb-[max(0px,env(safe-area-inset-bottom))]">
+          <div class="pointer-events-none absolute inset-x-0 bottom-0 z-30 app-bottom-chrome-inset">
             <div class="pointer-events-auto mx-1.5 mb-1.5 flex justify-end gap-2 rounded-xl border border-border/50 bg-card/70 px-3 py-2 shadow-sm backdrop-blur-sm">
               <Button
                 type="button"

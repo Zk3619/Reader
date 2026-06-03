@@ -3,7 +3,7 @@
  * 对齐 Legado 网络文件 / WebFile 章节
  */
 
-import { createSignal, Show } from 'solid-js';
+import { createSignal, Show, type Accessor } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
 import {
   MediaViewerShell,
@@ -27,6 +27,7 @@ import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface FileViewerPageProps {
   onClose: () => void;
+  entryVisible?: Accessor<boolean>;
 }
 
 function isPdfUrl(url: string): boolean {
@@ -55,65 +56,65 @@ export function FileViewerPage(props: FileViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell>
+      <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <div class="absolute inset-0 flex flex-col bg-muted/30">
-          <Show when={bootstrapping() || loading()}>
-            <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              加载中…
-            </div>
-          </Show>
-          <Show when={!bootstrapping() && !loading() && error()}>
-            <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-              <p class="text-sm text-destructive">{error()}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void viewerStore.refreshChapter()}
-              >
-                重试
-              </Button>
-            </div>
-          </Show>
-          <Show when={!bootstrapping() && !loading() && url()}>
-            {(fileUrl) => (
-              <>
-                <Show
-                  when={isPdfUrl(fileUrl())}
-                  fallback={
-                    <div class="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-                      <p class="text-center text-sm text-muted-foreground">
-                        当前格式请在浏览器中打开或下载
-                      </p>
-                      <div class="flex flex-wrap justify-center gap-2">
-                        <a
-                          class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-                          href={fileUrl()}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          打开链接
-                        </a>
-                        <a
-                          class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium"
-                          href={fileUrl()}
-                          download=""
-                        >
-                          下载
-                        </a>
-                      </div>
-                    </div>
-                  }
+            <Show when={bootstrapping() || loading()}>
+              <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                加载中…
+              </div>
+            </Show>
+            <Show when={!bootstrapping() && !loading() && error()}>
+              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                <p class="text-sm text-destructive">{error()}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void viewerStore.refreshChapter()}
                 >
-                  <iframe
-                    title={chapterTitle()}
-                    src={fileUrl()}
-                    class="min-h-0 flex-1 w-full border-0"
-                  />
-                </Show>
-              </>
-            )}
-          </Show>
+                  重试
+                </Button>
+              </div>
+            </Show>
+            <Show when={!bootstrapping() && !loading() && url()}>
+              {(fileUrl) => (
+                <>
+                  <Show
+                    when={isPdfUrl(fileUrl())}
+                    fallback={
+                      <div class="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+                        <p class="text-center text-sm text-muted-foreground">
+                          当前格式请在浏览器中打开或下载
+                        </p>
+                        <div class="flex flex-wrap justify-center gap-2">
+                          <a
+                            class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+                            href={fileUrl()}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            打开链接
+                          </a>
+                          <a
+                            class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium"
+                            href={fileUrl()}
+                            download=""
+                          >
+                            下载
+                          </a>
+                        </div>
+                      </div>
+                    }
+                  >
+                    <iframe
+                      title={chapterTitle()}
+                      src={fileUrl()}
+                      class="min-h-0 flex-1 w-full border-0"
+                    />
+                  </Show>
+                </>
+              )}
+            </Show>
           </div>
 
           <MediaViewerHeader placement="overlay">

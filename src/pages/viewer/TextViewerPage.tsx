@@ -3,7 +3,10 @@
  * 参考 legado ReadBookActivity：全屏阅读、顶部栏、正文区、目录与设置
  */
 
-import { createSignal, Show, Index, onMount, onCleanup, createEffect } from 'solid-js';
+import { createSignal, Show, Index, onMount, onCleanup, createEffect, type Accessor } from 'solid-js';
+import { subscribeMediaViewerAppFocus } from '@/lib/media/media-viewer-app-focus';
+import { createMediaViewerChromeAutoHide } from '@/lib/media/media-viewer-chrome-auto-hide';
+import { createMediaViewerChromeInputHandlers } from '@/lib/media/media-viewer-chrome-input';
 import { textViewerStore } from '@/stores/viewer';
 import { Button } from '@/components/ui/button';
 import {
@@ -80,10 +83,41 @@ export interface BookReaderProps {
   onClose: () => void;
   /** 点击顶栏书名时进入书籍信息页（不传则书名不可点） */
   onOpenBookInfo?: () => void;
+  /** 导航栈条目是否栈顶可见 */
+  entryVisible?: Accessor<boolean>;
 }
 
 export function BookReader(props: BookReaderProps) {
   const [topBarVisible, setTopBarVisible] = createSignal(true);
+
+  const tryShowChromeOnForeground = () => {
+    if (props.entryVisible?.()) setTopBarVisible(true);
+  };
+
+  const appFocus = subscribeMediaViewerAppFocus({
+    onForeground: tryShowChromeOnForeground,
+    onBackground: () => chromeAutoHide.clearHideTimer(),
+  });
+
+  const chromeAutoHide = createMediaViewerChromeAutoHide({
+    enabled: () => true,
+    isControlled: () => false,
+    setHeaderVisible: setTopBarVisible,
+    canAutoHide: appFocus.canAutoHide,
+  });
+
+  const applyTopBarVisible = (visible: boolean) => {
+    setTopBarVisible(visible);
+    if (!visible) chromeAutoHide.clearHideTimer();
+  };
+
+  const chromeInput = createMediaViewerChromeInputHandlers({
+    headerVisible: topBarVisible,
+    setHeaderVisible: applyTopBarVisible,
+    toggleBars: () => applyTopBarVisible(!topBarVisible()),
+    enabled: () => true,
+  });
+
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   /** 目录列表滚动位置缓存（关闭时保存，再次打开时恢复），换书时清零 */
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
@@ -345,7 +379,7 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
-  const toggleTopBar = () => setTopBarVisible((v) => !v);
+  const toggleTopBar = () => applyTopBarVisible(!topBarVisible());
 
   const toggleTheme = (pressed: boolean) => {
     setIsDark(pressed);
@@ -389,6 +423,25 @@ export function BookReader(props: BookReaderProps) {
       id = requestAnimationFrame(() => setPanelEntering(false));
     });
     return () => cancelAnimationFrame(id);
+  });
+
+  createEffect(() => {
+    if (props.entryVisible?.()) {
+      chromeAutoHide.revealSession();
+    } else {
+      chromeAutoHide.clearHideTimer();
+    }
+  });
+
+  onMount(() => {
+    if (props.entryVisible === undefined || props.entryVisible()) {
+      chromeAutoHide.revealSession();
+    }
+    onCleanup(() => {
+      appFocus.dispose();
+      chromeAutoHide.dispose();
+      chromeInput.dispose();
+    });
   });
 
   onMount(() => {
@@ -608,8 +661,7 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
-  const onContentClick = (e: MouseEvent) => {
-    if (isMediaViewerInteractiveClick(e.target)) return;
+  const runRegionalClick = (e: MouseEvent) => {
     const t = e.currentTarget as HTMLElement;
     const rect = t.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
@@ -617,21 +669,34 @@ export function BookReader(props: BookReaderProps) {
     const zone = resolveClickZone(xRatio, yRatio, textViewerStore.state.config.clickRegion);
     const actions = textViewerStore.state.config.clickActions;
     const action = actions[zone] ?? 'menu';
+    runClickAction(action);
+    tapStartTime = 0;
+  };
+
+  const onContentClick = (e: MouseEvent) => {
+    if (isMediaViewerInteractiveClick(e.target)) return;
     const wasLongPress = tapStartTime && Date.now() - tapStartTime >= LONG_PRESS_MS;
     if (tapMoved || wasLongPress) {
       tapStartTime = 0;
       return;
     }
-    runClickAction(action);
-    tapStartTime = 0;
+    chromeInput.onContentPrimaryClick(e, () => runRegionalClick(e));
+  };
+
+  const onContentDblClick = (e: MouseEvent) => {
+    if (isMediaViewerInteractiveClick(e.target)) return;
+    chromeInput.onContentDblClick(e);
   };
 
   return (
     <>
       <MediaViewerShell
         tapToToggleBars={false}
+        chromePointerInput
+        chromeInputHandlers={chromeInput}
+        entryVisible={props.entryVisible}
         headerVisible={topBarVisible()}
-        onHeaderVisibleChange={setTopBarVisible}
+        onHeaderVisibleChange={applyTopBarVisible}
         footerVisible={statusBarVisible() || operationBarVisible()}
       >
         <MediaViewerShellMain tapToToggleBars={false}>
@@ -646,6 +711,7 @@ export function BookReader(props: BookReaderProps) {
                 onPointerDown={onContentPointerDown}
                 onPointerMove={onContentPointerMove}
                 onClick={onContentClick}
+                onDblClick={onContentDblClick}
               >
                 <Index each={[contentEnterKey()]}>
                   {() => (
@@ -671,6 +737,7 @@ export function BookReader(props: BookReaderProps) {
                   onPointerDown={onContentPointerDown}
                   onPointerMove={onContentPointerMove}
                   onClick={onContentClick}
+                  onDblClick={onContentDblClick}
                 >
                   <Index each={[contentEnterKey()]}>
                     {() => (

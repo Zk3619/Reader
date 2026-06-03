@@ -3,7 +3,7 @@
  * 对齐 Legado VideoPlayerActivity / VideoPlay
  */
 
-import { createSignal, createEffect, createMemo, Show, on } from 'solid-js';
+import { createSignal, createEffect, createMemo, Show, on, type Accessor } from 'solid-js';
 import { Gauge } from 'lucide-solid';
 import { viewerStore } from '@/stores/viewer';
 import { setState } from '@/stores/viewer/media/state';
@@ -13,6 +13,7 @@ import {
   MediaViewerHeader,
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
+import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
@@ -49,6 +50,42 @@ import { cn } from '@/lib/utils';
 
 export interface VideoViewerPageProps {
   onClose: () => void;
+  entryVisible?: Accessor<boolean>;
+}
+
+/** 视频舞台：单击播放/暂停（不冒泡到主区），双击切换顶底栏 */
+function VideoArtPlayerStage(props: {
+  player: ReturnType<typeof useArtplayer>;
+  loading: () => boolean;
+  error: () => string | null;
+  hasSrc: () => boolean;
+  onRetry: () => void;
+  class?: string;
+}) {
+  const shell = useMediaViewerShell();
+
+  return (
+    <ArtPlayerStage
+      containerRef={props.player.containerRef}
+      loading={props.loading}
+      error={props.error}
+      hasSrc={props.hasSrc}
+      overlayTip={props.player.overlayTip}
+      onRetry={props.onRetry}
+      onPointerDown={props.player.handlePointerDown}
+      onPointerUp={props.player.handlePointerUp}
+      onPointerCancel={props.player.handlePointerCancel}
+      class={props.class}
+      onClick={(e) => {
+        e.stopPropagation();
+        shell.onContentPrimaryClick?.(e, () => props.player.togglePlay());
+      }}
+      onDblClick={(e) => {
+        e.stopPropagation();
+        shell.onContentDblClick?.(e, { forceChrome: true });
+      }}
+    />
+  );
 }
 
 export function VideoViewerPage(props: VideoViewerPageProps) {
@@ -155,7 +192,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell>
+      <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <div
             ref={videoStageEl}
@@ -164,17 +201,12 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               fullscreen.isFullscreen() && 'z-50',
             )}
           >
-            <ArtPlayerStage
-              containerRef={player.containerRef}
+            <VideoArtPlayerStage
+              player={player}
               loading={stageLoading}
               error={error}
               hasSrc={() => Boolean(url())}
-              overlayTip={player.overlayTip}
               onRetry={() => void viewerStore.refreshChapter()}
-              onDblClick={() => player.togglePlay()}
-              onPointerDown={player.handlePointerDown}
-              onPointerUp={player.handlePointerUp}
-              onPointerCancel={player.handlePointerCancel}
               class="absolute inset-0"
             />
           </div>

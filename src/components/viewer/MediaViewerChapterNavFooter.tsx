@@ -37,7 +37,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
     <div
       class={cn(
         'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-        'flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur safe-area-inset-bottom',
+        'flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur app-bottom-chrome-inset',
         !visible() && 'reader-chrome-overlay-panel--hidden',
       )}
     >

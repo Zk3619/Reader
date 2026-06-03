@@ -1,0 +1,128 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/media/is-media-viewer-interactive-click', () => ({
+  isMediaViewerInteractiveClick: () => false,
+}));
+
+import {
+  MEDIA_VIEWER_CLICK_PAIR_MS,
+  createMediaViewerChromeInputHandlers,
+} from '@/lib/media/media-viewer-chrome-input';
+
+function clickEvent(): MouseEvent {
+  return {
+    target: {},
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  } as unknown as MouseEvent;
+}
+
+function pointerLeaveEvent(related: EventTarget | null): PointerEvent {
+  const shell = {
+    contains: () => false,
+  } as unknown as HTMLElement;
+  return {
+    currentTarget: shell,
+    relatedTarget: related,
+  } as unknown as PointerEvent;
+}
+
+describe('media viewer chrome input', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('desktop pointer leave shell shows bars', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    let visible = false;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    expect(visible).toBe(true);
+    handlers.dispose();
+  });
+
+  it('single click runs action after pair delay', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let actions = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => true,
+      setHeaderVisible: () => {},
+      toggleBars: () => {},
+      enabled: () => true,
+    });
+    handlers.onContentPrimaryClick(clickEvent(), () => actions++);
+    expect(actions).toBe(0);
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS);
+    expect(actions).toBe(1);
+    handlers.dispose();
+  });
+
+  it('double-click toggles chrome only without running deferred single action', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let actions = 0;
+    let barToggles = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => true,
+      setHeaderVisible: () => {},
+      toggleBars: () => {
+        barToggles += 1;
+      },
+      enabled: () => true,
+    });
+    const ev = clickEvent();
+    handlers.onContentPrimaryClick(ev, () => actions++);
+    handlers.onContentPrimaryClick(ev, () => actions++);
+    handlers.onContentDblClick(ev);
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS);
+    expect(actions).toBe(0);
+    expect(barToggles).toBe(1);
+    handlers.dispose();
+  });
+
+  it('double-click on video stage toggles chrome without play', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let plays = 0;
+    let barToggles = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => true,
+      setHeaderVisible: () => {},
+      toggleBars: () => {
+        barToggles += 1;
+      },
+      enabled: () => true,
+    });
+    const ev = clickEvent();
+    handlers.onContentPrimaryClick(ev, () => plays++);
+    handlers.onContentPrimaryClick(ev, () => plays++);
+    handlers.onContentDblClick(ev, { forceChrome: true });
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS);
+    expect(plays).toBe(0);
+    expect(barToggles).toBe(1);
+    handlers.dispose();
+  });
+});

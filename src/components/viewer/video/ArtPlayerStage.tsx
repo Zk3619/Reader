@@ -16,7 +16,8 @@ export interface ArtPlayerStageProps {
   onPointerDown?: () => void;
   onPointerUp?: () => void;
   onPointerCancel?: () => void;
-  onDblClick?: () => void;
+  onClick?: (event: MouseEvent) => void;
+  onDblClick?: (event: MouseEvent) => void;
   class?: string;
 }
 
@@ -31,6 +32,7 @@ export function ArtPlayerStage(props: ArtPlayerStageProps) {
       onPointerUp={props.onPointerUp}
       onPointerCancel={props.onPointerCancel}
       onPointerLeave={props.onPointerCancel}
+      onClick={props.onClick}
       onDblClick={props.onDblClick}
     >
       <div

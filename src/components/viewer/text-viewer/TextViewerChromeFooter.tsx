@@ -38,7 +38,7 @@ export function TextViewerChromeFooter(props: TextViewerChromeFooterProps) {
         class={cn(
           'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom flex h-9 shrink-0 items-center justify-between gap-3 px-4 text-xs',
           props.bottomBarThemeClasses ??
-            'border-t border-border/50 bg-background/95 text-muted-foreground backdrop-blur',
+          'border-t border-border/50 bg-background/95 text-muted-foreground backdrop-blur',
           !props.statusBarVisible && 'reader-chrome-overlay-panel--hidden',
         )}
       >

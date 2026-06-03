@@ -6,6 +6,10 @@ export interface MediaViewerShellContextValue {
   setHeaderVisible: (visible: boolean) => void;
   toggleBars: () => void;
   tapToToggleBars: boolean;
+  /** 内容区单击（立即执行 action；桌面「回视口后点此隐藏」） */
+  onContentPrimaryClick?: (event: MouseEvent, action: () => void) => void;
+  /** 内容区双击：切换顶底栏 */
+  onContentDblClick?: (event: MouseEvent, options?: { forceChrome?: boolean }) => void;
 }
 
 const MediaViewerShellContext = createContext<MediaViewerShellContextValue>();

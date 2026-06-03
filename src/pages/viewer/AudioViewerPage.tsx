@@ -3,7 +3,7 @@
  * 对齐 Legado AudioPlayActivity / AudioPlayService
  */
 
-import { createSignal, createMemo, Show, type Component } from 'solid-js';
+import { createSignal, createMemo, Show, type Accessor, type Component } from 'solid-js';
 import {
   Repeat,
   Repeat1,
@@ -68,6 +68,7 @@ import { cn } from '@/lib/utils';
 
 export interface AudioViewerPageProps {
   onClose: () => void;
+  entryVisible?: Accessor<boolean>;
 }
 
 function formatTime(sec: number): string {
@@ -192,7 +193,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell>
+      <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6">
             <Show when={book()?.coverUrl || book()?.customCoverUrl}>
@@ -229,158 +230,158 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                 class="flex w-full max-w-md flex-col items-center gap-4"
                 data-media-viewer-interactive-zone
               >
-              <audio
-                ref={player.audioRef}
-                class="hidden"
-                onError={() => {
-                  showAppToast({
-                    title: '无法播放音频',
-                    description:
-                      '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
-                  });
-                }}
-              />
-              <AudioLyricPanel lyric={lyric()} positionSec={player.currentTime()} />
-              <div class="flex w-full flex-col gap-1">
-                <div class="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9 shrink-0"
-                    aria-label={`快退 ${SEEK_STEP_SEC} 秒`}
-                    onClick={() => player.skipBy(-SEEK_STEP_SEC)}
-                  >
-                    <Rewind size={20} />
-                  </Button>
-                  <div class="min-w-0 flex-1">
-                    <Slider
-                      class="w-full"
-                      minValue={0}
-                      maxValue={Math.max(player.duration(), 1)}
-                      step={0.1}
-                      value={[player.currentTime()]}
-                      onChange={(v) => player.seekTo(v[0] ?? 0, player.playing())}
-                    >
-                      <SliderTrack>
-                        <SliderFill />
-                      </SliderTrack>
-                      <SliderThumb />
-                    </Slider>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9 shrink-0"
-                    aria-label={`快进 ${SEEK_STEP_SEC} 秒`}
-                    onClick={() => player.skipBy(SEEK_STEP_SEC)}
-                  >
-                    <FastForward size={20} />
-                  </Button>
-                </div>
-                <div class="flex justify-between px-11 text-xs tabular-nums text-muted-foreground">
-                  <span>{formatTime(player.currentTime())}</span>
-                  <span>{formatTime(player.duration())}</span>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-2">
-                <Show when={player.sleepMinutes() > 0}>
-                  <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
-                    {player.sleepMinutes()}m
-                  </span>
-                </Show>
-                <Show when={audioConfig().playSpeed !== 1}>
-                  <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
-                    {audioConfig().playSpeed.toFixed(1)}x
-                  </span>
-                </Show>
-                <Show when={mediaUrls().length > 1}>
-                  <span class="text-xs text-muted-foreground">
-                    分段 {player.segmentIndex() + 1}/{mediaUrls().length}
-                  </span>
-                </Show>
-              </div>
-
-              <div class="flex items-center gap-3">
-                <Tooltip>
-                  <TooltipTrigger as="div">
-                    <MultiSwitch<AudioPlayMode>
-                      options={PLAY_MODE_OPTIONS}
-                      value={() => audioConfig().playMode}
-                      onChange={(mode) => void patchBookConfig({ playMode: mode })}
-                      sizeClass="h-9 w-9"
-                    />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
-                  </TooltipContent>
-                </Tooltip>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={!canPrev()}
-                  onClick={() => void goChapterDelta(-1)}
-                  aria-label="上一章"
-                >
-                  <SkipBack size={22} />
-                </Button>
-
-                <Button
-                  size="icon"
-                  class="h-14 w-14 rounded-full"
-                  onClick={() => player.togglePlay()}
-                  aria-label={player.playing() ? '暂停' : '播放'}
-                >
-                  <Show when={player.playing()} fallback={<Play size={28} />}>
-                    <Pause size={28} />
-                  </Show>
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={!canNext()}
-                  onClick={() => void goChapterDelta(1)}
-                  aria-label="下一章"
-                >
-                  <SkipForward size={22} />
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-9 w-9"
-                  aria-label="播放速度"
-                  onClick={() => {
-                    setSpeedDraft(audioConfig().playSpeed);
-                    setSpeedDialogOpen(true);
+                <audio
+                  ref={player.audioRef}
+                  class="hidden"
+                  onError={() => {
+                    showAppToast({
+                      title: '无法播放音频',
+                      description:
+                        '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
+                    });
                   }}
-                >
-                  <Gauge size={20} />
-                </Button>
-              </div>
+                />
+                <AudioLyricPanel lyric={lyric()} positionSec={player.currentTime()} />
+                <div class="flex w-full flex-col gap-1">
+                  <div class="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-9 w-9 shrink-0"
+                      aria-label={`快退 ${SEEK_STEP_SEC} 秒`}
+                      onClick={() => player.skipBy(-SEEK_STEP_SEC)}
+                    >
+                      <Rewind size={20} />
+                    </Button>
+                    <div class="min-w-0 flex-1">
+                      <Slider
+                        class="w-full"
+                        minValue={0}
+                        maxValue={Math.max(player.duration(), 1)}
+                        step={0.1}
+                        value={[player.currentTime()]}
+                        onChange={(v) => player.seekTo(v[0] ?? 0, player.playing())}
+                      >
+                        <SliderTrack>
+                          <SliderFill />
+                        </SliderTrack>
+                        <SliderThumb />
+                      </Slider>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-9 w-9 shrink-0"
+                      aria-label={`快进 ${SEEK_STEP_SEC} 秒`}
+                      onClick={() => player.skipBy(SEEK_STEP_SEC)}
+                    >
+                      <FastForward size={20} />
+                    </Button>
+                  </div>
+                  <div class="flex justify-between px-11 text-xs tabular-nums text-muted-foreground">
+                    <span>{formatTime(player.currentTime())}</span>
+                    <span>{formatTime(player.duration())}</span>
+                  </div>
+                </div>
 
-              <div class="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTimerDialogOpen(true)}
-                >
-                  <Timer size={16} class="mr-1" />
-                  定时
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSkipCreditsOpen(true)}
-                >
-                  <Scissors size={16} class="mr-1" />
-                  片头片尾
-                </Button>
-              </div>
+                <div class="flex items-center gap-2">
+                  <Show when={player.sleepMinutes() > 0}>
+                    <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                      {player.sleepMinutes()}m
+                    </span>
+                  </Show>
+                  <Show when={audioConfig().playSpeed !== 1}>
+                    <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                      {audioConfig().playSpeed.toFixed(1)}x
+                    </span>
+                  </Show>
+                  <Show when={mediaUrls().length > 1}>
+                    <span class="text-xs text-muted-foreground">
+                      分段 {player.segmentIndex() + 1}/{mediaUrls().length}
+                    </span>
+                  </Show>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <Tooltip>
+                    <TooltipTrigger as="div">
+                      <MultiSwitch<AudioPlayMode>
+                        options={PLAY_MODE_OPTIONS}
+                        value={() => audioConfig().playMode}
+                        onChange={(mode) => void patchBookConfig({ playMode: mode })}
+                        sizeClass="h-9 w-9"
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={!canPrev()}
+                    onClick={() => void goChapterDelta(-1)}
+                    aria-label="上一章"
+                  >
+                    <SkipBack size={22} />
+                  </Button>
+
+                  <Button
+                    size="icon"
+                    class="h-14 w-14 rounded-full"
+                    onClick={() => player.togglePlay()}
+                    aria-label={player.playing() ? '暂停' : '播放'}
+                  >
+                    <Show when={player.playing()} fallback={<Play size={28} />}>
+                      <Pause size={28} />
+                    </Show>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={!canNext()}
+                    onClick={() => void goChapterDelta(1)}
+                    aria-label="下一章"
+                  >
+                    <SkipForward size={22} />
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="h-9 w-9"
+                    aria-label="播放速度"
+                    onClick={() => {
+                      setSpeedDraft(audioConfig().playSpeed);
+                      setSpeedDialogOpen(true);
+                    }}
+                  >
+                    <Gauge size={20} />
+                  </Button>
+                </div>
+
+                <div class="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTimerDialogOpen(true)}
+                  >
+                    <Timer size={16} class="mr-1" />
+                    定时
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSkipCreditsOpen(true)}
+                  >
+                    <Scissors size={16} class="mr-1" />
+                    片头片尾
+                  </Button>
+                </div>
               </div>
             </Show>
           </div>

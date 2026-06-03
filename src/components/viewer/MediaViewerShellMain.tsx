@@ -19,15 +19,29 @@ export function MediaViewerShellMain(props: MediaViewerShellMainProps) {
   const [local] = splitProps(props, ['children', 'class', 'tapToToggleBars', 'onClick']);
   const shell = useMediaViewerShell();
 
+  const canToggleBars = () =>
+    local.tapToToggleBars !== false && shell.tapToToggleBars && shell.onContentPrimaryClick;
+
   const handleClick = (e: MouseEvent) => {
+    if (isMediaViewerInteractiveClick(e.target)) return;
+
     if (local.onClick) {
+      if (shell.onContentPrimaryClick) {
+        shell.onContentPrimaryClick(e, () => local.onClick!(e));
+        return;
+      }
       local.onClick(e);
       return;
     }
-    if (local.tapToToggleBars === false) return;
-    if (!shell.tapToToggleBars) return;
+
+    if (!canToggleBars()) return;
+    shell.onContentPrimaryClick!(e, () => shell.toggleBars());
+  };
+
+  const handleDblClick = (e: MouseEvent) => {
     if (isMediaViewerInteractiveClick(e.target)) return;
-    shell.toggleBars();
+    if (!canToggleBars() || !shell.onContentDblClick) return;
+    shell.onContentDblClick(e, undefined);
   };
 
   return (
@@ -37,6 +51,7 @@ export function MediaViewerShellMain(props: MediaViewerShellMainProps) {
         local.class,
       )}
       onClick={handleClick}
+      onDblClick={handleDblClick}
     >
       {local.children}
     </div>

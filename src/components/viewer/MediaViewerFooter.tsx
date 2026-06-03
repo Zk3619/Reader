@@ -42,7 +42,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         'reader-footer flex flex-col',
         placement() === 'overlay' && 'pointer-events-none absolute bottom-0 left-0 right-0 z-10',
         placement() === 'fixed' && 'shrink-0 border-t border-border',
-        !overlayFooterPanel() && collapseTarget() === 'footer' && 'safe-area-inset-bottom',
+        !overlayFooterPanel() && collapseTarget() === 'footer' && 'app-bottom-chrome-inset',
         !overlayFooterPanel() && collapseTarget() === 'footer' && !visible() && 'reader-bar-hidden',
         collapseTarget() === 'bottom-bar' && !visible() && 'pointer-events-none',
         local.class,
@@ -56,7 +56,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         <div
           class={cn(
             'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-            'pointer-events-auto flex w-full flex-col safe-area-inset-bottom',
+            'pointer-events-auto flex w-full flex-col app-bottom-chrome-inset',
             !visible() && 'reader-chrome-overlay-panel--hidden',
           )}
         >

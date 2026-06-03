@@ -1,4 +1,4 @@
-import { createSignal, Index, Show, createEffect, createMemo, onCleanup, onMount } from 'solid-js';
+import { createSignal, Index, Show, createEffect, createMemo, onCleanup, onMount, type Accessor } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
 import {
   MANGA_SCROLL_ROOT_ATTR,
@@ -32,6 +32,8 @@ import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface ImageViewerPageProps {
   onClose: () => void;
+  /** 导航栈条目是否栈顶可见 */
+  entryVisible?: Accessor<boolean>;
 }
 
 export function ImageViewerPage(props: ImageViewerPageProps) {
@@ -171,7 +173,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell>
+      <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <div
             ref={scrollRootEl}
