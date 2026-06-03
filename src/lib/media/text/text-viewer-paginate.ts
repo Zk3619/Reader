@@ -1,4 +1,11 @@
-/** 按内容区实际高度分页（行级断页，避免半行裁切） */
+/** 按内容区实际高度分页（段/行边界断页，避免半行裁切） */
+
+import { TEXT_VIEWER_PAGED_VERTICAL_PAD_PX } from '@/lib/media/text/reader-ui-config';
+
+export const PAGE_CLIP_SAFETY_BASE_PX = 4;
+
+/** 裁切窗底部相对最后一段底的额外留白 */
+export const PAGE_BOTTOM_PAD_PX = 6;
 
 export interface ReaderBlockMetric {
   blockIndex: number;
@@ -9,178 +16,293 @@ export interface ReaderBlockMetric {
 export interface ReaderLineMetric {
   top: number;
   height: number;
+  bottom: number;
 }
 
-const LINE_TOP_EPS = 2;
-
-/** 从测量根节点采集块位置（相对内容顶部的像素坐标） */
-export function measureBlockMetrics(
-  contentRoot: HTMLElement,
-  blockSelector = '[data-reader-measure-block]',
-): ReaderBlockMetric[] {
-  const blocks = contentRoot.querySelectorAll<HTMLElement>(blockSelector);
-  if (blocks.length === 0) return [];
-
-  const rootRect = contentRoot.getBoundingClientRect();
-  const metrics: ReaderBlockMetric[] = [];
-
-  blocks.forEach((el, order) => {
-    const rect = el.getBoundingClientRect();
-    metrics.push({
-      blockIndex: order,
-      top: rect.top - rootRect.top,
-      height: rect.height,
-    });
-  });
-
-  return metrics;
+export interface ReaderLayoutSegment {
+  top: number;
+  bottom: number;
 }
 
-/** 采集段落/标题各行（getClientRects），用于行级断页 */
-export function measureLineMetrics(contentRoot: HTMLElement): ReaderLineMetric[] {
-  const rootRect = contentRoot.getBoundingClientRect();
-  const lineMap = new Map<number, ReaderLineMetric>();
-
-  const addRect = (top: number, height: number) => {
-    if (height < 0.5) return;
-    const key = Math.round(top / LINE_TOP_EPS) * LINE_TOP_EPS;
-    const prev = lineMap.get(key);
-    if (!prev || height > prev.height) {
-      lineMap.set(key, { top, height });
-    }
-  };
-
-  const blocks = contentRoot.querySelectorAll<HTMLElement>('[data-reader-measure-block]');
-  blocks.forEach((block) => {
-    const textNodes = block.querySelectorAll<HTMLElement>('.reader-p, h2, figure');
-    if (textNodes.length === 0) {
-      const rect = block.getBoundingClientRect();
-      addRect(rect.top - rootRect.top, rect.height);
-      return;
-    }
-
-    textNodes.forEach((el) => {
-      if (el.tagName === 'FIGURE') {
-        const rect = el.getBoundingClientRect();
-        addRect(rect.top - rootRect.top, rect.height);
-        return;
-      }
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const rects = range.getClientRects();
-      for (let i = 0; i < rects.length; i++) {
-        const rect = rects.item(i);
-        if (!rect) continue;
-        addRect(rect.top - rootRect.top, rect.height);
-      }
-    });
-  });
-
-  return Array.from(lineMap.values()).sort((a, b) => a.top - b.top);
+export interface PaginateReaderContentOptions {
+  padTop?: number;
+  padBottom?: number;
+  fontSize?: number;
+  lineSpacing?: number;
 }
 
-export function contentExtentFromLines(
-  lines: ReaderLineMetric[],
-  contentRoot: HTMLElement,
-): number {
-  const fromLines = lines.reduce((max, l) => Math.max(max, l.top + l.height), 0);
-  return Math.max(fromLines, contentRoot.scrollHeight, contentRoot.clientHeight);
+export interface PaginateReaderContentResult {
+  pageStarts: number[];
+  clipHeight: number;
+  viewportHeight: number;
+  contentExtent: number;
+  padTop: number;
+  padBottom: number;
+  segments: ReaderLayoutSegment[];
+}
+
+export function resolvePagedMeasureRoot(contentRoot: HTMLElement): HTMLElement {
+  return contentRoot.querySelector<HTMLElement>('.reader-body') ?? contentRoot;
+}
+
+export function readLineHeightPx(el: HTMLElement, fontSize?: number, lineSpacing?: number): number {
+  const style = getComputedStyle(el);
+  const lh = parseFloat(style.lineHeight);
+  if (Number.isFinite(lh) && lh > 0) return lh;
+  const fs = parseFloat(style.fontSize);
+  const size = Number.isFinite(fs) ? fs : (fontSize ?? 18);
+  return size * ((lineSpacing ?? 0.8) + 1);
+}
+
+function relativeTop(rootRect: DOMRect, el: Element): number {
+  return el.getBoundingClientRect().top - rootRect.top;
+}
+
+function relativeBottom(rootRect: DOMRect, el: Element): number {
+  return el.getBoundingClientRect().bottom - rootRect.top;
+}
+
+function collectLineSegmentsInBlock(
+  measureRoot: HTMLElement,
+  rootRect: DOMRect,
+  block: HTMLElement,
+  lineHeightPx: number,
+): ReaderLayoutSegment[] {
+  const textEl =
+    block.querySelector<HTMLElement>('.reader-p') ??
+    block.querySelector<HTMLElement>('h2');
+  if (!textEl) return [];
+
+  const range = document.createRange();
+  range.selectNodeContents(textEl);
+  const rects = Array.from(range.getClientRects()).sort((a, b) => a.top - b.top);
+  if (rects.length === 0) {
+    return [
+      {
+        top: relativeTop(rootRect, textEl),
+        bottom: relativeBottom(rootRect, textEl),
+      },
+    ];
+  }
+
+  const lines: ReaderLayoutSegment[] = [];
+  for (const rect of rects) {
+    const top = rect.top - rootRect.top;
+    const bottom = top + lineHeightPx;
+    if (bottom > top + 0.5) lines.push({ top, bottom });
+  }
+  return lines;
 }
 
 /**
- * 行级断页：每页高度为可视区高度，仅在行边界分页（对齐 Legado 行排版思路）。
+ * 块级为主：整块（含段距、气泡）不可分割；超高块再按行拆。
  */
-export function computePageStartsFromLines(
-  lines: ReaderLineMetric[],
-  pageHeight: number,
+export function measureLayoutSegments(
+  measureRoot: HTMLElement,
+  fontSize?: number,
+  lineSpacing?: number,
+): ReaderLayoutSegment[] {
+  const rootRect = measureRoot.getBoundingClientRect();
+  const segments: ReaderLayoutSegment[] = [];
+  const sampleLineEl =
+    measureRoot.querySelector<HTMLElement>('.reader-p') ??
+    measureRoot.querySelector<HTMLElement>('h2');
+  const defaultLineH = sampleLineEl
+    ? readLineHeightPx(sampleLineEl, fontSize, lineSpacing)
+    : (fontSize ?? 18) * ((lineSpacing ?? 0.8) + 1);
+
+  const blocks = measureRoot.querySelectorAll<HTMLElement>('[data-reader-measure-block]');
+  blocks.forEach((block) => {
+    const blockTop = relativeTop(rootRect, block);
+    const blockBottom = relativeBottom(rootRect, block);
+    if (blockBottom <= blockTop + 0.5) return;
+
+    const figure = block.querySelector('figure');
+    if (figure) {
+      segments.push({
+        top: relativeTop(rootRect, figure),
+        bottom: relativeBottom(rootRect, figure),
+      });
+      return;
+    }
+
+    const textEl =
+      block.querySelector<HTMLElement>('.reader-p') ??
+      block.querySelector<HTMLElement>('h2');
+    const lineHeightPx = textEl
+      ? readLineHeightPx(textEl, fontSize, lineSpacing)
+      : defaultLineH;
+
+    const blockH = blockBottom - blockTop;
+    if (blockH <= defaultLineH * 1.5) {
+      segments.push({ top: blockTop, bottom: blockBottom });
+      return;
+    }
+
+    const lineSegs = collectLineSegmentsInBlock(
+      measureRoot,
+      rootRect,
+      block,
+      lineHeightPx,
+    );
+    if (lineSegs.length === 0) {
+      segments.push({ top: blockTop, bottom: blockBottom });
+      return;
+    }
+
+    for (const line of lineSegs) {
+      segments.push(line);
+    }
+    const lastLine = lineSegs[lineSegs.length - 1]!;
+    if (blockBottom > lastLine.bottom + 1) {
+      segments.push({ top: lastLine.bottom, bottom: blockBottom });
+    }
+  });
+
+  return segments.sort((a, b) => a.top - b.top || a.bottom - b.bottom);
+}
+
+/** DOM 探测：是否有元素跨越裁切下边界 */
+export function pageWindowHasStraddle(
+  measureRoot: HTMLElement,
+  pageStart: number,
+  windowBottom: number,
+): boolean {
+  const rootRect = measureRoot.getBoundingClientRect();
+  const selectors = '.reader-p, h2, figure, [data-reader-measure-block]';
+  const nodes = measureRoot.querySelectorAll<HTMLElement>(selectors);
+
+  for (const el of nodes) {
+    const top = el.getBoundingClientRect().top - rootRect.top;
+    const bottom = el.getBoundingClientRect().bottom - rootRect.top;
+    if (bottom <= pageStart + 0.5) continue;
+    if (top >= windowBottom - 0.5) continue;
+    if (top < windowBottom - 1 && bottom > windowBottom + 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function contentExtentFromSegments(
+  segments: ReaderLayoutSegment[],
+  measureRoot: HTMLElement,
+): number {
+  const fromSeg = segments.reduce((max, s) => Math.max(max, s.bottom), 0);
+  return Math.max(fromSeg, measureRoot.scrollHeight, measureRoot.offsetHeight);
+}
+
+export function measureLineMetrics(
+  measureRoot: HTMLElement,
+  fontSize?: number,
+  lineSpacing?: number,
+): ReaderLineMetric[] {
+  return measureLayoutSegments(measureRoot, fontSize, lineSpacing).map((s) => ({
+    top: s.top,
+    height: s.bottom - s.top,
+    bottom: s.bottom,
+  }));
+}
+
+export function clipSafetyPx(fontSize = 18, lineSpacing = 0.8): number {
+  const lineHeight = fontSize * (lineSpacing + 1);
+  return PAGE_CLIP_SAFETY_BASE_PX + Math.ceil(lineHeight * 0.35);
+}
+
+/**
+ * 裁切窗高度：贴齐本页最后一段底，上限为 nextStart（防半行），不超过 clipHeight。
+ */
+export function pageDisplayHeight(
+  pageIndex: number,
+  pageStarts: number[],
+  clipHeight: number,
+  contentExtent: number,
+  segments: ReaderLayoutSegment[],
+): number {
+  const start = Math.round(pageStarts[pageIndex] ?? 0);
+  const nextTop = pageStarts[pageIndex + 1];
+  const maxEnd = nextTop != null ? Math.round(nextTop) : Math.ceil(contentExtent);
+  const maxSpan = Math.min(clipHeight, Math.max(1, maxEnd - start));
+
+  let lastBottom = start;
+  for (const seg of segments) {
+    if (seg.top < start - 0.5) continue;
+    if (seg.top >= maxEnd - 0.5) break;
+    lastBottom = Math.max(lastBottom, seg.bottom);
+  }
+
+  const contentSpan = Math.max(1, Math.ceil(lastBottom - start) + PAGE_BOTTOM_PAD_PX);
+  return Math.min(maxSpan, contentSpan);
+}
+
+function shrinkPageEndBeforeStraddle(
+  measureRoot: HTMLElement,
+  pageStart: number,
+  pageEnd: number,
+): number {
+  if (!pageWindowHasStraddle(measureRoot, pageStart, pageEnd)) return pageEnd;
+  const rootRect = measureRoot.getBoundingClientRect();
+  let shrink = pageEnd;
+  measureRoot
+    .querySelectorAll<HTMLElement>('.reader-p, h2, figure, [data-reader-measure-block]')
+    .forEach((el) => {
+      const top = el.getBoundingClientRect().top - rootRect.top;
+      const bottom = el.getBoundingClientRect().bottom - rootRect.top;
+      if (top < pageEnd - 1 && bottom > pageEnd + 1 && top >= pageStart - 0.5) {
+        shrink = Math.min(shrink, top);
+      }
+    });
+  return shrink > pageStart + 1 ? shrink : pageEnd;
+}
+
+/**
+ * 每页仅显示 [pageStart, nextStart) 区间；nextStart 为首个放不下的片段顶。
+ * 显示高度 = nextStart - pageStart（≤ clipHeight），避免固定窗高把下一行裁进半幅。
+ */
+export function computePageStartsFromSegments(
+  segments: ReaderLayoutSegment[],
+  clipHeight: number,
   contentExtent?: number,
+  safetyPx?: number,
+  measureRoot?: HTMLElement,
 ): number[] {
-  const safeHeight = Math.max(1, pageHeight);
-  if (lines.length === 0) return [0];
+  const safety = safetyPx ?? PAGE_CLIP_SAFETY_BASE_PX;
+  if (segments.length === 0) return [0];
 
   const contentBottom =
-    contentExtent ?? lines.reduce((max, l) => Math.max(max, l.top + l.height), 0);
-  if (contentBottom <= safeHeight + 0.5) return [0];
+    contentExtent ?? segments.reduce((max, s) => Math.max(max, s.bottom), 0);
+  const packLimit = (pageStart: number) => pageStart + clipHeight - safety;
+  if (contentBottom <= packLimit(0) + 0.5) return [0];
 
   const starts: number[] = [0];
   let pageStart = 0;
 
-  while (pageStart + safeHeight < contentBottom - 0.5) {
-    const pageEnd = pageStart + safeHeight;
-    let lastFitting = -1;
+  for (;;) {
+    const limit = packLimit(pageStart);
+    if (pageStart + clipHeight >= contentBottom - 0.5) break;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!;
-      if (line.top < pageStart - 0.5) continue;
-      if (line.top + line.height <= pageEnd + 0.5) {
-        lastFitting = i;
-      } else {
-        break;
-      }
+    let nextStart = -1;
+    for (const seg of segments) {
+      if (seg.top < pageStart - 0.5) continue;
+      if (seg.bottom <= limit + 0.5) continue;
+      nextStart = seg.top;
+      break;
     }
 
-    let nextStart = pageEnd;
-    if (lastFitting >= 0 && lastFitting < lines.length - 1) {
-      nextStart = lines[lastFitting + 1]!.top;
-    } else {
-      const nextLine = lines.find(
-        (l) => l.top >= pageEnd - 0.5 && l.top > pageStart + 0.5,
-      );
-      if (nextLine) nextStart = nextLine.top;
+    if (nextStart < 0) break;
+
+    if (measureRoot) {
+      nextStart = shrinkPageEndBeforeStraddle(measureRoot, pageStart, nextStart);
     }
 
     if (nextStart <= pageStart + 0.5) {
-      nextStart = pageEnd;
+      nextStart = Math.min(limit, pageStart + clipHeight);
     }
 
+    if (nextStart <= pageStart + 0.5) break;
+
+    starts.push(nextStart);
     pageStart = nextStart;
-    starts.push(pageStart);
-  }
-
-  return starts;
-}
-
-/** @deprecated 块级断页，长段落会裁切半行 */
-export function computePageStarts(
-  metrics: ReaderBlockMetric[],
-  pageHeight: number,
-): number[] {
-  const safeHeight = Math.max(1, pageHeight);
-  if (metrics.length === 0) return [0];
-
-  const contentBottom = metrics.reduce(
-    (max, m) => Math.max(max, m.top + m.height),
-    0,
-  );
-  if (contentBottom <= safeHeight) return [0];
-
-  const starts: number[] = [0];
-  let pageStart = 0;
-
-  while (pageStart + safeHeight < contentBottom - 0.5) {
-    const pageEnd = pageStart + safeHeight;
-    let nextStart = pageEnd;
-
-    for (const m of metrics) {
-      if (m.top >= pageEnd - 0.5) {
-        nextStart = Math.min(nextStart, m.top);
-        break;
-      }
-      if (m.top < pageEnd && m.top + m.height > pageEnd + 0.5) {
-        if (m.height > safeHeight) {
-          nextStart = pageEnd;
-        } else if (m.top > pageStart + 1) {
-          nextStart = Math.min(nextStart, m.top);
-        }
-      }
-    }
-
-    if (nextStart <= pageStart + 1) {
-      nextStart = pageEnd;
-    }
-
-    pageStart = nextStart;
-    starts.push(pageStart);
   }
 
   return starts;
@@ -190,7 +312,53 @@ export function pageCountFromStarts(starts: number[]): number {
   return Math.max(1, starts.length);
 }
 
+export function paginateReaderContent(
+  contentRoot: HTMLElement,
+  viewportHeight: number,
+  options?: PaginateReaderContentOptions,
+): PaginateReaderContentResult {
+  const padTop = options?.padTop ?? TEXT_VIEWER_PAGED_VERTICAL_PAD_PX;
+  const padBottom = options?.padBottom ?? TEXT_VIEWER_PAGED_VERTICAL_PAD_PX;
+  const measureRoot = resolvePagedMeasureRoot(contentRoot);
+  const fontSize = options?.fontSize;
+  const lineSpacing = options?.lineSpacing;
+  const segments = measureLayoutSegments(measureRoot, fontSize, lineSpacing);
+  const extent = contentExtentFromSegments(segments, measureRoot);
+  const clipHeight = Math.max(1, viewportHeight - padTop - padBottom);
+  const safety = clipSafetyPx(fontSize, lineSpacing);
+  const pageStarts = computePageStartsFromSegments(
+    segments,
+    clipHeight,
+    extent,
+    safety,
+    measureRoot,
+  );
+
+  return {
+    pageStarts,
+    clipHeight,
+    viewportHeight: Math.max(1, viewportHeight),
+    contentExtent: extent,
+    padTop,
+    padBottom,
+    segments,
+  };
+}
+
 /** @deprecated */
+export function computePageStartsFromLines(
+  lines: ReaderLineMetric[],
+  clipHeight: number,
+  contentExtent?: number,
+  safetyPx?: number,
+): number[] {
+  const segments = lines.map((l) => ({
+    top: l.top,
+    bottom: l.bottom ?? l.top + l.height,
+  }));
+  return computePageStartsFromSegments(segments, clipHeight, contentExtent, safetyPx);
+}
+
 export function splitBlockIndicesByPageHeight(
   blockHeights: number[],
   pageHeight: number,

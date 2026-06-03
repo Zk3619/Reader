@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   onCleanup,
+  onMount,
   Show,
   splitProps,
   type Accessor,
@@ -10,11 +11,12 @@ import {
 import { textViewerStore } from '@/stores/viewer';
 import { ReaderContent, type ReaderContentProps } from '@/components/viewer/text-viewer/ReaderContent';
 import {
-  computePageStartsFromLines,
-  contentExtentFromLines,
-  measureLineMetrics,
+  paginateReaderContent,
   pageCountFromStarts,
+  pageDisplayHeight,
+  type ReaderLayoutSegment,
 } from '@/lib/media/text/text-viewer-paginate';
+import { TEXT_VIEWER_PAGED_VERTICAL_PAD_PX } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import type { TextViewerPageAnim } from '@/lib/media/text/reader-ui-config';
 import {
@@ -50,7 +52,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const [pageIndex, setPageIndex] = createSignal(0);
   const [pageStarts, setPageStarts] = createSignal<number[]>([0]);
-  const [pageHeight, setPageHeight] = createSignal(0);
+  const [pageClipHeight, setPageClipHeight] = createSignal(0);
+  const [contentExtent, setContentExtent] = createSignal(0);
+  const [layoutSegments, setLayoutSegments] = createSignal<ReaderLayoutSegment[]>([]);
+  const [pagePad, setPagePad] = createSignal({
+    top: TEXT_VIEWER_PAGED_VERTICAL_PAD_PX,
+    bottom: TEXT_VIEWER_PAGED_VERTICAL_PAD_PX,
+  });
 
   const [turnStage, setTurnStage] = createSignal<TurnStage>('idle');
   const [turnFrom, setTurnFrom] = createSignal(0);
@@ -58,6 +66,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const [turnDir, setTurnDir] = createSignal<PagedTurnDirection>('next');
   const [turnProgress, setTurnProgress] = createSignal(0);
 
+  let measureSlot: HTMLDivElement | undefined;
   let measureInner: HTMLDivElement | undefined;
   let viewportEl: HTMLDivElement | undefined;
   let animFrame: number | undefined;
@@ -78,18 +87,50 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const remeasure = () => {
     if (!measureInner || !viewportEl) return;
     const height = viewportEl.clientHeight;
-    if (height <= 0) return;
+    const width = viewportEl.clientWidth;
+    if (height <= 0 || width <= 0) return;
+
+    measureInner.style.width = `${width}px`;
+    measureInner.style.maxWidth = `${width}px`;
+
     const contentRoot = measureInner.querySelector<HTMLElement>('[data-reader-content]');
     if (!contentRoot) return;
-    setPageHeight(height);
-    const lines = measureLineMetrics(contentRoot);
-    const extent = contentExtentFromLines(lines, contentRoot);
-    const starts = computePageStartsFromLines(lines, height, extent);
-    setPageStarts(starts);
-    setPageIndex((i) => Math.min(i, Math.max(0, starts.length - 1)));
+
+    const cfg = textViewerStore.state.config;
+    const paginateOpts = {
+      padTop: TEXT_VIEWER_PAGED_VERTICAL_PAD_PX,
+      padBottom: TEXT_VIEWER_PAGED_VERTICAL_PAD_PX,
+      fontSize: cfg.fontSize,
+      lineSpacing: cfg.spacing.line,
+    };
+
+    let result = paginateReaderContent(contentRoot, height, paginateOpts);
+
+    if (turnStage() === 'idle' && viewportEl) {
+      const visibleRoot = viewportEl.querySelector<HTMLElement>('[data-reader-content]');
+      if (visibleRoot && visibleRoot !== contentRoot) {
+        result = paginateReaderContent(visibleRoot, height, paginateOpts);
+      }
+    }
+
+    setPageClipHeight(result.clipHeight);
+    setContentExtent(result.contentExtent);
+    setLayoutSegments(result.segments);
+    setPagePad({ top: result.padTop, bottom: result.padBottom });
+    setPageStarts(result.pageStarts);
+    setPageIndex((i) => Math.min(i, Math.max(0, result.pageStarts.length - 1)));
   };
 
-  const pageStartAt = (index: number) => pageStarts()[index] ?? 0;
+  const pageStartAt = (index: number) => Math.round(pageStarts()[index] ?? 0);
+
+  const displayHeightForPage = (page: number) =>
+    pageDisplayHeight(
+      page,
+      pageStarts(),
+      pageClipHeight(),
+      contentExtent(),
+      layoutSegments(),
+    );
 
   const cancelAnimFrame = () => {
     if (animFrame !== undefined) {
@@ -171,6 +212,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     scheduleRemeasure();
   });
 
+  onMount(() => {
+    void document.fonts?.ready.then(() => scheduleRemeasure());
+  });
+
   createEffect(() => {
     if (!measureInner) return;
     const images = measureInner.querySelectorAll('img');
@@ -207,7 +252,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const ch = textViewerStore.state.chapterIndex;
     const starts = pageStarts();
     if (starts.length === 0) return;
-    const key = `${ch}:${starts.length}:${pageHeight()}`;
+    const key = `${ch}:${starts.length}:${pageClipHeight()}`;
     if (progressRestoredKey === key) return;
     progressRestoredKey = key;
     const pos = textViewerStore.state.chapterPos;
@@ -316,7 +361,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     extraTransform?: string,
   ) => {
     const start = pageStartAt(page);
-    const h = pageHeight();
+    const displayH = displayHeightForPage(page);
+    const pad = pagePad();
     const layerTransform = readerPagedLayerTransform(anim(), role, turnDir(), progress);
     const dragTransform =
       role === 'outgoing' && turnStage() === 'drag'
@@ -327,30 +373,32 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return (
       <div
         class={cn(
-          'reader-paged-window absolute inset-0 h-full w-full overflow-hidden',
+          'reader-paged-window absolute inset-0 box-border h-full w-full overflow-hidden',
           themeCls.bg,
           themeCls.text,
         )}
         style={{
+          'padding-top': `${pad.top}px`,
+          'padding-bottom': `${pad.bottom}px`,
           'z-index': role === 'outgoing'
             ? readerPagedOutgoingZIndex(anim())
             : readerPagedIncomingZIndex(anim()),
         }}
       >
         <div
-          class={cn('reader-paged-window-inner w-full will-change-transform', themeCls.bg)}
-          style={{
-            transform: [
-              readerPagedContentOffsetStyle(start).transform,
-              layerTransform,
-              dragTransform,
-            ]
-              .filter(Boolean)
-              .join(' '),
-            ...(h > 0 ? { 'min-height': `${Math.max(h, start + h)}px` } : {}),
-          }}
+          class="relative overflow-hidden"
+          style={displayH > 0 ? { height: `${displayH}px` } : { height: '100%' }}
         >
-          <ReaderContent {...contentProps} pagedLayout dualPage={false} />
+          <div
+            class={cn('reader-paged-window-inner w-full will-change-transform', themeCls.bg)}
+            style={{
+              ...readerPagedContentOffsetStyle(start),
+              transform: [layerTransform, dragTransform].filter(Boolean).join(' ') || undefined,
+              'min-height': `${start + displayH}px`,
+            }}
+          >
+            <ReaderContent {...contentProps} pagedLayout dualPage={false} />
+          </div>
         </div>
         <Show when={anim() === 'linkedCover' && role === 'incoming'}>
           <div
@@ -385,10 +433,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       onPointerCancel={onPointerUp}
     >
       <div
-        class="pointer-events-none absolute left-0 right-0 top-0 -z-10 w-full opacity-0"
+        ref={measureSlot}
+        class="pointer-events-none absolute inset-0 -z-10 overflow-hidden opacity-0"
         aria-hidden="true"
       >
-        <div ref={measureInner} class="w-full">
+        <div ref={measureInner} class="mx-auto w-full">
           <ReaderContent {...contentProps} measureBlocks pagedLayout dualPage={false} />
         </div>
       </div>

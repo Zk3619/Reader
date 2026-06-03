@@ -23,6 +23,9 @@ export type TextViewerImageStyle = 'DEFAULT' | 'FULL' | 'TEXT' | 'SINGLE';
 /** Tailwind `xl` 断点（1280px）：双页「自动」模式的最小视口宽度 */
 export const TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX = 1280;
 
+/** 按页阅读：裁切区上下留白（与原先 py-4 一致，每页顶部/底部固定） */
+export const TEXT_VIEWER_PAGED_VERTICAL_PAD_PX = 16;
+
 export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, string> = {
   off: '关闭',
   auto: '自动',

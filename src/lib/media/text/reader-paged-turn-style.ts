@@ -2,9 +2,10 @@ import type { TextViewerPageAnim } from '@/lib/media/text/reader-ui-config';
 
 export type PagedTurnDirection = 'next' | 'prev';
 
-/** 按页阅读：单页窗口内正文纵向偏移 */
+/** 按页阅读：单页窗口内正文纵向偏移（margin 避免 transform 亚像素裁切） */
 export function readerPagedContentOffsetStyle(pageStartPx: number): Record<string, string> {
-  return { transform: `translate3d(0, ${-pageStartPx}px, 0)` };
+  const y = Math.round(pageStartPx);
+  return y > 0 ? { 'margin-top': `${-y}px` } : {};
 }
 
 /**

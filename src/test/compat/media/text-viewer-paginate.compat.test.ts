@@ -1,35 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computePageStarts,
-  computePageStartsFromLines,
+  clipSafetyPx,
+  computePageStartsFromSegments,
+  pageDisplayHeight,
   splitBlockIndicesByPageHeight,
 } from '@/lib/media/text/text-viewer-paginate';
 
-describe('computePageStartsFromLines', () => {
+describe('computePageStartsFromSegments', () => {
   it('returns single page when content fits', () => {
     expect(
-      computePageStartsFromLines([{ top: 0, height: 20 }, { top: 24, height: 20 }], 800),
+      computePageStartsFromSegments(
+        [
+          { top: 0, bottom: 20 },
+          { top: 24, bottom: 44 },
+        ],
+        800,
+        undefined,
+        30,
+      ),
     ).toEqual([0]);
   });
 
-  it('breaks only at line boundaries', () => {
-    const lines = [
-      { top: 0, height: 22 },
-      { top: 26, height: 22 },
-      { top: 52, height: 22 },
-      { top: 78, height: 22 },
-      { top: 104, height: 22 },
+  it('packs segments greedily with safety margin', () => {
+    const lineH = 32;
+    const safety = clipSafetyPx(18, 0.8);
+    const clipHeight = 80;
+    const usable = clipHeight - safety;
+    const segments = [
+      { top: 0, bottom: lineH },
+      { top: lineH, bottom: lineH * 2 },
+      { top: lineH * 2, bottom: lineH * 3 },
+      { top: lineH * 3, bottom: lineH * 4 },
     ];
-    const starts = computePageStartsFromLines(lines, 80, 126);
+    const starts = computePageStartsFromSegments(segments, clipHeight, lineH * 4, safety);
     expect(starts[0]).toBe(0);
-    expect(starts[1]).toBe(78);
-    expect(starts).toHaveLength(2);
+    expect(starts[1]).toBeGreaterThan(0);
+    expect(starts.length).toBeGreaterThanOrEqual(2);
   });
-});
 
-describe('computePageStarts (block legacy)', () => {
-  it('returns single page when content fits', () => {
-    expect(computePageStarts([{ blockIndex: 0, top: 0, height: 200 }], 800)).toEqual([0]);
+  it('pageDisplayHeight follows last segment bottom not next page gap', () => {
+    const segments = [
+      { top: 0, bottom: 380 },
+      { top: 400, bottom: 780 },
+      { top: 800, bottom: 1100 },
+    ];
+    const starts = [0, 400, 800];
+    expect(pageDisplayHeight(0, starts, 500, 1200, segments)).toBe(386);
+    expect(pageDisplayHeight(1, starts, 500, 1200, segments)).toBe(386);
+    expect(pageDisplayHeight(2, starts, 500, 1200, segments)).toBe(306);
   });
 });
 

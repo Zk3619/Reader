@@ -216,7 +216,7 @@ export function ReaderContent(props: ReaderContentProps) {
     <div
       class={cn(
         'reader-content min-h-full w-full px-0 selection:bg-primary/20',
-        props.pagedLayout ? 'min-h-full py-4' : 'py-8',
+        props.pagedLayout ? 'min-h-full py-0' : 'py-8',
         themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
         themeClasses[config().theme]?.text ?? themeClasses[0].text,
         props.class
