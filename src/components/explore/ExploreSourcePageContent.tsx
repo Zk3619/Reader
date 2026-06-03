@@ -279,7 +279,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
   });
 
   return (
-    <div class={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden', props.class)}>
+    <div class={cn('flex h-full min-h-0 flex-1 flex-col overflow-hidden my-1', props.class)}>
       <Show when={loading()}>
         <div class={cn(mainShellPageScroll, 'min-h-0 flex-1')}>
           <ExploreBookListSkeleton />

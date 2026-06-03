@@ -3,8 +3,12 @@
  */
 
 import { createEffect, createSignal, For } from 'solid-js';
-import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
+import {
+  AppManualRadioGroup,
+  AppManualRadioOption,
+} from '@/components/shared/AppManualRadio';
 import { settingsStore } from '@/stores/settings';
+import { cn } from '@/lib/utils';
 
 type BookInfoPresentation = 'page' | 'drawer';
 
@@ -37,26 +41,28 @@ export function BookInfoPresentationSetting() {
         从书架、探索、搜索或阅读器打开书籍详情时的展示方式。
       </p>
 
-      <RadioGroup
-        value={value()}
-        onChange={(next) => {
-          const mode = next as BookInfoPresentation;
-          setValue(mode);
-          void settingsStore.setBookInfoPresentation(mode);
-        }}
-        class="flex flex-col gap-2"
-      >
+      <AppManualRadioGroup class="flex flex-col gap-2">
         <For each={OPTIONS}>
           {(option) => (
-            <RadioGroupItem value={option.value} class="items-start gap-3 rounded-lg border border-border/40 px-3 py-2.5">
-              <RadioGroupItemLabel class="flex flex-col gap-0.5 font-normal">
+            <AppManualRadioOption
+              selected={value() === option.value}
+              onSelect={() => {
+                setValue(option.value);
+                void settingsStore.setBookInfoPresentation(option.value);
+              }}
+              class={cn(
+                'h-max items-start gap-3 rounded-lg border border-border/40 px-3 py-2.5',
+                value() === option.value ? 'bg-muted/30' : 'bg-transparent',
+              )}
+            >
+              <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span class="text-sm font-medium text-foreground">{option.label}</span>
                 <span class="text-xs text-muted-foreground">{option.description}</span>
-              </RadioGroupItemLabel>
-            </RadioGroupItem>
+              </div>
+            </AppManualRadioOption>
           )}
         </For>
-      </RadioGroup>
+      </AppManualRadioGroup>
     </div>
   );
 }

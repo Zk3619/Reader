@@ -133,7 +133,7 @@ export function bookshelfCompactListCardClass(...extra: Parameters<typeof cn>) {
 /** 书架/分组网格卡片（书籍为 div，分组为 button 时叠加 BOOK_GROUP_CARD_BUTTON_BASE） */
 export function bookGroupGridCardClass(...extra: Parameters<typeof cn>) {
   return bookGroupGridRowVisualClass(
-    'flex flex-col items-center gap-1.5 p-2',
+    'flex flex-col items-center gap-1 p-1',
     ...extra,
   );
 }
@@ -147,7 +147,15 @@ export function bookGroupGridButtonClass(...extra: Parameters<typeof cn>) {
 export function bookGroupGridCoverClass(...extra: Parameters<typeof cn>) {
   return cn(
     'book-group-card-cover-motion book-group-card-cover-motion--grid',
-    'flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50',
+    'relative flex w-full aspect-3/4 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50',
+    ...extra,
+  );
+}
+
+/** 网格封面内层：悬停缩放作用于此层，由外层 cover 裁切，避免大封面溢出卡片 */
+export function bookGroupGridCoverZoomClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'book-group-card-cover-zoom relative flex h-full w-full min-h-0 min-w-0 items-center justify-center',
     ...extra,
   );
 }
@@ -180,17 +188,38 @@ export function bookGroupRowSubtitleClass(compact: boolean, ...extra: Parameters
   return bookshelfRowSubtitleClass(compact, ...extra);
 }
 
+/** 网格书名下方信息区最小高度（与 bookshelf-grid-row-height 中标题/副标题行高 + gap-0.5 对齐） */
+export const BOOKSHELF_GRID_META_MIN_HEIGHT_CLASS = 'min-h-9';
+
+/** 网格封面下书名/作者（或分组副标题）容器 */
+export function bookGroupGridMetaClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'flex w-full flex-col items-center gap-0.5',
+    BOOKSHELF_GRID_META_MIN_HEIGHT_CLASS,
+    ...extra,
+  );
+}
+
+/** 网格作者展示：空串/空白与缺失统一为占位符，避免副标题行塌陷 */
+export function formatBookshelfGridAuthor(author: string | null | undefined): string {
+  const trimmed = author?.trim();
+  return trimmed ? trimmed : '—';
+}
+
 /** 网格标题（显示书名/分组名） */
 export function bookGroupGridTitleClass(...extra: Parameters<typeof cn>) {
   return cn(
-    'm-0 w-full truncate text-center text-sm leading-tight font-semibold text-foreground',
+    'm-0 min-h-5 w-full shrink-0 truncate text-center text-sm leading-tight font-semibold text-foreground',
     ...extra,
   );
 }
 
 /** 网格副标题 */
 export function bookGroupGridSubtitleClass(...extra: Parameters<typeof cn>) {
-  return cn('m-0 text-xs leading-tight text-muted-foreground', ...extra);
+  return cn(
+    'm-0 min-h-4 w-full shrink-0 truncate text-center text-xs leading-tight text-muted-foreground',
+    ...extra,
+  );
 }
 
 /** 书架列表封面：高度占满项、固定 3:4 */

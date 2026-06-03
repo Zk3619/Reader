@@ -1,6 +1,7 @@
 import { For, Show, createMemo, type Component } from "solid-js";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { appBottomChromePadding } from "@/lib/ui/viewport-classes";
 import type { PageType } from "@/components/shell/Navigation";
 import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
 import {
@@ -51,7 +52,10 @@ export function BottomBar(props: BottomBarProps) {
   const bottomBarPages: PageType[] = ["bookshelf", "scout", "sources", "subscription", "settings"];
 
   return (
-    <div class="fixed bottom-0 left-0 right-0 z-50 border-t border-border/40 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/95 safe-area-inset-bottom">
+    <div class={cn(
+      "fixed bottom-0 left-0 right-0 z-50 border-t border-border/40 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/95",
+      appBottomChromePadding,
+    )}>
       <div class="flex h-14 items-center justify-around px-2">
         <For each={bottomBarPages}>
           {(page) => {

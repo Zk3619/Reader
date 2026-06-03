@@ -9,8 +9,11 @@ import type { BookSource, SearchBook } from '@/types';
 import {
   bookGroupGridCardClass,
   bookGroupGridCoverClass,
+  bookGroupGridCoverZoomClass,
+  bookGroupGridMetaClass,
   bookGroupGridSubtitleClass,
   bookGroupGridTitleClass,
+  formatBookshelfGridAuthor,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { explorePageLayoutStore } from '@/stores/explore-page-layout';
@@ -47,35 +50,44 @@ function ExploreBookGridCardCellContent(props: {
       >
         <Show when={showCover()}>
           <div class={bookGroupGridCoverClass()}>
-            <BookCoverImg
-              src={coverUrl()}
-              referer={origin()}
-              source={props.source}
-              bookUrl={props.book().bookUrl}
-              onCoverUrlRefreshed={(url) =>
-                props.onCoverUrlRefreshed(props.book().bookUrl, url)
-              }
-              alt=""
-              class="h-full w-full object-cover"
-              loading="lazy"
-              draggable={false}
-              deferLoadUntilVisible
-              fallback={
-                <div class="flex h-full w-full items-center justify-center">
-                  <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
-                </div>
-              }
-            />
+            <div class={bookGroupGridCoverZoomClass()}>
+              <BookCoverImg
+                src={coverUrl()}
+                referer={origin()}
+                source={props.source}
+                bookUrl={props.book().bookUrl}
+                onCoverUrlRefreshed={(url) =>
+                  props.onCoverUrlRefreshed(props.book().bookUrl, url)
+                }
+                alt=""
+                class="h-full w-full object-cover"
+                loading="lazy"
+                draggable={false}
+                deferLoadUntilVisible
+                fallback={
+                  <div class="flex h-full w-full items-center justify-center">
+                    <BookCoverIcon class="h-8 w-8 text-muted-foreground" size={32} />
+                  </div>
+                }
+              />
+            </div>
           </div>
         </Show>
-        <div class="flex w-full flex-col items-center gap-0.5">
-          <h3 class={bookGroupGridTitleClass()}>{props.book().name}</h3>
-          <Show when={!compact()}>
-            <p class={cn(bookGroupGridSubtitleClass(), 'w-full truncate text-center')}>
-              {props.book().author || '—'}
+        <Show
+          when={!compact()}
+          fallback={
+            <div class={bookGroupGridMetaClass('min-h-5 justify-center')}>
+              <h3 class={bookGroupGridTitleClass()}>{props.book().name}</h3>
+            </div>
+          }
+        >
+          <div class={bookGroupGridMetaClass()}>
+            <h3 class={bookGroupGridTitleClass()}>{props.book().name}</h3>
+            <p class={bookGroupGridSubtitleClass()}>
+              {formatBookshelfGridAuthor(props.book().author)}
             </p>
-          </Show>
-        </div>
+          </div>
+        </Show>
       </button>
     </li>
   );

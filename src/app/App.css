@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
 
 /* dark 变体：匹配 html.dark 及其子树（须含 .dark *，否则 dark: 只对根节点生效） */
 @custom-variant dark (&:where(.dark, .dark *, [data-kb-theme="dark"], [data-kb-theme="dark"] *));
@@ -42,6 +43,8 @@
   --animate-accordion-up: accordion-up 0.2s ease-out;
   --animate-content-show: content-show 0.2s ease-out;
   --animate-content-hide: content-hide 0.2s ease-out;
+  --animate-app-menu-show: app-menu-show 0.12s ease-out;
+  --animate-app-menu-hide: app-menu-hide 0.07s ease-in;
   --animate-caret-blink: caret-blink 1.25s ease-out infinite;
 
   @keyframes accordion-down {
@@ -85,6 +88,28 @@
     to {
       opacity: 0;
       transform: scale(0.96);
+    }
+  }
+
+  @keyframes app-menu-show {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes app-menu-hide {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
     }
   }
 
@@ -373,6 +398,15 @@
       transform var(--book-card-motion-duration, 0.55s) var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
   }
 
+  .book-group-card-cover-zoom {
+    transform: scale3d(1, 1, 1);
+    transform-origin: center center;
+    will-change: transform;
+    backface-visibility: hidden;
+    transition:
+      transform var(--book-card-motion-duration, 0.55s) var(--book-card-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
   .book-group-card-motion:hover .book-group-card-cover-motion--list {
     transform: scale3d(1.04, 1.04, 1);
   }
@@ -382,8 +416,9 @@
     transform: scale3d(1.012, 1.012, 1);
   }
 
-  .book-group-card-motion:hover .book-group-card-cover-motion--grid {
-    transform: scale3d(1.02, 1.02, 1);
+  /** 网格：仅缩放内层，外层 overflow-hidden 裁切；略小于列表，大封面时绝对溢出更小 */
+  .book-group-card-motion:hover .book-group-card-cover-motion--grid .book-group-card-cover-zoom {
+    transform: scale3d(1.015, 1.015, 1);
   }
 
   .book-group-card-motion.book-group-card-motion--pressed .book-group-card-cover-motion {
@@ -404,9 +439,10 @@
     }
 
     .book-group-card-cover-motion,
+    .book-group-card-cover-zoom,
     .book-group-card-motion:hover .book-group-card-cover-motion--list,
     .book-group-card-motion:hover .book-group-card-cover-motion--compact,
-    .book-group-card-motion:hover .book-group-card-cover-motion--grid {
+    .book-group-card-motion:hover .book-group-card-cover-motion--grid .book-group-card-cover-zoom {
       transform: scale3d(1, 1, 1);
       transition: none;
     }
@@ -452,10 +488,7 @@
   scrollbar-gutter: stable both-edges;
 }
 
-/* 主壳 Tab 滚动区：桌面壳层无底栏时末尾留白（与 scrollEdgeBottomInset / mb-2 一致） */
-#main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
-  margin-bottom: 0.5rem;
-}
+/* 主壳 Tab 滚动区：触摸端无底栏时末尾留白（见 @media coarse 内同名规则） */
 
 /*
  * 书籍详情纵向布局：滚动条浮于内容之上，不预留两侧 gutter。
@@ -909,15 +942,13 @@ body.reader-inner-web-session #root [data-tauri-drag-region] {
   -webkit-app-region: no-drag !important;
 }
 
-/* 进入/退出动画类 */
+/* 未单独指定 duration-* 时的默认节奏（animation-name 由 tailwindcss-animate 提供） */
 .animate-in {
-  animation-duration: 0.5s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   animation-fill-mode: both;
 }
 
 .animate-out {
-  animation-duration: 0.2s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   animation-fill-mode: both;
 }
@@ -1567,7 +1598,9 @@ body.reader-inner-web-session--drawer {
 [data-reduce-motion="true"] .slide-out-to-left-52,
 [data-reduce-motion="true"] .slide-out-to-right-52,
 [data-reduce-motion="true"] .slide-out-to-top-52,
-[data-reduce-motion="true"] .slide-out-to-bottom-52 {
+[data-reduce-motion="true"] .slide-out-to-bottom-52,
+[data-reduce-motion="true"] .animate-app-menu-show,
+[data-reduce-motion="true"] .animate-app-menu-hide {
   animation-duration: 0.01ms !important;
   animation-delay: 0s !important;
 }
@@ -1579,6 +1612,8 @@ body.reader-inner-web-session--drawer {
 
 :root {
   --app-bar-height: 3.5rem;
+  --app-bottom-edge-inset: 0.5rem;
+  /* mb-2 / pb-2，仅触摸端启用 */
   --safe-area-top-effective: env(safe-area-inset-top, 0px);
   --safe-area-bottom-effective: env(safe-area-inset-bottom, 0px);
   --keyboard-inset-bottom: 0px;
@@ -1597,12 +1632,28 @@ body.reader-inner-web-session--drawer {
   bottom: calc(var(--app-bar-height) + var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
 }
 
+/* 遗留 class：桌面用 env；触摸端在下方 @media 中叠加 app-bottom-edge-inset */
 .safe-area-inset-bottom {
   padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
 }
 
 .safe-area-page-bottom {
   padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+/** 贴底 chrome（底栏、抽屉、阅读器底栏）：仅触摸端 pb-2 */
+.app-bottom-chrome-inset {
+  padding-bottom: 0;
+}
+
+/** 块级底部外边距：仅触摸端 mb-2 */
+.app-bottom-edge-inset {
+  margin-bottom: 0;
+}
+
+/** 滚动区末尾：顶恒 mt-2，底仅触摸端 mb-2（见 scrollEdgeBottomInset） */
+.app-scroll-bottom-inset {
+  margin-bottom: 0;
 }
 
 html.keyboard-open .reader-footer.safe-area-inset-bottom,
@@ -1613,11 +1664,33 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
 @media (pointer: coarse) and (hover: none) {
   :root {
     --safe-area-top-effective: var(--mobile-safe-top);
-    --safe-area-bottom-effective: var(--mobile-safe-bottom);
+    /* 手势导航常无系统底栏，env 为 0 时用固定 0.5rem */
+    --safe-area-bottom-effective: var(--app-bottom-edge-inset);
+  }
+
+  .safe-area-inset-bottom,
+  .safe-area-page-bottom {
+    padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+  }
+
+  .app-bottom-chrome-inset {
+    padding-bottom: calc(var(--app-bottom-edge-inset) + var(--keyboard-inset-bottom));
+  }
+
+  .app-bottom-edge-inset {
+    margin-bottom: var(--app-bottom-edge-inset);
+  }
+
+  .app-scroll-bottom-inset {
+    margin-bottom: var(--app-bottom-edge-inset);
   }
 
   .safe-area-min-height-bottom {
-    min-height: var(--mobile-safe-bottom);
+    min-height: var(--app-bottom-edge-inset);
+  }
+
+  #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
+    margin-bottom: var(--app-bottom-edge-inset);
   }
 }
 

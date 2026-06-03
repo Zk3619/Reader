@@ -3,7 +3,7 @@
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
-import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { ExploreLayoutDialog } from '@/components/explore/ExploreLayoutDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -86,9 +86,7 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
         <AppDropdownMenuContent layout="compact">
-          <AppDropdownMenuItem
-            onSelect={() => openAppDialogAfterMenuDismiss(() => setLayoutDialogOpen(true))}
-          >
+          <AppDropdownMenuItem onSelect={() => setLayoutDialogOpen(true)}>
             <Settings2Icon class="h-4 w-4" />
             <span>布局偏好</span>
           </AppDropdownMenuItem>

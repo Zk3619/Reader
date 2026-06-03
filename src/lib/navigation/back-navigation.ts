@@ -82,6 +82,15 @@ export function getBackHistoryDepth(): number {
   return historyDepth;
 }
 
+/** 无可返回层时校正 history 深度，避免「再按一次退出」无法真正退出 */
+export function clearBackHistoryDepth(): void {
+  historyDepth = 0;
+  skipNextPop = false;
+  if (typeof history !== 'undefined') {
+    history.replaceState({ [HISTORY_KEY]: 0 }, '');
+  }
+}
+
 export function hasBackNavigation(): boolean {
   return handlerStack.length > 0 || historyDepth > 0;
 }

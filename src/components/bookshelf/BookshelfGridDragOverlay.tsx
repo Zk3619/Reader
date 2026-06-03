@@ -10,8 +10,10 @@ import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookGroupCoverFace } from '@/components/bookshelf/BookGroupCoverFace';
 import {
   bookGroupGridCoverClass,
+  bookGroupGridMetaClass,
   bookGroupGridSubtitleClass,
   bookGroupGridTitleClass,
+  formatBookshelfGridAuthor,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { sourcesStore } from '@/stores/sources';
 import { cn } from '@/lib/utils';
@@ -41,11 +43,11 @@ export function BookshelfBookGridDragOverlay(props: {
             fallback={<BookCoverFallback class="h-8 w-8" />}
           />
         </div>
-        <div class="flex w-full min-w-0 flex-col items-center gap-0.5">
+        <div class={bookGroupGridMetaClass('min-w-0')}>
           <span class={bookGroupGridTitleClass()}>{props.book.name}</span>
           <Show when={props.showSubtitle}>
-            <span class={cn(bookGroupGridSubtitleClass(), 'w-full truncate text-center')}>
-              {props.book.author ?? '—'}
+            <span class={bookGroupGridSubtitleClass()}>
+              {formatBookshelfGridAuthor(props.book.author)}
             </span>
           </Show>
         </div>
@@ -69,11 +71,9 @@ export function BookshelfGroupGridDragOverlay(props: {
         <div class={bookGroupGridCoverClass('h-24 w-full overflow-hidden')}>
           <BookGroupCoverFace group={props.group} emojiClass="text-3xl" iconClass="h-10 w-10" />
         </div>
-        <div class="flex w-full min-w-0 flex-col items-center gap-0.5">
+        <div class={bookGroupGridMetaClass('min-w-0')}>
           <span class={bookGroupGridTitleClass()}>{props.title}</span>
-          <span class={cn(bookGroupGridSubtitleClass(), 'w-full truncate text-center')}>
-            {props.subtitle}
-          </span>
+          <span class={bookGroupGridSubtitleClass()}>{props.subtitle}</span>
         </div>
       </div>
     </div>

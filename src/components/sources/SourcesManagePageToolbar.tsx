@@ -3,7 +3,7 @@
  */
 
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
-import { blurActiveElement, openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
+import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -211,22 +211,16 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
             <FileTextIcon class="h-4 w-4" />
             <span>新建书源</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportLocal?.())}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onSourcesImportLocal?.()}>
             <FolderPlusIcon class="h-4 w-4" />
             <span>本地导入</span>
           </AppDropdownMenuItem>
-          <AppDropdownMenuItem
-            onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportNetwork?.())}
-          >
+          <AppDropdownMenuItem onSelect={() => props.onSourcesImportNetwork?.()}>
             <LinkIcon class="h-4 w-4" />
             <span>网络导入</span>
           </AppDropdownMenuItem>
           <Show when={props.showSourcesImportQR}>
-            <AppDropdownMenuItem
-              onSelect={() => openAppDialogAfterMenuDismiss(() => props.onSourcesImportQR?.())}
-            >
+            <AppDropdownMenuItem onSelect={() => props.onSourcesImportQR?.()}>
               <QrCodeIcon class="h-4 w-4" />
               <span>二维码导入</span>
             </AppDropdownMenuItem>

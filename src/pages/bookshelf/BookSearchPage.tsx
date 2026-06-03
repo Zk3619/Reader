@@ -59,7 +59,7 @@ import { getEnabledSources } from '@/lib/database/sources';
 import { getSource } from '@/lib/database/sources';
 import { bookToSearchBook } from '@/lib/bookshelf/book-to-search-book';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { standalonePageScroll } from '@/lib/ui/viewport-classes';
+import { appBottomChromePadding, standalonePageScroll } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import type { Book, BookSource, SearchBook, SearchKeyword } from '@/types';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
@@ -521,8 +521,8 @@ export function BookSearchPage(props: BookSearchPageProps) {
         class={cn(
           'px-2',
           submitted() && !helpVisible()
-            ? 'flex min-h-0 flex-1 flex-col overflow-hidden safe-area-page-bottom'
-            : cn(standalonePageScroll, 'safe-area-page-bottom'),
+            ? cn('flex min-h-0 flex-1 flex-col overflow-hidden', appBottomChromePadding)
+            : standalonePageScroll,
         )}
         onScroll={(e) => {
           if (submitted() && !helpVisible()) return;

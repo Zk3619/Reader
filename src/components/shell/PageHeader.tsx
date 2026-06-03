@@ -22,7 +22,6 @@ import {
 } from '@/components/shared/AppDropdownMenu';
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
-import { openAppDialogAfterMenuDismiss } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 import { ChevronLeftIcon, ThemeLightIcon, ThemeDarkIcon } from '@/components/shared/icons';
 import { isTauri, isMobile } from '@/lib/platform/detect';
@@ -117,9 +116,6 @@ function DropdownActionButton(props: {
 }) {
   const [dropdownOpen, setDropdownOpen] = createSignal(false);
   
-  const handleItemSelect = (item: PageHeaderDropdownItem) => {
-    openAppDialogAfterMenuDismiss(() => item.onClick());
-  };
   
   return (
     <AppDropdownMenu open={dropdownOpen()} onOpenChange={setDropdownOpen}>
@@ -147,7 +143,7 @@ function DropdownActionButton(props: {
               <Show when={item.separator}>
                 <AppDropdownMenuSeparator />
               </Show>
-                <AppDropdownMenuItem onSelect={() => handleItemSelect(item)}>
+                <AppDropdownMenuItem onSelect={() => item.onClick()}>
                   {(() => {
                     if (item.icon) {
                       const Icon = item.icon;

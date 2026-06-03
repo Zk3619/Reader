@@ -405,7 +405,7 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
       </div>
 
       {/* 文件列表 */}
-      <div class="flex-1 overflow-auto scroll-gutter-stable-both px-2 pt-4 pb-2 mb-4 safe-area-page-bottom">
+      <div class="flex-1 overflow-auto scroll-gutter-stable-both px-2 pt-4 pb-2 app-bottom-edge-inset">
         <Show
           when={!isLoading()}
           fallback={

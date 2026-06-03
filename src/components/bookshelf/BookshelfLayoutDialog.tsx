@@ -3,7 +3,7 @@
  * 对应 UI.md 中的书架布局设置功能
  */
 
-import { createSignal, For, createEffect, onMount } from 'solid-js';
+import { createSignal, For, createEffect, onMount, Show } from 'solid-js';
 import { setupAccessibilityListeners } from '@/utils/accessibility';
 import {
   AppDialog,
@@ -14,7 +14,10 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
+import {
+  AppManualRadioGroup,
+  AppManualRadioOption,
+} from '@/components/shared/AppManualRadio';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
@@ -42,6 +45,7 @@ import {
   isListViewMode,
 } from '@/lib/bookshelf/bookshelf-layout-settings';
 import { cn } from '@/lib/utils';
+import { appDialogSettingsScrollBody, appDialogSettingsShell } from '@/lib/ui/viewport-classes';
 
 const sectionPanelClass =
   'rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3';
@@ -55,29 +59,37 @@ function SettingToggleRow(props: {
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
-  return (
-    <div
-      class={cn(
-        'flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors',
-        props.disabled ? 'opacity-60' : 'hover:bg-background/60',
-      )}
-    >
-      <Label
-        for={props.id}
-        class={cn(
-          'text-sm font-normal leading-snug text-foreground',
-          props.disabled ? 'cursor-not-allowed' : 'cursor-pointer',
-        )}
-      >
+  const rowClass = cn(
+    'flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors',
+    props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-background/60',
+  );
+  const content = (
+    <>
+      <span class="text-sm font-normal leading-snug text-foreground select-none">
         {props.label}
-      </Label>
+      </span>
       <Checkbox
         id={props.id}
         checked={props.checked}
         disabled={props.disabled}
         onChange={props.onChange}
       />
-    </div>
+    </>
+  );
+
+  return (
+    <Show
+      when={!props.disabled}
+      fallback={
+        <div class={rowClass} aria-disabled="true">
+          {content}
+        </div>
+      }
+    >
+      <label for={props.id} class={rowClass}>
+        {content}
+      </label>
+    </Show>
   );
 }
 
@@ -150,15 +162,17 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
     { value: 'overlay', label: '叠加' },
   ];
 
+  const manualSortSelected = () => localSettings().sortMode === 'manual';
+
   return (
     <AppDialog open={props.open} onOpenChange={handleOpenChange}>
-      <AppDialogContent>
+      <AppDialogContent class={appDialogSettingsShell}>
         <AppDialogHeader>
           <AppDialogTitle>书架布局</AppDialogTitle>
           <AppDialogDescription>自定义书架和分组的显示方式</AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <div class={appDialogSettingsScrollBody}>
           <section class={sectionPanelClass}>
             <Label class={sectionTitleClass}>分组样式</Label>
             <AppSelect
@@ -232,6 +246,7 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                 id="enable-drag-sort"
                 label="启用拖拽排序"
                 checked={localSettings().enableDragSort}
+                disabled={!manualSortSelected()}
                 onChange={(checked) =>
                   setLocalSettings({ ...localSettings(), enableDragSort: checked })
                 }
@@ -245,35 +260,45 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
           <div class="grid gap-4 sm:grid-cols-2">
             <section class={sectionPanelClass}>
               <Label class={sectionTitleClass}>视图</Label>
-              <RadioGroup
-                value={localSettings().viewMode}
-                onChange={(value) =>
-                  setLocalSettings({ ...localSettings(), viewMode: value as ViewMode })
-                }
-                class="w-full"
-              >
+              <AppManualRadioGroup class="w-full">
                 <div class="grid grid-cols-2 items-start gap-3">
                   <div class="space-y-3">
                     <div class="space-y-2">
                       <p class="text-xs font-medium text-muted-foreground">列表</p>
-                      <div class="flex flex-col gap-1.5">
+                      <div class="flex flex-col gap-0.5">
                         <For each={bookshelfStandardListViewModeOptions}>
                           {(option) => (
-                            <RadioGroupItem value={option.value}>
-                              <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                            </RadioGroupItem>
+                            <AppManualRadioOption
+                              selected={localSettings().viewMode === option.value}
+                              onSelect={() =>
+                                setLocalSettings({
+                                  ...localSettings(),
+                                  viewMode: option.value as ViewMode,
+                                })
+                              }
+                            >
+                              <span>{option.label}</span>
+                            </AppManualRadioOption>
                           )}
                         </For>
                       </div>
                     </div>
                     <div class="space-y-2">
                       <p class="text-xs font-medium text-muted-foreground">紧凑列表</p>
-                      <div class="flex flex-col gap-1.5">
+                      <div class="flex flex-col gap-0.5">
                         <For each={bookshelfCompactListViewModeOptions}>
                           {(option) => (
-                            <RadioGroupItem value={option.value}>
-                              <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                            </RadioGroupItem>
+                            <AppManualRadioOption
+                              selected={localSettings().viewMode === option.value}
+                              onSelect={() =>
+                                setLocalSettings({
+                                  ...localSettings(),
+                                  viewMode: option.value as ViewMode,
+                                })
+                              }
+                            >
+                              <span>{option.label}</span>
+                            </AppManualRadioOption>
                           )}
                         </For>
                       </div>
@@ -281,37 +306,47 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
                   </div>
                   <div class="space-y-2">
                     <p class="text-xs font-medium text-muted-foreground">网格</p>
-                    <div class="flex flex-col gap-1.5">
+                    <div class="flex flex-col gap-0.5">
                       <For each={gridViewModeOptions}>
                         {(option) => (
-                          <RadioGroupItem value={option.value}>
-                            <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                          </RadioGroupItem>
+                          <AppManualRadioOption
+                            selected={localSettings().viewMode === option.value}
+                            onSelect={() =>
+                              setLocalSettings({
+                                ...localSettings(),
+                                viewMode: option.value as ViewMode,
+                              })
+                            }
+                          >
+                            <span>{option.label}</span>
+                          </AppManualRadioOption>
                         )}
                       </For>
                     </div>
                   </div>
                 </div>
-              </RadioGroup>
+              </AppManualRadioGroup>
             </section>
 
             <section class={sectionPanelClass}>
               <Label class={sectionTitleClass}>书籍排序</Label>
-              <RadioGroup
-                value={localSettings().sortMode}
-                onChange={(value) =>
-                  setLocalSettings({ ...localSettings(), sortMode: value as SortMode })
-                }
-                class="flex flex-col gap-1.5"
-              >
+              <AppManualRadioGroup class="flex flex-col gap-0.5">
                 <For each={sortModeOptions}>
                   {(option) => (
-                    <RadioGroupItem value={option.value}>
-                      <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                    </RadioGroupItem>
+                    <AppManualRadioOption
+                      selected={localSettings().sortMode === option.value}
+                      onSelect={() =>
+                        setLocalSettings({
+                          ...localSettings(),
+                          sortMode: option.value as SortMode,
+                        })
+                      }
+                    >
+                      <span>{option.label}</span>
+                    </AppManualRadioOption>
                   )}
                 </For>
-              </RadioGroup>
+              </AppManualRadioGroup>
             </section>
           </div>
 
@@ -348,22 +383,25 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
             <p class="text-xs text-muted-foreground">
               仅对网格视图生效；列表与紧凑列表始终显示名称。
             </p>
-            <RadioGroup
-              value={localSettings().bookTitleDisplay}
-              onChange={(value) => {
-                setLocalSettings({ ...localSettings(), bookTitleDisplay: value as BookTitleDisplay });
-              }}
-              class="flex flex-wrap gap-x-6 gap-y-2"
-              disabled={!isGridViewMode(localSettings().viewMode)}
-            >
+            <AppManualRadioGroup class="flex flex-row gap-x-2 gap-y-0.5">
               <For each={bookTitleDisplayOptions}>
                 {(option) => (
-                  <RadioGroupItem value={option.value}>
-                    <RadioGroupItemLabel class="text-sm">{option.label}</RadioGroupItemLabel>
-                  </RadioGroupItem>
+                  <AppManualRadioOption
+                    selected={localSettings().bookTitleDisplay === option.value}
+                    disabled={!isGridViewMode(localSettings().viewMode)}
+                    onSelect={() =>
+                      setLocalSettings({
+                        ...localSettings(),
+                        bookTitleDisplay: option.value as BookTitleDisplay,
+                      })
+                    }
+                    class="w-auto shrink-0"
+                  >
+                    <span>{option.label}</span>
+                  </AppManualRadioOption>
                 )}
               </For>
-            </RadioGroup>
+            </AppManualRadioGroup>
           </section>
 
           <section class={sectionPanelClass}>

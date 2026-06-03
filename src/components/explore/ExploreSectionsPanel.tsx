@@ -207,7 +207,7 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
   }
 
   return (
-    <div class="shrink-0">
+    <div class="shrink-0 border-b border-border/50">
       <Show when={!props.source}>
         <p class='px-4 py-2 text-center text-sm text-muted-foreground'>
           请选择书源
@@ -237,7 +237,7 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
                 class={cn(
                   exploreTabBarShellClass,
                   exploreHubItemsTrackClass,
-                  'my-0 max-h-none flex-wrap overflow-y-visible px-4',
+                  'my-0 px-2 mb-1',
                 )}
               >
                 <For each={navItems()}>{renderStackedNavItem}</For>

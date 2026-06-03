@@ -51,15 +51,11 @@ export function SplashScreen(props: SplashScreenProps) {
 
     const fadeTimer = window.setTimeout(() => {
       setIsVisible(false);
-    }, fadeOutDelay);
-
-    const completeTimer = window.setTimeout(() => {
       props.onComplete?.();
-    }, animationDuration);
+    }, fadeOutDelay);
 
     return () => {
       window.clearTimeout(fadeTimer);
-      window.clearTimeout(completeTimer);
       observer.disconnect();
     };
   });
@@ -116,7 +112,7 @@ export function SplashScreen(props: SplashScreenProps) {
                 transform: "scale(1.5)",
               }}
             />
-            
+
             {/* Logo 图片 */}
             <div
               class={cn(

@@ -40,6 +40,8 @@ import {
   bookshelfListMainClass,
   bookGroupGridButtonClass,
   bookGroupGridCoverClass,
+  bookGroupGridCoverZoomClass,
+  bookGroupGridMetaClass,
   bookGroupGridSubtitleClass,
   bookGroupGridTitleClass,
   bookGroupListButtonClass,
@@ -841,69 +843,69 @@ export function BookGroup(props: BookGroupProps = {}) {
                     subtitle={`${getGroupBookCount(group)} 本书`}
                   >
                     <div
-                      class={cn(
-                        bookGroupGridCoverClass(
-                          'bg-linear-to-br from-muted to-accent/30 text-4xl',
-                        ),
-                        titleDisplay() === 'overlay' && 'relative',
+                      class={bookGroupGridCoverClass(
+                        'bg-linear-to-br from-muted to-accent/30 text-4xl',
                       )}
                     >
-                      {(() => {
-                        const info = getCoverPreviewInfo(group.cover);
-                        const imageFailed = coverImageErrorIds().has(group.groupId);
-                        if (!group.cover?.trim()) {
-                          return (
-                            <span class="flex h-full w-full items-center justify-center">
-                              <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
-                            </span>
-                          );
-                        }
-                        if (info.type === 'invalid' || (info.url && imageFailed)) {
+                      <div class={bookGroupGridCoverZoomClass()}>
+                        {(() => {
+                          const info = getCoverPreviewInfo(group.cover);
+                          const imageFailed = coverImageErrorIds().has(group.groupId);
+                          if (!group.cover?.trim()) {
+                            return (
+                              <span class="flex h-full w-full items-center justify-center">
+                                <DefaultGroupCoverIcon group={group} class="h-8 w-8" />
+                              </span>
+                            );
+                          }
+                          if (info.type === 'invalid' || (info.url && imageFailed)) {
+                            return (
+                              <span class="flex h-full w-full items-center justify-center">
+                                <BookCoverPlaceholderIcon class="h-8 w-8" size={32} />
+                              </span>
+                            );
+                          }
+                          if (info.type === 'emoji' && group.cover) {
+                            return (
+                              <span class="flex h-full w-full items-center justify-center">
+                                {group.cover.trim()}
+                              </span>
+                            );
+                          }
+                          if (info.url && !imageFailed) {
+                            return (
+                              <img
+                                src={info.url}
+                                alt=""
+                                class="h-full w-full object-cover"
+                                draggable={false}
+                                onError={() =>
+                                  setCoverImageErrorIds((prev) =>
+                                    new Set(prev).add(group.groupId),
+                                  )
+                                }
+                              />
+                            );
+                          }
                           return (
                             <span class="flex h-full w-full items-center justify-center">
                               <BookCoverPlaceholderIcon class="h-8 w-8" size={32} />
                             </span>
                           );
-                        }
-                        if (info.type === 'emoji' && group.cover) {
-                          return (
-                            <span class="flex h-full w-full items-center justify-center">
-                              {group.cover.trim()}
-                            </span>
-                          );
-                        }
-                        if (info.url && !imageFailed) {
-                          return (
-                            <img
-                              src={info.url}
-                              alt=""
-                              class="h-full w-full object-cover"
-                              draggable={false}
-                              onError={() =>
-                                setCoverImageErrorIds((prev) => new Set(prev).add(group.groupId))
-                              }
-                            />
-                          );
-                        }
-                        return (
-                          <span class="flex h-full w-full items-center justify-center">
-                            <BookCoverPlaceholderIcon class="h-8 w-8" size={32} />
-                          </span>
-                        );
-                      })()}
-                      <Show when={titleDisplay() === 'overlay'}>
-                        <BookshelfCoverTitleOverlay title={getGroupDisplayName(group)} />
-                      </Show>
+                        })()}
+                        <Show when={titleDisplay() === 'overlay'}>
+                          <BookshelfCoverTitleOverlay title={getGroupDisplayName(group)} />
+                        </Show>
+                      </div>
                     </div>
 
                     <Show when={titleDisplay() === 'show'}>
-                      <h3 class={bookGroupGridTitleClass()}>{getGroupDisplayName(group)}</h3>
-                    </Show>
-
-                    <Show when={titleDisplay() === 'show'}>
-                      <p class={bookGroupGridSubtitleClass()}>
-                        {getGroupBookCount(group)} 本书
-                      </p>
+                      <div class={bookGroupGridMetaClass()}>
+                        <h3 class={bookGroupGridTitleClass()}>{getGroupDisplayName(group)}</h3>
+                        <p class={bookGroupGridSubtitleClass()}>
+                          {getGroupBookCount(group)} 本书
+                        </p>
+                      </div>
                     </Show>
                   </BookshelfGridHideTooltip>
                 </BookGroupCardWithMenu>

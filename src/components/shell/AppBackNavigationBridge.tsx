@@ -1,5 +1,7 @@
 import { createEffect, onCleanup, onMount } from 'solid-js';
 import {
+  clearBackHistoryDepth,
+  getBackHistoryDepth,
   installBackNavigation,
   isConsumingBackNavigation,
   popBackHistoryProgrammatic,
@@ -14,7 +16,9 @@ export interface BackLayerDefinition {
 }
 
 export interface AppBackNavigationBridgeProps {
-  /** 按优先级排列：仅包含当前打开的可返回层 */
+  /**
+   * 自下而上（数组末项为栈顶）。仅包含当前打开的可返回层。
+   */
   getOpenLayers: () => BackLayerDefinition[];
 }
 
@@ -42,6 +46,9 @@ export function AppBackNavigationBridge(props: AppBackNavigationBridgeProps) {
       for (const id of prevOpenIds) {
         if (!currentIds.has(id)) popBackHistoryProgrammatic();
       }
+      if (openLayers.length === 0 && getBackHistoryDepth() > 0) {
+        clearBackHistoryDepth();
+      }
     }
     return currentIds;
   }, new Set<string>());
@@ -49,7 +56,7 @@ export function AppBackNavigationBridge(props: AppBackNavigationBridgeProps) {
   createEffect(() => {
     const unregister = registerBackHandler(() => {
       const layers = props.getOpenLayers();
-      const top = layers[0];
+      const top = layers[layers.length - 1];
       if (!top) return false;
       top.close();
       return true;

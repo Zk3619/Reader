@@ -77,13 +77,19 @@ import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
 import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
 import { TocPaginationSafetySetting } from "@/components/settings/TocPaginationSafetySetting";
 import { BookInfoPresentationSetting } from "@/components/settings/BookInfoPresentationSetting";
+import { SourceExploreDrawerLayoutSetting } from "@/components/settings/SourceExploreDrawerLayoutSetting";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
 import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderModeSetting";
 import { cn } from "@/lib/utils";
-import { mainShellInset, mainShellPageRoot, mainShellPageScroll } from "@/lib/ui/viewport-classes";
+import {
+  mainShellInset,
+  mainShellPageRoot,
+  mainShellPageScroll,
+  mainShellTabEnterClass,
+} from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
 import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons, getAppToastVisibleLimit } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
@@ -149,11 +155,11 @@ import {
   type InnerWebPayload,
 } from "@/lib/platform/inner-web";
 import {
-  INNER_WEB_OVERLAY_Z,
   releaseInnerWebPanelForOverlay,
   retainInnerWebPanelForOverlay,
   shouldManageInnerWebPanelOverlay,
 } from "@/lib/platform/inner-web-panel-overlay";
+import { APP_INNER_WEB_DIALOG_Z } from "@/lib/ui/overlay-z";
 import {
   parseReaderImportDeepLink,
   READER_BOOKSOURCE_IDENTIFY_EVENT,
@@ -184,6 +190,7 @@ import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
+import { dismissFloatingOverlaysForShellChange } from "@/utils/accessibility";
 import {
   createOverlayStack,
   isOverlayPage,
@@ -351,6 +358,17 @@ function AppContent() {
     writeHmrData("currentPage", currentPage());
   });
 
+  /** Tab / 全屏子页 / 阅读叠层变化时关掉仍挂着的菜单 Portal，避免 Android 闪到左上角 */
+  createEffect(() => {
+    currentPage();
+    showGroupManage();
+    showSourcesManage();
+    showBookshelfManage();
+    showBookshelfCache();
+    nav.top();
+    dismissFloatingOverlaysForShellChange();
+  });
+
   /** DEV HMR：页面仍停在媒体阅读器但 store 已重置时，尝试从缓存会话恢复或退回书架 */
   createEffect(() => {
     const page = currentPage();
@@ -447,7 +465,7 @@ function AppContent() {
   }
 
   const bookSourceImportDialogPortalZ = () =>
-    isInnerWebSessionActive() ? INNER_WEB_OVERLAY_Z : undefined;
+    isInnerWebSessionActive() ? APP_INNER_WEB_DIALOG_Z : undefined;
 
   const openImportSourceSelectLoading = async () => {
     setImportSourceLoading(true);
@@ -888,10 +906,13 @@ function AppContent() {
 
   const bookInfoCanContinueReading = () => {
     if (bookInfoUsesDrawer()) {
-      return (
-        bookInfoDrawerOpen() &&
-        nav.entries().some((e) => e.kind === "text-viewer")
-      );
+      const drawer = bookInfoDrawer();
+      if (!bookInfoDrawerOpen() || !drawer) return false;
+      const reading = textViewerStore.state.book;
+      if (!reading || !nav.entries().some((e) => e.kind === "text-viewer")) {
+        return false;
+      }
+      return reading.bookUrl === drawer.book.bookUrl;
     }
     return nav.bookInfoCanContinueReading();
   };
@@ -1726,32 +1747,37 @@ function AppContent() {
     }
   });
 
-  // 初始化数据库、应用设置与布局设置
-  onMount(async () => {
-    try {
-      await settingsStore.loadSettings();
-    } catch (e) {
+  // 设置尽早加载；数据库等重初始化延至开屏结束，避免动画结束后主线程长时间无响应
+  onMount(() => {
+    void settingsStore.loadSettings().catch((e) => {
       console.warn('加载应用设置失败:', e);
-    }
-    try {
-      console.log('正在初始化数据库...');
-      await initDatabase();
-      setDbInitialized(true);
-      console.log('数据库初始化成功');
+    });
+  });
 
-      const { clearInvalidChapterCache } = await import('@/lib/chapter-cache');
-      void clearInvalidChapterCache().catch((e) => {
-        console.warn('[chapter-cache] clearInvalidChapterCache', e);
-      });
+  let appHeavyInitStarted = false;
+  createEffect(() => {
+    if (showSplash() || appHeavyInitStarted) return;
+    appHeavyInitStarted = true;
+    void (async () => {
+      try {
+        console.log('正在初始化数据库...');
+        await initDatabase();
+        setDbInitialized(true);
+        console.log('数据库初始化成功');
 
-      // 初始化书架布局设置
-      await initBookshelfLayoutSettings();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('数据库初始化失败:', error);
-      setDbError(errorMessage);
-      setDbInitialized(true); // 即使失败也设置为 true，避免无限等待
-    }
+        const { clearInvalidChapterCache } = await import('@/lib/chapter-cache');
+        void clearInvalidChapterCache().catch((e) => {
+          console.warn('[chapter-cache] clearInvalidChapterCache', e);
+        });
+
+        await initBookshelfLayoutSettings();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('数据库初始化失败:', error);
+        setDbError(errorMessage);
+        setDbInitialized(true);
+      }
+    })();
   });
 
   // 设置窗口状态监听器
@@ -2205,6 +2231,7 @@ function AppContent() {
   };
 
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
+  const shellTabEnter = () => mainShellTabEnterClass(reduceMotion(), isMobile());
 
   const getOpenBackLayers = (): BackLayerDefinition[] => {
     const layers: BackLayerDefinition[] = [];
@@ -2282,6 +2309,11 @@ function AppContent() {
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
     push("book-info-drawer", bookInfoDrawerOpen(), () => closeBookInfo());
+    push(
+      "sources-explore-drawer",
+      currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
+      () => setSourcesExpandedSourceUrl(null),
+    );
 
     const overlayTop = nav.top();
     if (overlayTop) {
@@ -2401,9 +2433,7 @@ function AppContent() {
             <section
               class={cn(
                 mainShellPageRoot,
-                currentPage() === "bookshelf"
-                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                  : "hidden",
+                currentPage() === "bookshelf" ? shellTabEnter() : "hidden",
               )}
             >
               <div class="flex flex-col flex-1 min-h-0 w-full">
@@ -2489,9 +2519,7 @@ function AppContent() {
             <section
               class={cn(
                 mainShellPageRoot,
-                currentPage() === "scout"
-                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                  : "hidden",
+                currentPage() === "scout" ? shellTabEnter() : "hidden",
               )}
             >
               <ExplorePage
@@ -2508,9 +2536,7 @@ function AppContent() {
             <section
               class={cn(
                 mainShellPageRoot,
-                currentPage() === "sources"
-                  ? "animate-in fade-in slide-in-from-bottom-4 duration-500"
-                  : "hidden",
+                currentPage() === "sources" ? shellTabEnter() : "hidden",
               )}
             >
               <div class="flex flex-col flex-1 min-h-0 w-full">
@@ -2602,6 +2628,9 @@ function AppContent() {
                     onSourceSearch={(source) => {
                       openBookSearch(undefined, formatSourceScope(source));
                     }}
+                    onOpenBookSearch={(query, source) => {
+                      openBookSearch(query, formatSourceScope(source));
+                    }}
                     onExploreSectionClick={async (source, section) => {
                       if (!section.url?.trim()) {
                         showAppToast({
@@ -2659,10 +2688,7 @@ function AppContent() {
             {/* 订阅视图 */}
             <Show when={currentPage() === "subscription"}>
               <section
-                class={cn(
-                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                  mainShellPageRoot,
-                )}
+                class={cn(shellTabEnter(), mainShellPageRoot)}
               >
                 <PageToolbar
                   title="订阅"
@@ -2686,10 +2712,7 @@ function AppContent() {
             {/* 书签视图 */}
             <Show when={currentPage() === "bookmark"}>
               <section
-                class={cn(
-                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                  mainShellPageRoot,
-                )}
+                class={cn(shellTabEnter(), mainShellPageRoot)}
               >
                 <PageToolbar
                   title="书签"
@@ -2711,10 +2734,7 @@ function AppContent() {
             {/* 记录视图 */}
             <Show when={currentPage() === "record"}>
               <section
-                class={cn(
-                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                  mainShellPageRoot,
-                )}
+                class={cn(shellTabEnter(), mainShellPageRoot)}
               >
                 <PageToolbar
                   title="阅读记录"
@@ -2737,10 +2757,7 @@ function AppContent() {
             {/* 设置视图 */}
             <Show when={currentPage() === "settings"}>
               <section
-                class={cn(
-                  'animate-in fade-in slide-in-from-bottom-4 duration-500',
-                  mainShellPageRoot,
-                )}
+                class={cn(shellTabEnter(), mainShellPageRoot)}
               >
                 <PageToolbar
                   title="设置"
@@ -2767,6 +2784,8 @@ function AppContent() {
                     <TocPaginationSafetySetting />
 
                     <BookInfoPresentationSetting />
+
+                    <SourceExploreDrawerLayoutSetting />
 
                     <SourceBlocklistSetting />
 
@@ -2897,6 +2916,7 @@ function AppContent() {
                 <Switch>
                   <Match when={entry.kind === "text-viewer"}>
                     <BookReader
+                entryVisible={() => nav.entryIsVisible(entry)}
                 onClose={requestCloseReader}
                 onOpenBookInfo={async () => {
                 const book = textViewerStore.state.book;
@@ -2932,16 +2952,28 @@ function AppContent() {
                     />
                   </Match>
                   <Match when={entry.kind === "image-viewer"}>
-                    <ImageViewerPage onClose={requestCloseReader} />
+                    <ImageViewerPage
+                      entryVisible={() => nav.entryIsVisible(entry)}
+                      onClose={requestCloseReader}
+                    />
                   </Match>
                   <Match when={entry.kind === "audio-viewer"}>
-                    <AudioViewerPage onClose={requestCloseReader} />
+                    <AudioViewerPage
+                      entryVisible={() => nav.entryIsVisible(entry)}
+                      onClose={requestCloseReader}
+                    />
                   </Match>
                   <Match when={entry.kind === "video-viewer"}>
-                    <VideoViewerPage onClose={requestCloseReader} />
+                    <VideoViewerPage
+                      entryVisible={() => nav.entryIsVisible(entry)}
+                      onClose={requestCloseReader}
+                    />
                   </Match>
                   <Match when={entry.kind === "file-viewer"}>
-                    <FileViewerPage onClose={requestCloseReader} />
+                    <FileViewerPage
+                      entryVisible={() => nav.entryIsVisible(entry)}
+                      onClose={requestCloseReader}
+                    />
                   </Match>
                   <Match when={entry.kind === "explore"}>
                     {(() => {

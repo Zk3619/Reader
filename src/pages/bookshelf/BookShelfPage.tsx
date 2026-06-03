@@ -88,8 +88,11 @@ import { BookShelfListBookRow } from '@/components/bookshelf/BookShelfListBookRo
 import {
   bookGroupGridCardClass,
   bookGroupGridCoverClass,
+  bookGroupGridCoverZoomClass,
+  bookGroupGridMetaClass,
   bookGroupGridSubtitleClass,
   bookGroupGridTitleClass,
+  formatBookshelfGridAuthor,
   bookshelfCompactListCardClass,
   bookshelfListCardClass,
 } from '@/lib/bookshelf/book-group-card-styles';
@@ -1147,7 +1150,7 @@ function BookCardWithMenu(props: {
       <BookshelfGridHideTooltip
         enabled={showGridHideTooltip()}
         title={props.book.name}
-        subtitle={props.book.author ?? '—'}
+        subtitle={formatBookshelfGridAuthor(props.book.author)}
       >
         <Show
           when={props.layout !== 'grid' && effectiveTitleDisplay() === 'show'}
@@ -1175,33 +1178,33 @@ function BookCardWithMenu(props: {
                 <Show when={props.showUnreadFlag && props.layout === 'grid'}>
                   <BookShelfGridUnreadBadge book={props.book} />
                 </Show>
-                <BookCoverImg
-                  src={props.book.customCoverUrl || props.book.coverUrl}
-                  referer={props.book.origin}
-                  source={sourcesStore.getBookSource(props.book.origin)}
-                  bookUrl={props.book.bookUrl}
-                  onCoverUrlRefreshed={(url) =>
-                    props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
-                  }
-                  alt=""
-                  class="h-full w-full object-cover"
-                  draggable={false}
-                  fallback={<BookCoverFallback class="h-8 w-8" />}
-                />
-                <Show when={effectiveTitleDisplay() === 'overlay'}>
-                  <BookshelfCoverTitleOverlay
-                    title={props.book.name}
-                    subtitle={props.book.author ?? '—'}
+                <div class={bookGroupGridCoverZoomClass()}>
+                  <BookCoverImg
+                    src={props.book.customCoverUrl || props.book.coverUrl}
+                    referer={props.book.origin}
+                    source={sourcesStore.getBookSource(props.book.origin)}
+                    bookUrl={props.book.bookUrl}
+                    onCoverUrlRefreshed={(url) =>
+                      props.onCoverUrlRefreshed?.(props.book.bookUrl, url)
+                    }
+                    alt=""
+                    class="h-full w-full object-cover"
+                    draggable={false}
+                    fallback={<BookCoverFallback class="h-8 w-8" />}
                   />
-                </Show>
+                  <Show when={effectiveTitleDisplay() === 'overlay'}>
+                    <BookshelfCoverTitleOverlay
+                      title={props.book.name}
+                      subtitle={formatBookshelfGridAuthor(props.book.author)}
+                    />
+                  </Show>
+                </div>
               </div>
               <Show when={effectiveTitleDisplay() === 'show' && props.layout === 'grid'}>
-                <div class="flex w-full flex-col items-center gap-0.5">
-                  <h3 class={bookGroupGridTitleClass()}>
-                    {props.book.name}
-                  </h3>
-                  <p class={cn(bookGroupGridSubtitleClass(), 'w-full truncate text-center')}>
-                    {props.book.author ?? '—'}
+                <div class={bookGroupGridMetaClass()}>
+                  <h3 class={bookGroupGridTitleClass()}>{props.book.name}</h3>
+                  <p class={bookGroupGridSubtitleClass()}>
+                    {formatBookshelfGridAuthor(props.book.author)}
                   </p>
                 </div>
               </Show>

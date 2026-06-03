@@ -13,16 +13,27 @@ import {
   clearExploreSectionsCache,
   getExploreSections,
   getExploreSectionsAsync,
+  isExploreDrawerButtonSection,
   isExploreUrlScript,
   resolveExploreSectionsFromResource,
   shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
   type ExploreSection,
 } from '@/lib/book-source/explore-sections';
+import {
+  getExploreInfoMap,
+  setExploreInfoMapValue,
+} from '@/lib/book-source/explore-info-map-store';
+import { runExploreSectionAction } from '@/lib/js-engine/legado/explore-section-action-runner';
+import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { cn } from '@/lib/utils';
-import { mainShellPageRoot, sourcesExploreDrawerWidth } from '@/lib/ui/viewport-classes';
+import {
+  appDrawerScrollBody,
+  mainShellPageRoot,
+  sourcesExploreDrawerWidth,
+} from '@/lib/ui/viewport-classes';
 import {
   APP_DRAWER_CLOSE_BUTTON_CLASS,
   AppDrawer,
@@ -81,6 +92,8 @@ export interface SourcesPageProps {
   onSourceVariables?: (source: BookSource) => void;
   /** 书源搜索：使用该书源进行搜索（仅当书源支持搜索时显示） */
   onSourceSearch?: (source: BookSource) => void;
+  /** 发现页搜索框/脚本：带关键词打开搜索 */
+  onOpenBookSearch?: (query: string, source: BookSource) => void;
   /** 点击发现子项（分类/排行榜等），由 App 打开发现页或书籍列表 */
   onExploreSectionClick?: (source: BookSource, section: ExploreSection) => void;
   /** 当前展开的书源 URL（由 App 持有，避免切页后收起） */
@@ -364,9 +377,81 @@ export function SourcesPage(props: SourcesPageProps) {
     section: ExploreSection,
     value: string
   ) {
+    const sourceKey = getLegadoSourceKey(source);
+    setExploreInfoMapValue(sourceKey, section.title, value);
+
+    if (section.paramKey) {
+      updateExploreSourceArgument(source, section.paramKey, value);
+    }
+
+    const action = section.action?.trim();
+    if (action) {
+      const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
+      try {
+        await runExploreSectionAction(source, action, {
+          infoMap: getExploreInfoMap(sourceKey),
+          onScriptToast: noticeBus.onScriptToast,
+          onRefreshExplore: async () => {
+            clearExploreSectionsCache(sourceKey);
+            await refetchExploreSections();
+          },
+          onOpenSearch: (query, src) => {
+            props.onOpenBookSearch?.(query.trim(), src);
+          },
+        });
+      } catch (e) {
+        console.error('发现筛选 action 失败:', e);
+      }
+      if (!section.paramKey) {
+        clearExploreSectionsCache(sourceKey);
+        await refetchExploreSections();
+      }
+      return;
+    }
+
     if (!section.paramKey) return;
-    updateExploreSourceArgument(source, section.paramKey, value);
     await refetchExploreSections();
+  }
+
+  async function handleExploreSectionAction(source: BookSource, section: ExploreSection) {
+    const action = section.action?.trim();
+    if (!action) return;
+    const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
+    try {
+      const sourceKey = getLegadoSourceKey(source);
+      await runExploreSectionAction(source, action, {
+        infoMap: getExploreInfoMap(sourceKey),
+        onScriptToast: noticeBus.onScriptToast,
+        onRefreshExplore: async () => {
+          clearExploreSectionsCache(sourceKey);
+          await refetchExploreSections();
+        },
+        onOpenSearch: (query, src) => {
+          if (query.trim()) {
+            props.onOpenBookSearch?.(query.trim(), src);
+          } else {
+            props.onSourceSearch?.(src);
+          }
+        },
+      });
+      clearExploreSectionsCache(sourceKey);
+      await refetchExploreSections();
+    } catch (e) {
+      console.error('发现 action 执行失败:', e);
+      showAppToast({
+        title: '操作失败',
+        description: e instanceof Error ? e.message : section.title,
+        variant: 'destructive',
+      });
+    }
+  }
+
+  async function handleExploreSectionClick(source: BookSource, section: ExploreSection) {
+    if (isExploreDrawerButtonSection(section) && section.action?.trim()) {
+      await handleExploreSectionAction(source, section);
+      return;
+    }
+    await props.onExploreSectionClick?.(source, section);
   }
 
   async function handleRefreshExploreDrawer() {
@@ -543,7 +628,7 @@ export function SourcesPage(props: SourcesPageProps) {
         defaultSnapPoint={1}
       >
         <AppDrawerContent
-          class={cn('z-50 flex h-full flex-col', sourcesExploreDrawerWidth)}
+          class={cn('flex h-full flex-col', sourcesExploreDrawerWidth)}
           showNativeDragHandle={false}
         >
           <AppDrawerHeader
@@ -570,7 +655,7 @@ export function SourcesPage(props: SourcesPageProps) {
               </Tooltip>
             }
           />
-          <AppDrawerBody class="overflow-y-auto scroll-gutter-stable-both px-3 pb-2 pt-1 mb-4">
+          <AppDrawerBody class={appDrawerScrollBody}>
             <Show when={expandedSource()}>
               {(source) => (
                 <SourceExploreDrawerContent
@@ -579,7 +664,8 @@ export function SourcesPage(props: SourcesPageProps) {
                   loading={drawerSectionsLoading}
                   error={drawerSectionsError}
                   errorMessage={drawerSectionsErrorMessage}
-                  onExploreSectionClick={props.onExploreSectionClick}
+                  onExploreSectionClick={handleExploreSectionClick}
+                  onExploreSectionAction={handleExploreSectionAction}
                   onExploreSelectChange={handleExploreSelectChange}
                 />
               )}

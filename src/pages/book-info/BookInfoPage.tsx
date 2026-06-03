@@ -240,18 +240,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
   
   // 检查缓存
-  const bookUrl = props.book.tocUrl || props.book.bookUrl;
+  const bookUrl = props.book.bookUrl || props.book.tocUrl;
   const cachedBook = bookUrl ? pageCacheStore.getBookInfoCache(bookUrl) : null;
   const initialBook = cachedBook?.book || props.book;
   const [bookData, setBookData] = createSignal<SearchBook>(initialBook);
 
-  // 同步计算是否需要刷新，若需要则 isLoading 初始为 true，避免内容闪烁
-  // 如果有缓存且数据完整，则不需要刷新
-  const needsRefresh = cachedBook 
-    ? false 
-    : (!props.book.intro || !props.book.latestChapterTitle
-        || !props.book.latestChapterUpdateTime || !props.book.coverUrl);
-  const [isLoading, setIsLoading] = createSignal(needsRefresh && !cachedBook);
+  // 同步计算是否需要刷新：缺作者/简介/封面等任一字段即拉详情（看漫画等靠 og:novel meta 补作者）
+  const bookNeedsDetailRefresh = (book: SearchBook) =>
+    !isMeaningful(book.author) ||
+    !book.intro?.trim() ||
+    !isMeaningful(book.latestChapterTitle) ||
+    !isMeaningful(book.latestChapterUpdateTime) ||
+    !book.coverUrl?.trim();
+  const needsRefresh = bookNeedsDetailRefresh(cachedBook?.book ?? props.book);
+  const [isLoading, setIsLoading] = createSignal(needsRefresh);
   const [loadError, setLoadError] = createSignal<string | null>(null);
   /** 对齐 legado：详情页后台预加载目录，加入书架时直接写入 */
   const [preloadedChapters, setPreloadedChapters] = createSignal<BookChapter[] | null>(
@@ -346,7 +348,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   // 加载书籍信息的函数（可重用）
   const loadBookInfo = async () => {
-    const bookUrl = props.book.tocUrl || props.book.bookUrl;
+    const bookUrl = props.book.bookUrl || props.book.tocUrl;
     
     if (!needsRefresh || !bookUrl) {
       setIsLoading(false);
@@ -391,7 +393,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
         const mergedBook: SearchBook = {
           ...props.book,
           name: preferDetailField(bookInfo.name, props.book.name) ?? props.book.name,
-          author: preferDetailField(bookInfo.author, props.book.author) ?? props.book.author,
+          author: isMeaningful(bookInfo.author)
+            ? bookInfo.author!
+            : isMeaningful(props.book.author)
+              ? props.book.author!
+              : (preferDetailField(bookInfo.author, props.book.author) ?? props.book.author ?? ''),
           kind: preferDetailField(bookInfo.kind, props.book.kind),
           intro: preferDetailIntro(bookInfo.intro, props.book.intro),
           latestChapterTitle: m(props.book.latestChapterTitle, bookInfo.latestChapterTitle),
@@ -456,7 +462,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       }
     }
 
-    const bookUrl = props.book.tocUrl || props.book.bookUrl;
+    const bookUrl = props.book.bookUrl || props.book.tocUrl;
 
     console.log('[BookInfo] 刷新检查:', {
       needsRefresh,
@@ -524,6 +530,28 @@ export function BookInfoPage(props: BookInfoPageProps) {
   }
 
   async function handleStartReading() {
+    if (props.continueReading) {
+      props.onBack();
+      return;
+    }
+    const book = currentBook();
+    let source = bookSource();
+    if (!source && book.origin) {
+      source = (await getSource(book.origin)) ?? undefined;
+      if (source) setBookSource(source);
+    }
+    if (source && isOnlineSearchBook(book)) {
+      await preloadChapterList(book, source);
+    }
+    const list = preloadedChapters();
+    if (!list?.length) {
+      showAppToast({
+        title: '无法开始阅读',
+        description: tocLoadError() || '目录为空，请检查网络或书源规则',
+        variant: 'error',
+      });
+      return;
+    }
     await openBookAtChapter();
   }
 
@@ -864,7 +892,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
   /* ── 底部操作栏 ── */
   function ActionBar() {
     return (
-      <div class="shrink-0 border-t border-border/40 bg-background safe-area-inset-bottom md:bg-background">
+      <div class="shrink-0 border-t border-border/40 bg-background app-bottom-chrome-inset md:bg-background">
         <div class="flex h-[50px] items-center gap-2 px-4">
           <Show
             when={isInShelf()}
@@ -1042,7 +1070,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
               </div>
             </div>
             {/* 底部填充块：延伸白底到 ActionBar，消除缝隙 */}
-            <div class="min-h-8 flex-1 bg-background safe-area-min-height-bottom" aria-hidden="true" />
+            <div class="min-h-8 flex-1 bg-background app-bottom-edge-inset" aria-hidden="true" />
             </div>
           </div>
 
@@ -1131,7 +1159,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
                     }
                   >
                     <div class="bookinfo-fade-in">
-                      <DetailInfoList hideAuthor />
+                      <DetailInfoList />
                       <IntroSection />
                     </div>
                   </Show>

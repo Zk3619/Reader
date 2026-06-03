@@ -585,7 +585,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         class="border-b"
       />
 
-      <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-2 safe-area-page-bottom">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-2 app-bottom-edge-inset">
         <Show
           when={!loading()}
           fallback={

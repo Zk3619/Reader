@@ -79,6 +79,8 @@ export interface AppSettings {
    * 纯 Web 与移动端忽略此项。
    */
   innerWebRenderMode?: 'auto' | 'tauri-panel' | 'iframe';
+  /** 书源页发现抽屉布局：default=按脚本 style；legado=强制三列 */
+  sourceExploreDrawerLayout?: 'default' | 'legado';
 }
 
 /**
@@ -99,6 +101,7 @@ const defaultAppSettings: AppSettings = {
   tocPaginationMaxPages: 80,
   bookInfoPresentation: 'page',
   innerWebRenderMode: 'auto',
+  sourceExploreDrawerLayout: 'default',
 };
 
 /**
@@ -314,6 +317,12 @@ export const settingsStore = {
     bookInfoPresentation: 'page' | 'drawer',
   ): Promise<void> {
     await this.updateAppSettings({ bookInfoPresentation });
+  },
+
+  async setSourceExploreDrawerLayout(
+    sourceExploreDrawerLayout: 'default' | 'legado',
+  ): Promise<void> {
+    await this.updateAppSettings({ sourceExploreDrawerLayout });
   },
 
   async setInnerWebRenderMode(

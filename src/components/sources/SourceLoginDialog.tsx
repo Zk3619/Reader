@@ -21,6 +21,7 @@ import {
   getStoredLoginInfo,
 } from '@/lib/js-engine';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
+import { clearExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { clearExploreSectionsCache } from '@/lib/book-source/explore-sections';
 import { isTauri } from '@/lib/platform/detect';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
@@ -316,7 +317,9 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
         }
       }
       if (!isLogoutFormAction(action)) {
-        clearExploreSectionsCache(getLegadoSourceKey(source));
+        const key = getLegadoSourceKey(source);
+        clearExploreSectionsCache(key);
+        clearExploreInfoMap(key);
       }
     } catch (e) {
       console.error('登录脚本执行失败:', e);
