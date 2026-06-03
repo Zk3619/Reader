@@ -9,9 +9,36 @@ import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickRegion } from '@/lib/media/text/reader-click-region';
 
-export type TextViewerPageAnim = 'scroll' | 'cover' | 'slide' | 'none';
+/** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 关联覆盖 / 滑动 / 仿真 / 无动画 */
+export type TextViewerPageAnim =
+  | 'scroll'
+  | 'cover'
+  | 'linkedCover'
+  | 'slide'
+  | 'simulation'
+  | 'none';
 export type TextViewerDualPageMode = 'off' | 'auto' | 'always';
 export type TextViewerImageStyle = 'DEFAULT' | 'FULL' | 'TEXT' | 'SINGLE';
+
+/** Tailwind `xl` 断点（1280px）：双页「自动」模式的最小视口宽度 */
+export const TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX = 1280;
+
+export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, string> = {
+  off: '关闭',
+  auto: '自动',
+  always: '始终',
+};
+
+/** 是否启用双页分栏（宽屏 + 模式） */
+export function textViewerDualPageActive(
+  mode: TextViewerDualPageMode,
+  isWideScreen: boolean,
+  viewportWidth: number = typeof window !== 'undefined' ? window.innerWidth : 0,
+): boolean {
+  if (mode === 'off') return false;
+  if (mode === 'always') return isWideScreen;
+  return isWideScreen && viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX;
+}
 
 export interface TextViewerUiConfig {
   theme: number;

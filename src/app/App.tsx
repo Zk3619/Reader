@@ -82,6 +82,7 @@ import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
+import { ViewerChromeLayoutSetting } from "@/components/settings/ViewerChromeLayoutSetting";
 import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderModeSetting";
 import { cn } from "@/lib/utils";
 import {
@@ -2861,6 +2862,8 @@ function AppContent() {
 
                     <ShellLayoutSetting />
 
+                    <ViewerChromeLayoutSetting />
+
                     <InnerWebRenderModeSetting />
 
                     {/* 减少动效 */}
@@ -3017,9 +3020,6 @@ function AppContent() {
                       onOpenBookInfo={(source, book) => {
                         openBookInfo({ source, book, originShell: e.originShell });
                       }}
-                      onAddedToShelf={() =>
-                        window.dispatchEvent(new CustomEvent("bookshelf-refresh"))
-                      }
                     />
                       );
                     })()}

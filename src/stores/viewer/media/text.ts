@@ -49,6 +49,7 @@ import {
   defaultTextViewerUiConfig,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
+import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { migrateReaderImageStyle } from '@/lib/js-engine/legado/legado-image-options';
 
 const defaultConfig = defaultTextViewerUiConfig;
@@ -105,6 +106,7 @@ async function hydrateReaderConfig(): Promise<void> {
         }
         : prev.clickRegion,
       imageStyle: migrateReaderImageStyle(saved.imageStyle),
+      pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
     }));
   }
 }

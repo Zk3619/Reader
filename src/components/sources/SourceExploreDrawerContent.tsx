@@ -56,8 +56,39 @@ const EXPLORE_KINDS_ROW_CLASS = 'flex w-full min-w-0 items-stretch gap-2';
 
 const EXPLORE_KINDS_WRAP_CLASS = 'flex w-full min-w-0 flex-wrap items-stretch gap-2 box-border py-2';
 
-const SKELETON_CHIP_CLASS =
-  'h-9 min-w-0 flex-1 animate-pulse rounded-lg border border-border/30 bg-muted/60';
+const SKELETON_CHIP_BASE =
+  'h-9 animate-pulse rounded-lg border border-border/30 bg-muted/60';
+
+const SKELETON_CHIP_ROW_CLASS = `${SKELETON_CHIP_BASE} min-w-0 flex-1`;
+
+/** Legado 三列网格骨架行数（贴近常见分类/排行榜密度） */
+const EXPLORE_DRAWER_SKELETON_LEGADO_ROWS = 5;
+
+const EXPLORE_DRAWER_SKELETON_LEGADO_ROW_INDICES = Array.from(
+  { length: EXPLORE_DRAWER_SKELETON_LEGADO_ROWS },
+  (_, i) => i,
+);
+
+const EXPLORE_DRAWER_SKELETON_LEGADO_COL_INDICES = [0, 1, 2];
+
+/** 默认换行布局：不等宽芯片模拟按钮文案长度 */
+const EXPLORE_DRAWER_SKELETON_WRAP_WIDTHS = [
+  'w-16',
+  'w-20',
+  'w-24',
+  'w-20',
+  'w-28',
+  'w-16',
+  'w-24',
+  'w-20',
+  'w-16',
+  'w-28',
+  'w-24',
+  'w-20',
+  'w-16',
+  'w-28',
+  'w-24',
+] as const;
 
 export interface SourceExploreDrawerContentProps {
   source: BookSource;
@@ -191,13 +222,33 @@ export function SourceExploreDrawerContent(props: SourceExploreDrawerContentProp
     /** data-corvu-no-drag 用于禁用抽屉拖拽关闭 */
     <div class="min-h-0 w-full min-w-0 flex-1">
       <Show when={props.loading()}>
-        <div class={EXPLORE_KINDS_TRACK_CLASS} aria-busy="true">
-          <div class={EXPLORE_KINDS_ROW_CLASS}>
-            <div class={SKELETON_CHIP_CLASS} aria-hidden="true" />
-            <div class={SKELETON_CHIP_CLASS} aria-hidden="true" />
-            <div class={SKELETON_CHIP_CLASS} aria-hidden="true" />
+        <Show
+          when={scheme() === 'legado'}
+          fallback={
+            <div class={EXPLORE_KINDS_WRAP_CLASS} aria-busy="true">
+              <For each={[...EXPLORE_DRAWER_SKELETON_WRAP_WIDTHS]}>
+                {(widthClass) => (
+                  <div
+                    class={`${SKELETON_CHIP_BASE} shrink-0 ${widthClass}`}
+                    aria-hidden="true"
+                  />
+                )}
+              </For>
+            </div>
+          }
+        >
+          <div class={EXPLORE_KINDS_TRACK_CLASS} aria-busy="true">
+            <For each={EXPLORE_DRAWER_SKELETON_LEGADO_ROW_INDICES}>
+              {() => (
+                <div class={EXPLORE_KINDS_ROW_CLASS}>
+                  <For each={EXPLORE_DRAWER_SKELETON_LEGADO_COL_INDICES}>
+                    {() => <div class={SKELETON_CHIP_ROW_CLASS} aria-hidden="true" />}
+                  </For>
+                </div>
+              )}
+            </For>
           </div>
-        </div>
+        </Show>
       </Show>
       <Show when={props.error()}>
         <div class="my-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">

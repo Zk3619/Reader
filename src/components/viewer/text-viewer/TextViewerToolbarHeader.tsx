@@ -1,5 +1,7 @@
 import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import { Toggle } from '@/components/ui/toggle';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
@@ -39,6 +41,15 @@ export interface TextViewerToolbarHeaderProps {
 
 /** 文本阅读器顶栏业务内容（布局由 MediaViewerHeader 提供） */
 export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
+  const floating = useMediaViewerChromeFloating();
+  const iconBtn = () => cn('no-drag', floating.iconButtonClass());
+  const titleClass = () =>
+    cn(
+      'min-w-0 max-w-[40%] truncate text-sm font-medium text-foreground',
+      floating.isFloating() && floating.pillClass(),
+      floating.isFloating() && 'px-3 py-1.5 no-drag',
+    );
+
   return (
     <>
       <Tooltip>
@@ -46,7 +57,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           as={Button}
           variant="ghost"
           size="icon"
-          class="no-drag"
+          class={iconBtn()}
           onClick={props.onClose}
           aria-label="关闭阅读器"
         >
@@ -57,10 +68,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
       <Show
         when={props.onOpenBookInfo}
         fallback={
-          <h1
-            class="min-w-0 max-w-[40%] truncate text-sm font-medium text-foreground"
-            data-tauri-drag-region
-          >
+          <h1 class={titleClass()} data-tauri-drag-region>
             {props.bookName || '—'}
           </h1>
         }
@@ -69,7 +77,10 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           <TooltipTrigger
             as="button"
             type="button"
-            class="min-w-0 max-w-[40%] truncate text-left text-sm font-medium text-foreground transition-colors cursor-pointer hover:text-primary no-drag"
+            class={cn(
+              titleClass(),
+              'text-left transition-colors cursor-pointer hover:text-primary',
+            )}
             onClick={() => props.onOpenBookInfo!()}
             aria-label="进入书籍信息页"
           >
@@ -78,14 +89,22 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           <TooltipContent>书籍信息</TooltipContent>
         </Tooltip>
       </Show>
-      <div class="min-w-0 flex-1" data-tauri-drag-region />
+      <Show when={!floating.isFloating()}>
+        <div class="min-w-0 flex-1" data-tauri-drag-region />
+      </Show>
+      <div
+        class={cn(
+          'flex shrink-0 items-center gap-0.5 no-drag',
+          floating.isFloating() && 'ml-auto',
+        )}
+      >
       <Show when={props.isWideScreen}>
         <Tooltip>
           <TooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={(e) => {
               e.stopPropagation();
               props.onOpenCatalog();
@@ -101,7 +120,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onReadAloud}
             aria-label="朗读"
           >
@@ -118,7 +137,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onOpenSettings}
             aria-label="界面（字号、间距、配色）"
           >
@@ -133,7 +152,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onOpenReaderMenu}
             aria-label="设置"
           >
@@ -142,13 +161,12 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           <TooltipContent>设置</TooltipContent>
         </Tooltip>
       </Show>
-      <div class="flex shrink-0 items-center gap-0.5 no-drag">
         <Tooltip>
           <TooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onChangeSource}
             aria-label="换源"
           >
@@ -161,7 +179,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onRefreshChapter}
             aria-label="刷新当前章节"
           >
@@ -174,7 +192,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onOpenOfflineCache}
             aria-label="离线缓存"
           >
@@ -187,7 +205,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             as={Button}
             variant="ghost"
             size="icon"
-            class="no-drag"
+            class={iconBtn()}
             onClick={props.onOpenMoreMenu}
             aria-label="更多"
           >
@@ -195,8 +213,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           </TooltipTrigger>
           <TooltipContent>更多</TooltipContent>
         </Tooltip>
-      </div>
-      <Show when={isTauri() && !isMobile()}>
+      <Show when={isTauri() && !isMobile() && !floating.isFloating()}>
         <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
       </Show>
       <div class="flex items-center gap-2 no-drag">
@@ -207,7 +224,12 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
               onChange={props.onToggleTheme}
               variant="default"
               size="default"
-              class="h-9 w-9 rounded-md hover:bg-muted transition-colors p-0"
+              class={cn(
+                'h-9 w-9 p-0 transition-colors',
+                floating.isFloating()
+                  ? floating.iconButtonClass()
+                  : 'rounded-md hover:bg-muted',
+              )}
             >
               <Show
                 when={props.isDark}
@@ -225,6 +247,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           </TooltipContent>
         </Tooltip>
         <WindowControlButtons />
+      </div>
       </div>
     </>
   );

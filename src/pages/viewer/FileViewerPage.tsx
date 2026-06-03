@@ -11,6 +11,8 @@ import {
   MediaViewerHeader,
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
 import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
@@ -37,6 +39,7 @@ function isPdfUrl(url: string): boolean {
 export function FileViewerPage(props: FileViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
+  const mainStageClass = useMediaViewerMainStageClass('flex flex-col bg-muted/30');
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
@@ -58,7 +61,38 @@ export function FileViewerPage(props: FileViewerPageProps) {
     <>
       <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
-          <div class="absolute inset-0 flex flex-col bg-muted/30">
+          <MediaViewerChromeSlots
+            header={
+              <MediaViewerHeader>
+                <MediaViewerToolbarHeader
+                  title={book()?.name ?? ''}
+                  subtitle={chapterTitle()}
+                  onClose={props.onClose}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onRefresh={() => {
+                    if (!viewerStore.isOpen()) {
+                      showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
+                      return;
+                    }
+                    void viewerStore.refreshChapter();
+                  }}
+                  loading={loading()}
+                />
+              </MediaViewerHeader>
+            }
+            footer={
+              <MediaViewerFooter>
+                <MediaViewerChapterNavFooter
+                  chapterIndex={chapterIndex()}
+                  catalogLength={catalog().length}
+                  loading={loading()}
+                  onPrev={() => void goChapter(-1)}
+                  onNext={() => void goChapter(1)}
+                />
+              </MediaViewerFooter>
+            }
+          >
+          <div class={mainStageClass()}>
             <Show when={bootstrapping() || loading()}>
               <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                 加载中…
@@ -116,33 +150,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
               )}
             </Show>
           </div>
-
-          <MediaViewerHeader placement="overlay">
-            <MediaViewerToolbarHeader
-              title={book()?.name ?? ''}
-              subtitle={chapterTitle()}
-              onClose={props.onClose}
-              onOpenCatalog={() => setCatalogOpen(true)}
-              onRefresh={() => {
-                if (!viewerStore.isOpen()) {
-                  showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
-                  return;
-                }
-                void viewerStore.refreshChapter();
-              }}
-              loading={loading()}
-            />
-          </MediaViewerHeader>
-
-          <MediaViewerFooter placement="overlay" collapseTarget="bottom-bar">
-            <MediaViewerChapterNavFooter
-              chapterIndex={chapterIndex()}
-              catalogLength={catalog().length}
-              loading={loading()}
-              onPrev={() => void goChapter(-1)}
-              onNext={() => void goChapter(1)}
-            />
-          </MediaViewerFooter>
+          </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
 

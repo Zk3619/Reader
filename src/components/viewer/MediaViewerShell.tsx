@@ -1,7 +1,10 @@
 import { createEffect, createSignal, onCleanup, onMount, splitProps, type Accessor, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { subscribeMediaViewerAppFocus } from '@/lib/media/media-viewer-app-focus';
-import { createMediaViewerChromeAutoHide } from '@/lib/media/media-viewer-chrome-auto-hide';
+import {
+  createMediaViewerChromeAutoHide,
+  type MediaViewerChromeAutoHide,
+} from '@/lib/media/media-viewer-chrome-auto-hide';
 import {
   createMediaViewerChromeInputHandlers,
   type MediaViewerChromeInputHandlers,
@@ -10,6 +13,7 @@ import {
   MediaViewerShellContextProvider,
   type MediaViewerShellContextValue,
 } from '@/components/viewer/media-viewer-shell-context';
+import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 
 export type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
 
@@ -18,20 +22,27 @@ export interface MediaViewerShellProps {
   class?: string;
   /** 顶栏显隐；不传则 Shell 内部管理（点击主区可切换）*/
   headerVisible?: boolean;
-  /** 底栏显隐；不传则与顶栏一致 */
-  footerVisible?: boolean;
   onHeaderVisibleChange?: (visible: boolean) => void;
   /** 点击 MediaViewerShellMain 切换 overlay 顶底栏；文本阅读器请设为 false */
   tapToToggleBars?: boolean;
   /**
-   * 启用壳层指针显隐（移出显示 / 移入后单击隐藏）与内容区双击，且不占用主区单击切换。
-   * 文本阅读器传入外部 `chromeInputHandlers` 并保留分区单击。
+   * 启用壳层指针显隐（移出显示 / 移入后单击隐藏）与内容区双击。
+   * 与 `tapToToggleBars={false}` 联用时需配合 `contentPrimaryAction`（文本分区点击）。
    */
   chromePointerInput?: boolean;
-  /** 外部 chrome 指针逻辑（由页面创建并 dispose） */
+  /** 主区单击动作（文本分区）；未设且 tapToToggleBars 为 true 时等同 toggleBars */
+  contentPrimaryAction?: (event: MouseEvent) => void;
+  /** 外部 chrome 指针逻辑（一般无需；文本请用内置 chrome + contentPrimaryAction） */
   chromeInputHandlers?: MediaViewerChromeInputHandlers;
   /** 导航栈条目是否为栈顶（从其它页回到 viewer 时由 App 传入） */
   entryVisible?: Accessor<boolean>;
+  /**
+   * 使用外部 chromeInputHandlers 时仍启用进入/失焦时的自动隐藏与会话 reveal
+   * （文本阅读器：受控顶栏 + 分区单击）
+   */
+  autoHideSession?: boolean;
+  /** 自动隐藏实例就绪（供页面在手动隐藏顶栏时 clearHideTimer） */
+  onChromeAutoHideReady?: (autoHide: MediaViewerChromeAutoHide) => void;
 }
 
 function MediaViewerShellRoot(props: MediaViewerShellProps) {
@@ -39,27 +50,33 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     'children',
     'class',
     'headerVisible',
-    'footerVisible',
     'onHeaderVisibleChange',
     'tapToToggleBars',
     'chromePointerInput',
+    'contentPrimaryAction',
     'chromeInputHandlers',
     'entryVisible',
+    'autoHideSession',
+    'onChromeAutoHideReady',
   ]);
 
   const [internalHeaderVisible, setInternalHeaderVisible] = createSignal(true);
+  const chromeLayout = useViewerChromeLayout();
+  const chromeBarsCollapsible = () => chromeLayout() !== 'fixed';
 
   const isHeaderControlled = () => local.headerVisible !== undefined;
 
-  const headerVisible = () =>
-    isHeaderControlled() ? (local.headerVisible as boolean) : internalHeaderVisible();
-
-  const footerVisible = () => {
-    if (local.footerVisible !== undefined) return local.footerVisible;
-    return headerVisible();
+  const headerVisible = () => {
+    if (!chromeBarsCollapsible()) return true;
+    return isHeaderControlled()
+      ? (local.headerVisible as boolean)
+      : internalHeaderVisible();
   };
 
+  const footerVisible = headerVisible;
+
   const setHeaderVisibleRaw = (visible: boolean) => {
+    if (!chromeBarsCollapsible()) return;
     if (local.onHeaderVisibleChange) {
       local.onHeaderVisibleChange(visible);
       return;
@@ -69,64 +86,92 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     }
   };
 
-  const tapToToggleBars = () => local.tapToToggleBars !== false;
-  const chromePointerInput = () => local.chromePointerInput === true;
-  const chromeInputEnabled = () => tapToToggleBars() || chromePointerInput();
+  const wantsTapToggle = () => local.tapToToggleBars !== false;
+  const wantsPointerChrome = () => local.chromePointerInput === true;
+  const wantsContentAction = () => local.contentPrimaryAction != null;
+  /** 需要主区单击/双击处理器（固定模式下仍保留分区单击等，但不隐藏顶底栏） */
+  const needsChromeInputHandlers = () =>
+    wantsTapToggle() || wantsPointerChrome() || wantsContentAction();
+  const tapToToggleBars = () => wantsTapToggle() && chromeBarsCollapsible();
 
-  const useInternalAutoHide = () => chromeInputEnabled() && !local.chromeInputHandlers;
+  const useSessionAutoHide = () =>
+    local.autoHideSession === true && chromeBarsCollapsible();
+  const useInternalAutoHide = () =>
+    chromeBarsCollapsible() &&
+    (wantsTapToggle() || wantsPointerChrome()) &&
+    !local.chromeInputHandlers;
+  const useAutoHide = () => useInternalAutoHide() || useSessionAutoHide();
 
   const tryShowChromeOnForeground = () => {
-    if (!useInternalAutoHide() || isHeaderControlled()) return;
+    if (!useAutoHide()) return;
+    if (isHeaderControlled() && !useSessionAutoHide()) return;
     const entryVisible = local.entryVisible;
     if (entryVisible !== undefined && !entryVisible()) return;
-    setHeaderVisibleRaw(true);
+    setHeaderVisible(true);
+    activeChromeInput()?.resetDismissGestureState();
   };
 
-  const appFocus = useInternalAutoHide()
+  let chromeAutoHide: MediaViewerChromeAutoHide;
+  let revealChromeSession: () => void;
+  let internalChromeInput: MediaViewerChromeInputHandlers | null = null;
+
+  const activeChromeInput = () => local.chromeInputHandlers ?? internalChromeInput;
+
+  const setHeaderVisible = (visible: boolean) => {
+    setHeaderVisibleRaw(visible);
+    if (!visible) {
+      activeChromeInput()?.resetDismissGestureState();
+    }
+    if (!visible && useAutoHide()) {
+      chromeAutoHide.clearHideTimer();
+    }
+  };
+
+  internalChromeInput =
+    !local.chromeInputHandlers && needsChromeInputHandlers()
+      ? createMediaViewerChromeInputHandlers({
+        headerVisible,
+        setHeaderVisible,
+        toggleBars: () => setHeaderVisible(!headerVisible()),
+        enabled: () => true,
+        barsCollapsible: chromeBarsCollapsible,
+      })
+      : null;
+
+  chromeAutoHide = createMediaViewerChromeAutoHide({
+    enabled: useAutoHide,
+    isControlled: () => isHeaderControlled() && !useSessionAutoHide(),
+    setHeaderVisible,
+    canAutoHide: () => appFocus?.canAutoHide() ?? true,
+  });
+
+  revealChromeSession = () => {
+    chromeAutoHide.revealSession();
+    activeChromeInput()?.resetDismissGestureState();
+  };
+
+  let appFocus: ReturnType<typeof subscribeMediaViewerAppFocus> | null = null;
+  appFocus = useAutoHide()
     ? subscribeMediaViewerAppFocus({
       onForeground: tryShowChromeOnForeground,
       onBackground: () => chromeAutoHide.clearHideTimer(),
     })
     : null;
 
-  const chromeAutoHide = createMediaViewerChromeAutoHide({
-    enabled: useInternalAutoHide,
-    isControlled: isHeaderControlled,
-    setHeaderVisible: setHeaderVisibleRaw,
-    canAutoHide: () => appFocus?.canAutoHide() ?? true,
-  });
-
-  const setHeaderVisible = (visible: boolean) => {
-    setHeaderVisibleRaw(visible);
-    if (!visible && !isHeaderControlled() && chromeInputEnabled() && !local.chromeInputHandlers) {
-      chromeAutoHide.clearHideTimer();
-    }
-  };
-
-  const internalChromeInput = !local.chromeInputHandlers && chromeInputEnabled()
-    ? createMediaViewerChromeInputHandlers({
-      headerVisible,
-      setHeaderVisible,
-      toggleBars: () => setHeaderVisible(!headerVisible()),
-      enabled: () => true,
-    })
-    : null;
-
-  const activeChromeInput = () => local.chromeInputHandlers ?? internalChromeInput;
-
   onMount(() => {
-    if (local.chromeInputHandlers || isHeaderControlled() || !chromeInputEnabled()) return;
+    local.onChromeAutoHideReady?.(chromeAutoHide);
+    if (!useAutoHide()) return;
     const entryVisible = local.entryVisible;
     if (entryVisible !== undefined && !entryVisible()) return;
-    chromeAutoHide.revealSession();
+    revealChromeSession();
   });
 
   createEffect(() => {
-    if (local.chromeInputHandlers) return;
+    if (!useAutoHide()) return;
     const entryVisible = local.entryVisible?.();
     if (entryVisible === undefined) return;
     if (entryVisible) {
-      chromeAutoHide.revealSession();
+      revealChromeSession();
     } else {
       chromeAutoHide.clearHideTimer();
     }
@@ -135,9 +180,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
   onCleanup(() => {
     appFocus?.dispose();
     internalChromeInput?.dispose();
-    if (!local.chromeInputHandlers) {
-      chromeAutoHide.dispose();
-    }
+    chromeAutoHide.dispose();
   });
 
   const shellValue = (): MediaViewerShellContextValue => {
@@ -145,9 +188,14 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     return {
       headerVisible,
       footerVisible,
+      chromeBarsCollapsible,
       setHeaderVisible,
-      toggleBars: () => setHeaderVisible(!headerVisible()),
+      toggleBars: () => {
+        if (!chromeBarsCollapsible()) return;
+        setHeaderVisible(!headerVisible());
+      },
       tapToToggleBars: tapToToggleBars(),
+      contentPrimaryAction: local.contentPrimaryAction,
       onContentPrimaryClick: input?.onContentPrimaryClick,
       onContentDblClick: input?.onContentDblClick,
     };
@@ -173,5 +221,8 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
 export const MediaViewerShell = MediaViewerShellRoot;
 
 export { MediaViewerShellMain } from '@/components/viewer/MediaViewerShellMain';
+export { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
 export { MediaViewerHeader } from '@/components/viewer/MediaViewerHeader';
 export { MediaViewerFooter } from '@/components/viewer/MediaViewerFooter';
+export { MediaViewerOverlayBottomChrome } from '@/components/viewer/MediaViewerOverlayBottomChrome';
+export { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';

@@ -26,6 +26,8 @@ import {
   MediaViewerHeader,
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
 import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
@@ -100,6 +102,9 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const [speedDialogOpen, setSpeedDialogOpen] = createSignal(false);
   const [timerDialogOpen, setTimerDialogOpen] = createSignal(false);
   const [speedDraft, setSpeedDraft] = createSignal(1);
+  const mainStageClass = useMediaViewerMainStageClass(
+    'flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6',
+  );
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
@@ -195,7 +200,41 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     <>
       <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
-          <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6">
+          <MediaViewerChromeSlots
+            header={
+              <MediaViewerHeader>
+                <MediaViewerToolbarHeader
+                  title={book()?.name ?? ''}
+                  subtitle={chapterTitle()}
+                  onClose={props.onClose}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onRefresh={() => {
+                    if (!viewerStore.isOpen()) {
+                      showAppToast({
+                        title: '未打开书籍',
+                        description: '请从书架重新打开本书',
+                      });
+                      return;
+                    }
+                    void viewerStore.refreshChapter();
+                  }}
+                  loading={loading()}
+                />
+              </MediaViewerHeader>
+            }
+            footer={
+              <MediaViewerFooter>
+                <MediaViewerChapterNavFooter
+                  chapterIndex={chapterIndex()}
+                  catalogLength={catalog().length}
+                  loading={loading()}
+                  onPrev={() => void goChapterDelta(-1)}
+                  onNext={() => void goChapterDelta(1)}
+                />
+              </MediaViewerFooter>
+            }
+          >
+          <div class={mainStageClass()}>
             <Show when={book()?.coverUrl || book()?.customCoverUrl}>
               <img
                 src={book()?.customCoverUrl || book()?.coverUrl}
@@ -385,36 +424,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               </div>
             </Show>
           </div>
-
-          <MediaViewerHeader placement="overlay">
-            <MediaViewerToolbarHeader
-              title={book()?.name ?? ''}
-              subtitle={chapterTitle()}
-              onClose={props.onClose}
-              onOpenCatalog={() => setCatalogOpen(true)}
-              onRefresh={() => {
-                if (!viewerStore.isOpen()) {
-                  showAppToast({
-                    title: '未打开书籍',
-                    description: '请从书架重新打开本书',
-                  });
-                  return;
-                }
-                void viewerStore.refreshChapter();
-              }}
-              loading={loading()}
-            />
-          </MediaViewerHeader>
-
-          <MediaViewerFooter placement="overlay" collapseTarget="bottom-bar">
-            <MediaViewerChapterNavFooter
-              chapterIndex={chapterIndex()}
-              catalogLength={catalog().length}
-              loading={loading()}
-              onPrev={() => void goChapterDelta(-1)}
-              onNext={() => void goChapterDelta(1)}
-            />
-          </MediaViewerFooter>
+          </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
 

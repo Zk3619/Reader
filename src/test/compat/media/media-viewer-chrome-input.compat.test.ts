@@ -125,4 +125,53 @@ describe('media viewer chrome input', () => {
     expect(barToggles).toBe(1);
     handlers.dispose();
   });
+
+  it('after resetDismissGestureState, first click runs action instead of dismiss', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    let visible = true;
+    let actions = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    handlers.onShellPointerEnter({} as PointerEvent);
+    visible = false;
+    handlers.resetDismissGestureState();
+    handlers.onContentPrimaryClick(clickEvent(), () => actions++);
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS);
+    expect(actions).toBe(1);
+    expect(visible).toBe(false);
+    handlers.dispose();
+  });
+
+  it('fixed layout: double-click does not toggle bars', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let barToggles = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => true,
+      setHeaderVisible: () => {},
+      toggleBars: () => {
+        barToggles += 1;
+      },
+      enabled: () => true,
+      barsCollapsible: () => false,
+    });
+    const ev = clickEvent();
+    handlers.onContentDblClick(ev);
+    expect(barToggles).toBe(0);
+    handlers.dispose();
+  });
 });

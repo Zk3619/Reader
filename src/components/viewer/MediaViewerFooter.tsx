@@ -1,68 +1,55 @@
 import { Show, splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
+import { MediaViewerOverlayBottomChrome } from '@/components/viewer/MediaViewerOverlayBottomChrome';
+import { MediaViewerFloatingBottomChrome } from '@/components/viewer/MediaViewerFloatingBottomChrome';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
-import type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
+import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 
 export interface MediaViewerFooterProps {
   children: JSX.Element;
-  /** fixed：占位底栏；overlay：悬浮于主内容之上 */
-  placement?: ViewerChromePlacement;
-  /** 不传 overlay 时跟 MediaViewerShell footerVisible */
+  layout?: ViewerChromeLayout;
   visible?: boolean;
-  /**
-   * footer：外层 reader-footer 收起（文本阅读器多段底栏整体隐藏）
-   * bottom-bar：子级 reader-bottom-bar 收起（与文本状态栏动画一致，音视频/文件用）
-   */
-  collapseTarget?: 'footer' | 'bottom-bar';
   class?: string;
 }
 
 export function MediaViewerFooter(props: MediaViewerFooterProps) {
-  const [local] = splitProps(props, [
-    'children',
-    'placement',
-    'visible',
-    'collapseTarget',
-    'class',
-  ]);
+  const [local] = splitProps(props, ['children', 'layout', 'visible', 'class']);
   const shell = useMediaViewerShellOptional();
-  const placement = () => local.placement ?? 'overlay';
-  const collapseTarget = () => local.collapseTarget ?? 'footer';
-  const visible = () => {
+  const chromeLayout = useViewerChromeLayout();
+  const layout = () => local.layout ?? chromeLayout();
+  const panelVisible = () => {
+    if (layout() === 'fixed') return true;
     if (local.visible !== undefined) return local.visible;
-    if (placement() === 'overlay' && shell) return shell.footerVisible();
+    if (shell) return shell.headerVisible();
     return true;
   };
-  const overlayFooterPanel = () =>
-    placement() === 'overlay' && collapseTarget() === 'footer';
 
   return (
     <div
       class={cn(
-        'reader-footer flex flex-col',
-        placement() === 'overlay' && 'pointer-events-none absolute bottom-0 left-0 right-0 z-10',
-        placement() === 'fixed' && 'shrink-0 border-t border-border',
-        !overlayFooterPanel() && collapseTarget() === 'footer' && 'app-bottom-chrome-inset',
-        !overlayFooterPanel() && collapseTarget() === 'footer' && !visible() && 'reader-bar-hidden',
-        collapseTarget() === 'bottom-bar' && !visible() && 'pointer-events-none',
+        'flex flex-col',
+        layout() === 'stacked' &&
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0',
+        layout() === 'floating' &&
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0',
+        layout() === 'fixed' &&
+          'reader-footer shrink-0 border-t border-border bg-background/95 backdrop-blur',
         local.class,
       )}
       onClick={(e) => e.stopPropagation()}
     >
-      <Show
-        when={overlayFooterPanel()}
-        fallback={local.children}
-      >
-        <div
-          class={cn(
-            'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-            'pointer-events-auto flex w-full flex-col app-bottom-chrome-inset',
-            !visible() && 'reader-chrome-overlay-panel--hidden',
-          )}
-        >
+      <Show when={layout() === 'stacked'}>
+        <MediaViewerOverlayBottomChrome visible={panelVisible()}>
           {local.children}
-        </div>
+        </MediaViewerOverlayBottomChrome>
       </Show>
+      <Show when={layout() === 'floating'}>
+        <MediaViewerFloatingBottomChrome visible={panelVisible()}>
+          {local.children}
+        </MediaViewerFloatingBottomChrome>
+      </Show>
+      <Show when={layout() === 'fixed'}>{local.children}</Show>
     </div>
   );
 }

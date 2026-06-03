@@ -1,15 +1,13 @@
 /**
  * 阅读设置面板
- * 参考 legado：主题、字体大小、行距/段距/字距、阅读宽度（最后一项；窄屏+移动端不显示）
+ * 参考 legado：主题、字体、行距/字距/段距、阅读宽度、边距、双页等
  */
 
 import { For, Show, onMount, createSignal } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import type {
   TextViewerUiConfig as ReadConfig,
-  TextViewerPageAnim as ReaderPageAnim,
   TextViewerDualPageMode as ReaderDualPageMode,
-  TextViewerImageStyle as ReaderImageStyle,
 } from '@/lib/media/text/reader-ui-config';
 import { READER_IMAGE_STYLE_LABELS } from '@/lib/js-engine/legado/legado-image-options';
 import { getAllHttpTTS } from '@/lib/database/http-tts';
@@ -18,6 +16,19 @@ import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
+import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
+import {
+  TEXT_VIEWER_DUAL_PAGE_MODE_LABELS,
+  TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
+  type TextViewerPageAnim,
+  type TextViewerImageStyle,
+} from '@/lib/media/text/reader-ui-config';
+import {
+  TEXT_VIEWER_PAGE_ANIM_LABELS,
+  TEXT_VIEWER_PAGE_ANIM_OPTIONS,
+} from '@/lib/media/text/text-viewer-page-anim';
 const themeLabels: Record<number, string> = {
   0: '默认',
   1: '护眼绿',
@@ -64,6 +75,14 @@ export function ReaderSettings(props: ReaderSettingsProps) {
 
   return (
     <div class="flex flex-1 flex-col gap-6 overflow-y-auto scroll-gutter-stable-both pt-4 pb-2 mb-4">
+      <div class="space-y-3">
+        <Label>顶栏与底栏布局</Label>
+        <p class="text-xs text-muted-foreground">
+          固定、层叠或悬浮；对所有阅读器生效，可在应用设置中同样修改。
+        </p>
+        <ViewerChromeLayoutControls />
+      </div>
+
       {/* 主题 */}
       <div class="space-y-3">
         <Label>主题</Label>
@@ -142,24 +161,47 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Slider>
       </div>
 
-      {/* 双页 */}
-      <div class="space-y-3">
-        <Label>双页阅读</Label>
-        <p class="text-xs text-muted-foreground">宽屏下分栏显示；「自动」在横屏且宽度≥900px 时启用。</p>
-        <div class="grid grid-cols-3 gap-2">
-          <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
-            {(mode) => (
-              <Button
-                variant={config().dualPage === mode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setConfig({ dualPage: mode })}
-              >
-                {mode === 'off' ? '关闭' : mode === 'auto' ? '自动' : '始终'}
-              </Button>
-            )}
-          </For>
+      {/* 段距 */}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <Label>段距</Label>
+          <span class="text-sm text-muted-foreground">{config().spacing.paragraph.toFixed(1)}em</span>
         </div>
+        <Slider
+          value={[config().spacing.paragraph]}
+          minValue={0}
+          maxValue={2}
+          step={0.1}
+          onChange={(values: number[]) => setSpacing('paragraph', values[0] ?? config().spacing.paragraph)}
+        >
+          <SliderTrack>
+            <SliderFill />
+            <SliderThumb />
+          </SliderTrack>
+        </Slider>
       </div>
+
+      {/* 阅读宽度：窄屏+移动端不显示 */}
+      <Show when={props.showReadWidth?.() ?? true}>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label>阅读宽度</Label>
+            <span class="text-sm text-muted-foreground">{config().readWidth}px</span>
+          </div>
+          <Slider
+            value={[config().readWidth]}
+            minValue={400}
+            maxValue={1200}
+            step={50}
+            onChange={(values: number[]) => setConfig({ readWidth: values[0] ?? config().readWidth })}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+      </Show>
 
       {/* 边距：正文与视口/列边界留白 */}
       <div class="space-y-4">
@@ -177,7 +219,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           <Slider
             value={[config().contentInset.left]}
             minValue={0}
-            maxValue={80}
+            maxValue={200}
             step={2}
             onChange={(values: number[]) =>
               setContentInset('left', values[0] ?? config().contentInset.left)
@@ -197,7 +239,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           <Slider
             value={[config().contentInset.right]}
             minValue={0}
-            maxValue={80}
+            maxValue={200}
             step={2}
             onChange={(values: number[]) =>
               setContentInset('right', values[0] ?? config().contentInset.right)
@@ -218,7 +260,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             <Slider
               value={[config().contentInset.center]}
               minValue={0}
-              maxValue={120}
+              maxValue={400}
               step={2}
               onChange={(values: number[]) =>
                 setContentInset('center', values[0] ?? config().contentInset.center)
@@ -233,22 +275,63 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Show>
       </div>
 
+      {/* 双页 */}
+      <div class="space-y-3">
+        <Label>双页阅读</Label>
+        <p class="text-xs text-muted-foreground">
+          宽屏下分栏显示；「自动」在视口宽度达到 xl（≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px）时启用。
+        </p>
+        <Tabs
+          value={config().dualPage}
+          onChange={(value) => setConfig({ dualPage: value as ReaderDualPageMode })}
+          class="w-full"
+        >
+          <TabsList
+            class={cn(
+              'flex h-auto w-full gap-1 rounded-lg border border-input bg-muted p-1.5',
+            )}
+            aria-label="双页阅读"
+          >
+            <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
+              {(mode) => (
+                <TabsTrigger
+                  value={mode}
+                  class="h-8 flex-1 shadow-none data-selected:ring-1 data-selected:ring-primary/30"
+                >
+                  {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
+                </TabsTrigger>
+              )}
+            </For>
+          </TabsList>
+        </Tabs>
+      </div>
+
       {/* 插图样式 */}
       <div class="space-y-3">
         <Label>插图样式</Label>
-        <div class="grid grid-cols-4 gap-2">
-          <For each={(['DEFAULT', 'FULL', 'TEXT', 'SINGLE'] as ReaderImageStyle[])}>
-            {(style) => (
-              <Button
-                variant={config().imageStyle === style ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setConfig({ imageStyle: style })}
-              >
-                {READER_IMAGE_STYLE_LABELS[style]}
-              </Button>
+        <Tabs
+          value={config().imageStyle}
+          onChange={(value) => setConfig({ imageStyle: value as TextViewerImageStyle })}
+          class="w-full"
+        >
+          <TabsList
+            class={cn(
+              'grid h-auto w-full grid-cols-4 gap-1 rounded-lg border border-input bg-muted p-1.5',
             )}
-          </For>
-        </div>
+            aria-label="插图样式"
+          >
+            <For each={(['DEFAULT', 'FULL', 'TEXT', 'SINGLE'] as TextViewerImageStyle[])}>
+              {(style) => (
+                <TabsTrigger
+                  value={style}
+                  class="h-8 px-1 text-xs shadow-none data-selected:ring-1 data-selected:ring-primary/30"
+                >
+                  {READER_IMAGE_STYLE_LABELS[style]}
+                </TabsTrigger>
+              )}
+            </For>
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* 音量键翻页 */}
@@ -353,70 +436,32 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       <div class="space-y-3">
         <Label>翻页模式</Label>
         <p class="text-xs text-muted-foreground">
-          滚动为默认；覆盖/滑动在切换章节时带过渡动画（仍为滚动阅读，与 Legado 仿真翻页不同）。
+          滚动为连续阅读；其余模式按页翻页，可拖拽或点击换页。覆盖：当前页盖住新页；关联覆盖：新页先露边且联动；滑动：两页并排平移；仿真：折页。
         </p>
-        <div class="grid grid-cols-2 gap-2">
-          <For each={(['scroll', 'cover', 'slide', 'none'] as ReaderPageAnim[])}>
-            {(mode) => (
-              <Button
-                variant={config().pageAnim === mode ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setConfig({ pageAnim: mode })}
-              >
-                {mode === 'scroll'
-                  ? '滚动'
-                  : mode === 'cover'
-                    ? '覆盖'
-                    : mode === 'slide'
-                      ? '滑动'
-                      : '无动画'}
-              </Button>
-            )}
-          </For>
-        </div>
-      </div>
-
-      {/* 段距 */}
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>段距</Label>
-          <span class="text-sm text-muted-foreground">{config().spacing.paragraph.toFixed(1)}em</span>
-        </div>
-        <Slider
-          value={[config().spacing.paragraph]}
-          minValue={0}
-          maxValue={2}
-          step={0.1}
-          onChange={(values: number[]) => setSpacing('paragraph', values[0] ?? config().spacing.paragraph)}
+        <Tabs
+          value={config().pageAnim}
+          onChange={(value) => setConfig({ pageAnim: value as TextViewerPageAnim })}
+          class="w-full"
         >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
-
-      {/* 阅读宽度：最后一项；窄屏+移动端不显示 */}
-      <Show when={props.showReadWidth?.() ?? true}>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label>阅读宽度</Label>
-            <span class="text-sm text-muted-foreground">{config().readWidth}px</span>
-          </div>
-          <Slider
-            value={[config().readWidth]}
-            minValue={400}
-            maxValue={1200}
-            step={50}
-            onChange={(values: number[]) => setConfig({ readWidth: values[0] ?? config().readWidth })}
+          <TabsList
+            class={cn(
+              'grid h-auto w-full grid-cols-3 gap-1 rounded-lg border border-input bg-muted p-1.5',
+            )}
+            aria-label="翻页模式"
           >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-      </Show>
+            <For each={TEXT_VIEWER_PAGE_ANIM_OPTIONS}>
+              {(mode) => (
+                <TabsTrigger
+                  value={mode}
+                  class="h-8 px-1 text-xs shadow-none data-selected:ring-1 data-selected:ring-primary/30"
+                >
+                  {TEXT_VIEWER_PAGE_ANIM_LABELS[mode]}
+                </TabsTrigger>
+              )}
+            </For>
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* 恢复默认 */}
       <Button

@@ -16,6 +16,9 @@ import {
   MediaViewerHeader,
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+import { useMediaViewerMainScrollClass } from '@/lib/viewer/viewer-chrome-layout';
+import { cn } from '@/lib/utils';
 import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
@@ -44,6 +47,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   const [viewPage, setViewPage] = createSignal(1);
 
   let scrollRootEl: HTMLDivElement | undefined;
+  const mainScrollClass = useMediaViewerMainScrollClass('scroll-gutter-stable-both bg-black/90');
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
@@ -175,9 +179,40 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     <>
       <MediaViewerShell entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
+          <MediaViewerChromeSlots
+            header={
+              <MediaViewerHeader>
+                <MediaViewerToolbarHeader
+                  title={book()?.name ?? ''}
+                  subtitle={chapterTitle()}
+                  onClose={props.onClose}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onRefresh={refreshChapter}
+                  onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
+                  loading={loading()}
+                />
+              </MediaViewerHeader>
+            }
+            footer={
+              <MediaViewerFooter>
+                <MediaViewerChapterNavFooter
+                  chapterIndex={chapterIndex()}
+                  catalogLength={catalog().length}
+                  loading={loading()}
+                  onPrev={() => void goChapter(-1)}
+                  onNext={() => void goChapter(1)}
+                  center={
+                    <span class="text-xs tabular-nums text-muted-foreground">
+                      {totalPages() > 0 ? `${viewPage()} / ${totalPages()} 页` : ''}
+                    </span>
+                  }
+                />
+              </MediaViewerFooter>
+            }
+          >
           <div
             ref={scrollRootEl}
-            class="absolute inset-0 overflow-y-auto scroll-gutter-stable-both bg-black/90"
+            class={mainScrollClass()}
             {...{ [MANGA_SCROLL_ROOT_ATTR]: '' }}
           >
             <Show when={bootstrapping() || loading()}>
@@ -227,33 +262,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
               </Show>
             </Show>
           </div>
-
-          <MediaViewerHeader placement="overlay">
-            <MediaViewerToolbarHeader
-              title={book()?.name ?? ''}
-              subtitle={chapterTitle()}
-              onClose={props.onClose}
-              onOpenCatalog={() => setCatalogOpen(true)}
-              onRefresh={refreshChapter}
-              onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
-              loading={loading()}
-            />
-          </MediaViewerHeader>
-
-          <MediaViewerFooter placement="overlay" collapseTarget="bottom-bar">
-            <MediaViewerChapterNavFooter
-              chapterIndex={chapterIndex()}
-              catalogLength={catalog().length}
-              loading={loading()}
-              onPrev={() => void goChapter(-1)}
-              onNext={() => void goChapter(1)}
-              center={
-                <span class="text-xs tabular-nums text-muted-foreground">
-                  {totalPages() > 0 ? `${viewPage()} / ${totalPages()} 页` : ''}
-                </span>
-              }
-            />
-          </MediaViewerFooter>
+          </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
 

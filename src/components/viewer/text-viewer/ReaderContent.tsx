@@ -66,17 +66,7 @@ function toDisplayBlocks(
 }
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-/** 主题 0–6 对应的背景/文字色类名（与 legado 一致：默认、绿、棕、蓝、紫、黑、夜间） */
-const themeClasses: Record<number, { bg: string; text: string }> = {
-  0: { bg: 'bg-[#f5f0e6]', text: 'text-[#5b4636]' },   // 默认纸质
-  1: { bg: 'bg-[#e8f5e9]', text: 'text-[#2e7d32]' },   // 护眼绿
-  2: { bg: 'bg-[#f5e6d3]', text: 'text-[#5d4e37]' },   // 羊皮纸
-  3: { bg: 'bg-[#e3f2fd]', text: 'text-[#1565c0]' },   // 淡蓝
-  4: { bg: 'bg-[#f3e5f5]', text: 'text-[#6a1b9a]' },   // 淡紫
-  5: { bg: 'bg-[#263238]', text: 'text-[#b0bec5]' },   // 深色
-  6: { bg: 'bg-[#1e1e1e]', text: 'text-[#cfcfcf]' },   // 夜间
-};
+import { READER_THEME_CLASSES as themeClasses } from '@/lib/media/text/reader-theme-classes';
 
 export interface ReaderContentProps {
   class?: string;
@@ -92,6 +82,12 @@ export interface ReaderContentProps {
   applyReadWidth?: () => boolean;
   /** 双页分栏（宽屏） */
   dualPage?: boolean;
+  /** 仅渲染指定块索引（分页模式） */
+  visibleBlockIndices?: number[];
+  /** 为分页测量高度：块级节点带 data-reader-measure-block */
+  measureBlocks?: boolean;
+  /** 按页阅读：与测量层相同排版，避免 py 导致页高不一致 */
+  pagedLayout?: boolean;
 }
 
 export function ReaderContent(props: ReaderContentProps) {
@@ -185,6 +181,17 @@ export function ReaderContent(props: ReaderContentProps) {
     toDisplayBlocks(content() ?? '', currentChapter()?.title, imageStyleKey()),
   );
 
+  const blockEntries = createMemo(() => {
+    const all = contentBlocks();
+    const indices = props.visibleBlockIndices;
+    if (!indices?.length) {
+      return all.map((block, blockIndex) => ({ block, blockIndex }));
+    }
+    return indices
+      .filter((i) => i >= 0 && i < all.length)
+      .map((blockIndex) => ({ block: all[blockIndex]!, blockIndex }));
+  });
+
   const getCount = (segmentIndex: number) =>
     (props.getSegmentCommentCount ?? (() => 0))(
       chapterIndex(),
@@ -208,7 +215,8 @@ export function ReaderContent(props: ReaderContentProps) {
   return (
     <div
       class={cn(
-        'reader-content min-h-full w-full px-0 py-8 selection:bg-primary/20',
+        'reader-content min-h-full w-full px-0 selection:bg-primary/20',
+        props.pagedLayout ? 'min-h-full py-4' : 'py-8',
         themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
         themeClasses[config().theme]?.text ?? themeClasses[0].text,
         props.class
@@ -252,7 +260,10 @@ export function ReaderContent(props: ReaderContentProps) {
           >
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
             <Show when={currentChapter()?.title}>
-              <div class="mb-4 flex items-center justify-center gap-2">
+              <div
+                class="mb-4 flex items-center justify-center gap-2"
+                data-reader-measure-block={props.measureBlocks ? '' : undefined}
+              >
                 <h2 class="text-center text-lg font-semibold">
                   {currentChapter()!.title}
                 </h2>
@@ -273,11 +284,12 @@ export function ReaderContent(props: ReaderContentProps) {
             </Show>
           {/* 段落 / 插图块 + 段评气泡 */}
           <div class="prose prose-p:mb-4 max-w-none">
-            <For each={contentBlocks()}>
-              {(block, blockIndex) => (
+            <For each={blockEntries()}>
+              {(entry) => (
+                <div data-reader-measure-block={props.measureBlocks ? '' : undefined}>
                 <ReaderBlockItem
-                  block={block}
-                  blockIndex={blockIndex()}
+                  block={entry.block}
+                  blockIndex={entry.blockIndex}
                   paragraphStyle={paragraphStyle()}
                   getCount={getCount}
                   hideBubbles={props.hideCommentBubbles}
@@ -289,6 +301,7 @@ export function ReaderContent(props: ReaderContentProps) {
                   referer={chapterPageReferer()}
                   source={bookSource()}
                 />
+                </div>
               )}
             </For>
           </div>

@@ -1,7 +1,9 @@
 import { splitProps } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
+import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
+import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
+import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 
 export interface MediaViewerChapterNavFooterProps {
   chapterIndex: number;
@@ -9,13 +11,13 @@ export interface MediaViewerChapterNavFooterProps {
   loading?: boolean;
   /** 中间附加信息（如漫画页码）*/
   center?: import('solid-js').JSX.Element;
-  /** 不传 overlay 时跟 MediaViewerShell footerVisible */
+  /** @deprecated 显隐由 MediaViewerOverlayBottomChrome 控制 */
   visible?: boolean;
   onPrev: () => void;
   onNext: () => void;
 }
 
-/** 媒体阅读器通用章节切换底栏（overlay 位移+淡入淡出） */
+/** 媒体阅读器章节底栏内容（壳层见 MediaViewerFooter → MediaViewerOverlayBottomChrome） */
 export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterProps) {
   const [local] = splitProps(props, [
     'chapterIndex',
@@ -26,45 +28,55 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
     'onPrev',
     'onNext',
   ]);
-  const shell = useMediaViewerShellOptional();
-  const visible = () => {
-    if (local.visible !== undefined) return local.visible;
-    if (shell) return shell.footerVisible();
-    return true;
-  };
+
+  const floating = useMediaViewerChromeFloating();
+  const navBtn = () =>
+    cn(
+      floating.isFloating() && floating.pillClass(),
+      floating.isFloating() && 'shadow-sm',
+    );
+  const centerWrap = () =>
+    cn(
+      'flex min-w-0 flex-col items-center gap-0.5 text-center',
+      floating.isFloating() && floating.pillClass(),
+      floating.isFloating() && 'px-3 py-1.5',
+    );
 
   return (
-    <div
-      class={cn(
-        'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-        'flex items-center justify-between gap-2 border-t border-border/50 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur app-bottom-chrome-inset',
-        !visible() && 'reader-chrome-overlay-panel--hidden',
-      )}
-    >
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={local.chapterIndex <= 0 || local.loading}
-        onClick={local.onPrev}
+    <MediaViewerBottomChromeContent>
+      <div
+        class={cn(
+          mediaViewerChromeBottomRowClass,
+          floating.isFloating() && 'border-0 bg-transparent',
+        )}
       >
-        上一章
-      </Button>
-      <div class="flex min-w-0 flex-col items-center gap-0.5 text-center">
-        <span class="text-xs text-muted-foreground">
-          {local.catalogLength > 0
-            ? `${local.chapterIndex + 1} / ${local.catalogLength} 章`
-            : ''}
-        </span>
-        {local.center}
+        <Button
+          variant={floating.isFloating() ? 'ghost' : 'outline'}
+          size="sm"
+          class={navBtn()}
+          disabled={local.chapterIndex <= 0 || local.loading}
+          onClick={local.onPrev}
+        >
+          上一章
+        </Button>
+        <div class={centerWrap()}>
+          <span class="text-xs text-muted-foreground">
+            {local.catalogLength > 0
+              ? `${local.chapterIndex + 1} / ${local.catalogLength} 章`
+              : ''}
+          </span>
+          {local.center}
+        </div>
+        <Button
+          variant={floating.isFloating() ? 'ghost' : 'outline'}
+          size="sm"
+          class={navBtn()}
+          disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
+          onClick={local.onNext}
+        >
+          下一章
+        </Button>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
-        onClick={local.onNext}
-      >
-        下一章
-      </Button>
-    </div>
+    </MediaViewerBottomChromeContent>
   );
 }

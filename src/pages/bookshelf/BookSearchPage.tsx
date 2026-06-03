@@ -87,7 +87,6 @@ export interface BookSearchPageProps {
   onBack: () => void;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo: (source: BookSource, book: SearchBook) => void;
-  onAddedToShelf?: () => void;
   className?: string;
 }
 
@@ -152,7 +151,6 @@ export function BookSearchPage(props: BookSearchPageProps) {
   onMount(() => {
     const onBookshelfRefresh = () => {
       void reloadShelfMembership();
-      props.onAddedToShelf?.();
     };
     window.addEventListener('bookshelf-refresh', onBookshelfRefresh);
     onCleanup(() => window.removeEventListener('bookshelf-refresh', onBookshelfRefresh));

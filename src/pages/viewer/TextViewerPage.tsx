@@ -4,10 +4,10 @@
  */
 
 import { createSignal, Show, Index, onMount, onCleanup, createEffect, type Accessor } from 'solid-js';
-import { subscribeMediaViewerAppFocus } from '@/lib/media/media-viewer-app-focus';
-import { createMediaViewerChromeAutoHide } from '@/lib/media/media-viewer-chrome-auto-hide';
-import { createMediaViewerChromeInputHandlers } from '@/lib/media/media-viewer-chrome-input';
+import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
+import { textViewerDualPageActive } from '@/lib/media/text/reader-ui-config';
+import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { Button } from '@/components/ui/button';
 import {
   AppDrawer,
@@ -25,6 +25,12 @@ import {
 } from '@/components/shared/AppDialog';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { ReaderContent } from '@/components/viewer/text-viewer/ReaderContent';
+import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
+import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
+import {
+  isTextViewerPagedAnim,
+  normalizeTextViewerPageAnim,
+} from '@/lib/media/text/text-viewer-page-anim';
 import { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';
 import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
@@ -52,7 +58,6 @@ import {
 } from '@/lib/media/text/reader-bookmark';
 import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
-import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
 import { isMobile } from '@/lib/platform/detect';
 import { isLocalBook } from '@/lib/local-book';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -62,10 +67,15 @@ import {
   MediaViewerHeader,
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+import {
+  useMediaViewerMainScrollClass,
+  useMediaViewerMainStageClass,
+} from '@/lib/viewer/viewer-chrome-layout';
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
-import { TextViewerChromeFooter } from '@/components/viewer/text-viewer/TextViewerChromeFooter';
+import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
 
-const LONG_PRESS_MS = 400;
+/** 区分轻点与滑动：移动超过阈值则不触发分区单击 */
 const TAP_MOVE_THRESHOLD = 10;
 
 /** 阅读器主题 0–6 的底栏配色（与 ReaderContent 正文一致，窄屏+移动端时使用）；边框与背景对比明显，各主题下都清晰可见 */
@@ -87,36 +97,15 @@ export interface BookReaderProps {
   entryVisible?: Accessor<boolean>;
 }
 
+/** 在 Shell 内挂载，供分区「菜单」动作与 Shell 顶栏显隐同步 */
+function BookReaderChromeBridge(props: { onReady: (toggleBars: () => void) => void }) {
+  const shell = useMediaViewerShell();
+  onMount(() => props.onReady(() => shell.toggleBars()));
+  return null;
+}
+
 export function BookReader(props: BookReaderProps) {
-  const [topBarVisible, setTopBarVisible] = createSignal(true);
-
-  const tryShowChromeOnForeground = () => {
-    if (props.entryVisible?.()) setTopBarVisible(true);
-  };
-
-  const appFocus = subscribeMediaViewerAppFocus({
-    onForeground: tryShowChromeOnForeground,
-    onBackground: () => chromeAutoHide.clearHideTimer(),
-  });
-
-  const chromeAutoHide = createMediaViewerChromeAutoHide({
-    enabled: () => true,
-    isControlled: () => false,
-    setHeaderVisible: setTopBarVisible,
-    canAutoHide: appFocus.canAutoHide,
-  });
-
-  const applyTopBarVisible = (visible: boolean) => {
-    setTopBarVisible(visible);
-    if (!visible) chromeAutoHide.clearHideTimer();
-  };
-
-  const chromeInput = createMediaViewerChromeInputHandlers({
-    headerVisible: topBarVisible,
-    setHeaderVisible: applyTopBarVisible,
-    toggleBars: () => applyTopBarVisible(!topBarVisible()),
-    enabled: () => true,
-  });
+  let toggleChromeBars: () => void = () => undefined;
 
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   /** 目录列表滚动位置缓存（关闭时保存，再次打开时恢复），换书时清零 */
@@ -146,6 +135,7 @@ export function BookReader(props: BookReaderProps) {
   const [panelClosing, setPanelClosing] = createSignal(false);
   /** 宽屏下段评面板刚打开，用于进入动画（从右侧滑入） */
   const [panelEntering, setPanelEntering] = createSignal(false);
+  const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
   const [isWideScreen, setIsWideScreen] = createSignal(window.innerWidth >= 480);
   const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
 
@@ -182,15 +172,6 @@ export function BookReader(props: BookReaderProps) {
   const content = () => textViewerStore.state.content;
   const chapterPos = () => textViewerStore.state.chapterPos;
 
-  /** 阅读进度状态栏是否显示（仅控制状态栏，不绑操作栏） */
-  const statusBarVisible = () => {
-    const style = textViewerStore.state.config.statusBarDisplayStyle;
-    if (style === 'always') return true;
-    if (style === 'never') return false;
-    return topBarVisible();
-  };
-  /** 底栏操作栏是否显示（窄屏且顶栏可见） */
-  const operationBarVisible = () => !isWideScreen() && topBarVisible();
   /** 底栏：本章字数展示（优先章节 wordCount，否则按正文长度） */
   const chapterWordCountText = () => {
     const ch = currentChapter();
@@ -330,23 +311,47 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
+  let pagedNav: ReaderPagedNavApi | undefined;
+
+  const normalizedPageAnim = () =>
+    normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
+  const isPagedMode = () => isTextViewerPagedAnim(normalizedPageAnim());
+
   const dualPageActive = () => {
-    const mode = textViewerStore.state.config.dualPage ?? 'auto';
-    if (mode === 'off') return false;
-    if (mode === 'always') return isWideScreen();
-    return isWideScreen() && window.innerWidth >= 900;
+    if (isPagedMode()) return false;
+    return textViewerDualPageActive(
+      textViewerStore.state.config.dualPage ?? 'auto',
+      isWideScreen(),
+      viewportWidth(),
+    );
+  };
+
+  const goNextPage = () => {
+    if (isPagedMode() && pagedNav) {
+      pagedNav.goNextPage();
+      return;
+    }
+    void handleNext();
+  };
+
+  const goPrevPage = () => {
+    if (isPagedMode() && pagedNav) {
+      pagedNav.goPrevPage();
+      return;
+    }
+    void handlePrev();
   };
 
   const runClickAction = (action: ReaderClickActionId) => {
     switch (action) {
       case 'menu':
-        toggleTopBar();
+        toggleChromeBars();
         break;
       case 'nextPage':
-        handleNext();
+        goNextPage();
         break;
       case 'prevPage':
-        handlePrev();
+        goPrevPage();
         break;
       case 'nextChapter':
         void handleNext();
@@ -359,11 +364,11 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
-  const pageAnim = () => textViewerStore.state.config.pageAnim ?? 'scroll';
   const contentTransitionClass = () => {
-    const anim = pageAnim();
-    if (anim === 'cover') return 'reader-chapter-enter-cover';
-    if (anim === 'slide') return 'reader-chapter-enter-slide';
+    if (isPagedMode()) return '';
+    const anim = normalizedPageAnim();
+    if (anim === 'cover' || anim === 'linkedCover') return 'reader-chapter-enter-cover';
+    if (anim === 'slide' || anim === 'simulation') return 'reader-chapter-enter-slide';
     if (anim === 'none') return '';
     return '';
   };
@@ -372,14 +377,16 @@ export function BookReader(props: BookReaderProps) {
   const handleChapterProgressChange = (values: number[]) => {
     const p = Math.max(0, Math.min(1, values[0] ?? 0));
     textViewerStore.setChapterPos(p);
+    if (isPagedMode() && pagedNav) {
+      pagedNav.setPageProgress(p);
+      return;
+    }
     if (scrollContainer) {
       const sh = scrollContainer.scrollHeight;
       const ch = scrollContainer.clientHeight;
       scrollContainer.scrollTop = sh > ch ? p * (sh - ch) : 0;
     }
   };
-
-  const toggleTopBar = () => applyTopBarVisible(!topBarVisible());
 
   const toggleTheme = (pressed: boolean) => {
     setIsDark(pressed);
@@ -425,27 +432,12 @@ export function BookReader(props: BookReaderProps) {
     return () => cancelAnimationFrame(id);
   });
 
-  createEffect(() => {
-    if (props.entryVisible?.()) {
-      chromeAutoHide.revealSession();
-    } else {
-      chromeAutoHide.clearHideTimer();
-    }
-  });
-
   onMount(() => {
-    if (props.entryVisible === undefined || props.entryVisible()) {
-      chromeAutoHide.revealSession();
-    }
-    onCleanup(() => {
-      appFocus.dispose();
-      chromeAutoHide.dispose();
-      chromeInput.dispose();
-    });
-  });
-
-  onMount(() => {
-    const handleResize = () => setIsWideScreen(window.innerWidth >= 480);
+    const handleResize = () => {
+      const w = window.innerWidth;
+      setViewportWidth(w);
+      setIsWideScreen(w >= 480);
+    };
     window.addEventListener('resize', handleResize);
     onCleanup(() => window.removeEventListener('resize', handleResize));
   });
@@ -485,10 +477,10 @@ export function BookReader(props: BookReaderProps) {
         setCatalogOpen(false);
         setSettingsOpen(false);
         if (commentsOpen()) setPanelClosing(true);
-        else if (!catalogOpen() && !settingsOpen()) setTopBarVisible((v) => !v);
+        else if (!catalogOpen() && !settingsOpen()) toggleChromeBars();
       }
-      if (e.key === 'ArrowLeft') handlePrev();
-      if (e.key === 'ArrowRight') handleNext();
+      if (e.key === 'ArrowLeft') goPrevPage();
+      if (e.key === 'ArrowRight') goNextPage();
       if (textViewerStore.state.config.volumeKeyTurnPage) {
         if (e.key === 'ArrowUp' || e.code === 'AudioVolumeUp') {
           e.preventDefault();
@@ -515,7 +507,7 @@ export function BookReader(props: BookReaderProps) {
   let lastChapterIndex = -1;
 
   const handleScroll = () => {
-    if (!scrollContainer || isRestoringScroll) return;
+    if (isPagedMode() || !scrollContainer || isRestoringScroll) return;
 
     // 计算滚动位置（相对于内容顶部）
     const scrollTop = scrollContainer.scrollTop;
@@ -549,17 +541,18 @@ export function BookReader(props: BookReaderProps) {
 
     // 检测章节切换：如果章节索引变化了，重置滚动位置到顶部
     if (lastChapterIndex !== -1 && lastChapterIndex !== index) {
-      const anim = textViewerStore.state.config.pageAnim ?? 'scroll';
-      if (anim !== 'scroll') {
+      const anim = normalizedPageAnim();
+      if (!isTextViewerPagedAnim(anim) && anim !== 'scroll') {
         setContentEnterKey((k) => k + 1);
       }
-      // 章节切换了，重置滚动位置到顶部
-      requestAnimationFrame(() => {
-        if (scrollContainer) {
-          scrollContainer.scrollTop = 0;
-          textViewerStore.setChapterPos(0);
-        }
-      });
+      if (!isPagedMode()) {
+        requestAnimationFrame(() => {
+          if (scrollContainer) {
+            scrollContainer.scrollTop = 0;
+            textViewerStore.setChapterPos(0);
+          }
+        });
+      }
       lastChapterIndex = index;
       return;
     }
@@ -569,6 +562,11 @@ export function BookReader(props: BookReaderProps) {
 
     // 只在首次打开书籍时恢复滚动位置
     if (hasRestoredInitialScroll) return;
+
+    if (isPagedMode()) {
+      hasRestoredInitialScroll = true;
+      return;
+    }
 
     const pos = textViewerStore.state.chapterPos;
 
@@ -662,7 +660,8 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const runRegionalClick = (e: MouseEvent) => {
-    const t = e.currentTarget as HTMLElement;
+    const t = scrollContainer;
+    if (!t) return;
     const rect = t.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
     const yRatio = (e.clientY - rect.top) / Math.max(rect.height, 1);
@@ -673,33 +672,128 @@ export function BookReader(props: BookReaderProps) {
     tapStartTime = 0;
   };
 
-  const onContentClick = (e: MouseEvent) => {
-    if (isMediaViewerInteractiveClick(e.target)) return;
-    const wasLongPress = tapStartTime && Date.now() - tapStartTime >= LONG_PRESS_MS;
-    if (tapMoved || wasLongPress) {
+  const contentPrimaryAction = (e: MouseEvent) => {
+    if (tapMoved) {
       tapStartTime = 0;
       return;
     }
-    chromeInput.onContentPrimaryClick(e, () => runRegionalClick(e));
+    runRegionalClick(e);
   };
 
-  const onContentDblClick = (e: MouseEvent) => {
-    if (isMediaViewerInteractiveClick(e.target)) return;
-    chromeInput.onContentDblClick(e);
+  const scrollContentClass = useMediaViewerMainScrollClass('reader-text-scroll');
+  const stageContentClass = useMediaViewerMainStageClass('reader-text-stage');
+  const readerThemeBg = () => readerThemeClasses(textViewerStore.state.config.theme).bg;
+
+  const mainContentClass = () =>
+    cn(
+      isPagedMode() ? stageContentClass() : scrollContentClass(),
+      isPagedMode() && readerThemeBg(),
+    );
+
+  const readerContentShared = {
+    onOpenComments: openComments,
+    getSegmentCommentCount,
+    applyReadWidth: () => false as const,
   };
+
+  const renderTextBody = () => (
+    <Show
+      when={isPagedMode()}
+      fallback={
+        <Index each={[contentEnterKey()]}>
+          {() => (
+            <ReaderContent
+              class={cn('min-h-full', contentTransitionClass())}
+              {...readerContentShared}
+              dualPage={dualPageActive()}
+            />
+          )}
+        </Index>
+      }
+    >
+      <ReaderPagedViewport
+        pageAnim={normalizedPageAnim}
+        class="h-full min-h-full"
+        {...readerContentShared}
+        onRequestPrevChapter={() => void handlePrev()}
+        onRequestNextChapter={() => void handleNext()}
+        onRegisterNav={(api) => {
+          pagedNav = api;
+        }}
+      />
+    </Show>
+  );
 
   return (
     <>
       <MediaViewerShell
+        entryVisible={props.entryVisible}
         tapToToggleBars={false}
         chromePointerInput
-        chromeInputHandlers={chromeInput}
-        entryVisible={props.entryVisible}
-        headerVisible={topBarVisible()}
-        onHeaderVisibleChange={applyTopBarVisible}
-        footerVisible={statusBarVisible() || operationBarVisible()}
+        contentPrimaryAction={contentPrimaryAction}
       >
-        <MediaViewerShellMain tapToToggleBars={false}>
+        <BookReaderChromeBridge onReady={(toggle) => {
+          toggleChromeBars = toggle;
+        }} />
+        <MediaViewerShellMain>
+          <MediaViewerChromeSlots
+            header={
+              <MediaViewerHeader>
+                <TextViewerToolbarHeader
+                  bookName={book()?.name ?? ''}
+                  onClose={props.onClose}
+                  onOpenBookInfo={props.onOpenBookInfo}
+                  isWideScreen={isWideScreen()}
+                  readAloudActive={readAloudActive()}
+                  isDark={isDark()}
+                  onToggleTheme={toggleTheme}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onReadAloud={handleReadAloud}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+                  onChangeSource={() => {
+                    const b = book();
+                    if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
+                      showAppToast({
+                        title: '无法换源',
+                        description: textViewerStore.isGuestReading()
+                          ? '试读请先加入书架'
+                          : '本地书不支持换源',
+                      });
+                      return;
+                    }
+                    setChangeSourceOpen(true);
+                  }}
+                  onRefreshChapter={() => {
+                    void textViewerStore.refreshChapter().catch(() => undefined);
+                  }}
+                  onOpenOfflineCache={openOfflineCacheDialog}
+                  onOpenMoreMenu={() => setMoreMenuOpen(true)}
+                />
+              </MediaViewerHeader>
+            }
+            footer={
+              <MediaViewerFooter>
+                <TextViewerBottomChrome
+                  isWideScreen={isWideScreen()}
+                  bottomBarThemeClasses={bottomBarThemeClasses()}
+                  chapterTitle={currentChapter()?.title ?? ''}
+                  chapterWordCountText={chapterWordCountText()}
+                  chapterProgressPercent={chapterProgressPercent()}
+                  bookProgressPercent={bookProgressPercent()}
+                  chapterPos={chapterPos()}
+                  onChapterProgressChange={handleChapterProgressChange}
+                  onPrevChapter={handlePrev}
+                  onNextChapter={handleNext}
+                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onReadAloud={handleReadAloud}
+                  readAloudActive={readAloudActive()}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+                />
+              </MediaViewerFooter>
+            }
+          >
           <Show
             when={isWideScreen() && (commentsOpen() || panelClosing())}
             fallback={
@@ -707,23 +801,11 @@ export function BookReader(props: BookReaderProps) {
                 ref={(el) => {
                   if (el) scrollContainer = el;
                 }}
-                class="reader-text-scroll absolute inset-0 overflow-y-auto"
+                class={mainContentClass()}
                 onPointerDown={onContentPointerDown}
                 onPointerMove={onContentPointerMove}
-                onClick={onContentClick}
-                onDblClick={onContentDblClick}
               >
-                <Index each={[contentEnterKey()]}>
-                  {() => (
-                    <ReaderContent
-                      class={cn('min-h-full', contentTransitionClass())}
-                      onOpenComments={openComments}
-                      getSegmentCommentCount={getSegmentCommentCount}
-                      applyReadWidth={() => false}
-                      dualPage={dualPageActive()}
-                    />
-                  )}
-                </Index>
+                {renderTextBody()}
               </div>
             }
           >
@@ -733,23 +815,11 @@ export function BookReader(props: BookReaderProps) {
                   ref={(el) => {
                     if (el) scrollContainer = el;
                   }}
-                  class="reader-text-scroll absolute inset-0 overflow-y-auto"
+                  class={mainContentClass()}
                   onPointerDown={onContentPointerDown}
                   onPointerMove={onContentPointerMove}
-                  onClick={onContentClick}
-                  onDblClick={onContentDblClick}
                 >
-                  <Index each={[contentEnterKey()]}>
-                    {() => (
-                      <ReaderContent
-                        class={cn('min-h-full', contentTransitionClass())}
-                        onOpenComments={openComments}
-                        getSegmentCommentCount={getSegmentCommentCount}
-                        applyReadWidth={() => false}
-                        dualPage={dualPageActive()}
-                      />
-                    )}
-                  </Index>
+                  {renderTextBody()}
                 </div>
               </div>
               <div
@@ -769,65 +839,7 @@ export function BookReader(props: BookReaderProps) {
               </div>
             </div>
           </Show>
-
-          <MediaViewerHeader placement="overlay" visible={topBarVisible()}>
-            <TextViewerToolbarHeader
-              bookName={book()?.name ?? ''}
-              onClose={props.onClose}
-              onOpenBookInfo={props.onOpenBookInfo}
-              isWideScreen={isWideScreen()}
-              readAloudActive={readAloudActive()}
-              isDark={isDark()}
-              onToggleTheme={toggleTheme}
-              onOpenCatalog={() => setCatalogOpen(true)}
-              onReadAloud={handleReadAloud}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
-              onChangeSource={() => {
-                const b = book();
-                if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
-                  showAppToast({
-                    title: '无法换源',
-                    description: textViewerStore.isGuestReading()
-                      ? '试读请先加入书架'
-                      : '本地书不支持换源',
-                  });
-                  return;
-                }
-                setChangeSourceOpen(true);
-              }}
-              onRefreshChapter={() => {
-                void textViewerStore.refreshChapter().catch(() => undefined);
-              }}
-              onOpenOfflineCache={openOfflineCacheDialog}
-              onOpenMoreMenu={() => setMoreMenuOpen(true)}
-            />
-          </MediaViewerHeader>
-
-          <MediaViewerFooter
-            placement="overlay"
-            visible={statusBarVisible() || operationBarVisible()}
-          >
-            <TextViewerChromeFooter
-              isWideScreen={isWideScreen()}
-              statusBarVisible={statusBarVisible()}
-              operationBarVisible={operationBarVisible()}
-              bottomBarThemeClasses={bottomBarThemeClasses()}
-              chapterTitle={currentChapter()?.title ?? ''}
-              chapterWordCountText={chapterWordCountText()}
-              chapterProgressPercent={chapterProgressPercent()}
-              bookProgressPercent={bookProgressPercent()}
-              chapterPos={chapterPos()}
-              onChapterProgressChange={handleChapterProgressChange}
-              onPrevChapter={handlePrev}
-              onNextChapter={handleNext}
-              onOpenCatalog={() => setCatalogOpen(true)}
-              onReadAloud={handleReadAloud}
-              readAloudActive={readAloudActive()}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
-            />
-          </MediaViewerFooter>
+          </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
 
@@ -1105,6 +1117,108 @@ export function BookReader(props: BookReaderProps) {
         }
         .reader-chapter-enter-slide {
           animation: reader-slide-in 0.32s ease-out;
+        }
+
+        .reader-paged-page {
+          transform-origin: center center;
+          will-change: transform, opacity;
+        }
+
+        @keyframes reader-paged-cover-out-next {
+          from { transform: translateX(0); }
+          to { transform: translateX(-100%); }
+        }
+        @keyframes reader-paged-cover-out-prev {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes reader-paged-cover-in-next {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes reader-paged-cover-in-prev {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(0); }
+        }
+        .reader-paged-turn-cover-out-next {
+          animation: reader-paged-cover-out-next 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-cover-out-prev {
+          animation: reader-paged-cover-out-prev 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-cover-in-next {
+          animation: reader-paged-cover-in-next 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-cover-in-prev {
+          animation: reader-paged-cover-in-prev 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-linked-out-next {
+          animation: reader-paged-cover-out-next 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-linked-out-prev {
+          animation: reader-paged-cover-out-prev 0.32s ease-out forwards;
+        }
+
+        @keyframes reader-paged-slide-out-next {
+          from { transform: translateX(0); }
+          to { transform: translateX(-100%); }
+        }
+        @keyframes reader-paged-slide-out-prev {
+          from { transform: translateX(0); }
+          to { transform: translateX(100%); }
+        }
+        @keyframes reader-paged-slide-in-next {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        @keyframes reader-paged-slide-in-prev {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(0); }
+        }
+        .reader-paged-turn-slide-out-next {
+          animation: reader-paged-slide-out-next 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-slide-out-prev {
+          animation: reader-paged-slide-out-prev 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-slide-in-next {
+          animation: reader-paged-slide-in-next 0.32s ease-out forwards;
+        }
+        .reader-paged-turn-slide-in-prev {
+          animation: reader-paged-slide-in-prev 0.32s ease-out forwards;
+        }
+
+        @keyframes reader-paged-sim-out-next {
+          from { transform: perspective(1200px) rotateY(0deg); opacity: 1; }
+          to { transform: perspective(1200px) rotateY(-85deg); opacity: 0.2; }
+        }
+        @keyframes reader-paged-sim-out-prev {
+          from { transform: perspective(1200px) rotateY(0deg); opacity: 1; }
+          to { transform: perspective(1200px) rotateY(85deg); opacity: 0.2; }
+        }
+        @keyframes reader-paged-sim-in-next {
+          from { transform: perspective(1200px) rotateY(85deg); opacity: 0.2; }
+          to { transform: perspective(1200px) rotateY(0deg); opacity: 1; }
+        }
+        @keyframes reader-paged-sim-in-prev {
+          from { transform: perspective(1200px) rotateY(-85deg); opacity: 0.2; }
+          to { transform: perspective(1200px) rotateY(0deg); opacity: 1; }
+        }
+        .reader-paged-turn-sim-out-next {
+          animation: reader-paged-sim-out-next 0.32s ease-out forwards;
+          transform-origin: left center;
+        }
+        .reader-paged-turn-sim-out-prev {
+          animation: reader-paged-sim-out-prev 0.32s ease-out forwards;
+          transform-origin: right center;
+        }
+        .reader-paged-turn-sim-in-next {
+          animation: reader-paged-sim-in-next 0.32s ease-out forwards;
+          transform-origin: right center;
+        }
+        .reader-paged-turn-sim-in-prev {
+          animation: reader-paged-sim-in-prev 0.32s ease-out forwards;
+          transform-origin: left center;
         }
       `}</style>
     </>

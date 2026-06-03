@@ -1,0 +1,31 @@
+import { splitProps, type JSX } from 'solid-js';
+import { cn } from '@/lib/utils';
+
+export interface MediaViewerFloatingTopChromeProps {
+  children: JSX.Element;
+  visible?: boolean;
+  class?: string;
+}
+
+/** 悬浮顶栏：控件独立浮于内容区，胶囊/圆形半透明背景 */
+export function MediaViewerFloatingTopChrome(props: MediaViewerFloatingTopChromeProps) {
+  const [local] = splitProps(props, ['children', 'visible', 'class']);
+  const visible = () => local.visible !== false;
+
+  return (
+    <header
+      class={cn(
+        'reader-chrome-floating-top pointer-events-none absolute inset-x-0 top-0 z-10',
+        'safe-area-inset-top',
+        !visible() && 'reader-chrome-floating-top--hidden',
+        local.class,
+      )}
+      data-tauri-drag-region
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div class="reader-chrome-floating-top__track pointer-events-auto flex h-14 items-center gap-2 px-3 pb-2 pt-3">
+        {local.children}
+      </div>
+    </header>
+  );
+}

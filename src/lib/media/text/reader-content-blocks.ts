@@ -14,6 +14,7 @@ import {
   resolveLegadoImageLayout,
   type LegadoImageLayout,
 } from '@/lib/js-engine/legado/legado-image-options';
+import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 
 export type ReaderContentBlock =
   | { type: 'text'; text: string }
@@ -109,13 +110,14 @@ export function splitRawIntoParagraphSegments(raw: string): string[] {
 }
 
 function stripInlineMarkup(text: string): string {
-  return text
+  const stripped = text
     .replace(/<\/?p\b[^>]*>/gi, '')
     .replace(/<\/?(?:div|br|hr|span)\b[^>]*>/gi, (tag) =>
       /^<\/?br/i.test(tag) ? '\n' : '',
     )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  return decodeHtmlEntities(stripped);
 }
 
 function readLegadoClickFromImgTag(tag: string): string | undefined {

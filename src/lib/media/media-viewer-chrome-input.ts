@@ -17,6 +17,8 @@ export type MediaViewerChromeInputHandlers = {
   onContentPrimaryClick: (event: MouseEvent, action: () => void) => void;
   /** 双击：仅切换顶底栏，并取消待执行的单击 */
   onContentDblClick: (event: MouseEvent, options?: { forceChrome?: boolean }) => void;
+  /** 顶底栏被自动隐藏或外部设为不可见时，清除「移入后首次单击隐藏」状态 */
+  resetDismissGestureState: () => void;
   dispose: () => void;
 };
 
@@ -40,7 +42,10 @@ export function createMediaViewerChromeInputHandlers(options: {
   setHeaderVisible: (visible: boolean) => void;
   toggleBars: () => void;
   enabled: () => boolean;
+  /** 固定布局：不切换/隐藏顶底栏，仍允许执行主区单击 action */
+  barsCollapsible?: () => boolean;
 }): MediaViewerChromeInputHandlers {
+  const barsCollapsible = () => options.barsCollapsible?.() !== false;
   let shellElement: HTMLElement | undefined;
   let awaitingDismissClick = false;
   let shownBarsByPointerLeave = false;
@@ -67,6 +72,11 @@ export function createMediaViewerChromeInputHandlers(options: {
     shellElement = el;
   };
 
+  const resetDismissGestureState = () => {
+    awaitingDismissClick = false;
+    shownBarsByPointerLeave = false;
+  };
+
   const showBarsFromPointerLeave = () => {
     options.setHeaderVisible(true);
     shownBarsByPointerLeave = true;
@@ -74,7 +84,7 @@ export function createMediaViewerChromeInputHandlers(options: {
   };
 
   const onDocumentPointerOut = (event: PointerEvent) => {
-    if (!options.enabled() || !isDesktop() || !shellElement) return;
+    if (!options.enabled() || !barsCollapsible() || !isDesktop() || !shellElement) return;
     if (!isPointerLeavingShell(shellElement, event.relatedTarget)) return;
     if (!(event.target instanceof Node) || !shellElement.contains(event.target)) return;
     showBarsFromPointerLeave();
@@ -85,7 +95,7 @@ export function createMediaViewerChromeInputHandlers(options: {
   }
 
   const onShellPointerLeave = (event: PointerEvent) => {
-    if (!options.enabled() || !isDesktop()) return;
+    if (!options.enabled() || !barsCollapsible() || !isDesktop()) return;
     const shell = event.currentTarget;
     if (
       !shell ||
@@ -99,7 +109,8 @@ export function createMediaViewerChromeInputHandlers(options: {
   };
 
   const onShellPointerEnter = (_event: PointerEvent) => {
-    if (!options.enabled() || !isDesktop() || !shownBarsByPointerLeave) return;
+    if (!options.enabled() || !barsCollapsible() || !isDesktop() || !shownBarsByPointerLeave)
+      return;
     if (options.headerVisible()) {
       awaitingDismissClick = true;
     }
@@ -110,7 +121,7 @@ export function createMediaViewerChromeInputHandlers(options: {
     if (!options.enabled()) return;
     if (isMediaViewerInteractiveClick(event.target)) return;
 
-    if (isDesktop() && awaitingDismissClick) {
+    if (barsCollapsible() && isDesktop() && awaitingDismissClick) {
       event.preventDefault();
       event.stopPropagation();
       awaitingDismissClick = false;
@@ -138,7 +149,7 @@ export function createMediaViewerChromeInputHandlers(options: {
   };
 
   const onContentDblClick = (event: MouseEvent, _dblOptions?: { forceChrome?: boolean }) => {
-    if (!options.enabled()) return;
+    if (!options.enabled() || !barsCollapsible()) return;
     if (isMediaViewerInteractiveClick(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -152,8 +163,7 @@ export function createMediaViewerChromeInputHandlers(options: {
       document.removeEventListener('pointerout', onDocumentPointerOut);
     }
     shellElement = undefined;
-    awaitingDismissClick = false;
-    shownBarsByPointerLeave = false;
+    resetDismissGestureState();
     resetClickPair();
   };
 
@@ -163,6 +173,7 @@ export function createMediaViewerChromeInputHandlers(options: {
     onShellPointerEnter,
     onContentPrimaryClick,
     onContentDblClick,
+    resetDismissGestureState,
     dispose,
   };
 }

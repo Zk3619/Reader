@@ -14,13 +14,16 @@ const NAMED_ENTITIES: Record<string, string> = {
   rlm: '\u200F',
 };
 
+const ENTITY_REMAIN_RE = /&#(\d+|x[0-9a-fA-F]+);|&[a-zA-Z]+;/;
+
 export function decodeHtmlEntities(text: string): string {
   if (!text || !text.includes('&')) return text;
 
   if (typeof document !== 'undefined' && !/<[a-zA-Z!/]/.test(text)) {
     const ta = document.createElement('textarea');
     ta.innerHTML = text;
-    if (ta.value) return ta.value;
+    const decoded = ta.value;
+    if (decoded && !ENTITY_REMAIN_RE.test(decoded)) return decoded;
   }
 
   return decodeHtmlEntitiesFallback(text);
