@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { flushExploreScriptToastBuffer } from '@/lib/js-engine/legado/explore-inject';
 
 describe('flushExploreScriptToastBuffer', () => {
-  it('VM 结束后才调用 onScriptToast，单条失败不中断后续', () => {
+  it('VM 结束后才调用 onScriptToast，单条失败不中断后续', async () => {
     const buffer = [
       { msg: '第一条', level: 'info' },
       { msg: '第二条', level: 'warning' },
@@ -15,6 +15,7 @@ describe('flushExploreScriptToastBuffer', () => {
       .mockImplementationOnce(() => {});
 
     expect(() => flushExploreScriptToastBuffer(buffer, onScriptToast)).not.toThrow();
+    await new Promise<void>((resolve) => queueMicrotask(() => queueMicrotask(resolve)));
     expect(onScriptToast).toHaveBeenCalledTimes(2);
     expect(onScriptToast).toHaveBeenNthCalledWith(1, '第一条', 'info');
     expect(onScriptToast).toHaveBeenNthCalledWith(2, '第二条', 'warning');

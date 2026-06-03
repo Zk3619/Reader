@@ -1,0 +1,333 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="p2">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                            <title>恋爱漫画-漫画搜索 - 图库漫画</title>
+                            <meta content="来图库漫画发现海量日本漫画、韩国漫画、日韩、大陆、港台、欧美等多种题材漫画。" name="Description" />
+                            <meta content="恋爱,恋爱漫画,漫画,漫畫,漫画更新,漫畫更新,在线漫画,在線漫畫,線上漫畫,同人漫画,绅士漫画,成人漫画,熱門漫畫,漫画连载,漫畫連載" name="keywords" />
+                            <meta content="图库漫画:免费日韩漫画在线阅读平台、tuku.cc" name="Author" />
+                                                    <link rel="icon" type="image/svg+xml" href="../assets/images/tuku_icon.png" />
+                                                    <link rel="stylesheet" href="../css/common/index.css" />
+                                                    <link rel="stylesheet" href="../css/common/skeletons.css" />
+                                                    <link rel="stylesheet" href="../../css/header/index.css" />
+                                                    <link rel="stylesheet" href="../css/search/index.css" />
+</head>
+<body>
+    <div class="w-full bg-color-primary us-none fixed" style="height:78px;z-index:101">
+        <div class="box-center" style="height:78px">
+            <div class="f-left">
+                <a class="header-logo mr-20 f-left" href="/">
+                    <img class="w-full" style="width:130px;" src="../assets/images/logo.png" alt="" />
+                </a>
+                <ul class="relative f-left" style="width:410px;">
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/"><span class="i-b nav-text">首页</span></a></li>
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/update/"><span class="i-b nav-text">更新</span></a></li>
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/rank/"><span class="i-b nav-text">排行</span></a></li>
+                    <li class="header-nav dv-navAct f-left">
+                        <a class="w-full h-full  i-b" href="/comics/"><span class="i-b nav-text">分类</span></a>
+                    </li>
+                </ul>
+            </div>
+            <div class="header-search f-right mt-20 ">
+                <div class="header-search-input  bg-white radius-8 f-left relative">
+                    <input class="flex-1 input-style-none  dv-searchVal f-left search-ipt placeholder" placeholder="一拳超人" type="text" autocomplete="off" id="txtKeywords" data="一拳超人" />
+                    <img class="header-search-icon f-right" src="../assets/images/search-icon.png" alt="" id="btnSearch" />
+                    <div class="fuzzy-search-list absolute"></div>
+                </div>
+                <div class="hearder-f-ls  f-left">
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a  block f-left dv-userClick cp" ><img class="w-full" src="../assets/images/history-icon.png" alt="" /></a>
+                        <div class="p-10 relative bg-white radius-8 login-out login-out-wrap">
+                            <a class="block w-full text-common text-13 text-center m-0" href="/comichistory/">阅读历史</a>
+                            <div class="triangle absolute"></div>
+                        </div>
+                    </div>
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a block f-left dv-userClick cp" ><img class="w-full" src="../assets/images/collect-icon.png" alt="" /></a>
+                        <div class="p-10 relative bg-white radius-8 login-out login-out-wrap">
+                            <a class="block w-full text-common text-13 text-center m-0" href="/bookmarker/">我的收藏</a>
+                            <div class="triangle absolute"></div>
+                        </div>
+                    </div>
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a block dv-userClick cp" ><img class="w-full" src="../assets/images/user-icon.png" alt="" /></a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <img class="to-top cp dv-toTop" src="../assets/images/to-top-icon.png" alt="" />
+    </div>
+    <div style="height: 78px"></div>
+    <!-- 登录 -->
+    <div id="login" class="mask  hidden dv-loginShow us-none" style="display:none;">
+    </div>
+    <div class="login-modal bg-white radius-8 p-30  dv-loginShow register-modal" style="display: none; z-index: 10086;">
+        <div class="dv-userClick cp absolute login-close z-top"></div>
+        <p class="title login-title w-full text-center">登录</p>
+        <input type="email" class="ipt w-full mt-40 login-text-email placeholder" name="txt_email" placeholder="您的邮箱" />
+        <input class="ipt w-full mt-20 login-pw placeholder" type="password" name="txt_password" placeholder="您的密码" maxlength="20" minlength="6" />
+        <button class="btn text-16 text-black bold btn bg-color-primary radius-8 cp w-full text-center mt-40 mb-40 button" id="btnLogin" type="submit">立即登录</button>
+        <div class="w-full hidden">
+            <div class="f-left">
+                <input type="checkbox" name="remember" id="remember" />
+                <label class="cp" for="remember">自动登录</label>
+            </div>
+            <p class="f-right">
+                没有账号?                <a class="text-markedness" href="/register/">去注册</a>
+            </p>
+        </div>
+    </div>
+    <!--提示-->
+    <div class="toast" style="display:none">
+        <p class="toast-center text-14">这是一条提示</p>
+    </div>
+    <script src="../assets/js/jquery.min.js"></script>
+    <script src="../assets/js/array.compatibility.js"></script>
+    <script src="../js/login.js"></script>
+    <script src="../js/search.js"></script>
+<div class="box-center justify-start doc-center mt-40" id="search">
+    <div class="search-card bg-color-f9 radius-8 w-full search-text-wrap p-30 mb-28">
+        <p class="search-tip-text text-black mb-28">
+            <img class="mr-8 i-b mt-2 f-left" src="../assets/images/search-icon.png" alt="" />
+            搜索:            <span class="bold">"恋爱"</span>
+            共有7388个结果        </p>
+        <div class="line mb-28"></div>
+        <div class="hidden">
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-31002/" title="恋爱.爱恋..."><img class="w-full h-full" src="https://cover5.tuku.cc/44/43145/20180711130745_180x240_15.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-31002/" title="恋爱.爱恋...">恋爱.爱恋...</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter125150/" target="_blank" title="恋爱.爱恋... 第1卷">第1卷 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-33479/" title="恋爱·爱恋…"><img class="w-full h-full" src="https://cover8.tuku.cc/51/50488/20190528222717_180x240_15.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-33479/" title="恋爱·爱恋…">恋爱·爱恋…</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter130010/" target="_blank" title="恋爱·爱恋… 第1卷">第1卷 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-1336/" title="恋爱"><img class="w-full h-full" src="https://cover2.tuku.cc/4/3337/3337.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-1336/" title="恋爱">恋爱</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter8667/" target="_blank" title="恋爱 第4卷">第4卷 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-34145/" title="爱恋"><img class="w-full h-full" src="https://cover5.tuku.cc/52/51659/20190711102701_180x240_25.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-34145/" title="爱恋">爱恋</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter131065/" target="_blank" title="爱恋 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-7618/" title="你的恋爱我的恋爱"><img class="w-full h-full" src="https://cover5.tuku.cc/16/15761/15761_b.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-7618/" title="你的恋爱我的恋爱">你的恋爱我的恋爱</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter36398/" target="_blank" title="你的恋爱我的恋爱 第2话">第2话 后篇</a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-12664/" title="恋爱☆SLG"><img class="w-full h-full" src="https://cover6.tuku.cc/40/39555/20171128194652_180x240_22.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-12664/" title="恋爱☆SLG">恋爱☆SLG</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter58440/" target="_blank" title="恋爱☆SLG 第1话">第1话 觉醒！古老的传说骑士</a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-15726/" title="恋爱吧"><img class="w-full h-full" src="https://cover8.tuku.cc/41/40502/20180125210620_180x240_23.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-15726/" title="恋爱吧">恋爱吧</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter70028/" target="_blank" title="恋爱吧 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-28171/" title="恋爱ゲーム"><img class="w-full h-full" src="https://cover5.tuku.cc/34/33917/20161124114100_180x240_29.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-28171/" title="恋爱ゲーム">恋爱ゲーム</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter118205/" target="_blank" title="恋爱ゲーム 第2话">第2话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-27071/" title="恋爱Paradox"><img class="w-full h-full" src="https://cover4.tuku.cc/22/21895/20160218135144_180x240_23.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-27071/" title="恋爱Paradox">恋爱Paradox</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter115164/" target="_blank" title="初回限定版">初回限定版 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-61977/" title="恋爱 catharsis"><img class="w-full h-full" src="https://cover5.tuku.cc/76/75270/20220129151601_180x240_24.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-61977/" title="恋爱 catharsis">恋爱 catharsis</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter557072/" target="_blank" title="恋爱 catharsis 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-14865/" title="谈恋爱"><img class="w-full h-full" src="https://cover1.tuku.cc/37/36909/20170610214026_180x240_28.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-14865/" title="谈恋爱">谈恋爱</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter66972/" target="_blank" title="谈恋爱 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-7379/" title="恋爱platform"><img class="w-full h-full" src="https://cover9.tuku.cc/16/15229/15229_b.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-7379/" title="恋爱platform">恋爱platform</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter35560/" target="_blank" title="恋爱platform 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-1004/" title="恋爱RPG"><img class="w-full h-full" src="https://cover9.tuku.cc/3/2519/2519_b.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-1004/" title="恋爱RPG">恋爱RPG</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter6984/" target="_blank" title="恋爱RPG 第3卷">第3卷 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-42702/" title="恋爱吧！"><img class="w-full h-full" src="https://cover8.tuku.cc/84/83227/20221219103908_180x240_21.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-42702/" title="恋爱吧！">恋爱吧！</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter156907/" target="_blank" title="恋爱吧！ 第1话">第1话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-59376/" title="恋爱AI"><img class="w-full h-full" src="https://cover8.tuku.cc/70/69329/20210602153801_180x240_21.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-59376/" title="恋爱AI">恋爱AI</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter542638/" target="_blank" title="恋爱AI 第17话">第17话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-24907/" title="恋爱宅女"><img class="w-full h-full" src="https://cover1.tuku.cc/7/6620/6620_b.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-24907/" title="恋爱宅女">恋爱宅女</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter98580/" target="_blank" title="恋爱宅女 第1卷">第1卷 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-25340/" title="恋爱吧爱迪生"><img class="w-full h-full" src="https://cover6.tuku.cc/10/9577/9577_b.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-25340/" title="恋爱吧爱迪生">恋爱吧爱迪生</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter103263/" target="_blank" title="恋爱吧爱迪生 第29话">第29话 第二位发明家</a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-43386/" title="恋爱革命"><img class="w-full h-full" src="https://cover7.tuku.cc/84/83970/20230413185018_180x240_12.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-43386/" title="恋爱革命">恋爱革命</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter166932/" target="_blank" title="恋爱革命 第437话">第437话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-70847/" title="似恋非爱"><img class="w-full h-full" src="https://cover7.tuku.cc/86/85741/20240627223236_180x240_16.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-70847/" title="似恋非爱">似恋非爱</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">最新</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter789626/" target="_blank" title="似恋非爱 第101话">第101话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-51344/" title="14岁恋爱"><img class="w-full h-full" src="https://cover5.tuku.cc/10/9441/20191202092304_180x240_28.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-51344/" title="14岁恋爱">14岁恋爱</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter374130/" target="_blank" title="14岁恋爱 第50.5话">第50.5话 </a>
+                </div>
+            </div>
+            <div class="swiper-card-item mb-26 nth-7 ls-ml-35 f-left">
+                <a class="swiper-card-item-img radius-8 hidden block" href="/manga-43839/" title="恋爱暴君"><img class="w-full h-full" src="https://cover5.tuku.cc/10/9873/20190304091823_180x240_30.jpg" alt="" /></a>
+                <h3><a class="text-black title ellipsis text-14 block" href="/manga-43839/" title="恋爱暴君">恋爱暴君</a></h3>
+                <div class="text-12">
+                    <p class="text-common ellipsis new-tip mr-4 f-left">完结</p>
+                    <a class="text-markedness block ellipsis f-left" style="width:95px" href="/chapter186189/" target="_blank" title="单行附赠">单行附赠 </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="page-content mb-80 mt-28">
+        <div class="page us-none hidden">
+            <ul class="dv-pageClick f-right hidden">
+                <li class="page-item  cp f-left act">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1" data-index="1">1</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=2" data-index="2">2</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=3" data-index="3">3</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=4" data-index="4">4</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=5" data-index="5">5</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=6" data-index="6">6</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=7" data-index="7">7</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=8" data-index="8">8</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=9" data-index="9">9</a>
+                </li>
+                <li class="page-item  cp f-left ">
+                    <a class="text-13 text-common i-b" href="/search?title=%e6%81%8b%e7%88%b1&page=10" data-index="10">10</a>
+                </li>
+                <li class="next  cp f-left" data-value="next">
+                    <a class="i-b" href="/search?title=%e6%81%8b%e7%88%b1&amp;page=2" data-index="2"><img class="event-none" src="../../assets/images/page-right-icon.png" alt="" /></a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+<script src="../js/search/index.js"></script>
+<!--[if (gte IE 8)&(lte IE 9)]>
+    <link rel="stylesheet" type="text/css" href="../assets/css/ie8-9.css" />
+<![endif]-->
+<div class="w-full footer hidden z-top relative">
+    <p class="text-common w-full text-center mt-40">Copyright (C) 2024-2025 www.tuku.cc 图库漫画 All rights reserved</p>
+</div>
+<script src="../js/header/index.js"></script>
+<script src="../assets/js/jquery.lazyload.min.js"></script>
+<script>
+    $(function () {        $("img").lazyload({            threshold: 300,            effect: 'fadeIn',            skip_invisible: false,            load: function (elements_left, settings) {                $(this).css({ 'height': '100%', 'width': '100%', });            }        });    });</script>
+<div style="display:none">
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-3TVCDQB9HZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-3TVCDQB9HZ');
+</script></div>
+<!--[if (gte IE 8)&(lte IE 9)]>
+<script src="../assets/js/ie8-9.placeholder.js"></script>
+<![endif]-->
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"e55d8e0c253147548d4cdbf3370ba7a9","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>

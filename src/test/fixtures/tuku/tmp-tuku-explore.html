@@ -1,0 +1,485 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="p2">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <title>热血,港台,连载漫画- 漫画连载-图库漫画</title>
+                <meta content="图库漫画提供中文全本漫画连载，汇集日本漫画、韩国漫画、日韩、大陆、港台、欧美漫画家的海量作品，提供各种热门漫画的在线阅读。包括热血、奇幻、恋爱、冒险、古风、都市、悬疑、历史、后宫、治愈、耽美、百合、搞笑、绅士、同人等多种题材漫画。当前最热门漫画：如火影忍者，海贼王,我獨自升級,咒術迴戰,王者天下，蓝色监狱，一拳超人，博人传，葬送的芙莉蓮，全職獵人等" name="Description" />
+                <meta content="热血,港台,连载漫画,热血,港台,连载漫画大全,热血,港台,连载漫画推荐,热血,港台,连载热门漫画" name="keywords" />
+                <meta content="图库漫画:免费日韩漫画在线阅读平台、tuku.cc" name="Author" />
+                                                    <link rel="icon" type="image/svg+xml" href="../assets/images/tuku_icon.png" />
+                                                    <link rel="stylesheet" href="../css/common/index.css" />
+                                                    <link rel="stylesheet" href="../css/common/skeletons.css" />
+                                                    <link rel="stylesheet" href="../../css/header/index.css" />
+                                                    <link rel="stylesheet" href="../css/search/index.css" />
+</head>
+<body>
+    <div class="w-full bg-color-primary us-none fixed" style="height:78px;z-index:101">
+        <div class="box-center" style="height:78px">
+            <div class="f-left">
+                <a class="header-logo mr-20 f-left" href="/">
+                    <img class="w-full" style="width:130px;" src="../assets/images/logo.png" alt="" />
+                </a>
+                <ul class="relative f-left" style="width:410px;">
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/"><span class="i-b nav-text">首页</span></a></li>
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/update/"><span class="i-b nav-text">更新</span></a></li>
+                    <li class="header-nav dv-navAct f-left"><a class="w-full h-full  i-b" href="/rank/"><span class="i-b nav-text">排行</span></a></li>
+                    <li class="header-nav dv-navAct f-left">
+                        <a class="w-full h-full  i-b" href="/comics/"><span class="i-b nav-text">分类</span></a>
+                    </li>
+                </ul>
+            </div>
+            <div class="header-search f-right mt-20 ">
+                <div class="header-search-input  bg-white radius-8 f-left relative">
+                    <input class="flex-1 input-style-none  dv-searchVal f-left search-ipt placeholder" placeholder="一拳超人" type="text" autocomplete="off" id="txtKeywords" data="一拳超人" />
+                    <img class="header-search-icon f-right" src="../assets/images/search-icon.png" alt="" id="btnSearch" />
+                    <div class="fuzzy-search-list absolute"></div>
+                </div>
+                <div class="hearder-f-ls  f-left">
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a  block f-left dv-userClick cp" ><img class="w-full" src="../assets/images/history-icon.png" alt="" /></a>
+                        <div class="p-10 relative bg-white radius-8 login-out login-out-wrap">
+                            <a class="block w-full text-common text-13 text-center m-0" href="/comichistory/">阅读历史</a>
+                            <div class="triangle absolute"></div>
+                        </div>
+                    </div>
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a block f-left dv-userClick cp" ><img class="w-full" src="../assets/images/collect-icon.png" alt="" /></a>
+                        <div class="p-10 relative bg-white radius-8 login-out login-out-wrap">
+                            <a class="block w-full text-common text-13 text-center m-0" href="/bookmarker/">我的收藏</a>
+                            <div class="triangle absolute"></div>
+                        </div>
+                    </div>
+                    <div class="user-info relative ml-16 f-left">
+                        <a class="icon-a block dv-userClick cp" ><img class="w-full" src="../assets/images/user-icon.png" alt="" /></a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <img class="to-top cp dv-toTop" src="../assets/images/to-top-icon.png" alt="" />
+    </div>
+    <div style="height: 78px"></div>
+    <!-- 登录 -->
+    <div id="login" class="mask  hidden dv-loginShow us-none" style="display:none;">
+    </div>
+    <div class="login-modal bg-white radius-8 p-30  dv-loginShow register-modal" style="display: none; z-index: 10086;">
+        <div class="dv-userClick cp absolute login-close z-top"></div>
+        <p class="title login-title w-full text-center">登录</p>
+        <input type="email" class="ipt w-full mt-40 login-text-email placeholder" name="txt_email" placeholder="您的邮箱" />
+        <input class="ipt w-full mt-20 login-pw placeholder" type="password" name="txt_password" placeholder="您的密码" maxlength="20" minlength="6" />
+        <button class="btn text-16 text-black bold btn bg-color-primary radius-8 cp w-full text-center mt-40 mb-40 button" id="btnLogin" type="submit">立即登录</button>
+        <div class="w-full hidden">
+            <div class="f-left">
+                <input type="checkbox" name="remember" id="remember" />
+                <label class="cp" for="remember">自动登录</label>
+            </div>
+            <p class="f-right">
+                没有账号?                <a class="text-markedness" href="/register/">去注册</a>
+            </p>
+        </div>
+    </div>
+    <!--提示-->
+    <div class="toast" style="display:none">
+        <p class="toast-center text-14">这是一条提示</p>
+    </div>
+    <script src="../assets/js/jquery.min.js"></script>
+    <script src="../assets/js/array.compatibility.js"></script>
+    <script src="../js/login.js"></script>
+    <script src="../js/search.js"></script>
+<link rel="stylesheet" href="../css/classify/index.css" />
+<div class="box-center justify-start doc-center calssify-wrap hidden" id="update">
+    <!-- 分类 -->
+    <div class="relative classify-ls-wrap box-center radius-8 mt-20 text-black cp pt-20 pb-20 pl-16 align-start dv-navHeight us-none" style="">
+        <div class="dv-tcHeight hidden mb-20">
+            <div class="text-common event-none mr-20 f-left">题材:</div>
+            <ul class="flex-wrap hidden f-left" style="width: 1000px">
+                <li class="f-left "><a class="text-black" href="/comics-region1-status1/">全部</a></li>
+                <li class="f-left act"><a class="text-black" href="/comics-region1-tag1-status1/">热血</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag2-status1/">恋爱</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag4-status1/">百合</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag5-status1/">彩虹</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag6-status1/">冒险</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag9-status1/">后宫</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag10-status1/">治愈</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag16-status1/">悬疑</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag18-status1/">搞笑</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag19-status1/">奇幻</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag24-status1/">历史</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag31-status1/">古风</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag33-status1/">都市</a></li>
+            </ul>
+        </div>
+        <div class="mb-20 dv-ulShow hidden">
+            <div class="text-common event-none mr-20 f-left">地区:</div>
+            <ul class="f-left hidden">
+                <li class="f-left "><a class="text-black" href="/comics-tag1-status1/">全部</a></li>
+                <li class="f-left act"><a class="text-black" href="/comics-region1-tag1-status1/">港台</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region2-tag1-status1/">日本</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region3-tag1-status1/">韩国</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region4-tag1-status1/">大陆</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region5-tag1-status1/">欧美</a></li>
+            </ul>
+        </div>
+        <div class="dv-ulShow hidden">
+            <div class="text-common event-none mr-20 f-left">进度:</div>
+            <ul class="f-left hidden">
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag1/">全部</a></li>
+                <li class="f-left act"><a class="text-black" href="/comics-region1-tag1-status1/">连载中</a></li>
+                <li class="f-left "><a class="text-black" href="/comics-region1-tag1-status2/">已完结</a></li>
+            </ul>
+        </div>
+        <div class="text-common text-13 more more-wrap absolute fold dv-foldClick hidden">
+            <p class="mr-4 dv-foldText f-left">收起选项</p>
+            <img class="dv-topImg f-left" src="../assets/images/top-icon.png" alt="" />
+        </div>
+    </div>
+    <!-- 分类结束 -->
+    <div class="mt-40 dv-sortClick hidden">
+        <p class="text-common mr-16 f-left">排序:</p>
+        <a href="/comics-region1-tag1-status1/" class="hidden f-left sort-btn cp mr-16 text-common act">
+            <p class="f-left" style=" margin-left: 13px;">人气热门</p>
+            <div class="inverted event-none f-left" style="margin-top: 8px;"></div>
+        </a>
+        <a href="/comics-region1-tag1-status1-order2/" class="f-left sort-btn cp mr-16 text-common ">
+            <p class="f-left" style=" margin-left: 13px;">更新时间</p>
+            <div class="inverted event-none f-left" style="margin-top: 8px;"></div>
+        </a>
+        <a href="/comics-region1-tag1-status1-order18/" class="f-left sort-btn cp mr-16 text-common ">
+            <p class="f-left" style=" margin-left: 13px;">新品上架</p>
+            <div class="inverted event-none f-left" style="margin-top: 8px;"></div>
+        </a>
+    </div>
+    <div class="box-center relative hidden">
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-50781/" title="新著龙虎门"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover3.tuku.cc/3/2305/20160428194958_180x240_27.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-50781/" title="新著龙虎门">新著龙虎门</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter346742/" target="_blank" title="新著龙虎门 第1078卷">第1078卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-52707/" title="火武耀扬"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover4.tuku.cc/26/25475/20160713131404_180x240_23.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-52707/" title="火武耀扬">火武耀扬</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter426046/" target="_blank" title="火武耀扬 第882回">第882回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag35/"><p class="tag mr-4">限制级</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-43506/" title="毁童年系列-哆啦B梦"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/15/14385/14385_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-43506/" title="毁童年系列-哆啦B梦">毁童年系列-哆啦B梦</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter176645/" target="_blank" title="毁童年系列-哆啦B梦 第12回">第12回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-67060/" title="配角X3"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover2.tuku.cc/23/22686/20160428200445_180x240_18.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-67060/" title="配角X3">配角X3</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter804632/" target="_blank" title="配角X3 第85回">第85回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag6/"><p class="tag mr-4">冒险</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-46991/" title="戇男故事"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover5.tuku.cc/6/5806/5806_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-46991/" title="戇男故事">戇男故事</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter252832/" target="_blank" title="戇男故事 第130卷">第130卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-48331/" title="勇者系列"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/37/36203/20170428083918_180x240_14.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-48331/" title="勇者系列">勇者系列</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter289198/" target="_blank" title="勇者系列 第158回">第158回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-24280/" title="耀武扬威"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover1.tuku.cc/2/1872/1872_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-24280/" title="耀武扬威">耀武扬威</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter92749/" target="_blank" title="耀武扬威 第327卷">第327卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag35/"><p class="tag mr-4">限制级</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-26562/" title="火武英雄"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover4.tuku.cc/19/18056/20150410160902_180x240_21.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-26562/" title="火武英雄">火武英雄</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter112383/" target="_blank" title="火武英雄 第128回">第128回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag35/"><p class="tag mr-4">限制级</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-43406/" title="拳皇2000"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/1/631/631_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-43406/" title="拳皇2000">拳皇2000</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter169607/" target="_blank" title="拳皇2000 第200041卷">第200041卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-43782/" title="覆雨翻云"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/1/299/299_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-43782/" title="覆雨翻云">覆雨翻云</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter183693/" target="_blank" title="覆雨翻云 第22卷">第22卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-10699/" title="Oldman奥德曼"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/34/33552/20161026194228_180x240_16.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-10699/" title="Oldman奥德曼">Oldman奥德曼</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter49031/" target="_blank" title="纸飞机">纸飞机 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag12/"><p class="tag mr-4">科幻</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-48218/" title="旧著李小龙"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover2.tuku.cc/35/34055/20161207135129_180x240_27.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-48218/" title="旧著李小龙">旧著李小龙</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter285411/" target="_blank" title="旧著李小龙 第6卷">第6卷 (复刻版) </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-47755/" title="绝代英雄"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover2.tuku.cc/6/5938/5938_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-47755/" title="绝代英雄">绝代英雄</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter270160/" target="_blank" title="绝代英雄 第44回">第44回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-3793/" title="武道狂之诗"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover8.tuku.cc/8/7993/20150402095057_180x240_17.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-3793/" title="武道狂之诗">武道狂之诗</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter22036/" target="_blank" title="武道狂之诗 第13卷">第13卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-44772/" title="唐山葬"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover4.tuku.cc/18/17927/20191211131218_180x240_22.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-44772/" title="唐山葬">唐山葬</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter206351/" target="_blank" title="唐山葬 第47回">第47回 下</a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-52199/" title="PLAYer"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover3.tuku.cc/18/17995/20150407164511_180x240_19.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-52199/" title="PLAYer">PLAYer</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter408129/" target="_blank" title="PLAYer 第36回">第36回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag6/"><p class="tag mr-4">冒险</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-46830/" title="小强漫画集"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover4.tuku.cc/23/22558/20160414134716_180x240_24.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-46830/" title="小强漫画集">小强漫画集</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter247589/" target="_blank" title="小强漫画集 第4回">第4回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag18/"><p class="tag mr-4">搞笑</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-52154/" title="我若为皇4-最后一战"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover2.tuku.cc/18/17626/20150314150349_180x240_24.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-52154/" title="我若为皇4-最后一战">我若为皇4-最后一战</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter406487/" target="_blank" title="我若为皇4-最后一战 第24回">第24回 家破人亡</a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag26/"><p class="tag mr-4">玄幻</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-215/" title="拳皇2003"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover1.tuku.cc/1/633/633_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-215/" title="拳皇2003">拳皇2003</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter1660/" target="_blank" title="拳皇2003 第2003卷">第2003卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-9181/" title="圣女贞德战役"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover4.tuku.cc/20/19313/20150817104842_180x240_29.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-9181/" title="圣女贞德战役">圣女贞德战役</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter42864/" target="_blank" title="圣女贞德战役 第14回">第14回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-7978/" title="欲望之翼"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover8.tuku.cc/17/16625/16625_b.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-7978/" title="欲望之翼">欲望之翼</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter37687/" target="_blank" title="欲望之翼 第2回">第2回 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-9629/" title="春秋猛士"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover6.tuku.cc/22/21434/20160106215225_180x240_17.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-9629/" title="春秋猛士">春秋猛士</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter44605/" target="_blank" title="春秋猛士 第13回">第13回 大秦战神</a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-46681/" title="天界无限"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover6.tuku.cc/19/18095/20150414092019_180x240_21.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-46681/" title="天界无限">天界无限</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter243507/" target="_blank" title="天界无限 第14卷">第14卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                </div>
+            </div>
+            <div class="swiper-card-item ml-20 nth-8 mt-20 mb-24 f-left">
+                <a class="swiper-card-item-img radius-8 mb-8 block hidden" href="/manga-9941/" title="假面骑士OOO"><img class="w-full h-full" src="" style="display:none;" data-original="https://cover7.tuku.cc/23/22417/20160401231853_180x240_17.jpg" alt=""></a>
+                <h3><a class="card-item-title text-black ellipsis block" href="/manga-9941/" title="假面骑士OOO">假面骑士OOO</a></h3>
+                <div class="card-item-text-wrap mb-4 hidden">
+                    <p class="card-item-state text-markedness shrink-0 mr-4 f-left">最新</p>
+                    <a class="card-item-chapter text-12 text-common ellipsis block f-left" style="width:100px" href="/chapter45995/" target="_blank" title="假面骑士OOO 第2卷">第2卷 </a>
+                </div>
+                <div class="swiper-card-item-tag-warp ellipsis hidden w-full">
+                    <a href="/comics-tag1/"><p class="tag mr-4">热血</p></a>
+                    <a href="/comics-tag11/"><p class="tag mr-4">格斗</p></a>
+                    <a href="/comics-tag12/"><p class="tag mr-4">科幻</p></a>
+                </div>
+            </div>
+    </div>
+    <div class="page-content mb-80 mt-28">
+        <div class="page us-none hidden f-right">
+            <ul class="dv-pageClick hidden">
+                <li class="page-item cp f-left act">
+                    <a class="text-13 text-common i-b" href="/comics-region1-tag1-status1/" data-index="1">1</a>
+                </li>
+                <li class="page-item cp f-left ">
+                    <a class="text-13 text-common i-b" href="/comics-region1-tag1-status1-p2/" data-index="2">2</a>
+                </li>
+                <li class="next cp f-left" data-value="next">
+                    <a class="i-b" href="/comics-region1-tag1-status1-p2/" data-index="2"><img class="event-none" src="../../assets/images/page-right-icon.png" alt="" /></a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+<script src="../js/classify/index.js"></script><!--[if (gte IE 8)&(lte IE 9)]>
+    <link rel="stylesheet" type="text/css" href="../assets/css/ie8-9.css" />
+<![endif]-->
+<div class="w-full footer hidden z-top relative">
+    <p class="text-common w-full text-center mt-40">Copyright (C) 2024-2025 www.tuku.cc 图库漫画 All rights reserved</p>
+</div>
+<script src="../js/header/index.js"></script>
+<script src="../assets/js/jquery.lazyload.min.js"></script>
+<script>
+    $(function () {        $("img").lazyload({            threshold: 300,            effect: 'fadeIn',            skip_invisible: false,            load: function (elements_left, settings) {                $(this).css({ 'height': '100%', 'width': '100%', });            }        });    });</script>
+<div style="display:none">
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-3TVCDQB9HZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-3TVCDQB9HZ');
+</script></div>
+<!--[if (gte IE 8)&(lte IE 9)]>
+<script src="../assets/js/ie8-9.placeholder.js"></script>
+<![endif]-->
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"e55d8e0c253147548d4cdbf3370ba7a9","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>

@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BookSource } from '@/types';
 import {
   getExploreSections,
+  getExploreSectionSelectDisplayValue,
+  isExploreUrlScript,
   parseNameUrlExploreSections,
+  readExploreSourceArgumentValue,
+  updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
+import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
 
 describe('explore sections name::url syntax', () => {
   it('parses newline-separated Legado exploreUrl entries', () => {
@@ -28,8 +33,15 @@ describe('explore sections name::url syntax', () => {
 
   it('ignores script and json exploreUrl shapes', () => {
     expect(parseNameUrlExploreSections('<js>JSON.stringify([])</js>')).toBeNull();
+    expect(parseNameUrlExploreSections('@js:\nJSON.stringify([])')).toBeNull();
     expect(parseNameUrlExploreSections('[{"title":"a","url":"/a"}]')).toBeNull();
     expect(parseNameUrlExploreSections('https://example.com/list')).toBeNull();
+  });
+
+  it('isExploreUrlScript recognizes @js: prefix', () => {
+    expect(isExploreUrlScript('<js>JSON.stringify([])</js>')).toBe(true);
+    expect(isExploreUrlScript('@js:\nJSON.stringify([])')).toBe(true);
+    expect(isExploreUrlScript('https://example.com/list')).toBe(false);
   });
 
   it('getExploreSections prefers name::url over single fallback', () => {
@@ -44,5 +56,41 @@ describe('explore sections name::url syntax', () => {
       { title: '推荐', url: '/hot.html' },
       { title: '完结', url: '/done.html' },
     ]);
+  });
+});
+
+describe('explore section select display value', () => {
+  const source = {
+    bookSourceUrl: 'https://example.com',
+    sourceUrl: 'https://example.com',
+    sourceName: '示例',
+  } as BookSource;
+
+  const ls = new Map<string, string>();
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    ls.clear();
+  });
+
+  it('prefers localStorage param over script default', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => ls.get(k) ?? null,
+      setItem: (k: string, v: string) => ls.set(k, v),
+      removeItem: (k: string) => ls.delete(k),
+    });
+
+    updateExploreSourceArgument(source, 'find_tab', '听书');
+    expect(readExploreSourceArgumentValue(source, 'find_tab')).toBe('听书');
+    expect(
+      getExploreSectionSelectDisplayValue(source, {
+        title: '模式',
+        type: 'select',
+        chars: ['小说', '听书'],
+        default: '小说',
+        paramKey: 'find_tab',
+      }),
+    ).toBe('听书');
+    expect(ls.has(getSourceArgsKey(source))).toBe(true);
   });
 });

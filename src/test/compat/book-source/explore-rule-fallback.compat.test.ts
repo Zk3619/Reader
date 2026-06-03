@@ -113,4 +113,29 @@ describe('explore ruleExplore → ruleSearch fallback', () => {
     }
   });
 
+  it('JSON 列表项 author 解析失败时不得显示规则字面量 a.author@text', async () => {
+    const row = JSON.stringify({
+      comic_name: '穿越西元3000后',
+      cartoon_author_list_name: '飒飒动漫',
+    });
+    const context = {
+      content: row,
+      contentType: 'json' as const,
+      baseUrl: 'https://www.kanman.com/50781/',
+    };
+    expect(await resolveExploreAuthor('$.cartoon_author_list_name', context)).toBe('飒飒动漫');
+    const apiRow = JSON.stringify({
+      comic_name: '妖神记',
+      comic_author: '踏雪动漫',
+    });
+    const apiCtx = {
+      content: apiRow,
+      contentType: 'json' as const,
+      baseUrl: 'https://www.kanman.com/27417/',
+    };
+    expect(await resolveExploreAuthor('$.cartoon_author_list_name', apiCtx)).toBe('踏雪动漫');
+    expect(await resolveExploreAuthor('$.missing', context)).toBe('');
+    expect(await resolveExploreAuthor('a.author@text', context)).toBe('');
+    expect(await analyzeString('a.author@text', context)).toBe('');
+  });
 });
