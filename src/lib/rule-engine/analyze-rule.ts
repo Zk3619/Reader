@@ -573,6 +573,8 @@ async function executeRuleByMode(
         }
         const fieldValue = readJsonListItemField(context, ruleBody);
         if (fieldValue) return [fieldValue];
+        // CSS/XPath 等规则在 JSON 列表项上未命中时勿泄漏规则字面量（如 a.author@text）
+        if (isRuleExpression(ruleBody)) return [];
         // {{$.x}} 模板展开后的元数据（如 已完结,0分,tags）不是 CSS，勿对 JSON 正文做 select
         const literal = ruleBody.trim();
         return literal ? [literal] : [];

@@ -3,13 +3,18 @@
  */
 
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
+import { isExploreDrawerSelectSection } from '@/lib/book-source/explore-sections';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
+import { EXPLORE_KIND_DEFAULT_BASIS_PERCENT } from '@/lib/book-source/legado-flex-child-style';
 
+/** Tailwind 近似类（发现抽屉请用 legadoFlexChildWrapperStyle 精确对齐脚本 style） */
 export function exploreSectionFlexClass(section: ExploreSection): string {
-  const basisPct = section.style?.layout_flexBasisPercent ?? 1;
-  if (basisPct <= 0.25) return 'min-w-0 flex-[1_1_25%]';
-  if (basisPct <= 0.45) return 'min-w-0 flex-[1_1_45%]';
-  return 'min-w-0 flex-[1_1_100%]';
+  const raw = section.style?.layout_flexBasisPercent;
+  const basisPct =
+    typeof raw === 'number' && raw >= 0 ? (raw <= 1 ? raw : raw / 100) : EXPLORE_KIND_DEFAULT_BASIS_PERCENT;
+  if (basisPct <= 1 / 3 + 0.02) return 'min-w-0 flex-[0_0_33.333%]';
+  if (basisPct <= 2 / 3 + 0.02) return 'min-w-0 flex-[0_0_66.666%]';
+  return 'min-w-0 flex-[0_0_100%]';
 }
 
 export type ExploreSectionNavItem =
@@ -26,12 +31,7 @@ export type ExploreSectionNavItem =
 
 /** Legado createFilter：type=select + paramKey（晴天聚合：线路/模式/频道/平台等） */
 export function isExploreSourceArgumentSelect(section: ExploreSection): boolean {
-  return (
-    section.type === 'select' &&
-    !!section.chars &&
-    section.chars.length > 0 &&
-    !!section.paramKey
-  );
+  return isExploreDrawerSelectSection(section) && !!section.paramKey;
 }
 
 function isLegadoSelectFilter(section: ExploreSection): boolean {

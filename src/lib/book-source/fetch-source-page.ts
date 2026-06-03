@@ -17,6 +17,7 @@ import {
   resolveSourceCookiesForHttp,
 } from '@/lib/book-source/source-http';
 import { splitUrlAndOption, URL_OPTION_SPLIT } from '@/lib/book-source/analyze-url-option';
+import { isAtomicLegadoScriptRule } from '@/lib/rule-engine/legado-source-rule';
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 import { get, HttpError } from '@/lib/http';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
@@ -60,6 +61,7 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
   const { urlPart } = splitUrlAndOption(ruleUrl);
 
   const resolvePageUrl = () => {
+    if (isAtomicLegadoScriptRule(urlPart)) return urlPart;
     try {
       const base =
         params.baseUrl ||

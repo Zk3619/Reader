@@ -5,7 +5,8 @@
 
 import { get, isAbortError, post } from '@/lib/http';
 import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
-import { legadoListRuleNeedsAllSuffix } from '@/lib/rule-engine/legado-source-rule';
+import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
+import { legadoListRuleNeedsAllSuffix, isAtomicLegadoScriptRule } from '@/lib/rule-engine/legado-source-rule';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import type { BookSource, ExploreRule, SearchRule } from '@/types';
@@ -16,6 +17,7 @@ import { buildUrl, parseHeaders, resolveUrl, detectContentType, resolveMediaUrl 
 import { resolveBookType } from '@/lib/book-source/book-type';
 import {
   COVER_JSON_PATHS,
+  EXPLORE_AUTHOR_JSON_PATHS,
   EXPLORE_INTRO_JSON_PATHS,
   EXPLORE_LAST_CHAPTER_JSON_PATHS,
   EXPLORE_UPDATE_TIME_JSON_PATHS,
@@ -86,6 +88,7 @@ function stripHtmlFragment(raw: string | undefined): string {
 function exploreAuthorLooksInvalid(author: string): boolean {
   const t = author.trim();
   if (!t) return true;
+  if (isRuleExpression(t)) return true;
   if (/<[a-z!/]/i.test(t)) return true;
   if (/\$1|class\s*=/i.test(t)) return true;
   if (t.length > 64) return true;
@@ -99,8 +102,8 @@ async function fallbackExploreName(
 ): Promise<string> {
   if (rawName.trim()) return rawName;
   const rule = nameRule?.trim() ?? '';
-  if (rule !== '@text') return rawName;
-  for (const r of ['a@text', 'a@ownText', '@title', 'a@title']) {
+  if (rule !== '@text' && rule !== 'title' && rule !== '@title') return rawName;
+  for (const r of ['@title', 'title', 'a@title', 'a@text', 'a@ownText']) {
     const v = (await analyzeString(r, context)).trim();
     if (v) return v;
   }
@@ -114,9 +117,9 @@ async function fallbackExploreBookUrl(
 ): Promise<string> {
   if (rawUrl.trim()) return rawUrl;
   const rule = bookUrlRule?.trim() ?? '';
-  if (rule !== '@href') return rawUrl;
+  if (rule !== '@href' && rule !== 'href') return rawUrl;
 
-  for (const r of ['a@href', '@data-href', '@data-url', 'a@data-href', 'a@data-url']) {
+  for (const r of ['@href', 'href', 'a@href', '@data-href', '@data-url', 'a@data-href', 'a@data-url']) {
     const v = (await analyzeString(r, context, { isUrl: true })).trim();
     if (v) return v;
   }
@@ -143,6 +146,12 @@ export async function resolveExploreAuthor(
         author = hit;
         break;
       }
+    }
+  }
+  if (exploreAuthorLooksInvalid(author) && context.contentType === 'json') {
+    const hit = await pickFirstJsonField(context, EXPLORE_AUTHOR_JSON_PATHS);
+    if (hit) {
+      author = normalizeAuthorText(stripHtmlFragment(hit));
     }
   }
   return exploreAuthorLooksInvalid(author) ? '' : author;
@@ -322,11 +331,13 @@ export async function exploreBook(
   const startTime = Date.now();
 
   try {
-    // 构建发现 URL（支持 {{page}} 分页）
-    const exploreUrl = alignUrlToBookSourceRequestOrigin(
-      buildUrl(baseUrl, { page: page.toString() }),
-      source,
-    );
+    // 构建发现 URL（支持 {{page}} 分页；@js:/<js> 规则勿走 URL 解析以免被 encode）
+    const exploreUrl = isAtomicLegadoScriptRule(baseUrl)
+      ? buildUrl(baseUrl, { page: page.toString() })
+      : alignUrlToBookSourceRequestOrigin(
+          buildUrl(baseUrl, { page: page.toString() }),
+          source,
+        );
     console.log('[explore] 构建后的 URL:', exploreUrl.substring(0, 200), '页码:', page);
 
     // 发起请求

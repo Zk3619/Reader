@@ -43,6 +43,10 @@ import {
   parseLegadoApiJsonResponse,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import {
+  flushExploreScriptToastBuffer,
+  type ScriptToastEntry,
+} from '@/lib/js-engine/legado/explore-inject';
 import { createLoginInjector } from '@/lib/js-engine/legado/login-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
@@ -1385,15 +1389,16 @@ async function tryRunLoginScriptQuickJS(
   const isWaitingToast = (msg?: string) =>
     typeof msg === 'string' && (/正在检测|请稍等|正在登录中/.test(msg));
 
+  const loginToastBuffer: ScriptToastEntry[] = [];
   const toast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
     const text = normalizeToastText(msg);
-    if (text && onToast) onToast(text, false);
+    if (text) loginToastBuffer.push({ msg: text, level: 'info' });
   };
   const longToast = (msg?: string) => {
     if (suppressResumeToast && isWaitingToast(msg)) return;
     const text = normalizeToastText(msg);
-    if (text && onToast) onToast(text, true);
+    if (text) loginToastBuffer.push({ msg: text, level: 'long' });
   };
 
   const cookieStore = new Map<string, string>();
@@ -1799,6 +1804,13 @@ async function tryRunLoginScriptQuickJS(
     if (isClearDeviceAction) {
       resetLegadoDeviceId();
     }
+
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(loginToastBuffer, (msg, level) => {
+        const long = level === true || String(level ?? '').toLowerCase().includes('long');
+        onToast?.(String(msg ?? ''), long);
+      });
+    }, 0);
 
     console.warn(LOG_TAG, 'runLoginScript QuickJS 完成');
     return true;

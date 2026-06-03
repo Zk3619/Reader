@@ -34,6 +34,13 @@ export const EXPLORE_LAST_CHAPTER_JSON_PATHS = [
   '$.new_chapter_title',
 ] as const;
 
+/** 作者：看漫画等 API 为 comic_author */
+export const EXPLORE_AUTHOR_JSON_PATHS = [
+  '$.comic_author',
+  '$.author',
+  '$.book_author',
+] as const;
+
 /** 更新时间（晴天聚合为 last_chapter_update_time，部分书源规则误写 last_update_time） */
 export const EXPLORE_UPDATE_TIME_JSON_PATHS = [
   '$.last_chapter_update_time',

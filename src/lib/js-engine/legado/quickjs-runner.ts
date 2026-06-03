@@ -13,6 +13,7 @@ import {
 import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
 import { AjaxCoordinator, type AjaxCoordinatorMode } from '@/lib/js-engine/legado/host/ajax-coordinator';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+import { withLegadoScriptVm } from '@/lib/js-engine/legado/legado-vm-guard';
 import { wrapLegadoCatchRethrow } from '@/lib/js-engine/legado/script-wrap';
 
 export type LegadoInjector = (vm: QuickJSContext, rt: LegadoRunRuntime) => void;
@@ -66,6 +67,14 @@ function readGlobalResult(vm: QuickJSContext): unknown {
 }
 
 function evalScript(
+  vm: QuickJSContext,
+  script: string,
+  rt: LegadoRunRuntime
+): { status: 'done' } | { status: 'suspend'; suspend: SuspendScript } {
+  return withLegadoScriptVm(() => evalScriptInVm(vm, script, rt));
+}
+
+function evalScriptInVm(
   vm: QuickJSContext,
   script: string,
   rt: LegadoRunRuntime

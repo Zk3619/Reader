@@ -7,6 +7,7 @@ import type { BookSource } from '@/types';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
 import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import { getSourceArgsKey, getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
+import { getExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
@@ -32,12 +33,18 @@ export interface ExploreSection {
   default?: string;
   /** 写入书源变量 JSON 的字段名（如 server、find_tab） */
   paramKey?: string;
+  /** Legado 发现项 action（select/button 变更时执行的 JS） */
+  action?: string;
 }
 
 function extractParamKeyFromAction(action: unknown): string | undefined {
   if (typeof action !== 'string') return undefined;
-  const m = action.match(/,\s*'([^']+)'\s*\)\s*$/);
-  return m?.[1];
+  const trimmed = action.trim();
+  const showMatch = trimmed.match(/,\s*'([^']+)'\s*\)\s*$/);
+  if (showMatch?.[1]) return showMatch[1];
+  const setArgsMatch = trimmed.match(/setArguments\s*\(\s*'([^']+)'/);
+  if (setArgsMatch?.[1]) return setArgsMatch[1];
+  return undefined;
 }
 
 export function mapRawExploreItem(rec: Record<string, unknown>): ExploreSection | null {
@@ -66,6 +73,7 @@ export function mapRawExploreItem(rec: Record<string, unknown>): ExploreSection 
     typeof rec.paramKey === 'string'
       ? rec.paramKey
       : extractParamKeyFromAction(rec.action);
+  const action = typeof rec.action === 'string' ? rec.action : undefined;
   return {
     title: String(title).trim(),
     url: typeof url === 'string' ? url : undefined,
@@ -74,7 +82,28 @@ export function mapRawExploreItem(rec: Record<string, unknown>): ExploreSection 
     chars,
     default: defaultVal,
     paramKey,
+    action,
   };
+}
+
+/** 发现抽屉/导航：Legado type=select 且具备选项与 paramKey（或可从 action 解析） */
+export function isExploreDrawerSelectSection(section: ExploreSection): boolean {
+  return (
+    section.type === 'select' &&
+    !!section.chars &&
+    section.chars.length > 0 &&
+    !!(section.paramKey || section.action)
+  );
+}
+
+/** 发现抽屉：Legado type=button 且带 action（无 url 时仍应可点击） */
+export function isExploreDrawerButtonSection(section: ExploreSection): boolean {
+  return section.type === 'button' && !!section.action?.trim();
+}
+
+/** 发现抽屉：Legado type=text / password 输入框 */
+export function isExploreDrawerTextSection(section: ExploreSection): boolean {
+  return section.type === 'text' || section.type === 'password';
 }
 
 /** 更新发现脚本用的书源变量（对齐 Legado setArguments / show） */
@@ -106,6 +135,40 @@ export function updateExploreSourceArgument(
   }
   clearExploreSectionsCache(getLegadoSourceKey(source));
   bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
+}
+
+/** 从书源变量 localStorage 读取发现脚本参数（对齐 Legado getArguments） */
+export function readExploreSourceArgumentValue(
+  source: BookSource,
+  paramKey: string,
+): string | undefined {
+  try {
+    const raw = localStorage.getItem(getSourceArgsKey(source));
+    if (!raw) return undefined;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const v = data[paramKey];
+    if (v == null) return undefined;
+    const s = String(v).trim();
+    return s || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 发现抽屉 Select 当前展示值（优先已写入的书源变量，其次 infoMap / 脚本 default） */
+export function getExploreSectionSelectDisplayValue(
+  source: BookSource,
+  section: ExploreSection,
+): string {
+  if (section.paramKey) {
+    const fromArgs = readExploreSourceArgumentValue(source, section.paramKey);
+    if (fromArgs) return fromArgs;
+  }
+  const fromInfo = getExploreInfoMap(getLegadoSourceKey(source))[section.title]?.trim();
+  if (fromInfo) return fromInfo;
+  const def = section.default?.trim();
+  if (def) return def;
+  return section.chars?.[0] ?? '';
 }
 
 /**
@@ -232,29 +295,30 @@ export function parseNameUrlExploreSections(text: string): ExploreSection[] | nu
  * - 否则返回空数组
  */
 export function getExploreSections(source: BookSource): ExploreSection[] {
+  let result: ExploreSection[] = [];
+
   // 1. 优先从 exploreScreen 解析
   if (source.exploreScreen && typeof source.exploreScreen === 'string' && source.exploreScreen.trim()) {
     const sections = tryParseJsonSections(source.exploreScreen);
-    if (sections) return sections;
+    if (sections) result = sections;
   }
 
-  // 2. 尝试将 exploreUrl 解析为 JSON 或 Legado name::url 列表
-  if (source.exploreUrl && typeof source.exploreUrl === 'string') {
+  if (result.length === 0 && source.exploreUrl && typeof source.exploreUrl === 'string') {
     const trimmed = source.exploreUrl.trim();
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       const sections = tryParseJsonSections(trimmed);
-      if (sections) return sections;
+      if (sections) result = sections;
     } else {
       const nameUrlSections = parseNameUrlExploreSections(trimmed);
-      if (nameUrlSections) return nameUrlSections;
+      if (nameUrlSections) result = nameUrlSections;
     }
   }
 
-  // 3. 回退：有 exploreUrl + ruleExplore 时返回单条「发现」
-  if (source.exploreUrl && source.ruleExplore) {
-    return [{ title: '发现', url: source.exploreUrl }];
+  if (result.length === 0 && source.exploreUrl && source.ruleExplore) {
+    result = [{ title: '发现', url: source.exploreUrl }];
   }
-  return [];
+
+  return result;
 }
 
 const exploreSectionsMemCache = new Map<string, ExploreSection[]>();
@@ -305,9 +369,11 @@ export async function getExploreSectionsAsync(
   return getExploreSections(source);
 }
 
-/** 书源发现是否由脚本动态生成（exploreUrl 为 <js>... 形式，需异步执行脚本得到分类列表） */
+/** 书源发现是否由脚本动态生成（exploreUrl 为 @js: / <js>... 形式，需异步执行脚本得到分类列表） */
 export function isExploreUrlScript(exploreUrl: string | undefined): boolean {
-  return typeof exploreUrl === 'string' && exploreUrl.trimStart().startsWith('<js>');
+  if (typeof exploreUrl !== 'string') return false;
+  const s = exploreUrl.trimStart();
+  return s.startsWith('<js>') || /^@js:/i.test(s);
 }
 
 /** createResource 返回值（含 loading / state） */

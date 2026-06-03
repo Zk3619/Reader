@@ -8,8 +8,8 @@
 
 import { get, post, HttpError } from '@/lib/http';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
-import type { BookSource } from '@/types';
-import type { BookInfo } from '@/types';
+import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
+import type { BookInfo, BookSource } from '@/types';
 import {
   buildBookSourceApiRequestHeaders,
   buildSourceRequestHeaders,
@@ -38,6 +38,7 @@ import {
   buildIntroFromDetailJson,
   preferDetailField,
 } from '@/lib/book-source/intro-merge';
+import { EXPLORE_AUTHOR_JSON_PATHS, pickFirstJsonField } from '@/lib/book-source/explore-json-fields';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import {
   consumeHtmlRateLimitNotice,
@@ -87,6 +88,7 @@ function normalizeAuthorText(author: string): string {
 function isPlausibleDetailAuthor(author: string): boolean {
   const t = author.trim();
   if (!t) return false;
+  if (isRuleExpression(t)) return false;
   if (t.length > 80) return false;
   if (/[<>\n\r]/.test(t)) return false;
   if (/https?:\/\//i.test(t)) return false;
@@ -103,6 +105,8 @@ async function fallbackAuthorAndTagsFromHtml(context: RuleContext): Promise<{
   if (context.contentType !== 'html') return {};
 
   const authorRules = [
+    'meta[property="og:novel:author"]@content',
+    'meta[property="og:novel:author_name"]@content',
     'p.gray a[href*="authorarticle"]@text',
     '.gray a[href*="authorarticle"]@text',
     'a[href*="authorarticle"]@text',
@@ -123,6 +127,15 @@ async function fallbackAuthorAndTagsFromHtml(context: RuleContext): Promise<{
     new Set(tags.map(normalizeTagText).filter(Boolean)),
   ).join(' ');
   return { tags: normalized || undefined };
+}
+
+function authorFromRuleResult(ruleResult?: Record<string, unknown>): string {
+  if (!ruleResult) return '';
+  for (const key of ['author', 'comic_author', 'cartoon_author_list_name', 'book_author']) {
+    const v = ruleResult[key];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return '';
 }
 
 function normalizeTagText(tag: string): string {
@@ -243,6 +256,8 @@ function cleanDetailPageTitle(raw: string): string {
 async function fallbackNameFromHtml(context: RuleContext): Promise<string> {
   if (context.contentType !== 'html') return '';
   const rules = [
+    'meta[property="og:novel:book_name"]@content',
+    'meta[property="og:novel:title"]@content',
     'meta[property="og:title"]@content',
     'meta[name="og:title"]@content',
     'h1@text',
@@ -379,11 +394,14 @@ async function analyzeBookInfoFromBody(
   }
   const authorFromRule = await safeAnalyze(rule.author);
   const authorRawFromBaseRule = await safeAnalyze(getRuleBaseBeforeReplace(rule.author));
-  const rawAuthor =
+  let rawAuthor =
     authorFromRule.trim() ||
     authorRawFromBaseRule.trim() ||
     bookSnapshotString(context.book, 'author') ||
-    (ruleResult?.author != null ? String(ruleResult.author) : '');
+    authorFromRuleResult(ruleResult);
+  if (!rawAuthor.trim() && context.contentType === 'json') {
+    rawAuthor = (await pickFirstJsonField(context, EXPLORE_AUTHOR_JSON_PATHS)) ?? '';
+  }
   const authorSplit = splitAuthorAndInlineTags(rawAuthor);
   let author = normalizeAuthorText(authorSplit.author);
   if (author && !isPlausibleDetailAuthor(author)) {

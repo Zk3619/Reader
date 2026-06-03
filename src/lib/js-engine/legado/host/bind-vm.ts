@@ -8,6 +8,18 @@ export function vmNewString(vm: QuickJSContext, value: string): QuickJSHandle {
   return vm.newString(value);
 }
 
+/** QuickJS 无参调用时 arg handle 可能为 undefined，直接 vm.dump 会抛 owner 错误 */
+export function vmDumpOptional(vm: QuickJSContext, handle?: QuickJSHandle): unknown {
+  if (handle === undefined) return undefined;
+  try {
+    const t = vm.typeof(handle);
+    if (t === 'undefined') return undefined;
+  } catch {
+    return undefined;
+  }
+  return vm.dump(handle);
+}
+
 export function bindVmFunction(
   vm: QuickJSContext,
   target: QuickJSHandle,
@@ -15,9 +27,13 @@ export function bindVmFunction(
   fn: (...args: QuickJSHandle[]) => QuickJSHandle | void
 ): void {
   const handle = vm.newFunction(name, (...args) => {
-    const ret = fn(...args);
-    // 勿用 vm.undefined：每次 void 回调会泄漏 handle，dispose 时触发 gc_obj_list 断言
-    if (ret !== undefined) return ret;
+    try {
+      const ret = fn(...args);
+      // 勿用 vm.undefined：每次 void 回调会泄漏 handle，dispose 时触发 gc_obj_list 断言
+      if (ret !== undefined) return ret;
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(String(e));
+    }
   });
   vm.setProp(target, name, handle);
   handle.dispose();

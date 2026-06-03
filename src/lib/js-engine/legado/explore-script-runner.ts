@@ -15,14 +15,18 @@ import {
   createLegadoScriptCookieApi,
 } from '@/lib/js-engine/legado/login-script-runner';
 import {
+  createLegadoExploreJavaDeviceHandlers,
+  LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
+} from '@/lib/js-engine/legado/legado-explore-java-device';
+import {
   buildLegadoExploreScriptBundle,
   createLegadoGetArguments,
   createLegadoScriptCache,
   createSourceVariableHandlers,
+  getLegadoSourceKey,
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
-  getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
   readSourceLoginInfoMap,
@@ -39,14 +43,34 @@ export type ExploreScriptRunOptions = {
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
 };
 
-/** 从 exploreUrl 中提取 <js>...</js> 内的脚本内容 */
+/** 从 exploreUrl 中提取 @js: / <js>...</js> 内的脚本内容 */
 export function extractExploreScript(exploreUrl: string | undefined): string | null {
   if (typeof exploreUrl !== 'string') return null;
   const s = exploreUrl.trim();
+  if (/^@js:/i.test(s)) return s.replace(/^@js:/i, '').trim() || null;
   if (!s.startsWith('<js>')) return null;
   const end = s.indexOf('</js>');
   if (end === -1) return null;
   return s.slice(4, end).trim();
+}
+
+function logExploreScriptDiagnostics(sections: ExploreSection[], engine: 'quickjs' | 'legacy'): void {
+  if (!import.meta.env.DEV) return;
+  const selectTitles = sections.filter((s) => s.type === 'select').map((s) => s.title);
+  const hasSigma = sections.some((s) => s.title.includes('Sigma'));
+  const hasLoginSwitch = sections.some((s) => s.title.includes('点击登录可切换来源'));
+  const textCount = sections.filter((s) => s.type === 'text').length;
+  const buttonActions = sections.filter((s) => s.type === 'button' && s.action).length;
+  console.log(`[explore-script] ${engine} parsed`, {
+    total: sections.length,
+    selects: selectTitles.length,
+    selectTitles: selectTitles.slice(0, 6),
+    textCount,
+    buttonActions,
+    hasSigma,
+    hasLoginSwitch,
+    head: sections.slice(0, 8).map((s) => `${s.title}${s.type ? `[${s.type}]` : ''}`),
+  });
 }
 
 async function tryRunExploreScriptQuickJS(
@@ -87,6 +111,7 @@ async function tryRunExploreScriptQuickJS(
     source: {
       ...sourceVars,
       getLoginInfoMap: () => readSourceLoginInfoMap(source),
+      loginUi: source.loginUi,
     },
     scriptToastBuffer: toastBuffer,
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
@@ -102,12 +127,11 @@ async function tryRunExploreScriptQuickJS(
       inject: injector,
       beforeEval: (vm) => {
         evalCodeVoid(vm, 'globalThis.result = undefined;');
+        evalCodeVoid(vm, LEGADO_EXPLORE_DEVICE_JAVA_SHIM);
       },
     });
-    setTimeout(() => {
-      flushExploreScriptToastBuffer(toastBuffer, options?.onScriptToast);
-    }, 0);
     const sections = parseScriptResult(raw);
+    logExploreScriptDiagnostics(sections, 'quickjs');
     if (sections.length === 0 && raw != null) {
       const preview =
         typeof raw === 'string'
@@ -119,6 +143,10 @@ async function tryRunExploreScriptQuickJS(
   } catch (e) {
     console.warn('[explore-script] QuickJS 失败，降级 Function', e);
     return null;
+  } finally {
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(toastBuffer, options?.onScriptToast);
+    }, 0);
   }
 }
 
@@ -178,6 +206,8 @@ async function runExploreScriptLegacy(
   const { PatchedDate, applyAjaxDuration } = installScriptDateShim();
   let pending: Promise<unknown>[] = [];
 
+  const deviceHandlers = createLegadoExploreJavaDeviceHandlers(source);
+
   const scopeObj: Record<string, unknown> = {
     Date: PatchedDate,
     result: undefined,
@@ -186,6 +216,7 @@ async function runExploreScriptLegacy(
     cache: createLegadoScriptCache(),
     getArguments: createLegadoGetArguments(hostList[0] || baseUrl),
     bhost: () => hostList[0] || baseUrl || '',
+    infoMap: {} as Record<string, string>,
     cookie: cookieApi,
     cookieRef: cookieApi,
 
@@ -193,6 +224,7 @@ async function runExploreScriptLegacy(
       getVariable: (key?: string) => sourceVars.getVariable(key),
       setVariable: (val?: string) => sourceVars.setVariable(val),
       getLoginInfoMap: () => readSourceLoginInfoMap(source),
+      loginUi: source.loginUi,
     },
 
     java: {
@@ -206,9 +238,12 @@ async function runExploreScriptLegacy(
         console.warn('[explore-script]', ...args);
         return args[0];
       },
-      androidId: () => resolveBookSourceDeviceId(source),
-      deviceID: () => resolveBookSourceDeviceId(source),
-      qread() {},
+      androidId: () => deviceHandlers.androidId(),
+      deviceID: () => deviceHandlers.deviceID(),
+      qread: () => deviceHandlers.qread(),
+      reLoginView() {
+        /* 光遇 checkEnv */
+      },
       startBrowser(_url?: string) {},
       getCookie(url: string) {
         return cookieApi.getCookie(url);
@@ -342,6 +377,7 @@ async function runExploreScriptLegacy(
 
   const raw = await Promise.race([runPromise, timeoutPromise]);
   const sections = parseScriptResult(raw);
+  logExploreScriptDiagnostics(sections, 'legacy');
   console.log('[explore-script] legacy final:', sections.length, 'sections');
   return sections;
 }

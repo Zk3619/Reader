@@ -5,6 +5,10 @@
 import type { BookSource } from '@/types';
 import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
 import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
+import {
+  LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
+  patchExploreScriptForReaderWeb,
+} from '@/lib/js-engine/legado/legado-explore-java-device';
 
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
@@ -228,7 +232,12 @@ const EXPLORE_JSLIB_THIS_BIND_TARGETS = [
   'show',
   'createFilter',
   'createLoginFilter',
+  'show',
   'renderVersionPage',
+  'getHtmlSettings',
+  'getServerSettings',
+  'getSvgSettings',
+  'login',
   'toggleLogs',
   'compareVersions',
   'fetchVersionData',
@@ -303,12 +312,60 @@ getFanqieCookie = function() {
     return '';
   }
 };
+(function __readerGetTokenFallback() {
+  if (typeof getToken !== 'function') return;
+  var __origGetToken = getToken;
+  getToken = function() {
+    var t = String(__origGetToken.apply(this, arguments) || '').trim();
+    if (t.length > 10) return t;
+    try {
+      if (typeof cookie !== 'undefined' && cookie.getKey) {
+        var line = '';
+        if (typeof BaseUrl === 'function') {
+          try { line = String(BaseUrl() || ''); } catch (e1) {}
+        }
+        if (!line && typeof host !== 'undefined' && host && host[0]) line = String(host[0]);
+        if (!line && typeof baseUrl === 'string') line = baseUrl;
+        var fromKey = cookie.getKey(line || baseUrl || '', 'qttoken');
+        if (fromKey && String(fromKey).length > 10) return String(fromKey).trim();
+      }
+    } catch (e2) {}
+    return t;
+  };
+})();
 `;
 
 /**
  * 光遇 jsLib request() 在 java.ajax 返回空或非 JSON 时会同步递归 index+1 扫完全部线路。
  * Web 端 ajax 异步/挂起首轮常为空，须禁止同步扫线，改由宿主多轮重跑 + switchToNextLine。
  */
+/** 避免 getCloudSettings 在「云端配置」为空时访问 undefined.version */
+export const EXPLORE_GET_CLOUD_SETTINGS_GUARD_SHIM = `
+(function() {
+  if (typeof getCloudSettings !== 'function') return;
+  var __origGCS = getCloudSettings;
+  getCloudSettings = function(r) {
+    var cfg = null;
+    try {
+      cfg = typeof getVariable === 'function' ? getVariable('云端配置') : null;
+    } catch (e) { cfg = null; }
+    if (cfg == null || cfg === '') {
+      if (r === undefined) r = false;
+      if (!r) return;
+    }
+    try {
+      return __origGCS(r);
+    } catch (e) {
+      try {
+        if (typeof java !== 'undefined' && java.log) {
+          java.log('getCloudSettings: ' + (e && e.message != null ? e.message : e));
+        }
+      } catch (_) {}
+    }
+  };
+})();
+`.trim();
+
 export const GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM = `
 (function __readerGyksRequestNoSyncFailover() {
   if (typeof request !== 'function') return;
@@ -439,7 +496,10 @@ export function buildLegadoExploreScriptBundle(jsLib: string, scriptContent: str
     jsLib ? jsLib + '\n' : '',
     EXPLORE_JSLIB_THIS_BIND_SHIM,
     EXPLORE_JSLIB_CONTEXT_SHIM,
+    EXPLORE_GET_CLOUD_SETTINGS_GUARD_SHIM,
     GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
+    // two-pass 每轮 eval 都会重跑；须在书源 device_type 探测前覆盖 java.qread/deviceID
+    LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
     body,
   ].join('\n');
 }
@@ -493,7 +553,7 @@ export function createLegadoScriptCache(): {
 }
 
 export function ensureExploreScriptSetsResult(script: string): string {
-  const s = script.trimEnd();
+  let s = patchExploreScriptForReaderWeb(script.trimEnd());
   // QuickJS 路径用 IIFE 包裹脚本，脚本内 `var result` 会遮蔽外层；须写入 globalThis.result
   if (/\b(?:globalThis\.)?result\s*=\s*JSON\.stringify\s*\(/m.test(s)) return s;
   const m = s.match(/^([\s\S]*?)^(\s*)JSON\.stringify\s*\(\s*([\w$]+)\s*\)\s*;?\s*$/m);

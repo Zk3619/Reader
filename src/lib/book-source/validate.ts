@@ -87,9 +87,11 @@ async function probeGet(
   }
 }
 
-/** 判断是否为脚本 URL（Legado 中 searchUrl/exploreUrl 可为 <js>...</js>） */
+/** 判断是否为脚本 URL（Legado 中 searchUrl/exploreUrl 可为 @js: / <js>...</js>） */
 function isScriptUrl(url: string | undefined): boolean {
-  return typeof url === 'string' && url.trimStart().startsWith('<js>');
+  if (typeof url !== 'string') return false;
+  const s = url.trimStart();
+  return s.startsWith('<js>') || /^@js:/i.test(s);
 }
 
 /** 校验搜索：有 searchUrl + ruleSearch 时执行；searchUrl 为脚本时跳过 */

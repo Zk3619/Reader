@@ -101,6 +101,15 @@ function resolveContextElements($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
   return $('*');
 }
 
+/** 列表项片段（body 下单个子节点）对齐 Legado：裸 href/title 等取该根元素属性 */
+function resolveListItemContextElements($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
+  const body = $('body');
+  if (body.length === 0) return resolveContextElements($);
+  const direct = body.children();
+  if (direct.length === 1) return direct;
+  return body;
+}
+
 /** 含空格/引号/[] 的复合 CSS，不应在解析失败时回退到 body@text */
 function looksLikeCompoundCssSelector(selector: string): boolean {
   const s = selector.trim();
@@ -121,6 +130,17 @@ function selectByCssHead(
 ): cheerio.Cheerio<any> {
   const head = headSel.trim();
   if (!head) return resolveContextElements($);
+
+  // head 内 meta/link：优先全文匹配，避免未命中时回退到 body@text
+  if (/^meta\b/i.test(head) || /^link\b/i.test(head)) {
+    try {
+      const found = $(head);
+      if (found.length > 0) return found;
+    } catch {
+      return $('');
+    }
+    return $('');
+  }
 
   if (usesLegacyIndexSelector(head)) {
     const legacy = selectWithLegacyIndex($, null, head);
@@ -236,6 +256,13 @@ function parseCssSegment(rule: string, html: string): string[] {
   const analyzer = new RuleAnalyzer(normalizedRule, false);
   analyzer.trimRule();
   const chain = analyzer.splitRule('@');
+  if (chain.length === 1) {
+    const only = (chain[0] ?? '').trim();
+    if (only && (isAttrExtractorName(only) || isExtractorKeyword(only))) {
+      const scope = resolveListItemContextElements($);
+      return extractElements($, scope, `@${only}`);
+    }
+  }
   if (chain.length > 1) {
     const headSel = chain[0]?.trim() ?? '';
     let elements = selectByCssHead($, headSel || '*');
@@ -261,7 +288,7 @@ function parseCssSegment(rule: string, html: string): string[] {
   const root = usesLegacyIndexSelector(rootSelector) ? rootSelector : '*';
   let elements =
     root === '*' && !usesLegacyIndexSelector(rootSelector)
-      ? resolveContextElements($)
+      ? resolveListItemContextElements($)
       : selectWithLegacyIndex($, null, root || '*');
   for (const nested of nestedSelectors) {
     elements = selectWithLegacyIndex($, elements, nested);
@@ -570,6 +597,13 @@ function parseSelectorChain(rule: string): {
   }
   const tail = parts.slice(1);
   if (tail.length === 0) {
+    const only = parts[0] || '';
+    if (isAttrExtractorName(only)) {
+      return { rootSelector: '*', nestedSelectors: [], extractor: `@${only}` };
+    }
+    if (isExtractorKeyword(only)) {
+      return { rootSelector: '*', nestedSelectors: [], extractor: `@${only}` };
+    }
     return { rootSelector, nestedSelectors: [], extractor: '@text' };
   }
 
