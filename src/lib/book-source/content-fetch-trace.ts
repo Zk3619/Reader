@@ -75,3 +75,11 @@ export function traceContentFetchDone(
     ...extra,
   });
 }
+
+/** 始终输出：正文拉取结果或失败原因（生产环境可见） */
+export function warnContentFetchOutcome(
+  stage: string,
+  extra?: Record<string, unknown>,
+): void {
+  console.warn(`[content] ${stage}`, extra ?? {});
+}

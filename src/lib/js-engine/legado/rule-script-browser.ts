@@ -153,8 +153,11 @@ export function createRuleScriptBrowserHandlers(options: {
   pending: Promise<void>[];
   variables?: Record<string, unknown>;
   scope: Record<string, unknown>;
+  /** 正文视频书源：打开播放页后继续执行，不等待 √ */
+  nonBlockingBrowserAwait?: boolean;
 }): RuleScriptBrowserHandlers {
-  const { bookSource, baseUrl, state, pending, variables, scope } = options;
+  const { bookSource, baseUrl, state, pending, variables, scope, nonBlockingBrowserAwait } =
+    options;
 
   const rememberBrowserUrl = (resolved: string) => {
     if (variables && isOpenableBrowserUrl(resolved)) {
@@ -175,6 +178,10 @@ export function createRuleScriptBrowserHandlers(options: {
     },
 
     startBrowserAwait(url: string, title?: string) {
+      if (nonBlockingBrowserAwait) {
+        this.startBrowser(url, title);
+        return createLegadoStrResponse('');
+      }
       if (state.awaitDone) {
         return createLegadoStrResponse(state.awaitBody);
       }

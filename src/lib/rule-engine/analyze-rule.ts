@@ -83,6 +83,10 @@ export interface RuleContext {
   regexGroups?: string[];
   /** 脚本 toast 回调（java.toast/toast） */
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  /**
+   * 正文拉取：startBrowserAwait 仅打开内嵌页不阻塞脚本（咕咕番等视频书源）
+   */
+  nonBlockingBrowserAwait?: boolean;
 }
 
 /** 规则链下一段的 content：对象须 JSON 化，供 $.content 等 JSONPath 使用 */
@@ -135,6 +139,7 @@ function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
     variables: context.variables,
     bookSource: context.source as BookSource | undefined,
     onScriptToast: context.onScriptToast,
+    nonBlockingBrowserAwait: context.nonBlockingBrowserAwait,
   };
 }
 

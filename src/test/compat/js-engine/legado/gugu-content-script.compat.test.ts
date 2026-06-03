@@ -58,6 +58,31 @@ describe('咕咕番正文 rule-script', () => {
     expect(String(variables.__readerLastBrowserUrl ?? '')).toMatch(/artplayer\.php/i);
   });
 
+  it('正文 nonBlockingBrowserAwait 不挂起且仍打开播放页', async () => {
+    const { openLegadoBrowserInApp } = await import('@/lib/platform/open-url');
+    const openMock = vi.mocked(openLegadoBrowserInApp);
+    openMock.mockClear();
+
+    const out = await runLegadoRuleScript(
+      contentRule.replace(/^@js:\n/, ''),
+      {
+        result: CHAPTER_HTML,
+        baseUrl: 'https://www.gugu3.com/index.php/vod/play/id/4973/sid/1/nid/1.html',
+        ruleContent: CHAPTER_HTML,
+        ruleContentType: 'html',
+        source: { bookSourceUrl: 'https://www.gugu3.com/' },
+        book: { name: '测试番剧' },
+        variables: {},
+        nonBlockingBrowserAwait: true,
+      },
+      source,
+    );
+
+    expect(String(out)).toContain('请刷新尝试播放');
+    expect(openMock).toHaveBeenCalled();
+    expect(openMock.mock.calls[0]?.[3]).not.toMatchObject({ awaitClose: true });
+  });
+
   it('书源 try/catch 包裹 startBrowserAwait 仍会打开内嵌页', async () => {
     const { openLegadoBrowserInApp } = await import('@/lib/platform/open-url');
     const openMock = vi.mocked(openLegadoBrowserInApp);

@@ -34,6 +34,8 @@ export interface JsContext {
   bookSource?: BookSource;
   /** 脚本 toast 回调（java.toast/toast） */
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  /** 正文：startBrowserAwait 不挂起脚本 */
+  nonBlockingBrowserAwait?: boolean;
 }
 
 const fallbackScopedStore = new Map<string, Map<string, unknown>>();
@@ -74,6 +76,9 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
       return await runLegadoRuleScript(script, context, context.bookSource);
     } catch (e) {
       console.error('[js-engine] rule-script 执行失败:', e);
+      if (context.nonBlockingBrowserAwait) {
+        throw e;
+      }
       return null;
     }
   }

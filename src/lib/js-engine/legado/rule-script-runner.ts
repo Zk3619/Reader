@@ -43,6 +43,8 @@ import {
 } from '@/lib/js-engine/legado/rule-script-browser';
 import { createLegadoJsoupScopeBindings } from '@/lib/js-engine/legado/legado-jsoup';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
+import { READER_LAST_BROWSER_URL_KEY } from '@/lib/js-engine/legado/rule-script-browser';
 
 const SCRIPT_TIMEOUT_MS = 90_000;
 const MAX_AJAX_ROUNDS = 8;
@@ -307,6 +309,7 @@ function isEmptyContentRuleResult(result: unknown): boolean {
     parsed = result as Record<string, unknown>;
   } else {
     const text = String(result).trim();
+    if (isLegadoBrowserPlaceholderContent(text)) return false;
     if (/^[0-9a-f]+$/i.test(text) && text.length > 40) return true;
     if (text.startsWith('<') && text.length >= 500) return false;
     try {
@@ -336,6 +339,7 @@ function ruleScriptResultLooksFinal(result: unknown): boolean {
   }
   const text = String(result).trim();
   if (!text) return false;
+  if (isLegadoBrowserPlaceholderContent(text)) return true;
   if (/^[0-9a-f]+$/i.test(text) && text.length > 40) return false;
   try {
     const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -756,6 +760,7 @@ export async function runLegadoRuleScript(
       pending,
       variables: context.variables as Record<string, unknown> | undefined,
       scope,
+      nonBlockingBrowserAwait: context.nonBlockingBrowserAwait,
     });
     return scope;
   };
@@ -770,11 +775,34 @@ export async function runLegadoRuleScript(
 
   const finishRuleScript = (result: unknown): unknown => {
     syncBookScopeBack();
+    if (isUnmodifiedRuleScriptInput(result, initialResult, ruleContent)) {
+      const lastUrl = String(
+        (context.variables as Record<string, unknown> | undefined)?.[
+          READER_LAST_BROWSER_URL_KEY
+        ] ?? '',
+      ).trim();
+      if (
+        context.nonBlockingBrowserAwait &&
+        lastUrl.startsWith('http')
+      ) {
+        return '请刷新尝试播放';
+      }
+    }
     return finishRuleScriptResult(result, initialResult, ruleContent);
   };
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let rejectScriptTimeout: ((reason: Error) => void) | undefined;
+  const armScriptTimeout = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(
+      () => rejectScriptTimeout?.(new Error('规则脚本执行超时')),
+      SCRIPT_TIMEOUT_MS,
+    );
+  };
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('规则脚本执行超时')), SCRIPT_TIMEOUT_MS);
+    rejectScriptTimeout = reject as (reason: Error) => void;
+    armScriptTimeout();
   });
 
   const runPromise = (async () => {
@@ -800,7 +828,9 @@ export async function runLegadoRuleScript(
       }
 
       if (browserSuspend) {
+        if (timeoutId) clearTimeout(timeoutId);
         await browserSuspend.promise;
+        armScriptTimeout();
         continue;
       }
 
@@ -813,7 +843,7 @@ export async function runLegadoRuleScript(
           throw runError;
         }
       }
-      if (hadAjax) {
+      if (pending.length > 0) {
         await Promise.all(pending);
       }
 

@@ -8,8 +8,14 @@ import {
   fetchAndCacheChapterContent,
   readCachedChapterRaw,
 } from '@/lib/chapter-cache/storage';
-import type { Book, BookChapter } from '@/types';
+import type { Book, BookChapter, BookSource } from '@/types';
 import type { ChapterCacheSettings } from '@/lib/chapter-cache/settings';
+import { isInnerWebAwaiting } from '@/lib/platform/inner-web';
+
+/** 正文脚本用 startBrowserAwait 打开播放器，不宜并发预取（会抢占内嵌页 await） */
+function sourceContentUsesBrowserAwait(source: BookSource): boolean {
+  return /\bjava\.startBrowserAwait\b/.test(source.ruleContent?.content ?? '');
+}
 
 const inflight = new Set<string>();
 const MAX_PREFETCH_INFLIGHT = 2;
@@ -66,6 +72,7 @@ export async function prefetchChaptersOnRead(
 
   const source = await sourcesDb.getSource(book.origin);
   if (!source?.enabled) return;
+  if (isInnerWebAwaiting() || sourceContentUsesBrowserAwait(source)) return;
 
   for (const index of targets) {
     if (inflight.size >= MAX_PREFETCH_INFLIGHT) break;

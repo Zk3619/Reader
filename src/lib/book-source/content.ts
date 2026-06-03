@@ -142,7 +142,13 @@ import { summarizeContentPostItemId } from '@/lib/book-source/content-post-debug
 import {
   traceContentFetchStart,
   traceContentFetchDone,
+  warnContentFetchOutcome,
 } from '@/lib/book-source/content-fetch-trace';
+import {
+  chapterHtmlHasPlayerVid,
+  contentRuleUsesMizhiArtplayerChain,
+  tryResolveMizhiArtplayerBrowserUrl,
+} from '@/lib/book-source/legado-browser-playback-fallback';
 import { scanImgTags } from '@/lib/media/text/scan-img-tags';
 import {
   extractContentFromRuleOutput,
@@ -171,6 +177,7 @@ import {
   resolveFreshCatalogItemId,
 } from '@/lib/book-source/chapters';
 import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import { READER_LAST_BROWSER_URL_KEY } from '@/lib/js-engine/legado/rule-script-browser';
 const MAX_CONTENT_PAGES = 20;
 const CONTENT_API_VERSION = '4.11.5.1';
 
@@ -538,6 +545,7 @@ function buildContentRuleContext(
   contentType: 'html' | 'json' | 'text',
   baseUrl: string,
   onScriptToast?: (msg?: unknown, level?: unknown) => void,
+  nonBlockingBrowserAwait = false,
 ): RuleContext {
   let variables: Record<string, string> | undefined;
   try {
@@ -588,22 +596,31 @@ function buildContentRuleContext(
     chapter: chapter as unknown as Record<string, unknown>,
     variables: variables ?? {},
     onScriptToast,
+    nonBlockingBrowserAwait,
   };
 }
 
-/** 规则返回占位文案且脚本曾打开内嵌页时，对齐 Legado 再次展示播放页 */
+/** 规则返回占位文案且脚本曾解析出播放页 URL 时打开内嵌页（含 nonBlocking 回退） */
 async function maybeOpenRuleContentEmbeddedBrowser(
   source: BookSource,
   book: Book | undefined,
   content: string,
   ruleContext: RuleContext,
 ): Promise<void> {
-  const url = String(ruleContext.variables?.__readerLastBrowserUrl ?? '').trim();
+  const url = String(ruleContext.variables?.[READER_LAST_BROWSER_URL_KEY] ?? '').trim();
   if (!url.startsWith('http')) return;
   const trimmed = content.trim();
-  if (!trimmed) return;
-  if (trimmed.includes('<img') && scanImgTags(trimmed).length >= 3) return;
-  if (!LEGADO_BROWSER_PLACEHOLDER_RE.test(trimmed) && trimmed.length > 300) return;
+  const isPlaceholder =
+    !trimmed ||
+    isLegadoBrowserPlaceholderContent(trimmed) ||
+    LEGADO_BROWSER_PLACEHOLDER_RE.test(trimmed);
+  if (!isPlaceholder) {
+    if (trimmed.includes('<img') && scanImgTags(trimmed).length >= 3) return;
+    if (trimmed.length > 300) return;
+  }
+
+  const { isInnerWebSessionActive } = await import('@/lib/platform/inner-web');
+  if (isInnerWebSessionActive()) return;
 
   const { openLegadoBrowserInApp } = await import('@/lib/platform/open-url');
   const { resolveSourceCookiesForHttp } = await import('@/lib/book-source/source-http');
@@ -758,7 +775,16 @@ export async function getContent(
       chapterBase,
       noticeBus,
     );
+    warnContentFetchOutcome('章节页已拉取', {
+      chapter: chapter.title,
+      bodyLen: body.length,
+      url: absoluteUrl.slice(0, 120),
+    });
     if (!body.trim()) {
+      warnContentFetchOutcome('章节页 body 为空，无法执行 ruleContent', {
+        chapter: chapter.title,
+        url: absoluteUrl,
+      });
       return null;
     }
     if (isDataChapterUrl(contentUrl)) {
@@ -784,13 +810,52 @@ export async function getContent(
       contentType,
       baseUrl,
       onScriptToast,
+      /\bjava\.startBrowserAwait\b/.test(contentRule),
     );
 
     // 对齐 Legado WebBook.getContentAwait：AnalyzeUrl 取 body → ruleContent 解析
-    let content = extractContentFromRuleOutput(
-      (await parseContentByRule(contentRule, ruleContext)) ?? '',
-    );
-    await maybeOpenRuleContentEmbeddedBrowser(source, book, content, ruleContext);
+    let rawRuleOutput = '';
+    try {
+      rawRuleOutput = (await parseContentByRule(contentRule, ruleContext)) ?? '';
+    } catch (ruleErr) {
+      warnContentFetchOutcome('ruleContent 脚本异常', {
+        chapter: chapter.title,
+        error: ruleErr instanceof Error ? ruleErr.message : String(ruleErr),
+      });
+    }
+
+    if (!rawRuleOutput.trim() && contentRuleUsesMizhiArtplayerChain(contentRule)) {
+      const playbackUrl = await tryResolveMizhiArtplayerBrowserUrl(body, source);
+      if (playbackUrl) {
+        if (!ruleContext.variables) ruleContext.variables = {};
+        ruleContext.variables[READER_LAST_BROWSER_URL_KEY] = playbackUrl;
+        rawRuleOutput = '请刷新尝试播放';
+        warnContentFetchOutcome('已用 TS 回退解析播放页', {
+          playbackUrl: playbackUrl.slice(0, 100),
+        });
+      }
+    }
+
+    const browserPlaybackUrl = String(
+      ruleContext.variables?.[READER_LAST_BROWSER_URL_KEY] ?? '',
+    ).trim();
+    if (
+      !rawRuleOutput.trim() &&
+      browserPlaybackUrl.startsWith('http') &&
+      ruleContext.nonBlockingBrowserAwait
+    ) {
+      rawRuleOutput = '请刷新尝试播放';
+    }
+    if (!rawRuleOutput.trim()) {
+      warnContentFetchOutcome('ruleContent 无输出', {
+        chapter: chapter.title,
+        hasPlaybackUrl: browserPlaybackUrl.startsWith('http'),
+        bodyHasPlayerJson: chapterHtmlHasPlayerVid(body),
+      });
+    }
+
+    let content = extractContentFromRuleOutput(rawRuleOutput);
+    void maybeOpenRuleContentEmbeddedBrowser(source, book, content, ruleContext);
     if (import.meta.env.DEV && content?.includes('<img')) {
       console.log('[content] ruleContent 解析完成', {
         contentLen: content.length,
@@ -859,13 +924,25 @@ export async function getContent(
     }
 
     if (!content?.trim()) {
-      const browserUrl = String(ruleContext.variables?.__readerLastBrowserUrl ?? '').trim();
+      const browserUrl = String(
+        ruleContext.variables?.[READER_LAST_BROWSER_URL_KEY] ?? '',
+      ).trim();
       if (browserUrl.startsWith('http')) {
-        content = formatLegadoBrowserPlaceholderForReader('请在内嵌页中观看；若未弹出播放页，请点击重试。');
+        content = formatLegadoBrowserPlaceholderForReader(
+          '请在内嵌页中观看；若未弹出播放页，请点击重试。',
+        );
+        void maybeOpenRuleContentEmbeddedBrowser(source, book, content, ruleContext);
       }
     }
 
     if (!content?.trim()) {
+      warnContentFetchOutcome('正文为空，拉取失败', {
+        chapter: chapter.title,
+        playbackUrl: String(ruleContext.variables?.[READER_LAST_BROWSER_URL_KEY] ?? '').slice(
+          0,
+          100,
+        ),
+      });
       if (isDataChapterUrl(contentUrl)) {
         const decoded = decodeChapterDataPayload(chapterBase, contentChapter.url);
         const serverUrl = resolveBookSourceServerUrl(source) ?? '';
@@ -933,6 +1010,7 @@ export async function getContent(
     }
 
     if (!content || content.trim().length === 0) {
+      warnContentFetchOutcome('正文处理后仍为空', { chapter: chapter.title });
       return null;
     }
 
@@ -1008,9 +1086,18 @@ export async function getContent(
     traceContentFetchDone('getContent 完成', content, {
       path: isDataChapterUrl(contentUrl) ? 'ruleContent+dataUrl' : 'ruleContent',
     });
+    warnContentFetchOutcome('getContent 完成', {
+      chapter: chapter.title,
+      contentLen: content.trim().length,
+      placeholder: browserPlaceholder,
+    });
 
     return content;
   } catch (error) {
+    warnContentFetchOutcome('getContent 异常', {
+      chapter: chapter.title,
+      error: error instanceof Error ? error.message : String(error),
+    });
     console.error(`获取正文内容失败 [${source.sourceName}]:`, error);
     // 抛出错误以便阅读器显示具体网络/服务器错误信息，而非仅“内容加载失败”
     throw error;

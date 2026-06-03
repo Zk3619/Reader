@@ -1,6 +1,7 @@
 import { isTauri } from '@/lib/platform/detect';
 import { formatStorageRef, parseStorageRef } from '@/lib/platform/fs/storage-ref';
 import type { AppSettings } from '@/stores/settings';
+import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 
 /** 将旧版 booksDirectory / 裸路径 迁移为 booksStorageRoot */
 export function migrateAppStorageSettings(app: AppSettings): AppSettings {
@@ -24,6 +25,13 @@ export function migrateAppStorageSettings(app: AppSettings): AppSettings {
         booksDirectory: undefined,
       };
     }
+  }
+
+  if (next.viewerChromeLayout != null) {
+    next = {
+      ...next,
+      viewerChromeLayout: normalizeViewerChromeLayout(next.viewerChromeLayout),
+    };
   }
 
   return next;
