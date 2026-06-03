@@ -5,6 +5,7 @@
 
 import type { Component, ComponentProps, JSX } from 'solid-js';
 import { onCleanup, splitProps } from 'solid-js';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { useAppDrawerOverlayLock, syncAppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
 
 import {
@@ -13,7 +14,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuGroupLabel,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuPortal,
   DropdownMenuRadioGroup,
@@ -37,10 +37,37 @@ import {
 import {
   blurActiveElement,
   blurAfterMenuTriggerRefocus,
+  deferUntilMenuDismissed,
   handleMenuCloseAutoFocusForPendingDialog,
   shouldPreventMenuCloseAutoFocus,
   withBlurBefore,
 } from '@/utils/accessibility';
+import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
+import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
+
+type AppDropdownMenuItemProps = ComponentProps<typeof DropdownMenuItem> & {
+  /** 为 false 时立即执行 onSelect（默认 true：等菜单关闭后再执行） */
+  deferOnSelect?: boolean;
+};
+
+/** 默认在菜单完全关闭后再执行 onSelect，避免 Android 上 Popper 锚点失效闪到左上角 */
+export const AppDropdownMenuItem: Component<AppDropdownMenuItemProps> = (props) => {
+  const [local, rest] = splitProps(props, ['onSelect', 'deferOnSelect']);
+  return (
+    <DropdownMenuItem
+      {...rest}
+      onSelect={() => {
+        const action = local.onSelect;
+        if (!action) return;
+        if (local.deferOnSelect === false) {
+          action();
+          return;
+        }
+        deferUntilMenuDismissed(action);
+      }}
+    />
+  );
+};
 
 /** 工具栏/批量操作等：按内容收缩宽度 */
 export const APP_DROPDOWN_MENU_CONTENT_COMPACT = 'min-w-0 w-auto';
@@ -102,6 +129,7 @@ function mergeOpenChange(
     userOnOpenChange?.(open);
     if (accessibilityDisabled) return;
     if (open) {
+      scheduleOverlayPositionSync();
       requestAnimationFrame(() => blurActiveElement());
     } else {
       blurActiveElement();
@@ -169,7 +197,12 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
         if (handleMenuCloseAutoFocusForPendingDialog(e)) return;
         userOnCloseAutoFocus?.(e);
       }}
-      class={cn(CONTENT_LAYOUT_CLASS[layout()], local.portalZClass, local.class)}
+      class={cn(
+        appDropdownMenuContentMotionClass,
+        CONTENT_LAYOUT_CLASS[layout()],
+        local.portalZClass,
+        local.class
+      )}
     />
   );
 };
@@ -233,7 +266,6 @@ export function AppDropdownMenuIconTrigger(
 
 export {
   DropdownMenuTrigger as AppDropdownMenuTrigger,
-  DropdownMenuItem as AppDropdownMenuItem,
   DropdownMenuSeparator as AppDropdownMenuSeparator,
   DropdownMenuCheckboxItem as AppDropdownMenuCheckboxItem,
   DropdownMenuRadioGroup as AppDropdownMenuRadioGroup,

@@ -74,10 +74,19 @@ export const maxHTitleMenu = 'max-h-[min(24rem,calc(100dvh-11rem))]';
 export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
 
 /**
- * 滚动区末尾留白：避免末项贴齐滚动容器底边。
- * 主壳 Tab 页在桌面无底栏时由 App.css + data-shell-bottom-bar 注入；其余用于下方无底栏/DialogFooter 的滚动容器。
+ * 滚动区垂直留白：顶恒 mt-2；底仅触摸端（App.css `.app-scroll-bottom-inset`）。
+ * 主壳 Tab 无底栏时的底留白亦仅在触摸端由 App.css 注入。
  */
-export const scrollEdgeBottomInset = 'my-2';
+export const scrollEdgeBottomInset = 'mt-2 app-scroll-bottom-inset';
+
+/**
+ * 贴底 chrome 内边距（底栏、抽屉、阅读器底栏）：仅 `(pointer: coarse)` 触摸端生效。
+ * @see App.css `.app-bottom-chrome-inset`
+ */
+export const appBottomChromePadding = 'app-bottom-chrome-inset';
+
+/** 块级底外边距：仅触摸端，见 App.css `.app-bottom-edge-inset` */
+export const appBottomEdgeInset = 'app-bottom-edge-inset';
 
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;
@@ -125,9 +134,9 @@ export const mainShellPageScroll = cn(
   'main-shell-page-scroll flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1',
 );
 
-/** 独立全屏页主内容可滚动区（无底栏时保留底部安全区 + 列表末尾留白） */
+/** 独立全屏页主内容可滚动区（触摸端底留白，桌面无额外底距） */
 export const standalonePageScroll = cn(
-  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both safe-area-page-bottom',
+  'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both',
   scrollEdgeBottomInset,
 );
 
@@ -137,6 +146,42 @@ export const appDialogScrollBodyNoFooter = cn(
   scrollEdgeBottomInset,
 );
 
+/** 多区块设置类弹窗正文：固定最大高度，避免 h-fit 随单选切换重算导致整体塌缩 */
+export const appDialogSettingsScrollBody = cn(
+  'flex-1 min-h-0 max-h-[min(65dvh,32rem)] space-y-4 overflow-y-auto overscroll-contain px-6 py-4',
+  scrollEdgeBottomInset,
+);
+
+/** 书架/探索等宽设置弹窗外壳：稳定宽高，内部正文用 appDialogSettingsScrollBody */
+export const appDialogSettingsShell = 'w-[min(42rem,85dvw)] min-h-[min(75dvh,36rem)]';
+
+/**
+ * 主壳 Tab 页入场动画。移动端省略位移，减少 Popper 首次测量错误。
+ */
+export function mainShellTabEnterClass(reduceMotion: boolean, mobileDevice: boolean): string {
+  if (reduceMotion) return '';
+  if (mobileDevice) return 'animate-in fade-in duration-200';
+  return 'animate-in fade-in slide-in-from-bottom-4 duration-500';
+}
+
 /** 主壳顶/底栏 fixed 偏移（含移动端安全区） */
 export const insetTopAppBar = 'inset-top-app-bar';
 export const insetBottomAppBar = 'inset-bottom-app-bar';
+
+/** 侧栏 AppDrawer：顶栏安全区 + 底部 pb-2（不依赖 env safe-area-inset-bottom） */
+export const appDrawerSideSafeArea = cn('safe-area-inset-top', appBottomChromePadding);
+
+/** 底栏抽屉：底部 pb-2 */
+export const appDrawerBottomSafeArea = appBottomChromePadding;
+
+/** 顶栏抽屉：状态栏 */
+export const appDrawerTopSafeArea = 'safe-area-inset-top';
+
+/**
+ * 抽屉内纵向滚动：双侧 stable 沟槽防抖动；横向用较小 px-2，为沟槽留出净宽（分类 grid 见 SourceExploreDrawerContent）。
+ */
+export const appDrawerScrollBody = cn(
+  'min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pt-1',
+  scrollGutterStableBoth,
+  scrollEdgeBottomInset,
+);

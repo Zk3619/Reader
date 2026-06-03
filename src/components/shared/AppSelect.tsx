@@ -24,10 +24,15 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
+  APP_DIALOG_POPPER_Z,
+  APP_DRAWER_POPPER_Z,
+} from '@/lib/ui/overlay-z';
+import {
   popperContentViewportScroll,
   popperOverflowPadding,
 } from '@/lib/ui/viewport-classes';
 import { blurActiveElement } from '@/utils/accessibility';
+import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
 /** 选项行：与表单/对话框内其它 Select 一致，缩小左侧勾选留白 */
 export const APP_SELECT_ITEM_CLASS = 'pl-2';
@@ -66,6 +71,7 @@ function mergeOpenChange(
     userOnOpenChange?.(open);
     if (accessibilityDisabled) return;
     if (open) {
+      scheduleOverlayPositionSync();
       requestAnimationFrame(() => blurActiveElement());
     } else {
       blurActiveElement();
@@ -134,13 +140,14 @@ export const AppSelectContent: Component<AppSelectContentProps> = (props) => {
   const layout = () => local.layout ?? 'plain';
   const drawerPortalMount = useAppDrawerPortalMount();
   const portalMount = () => drawerPortalMount() ?? undefined;
+  const inDrawer = () => portalMount() != null;
   return (
     <SelectContent
       {...rest}
       mount={portalMount()}
       class={cn(
         CONTENT_LAYOUT_CLASS[layout()],
-        portalMount() && 'z-60',
+        inDrawer() ? APP_DRAWER_POPPER_Z : APP_DIALOG_POPPER_Z,
         local.portalZClass,
         local.class,
       )}

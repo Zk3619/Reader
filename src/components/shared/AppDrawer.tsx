@@ -35,9 +35,17 @@ import {
   AppDrawerPortalMountContext,
   appDrawerBlocksOutsideDismiss,
   preventCorvuOutsidePointerForAppToast,
+  preventDrawerDismissForFloatingOverlay,
   type AppDrawerOverlayLock,
 } from '@/components/shared/app-drawer-overlay-lock';
-import { appBlockDrag } from '@/lib/ui/viewport-classes';
+import {
+  appBlockDrag,
+  appDrawerBottomSafeArea,
+  appDrawerSideSafeArea,
+  appDrawerTopSafeArea,
+} from '@/lib/ui/viewport-classes';
+import { APP_DRAWER_Z } from '@/lib/ui/overlay-z';
+import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
 export type { AppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
 export {
@@ -56,6 +64,7 @@ export const AppDrawer: Component<AppDrawerProps> = (props) => {
     'closeOnOutsideFocus',
     'children',
     'onOutsidePointer',
+    'onOpenChange',
   ]);
   const [overlayLockCount, setOverlayLockCount] = createSignal(0);
 
@@ -80,8 +89,13 @@ export const AppDrawer: Component<AppDrawerProps> = (props) => {
           local.closeOnOutsidePointer,
         )}
         closeOnOutsideFocus={local.closeOnOutsideFocus ?? false}
+        onOpenChange={(open) => {
+          if (open) scheduleOverlayPositionSync();
+          local.onOpenChange?.(open);
+        }}
         onOutsidePointer={(event) => {
           preventCorvuOutsidePointerForAppToast(event);
+          preventDrawerDismissForFloatingOverlay(event);
           local.onOutsidePointer?.(event);
         }}
       >
@@ -182,15 +196,30 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
         <DrawerOverlay class={cn(appBlockDrag, local.overlayClass)} />
         <DrawerPrimitive.Content
           class={cn(
-            'fixed z-50 flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
+            'fixed flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
+            APP_DRAWER_Z,
             appBlockDrag,
             (side() === 'bottom' || side() === 'top') && APP_DRAWER_MAX_HEIGHT_CLASS,
             side() === 'left' &&
-              'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
+              cn(
+                'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
+                appDrawerSideSafeArea,
+              ),
             side() === 'right' &&
-              'right-0 top-0 bottom-0 h-full w-full max-w-sm rounded-l-[10px] border-r',
-            (side() === 'bottom' || side() === 'top') &&
-              'inset-x-0 bottom-0 mt-24 flex h-auto flex-col rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
+              cn(
+                'right-0 top-0 bottom-0 h-full w-full max-w-sm rounded-l-[10px] border-r',
+                appDrawerSideSafeArea,
+              ),
+            side() === 'bottom' &&
+              cn(
+                'inset-x-0 bottom-0 mt-24 flex h-auto flex-col rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
+                appDrawerBottomSafeArea,
+              ),
+            side() === 'top' &&
+              cn(
+                'inset-x-0 top-0 flex h-auto flex-col rounded-b-[10px]',
+                appDrawerTopSafeArea,
+              ),
             local.class,
           )}
           {...rest}

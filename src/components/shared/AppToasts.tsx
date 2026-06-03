@@ -4,7 +4,7 @@
  */
 
 import type { JSX } from "solid-js"
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { createRoot, createSignal, onCleanup, onMount } from "solid-js"
 import { toast, type ExternalToast, type ToasterProps } from "solid-sonner"
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
@@ -491,10 +491,8 @@ export function normalizeScriptToastText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\t/g, "    ").trimEnd()
 }
 
-/**
- * 通用 Toast 通知函数
- */
-export function showAppToast(props: {
+/** 在独立 Solid root 中展示，避免 createResource/untrack 或 QuickJS 宿主间隙下 owner 链断裂 */
+function showAppToastImpl(props: {
   title?: JSX.Element
   description?: JSX.Element
   children?: JSX.Element
@@ -502,9 +500,7 @@ export function showAppToast(props: {
   duration?: number
   persistent?: boolean
   progress?: ToastProgressInput
-  /** 固定 id，用于脚本 toast 等需要替换上一条的场景 */
   id?: string | number
-  /** 书源脚本等多行等宽排版 */
   script?: boolean
 }) {
   const toastId = claimToastSlot(props.id)
@@ -592,6 +588,29 @@ export function showAppToast(props: {
     default:
       toast.info(toastMessage, payload)
   }
+}
+
+/**
+ * 通用 Toast 通知函数
+ */
+export function showAppToast(props: {
+  title?: JSX.Element
+  description?: JSX.Element
+  children?: JSX.Element
+  variant?: ToastVariant
+  duration?: number
+  persistent?: boolean
+  progress?: ToastProgressInput
+  /** 固定 id，用于脚本 toast 等需要替换上一条的场景 */
+  id?: string | number
+  /** 书源脚本等多行等宽排版 */
+  script?: boolean
+}) {
+  queueMicrotask(() => {
+    createRoot(() => {
+      showAppToastImpl(props)
+    })
+  })
 }
 
 export function showImmersiveEnterToast() {

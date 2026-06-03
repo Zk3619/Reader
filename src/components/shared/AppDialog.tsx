@@ -13,7 +13,13 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
+import {
+  appDialogContentMotionClass,
+  appDialogOverlayMotionClass,
+} from '@/lib/ui/dialog-motion';
+import { APP_DIALOG_Z } from '@/lib/ui/overlay-z';
 import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
+import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
 import {
   clearFocusBeforeModal,
@@ -26,8 +32,11 @@ export const APP_DIALOG_CLOSE_BUTTON_CLASS =
   'h-9 w-9 shrink-0 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors';
 
 /** 与 ui/dialog DialogContent 对齐，但不渲染右上角默认关闭钮 */
-const APP_DIALOG_CONTENT_BASE_CLASS =
-  'fixed left-1/2 top-1/2 z-50 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg duration-200 data-expanded:animate-in data-closed:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[closed]:slide-out-to-left-1/2 data-[closed]:slide-out-to-top-[48%] data-[expanded]:slide-in-from-left-1/2 data-[expanded]:slide-in-from-top-[48%] rounded-lg';
+const APP_DIALOG_CONTENT_BASE_CLASS = cn(
+  'fixed left-1/2 top-1/2 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg rounded-lg',
+  APP_DIALOG_Z,
+  appDialogContentMotionClass
+);
 
 type AppDialogPortalProps = DialogPrimitive.DialogPortalProps & { wrapperClass?: string };
 
@@ -37,7 +46,8 @@ const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
     <DialogPrimitive.Portal {...rest}>
       <div
         class={cn(
-          'fixed inset-0 z-50 flex items-start justify-center sm:items-center',
+          'fixed inset-0 flex items-start justify-center sm:items-center',
+          APP_DIALOG_Z,
           props.wrapperClass
         )}
       >
@@ -50,7 +60,9 @@ const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
 const AppDialogOverlay: Component<{ class?: string }> = (props) => (
   <DialogPrimitive.Overlay
     class={cn(
-      'fixed inset-0 z-50 bg-background/80 data-expanded:animate-in data-closed:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0',
+      'fixed inset-0 bg-background/80',
+      APP_DIALOG_Z,
+      appDialogOverlayMotionClass,
       appBlockDrag,
       props.class
     )}
@@ -93,6 +105,7 @@ export const AppDialog: Component<AppDialogProps> = (props) => {
     () => local.open,
     (open) => {
       if (local.disableAccessibilityAnnounce || !open) return;
+      scheduleOverlayPositionSync();
       releasePageFocus();
       prepareForAppDialogOpen();
       requestAnimationFrame(() => releasePageFocus());

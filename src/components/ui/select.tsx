@@ -51,17 +51,21 @@ const SelectIcon: Component<SelectPrimitive.SelectIconProps> = (props) => {
 }
 
 type SelectContentProps<T extends ValidComponent = "div"> =
-  SelectPrimitive.SelectContentProps<T> & { class?: string | undefined }
+  SelectPrimitive.SelectContentProps<T> & {
+    class?: string | undefined
+    /** 挂到指定节点（如 AppDrawer 内 Portal 锚点），避免 body 层被抽屉挡住 */
+    mount?: HTMLElement | undefined
+  }
 
 const SelectContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, SelectContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as SelectContentProps, ["class"])
+  const [local, others] = splitProps(props as SelectContentProps, ["class", "mount"])
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal mount={local.mount}>
       <SelectPrimitive.Content
         class={cn(
-          "relative z-50 min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          "relative min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
           local.class
         )}
         {...others}

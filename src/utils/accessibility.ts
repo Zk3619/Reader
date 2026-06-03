@@ -122,6 +122,32 @@ export function dismissOpenKobalteOverlays(): void {
   );
 }
 
+function hasOpenKobalteDropdownMenu(): boolean {
+  if (typeof document === 'undefined') return false;
+  return !!document.querySelector(
+    '[id*="dropdownmenu"][data-expanded], [role="menu"][data-expanded]'
+  );
+}
+
+/** 壳层 Tab / 全屏子页 / 叠层栈变化时：关闭仍挂着的 Popper 菜单与选择器（不波及已打开的 dialog） */
+export function dismissFloatingOverlaysForShellChange(): void {
+  blurFocusInDismissableOverlay();
+  blurOpenDropdownMenuTriggers();
+  closeAllSelectMenus();
+  if (hasOpenKobalteDropdownMenu()) {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        keyCode: 27,
+        which: 27,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  }
+}
+
 /** 从菜单项打开 dialog 时，本帧内 AppDialog.prepare 不再发 Escape */
 let skipNextDialogPrepare = false;
 
@@ -189,17 +215,25 @@ function flushPendingDialogAfterMenuClose(): void {
 
 /** 在 DropdownMenu onCloseAutoFocus 内 sync refocus(trigger) 之后再 flush */
 function scheduleFlushAfterMenuCloseAutoFocus(): void {
-  setTimeout(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => flushPendingDialogAfterMenuClose());
-    });
-  }, 0);
+  requestAnimationFrame(() => {
+    flushPendingDialogAfterMenuClose();
+  });
 }
 
 /**
- * 登记待打开的 dialog；在菜单 onCloseAutoFocus（含 trigger refocus）之后再 setOpen。
+ * 登记待执行回调：在菜单 onCloseAutoFocus（含 trigger refocus）之后再执行。
+ * 用于开弹窗、切页、开全屏子页等，避免锚点随 DOM 隐藏后 Popper 闪到左上角（Android 常见）。
  */
+export function deferUntilMenuDismissed(action: () => void): void {
+  openAppDialogAfterMenuDismissImpl(action);
+}
+
+/** @deprecated 使用 deferUntilMenuDismissed；保留别名兼容旧调用 */
 export function openAppDialogAfterMenuDismiss(action: () => void): void {
+  deferUntilMenuDismissed(action);
+}
+
+function openAppDialogAfterMenuDismissImpl(action: () => void): void {
   preventMenuCloseAutoFocus = true;
   pendingDialogAfterMenu = action;
   pendingDialogRunScheduled = false;
@@ -207,7 +241,7 @@ export function openAppDialogAfterMenuDismiss(action: () => void): void {
   if (pendingDialogFallbackTimer !== undefined) {
     clearTimeout(pendingDialogFallbackTimer);
   }
-  pendingDialogFallbackTimer = setTimeout(() => flushPendingDialogAfterMenuClose(), 200);
+  pendingDialogFallbackTimer = setTimeout(() => flushPendingDialogAfterMenuClose(), 100);
 }
 
 /**

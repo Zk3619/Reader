@@ -39,13 +39,20 @@ export function isAppToastTarget(target: EventTarget | null | undefined): boolea
   );
 }
 
-export function preventDrawerDismissForFloatingOverlay(event: {
+/** corvu Drawer `onOutsidePointer`：原生 PointerEvent 或带 originalEvent 的自定义事件 */
+export type AppOutsidePointerEvent = PointerEvent | {
   target?: EventTarget | null;
   detail?: { originalEvent?: Event };
   preventDefault: () => void;
-}): void {
-  const target = event.detail?.originalEvent?.target ?? event.target;
-  if (isAppFloatingOverlayTarget(target)) {
+};
+
+function outsidePointerTarget(event: AppOutsidePointerEvent): EventTarget | null | undefined {
+  if (event instanceof PointerEvent) return event.target;
+  return event.detail?.originalEvent?.target ?? event.target;
+}
+
+export function preventDrawerDismissForFloatingOverlay(event: AppOutsidePointerEvent): void {
+  if (isAppFloatingOverlayTarget(outsidePointerTarget(event))) {
     event.preventDefault();
   }
 }
@@ -63,8 +70,8 @@ export function preventOverlayDismissForAppToast(event: {
 }
 
 /** corvu Drawer / Dialog：Toast 交互不应触发 outside dismiss */
-export function preventCorvuOutsidePointerForAppToast(event: PointerEvent): void {
-  if (isAppToastTarget(event.target)) {
+export function preventCorvuOutsidePointerForAppToast(event: AppOutsidePointerEvent): void {
+  if (isAppToastTarget(outsidePointerTarget(event))) {
     event.preventDefault();
   }
 }
