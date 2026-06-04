@@ -23,10 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import {
-  APP_DIALOG_POPPER_Z,
-  APP_DRAWER_POPPER_Z,
-} from '@/lib/ui/overlay-z';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import {
   popperContentViewportScroll,
   popperOverflowPadding,
@@ -133,22 +130,25 @@ type AppSelectContentProps = ComponentProps<typeof SelectContent> & {
   layout?: AppSelectContentLayout;
   /** 附加在 Content 上的 z-index 等（如内嵌页 z-[160]） */
   portalZClass?: string;
+  /** 挂 body 并用显式 portalZClass（阅读器内用 ViewerAppSelectContent） */
+  portalToBody?: boolean;
 };
 
 export const AppSelectContent: Component<AppSelectContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
+  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'portalToBody']);
   const layout = () => local.layout ?? 'plain';
+  const layer = useOverlayLayerZ();
   const drawerPortalMount = useAppDrawerPortalMount();
-  const portalMount = () => drawerPortalMount() ?? undefined;
-  const inDrawer = () => portalMount() != null;
+  const inDrawer = () => !local.portalToBody && drawerPortalMount() != null;
+  const popperZ = () =>
+    local.portalZClass ?? (inDrawer() ? layer.drawerPopper : layer.dialogPopper);
   return (
     <SelectContent
       {...rest}
-      mount={portalMount()}
+      mount={local.portalToBody ? undefined : drawerPortalMount() ?? undefined}
       class={cn(
         CONTENT_LAYOUT_CLASS[layout()],
-        inDrawer() ? APP_DRAWER_POPPER_Z : APP_DIALOG_POPPER_Z,
-        local.portalZClass,
+        popperZ(),
         local.class,
       )}
     />

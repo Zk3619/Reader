@@ -22,7 +22,6 @@ import {
   DrawerDescription,
   DrawerFooter,
   DrawerHeader,
-  DrawerOverlay,
   DrawerPortal,
   DrawerTitle,
   DrawerTrigger,
@@ -44,7 +43,8 @@ import {
   appDrawerSideSafeArea,
   appDrawerTopSafeArea,
 } from '@/lib/ui/viewport-classes';
-import { APP_DRAWER_Z } from '@/lib/ui/overlay-z';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
 export type { AppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
@@ -126,6 +126,8 @@ type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> &
   overlayClass?: string;
   /** 是否显示顶/底栏或侧栏的原生拖动手柄条，默认 false */
   showNativeDragHandle?: boolean;
+  /** App 根级抽屉（如书籍详情）须挂 body 并使用自带 z-index，勿挂阅读器 Portal 宿主 */
+  portalToBody?: boolean;
 };
 
 export type AppDrawerBodyProps = ComponentProps<'div'> & {
@@ -164,6 +166,29 @@ function AppDrawerBottomDragHandle() {
   return <div class="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />;
 }
 
+/** 主题色遮罩 + 分层 z-index（高于 Corvu 默认纯黑 rgb 遮罩） */
+function AppDrawerOverlay(props: { class?: string }) {
+  const ctx = DrawerPrimitive.useContext();
+  const layer = useOverlayLayerZ();
+  const [local] = splitProps(props, ['class']);
+  return (
+    <DrawerPrimitive.Overlay
+      data-app-overlay-backdrop=""
+      class={cn(
+        'fixed inset-0',
+        APP_OVERLAY_BACKDROP_CLASS,
+        'data-transitioning:transition-opacity data-transitioning:duration-300',
+        layer.drawerOverlay,
+        appBlockDrag,
+        local.class,
+      )}
+      style={{
+        opacity: `${0.8 * ctx.openPercentage()}`,
+      }}
+    />
+  );
+}
+
 const AppDrawerPortalMountHost: Component<{ children: JSX.Element }> = (props) => {
   const [portalMount, setPortalMount] = createSignal<HTMLElement | undefined>();
   const mountAccessor: Accessor<HTMLElement | undefined> = portalMount;
@@ -181,11 +206,13 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
   props: DynamicProps<T, AppDrawerContentProps<T>>,
 ) => {
   const ctx = DrawerPrimitive.useContext();
+  const layer = useOverlayLayerZ();
   const [local, rest] = splitProps(props as AppDrawerContentProps, [
     'class',
     'children',
     'overlayClass',
     'showNativeDragHandle',
+    'portalToBody',
   ]);
   const side = () => ctx.side();
   const showNativeDragHandle = createMemo(() => local.showNativeDragHandle ?? false);
@@ -193,11 +220,12 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
   return (
     <AppDrawerNativeDragHandleContext.Provider value={showNativeDragHandle}>
       <DrawerPortal>
-        <DrawerOverlay class={cn(appBlockDrag, local.overlayClass)} />
+        <AppDrawerOverlay class={local.overlayClass} />
         <DrawerPrimitive.Content
+          data-app-overlay-surface=""
           class={cn(
             'fixed flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
-            APP_DRAWER_Z,
+            layer.drawer,
             appBlockDrag,
             (side() === 'bottom' || side() === 'top') && APP_DRAWER_MAX_HEIGHT_CLASS,
             side() === 'left' &&

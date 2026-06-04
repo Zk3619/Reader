@@ -30,11 +30,11 @@ const DrawerOverlay = <T extends ValidComponent = "div">(
   return (
     <DrawerPrimitive.Overlay
       class={cn(
-        "fixed inset-0 z-50 data-transitioning:transition-colors data-transitioning:duration-300",
+        "fixed inset-0 z-50 bg-background data-transitioning:transition-opacity data-transitioning:duration-300",
         props.class
       )}
       style={{
-        "background-color": `rgb(0 0 0 / ${0.8 * drawerContext.openPercentage()})`
+        opacity: `${0.8 * drawerContext.openPercentage()}`
       }}
       {...rest}
     />

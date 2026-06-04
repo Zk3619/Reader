@@ -157,14 +157,17 @@ const ComboboxTrigger = <T extends ValidComponent = "button">(
 }
 
 type ComboboxContentProps<T extends ValidComponent = "div"> =
-  ComboboxPrimitive.ComboboxContentProps<T> & { class?: string | undefined }
+  ComboboxPrimitive.ComboboxContentProps<T> & {
+    class?: string | undefined
+    mount?: HTMLElement | undefined
+  }
 
 const ComboboxContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ComboboxContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ComboboxContentProps, ["class"])
+  const [local, others] = splitProps(props as ComboboxContentProps, ["class", "mount"])
   return (
-    <ComboboxPrimitive.Portal>
+    <ComboboxPrimitive.Portal mount={props.mount}>
       <ComboboxPrimitive.Content
         class={cn(
           "relative z-50 min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-80",

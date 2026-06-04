@@ -10,14 +10,15 @@ import * as DialogPrimitive from '@kobalte/core/dialog';
 
 import { Dialog, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import {
   appDialogContentMotionClass,
   appDialogOverlayMotionClass,
 } from '@/lib/ui/dialog-motion';
-import { APP_DIALOG_Z } from '@/lib/ui/overlay-z';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
 import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
@@ -31,43 +32,47 @@ import {
 export const APP_DIALOG_CLOSE_BUTTON_CLASS =
   'h-9 w-9 shrink-0 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors';
 
-/** 与 ui/dialog DialogContent 对齐，但不渲染右上角默认关闭钮 */
-const APP_DIALOG_CONTENT_BASE_CLASS = cn(
-  'fixed left-1/2 top-1/2 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg rounded-lg',
-  APP_DIALOG_Z,
-  appDialogContentMotionClass
-);
+const APP_DIALOG_CONTENT_LAYOUT_CLASS =
+  'fixed left-1/2 top-1/2 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg rounded-lg';
 
-type AppDialogPortalProps = DialogPrimitive.DialogPortalProps & { wrapperClass?: string };
+type AppDialogPortalProps = DialogPrimitive.DialogPortalProps & {
+  wrapperClass?: string;
+  /** 与 BookInfoDrawer 一致：挂 body 并用显式 z-index（阅读器内请用 ViewerAppDialogContent） */
+  portalToBody?: boolean;
+};
 
 const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
-  const [, rest] = splitProps(props, ['children', 'wrapperClass']);
+  const [local, rest] = splitProps(props, ['children', 'wrapperClass', 'portalToBody']);
   return (
     <DialogPrimitive.Portal {...rest}>
       <div
         class={cn(
           'fixed inset-0 flex items-start justify-center sm:items-center',
-          APP_DIALOG_Z,
-          props.wrapperClass
+          local.wrapperClass,
         )}
       >
-        {props.children}
+        {local.children}
       </div>
     </DialogPrimitive.Portal>
   );
 };
 
-const AppDialogOverlay: Component<{ class?: string }> = (props) => (
-  <DialogPrimitive.Overlay
-    class={cn(
-      'fixed inset-0 bg-background/80',
-      APP_DIALOG_Z,
-      appDialogOverlayMotionClass,
-      appBlockDrag,
-      props.class
-    )}
-  />
-);
+const AppDialogOverlay: Component<{ class?: string; overlayZClass?: string }> = (props) => {
+  const [local] = splitProps(props, ['class', 'overlayZClass']);
+  return (
+    <DialogPrimitive.Overlay
+      data-app-overlay-backdrop=""
+      class={cn(
+        'fixed inset-0',
+        APP_OVERLAY_BACKDROP_CLASS,
+        local.overlayZClass,
+        appDialogOverlayMotionClass,
+        appBlockDrag,
+        local.class,
+      )}
+    />
+  );
+};
 
 /** 与 ui/dialog 中 DialogContent 一致的扩展 props（含 layout） */
 export type AppDialogContentProps<T extends ValidComponent = 'div'> =
@@ -81,6 +86,8 @@ export type AppDialogContentProps<T extends ValidComponent = 'div'> =
      * plain：不附加默认尺寸类，用于内嵌页 Cookie 等简单对话框
      */
     layout?: 'app' | 'plain';
+    /** 挂 body + 显式 portalZClass/overlayClass（阅读器叠层内用 ViewerAppDialogContent） */
+    portalToBody?: boolean;
   };
 
 export type AppDialogProps = ComponentProps<typeof Dialog> & {
@@ -136,6 +143,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
     'portalZClass',
     'overlayClass',
     'layout',
+    'portalToBody',
     'onOpenAutoFocus',
     'onPointerDownOutside',
     'onInteractOutside',
@@ -144,13 +152,19 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
   const userOnPointerDownOutside = () =>
     (props as AppDialogContentProps<T>).onPointerDownOutside;
   const userOnInteractOutside = () => (props as AppDialogContentProps<T>).onInteractOutside;
+  const layer = useOverlayLayerZ();
   const layout = () => (props as AppDialogContentProps<T>).layout ?? 'app';
-  const portalZ = () => (props as AppDialogContentProps<T>).portalZClass;
+  const portalToBody = () => (props as AppDialogContentProps<T>).portalToBody === true;
+  const zOverride = () => (props as AppDialogContentProps<T>).portalZClass;
+  const portalZ = () => zOverride() ?? layer.dialogOverlay;
+  const contentZ = () => layer.dialog;
   const overlayCls = () => (props as AppDialogContentProps<T>).overlayClass;
+  const overlayZ = () => overlayCls() ?? zOverride() ?? layer.dialogOverlay;
   return (
-    <AppDialogPortal wrapperClass={portalZ()}>
-      <AppDialogOverlay class={cn(portalZ(), overlayCls())} />
+    <AppDialogPortal wrapperClass={portalZ()} portalToBody={portalToBody()}>
+      <AppDialogOverlay overlayZClass={overlayZ()} class={overlayCls()} />
       <DialogPrimitive.Content
+        data-app-overlay-surface=""
         {...(rest as DialogPrimitive.DialogContentProps<'div'>)}
         onOpenAutoFocus={(e) => {
           userOnOpenAutoFocus()?.(e);
@@ -169,9 +183,10 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
           userOnInteractOutside()?.(e);
         }}
         class={cn(
-          APP_DIALOG_CONTENT_BASE_CLASS,
+          APP_DIALOG_CONTENT_LAYOUT_CLASS,
+          appDialogContentMotionClass,
           appBlockDrag,
-          portalZ(),
+          zOverride() ?? contentZ(),
           layout() === 'app' && `${dialogViewportLimits} flex flex-col overflow-hidden p-0`,
           (props as AppDialogContentProps<T>).class
         )}
@@ -192,8 +207,8 @@ export const AppDialogCloseButton: Component<{
 }> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'disabled']);
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         onFocus={(e) => e.preventDefault()}
         as={(triggerProps: Record<string, unknown>) => (
           <DialogPrimitive.CloseButton
@@ -210,8 +225,8 @@ export const AppDialogCloseButton: Component<{
           </DialogPrimitive.CloseButton>
         )}
       />
-      <TooltipContent class="z-100">关闭</TooltipContent>
-    </Tooltip>
+      <AppTooltipContent>关闭</AppTooltipContent>
+    </AppTooltip>
   );
 };
 

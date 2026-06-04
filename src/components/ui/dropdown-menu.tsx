@@ -19,14 +19,15 @@ const DropdownMenu: Component<DropdownMenuPrimitive.DropdownMenuRootProps> = (pr
 type DropdownMenuContentProps<T extends ValidComponent = "div"> =
   DropdownMenuPrimitive.DropdownMenuContentProps<T> & {
     class?: string | undefined
+    mount?: HTMLElement | undefined
   }
 
 const DropdownMenuContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, DropdownMenuContentProps<T>>
 ) => {
-  const [, rest] = splitProps(props as DropdownMenuContentProps, ["class"])
+  const [, rest] = splitProps(props as DropdownMenuContentProps, ["class", "mount"])
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal mount={props.mount}>
       <DropdownMenuPrimitive.Content
         class={cn(
           "z-50 min-w-32 origin-(--kb-menu-content-transform-origin) animate-content-hide overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-expanded:animate-content-show",

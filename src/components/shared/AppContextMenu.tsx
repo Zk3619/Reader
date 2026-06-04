@@ -28,6 +28,8 @@ import {
   popperContentViewportScroll,
   popperOverflowPadding,
 } from '@/lib/ui/viewport-classes';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { blurActiveElement } from '@/utils/accessibility';
 
 /** 常规右键菜单：最小宽度 + 不超过锚点方向可用高度时纵向滚动 */
@@ -90,10 +92,30 @@ type AppContextMenuContentProps = ComponentProps<typeof ContextMenuContent> & {
 export const AppContextMenuContent: Component<AppContextMenuContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
   const layout = () => local.layout ?? 'compact';
+  const layer = useOverlayLayerZ();
+  const mount = useOverlayPortalMount();
+  const popperZ = () => local.portalZClass ?? layer.popper;
   return (
     <ContextMenuContent
+      mount={mount}
       {...rest}
-      class={cn(CONTENT_LAYOUT_CLASS[layout()], local.portalZClass, local.class)}
+      class={cn(CONTENT_LAYOUT_CLASS[layout()], popperZ(), local.class)}
+    />
+  );
+};
+
+type AppContextMenuSubContentProps = ComponentProps<typeof ContextMenuSubContent> & {
+  portalZClass?: string;
+};
+
+export const AppContextMenuSubContent: Component<AppContextMenuSubContentProps> = (props) => {
+  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
+  const layer = useOverlayLayerZ();
+  const popperZ = () => local.portalZClass ?? layer.popper;
+  return (
+    <ContextMenuSubContent
+      {...rest}
+      class={cn(popperZ(), local.class)}
     />
   );
 };
@@ -110,6 +132,5 @@ export {
   ContextMenuShortcut as AppContextMenuShortcut,
   ContextMenuSub as AppContextMenuSub,
   ContextMenuSubTrigger as AppContextMenuSubTrigger,
-  ContextMenuSubContent as AppContextMenuSubContent,
   ContextMenuPortal as AppContextMenuPortal,
 };

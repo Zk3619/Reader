@@ -1,11 +1,17 @@
 import { createEffect, createSignal, onCleanup, splitProps } from 'solid-js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  AppTooltip,
+  AppTooltipContent,
+  AppTooltipTrigger,
+} from '@/components/shared/AppTooltip';
 import { cn } from '@/lib/utils';
 
 export interface TruncatedTooltipProps {
   text: string;
   class?: string;
   as?: 'span' | 'div';
+  /** 阅读器叠层内请用 ViewerAppTooltipContent 包裹并传入 portalZClass */
+  portalZClass?: string;
 }
 
 function isTextTruncated(el: HTMLElement) {
@@ -13,7 +19,7 @@ function isTextTruncated(el: HTMLElement) {
 }
 
 export function TruncatedTooltip(props: TruncatedTooltipProps) {
-  const [local, others] = splitProps(props, ['text', 'class', 'as']);
+  const [local, others] = splitProps(props, ['text', 'class', 'as', 'portalZClass']);
   const [triggerEl, setTriggerEl] = createSignal<HTMLElement | undefined>();
   const [truncated, setTruncated] = createSignal(false);
 
@@ -32,16 +38,18 @@ export function TruncatedTooltip(props: TruncatedTooltipProps) {
   });
 
   return (
-    <Tooltip disabled={!truncated()}>
-      <TooltipTrigger
+    <AppTooltip disabled={!truncated()}>
+      <AppTooltipTrigger
         as={local.as ?? 'span'}
         ref={setTriggerEl}
         class={cn('truncate', local.class)}
         {...others}
       >
         {local.text}
-      </TooltipTrigger>
-      <TooltipContent>{local.text}</TooltipContent>
-    </Tooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent portalToBody portalZClass={local.portalZClass}>
+        {local.text}
+      </AppTooltipContent>
+    </AppTooltip>
   );
 }

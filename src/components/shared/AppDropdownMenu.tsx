@@ -42,6 +42,7 @@ import {
   shouldPreventMenuCloseAutoFocus,
   withBlurBefore,
 } from '@/utils/accessibility';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
@@ -184,12 +185,22 @@ type AppDropdownMenuContentProps = ComponentProps<typeof DropdownMenuContent> & 
   layout?: AppDropdownMenuContentLayout;
   /** 附加在 Content 上的 z-index 等（如内嵌页 z-[160]） */
   portalZClass?: string;
+  /** 挂 body 并用显式 portalZClass（阅读器内用 ViewerAppDropdownMenuContent） */
+  portalToBody?: boolean;
 };
 
 export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'onCloseAutoFocus']);
+  const [local, rest] = splitProps(props, [
+    'class',
+    'layout',
+    'portalZClass',
+    'portalToBody',
+    'onCloseAutoFocus',
+  ]);
   const layout = () => local.layout ?? 'compact';
+  const layer = useOverlayLayerZ();
   const userOnCloseAutoFocus = local.onCloseAutoFocus;
+  const popperZ = () => local.portalZClass ?? layer.popper;
   return (
     <DropdownMenuContent
       {...rest}
@@ -200,9 +211,25 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
       class={cn(
         appDropdownMenuContentMotionClass,
         CONTENT_LAYOUT_CLASS[layout()],
-        local.portalZClass,
+        popperZ(),
         local.class
       )}
+    />
+  );
+};
+
+type AppDropdownMenuSubContentProps = ComponentProps<typeof DropdownMenuSubContent> & {
+  portalZClass?: string;
+};
+
+export const AppDropdownMenuSubContent: Component<AppDropdownMenuSubContentProps> = (props) => {
+  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
+  const layer = useOverlayLayerZ();
+  const popperZ = () => local.portalZClass ?? layer.popper;
+  return (
+    <DropdownMenuSubContent
+      {...rest}
+      class={cn(popperZ(), local.class)}
     />
   );
 };
@@ -276,6 +303,5 @@ export {
   DropdownMenuShortcut as AppDropdownMenuShortcut,
   DropdownMenuSub as AppDropdownMenuSub,
   DropdownMenuSubTrigger as AppDropdownMenuSubTrigger,
-  DropdownMenuSubContent as AppDropdownMenuSubContent,
   DropdownMenuPortal as AppDropdownMenuPortal,
 };

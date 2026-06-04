@@ -19,14 +19,15 @@ const ContextMenu: Component<ContextMenuPrimitive.ContextMenuRootProps> = (props
 type ContextMenuContentProps<T extends ValidComponent = "div"> =
   ContextMenuPrimitive.ContextMenuContentProps<T> & {
     class?: string | undefined
+    mount?: HTMLElement | undefined
   }
 
 const ContextMenuContent = <T extends ValidComponent = "div">(
   props: PolymorphicProps<T, ContextMenuContentProps<T>>
 ) => {
-  const [local, others] = splitProps(props as ContextMenuContentProps, ["class"])
+  const [local, others] = splitProps(props as ContextMenuContentProps, ["class", "mount"])
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal mount={props.mount}>
       <ContextMenuPrimitive.Content
         class={cn(
           "z-50 min-w-32 origin-(--kb-menu-content-transform-origin) overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in",

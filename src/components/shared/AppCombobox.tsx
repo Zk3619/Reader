@@ -15,6 +15,8 @@ import {
   ComboboxTrigger,
 } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
+import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 
 export type AppComboboxProps = {
   options: string[];
@@ -28,6 +30,8 @@ export type AppComboboxProps = {
 };
 
 export const AppCombobox: Component<AppComboboxProps> = (props) => {
+  const layer = useOverlayLayerZ();
+  const mount = useOverlayPortalMount();
   const [local] = splitProps(props, [
     'options',
     'value',
@@ -64,7 +68,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
         <ComboboxInput />
         <ComboboxTrigger />
       </ComboboxControl>
-      <ComboboxContent class={cn('z-60', local.contentClass)} />
+      <ComboboxContent mount={mount} class={cn(layer.popper, local.contentClass)} />
     </Combobox>
   );
 };
