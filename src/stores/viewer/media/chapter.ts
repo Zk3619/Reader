@@ -29,10 +29,12 @@ export type ApplyMediaFromRawFn = (
 ) => void | Promise<void>;
 
 let chapterLoadSeq = 0;
+let mediaOpenSeq = 0;
 let allowMediaTextFallback = false;
 
 export function resetMediaChapterSession(): void {
   chapterLoadSeq = 0;
+  mediaOpenSeq = 0;
   allowMediaTextFallback = false;
   void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrls());
   void import('@/stores/viewer/media/video').then((m) => m.revokeVideoPlaybackUrls());
@@ -41,7 +43,20 @@ export function resetMediaChapterSession(): void {
 
 export function beginMediaChapterSession(): void {
   chapterLoadSeq = 0;
+  mediaOpenSeq += 1;
   allowMediaTextFallback = true;
+}
+
+function isMediaOpenStillActive(
+  bookUrl: string,
+  kind: MediaKind,
+  openSeq: number,
+): boolean {
+  return (
+    openSeq === mediaOpenSeq &&
+    state.kind === kind &&
+    state.book?.bookUrl === bookUrl
+  );
 }
 
 export function clampChapterIndex(index: number, length: number): number {
@@ -118,17 +133,29 @@ export async function openMediaBookWithKind(
     throw new Error('文本书籍请使用文本阅读器');
   }
 
-  const guestReading =
-    !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
-
   beginMediaChapterSession();
+  const openSeq = mediaOpenSeq;
   setState({
     kind,
     book,
-    guestReading,
+    guestReading: false,
+    catalog: [],
+    chapterIndex: 0,
+    chapterPos: 0,
+    rawContent: '',
+    mediaUrls: [],
+    primaryUrl: null,
     loading: true,
     error: null,
   });
+
+  const guestReading =
+    !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
+  if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+    setState({ loading: false });
+    return;
+  }
+  setState({ guestReading });
 
   const rawIndex = book.durChapterIndex ?? 0;
   const chapterPos = book.durChapterPos ?? 0;
@@ -137,6 +164,10 @@ export async function openMediaBookWithKind(
   let catalogToUse = options?.initialCatalog?.length ? options.initialCatalog : [];
   if (!catalogToUse.length && !guestReading) {
     catalogToUse = await chaptersDb.getChapterList(book.bookUrl);
+    if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+      setState({ loading: false });
+      return;
+    }
   }
 
   const source =
@@ -148,7 +179,7 @@ export async function openMediaBookWithKind(
       bookVariable: book.variable,
       onPartial: async (partial) => {
         if (partial.chapters.length === 0) return;
-        if (state.book?.bookUrl !== book.bookUrl) return;
+        if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) return;
         const idx = clampChapterIndex(rawIndex, partial.chapters.length);
         setState({ catalog: partial.chapters, chapterIndex: idx, chapterPos });
         if (!state.rawContent && partial.chapters.length > 0 && !state.primaryUrl) {
@@ -159,7 +190,10 @@ export async function openMediaBookWithKind(
         }
       },
     });
-    if (state.book?.bookUrl !== book.bookUrl) return;
+    if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+      setState({ loading: false });
+      return;
+    }
 
     if (state.catalog.length === 0 && chapters.length > 0) {
       const idx = clampChapterIndex(rawIndex, chapters.length);
@@ -168,6 +202,7 @@ export async function openMediaBookWithKind(
 
     if (state.catalog.length > 0 && !state.primaryUrl && !state.error) {
       const idx = clampChapterIndex(rawIndex, state.catalog.length);
+      if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) return;
       await loadChapter(idx);
     } else if (state.catalog.length === 0) {
       setState({ loading: false, error: '暂无章节' });
@@ -183,7 +218,15 @@ export async function openMediaBookWithKind(
     return;
   }
 
+  if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+    setState({ loading: false });
+    return;
+  }
   await persistCatalogToDb(book, catalogToUse, guestReading);
+  if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+    setState({ loading: false });
+    return;
+  }
   await loadChapter(chapterIndex);
 }
 
@@ -266,6 +309,13 @@ export function setMediaBookInitialState(book: Book, kind: MediaKind): void {
   setState({
     kind,
     book,
+    guestReading: false,
+    catalog: [],
+    chapterIndex: 0,
+    chapterPos: 0,
+    rawContent: '',
+    mediaUrls: [],
+    primaryUrl: null,
     loading: true,
     error: null,
   });

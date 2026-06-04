@@ -19,6 +19,8 @@ export type MediaViewerChromeInputHandlers = {
   onContentDblClick: (event: MouseEvent, options?: { forceChrome?: boolean }) => void;
   /** 顶底栏被自动隐藏或外部设为不可见时，清除「移入后首次单击隐藏」状态 */
   resetDismissGestureState: () => void;
+  /** 桌面移出视口唤出顶底栏期间为 true：不启动自动隐藏 */
+  shouldSuppressAutoHide: () => boolean;
   dispose: () => void;
 };
 
@@ -77,10 +79,14 @@ export function createMediaViewerChromeInputHandlers(options: {
     shownBarsByPointerLeave = false;
   };
 
+  const shouldSuppressAutoHide = () =>
+    shownBarsByPointerLeave || awaitingDismissClick;
+
+  /** 移出视口：终止自动隐藏，并按「移出视口唤出」处理（回视口后单击内容区隐藏） */
   const showBarsFromPointerLeave = () => {
-    options.setHeaderVisible(true);
     shownBarsByPointerLeave = true;
     awaitingDismissClick = false;
+    options.setHeaderVisible(true);
   };
 
   const onDocumentPointerOut = (event: PointerEvent) => {
@@ -174,6 +180,7 @@ export function createMediaViewerChromeInputHandlers(options: {
     onContentPrimaryClick,
     onContentDblClick,
     resetDismissGestureState,
+    shouldSuppressAutoHide,
     dispose,
   };
 }

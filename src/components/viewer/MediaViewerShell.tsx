@@ -6,6 +6,10 @@ import {
   type MediaViewerChromeAutoHide,
 } from '@/lib/media/media-viewer-chrome-auto-hide';
 import {
+  isMediaViewerChromeAutoHideSuspended,
+  registerMediaViewerChromeAutoHideSession,
+} from '@/lib/media/media-viewer-chrome-auto-hide-registry';
+import {
   createMediaViewerChromeInputHandlers,
   type MediaViewerChromeInputHandlers,
 } from '@/lib/media/media-viewer-chrome-input';
@@ -117,14 +121,37 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
 
   const activeChromeInput = () => local.chromeInputHandlers ?? internalChromeInput;
 
+  const shouldScheduleAutoHide = () => {
+    if (!useAutoHide() || !headerVisible()) return false;
+    if (activeChromeInput()?.shouldSuppressAutoHide()) return false;
+    return true;
+  };
+
   const setHeaderVisible = (visible: boolean) => {
     setHeaderVisibleRaw(visible);
     if (!visible) {
       activeChromeInput()?.resetDismissGestureState();
+      if (useAutoHide()) {
+        chromeAutoHide.clearHideTimer();
+      }
+      return;
     }
-    if (!visible && useAutoHide()) {
+    if (!useAutoHide()) return;
+    if (activeChromeInput()?.shouldSuppressAutoHide()) {
       chromeAutoHide.clearHideTimer();
+      return;
     }
+    chromeAutoHide.scheduleHide();
+  };
+
+  const onChromeBarPointerEnter = () => {
+    if (!useAutoHide() || !chromeBarsCollapsible()) return;
+    chromeAutoHide.clearHideTimer();
+  };
+
+  const onChromeBarPointerLeave = () => {
+    if (!shouldScheduleAutoHide()) return;
+    chromeAutoHide.scheduleHide();
   };
 
   internalChromeInput =
@@ -138,11 +165,33 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
       })
       : null;
 
+  const registryToken = Symbol('media-viewer-chrome-auto-hide');
+
+  const syncChromeAutoHideRegistry = () => {
+    if (!useAutoHide()) {
+      registerMediaViewerChromeAutoHideSession(null, registryToken);
+      return;
+    }
+    const visible = local.entryVisible?.() ?? true;
+    if (visible) {
+      registerMediaViewerChromeAutoHideSession(
+        {
+          autoHide: chromeAutoHide,
+          showChrome: () => setHeaderVisible(true),
+        },
+        registryToken,
+      );
+    } else {
+      registerMediaViewerChromeAutoHideSession(null, registryToken);
+    }
+  };
+
   chromeAutoHide = createMediaViewerChromeAutoHide({
     enabled: useAutoHide,
     isControlled: () => isHeaderControlled() && !useSessionAutoHide(),
     setHeaderVisible,
-    canAutoHide: () => appFocus?.canAutoHide() ?? true,
+    canAutoHide: () =>
+      (appFocus?.canAutoHide() ?? true) && !isMediaViewerChromeAutoHideSuspended(),
   });
 
   revealChromeSession = () => {
@@ -164,6 +213,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     const entryVisible = local.entryVisible;
     if (entryVisible !== undefined && !entryVisible()) return;
     revealChromeSession();
+    syncChromeAutoHideRegistry();
   });
 
   createEffect(() => {
@@ -171,13 +221,18 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     const entryVisible = local.entryVisible?.();
     if (entryVisible === undefined) return;
     if (entryVisible) {
-      revealChromeSession();
+      if (!isMediaViewerChromeAutoHideSuspended()) {
+        revealChromeSession();
+      }
+      syncChromeAutoHideRegistry();
     } else {
       chromeAutoHide.clearHideTimer();
+      registerMediaViewerChromeAutoHideSession(null, registryToken);
     }
   });
 
   onCleanup(() => {
+    registerMediaViewerChromeAutoHideSession(null, registryToken);
     appFocus?.dispose();
     internalChromeInput?.dispose();
     chromeAutoHide.dispose();
@@ -198,6 +253,8 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
       contentPrimaryAction: local.contentPrimaryAction,
       onContentPrimaryClick: input?.onContentPrimaryClick,
       onContentDblClick: input?.onContentDblClick,
+      onChromeBarPointerEnter: useAutoHide() ? onChromeBarPointerEnter : undefined,
+      onChromeBarPointerLeave: useAutoHide() ? onChromeBarPointerLeave : undefined,
     };
   };
 

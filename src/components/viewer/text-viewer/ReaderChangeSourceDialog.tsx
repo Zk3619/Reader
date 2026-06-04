@@ -11,11 +11,11 @@ import {
 import type { Book } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface ReaderChangeSourceDialogProps {
@@ -83,11 +83,11 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   };
 
   return (
-    <AppDialog open={props.open} onOpenChange={handleOpen}>
-      <AppDialogContent class="max-h-[85dvh] max-w-lg">
-        <AppDialogHeader>
-          <AppDialogTitle>换源</AppDialogTitle>
-        </AppDialogHeader>
+    <ViewerAppDialog open={props.open} onOpenChange={handleOpen}>
+      <ViewerAppDialogContent class="max-h-[85dvh] max-w-lg">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>换源</ViewerAppDialogTitle>
+        </ViewerAppDialogHeader>
         <div class="space-y-3 px-6 pb-6">
           <p class="text-sm text-muted-foreground">
             在已启用书源中搜索与《{props.book?.name}》同名同作者的书籍，选择后迁移阅读进度。
@@ -119,7 +119,7 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
             重新搜索
           </Button>
         </div>
-      </AppDialogContent>
-    </AppDialog>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }

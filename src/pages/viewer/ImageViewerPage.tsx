@@ -23,15 +23,50 @@ import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { ZoomIn, ZoomOut } from 'lucide-solid';
+
+const IMAGE_VIEWER_CONTENT_SCALE_KEY = 'reader.imageViewer.contentScale';
+const IMAGE_VIEWER_SCALE_MIN = 0.5;
+const IMAGE_VIEWER_SCALE_MAX = 2;
+const IMAGE_VIEWER_SCALE_STEP = 0.05;
+/** 与 Tailwind `max-w-3xl` 一致（48rem） */
+const IMAGE_VIEWER_CONTENT_MAX_REM = 48;
+
+function clampImageViewerScale(value: number): number {
+  return Math.min(IMAGE_VIEWER_SCALE_MAX, Math.max(IMAGE_VIEWER_SCALE_MIN, value));
+}
+
+function loadImageViewerContentScale(): number {
+  try {
+    const raw = localStorage.getItem(IMAGE_VIEWER_CONTENT_SCALE_KEY);
+    if (raw != null) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return clampImageViewerScale(n);
+    }
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
+function persistImageViewerContentScale(scale: number): void {
+  try {
+    localStorage.setItem(IMAGE_VIEWER_CONTENT_SCALE_KEY, String(scale));
+  } catch {
+    /* ignore */
+  }
+}
 
 export interface ImageViewerPageProps {
   onClose: () => void;
@@ -41,6 +76,8 @@ export interface ImageViewerPageProps {
 
 export function ImageViewerPage(props: ImageViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [contentScale, setContentScale] = createSignal(loadImageViewerContentScale());
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
   const [batchRetryToken, setBatchRetryToken] = createSignal(0);
@@ -165,6 +202,22 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     await viewerStore.loadChapter(next);
   };
 
+  const setContentScaleClamped = (next: number) => {
+    const v = clampImageViewerScale(next);
+    setContentScale(v);
+    persistImageViewerContentScale(v);
+  };
+
+  const nudgeContentScale = (delta: number) => {
+    setContentScaleClamped(contentScale() + delta);
+  };
+
+  const contentMaxWidthStyle = () => ({
+    'max-width': `${IMAGE_VIEWER_CONTENT_MAX_REM * contentScale()}rem`,
+  });
+
+  const contentScalePercent = () => Math.round(contentScale() * 100);
+
   const refreshChapter = () => {
     if (!viewerStore.isOpen()) {
       showAppToast({ title: '未打开书籍', description: '请从书架重新打开本书' });
@@ -187,6 +240,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   subtitle={chapterTitle()}
                   onClose={props.onClose}
                   onOpenCatalog={() => setCatalogOpen(true)}
+                  onOpenImageSettings={() => setSettingsOpen(true)}
                   onRefresh={refreshChapter}
                   onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
                   loading={loading()}
@@ -240,7 +294,10 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   </div>
                 }
               >
-                <div class="mx-auto flex w-full max-w-3xl flex-col">
+                <div
+                  class="mx-auto flex w-full flex-col"
+                  style={contentMaxWidthStyle()}
+                >
                   <Index each={imageList()}>
                     {(item) => (
                       <div data-manga-page={item().page} class="w-full">
@@ -266,13 +323,13 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
         </MediaViewerShellMain>
       </MediaViewerShell>
 
-      <AppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
-        <AppDrawerContent class={hDrawerPanel}>
-          <AppDrawerHeader>
+      <ViewerAppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
+        <ViewerAppDrawerContent class={hDrawerPanel}>
+          <ViewerAppDrawerHeader>
             <span>目录</span>
-            <AppDrawerClose />
-          </AppDrawerHeader>
-          <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
+            <ViewerAppDrawerClose />
+          </ViewerAppDrawerHeader>
+          <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
               loading={bootstrapping()}
@@ -283,9 +340,68 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                 void viewerStore.loadChapter(index);
               }}
             />
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
+
+      <ViewerAppDrawer
+        open={settingsOpen()}
+        onOpenChange={setSettingsOpen}
+        snapPoints={[0, 1]}
+        defaultSnapPoint={1}
+      >
+        <ViewerAppDrawerContent
+          class={cn('flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
+          showNativeDragHandle={false}
+        >
+          <ViewerAppDrawerHeader title="界面设置" />
+          <ViewerAppDrawerBody class="mb-4 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 pt-1">
+            <div class="space-y-2 py-2">
+              <div class="flex items-center justify-between">
+                <Label>内容缩放</Label>
+                <span class="text-sm tabular-nums text-muted-foreground">
+                  {contentScalePercent()}%
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  class="shrink-0"
+                  aria-label="缩小"
+                  disabled={contentScale() <= IMAGE_VIEWER_SCALE_MIN}
+                  onClick={() => nudgeContentScale(-IMAGE_VIEWER_SCALE_STEP)}
+                >
+                  <ZoomOut class="h-4 w-4" />
+                </Button>
+                <Slider
+                  class="min-w-0 flex-1 py-2"
+                  value={[contentScale()]}
+                  minValue={IMAGE_VIEWER_SCALE_MIN}
+                  maxValue={IMAGE_VIEWER_SCALE_MAX}
+                  step={IMAGE_VIEWER_SCALE_STEP}
+                  onChange={(values) => setContentScaleClamped(values[0] ?? contentScale())}
+                >
+                  <SliderTrack>
+                    <SliderFill />
+                    <SliderThumb />
+                  </SliderTrack>
+                </Slider>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  class="shrink-0"
+                  aria-label="放大"
+                  disabled={contentScale() >= IMAGE_VIEWER_SCALE_MAX}
+                  onClick={() => nudgeContentScale(IMAGE_VIEWER_SCALE_STEP)}
+                >
+                  <ZoomIn class="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
     </>
   );
 }

@@ -10,19 +10,17 @@ import { textViewerDualPageActive } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { Button } from '@/components/ui/button';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
-import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { ReaderContent } from '@/components/viewer/text-viewer/ReaderContent';
 import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
@@ -855,20 +853,19 @@ export function BookReader(props: BookReaderProps) {
 
       {/* 目录 Drawer：左侧滑出，向左拖动整块收起（与底部 Drawer 一致） */}
       <Show when={book()}>
-        <AppDrawer
+        <ViewerAppDrawer
           open={catalogOpen()}
           onOpenChange={setCatalogOpen}
           side="left"
           snapPoints={[0, 1]}
           defaultSnapPoint={1}
         >
-          <AppDrawerContent
-            class="z-100 flex h-full w-full max-w-sm flex-col"
-            overlayClass="z-100"
+          <ViewerAppDrawerContent
+            class="flex h-full w-full max-w-sm flex-col"
             showNativeDragHandle={false}
           >
-            <AppDrawerHeader title="目录" />
-            <AppDrawerBody>
+            <ViewerAppDrawerHeader title="目录" />
+            <ViewerAppDrawerBody>
               <Show when={catalogOpen()}>
                 <ReaderCatalog
                   open
@@ -881,31 +878,30 @@ export function BookReader(props: BookReaderProps) {
                   onClose={() => setCatalogOpen(false)}
                 />
               </Show>
-            </AppDrawerBody>
-          </AppDrawerContent>
-        </AppDrawer>
+            </ViewerAppDrawerBody>
+          </ViewerAppDrawerContent>
+        </ViewerAppDrawer>
       </Show>
 
       {/* 阅读设置 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
-      <AppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
-        <AppDrawerContent
-          class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
-          overlayClass="z-100"
+      <ViewerAppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
+        <ViewerAppDrawerContent
+          class={cn('flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
           showNativeDragHandle={false}
         >
-          <AppDrawerHeader title="阅读设置" />
-          <AppDrawerBody class="px-4 pb-2 pt-1 overflow-y-auto scroll-gutter-stable-both mb-4">
+          <ViewerAppDrawerHeader title="阅读设置" />
+          <ViewerAppDrawerBody class="px-4 pb-2 pt-1 overflow-y-auto scroll-gutter-stable-both mb-4">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
               showReadWidth={() => isWideScreen() || !isMobile()}
               onOpenClickRegionalConfig={() => openClickRegionalConfig(false)}
             />
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
 
       {/* 设置抽屉：仅关闭/全开两档，保证可滚动区高度固定、滚动正常。从本抽屉内打开「阅读进度状态栏」对话框时禁止因焦点/点击移出而关闭，避免抽屉被误关、对话框随之关闭并触发设置按钮 tooltip */}
-      <AppDrawer
+      <ViewerAppDrawer
         open={readerMenuDrawerOpen()}
         onOpenChange={setReaderMenuDrawerOpen}
         snapPoints={[0, 1]}
@@ -913,14 +909,13 @@ export function BookReader(props: BookReaderProps) {
         closeOnOutsideFocus={!statusBarStyleDialogOpen()}
         closeOnOutsidePointer={!statusBarStyleDialogOpen()}
       >
-        <AppDrawerContent
-          class={cn('z-100 flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
-          overlayClass="z-100"
+        <ViewerAppDrawerContent
+          class={cn('flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
           showNativeDragHandle={false}
         >
-          <AppDrawerHeader title="设置" />
+          <ViewerAppDrawerHeader title="设置" />
           {/* 阻止内部拖拽使用 data-corvu-no-drag 或 disableDragClose */}
-          <AppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-2 mb-4">
+          <ViewerAppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-2 mb-4">
             <Button
               variant="ghost"
               class="w-full justify-start"
@@ -978,23 +973,21 @@ export function BookReader(props: BookReaderProps) {
                     : '始终隐藏'}
               </button>
             </div>
-            <AppDrawerClose as="button" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
+            <ViewerAppDrawerClose as="button" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
               关闭
-            </AppDrawerClose>
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+            </ViewerAppDrawerClose>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
 
       {/* 阅读进度状态栏显示风格选项弹窗：盖过设置抽屉(z-100)；窄屏下限制宽度并留边距；非模态避免关闭后影响阅读器操作 */}
-      <AppDialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
-        <AppDialogContent
+      <ViewerAppDialog open={statusBarStyleDialogOpen()} onOpenChange={setStatusBarStyleDialogOpen} modal={false}>
+        <ViewerAppDialogContent
           class={cn('w-[calc(100dvw-2rem)] max-w-[20rem]')}
-          portalZClass="z-[110]"
-          overlayClass="bg-black/80"
         >
-          <AppDialogHeader>
-            <AppDialogTitle>阅读进度状态栏的显示风格</AppDialogTitle>
-          </AppDialogHeader>
+          <ViewerAppDialogHeader>
+            <ViewerAppDialogTitle>阅读进度状态栏的显示风格</ViewerAppDialogTitle>
+          </ViewerAppDialogHeader>
           <div class="min-h-0 overflow-y-auto overscroll-contain px-6 pt-4 pb-2 contain-layout mb-4">
             <RadioGroup
               value={textViewerStore.state.config.statusBarDisplayStyle}
@@ -1054,8 +1047,8 @@ export function BookReader(props: BookReaderProps) {
               </div>
             </RadioGroup>
           </div>
-        </AppDialogContent>
-      </AppDialog>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
 
       <ReaderOfflineCacheDialog
         open={offlineCacheDialogOpen()}

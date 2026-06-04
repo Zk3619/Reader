@@ -1,12 +1,12 @@
 import { Button } from '@/components/ui/button';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogDescription,
-  AppDialogFooter,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogDescription,
+  ViewerAppDialogFooter,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 
 export interface ReaderGuestAddToShelfDialogProps {
   open: boolean;
@@ -25,15 +25,20 @@ export function ReaderGuestAddToShelfDialog(props: ReaderGuestAddToShelfDialogPr
   };
 
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent layout="plain" class="max-w-md">
-        <AppDialogHeader>
-          <AppDialogTitle>{title()}</AppDialogTitle>
-          <AppDialogDescription>
+    <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+      <ViewerAppDialogContent
+        layout="plain"
+        class="max-w-md"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>{title()}</ViewerAppDialogTitle>
+          <ViewerAppDialogDescription>
             加入书架后可保存阅读进度，并在书架中继续阅读。
-          </AppDialogDescription>
-        </AppDialogHeader>
-        <AppDialogFooter class="gap-2 sm:justify-end">
+          </ViewerAppDialogDescription>
+        </ViewerAppDialogHeader>
+        <ViewerAppDialogFooter class="gap-2 sm:justify-end">
           <Button
             type="button"
             variant="outline"
@@ -45,8 +50,8 @@ export function ReaderGuestAddToShelfDialog(props: ReaderGuestAddToShelfDialogPr
           <Button type="button" disabled={props.adding} onClick={props.onConfirm}>
             {props.adding ? '加入中…' : '加入书架'}
           </Button>
-        </AppDialogFooter>
-      </AppDialogContent>
-    </AppDialog>
+        </ViewerAppDialogFooter>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }

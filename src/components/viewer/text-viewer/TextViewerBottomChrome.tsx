@@ -1,5 +1,9 @@
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ViewerAppTooltip,
+  ViewerAppTooltipContent,
+  ViewerAppTooltipTrigger,
+} from '@/components/viewer/viewer-app-overlay';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import {
   ListIcon,
@@ -61,12 +65,12 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
             cn(floating.pillClass(), 'mx-auto w-fit max-w-[calc(100%-1.5rem)]'),
         )}
       >
-        <Tooltip>
-          <TooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
             {props.chapterTitle || '—'}
-          </TooltipTrigger>
-          <TooltipContent>{props.chapterTitle || '—'}</TooltipContent>
-        </Tooltip>
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>{props.chapterTitle || '—'}</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
         <div class="flex shrink-0 items-center gap-3 tabular-nums">
           <span>
             {props.chapterWordCountText === '—'
@@ -138,8 +142,8 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
             <ListIcon class="h-4 w-4" />
             <span>目录</span>
           </Button>
-          <Tooltip>
-            <TooltipTrigger
+          <ViewerAppTooltip>
+            <ViewerAppTooltipTrigger
               as={Button}
               variant="ghost"
               size="sm"
@@ -156,9 +160,9 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
                 <VolumeOnIcon class="h-4 w-4" size={16} />
               )}
               <span>朗读</span>
-            </TooltipTrigger>
-            <TooltipContent>朗读</TooltipContent>
-          </Tooltip>
+            </ViewerAppTooltipTrigger>
+            <ViewerAppTooltipContent>朗读</ViewerAppTooltipContent>
+          </ViewerAppTooltip>
           <Button
             variant="ghost"
             size="sm"

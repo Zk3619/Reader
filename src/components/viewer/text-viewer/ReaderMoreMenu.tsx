@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+} from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
@@ -38,14 +38,13 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   };
 
   return (
-    <AppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
-      <AppDrawerContent
-        class={cn('z-100 flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
-        overlayClass="z-100"
+    <ViewerAppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
+      <ViewerAppDrawerContent
+        class={cn('flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
         showNativeDragHandle={false}
       >
-        <AppDrawerHeader title="更多" />
-        <AppDrawerBody class="gap-1 px-2 pb-6">
+        <ViewerAppDrawerHeader title="更多" />
+        <ViewerAppDrawerBody class="gap-1 px-2 pb-6">
           <Button
             variant="ghost"
             class="w-full justify-start"
@@ -90,11 +89,11 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
               <SwitchLabel class="sr-only">启用替换净化</SwitchLabel>
             </Switch>
           </div>
-          <AppDrawerClose as="button" class="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
+          <ViewerAppDrawerClose as="button" class="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
             关闭
-          </AppDrawerClose>
-        </AppDrawerBody>
-      </AppDrawerContent>
-    </AppDrawer>
+          </ViewerAppDrawerClose>
+        </ViewerAppDrawerBody>
+      </ViewerAppDrawerContent>
+    </ViewerAppDrawer>
   );
 }

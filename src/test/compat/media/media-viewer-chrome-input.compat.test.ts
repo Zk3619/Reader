@@ -154,6 +154,74 @@ describe('media viewer chrome input', () => {
     handlers.dispose();
   });
 
+  it('pointer leave while bars already visible adopts persistent dismiss mode', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    let visible = true;
+    let handlers!: ReturnType<typeof createMediaViewerChromeInputHandlers>;
+    handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    expect(handlers.shouldSuppressAutoHide()).toBe(false);
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    expect(visible).toBe(true);
+    expect(handlers.shouldSuppressAutoHide()).toBe(true);
+    handlers.dispose();
+  });
+
+  it('pointer leave shows bars and suppresses auto hide', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    let visible = false;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    expect(visible).toBe(true);
+    expect(handlers.shouldSuppressAutoHide()).toBe(true);
+    handlers.dispose();
+  });
+
+  it('double-click toggle does not suppress auto hide', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let visible = false;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onContentDblClick(clickEvent());
+    expect(visible).toBe(true);
+    expect(handlers.shouldSuppressAutoHide()).toBe(false);
+    handlers.dispose();
+  });
+
   it('fixed layout: double-click does not toggle bars', () => {
     vi.stubGlobal(
       'navigator',

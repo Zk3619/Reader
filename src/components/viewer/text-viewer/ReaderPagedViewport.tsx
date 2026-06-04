@@ -358,7 +358,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     page: number,
     role: 'outgoing' | 'incoming',
     progress: number,
-    extraTransform?: string,
+    _extraTransform?: string,
   ) => {
     const start = pageStartAt(page);
     const displayH = displayHeightForPage(page);

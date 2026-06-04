@@ -4,11 +4,11 @@
 
 import { createEffect, createSignal } from 'solid-js';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import {
@@ -39,11 +39,11 @@ export function VideoSettingsDialog(props: VideoSettingsDialogProps) {
   };
 
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent layout="app" class="max-w-sm">
-        <AppDialogHeader>
-          <AppDialogTitle>视频设置</AppDialogTitle>
-        </AppDialogHeader>
+    <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <ViewerAppDialogContent layout="app" class="max-w-sm">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>视频设置</ViewerAppDialogTitle>
+        </ViewerAppDialogHeader>
         <div class="flex flex-col gap-4 px-4 py-2">
           <label class="flex cursor-pointer items-center justify-between gap-3 text-sm">
             <span>自动播放</span>
@@ -101,7 +101,7 @@ export function VideoSettingsDialog(props: VideoSettingsDialogProps) {
             确定
           </Button>
         </div>
-      </AppDialogContent>
-    </AppDialog>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }

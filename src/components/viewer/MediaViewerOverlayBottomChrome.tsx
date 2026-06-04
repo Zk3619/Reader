@@ -2,6 +2,8 @@ import { splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import { mediaViewerChromeBottomSurfaceClass } from '@/components/viewer/viewer-chrome';
+import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerOverlayBottomChromeProps {
   children: JSX.Element;
@@ -17,6 +19,8 @@ export interface MediaViewerOverlayBottomChromeProps {
 export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomChromeProps) {
   const [local] = splitProps(props, ['children', 'visible', 'class']);
   const shell = useMediaViewerShellOptional();
+  const chromeLayout = useViewerChromeLayout();
+  const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, chromeLayout());
   const panelVisible = () => {
     if (local.visible !== undefined) return local.visible;
     if (shell) return shell.headerVisible();
@@ -31,6 +35,8 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
         !panelVisible() && 'reader-chrome-overlay-panel--hidden',
         local.class,
       )}
+      onPointerEnter={chromeBarHover().onPointerEnter}
+      onPointerLeave={chromeBarHover().onPointerLeave}
     >
       <div
         class={cn(

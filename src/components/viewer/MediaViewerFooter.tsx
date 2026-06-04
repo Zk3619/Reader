@@ -5,6 +5,7 @@ import { MediaViewerFloatingBottomChrome } from '@/components/viewer/MediaViewer
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerFooterProps {
   children: JSX.Element;
@@ -25,6 +26,8 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
     return true;
   };
 
+  const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, layout());
+
   return (
     <div
       class={cn(
@@ -37,6 +40,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
           'reader-footer shrink-0 border-t border-border bg-background/95 backdrop-blur',
         local.class,
       )}
+      data-media-viewer-interactive-zone
       onClick={(e) => e.stopPropagation()}
     >
       <Show when={layout() === 'stacked'}>
@@ -45,7 +49,11 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         </MediaViewerOverlayBottomChrome>
       </Show>
       <Show when={layout() === 'floating'}>
-        <MediaViewerFloatingBottomChrome visible={panelVisible()}>
+        <MediaViewerFloatingBottomChrome
+          visible={panelVisible()}
+          onPointerEnter={chromeBarHover().onPointerEnter}
+          onPointerLeave={chromeBarHover().onPointerLeave}
+        >
           {local.children}
         </MediaViewerFloatingBottomChrome>
       </Show>

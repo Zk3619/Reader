@@ -9,11 +9,11 @@ import { plainTextForAloud } from '@/lib/media/text/read-aloud';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+} from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
@@ -73,14 +73,13 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
   };
 
   return (
-    <AppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
-      <AppDrawerContent
-        class={cn('z-100 flex flex-col', hDrawerPanel, 'max-h-[85dvh]')}
-        overlayClass="z-100"
+    <ViewerAppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
+      <ViewerAppDrawerContent
+        class={cn('flex flex-col', hDrawerPanel, 'max-h-[85dvh]')}
         showNativeDragHandle={false}
       >
-        <AppDrawerHeader title="全书搜索" />
-        <AppDrawerBody class="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-2">
+        <ViewerAppDrawerHeader title="全书搜索" />
+        <ViewerAppDrawerBody class="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-2">
           <form
             class="flex gap-2"
             onSubmit={(e) => {
@@ -140,8 +139,8 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
           <Show when={!searching() && keyword().trim() && hits().length === 0}>
             <p class="text-center text-sm text-muted-foreground">未找到匹配（可尝试先缓存更多章节）</p>
           </Show>
-        </AppDrawerBody>
-      </AppDrawerContent>
-    </AppDrawer>
+        </ViewerAppDrawerBody>
+      </ViewerAppDrawerContent>
+    </ViewerAppDrawer>
   );
 }

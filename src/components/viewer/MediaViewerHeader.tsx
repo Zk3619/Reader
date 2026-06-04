@@ -7,6 +7,7 @@ import {
   mediaViewerChromeTopSurfaceClass,
   type ViewerChromeLayout,
 } from '@/components/viewer/viewer-chrome';
+import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerHeaderProps {
   children: JSX.Element;
@@ -28,6 +29,8 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
     return true;
   };
 
+  const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, layout());
+
   const toolbarRow = () => (
     <div
       class={cn(
@@ -41,7 +44,12 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
 
   if (layout() === 'floating') {
     return (
-      <MediaViewerFloatingTopChrome visible={visible()} class={local.class}>
+      <MediaViewerFloatingTopChrome
+        visible={visible()}
+        class={local.class}
+        onPointerEnter={chromeBarHover().onPointerEnter}
+        onPointerLeave={chromeBarHover().onPointerLeave}
+      >
         {toolbarRow()}
       </MediaViewerFloatingTopChrome>
     );
@@ -56,8 +64,11 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           !visible() && 'reader-chrome-overlay-panel--hidden',
           local.class,
         )}
+        data-media-viewer-interactive-zone
         data-tauri-drag-region
         onClick={(e) => e.stopPropagation()}
+        onPointerEnter={chromeBarHover().onPointerEnter}
+        onPointerLeave={chromeBarHover().onPointerLeave}
       >
         <div
           class={cn(

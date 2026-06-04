@@ -5,11 +5,19 @@ export interface MediaViewerFloatingBottomChromeProps {
   children: JSX.Element;
   visible?: boolean;
   class?: string;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
 }
 
 /** 悬浮底栏：控件独立浮于内容区底部 */
 export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottomChromeProps) {
-  const [local] = splitProps(props, ['children', 'visible', 'class']);
+  const [local] = splitProps(props, [
+    'children',
+    'visible',
+    'class',
+    'onPointerEnter',
+    'onPointerLeave',
+  ]);
   const visible = () => local.visible !== false;
 
   return (
@@ -22,7 +30,11 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
       )}
       onClick={(e) => e.stopPropagation()}
     >
-      <div class="reader-chrome-floating-bottom__track pointer-events-auto flex w-full flex-col gap-2 px-3 pb-3 pt-2">
+      <div
+        class="reader-chrome-floating-bottom__track pointer-events-auto flex w-full flex-col gap-2 px-3 pb-3 pt-2"
+        onPointerEnter={local.onPointerEnter}
+        onPointerLeave={local.onPointerLeave}
+      >
         {local.children}
       </div>
     </div>

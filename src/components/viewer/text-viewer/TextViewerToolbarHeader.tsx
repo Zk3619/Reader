@@ -3,7 +3,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import { Toggle } from '@/components/ui/toggle';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ViewerAppTooltip,
+  ViewerAppTooltipContent,
+  ViewerAppTooltipTrigger,
+} from '@/components/viewer/viewer-app-overlay';
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import {
@@ -52,8 +56,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -62,9 +66,9 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           aria-label="关闭阅读器"
         >
           <ChevronLeftIcon class="size-5" />
-        </TooltipTrigger>
-        <TooltipContent>关闭阅读器</TooltipContent>
-      </Tooltip>
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>关闭阅读器</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
       <Show
         when={props.onOpenBookInfo}
         fallback={
@@ -73,8 +77,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           </h1>
         }
       >
-        <Tooltip>
-          <TooltipTrigger
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as="button"
             type="button"
             class={cn(
@@ -85,9 +89,9 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="进入书籍信息页"
           >
             {props.bookName || '—'}
-          </TooltipTrigger>
-          <TooltipContent>书籍信息</TooltipContent>
-        </Tooltip>
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
       </Show>
       <Show when={!floating.isFloating()}>
         <div class="min-w-0 flex-1" data-tauri-drag-region />
@@ -99,8 +103,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         )}
       >
       <Show when={props.isWideScreen}>
-        <Tooltip>
-          <TooltipTrigger
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -112,11 +116,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="目录"
           >
             <ListIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>目录</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>目录</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -129,11 +133,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             ) : (
               <VolumeOnIcon class="size-5" size={20} />
             )}
-          </TooltipTrigger>
-          <TooltipContent>朗读</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>朗读</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -144,11 +148,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             <span class="text-base font-normal leading-none" aria-hidden="true">
               Aa
             </span>
-          </TooltipTrigger>
-          <TooltipContent>界面</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>界面</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -157,12 +161,12 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="设置"
           >
             <SettingsIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>设置</TooltipContent>
-        </Tooltip>
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>设置</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
       </Show>
-        <Tooltip>
-          <TooltipTrigger
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -171,11 +175,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="换源"
           >
             <ReplaceIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>换源</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -184,11 +188,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="刷新当前章节"
           >
             <RefreshIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>刷新</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>刷新</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -197,11 +201,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="离线缓存"
           >
             <DownloadIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>离线缓存</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -210,15 +214,15 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="更多"
           >
             <MoreIcon class="size-5" />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
       <Show when={isTauri() && !isMobile() && !floating.isFloating()}>
         <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
       </Show>
       <div class="flex items-center gap-2 no-drag">
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger as="div">
             <Toggle
               pressed={props.isDark}
               onChange={props.onToggleTheme}
@@ -241,11 +245,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
                 {props.isDark ? '切换到浅色模式' : '切换到深色模式'}
               </span>
             </Toggle>
-          </TooltipTrigger>
-          <TooltipContent>
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>
             {props.isDark ? '切换到浅色模式' : '切换到深色模式'}
-          </TooltipContent>
-        </Tooltip>
+          </ViewerAppTooltipContent>
+        </ViewerAppTooltip>
         <WindowControlButtons />
       </div>
       </div>

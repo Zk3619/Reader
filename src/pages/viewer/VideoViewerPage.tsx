@@ -22,18 +22,16 @@ import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbar
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
 import { VideoSettingsDialog } from '@/components/viewer/video/VideoSettingsDialog';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
-import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
@@ -286,13 +284,13 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
         </MediaViewerShellMain>
       </MediaViewerShell>
 
-      <AppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
-        <AppDrawerContent class={hDrawerPanel}>
-          <AppDrawerHeader>
+      <ViewerAppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
+        <ViewerAppDrawerContent class={hDrawerPanel}>
+          <ViewerAppDrawerHeader>
             <span>目录</span>
-            <AppDrawerClose />
-          </AppDrawerHeader>
-          <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
+            <ViewerAppDrawerClose />
+          </ViewerAppDrawerHeader>
+          <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
               loading={bootstrapping()}
@@ -304,9 +302,9 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
                 void goChapterTo(index);
               }}
             />
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
 
       <VideoSettingsDialog
         open={settingsOpen()}
@@ -316,11 +314,11 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
         }}
       />
 
-      <AppDialog open={speedDialogOpen()} onOpenChange={setSpeedDialogOpen}>
-        <AppDialogContent layout="app" class="max-w-sm">
-          <AppDialogHeader>
-            <AppDialogTitle>播放速度</AppDialogTitle>
-          </AppDialogHeader>
+      <ViewerAppDialog open={speedDialogOpen()} onOpenChange={setSpeedDialogOpen}>
+        <ViewerAppDialogContent layout="app" class="max-w-sm">
+          <ViewerAppDialogHeader>
+            <ViewerAppDialogTitle>播放速度</ViewerAppDialogTitle>
+          </ViewerAppDialogHeader>
           <div class="px-4 py-4">
             <div class="mb-2 flex justify-between text-sm">
               <span>速度</span>
@@ -362,8 +360,8 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               确定
             </Button>
           </div>
-        </AppDialogContent>
-      </AppDialog>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
     </>
   );
 }

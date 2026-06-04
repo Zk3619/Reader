@@ -25,7 +25,7 @@ describe('computePageStartsFromSegments', () => {
     const lineH = 32;
     const safety = clipSafetyPx(18, 0.8);
     const clipHeight = 80;
-    const usable = clipHeight - safety;
+    void (clipHeight - safety);
     const segments = [
       { top: 0, bottom: lineH },
       { top: lineH, bottom: lineH * 2 },

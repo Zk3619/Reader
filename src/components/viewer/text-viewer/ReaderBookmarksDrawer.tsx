@@ -8,11 +8,11 @@ import { deleteBookmark } from '@/lib/database/bookmarks';
 import type { Book, Bookmark } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+} from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
@@ -38,14 +38,13 @@ export function ReaderBookmarksDrawer(props: ReaderBookmarksDrawerProps) {
   };
 
   return (
-    <AppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
-      <AppDrawerContent
-        class={cn('z-100 flex flex-col', hDrawerPanel, 'max-h-[85dvh]')}
-        overlayClass="z-100"
+    <ViewerAppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
+      <ViewerAppDrawerContent
+        class={cn('flex flex-col', hDrawerPanel, 'max-h-[85dvh]')}
         showNativeDragHandle={false}
       >
-        <AppDrawerHeader title="本书书签" />
-        <AppDrawerBody class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 mb-4">
+        <ViewerAppDrawerHeader title="本书书签" />
+        <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 mb-4">
           <Show when={bookmarks.loading}>
             <p class="text-sm text-muted-foreground">加载中…</p>
           </Show>
@@ -81,8 +80,8 @@ export function ReaderBookmarksDrawer(props: ReaderBookmarksDrawerProps) {
               )}
             </For>
           </ul>
-        </AppDrawerBody>
-      </AppDrawerContent>
-    </AppDrawer>
+        </ViewerAppDrawerBody>
+      </ViewerAppDrawerContent>
+    </ViewerAppDrawer>
   );
 }

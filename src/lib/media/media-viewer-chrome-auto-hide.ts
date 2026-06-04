@@ -1,9 +1,11 @@
 /** 进入 / 回到 viewer 后顶底栏保持可见的时长，随后自动隐藏 */
-export const MEDIA_VIEWER_CHROME_AUTO_HIDE_MS = 3000;
+export const MEDIA_VIEWER_CHROME_AUTO_HIDE_MS = 5000;
 
 export type MediaViewerChromeAutoHide = {
   /** 进入 / 从其它页回到 viewer：显示顶底栏并启动一次自动隐藏 */
   revealSession: () => void;
+  /** 顶底栏已显示时重新启动自动隐藏倒计时（如点击/双击唤出、鼠标移出顶底栏） */
+  scheduleHide: () => void;
   clearHideTimer: () => void;
   dispose: () => void;
 };
@@ -48,6 +50,7 @@ export function createMediaViewerChromeAutoHide(options: {
 
   return {
     revealSession,
+    scheduleHide,
     clearHideTimer,
     dispose,
   };

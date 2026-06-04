@@ -14,6 +14,10 @@ export interface MediaViewerShellContextValue {
   onContentPrimaryClick?: (event: MouseEvent, action: () => void) => void;
   /** 内容区双击：切换顶底栏 */
   onContentDblClick?: (event: MouseEvent, options?: { forceChrome?: boolean }) => void;
+  /** 鼠标进入顶/底栏：暂停自动隐藏倒计时 */
+  onChromeBarPointerEnter?: () => void;
+  /** 鼠标离开顶/底栏：恢复并重新计时 */
+  onChromeBarPointerLeave?: () => void;
 }
 
 const MediaViewerShellContext = createContext<MediaViewerShellContextValue>();

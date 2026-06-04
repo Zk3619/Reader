@@ -199,6 +199,10 @@ export const viewerStore = {
     return state.guestReading;
   },
 
+  setGuestReading(value: boolean): void {
+    setState({ guestReading: value });
+  },
+
   isMediaViewerBootstrapping(): boolean {
     return isMediaViewerBootstrapping();
   },

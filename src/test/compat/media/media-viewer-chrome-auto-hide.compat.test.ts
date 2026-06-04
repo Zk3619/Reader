@@ -28,6 +28,21 @@ describe('media viewer chrome auto hide', () => {
     auto.dispose();
   });
 
+  it('scheduleHide hides after delay without changing visibility first', () => {
+    let visible = true;
+    const auto = createMediaViewerChromeAutoHide({
+      enabled: () => true,
+      isControlled: () => false,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+    });
+    auto.scheduleHide();
+    vi.advanceTimersByTime(MEDIA_VIEWER_CHROME_AUTO_HIDE_MS);
+    expect(visible).toBe(false);
+    auto.dispose();
+  });
+
   it('does not schedule hide when canAutoHide is false', () => {
     let visible = true;
     const auto = createMediaViewerChromeAutoHide({

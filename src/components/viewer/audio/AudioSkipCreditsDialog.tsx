@@ -4,12 +4,12 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogFooter,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogFooter,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import type { Book } from '@/types';
@@ -34,11 +34,11 @@ export function AudioSkipCreditsDialog(props: AudioSkipCreditsDialogProps) {
   });
 
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent layout="app" class="max-w-sm">
-        <AppDialogHeader>
-          <AppDialogTitle>跳过片头片尾</AppDialogTitle>
-        </AppDialogHeader>
+    <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <ViewerAppDialogContent layout="app" class="max-w-sm">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>跳过片头片尾</ViewerAppDialogTitle>
+        </ViewerAppDialogHeader>
         <div class="flex flex-col gap-6 px-4 py-2">
           <div class="space-y-2">
             <div class="flex items-center justify-between text-sm">
@@ -77,7 +77,7 @@ export function AudioSkipCreditsDialog(props: AudioSkipCreditsDialogProps) {
             </Slider>
           </div>
         </div>
-        <AppDialogFooter class="px-4 pb-4">
+        <ViewerAppDialogFooter class="px-4 pb-4">
           <Button
             class="w-full"
             onClick={() => {
@@ -87,8 +87,8 @@ export function AudioSkipCreditsDialog(props: AudioSkipCreditsDialogProps) {
           >
             保存
           </Button>
-        </AppDialogFooter>
-      </AppDialogContent>
-    </AppDialog>
+        </ViewerAppDialogFooter>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }

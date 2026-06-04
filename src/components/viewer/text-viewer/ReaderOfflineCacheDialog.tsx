@@ -4,13 +4,13 @@
 
 import { createEffect, createSignal, Show } from 'solid-js';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogDescription,
-  AppDialogFooter,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogDescription,
+  ViewerAppDialogFooter,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -108,14 +108,14 @@ export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
   };
 
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent layout="plain" class="max-w-md">
-        <AppDialogHeader>
-          <AppDialogTitle>离线缓存</AppDialogTitle>
-          <AppDialogDescription>
+    <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+      <ViewerAppDialogContent layout="plain" class="max-w-md">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>离线缓存</ViewerAppDialogTitle>
+          <ViewerAppDialogDescription>
             将章节正文下载到本地，无网络时也可阅读。与阅读时的自动预取相互独立。
-          </AppDialogDescription>
-        </AppDialogHeader>
+          </ViewerAppDialogDescription>
+        </ViewerAppDialogHeader>
 
         <div class="space-y-4 px-6 py-2">
           <div class="grid grid-cols-2 gap-3">
@@ -156,7 +156,7 @@ export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
           </Show>
         </div>
 
-        <AppDialogFooter class="gap-2 sm:justify-end">
+        <ViewerAppDialogFooter class="gap-2 sm:justify-end">
           <Show when={isDownloading()}>
             <Button type="button" variant="outline" onClick={handleStop}>
               停止
@@ -168,8 +168,8 @@ export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
           <Button type="button" onClick={handleStart}>
             开始缓存
           </Button>
-        </AppDialogFooter>
-      </AppDialogContent>
-    </AppDialog>
+        </ViewerAppDialogFooter>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }

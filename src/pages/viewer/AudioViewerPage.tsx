@@ -34,22 +34,24 @@ import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChap
 import { AudioSkipCreditsDialog } from '@/components/viewer/audio/AudioSkipCreditsDialog';
 import { AudioLyricPanel } from '@/components/viewer/audio/AudioLyricPanel';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
-import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ViewerAppTooltip,
+  ViewerAppTooltipContent,
+  ViewerAppTooltipTrigger,
+} from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
@@ -344,19 +346,19 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                 </div>
 
                 <div class="flex items-center gap-3">
-                  <Tooltip>
-                    <TooltipTrigger as="div">
+                  <ViewerAppTooltip>
+                    <ViewerAppTooltipTrigger as="div">
                       <MultiSwitch<AudioPlayMode>
                         options={PLAY_MODE_OPTIONS}
                         value={() => audioConfig().playMode}
                         onChange={(mode) => void patchBookConfig({ playMode: mode })}
                         sizeClass="h-9 w-9"
                       />
-                    </TooltipTrigger>
-                    <TooltipContent>
+                    </ViewerAppTooltipTrigger>
+                    <ViewerAppTooltipContent>
                       {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
-                    </TooltipContent>
-                  </Tooltip>
+                    </ViewerAppTooltipContent>
+                  </ViewerAppTooltip>
 
                   <Button
                     variant="ghost"
@@ -428,13 +430,13 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
         </MediaViewerShellMain>
       </MediaViewerShell>
 
-      <AppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
-        <AppDrawerContent class={hDrawerPanel}>
-          <AppDrawerHeader>
+      <ViewerAppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
+        <ViewerAppDrawerContent class={hDrawerPanel}>
+          <ViewerAppDrawerHeader>
             <span>目录</span>
-            <AppDrawerClose />
-          </AppDrawerHeader>
-          <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
+            <ViewerAppDrawerClose />
+          </ViewerAppDrawerHeader>
+          <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
               loading={bootstrapping()}
@@ -445,9 +447,9 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                 void goChapterTo(index);
               }}
             />
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
 
       <Show when={book()}>
         {(b) => (
@@ -464,11 +466,11 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
         )}
       </Show>
 
-      <AppDialog open={speedDialogOpen()} onOpenChange={setSpeedDialogOpen}>
-        <AppDialogContent layout="app" class="max-w-sm">
-          <AppDialogHeader>
-            <AppDialogTitle>播放速度</AppDialogTitle>
-          </AppDialogHeader>
+      <ViewerAppDialog open={speedDialogOpen()} onOpenChange={setSpeedDialogOpen}>
+        <ViewerAppDialogContent layout="app" class="max-w-sm">
+          <ViewerAppDialogHeader>
+            <ViewerAppDialogTitle>播放速度</ViewerAppDialogTitle>
+          </ViewerAppDialogHeader>
           <div class="px-4 py-4">
             <div class="mb-2 flex justify-between text-sm">
               <span>速度</span>
@@ -500,14 +502,14 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               确定
             </Button>
           </div>
-        </AppDialogContent>
-      </AppDialog>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
 
-      <AppDialog open={timerDialogOpen()} onOpenChange={setTimerDialogOpen}>
-        <AppDialogContent layout="app" class="max-w-sm">
-          <AppDialogHeader>
-            <AppDialogTitle>定时关闭</AppDialogTitle>
-          </AppDialogHeader>
+      <ViewerAppDialog open={timerDialogOpen()} onOpenChange={setTimerDialogOpen}>
+        <ViewerAppDialogContent layout="app" class="max-w-sm">
+          <ViewerAppDialogHeader>
+            <ViewerAppDialogTitle>定时关闭</ViewerAppDialogTitle>
+          </ViewerAppDialogHeader>
           <div class="flex flex-col gap-2 px-4 py-2">
             {[0, 15, 30, 45, 60, 90, 120, 180].map((m) => (
               <Button
@@ -530,8 +532,8 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               +10 分钟
             </Button>
           </div>
-        </AppDialogContent>
-      </AppDialog>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
     </>
   );
 }

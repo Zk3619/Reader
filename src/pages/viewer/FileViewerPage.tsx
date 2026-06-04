@@ -17,12 +17,12 @@ import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
 import {
-  AppDrawer,
-  AppDrawerBody,
-  AppDrawerClose,
-  AppDrawerContent,
-  AppDrawerHeader,
-} from '@/components/shared/AppDrawer';
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerClose,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -154,13 +154,13 @@ export function FileViewerPage(props: FileViewerPageProps) {
         </MediaViewerShellMain>
       </MediaViewerShell>
 
-      <AppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
-        <AppDrawerContent class={hDrawerPanel}>
-          <AppDrawerHeader>
+      <ViewerAppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
+        <ViewerAppDrawerContent class={hDrawerPanel}>
+          <ViewerAppDrawerHeader>
             <span>目录</span>
-            <AppDrawerClose />
-          </AppDrawerHeader>
-          <AppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
+            <ViewerAppDrawerClose />
+          </ViewerAppDrawerHeader>
+          <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
             <MediaViewerCatalog
               open={catalogOpen()}
               loading={bootstrapping()}
@@ -171,9 +171,9 @@ export function FileViewerPage(props: FileViewerPageProps) {
                 void viewerStore.loadChapter(index);
               }}
             />
-          </AppDrawerBody>
-        </AppDrawerContent>
-      </AppDrawer>
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
     </>
   );
 }

@@ -23,20 +23,17 @@ import {
   getZoneRectRatio,
 } from '@/lib/media/text/reader-click-region';
 import {
-  AppDialog,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-} from '@/components/shared/AppDialog';
+  ViewerAppDialog,
+  ViewerAppDialogContent,
+  ViewerAppDialogHeader,
+  ViewerAppDialogTitle,
+} from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { XIcon } from '@/components/shared/icons';
 import { markClickActionHintShown } from '@/lib/media/text/reader-click-hint-storage';
-import {
-  APP_READER_CLICK_REGIONAL_OVERLAY_Z,
-  APP_READER_OVERLAY_DIALOG_Z,
-} from '@/lib/ui/overlay-z';
+import { APP_READER_CLICK_REGIONAL_OVERLAY_Z } from '@/lib/ui/overlay-z';
 
 export interface ReaderClickRegionalOverlayProps {
   open: boolean;
@@ -67,20 +64,16 @@ function ReaderClickActionPickerDialog(props: {
       : 'menu';
 
   return (
-    <AppDialog
+    <ViewerAppDialog
       open={props.zone != null}
       onOpenChange={(open) => {
         if (!open) props.onClose();
       }}
     >
-      <AppDialogContent
-        layout="plain"
-        portalZClass={APP_READER_OVERLAY_DIALOG_Z}
-        class="max-w-sm gap-3"
-      >
-        <AppDialogHeader>
-          <AppDialogTitle>选择动作</AppDialogTitle>
-        </AppDialogHeader>
+      <ViewerAppDialogContent layout="plain" class="max-w-sm gap-3">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>选择动作</ViewerAppDialogTitle>
+        </ViewerAppDialogHeader>
         <div class="grid gap-1.5">
           <For each={CLICK_ACTION_OPTIONS}>
             {(action) => (
@@ -95,8 +88,8 @@ function ReaderClickActionPickerDialog(props: {
             )}
           </For>
         </div>
-      </AppDialogContent>
-    </AppDialog>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 }
 
