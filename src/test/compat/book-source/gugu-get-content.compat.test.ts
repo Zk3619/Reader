@@ -28,6 +28,10 @@ describe('咕咕番 getContent', () => {
     url: '/index.php/vod/play/id/4973/sid/1/nid/1.html',
     index: 0,
     baseUrl: 'https://www.gugu3.com/',
+    bookUrl: 'https://www.gugu3.com/index.php/vod/detail/id/4973.html',
+    isVolume: false,
+    isVip: false,
+    isPay: false,
   };
   const book = {
     name: '测试番剧',

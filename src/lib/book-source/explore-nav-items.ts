@@ -2,8 +2,12 @@
  * 发现页分类导航项：仅展示可进入书籍列表的按钮，以及 select/嵌套 select 筛选
  */
 
+import type { BookSource } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
-import { isExploreDrawerSelectSection } from '@/lib/book-source/explore-sections';
+import {
+  getExploreSectionSelectDisplayValue,
+  isExploreDrawerSelectSection,
+} from '@/lib/book-source/explore-sections';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
 import { EXPLORE_KIND_DEFAULT_BASIS_PERCENT } from '@/lib/book-source/legado-flex-child-style';
 
@@ -69,17 +73,15 @@ export function shouldShowInExploreNav(section: ExploreSection): boolean {
   return shouldOpenExplorePageForSection(section);
 }
 
-/** 书源变量类下拉的当前值（优先脚本回填的 default） */
+/** 书源变量类下拉的当前值（与发现抽屉 Select 同源：localStorage / infoMap / default） */
 export function getExploreArgumentSelectValue(
   item: Extract<ExploreSectionNavItem, { kind: 'select' }>,
   selectedSection?: ExploreSection | null,
+  source?: BookSource | null,
 ): string {
   const filter = item.filterSection;
-  if (filter?.paramKey) {
-    const def = filter.default?.trim();
-    if (def) return def;
-    const first = filter.chars?.[0]?.trim();
-    if (first) return first;
+  if (filter && source) {
+    return getExploreSectionSelectDisplayValue(source, filter);
   }
   const sel = selectedSection;
   if (!sel) return item.options[0]?.title ?? '';
@@ -137,6 +139,7 @@ export type ExploreNavAutoSelection = {
 export function resolveDefaultExploreNavSelection(
   sections: ExploreSection[],
   selectedSection?: ExploreSection | null,
+  source?: BookSource | null,
 ): ExploreNavAutoSelection {
   const items = buildExploreSectionNavItems(sections);
   if (items.length === 0) {
@@ -154,7 +157,7 @@ export function resolveDefaultExploreNavSelection(
   }
 
   if (first.filterSection?.paramKey) {
-    const current = getExploreArgumentSelectValue(first, selectedSection);
+    const current = getExploreArgumentSelectValue(first, selectedSection, source);
     if (current !== opt.title) {
       return {
         section: shouldOpenExplorePageForSection(opt) ? opt : pickDefaultExploreHubSection(sections),

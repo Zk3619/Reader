@@ -35,6 +35,8 @@ import {
 } from '@/lib/book-source/explore-nav-items';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
 import { explorePageLayoutStore } from '@/stores/explore-page-layout';
+import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
+import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { cn } from '@/lib/utils';
 
 /** 探索页分类区：固定高度、内容宽度、上限宽度 */
@@ -89,6 +91,7 @@ function isSectionSelected(a: ExploreSection | null | undefined, b: ExploreSecti
 }
 
 function SelectNavItem(props: {
+  source: BookSource | null;
   item: Extract<ExploreSectionNavItem, { kind: 'select' }>;
   selectedSection?: ExploreSection | null;
   onSectionSelect: (section: ExploreSection) => void;
@@ -97,8 +100,11 @@ function SelectNavItem(props: {
   const paramKey = () => props.item.filterSection?.paramKey;
   const isArgumentFilter = () => !!paramKey();
 
-  const selectedValue = () =>
-    getExploreArgumentSelectValue(props.item, props.selectedSection);
+  const selectedValue = () => {
+    const s = props.source;
+    if (s) void getExploreSourceArgsVersion(getLegadoSourceKey(s));
+    return getExploreArgumentSelectValue(props.item, props.selectedSection, s);
+  };
 
   return (
     <div
@@ -188,6 +194,7 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
     if (item.kind === 'select') {
       return (
         <SelectNavItem
+          source={props.source}
           item={item}
           selectedSection={props.selectedSection}
           onSectionSelect={props.onSectionSelect}
@@ -256,6 +263,7 @@ export function ExploreSectionsPanel(props: ExploreSectionsPanelProps) {
                 <For each={selectItems()}>
                   {(item) => (
                     <SelectNavItem
+                      source={props.source}
                       item={item}
                       selectedSection={props.selectedSection}
                       onSectionSelect={props.onSectionSelect}

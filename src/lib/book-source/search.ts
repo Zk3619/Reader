@@ -228,7 +228,7 @@ async function analyzeFieldWithDebug(
 ): Promise<string> {
   if (!rule?.trim()) return '';
   const replaced = await analyzeLegadoStringField(rule, context, joiner, options);
-  if (debugBookIndex != null && typeof window !== 'undefined') {
+  if (debugBookIndex != null && import.meta.env.DEV) {
     logSearchFieldDebug(sourceName, debugBookIndex, field, rule, context, replaced, replaced);
   }
   return replaced;
@@ -761,7 +761,7 @@ async function parseBookInfoFromDetail(
     let kind = rule.kind
       ? normalizeKindFromRule(await analyzeKindField(rule.kind, context, kindOpts), kindOpts)
       : undefined;
-    if (debugBookIndex != null && typeof window !== 'undefined' && rule.kind) {
+    if (debugBookIndex != null && import.meta.env.DEV && rule.kind) {
       const kindRaw = await analyzeRule(rule.kind, context);
       logSearchFieldDebug(
         source.sourceName,
@@ -825,7 +825,7 @@ async function parseSearchBook(
     let author = rule.author
       ? await resolveExploreAuthor(rule.author, context)
       : '';
-    if (debugBookIndex != null && typeof window !== 'undefined' && rule.author) {
+    if (debugBookIndex != null && import.meta.env.DEV && rule.author) {
       logSearchFieldDebug(
         source.sourceName,
         debugBookIndex,
@@ -895,7 +895,7 @@ async function parseSearchBook(
     let kind = rule.kind
       ? normalizeKindFromRule(await analyzeKindField(rule.kind, context, kindOpts), kindOpts)
       : undefined;
-    if (debugBookIndex != null && typeof window !== 'undefined' && rule.kind) {
+    if (debugBookIndex != null && import.meta.env.DEV && rule.kind) {
       const kindRaw = await analyzeRule(rule.kind, context);
       logSearchFieldDebug(
         source.sourceName,

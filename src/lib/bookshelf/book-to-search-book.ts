@@ -1,8 +1,40 @@
-import type { Book, SearchBook } from '@/types';
+import type { Book, BookSource, SearchBook } from '@/types';
 import { mergeBookContentVariable, readBookContentSource } from '@/lib/book-source/utils';
+import {
+  isBookAudio,
+  isBookFile,
+  isBookImage,
+  isBookVideo,
+  resolveBookType,
+} from '@/lib/book-source/book-type';
+
+function resolveEphemeralBookType(
+  sb: SearchBook,
+  source?: Pick<BookSource, 'sourceType'>,
+): number {
+  const fromSearch = resolveBookType(sb.type ?? 0, sb.tab);
+  if (!source) return fromSearch;
+  const fromSource = resolveBookType(source.sourceType, sb.tab);
+  const origin = sb.origin;
+  const sourceIsMedia =
+    isBookImage(fromSource) ||
+    isBookAudio(fromSource) ||
+    isBookVideo(fromSource, origin) ||
+    isBookFile(fromSource);
+  if (!sourceIsMedia) return fromSearch;
+  const searchIsMedia =
+    isBookImage(fromSearch) ||
+    isBookAudio(fromSearch) ||
+    isBookVideo(fromSearch, origin) ||
+    isBookFile(fromSearch);
+  return searchIsMedia ? fromSearch : fromSource;
+}
 
 /** 未上架书籍进入阅读器用的临时 Book（不写库） */
-export function searchBookToEphemeralBook(sb: SearchBook): Book {
+export function searchBookToEphemeralBook(
+  sb: SearchBook,
+  source?: Pick<BookSource, 'sourceType'>,
+): Book {
   const now = Date.now();
   return {
     bookUrl: sb.bookUrl,
@@ -15,7 +47,7 @@ export function searchBookToEphemeralBook(sb: SearchBook): Book {
     intro: sb.intro,
     coverUrl: sb.coverUrl,
     charset: undefined,
-    type: sb.type ?? 0,
+    type: resolveEphemeralBookType(sb, source),
     group: 0,
     latestChapterTime: now,
     lastCheckTime: now,

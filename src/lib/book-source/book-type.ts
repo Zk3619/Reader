@@ -65,6 +65,11 @@ export function isLocalOrigin(origin: string): boolean {
   return origin === 'local' || origin.startsWith('local::') || origin === 'loc_book';
 }
 
+/** 书源 sourceType / bookSourceType 枚举（0–4），与 Legado BookType 位标志区分 */
+export function isBookSourceTypeEnum(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= BookSourceType.video;
+}
+
 /** 将书源类型转为 Legado 书籍 type 位（加入书架时推荐） */
 export function bookTypeFromSourceType(sourceType: number): number {
   switch (sourceType) {
@@ -83,12 +88,15 @@ export function bookTypeFromSourceType(sourceType: number): number {
 
 /** 结合 tab（漫画/听书/短剧）与书源 type 得到有效书籍 type */
 export function resolveBookType(
-  sourceType: number,
+  typeOrSourceType: number,
   tab?: string,
 ): number {
   const fromTab = tab?.trim() ? TAB_TO_BOOK_TYPE[tab.trim()] : undefined;
   if (fromTab != null) return fromTab;
-  return bookTypeFromSourceType(sourceType);
+  if (!isBookSourceTypeEnum(typeOrSourceType)) {
+    return typeOrSourceType;
+  }
+  return bookTypeFromSourceType(typeOrSourceType);
 }
 
 export function isBookAudio(type: number): boolean {
@@ -137,6 +145,12 @@ export function resolveMediaKind(
   const { type, origin } = book;
   if (isReaderLocalBookType(type, origin)) return MediaKind.text;
 
+  // 已带 Legado 媒体位标志时优先采用，避免 data: URL / 详情 tab（如「小说」）把漫画降成文本
+  if (isBookVideo(type, origin)) return MediaKind.video;
+  if (isBookAudio(type)) return MediaKind.audio;
+  if (isBookImage(type)) return MediaKind.image;
+  if (isBookFile(type)) return MediaKind.file;
+
   const tab = book.tab?.trim() || inferTabFromBook(book);
   const effectiveType = tab ? resolveBookType(type, tab) : type;
 
@@ -145,5 +159,23 @@ export function resolveMediaKind(
   if (isBookImage(effectiveType)) return MediaKind.image;
   if (isBookFile(effectiveType)) return MediaKind.file;
   return MediaKind.text;
+}
+
+/**
+ * 结合书源 sourceType 解析阅读器种类（搜索书 type 常为 0b1000=8，图库 sourceType=2 时应进 image-viewer）
+ */
+export function resolveMediaKindWithSource(
+  book: Pick<Book, 'type' | 'origin' | 'bookUrl' | 'tocUrl'> & { tab?: string },
+  sourceType?: number,
+): MediaKind {
+  const fromBook = resolveMediaKind(book);
+  if (sourceType == null || !isBookSourceTypeEnum(sourceType)) {
+    return fromBook;
+  }
+  const fromSource = mediaKindFromSourceType(sourceType);
+  if (fromBook === MediaKind.text && fromSource !== MediaKind.text) {
+    return fromSource;
+  }
+  return fromBook;
 }
 

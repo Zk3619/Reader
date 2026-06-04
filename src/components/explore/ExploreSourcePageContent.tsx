@@ -260,7 +260,7 @@ export function ExploreSourcePageContent(props: ExploreSourcePageContentProps) {
       if (props.onOpenBookInfo) {
         props.onOpenBookInfo(props.source, sb);
       } else {
-        props.onOpenBook(searchBookToEphemeralBook(sb));
+        props.onOpenBook(searchBookToEphemeralBook(sb, props.source));
       }
     },
     onCoverUrlRefreshed: exploreBooks.patchCoverUrl,
