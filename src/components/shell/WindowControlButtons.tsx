@@ -7,7 +7,7 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from "@/components/shared/AppTooltip"
 import {
   AppDialog,
   AppDialogContent,
@@ -157,15 +157,15 @@ export function WindowControlButtons() {
     <>
       <Show when={showWindowControls()}>
         <div class="flex items-center gap-1 no-drag">
-          <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={minimizeWindow}>
+          <AppTooltip>
+            <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={minimizeWindow}>
               <MinimizeWindowIcon class="h-4 w-4" size={16} />
               <span class="sr-only">最小化</span>
-            </TooltipTrigger>
-            <TooltipContent>最小化</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={maximizeWindow}>
+            </AppTooltipTrigger>
+            <AppTooltipContent>最小化</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={maximizeWindow}>
               <Show
                 when={isMaximized()}
                 fallback={<MaximizeWindowIcon class="h-4 w-4" size={16} />}
@@ -173,19 +173,19 @@ export function WindowControlButtons() {
                 <RestoreWindowIcon class="h-4 w-4" size={16} />
               </Show>
               <span class="sr-only">{isMaximized() ? "还原" : "最大化"}</span>
-            </TooltipTrigger>
-            <TooltipContent>{isMaximized() ? "还原" : "最大化"}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors" onClick={(e: MouseEvent) => {
+            </AppTooltipTrigger>
+            <AppTooltipContent>{isMaximized() ? "还原" : "最大化"}</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors" onClick={(e: MouseEvent) => {
               ; (e.currentTarget as HTMLElement).blur()
               closeWindow(e)
             }}>
               <XIcon class="h-4 w-4" size={16} />
               <span class="sr-only">关闭</span>
-            </TooltipTrigger>
-            <TooltipContent>关闭</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>关闭</AppTooltipContent>
+          </AppTooltip>
         </div>
       </Show>
 

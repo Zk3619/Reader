@@ -43,8 +43,13 @@ export function AppBackNavigationBridge(props: AppBackNavigationBridgeProps) {
       if (!prevOpenIds.has(id)) pushBackHistoryEntry();
     }
     if (!isConsumingBackNavigation()) {
+      let removedAny = false;
       for (const id of prevOpenIds) {
-        if (!currentIds.has(id)) popBackHistoryProgrammatic();
+        if (!currentIds.has(id)) removedAny = true;
+      }
+      // 同一 tick 多层关闭（如抽屉+叠层切换）只 back 一次，避免误触发下一层 close
+      if (removedAny) {
+        popBackHistoryProgrammatic();
       }
       if (openLayers.length === 0 && getBackHistoryDepth() > 0) {
         clearBackHistoryDepth();

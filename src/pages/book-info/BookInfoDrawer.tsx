@@ -12,6 +12,10 @@ import {
   AppDrawerHeader,
 } from '@/components/shared/AppDrawer';
 import { cn } from '@/lib/utils';
+import {
+  APP_BOOK_INFO_DRAWER_OVERLAY_Z,
+  APP_BOOK_INFO_DRAWER_Z,
+} from '@/lib/ui/overlay-z';
 
 const MD_MEDIA_QUERY = '(min-width: 768px)';
 
@@ -49,7 +53,9 @@ export function BookInfoDrawer(props: BookInfoDrawerProps) {
       defaultSnapPoint={1}
     >
       <AppDrawerContent
-        class={cn('z-50 flex flex-col overflow-hidden', mdUp() && 'h-full')}
+        portalToBody
+        class={cn(APP_BOOK_INFO_DRAWER_Z, 'flex flex-col overflow-hidden', mdUp() && 'h-full')}
+        overlayClass={APP_BOOK_INFO_DRAWER_OVERLAY_Z}
         showNativeDragHandle={false}
       >
         <AppDrawerHeader

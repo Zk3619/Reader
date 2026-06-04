@@ -63,7 +63,7 @@ function relativeBottom(rootRect: DOMRect, el: Element): number {
 }
 
 function collectLineSegmentsInBlock(
-  measureRoot: HTMLElement,
+  _measureRoot: HTMLElement,
   rootRect: DOMRect,
   block: HTMLElement,
   lineHeightPx: number,

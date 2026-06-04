@@ -20,6 +20,7 @@ import type { BookSource } from '@/types';
 import type { Book, SearchBook } from '@/types';
 import type { ExploreSection } from '@/lib/book-source/explore-sections';
 import {
+  clearExploreSectionsCache,
   getExploreSections,
   getExploreSectionsAsync,
   isExploreUrlScript,
@@ -27,6 +28,7 @@ import {
   shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
+import { applyExploreSelectChange } from '@/lib/book-source/explore-select-change';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { ExploreBookListSkeleton } from '@/components/explore/ExploreBookCardSkeleton';
@@ -96,7 +98,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     return sources().find((s) => s.sourceUrl === url) ?? null;
   });
 
-  const [dynamicSections] = createResource(
+  const [dynamicSections, { refetch: refetchExploreSections }] = createResource(
     () => {
       if (!isActive()) return null;
       const s = selectedSource();
@@ -224,7 +226,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     const sel = untrack(selectedSection);
     if (isExploreSectionInNav(secs, sel)) return;
 
-    const { section: next, argumentUpdate } = resolveDefaultExploreNavSelection(secs, sel);
+    const { section: next, argumentUpdate } = resolveDefaultExploreNavSelection(secs, sel, s);
     if (argumentUpdate) {
       updateExploreSourceArgument(s, argumentUpdate.paramKey, argumentUpdate.value);
       return;
@@ -272,8 +274,13 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
 
   async function handleSelectFilterChange(section: ExploreSection, value: string) {
     const s = selectedSource();
-    if (!s || !section.paramKey) return;
-    updateExploreSourceArgument(s, section.paramKey, value);
+    if (!s) return;
+    await applyExploreSelectChange(s, section, value, {
+      onRefreshExplore: async () => {
+        clearExploreSectionsCache(getLegadoSourceKey(s));
+        await refetchExploreSections();
+      },
+    });
     setListRefreshKey((k) => k + 1);
   }
 

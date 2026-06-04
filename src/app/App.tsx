@@ -44,7 +44,8 @@ import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
 } from "@/lib/media/text/reader-media-messages";
-import { MediaKind, resolveMediaKind } from "@/lib/book-source/book-type";
+import { MediaKind, resolveMediaKindWithSource } from "@/lib/book-source/book-type";
+import { searchBookToEphemeralBook } from "@/lib/bookshelf/book-to-search-book";
 import {
   mediaViewerPageForKind,
   NON_TEXT_MEDIA_VIEWER_PAGES,
@@ -64,6 +65,12 @@ import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
 import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/ReaderGuestAddToShelfDialog";
+import {
+  freezeMediaViewerChromeAutoHide,
+  resumeMediaViewerChromeAutoHide,
+} from "@/lib/media/media-viewer-chrome-auto-hide-registry";
+import { publishActiveOverlayLayer } from "@/lib/ui/overlay-layer-active";
+import { APP_TOAST_Z } from "@/lib/ui/overlay-z";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
@@ -191,11 +198,13 @@ import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
+import { OverlayStackEntry } from "@/components/navigation/OverlayStackEntry";
 import { dismissFloatingOverlaysForShellChange } from "@/utils/accessibility";
 import {
   createOverlayStack,
   isOverlayPage,
   isViewerOverlayKind,
+  normalizeOverlayBookUrl,
   normalizeShellTab,
   type OverlayEntry,
   type ShellTabPage,
@@ -246,6 +255,10 @@ function AppContent() {
   );
   const currentPage = nav.currentPage;
   const isStandalonePage = nav.isStandaloneVisible;
+
+  createEffect(() => {
+    publishActiveOverlayLayer(nav.top());
+  });
 
   const navigateToPage = (page: PageType) => {
     if (page === "book-search") {
@@ -372,9 +385,12 @@ function AppContent() {
 
   /** DEV HMR：页面仍停在媒体阅读器但 store 已重置时，尝试从缓存会话恢复或退回书架 */
   createEffect(() => {
+    if (!import.meta.env.DEV) return;
     const page = currentPage();
     if (!isMediaViewerPage(page)) return;
-    if (viewerStore.state.book || viewerStore.state.loading) return;
+    if (viewerStore.state.book || viewerStore.state.loading || viewerStore.isMediaViewerBootstrapping()) {
+      return;
+    }
 
     const session = readHmrData<{ bookUrl: string; kind: MediaKind } | null>(
       "mediaViewerSession",
@@ -391,6 +407,9 @@ function AppContent() {
       });
       return;
     }
+
+    // 有 mediaViewerSession 说明正在打开中，勿误 pop（openReaderPage 会先写 session 再 push）
+    if (session) return;
 
     nav.pop();
   });
@@ -909,11 +928,21 @@ function AppContent() {
     if (bookInfoUsesDrawer()) {
       const drawer = bookInfoDrawer();
       if (!bookInfoDrawerOpen() || !drawer) return false;
-      const reading = textViewerStore.state.book;
-      if (!reading || !nav.entries().some((e) => e.kind === "text-viewer")) {
-        return false;
-      }
-      return reading.bookUrl === drawer.book.bookUrl;
+      const bookUrl = drawer.book.bookUrl;
+      const kind = resolveMediaKindWithSource(
+        searchBookToEphemeralBook(drawer.book, drawer.source),
+        drawer.source.sourceType,
+      );
+      const viewerKind = mediaViewerPageForKind(kind);
+      const existing = nav.findViewerEntry(viewerKind, bookUrl);
+      return (
+        !!existing &&
+        viewerStore.isOpen() &&
+        viewerStore.state.kind === kind &&
+        normalizeOverlayBookUrl(viewerStore.state.book?.bookUrl ?? "") ===
+          normalizeOverlayBookUrl(bookUrl) &&
+        !viewerStore.isMediaViewerBootstrapping()
+      );
     }
     return nav.bookInfoCanContinueReading();
   };
@@ -950,51 +979,160 @@ function AppContent() {
     });
   }
 
-  function openBookFromBookInfo(book: Book, catalog?: import("@/types").BookChapter[]) {
-    if (bookInfoCanContinueReading()) {
-      closeBookInfo();
-      return;
-    }
+  function openBookFromBookInfo(
+    book: Book,
+    catalog?: import("@/types").BookChapter[],
+    source?: BookSource,
+  ) {
     if (bookInfoUsesDrawer()) {
       setBookInfoDrawerOpen(false);
       setBookInfoDrawer(null);
+      // 等抽屉叠层卸载后再 push 阅读器，避免 z-[115] 遮罩挡住顶栏返回键
+      queueMicrotask(() => openReaderPage(book, catalog, source));
+      return;
     }
-    openReaderPage(book, catalog);
+    if (nav.top()?.kind === "book-info") {
+      nav.pop();
+    }
+    openReaderPage(book, catalog, source);
   }
 
   const [guestAddToShelfOpen, setGuestAddToShelfOpen] = createSignal(false);
   const [guestAddToShelfBusy, setGuestAddToShelfBusy] = createSignal(false);
 
+  /** 叠层栈条目是否栈顶可见（须在 JSX 中调用 visible() 以保持响应式） */
+  function overlayEntryVisible(entry: OverlayEntry) {
+    return nav.top()?.id === entry.id;
+  }
+
+  function mountReaderOnNav(
+    book: Book,
+    viewerKind: ReturnType<typeof mediaViewerPageForKind>,
+  ) {
+    const bookUrl = normalizeOverlayBookUrl(book.bookUrl);
+    nav.removeViewerKinds(viewerKind);
+    nav.push({ kind: viewerKind, bookUrl });
+  }
+
+  function popViewerNavIfTop(bookUrl: string) {
+    const top = nav.top();
+    if (
+      top &&
+      isViewerOverlayKind(top.kind) &&
+      "bookUrl" in top &&
+      top.bookUrl === bookUrl
+    ) {
+      nav.pop();
+    }
+  }
+
   function openReaderPage(
     book: Book,
     initialCatalog?: import("@/types").BookChapter[],
+    source?: Pick<BookSource, "sourceType">,
   ) {
-    const kind = resolveMediaKind(book);
+    const kind = resolveMediaKindWithSource(book, source?.sourceType);
     const viewerKind = mediaViewerPageForKind(kind);
-    const existing = nav.findViewerEntry(viewerKind, book.bookUrl);
-    if (existing) {
-      nav.popToEntryId(existing.id);
-      return;
-    }
-    nav.removeViewerKinds(viewerKind);
-
-    if (kind === MediaKind.text) {
-      textViewerStore.setBookInitialState(book);
-      nav.push({ kind: "text-viewer", bookUrl: book.bookUrl });
-      void textViewerStore.openBook(book, { initialCatalog }).catch((e) => {
-        console.error("打开书籍失败:", e);
-        nav.pop();
+    if (import.meta.env.DEV) {
+      console.info("[reader-nav] openReaderPage", {
+        kind,
+        viewerKind,
+        sourceType: source?.sourceType,
+        bookType: book.type,
+        stack: nav.entries().map((e) => e.kind),
+        top: nav.top()?.kind,
       });
+    }
+    const existing = nav.findViewerEntry(viewerKind, book.bookUrl);
+    const storeReady =
+      kind === MediaKind.text
+        ? viewerStore.isOpen() &&
+          viewerStore.state.kind === MediaKind.text &&
+          viewerStore.state.book?.bookUrl === book.bookUrl &&
+          !viewerStore.state.contentBootstrapping
+        : viewerStore.isOpen() &&
+          normalizeOverlayBookUrl(viewerStore.state.book?.bookUrl ?? "") ===
+            normalizeOverlayBookUrl(book.bookUrl) &&
+          viewerStore.state.kind === kind &&
+          !viewerStore.isMediaViewerBootstrapping();
+
+    if (existing && storeReady) {
+      if (nav.top()?.id !== existing.id) {
+        nav.popToEntryId(existing.id);
+      }
       return;
     }
 
-    viewerStore.setBookInitialState(book, kind);
-    writeHmrData("mediaViewerSession", { bookUrl: book.bookUrl, kind });
-    nav.push({ kind: viewerKind, bookUrl: book.bookUrl });
-    void viewerStore.openBook(book, kind, { initialCatalog }).catch((e) => {
-      console.error("打开书籍失败:", e);
-      nav.pop();
-    });
+    const prevUrl = viewerStore.state.book?.bookUrl;
+    const mustCloseOther =
+      viewerStore.isOpen() && !!prevUrl && prevUrl !== book.bookUrl;
+
+    const primeReaderStore = () => {
+      if (kind === MediaKind.text) {
+        textViewerStore.setBookInitialState(book);
+      } else {
+        viewerStore.setBookInitialState(book, kind);
+        writeHmrData("mediaViewerSession", { bookUrl: book.bookUrl, kind });
+      }
+    };
+
+    const loadBook = async () => {
+      try {
+        if (kind === MediaKind.text) {
+          await textViewerStore.openBook(book, { initialCatalog });
+        } else {
+          await viewerStore.openBook(book, kind, { initialCatalog });
+        }
+      } catch (e) {
+        console.error("打开书籍失败:", e);
+        if (kind === MediaKind.text) {
+          await textViewerStore.closeBook();
+        } else {
+          await viewerStore.closeBook();
+          writeHmrData("mediaViewerSession", null);
+        }
+        popViewerNavIfTop(book.bookUrl);
+      }
+    };
+
+    if (mustCloseOther) {
+      void (async () => {
+        if (kind === MediaKind.text) {
+          await textViewerStore.closeBook();
+        } else {
+          await viewerStore.closeBook();
+          writeHmrData("mediaViewerSession", null);
+        }
+        primeReaderStore();
+        mountReaderOnNav(book, viewerKind);
+        await loadBook();
+      })();
+      return;
+    }
+
+    primeReaderStore();
+    mountReaderOnNav(book, viewerKind);
+    if (import.meta.env.DEV) {
+      console.info("[reader-nav] mounted", {
+        viewerKind,
+        stack: nav.entries().map((e) => e.kind),
+        top: nav.top()?.kind,
+      });
+    }
+    void (async () => {
+      await loadBook();
+      if (kind !== MediaKind.text) {
+        const { isLocalBook } = await import("@/lib/local-book");
+        const guest =
+          !isLocalBook(book) && !(await hasBook(book.bookUrl));
+        if (
+          viewerStore.state.book?.bookUrl === book.bookUrl &&
+          viewerStore.state.kind === kind
+        ) {
+          viewerStore.setGuestReading(guest);
+        }
+      }
+    })();
   }
 
   function openTextViewerFromMediaFallback(detail: ReaderMediaTextFallbackDetail) {
@@ -1048,18 +1186,64 @@ function AppContent() {
     }
   }
 
+  let closeReaderPromptInFlight = false;
+
+  function activeReaderBook(): Book | null {
+    const top = nav.top();
+    if (!top || !isViewerOverlayKind(top.kind)) {
+      return textViewerStore.state.book ?? null;
+    }
+    if (top.kind === "text-viewer") {
+      return textViewerStore.state.book;
+    }
+    return viewerStore.state.book;
+  }
+
+  function activeReaderIsGuest(): boolean {
+    const top = nav.top();
+    if (top?.kind === "text-viewer") {
+      return textViewerStore.isGuestReading();
+    }
+    if (top && isViewerOverlayKind(top.kind)) {
+      return viewerStore.isGuestReading();
+    }
+    return false;
+  }
+
+  function openGuestAddToShelfPrompt() {
+    freezeMediaViewerChromeAutoHide();
+    setGuestAddToShelfOpen(true);
+  }
+
   function requestCloseReader() {
-    const guestBook =
-      textViewerStore.isGuestReading() && textViewerStore.state.book
-        ? textViewerStore.state.book
-        : viewerStore.state.guestReading && viewerStore.state.book
-          ? viewerStore.state.book
-          : null;
-    if (guestBook) {
-      setGuestAddToShelfOpen(true);
+    if (guestAddToShelfOpen()) return;
+
+    const book = activeReaderBook();
+    if (!book) {
+      void finishCloseReader();
       return;
     }
-    void finishCloseReader();
+
+    if (activeReaderIsGuest()) {
+      openGuestAddToShelfPrompt();
+      return;
+    }
+
+    if (closeReaderPromptInFlight) return;
+    closeReaderPromptInFlight = true;
+    void (async () => {
+      try {
+        const { isLocalBook } = await import("@/lib/local-book");
+        const onShelf = await hasBook(book.bookUrl);
+        if (!isLocalBook(book) && !onShelf) {
+          openGuestAddToShelfPrompt();
+          return;
+        }
+        await finishCloseReader();
+      } finally {
+        closeReaderPromptInFlight = false;
+      }
+    })();
   }
 
   async function confirmGuestAddToShelf() {
@@ -2249,7 +2433,6 @@ function AppContent() {
       Boolean(sourceVariableDialogSource()),
       () => setSourceVariableDialogSource(null),
     );
-    push("guest-add-shelf", guestAddToShelfOpen(), () => setGuestAddToShelfOpen(false));
     push(
       "import-source-select",
       showImportSourceSelectDialog(),
@@ -2309,23 +2492,33 @@ function AppContent() {
     push("group-manage", showGroupManage(), () => setShowGroupManage(false));
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
-    push("book-info-drawer", bookInfoDrawerOpen(), () => closeBookInfo());
     push(
       "sources-explore-drawer",
       currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
       () => setSourcesExpandedSourceUrl(null),
     );
 
-    const overlayTop = nav.top();
-    if (overlayTop) {
-      push(`overlay-${overlayTop.kind}`, true, () => {
-        if (overlayTop.kind === "text-viewer" || isViewerOverlayKind(overlayTop.kind)) {
-          void finishCloseReader();
+    // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
+    if (nav.top()) {
+      push("overlay-nav", true, () => {
+        const top = nav.top();
+        if (!top) return;
+        if (top.kind === "text-viewer" || isViewerOverlayKind(top.kind)) {
+          void requestCloseReader();
           return;
         }
         nav.pop();
       });
     }
+
+    // 叠在 overlay-nav 之上，系统返回先关详情抽屉
+    push("book-info-drawer", bookInfoDrawerOpen(), () => closeBookInfo());
+
+    // 须在阅读器叠层之上：否则系统返回会先走 overlay-nav，且弹窗在 z-[110] 下方时点击会误触「点外关闭」
+    push("guest-add-shelf", guestAddToShelfOpen(), () => {
+      setGuestAddToShelfOpen(false);
+      resumeMediaViewerChromeAutoHide();
+    });
 
     return layers;
   };
@@ -2910,16 +3103,14 @@ function AppContent() {
         {/* 独立页导航栈：栈内条目均保持挂载，仅栈顶可见（对齐 Legado Activity 栈） */}
         <Show when={isStandalonePage()}>
           <For each={nav.entries()}>
-            {(entry) => (
-              <div
-                class={cn(
-                  !nav.entryIsVisible(entry) && "hidden pointer-events-none",
-                )}
-              >
+            {(entry) => {
+              const overlayTopId = () => nav.top()?.id;
+              return (
+              <OverlayStackEntry entry={entry} topId={overlayTopId}>
                 <Switch>
                   <Match when={entry.kind === "text-viewer"}>
                     <BookReader
-                entryVisible={() => nav.entryIsVisible(entry)}
+                entryVisible={() => overlayEntryVisible(entry)}
                 onClose={requestCloseReader}
                 onOpenBookInfo={async () => {
                 const book = textViewerStore.state.book;
@@ -2956,25 +3147,25 @@ function AppContent() {
                   </Match>
                   <Match when={entry.kind === "image-viewer"}>
                     <ImageViewerPage
-                      entryVisible={() => nav.entryIsVisible(entry)}
+                      entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
                     />
                   </Match>
                   <Match when={entry.kind === "audio-viewer"}>
                     <AudioViewerPage
-                      entryVisible={() => nav.entryIsVisible(entry)}
+                      entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
                     />
                   </Match>
                   <Match when={entry.kind === "video-viewer"}>
                     <VideoViewerPage
-                      entryVisible={() => nav.entryIsVisible(entry)}
+                      entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
                     />
                   </Match>
                   <Match when={entry.kind === "file-viewer"}>
                     <FileViewerPage
-                      entryVisible={() => nav.entryIsVisible(entry)}
+                      entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
                     />
                   </Match>
@@ -3003,7 +3194,9 @@ function AppContent() {
                       source={e.source}
                       continueReading={bookInfoCanContinueReading()}
                       onBack={closeBookInfo}
-                      onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
+                      onOpenBook={(book, catalog, sourceFromPage) =>
+                        openBookFromBookInfo(book, catalog, sourceFromPage ?? e.source)
+                      }
                     />
                       );
                     })()}
@@ -3015,6 +3208,8 @@ function AppContent() {
                     <BookSearchPage
                       initialQuery={e.initialQuery}
                       initialScope={e.initialScope}
+                      active={() => overlayEntryVisible(entry)}
+                      overlayStack
                       onBack={() => nav.pop()}
                       onOpenBook={(book) => openReaderPage(book)}
                       onOpenBookInfo={(source, book) => {
@@ -3035,8 +3230,9 @@ function AppContent() {
                     />
                   </Match>
                 </Switch>
-              </div>
-            )}
+              </OverlayStackEntry>
+            );
+            }}
           </For>
         </Show>
 
@@ -3055,7 +3251,9 @@ function AppContent() {
                 source={source}
                 continueReading={bookInfoCanContinueReading()}
                 onBack={closeBookInfo}
-                onOpenBook={(book, catalog) => openBookFromBookInfo(book, catalog)}
+                onOpenBook={(book, catalog, sourceFromPage) =>
+                  openBookFromBookInfo(book, catalog, sourceFromPage ?? source)
+                }
               />
             );
           }}
@@ -3180,11 +3378,17 @@ function AppContent() {
         />
         <ReaderGuestAddToShelfDialog
           open={guestAddToShelfOpen()}
-          bookName={textViewerStore.state.book?.name ?? ""}
+          bookName={
+            textViewerStore.state.book?.name ??
+            viewerStore.state.book?.name ??
+            ""
+          }
           adding={guestAddToShelfBusy()}
           onOpenChange={(open) => {
+            // 仅关闭提示，不退出阅读器；退出由「暂不加入」或确认后加入流程处理
             if (!open && !guestAddToShelfBusy()) {
-              void finishCloseReader();
+              setGuestAddToShelfOpen(false);
+              resumeMediaViewerChromeAutoHide();
             }
           }}
           onDecline={() => void finishCloseReader()}
@@ -3269,7 +3473,7 @@ function App() {
             richColors={false}
             icons={appToastIcons}
             swipeDirections={["bottom", "right"]}
-            class="z-200"
+            class={APP_TOAST_Z}
           />
         </div>
       </Portal>

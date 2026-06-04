@@ -276,9 +276,10 @@
 
     --radius: 0.5rem;
 
-    /* 移动端安全区 */
+    /* 移动端安全区（顶栏固定；底栏由 mobile-viewport-insets + 下方变量） */
     --mobile-safe-top: 12px;
-    --mobile-safe-bottom: 12px;
+    --mobile-safe-bottom-gesture: 12px;
+    --mobile-safe-bottom-buttons: 48px;
   }
 
   .dark,
@@ -1209,6 +1210,58 @@ body.reader-inner-web-session .reader-inner-web-layer {
   user-select: auto;
 }
 
+/*
+ * 阅读器浮层 Portal 宿主（body 级，#reader-overlay-portal-host）
+ * Solid Portal 会插入无尺寸 wrapper div，须强制铺满；遮罩/内容须显式分层。
+ */
+#reader-overlay-portal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  display: none;
+}
+
+#reader-overlay-portal-host[data-active='true'] {
+  display: block;
+}
+
+#reader-overlay-portal-host>div {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+  z-index: 0 !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-corvu-drawer-overlay] {
+  z-index: 120 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-corvu-drawer-content],
+#reader-overlay-portal-host[data-active='true'] [data-app-overlay-surface] {
+  z-index: 121 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-app-overlay-backdrop]:not([data-corvu-drawer-overlay]) {
+  z-index: 130 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [role='dialog'] {
+  z-index: 131 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-kb-popper-content-wrapper],
+#reader-overlay-portal-host[data-active='true'] [data-kb-popper-content] {
+  z-index: 135 !important;
+  pointer-events: auto !important;
+}
+
 /* 内嵌页 Portal 下拉/对话框：须高于 .reader-inner-web-layer (z-150) */
 body.reader-inner-web-session [data-kb-popper-content-wrapper] {
   z-index: 160 !important;
@@ -1677,8 +1730,8 @@ body.reader-inner-web-session--drawer {
 
 :root {
   --app-bar-height: 3.5rem;
-  --app-bottom-edge-inset: 0.5rem;
-  /* mb-2 / pb-2，仅触摸端启用 */
+  /* 由 installMobileViewportInsets 写入；未就绪时触摸端 CSS 用手势条兜底 */
+  --system-nav-inset-bottom: 0px;
   --safe-area-top-effective: env(safe-area-inset-top, 0px);
   --safe-area-bottom-effective: env(safe-area-inset-bottom, 0px);
   --keyboard-inset-bottom: 0px;
@@ -1726,11 +1779,11 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
   padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
 }
 
+/* 触摸端：pointer:coarse 与 data-touch-ui 双轨（WebView 媒体查询可能失效） */
 @media (pointer: coarse) and (hover: none) {
   :root {
     --safe-area-top-effective: var(--mobile-safe-top);
-    /* 手势导航常无系统底栏，env 为 0 时用固定 0.5rem */
-    --safe-area-bottom-effective: var(--app-bottom-edge-inset);
+    --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
   }
 
   .safe-area-inset-bottom,
@@ -1739,24 +1792,59 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
   }
 
   .app-bottom-chrome-inset {
-    padding-bottom: calc(var(--app-bottom-edge-inset) + var(--keyboard-inset-bottom));
+    padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
   }
 
   .app-bottom-edge-inset {
-    margin-bottom: var(--app-bottom-edge-inset);
+    margin-bottom: var(--safe-area-bottom-effective);
   }
 
   .app-scroll-bottom-inset {
-    margin-bottom: var(--app-bottom-edge-inset);
+    margin-bottom: var(--safe-area-bottom-effective);
   }
 
   .safe-area-min-height-bottom {
-    min-height: var(--app-bottom-edge-inset);
+    min-height: var(--safe-area-bottom-effective);
   }
 
   #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
-    margin-bottom: var(--app-bottom-edge-inset);
+    margin-bottom: var(--safe-area-bottom-effective);
   }
+}
+
+html[data-touch-ui] {
+  --safe-area-top-effective: var(--mobile-safe-top);
+  --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
+}
+
+html[data-touch-ui] .safe-area-inset-bottom,
+html[data-touch-ui] .safe-area-page-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+html[data-touch-ui] .app-bottom-chrome-inset {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+html[data-touch-ui] .app-bottom-edge-inset {
+  margin-bottom: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] .app-scroll-bottom-inset {
+  margin-bottom: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] .safe-area-min-height-bottom {
+  min-height: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
+  margin-bottom: var(--safe-area-bottom-effective);
+}
+
+/* 三键导航：略增贴底 chrome 内边距（data-android-nav 由 JS 写入） */
+html[data-touch-ui][data-android-nav='buttons'] {
+  --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-buttons)));
 }
 
 :root {

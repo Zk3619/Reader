@@ -79,11 +79,17 @@ import { VirtualExploreBookGrid } from '@/components/explore/VirtualExploreBookG
 
 /** 结果少于一屏时自动翻页（对齐 Legado #5251：不够高则滚不到底） */
 const SEARCH_AUTO_LOAD_MIN_COUNT = 18;
+/** 单次搜索自动连翻页上限，避免结果过少时反复请求全部书源 */
+const SEARCH_AUTO_LOAD_MAX_ROUNDS = 4;
 
 export interface BookSearchPageProps {
   initialQuery?: string;
   /** 初始搜索范围（空=全部；分组逗号分隔；name::url=单书源） */
   initialScope?: string;
+  /** 导航栈条目是否为栈顶（非栈顶时暂停后台搜索） */
+  active?: () => boolean;
+  /** 由 App 导航栈包裹时设为 true，避免内层 fixed+z-50 盖住阅读器 */
+  overlayStack?: boolean;
   onBack: () => void;
   onOpenBook: (book: Book) => void;
   onOpenBookInfo: (source: BookSource, book: SearchBook) => void;
@@ -120,15 +126,22 @@ export function BookSearchPage(props: BookSearchPageProps) {
   const [sourceMap, setSourceMap] = createSignal<Record<string, BookSource>>({});
   const [scopeDialogOpen, setScopeDialogOpen] = createSignal(false);
   const session = new MultiSourceSearchSession();
+  let autoLoadRounds = 0;
+  let loadingNextPage = false;
 
   const loadNextSearchPage = async () => {
-    if (manualStop() || !session.getHasMore()) {
+    if (loadingNextPage || manualStop() || !session.getHasMore()) {
       setSearching(false);
       return;
     }
+    loadingNextPage = true;
     setSearching(true);
-    const sources = await resolveSearchScopeSources(scope());
-    await session.search('', sources);
+    try {
+      const sources = await resolveSearchScopeSources(scope());
+      await session.search('', sources);
+    } finally {
+      loadingNextPage = false;
+    }
   };
 
   const maybeAutoLoadNextSearchPage = (resultCount: number, more: boolean) => {
@@ -136,7 +149,11 @@ export function BookSearchPage(props: BookSearchPageProps) {
       setSearching(false);
       return;
     }
-    if (resultCount < SEARCH_AUTO_LOAD_MIN_COUNT) {
+    if (
+      resultCount < SEARCH_AUTO_LOAD_MIN_COUNT &&
+      autoLoadRounds < SEARCH_AUTO_LOAD_MAX_ROUNDS
+    ) {
+      autoLoadRounds += 1;
       void loadNextSearchPage();
       return;
     }
@@ -180,11 +197,21 @@ export function BookSearchPage(props: BookSearchPageProps) {
   });
 
   createEffect(() => {
+    const visible = props.active?.() ?? true;
+    if (visible) {
+      session.resume();
+      return;
+    }
+    session.pause();
+    setSearching(false);
+  });
+
+  createEffect(() => {
     const nextScope = props.initialScope ?? '';
     if (nextScope && nextScope !== scope()) {
       setScope(nextScope);
       void saveSearchScope(nextScope, { transient: true });
-      if (submitted() && query().trim()) {
+      if (submitted() && query().trim() && (props.active?.() ?? true)) {
         void submitSearch(query().trim(), true);
       }
     }
@@ -194,7 +221,9 @@ export function BookSearchPage(props: BookSearchPageProps) {
     const nextQuery = props.initialQuery?.trim() ?? '';
     if (!nextQuery || nextQuery === query()) return;
     setQuery(nextQuery);
-    void submitSearch(nextQuery);
+    if (props.active?.() ?? true) {
+      void submitSearch(nextQuery);
+    }
   });
 
   const filteredLocal = createMemo(() => {
@@ -259,6 +288,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
       onStart: (isNewSearch) => {
         setSearching(true);
         if (isNewSearch) {
+          autoLoadRounds = 0;
           searchBooksStore.clear();
           clearCoverSession();
         }
@@ -402,7 +432,9 @@ export function BookSearchPage(props: BookSearchPageProps) {
   return (
     <section
       class={cn(
-        'fixed inset-0 z-50 flex flex-col overflow-hidden bg-background',
+        props.overlayStack
+          ? 'flex h-full min-h-0 w-full flex-col overflow-hidden bg-background'
+          : 'fixed inset-0 z-50 flex flex-col overflow-hidden bg-background',
         props.className,
       )}
     >

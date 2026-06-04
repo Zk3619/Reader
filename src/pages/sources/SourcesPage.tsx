@@ -17,13 +17,10 @@ import {
   isExploreUrlScript,
   resolveExploreSectionsFromResource,
   shouldShowExploreSectionsSkeleton,
-  updateExploreSourceArgument,
   type ExploreSection,
 } from '@/lib/book-source/explore-sections';
-import {
-  getExploreInfoMap,
-  setExploreInfoMapValue,
-} from '@/lib/book-source/explore-info-map-store';
+import { applyExploreSelectChange } from '@/lib/book-source/explore-select-change';
+import { getExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { runExploreSectionAction } from '@/lib/js-engine/legado/explore-section-action-runner';
 import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
@@ -375,42 +372,17 @@ export function SourcesPage(props: SourcesPageProps) {
   async function handleExploreSelectChange(
     source: BookSource,
     section: ExploreSection,
-    value: string
+    value: string,
   ) {
-    const sourceKey = getLegadoSourceKey(source);
-    setExploreInfoMapValue(sourceKey, section.title, value);
-
-    if (section.paramKey) {
-      updateExploreSourceArgument(source, section.paramKey, value);
-    }
-
-    const action = section.action?.trim();
-    if (action) {
-      const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
-      try {
-        await runExploreSectionAction(source, action, {
-          infoMap: getExploreInfoMap(sourceKey),
-          onScriptToast: noticeBus.onScriptToast,
-          onRefreshExplore: async () => {
-            clearExploreSectionsCache(sourceKey);
-            await refetchExploreSections();
-          },
-          onOpenSearch: (query, src) => {
-            props.onOpenBookSearch?.(query.trim(), src);
-          },
-        });
-      } catch (e) {
-        console.error('发现筛选 action 失败:', e);
-      }
-      if (!section.paramKey) {
-        clearExploreSectionsCache(sourceKey);
+    await applyExploreSelectChange(source, section, value, {
+      onRefreshExplore: async () => {
+        clearExploreSectionsCache(getLegadoSourceKey(source));
         await refetchExploreSections();
-      }
-      return;
-    }
-
-    if (!section.paramKey) return;
-    await refetchExploreSections();
+      },
+      onOpenSearch: (query, src) => {
+        props.onOpenBookSearch?.(query.trim(), src);
+      },
+    });
   }
 
   async function handleExploreSectionAction(source: BookSource, section: ExploreSection) {

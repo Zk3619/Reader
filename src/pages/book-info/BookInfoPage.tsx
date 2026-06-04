@@ -220,7 +220,7 @@ export interface BookInfoPageProps {
   /** 阅读器内打开详情且当前书仍在阅读会话中 */
   continueReading?: boolean;
   onBack: () => void;
-  onOpenBook: (book: Book, initialCatalog?: BookChapter[]) => void;
+  onOpenBook: (book: Book, initialCatalog?: BookChapter[], source?: BookSource) => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
@@ -530,10 +530,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
   }
 
   async function handleStartReading() {
-    if (props.continueReading) {
-      props.onBack();
-      return;
-    }
     const book = currentBook();
     let source = bookSource();
     if (!source && book.origin) {
@@ -560,7 +556,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
     const detail = currentBook();
     if (isInShelf()) {
       const base = shelfBook() ?? (await getBook(detail.bookUrl));
-      if (!base) return;
+      if (!base) {
+        showAppToast({
+          title: '无法开始阅读',
+          description: '书架中未找到该书，请重新加入书架',
+          variant: 'error',
+        });
+        return;
+      }
       const mergedVariable = mergeBookContentVariable(base.variable, { source: detail.source });
       book = {
         ...base,
@@ -570,7 +573,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
       }
     } else {
-      book = searchBookToEphemeralBook(detail);
+      book = searchBookToEphemeralBook(detail, bookSource() ?? props.source);
       if (chapterIndex !== undefined) {
         book = { ...book, durChapterIndex: chapterIndex, durChapterPos: 0 };
       }
@@ -579,6 +582,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
     props.onOpenBook(
       book,
       catalog && catalog.length > 0 ? catalog : undefined,
+      bookSource() ?? props.source,
     );
   }
 

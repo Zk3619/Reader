@@ -51,6 +51,13 @@ const OVERLAY_KIND_SET = new Set<OverlayPageKind>([
 let seq = 0;
 const nextId = () => `overlay-${++seq}`;
 
+/** 叠层栈内书籍 URL 比对（忽略末尾斜杠差异） */
+export function normalizeOverlayBookUrl(url: string): string {
+  const t = url.trim();
+  if (!t) return t;
+  return t.replace(/\/+$/, '') || t;
+}
+
 export function isOverlayPage(page: PageType): page is OverlayPageKind {
   return OVERLAY_KIND_SET.has(page as OverlayPageKind);
 }
@@ -115,7 +122,13 @@ export function createOverlayStack(initialShell: ShellTabPage) {
   }
 
   function findViewerEntry(kind: ViewerOverlayKind, bookUrl: string) {
-    return entries().find((e) => e.kind === kind && "bookUrl" in e && e.bookUrl === bookUrl);
+    const norm = normalizeOverlayBookUrl(bookUrl);
+    return entries().find(
+      (e) =>
+        e.kind === kind &&
+        "bookUrl" in e &&
+        normalizeOverlayBookUrl(e.bookUrl) === norm,
+    );
   }
 
   function entryIsVisible(entry: OverlayEntry) {
@@ -133,7 +146,12 @@ export function createOverlayStack(initialShell: ShellTabPage) {
     if (stack.length < 2) return false;
     const t = stack[stack.length - 1];
     const b = stack[stack.length - 2];
-    return t.kind === "book-info" && b.kind === "text-viewer" && t.book.bookUrl === b.bookUrl;
+    return (
+      t.kind === "book-info" &&
+      isViewerOverlayKind(b.kind) &&
+      "bookUrl" in b &&
+      t.book.bookUrl === b.bookUrl
+    );
   }
 
   function isShellActiveUnderBookInfo(shell: ShellTabPage) {
