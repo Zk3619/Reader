@@ -3,7 +3,7 @@
  */
 
 import type { BookSource } from '@/types';
-import { get } from '@/lib/http';
+import { getBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { parseShowCmtCall } from '@/lib/js-engine/legado/legado-image-options';
 import {
   buildSourceRequestHeaders,
@@ -120,7 +120,7 @@ export async function openParagraphReviewFromClick(
   }
 
   try {
-    const body = await get(absoluteUrl, { headers });
+    const body = await getBookSourcePage(source, absoluteUrl, { headers });
     console.log(LOG_TAG, 'GET ok', { len: body.length, preview: body.slice(0, 120) });
     const patch: {
       loading: false;

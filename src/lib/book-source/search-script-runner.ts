@@ -3,7 +3,7 @@
  * 对齐 Legado AnalyzeUrl.analyzeJs / evalJS
  */
 
-import { get as httpGet, post } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { resolveUrl, utf8FromBase64, utf8ToBase64, hexToUtf8 } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import {
@@ -98,9 +98,9 @@ async function requestInScript(
     concurrentRate: options.source.concurrentRate,
   };
   if (options.method === 'POST') {
-    return post(url, options.body ?? '', httpOpts);
+    return postBookSourcePage(options.source, url, options.body ?? '', httpOpts);
   }
-  return httpGet(url, httpOpts);
+  return getBookSourcePage(options.source, url, httpOpts);
 }
 
 function scriptResultToString(raw: unknown): string {
@@ -366,6 +366,7 @@ async function evalExprQuickJS(
     const rt: LegadoRunRuntime = {
       coordinator,
       pending: [],
+      deferredCallbackHandles: [],
       setGlobalResult: () => {},
       getGlobalResult: () => undefined,
     };

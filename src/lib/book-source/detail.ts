@@ -6,29 +6,23 @@
  * data: URL 仅负责解码并请求 init 目标（与 Legado AnalyzeUrl 等价），不做书源专属拼装。
  */
 
-import { get, post, HttpError } from '@/lib/http';
+import { HttpError } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
 import type { BookInfo, BookSource } from '@/types';
 import {
   buildBookSourceApiRequestHeaders,
-  buildSourceRequestHeaders,
-  resolveBookSourceServerUrl,
+  listKnownAggregationServers,
 } from '@/lib/book-source/source-http';
-import {
-  buildCatalogApiVariable,
-  withJsonPostHeaders,
-} from '@/lib/book-source/chapters';
-import {
-  getScriptBaseUrl,
-  hostsFromJsLib,
-} from '@/lib/js-engine/legado/source-script-shared';
+import { buildCatalogApiVariable, withJsonPostHeaders } from '@/lib/book-source/chapters';
 import {
   resolveUrl,
   detectContentType,
   decodeDataUrl,
   resolveMediaUrl,
   buildQingtian2TocDataUrl,
+  dedupeLegadoSourceChapterTitle,
 } from '@/lib/book-source/utils';
 import {
   runBookInfoIntroScript,
@@ -84,16 +78,28 @@ function normalizeAuthorText(author: string): string {
   return t;
 }
 
+/** 不把括号内的逗号当分隔（如「DUBU（REDICE STUDIO), Chugong」）；仅按逗号分，避免空格拆开工作室名 */
+function splitDetailAuthorParts(author: string): string[] {
+  const masked = author.replace(
+    /[（(][^）)]*[）)]/g,
+    (m) => m.replace(/[,，]/g, '\u0000'),
+  );
+  return masked
+    .split(/[,，]+/)
+    .map((p) => p.trim().replace(/\u0000/g, ','))
+    .filter(Boolean);
+}
+
 /** 剔除明显不是作者名的抓取结果（导航/标签云/整页文本），不做站点关键词表 */
 function isPlausibleDetailAuthor(author: string): boolean {
   const t = author.trim();
   if (!t) return false;
   if (isRuleExpression(t)) return false;
-  if (t.length > 80) return false;
+  if (t.length > 120) return false;
   if (/[<>\n\r]/.test(t)) return false;
   if (/https?:\/\//i.test(t)) return false;
-  const parts = t.split(/[,，、\s|/]+/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length >= 4) return false;
+  const parts = splitDetailAuthorParts(t);
+  if (parts.length >= 8) return false;
   if (parts.length >= 3 && parts.every((p) => p.length <= 6)) return false;
   return true;
 }
@@ -403,9 +409,15 @@ async function analyzeBookInfoFromBody(
     rawAuthor = (await pickFirstJsonField(context, EXPLORE_AUTHOR_JSON_PATHS)) ?? '';
   }
   const authorSplit = splitAuthorAndInlineTags(rawAuthor);
+  const apiAuthor = authorFromRuleResult(ruleResult)?.trim();
   let author = normalizeAuthorText(authorSplit.author);
   if (author && !isPlausibleDetailAuthor(author)) {
-    author = '';
+    author =
+      apiAuthor && context.contentType === 'json'
+        ? normalizeAuthorText(apiAuthor)
+        : '';
+  } else if (!author && apiAuthor) {
+    author = normalizeAuthorText(apiAuthor);
   }
 
   // 字段顺序对齐 Legado BookInfo.analyzeBookInfo（wordCount 在 intro 之前，供 @get:{num}）
@@ -425,12 +437,15 @@ async function analyzeBookInfoFromBody(
     (ruleResult?.word_number != null ? String(ruleResult.word_number) : undefined);
 
   const latestFromRule = await safeAnalyze(rule.lastChapter);
-  const latestChapterTitle =
+  const latestChapterTitleRaw =
     latestFromRule.trim() ||
     bookSnapshotString(context.book, 'latestChapterTitle') ||
     (typeof ruleResult?.last_chapter_title === 'string'
       ? ruleResult.last_chapter_title
       : undefined);
+  const latestChapterTitle = latestChapterTitleRaw
+    ? dedupeLegadoSourceChapterTitle(latestChapterTitleRaw)
+    : undefined;
 
   const updateFromRule = await safeAnalyze(rule.updateTime);
   const latestChapterUpdateTime =
@@ -470,7 +485,7 @@ async function analyzeBookInfoFromBody(
   let tocUrl = bookUrl;
   if (rule.tocUrl?.trim()) {
     if (ruleResult) {
-      const qingtian2 = buildQingtian2TocDataUrl(ruleResult);
+      const qingtian2 = buildQingtian2TocDataUrl(ruleResult, bookUrl);
       if (qingtian2) {
         tocUrl = qingtian2;
       } else if (isJsRule(rule.tocUrl)) {
@@ -551,21 +566,6 @@ async function analyzeBookInfoFromBody(
   };
 }
 
-function listDetailApiServerCandidates(source: BookSource): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const add = (url: string | null | undefined) => {
-    const trimmed = (url ?? '').trim().replace(/\/+$/, '');
-    if (!trimmed || !/^https?:\/\//i.test(trimmed) || seen.has(trimmed)) return;
-    seen.add(trimmed);
-    out.push(trimmed);
-  };
-  add(resolveBookSourceServerUrl(source));
-  add(getScriptBaseUrl(source));
-  const jsLib = (source as Record<string, unknown>).jsLib;
-  for (const h of hostsFromJsLib(jsLib)) add(h);
-  return out;
-}
 
 /** 对齐 ruleBookInfo.init：/detail?...&variable= + POST { html } */
 function buildDetailApiUrl(
@@ -609,7 +609,7 @@ async function getBookInfoFromDataUrl(
     return null;
   }
 
-  const servers = listDetailApiServerCandidates(source);
+  const servers = listKnownAggregationServers(source);
   if (servers.length === 0) {
     console.warn('[detail] 无法从书源解析详情请求地址（jsLib server / 线路 / hosts）');
     return null;
@@ -635,7 +635,10 @@ async function getBookInfoFromDataUrl(
       detailBody,
     );
     try {
-      responseText = await post(detailUrl, detailBody, { headers, ...requestCommon });
+      responseText = await postBookSourcePage(source, detailUrl, detailBody, {
+        headers,
+        ...requestCommon,
+      });
       lastError = undefined;
       break;
     } catch (e) {
@@ -710,12 +713,9 @@ export async function getBookInfo(
       return await getBookInfoFromDataUrl(source, bookUrl, parseOptions);
     }
 
-    const headers = buildSourceRequestHeaders(source, bookUrl);
-    const html = await get(bookUrl, {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
-      timeout: 30000,
+    const html = await getBookSourcePage(source, bookUrl, {
+      timeout: 30_000,
+      cfTitle: `书籍详情 — ${source.sourceName?.trim() || '书源'}`,
     });
     await assertLoginCheckPassed(source, html, bookUrl);
     if (consumeHtmlRateLimitNotice(noticeBus, html)) {

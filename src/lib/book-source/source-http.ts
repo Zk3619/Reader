@@ -19,8 +19,10 @@ import {
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import {
   firstHostFromJsLib,
+  getScriptBaseUrl,
   getSourceArgsKey,
   getLegadoSourceKey,
+  hostsFromJsLib,
   normalizeServerFieldsInSourceArgs,
   readServerUrlFromSourceArgs,
   STORAGE_PREFIX_CF_ORIGIN,
@@ -41,7 +43,7 @@ const ANDROID_ID_KEY = LEGADO_DEVICE_ID_STORAGE_KEY;
 export const LEGADO_GYKS_DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-function isGyksAggregationHost(requestUrl: string): boolean {
+export function isGyksAggregationHost(requestUrl: string): boolean {
   try {
     const host = new URL(
       requestUrl.includes('://') ? requestUrl : `https://${requestUrl}`,
@@ -50,6 +52,89 @@ function isGyksAggregationHost(requestUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 502/503/504 时允许切换聚合书源下一条线路 */
+export function isRetryableGatewayHttpError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('status' in error)) return false;
+  const status = (error as { status: unknown }).status;
+  return status === 502 || status === 503 || status === 504;
+}
+
+function normalizeAggregationServerUrl(raw: string | null | undefined): string {
+  return (raw ?? '').trim().replace(/\/+$/, '');
+}
+
+function aggregationServerOrigin(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** 书源配置的聚合线路（线路变量 + jsLib hosts），不含请求 URL 本身 */
+export function listKnownAggregationServers(source: BookSource): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (raw: string | null | undefined) => {
+    const trimmed = normalizeAggregationServerUrl(raw);
+    if (!trimmed || !/^https?:\/\//i.test(trimmed) || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  add(resolveBookSourceServerUrl(source));
+  add(getScriptBaseUrl(source));
+  const jsLib = (source as Record<string, unknown>).jsLib;
+  for (const host of hostsFromJsLib(jsLib)) add(host);
+  return out;
+}
+
+/** 对齐 detail/catalog：当前请求线路优先，其余按书源配置顺序 */
+export function listAggregationServerCandidates(
+  source: BookSource,
+  requestUrl?: string,
+): string[] {
+  const known = listKnownAggregationServers(source);
+  if (!requestUrl) return known;
+
+  const requestOrigin = aggregationServerOrigin(requestUrl);
+  if (!requestOrigin) return known;
+
+  const idx = known.findIndex((server) => aggregationServerOrigin(server) === requestOrigin);
+  if (idx <= 0) return known;
+  const ordered = [...known];
+  const [current] = ordered.splice(idx, 1);
+  ordered.unshift(current);
+  return ordered;
+}
+
+export function replaceHttpUrlOrigin(url: string, serverOrigin: string): string {
+  try {
+    const target = new URL(url);
+    const base = normalizeAggregationServerUrl(serverOrigin);
+    const next = new URL(base.includes('://') ? base : `https://${base}`);
+    target.protocol = next.protocol;
+    target.hostname = next.hostname;
+    target.port = next.port;
+    return target.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** 聚合书源多线路：请求 URL 的 origin 须在书源已知线路中 */
+export function shouldUseAggregationServerFailover(
+  source: BookSource,
+  requestUrl: string,
+): boolean {
+  const known = listKnownAggregationServers(source);
+  if (known.length <= 1) return false;
+  if (isGyksAggregationHost(requestUrl)) return true;
+  const origin = aggregationServerOrigin(requestUrl);
+  if (!origin) return false;
+  return known.some((server) => aggregationServerOrigin(server) === origin);
 }
 
 export function applyGyksAggregationUserAgent(

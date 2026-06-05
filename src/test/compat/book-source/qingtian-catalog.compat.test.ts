@@ -16,9 +16,13 @@ import {
 import {
   buildCatalogBookIdCandidates,
   buildQingtian2TocDataUrl,
+  composeLegadoSourceChapterTitle,
+  dedupeLegadoSourceChapterTitle,
   normalizeDataUrlPayload,
   decodeDataUrl,
+  stripLegadoChapterSourcePrefixForToc,
 } from '@/lib/book-source/utils';
+import { formatTocChapterDisplayTitle } from '@/lib/catalog/chapter-list-layout';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { isLikelyUnresolvedRuleResult } from '@/lib/book-source/utils';
 
@@ -94,6 +98,65 @@ describe('Legado catalog API 解析', () => {
     expect(rows?.[0]?.title).toBe('第二章');
   });
 
+  it('extractCatalogChapterRows 在 last_chapter 与 chapters 并存时取较长列表', () => {
+    const rows = extractCatalogChapterRows({
+      code: 0,
+      data: {
+        last_chapter: { item_id: '9', title: '最新章' },
+        chapters: [
+          { item_id: '1', title: '第一章' },
+          { item_id: '2', title: '第二章' },
+        ],
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0]?.title).toBe('第一章');
+  });
+
+  it('mergeDataUrlPayloadFromBookUrls 从 bookUrl 补全 toc 缺 tab', async () => {
+    const { mergeDataUrlPayloadFromBookUrls, decodeDataUrl, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const bookUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({
+        book_id: 'aHR0cHM6Ly9t',
+        sources: 'G社漫画',
+        tab: '漫画',
+      }),
+    )}`;
+    const tocUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({
+        book_id: 'aHR0cHM6Ly9t',
+        sources: 'G社漫画',
+        tab: '',
+        url: '',
+      }),
+    )}`;
+    const tocPayload = decodeDataUrl(tocUrl)!;
+    const merged = mergeDataUrlPayloadFromBookUrls(tocPayload, [bookUrl]);
+    expect(merged.tab).toBe('漫画');
+  });
+
+  it('shelfCachedChapterListLooksStale 单章且缺 item_id 视为过期', async () => {
+    const { shelfCachedChapterListLooksStale } = await import('@/lib/book-source/chapters');
+    const stale = shelfCachedChapterListLooksStale(
+      [
+        {
+          url: 'data:;base64,eyJib29rX2lkIjoiTmciLCJzb3VyY2VzIjoiIiwidXJsIjoiIn0=,{"type":"qingtian3"}',
+          title: 'G社漫画:序章',
+          isVolume: false,
+          baseUrl: '',
+          bookUrl: 'bk',
+          index: 0,
+          isVip: false,
+          isPay: false,
+        },
+      ],
+      { totalChapterNum: 209 },
+    );
+    expect(stale).toBe(true);
+  });
+
   it('parseAjaxArgs 解析 Legado catalog POST 格式', () => {
     const parsed = parseAjaxArgs(
       'https://v1.gyks.cf/catalog?book_id=abc&source=番茄&tab=小说&variable=%7B%7D,{"method":"POST","body":{"html":""}}',
@@ -125,6 +188,15 @@ describe('Legado catalog API 解析', () => {
     expect(payload.source).toBe('番茄');
     expect(payload.tab).toBe('小说');
     expect(payload.url).toBe('https://example.com/toc');
+  });
+
+  it('章节标题工具：去重来源前缀、目录展示去前缀、拼接不重复', () => {
+    expect(dedupeLegadoSourceChapterTitle('番茄:番茄:第一章 开端')).toBe('番茄:第一章 开端');
+    expect(composeLegadoSourceChapterTitle('番茄', '番茄:第一章')).toBe('番茄:第一章');
+    expect(composeLegadoSourceChapterTitle('番茄', '第一章')).toBe('番茄:第一章');
+    expect(stripLegadoChapterSourcePrefixForToc('番茄:第一章 开端')).toBe('第一章 开端');
+    expect(stripLegadoChapterSourcePrefixForToc('第一章 开端')).toBe('第一章 开端');
+    expect(formatTocChapterDisplayTitle('番茄:第2章 相遇', 1)).toBe('第2章 相遇');
   });
 
   it('buildCatalogApiVariable 对齐 Legado custom 变量', () => {
@@ -421,6 +493,78 @@ describe('Legado catalog API 解析', () => {
     const { coalesceSourceField } = await import('@/lib/book-source/utils');
     expect(coalesceSourceField('', '番茄', '七猫')).toBe('番茄');
     expect(coalesceSourceField(undefined, 'svip_书旗')).toBe('svip_书旗');
+  });
+
+  it('漫画多作者 API 字符串括号内逗号不应拆成第四段作者', () => {
+    const author = 'DUBU（REDICE STUDIO) ,  Chugong ,  h-goon';
+    const masked = author.replace(
+      /[（(][^）)]*[）)]/g,
+      (m) => m.replace(/[,，]/g, '\u0000'),
+    );
+    const parts = masked
+      .split(/[,，]+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    expect(parts.length).toBe(3);
+    expect(parts.length).toBeLessThan(4);
+  });
+
+  it('mergeDataUrlPayloadFromBookUrls 替换占位 book_id 并补 sources', async () => {
+    const { mergeDataUrlPayloadFromBookUrls, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const bookUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({
+        book_id: 'aHR0cHM6Ly9tYW5odWEx',
+        sources: 'G社漫画',
+        tab: '漫画',
+      }),
+    )}`;
+    const merged = mergeDataUrlPayloadFromBookUrls(
+      { book_id: 'Ng', sources: '', tab: '', item_id: '' },
+      [bookUrl],
+    );
+    expect(merged.book_id).toBe('aHR0cHM6Ly9tYW5odWEx');
+    expect(merged.sources).toBe('G社漫画');
+    expect(merged.tab).toBe('漫画');
+  });
+
+  it('mergeChapterDataUrlFromRow 从 catalog 行补 item_id', async () => {
+    const { mergeChapterDataUrlFromRow, decodeDataUrl, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const stubUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({ book_id: 'Ng', sources: '', url: '' }),
+    )},{"type":"qingtian3"}`;
+    const patched = mergeChapterDataUrlFromRow(stubUrl, {
+      item_id: 'Nl8xNzY2MTc2',
+      source: 'G社漫画',
+      tab: '漫画',
+    });
+    const payload = decodeDataUrl(patched);
+    expect(payload?.item_id).toBe('Nl8xNzY2MTc2');
+    expect(payload?.sources).toBe('G社漫画');
+    expect(payload?.tab).toBe('漫画');
+  });
+
+  it('buildQingtian2TocDataUrl 详情短 book_id 时回退 bookUrl', async () => {
+    const { buildQingtian2TocDataUrl, decodeDataUrl, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const bookUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({
+        book_id: 'aHR0cHM6Ly9tYW5odWEx',
+        sources: 'G社漫画',
+        tab: '漫画',
+      }),
+    )}`;
+    const toc = buildQingtian2TocDataUrl(
+      { book_id: 'Ng', source: 'G社漫画', tab: '漫画' },
+      bookUrl,
+    );
+    const payload = decodeDataUrl(toc!);
+    expect(payload?.book_id).toBe('aHR0cHM6Ly9tYW5odWEx');
+    expect(payload?.sources).toBe('G社漫画');
   });
 
   it('enrichChapterContentPayload 仅补 book_id，不改 catalog source', async () => {

@@ -18,8 +18,8 @@ import {
 } from '@/lib/book-source/source-http';
 import { splitUrlAndOption, URL_OPTION_SPLIT } from '@/lib/book-source/analyze-url-option';
 import { isAtomicLegadoScriptRule } from '@/lib/rule-engine/legado-source-rule';
-import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
-import { get, HttpError } from '@/lib/http';
+import { HttpError } from '@/lib/http';
+import { getBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import type { ScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import {
@@ -177,11 +177,7 @@ export async function fetchChapterPageHtml(
     return body;
   }
 
-  const headers = buildSourceRequestHeaders(source, trimmed);
-  const html = await get(trimmed, {
-    headers,
-    enableCookieJar: source.enabledCookieJar,
-    concurrentRate: source.concurrentRate,
+  const html = await getBookSourcePage(source, trimmed, {
     timeout: 60_000,
   });
   await assertLoginCheckPassed(source, html, trimmed);

@@ -2,7 +2,7 @@
  * 书籍详情 ruleBookInfo 中的 Legado <js> 规则（如晴天聚合简介块）
  */
 
-import { get as httpGet, post } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import {
   buildSourceRequestHeaders,
   getOrCreateAndroidId,
@@ -150,9 +150,9 @@ async function requestInScript(
   };
 
   if (method === 'POST') {
-    return post(resolvedUrl, call.body ?? '', common);
+    return postBookSourcePage(source, resolvedUrl, call.body ?? '', common);
   }
-  return httpGet(resolvedUrl, common);
+  return getBookSourcePage(source, resolvedUrl, common);
 }
 
 async function runBookInfoLegadoFieldScript(

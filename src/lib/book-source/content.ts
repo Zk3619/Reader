@@ -3,12 +3,12 @@
  * 对应 legado WebBook.getContentAwait → AnalyzeUrl → BookContent.analyzeContent
  */
 
-import { get, post } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
 import type { BookSource, BookChapter, Book } from '@/types';
 import {
   buildLegadoContentApiRequestHeaders,
-  buildSourceRequestHeaders,
+  listKnownAggregationServers,
   readBookSourceArgsField,
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
@@ -27,7 +27,8 @@ import {
   extractComicIdFromAggregationBookId,
   summarizeAggregationItemIdForDebug,
   buildTypedChapterDataUrl,
-  extractHostListFromJsLib,
+  chapterBookIdLooksLikePlaceholder,
+  mergeDataUrlPayloadFromBookUrls,
 } from '@/lib/book-source/utils';
 
 /** 章节 URL 为 Legado data: 载荷（含或不含 ,{"type":...}） */
@@ -45,6 +46,107 @@ function decodeChapterDataPayload(
   } catch {
     return null;
   }
+}
+
+/** 章节标题「来源:章节名」补 sources（ruleToc 脚本常留空） */
+function mergeSourcesFromChapterTitle(
+  payload: Record<string, string>,
+  chapterTitle: string,
+): Record<string, string> {
+  if (payload.sources?.trim()) return payload;
+  const m = chapterTitle.trim().match(/^([^:：]+)[:：]/);
+  const label = m?.[1]?.trim();
+  if (!label) return payload;
+  return { ...payload, sources: label, source: label };
+}
+
+function chapterDataPayloadNeedsRebuild(
+  before: Record<string, string>,
+  after: Record<string, string>,
+): boolean {
+  return (
+    (before.book_id?.trim() ?? '') !== (after.book_id?.trim() ?? '') ||
+    coalesceSourceField(before.sources, before.source) !==
+      coalesceSourceField(after.sources, after.source) ||
+    (before.tab?.trim() || '小说') !== (after.tab?.trim() || '小说') ||
+    (before.item_id?.trim() ?? '') !== (after.item_id?.trim() ?? '')
+  );
+}
+
+/** 书架已缓存目录中同 index 章节的 item_id（ruleToc 修复后 URL 可能优于 durChapter 快照） */
+async function tryItemIdFromPersistedChapterList(
+  book: Book,
+  chapter: BookChapter,
+): Promise<string | null> {
+  const index = chapter.index ?? -1;
+  if (index < 0) return null;
+  try {
+    const { getChapterList } = await import('@/lib/database/chapters');
+    const list = await getChapterList(book.bookUrl);
+    const row = list[index];
+    if (!row?.url?.startsWith('data:')) return null;
+    const decoded = decodeDataUrl(row.url);
+    const id = decoded?.item_id?.trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 合并书籍/标题上下文并必要时重建 typed data: 章节 URL */
+async function normalizeDataChapterUrlForContent(
+  source: BookSource,
+  chapter: BookChapter,
+  contentUrl: string,
+  book: Book | undefined,
+): Promise<{ url: string; chapter: BookChapter }> {
+  const decoded = decodeDataUrl(contentUrl);
+  if (!decoded) return { url: contentUrl, chapter };
+
+  let merged = normalizeDataUrlPayload(decoded);
+  merged = mergeSourcesFromChapterTitle(merged, chapter.title);
+  merged = mergeDataUrlPayloadFromBookUrls(merged, [book?.tocUrl, book?.bookUrl]);
+  merged = await enrichChapterContentPayload(
+    source,
+    merged,
+    [book?.tocUrl, book?.bookUrl],
+    book?.variable,
+  );
+
+  if (!chapterDataPayloadNeedsRebuild(decoded, merged)) {
+    return { url: contentUrl, chapter };
+  }
+
+  if (!merged.item_id?.trim()) {
+    let itemId = await resolveFreshCatalogItemId(
+      source,
+      merged,
+      { title: chapter.title, index: chapter.index ?? 0 },
+      book?.variable,
+    );
+    if (!itemId && book?.bookUrl) {
+      itemId = await tryItemIdFromPersistedChapterList(book, chapter);
+    }
+    if (itemId) {
+      merged = normalizeDataUrlPayload({ ...merged, item_id: itemId });
+    }
+  }
+
+  const nextUrl = buildTypedChapterDataUrl(merged);
+  if (import.meta.env.DEV) {
+    console.log('[content] 已合并章节 data URL 载荷', {
+      chapter: chapter.title,
+      book_id_len: merged.book_id?.length ?? 0,
+      sources: merged.sources || merged.source,
+      tab: merged.tab,
+      item_id_len: merged.item_id?.length ?? 0,
+      book_id_replaced: chapterBookIdLooksLikePlaceholder(
+        decoded.book_id ?? '',
+        merged.book_id ?? '',
+      ),
+    });
+  }
+  return { url: nextUrl, chapter: { ...chapter, url: nextUrl } };
 }
 
 /** 目录缓存错误时章节 URL 可能为「来源:标题」而非 data: 载荷 */
@@ -103,8 +205,17 @@ async function tryRepairChapterDataUrl(
       { title: chapter.title, index: chapter.index ?? 0 },
       book?.variable,
     );
-    if (!freshId) return null;
-    merged = normalizeDataUrlPayload({ ...merged, item_id: freshId });
+    if (freshId) {
+      merged = normalizeDataUrlPayload({ ...merged, item_id: freshId });
+    } else {
+      const stillBadBookId = chapterBookIdLooksLikePlaceholder(
+        merged.book_id ?? '',
+        bookPayload.book_id ?? '',
+      );
+      if (!merged.sources?.trim() || stillBadBookId) {
+        return null;
+      }
+    }
   }
 
   const contentUrl = buildTypedChapterDataUrl(merged);
@@ -185,22 +296,6 @@ function isGyksContentServerPanic(message: string): boolean {
   return /nil pointer dereference/i.test(message);
 }
 
-function gyksServerCandidates(
-  source: BookSource,
-  primary: string,
-): string[] {
-  const out: string[] = [];
-  const push = (u: string) => {
-    const t = u.trim().replace(/\/+$/, '');
-    if (t && !out.includes(t)) out.push(t);
-  };
-  push(primary);
-  for (const h of extractHostListFromJsLib(source as unknown as Record<string, unknown>)) {
-    push(h);
-  }
-  return out;
-}
-
 export { isApiErrorText } from '@/lib/book-source/extract-api-content';
 
 /** 调试：对比 Legado 与 Reader 的 item_id 是否一致 */
@@ -277,11 +372,9 @@ async function resolveContentPageHtml(
   if (proxy !== '本地') return '';
 
   try {
-    const headers = buildSourceRequestHeaders(source, pageUrl);
-    return await get(pageUrl, {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
+    return await getBookSourcePage(source, pageUrl, {
       timeout: 30_000,
+      cfTitle: `章节正文 — ${source.sourceName?.trim() || '书源'}`,
     });
   } catch {
     return '';
@@ -307,7 +400,7 @@ async function requestContentApiDirect(
   );
   const requestPayload = html ? { ...enrichedPayload, html } : enrichedPayload;
 
-  const serverCandidates = gyksServerCandidates(source, primaryServer);
+  const serverCandidates = listKnownAggregationServers(source);
   const postSource = coalesceSourceField(
     requestPayload.sources,
     requestPayload.source,
@@ -358,9 +451,8 @@ async function requestContentApiDirect(
               attempt: i + 1,
             });
           }
-          const responseText = await post(url, body, {
+          const responseText = await postBookSourcePage(source, url, body, {
             headers,
-            enableCookieJar: source.enabledCookieJar,
             timeout: 60_000,
             legadoMinimalHeaders: true,
           });
@@ -464,10 +556,7 @@ async function fetchChapterPageBody(
         };
         const body = buildContentApiPostBody(payload);
         const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-        const headers = buildSourceRequestHeaders(source, baseUrl);
-        const html = await post(baseUrl, body, {
-          headers,
-          enableCookieJar: source.enabledCookieJar,
+        const html = await postBookSourcePage(source, baseUrl, body, {
           timeout: 60_000,
         });
         await assertLoginCheckPassed(source, html, baseUrl);
@@ -733,39 +822,20 @@ export async function getContent(
     }
 
     if (isDataChapterUrl(contentUrl)) {
-      const decoded = decodeDataUrl(contentUrl);
-      if (decoded?.book_id?.trim()) {
-        const payload = normalizeDataUrlPayload(decoded);
-        const merged = await enrichChapterContentPayload(
-          source,
-          payload,
-          [book?.tocUrl, book?.bookUrl],
-          book?.variable,
-        );
-        const prevId = merged.item_id?.trim() ?? '';
-        // 对齐 Legado：章节 URL 已带 item_id 时直接使用，不刷新 catalog token
-        if (!prevId) {
-          const freshId = await resolveFreshCatalogItemId(
-            source,
-            merged,
-            { title: chapter.title, index: chapter.index ?? 0 },
-            book?.variable,
-          );
-          if (freshId) {
-            const updated = normalizeDataUrlPayload({ ...merged, item_id: freshId });
-            contentUrl = buildTypedChapterDataUrl(updated);
-            contentChapter = { ...chapter, url: contentUrl };
-            console.log('[content] 章节无 item_id，已从 catalog 补全', {
-              new_len: freshId.length,
-              new_fp: itemIdFingerprint(freshId),
-            });
-          }
-        } else if (import.meta.env.DEV) {
-          console.log('[content] 使用章节 URL 内嵌 item_id（未刷新 catalog）', {
-            item_id_len: prevId.length,
-            item_id_fp: itemIdFingerprint(prevId),
-          });
-        }
+      const normalized = await normalizeDataChapterUrlForContent(
+        source,
+        contentChapter,
+        contentUrl,
+        book,
+      );
+      contentUrl = normalized.url;
+      contentChapter = normalized.chapter;
+      const prevId = decodeDataUrl(contentUrl)?.item_id?.trim() ?? '';
+      if (prevId && import.meta.env.DEV) {
+        console.log('[content] 使用章节 URL 内嵌 item_id（未刷新 catalog）', {
+          item_id_len: prevId.length,
+          item_id_fp: itemIdFingerprint(prevId),
+        });
       }
     }
 
@@ -899,14 +969,11 @@ export async function getContent(
         try {
           const retryHtml = isContentApi
             ? body
-            : await get(resolveUrl(chapterBase, chapter.url), {
-              headers: buildSourceRequestHeaders(
-                source,
-                resolveUrl(chapterBase, chapter.url),
-              ),
-              enableCookieJar: source.enabledCookieJar,
-              timeout: 60_000,
-            });
+            : await getBookSourcePage(
+              source,
+              resolveUrl(chapterBase, chapter.url),
+              { timeout: 60_000 },
+            );
           const retryContext: RuleContext = {
             ...ruleContext,
             content: retryHtml,

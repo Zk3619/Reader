@@ -431,6 +431,47 @@ export function normalizeCatalogScalarField(value: unknown): string {
   return String(value);
 }
 
+/** Legado 聚合源章节标题中的「来源:章节名」分隔（支持半角/全角冒号） */
+const LEGADO_CHAPTER_SOURCE_PREFIX_RE = /^([^:：]+)[:：]\s*(.+)$/;
+
+/**
+ * 去掉章节标题最外层来源前缀（目录展示用，对齐 Legado 目录列表仅显示章节名）。
+ */
+export function stripLegadoChapterSourcePrefixForToc(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) return trimmed;
+  const m = trimmed.match(LEGADO_CHAPTER_SOURCE_PREFIX_RE);
+  return m ? m[2].trim() : trimmed;
+}
+
+/**
+ * 合并「来源 + 章节名」，若标题已含相同来源前缀则不再重复拼接。
+ */
+export function composeLegadoSourceChapterTitle(source: string, title: string): string {
+  const sourceLabel = source.trim();
+  const rawTitle = title.trim();
+  if (!rawTitle) return sourceLabel;
+  if (!sourceLabel) return dedupeLegadoSourceChapterTitle(rawTitle);
+  const escaped = sourceLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const prefixRe = new RegExp(`^${escaped}[:：]\\s*`, 'i');
+  const composed = prefixRe.test(rawTitle) ? rawTitle : `${sourceLabel}:${rawTitle}`;
+  return dedupeLegadoSourceChapterTitle(composed);
+}
+
+/**
+ * 去除重复的「来源:来源:章节名」（详情最新章、目录预览行等保留单次来源前缀）。
+ */
+export function dedupeLegadoSourceChapterTitle(title: string): string {
+  let current = title.trim();
+  if (!current) return current;
+  for (;;) {
+    const m = current.match(/^([^:：]+)[:：]\s*\1[:：]\s*(.+)$/i);
+    if (!m) break;
+    current = `${m[1]}:${m[2].trim()}`;
+  }
+  return current;
+}
+
 /** 对齐 Legado：JSON 行/载荷里 source 与 sources 互为别名，取首个非空 */
 export function coalesceSourceField(
   ...values: Array<string | undefined | null>
@@ -773,19 +814,97 @@ export function buildContentApiItemIdCandidates(
 }
 
 
+/** 聚合书源：章节 URL 内 book_id 常为占位短串，书籍 data URL 为编码后的真实 id */
+export function chapterBookIdLooksLikePlaceholder(
+  chapterBookId: string,
+  bookBookId: string,
+): boolean {
+  const chapterId = chapterBookId.trim();
+  const bookId = bookBookId.trim();
+  if (!chapterId) return true;
+  if (!bookId || chapterId === bookId) return false;
+  const encoded =
+    bookId.length >= 20 && /^[A-Za-z0-9+/=_-]+$/.test(bookId);
+  const chapterEncoded =
+    chapterId.length >= 20 && /^[A-Za-z0-9+/=_-]+$/.test(chapterId);
+  return encoded && !chapterEncoded;
+}
+
+/**
+ * 从书籍 data URL 补全章节载荷（book_id / sources / tab），不覆盖已有 sources/tab
+ */
+export function mergeDataUrlPayloadFromBookUrls(
+  payload: Record<string, string>,
+  bookUrls?: Array<string | undefined>,
+): Record<string, string> {
+  let merged = { ...payload };
+  for (const url of bookUrls ?? []) {
+    if (!url?.startsWith('data:')) continue;
+    const book = decodeDataUrl(url);
+    if (!book) continue;
+
+    const bookId = book.book_id?.trim() ?? '';
+    const bookSources = coalesceSourceField(book.sources, book.source);
+    const bookTab = book.tab?.trim() ?? '';
+
+    if (bookId) {
+      const chapterId = merged.book_id?.trim() ?? '';
+      if (!chapterId || chapterBookIdLooksLikePlaceholder(chapterId, bookId)) {
+        merged = { ...merged, book_id: bookId };
+      }
+    }
+    if (!merged.sources?.trim() && bookSources) {
+      merged = { ...merged, sources: bookSources, source: bookSources };
+    }
+    if (!merged.tab?.trim() && bookTab) {
+      merged = { ...merged, tab: bookTab };
+    }
+  }
+  return merged;
+}
+
 /** 章节 data URL 载荷缺 book_id 时，从书籍 data URL 补全（对齐 Legado book_id 上下文） */
 export function mergeBookIdFromBookUrls(
   payload: Record<string, string>,
   bookUrls?: Array<string | undefined>,
 ): Record<string, string> {
-  if (payload.book_id?.trim()) return payload;
-  for (const url of bookUrls ?? []) {
-    if (!url?.startsWith('data:')) continue;
-    const decoded = decodeDataUrl(url);
-    const bookId = decoded?.book_id?.trim();
-    if (bookId) return { ...payload, book_id: bookId };
+  return mergeDataUrlPayloadFromBookUrls(payload, bookUrls);
+}
+
+/** ruleToc.chapterUrl 脚本可能省略 item_id/sources，从 catalog 行补全 typed data URL */
+export function mergeChapterDataUrlFromRow(
+  chapterUrl: string,
+  row: Record<string, unknown>,
+): string {
+  if (!chapterUrl.trim().startsWith('data:')) return chapterUrl;
+  const decoded = decodeDataUrl(chapterUrl);
+  if (!decoded) return chapterUrl;
+
+  const rowItemId = normalizeCatalogScalarField(row.item_id).trim();
+  const rowSources = coalesceSourceField(
+    normalizeCatalogScalarField(row.source),
+    normalizeCatalogScalarField(row.sources),
+  );
+  const rowTab = normalizeCatalogScalarField(row.tab).trim();
+
+  const itemId = decoded.item_id?.trim() || rowItemId;
+  const sources = coalesceSourceField(decoded.sources, decoded.source, rowSources);
+  const tab = decoded.tab?.trim() || rowTab || '小说';
+
+  if (
+    itemId === (decoded.item_id?.trim() ?? '') &&
+    sources === coalesceSourceField(decoded.sources, decoded.source) &&
+    tab === (decoded.tab?.trim() || '小说')
+  ) {
+    return chapterUrl;
   }
-  return payload;
+
+  return buildTypedChapterDataUrl({
+    ...decoded,
+    item_id: itemId,
+    sources,
+    tab,
+  });
 }
 
 /** 构建 Legado typed data: 章节 URL（ruleToc.chapterUrl 同结构） */
@@ -816,14 +935,32 @@ export function buildCatalogBookIdCandidates(bookId: string): string[] {
  */
 export function buildQingtian2TocDataUrl(
   detail: Record<string, unknown>,
+  bookUrl?: string,
 ): string | null {
-  const book_id = String(detail.book_id ?? '').trim();
-  const sources = coalesceSourceField(
+  let book_id = String(detail.book_id ?? '').trim();
+  let sources = coalesceSourceField(
     typeof detail.source === 'string' ? detail.source : undefined,
     typeof detail.sources === 'string' ? detail.sources : undefined,
   );
-  const tab = String(detail.tab || '小说').trim();
+  let tab = String(detail.tab || '小说').trim();
   const url = String(detail.toc_url ?? detail.url ?? '').trim();
+
+  if (bookUrl?.startsWith('data:')) {
+    const bookPayload = decodeDataUrl(bookUrl);
+    if (bookPayload) {
+      const urlBookId = bookPayload.book_id?.trim() ?? '';
+      if (urlBookId && chapterBookIdLooksLikePlaceholder(book_id, urlBookId)) {
+        book_id = urlBookId;
+      }
+      if (!sources) {
+        sources = coalesceSourceField(bookPayload.sources, bookPayload.source);
+      }
+      if (!String(detail.tab ?? '').trim() && bookPayload.tab?.trim()) {
+        tab = bookPayload.tab.trim();
+      }
+    }
+  }
+
   if (!book_id || !sources) return null;
   const b64 = utf8ToBase64(
     JSON.stringify({ book_id, sources, tab, url }),

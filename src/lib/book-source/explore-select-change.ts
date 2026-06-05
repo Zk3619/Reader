@@ -48,10 +48,8 @@ export async function applyExploreSelectChange(
     } catch (e) {
       console.error('发现筛选 action 失败:', e);
     }
-    if (!section.paramKey) {
-      clearExploreSectionsCache(sourceKey);
-      await options?.onRefreshExplore?.();
-    }
+    clearExploreSectionsCache(sourceKey);
+    await options?.onRefreshExplore?.();
     return;
   }
 

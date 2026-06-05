@@ -8,7 +8,8 @@
  *    构建 ${server}/catalog?book_id=... 请求后解析（模拟 legado ruleToc.chapterList init）
  */
 
-import { get, post } from '@/lib/http';
+import { HttpError } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { legadoListRuleNeedsAllSuffix } from '@/lib/rule-engine/legado-source-rule';
 import { analyzeListElements, analyzeString, analyzeStringList, type RuleContext } from '@/lib/rule-engine';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
@@ -16,10 +17,12 @@ import type { BookSource, TocRule } from '@/types';
 import type { BookChapter, NewBookChapter } from '@/types';
 import {
   buildBookSourceApiRequestHeaders,
-  buildSourceRequestHeaders,
+  listKnownAggregationServers,
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
-import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  getSourceArgsKey,
+} from '@/lib/js-engine/legado/source-script-shared';
 import { readAggregationApiFailure } from '@/lib/book-source/extract-api-content';
 import {
   resolveUrl,
@@ -31,8 +34,10 @@ import {
   buildCatalogBookIdCandidates,
   coalesceSourceField,
   buildTypedChapterDataUrl,
-  mergeBookIdFromBookUrls,
+  mergeChapterDataUrlFromRow,
+  mergeDataUrlPayloadFromBookUrls,
   normalizeCatalogScalarField,
+  composeLegadoSourceChapterTitle,
 } from '@/lib/book-source/utils';
 import { settingsStore } from '@/stores/settings';
 import { evalJs, type JsContext } from '@/lib/js-engine';
@@ -62,6 +67,8 @@ export interface GetChapterListOptions {
   onPartial?: (partial: PartialChapterList) => void | Promise<void>;
   /** 书架书籍 variable（对齐 Legado book.getVariable('custom')） */
   bookVariable?: string;
+  /** data: 目录失败时用于补全 book_id/sources/tab 的书籍 URL */
+  bookUrl?: string;
   /** 脚本 toast 回调（内部透传） */
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
 }
@@ -354,7 +361,62 @@ export async function enrichChapterContentPayload(
   bookUrls?: Array<string | undefined>,
   _bookVariable?: string,
 ): Promise<Record<string, string>> {
-  return mergeBookIdFromBookUrls(payload, bookUrls);
+  return mergeDataUrlPayloadFromBookUrls(payload, bookUrls);
+}
+
+function looksLikeCatalogChapterRow(row: unknown): boolean {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
+  const r = row as Record<string, unknown>;
+  return (
+    r.item_id != null ||
+    r.title != null ||
+    r.chapter_id != null ||
+    r.chapter_title != null
+  );
+}
+
+function catalogRowsFromArray(rows: unknown[]): Record<string, unknown>[] | null {
+  const filtered = rows.filter(
+    (row) => row && typeof row === 'object' && !Array.isArray(row),
+  ) as Record<string, unknown>[];
+  if (filtered.length === 0) return null;
+  if (!filtered.some(looksLikeCatalogChapterRow)) return null;
+  return filtered;
+}
+
+/** 在 catalog data 对象中选取最长的章节行数组（避免误用 last_chapter 单条对象） */
+function findLargestCatalogChapterArray(
+  nested: Record<string, unknown>,
+): Record<string, unknown>[] | null {
+  const preferredKeys = [
+    'data',
+    'list',
+    'items',
+    'chapters',
+    'chapter_list',
+    'chapterList',
+    'catalog',
+  ];
+  let best: Record<string, unknown>[] | null = null;
+
+  const consider = (candidate: Record<string, unknown>[] | null) => {
+    if (candidate && (!best || candidate.length > best.length)) {
+      best = candidate;
+    }
+  };
+
+  for (const key of preferredKeys) {
+    const value = nested[key];
+    if (Array.isArray(value)) {
+      consider(catalogRowsFromArray(value));
+    }
+  }
+  for (const value of Object.values(nested)) {
+    if (Array.isArray(value)) {
+      consider(catalogRowsFromArray(value));
+    }
+  }
+  return best;
 }
 
 /** 从 /catalog API 响应（code=0）中提取章节行 */
@@ -368,19 +430,10 @@ export function extractCatalogChapterRows(
 
   const data = root.data;
   if (Array.isArray(data)) {
-    return data.filter((row) => row && typeof row === 'object') as Record<string, unknown>[];
+    return catalogRowsFromArray(data);
   }
-  if (data && typeof data === 'object') {
-    const nested = data as Record<string, unknown>;
-    for (const key of ['data', 'list', 'items', 'chapters']) {
-      const rows = nested[key];
-      if (Array.isArray(rows)) {
-        return rows.filter((row) => row && typeof row === 'object') as Record<
-          string,
-          unknown
-        >[];
-      }
-    }
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return findLargestCatalogChapterArray(data as Record<string, unknown>);
   }
   return null;
 }
@@ -404,6 +457,40 @@ function normalizeCatalogRow(
     tab: normalizeCatalogScalarField(item.tab) || tab,
     toc_url: normalizeCatalogScalarField(item.toc_url ?? item.url),
     url: normalizeCatalogScalarField(item.url ?? item.toc_url),
+  };
+}
+
+function catalogRowToBookChapter(
+  row: Record<string, unknown>,
+  bookId: string,
+  sources: string,
+  tab: string,
+  tocUrl: string,
+  index: number,
+): BookChapter {
+  const title = String(row.title ?? '').trim();
+  const chapterPayload = {
+    book_id: bookId,
+    item_id: String(row.item_id ?? ''),
+    title,
+    sources: String(row.sources ?? sources),
+    tab: String(row.tab ?? tab),
+    url: String(row.toc_url ?? row.url ?? ''),
+    ...(row.content_url
+      ? { content_url: normalizeCatalogScalarField(row.content_url) }
+      : {}),
+  };
+  const url = mergeChapterDataUrlFromRow(buildTypedChapterDataUrl(chapterPayload), row);
+  return {
+    url,
+    title: title || `章节 ${index + 1}`,
+    isVolume: false,
+    baseUrl: tocUrl,
+    bookUrl: '',
+    index,
+    isVip: false,
+    isPay: false,
+    wordCount: undefined,
   };
 }
 
@@ -440,33 +527,19 @@ async function mapCatalogRowsToChapters(
         index,
       );
       if (chapter) {
-        chapters.push({ ...chapter, index: chapters.length });
+        const url = mergeChapterDataUrlFromRow(chapter.url, row);
+        chapters.push({ ...chapter, url, index: chapters.length });
+      } else if (title || row.item_id) {
+        chapters.push(
+          catalogRowToBookChapter(row, bookId, sources, tab, tocUrl, chapters.length),
+        );
       }
       continue;
     }
 
-    const chapterPayload = {
-      book_id: bookId,
-      item_id: String(row.item_id ?? ''),
-      title,
-      sources: String(row.sources ?? ''),
-      tab: String(row.tab ?? tab),
-      url: String(row.toc_url ?? row.url ?? ''),
-      ...(row.content_url
-        ? { content_url: normalizeCatalogScalarField(row.content_url) }
-        : {}),
-    };
-    chapters.push({
-      url: buildTypedChapterDataUrl(chapterPayload),
-      title: title || `章节 ${index + 1}`,
-      isVolume: false,
-      baseUrl: tocUrl,
-      bookUrl: '',
-      index: chapters.length,
-      isVip: false,
-      isPay: false,
-      wordCount: undefined,
-    });
+    chapters.push(
+      catalogRowToBookChapter(row, bookId, sources, tab, tocUrl, chapters.length),
+    );
   }
 
   return chapters;
@@ -495,15 +568,89 @@ async function fetchCatalogHtmlForPayload(
   if (proxy !== '本地') return '';
 
   try {
-    const headers = buildSourceRequestHeaders(source, pageUrl);
-    return await get(pageUrl, {
-      headers,
-      enableCookieJar: source.enabledCookieJar,
-      timeout: 30000,
+    return await getBookSourcePage(source, pageUrl, {
+      timeout: 30_000,
+      cfTitle: `章节目录 — ${source.sourceName?.trim() || '书源'}`,
     });
   } catch {
     return '';
   }
+}
+
+function buildDataUrlCatalogPayload(
+  tocUrl: string,
+  bookUrl?: string,
+): Record<string, string> | null {
+  const decoded = decodeDataUrl(tocUrl);
+  if (!decoded) return null;
+  return mergeDataUrlPayloadFromBookUrls(normalizeDataUrlPayload(decoded), [
+    bookUrl,
+    tocUrl,
+  ]);
+}
+
+async function requestCatalogChapterRowsOnce(
+  source: BookSource,
+  serverUrl: string,
+  candidateBookId: string,
+  sources: string,
+  tab: string,
+  variable: string,
+  html: string,
+): Promise<{
+  rows: Record<string, unknown>[] | null;
+  failure: { code: unknown; msg: string; book_id_len: number } | null;
+  responseText: string;
+}> {
+  const catalogQuery =
+    `${serverUrl}/catalog?book_id=${encodeURIComponent(candidateBookId)}` +
+    `&source=${encodeURIComponent(sources)}` +
+    `&tab=${encodeURIComponent(tab)}` +
+    `&variable=${encodeURIComponent(variable)}`;
+  const ajaxArg = `${catalogQuery},${JSON.stringify({ method: 'POST', body: { html } })}`;
+  const parsed = parseAjaxArgs(ajaxArg);
+  if (!parsed?.urlStr) {
+    return { rows: null, failure: null, responseText: '' };
+  }
+
+  const postBody = parsed.body ?? JSON.stringify({ html: '' });
+  const headers = withJsonPostHeaders(
+    buildBookSourceApiRequestHeaders(source, parsed.urlStr),
+    postBody,
+  );
+  const responseText =
+    parsed.method === 'POST'
+      ? await postBookSourcePage(source, parsed.urlStr, postBody, {
+          headers,
+          timeout: 30_000,
+        })
+      : await getBookSourcePage(source, parsed.urlStr, {
+          headers,
+          timeout: 30_000,
+        });
+  await assertLoginCheckPassed(source, responseText, parsed.urlStr);
+
+  let response: unknown;
+  try {
+    response = JSON.parse(responseText);
+  } catch {
+    console.warn('[chapters] 目录 API 响应非 JSON', { server: serverUrl });
+    return { rows: null, failure: null, responseText };
+  }
+
+  const rows = extractCatalogChapterRows(response);
+  if (rows) {
+    return { rows, failure: null, responseText };
+  }
+
+  const failure = readAggregationApiFailure(response);
+  return {
+    rows: null,
+    failure: failure
+      ? { ...failure, book_id_len: candidateBookId.length }
+      : null,
+    responseText,
+  };
 }
 
 /** 规则 chapterList 失败时，按 data URL 载荷直连书源 /catalog（与规则内 java.ajax 同形） */
@@ -515,79 +662,72 @@ async function fetchCatalogChapterRows(
   const bookId = payload.book_id?.trim();
   if (!bookId) return null;
 
-  const serverUrl = resolveBookSourceServerUrl(source);
-  if (!serverUrl) return null;
+  const servers = listKnownAggregationServers(source);
+  if (servers.length === 0) {
+    console.warn('[chapters] 无法从书源解析 catalog 请求地址');
+    return null;
+  }
 
   const sources = (payload.sources || payload.source || '').trim();
   if (!sources) {
     console.warn('[chapters] 目录 API 缺少 source/sources');
     return null;
   }
-  const tab = (payload.tab || '小说').trim();
+  // 对齐 detail API：不擅自默认 tab=小说，避免漫画书源 catalog 400
+  const tab = (payload.tab || '').trim();
   const variable = buildCatalogApiVariable(bookVariable);
   const html = await fetchCatalogHtmlForPayload(source, payload);
 
   let lastFailure: { code: unknown; msg: string; book_id_len: number } | null = null;
+  let lastHttpError: unknown;
 
   for (const candidateBookId of buildCatalogBookIdCandidates(bookId)) {
-    const catalogQuery =
-      `${serverUrl}/catalog?book_id=${encodeURIComponent(candidateBookId)}` +
-      `&source=${encodeURIComponent(sources)}` +
-      `&tab=${encodeURIComponent(tab)}` +
-      `&variable=${encodeURIComponent(variable)}`;
-    const ajaxArg = `${catalogQuery},${JSON.stringify({ method: 'POST', body: { html } })}`;
-    const parsed = parseAjaxArgs(ajaxArg);
-    if (!parsed?.urlStr) continue;
-
-    const postBody = parsed.body ?? JSON.stringify({ html: '' });
-    const headers = withJsonPostHeaders(
-      buildBookSourceApiRequestHeaders(source, parsed.urlStr),
-      postBody,
-    );
-    const responseText =
-      parsed.method === 'POST'
-        ? await post(parsed.urlStr, postBody, {
-            headers,
-            enableCookieJar: source.enabledCookieJar,
-            timeout: 30000,
-          })
-        : await get(parsed.urlStr, {
-            headers,
-            enableCookieJar: source.enabledCookieJar,
-            timeout: 30000,
+    for (let si = 0; si < servers.length; si++) {
+      const serverUrl = servers[si]!;
+      try {
+        const result = await requestCatalogChapterRowsOnce(
+          source,
+          serverUrl,
+          candidateBookId,
+          sources,
+          tab,
+          variable,
+          html,
+        );
+        if (result.rows) {
+          if (candidateBookId !== bookId || si > 0) {
+            console.log('[chapters] catalog 使用备用参数成功', {
+              book_id_len: candidateBookId.length,
+              chapters: result.rows.length,
+              server: serverUrl,
+            });
+          }
+          return result.rows;
+        }
+        if (result.failure) {
+          lastFailure = result.failure;
+        }
+        lastHttpError = undefined;
+      } catch (e) {
+        lastHttpError = e;
+        const retryable =
+          e instanceof HttpError && (e.status === 502 || e.status === 503 || e.status === 504);
+        if (retryable && si < servers.length - 1) {
+          console.warn('[chapters] catalog 网关错误，尝试下一条线路', {
+            status: e.status,
+            server: serverUrl,
           });
-    await assertLoginCheckPassed(source, responseText, parsed.urlStr);
-
-    let response: unknown;
-    try {
-      response = JSON.parse(responseText);
-    } catch {
-      console.warn('[chapters] 目录 API 响应非 JSON');
-      continue;
-    }
-
-    const rows = extractCatalogChapterRows(response);
-    if (rows) {
-      if (candidateBookId !== bookId) {
-        console.log('[chapters] catalog 使用备用 book_id 成功', {
-          book_id_len: candidateBookId.length,
-          chapters: rows.length,
-        });
+          continue;
+        }
+        if (!(e instanceof HttpError)) throw e;
       }
-      return rows;
-    }
-
-    const failure = readAggregationApiFailure(response);
-    if (failure) {
-      lastFailure = {
-        ...failure,
-        book_id_len: candidateBookId.length,
-      };
     }
   }
 
   if (lastFailure) {
     console.warn('[chapters] 目录 API 返回异常:', lastFailure);
+  } else if (lastHttpError) {
+    throw lastHttpError;
   } else {
     console.warn('[chapters] 目录 API 无章节数据');
   }
@@ -675,6 +815,19 @@ function splitTocChapterListJsRule(chapterList: string): {
   return { jsCode, tailRule };
 }
 
+/** 书架/详情页缓存目录是否明显不完整（勿用「仅 1 章」旧数据挡掉全量拉取） */
+export function shelfCachedChapterListLooksStale(
+  chapters: BookChapter[],
+  book: { totalChapterNum?: number; latestChapterTitle?: string },
+): boolean {
+  if (chapters.length === 0) return false;
+  if (dataUrlTocChaptersLookSuspicious(chapters)) return true;
+  const expected = book.totalChapterNum ?? 0;
+  if (expected > 3 && chapters.length < Math.min(expected, 3)) return true;
+  if (expected > 10 && chapters.length < expected * 0.25) return true;
+  return false;
+}
+
 /** 规则目录异常：无 item_id 或全部章节 URL 相同（去重后只剩一条） */
 function dataUrlTocChaptersLookSuspicious(chapters: BookChapter[]): boolean {
   if (chapters.length === 0) return false;
@@ -699,6 +852,36 @@ function dataUrlTocChaptersLookSuspicious(chapters: BookChapter[]): boolean {
 function resolveTocListTailRule(tailRule: string, listContext: RuleContext): string {
   const rule = (tailRule || '$.data').trim();
   const bare = rule.replace(/^@json:/i, '').trim();
+  if (bare === '$.data' || bare === '$.data.data') {
+    let root: unknown = listContext.result;
+    if (typeof root === 'string') {
+      const trimmed = root.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          root = JSON.parse(trimmed) as unknown;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const catalogRows = extractCatalogChapterRows(root);
+    if (catalogRows && catalogRows.length > 1) {
+      return bare === '$.data.data' ? '@json:$.data.data' : '@json:$.data';
+    }
+    if (Array.isArray(root)) return '$[*]';
+    if (root && typeof root === 'object') {
+      const data = (root as Record<string, unknown>).data;
+      if (Array.isArray(data)) return '@json:$.data';
+      if (data && typeof data === 'object') {
+        const nested = findLargestCatalogChapterArray(data as Record<string, unknown>);
+        if (nested && nested.length > 1) {
+          for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+            if (value === nested) return `@json:$.data.${key}`;
+          }
+        }
+      }
+    }
+  }
   if (bare !== '$.data') return rule;
   if (Array.isArray(listContext.result)) return '$[*]';
   const content = String(listContext.content ?? '').trim();
@@ -710,6 +893,36 @@ function resolveTocListTailRule(tailRule: string, listContext: RuleContext): str
     }
   }
   return rule;
+}
+
+async function finalizeDataUrlTocChapters(
+  source: BookSource,
+  chapters: BookChapter[],
+  tocUrl: string,
+  options?: GetChapterListOptions,
+): Promise<BookChapter[]> {
+  const rule = source.ruleToc;
+  const { reverse } = parseTocChapterListRule(rule?.chapterList);
+  let ordered = finalizeTocChapterOrder(
+    chapters,
+    reverse,
+    options?.reverseToc === true,
+  );
+  if (rule) {
+    ordered = await applyFormatJs(source, rule, ordered, tocUrl, options?.onScriptToast);
+  }
+  return ordered.map((chapter, index) => ({ ...chapter, index }));
+}
+
+function emitDataUrlTocPartial(
+  options: GetChapterListOptions | undefined,
+  chapters: BookChapter[],
+  isComplete: boolean,
+): void {
+  if (!options?.onPartial || chapters.length === 0) return;
+  void Promise.resolve(options.onPartial({ chapters, isComplete })).catch((e) => {
+    console.warn('[chapters] data URL onPartial 失败:', e);
+  });
 }
 
 async function getChapterListFromDataUrlViaRule(
@@ -851,7 +1064,14 @@ async function getChapterListFromDataUrlViaRule(
       book_id: bookId || payload.book_id,
     };
     const chapter = await parseChapter(source, rule, elementContext, tocUrl, i);
-    if (chapter) chapters.push(chapter);
+    if (chapter) {
+      const row =
+        elementContext.result && typeof elementContext.result === 'object'
+          ? (elementContext.result as Record<string, unknown>)
+          : {};
+      const url = mergeChapterDataUrlFromRow(chapter.url, row);
+      chapters.push({ ...chapter, url });
+    }
   }
 
   if (chapters.length === 0) return [];
@@ -867,32 +1087,69 @@ async function getChapterListFromDataUrlViaRule(
  * 处理 data: URL 场景的章节列表获取
  * 优先直连 /catalog（与 Legado chapterList 脚本同形），失败再跑 ruleToc.chapterList。
  */
+async function fetchCatalogRowsForDataUrlToc(
+  source: BookSource,
+  tocUrl: string,
+  options?: GetChapterListOptions,
+): Promise<{
+  rows: Record<string, unknown>[] | null;
+  payload: Record<string, string>;
+} | null> {
+  const payload = buildDataUrlCatalogPayload(tocUrl, options?.bookUrl);
+  if (!payload?.book_id?.trim()) {
+    console.warn('[chapters] data URL 中没有 book_id');
+    return null;
+  }
+
+  let rows = await fetchCatalogChapterRows(source, payload, options?.bookVariable);
+  if (rows?.length) {
+    return { rows, payload };
+  }
+
+  const bookUrl = options?.bookUrl?.trim();
+  if (bookUrl?.startsWith('data:') && bookUrl !== tocUrl) {
+    const bookPayload = buildDataUrlCatalogPayload(bookUrl);
+    if (
+      bookPayload?.book_id?.trim() &&
+      (bookPayload.book_id !== payload.book_id ||
+        bookPayload.sources !== payload.sources ||
+        bookPayload.tab !== payload.tab)
+    ) {
+      console.log('[chapters] catalog 使用 bookUrl 载荷重试', {
+        book_id_len: bookPayload.book_id.length,
+        sources: bookPayload.sources || bookPayload.source,
+        tab: bookPayload.tab,
+      });
+      rows = await fetchCatalogChapterRows(source, bookPayload, options?.bookVariable);
+      if (rows?.length) {
+        return { rows, payload: bookPayload };
+      }
+    }
+  }
+
+  return { rows: null, payload };
+}
+
 async function getChapterListFromDataUrl(
   source: BookSource,
   tocUrl: string,
   options?: GetChapterListOptions,
 ): Promise<BookChapter[]> {
-  const decoded = decodeDataUrl(tocUrl);
-  if (!decoded) {
+  const catalogAttempt = await fetchCatalogRowsForDataUrlToc(source, tocUrl, options);
+  if (!catalogAttempt) {
     console.warn('[chapters] 无法解码 data URL');
     return [];
   }
 
-  const payload = normalizeDataUrlPayload(decoded);
-
-  const bookId = payload.book_id?.trim();
-  if (!bookId) {
-    console.warn('[chapters] data URL 中没有 book_id');
-    return [];
-  }
+  const { rows, payload } = catalogAttempt;
+  const bookId = payload.book_id?.trim() ?? '';
 
   // 对齐 Legado chapterList：核心是 POST /catalog；直连可避免 $.data 误解析 hex 载荷
-  const rows = await fetchCatalogChapterRows(source, payload, options?.bookVariable);
   if (rows && rows.length > 0) {
     console.log('[chapters] catalog API 章节数:', rows.length);
     const sources = (payload.sources || payload.source || '').trim();
     const tab = (payload.tab || '小说').trim();
-    return mapCatalogRowsToChapters(
+    const mapped = await mapCatalogRowsToChapters(
       source,
       source.ruleToc,
       rows,
@@ -901,6 +1158,18 @@ async function getChapterListFromDataUrl(
       tab,
       tocUrl,
     );
+    if (mapped.length > 0) {
+      const ordered = await finalizeDataUrlTocChapters(source, mapped, tocUrl, options);
+      emitDataUrlTocPartial(options, ordered, true);
+      if (ordered.length < rows.length) {
+        console.warn('[chapters] catalog 行解析后章节数少于 API 行数', {
+          apiRows: rows.length,
+          chapters: ordered.length,
+        });
+      }
+      return ordered;
+    }
+    console.warn('[chapters] catalog API 有数据但章节映射为空');
   }
 
   try {
@@ -912,6 +1181,7 @@ async function getChapterListFromDataUrl(
     );
     if (viaRule.length > 0 && !dataUrlTocChaptersLookSuspicious(viaRule)) {
       console.log('[chapters] data URL 规则解析章节数:', viaRule.length);
+      emitDataUrlTocPartial(options, viaRule, true);
       return viaRule;
     }
     if (viaRule.length > 0) {
@@ -1219,7 +1489,10 @@ async function parseChapter(
       const sourceLabel = String(row.source ?? row.sources ?? '').trim();
       const rowTitle = String(row.title ?? '').trim();
       if (sourceLabel || rowTitle) {
-        title = sourceLabel && rowTitle ? `${sourceLabel}:${rowTitle}` : sourceLabel || rowTitle;
+        title =
+          sourceLabel && rowTitle
+            ? composeLegadoSourceChapterTitle(sourceLabel, rowTitle)
+            : sourceLabel || rowTitle;
       }
     }
 

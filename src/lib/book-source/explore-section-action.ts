@@ -2,7 +2,7 @@
  * 发现子项点击行为：区分普通发现列表 vs Legado 内嵌页（startBrowser / ajax,options）
  */
 
-import { post } from '@/lib/http';
+import { postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import { getScriptBaseUrl, getStoredSourceCookiesForUrl } from '@/lib/js-engine';
 import { openLegadoBrowserInApp } from '@/lib/platform/open-url';
@@ -92,11 +92,9 @@ export async function openExploreSectionInInnerWeb(
     if (ajax.method === 'POST') {
       const body =
         typeof ajax.body === 'string' ? ajax.body : JSON.stringify(ajax.body ?? '');
-      const html = await post(resolved, body, {
+      const html = await postBookSourcePage(source, resolved, body, {
         headers: { ...ajax.headers, ...(cookies ? { Cookie: cookies } : {}) },
-        enableCookieJar: source.enabledCookieJar,
-        concurrentRate: source.concurrentRate,
-        timeout: 30000,
+        timeout: 30_000,
       });
       const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
       await openLegadoBrowserInApp(dataUrl, '', section.title, {

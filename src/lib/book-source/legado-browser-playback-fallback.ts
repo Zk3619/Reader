@@ -2,7 +2,7 @@
  * 正文 ruleContent JS 失败时的播放链回退（咕咕番等：章节 HTML → mizhi_json → artplayer 内嵌页）
  */
 
-import { post } from '@/lib/http';
+import { postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import type { BookSource } from '@/types';
 
 const PLAYER_VID_RE = /"url":"([a-z0-9-]+)"/i;
@@ -36,10 +36,8 @@ export async function tryResolveMizhiArtplayerBrowserUrl(
   };
 
   try {
-    const res = await post(apiUrl, body, {
+    const res = await postBookSourcePage(source, apiUrl, body, {
       headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
       timeout: 60_000,
     });
     const json = JSON.parse(String(res ?? '').trim()) as { url?: string };

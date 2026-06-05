@@ -3,7 +3,8 @@
  * 对应 legado 项目的 WebBook.exploreBook
  */
 
-import { get, isAbortError, post } from '@/lib/http';
+import { isAbortError } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
 import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
 import { legadoListRuleNeedsAllSuffix, isAtomicLegadoScriptRule } from '@/lib/rule-engine/legado-source-rule';
@@ -212,8 +213,8 @@ async function exploreBookViaLegadoAjax(
     };
     const html =
       ajax.method === 'POST'
-        ? await post(requestUrl, body ?? '', httpOpts)
-        : await get(requestUrl, httpOpts);
+        ? await postBookSourcePage(source, requestUrl, body ?? '', httpOpts)
+        : await getBookSourcePage(source, requestUrl, httpOpts);
     await assertLoginCheckPassed(source, html, requestUrl);
 
     const respondTime = Date.now() - startTime;

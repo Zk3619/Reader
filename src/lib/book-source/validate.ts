@@ -3,8 +3,8 @@
  * 参考 Legado：对书源执行搜索/发现/目录/正文检查，并返回可展示的结果类型
  */
 
-import { get } from '@/lib/http';
 import { HttpError } from '@/lib/http';
+import { getBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { buildUrl, parseHeaders } from '@/lib/book-source/utils';
 import { searchBook } from '@/lib/book-source/search';
 import { exploreBook } from '@/lib/book-source/explore';
@@ -72,10 +72,8 @@ async function probeGet(
 ): Promise<{ ok: true } | SingleCheckResult> {
   try {
     const headers = parseHeaders(source.header);
-    const text = await get(url, {
+    const text = await getBookSourcePage(source, url, {
       headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
       timeout,
     });
     if (text == null || text.length === 0) {

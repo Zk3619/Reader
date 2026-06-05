@@ -8,7 +8,13 @@
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
-import { fetchChapterListDeduped, isChapterListFetchInFlight, toNewBookChapter, type PartialChapterList } from '@/lib/book-source/chapters';
+import {
+  fetchChapterListDeduped,
+  isChapterListFetchInFlight,
+  shelfCachedChapterListLooksStale,
+  toNewBookChapter,
+  type PartialChapterList,
+} from '@/lib/book-source/chapters';
 import { resolveBookType } from '@/lib/book-source/book-type';
 import { mergeBookContentVariable } from '@/lib/book-source/utils';
 import { isLocalBook } from '@/lib/local-book';
@@ -213,8 +219,19 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
         notifyShelfBookMeta(book.bookUrl);
       }
       const afterMeta = await booksDb.getBook(book.bookUrl);
-      if (afterMeta && !shelfBookNeedsChapterMeta(afterMeta) && !tocInFlight) {
+      if (
+        afterMeta &&
+        !shelfBookNeedsChapterMeta(afterMeta) &&
+        !tocInFlight &&
+        !shelfCachedChapterListLooksStale(existing, afterMeta)
+      ) {
         return;
+      }
+      if (existing.length > 0 && shelfCachedChapterListLooksStale(existing, book)) {
+        console.log('[saveBookToShelf] 本地目录不完整，重新拉取', {
+          cached: existing.length,
+          expected: book.totalChapterNum ?? 0,
+        });
       }
     }
   }
@@ -253,6 +270,7 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
     const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
       reverseToc: book.readConfig?.reverseToc === true,
       onPartial,
+      bookUrl: book.bookUrl,
       bookVariable: book.variable,
     });
     if (chapters.length === 0) return;
