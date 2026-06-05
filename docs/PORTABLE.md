@@ -28,22 +28,49 @@ npm run tauri build
 3. 将压缩包内文件**解压到任意文件夹**（例如 `Reader便携版`）。
 4. 该文件夹即为**便携版**：内含 `reader.exe` 及依赖，直接运行 `reader.exe`，**不会**写入注册表、**不会**在系统里注册卸载程序。可将整个文件夹复制到 U 盘或其它电脑使用。
 
-### config.json 与数据目录（安装版 / 便携版统一）
+### config.json 与数据目录（桌面绿色版）
 
-程序启动时会在**配置目录**创建 **`config.json`**（若不存在），用于统一存放：
+程序启动时会在 **`exe/AppData/`** 创建 **`config.json`**（若不存在），用于统一存放：
 - **数据路径**（如 `dataDir`，对应数据库、本地书籍、缓存等）；
 - **应用设置**（书架布局、WebDAV 等）与 `dataDir` 均保存在同一 `config.json` 中；程序仅使用 `config.json`，不再支持旧版 `settings.json`。
 
-- **安装版**：配置目录 = 系统默认目录 `%AppData%\com.zkingz.reader`，即 `config.json` 位于该目录下。
-- **便携版**：配置目录 = **与 `reader.exe` 同目录**。便携模式需在 exe 同目录存在 **`reader.json`** 或任一**标记文件**（`portable`、`reader.portable`、`.portable`）才会启用；启用后 `config.json` 也放在 exe 同目录。
+桌面端默认目录布局：
 
-`config.json` 中可通过 **`dataDir`** 指定数据根目录（数据库、设置、本地书籍、缓存等均在此目录下）：
+| 内容 | 默认路径 |
+|------|----------|
+| 配置、窗口状态、数据库与业务缓存 | `AppData/`（含 `config.json`、`.window-state.json`、`reader.db` 等） |
+| plugin-http Cookie 仓 | `AppData/.cookies`（启动时桥接到系统缓存目录） |
+| WebView2（localStorage、Cookies） | `EBWebView/`（与 exe 同级；可在设置中改 `webviewDataDir`） |
+| 运行日志 | `logs/`（按天轮转，保留 7 份） |
 
-- 不设或为空：安装版使用系统默认目录，便携版使用 exe 旁的 **`AppData`**（或 `reader.json` 中的 `dataDir`）。
-- 设为相对路径：相对**配置目录**解析（安装版即相对默认目录，便携版即相对 exe 目录）。
+首次从旧版升级时，程序会自动将 exe 根目录下的 `config.json`、`.window-state.json` 以及 `WebViewCache/*/EBWebView` 迁入上述新位置。
+
+`config.json` 中可通过 **`dataDir`** 指定数据根目录：
+
+- 不设或为空：使用 exe 旁的 **`AppData`**。
+- 设为相对路径：相对 **exe 目录** 解析。
 - 设为绝对路径：直接使用该路径。
 
-应用内**数据备份**对话框提供「数据目录」的**更改**与**恢复默认**，修改会写入当前使用的 `config.json`，**重启应用后生效**。用户也可直接编辑或迁移 `config.json`，便于备份或更换数据目录。
+可选：在 exe 同目录放置 **`reader.json`**，用其中的 **`dataDir`** 覆盖默认 `AppData`（无需其它标记文件）。
+
+应用内**设置 → 存储与 WebView** 可更改数据目录；**从旧版目录迁移** 可从 `%APPDATA%\com.zkingz.reader` 自动导入数据库与缓存。
+
+在设置中**更改程序数据目录**并重启后：
+1. **更改前**：设置页会预检原目录大小与目标磁盘剩余空间。
+2. **重启时**：先弹出「数据迁移」进度窗口（非后台静默），复制 `reader.db`（含 `-wal`/`-shm`）、`cover-cache`、`book-cache`。
+3. **事务性**：全量复制完成后在新目录写入 `.migration_complete_v1` 标记；**不自动删除**原目录，备份路径记在 `dataDirMigrationBackup`，可在设置中手动清理。
+4. **失败时**：可重试或「恢复原目录并启动」。
+
+**WebView 目录**变更不迁移缓存（易出错），重启后 WebView 数据重新生成，书源可能需重新登录。
+
+### 从安装版迁移到便携版
+
+1. **推荐**：保留旧目录不动，直接运行便携版 exe，程序会**自动**从 `%APPDATA%\com.zkingz.reader` 复制 `reader.db`（及 `-wal`/`-shm`）、`cover-cache`、`book-cache` 到 `exe\AppData\`。
+2. 若已手动复制文件，请确保：
+   - 数据库在 **`exe\AppData\reader.db`**（不是 exe 根目录）
+   - 同时复制 **`reader.db-wal`**、**`reader.db-shm`**（若存在）
+   - **不要**在 `exe\AppData\config.json` 里保留指向旧 `%APPDATA%` 的绝对路径 `dataDir`（程序会自动清除）
+3. 迁移后若书架仍空：设置 → 存储与 WebView → **从旧版目录迁移**，然后重启应用。
 
 ## 三、得到“单文件” exe（自解压）
 
