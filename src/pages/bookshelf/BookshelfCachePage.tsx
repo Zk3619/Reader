@@ -27,7 +27,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   chapterCacheDownloadStore,
-  countCachedChapters,
+  getChapterCacheStatsForBook,
   clearAllCachedChapters,
   deleteCachedChaptersByBook,
   enqueueDownloadAll,
@@ -124,19 +124,30 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
   );
 
   async function refreshBookCached(bookUrl: string) {
-    const cached = await countCachedChapters(bookUrl);
     const i = findRowIndex(bookUrl);
     if (i < 0) return;
-    setRows(i, { cached, downloadPercent: null });
+    const book = rows[i]?.book;
+    const stats = await getChapterCacheStatsForBook(bookUrl, book?.name);
+    setRows(i, {
+      cached: stats.chapterCount,
+      cacheBytes: stats.estimatedBytes,
+      downloadPercent: null,
+    });
   }
 
   async function refreshCounts(books: Book[]): Promise<void> {
     const next: BookshelfCacheRowState[] = [];
     for (const book of books) {
       if (isLocalBook(book)) continue;
-      const cached = await countCachedChapters(book.bookUrl);
+      const stats = await getChapterCacheStatsForBook(book.bookUrl, book.name);
       const total = book.totalChapterNum ?? 0;
-      next.push({ book, cached, total, downloadPercent: null });
+      next.push({
+        book,
+        cached: stats.chapterCount,
+        cacheBytes: stats.estimatedBytes,
+        total,
+        downloadPercent: null,
+      });
     }
     setRows(reconcile(next));
   }
@@ -264,7 +275,7 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     stopChapterDownload(book.bookUrl);
     await deleteCachedChaptersByBook(book);
     const i = findRowIndex(book.bookUrl);
-    if (i >= 0) setRows(i, { cached: 0, downloadPercent: null });
+    if (i >= 0) setRows(i, { cached: 0, cacheBytes: 0, downloadPercent: null });
     showAppToast({ title: `已清除：${book.name}` });
   };
 

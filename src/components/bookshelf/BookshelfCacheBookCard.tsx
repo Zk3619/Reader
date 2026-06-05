@@ -13,7 +13,7 @@ import {
   bookGroupCompactCardClass,
   bookshelfCompactCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
-import { chapterCacheDownloadStore } from '@/lib/chapter-cache';
+import { chapterCacheDownloadStore, formatChapterCacheSize } from '@/lib/chapter-cache';
 import { cn } from '@/lib/utils';
 import { sourcesStore } from '@/stores/sources';
 import type { Book } from '@/types';
@@ -21,6 +21,7 @@ import type { Book } from '@/types';
 export interface BookshelfCacheRowState {
   book: Book;
   cached: number;
+  cacheBytes: number;
   total: number;
   downloadPercent: number | null;
 }
@@ -41,6 +42,7 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
   const row = () => props.rows[props.rowIndex];
   const book = () => row().book;
   const cached = () => row().cached;
+  const cacheBytes = () => row().cacheBytes;
   const total = () => row().total;
   const downloadPercent = () => row().downloadPercent;
 
@@ -82,6 +84,7 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
           <p class="m-0 truncate text-xs leading-4 text-muted-foreground">
             已缓存 {cached()}
             {total() > 0 ? ` / ${total()}` : ''} 章
+            {cacheBytes() > 0 ? ` · ${formatChapterCacheSize(cacheBytes())}` : ''}
             <Show when={downloadPercent() != null}>
               <span> · 下载中 {downloadPercent()}%</span>
             </Show>

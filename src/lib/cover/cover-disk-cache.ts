@@ -6,11 +6,16 @@
 
 import { join } from '@tauri-apps/api/path';
 import { getCoverCacheDirectory } from '@/lib/cover/cover-cache-path';
+import {
+  getCoverCacheMaxBytes,
+  getCoverCacheSettings,
+} from '@/lib/cover/cover-cache-settings';
 import { isTauri } from '@/lib/platform/detect';
 import { getFileSystem } from '@/lib/platform/filesystem';
 
 export { getCoverCacheDirectory, getDefaultCoverCacheDirectory } from '@/lib/cover/cover-cache-path';
 
+/** 默认上限（未配置时） */
 export const MAX_COVER_CACHE_BYTES = 300 * 1024 * 1024;
 
 export type CoverCacheMeta = {
@@ -373,12 +378,15 @@ function invalidateEstimatedCacheBytes(): void {
   estimatedCacheTotalBytes = null;
 }
 
-/** 写入前按 savedAt 淘汰最旧条目，直到有空间 */
+/** 写入前按保留期与容量淘汰最旧条目 */
 async function evictIfNeeded(incomingBytes: number): Promise<void> {
+  const maxBytes = await getCoverCacheMaxBytes();
+  const { retentionDays } = await getCoverCacheSettings();
   const estimate = estimatedCacheTotalBytes;
   if (
     estimate != null &&
-    estimate + incomingBytes <= MAX_COVER_CACHE_BYTES
+    Number.isFinite(maxBytes) &&
+    estimate + incomingBytes <= maxBytes
   ) {
     estimatedCacheTotalBytes = estimate + incomingBytes;
     return;
@@ -394,17 +402,29 @@ async function evictIfNeeded(incomingBytes: number): Promise<void> {
   }
 
   lastFullEvictScanAt = now;
-  const metas = await listAllCacheMetas();
+  let metas = await listAllCacheMetas();
+
+  if (retentionDays > 0) {
+    const cutoff = now - retentionDays * 86_400_000;
+    for (const meta of metas) {
+      if (meta.savedAt > 0 && meta.savedAt < cutoff) {
+        const hash = await diskHashFromMeta(meta);
+        await deleteCacheEntryByHash(hash);
+      }
+    }
+    metas = await listAllCacheMetas();
+  }
+
   let total = metas.reduce((sum, m) => sum + m.byteSize, 0);
   estimatedCacheTotalBytes = total;
-  if (total + incomingBytes <= MAX_COVER_CACHE_BYTES) {
+  if (!Number.isFinite(maxBytes) || total + incomingBytes <= maxBytes) {
     estimatedCacheTotalBytes = total + incomingBytes;
     return;
   }
 
   const sorted = [...metas].sort((a, b) => a.savedAt - b.savedAt);
   for (const meta of sorted) {
-    if (total + incomingBytes <= MAX_COVER_CACHE_BYTES) break;
+    if (total + incomingBytes <= maxBytes) break;
     const hash = await diskHashFromMeta(meta);
     await deleteCacheEntryByHash(hash);
     total -= meta.byteSize;
@@ -452,7 +472,7 @@ export async function readCoverFromDisk(
         savedAt: Date.now(),
       };
       await ensureEntryDir(root, hash);
-      await fs.writeTextFile(metaPath, JSON.stringify(repaired)).catch(() => {});
+      await fs.writeTextFile(metaPath, JSON.stringify(repaired)).catch(() => { });
       return { bytes, meta: repaired };
     }
 
@@ -468,7 +488,7 @@ export async function readCoverFromDisk(
     if (!record?.bytes || !record.meta) return null;
     return { bytes: record.bytes, meta: record.meta };
   } catch {
-    await deleteCoverFromDisk(trimmed).catch(() => {});
+    await deleteCoverFromDisk(trimmed).catch(() => { });
     return null;
   }
 }
@@ -547,7 +567,7 @@ export async function writeCoverToDisk(
       bumpEstimatedCacheBytes(bytes.byteLength);
       legacyMigrationDone.add(hash);
     } catch (e) {
-      await fs.remove(metaPath).catch(() => {});
+      await fs.remove(metaPath).catch(() => { });
       throw e;
     }
     return;

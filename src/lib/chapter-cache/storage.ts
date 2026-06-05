@@ -12,6 +12,7 @@ import {
   clearAllChapterCacheFiles,
 } from '@/lib/chapter-cache/file-storage';
 import type { Book, BookChapter, BookSource } from '@/types';
+import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
 
 export async function readCachedChapterRaw(
   bookUrl: string,
@@ -54,6 +55,7 @@ export async function writeCachedChapterRaw(
       createdAt: now,
     });
     notifyChapterCacheUpdated(book.bookUrl);
+    await enforceChapterCacheLimits().catch(() => {});
     return;
   }
 
@@ -69,6 +71,7 @@ export async function writeCachedChapterRaw(
     createdAt: now,
   });
   notifyChapterCacheUpdated(book.bookUrl);
+  await enforceChapterCacheLimits().catch(() => {});
 }
 
 function notifyChapterCacheUpdated(bookUrl: string): void {

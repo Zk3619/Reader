@@ -7,6 +7,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { join } from '@tauri-apps/api/path';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { fileExists } from '@/lib/platform/filesystem';
+import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
 
 export interface ChapterCacheStats {
   chapterCount: number;
@@ -15,6 +16,7 @@ export interface ChapterCacheStats {
 }
 
 export async function getChapterCacheStats(): Promise<ChapterCacheStats> {
+  await enforceChapterCacheLimits().catch(() => {});
   const db = await getDatabase();
   const rows = await db.select<{ cnt: number; bytes: number }>(
     `SELECT COUNT(*) as cnt,

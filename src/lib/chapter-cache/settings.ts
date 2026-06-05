@@ -13,12 +13,18 @@ export interface ChapterCacheSettings {
   prefetchCount: number;
   /** 阅读后自动预下载后续章节数，0=关闭 */
   preDownloadNum: number;
+  /** 全局缓存上限（MB），0 = 不限制 */
+  maxBytesMb: number;
+  /** 超过该天数的缓存优先清理，0 = 不按时间清理 */
+  retentionDays: number;
 }
 
 const DEFAULTS: ChapterCacheSettings = {
   prefetchEnabled: true,
   prefetchCount: 1,
   preDownloadNum: 0,
+  maxBytesMb: 0,
+  retentionDays: 0,
 };
 
 let cached: ChapterCacheSettings | null = null;
@@ -36,6 +42,8 @@ export async function getChapterCacheSettings(): Promise<ChapterCacheSettings> {
           0,
           9999,
         ),
+        maxBytesMb: clampInt(parsed.maxBytesMb ?? DEFAULTS.maxBytesMb, 0, 102_400),
+        retentionDays: clampInt(parsed.retentionDays ?? DEFAULTS.retentionDays, 0, 3650),
       };
       return cached;
     }
@@ -62,6 +70,8 @@ export async function saveChapterCacheSettings(
       0,
       9999,
     ),
+    maxBytesMb: clampInt(patch.maxBytesMb ?? current.maxBytesMb, 0, 102_400),
+    retentionDays: clampInt(patch.retentionDays ?? current.retentionDays, 0, 3650),
   };
   cached = next;
   await setStorage(STORAGE_KEY, next);
