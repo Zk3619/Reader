@@ -12,6 +12,10 @@ import {
   getCoverCacheStats,
 } from '@/lib/http/cover-image-loader';
 import { getCoverCacheDirectory } from '@/lib/cover/cover-disk-cache';
+import {
+  getCoverCacheSettings,
+  saveCoverCacheSettings,
+} from '@/lib/cover/cover-cache-settings';
 import { isTauri } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -23,13 +27,20 @@ export function CoverCacheSetting() {
   const [loading, setLoading] = createSignal(true);
   const [clearing, setClearing] = createSignal(false);
   const [pickingDir, setPickingDir] = createSignal(false);
+  const [maxBytesMb, setMaxBytesMb] = createSignal(300);
+  const [retentionDays, setRetentionDays] = createSignal(0);
 
   const refreshStats = async () => {
     setLoading(true);
     try {
-      const stats = await getCoverCacheStats();
+      const [stats, settings] = await Promise.all([
+        getCoverCacheStats(),
+        getCoverCacheSettings(),
+      ]);
       setCount(stats.count);
       setTotalBytes(stats.totalBytes);
+      setMaxBytesMb(settings.maxBytesMb);
+      setRetentionDays(settings.retentionDays);
       if (isTauri()) {
         setCacheDir(await getCoverCacheDirectory());
       }
@@ -127,7 +138,44 @@ export function CoverCacheSetting() {
           <p class="mb-2 text-xs text-muted-foreground">
             未单独指定时使用数据根目录下的 cover-cache（与数据库、本地书籍数据目录一致）。更改目录后，旧目录中的缓存不会自动迁移。
           </p>
-          <div class="flex flex-wrap gap-2">
+          <div class="mb-4 space-y-3">
+        <label class="flex items-center justify-between gap-4 text-sm">
+          <span>磁盘上限（MB，0=不限制）</span>
+          <input
+            type="number"
+            min={0}
+            max={10240}
+            class="w-24 rounded border border-border bg-background px-2 py-1"
+            value={maxBytesMb()}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              setMaxBytesMb(v);
+              void saveCoverCacheSettings({ maxBytesMb: v }).then(() =>
+                showAppToast({ title: '封面缓存容量设置已保存' }),
+              );
+            }}
+          />
+        </label>
+        <label class="flex items-center justify-between gap-4 text-sm">
+          <span>保留天数（0=仅按容量淘汰）</span>
+          <input
+            type="number"
+            min={0}
+            max={3650}
+            class="w-24 rounded border border-border bg-background px-2 py-1"
+            value={retentionDays()}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              setRetentionDays(v);
+              void saveCoverCacheSettings({ retentionDays: v }).then(() =>
+                showAppToast({ title: '封面缓存保留期已保存' }),
+              );
+            }}
+          />
+        </label>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"

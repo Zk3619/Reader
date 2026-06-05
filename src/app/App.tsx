@@ -1,13 +1,11 @@
 import { createSignal, createEffect, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
-import { invoke } from "@tauri-apps/api/core";
-import { Button } from "@/components/ui/button";
 import { Navigation, type PageType } from "@/components/shell/Navigation";
 import { PageToolbar } from "@/components/shell/PageToolbar";
 import { PageToolbarTitleDropdown } from "@/components/shell/PageToolbarTitleDropdown";
 import { SourcesPageToolbar } from "@/components/sources/SourcesPageToolbar";
 import { SourcesFilterDialog } from "@/components/sources/SourcesFilterDialog";
-import { SettingsPageToolbar } from "@/components/shell/SettingsPageToolbar";
+import { SettingsPage } from "@/pages/settings/SettingsPage";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
 import {
@@ -39,7 +37,6 @@ import {
 } from "@/pages/viewer";
 import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
 import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
-import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
 import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
@@ -78,19 +75,7 @@ import {
   openExploreSectionInInnerWeb,
   shouldOpenExplorePageForSection,
 } from "@/lib/book-source/explore-section-action";
-import { DatabaseBackup } from "@/components/shared/DatabaseBackup";
-import { BooksStorageSetting } from "@/components/settings/BooksStorageSetting";
-import { CoverCacheSetting } from "@/components/settings/CoverCacheSetting";
-import { ChapterCacheSetting } from "@/components/settings/ChapterCacheSetting";
-import { TocPaginationSafetySetting } from "@/components/settings/TocPaginationSafetySetting";
-import { BookInfoPresentationSetting } from "@/components/settings/BookInfoPresentationSetting";
-import { SourceExploreDrawerLayoutSetting } from "@/components/settings/SourceExploreDrawerLayoutSetting";
-import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
-import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from "@/components/ui/switch";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
-import { ShellLayoutSetting } from "@/components/shell/ShellLayoutSetting";
-import { ViewerChromeLayoutSetting } from "@/components/settings/ViewerChromeLayoutSetting";
-import { InnerWebRenderModeSetting } from "@/components/settings/InnerWebRenderModeSetting";
 import { cn } from "@/lib/utils";
 import {
   mainShellInset,
@@ -101,6 +86,8 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons, getAppToastVisibleLimit } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
+import { clearAppDataDirCache } from "@/lib/platform/app-data-dir";
+import { isDesktopTauri } from "@/lib/platform/webview-storage";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
@@ -193,7 +180,6 @@ import {
   importRssFromNetworkUrl,
 } from "@/lib/book-source/import-network-sidecar";
 import { importDatabase } from "@/lib/database/export-import";
-import { SourceBlocklistSetting } from "@/components/settings/SourceBlocklistSetting";
 import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
@@ -271,8 +257,9 @@ function AppContent() {
     }
     nav.navigateShell(page);
   };
-  const [greetMsg, setGreetMsg] = createSignal("");
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
+  const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
+  const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [_dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
@@ -1945,6 +1932,9 @@ function AppContent() {
     appHeavyInitStarted = true;
     void (async () => {
       try {
+        if (isDesktopTauri()) {
+          clearAppDataDirCache();
+        }
         console.log('正在初始化数据库...');
         await initDatabase();
         setDbInitialized(true);
@@ -2096,15 +2086,6 @@ function AppContent() {
       window.removeEventListener("resize", handleResize);
     });
   });
-
-  async function testTauriCommand() {
-    try {
-      const result = await invoke("greet", { name: "Tauri Reader" });
-      setGreetMsg(result as string);
-    } catch (e) {
-      setGreetMsg(`调用失败: ${e}`);
-    }
-  }
 
   async function processSingleLocalBookPick(picked: LocalBookPickResult) {
     try {
@@ -2492,6 +2473,7 @@ function AppContent() {
     push("group-manage", showGroupManage(), () => setShowGroupManage(false));
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
+    push("settings-sub", settingsSubPageOpen(), () => settingsSubPageCloseRef.current());
     push(
       "sources-explore-drawer",
       currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
@@ -2948,155 +2930,20 @@ function AppContent() {
             </Show>
 
 
-            {/* 设置视图 */}
-            <Show when={currentPage() === "settings"}>
-              <section
-                class={cn(shellTabEnter(), mainShellPageRoot)}
-              >
-                <PageToolbar
-                  title="设置"
-                  description="自定义你的阅读体验"
-                  titleSlot={
-                    <PageToolbarTitleDropdown
-                      title="设置"
-                      description="自定义你的阅读体验"
-                      dropdownEnabled={false}
-                    />
-                  }
-                >
-                  <SettingsPageToolbar />
-                </PageToolbar>
-
-                <div class={mainShellPageScroll}>
-                  <div class="w-full max-w-4xl mx-auto space-y-4">
-                    <BooksStorageSetting />
-
-                    <CoverCacheSetting />
-
-                    <ChapterCacheSetting />
-
-                    <TocPaginationSafetySetting />
-
-                    <BookInfoPresentationSetting />
-
-                    <SourceExploreDrawerLayoutSetting />
-
-                    <SourceBlocklistSetting />
-
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <div class="mb-4">
-                        <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
-                        <p class="text-sm text-muted-foreground">
-                          管理正文替换规则，阅读器内可开关「应用替换」
-                        </p>
-                      </div>
-                      <ReplaceRulesPage />
-                    </div>
-
-                    {/* 数据库备份 */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <div class="mb-4">
-                        <h3 class="mb-2 font-semibold text-foreground">💾 数据备份</h3>
-                        <p class="text-sm text-muted-foreground">
-                          导出数据库备份文件，或从备份文件恢复数据
-                        </p>
-                      </div>
-                      <DatabaseBackup />
-                    </div>
-                    {/* Tauri 命令测试 */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <h3 class="mb-4 font-semibold text-foreground">🔧 Tauri 命令测试</h3>
-                      <div class="flex flex-col gap-4">
-                        <Button onClick={testTauriCommand} variant="default">
-                          测试 Tauri invoke
-                        </Button>
-                        <Show when={greetMsg()}>
-                          <div class="rounded-xl bg-success/10 p-4 text-sm text-success-foreground">
-                            <span class="font-medium">响应结果：</span> {greetMsg()}
-                          </div>
-                        </Show>
-                      </div>
-                    </div>
-
-                    {/* 按钮变体展示 */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <h3 class="mb-4 font-semibold text-foreground">🎨 Button 组件变体</h3>
-                      <div class="flex flex-wrap gap-3">
-                        <Button variant="default">Default</Button>
-                        <Button variant="secondary">Secondary</Button>
-                        <Button variant="destructive">Destructive</Button>
-                        <Button variant="outline">Outline</Button>
-                        <Button variant="ghost">Ghost</Button>
-                        <Button variant="link">Link</Button>
-                      </div>
-                    </div>
-
-                    {/* 按钮尺寸展示 */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <h3 class="mb-4 font-semibold text-foreground">📐 Button 尺寸</h3>
-                      <div class="flex flex-wrap items-center gap-3">
-                        <Button size="sm">Small</Button>
-                        <Button size="default">Default</Button>
-                        <Button size="lg">Large</Button>
-                        <Button size="icon">🔔</Button>
-                      </div>
-                    </div>
-
-                    {/* 主题切换（浅色 / 跟随系统 / 深色，左键循环、右键或长按选一项） */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <h3 class="font-semibold text-foreground">主题</h3>
-                          <p class="text-sm text-muted-foreground">浅色、跟随系统或深色；左键循环切换，右键或长按选择</p>
-                        </div>
-                        <ThemeSwitch withTooltip={false} />
-                      </div>
-                    </div>
-
-                    <ShellLayoutSetting />
-
-                    <ViewerChromeLayoutSetting />
-
-                    <InnerWebRenderModeSetting />
-
-                    {/* 减少动效 */}
-                    <div class="rounded-2xl border border-border/50 bg-card p-6">
-                      <div class="flex items-center justify-between gap-4">
-                        <div class="space-y-0.5">
-                          <h3 class="font-semibold text-foreground">减少动效</h3>
-                          <p class="text-sm text-muted-foreground">
-                            关闭或缩短动画与过渡，适合对动效敏感或追求性能的用户
-                          </p>
-                        </div>
-                        <UiSwitch
-                          checked={settingsStore.state.app.reduceMotion}
-                          onChange={(v: boolean) => settingsStore.setReduceMotion(!!v)}
-                        >
-                          <SwitchControl class="data-disabled:cursor-not-allowed">
-                            <SwitchThumb />
-                          </SwitchControl>
-                          <SwitchLabel class="sr-only">减少动效</SwitchLabel>
-                        </UiSwitch>
-                      </div>
-                    </div>
-
-                    {/* 技术栈信息 */}
-                    <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6">
-                      <h3 class="mb-3 font-semibold text-foreground">⚡ 技术栈</h3>
-                      <div class="flex flex-wrap gap-2">
-                        <For each={["Tauri 2.0", "SolidJS", "TailwindCSS v4", "solid-ui", "Kobalte"]}>
-                          {(tech) => (
-                            <span class="rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
-                              {tech}
-                            </span>
-                          )}
-                        </For>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </Show>
+            {/* 设置视图：保持挂载，子页切换时保留主列表滚动位置 */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                currentPage() === "settings" ? shellTabEnter() : "hidden",
+              )}
+            >
+              <SettingsPage
+                onSubPageOpenChange={(open, close) => {
+                  setSettingsSubPageOpen(open);
+                  settingsSubPageCloseRef.current = close ?? (() => {});
+                }}
+              />
+            </section>
           </main>
         </div>
 

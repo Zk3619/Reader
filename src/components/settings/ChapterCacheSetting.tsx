@@ -21,6 +21,8 @@ export function ChapterCacheSetting() {
   const [prefetchEnabled, setPrefetchEnabled] = createSignal(true);
   const [prefetchCount, setPrefetchCount] = createSignal(1);
   const [preDownloadNum, setPreDownloadNum] = createSignal(0);
+  const [maxBytesMb, setMaxBytesMb] = createSignal(0);
+  const [retentionDays, setRetentionDays] = createSignal(0);
   const [loading, setLoading] = createSignal(true);
   const [clearing, setClearing] = createSignal(false);
 
@@ -36,6 +38,8 @@ export function ChapterCacheSetting() {
       setPrefetchEnabled(settings.prefetchEnabled);
       setPrefetchCount(settings.prefetchCount);
       setPreDownloadNum(settings.preDownloadNum);
+      setMaxBytesMb(settings.maxBytesMb);
+      setRetentionDays(settings.retentionDays);
     } finally {
       setLoading(false);
     }
@@ -49,6 +53,8 @@ export function ChapterCacheSetting() {
     prefetchEnabled?: boolean;
     prefetchCount?: number;
     preDownloadNum?: number;
+    maxBytesMb?: number;
+    retentionDays?: number;
   }) => {
     await saveChapterCacheSettings(patch);
     showAppToast({ title: '章节缓存设置已保存' });
@@ -158,6 +164,36 @@ export function ChapterCacheSetting() {
               const v = Number(e.currentTarget.value);
               setPreDownloadNum(v);
               void persistSettings({ preDownloadNum: v });
+            }}
+          />
+        </label>
+        <label class="flex items-center justify-between gap-4 text-sm">
+          <span>全局缓存上限（MB，0=不限制）</span>
+          <input
+            type="number"
+            min={0}
+            max={102400}
+            class="w-24 rounded border border-border bg-background px-2 py-1"
+            value={maxBytesMb()}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              setMaxBytesMb(v);
+              void persistSettings({ maxBytesMb: v });
+            }}
+          />
+        </label>
+        <label class="flex items-center justify-between gap-4 text-sm">
+          <span>缓存保留天数（0=不按时间清理）</span>
+          <input
+            type="number"
+            min={0}
+            max={3650}
+            class="w-24 rounded border border-border bg-background px-2 py-1"
+            value={retentionDays()}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              setRetentionDays(v);
+              void persistSettings({ retentionDays: v });
             }}
           />
         </label>

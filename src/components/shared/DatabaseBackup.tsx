@@ -17,9 +17,6 @@ import {
 import { createBackup, restoreBackup } from '@/lib/database/backup-manager';
 import { getDatabaseLocation, checkDatabaseExists, openDatabaseDirectory } from '@/lib/database/db-location';
 import { isTauri } from '@/lib/platform/detect';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
-import { open } from '@tauri-apps/plugin-dialog';
-import { getConfig, setDataDir } from '@/lib/platform/config-file';
 import { DownloadIcon, UploadIcon } from '@/components/shared/icons';
 
 export function DatabaseBackup() {
@@ -31,22 +28,12 @@ export function DatabaseBackup() {
   const [showDialog, setShowDialog] = createSignal(false);
   const [dbLocation, setDbLocation] = createSignal<string>('');
   const [dbExists, setDbExists] = createSignal<boolean>(false);
-  const [dataDirRoot, setDataDirRoot] = createSignal<string>('');
-  const [hasDataDirOverride, setHasDataDirOverride] = createSignal(false);
-  const [isChangingDataDir, setIsChangingDataDir] = createSignal(false);
-
   async function loadDataDirInfo() {
     try {
       const location = await getDatabaseLocation();
       setDbLocation(location);
       const exists = await checkDatabaseExists();
       setDbExists(exists);
-      if (isTauri()) {
-        const root = await getAppDataDir();
-        setDataDirRoot(root);
-        const config = await getConfig();
-        setHasDataDirOverride(config.dataDir != null && String(config.dataDir).trim() !== '');
-      }
     } catch (err) {
       console.error('[数据库备份] 获取数据目录信息失败:', err);
     }
@@ -162,72 +149,6 @@ export function DatabaseBackup() {
               </div>
             </Show>
           </div>
-
-          {/* 数据目录（config.json 的 dataDir，数据库/本地书籍/缓存等均在此目录下） */}
-          <Show when={isTauri() && dataDirRoot()}>
-            <div class="rounded-lg border border-border/50 bg-muted/50 p-3 text-sm">
-              <div class="mb-2 font-semibold">数据目录</div>
-              <p class="mb-2 text-xs text-muted-foreground">
-                数据库、设置、本地书籍、缓存等均保存在此目录。可在下方更改或恢复默认，修改后需重启应用生效。配置文件为 config.json，可随程序迁移或手动编辑。
-              </p>
-              <div class="mb-2 break-all font-mono text-xs text-muted-foreground">
-                {dataDirRoot()}
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={isChangingDataDir()}
-                  onClick={async () => {
-                    try {
-                      setIsChangingDataDir(true);
-                      setError(null);
-                      const selected = await open({
-                        directory: true,
-                        multiple: false,
-                        defaultPath: dataDirRoot(),
-                      });
-                      if (selected && typeof selected === 'string') {
-                        await setDataDir(selected);
-                        await loadDataDirInfo();
-                        alert('数据目录已保存到 config.json。请重启应用后生效。');
-                      }
-                    } catch (err) {
-                      console.error('[数据库备份] 设置数据目录失败:', err);
-                      setError(err instanceof Error ? err.message : '设置失败');
-                    } finally {
-                      setIsChangingDataDir(false);
-                    }
-                  }}
-                >
-                  {isChangingDataDir() ? '处理中...' : '更改数据目录'}
-                </Button>
-                <Show when={hasDataDirOverride()}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={isChangingDataDir()}
-                    onClick={async () => {
-                      try {
-                        setIsChangingDataDir(true);
-                        setError(null);
-                        await setDataDir(null);
-                        await loadDataDirInfo();
-                        alert('已恢复为默认数据目录。请重启应用后生效。');
-                      } catch (err) {
-                        console.error('[数据库备份] 恢复默认失败:', err);
-                        setError(err instanceof Error ? err.message : '操作失败');
-                      } finally {
-                        setIsChangingDataDir(false);
-                      }
-                    }}
-                  >
-                    恢复默认
-                  </Button>
-                </Show>
-              </div>
-            </div>
-          </Show>
 
           {/* 导出区域 */}
           <div class="space-y-2">
