@@ -29,7 +29,7 @@ import { appDialogScrollBodyNoFooter } from '@/lib/ui/viewport-classes';
 import JSON5 from 'json5';
 import type { BookSource } from '@/types';
 
-/** legado loginUi 表单项（与晴天聚合等书源格式一致） */
+/** legado loginUi 表单项 */
 interface LoginUiItem {
   name?: string;
   type?: string;
@@ -371,7 +371,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
         </AppDialogHeader>
 
         <div class={appDialogScrollBodyNoFooter}>
-        {/* loginUi 为 JSON 表单（如晴天聚合），渲染表单并执行登录脚本 */}
+        {/* loginUi 为 JSON 表单，渲染表单并执行登录脚本 */}
         <Show when={useFormMode()}>
           <div class="flex flex-col gap-4">
             <p class="text-sm text-muted-foreground">
@@ -494,7 +494,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
         <Show when={props.source && !useFormMode()}>
           <div class="text-sm text-muted-foreground space-y-2">
             <p>
-              该书源已配置登录，但未解析到登录表单。与 Legado 对齐：loginUi 须为 JSON 数组字符串（如晴天聚合书源格式）。
+              该书源已配置登录，但未解析到登录表单。与 Legado 对齐：loginUi 须为 JSON 数组字符串。
             </p>
             <p class="text-xs text-muted-foreground/80">
               排查：该书源 loginUi 长度 = {getSourceLoginUi(props.source)?.length ?? 0}（0 表示未传入或未正确保存，可删除该书源后重新从 JSON 文件导入一次）。

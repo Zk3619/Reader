@@ -20,12 +20,12 @@ const OPTIONS: {
     value: 'default',
     label: '默认样式方案',
     description:
-      '按书源脚本返回的 layout_flexBasisPercent 等样式 flex 换行排列，仅做行内未占满时的均摊等轻量优化。',
+      '按书源脚本返回的 layout_flexBasisPercent 等样式 flex 换行排列。',
   },
   {
     value: 'legado',
     label: 'Legado 兼容方案',
-    description: '强制每行最多三列，并按 Legado 书源展开区的分行与撑满规则渲染（适合晴天聚合等复杂脚本）。',
+    description: '强制每行最多三列，并按 Legado 书源展开区的分行与撑满规则渲染。',
   },
 ];
 
