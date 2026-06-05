@@ -53,6 +53,12 @@ export function SettingsPage(props: SettingsPageProps) {
 
   const [activeTab, setActiveTab] = createSignal<SettingsCategoryId>('appearance');
   const [mobileSubPage, setMobileSubPage] = createSignal<SettingsCategoryId | null>(null);
+  /** 移动端已打开过的子页：保持挂载以避免重复拉取存储类数据 */
+  const [mountedMobileSubPages, setMountedMobileSubPages] = createSignal<
+    Set<SettingsCategoryId>
+  >(new Set());
+  /** 桌面端首次进入「存储与缓存」后保持挂载，避免重复请求 */
+  const [storageTabVisited, setStorageTabVisited] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [highlightedItemId, setHighlightedItemId] = createSignal<string | null>(null);
 
@@ -107,10 +113,21 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   });
 
+  createEffect(() => {
+    if (!useMobileLayout() && activeTab() === 'storage') {
+      setStorageTabVisited(true);
+    }
+  });
+
   function openSubPage(categoryId: SettingsCategoryId) {
     if (hubScrollEl) {
       savedHubScrollTop = hubScrollEl.scrollTop;
     }
+    setMountedMobileSubPages((prev) => {
+      const next = new Set(prev);
+      next.add(categoryId);
+      return next;
+    });
     setMobileSubPage(categoryId);
     setActiveTab(categoryId);
   }
@@ -292,7 +309,7 @@ export function SettingsPage(props: SettingsPageProps) {
           <Tabs
             value={activeTab()}
             onChange={(v) => setActiveTab(v as SettingsCategoryId)}
-            class="flex min-h-0 flex-1 flex-col"
+            class="settings-page-tabs flex min-h-0 flex-1 flex-col"
           >
             <PageToolbar
               title={pageTitle()}
@@ -336,7 +353,11 @@ export function SettingsPage(props: SettingsPageProps) {
               <Show when={!isSearching()}>
                 <For each={SETTINGS_CATEGORIES}>
                   {(cat) => (
-                    <TabsContent value={cat.id} class="mt-0 overflow-visible focus-visible:outline-none">
+                    <TabsContent
+                      value={cat.id}
+                      forceMount={cat.id === 'storage' && storageTabVisited()}
+                      class="mt-0 overflow-visible focus-visible:outline-none"
+                    >
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
@@ -415,13 +436,19 @@ export function SettingsPage(props: SettingsPageProps) {
               </div>
             </Show>
 
-            <Show when={!isSearching() && mobileSubPage()}>
-              {(catId) => (
-                <SettingsCategoryContent
-                  categoryId={catId()}
-                  highlightedItemId={highlightedItemId()}
-                />
-              )}
+            <Show when={!isSearching()}>
+              <For each={SETTINGS_CATEGORIES}>
+                {(cat) => (
+                  <Show when={mountedMobileSubPages().has(cat.id)}>
+                    <div class={cn(mobileSubPage() !== cat.id && 'hidden')}>
+                      <SettingsCategoryContent
+                        categoryId={cat.id}
+                        highlightedItemId={highlightedItemId()}
+                      />
+                    </div>
+                  </Show>
+                )}
+              </For>
             </Show>
           </div>
         </div>

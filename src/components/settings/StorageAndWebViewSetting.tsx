@@ -2,7 +2,8 @@
  * 程序数据目录、WebView 数据目录、日志与 WebView 清理
  */
 
-import { createSignal, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, Show } from 'solid-js';
+import { useSettingsPanelLoad } from '@/lib/settings/use-settings-panel-load';
 import { Button } from '@/components/ui/button';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,6 +30,16 @@ import { clearAppDataDirCache } from '@/lib/platform/app-data-dir';
 import { reinitializeDatabaseAfterImport } from '@/lib/database';
 import { showAppToast } from '@/components/shared/AppToasts';
 
+type StorageWebViewSnapshot = {
+  dataDir: string;
+  webviewDir: string;
+  logDir: string;
+  webviewBytes: number;
+  hasDataOverride: boolean;
+  hasWebviewOverride: boolean;
+  migrationBackup: MigrationBackupInfo | null;
+};
+
 export function StorageAndWebViewSetting() {
   const [dataDir, setDataDirDisplay] = createSignal('');
   const [webviewDir, setWebviewDirDisplay] = createSignal('');
@@ -37,40 +48,43 @@ export function StorageAndWebViewSetting() {
   const [hasDataOverride, setHasDataOverride] = createSignal(false);
   const [hasWebviewOverride, setHasWebviewOverride] = createSignal(false);
   const [migrationBackup, setMigrationBackup] = createSignal<MigrationBackupInfo | null>(null);
-  const [loading, setLoading] = createSignal(true);
   const [busy, setBusy] = createSignal(false);
 
-  const refresh = async () => {
-    if (!isDesktopTauri()) return;
-    setLoading(true);
-    try {
-      const [root, webRoot, logs, bytes, config, backup] = await Promise.all([
-        getAppDataDir(),
-        getWebviewDataRoot(),
-        getLogDirectory(),
-        getWebviewStorageStats(),
-        getConfig(),
-        getDataDirMigrationBackup(),
-      ]);
-      setDataDirDisplay(root);
-      setWebviewDirDisplay(webRoot);
-      setLogDir(logs);
-      setWebviewBytes(bytes);
-      setMigrationBackup(backup);
-      setHasDataOverride(config.dataDir != null && String(config.dataDir).trim() !== '');
-      setHasWebviewOverride(
+  const panel = useSettingsPanelLoad('storage-webview', async (): Promise<StorageWebViewSnapshot> => {
+    const [root, webRoot, logs, bytes, config, backup] = await Promise.all([
+      getAppDataDir(),
+      getWebviewDataRoot(),
+      getLogDirectory(),
+      getWebviewStorageStats(),
+      getConfig(),
+      getDataDirMigrationBackup(),
+    ]);
+    return {
+      dataDir: root,
+      webviewDir: webRoot,
+      logDir: logs,
+      webviewBytes: bytes,
+      migrationBackup: backup,
+      hasDataOverride: config.dataDir != null && String(config.dataDir).trim() !== '',
+      hasWebviewOverride:
         config.webviewDataDir != null && String(config.webviewDataDir).trim() !== '',
-      );
-    } catch (e) {
-      console.error('[StorageAndWebViewSetting] refresh', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  onMount(() => {
-    void refresh();
+    };
   });
+
+  createEffect(() => {
+    const snap = panel.data();
+    if (!snap) return;
+    setDataDirDisplay(snap.dataDir);
+    setWebviewDirDisplay(snap.webviewDir);
+    setLogDir(snap.logDir);
+    setWebviewBytes(snap.webviewBytes);
+    setMigrationBackup(snap.migrationBackup);
+    setHasDataOverride(snap.hasDataOverride);
+    setHasWebviewOverride(snap.hasWebviewOverride);
+  });
+
+  const loading = () => panel.loading();
+  const refresh = () => panel.refresh({ silent: true });
 
   const confirmDataDirChange = async (sourcePath: string, targetPath: string) => {
     if (pathsEqualApprox(sourcePath, targetPath)) return true;

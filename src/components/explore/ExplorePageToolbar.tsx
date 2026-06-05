@@ -1,5 +1,5 @@
 /**
- * 探索页操作区：搜索、更多（布局偏好）
+ * 探索页操作区：搜索、刷新列表/分类/整页、更多（布局偏好）
  */
 
 import { Show, createSignal, onMount } from 'solid-js';
@@ -14,12 +14,23 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { SearchIcon, MoreIcon, RefreshIcon, Settings2Icon } from '@/components/shared/icons';
+import {
+  SearchIcon,
+  MoreIcon,
+  RefreshIcon,
+  ListRefreshIcon,
+  FolderRefreshIcon,
+  Settings2Icon,
+} from '@/components/shared/icons';
 
 export interface ExplorePageToolbarProps {
   showRefresh?: boolean;
-  refreshDisabled?: boolean;
-  onRefresh?: () => void;
+  refreshListDisabled?: boolean;
+  onRefreshList?: () => void;
+  refreshCategoriesDisabled?: boolean;
+  onRefreshCategories?: () => void;
+  refreshPageDisabled?: boolean;
+  onRefreshPage?: () => void;
   searchDisabled?: boolean;
   onSearch?: () => void;
 }
@@ -61,13 +72,43 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
             variant="ghost"
             size="icon"
             class="h-9 w-9"
-            disabled={props.refreshDisabled}
-            onClick={() => props.onRefresh?.()}
+            disabled={props.refreshListDisabled}
+            onClick={() => props.onRefreshList?.()}
           >
-            <RefreshIcon class="h-4 w-4" />
-            <span class="sr-only">刷新</span>
+            <ListRefreshIcon class="h-4 w-4" />
+            <span class="sr-only">刷新列表</span>
           </TooltipTrigger>
           <TooltipContent>刷新列表</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9"
+            disabled={props.refreshCategoriesDisabled}
+            onClick={() => props.onRefreshCategories?.()}
+          >
+            <FolderRefreshIcon class="h-4 w-4" />
+            <span class="sr-only">刷新分类</span>
+          </TooltipTrigger>
+          <TooltipContent>刷新分类</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9"
+            disabled={props.refreshPageDisabled}
+            onClick={() => props.onRefreshPage?.()}
+          >
+            <RefreshIcon class="h-4 w-4" />
+            <span class="sr-only">刷新整页</span>
+          </TooltipTrigger>
+          <TooltipContent>刷新整页</TooltipContent>
         </Tooltip>
       </Show>
 

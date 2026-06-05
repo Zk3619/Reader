@@ -29,7 +29,11 @@ import {
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
 import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
-import { mergeBookContentVariable, preferDetailContentSource } from '@/lib/book-source/utils';
+import {
+  dedupeLegadoSourceChapterTitle,
+  mergeBookContentVariable,
+  preferDetailContentSource,
+} from '@/lib/book-source/utils';
 import { getReaderProgressSnapshot } from '@/lib/bookshelf/reading-progress-snapshot';
 import { formatBookshelfBookGroupNames, bookshelfBookCustomGroupIds } from '@/lib/bookshelf/book-source-name';
 import {
@@ -41,7 +45,10 @@ import { collectBookBadgeEntries } from '@/lib/book-source/book-tags';
 import { getBook, hasBook, updateBooksGroupMask } from '@/lib/database/books';
 import { getAllGroups } from '@/lib/database/book-groups';
 import { getBookInfo } from '@/lib/book-source/detail';
-import { fetchChapterListDeduped } from '@/lib/book-source/chapters';
+import {
+  fetchChapterListDeduped,
+  shelfCachedChapterListLooksStale,
+} from '@/lib/book-source/chapters';
 import {
   getBookInfoTocSessionCache,
   setBookInfoTocSessionCache,
@@ -217,6 +224,8 @@ export interface BookInfoPageProps {
   source?: BookSource;
   /** 展示方式：独立全屏页（默认）或嵌入抽屉内容区 */
   presentation?: 'page' | 'drawer';
+  /** 抽屉宿主：为 false 时强制关闭内嵌 Dialog，避免抽屉卸载中断 Portal 清理 */
+  shellActive?: boolean;
   /** 阅读器内打开详情且当前书仍在阅读会话中 */
   continueReading?: boolean;
   onBack: () => void;
@@ -265,6 +274,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [userGroups, setUserGroups] = createSignal<BookGroup[]>([]);
   const [showGroupPick, setShowGroupPick] = createSignal(false);
   const [showTocDialog, setShowTocDialog] = createSignal(false);
+
+  createEffect(() => {
+    if (props.shellActive !== false) return;
+    setShowTocDialog(false);
+    setShowCoverDialog(false);
+    setShowGroupPick(false);
+  });
 
   // 检测主题变化
   onMount(() => {
@@ -320,12 +336,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
     try {
       const inDb = await getDbChapterList(book.bookUrl);
-      if (inDb.length > 0) {
+      if (inDb.length > 0 && !shelfCachedChapterListLooksStale(inDb, book)) {
         commitPreloadedChapters(book, inDb);
         return;
       }
+      if (inDb.length > 0) {
+        console.log('[BookInfo] 本地目录不完整，重新拉取', {
+          cached: inDb.length,
+          expected: shelfBook()?.totalChapterNum ?? 0,
+        });
+      }
       setTocLoading(true);
       const list = await fetchChapterListDeduped(source, tocUrl, {
+        bookUrl: book.bookUrl,
+        bookVariable: book.variable,
         onPartial: async (partial) => {
           if (partial.chapters.length > 0) {
             commitPreloadedChapters(book, partial.chapters);
@@ -457,7 +481,12 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
     if (isOnlineSearchBook(props.book) && !preloadedChapters()?.length) {
       const inDb = await getDbChapterList(props.book.bookUrl);
-      if (inDb.length > 0) {
+      const savedShelfBook = shelfBook();
+      const bookForStaleCheck = savedShelfBook ?? props.book;
+      if (
+        inDb.length > 0 &&
+        !shelfCachedChapterListLooksStale(inDb, bookForStaleCheck)
+      ) {
         commitPreloadedChapters(props.book, inDb);
       }
     }
@@ -472,10 +501,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
     });
 
     await loadBookInfo();
-    const source = bookSource();
-    if (source && !preloadedChapters()?.length) {
-      void preloadChapterList(currentBook(), source);
-    }
   });
 
   function shelfAddOptions(chapters?: BookChapter[]) {
@@ -642,11 +667,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const tocRowText = () => {
     const chapters = preloadedChapters();
     const sb = shelfBook();
-    const prefix = currentBook().source || originDisplayName();
+    const durTitle = sb?.durChapterTitle?.trim();
+    if (durTitle) return dedupeLegadoSourceChapterTitle(durTitle);
     if (chapters && chapters.length > 0) {
       const idx = sb?.durChapterIndex ?? 0;
       const ch = chapters[Math.min(Math.max(idx, 0), chapters.length - 1)];
-      return `${prefix}:${ch?.title || '第1章'}`;
+      const title = ch?.title?.trim();
+      if (title) return dedupeLegadoSourceChapterTitle(title);
+      return '第1章';
     }
     if (tocLoading()) {
       return '加载中…';
@@ -852,7 +880,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         {/* 最新章节 — 使用 isMeaningful 过滤 " • " 等无效值 */}
         <Show when={isMeaningful(currentBook().latestChapterTitle)}>
           <InfoRow icon={ChapterMetaIcon} label="最新：">
-            {currentBook().latestChapterTitle}
+            {dedupeLegadoSourceChapterTitle(currentBook().latestChapterTitle!)}
           </InfoRow>
         </Show>
         {/* 更新时间 */}
@@ -1223,6 +1251,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       <BookInfoChapterListDialog
         open={showTocDialog()}
         onOpenChange={setShowTocDialog}
+        inDrawer={!isPagePresentation()}
         bookName={currentBook().name}
         bookUrl={currentBook().bookUrl}
         showChapterCacheHint={showChapterCacheHint()}

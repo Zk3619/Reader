@@ -11,7 +11,11 @@ import {
   readCachedChapterRaw,
   deleteCachedChapter,
 } from '@/lib/chapter-cache/storage';
-import { fetchChapterListDeduped, toNewBookChapter } from '@/lib/book-source/chapters';
+import {
+  fetchChapterListDeduped,
+  shelfCachedChapterListLooksStale,
+  toNewBookChapter,
+} from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
 import { MediaKind } from '@/lib/book-source/book-type';
 import {
@@ -163,10 +167,13 @@ export async function openMediaBookWithKind(
 
   let catalogToUse = options?.initialCatalog?.length ? options.initialCatalog : [];
   if (!catalogToUse.length && !guestReading) {
-    catalogToUse = await chaptersDb.getChapterList(book.bookUrl);
+    const inDb = await chaptersDb.getChapterList(book.bookUrl);
     if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
       setState({ loading: false });
       return;
+    }
+    if (inDb.length > 0 && !shelfCachedChapterListLooksStale(inDb, book)) {
+      catalogToUse = inDb;
     }
   }
 
@@ -176,6 +183,7 @@ export async function openMediaBookWithKind(
   if (catalogToUse.length === 0 && source && book.tocUrl) {
     const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
       reverseToc,
+      bookUrl: book.bookUrl,
       bookVariable: book.variable,
       onPartial: async (partial) => {
         if (partial.chapters.length === 0) return;

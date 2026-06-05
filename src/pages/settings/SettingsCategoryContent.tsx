@@ -85,11 +85,27 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
         <SettingItemAnchor id="viewer-chrome" highlighted={highlight('viewer-chrome')}>
           <ViewerChromeLayoutSetting />
         </SettingItemAnchor>
+
+        <SettingItemAnchor id="book-info-presentation" highlighted={highlight('book-info-presentation')}>
+          <BookInfoPresentationSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="source-explore-drawer" highlighted={highlight('source-explore-drawer')}>
+          <SourceExploreDrawerLayoutSetting />
+        </SettingItemAnchor>
       </Show>
 
       <Show when={props.categoryId === 'reading'}>
-        <SettingItemAnchor id="book-info-presentation" highlighted={highlight('book-info-presentation')}>
-          <BookInfoPresentationSetting />
+        <SettingItemAnchor id="replace-rules" highlighted={highlight('replace-rules')}>
+          <div class="rounded-2xl border border-border/50 bg-card p-6">
+            <div class="mb-4">
+              <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
+              <p class="text-sm text-muted-foreground">
+                管理正文替换规则，阅读器内可开关「应用替换」
+              </p>
+            </div>
+            <ReplaceRulesPage />
+          </div>
         </SettingItemAnchor>
 
         <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
@@ -102,10 +118,6 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       </Show>
 
       <Show when={props.categoryId === 'sources'}>
-        <SettingItemAnchor id="source-explore-drawer" highlighted={highlight('source-explore-drawer')}>
-          <SourceExploreDrawerLayoutSetting />
-        </SettingItemAnchor>
-
         <SettingItemAnchor id="source-blocklist" highlighted={highlight('source-blocklist')}>
           <SourceBlocklistSetting />
         </SettingItemAnchor>
@@ -126,20 +138,6 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
 
         <SettingItemAnchor id="chapter-cache" highlighted={highlight('chapter-cache')}>
           <ChapterCacheSetting />
-        </SettingItemAnchor>
-      </Show>
-
-      <Show when={props.categoryId === 'data'}>
-        <SettingItemAnchor id="replace-rules" highlighted={highlight('replace-rules')}>
-          <div class="rounded-2xl border border-border/50 bg-card p-6">
-            <div class="mb-4">
-              <h3 class="mb-2 font-semibold text-foreground">替换规则</h3>
-              <p class="text-sm text-muted-foreground">
-                管理正文替换规则，阅读器内可开关「应用替换」
-              </p>
-            </div>
-            <ReplaceRulesPage />
-          </div>
         </SettingItemAnchor>
 
         <SettingItemAnchor id="database-backup" highlighted={highlight('database-backup')}>

@@ -2,7 +2,8 @@
  * 设置页：章节正文缓存占用与清理、预取选项
  */
 
-import { createSignal, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, Show } from 'solid-js';
+import { useSettingsPanelLoad } from '@/lib/settings/use-settings-panel-load';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import {
@@ -15,6 +16,16 @@ import {
 } from '@/lib/chapter-cache';
 import { showAppToast } from '@/components/shared/AppToasts';
 
+type ChapterCacheSnapshot = {
+  chapterCount: number;
+  totalBytes: number;
+  prefetchEnabled: boolean;
+  prefetchCount: number;
+  preDownloadNum: number;
+  maxBytesMb: number;
+  retentionDays: number;
+};
+
 export function ChapterCacheSetting() {
   const [chapterCount, setChapterCount] = createSignal(0);
   const [totalBytes, setTotalBytes] = createSignal(0);
@@ -23,31 +34,38 @@ export function ChapterCacheSetting() {
   const [preDownloadNum, setPreDownloadNum] = createSignal(0);
   const [maxBytesMb, setMaxBytesMb] = createSignal(0);
   const [retentionDays, setRetentionDays] = createSignal(0);
-  const [loading, setLoading] = createSignal(true);
   const [clearing, setClearing] = createSignal(false);
 
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const [stats, settings] = await Promise.all([
-        getChapterCacheStats(),
-        getChapterCacheSettings(),
-      ]);
-      setChapterCount(stats.chapterCount);
-      setTotalBytes(stats.estimatedBytes);
-      setPrefetchEnabled(settings.prefetchEnabled);
-      setPrefetchCount(settings.prefetchCount);
-      setPreDownloadNum(settings.preDownloadNum);
-      setMaxBytesMb(settings.maxBytesMb);
-      setRetentionDays(settings.retentionDays);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  onMount(() => {
-    void refresh();
+  const panel = useSettingsPanelLoad('chapter-cache', async (): Promise<ChapterCacheSnapshot> => {
+    const [stats, settings] = await Promise.all([
+      getChapterCacheStats(),
+      getChapterCacheSettings(),
+    ]);
+    return {
+      chapterCount: stats.chapterCount,
+      totalBytes: stats.estimatedBytes,
+      prefetchEnabled: settings.prefetchEnabled,
+      prefetchCount: settings.prefetchCount,
+      preDownloadNum: settings.preDownloadNum,
+      maxBytesMb: settings.maxBytesMb,
+      retentionDays: settings.retentionDays,
+    };
   });
+
+  createEffect(() => {
+    const snap = panel.data();
+    if (!snap) return;
+    setChapterCount(snap.chapterCount);
+    setTotalBytes(snap.totalBytes);
+    setPrefetchEnabled(snap.prefetchEnabled);
+    setPrefetchCount(snap.prefetchCount);
+    setPreDownloadNum(snap.preDownloadNum);
+    setMaxBytesMb(snap.maxBytesMb);
+    setRetentionDays(snap.retentionDays);
+  });
+
+  const loading = () => panel.loading();
+  const refresh = () => panel.refresh({ silent: true });
 
   const persistSettings = async (patch: {
     prefetchEnabled?: boolean;

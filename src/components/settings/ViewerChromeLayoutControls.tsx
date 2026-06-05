@@ -2,6 +2,10 @@ import { For } from 'solid-js';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
+  settingsOptionTabsListClass,
+  settingsOptionTabsTriggerClass,
+} from '@/lib/settings/settings-tab-styles';
+import {
   VIEWER_CHROME_LAYOUT_HINTS,
   VIEWER_CHROME_LAYOUT_LABELS,
   type ViewerChromeLayout,
@@ -30,19 +34,10 @@ export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProp
         }
         class="w-full sm:w-auto"
       >
-        <TabsList
-          class={cn(
-            'flex h-auto w-full gap-1 rounded-lg border border-input bg-muted p-1.5',
-            'sm:w-auto',
-          )}
-          aria-label="顶栏与底栏布局"
-        >
+        <TabsList class={settingsOptionTabsListClass} aria-label="顶栏与底栏布局">
           <For each={LAYOUT_OPTIONS}>
             {(value) => (
-              <TabsTrigger
-                value={value}
-                class="h-8 min-w-18 flex-1 shadow-none data-selected:ring-1 data-selected:ring-primary/30 sm:flex-none"
-              >
+              <TabsTrigger value={value} class={settingsOptionTabsTriggerClass}>
                 {VIEWER_CHROME_LAYOUT_LABELS[value]}
               </TabsTrigger>
             )}

@@ -2,7 +2,8 @@
  * 设置页：封面磁盘/IndexedDB 缓存占用、目录与清除
  */
 
-import { createSignal, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, Show } from 'solid-js';
+import { useSettingsPanelLoad } from '@/lib/settings/use-settings-panel-load';
 import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { Button } from '@/components/ui/button';
@@ -20,45 +21,59 @@ import { isTauri } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 import { showAppToast } from '@/components/shared/AppToasts';
 
+type CoverCacheSnapshot = {
+  count: number;
+  totalBytes: number;
+  cacheDir: string;
+  maxBytesMb: number;
+  retentionDays: number;
+};
+
 export function CoverCacheSetting() {
   const [count, setCount] = createSignal(0);
   const [totalBytes, setTotalBytes] = createSignal(0);
   const [cacheDir, setCacheDir] = createSignal('');
-  const [loading, setLoading] = createSignal(true);
   const [clearing, setClearing] = createSignal(false);
   const [pickingDir, setPickingDir] = createSignal(false);
   const [maxBytesMb, setMaxBytesMb] = createSignal(300);
   const [retentionDays, setRetentionDays] = createSignal(0);
 
+  const panel = useSettingsPanelLoad('cover-cache', async (): Promise<CoverCacheSnapshot> => {
+    const [stats, settings] = await Promise.all([
+      getCoverCacheStats(),
+      getCoverCacheSettings(),
+    ]);
+    return {
+      count: stats.count,
+      totalBytes: stats.totalBytes,
+      maxBytesMb: settings.maxBytesMb,
+      retentionDays: settings.retentionDays,
+      cacheDir: isTauri() ? await getCoverCacheDirectory() : '',
+    };
+  });
+
+  createEffect(() => {
+    const snap = panel.data();
+    if (!snap) return;
+    setCount(snap.count);
+    setTotalBytes(snap.totalBytes);
+    setMaxBytesMb(snap.maxBytesMb);
+    setRetentionDays(snap.retentionDays);
+    setCacheDir(snap.cacheDir);
+  });
+
+  const loading = () => panel.loading();
   const refreshStats = async () => {
-    setLoading(true);
     try {
-      const [stats, settings] = await Promise.all([
-        getCoverCacheStats(),
-        getCoverCacheSettings(),
-      ]);
-      setCount(stats.count);
-      setTotalBytes(stats.totalBytes);
-      setMaxBytesMb(settings.maxBytesMb);
-      setRetentionDays(settings.retentionDays);
-      if (isTauri()) {
-        setCacheDir(await getCoverCacheDirectory());
-      }
+      await panel.refresh({ silent: true });
     } catch (e) {
-      console.error('[CoverCacheSetting] refreshStats', e);
       showAppToast({
         title: '读取封面缓存统计失败',
         description: String(e),
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
   };
-
-  onMount(() => {
-    void refreshStats();
-  });
 
   const handleClear = async () => {
     setClearing(true);

@@ -5,7 +5,11 @@ import {
   VirtualChapterList,
 } from '@/components/books/VirtualChapterList';
 import { Button } from '@/components/ui/button';
-import { buildChapterRowMetas, CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
+import {
+  buildChapterRowMetas,
+  CATALOG_ROW_HEIGHT_PX,
+  formatTocChapterDisplayTitle,
+} from '@/lib/catalog/chapter-list-layout';
 import { cn } from '@/lib/utils';
 
 export interface MediaViewerCatalogProps {
@@ -96,7 +100,9 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
               )}
               onClick={() => props.onSelectChapter(index)}
             >
-              <span class="min-w-0 flex-1 truncate">{chapter.title}</span>
+              <span class="min-w-0 flex-1 truncate">
+                {formatTocChapterDisplayTitle(chapter.title, index)}
+              </span>
             </Button>
           </div>
         );

@@ -33,6 +33,10 @@ export const APP_OVERLAY_VIEWER_Z = 'z-[110]';
 export const APP_BOOK_INFO_DRAWER_OVERLAY_Z = 'z-[115]';
 export const APP_BOOK_INFO_DRAWER_Z = 'z-[120]';
 
+/** 书籍详情抽屉内打开的 Dialog（须高于 APP_BOOK_INFO_DRAWER_Z） */
+export const APP_BOOK_INFO_DIALOG_OVERLAY_Z = 'z-[125]';
+export const APP_BOOK_INFO_DIALOG_Z = 'z-[126]';
+
 /** 阅读器全屏点击区域配置遮罩（九宫格，叠在阅读器壳层内部） */
 export const APP_READER_CLICK_REGIONAL_OVERLAY_Z = 'z-50';
 

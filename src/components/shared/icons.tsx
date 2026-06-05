@@ -36,6 +36,7 @@ import {
   Film,
   Folder,
   FolderPlus,
+  FolderSync,
   FolderTree,
   Globe,
   GripVertical,
@@ -48,6 +49,7 @@ import {
   Link,
   List,
   ListFilter,
+  ListRestart,
   LoaderCircle,
   Minus,
   Monitor,
@@ -116,6 +118,8 @@ export const SearchIcon = icon(Search);
 export const FilterIcon = icon(ListFilter);
 export const MoreIcon = icon(Ellipsis);
 export const RefreshIcon = icon(RefreshCw);
+export const ListRefreshIcon = icon(ListRestart);
+export const FolderRefreshIcon = icon(FolderSync);
 export const FolderPlusIcon = icon(FolderPlus);
 export const PlusIcon = icon(Plus);
 export const GlobeIcon = icon(Globe);

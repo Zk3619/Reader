@@ -147,6 +147,7 @@ import {
   shouldSuppressLoginDialogDismiss,
   READER_BOOKSOURCE_IMPORT_NETWORK_EVENT,
   isInnerWebSessionActive,
+  cancelInnerWebClose,
   type InnerWebPayload,
 } from "@/lib/platform/inner-web";
 import {
@@ -934,13 +935,23 @@ function AppContent() {
     return nav.bookInfoCanContinueReading();
   };
 
-  function closeBookInfo() {
+  let pendingAfterBookInfoDrawerDismiss: (() => void) | null = null;
+
+  function finalizeBookInfoDrawerDismiss() {
     setBookInfoDrawerOpen(false);
     setBookInfoDrawer(null);
     const top = nav.top();
     if (top?.kind === "book-info") {
       nav.pop();
     }
+    const pending = pendingAfterBookInfoDrawerDismiss;
+    pendingAfterBookInfoDrawerDismiss = null;
+    pending?.();
+  }
+
+  function closeBookInfo() {
+    pendingAfterBookInfoDrawerDismiss = null;
+    setBookInfoDrawerOpen(false);
   }
 
   function openBookInfo(params: {
@@ -972,10 +983,9 @@ function AppContent() {
     source?: BookSource,
   ) {
     if (bookInfoUsesDrawer()) {
+      pendingAfterBookInfoDrawerDismiss = () =>
+        openReaderPage(book, catalog, source);
       setBookInfoDrawerOpen(false);
-      setBookInfoDrawer(null);
-      // 等抽屉叠层卸载后再 push 阅读器，避免 z-[115] 遮罩挡住顶栏返回键
-      queueMicrotask(() => openReaderPage(book, catalog, source));
       return;
     }
     if (nav.top()?.kind === "book-info") {
@@ -1979,6 +1989,9 @@ function AppContent() {
       const detail = (ev as CustomEvent<{ url?: string }>).detail;
       const u = detail?.url?.trim();
       if (!u?.startsWith("http")) return;
+      if (isInnerWebSessionActive()) {
+        cancelInnerWebClose();
+      }
       void identifySourcesFromNetwork(u);
     };
     window.addEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
@@ -3091,7 +3104,7 @@ function AppContent() {
               <BookInfoDrawer
                 open={bookInfoDrawerOpen()}
                 onOpenChange={(open) => {
-                  if (!open) closeBookInfo();
+                  if (!open) finalizeBookInfoDrawerDismiss();
                   else setBookInfoDrawerOpen(true);
                 }}
                 book={book}

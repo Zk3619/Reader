@@ -492,6 +492,11 @@
   scrollbar-gutter: stable both-edges;
 }
 
+/* 设置页分类 Tab：forceMount 时隐藏未选中面板，避免重复挂载触发数据请求 */
+.settings-page-tabs [role='tabpanel']:not([data-selected]) {
+  display: none;
+}
+
 /* 主壳 Tab 滚动区：触摸端无底栏时末尾留白（见 @media coarse 内同名规则） */
 
 /* 设置页：搜索跳转后的卡片高亮（内嵌描边 + 柔光阴影） */

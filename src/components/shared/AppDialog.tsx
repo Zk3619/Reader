@@ -8,17 +8,19 @@ import { Show, on, splitProps } from 'solid-js';
 import type { PolymorphicProps } from '@kobalte/core/polymorphic';
 import * as DialogPrimitive from '@kobalte/core/dialog';
 
-import { Dialog, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogFooter,
+  DialogOverlay,
+  DialogTitle,
+  DialogDescription,
+  dialogContentMotionClass,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import {
-  appDialogContentMotionClass,
-  appDialogOverlayMotionClass,
-} from '@/lib/ui/dialog-motion';
 import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
-import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
 import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
@@ -54,23 +56,6 @@ const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
         {local.children}
       </div>
     </DialogPrimitive.Portal>
-  );
-};
-
-const AppDialogOverlay: Component<{ class?: string; overlayZClass?: string }> = (props) => {
-  const [local] = splitProps(props, ['class', 'overlayZClass']);
-  return (
-    <DialogPrimitive.Overlay
-      data-app-overlay-backdrop=""
-      class={cn(
-        'fixed inset-0',
-        APP_OVERLAY_BACKDROP_CLASS,
-        local.overlayZClass,
-        appDialogOverlayMotionClass,
-        appBlockDrag,
-        local.class,
-      )}
-    />
   );
 };
 
@@ -162,7 +147,10 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
   const overlayZ = () => overlayCls() ?? zOverride() ?? layer.dialogOverlay;
   return (
     <AppDialogPortal wrapperClass={portalZ()} portalToBody={portalToBody()}>
-      <AppDialogOverlay overlayZClass={overlayZ()} class={overlayCls()} />
+      <DialogOverlay
+        data-app-overlay-backdrop=""
+        class={cn(overlayZ(), appBlockDrag, overlayCls())}
+      />
       <DialogPrimitive.Content
         data-app-overlay-surface=""
         {...(rest as DialogPrimitive.DialogContentProps<'div'>)}
@@ -184,7 +172,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
         }}
         class={cn(
           APP_DIALOG_CONTENT_LAYOUT_CLASS,
-          appDialogContentMotionClass,
+          dialogContentMotionClass,
           appBlockDrag,
           zOverride() ?? contentZ(),
           layout() === 'app' && `${dialogViewportLimits} flex flex-col overflow-hidden p-0`,

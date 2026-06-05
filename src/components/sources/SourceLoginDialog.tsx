@@ -4,7 +4,7 @@
  * 仅 http(s) 且无 loginUi 时由 App 直接 openSourceSettingsInApp，不进入本弹窗。
  */
 
-import { createSignal, createMemo, createEffect, Show, For } from 'solid-js';
+import { createSignal, createMemo, createEffect, Show, For, onCleanup, onMount } from 'solid-js';
 import {
   AppDialog,
   AppDialogContent,
@@ -333,18 +333,33 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
     }
   };
 
+  const [innerWebActive, setInnerWebActive] = createSignal(isInnerWebSessionActive());
+  onMount(() => {
+    const sync = () => setInnerWebActive(isInnerWebSessionActive());
+    sync();
+    const mo = new MutationObserver(sync);
+    mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    onCleanup(() => mo.disconnect());
+  });
+
   const blockDialogDismissWhileInnerWeb = (e: { preventDefault: () => void }) => {
     if (shouldSuppressLoginDialogDismiss() || isInnerWebSessionActive()) {
       e.preventDefault();
     }
   };
 
+  /** 内嵌页打开时禁止 onFocusOutside 抢焦点，否则会与 Kobalte focus trap 死循环 */
+  const blockDialogFocusOutsideWhileInnerWeb = (e: { preventDefault: () => void }) => {
+    if (innerWebActive()) return;
+    blockDialogDismissWhileInnerWeb(e);
+  };
+
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal={!innerWebActive()}>
       <AppDialogContent
         onPointerDownOutside={blockDialogDismissWhileInnerWeb}
         onInteractOutside={blockDialogDismissWhileInnerWeb}
-        onFocusOutside={blockDialogDismissWhileInnerWeb}
+        onFocusOutside={blockDialogFocusOutsideWhileInnerWeb}
       >
         <AppDialogHeader>
           <AppDialogTitle>

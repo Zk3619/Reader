@@ -15,6 +15,7 @@ import {
   Settings2Icon,
 } from '@/components/shared/icons';
 import { Gauge, ImageUp, Maximize, Minimize, Settings } from 'lucide-solid';
+import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
@@ -194,6 +195,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
           <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
         </Show>
         <div class="flex items-center gap-2 no-drag">
+          <ThemeSwitch withTooltip />
           <WindowControlButtons />
         </div>
       </div>

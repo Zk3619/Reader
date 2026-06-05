@@ -9,8 +9,11 @@ import {
   type ShellLayoutPreference,
 } from '@/lib/shell/layout';
 import { isMobile } from '@/lib/platform/detect';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  settingsOptionTabsListClass,
+  settingsOptionTabsTriggerClass,
+} from '@/lib/settings/settings-tab-styles';
 import { settingsState, settingsStore } from '@/stores/settings';
 
 const SHELL_LAYOUT_OPTIONS: { value: ShellLayoutPreference; label: string }[] = [
@@ -58,35 +61,21 @@ export function ShellLayoutSetting() {
               <p class="text-sm text-primary">{autoEffectiveHint()}</p>
             </Show>
           </div>
-          <div
-            class="flex w-full shrink-0 gap-2 rounded-lg border border-input bg-muted p-1.5 sm:w-auto"
-            role="radiogroup"
-            aria-label="导航布局"
+          <Tabs
+            value={layout()}
+            onChange={(value) => void settingsStore.setShellLayout(value as ShellLayoutPreference)}
+            class="w-full shrink-0 sm:w-auto"
           >
-            <For each={SHELL_LAYOUT_OPTIONS}>
-              {(opt) => {
-                const selected = () => layout() === opt.value;
-                return (
-                  <Button
-                    type="button"
-                    role="radio"
-                    aria-checked={selected()}
-                    variant={selected() ? 'default' : 'ghost'}
-                    size="sm"
-                    class={cn(
-                      'min-w-18 h-8 flex-1 shadow-none transition-colors sm:flex-none',
-                      selected()
-                        ? 'ring-1 ring-primary/30 hover:bg-primary/90'
-                        : 'text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm',
-                    )}
-                    onClick={() => void settingsStore.setShellLayout(opt.value)}
-                  >
+            <TabsList class={settingsOptionTabsListClass} aria-label="导航布局">
+              <For each={SHELL_LAYOUT_OPTIONS}>
+                {(opt) => (
+                  <TabsTrigger value={opt.value} class={settingsOptionTabsTriggerClass}>
                     {opt.label}
-                  </Button>
-                );
-              }}
-            </For>
-          </div>
+                  </TabsTrigger>
+                )}
+              </For>
+            </TabsList>
+          </Tabs>
         </div>
       </div>
     </Show>

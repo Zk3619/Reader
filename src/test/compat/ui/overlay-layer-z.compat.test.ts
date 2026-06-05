@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APP_BOOK_INFO_DIALOG_OVERLAY_Z,
+  APP_BOOK_INFO_DIALOG_Z,
+  APP_BOOK_INFO_DRAWER_Z,
   APP_DIALOG_Z,
   APP_OVERLAY_LAYER_Z,
   APP_OVERLAY_VIEWER_Z,
@@ -31,5 +34,10 @@ describe('overlay layer z-index bands', () => {
   it('app layer keeps dialog content below viewer shell (viewer uses media layer)', () => {
     expect(zNum(APP_OVERLAY_LAYER_Z.dialogOverlay)).toBe(zNum(APP_DIALOG_Z));
     expect(zNum(APP_OVERLAY_LAYER_Z.dialog)).toBeLessThan(zNum(APP_OVERLAY_VIEWER_Z));
+  });
+
+  it('book info drawer dialogs sit above the drawer content', () => {
+    expect(zNum(APP_BOOK_INFO_DIALOG_OVERLAY_Z)).toBeGreaterThan(zNum(APP_BOOK_INFO_DRAWER_Z));
+    expect(zNum(APP_BOOK_INFO_DIALOG_Z)).toBeGreaterThan(zNum(APP_BOOK_INFO_DIALOG_OVERLAY_Z));
   });
 });

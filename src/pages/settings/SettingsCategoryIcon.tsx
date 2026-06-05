@@ -3,7 +3,6 @@ import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import {
   BookOpenIcon,
   BookSourceIcon,
-  FolderTreeIcon,
   LayoutIcon,
   SettingsIcon,
   GroupLocalIcon,
@@ -28,9 +27,6 @@ export function SettingsCategoryIcon(props: SettingsCategoryIconProps) {
       </Match>
       <Match when={props.categoryId === 'storage'}>
         <GroupLocalIcon class={props.class} size={20} />
-      </Match>
-      <Match when={props.categoryId === 'data'}>
-        <FolderTreeIcon class={props.class} size={20} />
       </Match>
       <Match when={props.categoryId === 'other'}>
         <SettingsIcon class={props.class} size={20} />

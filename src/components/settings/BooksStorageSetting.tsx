@@ -2,7 +2,8 @@
  * 设置页：本地书籍库根目录（与首次导入弹窗、StorageRef 托管一致）
  */
 
-import { createSignal, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, Show } from 'solid-js';
+import { useSettingsPanelLoad } from '@/lib/settings/use-settings-panel-load';
 import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { FsUnsupportedError, isUserCancelled } from '@/lib/platform/fs/errors';
 import {
@@ -21,45 +22,48 @@ import { settingsStore } from '@/stores/settings';
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
 
+type BooksStorageSnapshot = {
+  displayPath: string;
+  storageRefLabel: string;
+};
+
 export function BooksStorageSetting() {
   const [displayPath, setDisplayPath] = createSignal('');
   const [storageRefLabel, setStorageRefLabel] = createSignal('');
-  const [loading, setLoading] = createSignal(true);
   const [picking, setPicking] = createSignal(false);
 
-  const refreshDisplay = async () => {
-    setLoading(true);
-    try {
-      const app = settingsStore.state.app;
-      const formatted = app.booksStorageRoot?.trim();
-      if (formatted) {
-        setStorageRefLabel(formatted);
-        const ref = parseStorageRef(formatted);
-        if (ref.kind === 'path') {
-          setDisplayPath(ref.value);
-        } else if (ref.kind === 'opfs') {
-          setDisplayPath('浏览器内置存储 (OPFS)');
-        } else if (ref.kind === 'saf-tree') {
-          setDisplayPath(safTreeHumanLabel(ref.value));
-        } else {
-          setDisplayPath(refDisplayLabel(ref));
-        }
+  const panel = useSettingsPanelLoad('books-storage', async (): Promise<BooksStorageSnapshot> => {
+    const app = settingsStore.state.app;
+    const formatted = app.booksStorageRoot?.trim();
+    if (formatted) {
+      const ref = parseStorageRef(formatted);
+      let path: string;
+      if (ref.kind === 'path') {
+        path = ref.value;
+      } else if (ref.kind === 'opfs') {
+        path = '浏览器内置存储 (OPFS)';
+      } else if (ref.kind === 'saf-tree') {
+        path = safTreeHumanLabel(ref.value);
       } else {
-        setStorageRefLabel('');
-        setDisplayPath(await resolveBooksDirectoryPath());
+        path = refDisplayLabel(ref);
       }
-    } catch (e) {
-      console.error('[BooksStorageSetting] refreshDisplay', e);
-      setDisplayPath('');
-      setStorageRefLabel('');
-    } finally {
-      setLoading(false);
+      return { storageRefLabel: formatted, displayPath: path };
     }
-  };
-
-  onMount(() => {
-    void refreshDisplay();
+    return {
+      storageRefLabel: '',
+      displayPath: await resolveBooksDirectoryPath(),
+    };
   });
+
+  createEffect(() => {
+    const snap = panel.data();
+    if (!snap) return;
+    setDisplayPath(snap.displayPath);
+    setStorageRefLabel(snap.storageRefLabel);
+  });
+
+  const loading = () => panel.loading();
+  const refreshDisplay = () => panel.refresh({ silent: true });
 
   const handlePickDirectory = async () => {
     setPicking(true);

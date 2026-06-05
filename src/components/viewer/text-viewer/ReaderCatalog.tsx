@@ -13,7 +13,11 @@ import {
   VirtualChapterList,
 } from '@/components/books/VirtualChapterList';
 import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-indices';
-import { buildChapterRowMetas, CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
+import {
+  buildChapterRowMetas,
+  CATALOG_ROW_HEIGHT_PX,
+  formatTocChapterDisplayTitle,
+} from '@/lib/catalog/chapter-list-layout';
 import { isLocalBook } from '@/lib/local-book';
 import { cn } from '@/lib/utils';
 
@@ -116,7 +120,9 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
                 onClick={() => props.onSelectChapter(index)}
               >
                 <span class="flex w-full min-w-0 items-center gap-2">
-                  <span class="min-w-0 flex-1 truncate">{chapter.title}</span>
+                  <span class="min-w-0 flex-1 truncate">
+                    {formatTocChapterDisplayTitle(chapter.title, index)}
+                  </span>
                   <ChapterCacheCloudIcon
                     enabled={showCacheHint()}
                     cached={isChapterCached(index)}
@@ -145,7 +151,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
             >
               <span class="flex w-full min-w-0 items-center gap-2">
                 <span class="min-w-0 flex-1 truncate">
-                  {chapter.title || `第 ${index + 1} 章`}
+                  {formatTocChapterDisplayTitle(chapter.title, index)}
                 </span>
                 <ChapterCacheCloudIcon
                   enabled={showCacheHint()}

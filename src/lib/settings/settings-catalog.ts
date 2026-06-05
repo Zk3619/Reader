@@ -5,7 +5,6 @@ export type SettingsCategoryId =
   | 'reading'
   | 'sources'
   | 'storage'
-  | 'data'
   | 'other';
 
 export interface SettingsCategoryDef {
@@ -26,27 +25,22 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
     id: 'appearance',
     label: '外观与主题',
-    description: '主题、导航布局、动效与阅读器界面样式',
+    description: '主题、布局、书籍详情与发现抽屉等界面样式',
   },
   {
     id: 'reading',
     label: '阅读体验',
-    description: '书籍详情、目录安全、内嵌网页等阅读相关选项',
+    description: '替换规则、目录安全、内嵌网页等阅读相关选项',
   },
   {
     id: 'sources',
     label: '书源与发现',
-    description: '书源页发现抽屉与导入黑名单',
+    description: '书源导入黑名单',
   },
   {
     id: 'storage',
     label: '存储与缓存',
-    description: '数据目录、本地书库、封面与章节缓存',
-  },
-  {
-    id: 'data',
-    label: '数据管理',
-    description: '替换规则与数据库备份恢复',
+    description: '数据目录、本地书库、缓存与数据库备份',
   },
   {
     id: 'other',
@@ -86,10 +80,24 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
   },
   {
     id: 'book-info-presentation',
-    categoryId: 'reading',
+    categoryId: 'appearance',
     title: '书籍详情展示',
     description: '独立页面或右侧抽屉打开书籍详情',
     keywords: ['书籍详情', '详情', '抽屉', '独立页面'],
+  },
+  {
+    id: 'source-explore-drawer',
+    categoryId: 'appearance',
+    title: '发现抽屉布局',
+    description: '书源页发现分类排列方式',
+    keywords: ['发现', '抽屉', '书源页', '分类', '布局'],
+  },
+  {
+    id: 'replace-rules',
+    categoryId: 'reading',
+    title: '替换规则',
+    description: '正文替换规则管理',
+    keywords: ['替换规则', '替换', '正文', '规则'],
   },
   {
     id: 'toc-pagination-safety',
@@ -104,13 +112,6 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     title: '内嵌网页承载方式',
     description: '原生 WebView 或 iframe',
     keywords: ['内嵌网页', 'webview', 'iframe', '网页', '登录'],
-  },
-  {
-    id: 'source-explore-drawer',
-    categoryId: 'sources',
-    title: '发现抽屉布局',
-    description: '书源页发现分类排列方式',
-    keywords: ['发现', '抽屉', '书源页', '分类', '布局'],
   },
   {
     id: 'source-blocklist',
@@ -148,15 +149,8 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['章节', '缓存', '预取', '正文', '清理'],
   },
   {
-    id: 'replace-rules',
-    categoryId: 'data',
-    title: '替换规则',
-    description: '正文替换规则管理',
-    keywords: ['替换规则', '替换', '正文', '规则'],
-  },
-  {
     id: 'database-backup',
-    categoryId: 'data',
+    categoryId: 'storage',
     title: '数据备份',
     description: '导出或恢复数据库备份',
     keywords: ['备份', '恢复', '数据库', '导出', '导入'],

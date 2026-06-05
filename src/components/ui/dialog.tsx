@@ -7,6 +7,14 @@ import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import { cn } from "@/lib/utils"
 import { XIcon } from "@/components/shared/icons"
 
+/** 遮罩：淡入淡出（AppDialog 等封装层复用） */
+export const dialogOverlayClass =
+  "fixed inset-0 z-50 bg-background/80 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0"
+
+/** 内容区进出场动画（AppDialog 等封装层复用） */
+export const dialogContentMotionClass =
+  "duration-200 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-closed:slide-out-to-left-1/2 data-closed:slide-out-to-top-[48%] data-expanded:slide-in-from-left-1/2 data-expanded:slide-in-from-top-[48%]"
+
 const Dialog = DialogPrimitive.Root
 const DialogTrigger = DialogPrimitive.Trigger
 
@@ -32,10 +40,7 @@ const DialogOverlay = <T extends ValidComponent = "div">(
   const [, rest] = splitProps(props as DialogOverlayProps, ["class"])
   return (
     <DialogPrimitive.Overlay
-      class={cn(
-        "fixed inset-0 z-50 bg-background/80 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0",
-        props.class
-      )}
+      class={cn(dialogOverlayClass, props.class)}
       {...rest}
     />
   )
@@ -62,7 +67,8 @@ const DialogContent = <T extends ValidComponent = "div">(
       <DialogOverlay class={cn(portalZ(), overlayCls())} />
       <DialogPrimitive.Content
         class={cn(
-          "fixed left-1/2 top-1/2 z-50 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg duration-200 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-closed:slide-out-to-left-1/2 data-closed:slide-out-to-top-[48%] data-expanded:slide-in-from-left-1/2 data-expanded:slide-in-from-top-[48%] rounded-lg",
+          "fixed left-1/2 top-1/2 z-50 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg rounded-lg",
+          dialogContentMotionClass,
           portalZ(),
           props.class
         )}
@@ -131,9 +137,10 @@ const DialogDescription = <T extends ValidComponent = "p">(
 export {
   Dialog,
   DialogTrigger,
+  DialogOverlay,
   DialogContent,
   DialogHeader,
   DialogFooter,
   DialogTitle,
-  DialogDescription
+  DialogDescription,
 }

@@ -2,13 +2,19 @@
  * 书籍信息页 — 查看目录（对齐 legado BookInfoActivity.openChapterList）
  */
 
-import { Show, createEffect, createMemo } from 'solid-js';
+import { Show, createEffect, createMemo, onCleanup } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import {
   AppDialog,
   AppDialogContent,
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { BookInfoDrawerDialogContent } from '@/pages/book-info/book-info-drawer-overlay';
+import {
+  syncAppDrawerOverlayLock,
+  useAppDrawerOverlayLock,
+} from '@/components/shared/app-drawer-overlay-lock';
 import { Button } from '@/components/ui/button';
 import {
   dialogVirtualListPanelHeight,
@@ -22,7 +28,11 @@ import {
   VirtualChapterList,
 } from '@/components/books/VirtualChapterList';
 import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-indices';
-import { buildChapterRowMetas, CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
+import {
+  buildChapterRowMetas,
+  CATALOG_ROW_HEIGHT_PX,
+  formatTocChapterDisplayTitle,
+} from '@/lib/catalog/chapter-list-layout';
 import { cn } from '@/lib/utils';
 import type { BookChapter } from '@/types';
 
@@ -41,9 +51,27 @@ export interface BookInfoChapterListDialogProps {
   currentChapterIndex?: number;
   /** 点击章节（含卷标题）跳转阅读 */
   onSelectChapter: (index: number) => void;
+  /** 在 BookInfoDrawer 内打开时须为 true，以保证 Dialog 叠在抽屉之上 */
+  inDrawer?: boolean;
 }
 
 export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps) {
+  const drawerOverlayLock = useAppDrawerOverlayLock();
+  const overlayReleaseRef: { current: (() => void) | undefined } = { current: undefined };
+
+  createEffect(() => {
+    syncAppDrawerOverlayLock(
+      drawerOverlayLock,
+      props.open && Boolean(props.inDrawer),
+      overlayReleaseRef,
+    );
+  });
+
+  onCleanup(() => {
+    overlayReleaseRef.current?.();
+    overlayReleaseRef.current = undefined;
+  });
+
   const cacheHintEnabled = () =>
     Boolean(props.showChapterCacheHint && props.bookUrl);
   const { cached: cachedIndices } = useCachedChapterIndices(
@@ -73,7 +101,10 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class={dialogVirtualListPanelWidth}>
+      <Dynamic
+        component={props.inDrawer ? BookInfoDrawerDialogContent : AppDialogContent}
+        class={dialogVirtualListPanelWidth}
+      >
         <AppDialogHeader>
           <AppDialogTitle class="text-base">目录 · {props.bookName}</AppDialogTitle>
         </AppDialogHeader>
@@ -134,7 +165,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
                       >
                         <span class="flex w-full min-w-0 items-center gap-2">
                           <span class="min-w-0 flex-1 truncate">
-                            {chapter.title || `第 ${index + 1} 章`}
+                            {formatTocChapterDisplayTitle(chapter.title, index)}
                           </span>
                           <ChapterCacheCloudIcon
                             enabled={cacheHintEnabled()}
@@ -150,7 +181,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
             </Show>
           </Show>
         </div>
-      </AppDialogContent>
+      </Dynamic>
     </AppDialog>
   );
 }

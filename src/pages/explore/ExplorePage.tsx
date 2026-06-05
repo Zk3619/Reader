@@ -218,6 +218,14 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     }
   });
 
+  const applyAutoSelectedSection = (section: ExploreSection | null) => {
+    if (!section) return;
+    setSelectedSection(section);
+    if (section.url?.trim()) {
+      setListRefreshKey((k) => k + 1);
+    }
+  };
+
   createEffect(() => {
     if (!isActive()) return;
     const s = selectedSource();
@@ -229,10 +237,10 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     const { section: next, argumentUpdate } = resolveDefaultExploreNavSelection(secs, sel, s);
     if (argumentUpdate) {
       updateExploreSourceArgument(s, argumentUpdate.paramKey, argumentUpdate.value);
+      applyAutoSelectedSection(next);
       return;
     }
-    setSelectedSection(next);
-    if (next?.url?.trim()) setListRefreshKey(0);
+    applyAutoSelectedSection(next);
   });
 
   const pageDescription = () => {
@@ -301,6 +309,30 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     setListRefreshKey((k) => k + 1);
   }
 
+  async function handleRefreshCategories() {
+    const s = selectedSource();
+    if (!s) return;
+    clearExploreSectionsCache(getLegadoSourceKey(s));
+    setSectionsSnapshot(null);
+    setLoadedExploreArgsVersion(-1);
+    await loadSources();
+    if (isExploreUrlScript(s.exploreUrl)) {
+      await refetchExploreSections();
+    }
+  }
+
+  async function handleRefreshPage() {
+    const s = selectedSource();
+    const secUrl = selectedSection()?.url?.trim();
+    if (!s) return;
+    await handleRefreshCategories();
+    const cacheSourceId = s.sourceId || s.sourceName;
+    if (cacheSourceId && typeof cacheSourceId === 'string' && secUrl) {
+      pageCacheStore.clearExploreCache(cacheSourceId, secUrl);
+    }
+    setListRefreshKey((k) => k + 1);
+  }
+
   function handleOpenSearch() {
     const s = selectedSource();
     if (!s) return;
@@ -352,8 +384,12 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
       >
         <ExplorePageToolbar
           showRefresh={!!selectedSource()}
-          refreshDisabled={!selectedSection()?.url?.trim()}
-          onRefresh={handleRefreshList}
+          refreshListDisabled={!selectedSection()?.url?.trim()}
+          onRefreshList={handleRefreshList}
+          refreshCategoriesDisabled={!selectedSource()}
+          onRefreshCategories={() => void handleRefreshCategories()}
+          refreshPageDisabled={!selectedSource()}
+          onRefreshPage={() => void handleRefreshPage()}
           searchDisabled={!selectedSource()}
           onSearch={handleOpenSearch}
         />
