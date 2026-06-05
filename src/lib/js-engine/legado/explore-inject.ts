@@ -193,7 +193,6 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
         } else if (import.meta.env.DEV) {
           console.log('[explore-script]', ...parts);
         }
-        return vm.newString('');
       });
       bindVmFunction(vm, javaObj, 'androidId', () =>
         vm.newString(ctx.getOrCreateDeviceId()),

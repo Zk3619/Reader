@@ -487,7 +487,24 @@ export const GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM = `
 
 /** ajax 等待中占位 JSON（与 rule-script-runner 一致，避免 request() JSON.parse 失败扫线） */
 export const LEGADO_AJAX_PENDING_JSON =
-  '{"code":0,"msg":"","content":"","data":{"content":""},"__readerAjaxPending":true}';
+  '{"code":0,"msg":"","content":"","data":[],"__readerAjaxPending":true}';
+
+/** two-pass 首轮 discovestyle 等须得到空数组而非 pending 对象，避免 style_list.filter 抛错 */
+export const EXPLORE_DISCOVERSTYLE_AJAX_GUARD = `
+(function __readerDiscovestyleAjaxGuard() {
+  if (typeof java === 'undefined' || typeof java.ajax !== 'function') return;
+  var __origAjax = java.ajax;
+  java.ajax = function(url) {
+    var res = __origAjax.apply(this, arguments);
+    if (typeof res !== 'string' || res.indexOf('__readerAjaxPending') < 0) return res;
+    var urlStr = typeof url === 'string' ? url : (url && (url.url || url.href)) || '';
+    if (String(urlStr).indexOf('discovestyle') >= 0) {
+      return '{"code":0,"msg":"","data":[]}';
+    }
+    return res;
+  };
+})();
+`.trim();
 
 /** jsLib + this 绑定 + 发现页兼容 shim + 用户脚本 */
 export function buildLegadoExploreScriptBundle(jsLib: string, scriptContent: string): string {
@@ -498,6 +515,7 @@ export function buildLegadoExploreScriptBundle(jsLib: string, scriptContent: str
     EXPLORE_JSLIB_CONTEXT_SHIM,
     EXPLORE_GET_CLOUD_SETTINGS_GUARD_SHIM,
     GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
+    EXPLORE_DISCOVERSTYLE_AJAX_GUARD,
     // two-pass 每轮 eval 都会重跑；须在书源 device_type 探测前覆盖 java.qread/deviceID
     LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
     body,
@@ -558,7 +576,7 @@ export function ensureExploreScriptSetsResult(script: string): string {
   if (/\b(?:globalThis\.)?result\s*=\s*JSON\.stringify\s*\(/m.test(s)) return s;
   const m = s.match(/^([\s\S]*?)^(\s*)JSON\.stringify\s*\(\s*([\w$]+)\s*\)\s*;?\s*$/m);
   if (m) {
-    return `${m[1]}${m[2]}globalThis.result = JSON.stringify(${m[3]});`;
+    return `${m[1]}${m[2]}result = globalThis.result = JSON.stringify(${m[3]});`;
   }
   // 光遇 gysearch 等：末行 `data:;base64,...` 模板字符串
   if (!/\b(?:globalThis\.)?result\s*=/.test(s)) {

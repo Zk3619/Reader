@@ -3,12 +3,14 @@
  * 优先 QuickJS + 集中宿主 API；WASM 不可用时降级 with + Function。
  */
 
-import { get as httpGet, post } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import { resolveUrl } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import { mapRawExploreItem, type ExploreSection } from '@/lib/book-source/explore-sections';
 import { evalCodeVoid, initQuickJSRuntime, isQuickJSFallback } from '@/lib/js-engine/core/runtime';
 import { createExploreInjector, flushExploreScriptToastBuffer } from '@/lib/js-engine/legado/explore-inject';
+import { createLegacyJavaAjax } from '@/lib/js-engine/legado/host/legacy-java-ajax';
+import { parseLegadoApiJsonResponse } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import {
@@ -37,7 +39,7 @@ import {
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
 
-const SCRIPT_TIMEOUT_MS = 15000;
+const SCRIPT_TIMEOUT_MS = 30_000;
 
 export type ExploreScriptRunOptions = {
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
@@ -118,12 +120,21 @@ async function tryRunExploreScriptQuickJS(
   });
 
   try {
-    // two-pass：首轮 ajax 返回空串，次轮走 URL 缓存。suspend 的挂起异常会被书源里 try/catch 吞掉（如 discovestyle）。
+    const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+    // two-pass：首轮 ajax 返回 pending，次轮走 URL 缓存。suspend 的挂起异常会被书源里 try/catch 吞掉（如 discovestyle）。
     const raw = await runLegadoScriptQuickJS({
       script: fullScript,
       baseUrl,
       timeoutMs: SCRIPT_TIMEOUT_MS,
       mode: 'two-pass',
+      twoPassMaxRounds: expectsDiscovestyle ? 10 : 6,
+      twoPassContinueWhile: expectsDiscovestyle
+        ? (result, { round, maxRounds, hadPending }) => {
+            const sectionCount = parseScriptResult(result).length;
+            const incomplete = sectionCount < GYKS_DISCOVERSTYLE_MIN_SECTIONS;
+            return round < maxRounds - 1 && (hadPending || incomplete);
+          }
+        : undefined,
       inject: injector,
       beforeEval: (vm) => {
         evalCodeVoid(vm, 'globalThis.result = undefined;');
@@ -153,18 +164,40 @@ async function tryRunExploreScriptQuickJS(
 /**
  * 执行发现页脚本，返回解析后的发现子项列表
  */
+const GYKS_DISCOVERSTYLE_MARKER = 'discovestyle';
+/** 含 discovestyle 时仅 qtsj 筛选条数会落在该区间 */
+const GYKS_DISCOVERSTYLE_MIN_SECTIONS = 20;
+
 export async function runExploreScript(
   scriptContent: string,
   source: BookSource,
   options?: ExploreScriptRunOptions,
 ): Promise<ExploreSection[]> {
-  const quick = await tryRunExploreScriptQuickJS(scriptContent, source, options);
-  if (quick != null && quick.length > 0) {
-    console.log('[explore-script] QuickJS final:', quick.length, 'sections');
-    return quick;
-  }
-  if (quick != null && quick.length === 0) {
-    console.warn('[explore-script] QuickJS 返回 0 条，降级 Function');
+  const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+
+  // discovestyle 依赖多轮 ajax 缓存；QuickJS two-pass 在 hadPending=false 时会过早返回 8 条
+  if (!expectsDiscovestyle) {
+    const quick = await tryRunExploreScriptQuickJS(scriptContent, source, options);
+    if (quick != null && quick.length > 0) {
+      console.log('[explore-script] QuickJS final:', quick.length, 'sections');
+      return quick;
+    }
+    if (quick != null && quick.length === 0) {
+      console.warn('[explore-script] QuickJS 返回 0 条，降级 Function');
+    }
+  } else {
+    const quick = await tryRunExploreScriptQuickJS(scriptContent, source, options);
+    if (quick != null && quick.length >= GYKS_DISCOVERSTYLE_MIN_SECTIONS) {
+      console.log('[explore-script] QuickJS final:', quick.length, 'sections');
+      return quick;
+    }
+    if (quick != null && quick.length > 0) {
+      console.warn(
+        `[explore-script] QuickJS 仅 ${quick.length} 条（discovestyle 可能未加载），降级 Function`,
+      );
+    } else if (quick != null && quick.length === 0) {
+      console.warn('[explore-script] QuickJS 返回 0 条，降级 Function');
+    }
   }
 
   return runExploreScriptLegacy(scriptContent, source, options);
@@ -207,6 +240,22 @@ async function runExploreScriptLegacy(
   let pending: Promise<unknown>[] = [];
 
   const deviceHandlers = createLegadoExploreJavaDeviceHandlers(source);
+  const serverForToken = resolveBookSourceServerUrl(source) ?? baseUrl;
+
+  const logDiscovestyleAjax = import.meta.env.DEV
+    ? (resolvedUrl: string, body: string, fromCache: boolean) => {
+        if (!resolvedUrl.includes('discovestyle')) return;
+        const parsed = parseLegadoApiJsonResponse(body);
+        const data = parsed?.data;
+        const dataLen = Array.isArray(data) ? data.length : -1;
+        console.log('[explore-script] discovestyle ajax', {
+          fromCache,
+          bodyLen: body.length,
+          dataLen,
+          url: resolvedUrl.slice(0, 120),
+        });
+      }
+    : undefined;
 
   const scopeObj: Record<string, unknown> = {
     Date: PatchedDate,
@@ -248,86 +297,26 @@ async function runExploreScriptLegacy(
       getCookie(url: string) {
         return cookieApi.getCookie(url);
       },
-      ajax(
-        url: string | Record<string, unknown>,
-        optionsOrCb?: Record<string, unknown> | ((body: string) => void),
-        cb?: (body: string) => void
-      ): string {
-        let method = 'GET';
-        let body: string | undefined;
-        let headers: Record<string, string> = {};
-        let callback: ((body: string) => void) | null = null;
-
-        if (typeof optionsOrCb === 'function') {
-          callback = optionsOrCb;
-        } else if (typeof cb === 'function') {
-          callback = cb;
-          if (optionsOrCb && typeof optionsOrCb === 'object') {
-            method = ((optionsOrCb.method as string) || 'GET').toUpperCase();
-            body = optionsOrCb.body as string | undefined;
-            const h = optionsOrCb.headers as Record<string, string> | undefined;
-            if (h && typeof h === 'object') headers = { ...headers, ...h };
+      ajax: createLegacyJavaAjax({
+        baseUrl,
+        resolveUrl,
+        getCookie: (url) => cookieApi.getCookie(url),
+        request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+        applyDuration: applyAjaxDuration,
+        getArgToken: () => readBookSourceQttoken(source, serverForToken),
+        getDeviceId: () => resolveBookSourceDeviceId(source),
+        cache: ajaxCache,
+        durationCache: ajaxDurationCache,
+        pending,
+        onFailed: (url, err) => {
+          if (import.meta.env.DEV && url.includes('discovestyle')) {
+            console.warn('[explore-script] discovestyle ajax failed:', url, err);
+          } else {
+            console.warn('[explore-script] ajax failed:', err);
           }
-        } else if (optionsOrCb && typeof optionsOrCb === 'object') {
-          method = ((optionsOrCb.method as string) || 'GET').toUpperCase();
-          body = optionsOrCb.body as string | undefined;
-          const h = optionsOrCb.headers as Record<string, string> | undefined;
-          if (h && typeof h === 'object') headers = { ...headers, ...h };
-        }
-
-        let urlStr = typeof url === 'string' ? url : '';
-        if (!urlStr && url && typeof url === 'object') {
-          urlStr = (url as { url?: string }).url ?? (url as { href?: string }).href ?? '';
-        }
-        if (!urlStr || urlStr.includes('[object Object]')) {
-          if (callback) callback('');
-          return '';
-        }
-        const resolvedUrl = resolveUrl(baseUrl, urlStr);
-
-        if (ajaxCache.has(resolvedUrl)) {
-          const d = ajaxDurationCache.get(resolvedUrl);
-          if (d != null && d >= 0) applyAjaxDuration(d);
-          const cached = ajaxCache.get(resolvedUrl)!;
-          if (callback) {
-            try {
-              callback(cached);
-            } catch (e) {
-              console.warn('[explore-script] ajax callback error:', e);
-            }
-          }
-          return cached;
-        }
-
-        const requestStart = Date.now();
-        const p = requestInScript(resolvedUrl, {
-          method: method as 'GET' | 'POST',
-          headers: Object.keys(headers).length ? headers : undefined,
-          body,
-          source,
-        })
-          .then((text) => {
-            const durationMs = Date.now() - requestStart;
-            if (durationMs >= 0) ajaxDurationCache.set(resolvedUrl, durationMs);
-            ajaxCache.set(resolvedUrl, text);
-            if (callback) {
-              try {
-                callback(text);
-              } catch (e) {
-                console.warn('[explore-script] ajax callback error:', e);
-              }
-            }
-          })
-          .catch((e) => {
-            console.warn('[explore-script] ajax failed:', e);
-            const durationMs = Date.now() - requestStart;
-            if (durationMs >= 0) ajaxDurationCache.set(resolvedUrl, durationMs);
-            ajaxCache.set(resolvedUrl, '');
-            if (callback) callback('');
-          });
-        pending.push(p);
-        return '';
-      },
+        },
+        onResolved: logDiscovestyleAjax,
+      }),
     },
     toast(msg?: string, level?: string) {
       safeScriptToast(msg, level ?? 'info');
@@ -345,12 +334,25 @@ async function runExploreScriptLegacy(
     'try { with(__scope__) { eval(scriptText); } } catch (e) { console.warn("[explore-script] run error:", e); }'
   );
 
+  /** ensureExploreScriptSetsResult 写入 globalThis.result；with 作用域内 scope.result 不会自动同步 */
+  const pullLegacyExploreScriptResult = (scopeResult: unknown): unknown => {
+    if (scopeResult !== undefined && scopeResult !== null) return scopeResult;
+    const g = globalThis as { result?: unknown };
+    const fromGlobal = g.result;
+    if (fromGlobal !== undefined && fromGlobal !== null) {
+      g.result = undefined;
+      return fromGlobal;
+    }
+    return scopeResult;
+  };
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('发现页脚本执行超时')), SCRIPT_TIMEOUT_MS);
   });
 
   const runPromise = (async () => {
-    const maxRounds = 6;
+    const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+    const maxRounds = expectsDiscovestyle ? 10 : 6;
     let prevCacheSize = -1;
     for (let round = 0; round < maxRounds; round++) {
       if (round > 0) {
@@ -358,11 +360,16 @@ async function runExploreScriptLegacy(
         pending = [];
       }
       run(scopeObj, fullScript);
+      scopeObj.result = pullLegacyExploreScriptResult(scopeObj.result);
       const hadAsyncAjax = pending.length > 0;
       if (hadAsyncAjax) await Promise.all(pending);
       // 脚本在 java.ajax 返回空串时已执行 result=JSON.stringify(...)，须等 ajax 入缓存后重跑
       if (scopeObj.result !== undefined) {
-        if (hadAsyncAjax && round < maxRounds - 1) {
+        const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+        const sectionCount = parseScriptResult(scopeObj.result).length;
+        const discovestyleIncomplete =
+          expectsDiscovestyle && sectionCount < GYKS_DISCOVERSTYLE_MIN_SECTIONS;
+        if (round < maxRounds - 1 && (hadAsyncAjax || discovestyleIncomplete)) {
           scopeObj.result = undefined;
           prevCacheSize = ajaxCache.size;
           continue;
@@ -391,20 +398,14 @@ async function requestInScript(
     source: BookSource;
   }
 ): Promise<string> {
-  if (options.method === 'POST') {
-    return post(url, options.body ?? '', {
-      headers: options.headers,
-      timeout: 12000,
-      enableCookieJar: options.source.enabledCookieJar,
-      concurrentRate: options.source.concurrentRate,
-    });
-  }
-  return httpGet(url, {
+  const httpOpts = {
     headers: options.headers,
-    timeout: 12000,
-    enableCookieJar: options.source.enabledCookieJar,
-    concurrentRate: options.source.concurrentRate,
-  });
+    timeout: 12_000,
+  };
+  if (options.method === 'POST') {
+    return postBookSourcePage(options.source, url, options.body ?? '', httpOpts);
+  }
+  return getBookSourcePage(options.source, url, httpOpts);
 }
 
 const EXPLORE_LIST_KEYS = [

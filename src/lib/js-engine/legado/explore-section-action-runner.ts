@@ -4,15 +4,8 @@
 
 import type { BookSource } from '@/types';
 import { resolveUrl } from '@/lib/book-source/utils';
-import { initQuickJSRuntime, isQuickJSFallback, setGlobalJson } from '@/lib/js-engine/core/runtime';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import { createLegadoExploreJavaDeviceHandlers } from '@/lib/js-engine/legado/legado-explore-java-device';
-import {
-  createExploreInjector,
-  flushExploreScriptToastBuffer,
-  type ScriptToastEntry,
-} from '@/lib/js-engine/legado/explore-inject';
-import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import {
   createLegadoScriptCookieApi,
   getStoredSourceCookiesForInnerWeb,
@@ -28,15 +21,26 @@ import {
   loadSourceCookieStore,
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
-import {
-  readBookSourceQttoken,
-  resolveBookSourceDeviceId,
-  resolveBookSourceServerUrl,
-} from '@/lib/book-source/source-http';
 import { openLegadoBrowserInApp } from '@/lib/platform/open-url';
-import { get as httpGet, post } from '@/lib/http';
+import { tryRunExploreShowActionNative } from '@/lib/js-engine/legado/explore-show-action';
 
-const SCRIPT_TIMEOUT_MS = 15000;
+/** 同一书源发现 action 串行，避免快速切换 select 时并发执行 */
+const exploreActionChains = new Map<string, Promise<void>>();
+
+function enqueueExploreSectionAction(
+  sourceKey: string,
+  task: () => Promise<void>,
+): Promise<void> {
+  const prev = exploreActionChains.get(sourceKey) ?? Promise.resolve();
+  const next = prev.then(task, task);
+  exploreActionChains.set(
+    sourceKey,
+    next.catch(() => {
+      /* 不阻断后续 action */
+    }),
+  );
+  return next;
+}
 
 function resolveExploreBrowserUrl(raw: string, baseUrl: string): string {
   const t = raw.trim();
@@ -69,31 +73,6 @@ export type RunExploreSectionActionOptions = {
   onOpenSearch?: (query: string, source: BookSource) => void;
 };
 
-async function requestInScript(
-  url: string,
-  options: {
-    method: 'GET' | 'POST';
-    headers?: Record<string, string>;
-    body?: string;
-    source: BookSource;
-  },
-): Promise<string> {
-  if (options.method === 'POST') {
-    return post(url, options.body ?? '', {
-      headers: options.headers,
-      timeout: 12000,
-      enableCookieJar: options.source.enabledCookieJar,
-      concurrentRate: options.source.concurrentRate,
-    });
-  }
-  return httpGet(url, {
-    headers: options.headers,
-    timeout: 12000,
-    enableCookieJar: options.source.enabledCookieJar,
-    concurrentRate: options.source.concurrentRate,
-  });
-}
-
 /** 执行发现项 action（如 getCloudSettings(true) / getHtmlSettings()） */
 export async function runExploreSectionAction(
   source: BookSource,
@@ -103,8 +82,18 @@ export async function runExploreSectionAction(
   const actionTrim = action.trim();
   if (!actionTrim) return;
 
+  const sourceKey = getLegadoSourceKey(source);
+  return enqueueExploreSectionAction(sourceKey, () =>
+    runExploreSectionActionInner(source, actionTrim, options),
+  );
+}
+
+async function runExploreSectionActionInner(
+  source: BookSource,
+  actionTrim: string,
+  options?: RunExploreSectionActionOptions,
+): Promise<void> {
   const baseUrl = getScriptBaseUrl(source);
-  const sourceUrl = getLegadoSourceKey(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
   const jsLib =
@@ -113,108 +102,35 @@ export async function runExploreSectionAction(
       : '';
   const hosts = hostsFromJsLib(jsLib);
   const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
-  const serverForToken = resolveBookSourceServerUrl(source) ?? baseUrl;
 
-  const cookieStore = loadSourceCookieStore(cookiesKey);
-  const cookieApi = createLegadoScriptCookieApi(source, baseUrl, cookieStore, { hostList });
-  const sourceVars = createSourceVariableHandlers(source, argsKey);
   const infoMap = { ...(options?.infoMap ?? {}) };
-
-  const toastBuffer: ScriptToastEntry[] = [];
-  const pendingBrowsers: Promise<unknown>[] = [];
-
-  const openInnerWeb = (resolved: string, title?: string) => {
-    if (!isOpenableBrowserUrl(resolved)) return;
-    const cookies = getStoredSourceCookiesForInnerWeb(source, resolved);
-    pendingBrowsers.push(
-      openLegadoBrowserInApp(resolved, cookies, title?.trim(), {
-        bookSourceUrl: source.bookSourceUrl,
-      }),
-    );
-  };
 
   const refreshExplore = options?.onRefreshExplore;
   const onOpenSearch = options?.onOpenSearch
     ? (query: string) => options.onOpenSearch!(query, source)
     : undefined;
 
-  await initQuickJSRuntime();
-  if (isQuickJSFallback()) {
-    await runExploreSectionActionLegacy(source, actionTrim, {
-      baseUrl,
-      argsKey,
-      cookiesKey,
-      jsLib,
-      hostList,
-      serverForToken,
+  if (
+    tryRunExploreShowActionNative(source, actionTrim, {
       infoMap,
-      onScriptToast: options?.onScriptToast,
       onRefreshExplore: refreshExplore,
-      onOpenSearch,
-    });
+    })
+  ) {
     return;
   }
 
-  const initScript = buildLegadoExploreScriptBundle(jsLib, '/* explore-action-init */');
-
-  const injector = createExploreInjector({
+  // 发现 select/button action 统一走 legacy（整包 jsLib + QuickJS dispose 易触发 GC 断言）
+  await runExploreSectionActionLegacy(source, actionTrim, {
     baseUrl,
-    sourceUrl,
-    host: hostList,
-    resolveUrl,
-    getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
-    getArgToken: () => readBookSourceQttoken(source, serverForToken),
-    cookie: cookieApi,
-    source: {
-      ...sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      loginUi: source.loginUi,
-    },
-    scriptToastBuffer: toastBuffer,
+    argsKey,
+    cookiesKey,
+    jsLib,
+    hostList,
     infoMap,
+    onScriptToast: options?.onScriptToast,
     onRefreshExplore: refreshExplore,
     onOpenSearch,
-    javaExtensions: {
-      startBrowser: (url, title) => {
-        const resolved = resolveExploreBrowserUrl(String(url ?? '').trim(), baseUrl);
-        openInnerWeb(resolved, title);
-      },
-      showBrowser: (url, html, _preloadJs, _config) => {
-        const rawUrl = String(url ?? '').trim();
-        if (html && String(html).length > 0) {
-          const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(String(html))}`;
-          openInnerWeb(dataUrl, rawUrl || '书源设置');
-          return;
-        }
-        const resolved = resolveExploreBrowserUrl(rawUrl, baseUrl);
-        openInnerWeb(resolved, rawUrl);
-      },
-    },
-    request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
-
-  try {
-    await runLegadoScriptQuickJS({
-      initScript,
-      script: actionTrim,
-      baseUrl,
-      timeoutMs: SCRIPT_TIMEOUT_MS,
-      mode: 'suspend',
-      inject: (vm, rt) => {
-        injector(vm, rt);
-        setGlobalJson(vm, 'infoMap', infoMap);
-      },
-    });
-    await Promise.all(pendingBrowsers);
-    persistCookieStore(cookiesKey, cookieStore);
-  } catch (e) {
-    console.warn('[explore-action] action 执行失败', e);
-    throw e;
-  } finally {
-    setTimeout(() => {
-      flushExploreScriptToastBuffer(toastBuffer, options?.onScriptToast);
-    }, 0);
-  }
 }
 
 /** Function + with 降级（QuickJS 不可用时） */
@@ -227,7 +143,6 @@ async function runExploreSectionActionLegacy(
     cookiesKey: string;
     jsLib: string;
     hostList: string[];
-    serverForToken: string;
     infoMap: Record<string, string>;
     onScriptToast?: (msg?: unknown, level?: unknown) => void;
     onRefreshExplore?: () => void | Promise<void>;

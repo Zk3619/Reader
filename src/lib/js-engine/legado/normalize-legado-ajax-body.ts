@@ -158,9 +158,11 @@ export function isUserApiPost(resolvedUrl: string, method: string): boolean {
   return method.toUpperCase() === 'POST' && /\/user_api\b/.test(resolvedUrl);
 }
 
-/** 晴天 / 光遇聚合等：login_api、user_api */
+/** 晴天 / 光遇聚合等 JSON API（含 discovestyle） */
 export function isLegadoAggregationApiUrl(resolvedUrl: string): boolean {
-  return /\/(login_api|user_api)\b/i.test(resolvedUrl);
+  return /\/(login_api|user_api|discovestyle|group_name|fquser|bookshelf|check_status|render_version)\b/i.test(
+    resolvedUrl,
+  );
 }
 
 function headerHasName(headers: Record<string, string>, name: string): boolean {
@@ -195,7 +197,7 @@ export function applyLegadoAggregationApiHeaders(
 
 /** 解析聚合 API JSON；HTML / 空 / 畸形时返回 null（避免 JSON.parse 抛错） */
 export function parseLegadoApiJsonResponse(text: string): Record<string, unknown> | null {
-  const t = String(text ?? '').trim();
+  const t = normalizeLegadoAjaxResponseBody(text).trim();
   if (!t || t.startsWith('<')) return null;
   if (!t.startsWith('{') && !t.startsWith('[')) return null;
   try {
@@ -206,6 +208,63 @@ export function parseLegadoApiJsonResponse(text: string): Record<string, unknown
   } catch {
     return null;
   }
+}
+
+/**
+ * 裁剪 ajax 响应首段 JSON。
+ * Web 代理 / WebView 有时在合法 JSON 后拼接额外字节（如 72496+163），会导致 JSON.parse 失败。
+ */
+export function extractLeadingLegadoJsonBody(text: string): string {
+  const t = String(text ?? '').trim();
+  if (!t) return t;
+  try {
+    JSON.parse(t);
+    return t;
+  } catch {
+    /* 尾部垃圾 — 尝试截取首段平衡 JSON */
+  }
+
+  const startObj = t.indexOf('{');
+  const startArr = t.indexOf('[');
+  let start = -1;
+  if (startObj >= 0 && (startArr < 0 || startObj <= startArr)) start = startObj;
+  else if (startArr >= 0) start = startArr;
+  else return t;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < t.length; i++) {
+    const c = t[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
+      depth--;
+      if (depth === 0) {
+        const slice = t.slice(start, i + 1);
+        try {
+          JSON.parse(slice);
+          return slice;
+        } catch {
+          return t;
+        }
+      }
+    }
+  }
+  return t;
+}
+
+export function normalizeLegadoAjaxResponseBody(text: string): string {
+  return extractLeadingLegadoJsonBody(text);
 }
 
 export function legadoAggregationApiHtmlHint(): string {

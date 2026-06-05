@@ -2,7 +2,7 @@
  * Legado 书源脚本 QuickJS 执行器（挂起循环 / 两轮 replay）
  */
 
-import type { QuickJSContext } from 'quickjs-emscripten';
+import type { QuickJSContext, QuickJSHandle } from 'quickjs-emscripten';
 import {
   createQuickJSContext,
   evalCodeVoid,
@@ -21,6 +21,8 @@ export type LegadoInjector = (vm: QuickJSContext, rt: LegadoRunRuntime) => void;
 export interface LegadoRunRuntime {
   coordinator: AjaxCoordinator;
   pending: Promise<unknown>[];
+  /** two-pass 异步 ajax 回调 dup 的 handle，vm.dispose 前须释放 */
+  deferredCallbackHandles: QuickJSHandle[];
   setGlobalResult: (value: unknown) => void;
   getGlobalResult: () => unknown;
   applyAjaxDuration?: (ms: number) => void;
@@ -43,6 +45,13 @@ export interface RunLegadoScriptQuickJSOptions {
   wrapCatchRethrow?: boolean;
   /** 每次 eval 前调用（挂起重放时刷新 global result 等） */
   beforeEval?: (vm: QuickJSContext) => void;
+  /** two-pass 最大轮数（默认 6） */
+  twoPassMaxRounds?: number;
+  /** two-pass 是否在已有 result 时继续下一轮（如 discovestyle 未加载完） */
+  twoPassContinueWhile?: (
+    result: unknown,
+    ctx: { round: number; maxRounds: number; hadPending: boolean },
+  ) => boolean;
 }
 
 /** ajax 挂起 / two-pass 会在同一 VM 内多次 eval 整段脚本；IIFE 避免顶层 const/let 重复声明 */
@@ -130,6 +139,7 @@ export async function runLegadoScriptQuickJS(
   const rt: LegadoRunRuntime = {
     coordinator,
     pending,
+    deferredCallbackHandles: [],
     setGlobalResult: (v) => {
       globalResult = v;
     },
@@ -165,14 +175,28 @@ export async function runLegadoScriptQuickJS(
       injectLegadoEncodingUtils(vm);
 
       if (options.mode === 'two-pass') {
-        options.beforeEval?.(vm);
-        evalScript(vm, scriptText, rt);
-        if (pending.length > 0) await Promise.all(pending);
-        evalCodeVoid(vm, 'globalThis.result = undefined;');
-        pending.length = 0;
-        options.beforeEval?.(vm);
-        evalScript(vm, scriptText, rt);
-        if (pending.length > 0) await Promise.all(pending);
+        const maxRounds = options.twoPassMaxRounds ?? 6;
+        for (let round = 0; round < maxRounds; round++) {
+          if (round > 0) {
+            evalCodeVoid(vm, 'globalThis.result = undefined;');
+            pending.length = 0;
+          }
+          options.beforeEval?.(vm);
+          evalScript(vm, scriptText, rt);
+          const hadPending = pending.length > 0;
+          if (hadPending) await Promise.all(pending.splice(0));
+          const result = rt.getGlobalResult();
+          if (result !== undefined) {
+            const shouldContinue =
+              options.twoPassContinueWhile?.(result, { round, maxRounds, hadPending }) ??
+              (hadPending && round < maxRounds - 1);
+            if (shouldContinue) continue;
+            return result;
+          }
+          if (!hadPending) {
+            return result;
+          }
+        }
         return rt.getGlobalResult();
       }
 
@@ -219,6 +243,13 @@ export async function runLegadoScriptQuickJS(
       return rt.getGlobalResult();
     } finally {
       disarmScriptTimeout();
+      for (const handle of rt.deferredCallbackHandles.splice(0)) {
+        try {
+          handle.dispose();
+        } catch {
+          /* ignore */
+        }
+      }
       vm.dispose();
     }
   })();

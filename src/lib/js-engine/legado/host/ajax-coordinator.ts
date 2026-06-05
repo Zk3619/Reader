@@ -7,6 +7,33 @@ import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
 export type AjaxCoordinatorMode = 'suspend' | 'two-pass';
 
+/** 失败/空响应不写入缓存，避免 two-pass 后续轮次永远命中空串 */
+export function shouldCacheLegadoAjaxBody(body: string): boolean {
+  return body !== '';
+}
+
+export function readLegadoAjaxCache(
+  cache: Map<string, string>,
+  resolvedUrl: string,
+): string | undefined {
+  if (!cache.has(resolvedUrl)) return undefined;
+  const body = cache.get(resolvedUrl)!;
+  if (!shouldCacheLegadoAjaxBody(body)) {
+    cache.delete(resolvedUrl);
+    return undefined;
+  }
+  return body;
+}
+
+export function writeLegadoAjaxCache(
+  cache: Map<string, string>,
+  resolvedUrl: string,
+  body: string,
+): void {
+  if (!shouldCacheLegadoAjaxBody(body)) return;
+  cache.set(resolvedUrl, body);
+}
+
 export class AjaxCoordinator {
   readonly cache = new Map<string, string>();
   readonly durationCache = new Map<string, number>();
@@ -56,9 +83,10 @@ export class AjaxCoordinator {
       }
       return undefined;
     }
-    if (this.cache.has(resolvedUrl)) {
+    const cached = readLegadoAjaxCache(this.cache, resolvedUrl);
+    if (cached !== undefined) {
       this.restoreDuration(resolvedUrl, apply);
-      return this.cache.get(resolvedUrl)!;
+      return cached;
     }
     return undefined;
   }
@@ -80,7 +108,7 @@ export class AjaxCoordinator {
     this.recordDuration(resolvedUrl, durationMs);
     this.results[writeIndex] = body;
     if (this.mode === 'two-pass') {
-      this.cache.set(resolvedUrl, body);
+      writeLegadoAjaxCache(this.cache, resolvedUrl, body);
     }
   }
 }

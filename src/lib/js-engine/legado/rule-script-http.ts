@@ -3,6 +3,7 @@
  */
 
 import { get, post } from '@/lib/http';
+import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import {
   extractApiErrorMessage,
   materializeAggregationContentBody,
@@ -114,85 +115,90 @@ export async function requestLegadoRuleScriptHttpAsync(
     concurrentRate: options.source?.concurrentRate,
     legadoMinimalHeaders: isContentPost,
   };
-  if (options.method === 'POST') {
-    return post(url, body, reqOpts).then((text) => {
-      if (/\/content\b/.test(url) && options.source) {
-        const trimmed = String(text ?? '').trim();
-        if (trimmed.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-            const rawContentField =
-              typeof parsed.content === 'string' ? parsed.content : '';
-            const materialized = rawContentField.includes('<')
-              ? rawContentField
-              : materializeAggregationContentBody(rawContentField);
-            const contentImgCount = materialized.includes('<')
-              ? scanImgTags(materialized).length
-              : 0;
-            if (rawContentField.trim()) {
-              const cookieHdr = String(headers.cookie ?? headers.Cookie ?? '');
-              const deviceId = resolveLegadoDeviceId(cookieHdr, options.source);
-              const logPayload = {
-                ...summarizeApiContentResponse(parsed),
-                contentImgCount,
-                contentIsHex: rawContentField !== materialized,
-                post: summarizeContentPostBody(body),
-                contentsLen: Array.isArray(parsed.contents) ? parsed.contents.length : undefined,
-                deviceIdHint:
-                  deviceId.length >= 8
-                    ? `${deviceId.slice(0, 4)}…${deviceId.slice(-4)}`
-                    : deviceId || undefined,
-              };
-              if (import.meta.env.DEV) {
-                console.log('[rule-script] /content 响应', logPayload);
-              } else if (contentImgCount > 0 && contentImgCount <= 12) {
-                console.warn('[rule-script] /content 响应（图片偏少）', logPayload);
-              }
-            }
-            if (!rawContentField.trim()) {
-              const post =
-                body && body.trim().startsWith('{')
-                  ? (JSON.parse(body) as Record<string, unknown>)
-                  : {};
-              const cookieHdr = String(headers.cookie ?? headers.Cookie ?? '');
-              const qttoken = extractQttokenKey(cookieHdr);
-              const deviceId = (
-                cookieHdr.match(/(?:^|;)\s*deviceId=([^;]+)/i)?.[1] ?? ''
-              ).trim();
-              const postItemId =
-                typeof post.item_id === 'string' ? post.item_id : '';
-              const tokenHint =
-                qttoken.length >= 8
-                  ? `${qttoken.slice(0, 4)}…${qttoken.slice(-4)}`
-                  : '';
-              const deviceHint =
-                deviceId.length >= 8
-                  ? `${deviceId.slice(0, 4)}…${deviceId.slice(-4)}`
-                  : deviceId;
-              console.warn('[rule-script] /content 无正文', {
-                postSource: post.source,
-                postSources: post.sources,
-                postTab: post.tab,
-                postToneId: post.tone_id,
-                item_id_post_len: postItemId.length,
-                item_id_starts_with_eyJ: postItemId.startsWith('eyJ'),
-                hasQttoken: Boolean(qttoken),
-                qttokenLen: qttoken.length,
-                qttokenHint: tokenHint || undefined,
-                deviceIdLen: deviceId.length,
-                deviceIdHint: deviceHint || undefined,
-                response: summarizeApiContentResponse(parsed),
-                apiErr: extractApiErrorMessage(parsed),
-                bodyPreview: trimmed.slice(0, 400),
-              });
-            }
-          } catch {
-            /* ignore */
-          }
+  const logContentPostResponse = (text: string) => {
+    if (!/\/content\b/.test(url) || !options.source) return;
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed.startsWith('{')) return;
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const rawContentField =
+        typeof parsed.content === 'string' ? parsed.content : '';
+      const materialized = rawContentField.includes('<')
+        ? rawContentField
+        : materializeAggregationContentBody(rawContentField);
+      const contentImgCount = materialized.includes('<')
+        ? scanImgTags(materialized).length
+        : 0;
+      if (rawContentField.trim()) {
+        const cookieHdr = String(headers.cookie ?? headers.Cookie ?? '');
+        const deviceId = resolveLegadoDeviceId(cookieHdr, options.source);
+        const logPayload = {
+          ...summarizeApiContentResponse(parsed),
+          contentImgCount,
+          contentIsHex: rawContentField !== materialized,
+          post: summarizeContentPostBody(body),
+          contentsLen: Array.isArray(parsed.contents) ? parsed.contents.length : undefined,
+          deviceIdHint:
+            deviceId.length >= 8
+              ? `${deviceId.slice(0, 4)}…${deviceId.slice(-4)}`
+              : deviceId || undefined,
+        };
+        if (import.meta.env.DEV) {
+          console.log('[rule-script] /content 响应', logPayload);
+        } else if (contentImgCount > 0 && contentImgCount <= 12) {
+          console.warn('[rule-script] /content 响应（图片偏少）', logPayload);
         }
       }
-      return text;
-    });
+      if (!rawContentField.trim()) {
+        const postPayload =
+          body && body.trim().startsWith('{')
+            ? (JSON.parse(body) as Record<string, unknown>)
+            : {};
+        const cookieHdr = String(headers.cookie ?? headers.Cookie ?? '');
+        const qttoken = extractQttokenKey(cookieHdr);
+        const deviceId = (
+          cookieHdr.match(/(?:^|;)\s*deviceId=([^;]+)/i)?.[1] ?? ''
+        ).trim();
+        const postItemId =
+          typeof postPayload.item_id === 'string' ? postPayload.item_id : '';
+        const tokenHint =
+          qttoken.length >= 8
+            ? `${qttoken.slice(0, 4)}…${qttoken.slice(-4)}`
+            : '';
+        const deviceHint =
+          deviceId.length >= 8
+            ? `${deviceId.slice(0, 4)}…${deviceId.slice(-4)}`
+            : deviceId;
+        console.warn('[rule-script] /content 无正文', {
+          postSource: postPayload.source,
+          postSources: postPayload.sources,
+          postTab: postPayload.tab,
+          postToneId: postPayload.tone_id,
+          item_id_post_len: postItemId.length,
+          item_id_starts_with_eyJ: postItemId.startsWith('eyJ'),
+          hasQttoken: Boolean(qttoken),
+          qttokenLen: qttoken.length,
+          qttokenHint: tokenHint || undefined,
+          deviceIdLen: deviceId.length,
+          deviceIdHint: deviceHint || undefined,
+          response: summarizeApiContentResponse(parsed),
+          apiErr: extractApiErrorMessage(parsed),
+          bodyPreview: trimmed.slice(0, 400),
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (options.method === 'POST') {
+    const text = options.source
+      ? await postBookSourcePage(options.source, url, body, reqOpts)
+      : await post(url, body, reqOpts);
+    logContentPostResponse(text);
+    return text;
   }
-  return get(url, reqOpts);
+  return options.source
+    ? getBookSourcePage(options.source, url, reqOpts)
+    : get(url, reqOpts);
 }

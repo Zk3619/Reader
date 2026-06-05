@@ -8,15 +8,18 @@ import type { LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
 import { bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
 import { invokeQuickJsStringCallback } from '@/lib/js-engine/legado/host/invoke-vm-callback';
 import {
+  applyLegadoAggregationApiHeaders,
   isUserApiPost,
   mergeAjaxCookieHeaders,
   mergeLegadoCookieHeaderStrings,
   normalizeContentApiPostBody,
+  normalizeLegadoAjaxResponseBody,
   normalizeLegadoCookieHeader,
   normalizeUserApiPostBody,
   resolveUserApiCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
+import { writeLegadoAjaxCache } from '@/lib/js-engine/legado/host/ajax-coordinator';
 import { LEGADO_AJAX_PENDING_JSON } from '@/lib/js-engine/legado/source-script-shared';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 
@@ -25,6 +28,30 @@ export type AjaxRequestFn = (resolvedUrl: string, call: {
   body?: string;
   headers: Record<string, string>;
 }) => Promise<string>;
+
+function trackDeferredCallbackHandle(rt: LegadoRunRuntime, handle: QuickJSHandle): QuickJSHandle {
+  rt.deferredCallbackHandles.push(handle);
+  return handle;
+}
+
+function releaseDeferredCallbackHandle(rt: LegadoRunRuntime, handle: QuickJSHandle | undefined): void {
+  if (!handle) return;
+  const idx = rt.deferredCallbackHandles.indexOf(handle);
+  if (idx >= 0) rt.deferredCallbackHandles.splice(idx, 1);
+  try {
+    handle.dispose();
+  } catch {
+    /* ignore */
+  }
+}
+
+function captureVmCallbackHandle(
+  rt: LegadoRunRuntime,
+  handle: QuickJSHandle,
+  defer: boolean,
+): QuickJSHandle {
+  return defer ? trackDeferredCallbackHandle(rt, handle.dup()) : handle;
+}
 
 export function bindJavaAjax(
   vm: QuickJSContext,
@@ -58,11 +85,14 @@ export function bindJavaAjax(
     let optionsOrCb: Record<string, unknown> | ((body: string) => void) | undefined;
     let cb: ((body: string) => void) | null = null;
     let vmCallbackHandle: QuickJSHandle | undefined;
+    let deferredVmCallback = false;
+    const deferCallback = options.twoPassDefer === true;
 
     if (args[1]) {
       const t1 = vm.typeof(args[1]);
       if (t1 === 'function') {
-        vmCallbackHandle = args[1];
+        vmCallbackHandle = captureVmCallbackHandle(rt, args[1], deferCallback);
+        deferredVmCallback = deferCallback;
       } else {
         const d = vm.dump(args[1]);
         if (typeof d === 'function') {
@@ -72,7 +102,8 @@ export function bindJavaAjax(
           if (args[2]) {
             const t2 = vm.typeof(args[2]);
             if (t2 === 'function') {
-              vmCallbackHandle = args[2];
+              vmCallbackHandle = captureVmCallbackHandle(rt, args[2], deferCallback);
+              deferredVmCallback = deferCallback;
             } else {
               const d2 = vm.dump(args[2]);
               if (typeof d2 === 'function') cb = d2 as (body: string) => void;
@@ -88,6 +119,7 @@ export function bindJavaAjax(
       cb ?? undefined
     );
     if (!parsed) {
+      if (deferredVmCallback) releaseDeferredCallbackHandle(rt, vmCallbackHandle);
       return vm.newString('');
     }
 
@@ -97,6 +129,11 @@ export function bindJavaAjax(
     const runCallback = (text: string) => {
       if (vmCallbackHandle) {
         invokeQuickJsStringCallback(vm, vmCallbackHandle, text);
+        if (deferredVmCallback) {
+          releaseDeferredCallbackHandle(rt, vmCallbackHandle);
+          vmCallbackHandle = undefined;
+          deferredVmCallback = false;
+        }
         return;
       }
       if (callback) {
@@ -110,8 +147,9 @@ export function bindJavaAjax(
 
     const cached = coordinator.getCachedResponse(resolvedUrl, options.applyDuration);
     if (cached !== undefined) {
-      runCallback(cached);
-      return vm.newString(cached ?? '');
+      const body = normalizeLegadoAjaxResponseBody(cached);
+      runCallback(body);
+      return vm.newString(body ?? '');
     }
 
     let scriptCookie =
@@ -163,19 +201,21 @@ export function bindJavaAjax(
       delete hdrs['Content-Type'];
     }
 
+    const reqHeaders = applyLegadoAggregationApiHeaders(resolvedUrl, hdrs);
+
     const requestStart = Date.now();
-    const p = options.request(resolvedUrl, { method, body: reqBody, headers: hdrs });
+    const p = options.request(resolvedUrl, { method, body: reqBody, headers: reqHeaders });
 
     if (options.twoPassDefer) {
       p.then((text) => {
         const durationMs = Date.now() - requestStart;
         coordinator.recordDuration(resolvedUrl, durationMs, options.applyDuration);
-        coordinator.cache.set(resolvedUrl, text);
-        runCallback(text);
+        const body = normalizeLegadoAjaxResponseBody(text);
+        writeLegadoAjaxCache(coordinator.cache, resolvedUrl, body);
+        runCallback(body);
       }).catch(() => {
         const durationMs = Date.now() - requestStart;
         coordinator.recordDuration(resolvedUrl, durationMs, options.applyDuration);
-        coordinator.cache.set(resolvedUrl, '');
         runCallback('');
       });
       rt.pending.push(p);

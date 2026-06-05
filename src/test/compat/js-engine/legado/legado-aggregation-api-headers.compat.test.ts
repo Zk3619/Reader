@@ -20,6 +20,15 @@ describe('legado aggregation api headers', () => {
     expect(headers.Accept).toBeUndefined();
   });
 
+  it('discovestyle 自动补 Accept 与 X-Requested-With', () => {
+    const headers = applyLegadoAggregationApiHeaders(
+      'https://v1.gyks.cf/discovestyle?source=x',
+      {},
+    );
+    expect(headers.Accept).toBe('application/json');
+    expect(headers['X-Requested-With']).toBe('XMLHttpRequest');
+  });
+
   it('parseLegadoApiJsonResponse 拒绝 HTML', () => {
     expect(parseLegadoApiJsonResponse('<!DOCTYPE html><html>')).toBeNull();
     expect(parseLegadoApiJsonResponse('{"code":0,"key":"abc"}')).toEqual({
