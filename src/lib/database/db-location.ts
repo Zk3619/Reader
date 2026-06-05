@@ -67,8 +67,12 @@ export async function checkDatabaseExists(): Promise<boolean> {
     const dbPath = await getDatabaseLocation();
     return await exists(dbPath);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('forbidden path')) {
+      console.error('[数据库位置] 无权限访问数据库路径，请检查 FS 作用域:', error);
+      return false;
+    }
     console.warn('[数据库位置] 检查数据库文件失败，回退到 Web 检查:', error);
-    // 回退到 Web 环境检查
     return await checkWebDatabaseExists();
   }
 }

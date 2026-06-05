@@ -80,10 +80,9 @@ mod desktop {
             .parse()
             .map_err(|e: url::ParseError| e.to_string())?;
 
-        let panel = window
-            .add_child(
-                WebviewBuilder::new(BACKSTAGE_WEBVIEW_LABEL, WebviewUrl::External(blank))
-                    .on_navigation(move |url| {
+        let mut webview_builder =
+            WebviewBuilder::new(BACKSTAGE_WEBVIEW_LABEL, WebviewUrl::External(blank))
+                .on_navigation(move |url| {
                         let (request_id, re_opt) = {
                             let s = nav_override_state().lock().unwrap();
                             (s.request_id.clone(), s.regex.clone())
@@ -109,7 +108,20 @@ mod desktop {
                         }
                         true
                     })
-                    .focused(false),
+                .focused(false);
+        if let Ok(config_path) = crate::portable_paths::config_file_path() {
+            if let Ok(root) = crate::portable_paths::effective_webview_data_root(&config_path) {
+                if let Ok(data_dir) = crate::portable_paths::webview_data_directory(
+                    &root,
+                    BACKSTAGE_WEBVIEW_LABEL,
+                ) {
+                    webview_builder = webview_builder.data_directory(data_dir);
+                }
+            }
+        }
+        let panel = window
+            .add_child(
+                webview_builder,
                 LogicalPosition::new(-10_000.0, -10_000.0),
                 LogicalSize::new(1.0, 1.0),
             )

@@ -37,8 +37,15 @@
     "sql:allow-execute",
     "fs:default",
     {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$EXE/**" }
+      ]
+    },
+    {
       "identifier": "fs:allow-exists",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -49,6 +56,7 @@
     {
       "identifier": "fs:allow-read",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -59,6 +67,7 @@
     {
       "identifier": "fs:allow-read-file",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -69,6 +78,7 @@
     {
       "identifier": "fs:allow-write-file",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
@@ -79,6 +89,7 @@
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
@@ -89,6 +100,7 @@
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
@@ -99,6 +111,7 @@
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
@@ -109,6 +122,7 @@
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
@@ -119,6 +133,7 @@
     {
       "identifier": "fs:allow-stat",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -129,6 +144,7 @@
     {
       "identifier": "fs:allow-remove",
       "allow": [
+        { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },

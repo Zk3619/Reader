@@ -1,3 +1,8 @@
+mod data_migration;
+mod http_cookies;
+mod window_state;
+mod portable_paths;
+mod webview_storage;
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
@@ -26,12 +31,11 @@ fn inner_web_panel_user_agent_store() -> &'static Mutex<String> {
     STORE.get_or_init(|| Mutex::new(String::new()))
 }
 
-/// 统一配置文件名：安装版在默认目录、便携版在 exe 同目录创建，存放程序配置与数据路径（如 dataDir）
+/// 统一配置文件名：桌面在 exe 同目录、移动端在系统目录，存放程序配置与数据路径（如 dataDir）
 const CONFIG_FILE: &str = "config.json";
 
-/// 便携版：exe 同目录下的配置/标记，用于识别便携模式（可选 dataDir，默认 "AppData"）
-const PORTABLE_MARKER_FILE: &str = "reader.json";
-const PORTABLE_MARKER_FILES: &[&str] = &["portable", "reader.portable", ".portable"];
+/// 可选：exe 同目录 reader.json 中的 dataDir 覆盖默认 AppData
+pub(crate) const PORTABLE_MARKER_FILE: &str = "reader.json";
 
 /** 日志预览：按字节上限截断，但不切断 UTF-8 多字节字符 */
 fn truncate_utf8_preview(text: &str, max_bytes: usize) -> &str {
@@ -45,54 +49,15 @@ fn truncate_utf8_preview(text: &str, max_bytes: usize) -> &str {
     &text[..end]
 }
 
-#[derive(serde::Deserialize)]
-struct PortableMarkerConfig {
-    #[serde(rename = "dataDir")]
-    data_dir: Option<String>,
-}
-
-/// 便携模式：exe 目录存在 reader.json 或任一标记文件
-fn is_portable_mode(exe_dir: &std::path::Path) -> bool {
-    if exe_dir.join(PORTABLE_MARKER_FILE).exists() {
-        return true;
+/// 配置文件路径：桌面 = exe/AppData/config.json；移动端 = 系统 app_data_dir/config.json
+fn get_config_file_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        return portable_paths::config_file_path();
     }
-    for name in PORTABLE_MARKER_FILES {
-        if exe_dir.join(name).exists() {
-            return true;
-        }
-    }
-    false
-}
-
-/// 便携版默认数据根（无 config.json 的 dataDir 时）：reader.json 的 dataDir 或 exe 旁 AppData
-fn portable_default_data_root(exe_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let marker_path = exe_dir.join(PORTABLE_MARKER_FILE);
-    let data_dir_relative = if marker_path.exists() {
-        let s = std::fs::read_to_string(&marker_path).map_err(|e| format!("读取 {} 失败: {}", PORTABLE_MARKER_FILE, e))?;
-        let config: PortableMarkerConfig = serde_json::from_str(&s).unwrap_or(PortableMarkerConfig { data_dir: None });
-        config.data_dir.unwrap_or_else(|| "AppData".to_string())
-    } else {
-        "AppData".to_string()
-    };
-    let data_dir = data_dir_relative.trim();
-    let data_root = if data_dir.is_empty() {
-        exe_dir.join("AppData")
-    } else if std::path::Path::new(data_dir).is_absolute() {
-        std::path::PathBuf::from(data_dir)
-    } else {
-        exe_dir.join(data_dir)
-    };
-    if !data_root.exists() {
-        std::fs::create_dir_all(&data_root).map_err(|e| format!("创建便携数据目录失败: {}", e))?;
-    }
-    Ok(data_root)
-}
-
-/// 配置文件路径：便携版 = exe 目录/config.json，安装版 = 系统 app_data_dir/config.json
-fn get_config_file_path(app: &tauri::AppHandle, exe_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    if is_portable_mode(exe_dir) {
-        Ok(exe_dir.join(CONFIG_FILE))
-    } else {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
         let dir = app
             .path()
             .app_data_dir()
@@ -101,8 +66,46 @@ fn get_config_file_path(app: &tauri::AppHandle, exe_dir: &std::path::Path) -> Re
     }
 }
 
+/// 启动早期（尚无 AppHandle）解析当前业务数据根，供 http cookie 桥接等使用
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn effective_data_dir_at_startup() -> Result<std::path::PathBuf, String> {
+    let config_path = portable_paths::config_file_path()?;
+    ensure_config_exists(&config_path)?;
+    let default_base = default_app_data_base_static()?;
+    effective_data_dir_from_config(&config_path, &default_base)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn default_app_data_base_static() -> Result<std::path::PathBuf, String> {
+    let exe_dir = portable_paths::exe_dir()?;
+    if let Some(dir) = portable_paths::data_dir_from_reader_json(&exe_dir) {
+        if std::path::Path::new(&dir).is_absolute() {
+            let root = std::path::PathBuf::from(dir);
+            portable_paths::ensure_dir(&root)?;
+            return Ok(root);
+        }
+        return portable_paths::resolve_data_root_from_relative(&dir, &exe_dir);
+    }
+    portable_paths::default_data_root()
+}
+
+/// 默认业务数据根：桌面 = exe/AppData（或 reader.json dataDir）；移动端 = 系统目录
+pub(crate) fn default_app_data_base(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        return default_app_data_base_static();
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        app.path()
+            .app_data_dir()
+            .map_err(|e| format!("无法解析 app_data_dir: {}", e))
+    }
+}
+
 /// 确保配置文件存在：目录存在且 config.json 存在则不动，否则创建并写入 {}
-fn ensure_config_exists(path: &std::path::Path) -> Result<(), String> {
+pub(crate) fn ensure_config_exists(path: &std::path::Path) -> Result<(), String> {
     if path.exists() {
         return Ok(());
     }
@@ -113,8 +116,38 @@ fn ensure_config_exists(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 创建主窗口（tauri.conf 中 create: false，由 setup 或迁移完成后调用）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn create_main_window_if_missing(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::webview::WebviewWindowBuilder;
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+    let win_config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .or_else(|| app.config().app.windows.first())
+        .ok_or_else(|| "tauri.conf.json 中未配置主窗口".to_string())?;
+
+    let mut builder =
+        WebviewWindowBuilder::from_config(app, win_config).map_err(|e| e.to_string())?;
+    let config_path = get_config_file_path(app)?;
+    ensure_config_exists(&config_path)?;
+    if let Ok(root) = portable_paths::effective_webview_data_root(&config_path) {
+        if let Ok(data_dir) = portable_paths::webview_data_directory(&root, &win_config.label) {
+            builder = builder.data_directory(data_dir);
+        }
+    }
+    builder.build().map_err(|e| e.to_string())?;
+    window_state::restore_and_attach(app)?;
+    Ok(())
+}
+
 /// 从 config.json 读取 dataDir；若有效则作为数据根目录
-fn effective_data_dir_from_config(
+pub(crate) fn effective_data_dir_from_config(
     config_path: &std::path::Path,
     default_base: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
@@ -128,8 +161,8 @@ fn effective_data_dir_from_config(
     let data_root = match data_dir {
         Some(dir) if std::path::Path::new(dir).is_absolute() => std::path::PathBuf::from(dir),
         Some(dir) => {
-            let base = config_path.parent().unwrap_or(default_base);
-            base.join(dir)
+            let exe = portable_paths::exe_dir()?;
+            portable_paths::resolve_data_root_from_relative(dir, &exe)?
         }
         None => default_base.to_path_buf(),
     };
@@ -139,35 +172,27 @@ fn effective_data_dir_from_config(
     Ok(data_root)
 }
 
-/// 返回应用数据根目录：由 config.json 的 dataDir 决定，无则用默认（安装版=系统目录，便携版=exe 旁 AppData 等）
+/// 返回应用数据根目录：由 config.json 的 dataDir 决定，无则用默认（桌面=exe 旁 AppData，移动端=系统目录）
 #[tauri::command]
 fn get_app_data_root(app: tauri::AppHandle) -> Result<String, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| "无法获取 exe 所在目录".to_string())?;
-
-    let config_path = get_config_file_path(&app, exe_dir)?;
+    let config_path = get_config_file_path(&app)?;
     ensure_config_exists(&config_path)?;
-
-    let default_base = if is_portable_mode(exe_dir) {
-        portable_default_data_root(exe_dir)?
-    } else {
-        app.path()
-            .app_data_dir()
-            .map_err(|e| format!("无法解析 app_data_dir: {}", e))?
-    };
-
+    let default_base = default_app_data_base(&app)?;
     let data_root = effective_data_dir_from_config(&config_path, &default_base)?;
     Ok(data_root.to_string_lossy().into_owned())
+}
+
+/// 默认业务数据根（exe/AppData 或 reader.json），不含 config.dataDir 覆盖
+#[tauri::command]
+fn get_default_app_data_base(app: tauri::AppHandle) -> Result<String, String> {
+    let base = default_app_data_base(&app)?;
+    Ok(base.to_string_lossy().into_owned())
 }
 
 /// 读取 config.json 全文（供前端展示与编辑）
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path.parent().ok_or_else(|| "无法获取 exe 所在目录".to_string())?;
-    let config_path = get_config_file_path(&app, exe_dir)?;
+    let config_path = get_config_file_path(&app)?;
     ensure_config_exists(&config_path)?;
     let s = std::fs::read_to_string(&config_path).unwrap_or_else(|_| "{}".to_string());
     serde_json::from_str(&s).map_err(|e| format!("解析配置失败: {}", e))
@@ -176,9 +201,7 @@ fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 /// 写入 config.json 全文（前端保存后调用；dataDir 变更需重启生效）
 #[tauri::command]
 fn set_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path.parent().ok_or_else(|| "无法获取 exe 所在目录".to_string())?;
-    let config_path = get_config_file_path(&app, exe_dir)?;
+    let config_path = get_config_file_path(&app)?;
     ensure_config_exists(&config_path)?;
     let json = serde_json::to_string_pretty(&config).map_err(|e| format!("序列化配置失败: {}", e))?;
     std::fs::write(&config_path, json.as_bytes()).map_err(|e| format!("写入配置失败: {}", e))?;
@@ -893,15 +916,21 @@ async fn open_inner_web_panel(
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
     let app_for_nav = app.clone();
+    let mut webview_builder = WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(target_url))
+        .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
+        .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
+        .focused(true);
+    if let Ok(config_path) = portable_paths::config_file_path() {
+        if let Ok(root) = portable_paths::effective_webview_data_root(&config_path) {
+            if let Ok(data_dir) =
+                portable_paths::webview_data_directory(&root, INNER_WEB_PANEL_LABEL)
+            {
+                webview_builder = webview_builder.data_directory(data_dir);
+            }
+        }
+    }
     let panel = window
-        .add_child(
-            WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(target_url))
-                .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
-                .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
-                .focused(true),
-            pos,
-            size,
-        )
+        .add_child(webview_builder, pos, size)
         .map_err(|e| e.to_string())?;
 
     if !cookies_str.is_empty() && ok_http {
@@ -1038,7 +1067,7 @@ async fn open_inner_web_child_window(
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
     let app_for_nav = app.clone();
-    let child = WebviewWindowBuilder::new(
+    let mut child_builder = WebviewWindowBuilder::new(
         &app,
         INNER_WEB_CHILD_LABEL,
         WebviewUrl::External(target_url),
@@ -1054,9 +1083,17 @@ async fn open_inner_web_child_window(
     .visible(true)
     .focused(true)
     .position(x, y)
-    .inner_size(w, h)
-    .build()
-    .map_err(|e| e.to_string())?;
+    .inner_size(w, h);
+    if let Ok(config_path) = portable_paths::config_file_path() {
+        if let Ok(root) = portable_paths::effective_webview_data_root(&config_path) {
+            if let Ok(data_dir) =
+                portable_paths::webview_data_directory(&root, INNER_WEB_CHILD_LABEL)
+            {
+                child_builder = child_builder.data_directory(data_dir);
+            }
+        }
+    }
+    let child = child_builder.build().map_err(|e| e.to_string())?;
 
     if !cookies_str.is_empty() && ok_http {
         if let Some(wv) = app.get_webview(INNER_WEB_CHILD_LABEL) {
@@ -1320,7 +1357,7 @@ async fn open_url_with_cookies(
         title
     };
 
-    let builder = WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         &app,
         &label,
         WebviewUrl::External("about:blank".parse().map_err(|e: url::ParseError| e.to_string())?),
@@ -1328,6 +1365,13 @@ async fn open_url_with_cookies(
     .title(&title)
     .inner_size(800.0_f64, 600.0_f64)
     .min_inner_size(400.0_f64, 300.0_f64);
+    if let Ok(config_path) = portable_paths::config_file_path() {
+        if let Ok(root) = portable_paths::effective_webview_data_root(&config_path) {
+            if let Ok(data_dir) = portable_paths::webview_data_directory(&root, &label) {
+                builder = builder.data_directory(data_dir);
+            }
+        }
+    }
 
     let window = builder.build().map_err(|e| e.to_string())?;
 
@@ -1459,6 +1503,45 @@ fn prevent_default_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    portable_paths::run_legacy_layout_migrations();
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    http_cookies::preflight_install_http_cookies_bridge();
+
+    let log_plugin = {
+        use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+        let mut builder = tauri_plugin_log::Builder::new()
+            .level(tauri_plugin_log::log::LevelFilter::Info)
+            .rotation_strategy(RotationStrategy::KeepSome(7))
+            .max_file_size(10 * 1024 * 1024)
+            .timezone_strategy(TimezoneStrategy::UseLocal);
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            if let Ok(log_dir) = portable_paths::log_directory() {
+                builder = builder.targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Folder {
+                        path: log_dir,
+                        file_name: Some("reader".into()),
+                    }),
+                ]);
+            } else {
+                builder = builder.target(Target::new(TargetKind::Stdout));
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            builder = builder.targets([
+                Target::new(TargetKind::Stdout),
+                Target::new(TargetKind::LogDir {
+                    file_name: Some("reader".into()),
+                }),
+            ]);
+        }
+        builder.build()
+    };
+
     let builder = tauri::Builder::default()
         // 所有平台都支持的插件
         .plugin(tauri_plugin_shell::init())
@@ -1470,11 +1553,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .level(tauri_plugin_log::log::LevelFilter::Info)
-                .build(),
-        )
+        .plugin(log_plugin)
         .plugin(prevent_default_plugin());
 
     // 桌面平台专用插件和命令
@@ -1485,16 +1564,6 @@ pub fn run() {
         // .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         // .plugin(tauri_plugin_clipboard::init()) // 如果需要可以取消注释
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::POSITION
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
-                        | tauri_plugin_window_state::StateFlags::VISIBLE,
-                )
-                .build(),
-        )
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 window.show().unwrap();
@@ -1549,6 +1618,57 @@ pub fn run() {
 
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
+
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let config_path = get_config_file_path(app.handle())?;
+            ensure_config_exists(&config_path)?;
+            data_migration::validate_and_fallback_data_dir(app.handle())?;
+
+            if data_migration::has_pending_relocation(app.handle())? {
+                use tauri::{WebviewUrl, WebviewWindowBuilder};
+                WebviewWindowBuilder::new(
+                    app.handle(),
+                    "migration_splash",
+                    WebviewUrl::default(),
+                )
+                .title("正在迁移数据")
+                .inner_size(520.0, 320.0)
+                .center()
+                .resizable(false)
+                .decorations(true)
+                .visible(true)
+                .build()?;
+                data_migration::spawn_relocation_migration(app.handle().clone());
+            } else {
+                data_migration::run_startup_migration(app.handle());
+                create_main_window_if_missing(app.handle())?;
+                let default_base = default_app_data_base(app.handle())?;
+                let data_root = effective_data_dir_from_config(&config_path, &default_base)?;
+                portable_paths::register_portable_fs_scope(app.handle(), &data_root)?;
+                if let Ok(web_root) = portable_paths::effective_webview_data_root(&config_path) {
+                    let _ = portable_paths::allow_fs_directory(app.handle(), &web_root);
+                }
+                if let Ok(log_dir) = portable_paths::log_directory() {
+                    let _ = portable_paths::allow_fs_directory(app.handle(), &log_dir);
+                }
+            }
+        }
+
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        if app.get_webview_window("main").is_none() {
+            use tauri::webview::WebviewWindowBuilder;
+            let win_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .or_else(|| app.config().app.windows.first())
+                .ok_or_else(|| "tauri.conf.json 中未配置主窗口".to_string())?;
+            WebviewWindowBuilder::from_config(app.handle(), win_config)?.build()?;
+        }
+
         Ok(())
     });
 
@@ -1569,8 +1689,35 @@ pub fn run() {
             decode_gbk,
             encode_form_urlencoded_gbk,
             get_app_data_root,
+            get_default_app_data_base,
             get_config,
             set_config,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::get_webview_data_root,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::get_log_directory,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::get_webview_storage_stats,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::clear_webview_disk_cache,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::clear_webview_cookies,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            webview_storage::clear_main_webview_all_browsing_data,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::run_legacy_data_migration,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::precheck_data_dir_migration,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::revert_pending_data_dir_migration,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::retry_pending_relocation_migration,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::get_data_dir_migration_backup,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            data_migration::clear_data_dir_migration_backup,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            window_state::save_window_state,
             run_login_script_rust,
             reader_emit_network_booksource_import,
             prepare_login_open,
@@ -1624,11 +1771,20 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {
+        .run(|app_handle, event| {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit { .. }
+            ) {
+                window_state::save_on_exit(app_handle);
+                http_cookies::finalize_http_cookies_to_portable();
+            }
+
             // 兜底：阻止 WebView 栈空时系统返回直接杀进程；「再按一次退出」由前端 onBackButtonPress 处理。
             // 前端无法拦截 RunEvent::ExitRequested，此逻辑不能整体搬到 JS。
             #[cfg(any(target_os = "android", target_os = "ios"))]
-            if let tauri::RunEvent::ExitRequested { api, .. } = _event {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 api.prevent_exit();
             }
         });
