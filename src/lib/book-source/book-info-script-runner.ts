@@ -1,5 +1,5 @@
 /**
- * 书籍详情 ruleBookInfo 中的 Legado <js> 规则（如晴天聚合简介块）
+ * 书籍详情 ruleBookInfo 中的 Legado <js> 规则
  */
 
 import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
