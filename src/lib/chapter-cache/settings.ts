@@ -5,8 +5,12 @@
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 const STORAGE_KEY = 'chapter_cache_settings';
+/** 设置结构版本：2 = preDownloadNum 默认 10，旧版存 0 时自动升级 */
+const SETTINGS_SCHEMA_VERSION = 2;
 
 export interface ChapterCacheSettings {
+  /** 持久化结构版本（内部字段） */
+  schemaVersion?: number;
   /** 阅读时预取相邻章节 */
   prefetchEnabled: boolean;
   /** 向前/向后各预取章数（1–2） */
@@ -20,9 +24,11 @@ export interface ChapterCacheSettings {
 }
 
 const DEFAULTS: ChapterCacheSettings = {
+  schemaVersion: SETTINGS_SCHEMA_VERSION,
   prefetchEnabled: true,
   prefetchCount: 1,
-  preDownloadNum: 0,
+  /** 对齐 Legado AppConfig.preDownloadNum 默认值 */
+  preDownloadNum: 10,
   maxBytesMb: 0,
   retentionDays: 0,
 };
@@ -34,17 +40,28 @@ export async function getChapterCacheSettings(): Promise<ChapterCacheSettings> {
   try {
     const parsed = await getStorage<Partial<ChapterCacheSettings>>(STORAGE_KEY);
     if (parsed) {
+      const schemaVersion = parsed.schemaVersion ?? 1;
+      let preDownloadNum = clampInt(
+        parsed.preDownloadNum ?? DEFAULTS.preDownloadNum,
+        0,
+        9999,
+      );
+      const migratedPreDownload =
+        schemaVersion < SETTINGS_SCHEMA_VERSION && preDownloadNum === 0;
+      if (migratedPreDownload) {
+        preDownloadNum = DEFAULTS.preDownloadNum;
+      }
       cached = {
+        schemaVersion: SETTINGS_SCHEMA_VERSION,
         prefetchEnabled: parsed.prefetchEnabled ?? DEFAULTS.prefetchEnabled,
         prefetchCount: clampInt(parsed.prefetchCount ?? DEFAULTS.prefetchCount, 1, 2),
-        preDownloadNum: clampInt(
-          parsed.preDownloadNum ?? DEFAULTS.preDownloadNum,
-          0,
-          9999,
-        ),
+        preDownloadNum,
         maxBytesMb: clampInt(parsed.maxBytesMb ?? DEFAULTS.maxBytesMb, 0, 102_400),
         retentionDays: clampInt(parsed.retentionDays ?? DEFAULTS.retentionDays, 0, 3650),
       };
+      if (migratedPreDownload) {
+        void setStorage(STORAGE_KEY, cached);
+      }
       return cached;
     }
   } catch (e) {
@@ -59,6 +76,7 @@ export async function saveChapterCacheSettings(
 ): Promise<ChapterCacheSettings> {
   const current = await getChapterCacheSettings();
   const next: ChapterCacheSettings = {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
     prefetchEnabled: patch.prefetchEnabled ?? current.prefetchEnabled,
     prefetchCount: clampInt(
       patch.prefetchCount ?? current.prefetchCount,

@@ -234,6 +234,7 @@ async function runBookJob(job: BookJob): Promise<ChapterDownloadBatchResult> {
           book,
           chapter,
           next?.url,
+          index,
         );
         if (raw?.trim()) {
           ok = true;

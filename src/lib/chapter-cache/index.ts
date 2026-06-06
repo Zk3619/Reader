@@ -10,6 +10,8 @@ export { getChapterCacheSettings, saveChapterCacheSettings } from '@/lib/chapter
 export {
   prefetchChaptersOnRead,
   scheduleChapterBodyCachePrefetch,
+  cancelPrefetchOnRead,
+  collectPrefetchIndices,
 } from '@/lib/chapter-cache/prefetch';
 export {
   chapterCacheDownloadStore,

@@ -75,6 +75,7 @@ export async function buildBookTxtContent(
         book,
         ch,
         next?.url,
+        i,
       );
     }
     if (!raw?.trim()) {

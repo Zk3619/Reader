@@ -169,7 +169,7 @@ export function ChapterCacheSetting() {
           <div class="min-w-0 flex-1 space-y-0.5">
             <span>预下载章节数（0=关闭）</span>
             <p class="text-xs text-muted-foreground">
-              对齐 Legado「预下载章节」：仅向当前章之后批量缓存（0=关闭，0–9999）。不负责往回翻，与上方相邻缓存分工。
+              对齐 Legado「预下载章节」（默认 10）：向前后批量缓存，跳过当前章 ±1（由阅读即时加载）；0=关闭。
             </p>
           </div>
           <input

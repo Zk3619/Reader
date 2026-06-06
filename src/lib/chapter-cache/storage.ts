@@ -11,6 +11,7 @@ import {
   writeChapterFile,
   clearAllChapterCacheFiles,
 } from '@/lib/chapter-cache/file-storage';
+import { catalogCacheIndex } from '@/lib/chapter-cache/catalog-cache-index';
 import type { Book, BookChapter, BookSource } from '@/types';
 import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
 
@@ -119,13 +120,16 @@ export async function fetchAndCacheChapterContent(
   book: Book,
   chapter: BookChapter,
   nextChapterUrl?: string,
+  /** 目录数组下标；须与阅读器 chapterIndex / 目录云标一致 */
+  cacheIndex?: number,
 ): Promise<string | null> {
   const { getContent } = await import('@/lib/book-source/content');
   const raw = await getContent(source, chapter, nextChapterUrl, book, {
     skipReplaceRules: true,
   });
   if (raw) {
-    await writeCachedChapterRaw(book, chapter.index, raw);
+    const idx = cacheIndex ?? catalogCacheIndex(chapter.index, chapter);
+    await writeCachedChapterRaw(book, idx, raw);
   }
   return raw;
 }
