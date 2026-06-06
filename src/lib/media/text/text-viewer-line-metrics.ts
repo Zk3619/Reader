@@ -128,7 +128,8 @@ export function collectDomTextLines(
     for (let li = 0; li < rects.length; li += 1) {
       const rect = rects[li]!;
       const lineTop = rect.top - rootRect.top;
-      const lineBottom = lineTop + lineHeightPx;
+      const rectBottom = rect.bottom - rootRect.top;
+      const lineBottom = Math.max(lineTop + lineHeightPx, rectBottom);
       const { columns, text, chapterPosition } = collectColumnsInLine(
         textEl,
         rootRect,

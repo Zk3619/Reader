@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computePageStartsFromSegments,
+  pageContentSpanPx,
   pageDisplayHeight,
   pagePackLimitPx,
   splitBlockIndicesByPageHeight,
@@ -74,6 +75,57 @@ describe('computePageStartsFromSegments', () => {
     expect(pageDisplayHeight(1, starts, 500, 1200, segments)).toBe(380);
     expect(pageDisplayHeight(2, starts, 500, 1200, segments)).toBe(300);
   });
+
+  it('pageDisplayHeight includes straddling segment tail on last page', () => {
+    const clipHeight = 749;
+    const segments = [
+      { top: 640, bottom: 672 },
+      { top: 672, bottom: 704 },
+      { top: 704, bottom: 736 },
+      { top: 717, bottom: 768 },
+    ];
+    const starts = [0, 736];
+    expect(pageDisplayHeight(1, starts, clipHeight, 768, segments)).toBe(32);
+  });
+
+  it('paginates oversized block that started on a prior page', () => {
+    const clipHeight = 749;
+    const segments = [{ top: 0, bottom: 1500 }];
+    expect(computePageStartsFromSegments(segments, clipHeight, 1500, 0)).toEqual([
+      0, 749, 1498,
+    ]);
+  });
+});
+
+describe('pageContentSpanPx', () => {
+  it('caps span at live clip height when layout clip is stale', () => {
+    const layout = {
+      pageStarts: [0, 736],
+      clipHeight: 800,
+      contentExtent: 768,
+      segments: [
+        { top: 640, bottom: 672 },
+        { top: 672, bottom: 704 },
+        { top: 704, bottom: 736 },
+      ],
+      pages: [{ displayHeight: 736 }],
+    };
+    expect(pageContentSpanPx(0, layout, 749)).toBe(736);
+    expect(pageContentSpanPx(0, layout, 700)).toBe(700);
+  });
+
+  it('uses displayHeight when shorter than break span (paragraph gap)', () => {
+    const layout = {
+      pageStarts: [0, 400],
+      clipHeight: 500,
+      contentExtent: 1100,
+      segments: [
+        { top: 0, bottom: 380 },
+        { top: 400, bottom: 780 },
+      ],
+    };
+    expect(pageContentSpanPx(0, layout, 500)).toBe(380);
+  });
 });
 
 describe('lastNonBlankPageIndex', () => {
@@ -93,6 +145,11 @@ describe('lastNonBlankPageIndex', () => {
       { top: 736, bottom: 768 },
     ];
     expect(lastNonBlankPageIndex([0, 736], segments)).toBe(1);
+  });
+
+  it('keeps last page when only a straddling segment tail is visible', () => {
+    const segments = [{ top: 717, bottom: 768 }];
+    expect(lastNonBlankPageIndex([0, 736], segments, 768)).toBe(1);
   });
 });
 

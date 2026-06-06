@@ -63,6 +63,7 @@ export function chapterLayoutsEqual(
   if (a.cacheKey !== b.cacheKey) return false;
   if (a.engine !== b.engine) return false;
   if (a.pageStarts.length !== b.pageStarts.length) return false;
+  if (Math.abs(a.clipHeight - b.clipHeight) > 1) return false;
   return a.pageStarts.every((v, i) => Math.abs(v - (b.pageStarts[i] ?? -1)) < 0.5);
 }
 

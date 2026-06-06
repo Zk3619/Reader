@@ -70,6 +70,20 @@ function relativeBottom(rootRect: DOMRect, el: Element): number {
   return el.getBoundingClientRect().bottom - rootRect.top;
 }
 
+function mergeLineSegment(
+  lines: ReaderLayoutSegment[],
+  top: number,
+  bottom: number,
+): void {
+  if (bottom <= top + 0.5) return;
+  const existing = lines.find((line) => Math.abs(line.top - top) < 1);
+  if (existing) {
+    existing.bottom = Math.max(existing.bottom, bottom);
+    return;
+  }
+  lines.push({ top, bottom });
+}
+
 function collectLineSegmentsInBlock(
   _measureRoot: HTMLElement,
   rootRect: DOMRect,
@@ -96,10 +110,12 @@ function collectLineSegmentsInBlock(
   const lines: ReaderLayoutSegment[] = [];
   for (const rect of rects) {
     const top = rect.top - rootRect.top;
-    const bottom = top + lineHeightPx;
-    if (bottom > top + 0.5) lines.push({ top, bottom });
+    const rectBottom = rect.bottom - rootRect.top;
+    // 行盒实测底可能高于 line-height（descender / 两端对齐）；仅用 lineHeight 会低估导致页底裁字
+    const bottom = Math.max(top + lineHeightPx, rectBottom);
+    mergeLineSegment(lines, top, bottom);
   }
-  return lines;
+  return lines.sort((a, b) => a.top - b.top || a.bottom - b.bottom);
 }
 
 /**
@@ -224,7 +240,16 @@ export function pagePackLimitPx(pageStart: number, clipHeight: number): number {
 
 /**
  * 裁切窗高度：贴齐本页最后一段底，上限为 nextStart（防半行），不超过 clipHeight。
+ * 含跨页 segment（top 在上一页、bottom 落入本页）。
  */
+export function segmentOverlapsRange(
+  seg: ReaderLayoutSegment,
+  rangeStart: number,
+  rangeEnd: number,
+): boolean {
+  return seg.bottom > rangeStart + 0.5 && seg.top < rangeEnd - 0.5;
+}
+
 export function pageDisplayHeight(
   pageIndex: number,
   pageStarts: number[],
@@ -239,13 +264,52 @@ export function pageDisplayHeight(
 
   let lastBottom = start;
   for (const seg of segments) {
-    if (seg.top < start - 0.5) continue;
-    if (seg.top >= maxEnd - 0.5) break;
-    lastBottom = Math.max(lastBottom, seg.bottom);
+    if (!segmentOverlapsRange(seg, start, maxEnd)) continue;
+    lastBottom = Math.max(lastBottom, Math.min(seg.bottom, maxEnd));
   }
 
   const contentSpan = Math.max(1, Math.ceil(lastBottom - start));
   return Math.min(maxSpan, contentSpan);
+}
+
+export interface PageContentSpanLayout {
+  pageStarts: number[];
+  clipHeight: number;
+  contentExtent: number;
+  segments: ReaderLayoutSegment[];
+  pages?: { displayHeight: number }[];
+}
+
+/**
+ * 单页正文裁切高度：nextStart − pageStart 防漏页；displayHeight 贴齐末行；
+ * liveClipHeight 对齐 DOM page-window，避免 layout.clipHeight 与实测偏差裁切。
+ */
+export function pageContentSpanPx(
+  pageIndex: number,
+  layout: PageContentSpanLayout | null | undefined,
+  liveClipHeightPx: number,
+): number {
+  const liveClip = Math.max(1, Math.round(liveClipHeightPx));
+  if (!layout) return liveClip;
+
+  const start = Math.round(layout.pageStarts[pageIndex] ?? 0);
+  const nextTop = layout.pageStarts[pageIndex + 1];
+  const breakSpan =
+    nextTop != null
+      ? Math.min(layout.clipHeight, Math.max(1, Math.round(nextTop - start)))
+      : liveClip;
+
+  const displayH =
+    layout.pages?.[pageIndex]?.displayHeight ??
+    pageDisplayHeight(
+      pageIndex,
+      layout.pageStarts,
+      layout.clipHeight,
+      layout.contentExtent,
+      layout.segments,
+    );
+
+  return Math.min(liveClip, breakSpan, Math.max(1, displayH));
 }
 
 function shrinkPageEndBeforeStraddle(
@@ -289,15 +353,16 @@ export function computePageStartsFromSegments(
   const starts: number[] = [0];
   let pageStart = 0;
 
-  for (;;) {
+  for (; ;) {
     const limit = packLimit(pageStart);
     if (pageStart + clipHeight >= contentBottom - 0.5) break;
 
     let nextStart = -1;
     for (const seg of segments) {
-      if (seg.top < pageStart - 0.5) continue;
+      if (seg.bottom <= pageStart + 0.5) continue;
       if (seg.bottom <= limit + 0.5) continue;
-      nextStart = seg.top;
+      nextStart =
+        seg.top >= pageStart - 0.5 ? Math.round(seg.top) : Math.round(limit);
       break;
     }
 
@@ -327,13 +392,19 @@ export function computePageStartsFromSegments(
 export function lastNonBlankPageIndex(
   pageStarts: number[],
   segments: ReaderLayoutSegment[],
+  contentExtent?: number,
 ): number {
   if (pageStarts.length <= 1) return 0;
   let last = pageStarts.length - 1;
   while (last > 0) {
     const start = pageStarts[last] ?? 0;
-    const hasContent = segments.some(
-      (s) => s.top >= start - 0.5 && s.bottom > start + 0.5,
+    const pageEnd =
+      pageStarts[last + 1] ??
+      Math.ceil(
+        contentExtent ?? segments.reduce((max, s) => Math.max(max, s.bottom), 0),
+      );
+    const hasContent = segments.some((s) =>
+      segmentOverlapsRange(s, start, pageEnd),
     );
     if (hasContent) break;
     last -= 1;
