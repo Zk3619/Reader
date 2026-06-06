@@ -6,6 +6,7 @@ import * as chaptersDb from '@/lib/database/chapters';
 import { deleteCachedChapter } from '@/lib/chapter-cache/storage';
 import { MediaKind } from '@/lib/book-source/book-type';
 import { clearChapterContentPool } from '@/lib/chapter-cache/chapter-content-pool';
+import { cancelPrefetchOnRead } from '@/lib/chapter-cache/prefetch';
 import { isLocalBook } from '@/lib/local-book';
 import { flushReadingSession } from '@/lib/media/text/reading-session';
 import type { Book, BookChapter } from '@/types';
@@ -217,6 +218,7 @@ export const viewerStore = {
 
     if (kind === MediaKind.text) {
       await flushReadingSession(state.guestReading ? null : book);
+      cancelPrefetchOnRead(book?.bookUrl);
       resetTextViewerSession();
     } else if (kind) {
       resetMediaChapterSession();
@@ -232,6 +234,7 @@ export const viewerStore = {
     if (!book) return;
 
     resetMediaChapterSession();
+    cancelPrefetchOnRead(book.bookUrl);
     resetTextViewerSession();
     clearChapterContentPool();
     resetViewerState();

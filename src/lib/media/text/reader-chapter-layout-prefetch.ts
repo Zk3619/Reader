@@ -3,9 +3,7 @@
  */
 
 import { getPooledChapterContent } from '@/lib/chapter-cache/chapter-content-pool';
-import { scheduleChapterBodyCachePrefetch } from '@/lib/chapter-cache/prefetch';
 import { readCachedChapterRaw } from '@/lib/chapter-cache/storage';
-import { isLocalBook } from '@/lib/local-book';
 import { layoutReaderChapter } from '@/lib/media/text/reader-chapter-layout';
 import {
   buildChapterLayoutCacheKey,
@@ -116,10 +114,6 @@ export function scheduleAdjacentChapterLayoutPrefetch(
 
   const run = () => {
     void (async () => {
-      if (!isLocalBook(book) && token === prefetchToken) {
-        scheduleChapterBodyCachePrefetch(book, catalog, chapterIndex);
-      }
-
       let warmed = 0;
       for (const index of neighbors) {
         if (token !== prefetchToken) return;

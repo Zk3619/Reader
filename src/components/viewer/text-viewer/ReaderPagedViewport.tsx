@@ -51,6 +51,15 @@ import {
   adjacentChapterIndex,
   resolveAdjacentChapterContent,
 } from '@/lib/media/text/reader-paged-cross-chapter-content';
+import {
+  type CurlPoint,
+  type SimulationCurlDirection,
+  clearSimulationCurl,
+  computeCurlCorner,
+  computeSimulationCurl,
+  legadoSimulationTouchY,
+  updateSimulationCurl,
+} from '@/lib/media/text/reader-paged-simulation-curl';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import type { TextViewerPageAnim, TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { textViewerPagedContentInsets, textViewerPagedDragCommitThresholdPx } from '@/lib/media/text/reader-ui-config';
@@ -69,6 +78,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import { consumePagedChapterEntry } from '@/lib/media/text/reader-paged-chapter-entry';
+import { lastNonBlankPageIndex } from '@/lib/media/text/text-viewer-paginate';
 
 const PAGE_TURN_MS = 320;
 /** 偏移落入此区间视为未选方向，用于换向时重置翻页态 */
@@ -94,6 +104,8 @@ type CrossChapterTurnState = {
   /** true = 已走 store 切章（缓存未命中时的回退路径） */
   chapterCommitted: boolean;
   stagingPainted: boolean;
+  /** 是否已请求提交（松手过阈值/点击翻页）；false 时仅做拖拽预览，不自动播放切章动画 */
+  commitRequested: boolean;
 };
 
 export interface ReaderPagedViewportProps extends ReaderContentProps {
@@ -155,6 +167,21 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let dragOffsetPxRef = 0;
   let crossChapterTurn: CrossChapterTurnState | null = null;
   let crossChapterLayoutTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 仿真卷曲：最近指针 client 坐标 + 页脚 + 动画段插值参数 */
+  let simPointerClientX = 0;
+  let simPointerClientY = 0;
+  let simCorner: CurlPoint | null = null;
+  let curlAnim:
+    | {
+        fromX: number;
+        fromY: number;
+        toX: number;
+        toY: number;
+        cornerX: number;
+        cornerY: number;
+        initial: number;
+      }
+    | null = null;
   /** finishTurn 异步切章期间，阻止 chapterIndex effect 重置排版 */
   let crossChapterCommitInFlight = false;
   let idleContentRootChapter = -1;
@@ -200,6 +227,22 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
   const pagedSlotInsetFromConfig = (): TextViewerPagedContentInsets =>
     textViewerPagedContentInsets(viewerState.config);
+
+  /**
+   * content-slot 正文内宽：滑动翻页时 slot 为满视口面板（padding 承载 inset），
+   * clientWidth 含 padding；按页挂载时 padding 为 0。统一扣除 padding 取内宽，
+   * 保证切章前后（slide 面板 ↔ 按页挂载）排版宽一致，避免缓存 key 失配导致重排抖动。
+   */
+  const slotContentInnerWidth = (): number => {
+    const inset = pagedSlotInsetFromConfig();
+    const outerWidth = viewportEl?.clientWidth ?? 0;
+    const fallback = Math.max(1, outerWidth - inset.left - inset.right);
+    if (!contentSlotEl || contentSlotEl.clientWidth <= 0) return fallback;
+    const padLeft = parseFloat(contentSlotEl.style.paddingLeft) || 0;
+    const padRight = parseFloat(contentSlotEl.style.paddingRight) || 0;
+    const inner = Math.round(contentSlotEl.clientWidth - padLeft - padRight);
+    return inner > 0 ? inner : fallback;
+  };
 
   const contentInset = (): TextViewerPagedContentInsets => {
     const fallback = pagedSlotInsetFromConfig();
@@ -286,20 +329,33 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const chapterTitleAt = (index: number) => viewerState.catalog[index]?.title;
 
+  /** 跨章 prev 落点：跳过尾部空白页，不改动全局 pageStarts */
+  const prevChapterLandingPage = (l: ReaderChapterLayout) =>
+    lastNonBlankPageIndex(l.pageStarts, l.segments);
+
   const buildIncomingChapterLayout = (
     chapterIndex: number,
     content: string,
     chapterTitle?: string,
   ): ReaderChapterLayout | null => {
     const pageWindow = pageWindowMetrics();
-    const slotInset = pagedSlotInsetFromConfig();
-    const outerWidth = viewportEl?.clientWidth ?? 0;
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerWidth - slotInset.left - slotInset.right);
+    const layoutWidth = slotContentInnerWidth();
     const height = pageWindow.viewportHeight;
     if (height <= 0 || layoutWidth <= 0 || !content.trim()) return null;
+
+    const cacheKey = buildChapterLayoutCacheKey({
+      chapterIndex,
+      contentRevision: buildContentRevision(content),
+      layoutSignature: buildReaderLayoutSignature(viewerState.config, {
+        dualPage: pagedLayoutDualPage(),
+        viewportWidth: layoutWidth,
+        viewportHeight: height,
+      }),
+      viewportSignature: buildViewportSignature(layoutWidth, height),
+      chapterTitle,
+    });
+    const cached = getCachedChapterLayout(cacheKey);
+    if (cached && isCrossChapterLayoutReady(cached, chapterIndex)) return cached;
 
     const next = layoutReaderChapter({
       chapterIndex,
@@ -331,7 +387,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       if (turn) {
         if (turn.targetPage != null) return turn.targetPage;
         if (turn.direction === 'next') return 0;
-        return Math.max(0, next.pageStarts.length - 1);
+        return prevChapterLandingPage(next);
       }
       const max = Math.max(0, next.pageStarts.length - 1);
       return i <= max ? i : max;
@@ -364,12 +420,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     }
     const pageWindow = pageWindowMetrics();
     const height = pageWindow.viewportHeight;
-    const slotInset = pagedSlotInsetFromConfig();
     const outerWidth = viewportEl.clientWidth;
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerWidth - slotInset.left - slotInset.right);
+    const layoutWidth = slotContentInnerWidth();
     if (height <= 0 || layoutWidth <= 0) return;
 
     syncViewportSize(outerWidth, viewportEl.clientHeight);
@@ -478,8 +530,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   }) => {
     const duringTurnOk = Boolean(
       options?.allowDuringTurn &&
-        crossChapterTurn &&
-        !crossChapterTurn.animRunning,
+      crossChapterTurn &&
+      !crossChapterTurn.animRunning,
     );
     if (!duringTurnOk && turnStage() !== 'idle') {
       return;
@@ -531,12 +583,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const buildCurrentChapterLayoutCacheKey = () => {
     const pageWindow = pageWindowMetrics();
-    const slotInset = pagedSlotInsetFromConfig();
-    const outerWidth = viewportEl?.clientWidth ?? 0;
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerWidth - slotInset.left - slotInset.right);
+    const layoutWidth = slotContentInnerWidth();
     const height = pageWindow.viewportHeight;
     const cfg = viewerState.config;
     const dual = pagedLayoutDualPage();
@@ -573,12 +620,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (l && isCrossChapterLayoutReady(l, viewerState.chapterIndex)) return false;
 
     const pageWindow = pageWindowMetrics();
-    const slotInset = pagedSlotInsetFromConfig();
-    const outerWidth = viewportEl?.clientWidth ?? 0;
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerWidth - slotInset.left - slotInset.right);
+    const layoutWidth = slotContentInnerWidth();
     const height = pageWindow.viewportHeight;
     if (height <= 0 || layoutWidth <= 0) return false;
 
@@ -616,11 +658,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (turn.targetPage != null) return turn.targetPage;
     if (turn.direction === 'next') return 0;
     if (turn.incomingLayout && !turn.chapterCommitted) {
-      return Math.max(0, turn.incomingLayout.pageStarts.length - 1);
+      return prevChapterLandingPage(turn.incomingLayout);
     }
     const l = layout();
     if (l && l.chapterIndex === viewerState.chapterIndex) {
-      return Math.max(0, l.pageStarts.length - 1);
+      return prevChapterLandingPage(l);
     }
     return null;
   };
@@ -659,10 +701,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       contentSlotEl,
       fallbackInsets: inset,
     });
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerW - inset.left - inset.right);
+    const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
     prefetchAdjacentChapterLayoutsFromPool({
       book,
@@ -725,8 +764,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return Math.max(
       1,
       (viewportEl?.clientHeight ?? 0) -
-        contentInset().top -
-        contentInset().bottom,
+      contentInset().top -
+      contentInset().bottom,
     );
   };
 
@@ -766,6 +805,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         return;
       }
       clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+      clearSimulationCurl(curtainSlideMountEl);
       turnCurtainKey = '';
       const l = turn.chapterCommitted ? layout() : turn.incomingLayout;
       const fallback =
@@ -796,9 +836,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         : local.onRequestPrevChapter(),
     );
 
-  /** 预取相邻章正文 + 离线排版；失败则回退为提前切 store */
+  /**
+   * 预取相邻章正文 + 离线排版用于跨章预览。
+   * allowCommitEarly=false（拖拽预览期）：相邻章无缓存时不切 store，仅返回 false 由调用方维持当前页；
+   * 默认 true（提交/点击）：无缓存时回退为提前切 store 加载。
+   */
   const prepareCrossChapterStaging = async (
     direction: PagedTurnDirection,
+    options?: { allowCommitEarly?: boolean },
   ): Promise<boolean> => {
     const turn = crossChapterTurn;
     if (!turn) return false;
@@ -831,18 +876,18 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return true;
     };
 
-    if (!content?.trim()) return commitEarly();
+    const deferCommit = options?.allowCommitEarly === false;
+
+    if (!content?.trim()) return deferCommit ? false : commitEarly();
 
     const incomingLayout = buildIncomingChapterLayout(incomingIdx, content, title);
-    if (!incomingLayout) return commitEarly();
+    if (!incomingLayout) return deferCommit ? false : commitEarly();
 
     turn.incomingChapterIndex = incomingIdx;
     turn.incomingContent = content;
     turn.incomingLayout = incomingLayout;
     turn.targetPage =
-      direction === 'next'
-        ? 0
-        : Math.max(0, incomingLayout.pageStarts.length - 1);
+      direction === 'next' ? 0 : prevChapterLandingPage(incomingLayout);
     return true;
   };
 
@@ -869,6 +914,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const tryStartCrossChapterAnimation = () => {
     const turn = crossChapterTurn;
     if (!turn || turn.animRunning) return;
+    // 用户仍在拖拽且尚未请求提交：只做预览，不抢跑动画。
+    // 否则已缓存相邻章预排版极快，拖拽刚起步就自动播完整段切章，丢失跟手预览。
+    if (turnStage() === 'drag' && !turn.commitRequested) return;
 
     if (turn.chapterCommitted) {
       tryApplyCachedChapterLayout();
@@ -884,7 +932,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       turn.targetPage =
         turn.direction === 'next'
           ? 0
-          : Math.max(0, (l?.pageStarts.length ?? 1) - 1);
+          : l
+            ? prevChapterLandingPage(l)
+            : 0;
     }
     const target = turn.targetPage;
     if (target == null) return;
@@ -923,6 +973,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       incomingLayout: null,
       chapterCommitted: false,
       stagingPainted: false,
+      commitRequested: true,
     };
 
     skipChapterPosSync = true;
@@ -964,18 +1015,24 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         incomingLayout: null,
         chapterCommitted: false,
         stagingPainted: false,
+        commitRequested: true,
       };
     }
     crossChapterTurn.direction = direction;
     crossChapterTurn.fromPage = fromPage;
     crossChapterTurn.pendingDragStartPx = dragStartPx;
+    // 松手过阈值：正式请求提交，允许动画接管（drag → anim）。
+    crossChapterTurn.commitRequested = true;
     if (crossChapterTurn.targetPage == null && direction === 'next') {
       crossChapterTurn.targetPage = 0;
     }
 
+    // 拖拽提交切章：保持翻页视觉态连续（drag → anim），不要置 idle。
+    // 置 idle 会让 staging 相邻章被卸载、滑动面板被复位，松手瞬间「硬切」回当前页后才补动画，
+    // 表现为切章不跟手翻页。此处仅停止指针跟踪，动画交由 kickoffCrossChapterTurn → startAnimatedTurn 接管；
+    // 相邻章排版未就绪时则维持松手位置静止，待就绪再续翻。
     dragPointerId = null;
     dragAxis = 'none';
-    setTurnStage('idle');
 
     if (!getPersistedTurnSlide() && liveInnerEl) {
       beginTurnCurtain(fromPage, liveInnerEl);
@@ -1005,9 +1062,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     })();
   };
 
-  const finishTurn = (target: number) => {
+  const finishTurn = (target: number, options?: { cancel?: boolean }) => {
     const turn = crossChapterTurn;
-    const pendingCommit = turn && !turn.chapterCommitted;
+    // cancel=true：松手未过阈值/不可翻，撤销跨章预览且不切 store，回到起始页。
+    const pendingCommit = turn && !turn.chapterCommitted && !options?.cancel;
     const commitDir = turn?.direction;
     const stagedLayout = turn?.incomingLayout ?? null;
     const revertPage = turn?.fromPage ?? target;
@@ -1015,6 +1073,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     cancelAnimFrame();
     skipChapterPosSync = true;
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+    clearSimulationCurl(curtainSlideMountEl);
+    simCorner = null;
+    curlAnim = null;
     turnCurtainKey = '';
     dragOffsetPxRef = 0;
     clearSlidePanelStyles();
@@ -1054,10 +1115,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return;
     }
 
-    if (turn?.chapterCommitted) {
+    if (turn?.chapterCommitted && !options?.cancel) {
       consumePagedChapterEntry();
     }
-    finalize(target);
+    finalize(options?.cancel ? revertPage : target);
   };
 
   const slideTurnOffsetPx = (stage: TurnStage, progressOrDrag: number) =>
@@ -1182,6 +1243,86 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     ensureTurnCurtainAttached(turnLayerEl, curtainSlideMountEl);
   };
 
+  /** client 坐标 → 卷曲盒（content-slot）本地坐标 */
+  const slotLocalPoint = (clientX: number, clientY: number): CurlPoint => {
+    const rect = curtainSlideMountEl?.getBoundingClientRect();
+    if (!rect) return { x: clientX, y: clientY };
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  /** 仿真卷曲动画终点（翻尽时拖拽点越过对侧边，使整页卷离） */
+  const simCurlEndTouch = (
+    corner: CurlPoint,
+    width: number,
+    height: number,
+  ): CurlPoint => {
+    const x = corner.x >= width / 2 ? -width * 0.5 : width * 1.5;
+    return { x, y: corner.y === 0 ? height * 0.05 : height * 0.95 };
+  };
+
+  const simCurlDirection = (): SimulationCurlDirection =>
+    turnDir() === 'prev' ? 'prev' : 'next';
+
+  /** 拖拽起点确定页脚（上半/下半 + 方向左右） */
+  const armSimCurlCorner = () => {
+    const mount = curtainSlideMountEl;
+    if (!mount) return;
+    const W = mount.clientWidth;
+    const H = mount.clientHeight;
+    const local = slotLocalPoint(dragStartX, dragStartY);
+    simCorner = computeCurlCorner(local.x, local.y, W, H, simCurlDirection());
+  };
+
+  /** 渲染一帧仿真卷曲：drag 用真实指点；anim 用 from→to 按进度插值 */
+  const renderSimulationCurl = (stage: TurnStage, progressRatio: number) => {
+    const mount = curtainSlideMountEl;
+    if (!mount) return;
+    const front = mount.querySelector<HTMLElement>('.reader-paged-turn-slide');
+    const W = mount.clientWidth;
+    // 卷曲盒高取幕帘正文高（与 clip-path 坐标系一致），缺省回退槽高
+    const H = front?.clientHeight || mount.clientHeight;
+    if (W <= 0 || H <= 0) return;
+
+    let cornerX: number;
+    let cornerY: number;
+    let touch: CurlPoint;
+
+    if (stage === 'drag') {
+      const corner =
+        simCorner ?? computeCurlCorner(W / 2, H, W, H, simCurlDirection());
+      cornerX = corner.x;
+      cornerY = corner.y;
+      const local = slotLocalPoint(simPointerClientX, simPointerClientY);
+      const startLocal = slotLocalPoint(dragStartX, dragStartY);
+      const rawY = Math.max(0, Math.min(H, local.y));
+      touch = {
+        x: Math.max(-W, Math.min(W * 2, local.x)),
+        y: legadoSimulationTouchY(startLocal.y, rawY, H, simCurlDirection()),
+      };
+    } else {
+      const a = curlAnim;
+      if (!a) return;
+      cornerX = a.cornerX;
+      cornerY = a.cornerY;
+      const span = a.initial >= 1 ? 1 : (progressRatio - a.initial) / (1 - a.initial);
+      const k = Math.max(0, Math.min(1, span));
+      touch = {
+        x: a.fromX + (a.toX - a.fromX) * k,
+        y: a.fromY + (a.toY - a.fromY) * k,
+      };
+    }
+
+    const geometry = computeSimulationCurl({
+      touchX: touch.x,
+      touchY: touch.y,
+      cornerX,
+      cornerY,
+      width: W,
+      height: H,
+    });
+    updateSimulationCurl({ slideMount: mount, geometry });
+  };
+
   const syncCurtainLayerTransform = (stage: TurnStage, progressRatio: number, dragPx?: number) => {
     if (stage === 'idle' || !turnLayerEl) {
       setTurnCurtainTransform(turnLayerEl, undefined);
@@ -1190,6 +1331,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (anim() === 'slide') {
       const offset = slideTurnOffsetPx(stage, stage === 'drag' ? (dragPx ?? 0) : progressRatio);
       setTurnCurtainTransform(turnLayerEl, readerPagedSlideOutgoingTransform(offset));
+      return;
+    }
+    if (anim() === 'simulation') {
+      // 仿真卷曲：不平移整层，改在幕帘上以贝塞尔 clip-path 还原翻起页 + 镜像背面 + 阴影。
+      setTurnCurtainTransform(turnLayerEl, undefined);
+      renderSimulationCurl(stage, Math.max(0, Math.min(1, progressRatio)));
       return;
     }
     const layerTransform = readerPagedLayerTransform(
@@ -1259,6 +1406,31 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       options?.dragStartPx != null && w > 0
         ? Math.min(1, Math.abs(options.dragStartPx) / w)
         : 0;
+
+    if (animMode === 'simulation') {
+      // 建立卷曲动画段：from=松手指点（拖拽）或页脚（点击），to=翻尽越界点。
+      const mount = curtainSlideMountEl;
+      const frontEl = mount?.querySelector<HTMLElement>('.reader-paged-turn-slide');
+      const W = mount?.clientWidth ?? 0;
+      const H = frontEl?.clientHeight || mount?.clientHeight || 0;
+      const cdir = simCurlDirection();
+      const corner =
+        simCorner ?? computeCurlCorner(W / 2, H, W, H, cdir);
+      const fromPt =
+        turnStage() === 'drag'
+          ? slotLocalPoint(simPointerClientX, simPointerClientY)
+          : { x: corner.x, y: corner.y };
+      const toPt = simCurlEndTouch(corner, W, H);
+      curlAnim = {
+        fromX: fromPt.x,
+        fromY: fromPt.y,
+        toX: toPt.x,
+        toY: toPt.y,
+        cornerX: corner.x,
+        cornerY: corner.y,
+        initial,
+      };
+    }
 
     setTurnProgress(initial);
     setTurnStage('anim');
@@ -1344,6 +1516,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const triggerKey = `${layoutKey}:${vp}`;
     if (triggerKey === lastMeasureTriggerKey) return;
     lastMeasureTriggerKey = triggerKey;
+    // 跨章翻页提交期间：新章已用 staging 排版（与预取/缓存一致）就地展示，
+    // 此处不得再 bypassCache 强制 DOM 重排覆盖，否则切章落点页文字重新分页而抖动。
+    // 仍更新去重 key，使该章后续走缓存命中、保持版式稳定。
+    if (crossChapterCommitInFlight) return;
     scheduleRemeasure({
       immediate: w <= 0 || h <= 0,
       bypassCache,
@@ -1377,10 +1553,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       contentSlotEl,
       fallbackInsets: inset,
     });
-    const layoutWidth =
-      contentSlotEl && contentSlotEl.clientWidth > 0
-        ? contentSlotEl.clientWidth
-        : Math.max(1, outerW - inset.left - inset.right);
+    const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
     scheduleAdjacentChapterLayoutPrefetch({
       book,
@@ -1468,6 +1641,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     skipChapterPosSync = true;
     cancelAnimFrame();
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+    clearSimulationCurl(curtainSlideMountEl);
     turnCurtainKey = '';
     setTurnStage('idle');
     setPageIndex(0);
@@ -1566,6 +1740,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     cancelAnimFrame();
     clearCrossChapterLayoutTimer();
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+    clearSimulationCurl(curtainSlideMountEl);
     cancelAdjacentChapterLayoutPrefetch();
     if (progressSaveTimer !== undefined) clearTimeout(progressSaveTimer);
     if (remeasureDebounceTimer !== undefined) clearTimeout(remeasureDebounceTimer);
@@ -1666,6 +1841,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const resetActiveDragTurn = () => {
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+    clearSimulationCurl(curtainSlideMountEl);
+    simCorner = null;
+    curlAnim = null;
     turnCurtainKey = '';
     dragOffsetPxRef = 0;
     clearSlidePanelStyles();
@@ -1710,6 +1888,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       syncSlideTurnVisuals('drag', offset);
       return;
     }
+    if (anim() === 'simulation') {
+      syncCurtainLayerTransform('drag', 0);
+      return;
+    }
     const w = width();
     const ratio = w > 0 ? Math.min(1, Math.abs(offset) / w) : 0;
     syncCurtainLayerTransform('drag', ratio);
@@ -1733,17 +1915,21 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       incomingLayout: null,
       chapterCommitted: false,
       stagingPainted: false,
+      commitRequested: false,
     };
     dragTurnInitialized = true;
     setTurnFrom(fromPage);
     setTurnTo(fromPage);
     setTurnDir(dir);
+    armSimCurlCorner();
     if (liveInnerEl) beginTurnCurtain(fromPage, liveInnerEl);
     setTurnStage('drag');
     dragOffsetPxRef = offset;
     setTurnProgress(offset);
     applyDragTurnProgress(offset);
-    void prepareCrossChapterStaging(dir).then(() => {
+    // 拖拽预览阶段只解析已缓存相邻章用于跟手预览；相邻章未缓存不在拖拽中切 store，
+    // 推迟到松手提交再加载，避免拖拽途中「立即切换」。
+    void prepareCrossChapterStaging(dir, { allowCommitEarly: false }).then(() => {
       if (crossChapterTurn) {
         kickoffCrossChapterTurn();
         if (turnStage() === 'drag') {
@@ -1772,6 +1958,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     setTurnFrom(fromPage);
     setTurnTo(to);
     setTurnDir(dir);
+    armSimCurlCorner();
     if (to !== fromPage && outgoingRoot) {
       beginTurnCurtain(fromPage, outgoingRoot);
       skipChapterPosSync = true;
@@ -1799,6 +1986,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     dragPointerId = e.pointerId;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
+    simPointerClientX = e.clientX;
+    simPointerClientY = e.clientY;
+    simCorner = null;
     dragStartPageIndex = pageIndex();
     dragTurnInitialized = false;
     dragAxis = 'none';
@@ -1807,6 +1997,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const onPointerMove = (e: PointerEvent) => {
     if (dragPointerId !== e.pointerId || turnStage() === 'anim') return;
+    simPointerClientX = e.clientX;
+    simPointerClientY = e.clientY;
     const dx = e.clientX - dragStartX;
     const dy = e.clientY - dragStartY;
     if (dragAxis === 'none') {
@@ -1872,7 +2064,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (commit) {
       if (offset < 0) {
         if (!canDragTowardNext(dragStartPageIndex)) {
-          finishTurn(dragStartPageIndex);
+          finishTurn(dragStartPageIndex, { cancel: true });
           return;
         }
         if (dragStartPageIndex < pageCount() - 1) {
@@ -1880,13 +2072,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         } else if (!isAtLastChapter()) {
           commitCrossChapterTurn('next', dragStartPageIndex, offset);
         } else {
-          finishTurn(dragStartPageIndex);
+          finishTurn(dragStartPageIndex, { cancel: true });
         }
         return;
       }
       if (offset > 0) {
         if (!canDragTowardPrev(dragStartPageIndex)) {
-          finishTurn(dragStartPageIndex);
+          finishTurn(dragStartPageIndex, { cancel: true });
           return;
         }
         if (dragStartPageIndex > 0) {
@@ -1894,13 +2086,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         } else if (!isAtFirstChapter()) {
           commitCrossChapterTurn('prev', dragStartPageIndex, offset);
         } else {
-          finishTurn(dragStartPageIndex);
+          finishTurn(dragStartPageIndex, { cancel: true });
         }
         return;
       }
     }
 
-    finishTurn(dragStartPageIndex);
+    // 未过阈值：撤销（含跨章预览），回到起始页且不切章
+    finishTurn(dragStartPageIndex, { cancel: true });
   };
 
   const liveChapterContentMountKey = createMemo(() => {
@@ -1936,18 +2129,63 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return turn.animRunning || turnStage() !== 'idle';
   };
 
+  /**
+   * staging 章 DOM 挂载后用实测排版精修 incomingLayout，使预览页界与切章落点一致
+   * （Canvas 预排与 DOM 常有偏差，尤其首/末页）。
+   */
+  const refineStagingLayoutFromDom = (contentRoot: HTMLElement) => {
+    const turn = crossChapterTurn;
+    if (!turn || turn.chapterCommitted || !turn.incomingContent?.trim()) return;
+
+    const pageWindow = pageWindowMetrics();
+    const layoutWidth = slotContentInnerWidth();
+    const height = pageWindow.viewportHeight;
+    if (height <= 0 || layoutWidth <= 0) return;
+
+    const refined = layoutReaderChapter({
+      chapterIndex: turn.incomingChapterIndex,
+      content: turn.incomingContent,
+      chapterTitle: chapterTitleAt(turn.incomingChapterIndex),
+      viewportWidth: layoutWidth,
+      viewportHeight: height,
+      config: viewerState.config,
+      contentRoot,
+      refineWithDom: true,
+      dualPage: pagedLayoutDualPage(),
+      padTop: pageWindow.padTop,
+      padBottom: pageWindow.padBottom,
+      clipHeightPx: pageWindow.clipHeight,
+      horizontalInsetOnSlot: true,
+    });
+    if (!isCrossChapterLayoutReady(refined, turn.incomingChapterIndex)) return;
+    if (chapterLayoutsEqual(turn.incomingLayout, refined)) return;
+
+    turn.incomingLayout = refined;
+    turn.targetPage =
+      turn.direction === 'next' ? 0 : prevChapterLandingPage(refined);
+
+    if (turnStage() === 'drag') {
+      applyDragTurnProgress(dragOffsetPxRef);
+    } else if (turnStage() === 'anim' && anim() === 'slide') {
+      syncSlideTurnVisuals('anim', turnProgress());
+    }
+  };
+
   const renderIncomingStagingChapter = () => {
     const turn = crossChapterTurn;
     if (!showIncomingStaging()) return null;
 
-    const page = turn!.targetPage ?? (turn!.direction === 'next' ? 0 : 0);
+    const page =
+      turn!.targetPage ??
+      resolveCrossChapterTargetPage() ??
+      (turn!.direction === 'next' ? 0 : 0);
     const il = turn!.incomingLayout!;
     const y = Math.round(il.pageStarts[page] ?? 0);
     const extent = il.contentExtent;
     const turning = turnVisualActive();
 
     let extraTransform: string | undefined;
-    if (turning && anim() !== 'slide') {
+    if (turning && anim() !== 'slide' && anim() !== 'simulation') {
       extraTransform = readerPagedLayerTransform(
         anim(),
         'incoming',
@@ -1977,17 +2215,25 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             'will-change': turning && anim() !== 'slide' ? 'transform' : undefined,
           }}
         >
-          <ReaderContent
-            {...contentProps}
-            measureBlocks
-            pagedLayout
-            dualPage={pagedLayoutDualPage()}
-            stagedChapter={{
-              chapterIndex: turn!.incomingChapterIndex,
-              content: turn!.incomingContent,
-              chapterTitle: chapterTitleAt(turn!.incomingChapterIndex),
+          <div
+            ref={(el) => {
+              const root =
+                el?.querySelector<HTMLElement>('[data-reader-content]') ?? el ?? null;
+              if (root) queueMicrotask(() => refineStagingLayoutFromDom(root));
             }}
-          />
+          >
+            <ReaderContent
+              {...contentProps}
+              measureBlocks
+              pagedLayout
+              dualPage={pagedLayoutDualPage()}
+              stagedChapter={{
+                chapterIndex: turn!.incomingChapterIndex,
+                content: turn!.incomingContent,
+                chapterTitle: chapterTitleAt(turn!.incomingChapterIndex),
+              }}
+            />
+          </div>
         </div>
       </div>
     );
@@ -1999,7 +2245,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const turning = turnVisualActive();
 
     let extraTransform: string | undefined;
-    if (turning && anim() !== 'cover' && anim() !== 'slide') {
+    if (
+      turning &&
+      anim() !== 'cover' &&
+      anim() !== 'slide' &&
+      anim() !== 'simulation'
+    ) {
       extraTransform = readerPagedLayerTransform(
         anim(),
         'incoming',

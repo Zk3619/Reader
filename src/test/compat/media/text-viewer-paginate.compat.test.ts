@@ -4,6 +4,7 @@ import {
   pageDisplayHeight,
   pagePackLimitPx,
   splitBlockIndicesByPageHeight,
+  lastNonBlankPageIndex,
 } from '@/lib/media/text/text-viewer-paginate';
 
 describe('computePageStartsFromSegments', () => {
@@ -72,6 +73,26 @@ describe('computePageStartsFromSegments', () => {
     expect(pageDisplayHeight(0, starts, 500, 1200, segments)).toBe(380);
     expect(pageDisplayHeight(1, starts, 500, 1200, segments)).toBe(380);
     expect(pageDisplayHeight(2, starts, 500, 1200, segments)).toBe(300);
+  });
+});
+
+describe('lastNonBlankPageIndex', () => {
+  it('skips trailing blank page index without mutating starts', () => {
+    const segments = [
+      { top: 0, bottom: 32 },
+      { top: 32, bottom: 64 },
+      { top: 64, bottom: 96 },
+    ];
+    expect(lastNonBlankPageIndex([0, 64, 128], segments)).toBe(1);
+    expect(lastNonBlankPageIndex([0], segments)).toBe(0);
+  });
+
+  it('keeps last page when a segment starts on that page', () => {
+    const segments = [
+      { top: 700, bottom: 732 },
+      { top: 736, bottom: 768 },
+    ];
+    expect(lastNonBlankPageIndex([0, 736], segments)).toBe(1);
   });
 });
 

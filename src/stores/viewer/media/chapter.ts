@@ -117,6 +117,7 @@ export async function loadChapterRaw(
     book,
     chapter,
     next?.url,
+    index,
   );
   if (forceRefresh && raw?.trim()) {
     const { clearChapterInlineImageLoadFailures } = await import(

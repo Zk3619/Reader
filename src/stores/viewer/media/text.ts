@@ -7,15 +7,13 @@ import * as chaptersDb from '@/lib/database/chapters';
 import * as booksDb from '@/lib/database/books';
 import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-book';
+import { normalizeCatalogChapterIndices } from '@/lib/chapter-cache/catalog-cache-index';
 import {
   readCachedChapterRaw,
   fetchAndCacheChapterContent,
 } from '@/lib/chapter-cache/storage';
 import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
-import {
-  prefetchChaptersOnRead,
-  scheduleChapterBodyCachePrefetch,
-} from '@/lib/chapter-cache/prefetch';
+import { scheduleChapterBodyCachePrefetch } from '@/lib/chapter-cache/prefetch';
 import {
   getPooledChapterContent,
   hasPooledNextChapter,
@@ -223,9 +221,10 @@ function applyPartialCatalogUpdateImpl(
   options: { isComplete?: boolean; preserveContent?: boolean } = {},
 ): void {
   if (!state.book || chapters.length === 0) return;
-  const nextIndex = clampChapterIndex(state.chapterIndex, chapters.length);
+  const normalized = normalizeCatalogChapterIndices(chapters);
+  const nextIndex = clampChapterIndex(state.chapterIndex, normalized.length);
   setState({
-    catalog: chapters,
+    catalog: normalized,
     chapterIndex: nextIndex,
     book: {
       ...state.book,
@@ -283,7 +282,10 @@ function attachTocProgressWhileReadingImpl(
       if (!hasEnteredContent && rawIndex < partial.chapters.length) {
         hasEnteredContent = true;
         const idx = clampChapterIndex(rawIndex, partial.chapters.length);
-        setState({ catalog: partial.chapters, chapterIndex: idx });
+        setState({
+          catalog: normalizeCatalogChapterIndices(partial.chapters),
+          chapterIndex: idx,
+        });
         void loadTextChapter(idx);
         return;
       }
@@ -347,9 +349,11 @@ export async function openTextBook(
 
     let catalogToUse: BookChapter[] = [];
     if (initialCatalog) {
-      catalogToUse = initialCatalog;
+      catalogToUse = normalizeCatalogChapterIndices(initialCatalog);
     } else if (!guestReading) {
-      catalogToUse = await chaptersDb.getChapterList(book.bookUrl);
+      catalogToUse = normalizeCatalogChapterIndices(
+        await chaptersDb.getChapterList(book.bookUrl),
+      );
     }
 
     const source =
@@ -367,7 +371,7 @@ export async function openTextBook(
 
           const idx = clampChapterIndex(rawIndex, partial.chapters.length);
           setState({
-            catalog: partial.chapters,
+            catalog: normalizeCatalogChapterIndices(partial.chapters),
             chapterIndex: idx,
             chapterPos,
           });
@@ -499,9 +503,6 @@ export async function loadTextChapter(
           ? await sourcesDb.getSource(book.origin)
           : null;
       void warmAdjacentChaptersFromCache(book, catalog, index, source);
-      if (!isLocalBook(book)) {
-        void prefetchChaptersOnRead(book, catalog, index);
-      }
       await saveTextProgress();
       return;
     }
@@ -553,7 +554,6 @@ export async function loadTextChapter(
         );
         commitChapterContent(index, content, book);
         void warmAdjacentChaptersFromCache(book, catalog, index, source);
-        void prefetchChaptersOnRead(book, catalog, index);
         await saveTextProgress();
         return;
       } catch (e) {
@@ -577,12 +577,12 @@ export async function loadTextChapter(
       book,
       chapter,
       nextChapterUrl,
+      index,
     );
     const content = raw ? await applyChapterDisplayProcessing(raw, book, source) : '';
 
     commitChapterContent(index, content, book);
     void warmAdjacentChaptersFromCache(book, catalog, index, source);
-    void prefetchChaptersOnRead(book, catalog, index);
     await saveTextProgress();
   } catch (e) {
     console.error('加载章节内容失败:', e);
@@ -701,7 +701,11 @@ export const textViewerTextApi = {
           entry.index,
           source,
         );
-        void prefetchChaptersOnRead(state.book, state.catalog, entry.index);
+        scheduleChapterBodyCachePrefetch(
+          state.book,
+          state.catalog,
+          entry.index,
+        );
         await saveTextProgress();
         return;
       }
@@ -737,7 +741,11 @@ export const textViewerTextApi = {
           entry.index,
           source,
         );
-        void prefetchChaptersOnRead(state.book, state.catalog, entry.index);
+        scheduleChapterBodyCachePrefetch(
+          state.book,
+          state.catalog,
+          entry.index,
+        );
         await saveTextProgress();
         return;
       }

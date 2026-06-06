@@ -320,6 +320,27 @@ export function computePageStartsFromSegments(
   return starts;
 }
 
+/**
+ * 末页索引：跳过尾部无 segment 的空白页（仅用于跨章 prev 落点/预览，勿写入全局 pageStarts）。
+ * 判断：该页起点之后须存在 segment 顶 ≥ start−0.5（与行级断页一致，避免误删含文页界）。
+ */
+export function lastNonBlankPageIndex(
+  pageStarts: number[],
+  segments: ReaderLayoutSegment[],
+): number {
+  if (pageStarts.length <= 1) return 0;
+  let last = pageStarts.length - 1;
+  while (last > 0) {
+    const start = pageStarts[last] ?? 0;
+    const hasContent = segments.some(
+      (s) => s.top >= start - 0.5 && s.bottom > start + 0.5,
+    );
+    if (hasContent) break;
+    last -= 1;
+  }
+  return last;
+}
+
 export function pageCountFromStarts(starts: number[]): number {
   return Math.max(1, starts.length);
 }

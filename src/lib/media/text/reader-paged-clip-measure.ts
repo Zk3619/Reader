@@ -83,7 +83,11 @@ export function measurePagedClipContentHeight(
   const fallback = Math.max(1, fallbackOuterHeight - top - bottom);
 
   if (contentSlotEl && contentSlotEl.clientHeight > 0) {
-    return Math.max(1, Math.round(contentSlotEl.clientHeight));
+    // 滑动翻页时 slot 为满视口面板，inset 由 padding 承担；clientHeight 含 padding 需扣除，
+    // 否则排版区高度被高估、切章前后页界不一致而抖动。按页挂载时 padding 为 0，结果不变。
+    const padTop = parseFloat(contentSlotEl.style.paddingTop) || 0;
+    const padBottom = parseFloat(contentSlotEl.style.paddingBottom) || 0;
+    return Math.max(1, Math.round(contentSlotEl.clientHeight - padTop - padBottom));
   }
 
   if (!clipEl || clipEl.clientHeight <= 0) {
