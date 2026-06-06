@@ -141,9 +141,10 @@ export function applyGyksAggregationUserAgent(
   headers: Record<string, string>,
   requestUrl: string,
 ): void {
-  if (isGyksAggregationHost(requestUrl)) {
-    headers['User-Agent'] = LEGADO_GYKS_DESKTOP_UA;
-  }
+  if (!isGyksAggregationHost(requestUrl)) return;
+  // gyks 聚合 API（discovestyle/catalog/detail 等）须固定桌面 UA，面板 UA 会导致 403/空数据
+  headers['User-Agent'] = LEGADO_GYKS_DESKTOP_UA;
+  delete headers['user-agent'];
 }
 
 /** 书源「清除设备」：下次登录重新生成 deviceId */
@@ -258,7 +259,8 @@ function originOfHttpUrl(url: string): string | undefined {
 }
 
 function cookieHeaderHasCfClearance(cookieHeader: string): boolean {
-  return /(?:^|;\s*)(?:cf_clearance|__cf_bm)=/i.test(cookieHeader.trim());
+  // 仅 cf_clearance（通过 JS 质询）才需跨域携带；__cf_bm 普通直连也会有，不作判据
+  return /(?:^|;\s*)cf_clearance=/i.test(cookieHeader.trim());
 }
 
 /** 书源目录域（sourceUrl / bookSourceUrl） */
@@ -419,8 +421,14 @@ export function readBookSourceArgsField(source: BookSource, field: string): stri
 
 /** Cookie 表 → args.qttoken → loginInfo.密钥 */
 export function readBookSourceQttoken(source: BookSource, serverUrl: string): string {
-  const fromCookie = extractQttokenKey(resolveSourceCookiesForHttp(source, serverUrl));
+  const tokenFromUrl = (url: string) =>
+    extractQttokenKey(resolveSourceCookiesForHttp(source, url));
+  const fromCookie = tokenFromUrl(serverUrl);
   if (fromCookie) return fromCookie;
+  for (const host of hostsFromJsLib((source as Record<string, unknown>).jsLib)) {
+    const fromHost = tokenFromUrl(host);
+    if (fromHost) return fromHost;
+  }
   const fromArgs = readBookSourceArgsField(source, 'qttoken');
   if (fromArgs) return extractQttokenKey(fromArgs) || fromArgs;
   try {

@@ -24,7 +24,9 @@ function throwCfChallengeError(pageUrl: string, kind: 'GET' | 'POST'): never {
 }
 
 export function cookieHeaderHasCfClearance(cookieHeader: string): boolean {
-  return /(?:^|;\s*)(?:cf_clearance|__cf_bm)=/i.test(cookieHeader.trim());
+  // 仅 cf_clearance 表示已通过 JS 质询、绑定浏览器指纹（直连会 403，须 WebView）。
+  // __cf_bm 是 CF bot 管理 cookie，正常直连也会下发，不代表该请求需要 WebView。
+  return /(?:^|;\s*)cf_clearance=/i.test(cookieHeader.trim());
 }
 
 export function shouldUseCfWebViewFetch(

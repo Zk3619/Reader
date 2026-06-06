@@ -204,7 +204,9 @@ export class HttpError extends Error {
     public status: number,
     public statusText: string,
     public url: string,
-    message?: string
+    message?: string,
+    /** 非 2xx 响应正文（用于区分真实 CF 挑战页与业务错误页） */
+    public body?: string,
   ) {
     super(message || `HTTP ${status} ${statusText}`);
     this.name = 'HttpError';
@@ -770,11 +772,12 @@ export async function request(
       });
       return response;
     }
+    let rawBody = '';
     let bodyPreview = '';
     try {
-      const raw = await response.text();
-      bodyPreview = raw.slice(0, 200).replace(/\s+/g, ' ');
-      if (raw.length > 200) bodyPreview += '...';
+      rawBody = await response.text();
+      bodyPreview = rawBody.slice(0, 200).replace(/\s+/g, ' ');
+      if (rawBody.length > 200) bodyPreview += '...';
     } catch {
       bodyPreview = '(无法读取)';
     }
@@ -787,7 +790,8 @@ export async function request(
       response.status,
       response.statusText,
       response.url,
-      `HTTP ${response.status}: ${response.statusText}`
+      `HTTP ${response.status}: ${response.statusText}`,
+      rawBody || undefined,
     );
   }
 

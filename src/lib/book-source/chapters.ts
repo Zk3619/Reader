@@ -23,7 +23,10 @@ import {
 import {
   getSourceArgsKey,
 } from '@/lib/js-engine/legado/source-script-shared';
-import { readAggregationApiFailure } from '@/lib/book-source/extract-api-content';
+import {
+  isNonRetryableAggregationApiFailure,
+  readAggregationApiFailure,
+} from '@/lib/book-source/extract-api-content';
 import {
   resolveUrl,
   detectContentType,
@@ -681,7 +684,8 @@ async function fetchCatalogChapterRows(
   let lastFailure: { code: unknown; msg: string; book_id_len: number } | null = null;
   let lastHttpError: unknown;
 
-  for (const candidateBookId of buildCatalogBookIdCandidates(bookId)) {
+  const bookIdCandidates = buildCatalogBookIdCandidates(bookId);
+  outer: for (const candidateBookId of bookIdCandidates) {
     for (let si = 0; si < servers.length; si++) {
       const serverUrl = servers[si]!;
       try {
@@ -706,6 +710,9 @@ async function fetchCatalogChapterRows(
         }
         if (result.failure) {
           lastFailure = result.failure;
+          if (isNonRetryableAggregationApiFailure(result.failure)) {
+            continue outer;
+          }
         }
         lastHttpError = undefined;
       } catch (e) {

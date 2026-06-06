@@ -11,11 +11,13 @@ import {
 } from '@/lib/book-source/content';
 import {
   extractApiErrorMessage,
+  isNonRetryableAggregationApiFailure,
   readAggregationApiFailure,
 } from '@/lib/book-source/extract-api-content';
 import {
   buildCatalogBookIdCandidates,
   buildQingtian2TocDataUrl,
+  isAggregationCatalogBookIdToken,
   composeLegadoSourceChapterTitle,
   dedupeLegadoSourceChapterTitle,
   normalizeDataUrlPayload,
@@ -53,6 +55,15 @@ describe('Legado catalog API 解析', () => {
     expect(readAggregationApiFailure({ code: 0, data: [] })).toBeNull();
   });
 
+  it('isNonRetryableAggregationApiFailure 识别 code is 400', () => {
+    expect(
+      isNonRetryableAggregationApiFailure({ code: -1, msg: 'code is 400' }),
+    ).toBe(true);
+    expect(
+      isNonRetryableAggregationApiFailure({ code: 502, msg: 'bad gateway' }),
+    ).toBe(false);
+  });
+
   it('extractApiErrorMessage 成功但无正文时有提示', () => {
     expect(extractApiErrorMessage({ code: 0, data: null })).toBe(
       '响应成功但无 content/contents',
@@ -60,9 +71,20 @@ describe('Legado catalog API 解析', () => {
   });
 
   it('buildCatalogBookIdCandidates 仅保留原始 book_id', () => {
+    expect(buildCatalogBookIdCandidates('Ng')).toEqual(['Ng']);
     const url = 'https://manhuafree.com/manga/example';
     const b64 = Buffer.from(url, 'utf8').toString('base64');
     expect(buildCatalogBookIdCandidates(b64)).toEqual([b64]);
+  });
+
+  it('isAggregationCatalogBookIdToken 识别短令牌与 base64 原站链接', () => {
+    expect(isAggregationCatalogBookIdToken('Ng')).toBe(true);
+    expect(isAggregationCatalogBookIdToken('32707')).toBe(true);
+    expect(isAggregationCatalogBookIdToken('aHR0cHM6Ly9t')).toBe(false);
+    const url = 'https://manhuafree.com/manga/woduzishengji-duburedicestudio-a04';
+    expect(isAggregationCatalogBookIdToken(Buffer.from(url, 'utf8').toString('base64'))).toBe(
+      false,
+    );
   });
 
   it('buildQingtian2TocDataUrl 生成带 toc_url 的目录载荷', () => {
@@ -509,7 +531,7 @@ describe('Legado catalog API 解析', () => {
     expect(parts.length).toBeLessThan(4);
   });
 
-  it('mergeDataUrlPayloadFromBookUrls 替换占位 book_id 并补 sources', async () => {
+  it('mergeDataUrlPayloadFromBookUrls 保留 G社 catalog 令牌 Ng', async () => {
     const { mergeDataUrlPayloadFromBookUrls, utf8ToBase64 } = await import(
       '@/lib/book-source/utils'
     );
@@ -524,7 +546,7 @@ describe('Legado catalog API 解析', () => {
       { book_id: 'Ng', sources: '', tab: '', item_id: '' },
       [bookUrl],
     );
-    expect(merged.book_id).toBe('aHR0cHM6Ly9tYW5odWEx');
+    expect(merged.book_id).toBe('Ng');
     expect(merged.sources).toBe('G社漫画');
     expect(merged.tab).toBe('漫画');
   });
@@ -547,7 +569,7 @@ describe('Legado catalog API 解析', () => {
     expect(payload?.tab).toBe('漫画');
   });
 
-  it('buildQingtian2TocDataUrl 详情短 book_id 时回退 bookUrl', async () => {
+  it('buildQingtian2TocDataUrl 保留 G社 详情短令牌 Ng（勿用搜索 URL 覆盖）', async () => {
     const { buildQingtian2TocDataUrl, decodeDataUrl, utf8ToBase64 } = await import(
       '@/lib/book-source/utils'
     );
@@ -563,8 +585,41 @@ describe('Legado catalog API 解析', () => {
       bookUrl,
     );
     const payload = decodeDataUrl(toc!);
-    expect(payload?.book_id).toBe('aHR0cHM6Ly9tYW5odWEx');
+    expect(payload?.book_id).toBe('Ng');
     expect(payload?.sources).toBe('G社漫画');
+  });
+
+  it('buildQingtian2TocDataUrl 保留 G社 数字 book_id（勿用搜索 URL 覆盖）', async () => {
+    const { buildQingtian2TocDataUrl, decodeDataUrl, utf8ToBase64 } = await import(
+      '@/lib/book-source/utils'
+    );
+    const manhuaUrl = 'https://manhuafree.com/manga/woduzishengji-duburedicestudio-a04';
+    const urlBookId = Buffer.from(manhuaUrl, 'utf8').toString('base64');
+    const bookUrl = `data:;base64,${utf8ToBase64(
+      JSON.stringify({
+        book_id: urlBookId,
+        sources: 'G社漫画',
+        tab: '漫画',
+      }),
+    )}`;
+    const toc = buildQingtian2TocDataUrl(
+      { book_id: '32707', source: 'G社漫画', tab: '漫画' },
+      bookUrl,
+    );
+    const payload = decodeDataUrl(toc!);
+    expect(payload?.book_id).toBe('32707');
+    expect(payload?.book_id).not.toBe(urlBookId);
+  });
+
+  it('chapterBookIdLooksLikePlaceholder Ng 与数字 id 非占位', async () => {
+    const { chapterBookIdLooksLikePlaceholder } = await import('@/lib/book-source/utils');
+    const urlBookId = Buffer.from(
+      'https://manhuafree.com/manga/example',
+      'utf8',
+    ).toString('base64');
+    expect(chapterBookIdLooksLikePlaceholder('32707', urlBookId)).toBe(false);
+    expect(chapterBookIdLooksLikePlaceholder('Ng', urlBookId)).toBe(false);
+    expect(chapterBookIdLooksLikePlaceholder('', urlBookId)).toBe(true);
   });
 
   it('enrichChapterContentPayload 仅补 book_id，不改 catalog source', async () => {

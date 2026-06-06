@@ -680,6 +680,7 @@ async function getBookInfoFromDataUrl(
     hasAbstract: !!d.abstract,
     hasLastChapter: !!d.last_chapter_title,
     source: d.source,
+    book_id_len: String(d.book_id ?? '').length,
   });
 
   return analyzeBookInfoFromBody(source, bookUrl, detailUrl, JSON.stringify(d), {

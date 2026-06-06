@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { BookSource } from '@/types';
 import {
+  applyGyksAggregationUserAgent,
+  LEGADO_GYKS_DESKTOP_UA,
   listAggregationServerCandidates,
   replaceHttpUrlOrigin,
   shouldUseAggregationServerFailover,
@@ -29,6 +31,21 @@ describe('aggregation server failover helpers', () => {
     expect(replaceHttpUrlOrigin(url, 'https://v2.gyks.cf')).toBe(
       'https://v2.gyks.cf/discovestyle?source=%E7%95%AA%E8%8C%84&tab=%E5%B0%8F%E8%AF%B4',
     );
+  });
+
+  it('applyGyksAggregationUserAgent gyks API 固定桌面 UA（覆盖 CF 面板 UA）', () => {
+    const cfUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/148.0.0.0';
+    const headers: Record<string, string> = { 'User-Agent': cfUa };
+    applyGyksAggregationUserAgent(headers, 'https://v1.gyks.cf/discovestyle?source=x');
+    expect(headers['User-Agent']).toBe(LEGADO_GYKS_DESKTOP_UA);
+    expect(headers['User-Agent']).not.toBe(cfUa);
+  });
+
+  it('applyGyksAggregationUserAgent 非 gyks 不修改 UA', () => {
+    const cfUa = 'Mozilla/5.0 Custom';
+    const headers: Record<string, string> = { 'User-Agent': cfUa };
+    applyGyksAggregationUserAgent(headers, 'https://manhuafree.com/manga/x');
+    expect(headers['User-Agent']).toBe(cfUa);
   });
 
   it('shouldUseAggregationServerFailover 在多线路且 origin 匹配时启用', () => {

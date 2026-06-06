@@ -39,10 +39,20 @@ describe('CF WebView fetch', () => {
     expect(cookieHeaderHasCfClearance('a=1')).toBe(false);
   });
 
+  it('仅 __cf_bm（CF bot cookie）不视为需要 WebView', () => {
+    expect(cookieHeaderHasCfClearance('__cf_bm=abc')).toBe(false);
+    expect(cookieHeaderHasCfClearance('__cf_bm=abc; qttoken=x')).toBe(false);
+  });
+
   it('有活跃域且含 clearance 时用 WebView 拉取', () => {
     setCfActiveRequestOrigin(SOURCE, 'https://www.banzhu77777777.net/');
     expect(shouldUseCfWebViewFetch(SOURCE, 'cf_clearance=x')).toBe(true);
     expect(shouldUseCfWebViewFetch(SOURCE, 'a=1')).toBe(false);
+  });
+
+  it('仅 __cf_bm 时不走 WebView（JSON API 域应直连）', () => {
+    setCfActiveRequestOrigin(SOURCE, 'https://v1.gyks.cf/');
+    expect(shouldUseCfWebViewFetch(SOURCE, '__cf_bm=x; qttoken=t')).toBe(false);
   });
 
   it('Legado 占位 Cookie 1 不算真实 Cookie', () => {

@@ -128,10 +128,16 @@ export function isCloudflareBlockedResponse(
 
 export function shouldOfferCloudflareVerification(error: unknown): boolean {
   if (typeof window === 'undefined') return false;
-  if (error instanceof HttpError) {
-    return error.status === 403 || error.status === 503;
+  if (!(error instanceof HttpError)) return false;
+  if (error.status !== 403 && error.status !== 503) return false;
+  // 仅当响应体确实是 CF 挑战页时才验证；业务错误页（如「域名未授权」、JSON 错误）不触发，
+  // 否则会把普通 API 域误记为 CF 活跃域，导致后续 JSON 请求被塞进 WebView 渲染。
+  const body = error.body;
+  if (body != null && body.trim()) {
+    return isCloudflareBlockedResponse(error.status, body);
   }
-  return false;
+  // 无正文（如纯网络层 403）时保守按挑战处理
+  return true;
 }
 
 /**

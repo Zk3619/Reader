@@ -26,4 +26,16 @@ describe('debug qingtian rule tail', () => {
     expect(patched).toContain('return {}');
     expect(patched).not.toMatch(/\bres\s*=\s*JSON\.parse\s*\(\s*result\s*\)/);
   });
+
+  it('光遇 chapterList 末尾返回 processCatalogList 结果', () => {
+    const tail = `if (showSource == "true") {
+    processCatalogList(data);
+} else {
+    data;
+}`;
+    const patched = patchLegadoRuleScript(tail);
+    expect(patched).toContain(
+      'return showSource == "true" ? processCatalogList(data) : data;',
+    );
+  });
 });

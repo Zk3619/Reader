@@ -3,6 +3,7 @@
  * 对应 legado 项目的 URL构建和变量处理
  */
 
+import { parseHostsFromJsLib } from '@/lib/js-engine/legado/jslib-hosts';
 import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
 
 /**
@@ -814,7 +815,22 @@ export function buildContentApiItemIdCandidates(
 }
 
 
-/** 聚合书源：章节 URL 内 book_id 常为占位短串，书籍 data URL 为编码后的真实 id */
+/** 聚合 /catalog 短令牌（如 G社 详情返回的 Ng）可直接用于目录 API */
+export function isAggregationCatalogBookIdToken(bookId: string): boolean {
+  const trimmed = (bookId ?? '').trim();
+  if (!trimmed || trimmed.startsWith('http')) return false;
+  if (/^\d+$/.test(trimmed)) return true;
+  if (trimmed.length >= 12 && /^[A-Za-z0-9+/=_-]+$/.test(trimmed)) {
+    try {
+      if (utf8FromBase64(trimmed).startsWith('http')) return false;
+    } catch {
+      /* 非 base64 原站链接 */
+    }
+  }
+  return trimmed.length < 12 && /^[A-Za-z0-9_-]+$/.test(trimmed);
+}
+
+/** 聚合书源：章节 URL 内 book_id 为空时才用书籍 data URL 的搜索 id 补全 */
 export function chapterBookIdLooksLikePlaceholder(
   chapterBookId: string,
   bookBookId: string,
@@ -823,6 +839,7 @@ export function chapterBookIdLooksLikePlaceholder(
   const bookId = bookBookId.trim();
   if (!chapterId) return true;
   if (!bookId || chapterId === bookId) return false;
+  if (isAggregationCatalogBookIdToken(chapterId)) return false;
   const encoded =
     bookId.length >= 20 && /^[A-Za-z0-9+/=_-]+$/.test(bookId);
   const chapterEncoded =
@@ -922,12 +939,11 @@ export function buildTypedChapterDataUrl(payload: Record<string, string>): strin
   )},{"type":"qingtian3"}`;
 }
 
-/**
- * /catalog 请求的 book_id（gyks 期望与 /detail 相同的编码，勿把 base64 解码成明文 URL 再提交）
- */
+/** /catalog 请求的 book_id 候选（聚合服期望短令牌或 base64，明文 URL 会触发 illegal base64） */
 export function buildCatalogBookIdCandidates(bookId: string): string[] {
   const trimmed = (bookId ?? '').trim();
-  return trimmed ? [trimmed] : [];
+  if (!trimmed) return [];
+  return [trimmed];
 }
 
 /**
@@ -937,7 +953,8 @@ export function buildQingtian2TocDataUrl(
   detail: Record<string, unknown>,
   bookUrl?: string,
 ): string | null {
-  let book_id = String(detail.book_id ?? '').trim();
+  // 对齐 Legado ruleBookInfo.tocUrl：直接使用详情 API 的 book_id，不用搜索 data URL 覆盖
+  const book_id = String(detail.book_id ?? detail.id ?? '').trim();
   let sources = coalesceSourceField(
     typeof detail.source === 'string' ? detail.source : undefined,
     typeof detail.sources === 'string' ? detail.sources : undefined,
@@ -948,10 +965,6 @@ export function buildQingtian2TocDataUrl(
   if (bookUrl?.startsWith('data:')) {
     const bookPayload = decodeDataUrl(bookUrl);
     if (bookPayload) {
-      const urlBookId = bookPayload.book_id?.trim() ?? '';
-      if (urlBookId && chapterBookIdLooksLikePlaceholder(book_id, urlBookId)) {
-        book_id = urlBookId;
-      }
       if (!sources) {
         sources = coalesceSourceField(bookPayload.sources, bookPayload.source);
       }
@@ -1050,26 +1063,9 @@ export function decodeDataUrl(dataUrl: string): Record<string, string> | null {
   }
 }
 
-/**
- * 从书源的 jsLib 中解析 host 列表，取第一个作为 server 地址
- */
 /** 从 jsLib 解析 `var host = ['https://...', ...]` */
 export function extractHostListFromJsLib(source: Record<string, unknown>): string[] {
-  const jsLib = source.jsLib as string | undefined;
-  if (!jsLib) return [];
-
-  const hostArrayMatch = jsLib.match(
-    /(?:var|let)\s+hosts?\s*=\s*\[([^\]]+)\]/,
-  );
-  if (!hostArrayMatch) return [];
-
-  const urls: string[] = [];
-  const re = /['"](https?:\/\/[^'"]+)['"]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(hostArrayMatch[1])) !== null) {
-    urls.push(m[1]);
-  }
-  return urls;
+  return parseHostsFromJsLib(source.jsLib);
 }
 
 export function extractServerFromJsLib(source: Record<string, unknown>): string | null {

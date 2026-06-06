@@ -107,6 +107,18 @@ export function isApiSuccessCode(code: unknown): boolean {
 }
 
 /** /catalog、/content 等聚合 API 失败摘要（日志用） */
+/** 业务/鉴权类错误换线路通常无效（如 catalog code is 400） */
+export function isNonRetryableAggregationApiFailure(
+  failure: { code: unknown; msg: string } | null | undefined,
+): boolean {
+  if (!failure) return false;
+  const msg = (failure.msg || '').toLowerCase();
+  if (/\bcode is (400|401|403)\b/.test(msg)) return true;
+  if (/illegal base64/i.test(msg)) return true;
+  const code = Number(failure.code);
+  return code === 400 || code === 401 || code === 403;
+}
+
 export function readAggregationApiFailure(
   response: unknown,
 ): { code: unknown; msg: string } | null {

@@ -59,6 +59,26 @@ describe('cloudflare-verification', () => {
     );
   });
 
+  it('业务 403 错误页（非 CF 挑战）不触发验证', () => {
+    const bizPage =
+      '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">' +
+      '<title>域名未授权</title></head><body>域名未授权</body></html>';
+    expect(
+      shouldOfferCloudflareVerification(
+        new HttpError(403, 'Forbidden', 'https://v1.gyks.cf/discovestyle', 'HTTP 403', bizPage),
+      ),
+    ).toBe(false);
+  });
+
+  it('真实 CF 挑战页 403 仍触发验证', () => {
+    const cfPage = '<html><head><title>Just a moment...</title></head><body>cf-chl</body></html>';
+    expect(
+      shouldOfferCloudflareVerification(
+        new HttpError(403, 'Forbidden', 'https://x.test/', 'HTTP 403', cfPage),
+      ),
+    ).toBe(typeof window !== 'undefined');
+  });
+
   it('CF 验证页优先使用当前请求 origin', () => {
     expect(
       resolveCloudflareVerificationUrl(
