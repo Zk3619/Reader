@@ -14,7 +14,6 @@ import {
 import { requestLegadoRuleScriptHttpAsync } from '@/lib/js-engine/legado/rule-script-http';
 import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import {
-  EXPLORE_JSLIB_CONTEXT_SHIM,
   LEGADO_AJAX_PENDING_JSON,
   createSourceVariableHandlers,
   hostsFromJsLib,
@@ -126,12 +125,7 @@ function runJsSnippet(
   jsLib: string,
 ): unknown {
   const userBody = wrapLegadoJsBodyWithImplicitReturn(patchLegadoRuleScript(snippet));
-  const fullBody = [
-    buildRuleScriptFullBody(userBody, jsLib),
-    EXPLORE_JSLIB_CONTEXT_SHIM,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const fullBody = buildRuleScriptFullBody(userBody, jsLib);
   const fn = new Function('__scope__', 'with (__scope__) {\n' + fullBody + '\n}');
   const out = fn(scope);
   rethrowDeferredRuleScriptSuspend(scope);
@@ -474,6 +468,10 @@ export async function runLegadoRuleScript(
       const u = String(url).trim().replace(/\/+$/, '');
       let c = resolveSourceCookiesForHttp(bookSource, u).trim();
       if (c) return c;
+      for (const h of hostList) {
+        c = resolveSourceCookiesForHttp(bookSource, h).trim();
+        if (c) return c;
+      }
       const server = resolveBookSourceServerUrl(bookSource);
       if (server) return resolveSourceCookiesForHttp(bookSource, server).trim();
       return '';

@@ -9,6 +9,7 @@ import {
   LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
   patchExploreScriptForReaderWeb,
 } from '@/lib/js-engine/legado/legado-explore-java-device';
+import { parseHostsFromJsLib } from '@/lib/js-engine/legado/jslib-hosts';
 
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
@@ -49,23 +50,14 @@ function isHttpUrl(s: string): boolean {
   return /^https?:\/\//i.test((s ?? '').trim());
 }
 
-/** 从 jsLib 中提取第一个 http(s) 地址 */
+/** 从 jsLib 中提取第一个聚合线路 */
 export function firstHostFromJsLib(jsLib: unknown): string {
-  const s = typeof jsLib === 'string' ? jsLib : '';
-  const m = s.match(/['"](https?:\/\/[^'"]+)['"]/);
-  return m ? m[1] : '';
+  return parseHostsFromJsLib(jsLib)[0] ?? '';
 }
 
-/** 从 jsLib 的 host 数组提取全部 http(s) 地址 */
+/** 从 jsLib 的 host(s) 数组提取全部聚合线路 */
 export function hostsFromJsLib(jsLib: unknown): string[] {
-  const s = typeof jsLib === 'string' ? jsLib : '';
-  const hosts: string[] = [];
-  const re = /['"](https?:\/\/[^'"]+)['"]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
-    hosts.push(m[1]);
-  }
-  return hosts;
+  return parseHostsFromJsLib(jsLib);
 }
 
 export function storageKey(prefix: string, sourceUrl: string): string {
@@ -429,7 +421,22 @@ export const GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM = `
         device = javaRef.deviceID();
       } catch (e2) {}
     }
-    var qttoken = __ctx.getToken ? __ctx.getToken() : '';
+    var qttoken = '';
+    try {
+      if (typeof getToken === 'function') {
+        qttoken = String(getToken.call(__ctx)).trim();
+      } else if (__ctx.getToken) {
+        qttoken = String(__ctx.getToken()).trim();
+      }
+    } catch (eTok) {}
+    if ((!qttoken || qttoken.length <= 10) && typeof cookie !== 'undefined' && cookie.getKey) {
+      try {
+        var line = __readerResolveBaseUrl();
+        if (!line && typeof host !== 'undefined' && host && host[0]) line = String(host[0]);
+        var fromKey = cookie.getKey(line || '', 'qttoken');
+        if (fromKey && String(fromKey).length > 10) qttoken = String(fromKey).trim();
+      } catch (eCk) {}
+    }
     var options = {
       method: method,
       headers: {

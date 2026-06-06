@@ -4,6 +4,7 @@
  */
 
 import {
+  EXPLORE_JSLIB_CONTEXT_SHIM,
   EXPLORE_JSLIB_THIS_BIND_SHIM,
   GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
 } from '@/lib/js-engine/legado/source-script-shared';
@@ -102,6 +103,13 @@ const DATA_JSON_PARSE_RE = /\bdata\s*=\s*JSON\.parse\s*\(\s*data\s*\)/g;
 const DATA_JSON_PARSE_SAFE =
   "data = (function(){ var __t = String(data == null ? '' : data).trim(); if (!__t) return data; try { return JSON.parse(__t); } catch (e) { return data; } })()";
 
+/** 光遇 chapterList：processCatalogList 结果须作为脚本返回值 */
+const SHOW_SOURCE_CATALOG_TAIL_RE =
+  /if\s*\(\s*showSource\s*==\s*["']true["']\s*\)\s*\{\s*processCatalogList\s*\(\s*data\s*\)\s*;\s*\}\s*else\s*\{\s*data\s*;\s*\}/g;
+
+const SHOW_SOURCE_CATALOG_TAIL_FIX =
+  'return showSource == "true" ? processCatalogList(data) : data;';
+
 /**
  * 修正正文/目录规则里在 `let res` 解析完成前引用未初始化 let 绑定的问题。
  * 不修改 `content = data.content` 等书源语义。
@@ -122,6 +130,7 @@ export function patchLegadoRuleScript(code: string): string {
   );
   out = out.replace(RES_JSON_PARSE_RESULT_RE, RES_JSON_PARSE_RESULT_SAFE);
   out = out.replace(DATA_JSON_PARSE_RE, DATA_JSON_PARSE_SAFE);
+  out = out.replace(SHOW_SOURCE_CATALOG_TAIL_RE, SHOW_SOURCE_CATALOG_TAIL_FIX);
   if (/\bcontent_url\s*=/.test(out) && !/\breturn\b/.test(out)) {
     out += '\nreturn content_url;';
   }
@@ -138,6 +147,7 @@ export function buildRuleScriptFullBody(
     PROCESS_CATALOG_LIST_SHIM,
     EXPLORE_JSLIB_THIS_BIND_SHIM,
     RULE_SCRIPT_JSLIB_THIS_BIND_SHIM,
+    EXPLORE_JSLIB_CONTEXT_SHIM,
     GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
     patchedSnippet,
   ]
