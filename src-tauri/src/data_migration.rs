@@ -1,11 +1,15 @@
 //! 数据目录迁移：事务性复制、进度事件、空间预检、失败回退
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::path::{Path, PathBuf};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::Manager;
 
 const DB_FILE: &str = "reader.db";
 const LEGACY_DB_ALIASES: &[&str] = &["reader.db", "legado.db"];
@@ -581,7 +585,7 @@ fn disk_free_bytes(path: &Path) -> Option<u64> {
     Some(free_bytes)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(any(target_os = "android", target_os = "ios"))))]
 fn disk_free_bytes(_path: &Path) -> Option<u64> {
     None
 }
@@ -841,6 +845,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn paths_equal(a: &Path, b: &Path) -> bool {
     a == b
         || a.canonicalize()

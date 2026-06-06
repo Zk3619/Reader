@@ -5,6 +5,7 @@
 //! 启动时在系统路径与 `{dataDir}/.cookies` 之间建立符号链接（失败则回退为复制），
 //! 退出时再兜底同步回 dataDir。
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::{Path, PathBuf};
 
 pub const HTTP_COOKIES_FILENAME: &str = ".cookies";

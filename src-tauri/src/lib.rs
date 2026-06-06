@@ -1784,8 +1784,11 @@ pub fn run() {
             // 兜底：阻止 WebView 栈空时系统返回直接杀进程；「再按一次退出」由前端 onBackButtonPress 处理。
             // 前端无法拦截 RunEvent::ExitRequested，此逻辑不能整体搬到 JS。
             #[cfg(any(target_os = "android", target_os = "ios"))]
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+            {
+                let _ = app_handle;
+                if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                    api.prevent_exit();
+                }
             }
         });
 }

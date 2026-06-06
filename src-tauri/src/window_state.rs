@@ -1,13 +1,20 @@
 //! 主窗口状态持久化：读写 exe 旁 `.window-state.json`（不依赖 window-state 插件）
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::path::PathBuf;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::time::Duration;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{
-    AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, Position, Size, State,
+    LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, Position, Size, State,
     WebviewWindow, WindowEvent,
 };
 
@@ -77,11 +84,13 @@ impl WindowStateInner {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn window_state_file_path() -> Result<PathBuf, String> {
     crate::portable_paths::window_state_file_path()
 }
 
 /// 兼容官方插件 `{"main":{...}}` 与当前扁平格式
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn load_from_disk() -> Result<Option<WindowStateInner>, String> {
     let path = window_state_file_path()?;
     if !path.exists() {
@@ -105,6 +114,7 @@ fn load_from_disk() -> Result<Option<WindowStateInner>, String> {
     Ok(Some(state))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn logical_size_from_window(window: &WebviewWindow) -> Result<(u32, u32), String> {
     let physical = window.inner_size().map_err(|e| e.to_string())?;
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
@@ -117,6 +127,7 @@ fn logical_size_from_window(window: &WebviewWindow) -> Result<(u32, u32), String
     ))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn flush_cache_to_disk(state: &WindowStateInner) -> Result<(), String> {
     let path = window_state_file_path()?;
     if let Some(parent) = path.parent() {
@@ -127,6 +138,7 @@ fn flush_cache_to_disk(state: &WindowStateInner) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn is_effectively_maximized(window: &WebviewWindow) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -137,6 +149,7 @@ fn is_effectively_maximized(window: &WebviewWindow) -> bool {
     window.is_maximized().unwrap_or(false)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn update_cache_from_window(cache: &mut WindowStateInner, window: &WebviewWindow) -> Result<(), String> {
     let is_maximized = is_effectively_maximized(window);
     let is_minimized = window.is_minimized().unwrap_or(false);
@@ -159,10 +172,12 @@ fn update_cache_from_window(cache: &mut WindowStateInner, window: &WebviewWindow
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 trait MonitorExt {
     fn intersects(&self, position: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> bool;
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl MonitorExt for Monitor {
     fn intersects(&self, position: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> bool {
         let pos = self.position();
@@ -186,6 +201,7 @@ impl MonitorExt for Monitor {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn physical_size_for_monitor_check(
     window: &WebviewWindow,
     width: u32,
@@ -203,6 +219,7 @@ fn physical_size_for_monitor_check(
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn clamp_size_to_monitor(
     window: &WebviewWindow,
     width: u32,
@@ -237,6 +254,7 @@ fn clamp_size_to_monitor(
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn set_window_size(window: &WebviewWindow, width: u32, height: u32, use_logical: bool) -> Result<(), String> {
     if use_logical {
         window
@@ -252,6 +270,7 @@ fn set_window_size(window: &WebviewWindow, width: u32, height: u32, use_logical:
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn position_on_available_monitor(
     window: &WebviewWindow,
     x: i32,
@@ -266,6 +285,7 @@ fn position_on_available_monitor(
     Ok(monitors.iter().any(|m| m.intersects(position, size)))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn apply_window_state(window: &WebviewWindow, state: &WindowStateInner) -> Result<(), String> {
     if !state.should_restore() {
         return Ok(());
@@ -303,6 +323,7 @@ fn apply_window_state(window: &WebviewWindow, state: &WindowStateInner) -> Resul
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn ensure_store(app: &AppHandle) -> Result<(), String> {
     if app.try_state::<WindowStateStore>().is_some() {
         return Ok(());
@@ -318,11 +339,13 @@ fn ensure_store(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn store<'a>(app: &'a AppHandle) -> Result<State<'a, WindowStateStore>, String> {
     app.try_state::<WindowStateStore>()
         .ok_or_else(|| "WindowStateStore 未初始化".to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn flush_store_immediately(app: &AppHandle, window: &WebviewWindow) -> Result<(), String> {
     let store = store(app)?;
     {
@@ -333,6 +356,7 @@ fn flush_store_immediately(app: &AppHandle, window: &WebviewWindow) -> Result<()
     flush_cache_to_disk(&cache)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn schedule_debounced_flush(app: AppHandle) {
     let Some(store) = app.try_state::<WindowStateStore>() else {
         return;
@@ -354,6 +378,7 @@ fn schedule_debounced_flush(app: AppHandle) {
     });
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn restore_from_store(app: &AppHandle, window: &WebviewWindow) -> Result<bool, String> {
     let store = store(app)?;
     let _guard = store.restoring.lock().map_err(|e| e.to_string())?;
@@ -367,6 +392,7 @@ fn restore_from_store(app: &AppHandle, window: &WebviewWindow) -> Result<bool, S
     Ok(true)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn schedule_deferred_restore(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(RESTORE_DELAY_MS)).await;
