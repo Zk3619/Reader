@@ -54,6 +54,7 @@ export function collectPrefetchIndices(
 
 /**
  * 阅读切章后后台缓存：前后相邻（可选）+ 向后预下载（Legado preDownloadNum）
+ * 按设置页「章节正文缓存」配置执行，与排版预热无关。
  */
 export async function prefetchChaptersOnRead(
   book: Book,
@@ -100,4 +101,16 @@ export async function prefetchChaptersOnRead(
       }
     })();
   }
+}
+
+/** 正文就绪后触发缓存预取（不阻塞阅读） */
+export function scheduleChapterBodyCachePrefetch(
+  book: Book,
+  catalog: BookChapter[],
+  currentIndex: number,
+): void {
+  if (book.origin === 'local' || book.origin?.startsWith('local::')) return;
+  void prefetchChaptersOnRead(book, catalog, currentIndex).catch((e) => {
+    console.warn('[chapter-cache] schedule prefetch failed', e);
+  });
 }

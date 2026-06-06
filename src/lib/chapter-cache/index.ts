@@ -8,6 +8,10 @@ export {
 } from '@/lib/chapter-cache/storage';
 export { getChapterCacheSettings, saveChapterCacheSettings } from '@/lib/chapter-cache/settings';
 export {
+  prefetchChaptersOnRead,
+  scheduleChapterBodyCachePrefetch,
+} from '@/lib/chapter-cache/prefetch';
+export {
   chapterCacheDownloadStore,
   enqueueChapterDownload,
   enqueueDownloadAll,
