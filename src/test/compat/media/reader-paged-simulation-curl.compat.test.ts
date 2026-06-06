@@ -4,6 +4,10 @@ import {
   computeSimulationCurl,
   legadoSimulationTouchY,
   lineCross,
+  simulationAnimEndTouch,
+  simulationAnimStartPoint,
+  simulationDragCommitAllowed,
+  simulationDragIntentFromOffset,
 } from '@/lib/media/text/reader-paged-simulation-curl';
 
 describe('computeCurlCorner', () => {
@@ -19,15 +23,76 @@ describe('computeCurlCorner', () => {
     expect(computeCurlCorner(300, 500, 400, 600, 'prev')).toEqual({ x: 400, y: 600 });
     // startX 在左半：mirror 为 320 → 右下页脚
     expect(computeCurlCorner(80, 500, 400, 600, 'prev')).toEqual({ x: 400, y: 600 });
+    // 点击上一页：Legado prevPageByAnim 起点 (0, viewHeight)
+    expect(computeCurlCorner(0, 600, 400, 600, 'prev')).toEqual({ x: 400, y: 600 });
+  });
+});
+
+describe('simulationAnimStartPoint', () => {
+  it('matches Legado prevPageByAnim / nextPageByAnim defaults', () => {
+    expect(simulationAnimStartPoint('prev', 400, 600)).toEqual({ x: 0, y: 600 });
+    expect(simulationAnimStartPoint('next', 400, 600)).toEqual({ x: 360, y: 1 });
+  });
+});
+
+describe('simulationAnimEndTouch', () => {
+  it('prev scrolls touch to the right even when corner is bottom-right', () => {
+    const corner = { x: 400, y: 600 };
+    expect(simulationAnimEndTouch(corner, 400, 600, 'prev')).toEqual({ x: 600, y: 570 });
+  });
+  it('next scrolls touch to the left when corner is bottom-right', () => {
+    const corner = { x: 400, y: 600 };
+    expect(simulationAnimEndTouch(corner, 400, 600, 'next')).toEqual({ x: -200, y: 570 });
+  });
+});
+
+describe('simulationDragIntentFromOffset', () => {
+  it('left half: only prev; right half: only next', () => {
+    expect(simulationDragIntentFromOffset(20, 100, 400, 8)).toBe('prev');
+    expect(simulationDragIntentFromOffset(-20, 100, 400, 8)).toBe('neutral');
+    expect(simulationDragIntentFromOffset(-20, 300, 400, 8)).toBe('next');
+    expect(simulationDragIntentFromOffset(20, 300, 400, 8)).toBe('neutral');
+  });
+});
+
+describe('simulationDragCommitAllowed', () => {
+  it('matches half-screen drag direction', () => {
+    expect(simulationDragCommitAllowed(50, 80, 400)).toBe(true);
+    expect(simulationDragCommitAllowed(-50, 80, 400)).toBe(false);
+    expect(simulationDragCommitAllowed(-50, 320, 400)).toBe(true);
+    expect(simulationDragCommitAllowed(50, 320, 400)).toBe(false);
+  });
+
+  it('respects configurable zone width (25% / 75%)', () => {
+    expect(simulationDragCommitAllowed(50, 90, 400, 25)).toBe(true);
+    expect(simulationDragCommitAllowed(-50, 90, 400, 25)).toBe(false);
+    expect(simulationDragCommitAllowed(-50, 110, 400, 25)).toBe(true);
+
+    expect(simulationDragCommitAllowed(50, 280, 400, 75)).toBe(true);
+    expect(simulationDragCommitAllowed(-50, 280, 400, 75)).toBe(false);
+    expect(simulationDragCommitAllowed(-50, 320, 400, 75)).toBe(true);
+  });
+});
+
+describe('simulationDragIntentFromOffset zone', () => {
+  it('25% left zone blocks next intent', () => {
+    expect(simulationDragIntentFromOffset(-20, 80, 400, 8, 25)).toBe('neutral');
+    expect(simulationDragIntentFromOffset(20, 80, 400, 8, 25)).toBe('prev');
+    expect(simulationDragIntentFromOffset(-20, 120, 400, 8, 25)).toBe('next');
   });
 });
 
 describe('legadoSimulationTouchY', () => {
-  it('pins touchY for prev and middle-band next drags', () => {
+  it('pins touchY for middle-band horizontal drags', () => {
     expect(legadoSimulationTouchY(300, 250, 600, 'prev')).toBe(600);
     expect(legadoSimulationTouchY(300, 250, 600, 'next')).toBe(600);
     expect(legadoSimulationTouchY(210, 250, 600, 'next')).toBe(1);
     expect(legadoSimulationTouchY(100, 250, 600, 'next')).toBe(250);
+  });
+
+  it('follows finger Y for bottom-half / bottom-corner starts', () => {
+    expect(legadoSimulationTouchY(450, 200, 600, 'next')).toBe(200);
+    expect(legadoSimulationTouchY(520, 180, 600, 'prev')).toBe(180);
   });
 });
 
@@ -106,5 +171,25 @@ describe('computeSimulationCurl', () => {
       height: 600,
     });
     expect(g.isRtOrLb).toBe(true);
+  });
+
+  it('transitions start1.x smoothly along left-up drag (bottom-right corner)', () => {
+    const W = 400;
+    const H = 600;
+    const base = { cornerX: W, cornerY: H, width: W, height: H };
+    const start1xs: number[] = [];
+    // 模拟图一附近继续向左上拖：每步小位移
+    for (let i = 0; i <= 24; i++) {
+      const tx = 220 - i * 7;
+      const ty = 380 - i * 12;
+      start1xs.push(computeSimulationCurl({ touchX: tx, touchY: ty, ...base }).start1.x);
+    }
+    let maxDelta = 0;
+    for (let i = 1; i < start1xs.length; i++) {
+      maxDelta = Math.max(maxDelta, Math.abs(start1xs[i]! - start1xs[i - 1]!));
+    }
+    // 旧 Legado 硬修正单步可跳数百 px；平滑后应显著降低
+    expect(maxDelta).toBeLessThan(55);
+    expect(start1xs.every((x) => Number.isFinite(x))).toBe(true);
   });
 });

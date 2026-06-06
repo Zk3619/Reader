@@ -28,6 +28,9 @@ export async function captureElementToDataUrl(
   clone.style.margin = '0';
   clone.style.transform = 'none';
   clone.style.width = `${w}px`;
+  // 快照须完整页内容；翻页卷曲会在 slide 上挂 clip-path，若带入 clone 会得到空白图
+  clone.style.clipPath = 'none';
+  clone.style.removeProperty('-webkit-clip-path');
 
   const serialized = new XMLSerializer().serializeToString(clone);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">

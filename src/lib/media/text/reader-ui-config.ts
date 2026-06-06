@@ -120,6 +120,31 @@ export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN = 10;
 export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX = 50;
 export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT = 25;
 
+/** 仿真翻页：左右拖拽分区边界（视口宽度百分比） */
+export type TextViewerSimulationDragZonePercent = 25 | 50 | 75;
+
+export const TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS: TextViewerSimulationDragZonePercent[] =
+  [25, 50, 75];
+
+export const TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT: TextViewerSimulationDragZonePercent = 50;
+
+export function normalizeSimulationDragZonePercent(
+  raw: unknown,
+): TextViewerSimulationDragZonePercent {
+  if (raw === 25 || raw === 50 || raw === 75) return raw;
+  return TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT;
+}
+
+/** 仿真拖拽分区边界 x：起点 ≤ boundary 为 prev 区，> boundary 为 next 区 */
+export function simulationDragZoneBoundaryPx(
+  viewportWidth: number,
+  zonePercent: number,
+): number {
+  if (viewportWidth <= 0) return 0;
+  const p = Math.max(25, Math.min(75, zonePercent));
+  return viewportWidth * (p / 100);
+}
+
 /** 按页拖拽翻页：|offset| ≥ 视口宽度 × 该比例才提交翻页 */
 export function textViewerPagedDragCommitThresholdPx(
   viewportWidth: number,
@@ -160,6 +185,8 @@ export interface TextViewerUiConfig {
   pageAnim: TextViewerPageAnim;
   /** 按页拖拽翻页提交阈值（视口宽度百分比，10–50） */
   pagedDragCommitPercent: number;
+  /** 仿真翻页：左右拖拽分区宽度（视口宽度 25% / 50% / 75%） */
+  simulationDragZonePercent: TextViewerSimulationDragZonePercent;
   dualPage: TextViewerDualPageMode;
   /** 两端对齐（Legado textFullJustify） */
   textFullJustify: boolean;
@@ -191,6 +218,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   statusBarDisplayStyle: 'follow',
   pageAnim: 'scroll',
   pagedDragCommitPercent: TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT,
+  simulationDragZonePercent: TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT,
   dualPage: 'auto',
   textFullJustify: true,
   textBottomJustify: true,

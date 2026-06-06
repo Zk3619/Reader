@@ -28,8 +28,10 @@ import {
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
   TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX,
   TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN,
+  TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS,
   type TextViewerPageAnim,
   type TextViewerImageStyle,
+  type TextViewerSimulationDragZonePercent,
 } from '@/lib/media/text/reader-ui-config';
 import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import {
@@ -531,6 +533,37 @@ export function ReaderSettings(props: ReaderSettingsProps) {
               <SliderThumb />
             </SliderTrack>
           </Slider>
+        </div>
+      </Show>
+
+      <Show when={config().pageAnim === 'simulation'}>
+        <div class="space-y-3">
+          <Label>仿真拖拽分区</Label>
+          <p class="text-xs text-muted-foreground">
+            左侧区域仅翻上一页，右侧区域仅翻下一页。调节左右分区宽度（占视口比例）。
+          </p>
+          <Tabs
+            value={String(config().simulationDragZonePercent)}
+            onChange={(value) =>
+              setConfig({
+                simulationDragZonePercent: Number(value) as TextViewerSimulationDragZonePercent,
+              })
+            }
+            class="w-full"
+          >
+            <TabsList class={readerDrawerOptionTabsListClass} aria-label="仿真拖拽分区">
+              <For each={TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS}>
+                {(percent) => (
+                  <TabsTrigger
+                    value={String(percent)}
+                    class={readerDrawerOptionTabsTriggerClass}
+                  >
+                    {percent}%
+                  </TabsTrigger>
+                )}
+              </For>
+            </TabsList>
+          </Tabs>
         </div>
       </Show>
 

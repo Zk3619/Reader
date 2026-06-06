@@ -1,9 +1,12 @@
 import { mergePagedContentTransforms } from '@/lib/media/text/reader-paged-turn-style';
 import type { TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 
-const SLIDE_CLASS = 'reader-paged-turn-slide';
+export const READER_PAGED_TURN_SLIDE_CLASS = 'reader-paged-turn-slide';
+export const READER_PAGED_TURN_CONTENT_CLIP_CLASS = 'reader-paged-turn-content-clip';
+
+const SLIDE_CLASS = READER_PAGED_TURN_SLIDE_CLASS;
 const INCOMING_MOUNT_CLASS = 'reader-paged-incoming-mount';
-const CONTENT_CLIP_CLASS = 'reader-paged-turn-content-clip';
+const CONTENT_CLIP_CLASS = READER_PAGED_TURN_CONTENT_CLIP_CLASS;
 
 /** Solid 重渲染可能 detach 幕帘节点；保留引用以便重新挂回，避免误从已翻页的 live 再 clone */
 let persistedTurnSlide: HTMLElement | null = null;
@@ -14,7 +17,8 @@ export function getPersistedTurnSlide(): HTMLElement | null {
   return persistedTurnSlide;
 }
 
-function resolveOpaquePageBackground(startEl: HTMLElement): string {
+/** 向上查找不透明页面背景色（幕帘 / 仿真背面折痕底色） */
+export function resolveOpaquePageBackground(startEl: HTMLElement): string {
   let node: HTMLElement | null = startEl;
   while (node) {
     if (node.classList.contains('reader-text-content-slot')) {
@@ -69,7 +73,7 @@ export function mountTurnPageCurtain(
     viewportHeightPx?: number;
     /** 覆盖：slideMount 由 JSX 对齐 content-slot 四边 inset，此处仅用于语义标记 */
     contentInsetPx?: TextViewerPagedContentInsets;
-    /** 滑动：满视口页面板（padding 承载 inset，与 incoming 一致） */
+    /** 滑动/仿真：满视口页面板（padding 承载 inset，与 incoming 一致） */
     slideViewportPanel?: boolean;
     /** @deprecated 使用 slideViewportPanel */
     slideFillMount?: boolean;

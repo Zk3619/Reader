@@ -51,6 +51,7 @@ import {
 } from '@/stores/viewer/media/chapter';
 import {
   defaultTextViewerUiConfig,
+  normalizeSimulationDragZonePercent,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
@@ -113,6 +114,9 @@ async function hydrateReaderConfig(): Promise<void> {
         : prev.clickRegion,
       imageStyle: migrateReaderImageStyle(saved.imageStyle),
       pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
+      simulationDragZonePercent: normalizeSimulationDragZonePercent(
+        saved.simulationDragZonePercent,
+      ),
     }));
   }
 }
