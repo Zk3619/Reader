@@ -27,6 +27,7 @@ export function MediaViewerChromeSlots(props: MediaViewerChromeSlotsProps) {
             'relative flex min-h-0 flex-1 flex-col overflow-hidden',
             local.class,
           )}
+          data-media-viewer-chrome-slots
         >
           {local.children}
           {local.header}
@@ -34,7 +35,7 @@ export function MediaViewerChromeSlots(props: MediaViewerChromeSlotsProps) {
         </div>
       }
     >
-      <div class={cn('flex min-h-0 flex-1 flex-col overflow-hidden', local.class)}>
+      <div class={cn('flex min-h-0 flex-1 flex-col overflow-hidden', local.class)} data-media-viewer-chrome-slots>
         {local.header}
         <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {local.children}

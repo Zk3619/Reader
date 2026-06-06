@@ -23,6 +23,7 @@ import {
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { ReaderContent } from '@/components/viewer/text-viewer/ReaderContent';
+import { ReaderTextContentSlot } from '@/components/viewer/text-viewer/reader-text-content-slot';
 import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import {
@@ -365,7 +366,7 @@ export function BookReader(props: BookReaderProps) {
   const contentTransitionClass = () => {
     if (isPagedMode()) return '';
     const anim = normalizedPageAnim();
-    if (anim === 'cover' || anim === 'linkedCover') return 'reader-chapter-enter-cover';
+    if (anim === 'cover') return 'reader-chapter-enter-cover';
     if (anim === 'slide' || anim === 'simulation') return 'reader-chapter-enter-slide';
     if (anim === 'none') return '';
     return '';
@@ -658,7 +659,15 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const runRegionalClick = (e: MouseEvent) => {
-    const t = scrollContainer;
+    const pagedViewport =
+      scrollContainer?.querySelector<HTMLElement>('.reader-paged-viewport') ?? null;
+    const t =
+      (isPagedMode() ? pagedViewport : null) ??
+      scrollContainer ??
+      (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
+        '.reader-paged-viewport',
+      ) ??
+      (e.currentTarget as HTMLElement | null);
     if (!t) return;
     const rect = t.getBoundingClientRect();
     const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
@@ -680,12 +689,12 @@ export function BookReader(props: BookReaderProps) {
 
   const scrollContentClass = useMediaViewerMainScrollClass('reader-text-scroll');
   const stageContentClass = useMediaViewerMainStageClass('reader-text-stage');
-  const readerThemeBg = () => readerThemeClasses(textViewerStore.state.config.theme).bg;
+  const readerThemeShell = () => readerThemeClasses(textViewerStore.state.config.theme);
 
   const mainContentClass = () =>
     cn(
       isPagedMode() ? stageContentClass() : scrollContentClass(),
-      isPagedMode() && readerThemeBg(),
+      readerThemeShell().bg,
     );
 
   const readerContentShared = {
@@ -700,11 +709,14 @@ export function BookReader(props: BookReaderProps) {
       fallback={
         <Index each={[contentEnterKey()]}>
           {() => (
-            <ReaderContent
-              class={cn('min-h-full', contentTransitionClass())}
-              {...readerContentShared}
-              dualPage={dualPageActive()}
-            />
+            <ReaderTextContentSlot mode="scroll">
+              <ReaderContent
+                class={cn('min-h-full', contentTransitionClass())}
+                insetManagedBySlot
+                {...readerContentShared}
+                dualPage={dualPageActive()}
+              />
+            </ReaderTextContentSlot>
           )}
         </Index>
       }
@@ -713,8 +725,8 @@ export function BookReader(props: BookReaderProps) {
         pageAnim={normalizedPageAnim}
         class="h-full min-h-full"
         {...readerContentShared}
-        onRequestPrevChapter={() => void handlePrev()}
-        onRequestNextChapter={() => void handleNext()}
+        onRequestPrevChapter={() => handlePrev()}
+        onRequestNextChapter={() => handleNext()}
         onRegisterNav={(api) => {
           pagedNav = api;
         }}

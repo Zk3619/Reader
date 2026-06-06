@@ -2,6 +2,8 @@ import { For } from 'solid-js';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
+  readerDrawerOptionTabsListClass,
+  readerDrawerOptionTabsTriggerClass,
   settingsOptionTabsListClass,
   settingsOptionTabsTriggerClass,
 } from '@/lib/settings/settings-tab-styles';
@@ -19,11 +21,21 @@ export interface ViewerChromeLayoutControlsProps {
   class?: string;
   /** 是否显示当前选项说明 */
   showHint?: boolean;
+  /** drawer：阅读设置抽屉内均分宽度 */
+  variant?: 'default' | 'drawer';
 }
 
 export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProps) {
   const layout = () =>
     normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
+  const tabsListClass = () =>
+    props.variant === 'drawer'
+      ? readerDrawerOptionTabsListClass
+      : settingsOptionTabsListClass;
+  const tabsTriggerClass = () =>
+    props.variant === 'drawer'
+      ? readerDrawerOptionTabsTriggerClass
+      : settingsOptionTabsTriggerClass;
 
   return (
     <div class={cn('space-y-2', props.class)}>
@@ -32,12 +44,12 @@ export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProp
         onChange={(value) =>
           void settingsStore.setViewerChromeLayout(value as ViewerChromeLayout)
         }
-        class="w-full sm:w-auto"
+        class="w-full"
       >
-        <TabsList class={settingsOptionTabsListClass} aria-label="顶栏与底栏布局">
+        <TabsList class={tabsListClass()} aria-label="顶栏与底栏布局">
           <For each={LAYOUT_OPTIONS}>
             {(value) => (
-              <TabsTrigger value={value} class={settingsOptionTabsTriggerClass}>
+              <TabsTrigger value={value} class={tabsTriggerClass()}>
                 {VIEWER_CHROME_LAYOUT_LABELS[value]}
               </TabsTrigger>
             )}

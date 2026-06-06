@@ -16,6 +16,7 @@ import {
 } from '@/lib/media/text/reader-content-blocks';
 import { openParagraphReviewFromClick } from '@/lib/book-source/legado-paragraph-review';
 import { ReaderInlineImg } from '@/components/viewer/text-viewer/ReaderInlineImg';
+import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import { getSource } from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 
@@ -88,11 +89,23 @@ export interface ReaderContentProps {
   measureBlocks?: boolean;
   /** 按页阅读：与测量层相同排版，避免 py 导致页高不一致 */
   pagedLayout?: boolean;
+  /** 四边 inset 已由外层 content-slot 管理（滚动 / 按页） */
+  insetManagedBySlot?: boolean;
+  /**
+   * 跨章翻页 staging：渲染相邻章正文，不切换 store（动画完成后再切章）
+   */
+  stagedChapter?: {
+    chapterIndex: number;
+    content: string;
+    chapterTitle?: string;
+  };
 }
 
 export function ReaderContent(props: ReaderContentProps) {
   const config = () => textViewerStore.state.config;
-  const content = () => textViewerStore.state.content;
+  const isStaged = () => props.stagedChapter != null;
+  const content = () =>
+    props.stagedChapter?.content ?? textViewerStore.state.content;
   const book = () => textViewerStore.state.book;
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
 
@@ -113,11 +126,31 @@ export function ReaderContent(props: ReaderContentProps) {
   const contentLoading = () => textViewerStore.state.contentLoading;
   const contentFetching = () => textViewerStore.state.contentFetching;
   const contentBootstrapping = () => textViewerStore.state.contentBootstrapping;
-  const showReaderSkeleton = () => contentFetching() || contentBootstrapping();
-  const showContent = () => textViewerStore.state.showContent;
+  const showReaderSkeleton = () => {
+    if (isStaged()) return false;
+    return (
+      contentFetching() ||
+      contentBootstrapping() ||
+      (contentLoading() && !showContent())
+    );
+  };
+  const showContent = () =>
+    isStaged()
+      ? Boolean(props.stagedChapter?.content?.trim())
+      : textViewerStore.state.showContent;
   const catalog = () => textViewerStore.state.catalog;
-  const chapterIndex = () => textViewerStore.state.chapterIndex;
-  const currentChapter = () => catalog()[chapterIndex()];
+  const chapterIndex = () =>
+    props.stagedChapter?.chapterIndex ?? textViewerStore.state.chapterIndex;
+  const currentChapter = () => {
+    const staged = props.stagedChapter;
+    if (staged) {
+      return (
+        catalog()[staged.chapterIndex] ??
+        (staged.chapterTitle ? { title: staged.chapterTitle } : undefined)
+      );
+    }
+    return catalog()[chapterIndex()];
+  };
   const chapterPageReferer = () => {
     const ch = currentChapter();
     const u = ch?.url ?? ch?.baseUrl ?? book()?.origin;
@@ -133,18 +166,26 @@ export function ReaderContent(props: ReaderContentProps) {
   };
 
   const isErrorContent = () => {
+    if (isStaged()) return false;
     if (contentLoading() || !showContent()) return false;
     const c = content()?.trim() ?? '';
     if (!c) return true;
     return errorDetail() != null;
   };
 
-  const contentInset = () => config().contentInset ?? { left: 16, right: 16, center: 32 };
+  const contentInset = () => config().contentInset ?? {
+    left: 16,
+    right: 16,
+    center: 32,
+    top: 32,
+    bottom: 32,
+  };
   const fontSizePx = () => config().fontSize;
+
+  const insetOnSlot = () => Boolean(props.insetManagedBySlot || props.pagedLayout);
 
   const themeStyle = () => {
     const c = config();
-    const inset = contentInset();
     const fontFamily = c.font === 0 || !c.customFontName
       ? 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)'
       : c.customFontName;
@@ -155,17 +196,20 @@ export function ReaderContent(props: ReaderContentProps) {
       'letter-spacing': c.spacing.letter ? `${c.spacing.letter}em` : undefined,
       'font-family': fontFamily,
       'max-width': useReadWidth ? `${c.readWidth}px` : undefined,
-      'padding-left': `${inset.left}px`,
-      'padding-right': `${inset.right}px`,
     } as Record<string, string | number | undefined>;
   };
 
   const bodyStyle = () => {
-    if (!props.dualPage) return undefined;
     const inset = contentInset();
-    return {
-      'column-gap': inset.center > 0 ? `${inset.center}px` : undefined,
-    } as Record<string, string | undefined>;
+    const style: Record<string, string | undefined> = {};
+    if (props.dualPage) {
+      const gap = inset.center > 0 ? inset.center : 32;
+      style['column-count'] = '2';
+      style['column-gap'] = `${gap}px`;
+      style['column-fill'] = 'balance';
+      style['width'] = '100%';
+    }
+    return style;
   };
 
   const paragraphStyle = () => {
@@ -216,7 +260,7 @@ export function ReaderContent(props: ReaderContentProps) {
     <div
       class={cn(
         'reader-content min-h-full w-full px-0 selection:bg-primary/20',
-        props.pagedLayout ? 'min-h-full py-0' : 'py-8',
+        insetOnSlot() ? 'min-h-full py-0' : 'py-8',
         themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
         themeClasses[config().theme]?.text ?? themeClasses[0].text,
         props.class
@@ -255,6 +299,8 @@ export function ReaderContent(props: ReaderContentProps) {
             class={cn(
               'wrap-break-word reader-body',
               props.dualPage && 'reader-dual-page columns-2',
+              props.pagedLayout && config().textFullJustify && 'reader-paged-justify',
+              props.pagedLayout && config().textBottomJustify && 'reader-paged-bottom-justify',
             )}
             style={bodyStyle()}
           >
@@ -863,51 +909,6 @@ function paragraphToHtml(p: string): string {
   // }
   
   return spaced.replace(/\n/g, '<br/>');
-}
-
-/**
- * 阅读器内容加载骨架屏
- * 不使用 Kobalte Skeleton（bg-primary/10 在阅读器主题背景上不可见），
- * 改用 bg-current + opacity 继承主题文字色，确保在所有阅读器主题下都清晰可见。
- * 无需额外 wrapper：父组件 ReaderContent 已提供主题背景和样式。
- */
-function ReaderContentSkeleton() {
-  // 预生成段落配置，避免每次渲染时重新计算
-  const paragraphs = createMemo(() => {
-    return Array.from({ length: 8 }, () => {
-      const lineCount = Math.floor(Math.random() * 3) + 2; // 2-4 行
-      return Array.from({ length: lineCount }, () => {
-        return Math.floor(Math.random() * 30) + 70; // 70-100% 宽度
-      });
-    });
-  });
-
-  return (
-    <>
-      {/* 章节标题 skeleton */}
-      <div class="mb-6 flex items-center justify-center">
-        <div class="skeleton-bar h-7 w-48 rounded" />
-      </div>
-
-      {/* 段落 skeleton */}
-      <div class="space-y-5">
-        <For each={paragraphs()}>
-          {(lines) => (
-            <div class="space-y-2.5">
-              <For each={lines}>
-                {(width) => (
-                  <div
-                    class="skeleton-bar h-4 rounded"
-                    style={{ width: `${width}%` }}
-                  />
-                )}
-              </For>
-            </div>
-          )}
-        </For>
-      </div>
-    </>
-  );
 }
 
 /** 仅转义 & < >，不转义引号，避免中文引号「」"" 显示异常 */

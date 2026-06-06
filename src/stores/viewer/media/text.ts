@@ -14,6 +14,7 @@ import {
 import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
 import {
   prefetchChaptersOnRead,
+  scheduleChapterBodyCachePrefetch,
 } from '@/lib/chapter-cache/prefetch';
 import {
   getPooledChapterContent,
@@ -39,6 +40,11 @@ import {
 } from '@/lib/media/text/reading-session';
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
+import {
+  chapterPosForPagedEntry,
+  consumePagedChapterEntry,
+  markPagedChapterEntry,
+} from '@/lib/media/text/reader-paged-chapter-entry';
 import type { Book, BookChapter, BookProgress, BookSource } from '@/types';
 import { state, setState } from '@/stores/viewer/media/state';
 import {
@@ -73,6 +79,8 @@ function mergeContentInset(
     left: saved.left ?? prev.left,
     right: saved.right ?? prev.right,
     center: center ?? prev.center,
+    top: saved.top ?? prev.top,
+    bottom: saved.bottom ?? prev.bottom,
   };
 }
 
@@ -194,6 +202,10 @@ function commitChapterContent(index: number, content: string, book: Book): void 
     contentBootstrapping: false,
     showContent: true,
   });
+  const catalog = state.catalog;
+  if (catalog.length > 0) {
+    scheduleChapterBodyCachePrefetch(book, catalog, index);
+  }
 }
 
 function beginSessionContentLoad(bookUrl: string): void {
@@ -444,6 +456,16 @@ export async function openTextBook(
   }
 }
 
+function beginChapterLoadUi(index: number): void {
+  const entry = consumePagedChapterEntry();
+  setState({
+    chapterIndex: index,
+    chapterPos: chapterPosForPagedEntry(entry, state.chapterPos),
+    contentLoading: true,
+    showContent: false,
+  });
+}
+
 export async function loadTextChapter(
   index: number,
   options?: { forceRefresh?: boolean },
@@ -464,6 +486,9 @@ export async function loadTextChapter(
   }
 
   const forceRefresh = options?.forceRefresh === true;
+  if (index !== state.chapterIndex || forceRefresh) {
+    beginChapterLoadUi(index);
+  }
 
   if (!forceRefresh) {
     const pooled = getPooledChapterContent(book.bookUrl, index);
@@ -653,6 +678,8 @@ export const textViewerTextApi = {
   async nextChapter(): Promise<void> {
     if (!state.book || state.chapterIndex >= state.catalog.length - 1) return;
 
+    markPagedChapterEntry('first');
+
     if (hasPooledNextChapter()) {
       const entry = swapPoolToNextChapter();
       if (entry) {
@@ -687,12 +714,14 @@ export const textViewerTextApi = {
   async prevChapter(): Promise<void> {
     if (!state.book || state.chapterIndex <= 0) return;
 
+    markPagedChapterEntry('last');
+
     if (hasPooledPrevChapter()) {
       const entry = swapPoolToPrevChapter();
       if (entry) {
         setState({
           chapterIndex: entry.index,
-          chapterPos: 0,
+          chapterPos: 1,
           content: entry.content,
           contentLoading: false,
           contentFetching: false,

@@ -20,15 +20,28 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
 import {
+  readerDrawerOptionTabsListClass,
+  readerDrawerOptionTabsTriggerClass,
+} from '@/lib/settings/settings-tab-styles';
+import {
   TEXT_VIEWER_DUAL_PAGE_MODE_LABELS,
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
+  TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX,
+  TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN,
   type TextViewerPageAnim,
   type TextViewerImageStyle,
 } from '@/lib/media/text/reader-ui-config';
+import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import {
   TEXT_VIEWER_PAGE_ANIM_LABELS,
   TEXT_VIEWER_PAGE_ANIM_OPTIONS,
+  isTextViewerPagedAnim,
 } from '@/lib/media/text/text-viewer-page-anim';
+import {
+  pagedLayoutCacheHit,
+  pagedLayoutEngine,
+  pagedLayoutPrefetchStatus,
+} from '@/lib/media/text/reader-paged-layout-debug';
 const themeLabels: Record<number, string> = {
   0: '默认',
   1: '护眼绿',
@@ -80,7 +93,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <p class="text-xs text-muted-foreground">
           固定、层叠或悬浮；对所有阅读器生效，可在应用设置中同样修改。
         </p>
-        <ViewerChromeLayoutControls />
+        <ViewerChromeLayoutControls variant="drawer" />
       </div>
 
       {/* 主题 */}
@@ -208,7 +221,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div>
           <Label>边距</Label>
           <p class="mt-1 text-xs text-muted-foreground">
-            正文与左右边界的间距；双页时可设置列间中心间距。
+            四边间距由 content-slot 统一控制；双页滚动时可设置列间中心间距。
           </p>
         </div>
         <div class="space-y-2">
@@ -251,6 +264,46 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             </SliderTrack>
           </Slider>
         </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">顶部</Label>
+            <span class="text-sm text-muted-foreground">{config().contentInset.top}px</span>
+          </div>
+          <Slider
+            value={[config().contentInset.top]}
+            minValue={0}
+            maxValue={120}
+            step={2}
+            onChange={(values: number[]) =>
+              setContentInset('top', values[0] ?? config().contentInset.top)
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">底部</Label>
+            <span class="text-sm text-muted-foreground">{config().contentInset.bottom}px</span>
+          </div>
+          <Slider
+            value={[config().contentInset.bottom]}
+            minValue={0}
+            maxValue={120}
+            step={2}
+            onChange={(values: number[]) =>
+              setContentInset('bottom', values[0] ?? config().contentInset.bottom)
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
         <Show when={dualPageMiddleVisible()}>
           <div class="space-y-2">
             <div class="flex items-center justify-between">
@@ -279,25 +332,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       <div class="space-y-3">
         <Label>双页阅读</Label>
         <p class="text-xs text-muted-foreground">
-          宽屏下分栏显示；「自动」在视口宽度达到 xl（≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px）时启用。
+          宽屏下分栏显示；「自动」在视口 ≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px 或横屏时启用（按页模式）。
         </p>
         <Tabs
           value={config().dualPage}
           onChange={(value) => setConfig({ dualPage: value as ReaderDualPageMode })}
           class="w-full"
         >
-          <TabsList
-            class={cn(
-              'flex h-auto w-full gap-1 rounded-lg border border-input bg-muted p-1.5',
-            )}
-            aria-label="双页阅读"
-          >
+          <TabsList class={readerDrawerOptionTabsListClass} aria-label="双页阅读">
             <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
               {(mode) => (
-                <TabsTrigger
-                  value={mode}
-                  class="h-8 flex-1 shadow-none data-selected:ring-1 data-selected:ring-primary/30"
-                >
+                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
                   {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
                 </TabsTrigger>
               )}
@@ -314,18 +359,10 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           onChange={(value) => setConfig({ imageStyle: value as TextViewerImageStyle })}
           class="w-full"
         >
-          <TabsList
-            class={cn(
-              'grid h-auto w-full grid-cols-4 gap-1 rounded-lg border border-input bg-muted p-1.5',
-            )}
-            aria-label="插图样式"
-          >
+          <TabsList class={readerDrawerOptionTabsListClass} aria-label="插图样式">
             <For each={(['DEFAULT', 'FULL', 'TEXT', 'SINGLE'] as TextViewerImageStyle[])}>
               {(style) => (
-                <TabsTrigger
-                  value={style}
-                  class="h-8 px-1 text-xs shadow-none data-selected:ring-1 data-selected:ring-primary/30"
-                >
+                <TabsTrigger value={style} class={readerDrawerOptionTabsTriggerClass}>
                   {READER_IMAGE_STYLE_LABELS[style]}
                 </TabsTrigger>
               )}
@@ -354,42 +391,53 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       {/* 朗读 */}
       <div class="space-y-3">
         <Label>朗读引擎</Label>
-        <div class="grid grid-cols-2 gap-2">
-          <Button
-            variant={config().aloudEngine === 'system' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setConfig({ aloudEngine: 'system' })}
-          >
-            系统 TTS
-          </Button>
-          <Button
-            variant={config().aloudEngine === 'httpTts' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setConfig({ aloudEngine: 'httpTts' })}
-          >
-            HttpTTS
-          </Button>
-        </div>
+        <Tabs
+          value={config().aloudEngine}
+          onChange={(value) => setConfig({ aloudEngine: value as ReadAloudEngine })}
+          class="w-full"
+        >
+          <TabsList class={readerDrawerOptionTabsListClass} aria-label="朗读引擎">
+            <TabsTrigger value="system" class={readerDrawerOptionTabsTriggerClass}>
+              系统 TTS
+            </TabsTrigger>
+            <TabsTrigger value="httpTts" class={readerDrawerOptionTabsTriggerClass}>
+              HttpTTS
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
         <Show when={config().aloudEngine === 'httpTts'}>
           <div class="space-y-2">
             <Label class="text-xs text-muted-foreground">HttpTTS 引擎</Label>
-            <div class="flex flex-col gap-1">
-              <For each={httpTtsList()}>
-                {(item) => (
-                  <Button
-                    variant={config().httpTtsId === item.id ? 'default' : 'outline'}
-                    size="sm"
-                    class="justify-start"
-                    onClick={() => setConfig({ httpTtsId: item.id })}
-                  >
-                    {item.name}
-                  </Button>
-                )}
-              </For>
-              <Show when={httpTtsList().length === 0}>
+            <Show
+              when={httpTtsList().length > 0}
+              fallback={
                 <p class="text-xs text-muted-foreground">请先在设置中配置 HttpTTS</p>
-              </Show>
-            </div>
+              }
+            >
+              <Tabs
+                value={
+                  config().httpTtsId != null
+                    ? String(config().httpTtsId)
+                    : undefined
+                }
+                onChange={(value) => setConfig({ httpTtsId: Number(value) })}
+                class="w-full"
+              >
+                <TabsList class={readerDrawerOptionTabsListClass} aria-label="HttpTTS 引擎">
+                  <For each={httpTtsList()}>
+                    {(item) => (
+                      <TabsTrigger
+                        value={String(item.id)}
+                        class={cn(readerDrawerOptionTabsTriggerClass, 'truncate')}
+                        title={item.name}
+                      >
+                        {item.name}
+                      </TabsTrigger>
+                    )}
+                  </For>
+                </TabsList>
+              </Tabs>
+            </Show>
             <div class="space-y-2">
               <div class="flex items-center justify-between">
                 <Label>语速</Label>
@@ -436,25 +484,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       <div class="space-y-3">
         <Label>翻页模式</Label>
         <p class="text-xs text-muted-foreground">
-          滚动为连续阅读；其余模式按页翻页，可拖拽或点击换页。覆盖：当前页盖住新页；关联覆盖：新页先露边且联动；滑动：两页并排平移；仿真：折页。
+          滚动为连续阅读；其余模式按页翻页，可拖拽或点击换页。覆盖：当前页盖住新页；滑动：两页并排平移；仿真：折页。
         </p>
         <Tabs
           value={config().pageAnim}
           onChange={(value) => setConfig({ pageAnim: value as TextViewerPageAnim })}
           class="w-full"
         >
-          <TabsList
-            class={cn(
-              'grid h-auto w-full grid-cols-3 gap-1 rounded-lg border border-input bg-muted p-1.5',
-            )}
-            aria-label="翻页模式"
-          >
+          <TabsList class={readerDrawerOptionTabsListClass} aria-label="翻页模式">
             <For each={TEXT_VIEWER_PAGE_ANIM_OPTIONS}>
               {(mode) => (
-                <TabsTrigger
-                  value={mode}
-                  class="h-8 px-1 text-xs shadow-none data-selected:ring-1 data-selected:ring-primary/30"
-                >
+                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
                   {TEXT_VIEWER_PAGE_ANIM_LABELS[mode]}
                 </TabsTrigger>
               )}
@@ -462,6 +502,57 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           </TabsList>
         </Tabs>
       </div>
+
+      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label>拖拽翻页阈值</Label>
+            <span class="text-sm tabular-nums text-muted-foreground">
+              {config().pagedDragCommitPercent}%
+            </span>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            拖动距离需超过视口宽度的该比例才翻页，否则松手回弹。
+          </p>
+          <Slider
+            value={[config().pagedDragCommitPercent]}
+            minValue={TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN}
+            maxValue={TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX}
+            step={1}
+            onChange={(values: number[]) =>
+              setConfig({
+                pagedDragCommitPercent:
+                  values[0] ?? config().pagedDragCommitPercent,
+              })
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+      </Show>
+
+      {/* 分页引擎（调试） */}
+      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+        <div class="space-y-2 rounded-lg border border-dashed border-muted-foreground/40 px-3 py-2">
+          <Label class="text-muted-foreground">分页引擎（调试）</Label>
+          <p class="text-sm font-medium tabular-nums">
+            {pagedLayoutEngine() === 'idle' ? '—' : pagedLayoutEngine()}
+            <Show when={pagedLayoutCacheHit()}>
+              <span class="ml-2 text-xs font-normal text-muted-foreground">缓存命中</span>
+            </Show>
+          </p>
+          <Show when={pagedLayoutPrefetchStatus()}>
+            <p class="text-xs text-muted-foreground">{pagedLayoutPrefetchStatus()}</p>
+          </Show>
+          <p class="text-xs text-muted-foreground">
+            canvas：纯文本 Canvas 预排；dom：HTML/插图 DOM 测量；canvas+dom：Canvas 初算后经 DOM 精修。
+            正文缓存由设置页「章节正文缓存」控制，切章后自动预取相邻章。
+          </p>
+        </div>
+      </Show>
 
       {/* 恢复默认 */}
       <Button
