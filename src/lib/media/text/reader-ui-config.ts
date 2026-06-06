@@ -9,11 +9,10 @@ import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickRegion } from '@/lib/media/text/reader-click-region';
 
-/** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 关联覆盖 / 滑动 / 仿真 / 无动画 */
+/** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 滑动 / 仿真 / 无动画 */
 export type TextViewerPageAnim =
   | 'scroll'
   | 'cover'
-  | 'linkedCover'
   | 'slide'
   | 'simulation'
   | 'none';
@@ -23,8 +22,65 @@ export type TextViewerImageStyle = 'DEFAULT' | 'FULL' | 'TEXT' | 'SINGLE';
 /** Tailwind `xl` 断点（1280px）：双页「自动」模式的最小视口宽度 */
 export const TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX = 1280;
 
-/** 按页阅读：裁切区上下留白（与原先 py-4 一致，每页顶部/底部固定） */
+/**
+ * 按页阅读：content-slot 四边 inset 默认值（与 {@link defaultTextViewerUiConfig} 一致）
+ * @deprecated 请使用 config.contentInset
+ */
+export const TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX = 32;
+/** @deprecated 请使用 config.contentInset */
+export const TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX = 32;
+
+/** @deprecated 请使用 {@link TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX} */
+export const TEXT_VIEWER_PAGED_PAD_TOP_PX = TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX;
+/** @deprecated 请使用 {@link TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX} */
+export const TEXT_VIEWER_PAGED_PAD_BOTTOM_PX = TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX;
+
+/** @deprecated 请使用 {@link textViewerPagedContentInsets} */
 export const TEXT_VIEWER_PAGED_VERTICAL_PAD_PX = 16;
+
+export type TextViewerPagedContentInsets = {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+};
+
+/** 按页 content-slot inset；未传 config 时用默认值 */
+export function textViewerPagedContentInsets(
+  config?: Pick<TextViewerUiConfig, 'contentInset'>,
+): TextViewerPagedContentInsets {
+  const inset = { ...defaultTextViewerUiConfig.contentInset, ...config?.contentInset };
+  return {
+    top: inset.top,
+    bottom: inset.bottom,
+    left: inset.left,
+    right: inset.right,
+  };
+}
+
+/** 排版内容区宽度（readWidth 上限）；按页且 inset 已在 slot 上时不重复扣左右 */
+export function textViewerLayoutContentWidth(
+  viewportWidth: number,
+  config: Pick<TextViewerUiConfig, 'contentInset' | 'readWidth'>,
+  options?: { horizontalInsetOnSlot?: boolean },
+): number {
+  const inset = config.contentInset;
+  const inner = options?.horizontalInsetOnSlot
+    ? viewportWidth
+    : Math.max(1, viewportWidth - inset.left - inset.right);
+  if (config.readWidth > 0) {
+    return Math.max(1, Math.min(inner, config.readWidth));
+  }
+  return Math.max(1, inner);
+}
+
+/** @deprecated 请使用 {@link textViewerPagedContentInsets} */
+export function textViewerPagedVerticalPads(
+  config?: Pick<TextViewerUiConfig, 'contentInset'>,
+): { top: number; bottom: number } {
+  const pads = textViewerPagedContentInsets(config);
+  return { top: pads.top, bottom: pads.bottom };
+}
 
 export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, string> = {
   off: '关闭',
@@ -32,7 +88,7 @@ export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, s
   always: '始终',
 };
 
-/** 是否启用双页分栏（宽屏 + 模式） */
+/** 滚动模式：以窗口宽度判断双页（ReaderContent columns-2） */
 export function textViewerDualPageActive(
   mode: TextViewerDualPageMode,
   isWideScreen: boolean,
@@ -41,6 +97,41 @@ export function textViewerDualPageActive(
   if (mode === 'off') return false;
   if (mode === 'always') return isWideScreen;
   return isWideScreen && viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX;
+}
+
+/** 按页模式：以阅读视口宽高判断（对齐 Legado viewWidth/viewHeight 双栏） */
+export function textViewerDualPageActiveInViewport(
+  mode: TextViewerDualPageMode,
+  viewportWidth: number,
+  viewportHeight: number,
+): boolean {
+  if (mode === 'off') return false;
+  const isWideScreen = viewportWidth >= 480;
+  if (!isWideScreen || viewportHeight <= 0) return false;
+  if (mode === 'always') return true;
+  const landscape = viewportWidth > viewportHeight;
+  return (
+    viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX || landscape
+  );
+}
+
+/** 按页拖拽翻页：提交阈值（视口宽度百分比）可调范围 */
+export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN = 10;
+export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX = 50;
+export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT = 25;
+
+/** 按页拖拽翻页：|offset| ≥ 视口宽度 × 该比例才提交翻页 */
+export function textViewerPagedDragCommitThresholdPx(
+  viewportWidth: number,
+  config?: Pick<TextViewerUiConfig, 'pagedDragCommitPercent'>,
+): number {
+  if (viewportWidth <= 0) return 0;
+  const raw = config?.pagedDragCommitPercent ?? TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT;
+  const percent = Math.max(
+    TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN,
+    Math.min(TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX, raw),
+  );
+  return viewportWidth * (percent / 100);
 }
 
 export interface TextViewerUiConfig {
@@ -60,10 +151,24 @@ export interface TextViewerUiConfig {
     left: number;
     right: number;
     center: number;
+    /** 按页 / 滚动：content-slot 顶部间距 */
+    top: number;
+    /** 按页 / 滚动：content-slot 底部间距 */
+    bottom: number;
   };
   statusBarDisplayStyle: 'follow' | 'always' | 'never';
   pageAnim: TextViewerPageAnim;
+  /** 按页拖拽翻页提交阈值（视口宽度百分比，10–50） */
+  pagedDragCommitPercent: number;
   dualPage: TextViewerDualPageMode;
+  /** 两端对齐（Legado textFullJustify） */
+  textFullJustify: boolean;
+  /** 末行底对齐（Legado textBottomJustify，按页微调行距） */
+  textBottomJustify: boolean;
+  /** 中文排版优化（Legado useZhLayout，预留） */
+  useZhLayout: boolean;
+  /** 覆盖/滑动翻页优先 bitmap 快照（Legado PageView screenshot） */
+  pagedTurnUseBitmap: boolean;
   volumeKeyTurnPage: boolean;
   clickActions: ReaderClickActions;
   clickRegion: ReaderClickRegion;
@@ -82,10 +187,15 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   customFontName: '',
   jumpDuration: 1000,
   spacing: { paragraph: 1, line: 0.8, letter: 0 },
-  contentInset: { left: 16, right: 16, center: 32 },
+  contentInset: { left: 16, right: 16, center: 32, top: 32, bottom: 32 },
   statusBarDisplayStyle: 'follow',
   pageAnim: 'scroll',
+  pagedDragCommitPercent: TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT,
   dualPage: 'auto',
+  textFullJustify: true,
+  textBottomJustify: true,
+  useZhLayout: false,
+  pagedTurnUseBitmap: true,
   volumeKeyTurnPage: true,
   clickActions: { ...DEFAULT_CLICK_ACTIONS },
   clickRegion: {

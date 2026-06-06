@@ -1,11 +1,12 @@
-/** 按内容区实际高度分页（段/行边界断页，避免半行裁切） */
+/** 按 content-slot 内 page-window 全高分页（上下间距仅由 content-slot inset 承担） */
 
-import { TEXT_VIEWER_PAGED_VERTICAL_PAD_PX } from '@/lib/media/text/reader-ui-config';
+import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
+import { computePageStartsForLayout } from '@/lib/media/text/text-viewer-paginate-dual';
 
-export const PAGE_CLIP_SAFETY_BASE_PX = 4;
+export const PAGE_CLIP_SAFETY_BASE_PX = 0;
 
-/** 裁切窗底部相对最后一段底的额外留白 */
-export const PAGE_BOTTOM_PAD_PX = 6;
+/** @deprecated 外层 content-slot 已预留上下间距，裁切区内不再留白 */
+export const PAGE_BOTTOM_PAD_PX = 0;
 
 export interface ReaderBlockMetric {
   blockIndex: number;
@@ -22,13 +23,19 @@ export interface ReaderLineMetric {
 export interface ReaderLayoutSegment {
   top: number;
   bottom: number;
+  /** 双栏时 0=左栏 1=右栏 */
+  column?: 0 | 1;
 }
 
 export interface PaginateReaderContentOptions {
   padTop?: number;
   padBottom?: number;
+  /** 直传 page-window 实测高度，避免 viewportHeight − inset 往返误差 */
+  clipHeightPx?: number;
   fontSize?: number;
   lineSpacing?: number;
+  /** 双栏物理页（Legado doublePage） */
+  dualPage?: boolean;
 }
 
 export interface PaginateReaderContentResult {
@@ -39,6 +46,7 @@ export interface PaginateReaderContentResult {
   padTop: number;
   padBottom: number;
   segments: ReaderLayoutSegment[];
+  leftLineSizes?: number[];
 }
 
 export function resolvePagedMeasureRoot(contentRoot: HTMLElement): HTMLElement {
@@ -204,9 +212,14 @@ export function measureLineMetrics(
   }));
 }
 
-export function clipSafetyPx(fontSize = 18, lineSpacing = 0.8): number {
-  const lineHeight = fontSize * (lineSpacing + 1);
-  return PAGE_CLIP_SAFETY_BASE_PX + Math.ceil(lineHeight * 0.35);
+/** @deprecated 行级 segment 断页已保证整行；裁切区不再扣减 */
+export function clipSafetyPx(_fontSize = 18, _lineSpacing = 0.8): number {
+  return 0;
+}
+
+/** 每页 pack 上限 = pageStart + clipHeight（裁切区即 page-window 全高） */
+export function pagePackLimitPx(pageStart: number, clipHeight: number): number {
+  return pageStart + clipHeight;
 }
 
 /**
@@ -231,7 +244,7 @@ export function pageDisplayHeight(
     lastBottom = Math.max(lastBottom, seg.bottom);
   }
 
-  const contentSpan = Math.max(1, Math.ceil(lastBottom - start) + PAGE_BOTTOM_PAD_PX);
+  const contentSpan = Math.max(1, Math.ceil(lastBottom - start));
   return Math.min(maxSpan, contentSpan);
 }
 
@@ -263,15 +276,14 @@ export function computePageStartsFromSegments(
   segments: ReaderLayoutSegment[],
   clipHeight: number,
   contentExtent?: number,
-  safetyPx?: number,
+  _safetyPx?: number,
   measureRoot?: HTMLElement,
 ): number[] {
-  const safety = safetyPx ?? PAGE_CLIP_SAFETY_BASE_PX;
   if (segments.length === 0) return [0];
 
   const contentBottom =
     contentExtent ?? segments.reduce((max, s) => Math.max(max, s.bottom), 0);
-  const packLimit = (pageStart: number) => pageStart + clipHeight - safety;
+  const packLimit = (pageStart: number) => pagePackLimitPx(pageStart, clipHeight);
   if (contentBottom <= packLimit(0) + 0.5) return [0];
 
   const starts: number[] = [0];
@@ -291,12 +303,12 @@ export function computePageStartsFromSegments(
 
     if (nextStart < 0) break;
 
-    if (measureRoot) {
-      nextStart = shrinkPageEndBeforeStraddle(measureRoot, pageStart, nextStart);
-    }
-
+    // 行级 segment 断点已是整行顶：勿对 nextStart 做块级 straddle 回缩（会误伤多行段落）
     if (nextStart <= pageStart + 0.5) {
-      nextStart = Math.min(limit, pageStart + clipHeight);
+      const windowBottom = pageStart + clipHeight;
+      nextStart = measureRoot
+        ? shrinkPageEndBeforeStraddle(measureRoot, pageStart, windowBottom)
+        : windowBottom;
     }
 
     if (nextStart <= pageStart + 0.5) break;
@@ -317,21 +329,30 @@ export function paginateReaderContent(
   viewportHeight: number,
   options?: PaginateReaderContentOptions,
 ): PaginateReaderContentResult {
-  const padTop = options?.padTop ?? TEXT_VIEWER_PAGED_VERTICAL_PAD_PX;
-  const padBottom = options?.padBottom ?? TEXT_VIEWER_PAGED_VERTICAL_PAD_PX;
+  const defaultInsets = textViewerPagedContentInsets();
+  const padTop = options?.padTop ?? defaultInsets.top;
+  const padBottom = options?.padBottom ?? defaultInsets.bottom;
   const measureRoot = resolvePagedMeasureRoot(contentRoot);
   const fontSize = options?.fontSize;
   const lineSpacing = options?.lineSpacing;
   const segments = measureLayoutSegments(measureRoot, fontSize, lineSpacing);
   const extent = contentExtentFromSegments(segments, measureRoot);
-  const clipHeight = Math.max(1, viewportHeight - padTop - padBottom);
-  const safety = clipSafetyPx(fontSize, lineSpacing);
-  const pageStarts = computePageStartsFromSegments(
+  /** 正文可排版高度（优先 page-window 实测，否则视口减 inset） */
+  const clipHeight =
+    options?.clipHeightPx != null && options.clipHeightPx > 0
+      ? Math.max(1, Math.round(options.clipHeightPx))
+      : Math.max(1, viewportHeight - padTop - padBottom);
+  const { pageStarts, leftLineSizes } = computePageStartsForLayout(
     segments,
     clipHeight,
     extent,
-    safety,
-    measureRoot,
+    {
+      dualPage: options?.dualPage,
+      measureRoot,
+      fontSize,
+      lineSpacing,
+      safetyPx: 0,
+    },
   );
 
   return {
@@ -342,6 +363,7 @@ export function paginateReaderContent(
     padTop,
     padBottom,
     segments,
+    leftLineSizes,
   };
 }
 
