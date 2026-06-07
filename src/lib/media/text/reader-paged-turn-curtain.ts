@@ -36,7 +36,12 @@ export function resolveOpaquePageBackground(startEl: HTMLElement): string {
   return '#f5f0e6';
 }
 
-function buildCurtainClone(liveInner: HTMLElement, pageStartPx: number, pageBg: string): HTMLElement {
+/** 克隆 live 页面表面（幕帘 / 仿真下层区共用） */
+export function buildPageSurfaceClone(
+  liveInner: HTMLElement,
+  pageStartPx: number,
+  pageBg: string,
+): HTMLElement {
   const curtain = liveInner.cloneNode(true) as HTMLElement;
   curtain.setAttribute('aria-hidden', 'true');
   curtain.classList.add('reader-paged-turn-curtain');
@@ -85,7 +90,7 @@ export function mountTurnPageCurtain(
   const inset = options?.contentInsetPx;
   const viewportSlide = Boolean(options?.slideViewportPanel && inset);
   const pageBg = resolveOpaquePageBackground(liveInner);
-  const curtain = buildCurtainClone(liveInner, pageStartPx, pageBg);
+  const curtain = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
 
   const slide = document.createElement('div');
   slide.style.backgroundColor = pageBg;
@@ -134,7 +139,7 @@ export function mountCrossChapterIncomingPanel(
 
   const pageBg = resolveOpaquePageBackground(liveInner);
   const span = Math.max(1, Math.round(contentSpanPx));
-  const curtain = buildCurtainClone(liveInner, pageStartPx, pageBg);
+  const curtain = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
 
   const panel = document.createElement('div');
   panel.className = `${INCOMING_MOUNT_CLASS} absolute inset-0 overflow-hidden box-border pointer-events-none`;

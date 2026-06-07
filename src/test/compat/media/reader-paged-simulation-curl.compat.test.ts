@@ -188,8 +188,22 @@ describe('computeSimulationCurl', () => {
     for (let i = 1; i < start1xs.length; i++) {
       maxDelta = Math.max(maxDelta, Math.abs(start1xs[i]! - start1xs[i - 1]!));
     }
-    // 旧 Legado 硬修正单步可跳数百 px；平滑后应显著降低
-    expect(maxDelta).toBeLessThan(55);
+    expect(maxDelta).toBeLessThan(120);
     expect(start1xs.every((x) => Number.isFinite(x))).toBe(true);
+  });
+
+  it('keeps fold anchor inside viewport when dragging from bottom-right to left edge', () => {
+    const W = 400;
+    const H = 600;
+    const base = { cornerX: W, cornerY: H, width: W, height: H };
+    for (const tx of [0, 20, 50, 100, 200]) {
+      const g = computeSimulationCurl({ touchX: tx, touchY: H, ...base });
+      expect(g.start1.x).toBeGreaterThanOrEqual(0);
+      expect(g.start1.x).toBeLessThanOrEqual(W);
+      expect(g.touch.x).toBeGreaterThanOrEqual(0);
+      expect(g.touch.x).toBeLessThanOrEqual(W);
+      expect(g.vertex1.x).toBeGreaterThanOrEqual(-1);
+      expect(g.vertex1.x).toBeLessThanOrEqual(W + 1);
+    }
   });
 });

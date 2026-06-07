@@ -10,8 +10,13 @@
  */
 
 import { simulationDragZoneBoundaryPx } from '@/lib/media/text/reader-ui-config';
+import type { TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { captureElementToDataUrl } from '@/lib/media/text/reader-paged-turn-snapshot';
-import { resolveOpaquePageBackground } from '@/lib/media/text/reader-paged-turn-curtain';
+import {
+  buildPageSurfaceClone,
+  READER_PAGED_TURN_CONTENT_CLIP_CLASS,
+  resolveOpaquePageBackground,
+} from '@/lib/media/text/reader-paged-turn-curtain';
 
 export type SimulationCurlDirection = 'next' | 'prev';
 
@@ -151,12 +156,77 @@ export function computeCurlCorner(
   return calcCornerXY(startX, startY, width, height);
 }
 
-/** 将折痕与底/顶边的交点钳在页内，避免越界后 Legado 硬回推 touch 造成折痕瞬移 */
-function clampCurlEdgeStart1(start1: CurlPoint, width: number): CurlPoint {
-  return {
-    x: Math.max(0, Math.min(width, start1.x)),
-    y: start1.y,
+type BezierCalc = {
+  middleX: number;
+  middleY: number;
+  control1: CurlPoint;
+  control2: CurlPoint;
+  start1: CurlPoint;
+};
+
+/** Legado calcPoints：由 touch/corner 求贝塞尔控制点与 start1 */
+function calcSimulationBezier(
+  touchX: number,
+  touchY: number,
+  cornerX: number,
+  cornerY: number,
+): BezierCalc {
+  const middleX = (touchX + cornerX) / 2;
+  const middleY = (touchY + cornerY) / 2;
+  const control1: CurlPoint = {
+    x: middleX - (cornerY - middleY) ** 2 / (cornerX - middleX || 0.1),
+    y: cornerY,
   };
+  const f4 = cornerY - middleY;
+  const control2: CurlPoint = {
+    x: cornerX,
+    y: middleY - (cornerX - middleX) ** 2 / (f4 === 0 ? 0.1 : f4),
+  };
+  const start1: CurlPoint = {
+    x: control1.x - (cornerX - control1.x) / 2,
+    y: cornerY,
+  };
+  return { middleX, middleY, control1, control2, start1 };
+}
+
+/**
+ * Legado calcPoints 折痕越界修正：touch 在页宽内且 start1 越界时回推 touch，
+ * 避免直角折痕锚点超出视口（右下起手向左拖至左边界）。
+ */
+function legadoAdjustTouchForEdgeStart1(
+  touchX: number,
+  touchY: number,
+  cornerX: number,
+  cornerY: number,
+  width: number,
+): { touchX: number; touchY: number; bezier: BezierCalc } {
+  let tx = touchX;
+  let ty = touchY;
+  let bezier = calcSimulationBezier(tx, ty, cornerX, cornerY);
+  let start1 = bezier.start1;
+
+  if (tx > 0 && tx < width && (start1.x < 0 || start1.x > width)) {
+    if (start1.x < 0) {
+      start1 = { ...start1, x: width - start1.x };
+    }
+    const f1 = Math.abs(cornerX - tx);
+    if (f1 > 1e-6 && Math.abs(start1.x) > 1e-6) {
+      const f2 = (width * f1) / start1.x;
+      tx = Math.abs(cornerX - f2);
+      const f3 = (Math.abs(cornerX - tx) * Math.abs(cornerY - ty)) / f1;
+      ty = Math.abs(cornerY - f3);
+      bezier = calcSimulationBezier(tx, ty, cornerX, cornerY);
+      bezier = {
+        ...bezier,
+        start1: {
+          x: bezier.control1.x - (cornerX - bezier.control1.x) / 2,
+          y: cornerY,
+        },
+      };
+    }
+  }
+
+  return { touchX: tx, touchY: ty, bezier };
 }
 
 /**
@@ -222,40 +292,25 @@ export function computeSimulationCurl(input: SimulationCurlInput): SimulationCur
   const H = Math.max(1, input.height);
   const cornerX = input.cornerX;
   const cornerY = input.cornerY;
-  let touchX = input.touchX;
-  let touchY = input.touchY;
 
   const isRtOrLb =
     (cornerX === 0 && cornerY === H) || (cornerY === 0 && cornerX === W);
 
-  const calc = () => {
-    const middleX = (touchX + cornerX) / 2;
-    const middleY = (touchY + cornerY) / 2;
-    const control1: CurlPoint = {
-      x: middleX - (cornerY - middleY) ** 2 / (cornerX - middleX || 0.1),
-      y: cornerY,
-    };
-    const f4 = cornerY - middleY;
-    const control2: CurlPoint = {
-      x: cornerX,
-      y: middleY - (cornerX - middleX) ** 2 / (f4 === 0 ? 0.1 : f4),
-    };
-    const start1: CurlPoint = {
-      x: control1.x - (cornerX - control1.x) / 2,
-      y: cornerY,
-    };
-    return { middleX, middleY, control1, control2, start1 };
-  };
-
-  let { control1, control2, start1 } = calc();
+  const adjusted = legadoAdjustTouchForEdgeStart1(
+    input.touchX,
+    input.touchY,
+    cornerX,
+    cornerY,
+    W,
+  );
+  const touchX = adjusted.touchX;
+  const touchY = adjusted.touchY;
+  const { control1, control2, start1 } = adjusted.bezier;
 
   const start2: CurlPoint = {
     x: cornerX,
     y: control2.y - (cornerY - control2.y) / 2,
   };
-
-  // 不修改 touch（保持跟手）；仅钳制折痕锚点在页内，平滑过渡底边→左边折痕
-  start1 = clampCurlEdgeStart1(start1, W);
 
   const touch: CurlPoint = { x: touchX, y: touchY };
   const touchToCornerDis = Math.hypot(touchX - cornerX, touchY - cornerY);
@@ -340,6 +395,10 @@ const BACK_CLASS = 'reader-paged-sim-back';
 const BACK_INNER_CLASS = 'reader-paged-sim-back-inner';
 const FOLD_SHADOW_CLASS = 'reader-paged-sim-fold-shadow';
 const CREASE_SHADOW_CLASS = 'reader-paged-sim-crease-shadow';
+/** Legado drawNextPageAreaAndShadow：path1 区显式贴下层页位图 */
+const NEXT_AREA_CLASS = 'reader-paged-sim-next-area';
+
+let persistedNextAreaPanel: HTMLElement | null = null;
 
 function fmtMatrix(m: [number, number, number, number, number, number]): string {
   return m.map((v) => (Number.isFinite(v) ? v.toFixed(4) : '0')).join(',');
@@ -364,6 +423,59 @@ function folderCreaseShadowGradient(degrees: number, isRtOrLb: boolean): string 
 }
 
 let backSnapshotGeneration = 0;
+
+/**
+ * 仿真 PREV：在 turn 层 path1 区贴当前页（Legado curBitmap），勿依赖 live 透显。
+ */
+export function mountSimulationNextAreaPanel(
+  slideMount: HTMLElement,
+  liveInner: HTMLElement,
+  pageStartPx: number,
+  options?: {
+    contentSpanPx?: number;
+    contentInsetPx?: TextViewerPagedContentInsets;
+  },
+): void {
+  clearSimulationNextAreaPanel(slideMount);
+
+  const contentSpan = Math.max(1, Math.round(options?.contentSpanPx ?? 0));
+  const inset = options?.contentInsetPx;
+  const pageBg = resolveOpaquePageBackground(liveInner);
+  const surface = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
+
+  const panel = document.createElement('div');
+  panel.className = `${NEXT_AREA_CLASS} pointer-events-none absolute inset-0 overflow-hidden box-border`;
+  panel.style.backgroundColor = pageBg;
+
+  if (inset) {
+    panel.style.paddingTop = `${inset.top}px`;
+    panel.style.paddingRight = `${inset.right}px`;
+    panel.style.paddingBottom = `${inset.bottom}px`;
+    panel.style.paddingLeft = `${inset.left}px`;
+  }
+
+  const contentClip = document.createElement('div');
+  contentClip.className = `${READER_PAGED_TURN_CONTENT_CLIP_CLASS} relative w-full overflow-hidden`;
+  contentClip.style.height = `${contentSpan}px`;
+  contentClip.appendChild(surface);
+  panel.appendChild(contentClip);
+
+  persistedNextAreaPanel = panel;
+  const foldShadow = slideMount.querySelector(`.${FOLD_SHADOW_CLASS}`);
+  const back = slideMount.querySelector(`.${BACK_CLASS}`);
+  if (foldShadow) slideMount.insertBefore(panel, foldShadow);
+  else if (back) slideMount.insertBefore(panel, back);
+  else slideMount.appendChild(panel);
+}
+
+export function clearSimulationNextAreaPanel(slideMount?: HTMLElement): void {
+  if (persistedNextAreaPanel) {
+    persistedNextAreaPanel.remove();
+    persistedNextAreaPanel = null;
+  } else {
+    slideMount?.querySelector(`.${NEXT_AREA_CLASS}`)?.remove();
+  }
+}
 
 function createDomBackInner(front: HTMLElement, pageBg: string): HTMLElement {
   const inner = front.cloneNode(true) as HTMLElement;
@@ -429,6 +541,12 @@ export function updateSimulationCurl(params: {
   front.style.clipPath = `path(evenodd, '${g.pageMinusCurlPath}')`;
   front.style.willChange = 'clip-path';
 
+  const nextArea = slideMount.querySelector<HTMLElement>(`.${NEXT_AREA_CLASS}`);
+  if (nextArea) {
+    nextArea.style.clipPath = `path('${g.nextAreaPath}')`;
+    nextArea.style.willChange = 'clip-path';
+  }
+
   let back = slideMount.querySelector<HTMLElement>(`.${BACK_CLASS}`);
   if (!back) {
     back = document.createElement('div');
@@ -483,6 +601,12 @@ export function clearSimulationCurl(slideMount: HTMLElement | undefined): void {
     front.style.clipPath = '';
     front.style.willChange = '';
   }
+  const nextArea = slideMount.querySelector<HTMLElement>(`.${NEXT_AREA_CLASS}`);
+  if (nextArea) {
+    nextArea.style.clipPath = '';
+    nextArea.style.willChange = '';
+  }
   slideMount.querySelector(`.${BACK_CLASS}`)?.remove();
   slideMount.querySelector(`.${FOLD_SHADOW_CLASS}`)?.remove();
+  clearSimulationNextAreaPanel(slideMount);
 }
