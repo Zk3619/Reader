@@ -130,8 +130,8 @@ function buildCanvasSegments(params: CanvasTextLayoutParams): {
   const plain = stripHtmlToPlain(raw);
   const paragraphs = splitRawIntoParagraphSegments(plain);
   for (let p = 0; p < paragraphs.length; p++) {
-    const para = paragraphs[p]!.trim();
-    if (!para) continue;
+    const para = paragraphs[p]!;
+    if (!para.trim()) continue;
     const lines = wrapParagraphToLines(ctx, para, contentWidth);
     for (const _line of lines) {
       segments.push({ top: y, bottom: y + lineHeight });

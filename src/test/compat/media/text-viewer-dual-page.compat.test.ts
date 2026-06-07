@@ -3,6 +3,7 @@ import {
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
   textViewerDualPageActive,
   textViewerDualPageActiveInViewport,
+  textViewerDualPageMeasureIntent,
 } from '@/lib/media/text/reader-ui-config';
 
 describe('textViewerDualPageActive', () => {
@@ -35,5 +36,22 @@ describe('textViewerDualPageActiveInViewport', () => {
 
   it('off is always false', () => {
     expect(textViewerDualPageActiveInViewport('off', 1920, 1080)).toBe(false);
+  });
+});
+
+describe('textViewerDualPageMeasureIntent', () => {
+  it('enables dual measure before viewport height is ready', () => {
+    expect(textViewerDualPageMeasureIntent('always', 1920, 0)).toBe(true);
+    expect(textViewerDualPageActiveInViewport('always', 1920, 0)).toBe(false);
+  });
+
+  it('auto enables at xl width before viewport height is ready', () => {
+    expect(textViewerDualPageMeasureIntent('auto', 1280, 0)).toBe(true);
+    expect(textViewerDualPageMeasureIntent('auto', 1024, 0)).toBe(false);
+    expect(textViewerDualPageMeasureIntent('auto', 600, 0)).toBe(false);
+  });
+
+  it('off is always false', () => {
+    expect(textViewerDualPageMeasureIntent('off', 1920, 1080)).toBe(false);
   });
 });

@@ -9,7 +9,14 @@ import {
   setCachedChapterLayout,
   chapterLayoutCacheSize,
 } from '@/lib/media/text/reader-chapter-layout-cache';
+import { layoutReaderChapter } from '@/lib/media/text/reader-chapter-layout';
 import { layoutPlainTextChapterCanvas } from '@/lib/media/text/canvas-text-chapter-layout';
+import {
+  buildChapterLayoutCacheKey,
+  buildContentRevision,
+  buildReaderLayoutSignature,
+  buildViewportSignature,
+} from '@/lib/media/text/reader-layout-signature';
 import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import type { ReaderChapterLayout } from '@/lib/media/text/reader-chapter-layout-types';
 
@@ -41,12 +48,91 @@ describe('reader-chapter-layout-cache', () => {
       contentExtent: 100,
       padTop: 24,
       padBottom: 8,
-      segments: [],
+      segments: [{ top: 0, bottom: 100 }],
       cacheKey: 'k1',
     };
     setCachedChapterLayout('k1', layout);
     expect(getCachedChapterLayout('k1')?.engine).toBe('canvas');
     expect(chapterLayoutCacheSize()).toBe(1);
+  });
+});
+
+describe('layoutReaderChapter incomplete cache', () => {
+  beforeEach(() => clearChapterLayoutCache());
+
+  it('does not persist or reuse layout with empty segments when content exists', () => {
+    const layout = layoutReaderChapter({
+      chapterIndex: 0,
+      content: '有正文的章节',
+      viewportWidth: 400,
+      viewportHeight: 600,
+      config: defaultTextViewerUiConfig,
+      contentRoot: null,
+      dualPage: true,
+      clipHeightPx: 500,
+    });
+
+    expect(layout.segments).toEqual([]);
+    expect(getCachedChapterLayout(layout.cacheKey)).toBeUndefined();
+
+    setCachedChapterLayout(layout.cacheKey, layout);
+    const again = layoutReaderChapter({
+      chapterIndex: 0,
+      content: '有正文的章节',
+      viewportWidth: 400,
+      viewportHeight: 600,
+      config: defaultTextViewerUiConfig,
+      contentRoot: null,
+      dualPage: true,
+      clipHeightPx: 500,
+    });
+    expect(again.segments).toEqual([]);
+    expect(again.cacheKey).toBe(layout.cacheKey);
+  });
+
+  it('cache hit preserves dualPage flag from input', () => {
+    const config = defaultTextViewerUiConfig;
+    const content = '有正文的章节';
+    const cacheKey = buildChapterLayoutCacheKey({
+      chapterIndex: 0,
+      contentRevision: buildContentRevision(content),
+      layoutSignature: buildReaderLayoutSignature(config, {
+        dualPage: true,
+        viewportWidth: 400,
+        viewportHeight: 600,
+      }),
+      viewportSignature: buildViewportSignature(400, 600),
+    });
+    const cached: ReaderChapterLayout = {
+      chapterIndex: 0,
+      engine: 'dom',
+      pages: [{ index: 0, startY: 0, endY: 100, displayHeight: 100, chapterPosition: 0 }],
+      pageStarts: [0],
+      rightPageStarts: [0],
+      clipHeight: 500,
+      viewportHeight: 600,
+      viewportWidth: 400,
+      contentExtent: 100,
+      padTop: 24,
+      padBottom: 8,
+      segments: [{ top: 0, bottom: 100, column: 0 }],
+      cacheKey,
+    };
+    setCachedChapterLayout(cacheKey, cached);
+
+    const hit = layoutReaderChapter({
+      chapterIndex: 0,
+      content,
+      viewportWidth: 400,
+      viewportHeight: 600,
+      config,
+      contentRoot: null,
+      dualPage: true,
+      clipHeightPx: 500,
+    });
+
+    expect(hit.dualPage).toBe(true);
+    expect(hit.segments.length).toBeGreaterThan(0);
   });
 });
 

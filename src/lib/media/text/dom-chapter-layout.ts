@@ -4,6 +4,7 @@ import {
   pageDisplayHeight,
   type PaginateReaderContentResult,
 } from '@/lib/media/text/text-viewer-paginate';
+import { segmentsForColumn } from '@/lib/media/text/text-viewer-paginate-dual';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { metaFromTextLines } from '@/lib/media/text/reader-text-layout-entities';
@@ -31,9 +32,9 @@ export function chapterLayoutFromPaginateResult(
 ): ReaderChapterLayout {
   const lines = options?.contentRoot
     ? collectDomTextLines(options.contentRoot, {
-        fontSize: options.config?.fontSize,
-        lineSpacing: options.config?.spacing.line,
-      })
+      fontSize: options.config?.fontSize,
+      lineSpacing: options.config?.spacing.line,
+    })
     : [];
   const lineMap = lines.length > 0 ? attachLinesToPages(
     result.pageStarts.map((startY, index) => ({
@@ -43,6 +44,10 @@ export function chapterLayoutFromPaginateResult(
     })),
     lines,
   ) : null;
+
+  const dualPage = options?.dualPage;
+  const displaySegments =
+    dualPage ? segmentsForColumn(result.segments, 0) : result.segments;
 
   const pages = result.pageStarts.map((startY, index) => {
     const pageLines = lineMap?.get(index) ?? [];
@@ -56,7 +61,7 @@ export function chapterLayoutFromPaginateResult(
         result.pageStarts,
         result.clipHeight,
         result.contentExtent,
-        result.segments,
+        displaySegments,
       ),
       chapterPosition: meta.chapterPosition,
       text: meta.text,
@@ -78,6 +83,9 @@ export function chapterLayoutFromPaginateResult(
     padBottom: result.padBottom,
     segments: result.segments,
     dualPage: options?.dualPage,
+    rightPageStarts: result.rightPageStarts,
+    leftColumnExtent: result.leftColumnExtent,
+    rightColumnExtent: result.rightColumnExtent,
     cacheKey,
   };
 }

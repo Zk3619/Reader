@@ -41,6 +41,29 @@ export function measureContentSlotInsets(
   };
 }
 
+/**
+ * 双栏 spread 排版内宽：以视口减 inset 为准，避免宽 shift 子节点撑大 content-slot 导致 2× 宽度反馈。
+ */
+export function readPagedSpreadContentWidthPx(params: {
+  viewportEl?: HTMLElement | null;
+  contentSlotEl?: HTMLElement | null;
+  fallbackInsets?: PagedContentInsets;
+}): number {
+  const insets = measureContentSlotInsets(params.contentSlotEl, params.fallbackInsets);
+  const viewportW = params.viewportEl?.clientWidth ?? 0;
+  if (viewportW > 0) {
+    return Math.max(1, Math.round(viewportW - insets.left - insets.right));
+  }
+  const slot = params.contentSlotEl;
+  if (slot && slot.clientWidth > 0) {
+    const padLeft = parseFloat(slot.style.paddingLeft) || 0;
+    const padRight = parseFloat(slot.style.paddingRight) || 0;
+    const inner = Math.round(slot.clientWidth - padLeft - padRight);
+    if (inner > 0) return inner;
+  }
+  return Math.max(1, 320);
+}
+
 /** 分页与展示共用的 page-window 度量（clipHeight 对齐 content-slot 实测高度） */
 export function readPagedPageWindowMetrics(params: {
   viewportEl?: HTMLElement | null;

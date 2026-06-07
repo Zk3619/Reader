@@ -64,6 +64,9 @@ export function chapterLayoutsEqual(
   if (a.engine !== b.engine) return false;
   if (a.pageStarts.length !== b.pageStarts.length) return false;
   if (Math.abs(a.clipHeight - b.clipHeight) > 1) return false;
+  if (Boolean(a.dualPage) !== Boolean(b.dualPage)) return false;
+  if (a.segments.length !== b.segments.length) return false;
+  if ((a.rightPageStarts?.length ?? 0) !== (b.rightPageStarts?.length ?? 0)) return false;
   return a.pageStarts.every((v, i) => Math.abs(v - (b.pageStarts[i] ?? -1)) < 0.5);
 }
 
@@ -77,6 +80,13 @@ function shouldPreferDomOverCanvas(
     if (Math.abs((canvasStarts[i] ?? 0) - (domStarts[i] ?? 0)) > 12) return true;
   }
   return false;
+}
+
+function isIncompleteChapterLayout(
+  layout: ReaderChapterLayout,
+  content: string,
+): boolean {
+  return content.trim().length > 0 && layout.segments.length === 0;
 }
 
 function emptyChapterLayout(
@@ -137,7 +147,9 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
 
   if (!input.bypassCache) {
     const cached = getCachedChapterLayout(cacheKey);
-    if (cached) return cached;
+    if (cached && !isIncompleteChapterLayout(cached, input.content)) {
+      return { ...cached, dualPage: input.dualPage };
+    }
   }
 
   let layout: ReaderChapterLayout;
@@ -211,9 +223,9 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
       input.viewportHeight,
       layoutPads.top != null || layoutPads.bottom != null
         ? {
-            top: layoutPads.top ?? textViewerPagedContentInsets().top,
-            bottom: layoutPads.bottom ?? textViewerPagedContentInsets().bottom,
-          }
+          top: layoutPads.top ?? textViewerPagedContentInsets().top,
+          bottom: layoutPads.bottom ?? textViewerPagedContentInsets().bottom,
+        }
         : undefined,
       input.clipHeightPx,
     );
@@ -223,10 +235,11 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
     !input.contentRoot &&
     input.content.trim().length > 0 &&
     layout.segments.length === 0;
-  if (!provisional) {
-    setCachedChapterLayout(cacheKey, layout);
+  const resolved = { ...layout, dualPage: input.dualPage };
+  if (!provisional && !isIncompleteChapterLayout(resolved, input.content)) {
+    setCachedChapterLayout(cacheKey, resolved);
   }
-  return { ...layout, dualPage: input.dualPage };
+  return resolved;
 }
 
 /** 由已缓存/计算好的章节版式取当前页显示高度 */

@@ -1,7 +1,11 @@
 /** 按 content-slot 内 page-window 全高分页（上下间距仅由 content-slot inset 承担） */
 
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
-import { computePageStartsForLayout } from '@/lib/media/text/text-viewer-paginate-dual';
+import {
+  computePageStartsForLayout,
+  dualSpreadColumnStarts,
+  type DualSpreadLayoutPick,
+} from '@/lib/media/text/text-viewer-paginate-dual';
 
 export const PAGE_CLIP_SAFETY_BASE_PX = 0;
 
@@ -25,6 +29,8 @@ export interface ReaderLayoutSegment {
   bottom: number;
   /** 双栏时 0=左栏 1=右栏 */
   column?: 0 | 1;
+  /** 对应 [data-reader-measure-block] 块索引 */
+  blockIndex?: number;
 }
 
 export interface PaginateReaderContentOptions {
@@ -47,6 +53,11 @@ export interface PaginateReaderContentResult {
   padBottom: number;
   segments: ReaderLayoutSegment[];
   leftLineSizes?: number[];
+  /** 双栏 spread 右栏首段 Y（与 pageStarts 等长） */
+  rightPageStarts?: number[];
+  /** 双栏：左/右栏归一化坐标系下的内容高度 */
+  leftColumnExtent?: number;
+  rightColumnExtent?: number;
 }
 
 export function resolvePagedMeasureRoot(contentRoot: HTMLElement): HTMLElement {
@@ -136,7 +147,7 @@ export function measureLayoutSegments(
     : (fontSize ?? 18) * ((lineSpacing ?? 0.8) + 1);
 
   const blocks = measureRoot.querySelectorAll<HTMLElement>('[data-reader-measure-block]');
-  blocks.forEach((block) => {
+  blocks.forEach((block, blockIndex) => {
     const blockTop = relativeTop(rootRect, block);
     const blockBottom = relativeBottom(rootRect, block);
     if (blockBottom <= blockTop + 0.5) return;
@@ -146,6 +157,7 @@ export function measureLayoutSegments(
       segments.push({
         top: relativeTop(rootRect, figure),
         bottom: relativeBottom(rootRect, figure),
+        blockIndex,
       });
       return;
     }
@@ -159,7 +171,7 @@ export function measureLayoutSegments(
 
     const blockH = blockBottom - blockTop;
     if (blockH <= defaultLineH * 1.5) {
-      segments.push({ top: blockTop, bottom: blockBottom });
+      segments.push({ top: blockTop, bottom: blockBottom, blockIndex });
       return;
     }
 
@@ -170,16 +182,16 @@ export function measureLayoutSegments(
       lineHeightPx,
     );
     if (lineSegs.length === 0) {
-      segments.push({ top: blockTop, bottom: blockBottom });
+      segments.push({ top: blockTop, bottom: blockBottom, blockIndex });
       return;
     }
 
     for (const line of lineSegs) {
-      segments.push(line);
+      segments.push({ ...line, blockIndex });
     }
     const lastLine = lineSegs[lineSegs.length - 1]!;
     if (blockBottom > lastLine.bottom + 1) {
-      segments.push({ top: lastLine.bottom, bottom: blockBottom });
+      segments.push({ top: lastLine.bottom, bottom: blockBottom, blockIndex });
     }
   });
 
@@ -264,8 +276,15 @@ export function pageDisplayHeight(
 
   let lastBottom = start;
   for (const seg of segments) {
-    if (!segmentOverlapsRange(seg, start, maxEnd)) continue;
-    lastBottom = Math.max(lastBottom, Math.min(seg.bottom, maxEnd));
+    if (seg.top >= maxEnd - 0.5) continue;
+    if (seg.bottom <= start + 0.5) continue;
+    if (seg.bottom > maxEnd + 0.5) {
+      if (seg.top >= start - 0.5) {
+        lastBottom = Math.max(lastBottom, seg.top);
+      }
+      continue;
+    }
+    lastBottom = Math.max(lastBottom, seg.bottom);
   }
 
   const contentSpan = Math.max(1, Math.ceil(lastBottom - start));
@@ -274,15 +293,76 @@ export function pageDisplayHeight(
 
 export interface PageContentSpanLayout {
   pageStarts: number[];
+  rightPageStarts?: number[];
   clipHeight: number;
   contentExtent: number;
   segments: ReaderLayoutSegment[];
   pages?: { displayHeight: number }[];
+  dualPage?: boolean;
+}
+
+function columnPageContentSpanPx(
+  pageIndex: number,
+  columnStarts: number[],
+  layout: PageContentSpanLayout,
+  liveClipHeightPx: number,
+  columnSegments: ReaderLayoutSegment[],
+): number {
+  const liveClip = Math.max(1, Math.round(liveClipHeightPx));
+  const start = Math.round(columnStarts[pageIndex] ?? 0);
+  const nextTop = columnStarts[pageIndex + 1];
+  const pageEnd =
+    nextTop != null ? Math.round(nextTop) : Math.ceil(layout.contentExtent);
+
+  if (nextTop != null && pageEnd <= start) {
+    return Math.min(liveClip, layout.clipHeight);
+  }
+
+  const breakSpan =
+    nextTop != null
+      ? Math.min(layout.clipHeight, Math.max(1, pageEnd - start))
+      : liveClip;
+
+  if (columnSegments.length === 0) {
+    return Math.min(liveClip, breakSpan);
+  }
+
+  const displayH = pageDisplayHeight(
+    pageIndex,
+    columnStarts,
+    layout.clipHeight,
+    layout.contentExtent,
+    columnSegments,
+  );
+
+  return Math.min(liveClip, breakSpan, Math.max(1, displayH));
+}
+
+/**
+ * 双栏 spread 单栏正文裁切高度（左/右栏各自按页界与末行贴齐，防半行）。
+ */
+export function dualSpreadColumnContentSpanPx(
+  pageIndex: number,
+  column: 'left' | 'right',
+  layout: PageContentSpanLayout | null | undefined,
+  liveClipHeightPx: number,
+): number {
+  const liveClip = Math.max(1, Math.round(liveClipHeightPx));
+  if (!layout) return liveClip;
+  if (!layout.dualPage) {
+    return pageContentSpanPx(pageIndex, layout, liveClipHeightPx);
+  }
+
+  // 按页块切片：栏 clip 恒为页窗高，避免 displayHeight 缩窗导致半行/重复
+  void pageIndex;
+  void column;
+  return liveClip;
 }
 
 /**
  * 单页正文裁切高度：nextStart − pageStart 防漏页；displayHeight 贴齐末行；
  * liveClipHeight 对齐 DOM page-window，避免 layout.clipHeight 与实测偏差裁切。
+ * 双栏时取左右栏较大值作为外层 clip，各 pane 另用 dualSpreadColumnContentSpanPx。
  */
 export function pageContentSpanPx(
   pageIndex: number,
@@ -292,24 +372,19 @@ export function pageContentSpanPx(
   const liveClip = Math.max(1, Math.round(liveClipHeightPx));
   if (!layout) return liveClip;
 
-  const start = Math.round(layout.pageStarts[pageIndex] ?? 0);
-  const nextTop = layout.pageStarts[pageIndex + 1];
-  const breakSpan =
-    nextTop != null
-      ? Math.min(layout.clipHeight, Math.max(1, Math.round(nextTop - start)))
-      : liveClip;
+  if (layout.dualPage) {
+    const left = dualSpreadColumnContentSpanPx(pageIndex, 'left', layout, liveClipHeightPx);
+    const right = dualSpreadColumnContentSpanPx(pageIndex, 'right', layout, liveClipHeightPx);
+    return Math.max(left, right);
+  }
 
-  const displayH =
-    layout.pages?.[pageIndex]?.displayHeight ??
-    pageDisplayHeight(
-      pageIndex,
-      layout.pageStarts,
-      layout.clipHeight,
-      layout.contentExtent,
-      layout.segments,
-    );
-
-  return Math.min(liveClip, breakSpan, Math.max(1, displayH));
+  return columnPageContentSpanPx(
+    pageIndex,
+    layout.pageStarts,
+    layout,
+    liveClipHeightPx,
+    layout.segments,
+  );
 }
 
 function shrinkPageEndBeforeStraddle(
@@ -434,7 +509,7 @@ export function paginateReaderContent(
     options?.clipHeightPx != null && options.clipHeightPx > 0
       ? Math.max(1, Math.round(options.clipHeightPx))
       : Math.max(1, viewportHeight - padTop - padBottom);
-  const { pageStarts, leftLineSizes } = computePageStartsForLayout(
+  const layoutResult = computePageStartsForLayout(
     segments,
     clipHeight,
     extent,
@@ -443,19 +518,31 @@ export function paginateReaderContent(
       measureRoot,
       fontSize,
       lineSpacing,
-      safetyPx: 0,
     },
   );
 
+  const layoutSegments = layoutResult.segments ?? segments;
+  const contentExtent =
+    options?.dualPage && layoutResult.leftColumnExtent != null
+      ? Math.max(
+          layoutResult.leftColumnExtent,
+          layoutResult.rightColumnExtent ?? 0,
+          extent,
+        )
+      : extent;
+
   return {
-    pageStarts,
+    pageStarts: layoutResult.pageStarts,
     clipHeight,
     viewportHeight: Math.max(1, viewportHeight),
-    contentExtent: extent,
+    contentExtent,
     padTop,
     padBottom,
-    segments,
-    leftLineSizes,
+    segments: layoutSegments,
+    leftLineSizes: layoutResult.leftLineSizes,
+    rightPageStarts: layoutResult.rightPageStarts,
+    leftColumnExtent: layoutResult.leftColumnExtent,
+    rightColumnExtent: layoutResult.rightColumnExtent,
   };
 }
 

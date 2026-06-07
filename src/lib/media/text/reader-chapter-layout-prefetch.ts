@@ -24,6 +24,7 @@ export interface AdjacentLayoutPrefetchParams {
   viewportWidth: number;
   viewportHeight: number;
   config: TextViewerUiConfig;
+  dualPage?: boolean;
 }
 
 let prefetchToken = 0;
@@ -43,7 +44,7 @@ function prefetchOne(
   title: string | undefined,
   content: string,
 ): void {
-  const { config, viewportWidth, viewportHeight } = params;
+  const { config, viewportWidth, viewportHeight, dualPage = false } = params;
   const inset = textViewerPagedContentInsets(config);
   const clipHeightPx = Math.max(
     1,
@@ -53,7 +54,7 @@ function prefetchOne(
     chapterIndex: index,
     contentRevision: buildContentRevision(content),
     layoutSignature: buildReaderLayoutSignature(config, {
-      dualPage: false,
+      dualPage,
       viewportWidth,
       viewportHeight,
     }),
@@ -71,7 +72,7 @@ function prefetchOne(
     config,
     contentRoot: null,
     refineWithDom: false,
-    dualPage: false,
+    dualPage,
     padTop: inset.top,
     padBottom: inset.bottom,
     clipHeightPx,

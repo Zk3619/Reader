@@ -115,6 +115,25 @@ export function textViewerDualPageActiveInViewport(
   );
 }
 
+/**
+ * 双栏 DOM 测量意图：宽屏即按单栏宽测量（不要求视口高度就绪）。
+ * 与 {@link textViewerDualPageActiveInViewport} 解耦，避免首帧高度=0 时测量根塌缩为 1px。
+ */
+export function textViewerDualPageMeasureIntent(
+  mode: TextViewerDualPageMode,
+  viewportWidth: number,
+  viewportHeight: number,
+): boolean {
+  if (mode === 'off') return false;
+  if (viewportWidth < 480) return false;
+  if (mode === 'always') return true;
+  if (viewportHeight <= 0) {
+    return viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX;
+  }
+  const landscape = viewportWidth > viewportHeight;
+  return viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX || landscape;
+}
+
 /** 按页拖拽翻页：提交阈值（视口宽度百分比）可调范围 */
 export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN = 10;
 export const TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX = 50;

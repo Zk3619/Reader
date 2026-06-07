@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computePageStartsFromSegments,
+  dualSpreadColumnContentSpanPx,
   pageContentSpanPx,
   pageDisplayHeight,
   pagePackLimitPx,
@@ -112,6 +113,37 @@ describe('pageContentSpanPx', () => {
     };
     expect(pageContentSpanPx(0, layout, 749)).toBe(736);
     expect(pageContentSpanPx(0, layout, 700)).toBe(700);
+  });
+
+  it('uses full live clip for dual-page spread block slicing', () => {
+    const layout = {
+      pageStarts: [0, 400],
+      rightPageStarts: [0, 32],
+      clipHeight: 500,
+      contentExtent: 2000,
+      segments: [
+        { top: 0, bottom: 380, column: 0 as const },
+        { top: 0, bottom: 32, column: 1 as const },
+      ],
+      dualPage: true,
+    };
+    expect(pageContentSpanPx(0, layout, 749)).toBe(749);
+    expect(pageContentSpanPx(0, layout, 300)).toBe(300);
+    expect(dualSpreadColumnContentSpanPx(0, 'left', layout, 749)).toBe(749);
+    expect(dualSpreadColumnContentSpanPx(0, 'right', layout, 749)).toBe(749);
+  });
+
+  it('falls back to live clip when dual layout has no column segments yet', () => {
+    const layout = {
+      pageStarts: [0],
+      clipHeight: 697,
+      contentExtent: 697,
+      segments: [] as { top: number; bottom: number }[],
+      dualPage: true,
+    };
+    expect(dualSpreadColumnContentSpanPx(0, 'left', layout, 697)).toBe(697);
+    expect(dualSpreadColumnContentSpanPx(0, 'right', layout, 697)).toBe(697);
+    expect(pageContentSpanPx(0, layout, 697)).toBe(697);
   });
 
   it('uses displayHeight when shorter than break span (paragraph gap)', () => {

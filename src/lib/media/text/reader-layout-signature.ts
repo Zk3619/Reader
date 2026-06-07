@@ -20,15 +20,15 @@ export function buildReaderLayoutSignature(
     extras?.dualPage ??
     (extras?.viewportHeight != null && extras.viewportWidth != null
       ? textViewerDualPageActiveInViewport(
-          config.dualPage,
-          extras.viewportWidth,
-          extras.viewportHeight,
-        )
+        config.dualPage,
+        extras.viewportWidth,
+        extras.viewportHeight,
+      )
       : textViewerDualPageActive(
-          config.dualPage,
-          true,
-          extras?.viewportWidth ?? 0,
-        ));
+        config.dualPage,
+        true,
+        extras?.viewportWidth ?? 0,
+      ));
   return [
     config.fontSize,
     config.spacing.line,
@@ -45,7 +45,7 @@ export function buildReaderLayoutSignature(
     config.textFullJustify ? 1 : 0,
     config.textBottomJustify ? 1 : 0,
     config.useZhLayout ? 1 : 0,
-    dualActive ? 1 : 0,
+    dualActive ? '1:dp9' : 0,
   ].join('\0');
 }
 

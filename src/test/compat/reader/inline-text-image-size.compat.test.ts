@@ -57,4 +57,17 @@ describe('splitRawIntoParagraphSegments', () => {
     const para0 = blocks[0];
     expect(para0?.type === 'paragraph' && para0.parts.some((p) => p.kind === 'img')).toBe(true);
   });
+
+  it('保留段首半角与全角缩进空格', () => {
+    const raw = '    第一段\n  第二段\n\u3000\u3000第三段';
+    const segs = splitRawIntoParagraphSegments(raw);
+    expect(segs).toEqual(['    第一段', '  第二段', '\u3000\u3000第三段']);
+    const blocks = buildReaderDisplayBlocks(raw, 'DEFAULT');
+    const texts = blocks
+      .filter((b): b is Extract<typeof b, { type: 'paragraph' }> => b.type === 'paragraph')
+      .map((b) => b.parts.filter((p) => p.kind === 'text').map((p) => p.text).join(''));
+    expect(texts[0]?.startsWith('    ')).toBe(true);
+    expect(texts[1]?.startsWith('  ')).toBe(true);
+    expect(texts[2]?.startsWith('\u3000\u3000')).toBe(true);
+  });
 });

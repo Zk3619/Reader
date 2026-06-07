@@ -59,34 +59,36 @@ export type ReaderInlineImageRef = {
   layout?: LegadoImageLayout;
 };
 
-/** 对齐 Legado ContentProcessor：trim 空白与全角空格 */
-function trimLegadoParagraphLine(line: string): string {
-  let start = 0;
+/** 仅去掉行尾空白，保留段首/行首缩进（半角或全角空格） */
+function trimParagraphTrailing(line: string): string {
   let end = line.length;
-  while (start < end) {
-    const ch = line[start]!;
-    if (ch <= ' ' || ch === '\u3000') start += 1;
-    else break;
-  }
-  while (end > start) {
+  while (end > 0) {
     const ch = line[end - 1]!;
     if (ch <= ' ' || ch === '\u3000') end -= 1;
     else break;
   }
-  return line.slice(start, end);
+  return line.slice(0, end);
+}
+
+function isBlankParagraphLine(line: string): boolean {
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (ch > ' ' && ch !== '\u3000') return false;
+  }
+  return true;
 }
 
 /** 对齐 Legado HtmlFormatter + ContentProcessor：`<p>`/`\n` 切段 */
 export function splitRawIntoParagraphSegments(raw: string): string[] {
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (!normalized) return [];
+  const normalized = normalizeRawParagraphInput(raw);
+  if (!normalized.trim()) return [];
 
   if (/<p\b/i.test(normalized)) {
     const segments: string[] = [];
     const re = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(normalized)) !== null) {
-      const inner = trimLegadoParagraphLine(m[1] ?? '');
+      const inner = trimParagraphTrailing(m[1] ?? '');
       if (inner) segments.push(stripInlineMarkup(inner));
     }
     if (segments.length > 0) {
@@ -97,15 +99,14 @@ export function splitRawIntoParagraphSegments(raw: string): string[] {
   // cleanContent 后按单 \n 切段（同 ContentProcessor.getContent textList）
   const segments: string[] = [];
   for (const line of normalized.split('\n')) {
-    const trimmed = trimLegadoParagraphLine(line);
-    if (!trimmed) continue;
-    const segment = stripInlineMarkup(trimmed);
+    if (isBlankParagraphLine(line)) continue;
+    const segment = stripInlineMarkup(trimParagraphTrailing(line));
     if (segment) segments.push(segment);
   }
 
   if (segments.length > 0) return segments;
 
-  const fallback = stripInlineMarkup(trimLegadoParagraphLine(normalized));
+  const fallback = stripInlineMarkup(trimParagraphTrailing(normalized));
   return fallback ? [fallback] : [];
 }
 
@@ -115,9 +116,8 @@ function stripInlineMarkup(text: string): string {
     .replace(/<\/?(?:div|br|hr|span)\b[^>]*>/gi, (tag) =>
       /^<\/?br/i.test(tag) ? '\n' : '',
     )
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return decodeHtmlEntities(stripped);
+    .replace(/\n{3,}/g, '\n\n');
+  return decodeHtmlEntities(trimParagraphTrailing(stripped));
 }
 
 function readLegadoClickFromImgTag(tag: string): string | undefined {
@@ -192,6 +192,11 @@ function buildParagraphPartsFromSegment(
   const tail = stripInlineMarkup(segment.slice(last));
   if (tail) parts.push({ kind: 'text', text: tail });
   return parts;
+}
+
+/** 去掉章节首尾换行，不剥段首缩进空格 */
+function normalizeRawParagraphInput(raw: string): string {
+  return raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\n+/, '').replace(/\n+$/, '');
 }
 
 /** 按书源段落切分；段评 SVG 等行内图留在对应段落 parts 内 */

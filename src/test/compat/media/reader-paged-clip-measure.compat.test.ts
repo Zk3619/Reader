@@ -4,6 +4,7 @@ import {
   measurePagedClipContentHeight,
   outerViewportHeightFromClipContent,
   readPagedPageWindowMetrics,
+  readPagedSpreadContentWidthPx,
 } from '@/lib/media/text/reader-paged-clip-measure';
 import { TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX, TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX } from '@/lib/media/text/reader-ui-config';
 
@@ -67,5 +68,16 @@ describe('outerViewportHeightFromClipContent', () => {
     expect(outerViewportHeightFromClipContent(466)).toBe(
       466 + TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX + TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX,
     );
+  });
+});
+
+describe('readPagedSpreadContentWidthPx', () => {
+  it('uses viewport minus insets instead of inflated slot width', () => {
+    const width = readPagedSpreadContentWidthPx({
+      viewportEl: { clientWidth: 1280 } as HTMLElement,
+      contentSlotEl: null,
+      fallbackInsets: { top: 32, bottom: 32, left: 16, right: 16 },
+    });
+    expect(width).toBe(1280 - 16 - 16);
   });
 });

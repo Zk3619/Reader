@@ -35,6 +35,11 @@ export interface ReaderChapterLayout {
   segments: ReaderLayoutSegment[];
   /** 是否双栏物理页（一屏左右两栏） */
   dualPage?: boolean;
+  /** 双栏 spread 右栏首段 Y（与 pageStarts 等长） */
+  rightPageStarts?: number[];
+  /** 双栏：左/右栏归一化坐标系内容高度（Render clip extent） */
+  leftColumnExtent?: number;
+  rightColumnExtent?: number;
   /** 流式排版是否已完成 */
   isLayoutComplete?: boolean;
   /** 流式排版进度 0–1 */
