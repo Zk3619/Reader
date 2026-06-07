@@ -935,10 +935,73 @@
   width: 100%;
 }
 
-.reader-paged-viewport[data-dual-page] .reader-body {
-  columns: 2;
-  column-fill: balance;
+/** 方案 B live spread：单栏 pane，禁止继承 viewport 级 multicol */
+.reader-dual-spread-pane {
+  column-count: 1 !important;
+  columns: 1 !important;
+}
+
+.reader-paged-dual-spread .reader-body {
+  column-count: 1 !important;
+  columns: 1 !important;
+}
+
+.reader-dual-measure .reader-body {
+  column-count: 1 !important;
+  columns: 1 !important;
+  column-fill: auto;
+  box-sizing: border-box;
+}
+
+.reader-paged-dual-spread {
+  isolation: isolate;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/** 双栏 Prepare：屏外测量根（保持 layout 与 getBoundingClientRect，避免 visibility:hidden 零高度） */
+.reader-dual-measure-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: -1;
+  height: auto;
+  max-height: none;
+}
+
+.reader-dual-measure-host .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/** 左右单栏 pane：宽 (spread − 中缝) / 2，与屏外测量根栏宽一致 */
+.reader-paged-dual-pane-left {
+  left: 0;
+  width: calc((100% - var(--reader-dual-column-gap, 32px)) / 2);
+}
+
+.reader-paged-dual-pane-right {
+  right: 0;
+  width: calc((100% - var(--reader-dual-column-gap, 32px)) / 2);
+}
+
+.reader-paged-dual-spread .reader-paged-dual-shift {
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-shift .reader-content,
+.reader-paged-dual-spread .reader-paged-dual-shift .reader-body {
   width: 100%;
+  max-width: none;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-column-clip .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
 }
 
 .reader-paged-page-window {

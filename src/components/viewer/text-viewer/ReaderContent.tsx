@@ -81,12 +81,22 @@ export interface ReaderContentProps {
   hideCommentBubbles?: boolean;
   /** 是否应用阅读宽度限制；窄屏+移动端应为 false（正文占满宽度） */
   applyReadWidth?: () => boolean;
-  /** 双页分栏（宽屏） */
+  /** 双页分栏（宽屏）— 仅隐藏测量根使用 columns-2 */
   dualPage?: boolean;
-  /** 仅渲染指定块索引（分页模式） */
+  /** Prepare：单栏宽测量（spread 全宽下的一栏，无 columns-2） */
+  measureAtColumnWidth?: boolean;
+  /** Render：单栏 pane（live 双页各栏独立块 + translateY） */
+  dualSpreadRender?: boolean;
+  /** 双页 spread 是否显示章节标题（measure block 0） */
+  showChapterTitle?: boolean;
+  /** 仅渲染指定正文块索引（分页模式；不含标题块） */
   visibleBlockIndices?: number[];
   /** 为分页测量高度：块级节点带 data-reader-measure-block */
   measureBlocks?: boolean;
+  /** 隐藏测量根：有正文即渲染块，不等待 showContent / contentLoading */
+  measureHost?: boolean;
+  /** 分页测量根挂载（data-reader-content 节点） */
+  onMeasureRoot?: (root: HTMLElement | null) => void;
   /** 按页阅读：与测量层相同排版，避免 py 导致页高不一致 */
   pagedLayout?: boolean;
   /** 四边 inset 已由外层 content-slot 管理（滚动 / 按页） */
@@ -202,11 +212,13 @@ export function ReaderContent(props: ReaderContentProps) {
   const bodyStyle = () => {
     const inset = contentInset();
     const style: Record<string, string | undefined> = {};
-    if (props.dualPage) {
+    if (props.measureAtColumnWidth) {
+      style['width'] = '100%';
+    } else if (props.dualPage) {
       const gap = inset.center > 0 ? inset.center : 32;
       style['column-count'] = '2';
       style['column-gap'] = `${gap}px`;
-      style['column-fill'] = 'balance';
+      style['column-fill'] = props.pagedLayout ? 'auto' : 'balance';
       style['width'] = '100%';
     }
     return style;
@@ -225,10 +237,23 @@ export function ReaderContent(props: ReaderContentProps) {
     toDisplayBlocks(content() ?? '', currentChapter()?.title, imageStyleKey()),
   );
 
+  const showChapterTitleBlock = () => {
+    if (props.showChapterTitle === false) return false;
+    if (props.dualSpreadRender && props.showChapterTitle === undefined) {
+      return props.visibleBlockIndices === undefined;
+    }
+    return Boolean(currentChapter()?.title);
+  };
+
+  const showMeasureOrLiveBody = () => {
+    if (props.measureHost) return Boolean(content()?.trim());
+    return !showReaderSkeleton() && !contentLoading() && showContent();
+  };
+
   const blockEntries = createMemo(() => {
     const all = contentBlocks();
     const indices = props.visibleBlockIndices;
-    if (!indices?.length) {
+    if (indices == null) {
       return all.map((block, blockIndex) => ({ block, blockIndex }));
     }
     return indices
@@ -258,9 +283,14 @@ export function ReaderContent(props: ReaderContentProps) {
 
   return (
     <div
+      ref={(el) => props.onMeasureRoot?.(el ?? null)}
       class={cn(
-        'reader-content min-h-full w-full px-0 selection:bg-primary/20',
-        insetOnSlot() ? 'min-h-full py-0' : 'py-8',
+        'reader-content w-full px-0 selection:bg-primary/20',
+        props.dualSpreadRender
+          ? 'min-h-0 h-auto py-0'
+          : insetOnSlot()
+            ? 'min-h-full py-0'
+            : 'min-h-full py-8',
         themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
         themeClasses[config().theme]?.text ?? themeClasses[0].text,
         props.class
@@ -274,7 +304,7 @@ export function ReaderContent(props: ReaderContentProps) {
         </div>
       </Show>
 
-      <Show when={!showReaderSkeleton() && !contentLoading() && showContent()}>
+      <Show when={showMeasureOrLiveBody()}>
         <Show
           when={!isErrorContent()}
           fallback={
@@ -298,14 +328,19 @@ export function ReaderContent(props: ReaderContentProps) {
           <div
             class={cn(
               'wrap-break-word reader-body',
-              props.dualPage && 'reader-dual-page columns-2',
+              props.measureAtColumnWidth && 'reader-dual-measure',
+              props.dualSpreadRender && 'reader-dual-spread-pane',
+              props.dualPage &&
+                !props.measureAtColumnWidth &&
+                !props.dualSpreadRender &&
+                'reader-dual-page columns-2',
               props.pagedLayout && config().textFullJustify && 'reader-paged-justify',
               props.pagedLayout && config().textBottomJustify && 'reader-paged-bottom-justify',
             )}
             style={bodyStyle()}
           >
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
-            <Show when={currentChapter()?.title}>
+            <Show when={showChapterTitleBlock()}>
               <div
                 class="mb-4 flex items-center justify-center gap-2"
                 data-reader-measure-block={props.measureBlocks ? '' : undefined}
@@ -557,7 +592,7 @@ function getParagraphs(text: string, chapterTitle?: string): string[] {
     let newParagraphs: string[] = [];
 
     // 优先：按「换行+全角空格」分段（与 content.ts cleanContent 的 legado 风格一致）
-    const byFullWidthIndent = single.split(/\n(?=[\u3000])/).map((p) => p.replace(/^\s+/, '').replace(/\s+$/, '')).filter((p) => p.length > 0);
+    const byFullWidthIndent = single.split(/\n(?=[\u3000])/).map((p) => p.replace(/\s+$/, '')).filter((p) => p.length > 0);
     if (byFullWidthIndent.length > 1) {
       newParagraphs = byFullWidthIndent;
     } else {
