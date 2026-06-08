@@ -66,6 +66,67 @@ export async function writeChapterFile(
   return `opfs:${OPFS_CACHE_DIR}/${folder}/${fileName}`;
 }
 
+/** 落盘章节文件字节数（Tauri stat / OPFS File.size） */
+export async function getChapterFileByteSize(filePath: string): Promise<number> {
+  if (!filePath) return 0;
+  try {
+    if (filePath.startsWith('opfs:')) {
+      const rel = filePath.slice(`opfs:${OPFS_CACHE_DIR}/`.length);
+      const [folder, ...rest] = rel.split('/');
+      const fileName = rest.join('/');
+      const root = await getOpfsCacheRoot();
+      const bookDir = await root.getDirectoryHandle(folder);
+      const fileHandle = await bookDir.getFileHandle(fileName);
+      const file = await fileHandle.getFile();
+      return file.size;
+    }
+    if (isTauri() && (await fileExists(filePath))) {
+      const { stat } = await import('@tauri-apps/plugin-fs');
+      const info = await stat(filePath);
+      return info.size ?? 0;
+    }
+  } catch {
+    return 0;
+  }
+  return 0;
+}
+
+export async function sumChapterFileByteSizes(filePaths: string[]): Promise<number> {
+  let total = 0;
+  for (const path of filePaths) {
+    total += await getChapterFileByteSize(path);
+  }
+  return total;
+}
+
+export async function estimateTauriBookCacheDirBytes(): Promise<number> {
+  if (!isTauri()) return 0;
+  try {
+    const appDir = await getAppDataDir();
+    const cacheDir = await join(appDir, OPFS_CACHE_DIR);
+    if (!(await fileExists(cacheDir))) return 0;
+    return await estimateTauriDirSize(cacheDir);
+  } catch {
+    return 0;
+  }
+}
+
+async function estimateTauriDirSize(dir: string): Promise<number> {
+  const { readDir, stat } = await import('@tauri-apps/plugin-fs');
+  let total = 0;
+  const entries = await readDir(dir);
+  for (const entry of entries) {
+    const path = await join(dir, entry.name);
+    if (entry.isDirectory) {
+      total += await estimateTauriDirSize(path);
+    } else {
+      const info = await stat(path);
+      total += info.size ?? 0;
+    }
+  }
+  return total;
+}
+
 export async function readChapterFile(filePath: string): Promise<string | null> {
   if (!filePath) return null;
   try {

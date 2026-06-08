@@ -4,7 +4,8 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
-import type { ChapterCache } from '@/types';
+import { normalizeChapterCacheTier } from '@/lib/chapter-cache/cache-tier';
+import type { ChapterCache, ChapterCacheTier } from '@/types';
 
 /**
  * 获取章节缓存
@@ -28,14 +29,15 @@ export async function upsertChapterCache(cache: ChapterCache): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `INSERT OR REPLACE INTO chapter_cache (
-      book_url, chapter_index, content, file_path, created_at
-    ) VALUES (?, ?, ?, ?, ?)`,
+      book_url, chapter_index, content, file_path, created_at, cache_tier
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
     [
       cache.bookUrl,
       cache.chapterIndex,
       cache.content,
       cache.filePath ?? null,
       cache.createdAt,
+      cache.cacheTier ?? 'auto',
     ],
   );
 }
@@ -96,6 +98,26 @@ export async function listDistinctCachedBookUrls(): Promise<string[]> {
   return rows.map((r) => String(r.book_url ?? ''));
 }
 
+export async function setChapterCacheTier(
+  bookUrl: string,
+  chapterIndex: number,
+  cacheTier: ChapterCacheTier,
+): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE chapter_cache SET cache_tier = ? WHERE book_url = ? AND chapter_index = ?`,
+    [cacheTier, bookUrl, chapterIndex],
+  );
+}
+
+export async function isManualCachedChapter(
+  bookUrl: string,
+  chapterIndex: number,
+): Promise<boolean> {
+  const row = await getChapterCache(bookUrl, chapterIndex);
+  return row?.cacheTier === 'manual';
+}
+
 function mapRowToCache(row: Record<string, unknown>): ChapterCache {
   return {
     bookUrl: String(row.book_url ?? ''),
@@ -103,5 +125,6 @@ function mapRowToCache(row: Record<string, unknown>): ChapterCache {
     content: String(row.content ?? ''),
     filePath: row.file_path != null ? String(row.file_path) : null,
     createdAt: Number(row.created_at ?? 0),
+    cacheTier: normalizeChapterCacheTier(row.cache_tier),
   };
 }

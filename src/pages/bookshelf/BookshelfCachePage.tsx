@@ -7,12 +7,14 @@ import {
   createEffect,
   Show,
   onMount,
+  onCleanup,
   createMemo,
   type Component,
 } from 'solid-js';
 import { createStore, reconcile } from 'solid-js/store';
 import * as booksDb from '@/lib/database/books';
 import * as groupsDb from '@/lib/database/book-groups';
+import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook } from '@/lib/local-book';
 import type { Book, BookGroup } from '@/types';
 import { PageToolbar } from '@/components/shell/PageToolbar';
@@ -35,7 +37,18 @@ import {
   stopAllChapterDownloads,
 } from '@/lib/chapter-cache';
 import { exportBookAsTxt } from '@/lib/export/export-book';
+import {
+  exportMangaImages,
+  isExportCancelledError,
+} from '@/lib/export/export-manga-images';
 import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
+import { resolveMangaBookFlag } from '@/lib/media/image/manga-book-detect';
+import {
+  getMangaImageCacheStatsForBook,
+  getMangaImageCacheStatsMap,
+  type MangaImageCacheBookStats,
+} from '@/lib/media/image/manga-image-disk-cache';
+import { warmCachedMangaImagesForBook } from '@/lib/media/image/manga-image-warm';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { BookshelfCacheGroupFilterDialog } from '@/components/bookshelf/BookshelfCacheGroupFilterDialog';
 import {
@@ -123,33 +136,101 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     </Show>
   );
 
+  const [warmingBookUrls, setWarmingBookUrls] = createSignal<string[]>([]);
+  const warmQueue: Book[] = [];
+  let warmPumpRunning = false;
+
+  const setBookWarming = (bookUrl: string, warming: boolean) => {
+    setWarmingBookUrls((prev) => {
+      const has = prev.includes(bookUrl);
+      if (warming && !has) return [...prev, bookUrl];
+      if (!warming && has) return prev.filter((u) => u !== bookUrl);
+      return prev;
+    });
+  };
+
+  async function buildRowState(
+    book: Book,
+    imageStatsMap?: Map<string, MangaImageCacheBookStats>,
+  ): Promise<BookshelfCacheRowState> {
+    const source = await sourcesDb.getSource(book.origin);
+    const stats = await getChapterCacheStatsForBook(book.bookUrl, book.name);
+    const imageStats =
+      imageStatsMap?.get(book.bookUrl.trim()) ??
+      (await getMangaImageCacheStatsForBook(book.bookUrl));
+    const isManga = await resolveMangaBookFlag(book, source);
+    return {
+      book,
+      cached: stats.chapterCount,
+      autoCached: stats.autoChapterCount,
+      manualCached: stats.manualChapterCount,
+      cacheBytes: stats.estimatedBytes,
+      imageCount: imageStats.imageCount,
+      imageCacheBytes: imageStats.estimatedBytes,
+      isManga,
+      total: book.totalChapterNum ?? 0,
+      downloadPercent: null,
+    };
+  }
+
+  async function pumpMangaWarmQueue() {
+    if (warmPumpRunning) return;
+    warmPumpRunning = true;
+    try {
+      while (warmQueue.length > 0) {
+        const book = warmQueue.shift();
+        if (!book || warmingBookUrls().includes(book.bookUrl)) continue;
+        setBookWarming(book.bookUrl, true);
+        try {
+          const result = await warmCachedMangaImagesForBook(book, {
+            maxChapters: 8,
+          });
+          if (result.imagesCached > 0) {
+            await refreshBookCached(book.bookUrl);
+          }
+        } catch {
+          /* ignore warm errors */
+        } finally {
+          setBookWarming(book.bookUrl, false);
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } finally {
+      warmPumpRunning = false;
+    }
+  }
+
+  function scheduleMangaWarm(book: Book, row: BookshelfCacheRowState) {
+    if (chapterCacheDownloadStore.isBookActive(book.bookUrl)) return;
+    if (!row.isManga || row.cached <= 0 || row.imageCount > 0) return;
+    if (warmingBookUrls().includes(book.bookUrl)) return;
+    if (warmQueue.some((b) => b.bookUrl === book.bookUrl)) return;
+    warmQueue.push(book);
+    void pumpMangaWarmQueue();
+  }
+
   async function refreshBookCached(bookUrl: string) {
     const i = findRowIndex(bookUrl);
     if (i < 0) return;
     const book = rows[i]?.book;
-    const stats = await getChapterCacheStatsForBook(bookUrl, book?.name);
-    setRows(i, {
-      cached: stats.chapterCount,
-      cacheBytes: stats.estimatedBytes,
-      downloadPercent: null,
-    });
+    if (!book) return;
+    const row = await buildRowState(book);
+    setRows(i, { ...row, downloadPercent: rows[i]?.downloadPercent ?? null });
+    scheduleMangaWarm(book, row);
   }
 
   async function refreshCounts(books: Book[]): Promise<void> {
-    const next: BookshelfCacheRowState[] = [];
-    for (const book of books) {
-      if (isLocalBook(book)) continue;
-      const stats = await getChapterCacheStatsForBook(book.bookUrl, book.name);
-      const total = book.totalChapterNum ?? 0;
-      next.push({
-        book,
-        cached: stats.chapterCount,
-        cacheBytes: stats.estimatedBytes,
-        total,
-        downloadPercent: null,
-      });
-    }
+    const online = books.filter((b) => !isLocalBook(b));
+    const imageStatsMap = await getMangaImageCacheStatsMap();
+    const next = await Promise.all(
+      online.map((book) => buildRowState(book, imageStatsMap)),
+    );
     setRows(reconcile(next));
+    queueMicrotask(() => {
+      for (const row of next) {
+        scheduleMangaWarm(row.book, row);
+      }
+    });
   }
 
   async function loadBooks() {
@@ -171,6 +252,14 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
 
   onMount(() => {
     void groupsDb.getUserGroups().then(setUserGroups);
+    const onCacheUpdated = (e: Event) => {
+      const bookUrl = (e as CustomEvent<{ bookUrl?: string }>).detail?.bookUrl;
+      if (bookUrl) {
+        void refreshBookCached(bookUrl);
+      }
+    };
+    window.addEventListener('chapter-cache-updated', onCacheUpdated);
+    onCleanup(() => window.removeEventListener('chapter-cache-updated', onCacheUpdated));
   });
 
   createEffect(() => {
@@ -254,11 +343,11 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     enqueueDownloadAll(book);
   };
 
-  const handleExportBook = async (book: Book) => {
+  const handleExportBookTxt = async (book: Book) => {
     setExportingUrl(book.bookUrl);
     try {
       await exportBookAsTxt(book, { fetchMissing: false, onlyCached: true });
-      showAppToast({ title: `已导出：${book.name}` });
+      showAppToast({ title: `已导出 TXT：${book.name}` });
     } catch (e) {
       if (e instanceof SaveTextFileCancelledError) return;
       showAppToast({
@@ -271,11 +360,48 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     }
   };
 
+  const handleExportMangaImages = async (
+    book: Book,
+    format: 'zip' | 'folder',
+  ) => {
+    setExportingUrl(book.bookUrl);
+    try {
+      const { exported } = await exportMangaImages(book, {
+        onlyCached: true,
+        format,
+      });
+      showAppToast({
+        title: `已导出图片：${book.name}`,
+        description: `共 ${exported} 张`,
+      });
+    } catch (e) {
+      if (isExportCancelledError(e)) return;
+      showAppToast({
+        title: '导出图片失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setExportingUrl(null);
+    }
+  };
+
   const handleClearBook = async (book: Book) => {
     stopChapterDownload(book.bookUrl);
     await deleteCachedChaptersByBook(book);
     const i = findRowIndex(book.bookUrl);
-    if (i >= 0) setRows(i, { cached: 0, cacheBytes: 0, downloadPercent: null });
+    if (i >= 0) {
+      setRows(i, {
+        cached: 0,
+        autoCached: 0,
+        manualCached: 0,
+        cacheBytes: 0,
+        imageCount: 0,
+        imageCacheBytes: 0,
+        isManga: rows[i]?.isManga ?? false,
+        downloadPercent: null,
+      });
+    }
     showAppToast({ title: `已清除：${book.name}` });
   };
 
@@ -363,7 +489,14 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
                 rowIndex={index}
                 exporting={exportingUrl() === row.book.bookUrl}
                 onToggleDownload={() => toggleBookDownload(row.book)}
-                onExport={() => void handleExportBook(row.book)}
+                onExportTxt={() => void handleExportBookTxt(row.book)}
+                onExportMangaZip={() =>
+                  void handleExportMangaImages(row.book, 'zip')
+                }
+                onExportMangaFolder={() =>
+                  void handleExportMangaImages(row.book, 'folder')
+                }
+                imageWarming={() => warmingBookUrls().includes(row.book.bookUrl)}
                 onClear={() => void handleClearBook(row.book)}
               />
             )}

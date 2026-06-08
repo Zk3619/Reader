@@ -1,5 +1,5 @@
 /**
- * 阅读器离线缓存（对齐 Legado BaseReadBookActivity.showDownloadDialog + CacheBook.start）
+ * 文本阅读器离线缓存（对齐 Legado BaseReadBookActivity.showDownloadDialog + CacheBook.start）
  */
 
 import { createEffect, createSignal, Show } from 'solid-js';
@@ -12,13 +12,18 @@ import {
   ViewerAppDialogTitle,
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { OfflineCacheChapterRangeFields } from '@/components/viewer/OfflineCacheChapterRangeFields';
 import {
-  chapterCacheDownloadStore,
-  enqueueChapterDownload,
-  stopChapterDownload,
-} from '@/lib/chapter-cache';
+  enqueueOfflineCacheRange,
+  formatOfflineCacheProgressText,
+  getOfflineCacheDownloadProgress,
+  isOfflineCacheDownloading,
+  offlineCacheDefaultRange,
+  parseOfflineCacheChapterRange,
+  resolveOfflineCacheChapterTotal,
+  stopOfflineCacheForBook,
+} from '@/lib/chapter-cache/offline-cache-actions';
 import type { Book } from '@/types';
 
 export interface ReaderOfflineCacheDialogProps {
@@ -31,63 +36,36 @@ export interface ReaderOfflineCacheDialogProps {
   catalogSize: number;
 }
 
-function chapterTotal(book: Book | null, catalogSize: number): number {
-  if (catalogSize > 0) return catalogSize;
-  const n = book?.totalChapterNum ?? 0;
-  return n > 0 ? n : 1;
-}
-
 export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
-  const total = () => chapterTotal(props.book, props.catalogSize);
-  const defaultStart = () => Math.min(props.chapterIndex + 1, total());
-  const defaultEnd = () => total();
+  const total = () => resolveOfflineCacheChapterTotal(props.book, props.catalogSize);
+  const defaultRange = () =>
+    offlineCacheDefaultRange(props.chapterIndex, total());
 
   const [startChapter, setStartChapter] = createSignal('1');
   const [endChapter, setEndChapter] = createSignal('1');
 
   const bookUrl = () => props.book?.bookUrl ?? '';
-  const isDownloading = () =>
-    Boolean(bookUrl() && chapterCacheDownloadStore.isBookActive(bookUrl()));
-  const progress = () =>
-    bookUrl() ? chapterCacheDownloadStore.getProgress(bookUrl()) : undefined;
+  const isDownloading = () => isOfflineCacheDownloading(bookUrl());
+  const progress = () => getOfflineCacheDownloadProgress(bookUrl());
 
   createEffect(() => {
     if (!props.open) return;
-    setStartChapter(String(defaultStart()));
-    setEndChapter(String(defaultEnd()));
+    const range = defaultRange();
+    setStartChapter(String(range.start));
+    setEndChapter(String(range.end));
   });
-
-  const parseRange = (): { start: number; end: number } | null => {
-    const max = total();
-    const startRaw = startChapter().trim();
-    const endRaw = endChapter().trim();
-    const start = startRaw === '' ? defaultStart() : Number.parseInt(startRaw, 10);
-    const end = endRaw === '' ? max : Number.parseInt(endRaw, 10);
-    if (!Number.isFinite(start) || !Number.isFinite(end)) {
-      showAppToast({ title: '请输入有效章节号', variant: 'warning' });
-      return null;
-    }
-    if (start < 1 || end < 1 || start > max || end > max) {
-      showAppToast({
-        title: '章节范围无效',
-        description: `请在 1–${max} 之间选择`,
-        variant: 'warning',
-      });
-      return null;
-    }
-    if (start > end) {
-      showAppToast({ title: '起始章节不能大于结束章节', variant: 'warning' });
-      return null;
-    }
-    return { start, end };
-  };
 
   const handleStart = () => {
     const url = bookUrl();
     if (!url) return;
-    const range = parseRange();
+    const range = parseOfflineCacheChapterRange({
+      startRaw: startChapter(),
+      endRaw: endChapter(),
+      max: total(),
+      defaultStart: defaultRange().start,
+    });
     if (!range) return;
-    enqueueChapterDownload(url, range.start - 1, range.end - 1);
+    enqueueOfflineCacheRange(url, range);
     showAppToast({
       title: '已开始离线缓存',
       description: (
@@ -103,7 +81,7 @@ export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
   const handleStop = () => {
     const url = bookUrl();
     if (!url) return;
-    stopChapterDownload(url);
+    stopOfflineCacheForBook(url);
     showAppToast({ title: '已停止本书缓存任务' });
   };
 
@@ -113,48 +91,30 @@ export function ReaderOfflineCacheDialog(props: ReaderOfflineCacheDialogProps) {
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>离线缓存</ViewerAppDialogTitle>
           <ViewerAppDialogDescription>
-            将章节正文下载到本地，无网络时也可阅读。与阅读时的自动预取相互独立。
+            将章节正文下载到本地，无网络时也可阅读。此处缓存归用户管理，不受设置页「自动缓存保留期/容量」清理；与阅读时的自动预取相互独立。
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
 
-        <div class="space-y-4 px-6 py-2">
-          <div class="grid grid-cols-2 gap-3">
-            <TextField class="space-y-1.5">
-              <TextFieldLabel>起始章节</TextFieldLabel>
-              <TextFieldInput
-                type="number"
-                min={1}
-                max={total()}
-                value={startChapter()}
-                onInput={(e) => setStartChapter(e.currentTarget.value)}
-              />
-            </TextField>
-            <TextField class="space-y-1.5">
-              <TextFieldLabel>结束章节</TextFieldLabel>
-              <TextFieldInput
-                type="number"
-                min={1}
-                max={total()}
-                value={endChapter()}
-                onInput={(e) => setEndChapter(e.currentTarget.value)}
-              />
-            </TextField>
-          </div>
-          <p class="text-xs text-muted-foreground">
-            共 {total()} 章；默认从当前阅读章节缓存到末章（对齐 Legado）。
-          </p>
-          <Show when={isDownloading() && progress()}>
-            {(p) => {
-              const cur = p().currentIndex;
-              return (
-                <p class="text-xs text-primary">
-                  正在缓存… {p().done}/{p().total}
-                  {cur != null ? `（第 ${cur + 1} 章）` : ''}
-                </p>
-              );
-            }}
-          </Show>
-        </div>
+        <OfflineCacheChapterRangeFields
+          total={total()}
+          startChapter={startChapter()}
+          endChapter={endChapter()}
+          onStartChapterChange={setStartChapter}
+          onEndChapterChange={setEndChapter}
+          hint={`共 ${total()} 章；默认从当前阅读章节缓存到末章（对齐 Legado）。`}
+        />
+
+        <Show when={isDownloading() && progress()}>
+          {(p) => (
+            <p class="px-6 pb-2 text-xs text-primary">
+              {formatOfflineCacheProgressText(
+                p().done,
+                p().total,
+                p().currentIndex,
+              )}
+            </p>
+          )}
+        </Show>
 
         <ViewerAppDialogFooter class="gap-2 sm:justify-end">
           <Show when={isDownloading()}>

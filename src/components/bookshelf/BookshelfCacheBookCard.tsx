@@ -14,6 +14,15 @@ import {
   bookshelfCompactCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { chapterCacheDownloadStore, formatChapterCacheSize } from '@/lib/chapter-cache';
+import { formatMangaImageCacheSize } from '@/lib/media/image/manga-image-disk-cache';
+import { isTauri } from '@/lib/platform/detect';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuButtonTrigger,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { cn } from '@/lib/utils';
 import { sourcesStore } from '@/stores/sources';
 import type { Book } from '@/types';
@@ -21,7 +30,13 @@ import type { Book } from '@/types';
 export interface BookshelfCacheRowState {
   book: Book;
   cached: number;
+  autoCached: number;
+  manualCached: number;
   cacheBytes: number;
+  imageCount: number;
+  imageCacheBytes: number;
+  /** 漫画书（元数据或正文抽样） */
+  isManga: boolean;
   total: number;
   downloadPercent: number | null;
 }
@@ -31,7 +46,11 @@ export interface BookshelfCacheBookCardProps {
   rowIndex: number;
   exporting: boolean;
   onToggleDownload: () => void;
-  onExport: () => void;
+  onExportTxt: () => void;
+  onExportMangaZip?: () => void;
+  onExportMangaFolder?: () => void;
+  /** 后台正在将已缓存章节 HTML 中的图片写入磁盘 */
+  imageWarming?: () => boolean;
   onClear: () => void;
 }
 
@@ -42,9 +61,14 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
   const row = () => props.rows[props.rowIndex];
   const book = () => row().book;
   const cached = () => row().cached;
+  const autoCached = () => row().autoCached;
+  const manualCached = () => row().manualCached;
   const cacheBytes = () => row().cacheBytes;
   const total = () => row().total;
   const downloadPercent = () => row().downloadPercent;
+  const imageCount = () => row().imageCount;
+  const imageCacheBytes = () => row().imageCacheBytes;
+  const isMangaBook = () => row().isManga;
 
   const active = () =>
     chapterCacheDownloadStore.state.activeBookUrls.includes(book().bookUrl);
@@ -84,9 +108,39 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
           <p class="m-0 truncate text-xs leading-4 text-muted-foreground">
             已缓存 {cached()}
             {total() > 0 ? ` / ${total()}` : ''} 章
-            {cacheBytes() > 0 ? ` · ${formatChapterCacheSize(cacheBytes())}` : ''}
+            <Show when={cached() > 0}>
+              <span>
+                {' '}
+                （自动 {autoCached()} · 离线 {manualCached()}）
+              </span>
+            </Show>
+            <Show when={isMangaBook()} fallback={
+              cacheBytes() > 0 ? <span> · {formatChapterCacheSize(cacheBytes())}</span> : null
+            }>
+              {cacheBytes() > 0 ? (
+                <span> · 章节 HTML {formatChapterCacheSize(cacheBytes())}</span>
+              ) : null}
+            </Show>
+            <Show when={isMangaBook() && (imageCount() > 0 || (cached() > 0 && props.imageWarming?.()))}>
+              <Show
+                when={imageCount() > 0}
+                fallback={<span> · 图片缓存中…</span>}
+              >
+                <span>
+                  {' '}
+                  · 图片 {imageCount()} 张
+                  {imageCacheBytes() > 0
+                    ? ` (${formatMangaImageCacheSize(imageCacheBytes())})`
+                    : ''}
+                </span>
+              </Show>
+            </Show>
             <Show when={downloadPercent() != null}>
-              <span> · 下载中 {downloadPercent()}%</span>
+              <span>
+                {' '}
+                · 缓存中 {downloadPercent()}%
+                <Show when={isMangaBook()}>（含图片）</Show>
+              </span>
             </Show>
           </p>
         </div>
@@ -109,23 +163,65 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
             </TooltipTrigger>
             <TooltipContent>{active() ? '停止缓存' : '缓存全书'}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              as={Button}
-              variant="outline"
-              size="icon"
-              class="size-7"
-              disabled={props.exporting}
-              onClick={(e) => {
-                e.stopPropagation();
-                props.onExport();
-              }}
-            >
-              <ExportIcon class="h-3.5 w-3.5" size={14} />
-              <span class="sr-only">导出已缓存章节</span>
-            </TooltipTrigger>
-            <TooltipContent>导出已缓存章节</TooltipContent>
-          </Tooltip>
+          <Show
+            when={isMangaBook()}
+            fallback={
+              <Tooltip>
+                <TooltipTrigger
+                  as={Button}
+                  variant="outline"
+                  size="icon"
+                  class="size-7"
+                  disabled={props.exporting}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onExportTxt();
+                  }}
+                >
+                  <ExportIcon class="h-3.5 w-3.5" size={14} />
+                  <span class="sr-only">导出已缓存章节</span>
+                </TooltipTrigger>
+                <TooltipContent>导出 TXT</TooltipContent>
+              </Tooltip>
+            }
+          >
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(triggerProps: Record<string, unknown>) => (
+                  <Tooltip>
+                    <TooltipTrigger
+                      as={Button}
+                      variant="outline"
+                      size="icon"
+                      class="size-7"
+                      disabled={props.exporting}
+                      {...triggerProps}
+                      onClick={(e: MouseEvent) => {
+                        e.stopPropagation();
+                      }}
+                    >
+                      <ExportIcon class="h-3.5 w-3.5" size={14} />
+                      <span class="sr-only">导出</span>
+                    </TooltipTrigger>
+                    <TooltipContent>导出 TXT / 图片</TooltipContent>
+                  </Tooltip>
+                )}
+              />
+              <AppDropdownMenuContent layout="compact">
+                <AppDropdownMenuItem onSelect={() => props.onExportTxt()}>
+                  导出 TXT
+                </AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => props.onExportMangaZip?.()}>
+                  导出图片 ZIP
+                </AppDropdownMenuItem>
+                <Show when={isTauri()}>
+                  <AppDropdownMenuItem onSelect={() => props.onExportMangaFolder?.()}>
+                    导出图片到文件夹
+                  </AppDropdownMenuItem>
+                </Show>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
+          </Show>
           <Tooltip>
             <TooltipTrigger
               as={Button}

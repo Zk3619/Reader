@@ -1,21 +1,32 @@
 /**
  * 批量缓存章节队列（对齐 Legado CacheBook）
+ * 漫画章：HTML 落盘后需等待插图全部拉取完成，才计为该章缓存完成。
  */
 
 import { createStore } from 'solid-js/store';
 import * as booksDb from '@/lib/database/books';
 import * as chaptersDb from '@/lib/database/chapters';
+import * as chapterCacheDb from '@/lib/database/chapter-cache';
 import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook } from '@/lib/local-book';
+import { CHAPTER_CACHE_TIER_MANUAL } from '@/lib/chapter-cache/cache-tier';
 import {
   fetchAndCacheChapterContent,
+  promoteChapterCacheToManual,
   readCachedChapterRaw,
 } from '@/lib/chapter-cache/storage';
+import { isMangaChapterContent } from '@/lib/media/image/manga-book-detect';
+import {
+  listFetchableMangaImageRefs,
+  warmMangaImagesForCachedChapter,
+} from '@/lib/export/export-manga-images';
+import { readMangaImageFromDisk } from '@/lib/media/image/manga-image-disk-cache';
 import { showAppToast } from '@/components/shared/AppToasts';
-import type { Book } from '@/types';
+import type { Book, BookChapter, BookSource } from '@/types';
 
 const DEFAULT_CONCURRENCY = 2;
 const MAX_RETRIES = 3;
+const MANGA_IMAGE_RETRY_DELAY_MS = 600;
 
 export interface ChapterDownloadProgress {
   bookUrl: string;
@@ -77,6 +88,16 @@ function setBookProgress(bookUrl: string, patch: Partial<ChapterDownloadProgress
     error: null,
   };
   setQueueState('progressByBook', bookUrl, { ...prev, ...patch });
+}
+
+function notifyChapterCacheUpdated(bookUrl: string): void {
+  window.dispatchEvent(
+    new CustomEvent('chapter-cache-updated', { detail: { bookUrl } }),
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function stopChapterDownload(bookUrl: string): void {
@@ -163,9 +184,7 @@ async function notifyBookDownloadFinished(
     variant: result.failed > 0 ? 'warning' : 'success',
   });
 
-  window.dispatchEvent(
-    new CustomEvent('chapter-cache-updated', { detail: { bookUrl: job.bookUrl } }),
-  );
+  notifyChapterCacheUpdated(job.bookUrl);
 }
 
 function pump(): void {
@@ -184,6 +203,115 @@ function pump(): void {
         pump();
       });
   }
+}
+
+async function warmMangaChapterWithRetry(
+  book: Book,
+  chapterIndex: number,
+  raw: string,
+  chapterUrl: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (signal.aborted) return false;
+    const result = await warmMangaImagesForCachedChapter(
+      book,
+      chapterIndex,
+      raw,
+      chapterUrl,
+    );
+    if (result.complete) return true;
+    if (attempt < MAX_RETRIES - 1) {
+      await delay(MANGA_IMAGE_RETRY_DELAY_MS);
+    }
+  }
+  return false;
+}
+
+/** 仅检查磁盘是否已有全部需拉取的漫画图（不触发网络） */
+async function isMangaChapterImagesCompleteOnDisk(
+  book: Book,
+  raw: string,
+  chapterUrl: string,
+): Promise<boolean> {
+  const fetchable = listFetchableMangaImageRefs(raw, chapterUrl);
+  if (fetchable.length === 0) return true;
+  const source = await sourcesDb.getSource(book.origin);
+  const sourceId = source?.sourceUrl ?? source?.sourceName;
+  let onDisk = 0;
+  for (const ref of fetchable) {
+    if (await readMangaImageFromDisk(ref.url, sourceId)) onDisk += 1;
+  }
+  return onDisk >= fetchable.length;
+}
+
+async function ensureChapterFullyCached(
+  book: Book,
+  source: BookSource,
+  chapter: BookChapter,
+  index: number,
+  nextChapterUrl: string | undefined,
+  job: BookJob,
+): Promise<boolean> {
+  const chapterUrl = chapter.url ?? chapter.baseUrl ?? '';
+
+  if (await chapterCacheDb.isManualCachedChapter(book.bookUrl, index)) {
+    const existingRaw = await readCachedChapterRaw(book.bookUrl, index);
+    if (existingRaw?.trim()) {
+      const complete = isMangaChapterContent(existingRaw, chapterUrl)
+        ? await isMangaChapterImagesCompleteOnDisk(book, existingRaw, chapterUrl)
+        : true;
+      if (complete) return true;
+    }
+  }
+
+  let raw = await readCachedChapterRaw(book.bookUrl, index);
+
+  if (!raw?.trim()) {
+    let fetched: string | null = null;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (job.abort.signal.aborted) return false;
+      try {
+        fetched = await fetchAndCacheChapterContent(
+          source,
+          book,
+          chapter,
+          nextChapterUrl,
+          { cacheIndex: index, cacheTier: CHAPTER_CACHE_TIER_MANUAL },
+        );
+        if (fetched?.trim()) break;
+      } catch (e) {
+        if (attempt === MAX_RETRIES - 1) {
+          setBookProgress(job.bookUrl, {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    }
+    raw = fetched;
+    if (!raw?.trim()) return false;
+  }
+
+  let ok = true;
+  if (isMangaChapterContent(raw, chapterUrl)) {
+    ok = await warmMangaChapterWithRetry(
+      book,
+      index,
+      raw,
+      chapterUrl,
+      job.abort.signal,
+    );
+    if (!ok) {
+      setBookProgress(job.bookUrl, {
+        error: `第 ${index + 1} 章漫画图片未全部缓存成功`,
+      });
+    }
+  }
+
+  if (ok) {
+    await promoteChapterCacheToManual(book.bookUrl, index);
+  }
+  return ok;
 }
 
 async function runBookJob(job: BookJob): Promise<ChapterDownloadBatchResult> {
@@ -216,38 +344,21 @@ async function runBookJob(job: BookJob): Promise<ChapterDownloadBatchResult> {
 
     setBookProgress(job.bookUrl, { currentIndex: index });
 
-    const existing = await readCachedChapterRaw(book.bookUrl, index);
-    if (existing?.trim()) {
-      done += 1;
-      cached += 1;
-      setBookProgress(job.bookUrl, { done });
-      continue;
-    }
+    const next = chapters[index + 1];
+    const ok = await ensureChapterFullyCached(
+      book,
+      source,
+      chapter,
+      index,
+      next?.url,
+      job,
+    );
 
-    let ok = false;
-    for (let attempt = 0; attempt < MAX_RETRIES && !ok; attempt++) {
-      if (job.abort.signal.aborted) break;
-      try {
-        const next = chapters[index + 1];
-        const raw = await fetchAndCacheChapterContent(
-          source,
-          book,
-          chapter,
-          next?.url,
-          index,
-        );
-        if (raw?.trim()) {
-          ok = true;
-          cached += 1;
-        }
-      } catch (e) {
-        if (attempt === MAX_RETRIES - 1) {
-          failed += 1;
-          setBookProgress(job.bookUrl, {
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
+    if (ok) {
+      cached += 1;
+      notifyChapterCacheUpdated(job.bookUrl);
+    } else if (!job.abort.signal.aborted) {
+      failed += 1;
     }
 
     done += 1;

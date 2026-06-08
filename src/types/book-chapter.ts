@@ -82,6 +82,10 @@ export interface ChapterContent {
 /**
  * 章节缓存（用于存储章节内容）
  */
+import type { ChapterCacheTier } from '@/lib/chapter-cache/cache-tier';
+
+export type { ChapterCacheTier };
+
 export interface ChapterCache {
   /** 书籍URL */
   bookUrl: string;
@@ -93,4 +97,6 @@ export interface ChapterCache {
   filePath?: string | null;
   /** 创建时间 */
   createdAt: number;
+  /** auto=阅读自动缓存（可淘汰）；manual=用户离线缓存 */
+  cacheTier?: ChapterCacheTier;
 }

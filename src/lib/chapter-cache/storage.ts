@@ -4,6 +4,12 @@
 
 import * as chapterCacheDb from '@/lib/database/chapter-cache';
 import {
+  CHAPTER_CACHE_TIER_AUTO,
+  CHAPTER_CACHE_TIER_MANUAL,
+  mergeChapterCacheTier,
+  type ChapterCacheTier,
+} from '@/lib/chapter-cache/cache-tier';
+import {
   CHAPTER_FILE_THRESHOLD_BYTES,
   deleteBookCacheFiles,
   deleteChapterFile,
@@ -14,6 +20,15 @@ import {
 import { catalogCacheIndex } from '@/lib/chapter-cache/catalog-cache-index';
 import type { Book, BookChapter, BookSource } from '@/types';
 import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
+import {
+  clearAllMangaImages,
+  clearMangaImagesByBook,
+} from '@/lib/media/image/manga-image-disk-cache';
+
+export type WriteCachedChapterOptions = {
+  /** auto=阅读自动；manual=用户离线缓存（不受自动淘汰） */
+  cacheTier?: ChapterCacheTier;
+};
 
 export async function readCachedChapterRaw(
   bookUrl: string,
@@ -28,17 +43,43 @@ export async function readCachedChapterRaw(
   return text ? row.content : null;
 }
 
+export async function isManualCachedChapter(
+  bookUrl: string,
+  chapterIndex: number,
+): Promise<boolean> {
+  return chapterCacheDb.isManualCachedChapter(bookUrl, chapterIndex);
+}
+
+/** 用户离线队列完成一章后，将已有 auto 缓存提升为 manual */
+export async function promoteChapterCacheToManual(
+  bookUrl: string,
+  chapterIndex: number,
+): Promise<void> {
+  const row = await chapterCacheDb.getChapterCache(bookUrl, chapterIndex);
+  if (!row) return;
+  if (row.cacheTier === CHAPTER_CACHE_TIER_MANUAL) return;
+  await chapterCacheDb.setChapterCacheTier(
+    bookUrl,
+    chapterIndex,
+    CHAPTER_CACHE_TIER_MANUAL,
+  );
+  notifyChapterCacheUpdated(bookUrl);
+}
+
 export async function writeCachedChapterRaw(
   book: Pick<Book, 'bookUrl' | 'name'>,
   chapterIndex: number,
   content: string,
+  options?: WriteCachedChapterOptions,
 ): Promise<void> {
   if (!content.trim()) return;
   const bytes = new TextEncoder().encode(content).byteLength;
   const now = Math.floor(Date.now() / 1000);
+  const requested = options?.cacheTier ?? CHAPTER_CACHE_TIER_AUTO;
+  const existing = await chapterCacheDb.getChapterCache(book.bookUrl, chapterIndex);
+  const cacheTier = mergeChapterCacheTier(existing?.cacheTier, requested);
 
   if (bytes > CHAPTER_FILE_THRESHOLD_BYTES) {
-    const existing = await chapterCacheDb.getChapterCache(book.bookUrl, chapterIndex);
     if (existing?.filePath) {
       await deleteChapterFile(existing.filePath);
     }
@@ -54,13 +95,15 @@ export async function writeCachedChapterRaw(
       content: '',
       filePath,
       createdAt: now,
+      cacheTier,
     });
     notifyChapterCacheUpdated(book.bookUrl);
-    await enforceChapterCacheLimits().catch(() => {});
+    if (cacheTier === CHAPTER_CACHE_TIER_AUTO) {
+      await enforceChapterCacheLimits().catch(() => {});
+    }
     return;
   }
 
-  const existing = await chapterCacheDb.getChapterCache(book.bookUrl, chapterIndex);
   if (existing?.filePath) {
     await deleteChapterFile(existing.filePath);
   }
@@ -70,9 +113,12 @@ export async function writeCachedChapterRaw(
     content,
     filePath: null,
     createdAt: now,
+    cacheTier,
   });
   notifyChapterCacheUpdated(book.bookUrl);
-  await enforceChapterCacheLimits().catch(() => {});
+  if (cacheTier === CHAPTER_CACHE_TIER_AUTO) {
+    await enforceChapterCacheLimits().catch(() => {});
+  }
 }
 
 function notifyChapterCacheUpdated(bookUrl: string): void {
@@ -104,32 +150,45 @@ export async function deleteCachedChaptersByBook(
   }
   await chapterCacheDb.deleteChapterCacheByBook(book.bookUrl);
   await deleteBookCacheFiles(book.bookUrl, book.name);
+  await clearMangaImagesByBook(book.bookUrl);
 }
 
 export async function clearAllCachedChapters(): Promise<void> {
   await chapterCacheDb.clearAllChapterCache();
   await clearAllChapterCacheFiles();
+  await clearAllMangaImages();
 }
 
 export async function countCachedChapters(bookUrl: string): Promise<number> {
   return chapterCacheDb.countChapterCacheByBook(bookUrl);
 }
 
+export type FetchAndCacheChapterOptions = {
+  cacheIndex?: number;
+  cacheTier?: ChapterCacheTier;
+};
+
 export async function fetchAndCacheChapterContent(
   source: BookSource,
   book: Book,
   chapter: BookChapter,
   nextChapterUrl?: string,
-  /** 目录数组下标；须与阅读器 chapterIndex / 目录云标一致 */
-  cacheIndex?: number,
+  cacheIndexOrOptions?: number | FetchAndCacheChapterOptions,
 ): Promise<string | null> {
+  const options: FetchAndCacheChapterOptions =
+    typeof cacheIndexOrOptions === 'number'
+      ? { cacheIndex: cacheIndexOrOptions }
+      : (cacheIndexOrOptions ?? {});
   const { getContent } = await import('@/lib/book-source/content');
   const raw = await getContent(source, chapter, nextChapterUrl, book, {
     skipReplaceRules: true,
   });
   if (raw) {
-    const idx = cacheIndex ?? catalogCacheIndex(chapter.index, chapter);
-    await writeCachedChapterRaw(book, idx, raw);
+    const idx =
+      options.cacheIndex ?? catalogCacheIndex(chapter.index, chapter);
+    await writeCachedChapterRaw(book, idx, raw, {
+      cacheTier: options.cacheTier,
+    });
   }
   return raw;
 }
