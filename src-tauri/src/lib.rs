@@ -172,6 +172,12 @@ pub(crate) fn effective_data_dir_from_config(
     Ok(data_root)
 }
 
+/// 前端「再按一次退出」确认后调用；须配合 RunEvent 仅拦截 code=None 的系统退出。
+#[tauri::command]
+fn request_app_exit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 /// 返回应用数据根目录：由 config.json 的 dataDir 决定，无则用默认（桌面=exe 旁 AppData，移动端=系统目录）
 #[tauri::command]
 fn get_app_data_root(app: tauri::AppHandle) -> Result<String, String> {
@@ -1688,6 +1694,7 @@ pub fn run() {
             extract_zip_json_entries,
             decode_gbk,
             encode_form_urlencoded_gbk,
+            request_app_exit,
             get_app_data_root,
             get_default_app_data_base,
             get_config,
@@ -1781,12 +1788,10 @@ pub fn run() {
                 http_cookies::finalize_http_cookies_to_portable();
             }
 
-            // 兜底：阻止 WebView 栈空时系统返回直接杀进程；「再按一次退出」由前端 onBackButtonPress 处理。
-            // 前端无法拦截 RunEvent::ExitRequested，此逻辑不能整体搬到 JS。
+            // 兜底：仅拦截系统/用户触发的退出（code=None）；前端 request_app_exit / app.exit(0) 为 code=Some，须放行。
             #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                let _ = app_handle;
-                if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
                     api.prevent_exit();
                 }
             }
