@@ -11,6 +11,7 @@ import {
   readCachedChapterRaw,
   deleteCachedChapter,
 } from '@/lib/chapter-cache/storage';
+import { scheduleChapterBodyCachePrefetch } from '@/lib/chapter-cache/prefetch';
 import {
   fetchChapterListDeduped,
   shelfCachedChapterListLooksStale,
@@ -43,6 +44,12 @@ export function resetMediaChapterSession(): void {
   void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrls());
   void import('@/stores/viewer/media/video').then((m) => m.revokeVideoPlaybackUrls());
   void import('@/lib/media/video/video-chapter-cache').then((m) => m.clearVideoChapterCache());
+  void import('@/lib/media/image/manga-image-prefetch').then((m) =>
+    m.cancelMangaImagePrefetchSession(),
+  );
+  void import('@/lib/media/image/manga-chapter-pool').then((m) =>
+    m.cancelMangaChapterPoolWarm(),
+  );
 }
 
 export function beginMediaChapterSession(): void {
@@ -274,6 +281,9 @@ export async function loadMediaChapterWithApply(
     if (seq !== chapterLoadSeq) return;
     setState({ loading: false });
     allowMediaTextFallback = false;
+    if (state.catalog.length > 0) {
+      scheduleChapterBodyCachePrefetch(book, state.catalog, index);
+    }
     if (saveProgressFn) {
       await saveProgressFn();
     }

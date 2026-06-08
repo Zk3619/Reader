@@ -1,13 +1,16 @@
-import { createSignal, Index, Show, createEffect, createMemo, onCleanup, onMount, type Accessor } from 'solid-js';
-import { viewerStore } from '@/stores/viewer';
 import {
-  MANGA_SCROLL_ROOT_ATTR,
-  ReaderInlineImg,
-} from '@/components/viewer/text-viewer/ReaderInlineImg';
+  createSignal,
+  Show,
+  createEffect,
+  createMemo,
+  onCleanup,
+  onMount,
+  type Accessor,
+} from 'solid-js';
+import { viewerStore } from '@/stores/viewer';
 import { flowImageRefs } from '@/lib/media/image/flow-images';
 import { logContentImageDiagnostics } from '@/lib/book-source/content-image-debug';
 import type { ReaderInlineImageRef } from '@/lib/media/text/reader-content-blocks';
-
 import { getSource } from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 import {
@@ -17,7 +20,7 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainScrollClass } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
 import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
@@ -29,68 +32,89 @@ import {
   ViewerAppDrawerHeader,
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { ZoomIn, ZoomOut } from 'lucide-solid';
+import { ImageViewerOfflineCacheDialog } from '@/components/viewer/image-viewer/ImageViewerOfflineCacheDialog';
+import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
+import {
+  ImageScrollViewport,
+  type ImageScrollNavApi,
+  type MangaPageItem,
+} from '@/components/viewer/image-viewer/ImageScrollViewport';
+import { ImagePagedViewport } from '@/components/viewer/image-viewer/ImagePagedViewport';
+import { ImageViewerSettings } from '@/components/viewer/image-viewer/ImageViewerSettings';
+import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
+import {
+  defaultImageViewerUiConfig,
+  type ImageViewerUiConfig,
+} from '@/lib/media/image/image-viewer-ui-config';
+import { loadImageViewerUiConfig } from '@/lib/media/image/image-viewer-config-storage';
+import { scheduleMangaImagePrefetch } from '@/lib/media/image/manga-image-prefetch';
+import { trimMangaImagesOutsideChapters } from '@/lib/media/image/manga-image-disk-cache';
+import { mangaImageRetainChapterWindow } from '@/lib/media/image/manga-image-retain';
+import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
+import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 
-const IMAGE_VIEWER_CONTENT_SCALE_KEY = 'reader.imageViewer.contentScale';
-const IMAGE_VIEWER_SCALE_MIN = 0.5;
-const IMAGE_VIEWER_SCALE_MAX = 2;
-const IMAGE_VIEWER_SCALE_STEP = 0.05;
-/** 与 Tailwind `max-w-3xl` 一致（48rem） */
 const IMAGE_VIEWER_CONTENT_MAX_REM = 48;
-
-function clampImageViewerScale(value: number): number {
-  return Math.min(IMAGE_VIEWER_SCALE_MAX, Math.max(IMAGE_VIEWER_SCALE_MIN, value));
-}
-
-function loadImageViewerContentScale(): number {
-  try {
-    const raw = localStorage.getItem(IMAGE_VIEWER_CONTENT_SCALE_KEY);
-    if (raw != null) {
-      const n = Number(raw);
-      if (Number.isFinite(n)) return clampImageViewerScale(n);
-    }
-  } catch {
-    /* ignore */
-  }
-  return 1;
-}
-
-function persistImageViewerContentScale(scale: number): void {
-  try {
-    localStorage.setItem(IMAGE_VIEWER_CONTENT_SCALE_KEY, String(scale));
-  } catch {
-    /* ignore */
-  }
-}
+const TAP_MOVE_THRESHOLD = 10;
 
 export interface ImageViewerPageProps {
   onClose: () => void;
-  /** 导航栈条目是否栈顶可见 */
   entryVisible?: Accessor<boolean>;
+}
+
+function ImageViewerChromeBridge(props: { onReady: (toggleBars: () => void) => void }) {
+  const shell = useMediaViewerShell();
+  onMount(() => props.onReady(() => shell.toggleBars()));
+  return null;
 }
 
 export function ImageViewerPage(props: ImageViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [contentScale, setContentScale] = createSignal(loadImageViewerContentScale());
+  const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
+  const [uiConfig, setUiConfig] = createSignal<ImageViewerUiConfig>(defaultImageViewerUiConfig);
+  const [configLoaded, setConfigLoaded] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
   const [batchRetryToken, setBatchRetryToken] = createSignal(0);
   const [viewPage, setViewPage] = createSignal(1);
 
-  let scrollRootEl: HTMLDivElement | undefined;
-  const mainScrollClass = useMediaViewerMainScrollClass('scroll-gutter-stable-both bg-black/90');
+  let toggleChromeBars: () => void = () => undefined;
+  let pagedNav: ReaderPagedNavApi | undefined;
+  let scrollNav: ImageScrollNavApi | undefined;
+
+  let tapStartTime = 0;
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapMoved = false;
+
+  const mainStageClass = useMediaViewerMainStageClass('bg-black/90');
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
+  const catalogSize = () => catalog().length;
+
+  const openOfflineCacheDialog = () => {
+    const blocked = getOfflineCacheBlockedReason(
+      book(),
+      viewerStore.isGuestReading(),
+    );
+    if (blocked) {
+      showAppToast({
+        title: '无法离线缓存',
+        description: blocked,
+        variant: 'default',
+      });
+      return;
+    }
+    setOfflineCacheDialogOpen(true);
+  };
   const chapterIndex = () => viewerStore.state.chapterIndex;
   const rawContent = () => viewerStore.state.rawContent;
   const mediaUrls = () => viewerStore.state.mediaUrls;
-  type MangaPageItem = ReaderInlineImageRef & { slot: string; page: number };
+
   const imageList = createMemo((): MangaPageItem[] => {
     const idx = chapterIndex();
     const ch = catalog()[idx];
@@ -105,10 +129,10 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       page: i + 1,
     }));
   });
+
   const loading = () => viewerStore.state.loading;
   const bootstrapping = () => viewerStore.isMediaViewerBootstrapping();
   const error = () => viewerStore.state.error;
-
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
   const chapterPageReferer = () => {
     const ch = catalog()[chapterIndex()];
@@ -117,62 +141,32 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   };
   const totalPages = () => imageList().length;
 
-  const updateViewPageFromScroll = () => {
-    const root = scrollRootEl;
-    if (!root) return;
-    const slots = root.querySelectorAll('[data-manga-page]');
-    if (slots.length === 0) {
-      setViewPage(1);
-      return;
-    }
-    const center = root.scrollTop + root.clientHeight / 2;
-    let bestPage = 1;
-    let bestDist = Number.POSITIVE_INFINITY;
-    slots.forEach((el) => {
-      const node = el as HTMLElement;
-      const page = Number(node.dataset.mangaPage);
-      if (!Number.isFinite(page) || page <= 0) return;
-      const mid = node.offsetTop + node.offsetHeight / 2;
-      const dist = Math.abs(mid - center);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPage = page;
-      }
-    });
-    setViewPage(bestPage);
-    viewerStore.setChapterPos(bestPage - 1);
+  const readingMode = () => uiConfig().readingMode;
+  const contentScale = () => uiConfig().contentScale;
+  const mangaPreDownloadNum = () => uiConfig().mangaPreDownloadNum;
+  const isPagedMode = () => readingMode() === 'paged';
+
+  const chapterProgressPercent = () => {
+    const total = totalPages();
+    if (total <= 0) return 0;
+    const current = Math.max(1, Math.min(viewPage(), total));
+    return Math.round(((current - 1) / Math.max(1, total - 1)) * 100);
   };
 
+  const contentMaxWidthStyle = () => ({
+    'max-width': `${IMAGE_VIEWER_CONTENT_MAX_REM * uiConfig().contentScale}rem`,
+  });
+
   onMount(() => {
-    const root = scrollRootEl;
-    if (!root) return;
-    const onScroll = () => updateViewPageFromScroll();
-    root.addEventListener('scroll', onScroll, { passive: true });
-    onCleanup(() => root.removeEventListener('scroll', onScroll));
-  });
-
-  createEffect(() => {
-    chapterIndex();
-    setBatchRetryToken(0);
-    setViewPage(1);
-    queueMicrotask(() => updateViewPageFromScroll());
-  });
-
-  createEffect(() => {
-    imageList().length;
-    queueMicrotask(() => updateViewPageFromScroll());
+    void loadImageViewerUiConfig().then((cfg) => {
+      setUiConfig(cfg);
+      setConfigLoaded(true);
+    });
   });
 
   createEffect(() => {
     if (import.meta.env.DEV && !loading() && !error() && rawContent()) {
       logContentImageDiagnostics(rawContent(), 'image-viewer.rawContent', 5);
-      const list = imageList();
-      console.log('[image-viewer] 渲染列表', {
-        count: list.length,
-        first: list[0]?.url.split('/').pop(),
-        fifth: list[4]?.url.split('/').pop(),
-        last: list[list.length - 1]?.url.split('/').pop(),
-      });
     }
   });
 
@@ -191,6 +185,39 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     };
   });
 
+  createEffect(() => {
+    const b = book();
+    const chIdx = chapterIndex();
+    if (!b) return;
+    void mangaImageRetainChapterWindow(chIdx).then(({ min, max }) => {
+      void trimMangaImagesOutsideChapters(b.bookUrl, min, max);
+    });
+  });
+
+  createEffect(() => {
+    const b = book();
+    const cat = catalog();
+    const chIdx = chapterIndex();
+    const list = imageList();
+    const page = viewPage();
+    const mode = readingMode();
+    if (!b || loading() || error() || list.length === 0) return;
+
+    scheduleMangaImagePrefetch({
+      book: b,
+      catalog: cat,
+      chapterIndex: chIdx,
+      items: list,
+      currentPageIndex: Math.max(0, page - 1),
+      readingMode: mode,
+      mangaPreDownloadNum: mangaPreDownloadNum(),
+      mangaPagedPreDownloadNum: uiConfig().mangaPagedPreDownloadNum,
+      persistToDisk: uiConfig().mangaDiskCacheWhileReading,
+      referer: chapterPageReferer(),
+      source: bookSource(),
+    });
+  });
+
   const goChapter = async (delta: number) => {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
@@ -201,21 +228,34 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     await viewerStore.loadChapter(next);
   };
 
-  const setContentScaleClamped = (next: number) => {
-    const v = clampImageViewerScale(next);
-    setContentScale(v);
-    persistImageViewerContentScale(v);
+  const handlePrevChapter = () => void goChapter(-1);
+  const handleNextChapter = () => void goChapter(1);
+
+  const goNextPage = () => {
+    if (isPagedMode() && pagedNav) {
+      pagedNav.goNextPage();
+      return;
+    }
+    void handleNextChapter();
   };
 
-  const nudgeContentScale = (delta: number) => {
-    setContentScaleClamped(contentScale() + delta);
+  const goPrevPage = () => {
+    if (isPagedMode() && pagedNav) {
+      pagedNav.goPrevPage();
+      return;
+    }
+    void handlePrevChapter();
   };
 
-  const contentMaxWidthStyle = () => ({
-    'max-width': `${IMAGE_VIEWER_CONTENT_MAX_REM * contentScale()}rem`,
-  });
-
-  const contentScalePercent = () => Math.round(contentScale() * 100);
+  const handleChapterProgressChange = (values: number[]) => {
+    const p = Math.max(0, Math.min(1, values[0] ?? 0));
+    viewerStore.setChapterPos(p);
+    if (isPagedMode() && pagedNav) {
+      pagedNav.setPageProgress(p);
+      return;
+    }
+    scrollNav?.scrollToProgress(p);
+  };
 
   const refreshChapter = () => {
     if (!viewerStore.isOpen()) {
@@ -227,9 +267,90 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     });
   };
 
+  const onContentPointerDown = (e: MouseEvent | TouchEvent) => {
+    const x = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const y = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    if ('button' in e && e.button !== 0) return;
+    tapStartTime = Date.now();
+    tapStartX = x;
+    tapStartY = y;
+    tapMoved = false;
+  };
+
+  const onContentPointerMove = (e: MouseEvent | TouchEvent) => {
+    const x = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+    const y = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+    if (
+      tapStartTime &&
+      (Math.abs(x - tapStartX) > TAP_MOVE_THRESHOLD ||
+        Math.abs(y - tapStartY) > TAP_MOVE_THRESHOLD)
+    ) {
+      tapMoved = true;
+    }
+  };
+
+  const contentPrimaryAction = (e: MouseEvent) => {
+    if (tapMoved) {
+      tapStartTime = 0;
+      return;
+    }
+    const target =
+      (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
+        '.reader-paged-viewport',
+      ) ?? (e.currentTarget as HTMLElement | null);
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
+
+    if (isPagedMode()) {
+      if (xRatio < 1 / 3) goPrevPage();
+      else if (xRatio > 2 / 3) goNextPage();
+      else toggleChromeBars();
+    } else {
+      toggleChromeBars();
+    }
+    tapStartTime = 0;
+  };
+
+  onMount(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setCatalogOpen(false);
+        setSettingsOpen(false);
+        if (!catalogOpen() && !settingsOpen()) toggleChromeBars();
+      }
+      if (e.key === 'ArrowLeft') goPrevPage();
+      if (e.key === 'ArrowRight') goNextPage();
+    };
+    window.addEventListener('keydown', handleKey);
+    onCleanup(() => window.removeEventListener('keydown', handleKey));
+  });
+
+  /** 滚动模式：外层不滚动，由 ImageScrollViewport 承担 overflow */
+  const mainContentClass = () => {
+    if (isPagedMode()) return mainStageClass();
+    return cn(
+      mainStageClass(),
+      'overflow-hidden',
+    );
+  };
+
   return (
     <>
-      <MediaViewerShell entryVisible={props.entryVisible}>
+      <MediaViewerChromeLayoutProvider
+        layout={() => uiConfig().viewerChromeLayout}
+      >
+      <MediaViewerShell
+        entryVisible={props.entryVisible}
+        tapToToggleBars={false}
+        chromePointerInput
+        contentPrimaryAction={contentPrimaryAction}
+      >
+        <ImageViewerChromeBridge
+          onReady={(toggle) => {
+            toggleChromeBars = toggle;
+          }}
+        />
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={
@@ -239,6 +360,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   subtitle={chapterTitle()}
                   onClose={props.onClose}
                   onOpenCatalog={() => setCatalogOpen(true)}
+                  onOpenOfflineCache={openOfflineCacheDialog}
                   onOpenImageSettings={() => setSettingsOpen(true)}
                   onRefresh={refreshChapter}
                   onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
@@ -252,75 +374,113 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   chapterIndex={chapterIndex()}
                   catalogLength={catalog().length}
                   loading={loading()}
-                  onPrev={() => void goChapter(-1)}
-                  onNext={() => void goChapter(1)}
+                  onPrev={handlePrevChapter}
+                  onNext={handleNextChapter}
                   center={
-                    <span class="text-xs tabular-nums text-muted-foreground">
-                      {totalPages() > 0 ? `${viewPage()} / ${totalPages()} 页` : ''}
-                    </span>
+                    <div class="flex min-w-0 flex-1 flex-col items-center gap-1 px-2">
+                      <span class="text-xs tabular-nums text-muted-foreground">
+                        {totalPages() > 0 ? `${viewPage()} / ${totalPages()} 页` : ''}
+                      </span>
+                      <Show when={totalPages() > 1}>
+                        <Slider
+                          class="h-4 w-full max-w-xs"
+                          value={[chapterProgressPercent() / 100]}
+                          minValue={0}
+                          maxValue={1}
+                          step={0.001}
+                          onChange={handleChapterProgressChange}
+                        >
+                          <SliderTrack>
+                            <SliderFill />
+                            <SliderThumb />
+                          </SliderTrack>
+                        </Slider>
+                      </Show>
+                    </div>
                   }
                 />
               </MediaViewerFooter>
             }
           >
-          <div
-            ref={scrollRootEl}
-            class={mainScrollClass()}
-            {...{ [MANGA_SCROLL_ROOT_ATTR]: '' }}
-          >
-            <Show when={bootstrapping() || loading()}>
-              <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-                加载中…
-              </div>
-            </Show>
-            <Show when={!bootstrapping() && !loading() && error()}>
-              <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
-                <p class="text-sm whitespace-pre-wrap text-destructive">{error()}</p>
-                <Button size="sm" variant="outline" onClick={refreshChapter}>
-                  重试
-                </Button>
-              </div>
-            </Show>
-            <Show when={!bootstrapping() && !loading() && !error()}>
-              <Show
-                when={imageList().length > 0}
-                fallback={
-                  <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
-                    <p class="text-sm text-muted-foreground">本章暂无图片，请尝试刷新章节</p>
-                    <Button size="sm" variant="outline" onClick={refreshChapter}>
-                      刷新本章
-                    </Button>
-                  </div>
-                }
-              >
-                <div
-                  class="mx-auto flex w-full flex-col"
-                  style={contentMaxWidthStyle()}
-                >
-                  <Index each={imageList()}>
-                    {(item) => (
-                      <div data-manga-page={item().page} class="w-full">
-                        <ReaderInlineImg
-                          src={item().url}
-                          legadoImageHeaders={item().legadoHeaders}
-                          referer={chapterPageReferer()}
-                          source={bookSource()}
-                          imageStyle="FULL"
-                          class="block w-full bg-neutral-900"
-                          deferUntilVisible
-                          useFetchQueue
-                          batchRetryToken={batchRetryToken()}
-                        />
-                      </div>
-                    )}
-                  </Index>
+            <div
+              class={mainContentClass()}
+              onPointerDown={onContentPointerDown}
+              onPointerMove={onContentPointerMove}
+            >
+              <Show when={bootstrapping() || loading()}>
+                <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+                  加载中…
                 </div>
               </Show>
-            </Show>
-          </div>
+              <Show when={!bootstrapping() && !loading() && error()}>
+                <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
+                  <p class="text-sm whitespace-pre-wrap text-destructive">{error()}</p>
+                  <Button size="sm" variant="outline" onClick={refreshChapter}>
+                    重试
+                  </Button>
+                </div>
+              </Show>
+              <Show when={!bootstrapping() && !loading() && !error() && configLoaded()}>
+                <Show
+                  when={imageList().length > 0}
+                  fallback={
+                    <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
+                      <p class="text-sm text-muted-foreground">本章暂无图片，请尝试刷新章节</p>
+                      <Button size="sm" variant="outline" onClick={refreshChapter}>
+                        刷新本章
+                      </Button>
+                    </div>
+                  }
+                >
+                  <Show
+                    when={isPagedMode()}
+                    fallback={
+                      <ImageScrollViewport
+                        class="h-full min-h-full"
+                        imageList={imageList}
+                        contentMaxWidthStyle={contentMaxWidthStyle}
+                        chapterPageReferer={chapterPageReferer}
+                        bookSource={bookSource}
+                        batchRetryToken={batchRetryToken}
+                        mangaPreDownloadNum={mangaPreDownloadNum}
+                        mangaEstimatedPageHeightPx={() =>
+                          uiConfig().mangaEstimatedPageHeightPx
+                        }
+                        mangaDiskCacheWhileReading={() =>
+                          uiConfig().mangaDiskCacheWhileReading
+                        }
+                        onViewPageChange={setViewPage}
+                        onRegisterNav={(api) => {
+                          scrollNav = api;
+                        }}
+                      />
+                    }
+                  >
+                    <ImagePagedViewport
+                      class="h-full min-h-full"
+                      contentScale={contentScale}
+                      imageList={imageList}
+                      chapterPageReferer={chapterPageReferer}
+                      bookSource={bookSource}
+                      batchRetryToken={batchRetryToken}
+                      mangaDiskCacheWhileReading={() =>
+                        uiConfig().mangaDiskCacheWhileReading
+                      }
+                      onRequestPrevChapter={handlePrevChapter}
+                      onRequestNextChapter={handleNextChapter}
+                      onViewPageChange={setViewPage}
+                      onRegisterNav={(api) => {
+                        pagedNav = api;
+                      }}
+                    />
+                  </Show>
+                </Show>
+              </Show>
+            </div>
           </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
+      </MediaViewerChromeLayoutProvider>
 
       <MediaViewerCatalogDrawer
         open={catalogOpen()}
@@ -332,6 +492,14 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
           setCatalogOpen(false);
           void viewerStore.loadChapter(index);
         }}
+      />
+
+      <ImageViewerOfflineCacheDialog
+        open={offlineCacheDialogOpen()}
+        onOpenChange={setOfflineCacheDialogOpen}
+        book={book() ?? null}
+        chapterIndex={chapterIndex()}
+        catalogSize={catalogSize()}
       />
 
       <ViewerAppDrawer
@@ -346,49 +514,11 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
         >
           <ViewerAppDrawerHeader title="界面设置" />
           <ViewerAppDrawerBody class="mb-4 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 pt-1">
-            <div class="space-y-2 py-2">
-              <div class="flex items-center justify-between">
-                <Label>内容缩放</Label>
-                <span class="text-sm tabular-nums text-muted-foreground">
-                  {contentScalePercent()}%
-                </span>
-              </div>
-              <div class="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  class="shrink-0"
-                  aria-label="缩小"
-                  disabled={contentScale() <= IMAGE_VIEWER_SCALE_MIN}
-                  onClick={() => nudgeContentScale(-IMAGE_VIEWER_SCALE_STEP)}
-                >
-                  <ZoomOut class="h-4 w-4" />
-                </Button>
-                <Slider
-                  class="min-w-0 flex-1 py-2"
-                  value={[contentScale()]}
-                  minValue={IMAGE_VIEWER_SCALE_MIN}
-                  maxValue={IMAGE_VIEWER_SCALE_MAX}
-                  step={IMAGE_VIEWER_SCALE_STEP}
-                  onChange={(values) => setContentScaleClamped(values[0] ?? contentScale())}
-                >
-                  <SliderTrack>
-                    <SliderFill />
-                    <SliderThumb />
-                  </SliderTrack>
-                </Slider>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  class="shrink-0"
-                  aria-label="放大"
-                  disabled={contentScale() >= IMAGE_VIEWER_SCALE_MAX}
-                  onClick={() => nudgeContentScale(IMAGE_VIEWER_SCALE_STEP)}
-                >
-                  <ZoomIn class="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            <ImageViewerSettings
+              config={uiConfig}
+              onChange={(patch) => setUiConfig((prev) => ({ ...prev, ...patch }))}
+              onClose={() => setSettingsOpen(false)}
+            />
           </ViewerAppDrawerBody>
         </ViewerAppDrawerContent>
       </ViewerAppDrawer>
