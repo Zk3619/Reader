@@ -1,4 +1,4 @@
-import { For } from 'solid-js';
+import { For, type Accessor } from 'solid-js';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
@@ -23,11 +23,18 @@ export interface ViewerChromeLayoutControlsProps {
   showHint?: boolean;
   /** drawer：阅读设置抽屉内均分宽度 */
   variant?: 'default' | 'drawer';
+  /** 受控模式：用于单阅读器配置（如漫画界面设置） */
+  value?: Accessor<ViewerChromeLayout>;
+  onChange?: (layout: ViewerChromeLayout) => void;
 }
 
 export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProps) {
-  const layout = () =>
-    normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
+  const layout = () => {
+    if (props.value) {
+      return normalizeViewerChromeLayout(props.value());
+    }
+    return normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
+  };
   const tabsListClass = () =>
     props.variant === 'drawer'
       ? readerDrawerOptionTabsListClass
@@ -41,9 +48,14 @@ export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProp
     <div class={cn('space-y-2', props.class)}>
       <Tabs
         value={layout()}
-        onChange={(value) =>
-          void settingsStore.setViewerChromeLayout(value as ViewerChromeLayout)
-        }
+        onChange={(value) => {
+          const next = value as ViewerChromeLayout;
+          if (props.onChange) {
+            props.onChange(next);
+            return;
+          }
+          void settingsStore.setViewerChromeLayout(next);
+        }}
         class="w-full"
       >
         <TabsList class={tabsListClass()} aria-label="顶栏与底栏布局">

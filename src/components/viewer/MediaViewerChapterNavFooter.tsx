@@ -2,8 +2,17 @@ import { splitProps } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
-import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
-import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
+import {
+  mediaViewerChromeBottomPassThroughClass,
+  mediaViewerChromeBottomRowClass,
+  mediaViewerChromeHitTargetClass,
+} from '@/components/viewer/viewer-chrome';
+import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
+import {
+  useMediaViewerChromeFloating,
+  useViewerChromeLayout,
+} from '@/lib/viewer/viewer-chrome-layout';
+import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerChapterNavFooterProps {
   chapterIndex: number;
@@ -30,16 +39,25 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
   ]);
 
   const floating = useMediaViewerChromeFloating();
+  const shell = useMediaViewerShellOptional();
+  const chromeLayout = useViewerChromeLayout();
+  const isFloatingLayout = () => chromeLayout() === 'floating';
+  const barHover = () =>
+    isFloatingLayout()
+      ? mediaViewerChromeBarHoverHandlers(shell, chromeLayout())
+      : {};
   const navBtn = () =>
     cn(
       floating.isFloating() && floating.pillClass(),
       floating.isFloating() && 'shadow-sm',
+      isFloatingLayout() && mediaViewerChromeHitTargetClass,
     );
   const centerWrap = () =>
     cn(
       'flex min-w-0 flex-col items-center gap-0.5 text-center',
       floating.isFloating() && floating.pillClass(),
       floating.isFloating() && 'px-3 py-1.5',
+      isFloatingLayout() && mediaViewerChromeHitTargetClass,
     );
 
   return (
@@ -47,6 +65,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
       <div
         class={cn(
           mediaViewerChromeBottomRowClass,
+          isFloatingLayout() && mediaViewerChromeBottomPassThroughClass,
           floating.isFloating() && 'border-0 bg-transparent',
         )}
       >
@@ -56,10 +75,16 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
           class={navBtn()}
           disabled={local.chapterIndex <= 0 || local.loading}
           onClick={local.onPrev}
+          onPointerEnter={barHover().onPointerEnter}
+          onPointerLeave={barHover().onPointerLeave}
         >
           上一章
         </Button>
-        <div class={centerWrap()}>
+        <div
+          class={centerWrap()}
+          onPointerEnter={barHover().onPointerEnter}
+          onPointerLeave={barHover().onPointerLeave}
+        >
           <span class="text-xs text-muted-foreground">
             {local.catalogLength > 0
               ? `${local.chapterIndex + 1} / ${local.catalogLength} 章`
@@ -73,6 +98,8 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
           class={navBtn()}
           disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
           onClick={local.onNext}
+          onPointerEnter={barHover().onPointerEnter}
+          onPointerLeave={barHover().onPointerLeave}
         >
           下一章
         </Button>

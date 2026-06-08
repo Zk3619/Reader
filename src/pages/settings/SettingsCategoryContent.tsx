@@ -1,6 +1,4 @@
-import { createSignal, For, Show } from 'solid-js';
-import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
+import { For, Show } from 'solid-js';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
@@ -26,17 +24,6 @@ export interface SettingsCategoryContentProps {
 }
 
 export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
-  const [greetMsg, setGreetMsg] = createSignal('');
-
-  async function testTauriCommand() {
-    try {
-      const msg = await invoke<string>('greet', { name: 'Reader' });
-      setGreetMsg(msg);
-    } catch (e) {
-      setGreetMsg(e instanceof Error ? e.message : '调用失败');
-    }
-  }
-
   const highlight = (id: string) => props.highlightedItemId === id;
 
   return (
@@ -154,48 +141,6 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       </Show>
 
       <Show when={props.categoryId === 'other'}>
-        <SettingItemAnchor id="tauri-test" highlighted={highlight('tauri-test')}>
-          <div class="rounded-2xl border border-border/50 bg-card p-6">
-            <h3 class="mb-4 font-semibold text-foreground">Tauri 命令测试</h3>
-            <div class="flex flex-col gap-4">
-              <Button onClick={testTauriCommand} variant="default">
-                测试 Tauri invoke
-              </Button>
-              <Show when={greetMsg()}>
-                <div class="rounded-xl bg-success/10 p-4 text-sm text-success-foreground">
-                  <span class="font-medium">响应结果：</span> {greetMsg()}
-                </div>
-              </Show>
-            </div>
-          </div>
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="button-variants" highlighted={highlight('button-variants')}>
-          <div class="rounded-2xl border border-border/50 bg-card p-6">
-            <h3 class="mb-4 font-semibold text-foreground">Button 组件变体</h3>
-            <div class="flex flex-wrap gap-3">
-              <Button variant="default">Default</Button>
-              <Button variant="secondary">Secondary</Button>
-              <Button variant="destructive">Destructive</Button>
-              <Button variant="outline">Outline</Button>
-              <Button variant="ghost">Ghost</Button>
-              <Button variant="link">Link</Button>
-            </div>
-          </div>
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="button-sizes" highlighted={highlight('button-sizes')}>
-          <div class="rounded-2xl border border-border/50 bg-card p-6">
-            <h3 class="mb-4 font-semibold text-foreground">Button 尺寸</h3>
-            <div class="flex flex-wrap items-center gap-3">
-              <Button size="sm">Small</Button>
-              <Button size="default">Default</Button>
-              <Button size="lg">Large</Button>
-              <Button size="icon">🔔</Button>
-            </div>
-          </div>
-        </SettingItemAnchor>
-
         <SettingItemAnchor id="tech-stack" highlighted={highlight('tech-stack')}>
           <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6">
             <h3 class="mb-3 font-semibold text-foreground">技术栈</h3>

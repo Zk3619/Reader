@@ -1,4 +1,4 @@
-import { splitProps, type JSX } from 'solid-js';
+import { Show, splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import { MediaViewerFloatingTopChrome } from '@/components/viewer/MediaViewerFloatingTopChrome';
@@ -34,65 +34,64 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
   const toolbarRow = () => (
     <div
       class={cn(
-        'flex h-14 items-center gap-2',
-        layout() === 'floating' ? 'px-3' : 'px-4',
+        'flex w-full items-center gap-2',
+        layout() === 'floating' && 'items-start justify-between',
+        layout() !== 'floating' && 'h-14 px-4',
       )}
     >
       {local.children}
     </div>
   );
 
-  if (layout() === 'floating') {
-    return (
-      <MediaViewerFloatingTopChrome
-        visible={visible()}
-        class={local.class}
-        onPointerEnter={chromeBarHover().onPointerEnter}
-        onPointerLeave={chromeBarHover().onPointerLeave}
-      >
-        {toolbarRow()}
-      </MediaViewerFloatingTopChrome>
-    );
-  }
-
-  if (layout() === 'stacked') {
-    return (
-      <header
-        class={cn(
-          'reader-chrome-overlay-panel reader-chrome-overlay-panel--top',
-          'absolute left-0 right-0 top-0 z-10',
-          !visible() && 'reader-chrome-overlay-panel--hidden',
-          local.class,
-        )}
-        data-media-viewer-interactive-zone
-        data-tauri-drag-region
-        onClick={(e) => e.stopPropagation()}
-        onPointerEnter={chromeBarHover().onPointerEnter}
-        onPointerLeave={chromeBarHover().onPointerLeave}
-      >
-        <div
-          class={cn(
-            'reader-chrome-overlay-panel__surface',
-            mediaViewerChromeTopSurfaceClass,
-          )}
+  return (
+    <>
+      <Show when={layout() === 'floating'}>
+        <MediaViewerFloatingTopChrome
+          visible={visible()}
+          class={local.class}
+          onPointerEnter={chromeBarHover().onPointerEnter}
+          onPointerLeave={chromeBarHover().onPointerLeave}
         >
           {toolbarRow()}
-        </div>
-      </header>
-    );
-  }
-
-  return (
-    <header
-      class={cn(
-        'reader-top-bar flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
-        !visible() && 'reader-bar-hidden',
-        local.class,
-      )}
-      data-tauri-drag-region
-      onClick={(e) => e.stopPropagation()}
-    >
-      {toolbarRow()}
-    </header>
+        </MediaViewerFloatingTopChrome>
+      </Show>
+      <Show when={layout() === 'stacked'}>
+        <header
+          class={cn(
+            'reader-chrome-overlay-panel reader-chrome-overlay-panel--top',
+            'absolute left-0 right-0 top-0 z-10',
+            !visible() && 'reader-chrome-overlay-panel--hidden',
+            local.class,
+          )}
+          data-media-viewer-interactive-zone
+          data-tauri-drag-region
+          onClick={(e) => e.stopPropagation()}
+          onPointerEnter={chromeBarHover().onPointerEnter}
+          onPointerLeave={chromeBarHover().onPointerLeave}
+        >
+          <div
+            class={cn(
+              'reader-chrome-overlay-panel__surface',
+              mediaViewerChromeTopSurfaceClass,
+            )}
+          >
+            {toolbarRow()}
+          </div>
+        </header>
+      </Show>
+      <Show when={layout() === 'fixed'}>
+        <header
+          class={cn(
+            'reader-top-bar flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
+            !visible() && 'reader-bar-hidden',
+            local.class,
+          )}
+          data-tauri-drag-region
+          onClick={(e) => e.stopPropagation()}
+        >
+          {toolbarRow()}
+        </header>
+      </Show>
+    </>
   );
 }

@@ -649,6 +649,10 @@
     opacity var(--reader-bar-duration) ease-out;
 }
 
+.reader-chrome-floating-top__track {
+  padding-top: calc(var(--safe-area-top-effective) + 0.75rem);
+}
+
 .reader-chrome-floating-top--hidden .reader-chrome-floating-top__track {
   opacity: 0;
   transform: translate3d(0, calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0);

@@ -3,6 +3,8 @@
  * 与书籍级 types/book.ReadConfig（reverseToc 等）不同，勿混用。
  */
 
+import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
 import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
@@ -222,6 +224,8 @@ export interface TextViewerUiConfig {
   httpTtsId: number | null;
   speakSpeed: number;
   imageStyle: TextViewerImageStyle;
+  /** 顶栏与底栏布局（仅文本阅读器；未配置时沿用应用设置） */
+  viewerChromeLayout: ViewerChromeLayout;
 }
 
 export const defaultTextViewerUiConfig: TextViewerUiConfig = {
@@ -253,4 +257,5 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   httpTtsId: null,
   speakSpeed: 5,
   imageStyle: 'DEFAULT',
+  viewerChromeLayout: defaultViewerChromeLayout,
 };

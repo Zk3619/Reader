@@ -1,29 +1,37 @@
 /**
  * 正文/漫画插图网络拉取并发池，对齐 Legado ReadConstants.PRE_DOWNLOAD_CONCURRENCY（2～3）。
- * 避免一章数十张图同时 download_binary 导致 CDN/书源限流或 Tauri 连接耗尽。
+ * 高优先级（可见页）优先于低优先级（章内预取），避免预取挤占首屏。
  */
 
 /** 与 Legado PRE_DOWNLOAD_CONCURRENCY 同量级 */
 export const READER_INLINE_IMAGE_FETCH_CONCURRENCY = 3;
 
+export type ReaderInlineImageFetchPriority = 'high' | 'low';
+
 let active = 0;
-const waiters: Array<() => void> = [];
+const highWaiters: Array<() => void> = [];
+const lowWaiters: Array<() => void> = [];
 
 function drain(): void {
-  while (active < READER_INLINE_IMAGE_FETCH_CONCURRENCY && waiters.length > 0) {
+  while (active < READER_INLINE_IMAGE_FETCH_CONCURRENCY) {
+    const next = highWaiters.shift() ?? lowWaiters.shift();
+    if (!next) break;
     active++;
-    const next = waiters.shift();
-    next?.();
+    next();
   }
 }
 
-function acquireSlot(): Promise<void> {
+function acquireSlot(priority: ReaderInlineImageFetchPriority): Promise<void> {
   if (active < READER_INLINE_IMAGE_FETCH_CONCURRENCY) {
     active++;
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    waiters.push(resolve);
+    if (priority === 'high') {
+      highWaiters.push(resolve);
+    } else {
+      lowWaiters.push(resolve);
+    }
   });
 }
 
@@ -32,11 +40,12 @@ function releaseSlot(): void {
   drain();
 }
 
-/** 在并发池内执行一次插图 HTTP 拉取 */
+/** 在并发池内执行一次插图 HTTP 拉取；可见页用 high，章内预取用 low */
 export async function withReaderInlineImageFetchSlot<T>(
   fn: () => Promise<T>,
+  priority: ReaderInlineImageFetchPriority = 'high',
 ): Promise<T> {
-  await acquireSlot();
+  await acquireSlot(priority);
   try {
     return await fn();
   } finally {

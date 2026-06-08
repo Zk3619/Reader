@@ -8,7 +8,7 @@ export function ViewerChromeLayoutSetting() {
         <div class="space-y-1">
           <h3 class="font-semibold text-foreground">阅读器顶栏与底栏</h3>
           <p class="text-sm text-muted-foreground">
-            适用于文本、图片、音频、视频等阅读器。层叠为整条叠在内容上；悬浮为独立圆角控件浮在正文上方。
+            文本与漫画阅读器可在各自界面设置中单独覆盖。此处为默认布局，并作用于音频、视频等未单独配置的阅读器。
           </p>
         </div>
         <ViewerChromeLayoutControls />

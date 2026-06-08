@@ -40,7 +40,10 @@ import {
   looksLikeCloudflareChallengeHtml,
 } from '@/lib/http/cf-protected-cdn';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
-import { withReaderInlineImageFetchSlot } from '@/lib/http/reader-inline-image-queue';
+import {
+  withReaderInlineImageFetchSlot,
+  type ReaderInlineImageFetchPriority,
+} from '@/lib/http/reader-inline-image-queue';
 import { coverLoadTrace } from '@/lib/http/cover-load-trace';
 import {
   canRefreshCoverUrlForBook,
@@ -164,6 +167,8 @@ export type CoverImageLoadOptions = {
   _backgroundRefreshScheduled?: boolean;
   /** 经正文插图并发池拉取（漫画 image-viewer 等） */
   readerInlineQueue?: boolean;
+  /** 并发池优先级：可见页 high，章内预取 low（默认 high） */
+  readerInlineQueuePriority?: ReaderInlineImageFetchPriority;
   /** 虚拟列表：跳过 L2 读盘，仅 L1 + 网络（避免 exists 风暴） */
   skipDiskRead?: boolean;
 };
@@ -525,7 +530,10 @@ async function fetchCoverImageBytesOnce(
       });
 
     return options?.readerInlineQueue
-      ? await withReaderInlineImageFetchSlot(doRequest)
+      ? await withReaderInlineImageFetchSlot(
+          doRequest,
+          options.readerInlineQueuePriority ?? 'high',
+        )
       : await doRequest();
   });
 
@@ -1020,6 +1028,25 @@ async function loadCoverImageObjectUrlInner(
   } catch {
     return failCoverLoad(bookUrlTrim, normalized, sourceId);
   }
+}
+
+/** 正文/漫画插图网络拉取（不写封面内存缓存，供 manga-image-loader 使用） */
+export async function fetchReaderInlineImageBytes(
+  url: string,
+  options?: CoverImageLoadOptions,
+): Promise<{ bytes: ArrayBuffer; mime: string } | null> {
+  const raw = url?.trim();
+  if (!raw) return null;
+  const normalized = normalizeImageUrl(raw);
+  if (
+    !shouldFetchReaderInlineImageAsBlob(normalized, {
+      legadoImageHeaders: options?.legadoImageHeaders,
+    })
+  ) {
+    return null;
+  }
+  const maxRetries = Math.max(0, options?.maxRetries ?? READER_INLINE_IMAGE_DEFAULT_RETRIES);
+  return fetchCoverImageBytesWithRetry(normalized, { ...options, maxRetries });
 }
 
 export async function loadCoverImageObjectUrl(

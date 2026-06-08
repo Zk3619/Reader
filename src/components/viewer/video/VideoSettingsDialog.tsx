@@ -10,6 +10,7 @@ import {
   ViewerAppDialogTitle,
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
+import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import {
   getVideoPlayConfig,
@@ -95,6 +96,7 @@ export function VideoSettingsDialog(props: VideoSettingsDialogProps) {
               恢复默认（3.0x）
             </Button>
           </div>
+          <ChapterBodyPrefetchControls viewer="video" />
         </div>
         <div class="px-4 pb-4">
           <Button class="w-full" onClick={save}>

@@ -4,6 +4,7 @@
  */
 
 import { createSignal, Show, Index, onMount, onCleanup, createEffect, type Accessor } from 'solid-js';
+import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
 import { textViewerDualPageActive } from '@/lib/media/text/reader-ui-config';
@@ -66,6 +67,7 @@ import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
 import { isMobile } from '@/lib/platform/detect';
 import { isLocalBook } from '@/lib/local-book';
+import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   MediaViewerShell,
@@ -151,19 +153,15 @@ export function BookReader(props: BookReaderProps) {
 
   const book = () => textViewerStore.state.book;
   const catalogSize = () => textViewerStore.state.catalog.length;
-  const canOfflineCache = () => {
-    const b = book();
-    if (!b || textViewerStore.isGuestReading()) return false;
-    return !isLocalBook(b);
-  };
-
   const openOfflineCacheDialog = () => {
-    if (!canOfflineCache()) {
+    const blocked = getOfflineCacheBlockedReason(
+      book(),
+      textViewerStore.isGuestReading(),
+    );
+    if (blocked) {
       showAppToast({
         title: '无法离线缓存',
-        description: textViewerStore.isGuestReading()
-          ? '试读书籍请先加入书架'
-          : '本地书籍无需缓存',
+        description: blocked,
         variant: 'default',
       });
       return;
@@ -604,6 +602,9 @@ export function BookReader(props: BookReaderProps) {
 
   return (
     <>
+      <MediaViewerChromeLayoutProvider
+        layout={() => textViewerStore.state.config.viewerChromeLayout}
+      >
       <MediaViewerShell
         entryVisible={props.entryVisible}
         tapToToggleBars={false}
@@ -718,6 +719,7 @@ export function BookReader(props: BookReaderProps) {
           </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>
+      </MediaViewerChromeLayoutProvider>
 
       {/* 窄屏段评 Drawer */}
       <Show when={!isWideScreen()}>

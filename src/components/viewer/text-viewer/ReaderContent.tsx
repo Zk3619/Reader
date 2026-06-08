@@ -19,6 +19,7 @@ import { openParagraphReviewFromClick } from '@/lib/book-source/legado-paragraph
 import { ReaderInlineImg } from '@/components/viewer/text-viewer/ReaderInlineImg';
 import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import { getSource } from '@/lib/database/sources';
+import { isMangaChapterContent } from '@/lib/media/image/manga-book-detect';
 import type { BookSource } from '@/types';
 
 type ReaderDisplayBlockLocal = ReaderDisplayBlock;
@@ -260,6 +261,30 @@ export function ReaderContent(props: ReaderContentProps) {
       .map((blockIndex) => ({ block: all[blockIndex]!, blockIndex }));
   });
 
+  const isMangaChapter = createMemo(() => {
+    const raw = content()?.trim() ?? '';
+    if (!raw) return false;
+    const ch = currentChapter();
+    return isMangaChapterContent(raw, ch?.url ?? ch?.baseUrl ?? '');
+  });
+
+  const mangaBookUrl = () => (isMangaChapter() ? book()?.bookUrl : undefined);
+
+  const mangaPageBaseByBlockIndex = createMemo(() => {
+    const map = new Map<number, number>();
+    if (!isMangaChapter()) return map;
+    let idx = 0;
+    for (const { block, blockIndex } of blockEntries()) {
+      map.set(blockIndex, idx);
+      if (block.type === 'figure') {
+        idx += block.refs.length;
+      } else {
+        idx += block.parts.filter((p) => p.kind === 'img').length;
+      }
+    }
+    return map;
+  });
+
   const getCount = (segmentIndex: number) =>
     (props.getSegmentCommentCount ?? (() => 0))(
       chapterIndex(),
@@ -387,6 +412,9 @@ export function ReaderContent(props: ReaderContentProps) {
                   imageStyle={imageStyleKey()}
                   referer={chapterPageReferer()}
                   source={bookSource()}
+                  mangaBookUrl={mangaBookUrl()}
+                  mangaChapterIndex={isMangaChapter() ? chapterIndex() : undefined}
+                  mangaPageBaseIndex={mangaPageBaseByBlockIndex().get(entry.blockIndex)}
                 />
                 </div>
               )}
@@ -413,6 +441,9 @@ function ReaderBlockItem(props: {
   imageStyle?: string;
   referer?: string;
   source?: BookSource | null;
+  mangaBookUrl?: string;
+  mangaChapterIndex?: number;
+  mangaPageBaseIndex?: number;
 }) {
   if (props.block.type === 'figure') {
     const refs = props.block.refs.map((ref) => {
@@ -431,7 +462,7 @@ function ReaderBlockItem(props: {
         )}
       >
         <For each={refs}>
-          {(ref) => (
+          {(ref, imgIndex) => (
             <ReaderInlineImg
               src={ref.url}
               legadoImageHeaders={ref.legadoHeaders}
@@ -442,6 +473,13 @@ function ReaderBlockItem(props: {
               imageStyle={props.imageStyle}
               fontSizePx={props.fontSizePx}
               onLegadoCommentClick={props.onLegadoCommentClick}
+              bookUrl={props.mangaBookUrl}
+              chapterIndex={props.mangaChapterIndex}
+              pageIndex={
+                props.mangaPageBaseIndex != null
+                  ? props.mangaPageBaseIndex + imgIndex()
+                  : undefined
+              }
             />
           )}
         </For>
@@ -466,6 +504,9 @@ function ReaderBlockItem(props: {
         imageStyle={props.imageStyle}
         referer={props.referer}
         source={props.source}
+        mangaBookUrl={props.mangaBookUrl}
+        mangaChapterIndex={props.mangaChapterIndex}
+        mangaPageBaseIndex={props.mangaPageBaseIndex}
       />
     );
   }
@@ -502,8 +543,12 @@ function ParagraphWithParts(props: {
   imageStyle?: string;
   referer?: string;
   source?: BookSource | null;
+  mangaBookUrl?: string;
+  mangaChapterIndex?: number;
+  mangaPageBaseIndex?: number;
 }) {
   const count = () => props.getCount(props.segmentIndex) ?? 0;
+  let inlineImgOffset = 0;
   const hideMockBubble = () => paragraphHasLegadoCommentImg(props.parts);
   const paragraphStyle = createMemo(() => {
     const p = viewerState.config.spacing.paragraph;
@@ -516,10 +561,15 @@ function ParagraphWithParts(props: {
       data-reader-dual-tail-block={props.isDualSpreadTail ? '' : undefined}
     >
       <For each={props.parts}>
-        {(part) =>
-          part.kind === 'text' ? (
-            <span innerHTML={paragraphToHtml(part.text)} />
-          ) : (
+        {(part) => {
+          if (part.kind === 'text') {
+            return <span innerHTML={paragraphToHtml(part.text)} />;
+          }
+          const pageIndex =
+            props.mangaPageBaseIndex != null
+              ? props.mangaPageBaseIndex + inlineImgOffset++
+              : undefined;
+          return (
             <ReaderInlineImg
               src={part.ref.url}
               legadoImageHeaders={part.ref.legadoHeaders}
@@ -530,9 +580,12 @@ function ParagraphWithParts(props: {
               imageStyle={props.imageStyle}
               fontSizePx={props.fontSizePx}
               onLegadoCommentClick={props.onLegadoCommentClick}
+              bookUrl={props.mangaBookUrl}
+              chapterIndex={props.mangaChapterIndex}
+              pageIndex={pageIndex}
             />
-          )
-        }
+          );
+        }}
       </For>
       <Show when={!props.hideBubbles && !hideMockBubble() && count() > 0}>
         <span class="inline align-baseline whitespace-nowrap ml-1">

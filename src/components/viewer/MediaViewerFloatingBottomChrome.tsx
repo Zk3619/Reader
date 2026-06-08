@@ -1,4 +1,5 @@
 import { splitProps, type JSX } from 'solid-js';
+import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
 export interface MediaViewerFloatingBottomChromeProps {
@@ -30,9 +31,10 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        class="reader-chrome-floating-bottom__track pointer-events-auto flex w-full flex-col gap-2 px-3 pb-3 pt-2"
-        onPointerEnter={local.onPointerEnter}
-        onPointerLeave={local.onPointerLeave}
+        class={cn(
+          'reader-chrome-floating-bottom__track pointer-events-none flex w-full flex-col gap-2 px-3 pb-3 pt-2',
+          scrollGutterStableBoth,
+        )}
       >
         {local.children}
       </div>

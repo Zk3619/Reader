@@ -4,6 +4,7 @@
  */
 
 import { For, Show, onMount, createSignal } from 'solid-js';
+import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { textViewerStore } from '@/stores/viewer';
 import type {
   TextViewerUiConfig as ReadConfig,
@@ -93,9 +94,13 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       <div class="space-y-3">
         <Label>顶栏与底栏布局</Label>
         <p class="text-xs text-muted-foreground">
-          固定、层叠或悬浮；对所有阅读器生效，可在应用设置中同样修改。
+          固定、层叠或悬浮；仅对本文本阅读器生效，与应用全局设置相互独立。
         </p>
-        <ViewerChromeLayoutControls variant="drawer" />
+        <ViewerChromeLayoutControls
+          variant="drawer"
+          value={() => config().viewerChromeLayout}
+          onChange={(layout) => setConfig({ viewerChromeLayout: layout })}
+        />
       </div>
 
       {/* 主题 */}
@@ -567,6 +572,8 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </div>
       </Show>
 
+      <ChapterBodyPrefetchControls viewer="text" />
+
       {/* 分页引擎（调试） */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
         <div class="space-y-2 rounded-lg border border-dashed border-muted-foreground/40 px-3 py-2">
@@ -582,7 +589,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           </Show>
           <p class="text-xs text-muted-foreground">
             canvas：纯文本 Canvas 预排；dom：HTML/插图 DOM 测量；canvas+dom：Canvas 初算后经 DOM 精修。
-            正文缓存由设置页「章节正文缓存」控制，切章后自动预取相邻章。
+            正文预下载见上方「章节正文预下载」；全局容量与清理见设置页「章节正文缓存」。
           </p>
         </div>
       </Show>

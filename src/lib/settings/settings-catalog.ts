@@ -45,7 +45,7 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
     id: 'other',
     label: '其他设置',
-    description: '暂未归入以上分类的选项',
+    description: '应用技术栈信息',
   },
 ];
 
@@ -144,9 +144,9 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
   {
     id: 'chapter-cache',
     categoryId: 'storage',
-    title: '章节缓存',
-    description: '章节正文缓存与预取',
-    keywords: ['章节', '缓存', '预取', '正文', '清理'],
+    title: '阅读缓存',
+    description: '章节正文、漫画图片占用与自动清理策略',
+    keywords: ['章节', '缓存', '正文', '漫画', '图片', '清理', '阅读'],
   },
   {
     id: 'database-backup',
@@ -154,27 +154,6 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     title: '数据备份',
     description: '导出或恢复数据库备份',
     keywords: ['备份', '恢复', '数据库', '导出', '导入'],
-  },
-  {
-    id: 'tauri-test',
-    categoryId: 'other',
-    title: 'Tauri 命令测试',
-    description: '测试 Tauri invoke 调用',
-    keywords: ['tauri', '测试', 'invoke', '命令'],
-  },
-  {
-    id: 'button-variants',
-    categoryId: 'other',
-    title: 'Button 组件变体',
-    description: '按钮样式预览',
-    keywords: ['button', '按钮', '变体', '组件'],
-  },
-  {
-    id: 'button-sizes',
-    categoryId: 'other',
-    title: 'Button 尺寸',
-    description: '按钮尺寸预览',
-    keywords: ['button', '按钮', '尺寸', '大小'],
   },
   {
     id: 'tech-stack',

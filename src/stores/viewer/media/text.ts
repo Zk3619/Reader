@@ -57,6 +57,8 @@ import {
 } from '@/lib/media/text/reader-ui-config';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { migrateReaderImageStyle } from '@/lib/js-engine/legado/legado-image-options';
+import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { settingsState } from '@/stores/settings';
 
 const defaultConfig = defaultTextViewerUiConfig;
 
@@ -117,6 +119,9 @@ async function hydrateReaderConfig(): Promise<void> {
       pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
       simulationDragZonePercent: normalizeSimulationDragZonePercent(
         saved.simulationDragZonePercent,
+      ),
+      viewerChromeLayout: normalizeViewerChromeLayout(
+        saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
       ),
     }));
   }

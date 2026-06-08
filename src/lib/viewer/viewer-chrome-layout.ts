@@ -1,10 +1,12 @@
 import { createMemo } from 'solid-js';
+import { useMediaViewerChromeLayoutOverride } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { cn } from '@/lib/utils';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import {
   defaultViewerChromeLayout,
   mediaViewerChromeFloatingIconButtonClass,
   mediaViewerChromeFloatingPillClass,
+  mediaViewerChromeHitTargetClass,
 } from '@/components/viewer/viewer-chrome';
 import { settingsState } from '@/stores/settings';
 
@@ -18,11 +20,16 @@ export function normalizeViewerChromeLayout(
   return defaultViewerChromeLayout;
 }
 
-/** 阅读器 / MediaViewer 顶底栏布局（来自应用设置） */
+/** 阅读器 / MediaViewer 顶底栏布局（应用设置；可被 MediaViewerChromeLayoutProvider 覆盖） */
 export function useViewerChromeLayout() {
-  return createMemo(() =>
-    normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout),
-  );
+  const override = useMediaViewerChromeLayoutOverride();
+  return createMemo(() => {
+    const fromViewer = override();
+    if (fromViewer != null) {
+      return normalizeViewerChromeLayout(fromViewer);
+    }
+    return normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
+  });
 }
 
 /** 正文滚动区 class：固定模式占 flex-1，层叠/悬浮为 absolute inset-0 */
@@ -61,5 +68,14 @@ export function useMediaViewerChromeFloating() {
   const pillClass = createMemo(() =>
     isFloating() ? mediaViewerChromeFloatingPillClass : '',
   );
-  return { layout, isFloating, iconButtonClass, pillClass };
+  /** 悬浮顶栏：左右各一组胶囊，避免逐按钮铺满整行形成背景条 */
+  const clusterClass = createMemo(() =>
+    isFloating()
+      ? cn(mediaViewerChromeFloatingPillClass, mediaViewerChromeHitTargetClass)
+      : '',
+  );
+  const inlineIconClass = createMemo(() =>
+    isFloating() ? 'size-10 shrink-0' : '',
+  );
+  return { layout, isFloating, iconButtonClass, pillClass, clusterClass, inlineIconClass };
 }

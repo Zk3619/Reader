@@ -35,6 +35,14 @@ export const mediaViewerChromeBottomContentClass = 'flex w-full flex-col';
 export const mediaViewerChromeBottomRowClass =
   'flex items-center justify-between gap-2 px-4 py-2';
 
+/**
+ * 悬浮底栏：容器不拦截指针，子控件加 mediaViewerChromeHitTargetClass（层叠模式不改）。
+ */
+export const mediaViewerChromeBottomPassThroughClass = 'pointer-events-none';
+
+/** 悬浮底栏内可点击控件 */
+export const mediaViewerChromeHitTargetClass = 'pointer-events-auto';
+
 /** 悬浮控件：圆角胶囊/圆形按钮 */
 export const mediaViewerChromeFloatingControlClass =
   'border border-border/50 bg-background/80 text-foreground shadow-sm backdrop-blur-md';

@@ -23,19 +23,14 @@ export function MediaViewerFloatingTopChrome(props: MediaViewerFloatingTopChrome
   return (
     <header
       class={cn(
-        'reader-chrome-floating-top pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col',
+        'reader-chrome-floating-top pointer-events-none absolute inset-x-0 top-0 z-10',
         !visible() && 'reader-chrome-floating-top--hidden',
         local.class,
       )}
-      data-tauri-drag-region
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        class="pointer-events-none shrink-0 bg-background/95 backdrop-blur safe-area-min-height-top"
-        aria-hidden="true"
-      />
-      <div
-        class="reader-chrome-floating-top__track pointer-events-auto flex h-14 items-center gap-2 px-3 pb-2 pt-3"
+        class="reader-chrome-floating-top__track pointer-events-none flex w-full items-start justify-between gap-2 px-3 pb-2"
         onPointerEnter={local.onPointerEnter}
         onPointerLeave={local.onPointerLeave}
       >

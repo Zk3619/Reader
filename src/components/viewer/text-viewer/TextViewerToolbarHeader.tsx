@@ -42,62 +42,62 @@ export interface TextViewerToolbarHeaderProps {
 /** 文本阅读器顶栏业务内容（布局由 MediaViewerHeader 提供） */
 export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
   const floating = useMediaViewerChromeFloating();
-  const iconBtn = () => cn('no-drag', floating.iconButtonClass());
-  const titleClass = () =>
+  const iconBtn = () =>
+    cn('no-drag', floating.isFloating() ? floating.inlineIconClass() : floating.iconButtonClass());
+  const titleClass = (inCluster: boolean) =>
     cn(
-      'min-w-0 max-w-[40%] truncate text-sm font-medium text-foreground',
-      floating.isFloating() && floating.pillClass(),
-      floating.isFloating() && 'px-3 py-1.5 no-drag',
+      'min-w-0 truncate text-sm font-medium text-foreground',
+      inCluster
+        ? 'max-w-[min(40vw,12rem)] px-1 no-drag'
+        : cn('max-w-[40%]', floating.isFloating() && floating.pillClass(), floating.isFloating() && 'px-3 py-1.5 no-drag'),
     );
+  const clusterClass = () => floating.clusterClass();
 
-  return (
-    <>
+  const closeButton = () => (
+    <ViewerAppTooltip>
+      <ViewerAppTooltipTrigger
+        as={Button}
+        variant="ghost"
+        size="icon"
+        class={iconBtn()}
+        onClick={props.onClose}
+        aria-label="关闭阅读器"
+      >
+        <ChevronLeftIcon class="size-5" />
+      </ViewerAppTooltipTrigger>
+      <ViewerAppTooltipContent>关闭阅读器</ViewerAppTooltipContent>
+    </ViewerAppTooltip>
+  );
+
+  const titleNode = (inCluster: boolean) => (
+    <Show
+      when={props.onOpenBookInfo}
+      fallback={
+        <h1 class={titleClass(inCluster)} data-tauri-drag-region={inCluster ? undefined : true}>
+          {props.bookName || '—'}
+        </h1>
+      }
+    >
       <ViewerAppTooltip>
         <ViewerAppTooltipTrigger
-          as={Button}
-          variant="ghost"
-          size="icon"
-          class={iconBtn()}
-          onClick={props.onClose}
-          aria-label="关闭阅读器"
+          as="button"
+          type="button"
+          class={cn(
+            titleClass(inCluster),
+            'text-left transition-colors cursor-pointer hover:text-primary',
+          )}
+          onClick={() => props.onOpenBookInfo!()}
+          aria-label="进入书籍信息页"
         >
-          <ChevronLeftIcon class="size-5" />
+          {props.bookName || '—'}
         </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>关闭阅读器</ViewerAppTooltipContent>
+        <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
       </ViewerAppTooltip>
-      <Show
-        when={props.onOpenBookInfo}
-        fallback={
-          <h1 class={titleClass()} data-tauri-drag-region>
-            {props.bookName || '—'}
-          </h1>
-        }
-      >
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as="button"
-            type="button"
-            class={cn(
-              titleClass(),
-              'text-left transition-colors cursor-pointer hover:text-primary',
-            )}
-            onClick={() => props.onOpenBookInfo!()}
-            aria-label="进入书籍信息页"
-          >
-            {props.bookName || '—'}
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-      </Show>
-      <Show when={!floating.isFloating()}>
-        <div class="min-w-0 flex-1" data-tauri-drag-region />
-      </Show>
-      <div
-        class={cn(
-          'flex shrink-0 items-center gap-0.5 no-drag',
-          floating.isFloating() && 'ml-auto',
-        )}
-      >
+    </Show>
+  );
+
+  const actionButtons = () => (
+    <>
       <Show when={props.isWideScreen}>
         <ViewerAppTooltip>
           <ViewerAppTooltipTrigger
@@ -161,58 +161,63 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           <ViewerAppTooltipContent>设置</ViewerAppTooltipContent>
         </ViewerAppTooltip>
       </Show>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class={iconBtn()}
-            onClick={props.onChangeSource}
-            aria-label="换源"
-          >
-            <ReplaceIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class={iconBtn()}
-            onClick={props.onRefreshChapter}
-            aria-label="刷新当前章节"
-          >
-            <RefreshIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>刷新</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class={iconBtn()}
-            onClick={props.onOpenOfflineCache}
-            aria-label="离线缓存"
-          >
-            <DownloadIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class={iconBtn()}
-            onClick={props.onOpenMoreMenu}
-            aria-label="更多"
-          >
-            <MoreIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class={iconBtn()}
+          onClick={props.onChangeSource}
+          aria-label="换源"
+        >
+          <ReplaceIcon class="size-5" />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class={iconBtn()}
+          onClick={props.onRefreshChapter}
+          aria-label="刷新当前章节"
+        >
+          <RefreshIcon class="size-5" />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>刷新</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class={iconBtn()}
+          onClick={props.onOpenOfflineCache}
+          aria-label="离线缓存"
+        >
+          <DownloadIcon class="size-5" />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class={iconBtn()}
+          onClick={props.onOpenMoreMenu}
+          aria-label="更多"
+        >
+          <MoreIcon class="size-5" />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+    </>
+  );
+
+  const windowChrome = () => (
+    <>
       <Show when={isTauri() && !isMobile() && !floating.isFloating()}>
         <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
       </Show>
@@ -220,7 +225,45 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         <ThemeSwitch withTooltip inViewerOverlay />
         <WindowControlButtons />
       </div>
-      </div>
     </>
+  );
+
+  return (
+    <Show
+      when={floating.isFloating()}
+      fallback={
+        <>
+          {closeButton()}
+          {titleNode(false)}
+          <Show when={!floating.isFloating()}>
+            <div class="min-w-0 flex-1" data-tauri-drag-region />
+          </Show>
+          <div class="flex shrink-0 items-center gap-0.5 no-drag">
+            {actionButtons()}
+            {windowChrome()}
+          </div>
+        </>
+      }
+    >
+      <div
+        class={cn(
+          clusterClass(),
+          'flex min-w-0 max-w-[calc(50%-0.375rem)] items-center gap-0.5',
+        )}
+        data-tauri-drag-region
+      >
+        {closeButton()}
+        {titleNode(true)}
+      </div>
+      <div
+        class={cn(
+          clusterClass(),
+          'ml-auto flex max-w-[calc(50%-0.375rem)] shrink-0 items-center gap-0.5 no-drag',
+        )}
+      >
+        {actionButtons()}
+        {windowChrome()}
+      </div>
+    </Show>
   );
 }
