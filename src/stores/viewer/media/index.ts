@@ -22,6 +22,7 @@ export {
   bookProgress,
   openTextBook,
   loadTextChapter,
+  fetchProcessedChapterContent,
   saveTextProgress,
   setTextBookInitialState,
   resetTextViewerSession,

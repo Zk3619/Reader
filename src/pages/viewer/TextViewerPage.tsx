@@ -21,10 +21,17 @@ import {
   ViewerAppDialogTitle,
 } from '@/components/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
+import {
+  mediaViewerCatalogDrawerContentClass,
+  mediaViewerCatalogDrawerSide,
+} from '@/lib/viewer/media-viewer-catalog-drawer';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
-import { ReaderContent } from '@/components/viewer/text-viewer/ReaderContent';
 import { ReaderTextContentSlot } from '@/components/viewer/text-viewer/reader-text-content-slot';
 import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
+import {
+  ReaderScrollViewport,
+  type ReaderScrollNavApi,
+} from '@/components/viewer/text-viewer/ReaderScrollViewport';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import {
   isTextViewerPagedAnim,
@@ -136,7 +143,6 @@ export function BookReader(props: BookReaderProps) {
   const [panelEntering, setPanelEntering] = createSignal(false);
   const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
   const [isWideScreen, setIsWideScreen] = createSignal(window.innerWidth >= 480);
-  const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
 
   let tapStartTime = 0;
   let tapStartX = 0;
@@ -198,15 +204,17 @@ export function BookReader(props: BookReaderProps) {
     return `border-t ${t.border} ${t.bg} ${t.text}`;
   };
 
-  // 监听书籍变化，重置滚动恢复标志与目录滚动缓存
+  let scrollContainer: HTMLDivElement | null = null;
+  const getScrollContainer = () => scrollContainer;
+  let lastChapterIndex = -1;
+
+  // 监听书籍变化，重置目录滚动缓存
   createEffect(() => {
     const currentBook = book();
     if (!currentBook) {
-      hasRestoredInitialScroll = false;
       lastChapterIndex = -1;
       setCatalogScrollTop(0);
     } else {
-      hasRestoredInitialScroll = false;
       lastChapterIndex = -1;
       setCatalogScrollTop(0);
     }
@@ -247,12 +255,11 @@ export function BookReader(props: BookReaderProps) {
     await textViewerStore.jumpToChapter(bm.chapterIndex);
     textViewerStore.setChapterPos(bm.chapterPos);
     requestAnimationFrame(() => {
-      if (scrollContainer) {
-        const sh = scrollContainer.scrollHeight;
-        const ch = scrollContainer.clientHeight;
-        scrollContainer.scrollTop =
-          sh > ch ? bm.chapterPos * (sh - ch) : 0;
+      if (isPagedMode() && pagedNav) {
+        pagedNav.setPageProgress(bm.chapterPos);
+        return;
       }
+      scrollNav?.scrollToChapterProgress(bm.chapterIndex, bm.chapterPos);
     });
   };
 
@@ -311,6 +318,7 @@ export function BookReader(props: BookReaderProps) {
   };
 
   let pagedNav: ReaderPagedNavApi | undefined;
+  let scrollNav: ReaderScrollNavApi | undefined;
 
   const normalizedPageAnim = () =>
     normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
@@ -380,16 +388,7 @@ export function BookReader(props: BookReaderProps) {
       pagedNav.setPageProgress(p);
       return;
     }
-    if (scrollContainer) {
-      const sh = scrollContainer.scrollHeight;
-      const ch = scrollContainer.clientHeight;
-      scrollContainer.scrollTop = sh > ch ? p * (sh - ch) : 0;
-    }
-  };
-
-  const toggleTheme = (pressed: boolean) => {
-    setIsDark(pressed);
-    document.documentElement.classList.toggle('dark', pressed);
+    scrollNav?.scrollToProgressInCurrentChapter(p);
   };
 
   const openComments = (chapterIndex: number, segmentIndex: number) => {
@@ -441,14 +440,6 @@ export function BookReader(props: BookReaderProps) {
     onCleanup(() => window.removeEventListener('resize', handleResize));
   });
 
-  onMount(() => {
-    const checkTheme = () => setIsDark(document.documentElement.classList.contains('dark'));
-    checkTheme();
-    const observer = new MutationObserver(checkTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    onCleanup(() => observer.disconnect());
-  });
-
   const dismissClickRegional = () => {
     setClickRegionalOpen(false);
     setClickRegionalMarkHint(false);
@@ -495,149 +486,22 @@ export function BookReader(props: BookReaderProps) {
     onCleanup(() => window.removeEventListener('keydown', handleKey));
   });
 
-  // 滚动监听：定期保存阅读进度
-  let scrollSaveTimer: number | null = null;
-  let scrollContainer: HTMLDivElement | null = null;
-  // 标记是否已经恢复过初始滚动位置（仅在首次打开书籍时恢复）
-  let hasRestoredInitialScroll = false;
-  // 标记是否正在恢复滚动位置，避免在恢复过程中触发滚动监听
-  let isRestoringScroll = false;
-  // 记录上次的章节索引，用于检测章节切换
-  let lastChapterIndex = -1;
-
-  const handleScroll = () => {
-    if (isPagedMode() || !scrollContainer || isRestoringScroll) return;
-
-    // 计算滚动位置（相对于内容顶部）
-    const scrollTop = scrollContainer.scrollTop;
-    const scrollHeight = scrollContainer.scrollHeight;
-    const clientHeight = scrollContainer.clientHeight;
-
-    // 计算阅读位置（0-1之间的比例）
-    const pos = scrollHeight > clientHeight
-      ? Math.max(0, Math.min(1, scrollTop / (scrollHeight - clientHeight)))
-      : 0;
-
-    // 更新阅读位置
-    textViewerStore.setChapterPos(pos);
-
-    // 防抖保存：延迟500ms后保存
-    if (scrollSaveTimer !== null) {
-      clearTimeout(scrollSaveTimer);
-    }
-    scrollSaveTimer = window.setTimeout(() => {
-      textViewerStore.saveProgress().catch(console.error);
-      scrollSaveTimer = null;
-    }, 500);
-  };
-
-  // 监听章节变化和内容加载完成
+  // 非滚动翻页动画：章节切换时重播进入动画
   createEffect(() => {
-    const index = chapterIndex(); // 监听章节索引变化
-    const contentShown = showContent(); // 监听内容显示状态
-
-    if (!contentShown) return;
-
-    // 检测章节切换：如果章节索引变化了，重置滚动位置到顶部
+    const index = chapterIndex();
+    if (!showContent()) return;
     if (lastChapterIndex !== -1 && lastChapterIndex !== index) {
       const anim = normalizedPageAnim();
       if (!isTextViewerPagedAnim(anim) && anim !== 'scroll') {
         setContentEnterKey((k) => k + 1);
       }
-      if (!isPagedMode()) {
-        requestAnimationFrame(() => {
-          if (scrollContainer) {
-            scrollContainer.scrollTop = 0;
-            textViewerStore.setChapterPos(0);
-          }
-        });
-      }
-      lastChapterIndex = index;
-      return;
     }
-
-    // 更新章节索引记录
     lastChapterIndex = index;
-
-    // 只在首次打开书籍时恢复滚动位置
-    if (hasRestoredInitialScroll) return;
-
-    if (isPagedMode()) {
-      hasRestoredInitialScroll = true;
-      return;
-    }
-
-    const pos = textViewerStore.state.chapterPos;
-
-    // 延迟恢复滚动位置，确保内容已完全渲染
-    // 使用双重 requestAnimationFrame 确保 DOM 完全渲染
-    let retryCount = 0;
-    const maxRetries = 10; // 最多重试 10 次（约 160ms）
-
-    isRestoringScroll = true;
-
-    const restoreScroll = () => {
-      if (!scrollContainer) {
-        // 如果 scrollContainer 还没绑定，再等待一下
-        if (retryCount < maxRetries) {
-          retryCount++;
-          requestAnimationFrame(restoreScroll);
-        } else {
-          isRestoringScroll = false;
-        }
-        return;
-      }
-
-      const scrollHeight = scrollContainer.scrollHeight;
-      const clientHeight = scrollContainer.clientHeight;
-
-      // 如果内容还没渲染完（scrollHeight 为 0 或很小），再等待一下
-      if (scrollHeight <= 0 && retryCount < maxRetries) {
-        retryCount++;
-        requestAnimationFrame(restoreScroll);
-        return;
-      }
-
-      // 如果内容高度足够，恢复滚动位置
-      if (scrollHeight > clientHeight && pos > 0) {
-        // pos 是 0-1 之间的比例
-        const targetScrollTop = pos * (scrollHeight - clientHeight);
-        scrollContainer.scrollTop = Math.max(0, Math.min(targetScrollTop, scrollHeight - clientHeight));
-      } else {
-        // 如果内容高度不足或没有保存的位置，重置到顶部
-        scrollContainer.scrollTop = 0;
-      }
-
-      // 标记已恢复初始滚动位置（仅恢复一次）
-      hasRestoredInitialScroll = true;
-      isRestoringScroll = false;
-    };
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(restoreScroll);
-    });
-  });
-
-  // 绑定滚动监听
-  onMount(() => {
-    // 等待DOM渲染完成后绑定
-    requestAnimationFrame(() => {
-      if (scrollContainer) {
-        scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
-      }
-    });
   });
 
   onCleanup(() => {
     stopReadAloud();
     setReadAloudActive(false);
-    // 清理定时器和监听器
-    if (scrollSaveTimer !== null) {
-      clearTimeout(scrollSaveTimer);
-    }
-    if (scrollContainer) {
-      scrollContainer.removeEventListener('scroll', handleScroll);
-    }
   });
 
   const onContentPointerDown = (e: MouseEvent | TouchEvent) => {
@@ -710,9 +574,13 @@ export function BookReader(props: BookReaderProps) {
         <Index each={[contentEnterKey()]}>
           {() => (
             <ReaderTextContentSlot mode="scroll">
-              <ReaderContent
+              <ReaderScrollViewport
                 class={cn('min-h-full', contentTransitionClass())}
                 insetManagedBySlot
+                getScrollContainer={getScrollContainer}
+                onRegisterNav={(api) => {
+                  scrollNav = api;
+                }}
                 {...readerContentShared}
                 dualPage={dualPageActive()}
               />
@@ -755,8 +623,6 @@ export function BookReader(props: BookReaderProps) {
                   onOpenBookInfo={props.onOpenBookInfo}
                   isWideScreen={isWideScreen()}
                   readAloudActive={readAloudActive()}
-                  isDark={isDark()}
-                  onToggleTheme={toggleTheme}
                   onOpenCatalog={() => setCatalogOpen(true)}
                   onReadAloud={handleReadAloud}
                   onOpenSettings={() => setSettingsOpen(true)}
@@ -863,17 +729,17 @@ export function BookReader(props: BookReaderProps) {
         />
       </Show>
 
-      {/* 目录 Drawer：左侧滑出，向左拖动整块收起（与底部 Drawer 一致） */}
+      {/* 目录 Drawer：桌面/Web 左侧滑出，移动端底部滑出 */}
       <Show when={book()}>
         <ViewerAppDrawer
           open={catalogOpen()}
           onOpenChange={setCatalogOpen}
-          side="left"
+          side={mediaViewerCatalogDrawerSide()}
           snapPoints={[0, 1]}
           defaultSnapPoint={1}
         >
           <ViewerAppDrawerContent
-            class="flex h-full w-full max-w-sm flex-col"
+            class={mediaViewerCatalogDrawerContentClass()}
             showNativeDragHandle={false}
           >
             <ViewerAppDrawerHeader title="目录" />
@@ -881,6 +747,7 @@ export function BookReader(props: BookReaderProps) {
               <Show when={catalogOpen()}>
                 <ReaderCatalog
                   open
+                  drawerBottom={mediaViewerCatalogDrawerSide() === 'bottom'}
                   initialScrollTop={catalogScrollTop()}
                   onScrollTop={setCatalogScrollTop}
                   onSelectChapter={(index: number) => {

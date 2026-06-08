@@ -27,8 +27,6 @@ export function ReaderGuestAddToShelfDialog(props: ReaderGuestAddToShelfDialogPr
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <ViewerAppDialogContent
-        layout="plain"
-        class="max-w-md"
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >

@@ -2,14 +2,14 @@ import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
-import { Toggle } from '@/components/ui/toggle';
+import { Separator } from '@/components/ui/separator';
+import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
+import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import {
   ViewerAppTooltip,
   ViewerAppTooltipContent,
   ViewerAppTooltipTrigger,
 } from '@/components/viewer/viewer-app-overlay';
-import { Separator } from '@/components/ui/separator';
-import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import {
   ChevronLeftIcon,
   ListIcon,
@@ -20,8 +20,6 @@ import {
   DownloadIcon,
   VolumeOnIcon,
   VolumeOffIcon,
-  ThemeLightIcon,
-  ThemeDarkIcon,
 } from '@/components/shared/icons';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
@@ -31,8 +29,6 @@ export interface TextViewerToolbarHeaderProps {
   onOpenBookInfo?: () => void;
   isWideScreen: boolean;
   readAloudActive: boolean;
-  isDark: boolean;
-  onToggleTheme: (pressed: boolean) => void;
   onOpenCatalog: () => void;
   onReadAloud: () => void;
   onOpenSettings: () => void;
@@ -221,35 +217,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
       </Show>
       <div class="flex items-center gap-2 no-drag">
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger as="div">
-            <Toggle
-              pressed={props.isDark}
-              onChange={props.onToggleTheme}
-              variant="default"
-              size="default"
-              class={cn(
-                'h-9 w-9 p-0 transition-colors',
-                floating.isFloating()
-                  ? floating.iconButtonClass()
-                  : 'rounded-md hover:bg-muted',
-              )}
-            >
-              <Show
-                when={props.isDark}
-                fallback={<ThemeLightIcon class="h-4 w-4" size={16} />}
-              >
-                <ThemeDarkIcon class="h-4 w-4" size={16} />
-              </Show>
-              <span class="sr-only">
-                {props.isDark ? '切换到浅色模式' : '切换到深色模式'}
-              </span>
-            </Toggle>
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>
-            {props.isDark ? '切换到浅色模式' : '切换到深色模式'}
-          </ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+        <ThemeSwitch withTooltip inViewerOverlay />
         <WindowControlButtons />
       </div>
       </div>

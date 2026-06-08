@@ -31,7 +31,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     <div
       class={cn(
         'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-        'pointer-events-auto w-full app-bottom-chrome-inset',
+        'pointer-events-auto w-full',
         !panelVisible() && 'reader-chrome-overlay-panel--hidden',
         local.class,
       )}
@@ -40,7 +40,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     >
       <div
         class={cn(
-          'reader-chrome-overlay-panel__surface flex w-full flex-col',
+          'reader-chrome-overlay-panel__surface flex w-full flex-col app-bottom-chrome-inset',
           mediaViewerChromeBottomSurfaceClass,
         )}
       >

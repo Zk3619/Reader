@@ -23,8 +23,7 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
   return (
     <div
       class={cn(
-        'reader-chrome-floating-bottom pointer-events-none absolute inset-x-0 bottom-0 z-10',
-        'app-bottom-chrome-inset',
+        'reader-chrome-floating-bottom pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col',
         !visible() && 'reader-chrome-floating-bottom--hidden',
         local.class,
       )}
@@ -37,6 +36,10 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
       >
         {local.children}
       </div>
+      <div
+        class="pointer-events-none shrink-0 bg-background/95 backdrop-blur safe-area-min-height-bottom"
+        aria-hidden="true"
+      />
     </div>
   );
 }

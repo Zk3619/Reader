@@ -21,6 +21,7 @@ export {
   bookProgress,
   openTextBook,
   loadTextChapter,
+  fetchProcessedChapterContent,
   saveTextProgress,
   setTextBookInitialState,
 } from '@/stores/viewer/media';
@@ -40,5 +41,7 @@ export const textViewerStore = {
   closeBook: () => viewerStore.closeBook(),
   loadCatalog: (bookUrl: string) => viewerStore.loadCatalog(bookUrl),
   setChapterPos: (pos: number) => viewerStore.setChapterPos(pos),
+  setScrollReadingPosition: (chapterIndex: number, chapterPos: number) =>
+    textViewerTextApi.setScrollReadingPosition(chapterIndex, chapterPos),
   isGuestReading: () => viewerStore.isGuestReading(),
 };

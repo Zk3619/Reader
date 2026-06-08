@@ -17,16 +17,11 @@ import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-cont
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
-import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
+import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
 import { VideoSettingsDialog } from '@/components/viewer/video/VideoSettingsDialog';
 import {
-  ViewerAppDrawer,
-  ViewerAppDrawerBody,
-  ViewerAppDrawerClose,
-  ViewerAppDrawerContent,
-  ViewerAppDrawerHeader,
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogHeader,
@@ -34,7 +29,6 @@ import {
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { findPlayableChapterIndex } from '@/lib/media/audio/play-mode';
 import { clampPlaySpeed } from '@/lib/media/audio/book-audio-config';
@@ -284,27 +278,18 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
         </MediaViewerShellMain>
       </MediaViewerShell>
 
-      <ViewerAppDrawer open={catalogOpen()} onOpenChange={setCatalogOpen}>
-        <ViewerAppDrawerContent class={hDrawerPanel}>
-          <ViewerAppDrawerHeader>
-            <span>目录</span>
-            <ViewerAppDrawerClose />
-          </ViewerAppDrawerHeader>
-          <ViewerAppDrawerBody class="min-h-0 flex-1 overflow-hidden p-0">
-            <MediaViewerCatalog
-              open={catalogOpen()}
-              loading={bootstrapping()}
-              initialScrollTop={catalogScrollTop()}
-              onScrollTop={setCatalogScrollTop}
-              onSelectChapter={(index) => {
-                setCatalogOpen(false);
-                if (catalog()[index]?.isVolume) return;
-                void goChapterTo(index);
-              }}
-            />
-          </ViewerAppDrawerBody>
-        </ViewerAppDrawerContent>
-      </ViewerAppDrawer>
+      <MediaViewerCatalogDrawer
+        open={catalogOpen()}
+        onOpenChange={setCatalogOpen}
+        loading={bootstrapping()}
+        initialScrollTop={catalogScrollTop()}
+        onScrollTop={setCatalogScrollTop}
+        onSelectChapter={(index) => {
+          setCatalogOpen(false);
+          if (catalog()[index]?.isVolume) return;
+          void goChapterTo(index);
+        }}
+      />
 
       <VideoSettingsDialog
         open={settingsOpen()}

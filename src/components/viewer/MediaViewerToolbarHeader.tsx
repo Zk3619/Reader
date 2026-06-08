@@ -195,7 +195,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
           <Separator orientation="vertical" class="mx-2 h-6 no-drag" />
         </Show>
         <div class="flex items-center gap-2 no-drag">
-          <ThemeSwitch withTooltip />
+          <ThemeSwitch withTooltip inViewerOverlay />
           <WindowControlButtons />
         </div>
       </div>

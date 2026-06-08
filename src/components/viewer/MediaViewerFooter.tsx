@@ -37,7 +37,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         layout() === 'floating' &&
           'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0',
         layout() === 'fixed' &&
-          'reader-footer shrink-0 border-t border-border bg-background/95 backdrop-blur',
+          'reader-footer shrink-0 border-t border-border bg-background/95 backdrop-blur app-bottom-chrome-inset',
         local.class,
       )}
       data-media-viewer-interactive-zone

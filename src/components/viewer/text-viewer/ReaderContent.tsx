@@ -5,6 +5,7 @@
 
 import { Show, For, createMemo, createSignal, createEffect } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
+import { state as viewerState } from '@/stores/viewer/media/state';
 import {
   buildReaderDisplayBlocks,
   applyReaderImageStyle,
@@ -112,7 +113,7 @@ export interface ReaderContentProps {
 }
 
 export function ReaderContent(props: ReaderContentProps) {
-  const config = () => textViewerStore.state.config;
+  const config = () => viewerState.config;
   const isStaged = () => props.stagedChapter != null;
   const content = () =>
     props.stagedChapter?.content ?? textViewerStore.state.content;
@@ -194,7 +195,7 @@ export function ReaderContent(props: ReaderContentProps) {
 
   const insetOnSlot = () => Boolean(props.insetManagedBySlot || props.pagedLayout);
 
-  const themeStyle = () => {
+  const themeStyle = createMemo(() => {
     const c = config();
     const fontFamily = c.font === 0 || !c.customFontName
       ? 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)'
@@ -207,9 +208,9 @@ export function ReaderContent(props: ReaderContentProps) {
       'font-family': fontFamily,
       'max-width': useReadWidth ? `${c.readWidth}px` : undefined,
     } as Record<string, string | number | undefined>;
-  };
+  });
 
-  const bodyStyle = () => {
+  const bodyStyle = createMemo(() => {
     const inset = contentInset();
     const style: Record<string, string | undefined> = {};
     if (props.measureAtColumnWidth) {
@@ -222,14 +223,12 @@ export function ReaderContent(props: ReaderContentProps) {
       style['width'] = '100%';
     }
     return style;
-  };
+  });
 
-  const paragraphStyle = () => {
+  const paragraphStyle = createMemo(() => {
     const p = config().spacing.paragraph;
-    // paragraphStyle 应用在 reader-body 上，用于设置段落间距
-    // 但实际段落间距由每个 <p> 标签的 mb-4 和 paragraphStyle 共同决定
     return { 'margin-bottom': p ? `${p}em` : undefined };
-  };
+  });
 
   const imageStyleKey = () => config().imageStyle;
 
@@ -286,14 +285,14 @@ export function ReaderContent(props: ReaderContentProps) {
       ref={(el) => props.onMeasureRoot?.(el ?? null)}
       class={cn(
         'reader-content w-full px-0 selection:bg-primary/20',
+        themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
+        themeClasses[config().theme]?.text ?? themeClasses[0].text,
+        props.class,
         props.dualSpreadRender
-          ? 'min-h-0 h-auto py-0'
+          ? 'min-h-0! h-auto! py-0'
           : insetOnSlot()
             ? 'min-h-full py-0'
             : 'min-h-full py-8',
-        themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
-        themeClasses[config().theme]?.text ?? themeClasses[0].text,
-        props.class
       )}
       data-reader-content="true"
       style={themeStyle()}
@@ -335,7 +334,10 @@ export function ReaderContent(props: ReaderContentProps) {
                 !props.dualSpreadRender &&
                 'reader-dual-page columns-2',
               props.pagedLayout && config().textFullJustify && 'reader-paged-justify',
-              props.pagedLayout && config().textBottomJustify && 'reader-paged-bottom-justify',
+              props.pagedLayout &&
+                config().textBottomJustify &&
+                !props.dualSpreadRender &&
+                'reader-paged-bottom-justify',
             )}
             style={bodyStyle()}
           >
@@ -364,14 +366,18 @@ export function ReaderContent(props: ReaderContentProps) {
               </div>
             </Show>
           {/* 段落 / 插图块 + 段评气泡 */}
-          <div class="prose prose-p:mb-4 max-w-none">
+          <div class="prose max-w-none">
             <For each={blockEntries()}>
-              {(entry) => (
+              {(entry, index) => (
                 <div data-reader-measure-block={props.measureBlocks ? '' : undefined}>
                 <ReaderBlockItem
                   block={entry.block}
                   blockIndex={entry.blockIndex}
                   paragraphStyle={paragraphStyle()}
+                  isDualSpreadTail={
+                    props.dualSpreadRender === true &&
+                    index() === blockEntries().length - 1
+                  }
                   getCount={getCount}
                   hideBubbles={props.hideCommentBubbles}
                   chapterIndex={chapterIndex()}
@@ -397,6 +403,7 @@ function ReaderBlockItem(props: {
   block: ReaderDisplayBlockLocal;
   blockIndex: number;
   paragraphStyle: Record<string, string | number | undefined>;
+  isDualSpreadTail?: boolean;
   getCount: (segmentIndex: number) => number;
   hideBubbles?: boolean;
   chapterIndex: number;
@@ -449,6 +456,7 @@ function ReaderBlockItem(props: {
         parts={props.block.parts}
         segmentIndex={props.blockIndex + 1}
         paragraphStyle={props.paragraphStyle}
+        isDualSpreadTail={props.isDualSpreadTail}
         getCount={props.getCount}
         hideBubbles={props.hideBubbles}
         chapterIndex={props.chapterIndex}
@@ -471,6 +479,7 @@ function ReaderBlockItem(props: {
       raw={text}
       segmentIndex={props.blockIndex + 1}
       paragraphStyle={props.paragraphStyle}
+      isDualSpreadTail={props.isDualSpreadTail}
       getCount={props.getCount}
       hideBubbles={props.hideBubbles}
       chapterIndex={props.chapterIndex}
@@ -483,6 +492,7 @@ function ParagraphWithParts(props: {
   parts: ReaderParagraphPart[];
   segmentIndex: number;
   paragraphStyle: Record<string, string | number | undefined>;
+  isDualSpreadTail?: boolean;
   getCount: (segmentIndex: number) => number;
   hideBubbles?: boolean;
   chapterIndex: number;
@@ -495,8 +505,16 @@ function ParagraphWithParts(props: {
 }) {
   const count = () => props.getCount(props.segmentIndex) ?? 0;
   const hideMockBubble = () => paragraphHasLegadoCommentImg(props.parts);
+  const paragraphStyle = createMemo(() => {
+    const p = viewerState.config.spacing.paragraph;
+    return { 'margin-bottom': p ? `${p}em` : undefined };
+  });
   return (
-    <p class="reader-p break-inside-avoid" style={props.paragraphStyle}>
+    <p
+      class="reader-p break-inside-avoid"
+      style={paragraphStyle()}
+      data-reader-dual-tail-block={props.isDualSpreadTail ? '' : undefined}
+    >
       <For each={props.parts}>
         {(part) =>
           part.kind === 'text' ? (
@@ -539,6 +557,7 @@ function ParagraphBlock(props: {
   raw: string;
   segmentIndex: number;
   paragraphStyle: Record<string, string | number | undefined>;
+  isDualSpreadTail?: boolean;
   getCount: (segmentIndex: number) => number;
   hideBubbles?: boolean;
   chapterIndex: number;
@@ -546,8 +565,16 @@ function ParagraphBlock(props: {
 }) {
   const count = () => props.getCount(props.segmentIndex) ?? 0;
   const html = () => paragraphToHtml(props.raw);
+  const paragraphStyle = createMemo(() => {
+    const p = viewerState.config.spacing.paragraph;
+    return { 'margin-bottom': p ? `${p}em` : undefined };
+  });
   return (
-    <p class="reader-p break-inside-avoid" style={props.paragraphStyle}>
+    <p
+      class="reader-p break-inside-avoid"
+      style={paragraphStyle()}
+      data-reader-dual-tail-block={props.isDualSpreadTail ? '' : undefined}
+    >
       <span innerHTML={html()} />
       <Show when={!props.hideBubbles && count() > 0}>
         <span class="inline align-baseline whitespace-nowrap ml-1">

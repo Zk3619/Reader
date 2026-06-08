@@ -39,7 +39,7 @@ import {
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
 import {
-  chapterPosForPagedEntry,
+  chapterPosForChapterSwitch,
   consumePagedChapterEntry,
   markPagedChapterEntry,
 } from '@/lib/media/text/reader-paged-chapter-entry';
@@ -47,6 +47,7 @@ import type { Book, BookChapter, BookProgress, BookSource } from '@/types';
 import { state, setState } from '@/stores/viewer/media/state';
 import {
   clampChapterIndex,
+  loadChapterRaw,
   persistCatalogToDb,
 } from '@/stores/viewer/media/chapter';
 import {
@@ -464,11 +465,19 @@ export async function openTextBook(
   }
 }
 
+function isScrollReadingMode(): boolean {
+  return normalizeTextViewerPageAnim(state.config.pageAnim) === 'scroll';
+}
+
 function beginChapterLoadUi(index: number): void {
   const entry = consumePagedChapterEntry();
   setState({
     chapterIndex: index,
-    chapterPos: chapterPosForPagedEntry(entry, state.chapterPos),
+    chapterPos: chapterPosForChapterSwitch(
+      entry,
+      state.chapterPos,
+      isScrollReadingMode(),
+    ),
     contentLoading: true,
     showContent: false,
   });
@@ -602,6 +611,39 @@ export async function loadTextChapter(
   }
 }
 
+/**
+ * 拉取已处理正文（不切换当前章 UI；用于滚动模式预载下一章）
+ */
+export async function fetchProcessedChapterContent(index: number): Promise<string> {
+  if (!state.book) {
+    throw new Error('未打开书籍');
+  }
+  if (index < 0 || index >= state.catalog.length) {
+    throw new Error('章节索引超出范围');
+  }
+
+  const book = state.book;
+  const catalog = state.catalog;
+  const chapter = catalog[index];
+  if (!chapter) {
+    throw new Error('章节不存在');
+  }
+
+  const pooled = getPooledChapterContent(book.bookUrl, index);
+  if (pooled) return pooled;
+
+  const raw = await loadChapterRaw(book, chapter, catalog, index, false);
+  const source =
+    !isLocalBook(book) && book.origin
+      ? await sourcesDb.getSource(book.origin)
+      : null;
+  const content = raw
+    ? await applyChapterDisplayProcessing(raw, book, source)
+    : '';
+  setAdjacentChapterInPool(book.bookUrl, state.chapterIndex, index, content);
+  return content;
+}
+
 export async function saveTextProgress(): Promise<void> {
   const book = state.book;
   if (!book || state.guestReading) {
@@ -729,7 +771,7 @@ export const textViewerTextApi = {
       if (entry) {
         setState({
           chapterIndex: entry.index,
-          chapterPos: 1,
+          chapterPos: isScrollReadingMode() ? 0 : 1,
           content: entry.content,
           contentLoading: false,
           contentFetching: false,
@@ -761,8 +803,20 @@ export const textViewerTextApi = {
   /** 跳转到指定章节 */
   async jumpToChapter(index: number): Promise<void> {
     if (index >= 0 && index < state.catalog.length) {
+      markPagedChapterEntry('first');
       await loadTextChapter(index);
     }
+  },
+
+  /**
+   * 滚动阅读：仅更新章索引与章内进度，不触发正文重载
+   */
+  setScrollReadingPosition(chapterIndex: number, chapterPos: number): void {
+    if (!state.book) return;
+    const idx = clampChapterIndex(chapterIndex, state.catalog.length);
+    const pos = Math.min(1, Math.max(0, chapterPos));
+    if (state.chapterIndex === idx && state.chapterPos === pos) return;
+    setState({ chapterIndex: idx, chapterPos: pos });
   },
 
   /**

@@ -19,6 +19,8 @@ export interface MediaViewerCatalogProps {
   loading?: boolean;
   initialScrollTop?: number;
   onScrollTop?: (scrollTop: number) => void;
+  /** 底部抽屉模式（移动端），避免选中行圆角被裁切 */
+  drawerBottom?: boolean;
 }
 
 export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
@@ -68,7 +70,7 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
       }
     >
     <VirtualChapterList
-      class="reader-catalog-scroll mb-2"
+      class={cn('reader-catalog-scroll mb-2', props.drawerBottom && 'px-2')}
       count={rows().length}
       onScrollContainer={(el) => {
         scrollContainer = el;

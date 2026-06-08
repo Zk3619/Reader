@@ -225,14 +225,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let simCorner: CurlPoint | null = null;
   let curlAnim:
     | {
-        fromX: number;
-        fromY: number;
-        toX: number;
-        toY: number;
-        cornerX: number;
-        cornerY: number;
-        initial: number;
-      }
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
+      cornerX: number;
+      cornerY: number;
+      initial: number;
+    }
     | null = null;
   /** finishTurn 异步切章期间，阻止 chapterIndex effect 重置排版 */
   let crossChapterCommitInFlight = false;
@@ -603,12 +603,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     }
   };
 
-  const measureRootHasBlocks = (contentRoot: HTMLElement | null | undefined): boolean => {
-    if (!contentRoot) return false;
-    const body = resolvePagedMeasureRoot(contentRoot);
-    return body.querySelector('[data-reader-measure-block]') != null;
-  };
-
   /** 测量块须非零高度，否则 segments 恒为空 */
   const measureRootHasUsableBlocks = (
     contentRoot: HTMLElement | null | undefined,
@@ -731,7 +725,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return `incoming:${turn.incomingChapterIndex}:${buildContentRevision(turn.incomingContent)}`;
     }
     viewerState.chapterIndex;
-    return `${viewerState.chapterIndex}:${buildContentRevision(viewerState.content)}`;
+    return `${viewerState.chapterIndex}:${buildContentRevision(viewerState.content)}:${layoutSignature()}`;
   });
 
   const measureHostStagedChapter = createMemo(() => {
@@ -816,13 +810,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (!l || !pagedLayoutDualPage() || l.segments.length === 0) {
       return column === 'left' ? undefined : [];
     }
+    const liveClip = clipViewportHeightPx();
     const pick = {
       pageStarts: l.pageStarts,
       rightPageStarts: l.rightPageStarts,
       segments: l.segments,
       dualPage: true as const,
       contentExtent: l.contentExtent,
-      clipHeight: l.clipHeight,
+      clipHeight: liveClip > 0 ? liveClip : l.clipHeight,
       leftColumnExtent: l.leftColumnExtent,
       rightColumnExtent: l.rightColumnExtent,
     };
@@ -854,18 +849,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       rightColumnExtent: l.rightColumnExtent,
     };
     return columnShowsChapterTitleOnSpreadPage(pick, column === 'left' ? 0 : 1, pageIndex);
-  };
-
-  const dualSpreadColumnExtentPx = (
-    column: 'left' | 'right',
-    layoutOverride?: ReaderChapterLayout | null,
-    fallback = 0,
-  ) => {
-    const l = layoutOverride ?? pagingLayout();
-    if (column === 'left') {
-      return l?.leftColumnExtent ?? fallback;
-    }
-    return l?.rightColumnExtent ?? fallback;
   };
 
   const remeasureAllowed = () => turnStage() === 'idle';
@@ -2023,8 +2006,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         viewportHeightPx: curtainViewportHeightPx(fromPage),
         contentInsetPx:
           local.pageAnim() === 'cover' ||
-          local.pageAnim() === 'slide' ||
-          local.pageAnim() === 'simulation'
+            local.pageAnim() === 'slide' ||
+            local.pageAnim() === 'simulation'
             ? contentInset()
             : undefined,
         slideViewportPanel:
@@ -3178,8 +3161,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const liveChapterContentMountKey = createMemo(() => {
     const ch = viewerState.chapterIndex;
     const rev = buildContentRevision(viewerState.content);
+    const sig = layoutSignature();
     viewerState.showContent;
-    return [`${ch}:${rev}:live`];
+    return [`${ch}:${rev}:${sig}:live`];
   });
 
   const curtainCloneHostMountKey = createMemo(() => {
@@ -3187,7 +3171,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (page == null) return ['none'];
     const ch = viewerState.chapterIndex;
     const rev = buildContentRevision(viewerState.content);
-    return [`host:${ch}:${rev}:${page}`];
+    const sig = layoutSignature();
+    return [`host:${ch}:${rev}:${sig}:${page}`];
   });
 
   const incomingStagingMountKey = createMemo(() => {
@@ -3444,7 +3429,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return (
         <div
           class={cn(
-            'reader-paged-incoming-inner absolute inset-0 z-[1] h-full w-full overflow-hidden pointer-events-none',
+            'reader-paged-incoming-inner absolute inset-0 z-1 h-full w-full overflow-hidden pointer-events-none',
             theme().bg,
           )}
         >
@@ -3471,7 +3456,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return (
       <div
         class={cn(
-          'reader-paged-incoming-inner absolute inset-0 z-[1] h-full w-full overflow-hidden pointer-events-none',
+          'reader-paged-incoming-inner absolute inset-0 z-1 h-full w-full overflow-hidden pointer-events-none',
           theme().bg,
         )}
       >
@@ -3833,7 +3818,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             ref={(el) => {
               contentSlotEl = el;
             }}
-            class="reader-text-content-slot absolute z-[2] overflow-hidden box-border"
+            class="reader-text-content-slot absolute z-2 overflow-hidden box-border"
             style={
               slideActive
                 ? readerTextContentSlotSlidePanelStyle(slotInset)
@@ -3933,7 +3918,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           >
             <div class="reader-paged-clip relative h-full overflow-hidden" style={pagedClipStyle()}>
               <div
-                class="reader-text-content-slot absolute z-[2] overflow-hidden box-border"
+                class="reader-text-content-slot absolute z-2 overflow-hidden box-border"
                 style={pagedContentSlotStyle(contentInset())}
               >
                 <ReaderContentSkeleton />

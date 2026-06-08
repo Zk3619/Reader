@@ -30,6 +30,8 @@ export interface ReaderCatalogProps {
   initialScrollTop?: number;
   /** 滚动时上报，用于关闭后缓存 */
   onScrollTop?: (scrollTop: number) => void;
+  /** 底部抽屉模式（移动端），避免选中行圆角被裁切 */
+  drawerBottom?: boolean;
 }
 
 export function ReaderCatalog(props: ReaderCatalogProps) {
@@ -88,7 +90,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
 
   return (
     <VirtualChapterList
-      class="reader-catalog-scroll"
+      class={cn('reader-catalog-scroll', props.drawerBottom && 'px-2')}
       count={rows().length}
       onScrollContainer={(el) => {
         scrollContainer = el;
