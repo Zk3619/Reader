@@ -25,6 +25,9 @@ let skipNextPop = false;
 let installed = false;
 let consumingBackNavigation = false;
 let rootExitArmedAt = 0;
+let appExitInProgress = false;
+/** 系统返回已关闭一层 UI 时置位，避免 AppBackNavigationBridge 再次 pop history 误关下一层 */
+let closedLayerViaBackNavigation = false;
 
 /** @internal 测试专用 */
 export function __resetBackNavigationForTests(): void {
@@ -32,8 +35,10 @@ export function __resetBackNavigationForTests(): void {
   historyDepth = 0;
   skipNextPop = false;
   consumingBackNavigation = false;
+  closedLayerViaBackNavigation = false;
   installed = false;
   rootExitArmedAt = 0;
+  appExitInProgress = false;
 }
 
 /** 打开可返回层时重置根层退出计时 */
@@ -61,7 +66,6 @@ export function isConsumingBackNavigation(): boolean {
 }
 
 export function registerBackHandler(handler: BackHandler): () => void {
-  resetRootExitConfirm();
   const id = Symbol('back-handler');
   const entry: BackEntry = { id, handler };
   handlerStack.push(entry);
@@ -73,9 +77,22 @@ export function registerBackHandler(handler: BackHandler): () => void {
 
 export function consumeBackNavigation(): boolean {
   for (let i = handlerStack.length - 1; i >= 0; i--) {
-    if (handlerStack[i].handler()) return true;
+    if (handlerStack[i].handler()) {
+      closedLayerViaBackNavigation = true;
+      return true;
+    }
   }
   return false;
+}
+
+/**
+ * 读取并清除「刚由 consumeBackNavigation 关闭一层」标记。
+ * AppBackNavigationBridge 在层从 getOpenLayers 移除时，若已消费则勿再 popBackHistoryProgrammatic。
+ */
+export function takeLayerClosedViaBackNavigation(): boolean {
+  const taken = closedLayerViaBackNavigation;
+  closedLayerViaBackNavigation = false;
+  return taken;
 }
 
 export function getBackHistoryDepth(): number {
@@ -119,18 +136,26 @@ async function exitApplication(): Promise<void> {
   try {
     const { isTauri } = await import('@/lib/platform/detect');
     if (!isTauri()) return;
-    const { exit } = await import('@tauri-apps/plugin-process');
-    await exit(0);
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('request_app_exit');
   } catch (e) {
     console.warn('[back-navigation] exit failed', e);
+    try {
+      const { exit } = await import('@tauri-apps/plugin-process');
+      await exit(0);
+    } catch (fallbackErr) {
+      console.warn('[back-navigation] plugin-process exit failed', fallbackErr);
+    }
   }
 }
 
 function handleRootBackNavigation(): void {
+  if (appExitInProgress) return;
   const { nextArmedAt, action } = stepRootExitConfirm(Date.now(), rootExitArmedAt);
   rootExitArmedAt = nextArmedAt;
 
   if (action === 'exit') {
+    appExitInProgress = true;
     void exitApplication();
     return;
   }
@@ -196,13 +221,9 @@ export function installBackNavigation(): () => void {
       if (!isAndroid()) return;
 
       const { onBackButtonPress } = await import('@tauri-apps/api/app');
-      const listener = await onBackButtonPress((payload) => {
+      const listener = await onBackButtonPress(() => {
         if (triggerBackNavigation()) return;
-        if (payload.canGoBack) {
-          skipNextPop = true;
-          history.back();
-          return;
-        }
+        // 根层：直接走退出确认，勿 history.back()+skipNextPop（会吞掉 popstate，导致「再按一次」后无法 exit）
         handleRootBackNavigation();
       });
       unlistenAndroid = () => {

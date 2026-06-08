@@ -7,8 +7,10 @@ import {
   popBackHistoryProgrammatic,
   pushBackHistoryEntry,
   registerBackHandler,
+  takeLayerClosedViaBackNavigation,
 } from '@/lib/navigation/back-navigation';
 import { installKeyboardViewport } from '@/lib/platform/keyboard-viewport';
+import { installMobileViewportInsets } from '@/lib/platform/mobile-viewport-insets';
 
 export interface BackLayerDefinition {
   id: string;
@@ -30,9 +32,11 @@ export function AppBackNavigationBridge(props: AppBackNavigationBridgeProps) {
   onMount(() => {
     const uninstallBack = installBackNavigation();
     const uninstallKeyboard = installKeyboardViewport();
+    const uninstallMobileInsets = installMobileViewportInsets();
     onCleanup(() => {
       uninstallBack();
       uninstallKeyboard();
+      uninstallMobileInsets();
     });
   });
 
@@ -47,8 +51,8 @@ export function AppBackNavigationBridge(props: AppBackNavigationBridgeProps) {
       for (const id of prevOpenIds) {
         if (!currentIds.has(id)) removedAny = true;
       }
-      // 同一 tick 多层关闭（如抽屉+叠层切换）只 back 一次，避免误触发下一层 close
-      if (removedAny) {
+      // UI 主动关闭时同步 history；系统返回已在 triggerBackNavigation 中 pop 过，勿重复以免误关下一层（如书籍详情抽屉下的探索页）
+      if (removedAny && !takeLayerClosedViaBackNavigation()) {
         popBackHistoryProgrammatic();
       }
       if (openLayers.length === 0 && getBackHistoryDepth() > 0) {

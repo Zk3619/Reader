@@ -4,6 +4,7 @@ import {
   consumeBackNavigation,
   registerBackHandler,
   stepRootExitConfirm,
+  takeLayerClosedViaBackNavigation,
   triggerBackNavigation,
 } from '@/lib/navigation/back-navigation';
 
@@ -28,6 +29,14 @@ describe('back-navigation', () => {
 
   it('triggerBackNavigation 在无 handler 时返回 false', () => {
     expect(triggerBackNavigation()).toBe(false);
+  });
+
+  it('consumeBackNavigation 标记系统返回已关层，供 history 同步去重', () => {
+    registerBackHandler(() => true);
+    expect(takeLayerClosedViaBackNavigation()).toBe(false);
+    consumeBackNavigation();
+    expect(takeLayerClosedViaBackNavigation()).toBe(true);
+    expect(takeLayerClosedViaBackNavigation()).toBe(false);
   });
 
   it('stepRootExitConfirm 首次 armed、窗口内再次 exit', () => {
