@@ -21,6 +21,7 @@ import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/s
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { useOverlayPortalMountAccessor } from '@/lib/ui/overlay-portal-mount';
 import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
@@ -45,8 +46,16 @@ type AppDialogPortalProps = DialogPrimitive.DialogPortalProps & {
 
 const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
   const [local, rest] = splitProps(props, ['children', 'wrapperClass', 'portalToBody']);
+  const viewerPortalHost = useOverlayPortalMountAccessor();
+  const resolveMount = () => {
+    // portalToBody：显式挂 body，由 portalZClass / overlay 档位决定 z-index（须高于 BookInfoDrawer z-120 等）
+    if (local.portalToBody) return document.body;
+    const viewerHost = viewerPortalHost();
+    if (viewerHost) return viewerHost;
+    return document.body;
+  };
   return (
-    <DialogPrimitive.Portal {...rest}>
+    <DialogPrimitive.Portal mount={resolveMount()} {...rest}>
       <div
         class={cn(
           'fixed inset-0 flex items-start justify-center sm:items-center',

@@ -3,10 +3,8 @@
  */
 
 import { Show, createEffect, createMemo, onCleanup } from 'solid-js';
-import { Dynamic } from 'solid-js/web';
 import {
   AppDialog,
-  AppDialogContent,
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
@@ -101,10 +99,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <Dynamic
-        component={props.inDrawer ? BookInfoDrawerDialogContent : AppDialogContent}
-        class={dialogVirtualListPanelWidth}
-      >
+      <BookInfoDrawerDialogContent class={dialogVirtualListPanelWidth}>
         <AppDialogHeader>
           <AppDialogTitle class="text-base">目录 · {props.bookName}</AppDialogTitle>
         </AppDialogHeader>
@@ -181,7 +176,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
             </Show>
           </Show>
         </div>
-      </Dynamic>
+      </BookInfoDrawerDialogContent>
     </AppDialog>
   );
 }

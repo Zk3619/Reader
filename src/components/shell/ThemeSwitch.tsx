@@ -3,6 +3,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ThemeLightIcon, ThemeDarkIcon, ThemeAutoIcon } from "@/components/shared/icons";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument, type ThemeMode } from "@/lib/theme";
+import {
+  ViewerAppDropdownMenuContent,
+  ViewerAppTooltip,
+  ViewerAppTooltipContent,
+  ViewerAppTooltipTrigger,
+} from "@/components/viewer/viewer-app-overlay";
 
 const THEME_OPTIONS: MultiSwitchOption<ThemeMode>[] = [
   { value: "light", label: "浅色", icon: ThemeLightIcon },
@@ -15,10 +21,13 @@ export interface ThemeSwitchProps {
   sizeClass?: string;
   /** 是否包裹在 Tooltip 中（导航栏用 true） */
   withTooltip?: boolean;
+  /** 阅读器叠层内为 true：下拉/Tooltip 使用正确 z-index */
+  inViewerOverlay?: boolean;
 }
 
 export function ThemeSwitch(props: ThemeSwitchProps) {
   const theme = () => settingsStore.state.app.theme;
+  const inViewer = () => props.inViewerOverlay === true;
 
   async function handleChange(value: ThemeMode) {
     await settingsStore.setTheme(value);
@@ -29,28 +38,40 @@ export function ThemeSwitch(props: ThemeSwitchProps) {
     const t = theme();
     if (t === "light") return "浅色模式";
     if (t === "dark") return "深色模式";
-    return "系统";
+    return "跟随系统";
   };
 
-  const content = (
+  const tooltipHint = () =>
+    `${label()}（左键循环切换，右键或长按打开菜单选择）`;
+
+  const switchControl = (
     <MultiSwitch<ThemeMode>
       options={THEME_OPTIONS}
       value={theme}
       onChange={handleChange}
       class={props.class}
       sizeClass={props.sizeClass ?? "h-9 w-9"}
+      DropdownMenuContent={inViewer() ? ViewerAppDropdownMenuContent : undefined}
     />
   );
 
-  if (props.withTooltip !== false) {
+  if (props.withTooltip === false) {
+    return switchControl;
+  }
+
+  if (inViewer()) {
     return (
-      <Tooltip>
-        <TooltipTrigger as="div">{content}</TooltipTrigger>
-        <TooltipContent>
-          {label()}（左键循环切换，右键或长按打开菜单选择）
-        </TooltipContent>
-      </Tooltip>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger as="div">{switchControl}</ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>{tooltipHint()}</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
     );
   }
-  return content;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger as="div">{switchControl}</TooltipTrigger>
+      <TooltipContent>{tooltipHint()}</TooltipContent>
+    </Tooltip>
+  );
 }

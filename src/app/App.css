@@ -550,33 +550,6 @@
 }
 
 /*
- * 书籍详情纵向布局：滚动条浮于内容之上，不预留两侧 gutter。
- * 用于 BookInfoPage 窄屏/抽屉纵向区与 BookInfoDrawer 内容滚动。
- */
-.bookinfo-stacked-scroll {
-  min-height: 0;
-  /* overflow-x: hidden;
-  overflow-y: auto; */
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
-  overflow: overlay;
-}
-
-.bookinfo-stacked-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.bookinfo-stacked-scroll::-webkit-scrollbar-thumb {
-  border-radius: 9999px;
-  background-color: hsl(var(--border));
-}
-
-.bookinfo-stacked-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-/*
  * PageToolbar 第二行横滚视口（BookshelfGroupNav 仅 __track）：
  * - 勿用 scrollbar-gutter：横滚时 Chromium 常在行向占位，导致 scrollLeft 范围错误
  * - padding-block 对称预留块轴（等同纵向 both-edges 视觉）
@@ -819,51 +792,6 @@
   height: 0;
 }
 
-/* 阅读器目录 Sheet 动画 */
-.reader-sheet-animated[data-expanded="true"],
-.reader-sheet-animated[data-expanded] {
-  transition-property: none !important;
-  transition-duration: 0s !important;
-  will-change: transform, opacity;
-  backface-visibility: hidden;
-  animation: reader-sheet-slide-in-left 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
-}
-
-.reader-sheet-animated[data-closed="true"],
-.reader-sheet-animated[data-closed] {
-  transition-property: none !important;
-  transition-duration: 0s !important;
-  animation: reader-sheet-slide-out-left 0.3s cubic-bezier(0.4, 0, 1, 1) forwards !important;
-}
-
-[data-kb-dialog-overlay] {
-  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-@keyframes reader-sheet-slide-in-left {
-  from {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes reader-sheet-slide-out-left {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-
-  to {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-}
-
 /* 阅读器目录滚动条样式 */
 .reader-catalog-scroll {
   scrollbar-gutter: stable both-edges;
@@ -1004,6 +932,15 @@
   min-height: 0 !important;
 }
 
+/** live 双栏 pane 裁切：页尾块段距不计入叠高，避免页尾裁字 */
+.reader-paged-dual-spread .reader-paged-dual-column-clip .reader-p[data-reader-dual-tail-block] {
+  margin-bottom: 0 !important;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-column-clip.reader-paged-bottom-justify .reader-p[data-reader-dual-tail-block] {
+  margin-bottom: 0 !important;
+}
+
 .reader-paged-page-window {
   position: relative;
   width: 100%;
@@ -1075,6 +1012,11 @@
 
 .reader-paged-bottom-justify .reader-p:last-child {
   margin-bottom: auto;
+}
+
+/** 双栏 clip 分页：禁用页底 justify（h-full + margin-auto 会把正文撑出 clip 导致末行裁切） */
+.reader-paged-dual-spread .reader-dual-spread-pane.reader-paged-bottom-justify .reader-p:last-child {
+  margin-bottom: unset;
 }
 
 @keyframes skeleton-fade-in {
@@ -1415,6 +1357,11 @@ body.reader-inner-web-session .reader-inner-web-layer {
   pointer-events: auto;
   -webkit-user-select: auto;
   user-select: auto;
+}
+
+/* 主壳内容区：限定 stacking，确保 body 级 Dialog（z-100+）始终在上 */
+#main-content-container {
+  z-index: 0;
 }
 
 /*
@@ -1939,7 +1886,8 @@ body.reader-inner-web-session--drawer {
 
 :root {
   --app-bar-height: 3.5rem;
-  /* 由 installMobileViewportInsets 写入；未就绪时触摸端 CSS 用手势条兜底 */
+  /* 由 installMobileViewportInsets 写入；未就绪时触摸端 CSS 用固定值兜底 */
+  --system-status-inset-top: 0px;
   --system-nav-inset-bottom: 0px;
   --safe-area-top-effective: env(safe-area-inset-top, 0px);
   --safe-area-bottom-effective: env(safe-area-inset-bottom, 0px);
@@ -1948,6 +1896,11 @@ body.reader-inner-web-session--drawer {
 
 .safe-area-inset-top {
   padding-top: var(--safe-area-top-effective);
+}
+
+/** 主壳 PageToolbar：安全区 + 1rem，避免与 Tailwind pt-4 争抢 padding-top */
+.page-toolbar-shell-top {
+  padding-top: calc(var(--safe-area-top-effective) + 1rem);
 }
 
 /** 主壳 fixed 区域：顶/底栏高度 + 安全区（与 Navigation / BottomBar 外层 padding 一致） */
@@ -1991,7 +1944,7 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
 /* 触摸端：pointer:coarse 与 data-touch-ui 双轨（WebView 媒体查询可能失效） */
 @media (pointer: coarse) and (hover: none) {
   :root {
-    --safe-area-top-effective: var(--mobile-safe-top);
+    --safe-area-top-effective: max(env(safe-area-inset-top, 0px), var(--system-status-inset-top, var(--mobile-safe-top)));
     --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
   }
 
@@ -2016,13 +1969,17 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
     min-height: var(--safe-area-bottom-effective);
   }
 
+  .safe-area-min-height-top {
+    min-height: var(--safe-area-top-effective);
+  }
+
   #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
     margin-bottom: var(--safe-area-bottom-effective);
   }
 }
 
 html[data-touch-ui] {
-  --safe-area-top-effective: var(--mobile-safe-top);
+  --safe-area-top-effective: max(env(safe-area-inset-top, 0px), var(--system-status-inset-top, var(--mobile-safe-top)));
   --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
 }
 
@@ -2045,6 +2002,10 @@ html[data-touch-ui] .app-scroll-bottom-inset {
 
 html[data-touch-ui] .safe-area-min-height-bottom {
   min-height: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] .safe-area-min-height-top {
+  min-height: var(--safe-area-top-effective);
 }
 
 html[data-touch-ui] #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {

@@ -32,7 +32,7 @@ export interface ImportLocalChoiceDialogProps {
 export function ImportLocalChoiceDialog(props: ImportLocalChoiceDialogProps) {
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalZClass={props.portalZClass}>
+      <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
           <AppDialogTitle>{props.title}</AppDialogTitle>
           <AppDialogDescription>{props.description}</AppDialogDescription>

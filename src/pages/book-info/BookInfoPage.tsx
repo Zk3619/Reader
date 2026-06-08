@@ -1023,63 +1023,56 @@ export function BookInfoPage(props: BookInfoPageProps) {
             />
           </Show>
 
-          <div class="bookinfo-stacked-scroll flex-1" data-tauri-no-drag>
-            {/* 窄屏滚动内容：用 flex + min-h-full 保证至少占满视口，底部用填充块延伸白底到 ActionBar 消除缝隙 */}
-            <div class="flex min-h-full flex-col">
-            {/* 封面区域：白色卡片从封面中部开始，封面下半部分覆盖在白色背景上 */}
-            <div class="relative shrink-0">
-              {/* 白色卡片背景 — 从封面垂直中点开始，圆角过渡 */}
-              {/* top = pt(8px) + 封面高度一半(80px) = 88px */}
-              <div class="absolute inset-x-0 bottom-0 top-[88px] rounded-t-[128px] bg-background pointer-events-none" />
-              {/* 封面 — z-10 使其浮于白色卡片之上 */}
-              <div class="relative z-10 flex justify-center pt-2 pb-5">
-                <BookCoverPreviewButton
-                  coverUrl={currentBook().coverUrl}
-                  bookUrl={props.book.bookUrl}
-                  origin={currentBook().origin}
-                  source={bookSource()}
-                  name={currentBook().name}
-                  onCoverUrlRefreshed={handleCoverUrlRefreshed}
-                  onPreview={() => setShowCoverDialog(true)}
-                  class="h-[160px] w-[110px] rounded-md shadow-2xl bg-muted/50 transition-transform hover:scale-[1.02] active:scale-[0.98]"
-                  fallback={
-                    <div class="flex h-full w-full items-center justify-center">
-                      <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
-                    </div>
-                  }
-                />
-              </div>
-            </div>
-
-            {/* 信息区域 — 与上方白色卡片无缝衔接 */}
-            <div
-              class={cn(
-                'shrink-0 bg-background px-4 pb-4',
-                isPagePresentation() ? 'min-h-[calc(100dvh-320px)]' : 'min-h-0',
-              )}
-            >
-              <div class="pb-4">
-                <Show
-                  when={loadError()}
-                  fallback={
-                    <Show
-                      when={!isLoading()}
-                      fallback={
-                        <div class="pt-1">
-                          <NameBadgesSkeleton />
-                          <DetailInfoListSkeleton />
-                          <IntroSkeleton />
-                        </div>
-                      }
-                    >
-                  <div class="bookinfo-fade-in">
-                    <NameAndBadges center class="mb-3" />
-                    <DetailInfoList />
-                    <IntroSection />
+          {/* 封面区域：固定不滚动；白色卡片从封面中部圆角过渡 */}
+          <div class="relative shrink-0" data-tauri-no-drag>
+            {/* top = pt(8px) + 封面高度一半(80px) = 88px */}
+            <div class="absolute inset-x-0 bottom-0 top-[88px] rounded-t-[128px] bg-background pointer-events-none" />
+            <div class="relative z-10 flex justify-center pt-2 pb-5">
+              <BookCoverPreviewButton
+                coverUrl={currentBook().coverUrl}
+                bookUrl={props.book.bookUrl}
+                origin={currentBook().origin}
+                source={bookSource()}
+                name={currentBook().name}
+                onCoverUrlRefreshed={handleCoverUrlRefreshed}
+                onPreview={() => setShowCoverDialog(true)}
+                class="h-[160px] w-[110px] rounded-md shadow-2xl bg-muted/50 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                fallback={
+                  <div class="flex h-full w-full items-center justify-center">
+                    <BookCoverIcon class="h-16 w-16 text-muted-foreground" size={64} />
                   </div>
-                    </Show>
-                  }
-                >
+                }
+              />
+            </div>
+          </div>
+
+          {/* 白色信息区：内部滚动，滚动条落在白底上 */}
+          <div
+            class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain scroll-gutter-stable-both bg-background px-4"
+            data-tauri-no-drag
+          >
+            <div class="pb-4 app-scroll-bottom-inset">
+              <Show
+                when={loadError()}
+                fallback={
+                  <Show
+                    when={!isLoading()}
+                    fallback={
+                      <div class="pt-1">
+                        <NameBadgesSkeleton />
+                        <DetailInfoListSkeleton />
+                        <IntroSkeleton />
+                      </div>
+                    }
+                  >
+                    <div class="bookinfo-fade-in">
+                      <NameAndBadges center class="mb-3" />
+                      <DetailInfoList />
+                      <IntroSection />
+                    </div>
+                  </Show>
+                }
+              >
                 <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-6 mt-4">
                   <div class="mb-4 text-center text-sm text-destructive">
                     <p class="font-medium mb-1">加载失败</p>
@@ -1087,7 +1080,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
                   </div>
                   <div class="flex justify-center">
                     <Button variant="outline" size="sm" onClick={() => {
-                      // 清除缓存并重新加载
                       const bookUrl = props.book.tocUrl || props.book.bookUrl;
                       if (bookUrl) {
                         pageCacheStore.clearBookInfoCache(bookUrl);
@@ -1098,11 +1090,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
                     </Button>
                   </div>
                 </div>
-                </Show>
-              </div>
-            </div>
-            {/* 底部填充块：延伸白底到 ActionBar，消除缝隙 */}
-            <div class="min-h-8 flex-1 bg-background app-bottom-edge-inset" aria-hidden="true" />
+              </Show>
             </div>
           </div>
 

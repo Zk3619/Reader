@@ -33,6 +33,8 @@ export interface MultiSwitchProps<T> {
    * 禁用长按、右键打开菜单，仅左键点击打开下拉。
    */
   dropdownTrigger?: boolean;
+  /** 自定义下拉内容容器（阅读器内须用 ViewerAppDropdownMenuContent） */
+  DropdownMenuContent?: Component<{ class?: string; children: JSX.Element }>;
 }
 
 function getValue<T>(value: T | (() => T)): T {
@@ -106,6 +108,29 @@ export function MultiSwitch<T>(props: MultiSwitchProps<T>) {
   };
 
   const currentOption = () => props.options[currentIndex()] ?? props.options[0];
+
+  const menuItems = () => (
+    <For each={props.options}>
+      {(opt) => (
+        <DropdownMenuItem
+          onSelect={() => {
+            props.onChange(opt.value);
+            setMenuOpen(false);
+          }}
+          class={cn(
+            "flex items-center gap-2",
+            equals()(opt.value, currentValue()) && "bg-accent/50"
+          )}
+        >
+          {opt.icon ? (() => {
+            const Icon = opt.icon!;
+            return <Icon class="h-4 w-4 shrink-0" />;
+          })() : null}
+          <span>{opt.label}</span>
+        </DropdownMenuItem>
+      )}
+    </For>
+  );
 
   const triggerButtonClass = () =>
     cn(
@@ -184,28 +209,15 @@ export function MultiSwitch<T>(props: MultiSwitchProps<T>) {
             </Show>
           </>
         )}
-        <DropdownMenuContent class="min-w-0 w-auto">
-          <For each={props.options}>
-            {(opt) => (
-              <DropdownMenuItem
-                onSelect={() => {
-                  props.onChange(opt.value);
-                  setMenuOpen(false);
-                }}
-                class={cn(
-                  "flex items-center gap-2",
-                  equals()(opt.value, currentValue()) && "bg-accent/50"
-                )}
-              >
-                {opt.icon ? (() => {
-                  const Icon = opt.icon!;
-                  return <Icon class="h-4 w-4 shrink-0" />;
-                })() : null}
-                <span>{opt.label}</span>
-              </DropdownMenuItem>
-            )}
-          </For>
-        </DropdownMenuContent>
+        {props.DropdownMenuContent ? (
+          <props.DropdownMenuContent class="min-w-0 w-auto">
+            {menuItems()}
+          </props.DropdownMenuContent>
+        ) : (
+          <DropdownMenuContent class="min-w-0 w-auto">
+            {menuItems()}
+          </DropdownMenuContent>
+        )}
       </DropdownMenu>
     </div>
   );

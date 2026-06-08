@@ -28,9 +28,11 @@ import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared'
 import { cn } from '@/lib/utils';
 import {
   appDrawerScrollBody,
+  hDrawerPanel,
   mainShellPageRoot,
   sourcesExploreDrawerWidth,
 } from '@/lib/ui/viewport-classes';
+import { isMobile } from '@/lib/platform/detect';
 import {
   APP_DRAWER_CLOSE_BUTTON_CLASS,
   AppDrawer,
@@ -340,6 +342,14 @@ export function SourcesPage(props: SourcesPageProps) {
   const exploreDrawerOpen = () =>
     expandedSourceUrl() != null && (props.exploreDrawerPresentationOpen ?? true);
 
+  /** 移动端底部抽屉，桌面 / Web 右侧侧栏抽屉 */
+  const exploreDrawerSide = () => (isMobile() ? 'bottom' : 'right') as 'bottom' | 'right';
+
+  const exploreDrawerContentClass = () =>
+    exploreDrawerSide() === 'right'
+      ? cn('flex h-full flex-col', sourcesExploreDrawerWidth)
+      : cn('flex flex-col', hDrawerPanel, 'max-h-[75dvh]');
+
   const drawerSectionsLoading = () => {
     const s = expandedSource();
     if (!s) return false;
@@ -595,12 +605,12 @@ export function SourcesPage(props: SourcesPageProps) {
             setExpandedSourceUrl(null);
           }
         }}
-        side="right"
+        side={exploreDrawerSide()}
         snapPoints={[0, 1]}
         defaultSnapPoint={1}
       >
         <AppDrawerContent
-          class={cn('flex h-full flex-col', sourcesExploreDrawerWidth)}
+          class={exploreDrawerContentClass()}
           showNativeDragHandle={false}
         >
           <AppDrawerHeader

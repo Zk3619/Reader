@@ -80,13 +80,17 @@ export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
 export const scrollEdgeBottomInset = 'mt-2 app-scroll-bottom-inset';
 
 /**
- * 贴底 chrome 内边距（底栏、抽屉、阅读器底栏）：仅 `(pointer: coarse)` 触摸端生效。
+ * 贴底 chrome 内边距（底栏、抽屉、阅读器底栏）。
+ * 触摸端由 App.css + `installMobileViewportInsets` 按手势条/三键导航分配底部安全距离。
  * @see App.css `.app-bottom-chrome-inset`
  */
 export const appBottomChromePadding = 'app-bottom-chrome-inset';
 
 /** 块级底外边距：仅触摸端，见 App.css `.app-bottom-edge-inset` */
 export const appBottomEdgeInset = 'app-bottom-edge-inset';
+
+/** 主壳 PageToolbar 顶距：安全区 + pt-4（见 App.css `.page-toolbar-shell-top`） */
+export const pageToolbarShellTop = 'page-toolbar-shell-top';
 
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;

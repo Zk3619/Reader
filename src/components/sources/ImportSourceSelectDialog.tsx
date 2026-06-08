@@ -89,7 +89,7 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
+      <AppDialogContent portalToBody portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
         <AppDialogHeader>
           <AppDialogTitle>导入书源</AppDialogTitle>
           <AppDialogDescription>

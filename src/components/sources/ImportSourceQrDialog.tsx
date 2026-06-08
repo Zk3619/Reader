@@ -48,7 +48,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={handleOpenChange} modal>
-      <AppDialogContent portalZClass={props.portalZClass}>
+      <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
           <AppDialogTitle>二维码导入书源</AppDialogTitle>
           <AppDialogDescription>

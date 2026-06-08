@@ -45,7 +45,7 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalZClass={props.portalZClass}>
+      <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
           <AppDialogTitle>网络导入书源</AppDialogTitle>
           <AppDialogDescription>

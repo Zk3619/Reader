@@ -68,6 +68,7 @@ import {
 } from "@/lib/media/media-viewer-chrome-auto-hide-registry";
 import { publishActiveOverlayLayer } from "@/lib/ui/overlay-layer-active";
 import { APP_TOAST_Z } from "@/lib/ui/overlay-z";
+import { scheduleOverlayPositionSync } from "@/lib/ui/overlay-position-sync";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
@@ -476,6 +477,9 @@ function AppContent() {
     isInnerWebSessionActive() ? APP_INNER_WEB_DIALOG_Z : undefined;
 
   const openImportSourceSelectLoading = async () => {
+    if (nav.shellTab() !== 'sources') {
+      nav.navigateShell('sources');
+    }
     setImportSourceLoading(true);
     setImportSourceCandidates([]);
     setImportSourceComparisons([]);
@@ -510,6 +514,8 @@ function AppContent() {
       bookSourceImportPanelRetained = true;
     }
     setShowImportSourceSelectDialog(true);
+    scheduleOverlayPositionSync();
+    requestAnimationFrame(() => scheduleOverlayPositionSync());
   };
 
   const applyRecognizedSources = async (sources: NewBookSource[], title = '导入书源') => {
@@ -951,6 +957,15 @@ function AppContent() {
 
   function closeBookInfo() {
     pendingAfterBookInfoDrawerDismiss = null;
+    if (bookInfoUsesDrawer()) {
+      setBookInfoDrawerOpen(false);
+      return;
+    }
+    const top = nav.top();
+    if (top?.kind === "book-info") {
+      nav.pop();
+      return;
+    }
     setBookInfoDrawerOpen(false);
   }
 

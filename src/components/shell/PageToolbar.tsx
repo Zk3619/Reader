@@ -10,7 +10,7 @@ import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { Separator } from '@/components/ui/separator';
 import { isMobile } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
-import { pageToolbarBelowScroll } from '@/lib/ui/viewport-classes';
+import { pageToolbarBelowScroll, pageToolbarShellTop } from '@/lib/ui/viewport-classes';
 
 /** 标题+描述文本块：占满可用宽度，超出后以 … 省略 */
 export function PageToolbarTitleText(props: {
@@ -79,8 +79,8 @@ export function PageToolbar(props: PageToolbarProps) {
   return (
     <div
       class={cn(
-        'flex w-full min-w-0 max-w-full shrink-0 flex-col space-y-3 overflow-x-hidden px-4 pt-4',
-        insetTopSafeArea() && 'safe-area-inset-top',
+        'flex w-full min-w-0 max-w-full shrink-0 flex-col space-y-3 overflow-x-hidden px-4',
+        insetTopSafeArea() ? pageToolbarShellTop : 'pt-4',
         props.class
       )}
     >
