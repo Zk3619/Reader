@@ -100,6 +100,7 @@ export function layoutChapterFromDom(params: DomChapterLayoutParams): ReaderChap
     clipHeightPx: params.clipHeightPx,
     fontSize: params.config.fontSize,
     lineSpacing: params.config.spacing.line,
+    paragraphSpacing: params.config.spacing.paragraph,
     dualPage: params.dualPage,
   });
   return chapterLayoutFromPaginateResult(

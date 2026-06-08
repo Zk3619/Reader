@@ -3,7 +3,6 @@
  */
 
 import type { ReaderChapterLayout } from '@/lib/media/text/reader-chapter-layout-types';
-import { inferDualSpreadRightStart } from '@/lib/media/text/text-viewer-paginate-dual';
 import { mergePagedContentTransforms } from '@/lib/media/text/reader-paged-turn-style';
 
 export type { DualSpreadLayoutPick } from '@/lib/media/text/text-viewer-paginate-dual';

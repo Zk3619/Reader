@@ -5,6 +5,7 @@ import {
   pageContentSpanPx,
   pageDisplayHeight,
   pagePackLimitPx,
+  snapContiguousMeasureBlocks,
   splitBlockIndicesByPageHeight,
   lastNonBlankPageIndex,
 } from '@/lib/media/text/text-viewer-paginate';
@@ -54,6 +55,32 @@ describe('computePageStartsFromSegments', () => {
     ];
     const starts = computePageStartsFromSegments(segments, clipHeight, 768, 0);
     expect(starts).toEqual([0, 736]);
+  });
+
+  it('keeps tail line when only line spacing exceeds clip', () => {
+    const clipHeight = 749;
+    const segments = [
+      { top: 640, bottom: 672, textBottom: 664 },
+      { top: 672, bottom: 704, textBottom: 696 },
+      { top: 704, bottom: 736, textBottom: 728 },
+      { top: 736, bottom: 768, textBottom: 736 },
+    ];
+    expect(computePageStartsFromSegments(segments, clipHeight, 768, 0)).toEqual([0]);
+  });
+
+  it('ignores trailing paragraph gap when text fits on page', () => {
+    const clipHeight = 100;
+    const segments = [
+      { top: 0, bottom: 80, textBottom: 72 },
+      { top: 72, bottom: 96, textBottom: 72 },
+    ];
+    expect(computePageStartsFromSegments(segments, clipHeight, 96, 0)).toEqual([0]);
+  });
+
+  it('still breaks when glyph bottom exceeds clip', () => {
+    const clipHeight = 749;
+    const segments = [{ top: 717, bottom: 781, textBottom: 760 }];
+    expect(computePageStartsFromSegments(segments, clipHeight, 781, 0)).toEqual([0, 717]);
   });
 
   it('breaks at line touching clip bottom', () => {
@@ -191,5 +218,28 @@ describe('splitBlockIndicesByPageHeight (legacy)', () => {
       [0, 1],
       [2, 3],
     ]);
+  });
+});
+
+describe('snapContiguousMeasureBlocks', () => {
+  it('removes spurious wrapper margin gaps between consecutive blocks', () => {
+    const lineH = 28.8;
+    const margin = 16;
+    const blockFull = lineH + margin;
+    const raw = [
+      { top: 0, bottom: blockFull, textBottom: lineH, blockIndex: 0 },
+      { top: blockFull + 8, bottom: blockFull * 2 + 8, textBottom: blockFull + 8 + lineH, blockIndex: 1 },
+    ];
+    const snapped = snapContiguousMeasureBlocks(raw, 20);
+    expect(snapped[0]!.bottom).toBeCloseTo(snapped[1]!.top, 0);
+  });
+
+  it('preserves large intentional gaps such as figure spacing', () => {
+    const raw = [
+      { top: 0, bottom: 32, textBottom: 32, blockIndex: 0 },
+      { top: 80, bottom: 112, textBottom: 112, blockIndex: 1 },
+    ];
+    const snapped = snapContiguousMeasureBlocks(raw, 20);
+    expect(snapped[1]!.top).toBe(80);
   });
 });

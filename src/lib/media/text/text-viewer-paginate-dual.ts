@@ -18,6 +18,135 @@ export function dualSpreadColumnPackLimit(clipHeight: number): number {
   return Math.max(1, clipHeight);
 }
 
+interface ColumnBlockBounds {
+  minTop: number;
+  maxBottom: number;
+  maxTextBottom: number;
+}
+
+function blockTextBottomInGroup(segs: ReaderLayoutSegment[]): number {
+  return segs.reduce((max, s) => Math.max(max, s.textBottom ?? s.bottom), 0);
+}
+
+/** 段距 tail（margin-only 尾段或单行 bottom−textBottom）；排除行盒下延 */
+function paragraphMarginTailPx(blockSegs: ReaderLayoutSegment[]): number {
+  const textBottom = blockTextBottomInGroup(blockSegs);
+  const last = blockSegs[blockSegs.length - 1]!;
+  const tail = Math.max(0, last.bottom - (last.textBottom ?? textBottom));
+  if (blockSegs.length === 1) return tail;
+  const prev = blockSegs[blockSegs.length - 2]!;
+  const marginOnlyTail =
+    last.top >= prev.bottom - 1 &&
+    Math.abs((last.textBottom ?? last.bottom) - textBottom) < 1;
+  if (marginOnlyTail) return tail;
+  /** 多行末段为行盒：tail 为 line-height 下延，段距从 margin-only 子段或典型 1em 推断 */
+  for (let i = blockSegs.length - 1; i >= 0; i -= 1) {
+    const seg = blockSegs[i]!;
+    const segTail = Math.max(0, seg.bottom - (seg.textBottom ?? seg.bottom));
+    if (segTail >= 10 && segTail <= 28) return segTail;
+  }
+  return tail >= 10 && tail <= 28 ? tail : 16;
+}
+
+/** 块在排版流中的叠高：首段顶 → 末字形 + 段距（与 measure blockFlowBottom 一致） */
+function blockFlowExtentInGroup(blockSegs: ReaderLayoutSegment[]): number {
+  const firstTop = blockSegs[0]!.top;
+  const textBottom = blockTextBottomInGroup(blockSegs);
+  return Math.max(0, textBottom + paragraphMarginTailPx(blockSegs) - firstTop);
+}
+
+type ColumnStackBlock = {
+  minTop: number;
+  maxBottom: number;
+  maxTextBottom: number;
+};
+
+/**
+ * 栏尾块清零 margin 后，末行仍保留 line-height 下行盒下延（lh − glyph）。
+ * 裁切判断须计入，否则 live 叠高低估 ~半行并被 column-clip 裁切。
+ */
+function lineBoxSlopBelowGlyphPx(block: ColumnStackBlock): number {
+  const tail = Math.max(0, block.maxBottom - block.maxTextBottom);
+  if (tail <= 0.5) return 0;
+  if (tail <= 10) return tail;
+  return 6.8;
+}
+
+/** 栏尾块：清零段距后可视高度 = 字形跨度 + 末行行盒下延 */
+function tailBlockVisualHeightPx(block: ColumnStackBlock): number {
+  const glyphSpan = block.maxTextBottom - block.minTop;
+  const marginTail = Math.max(0, block.maxBottom - block.maxTextBottom);
+  return glyphSpan + (marginTail >= 10 ? lineBoxSlopBelowGlyphPx(block) : Math.max(lineBoxSlopBelowGlyphPx(block), marginTail));
+}
+
+/** 栏内 live 可视叠高：中间块含段距；末块仅字形 + 行盒下延（段距 CSS 清零） */
+function columnVisualStackPx(
+  placed: ColumnStackBlock[],
+  candidate: ColumnStackBlock,
+): number {
+  let stack = 0;
+  let prevMaxBottom: number | null = null;
+  const all = [...placed, candidate];
+  for (let i = 0; i < all.length; i += 1) {
+    const b = all[i]!;
+    const gap = prevMaxBottom == null ? 0 : Math.max(0, b.minTop - prevMaxBottom);
+    const isTail = i === all.length - 1;
+    const blockH = isTail ? tailBlockVisualHeightPx(b) : b.maxBottom - b.minTop;
+    stack += gap + blockH;
+    prevMaxBottom = b.maxBottom;
+  }
+  return stack;
+}
+
+/** 与 contentBlockIndicesForSpreadPage / live pane 相同的栏内叠高模型 */
+function columnStackHeightsAfterAppend(
+  placed: ColumnStackBlock[],
+  candidate: ColumnStackBlock,
+): { nextFull: number; nextLive: number; nextVisual: number } {
+  let stackFull = 0;
+  let prevMaxBottom: number | null = null;
+  for (const b of [...placed, candidate]) {
+    const gap = prevMaxBottom == null ? 0 : Math.max(0, b.minTop - prevMaxBottom);
+    stackFull += gap + (b.maxBottom - b.minTop);
+    prevMaxBottom = b.maxBottom;
+  }
+  const tailMargin = Math.max(0, candidate.maxBottom - candidate.maxTextBottom);
+  return {
+    nextFull: stackFull,
+    nextLive: stackFull - tailMargin,
+    nextVisual: columnVisualStackPx(placed, candidate),
+  };
+}
+
+function columnBlockFitsClip(
+  placed: ColumnStackBlock[],
+  candidate: ColumnStackBlock,
+  clipHeight: number,
+): { fits: boolean; tailOnly: boolean } {
+  const { nextFull, nextLive, nextVisual } = columnStackHeightsAfterAppend(placed, candidate);
+  /** 仅以 columnVisualStackPx 为准；勿在 nextVisual 已超 clip 时用「栏尾剩余高度」误判可放（会把块 assign 进 spread 但 live 不渲染） */
+  if (nextVisual <= clipHeight + 0.5) {
+    if (nextFull <= clipHeight + 0.5) return { fits: true, tailOnly: false };
+    if (nextLive <= clipHeight + 0.5) return { fits: true, tailOnly: true };
+    return { fits: true, tailOnly: true };
+  }
+  return { fits: false, tailOnly: false };
+}
+
+type ColumnLastBlock = {
+  repackedBottom: number;
+  origBottom: number;
+};
+
+function repackSegmentTextBottom(
+  seg: ReaderLayoutSegment,
+  blockTop: number,
+  offset: number,
+): number | undefined {
+  if (seg.textBottom == null) return undefined;
+  return blockTop + offset + (seg.textBottom - seg.top);
+}
+
 export interface DualSpreadPageResult {
   pageStarts: number[];
   rightPageStarts: number[];
@@ -82,6 +211,9 @@ export function normalizeDualColumnSegments(
       ...s,
       top: s.top - minTop,
       bottom: s.bottom - minTop,
+      textBottom:
+        s.textBottom != null ? s.textBottom - minTop : undefined,
+      spreadIndex: s.spreadIndex,
     }));
     const extent = segs.reduce((max, s) => Math.max(max, s.bottom), 0);
     return { segs, extent };
@@ -138,23 +270,92 @@ export function contentBlockIndicesForColumn(
 function blockBoundsInColumn(
   segments: ReaderLayoutSegment[],
   column: 0 | 1,
-): Map<number, { minTop: number; maxBottom: number }> {
-  const bounds = new Map<number, { minTop: number; maxBottom: number }>();
+): Map<number, ColumnBlockBounds> {
+  const byBlock = new Map<number, ReaderLayoutSegment[]>();
   for (const seg of segments) {
     if ((seg.column ?? 0) !== column) continue;
     if (seg.blockIndex == null) continue;
-    const prev = bounds.get(seg.blockIndex);
-    if (!prev) {
-      bounds.set(seg.blockIndex, { minTop: seg.top, maxBottom: seg.bottom });
-      continue;
-    }
-    prev.minTop = Math.min(prev.minTop, seg.top);
-    prev.maxBottom = Math.max(prev.maxBottom, seg.bottom);
+    const list = byBlock.get(seg.blockIndex) ?? [];
+    list.push(seg);
+    byBlock.set(seg.blockIndex, list);
+  }
+  const bounds = new Map<number, ColumnBlockBounds>();
+  for (const [blockIndex, blockSegs] of byBlock) {
+    const minTop = Math.min(...blockSegs.map((s) => s.top));
+    const maxTextBottom = blockTextBottomInGroup(blockSegs);
+    const flowH = blockFlowExtentInGroup(blockSegs);
+    bounds.set(blockIndex, {
+      minTop,
+      maxBottom: minTop + flowH,
+      maxTextBottom,
+    });
   }
   return bounds;
 }
 
-/** 双栏 spread 单页：整块须完整落在页界且栏内叠高 ≤ clipHeight（Render 按块原子、自顶堆叠） */
+type SpreadColumnBlock = {
+  blockIndex: number;
+  minTop: number;
+  maxBottom: number;
+  maxTextBottom: number;
+};
+
+/** live pane 叠高：非尾块含段距；尾块 CSS 清零 margin-bottom，保留行盒下延 */
+function spreadPageVisualStackPx(
+  titleBlock: ColumnStackBlock | undefined,
+  contentBlocks: ColumnStackBlock[],
+): number {
+  if (contentBlocks.length === 0) {
+    if (!titleBlock) return 0;
+    return columnVisualStackPx([], titleBlock);
+  }
+  const placed: ColumnStackBlock[] = titleBlock ? [titleBlock] : [];
+  const last = contentBlocks[contentBlocks.length - 1]!;
+  for (let i = 0; i < contentBlocks.length - 1; i += 1) {
+    placed.push(contentBlocks[i]!);
+  }
+  return columnVisualStackPx(placed, last);
+}
+
+function blockSpreadIndexInColumn(
+  segments: ReaderLayoutSegment[],
+  blockIndex: number,
+  column: 0 | 1,
+): number | undefined {
+  for (const seg of segments) {
+    if (seg.blockIndex !== blockIndex) continue;
+    if ((seg.column ?? 0) !== column) continue;
+    return seg.spreadIndex;
+  }
+  return undefined;
+}
+
+function layoutUsesSpreadIndex(segments: ReaderLayoutSegment[]): boolean {
+  return segments.some((s) => s.spreadIndex != null);
+}
+
+function spreadIndexCount(segments: ReaderLayoutSegment[]): number {
+  let max = -1;
+  for (const seg of segments) {
+    if (seg.spreadIndex != null) max = Math.max(max, seg.spreadIndex);
+  }
+  return Math.max(1, max + 1);
+}
+
+function spreadColumnPageStartY(
+  segments: ReaderLayoutSegment[],
+  column: 0 | 1,
+  spreadIndex: number,
+  columnExtent: number,
+): number {
+  const inSpread = segments.filter(
+    (s) => (s.column ?? 0) === column && s.spreadIndex === spreadIndex,
+  );
+  if (inSpread.length === 0) return columnExtent;
+  return Math.min(...inSpread.map((s) => s.top));
+}
+
+/** 双栏 spread 单页：按块原子渲染；页尾允许忽略段距/行距下延（字形仍在页内） */
 export function contentBlockIndicesForSpreadPage(
   layout: DualSpreadLayoutPick,
   column: 0 | 1,
@@ -167,19 +368,33 @@ export function contentBlockIndicesForSpreadPage(
     nextTop != null
       ? Math.round(nextTop)
       : Math.ceil(
-          column === 0
-            ? layout.leftColumnExtent ?? layout.contentExtent
-            : layout.rightColumnExtent ?? layout.contentExtent,
-        );
-  const candidates: { blockIndex: number; minTop: number; maxBottom: number }[] = [];
+        column === 0
+          ? layout.leftColumnExtent ?? layout.contentExtent
+          : layout.rightColumnExtent ?? layout.contentExtent,
+      );
+  const candidates: SpreadColumnBlock[] = [];
+  const spreadAware = layoutUsesSpreadIndex(layout.segments);
   for (const [blockIndex, bounds] of blockBoundsInColumn(layout.segments, column)) {
     if (blockIndex <= 0) continue;
-    if (bounds.maxBottom <= start + 0.5) continue;
-    if (bounds.minTop >= pageEnd - 0.5) continue;
-    if (bounds.maxBottom > pageEnd + 0.5) continue;
-    candidates.push({ blockIndex, minTop: bounds.minTop, maxBottom: bounds.maxBottom });
+    if (spreadAware) {
+      const blockSpread = blockSpreadIndexInColumn(layout.segments, blockIndex, column);
+      if (blockSpread != null && blockSpread !== pageIndex) continue;
+    } else {
+      if (bounds.maxTextBottom <= start + 0.5) continue;
+      if (bounds.minTop < start - 0.5) continue;
+      if (bounds.minTop >= pageEnd - 0.5) continue;
+      if (bounds.maxTextBottom > pageEnd + 0.5) continue;
+    }
+    candidates.push({
+      blockIndex,
+      minTop: bounds.minTop,
+      maxBottom: bounds.maxBottom,
+      maxTextBottom: bounds.maxTextBottom,
+    });
   }
-  candidates.sort((a, b) => a.minTop - b.minTop || a.maxBottom - b.maxBottom);
+  candidates.sort(
+    (a, b) => a.minTop - b.minTop || a.maxTextBottom - b.maxTextBottom,
+  );
 
   const clipHeight =
     layout.clipHeight != null && layout.clipHeight > 0
@@ -189,24 +404,53 @@ export function contentBlockIndicesForSpreadPage(
   const stackFromColumnTop =
     pageIndex === 0 && columnShowsChapterTitleOnSpreadPage(layout, column, pageIndex);
 
+  const columnBounds = blockBoundsInColumn(layout.segments, column);
+  const titleBounds = stackFromColumnTop ? columnBounds.get(0) : undefined;
+
   const indices: number[] = [];
-  let spanMin = Number.POSITIVE_INFINITY;
-  let spanMax = Number.NEGATIVE_INFINITY;
+  const placed: ColumnStackBlock[] = titleBounds
+    ? [
+      {
+        minTop: titleBounds.minTop,
+        maxBottom: titleBounds.maxBottom,
+        maxTextBottom: titleBounds.maxTextBottom,
+      },
+    ]
+    : [];
 
   for (const c of candidates) {
     if (clipHeight != null) {
-      const newMin = Math.min(spanMin, c.minTop);
-      const newMax = Math.max(spanMax, c.maxBottom);
-      const stackSpan = stackFromColumnTop
-        ? newMax
-        : spanMin === Number.POSITIVE_INFINITY
-          ? c.maxBottom - c.minTop
-          : newMax - newMin;
-      if (stackSpan > clipHeight + 0.5) break;
-      spanMin = newMin;
-      spanMax = newMax;
+      const { fits, tailOnly } = columnBlockFitsClip(placed, c, clipHeight);
+      if (fits) {
+        indices.push(c.blockIndex - 1);
+        placed.push(c);
+        if (tailOnly) break;
+        continue;
+      }
+      break;
     }
+
     indices.push(c.blockIndex - 1);
+    placed.push(c);
+  }
+
+  if (clipHeight != null) {
+    while (indices.length > 0) {
+      const contentBlocks = indices
+        .map((idx) => candidates.find((b) => b.blockIndex - 1 === idx))
+        .filter((b): b is SpreadColumnBlock => b != null);
+      const titleBlock = titleBounds
+        ? {
+          minTop: titleBounds.minTop,
+          maxBottom: titleBounds.maxBottom,
+          maxTextBottom: titleBounds.maxTextBottom,
+        }
+        : undefined;
+      const liveH = spreadPageVisualStackPx(titleBlock, contentBlocks);
+      if (liveH <= clipHeight + 0.5) break;
+      indices.pop();
+      placed.pop();
+    }
   }
 
   return indices.sort((a, b) => a - b);
@@ -224,10 +468,10 @@ export function columnShowsChapterTitleOnSpreadPage(
     starts[1] != null
       ? Math.round(starts[1]!)
       : Math.ceil(
-          column === 0
-            ? layout.leftColumnExtent ?? layout.contentExtent
-            : layout.rightColumnExtent ?? layout.contentExtent,
-        );
+        column === 0
+          ? layout.leftColumnExtent ?? layout.contentExtent
+          : layout.rightColumnExtent ?? layout.contentExtent,
+      );
   return layout.segments.some(
     (s) =>
       (s.column ?? 0) === column &&
@@ -267,93 +511,185 @@ export function assignSegmentsBySpreadFillLeft(
   const packLimit = dualSpreadColumnPackLimit(clipHeight);
   const blockGroups = groupSegmentsByBlock(segments);
   const out: ReaderLayoutSegment[] = [];
-  let col: 0 | 1 = 0;
+  /** spread 内先填左栏；左栏放不下的一块起改填右栏，直至右栏也放不下再开新 spread */
+  let fillPhase: 'left' | 'right' = 'left';
   const colY: [number, number] = [0, 0];
   let spreadAnchor: [number, number] = [0, 0];
-  let spreadFill: [number, number] = [0, 0];
-  const lastInColumn: [
-    { repackedBottom: number; origBottom: number } | undefined,
-    { repackedBottom: number; origBottom: number } | undefined,
-  ] = [undefined, undefined];
+  let spreadTextFill: [number, number] = [0, 0];
+  const lastInColumn: [ColumnLastBlock | undefined, ColumnLastBlock | undefined] = [
+    undefined,
+    undefined,
+  ];
+  let placedInSpread: [ColumnStackBlock[], ColumnStackBlock[]] = [[], []];
+  /** 本 spread 上一块落在哪一栏；跨栏后同栏须紧贴叠放，勿把另一栏在测量流里的高度当 gap */
+  let lastPlacedCol: 0 | 1 | null = null;
+  /** 当前 spread 物理页；与 UI pageIndex 一一对应，避免左栏 clip 分页混入下一 spread 块 */
+  let spreadIndex = 0;
 
   const resetSpread = () => {
     spreadAnchor = [colY[0], colY[1]];
-    spreadFill = [0, 0];
-    col = 0;
+    spreadTextFill = [0, 0];
+    fillPhase = 'left';
     lastInColumn[0] = undefined;
     lastInColumn[1] = undefined;
+    placedInSpread = [[], []];
+    lastPlacedCol = null;
+    spreadIndex += 1;
   };
 
-  const projectedBlockInColumn = (targetCol: 0 | 1, blockFirstTop: number, blockH: number) => {
+  const projectedBlockInColumn = (
+    targetCol: 0 | 1,
+    blockFirstTop: number,
+    blockH: number,
+    blockTextH: number,
+  ) => {
     const prev = lastInColumn[targetCol];
-    const top =
-      prev != null
-        ? prev.repackedBottom + Math.max(0, blockFirstTop - prev.origBottom)
-        : colY[targetCol];
-    return { top, bottom: top + blockH };
+    const measureGap =
+      prev != null && lastPlacedCol === targetCol
+        ? Math.max(0, blockFirstTop - prev.origBottom)
+        : 0;
+    const top = prev != null ? prev.repackedBottom + measureGap : colY[targetCol];
+    const textBottom = top + blockTextH;
+    return {
+      top,
+      bottom: top + blockH,
+      textBottom,
+    };
   };
 
   const blockOverflowsColumn = (
     targetCol: 0 | 1,
-    bottom: number,
+    candidate: ColumnStackBlock,
+  ) => !columnBlockFitsClip(placedInSpread[targetCol], candidate, packLimit).fits;
+
+  const placeInColumn = (
+    targetCol: 0 | 1,
+    firstTop: number,
     blockH: number,
+    blockTextH: number,
   ) => {
-    const used = bottom - spreadAnchor[targetCol];
-    if (used > packLimit + 0.5) return true;
-    if (spreadFill[targetCol] <= 0.5 && blockH > packLimit + 0.5) return true;
-    return false;
+    const { top: blockTop, bottom: blockBottom, textBottom: blockTextBottom } =
+      projectedBlockInColumn(targetCol, firstTop, blockH, blockTextH);
+    return {
+      targetCol,
+      blockTop,
+      blockBottom,
+      blockTextBottom,
+    };
   };
 
   for (const blockSegs of blockGroups) {
     const firstTop = blockSegs[0]!.top;
     const lastBottom = blockSegs[blockSegs.length - 1]!.bottom;
-    const blockH = Math.max(0, lastBottom - firstTop);
+    const measureTextBottom = blockTextBottomInGroup(blockSegs);
+    /** 叠高/分栏用流高（字形+段距），勿把每行行盒下延累计进栏高 */
+    const blockH = blockFlowExtentInGroup(blockSegs);
+    const blockTextH = Math.max(0, measureTextBottom - firstTop);
     if (blockH <= 0.5) continue;
     const origBottom = lastBottom;
 
-    let targetCol = col;
-    let { top: blockTop, bottom: blockBottom } = projectedBlockInColumn(
-      targetCol,
-      firstTop,
-      blockH,
-    );
+    let targetCol: 0 | 1;
+    let blockTop: number;
+    let blockBottom: number;
+    let blockTextBottom: number;
 
-    if (blockOverflowsColumn(targetCol, blockBottom, blockH)) {
-      if (targetCol === 0) {
-        targetCol = 1;
-        ({ top: blockTop, bottom: blockBottom } = projectedBlockInColumn(1, firstTop, blockH));
-        if (blockOverflowsColumn(1, blockBottom, blockH)) {
+    if (fillPhase === 'left') {
+      ({ targetCol, blockTop, blockBottom, blockTextBottom } = placeInColumn(
+        0,
+        firstTop,
+        blockH,
+        blockTextH,
+      ));
+      const leftCandidate = {
+        minTop: blockTop,
+        maxBottom: blockBottom,
+        maxTextBottom: blockTextBottom,
+      };
+      if (blockOverflowsColumn(0, leftCandidate)) {
+        ({ targetCol, blockTop, blockBottom, blockTextBottom } = placeInColumn(
+          1,
+          firstTop,
+          blockH,
+          blockTextH,
+        ));
+        const rightCandidate = {
+          minTop: blockTop,
+          maxBottom: blockBottom,
+          maxTextBottom: blockTextBottom,
+        };
+        if (blockOverflowsColumn(1, rightCandidate)) {
           resetSpread();
-          targetCol = 0;
-          ({ top: blockTop, bottom: blockBottom } = projectedBlockInColumn(0, firstTop, blockH));
+          ({ targetCol, blockTop, blockBottom, blockTextBottom } = placeInColumn(
+            0,
+            firstTop,
+            blockH,
+            blockTextH,
+          ));
+          fillPhase = 'left';
+        } else {
+          fillPhase = 'right';
         }
       } else {
-        resetSpread();
         targetCol = 0;
-        ({ top: blockTop, bottom: blockBottom } = projectedBlockInColumn(0, firstTop, blockH));
+      }
+    } else {
+      ({ targetCol, blockTop, blockBottom, blockTextBottom } = placeInColumn(
+        1,
+        firstTop,
+        blockH,
+        blockTextH,
+      ));
+      const rightCandidate = {
+        minTop: blockTop,
+        maxBottom: blockBottom,
+        maxTextBottom: blockTextBottom,
+      };
+      if (blockOverflowsColumn(1, rightCandidate)) {
+        resetSpread();
+        ({ targetCol, blockTop, blockBottom, blockTextBottom } = placeInColumn(
+          0,
+          firstTop,
+          blockH,
+          blockTextH,
+        ));
+        fillPhase = 'left';
       }
     }
 
-    col = targetCol;
+    placedInSpread[targetCol].push({
+      minTop: blockTop,
+      maxBottom: blockBottom,
+      maxTextBottom: blockTextBottom,
+    });
+
+    const flowCap = blockTop + blockH;
     for (const seg of blockSegs) {
       const offset = seg.top - firstTop;
       const segH = Math.max(0, seg.bottom - seg.top);
+      const segBottom = Math.min(flowCap, blockTop + offset + segH);
       out.push({
         ...seg,
         column: targetCol,
+        spreadIndex,
         top: blockTop + offset,
-        bottom: blockTop + offset + segH,
+        bottom: segBottom,
+        textBottom: repackSegmentTextBottom(seg, blockTop, offset),
       });
     }
 
     colY[targetCol] = blockBottom;
-    lastInColumn[targetCol] = { repackedBottom: blockBottom, origBottom };
-    spreadFill[targetCol] = blockBottom - spreadAnchor[targetCol];
+    lastInColumn[targetCol] = {
+      repackedBottom: blockBottom,
+      origBottom,
+    };
+    lastPlacedCol = targetCol;
+    spreadTextFill[targetCol] = blockTextBottom - spreadAnchor[targetCol];
 
-    if (spreadFill[0] >= packLimit - 0.5 && spreadFill[1] >= packLimit - 0.5) {
+    if (
+      spreadTextFill[0] >= packLimit - 0.5 &&
+      spreadTextFill[1] >= packLimit - 0.5
+    ) {
       resetSpread();
-    } else if (spreadFill[0] >= packLimit - 0.5 && col === 0) {
-      col = 1;
     }
   }
   return out;
@@ -395,6 +731,7 @@ function measureLiveColumnSegments(
   column: 0 | 1,
   fontSize?: number,
   lineSpacing?: number,
+  paragraphSpacing?: number,
 ): { segments: ReaderLayoutSegment[]; measureRoot?: HTMLElement; extent: number } {
   if (!columnShift) return { segments: [], extent: 0 };
   const contentRoot =
@@ -403,7 +740,12 @@ function measureLiveColumnSegments(
   if (!measureRoot.querySelector('[data-reader-measure-block]')) {
     return { segments: [], measureRoot, extent: 0 };
   }
-  const segments = measureLayoutSegments(measureRoot, fontSize, lineSpacing).map((s) => ({
+  const segments = measureLayoutSegments(
+    measureRoot,
+    fontSize,
+    lineSpacing,
+    paragraphSpacing,
+  ).map((s) => ({
     ...s,
     column,
   }));
@@ -419,9 +761,10 @@ export function computeDualSpreadPageStartsFromLiveColumns(
   clipHeight: number,
   fontSize?: number,
   lineSpacing?: number,
+  paragraphSpacing?: number,
 ): (DualSpreadPageResult & { leftColumnExtent: number; rightColumnExtent: number }) | null {
-  const left = measureLiveColumnSegments(leftShift, 0, fontSize, lineSpacing);
-  const right = measureLiveColumnSegments(rightShift, 1, fontSize, lineSpacing);
+  const left = measureLiveColumnSegments(leftShift, 0, fontSize, lineSpacing, paragraphSpacing);
+  const right = measureLiveColumnSegments(rightShift, 1, fontSize, lineSpacing, paragraphSpacing);
   if (left.segments.length === 0 && right.segments.length === 0) return null;
 
   const leftStarts =
@@ -539,6 +882,10 @@ function aggregateSegmentsByBlock(segments: ReaderLayoutSegment[]): ReaderLayout
       ...prev,
       top: Math.min(prev.top, seg.top),
       bottom: Math.max(prev.bottom, seg.bottom),
+      textBottom: Math.max(
+        prev.textBottom ?? prev.bottom,
+        seg.textBottom ?? seg.bottom,
+      ),
     });
   }
   return [...byBlock.values(), ...unindexed].sort(
@@ -559,6 +906,22 @@ export function computeDualSpreadPageStarts(
 
   if (leftSegs.length === 0 && rightSegs.length === 0) {
     return { pageStarts: [0], rightPageStarts: [0], leftLineSizes: [0] };
+  }
+
+  if (layoutUsesSpreadIndex(segments)) {
+    const spreadCount = spreadIndexCount(segments);
+    const pageStarts: number[] = [];
+    const rightPageStarts: number[] = [];
+    const leftLineSizes: number[] = [];
+    for (let i = 0; i < spreadCount; i += 1) {
+      pageStarts.push(spreadColumnPageStartY(segments, 0, i, leftExtent));
+      rightPageStarts.push(spreadColumnPageStartY(segments, 1, i, rightExtent));
+      const start = pageStarts[i]!;
+      const end =
+        i + 1 < spreadCount ? pageStarts[i + 1]! : leftExtent;
+      leftLineSizes.push(countColumnSegmentsInPage(leftSegs, start, end));
+    }
+    return { pageStarts, rightPageStarts, leftLineSizes };
   }
 
   const leftBlocks = aggregateSegmentsByBlock(leftSegs);
@@ -654,6 +1017,7 @@ export function computePageStartsForLayout(
     measureRoot?: HTMLElement;
     fontSize?: number;
     lineSpacing?: number;
+    paragraphSpacing?: number;
   },
 ): {
   pageStarts: number[];

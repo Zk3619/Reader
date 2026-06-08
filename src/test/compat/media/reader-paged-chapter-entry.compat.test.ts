@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chapterPosForChapterSwitch,
   chapterPosForPagedEntry,
   consumePagedChapterEntry,
   markPagedChapterEntry,
@@ -10,6 +11,12 @@ describe('reader-paged-chapter-entry', () => {
     expect(chapterPosForPagedEntry('first', 0.5)).toBe(0);
     expect(chapterPosForPagedEntry('last', 0.5)).toBe(1);
     expect(chapterPosForPagedEntry('restore', 0.42)).toBe(0.42);
+  });
+
+  it('scroll mode maps first/last to chapter start', () => {
+    expect(chapterPosForChapterSwitch('first', 0.5, true)).toBe(0);
+    expect(chapterPosForChapterSwitch('last', 0.5, true)).toBe(0);
+    expect(chapterPosForChapterSwitch('last', 0.5, false)).toBe(1);
   });
 
   it('consumes pending entry once', () => {
