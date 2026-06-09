@@ -21,6 +21,8 @@ export interface UseAudioPlayerOptions {
   chapterPos: Accessor<number>;
   book: Accessor<Book | null>;
   audioConfig: Accessor<AudioPlayConfig>;
+  /** 章节正文/播放地址加载中时不应沿用旧 URL 或自动开播 */
+  loading?: Accessor<boolean>;
   onChapterPosChange: (pos: number) => void;
   onEndedChapter: () => Promise<void>;
   onSaveProgress: () => Promise<void>;
@@ -60,6 +62,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
   let closeCreditsTriggered = false;
   let userPaused = false;
   let lastSegmentKey = '';
+  let pendingLoadAfterFetch = false;
 
   const segmentUrls = () => {
     const list = options.mediaUrls();
@@ -92,15 +95,34 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     return 0;
   };
 
+  const resetProgressUi = (time = 0) => {
+    setCurrentTime(time);
+    setDuration(0);
+    setBufferedEnd(0);
+  };
+
+  const pauseAndResetUi = () => {
+    if (audioEl) {
+      audioEl.pause();
+    }
+    setPlaying(false);
+    resetProgressUi(0);
+  };
+
   const loadSegment = (index: number, autoplay: boolean) => {
     const urls = segmentUrls();
-    if (!audioEl || urls.length === 0) return;
+    if (!audioEl) return;
+    if (urls.length === 0) {
+      pauseAndResetUi();
+      return;
+    }
     const clamped = Math.min(Math.max(0, index), urls.length - 1);
     setSegmentIndex(clamped);
     closeCreditsTriggered = false;
     const url = urls[clamped]!;
     const srcChanged = audioEl.src !== url;
     if (srcChanged) {
+      audioEl.pause();
       audioEl.src = url;
       audioEl.preload = 'auto';
       if (url.startsWith('blob:')) {
@@ -109,14 +131,19 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     }
     applyPlaybackRate();
     const seek = clamped === 0 ? initialSeekSeconds() : 0;
+    if (srcChanged) {
+      resetProgressUi(seek);
+    }
     if (seek > 0 && (srcChanged || Math.abs(audioEl.currentTime - seek) > 0.5)) {
       audioEl.currentTime = seek;
       setCurrentTime(seek);
+    } else if (srcChanged && seek <= 0) {
+      audioEl.currentTime = 0;
     }
     const shouldPlay = autoplay && !userPaused;
     if (shouldPlay) {
       void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-    } else if (userPaused) {
+    } else {
       audioEl.pause();
       setPlaying(false);
     }
@@ -216,20 +243,31 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     el.addEventListener('ended', onSegmentEnded);
 
     const key = segmentLoadKey();
+    if (segmentUrls().length === 0 || (options.loading?.() ?? false)) {
+      pendingLoadAfterFetch = true;
+      return;
+    }
     lastSegmentKey = key;
-    userPaused = false;
     loadSegment(0, true);
   };
 
   createEffect(
     on(
-      segmentLoadKey,
-      (key) => {
+      () => [segmentLoadKey(), options.loading?.() ?? false] as const,
+      ([key, isLoading]) => {
         if (!audioEl) return;
-        if (key === lastSegmentKey) return;
+        if (isLoading) {
+          if (key !== lastSegmentKey) {
+            pendingLoadAfterFetch = true;
+            pauseAndResetUi();
+          }
+          return;
+        }
+        const keyChanged = key !== lastSegmentKey;
+        if (!keyChanged && !pendingLoadAfterFetch) return;
         lastSegmentKey = key;
-        userPaused = false;
-        loadSegment(0, true);
+        pendingLoadAfterFetch = false;
+        loadSegment(0, !userPaused);
       },
       { defer: true },
     ),
@@ -268,8 +306,12 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       void options.onSaveProgress();
       audioEl.pause();
     }
+    setPlaying(false);
+    resetProgressUi(0);
     boundAudioEl = undefined;
     audioEl = undefined;
+    lastSegmentKey = '';
+    pendingLoadAfterFetch = false;
   });
 
   return {

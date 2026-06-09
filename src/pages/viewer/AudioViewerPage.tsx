@@ -31,7 +31,9 @@ import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout'
 import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
 import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
+import { AudioViewerOfflineCacheDialog } from '@/components/viewer/audio/AudioViewerOfflineCacheDialog';
 import { AudioSkipCreditsDialog } from '@/components/viewer/audio/AudioSkipCreditsDialog';
+import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import { AudioLyricPanel } from '@/components/viewer/audio/AudioLyricPanel';
 import {
   ViewerAppDialog,
@@ -98,12 +100,30 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const [speedDialogOpen, setSpeedDialogOpen] = createSignal(false);
   const [timerDialogOpen, setTimerDialogOpen] = createSignal(false);
   const [speedDraft, setSpeedDraft] = createSignal(1);
+  const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const mainStageClass = useMediaViewerMainStageClass(
     'flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6',
   );
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
+  const catalogSize = () => catalog().length;
+
+  const openOfflineCacheDialog = () => {
+    const blocked = getOfflineCacheBlockedReason(
+      book(),
+      viewerStore.isGuestReading(),
+    );
+    if (blocked) {
+      showAppToast({
+        title: '无法离线缓存',
+        description: blocked,
+        variant: 'default',
+      });
+      return;
+    }
+    setOfflineCacheDialogOpen(true);
+  };
   const chapterIndex = () => viewerStore.state.chapterIndex;
   const url = () => viewerStore.state.primaryUrl;
   const mediaUrls = () => viewerStore.state.mediaUrls;
@@ -165,6 +185,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     chapterPos: () => viewerStore.state.chapterPos,
     book,
     audioConfig,
+    loading,
     onChapterPosChange: (pos) => viewerStore.setChapterPos(pos),
     onEndedChapter: handleEndedChapter,
     onSaveProgress: () => viewerStore.saveProgress(),
@@ -214,6 +235,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                     }
                     void viewerStore.refreshChapter();
                   }}
+                  onOpenOfflineCache={openOfflineCacheDialog}
                   loading={loading()}
                 />
               </MediaViewerHeader>
@@ -260,22 +282,23 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
               </div>
             </Show>
 
+            <audio
+              ref={player.audioRef}
+              class="hidden"
+              onError={() => {
+                showAppToast({
+                  title: '无法播放音频',
+                  description:
+                    '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
+                });
+              }}
+            />
+
             <Show when={!bootstrapping() && !loading() && url()}>
               <div
                 class="flex w-full max-w-md flex-col items-center gap-4"
                 data-media-viewer-interactive-zone
               >
-                <audio
-                  ref={player.audioRef}
-                  class="hidden"
-                  onError={() => {
-                    showAppToast({
-                      title: '无法播放音频',
-                      description:
-                        '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
-                    });
-                  }}
-                />
                 <AudioLyricPanel lyric={lyric()} positionSec={player.currentTime()} />
                 <div class="flex w-full flex-col gap-1">
                   <div class="flex items-center gap-2">
@@ -489,6 +512,14 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
           </div>
         </ViewerAppDialogContent>
       </ViewerAppDialog>
+
+      <AudioViewerOfflineCacheDialog
+        open={offlineCacheDialogOpen()}
+        onOpenChange={setOfflineCacheDialogOpen}
+        book={book() ?? null}
+        chapterIndex={chapterIndex()}
+        catalogSize={catalogSize()}
+      />
 
       <ViewerAppDialog open={timerDialogOpen()} onOpenChange={setTimerDialogOpen}>
         <ViewerAppDialogContent layout="app" class="max-w-sm">

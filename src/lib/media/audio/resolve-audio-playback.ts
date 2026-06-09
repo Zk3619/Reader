@@ -17,6 +17,10 @@ import {
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 import { isTauri } from '@/lib/platform/detect';
+import {
+  createAudioObjectUrl,
+  readAudioFromDisk,
+} from '@/lib/media/audio/audio-disk-cache';
 import type { ParsedAudioUrl } from '@/lib/media/audio/parsed-audio-url';
 import type { Book, BookChapter, BookSource } from '@/types';
 
@@ -57,11 +61,17 @@ function enrichAudioFetchHeaders(
   return out;
 }
 
-/** 跨域或防盗链 CDN 必须经 request 拉流，不能交给 <audio src=直链> */
-function mustFetchAsBlob(item: ParsedAudioUrl, headers: Record<string, string>): boolean {
+/** 正文或书源 Cookie 须经 request 拉流（<audio> 无法自定义请求头） */
+function needsCustomHeaderFetch(item: ParsedAudioUrl, headers: Record<string, string>): boolean {
   if (item.headers && Object.keys(item.headers).length > 0) return true;
-  if (PROTECTED_AUDIO_CDN_RE.test(item.url)) return true;
-  return isCrossOriginHttpUrl(item.url) || Boolean(headers.Cookie ?? headers.cookie);
+  return Boolean(headers.Cookie ?? headers.cookie);
+}
+
+/** Tauri 下番茄 CDN 无 Cookie 时优先 blob（可注入 Referer）；Web 优先同源代理 */
+function preferBlobBeforeProxy(item: ParsedAudioUrl, headers: Record<string, string>): boolean {
+  if (needsCustomHeaderFetch(item, headers)) return true;
+  if (!PROTECTED_AUDIO_CDN_RE.test(item.url)) return false;
+  return isTauri();
 }
 
 function buildProxyRequestHeaders(
@@ -137,7 +147,7 @@ export function resolveAudioPlaybackSrc(
     book?: Book;
   },
 ): ResolvedAudioPlayback | null {
-  if (isCrossOriginHttpUrl(item.url) && !isWebHttpProxyNeeded()) {
+  if (isCrossOriginHttpUrl(item.url) && !isWebHttpProxyNeeded() && !isTauri()) {
     return null;
   }
   const headers = mergeHeaders(options?.source, options?.chapter, item.headers);
@@ -209,20 +219,43 @@ export async function resolveAudioPlaybackList(
     source?: BookSource;
     chapter?: BookChapter;
     book?: Book;
+    chapterIndex?: number;
   },
 ): Promise<{ urls: string[]; revokeAll: () => void }> {
   const revokes: Array<() => void> = [];
   const urls: string[] = [];
+  const chapterIndex = options?.chapterIndex ?? options?.chapter?.index;
 
-  for (const item of items) {
+  for (let segmentIndex = 0; segmentIndex < items.length; segmentIndex++) {
+    const item = items[segmentIndex]!;
     const headers = mergeHeaders(options?.source, options?.chapter, item.headers);
     let resolved: ResolvedAudioPlayback | null = null;
 
-    if (mustFetchAsBlob(item, headers)) {
+    if (options?.book && chapterIndex != null && Number.isFinite(chapterIndex)) {
+      const sourceId = options.source?.sourceUrl ?? options.source?.sourceName;
+      const disk = await readAudioFromDisk(
+        options.book.bookUrl,
+        chapterIndex,
+        segmentIndex,
+        item.url,
+        sourceId,
+      );
+      if (disk) {
+        const src = createAudioObjectUrl(disk.bytes, disk.meta.mime);
+        revokes.push(() => URL.revokeObjectURL(src));
+        urls.push(src);
+        continue;
+      }
+    }
+
+    if (preferBlobBeforeProxy(item, headers)) {
       resolved = await fetchAudioBlobSrc(item, options);
     }
     if (!resolved) {
       resolved = resolveAudioPlaybackSrc(item, options);
+    }
+    if (!resolved && !preferBlobBeforeProxy(item, headers)) {
+      resolved = await fetchAudioBlobSrc(item, options);
     }
 
     if (!resolved) {

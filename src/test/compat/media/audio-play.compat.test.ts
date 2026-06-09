@@ -41,6 +41,21 @@ describe('audio play (Legado compat)', () => {
     expect(parseParsedAudioUrls(raw)[0]?.url).toBe(raw);
   });
 
+  it('ignores manga chapter HTML image urls', () => {
+    const img =
+      'https://hw-chapter2.kaimanhua.com/comic/Z/%E7%9C%9F%E5%AE%9E%E6%B8%B8%E6%88%8F/%E7%AC%AC7%E8%AF%9DF1_71124/1.jpg-qmmh.middle.webp?auth_key=1';
+    const raw = `<img src="${img}"/><img src="${img.replace('1.jpg', '2.jpg')}"/>`;
+    expect(parseParsedAudioUrls(raw)).toEqual([]);
+  });
+
+  it('isAudioChapterContent returns false for image-heavy HTML', async () => {
+    const { isAudioChapterContent } = await import('@/lib/media/audio/audio-book-detect');
+    const img =
+      'https://cdn.example/comic/ch/1.jpg-qmmh.middle.webp?auth_key=1';
+    const raw = `<img src="${img}"/><img src="${img.replace('1.jpg', '2.jpg')}"/>`;
+    expect(isAudioChapterContent(raw)).toBe(false);
+  });
+
   it('reads playMode and credits from readConfig', () => {
     const book = {
       readConfig: {
@@ -77,15 +92,26 @@ describe('audio play (Legado compat)', () => {
     ).toBe(0);
   });
 
-  it('mustFetchAsBlob for fqnovelvod CDN', async () => {
-    const { fetchAudioBlobSrc } = await import('@/lib/media/audio/resolve-audio-playback');
+  it('exports audio playback resolvers for fqnovelvod CDN', async () => {
+    const { resolveAudioPlaybackSrc, fetchAudioBlobSrc } = await import(
+      '@/lib/media/audio/resolve-audio-playback'
+    );
     const item = {
       url: 'https://v5-novelapp.fqnovelvod.com/path/audio?mime_type=audio_mpeg',
     };
-    const headers = { Referer: 'https://reading.snssdk.com/' };
     expect(item.url).toMatch(/fqnovelvod/);
-    expect(headers.Referer).toBeTruthy();
+    expect(typeof resolveAudioPlaybackSrc).toBe('function');
     expect(typeof fetchAudioBlobSrc).toBe('function');
+  });
+
+  it('audio chapter cache TTL matches video', async () => {
+    const { AUDIO_CHAPTER_CACHE_TTL_MS } = await import(
+      '@/lib/media/audio/audio-chapter-cache'
+    );
+    const { VIDEO_CHAPTER_CACHE_TTL_MS } = await import(
+      '@/lib/media/video/video-chapter-cache'
+    );
+    expect(AUDIO_CHAPTER_CACHE_TTL_MS).toBe(VIDEO_CHAPTER_CACHE_TTL_MS);
   });
 
   it('skips volume chapters when finding playable index', () => {

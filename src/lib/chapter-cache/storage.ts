@@ -20,10 +20,11 @@ import {
 import { catalogCacheIndex } from '@/lib/chapter-cache/catalog-cache-index';
 import type { Book, BookChapter, BookSource } from '@/types';
 import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
+import { clearAllAudio, clearAudioByBook } from '@/lib/media/audio/audio-disk-cache';
 import {
   clearAllMangaImages,
   clearMangaImagesByBook,
-} from '@/lib/media/image/manga-image-disk-cache';
+} from '@/lib/media/image/image-disk-cache';
 
 export type WriteCachedChapterOptions = {
   /** auto=阅读自动；manual=用户离线缓存（不受自动淘汰） */
@@ -99,7 +100,7 @@ export async function writeCachedChapterRaw(
     });
     notifyChapterCacheUpdated(book.bookUrl);
     if (cacheTier === CHAPTER_CACHE_TIER_AUTO) {
-      await enforceChapterCacheLimits().catch(() => {});
+      await enforceChapterCacheLimits().catch(() => { });
     }
     return;
   }
@@ -117,7 +118,7 @@ export async function writeCachedChapterRaw(
   });
   notifyChapterCacheUpdated(book.bookUrl);
   if (cacheTier === CHAPTER_CACHE_TIER_AUTO) {
-    await enforceChapterCacheLimits().catch(() => {});
+    await enforceChapterCacheLimits().catch(() => { });
   }
 }
 
@@ -151,12 +152,14 @@ export async function deleteCachedChaptersByBook(
   await chapterCacheDb.deleteChapterCacheByBook(book.bookUrl);
   await deleteBookCacheFiles(book.bookUrl, book.name);
   await clearMangaImagesByBook(book.bookUrl);
+  await clearAudioByBook(book.bookUrl);
 }
 
 export async function clearAllCachedChapters(): Promise<void> {
   await chapterCacheDb.clearAllChapterCache();
   await clearAllChapterCacheFiles();
   await clearAllMangaImages();
+  await clearAllAudio();
 }
 
 export async function countCachedChapters(bookUrl: string): Promise<number> {

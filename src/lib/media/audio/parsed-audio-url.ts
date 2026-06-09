@@ -41,6 +41,7 @@ function pushParsed(out: ParsedAudioUrl[], raw: string): void {
   if (!trimmed) return;
   const parsed = parseLegadoUrlWithOptions(trimmed);
   if (!parsed.url || !/^https?:\/\//i.test(parsed.url)) return;
+  if (looksLikeImageUrl(parsed.url) && !looksLikeAudioUrl(parsed.url)) return;
   out.push({
     url: parsed.url,
     headers: parsed.headers,
@@ -99,17 +100,49 @@ function looksLikeAudioUrl(url: string): boolean {
   );
 }
 
+/** 图片 CDN / 漫画插图（勿当作听书段） */
+function looksLikeImageUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    /\.(webp|jpe?g|png|gif|bmp|avif|svg|ico)(\?|#|$)/i.test(lower) ||
+    /\.(webp|jpe?g|png|gif|bmp|avif)/i.test(lower) ||
+    lower.includes('/image/') ||
+    lower.includes('/images/') ||
+    lower.includes('/img/') ||
+    lower.includes('/comic/') ||
+    lower.includes('middle.webp')
+  );
+}
+
+function isPlainUrlLine(line: string, url: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === url || trimmed.startsWith(`${url},`);
+}
+
+function shouldAcceptHttpUrl(url: string, line: string): boolean {
+  if (looksLikeImageUrl(url)) return false;
+  if (looksLikeAudioUrl(url)) return true;
+  return isPlainUrlLine(line, url);
+}
+
 function extractHttpLines(raw: string, out: ParsedAudioUrl[]): void {
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const candidates = lines.length > 0 ? lines : [raw.trim()];
   for (const line of candidates) {
     if (line.startsWith('http') || /^https?:\/\//i.test(line)) {
-      pushParsed(out, line);
+      const parsed = parseLegadoUrlWithOptions(line);
+      if (
+        parsed.url &&
+        /^https?:\/\//i.test(parsed.url) &&
+        shouldAcceptHttpUrl(parsed.url, line)
+      ) {
+        pushParsed(out, line);
+      }
       continue;
     }
     const matches = line.match(URL_LINE_RE) ?? [];
     for (const m of matches) {
-      if (looksLikeAudioUrl(m) || !m.includes('<')) {
+      if (shouldAcceptHttpUrl(m, line)) {
         pushParsed(out, m);
       }
     }
@@ -126,7 +159,11 @@ export function parseParsedAudioUrls(raw: string): ParsedAudioUrl[] {
 
   if (text.startsWith('http') || text.startsWith('https://')) {
     const single = parseLegadoUrlWithOptions(text);
-    if (single.url && /^https?:\/\//i.test(single.url)) {
+    if (
+      single.url &&
+      /^https?:\/\//i.test(single.url) &&
+      shouldAcceptHttpUrl(single.url, text)
+    ) {
       return [{ url: single.url, headers: single.headers }];
     }
   }
