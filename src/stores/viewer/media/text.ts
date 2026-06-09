@@ -42,6 +42,7 @@ import {
   chapterPosForChapterSwitch,
   consumePagedChapterEntry,
   markPagedChapterEntry,
+  type PagedChapterEntry,
 } from '@/lib/media/text/reader-paged-chapter-entry';
 import type { Book, BookChapter, BookProgress, BookSource } from '@/types';
 import { state, setState } from '@/stores/viewer/media/state';
@@ -805,10 +806,18 @@ export const textViewerTextApi = {
     await loadTextChapter(state.chapterIndex - 1);
   },
 
-  /** 跳转到指定章节 */
-  async jumpToChapter(index: number): Promise<void> {
+  /** 跳转到指定章节（目录等默认章首；书签等可传 restore + chapterPos） */
+  async jumpToChapter(
+    index: number,
+    options?: { entry?: PagedChapterEntry; chapterPos?: number },
+  ): Promise<void> {
     if (index >= 0 && index < state.catalog.length) {
-      markPagedChapterEntry('first');
+      if (options?.chapterPos != null) {
+        setState({
+          chapterPos: Math.min(1, Math.max(0, options.chapterPos)),
+        });
+      }
+      markPagedChapterEntry(options?.entry ?? 'first');
       await loadTextChapter(index);
     }
   },

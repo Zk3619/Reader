@@ -61,7 +61,6 @@ import { type ReaderClickActionId } from '@/lib/media/text/reader-click-actions'
 import {
   addReaderBookmark,
   selectionTextFromDocument,
-  plainChapterExcerpt,
 } from '@/lib/media/text/reader-bookmark';
 import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
@@ -232,12 +231,21 @@ export function BookReader(props: BookReaderProps) {
     if (!b || !ch) return;
     try {
       const selected = selectionTextFromDocument();
+      let pos = chapterPos();
+      let pageText: string | undefined;
+      if (isPagedMode() && pagedNav) {
+        const snapshot = pagedNav.getBookmarkSnapshot();
+        pos = snapshot.chapterPos;
+        pageText = snapshot.pageText;
+      }
       await addReaderBookmark({
         book: b,
         chapterIndex: chapterIndex(),
-        chapterPos: chapterPos(),
+        chapterPos: pos,
         chapterTitle: ch.title,
-        selectedText: selected || plainChapterExcerpt(content()),
+        chapterHtml: content(),
+        selectedText: selected || undefined,
+        pageText: pageText || undefined,
       });
       showAppToast({ title: '已添加书签' });
     } catch (e) {
@@ -250,8 +258,10 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const handleJumpBookmark = async (bm: Bookmark) => {
-    await textViewerStore.jumpToChapter(bm.chapterIndex);
-    textViewerStore.setChapterPos(bm.chapterPos);
+    await textViewerStore.jumpToChapter(bm.chapterIndex, {
+      entry: 'restore',
+      chapterPos: bm.chapterPos,
+    });
     requestAnimationFrame(() => {
       if (isPagedMode() && pagedNav) {
         pagedNav.setPageProgress(bm.chapterPos);

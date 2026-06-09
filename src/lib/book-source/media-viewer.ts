@@ -1,5 +1,5 @@
 /**
- * 媒体阅读器页面路由（�?MediaKind / BookSourceType 一一对应�?
+ * 媒体阅读器页面路由（与 MediaKind / BookSourceType 一一对应）
  */
 
 import type { MediaKind } from '@/lib/book-source/book-type';
@@ -19,7 +19,7 @@ const MEDIA_KIND_TO_PAGE: Record<MediaKind, MediaViewerPage> = {
   file: 'file-viewer',
 };
 
-/** 非文本类 Media Viewer 页（使用 viewerStore�?*/
+/** 非文本类 Media Viewer 页（使用 viewerStore） */
 export const NON_TEXT_MEDIA_VIEWER_PAGES: MediaViewerPage[] = [
   'image-viewer',
   'audio-viewer',

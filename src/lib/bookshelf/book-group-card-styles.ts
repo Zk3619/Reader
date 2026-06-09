@@ -129,6 +129,14 @@ export function readRecordListRowClass(...extra: Parameters<typeof cn>) {
   );
 }
 
+/** 阅读记录列表行内「打开书籍」ghost 按钮 */
+export function readRecordRowOpenButtonClass(...extra: Parameters<typeof cn>) {
+  return cn(
+    'h-auto min-h-0 flex-1 justify-start gap-3 px-0 py-0 text-left font-normal shadow-none hover:bg-transparent',
+    ...extra,
+  );
+}
+
 /** 书架页紧凑列表书籍卡片 */
 export function bookshelfCompactListCardClass(...extra: Parameters<typeof cn>) {
   return bookGroupCompactRowVisualClass(

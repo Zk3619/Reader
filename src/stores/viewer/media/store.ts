@@ -158,6 +158,12 @@ export const viewerStore = {
       );
       invalidateCurrentVideoChapterCache();
     }
+    if (state.kind === MediaKind.audio) {
+      const { invalidateCurrentAudioChapterCache } = await import(
+        '@/stores/viewer/media/audio'
+      );
+      invalidateCurrentAudioChapterCache();
+    }
     await viewerStore.loadChapter(idx, { forceRefresh: true });
   },
 

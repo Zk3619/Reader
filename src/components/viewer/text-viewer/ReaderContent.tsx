@@ -19,7 +19,7 @@ import { openParagraphReviewFromClick } from '@/lib/book-source/legado-paragraph
 import { ReaderInlineImg } from '@/components/viewer/text-viewer/ReaderInlineImg';
 import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import { getSource } from '@/lib/database/sources';
-import { isMangaChapterContent } from '@/lib/media/image/manga-book-detect';
+import { isMangaChapterContent } from '@/lib/media/image/image-book-detect';
 import type { BookSource } from '@/types';
 
 type ReaderDisplayBlockLocal = ReaderDisplayBlock;

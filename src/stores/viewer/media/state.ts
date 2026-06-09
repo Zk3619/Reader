@@ -1,5 +1,5 @@
 /**
- * 统一 Viewer 状态（text / image / audio / video / file 共用�?
+ * 统一 Viewer 状态（text / image / audio / video / file 共用）
  */
 
 import { createStore } from 'solid-js/store';

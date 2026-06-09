@@ -1,5 +1,5 @@
 /**
- * File Viewer：章�?raw �?文件 URL
+ * File Viewer：章节 raw → 文件 URL
  */
 
 import { MediaKind } from '@/lib/book-source/book-type';
