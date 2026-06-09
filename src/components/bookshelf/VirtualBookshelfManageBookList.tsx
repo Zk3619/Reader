@@ -10,7 +10,7 @@ import {
 } from '@/components/shared/virtual-list';
 import { BOOKSHELF_MANAGE_LIST_ROW_HEIGHT_PX } from '@/components/bookshelf/bookshelf-manage-list-layout';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
-import { BookCoverImg } from '@/components/books/BookCoverImg';
+import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { bookshelfCompactCoverClass } from '@/lib/bookshelf/book-group-card-styles';
 import type { Id } from '@thisbeyond/solid-dnd';
 import type { Book } from '@/types';
@@ -23,10 +23,8 @@ export function BookshelfManageBookDragOverlay(props: { book: Book }) {
     <div class="origin-center" style={{ transform: `scale(${BOOKSHELF_MANAGE_DRAG_OVERLAY_SCALE})` }}>
       <div class="flex h-16 w-max max-w-[min(85vw,24rem)] items-center gap-3 rounded-lg border border-border/50 bg-card px-2 text-sm shadow-lg">
         <div class={bookshelfCompactCoverClass('shrink-0')}>
-          <BookCoverImg
-            src={props.book.customCoverUrl || props.book.coverUrl}
-            referer={props.book.origin}
-            bookUrl={props.book.bookUrl}
+          <BookCoverFromBook
+            book={props.book}
             alt=""
             class="h-full w-full object-cover"
             draggable={false}

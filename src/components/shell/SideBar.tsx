@@ -27,6 +27,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from "@/components/shared/icons";
+import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
+import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
 // 页面配置（与 Navigation 组件保持一致）
 const pageConfig: Record<PageType, { label: string; icon: Component<any>; description: string }> = {
@@ -53,17 +55,11 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   },
 };
 
-// 最近读过的书籍类型
-interface RecentBook {
-  id: number;
-  title: string;
-  chapterName: string;
-}
-
 interface SideBarProps {
   currentPage?: PageType;
   onPageChange?: (page: PageType) => void;
-  recentBooks?: RecentBook[];
+  recentBooks?: RecentReadBook[];
+  onOpenRecentBook?: (book: RecentReadBook) => void;
   /** 由 App 层 SidebarProvider 注入，避免独立页卸载后重挂载时丢失上下文 */
   sidebarState: Accessor<"expanded" | "collapsed">;
   onToggleSidebar: () => void;
@@ -154,42 +150,83 @@ export function SideBar(props: SideBarProps) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* 与最近读过区域之间的分割线 */}
-        <Show when={recentBooks().length > 0 && !isCollapsed()}>
+        {/* 最近读过：展开为列表，收起为封面快捷入口 */}
+        <Show when={recentBooks().length > 0 || !isCollapsed()}>
           <>
             <Separator />
             <SidebarGroup>
-              <SidebarGroupLabel class="text-xs font-semibold text-sidebar-foreground/70">
+              <SidebarGroupLabel
+                class={cn(
+                  "text-xs font-semibold text-sidebar-foreground/70",
+                  isCollapsed() && "sr-only",
+                  !isCollapsed() && "cursor-pointer hover:text-primary",
+                )}
+                onClick={() => !isCollapsed() && handlePageChange("record")}
+              >
                 最近读过
               </SidebarGroupLabel>
-              <SidebarGroupContent class="mt-3">
-                <SidebarMenu>
-                  <For each={recentBooks().slice(0, 5)}>
-                    {(book, index) => (
-                      <>
-                        <Show when={index() > 0}>
-                          <Separator class="my-1 h-0.3" />
-                        </Show>
-                        <SidebarMenuItem>
-                          <SidebarMenuButton
-                            class={sidebarNavButtonClass(
-                              false,
-                              "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left"
-                            )}
-                            tooltip={`${book.title} - ${book.chapterName}`}
-                          >
-                            <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
-                              {book.title}
-                            </span>
-                            <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
-                              {book.chapterName}
-                            </span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      </>
-                    )}
-                  </For>
-                </SidebarMenu>
+              <SidebarGroupContent class={cn(!isCollapsed() && "mt-3")}>
+                <Show
+                  when={recentBooks().length > 0}
+                  fallback={
+                    <Show when={!isCollapsed()}>
+                      <p class="px-3 py-2 text-xs text-muted-foreground">尚无阅读记录</p>
+                    </Show>
+                  }
+                >
+                  <SidebarMenu>
+                    <For each={recentBooks().slice(0, isCollapsed() ? 3 : 5)}>
+                      {(book, index) => (
+                        <>
+                          <Show when={!isCollapsed() && index() > 0}>
+                            <Separator class="my-1 h-0.3" />
+                          </Show>
+                          <SidebarMenuItem>
+                            <SidebarMenuButton
+                              class={sidebarNavButtonClass(
+                                false,
+                                isCollapsed()
+                                  ? "h-10 justify-center px-0"
+                                  : "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left",
+                              )}
+                              tooltip={`${book.title} - ${book.chapterName}`}
+                              onClick={() => props.onOpenRecentBook?.(book)}
+                            >
+                              <Show
+                                when={isCollapsed()}
+                                fallback={
+                                  <>
+                                    <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
+                                      {book.title}
+                                    </span>
+                                    <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
+                                      {book.chapterName}
+                                    </span>
+                                  </>
+                                }
+                              >
+                                <span class="mx-auto flex h-8 w-6 shrink-0 overflow-hidden rounded-sm border border-border/40 bg-muted">
+                                  <BookCoverFromBook
+                                    book={book.book}
+                                    bookUrl={book.bookUrl || undefined}
+                                    coverUrl={book.coverUrl}
+                                    alt={book.title}
+                                    class="h-full w-full object-cover"
+                                    fallback={
+                                      <span class="flex h-full w-full items-center justify-center">
+                                        <BookOpenIcon class="h-3.5 w-3.5 text-muted-foreground" size={14} />
+                                      </span>
+                                    }
+                                  />
+                                </span>
+                              </Show>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        </>
+                      )}
+                    </For>
+                  </SidebarMenu>
+                </Show>
               </SidebarGroupContent>
             </SidebarGroup>
           </>

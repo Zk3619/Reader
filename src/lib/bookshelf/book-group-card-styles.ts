@@ -121,6 +121,14 @@ export function bookshelfListCardClass(...extra: Parameters<typeof cn>) {
   );
 }
 
+/** 阅读记录页虚拟列表行：与书架标准列表同款边框/悬停，高度由虚拟行槽位决定 */
+export function readRecordListRowClass(...extra: Parameters<typeof cn>) {
+  return bookGroupListRowVisualClass(
+    'flex h-full w-full cursor-pointer items-stretch gap-3 p-2',
+    ...extra,
+  );
+}
+
 /** 书架页紧凑列表书籍卡片 */
 export function bookshelfCompactListCardClass(...extra: Parameters<typeof cn>) {
   return bookGroupCompactRowVisualClass(

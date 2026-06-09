@@ -6,7 +6,7 @@ import { Show, type Component } from 'solid-js';
 import type { Store } from 'solid-js/store';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { BookCoverImg } from '@/components/books/BookCoverImg';
+import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverIcon, ExportIcon, PlayIcon, SquareIcon } from '@/components/shared/icons';
 import { Trash2 } from 'lucide-solid';
 import {
@@ -18,13 +18,11 @@ import { formatMangaImageCacheSize } from '@/lib/media/image/manga-image-disk-ca
 import { isTauri } from '@/lib/platform/detect';
 import {
   AppDropdownMenu,
-  AppDropdownMenuButtonTrigger,
   AppDropdownMenuContent,
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import { cn } from '@/lib/utils';
-import { sourcesStore } from '@/stores/sources';
 import type { Book } from '@/types';
 
 export interface BookshelfCacheRowState {
@@ -82,11 +80,8 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
         )}
       >
         <div class={bookshelfCompactCoverClass('h-12 w-9')}>
-          <BookCoverImg
-            src={book().customCoverUrl || book().coverUrl}
-            referer={book().origin}
-            source={sourcesStore.getBookSource(book().origin)}
-            bookUrl={book().bookUrl}
+          <BookCoverFromBook
+            book={book()}
             alt=""
             class="h-full w-full object-cover"
             loading="lazy"
