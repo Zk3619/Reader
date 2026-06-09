@@ -58,6 +58,7 @@ import {
   Newspaper,
   PanelLeft,
   Plus,
+  Pencil,
   Play,
   QrCode,
   RefreshCw,
@@ -78,6 +79,7 @@ import {
   Cloud,
   Cookie,
   Crown,
+  CalendarDays,
   SquareArrowRightEnter,
   SquareArrowRightExit,
 } from 'lucide-solid';
@@ -127,6 +129,8 @@ export const GlobeIcon = icon(Globe);
 export const LinkIcon = icon(Link);
 export const CookieIcon = icon(Cookie);
 export const CrownIcon = icon(Crown);
+export const CalendarDaysIcon = icon(CalendarDays);
+export const PencilIcon = icon(Pencil);
 export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);

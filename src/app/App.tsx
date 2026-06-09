@@ -2936,49 +2936,39 @@ function AppContent() {
 
             {/* 书签视图 */}
             <Show when={currentPage() === "bookmark"}>
-              <section
-                class={cn(shellTabEnter(), mainShellPageRoot)}
-              >
-                <PageToolbar
-                  title="书签"
-                  description="查看你的书签"
-                  titleSlot={
-                    <PageToolbarTitleDropdown
-                      title="书签"
-                      description="查看你的书签"
-                      dropdownEnabled={false}
-                    />
-                  }
-                />
-                <div class={mainShellPageScroll}>
-                  <BookmarkPage />
-                </div>
-              </section>
+              <BookmarkPage
+                onOpenBookmark={(bookmark, book) => {
+                  openReaderPage({
+                    ...book,
+                    durChapterIndex: bookmark.chapterIndex,
+                    durChapterPos: bookmark.chapterPos,
+                  });
+                }}
+              />
             </Show>
 
             {/* 记录视图 */}
             <Show when={currentPage() === "record"}>
-              <section
-                class={cn(shellTabEnter(), mainShellPageRoot)}
-              >
-                <PageToolbar
-                  title="阅读记录"
-                  description="查看你的阅读历史"
-                  titleSlot={
-                    <PageToolbarTitleDropdown
-                      title="阅读记录"
-                      description="查看你的阅读历史"
-                      dropdownEnabled={false}
-                    />
+              <ReadRecordPage
+                onOpenBook={(book) => openReaderPage(book)}
+                onSearchBook={(name) => openBookSearch(name)}
+                onOpenBookInfo={async (book) => {
+                  const source = await getSource(book.origin);
+                  if (!source) {
+                    showAppToast({
+                      title: "无法打开详情",
+                      description: "未找到对应书源",
+                      variant: "destructive",
+                    });
+                    return;
                   }
-                />
-                <div class={mainShellPageScroll}>
-                  <ReadRecordPage
-                    onOpenBook={(book) => openReaderPage(book)}
-                    onSearchBook={(name) => openBookSearch(name)}
-                  />
-                </div>
-              </section>
+                  openBookInfo({
+                    source,
+                    book: bookToSearchBook(book),
+                    originShell: "record",
+                  });
+                }}
+              />
             </Show>
 
 
@@ -2994,6 +2984,7 @@ function AppContent() {
                   setSettingsSubPageOpen(open);
                   settingsSubPageCloseRef.current = close ?? (() => {});
                 }}
+                onNavigateToPage={navigateToPage}
               />
             </section>
           </main>

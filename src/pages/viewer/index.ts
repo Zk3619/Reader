@@ -1,5 +1,6 @@
 /**
- * Viewer 模块导出（text / image / audio / video / file�? */
+ * Viewer 模块导出（text / image / audio / video / file）
+ */
 
 export { BookReader, type BookReaderProps } from '@/pages/viewer/TextViewerPage';
 export { ImageViewerPage } from '@/pages/viewer/ImageViewerPage';

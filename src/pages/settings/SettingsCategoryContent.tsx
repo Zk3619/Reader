@@ -27,7 +27,7 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
   const highlight = (id: string) => props.highlightedItemId === id;
 
   return (
-    <div class="mx-auto w-full max-w-4xl space-y-4 px-1">
+    <div class="w-full space-y-4">
       <Show when={props.categoryId === 'appearance'}>
         <SettingItemAnchor id="theme" highlighted={highlight('theme')}>
           <div class="rounded-2xl border border-border/50 bg-card p-6">

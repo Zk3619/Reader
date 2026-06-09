@@ -26,26 +26,39 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { ChevronRightIcon } from '@/components/shared/icons';
+import type { PageType } from '@/components/shell/Navigation';
 import {
   SETTINGS_CATEGORIES,
   getSettingsCategory,
   searchSettingsItems,
   type SettingsCategoryId,
 } from '@/lib/settings/settings-catalog';
+import { SETTINGS_MOBILE_QUICK_PAGES } from '@/lib/settings/settings-mobile-nav';
 import { SettingsCategoryContent } from '@/pages/settings/SettingsCategoryContent';
 
 export interface SettingsPageProps {
   /** 移动端子页面开关变化，供 App 注册系统返回层 */
   onSubPageOpenChange?: (open: boolean, close?: () => void) => void;
+  /** 移动端主列表跳转到书签 / 阅读记录等独立页 */
+  onNavigateToPage?: (page: PageType) => void;
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
 const SETTINGS_PAGE_DESCRIPTION = '自定义你的阅读体验';
 
+const settingsPageScrollTrackClass =
+  'flex min-h-0 w-full min-w-0 flex-1 flex-col items-stretch';
+const settingsPageSearchResultsClass = 'w-full min-w-0 self-stretch';
+const settingsPageListClass = 'flex w-full min-w-0 flex-col gap-2';
+const settingsPageListItemClass = 'w-full min-w-0';
+
 const settingsMobileListCardClass = cn(
-  bookshelfCompactListCardClass('h-16 w-full'),
+  bookshelfCompactListCardClass('h-16 w-full min-w-0'),
   'cursor-pointer items-center text-left',
 );
+
+const settingsSearchEmptyStateClass =
+  'w-full rounded-xl border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground';
 
 export function SettingsPage(props: SettingsPageProps) {
   const shell = useShellLayout();
@@ -199,22 +212,22 @@ export function SettingsPage(props: SettingsPageProps) {
   const showDesktopTabs = () => !useMobileLayout();
 
   const hubSearchResults = () => (
-    <div class="w-full max-w-4xl mx-auto space-y-2 px-1">
+    <div class={settingsPageSearchResultsClass}>
       <Show
         when={searchResults().length > 0}
         fallback={
-          <div class="rounded-xl border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
+          <div class={settingsSearchEmptyStateClass}>
             <p>未找到匹配的设置项</p>
             <p class="mt-1">尝试其他关键词，如「主题」「缓存」「备份」</p>
           </div>
         }
       >
-        <ul class="space-y-2">
+        <ul class={settingsPageListClass}>
           <For each={searchResults()}>
             {(item) => {
               const cat = () => getSettingsCategory(item.categoryId);
               return (
-                <li>
+                <li class={settingsPageListItemClass}>
                   <button
                     type="button"
                     class={settingsMobileListCardClass}
@@ -271,14 +284,38 @@ export function SettingsPage(props: SettingsPageProps) {
 
               <div
                 ref={hubScrollEl}
-                class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}
+                class={cn(mainShellPageScroll, settingsPageScrollTrackClass)}
               >
                 <Show when={isSearching()}>{hubSearchResults()}</Show>
                 <Show when={showMobileHub() && !isSearching()}>
-                  <ul class="w-full max-w-4xl mx-auto space-y-2 px-1">
+                  <ul class={settingsPageListClass}>
+                    <For each={SETTINGS_MOBILE_QUICK_PAGES}>
+                      {(entry) => (
+                        <li class={settingsPageListItemClass}>
+                          <button
+                            type="button"
+                            class={settingsMobileListCardClass}
+                            onClick={() => props.onNavigateToPage?.(entry.page)}
+                          >
+                            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                              <entry.icon class="h-5 w-5" size={20} />
+                            </span>
+                            <div class={bookshelfCompactMainClass()}>
+                              <span class="truncate font-medium text-foreground">{entry.label}</span>
+                              <span class="truncate text-xs text-muted-foreground">
+                                {entry.description}
+                              </span>
+                            </div>
+                            <span class="flex shrink-0 items-center pr-1.5 text-muted-foreground">
+                              <ChevronRightIcon class="h-4 w-4" />
+                            </span>
+                          </button>
+                        </li>
+                      )}
+                    </For>
                     <For each={SETTINGS_CATEGORIES}>
                       {(cat) => (
-                        <li>
+                        <li class={settingsPageListItemClass}>
                           <button
                             type="button"
                             class={settingsMobileListCardClass}
@@ -347,7 +384,7 @@ export function SettingsPage(props: SettingsPageProps) {
 
             <div
               ref={hubScrollEl}
-              class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}
+              class={cn(mainShellPageScroll, settingsPageScrollTrackClass)}
             >
               <Show when={isSearching()}>{hubSearchResults()}</Show>
               <Show when={!isSearching()}>
@@ -356,7 +393,7 @@ export function SettingsPage(props: SettingsPageProps) {
                     <TabsContent
                       value={cat.id}
                       forceMount={cat.id === 'storage' && storageTabVisited()}
-                      class="mt-0 overflow-visible focus-visible:outline-none"
+                      class="mt-0 w-full min-w-0 overflow-visible focus-visible:outline-none"
                     >
                       <SettingsCategoryContent
                         categoryId={cat.id}
@@ -393,48 +430,9 @@ export function SettingsPage(props: SettingsPageProps) {
 
           <div
             ref={subPageScrollEl}
-            class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col pb-4')}
+            class={cn(mainShellPageScroll, settingsPageScrollTrackClass, 'pb-4')}
           >
-            <Show when={isSearching()}>
-              <div class="w-full max-w-4xl mx-auto space-y-2 px-1">
-                <Show
-                  when={searchResults().length > 0}
-                  fallback={
-                    <div class="rounded-xl border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-                      <p>未找到匹配的设置项</p>
-                    </div>
-                  }
-                >
-                  <ul class="space-y-2">
-                    <For each={searchResults()}>
-                      {(item) => {
-                        const cat = () => getSettingsCategory(item.categoryId);
-                        return (
-                          <li>
-                            <button
-                              type="button"
-                              class={settingsMobileListCardClass}
-                              onClick={() => navigateToSettingItem(item.id, item.categoryId)}
-                            >
-                              <div class={bookshelfCompactMainClass('px-2')}>
-                                <span class="truncate font-medium text-foreground">{item.title}</span>
-                                <span class="truncate text-xs text-muted-foreground">
-                                  {cat().label}
-                                  {item.description ? ` · ${item.description}` : ''}
-                                </span>
-                              </div>
-                              <span class="flex shrink-0 items-center pr-1.5 text-muted-foreground">
-                                <ChevronRightIcon class="h-4 w-4" />
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      }}
-                    </For>
-                  </ul>
-                </Show>
-              </div>
-            </Show>
+            <Show when={isSearching()}>{hubSearchResults()}</Show>
 
             <Show when={!isSearching()}>
               <For each={SETTINGS_CATEGORIES}>
