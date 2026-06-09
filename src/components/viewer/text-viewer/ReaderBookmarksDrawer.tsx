@@ -5,6 +5,7 @@
 import { createResource, For, Show } from 'solid-js';
 import * as bookmarksDb from '@/lib/database/bookmarks';
 import { deleteBookmark } from '@/lib/database/bookmarks';
+import { bookmarkNoteForDisplay } from '@/lib/media/text/reader-bookmark';
 import type { Book, Bookmark } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,19 +56,31 @@ export function ReaderBookmarksDrawer(props: ReaderBookmarksDrawerProps) {
             <For each={bookmarks() ?? []}>
               {(bm) => (
                 <li class="rounded-lg border border-border/60 p-3">
-                  <button
+                  <Button
                     type="button"
-                    class="w-full text-left"
+                    variant="ghost"
+                    class="h-auto min-h-0 w-full min-w-0 justify-start px-0 py-0 text-left font-normal hover:bg-transparent"
                     onClick={() => {
                       props.onJump(bm);
                       props.onOpenChange(false);
                     }}
                   >
-                    <div class="text-sm font-medium">{bm.chapterName}</div>
-                    <div class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                      {bm.bookText || bm.content}
+                    <div class="flex min-w-0 w-full flex-col gap-1 overflow-hidden">
+                      <div class="line-clamp-1 text-sm font-medium">{bm.chapterName}</div>
+                      <Show when={bm.bookText.trim()}>
+                        <p class="line-clamp-2 min-w-0 break-words text-xs leading-relaxed text-muted-foreground">
+                          {bm.bookText}
+                        </p>
+                      </Show>
+                      <Show when={bookmarkNoteForDisplay(bm)}>
+                        {(note) => (
+                          <p class="line-clamp-2 min-w-0 break-words text-xs leading-relaxed text-muted-foreground/90">
+                            {note()}
+                          </p>
+                        )}
+                      </Show>
                     </div>
-                  </button>
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"

@@ -107,6 +107,7 @@ import {
 } from '@/lib/media/text/reader-paged-clip-measure';
 import { cn } from '@/lib/utils';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
+import { buildPagedBookmarkSnapshot } from '@/lib/media/text/reader-bookmark';
 import { consumePagedChapterEntry } from '@/lib/media/text/reader-paged-chapter-entry';
 import {
   dualSpreadColumnContentSpanPx,
@@ -2652,7 +2653,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     cancelAdjacentChapterLayoutPrefetch();
     setPagedLayoutEngine('idle');
     queueMicrotask(() => {
-      skipChapterPosSync = false;
       if (viewerState.content?.trim()) {
         scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
       }
@@ -2696,11 +2696,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (progressRestoredKey === key) return;
     progressRestoredKey = key;
     const starts = l.pageStarts;
-    if (starts.length === 0) return;
     const pos = viewerState.chapterPos;
     const total = Math.max(1, starts.length);
     const target =
-      total <= 1 ? 0 : Math.round(Math.max(0, Math.min(1, pos)) * (total - 1));
+      total <= 1 || starts.length === 0
+        ? 0
+        : Math.round(Math.max(0, Math.min(1, pos)) * (total - 1));
     skipChapterPosSync = true;
     setPageIndex(target);
     queueMicrotask(() => {
@@ -2708,8 +2709,24 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     });
   });
 
+  const getBookmarkSnapshot = () => {
+    const idx = pageIndex();
+    return buildPagedBookmarkSnapshot({
+      layout: layout(),
+      pageIndex: idx,
+      chapterHtml: viewerState.content,
+      viewportRoot: viewportEl,
+      contentRoot: idleContentRoot,
+    });
+  };
+
   createEffect(() => {
-    local.onRegisterNav?.({ goNextPage, goPrevPage, setPageProgress });
+    local.onRegisterNav?.({
+      goNextPage,
+      goPrevPage,
+      setPageProgress,
+      getBookmarkSnapshot,
+    });
   });
 
   createEffect(() => {
@@ -2750,7 +2767,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
     clearSimulationCurl(curtainSlideMountEl);
     cancelAdjacentChapterLayoutPrefetch();
-    if (progressSaveTimer !== undefined) clearTimeout(progressSaveTimer);
+    if (progressSaveTimer !== undefined) {
+      clearTimeout(progressSaveTimer);
+      progressSaveTimer = undefined;
+    }
+    const total = pageCount();
+    const pos = total <= 1 ? 0 : pageIndex() / (total - 1);
+    textViewerStore.setChapterPos(pos);
+    void textViewerStore.saveProgress().catch(console.error);
     if (remeasureDebounceTimer !== undefined) clearTimeout(remeasureDebounceTimer);
     setPagedLayoutEngine('idle');
   });
