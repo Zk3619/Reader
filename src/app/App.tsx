@@ -1,4 +1,4 @@
-import { createSignal, createEffect, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, createResource, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Navigation, type PageType } from "@/components/shell/Navigation";
 import { PageToolbar } from "@/components/shell/PageToolbar";
@@ -58,6 +58,7 @@ import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog"
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
+import { sourcesStore } from "@/stores/sources";
 import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
@@ -92,7 +93,8 @@ import { isDesktopTauri } from "@/lib/platform/webview-storage";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
-import { getBook, hasBook } from "@/lib/database/books";
+import { getBook, getBookByNameAndAuthor, hasBook } from "@/lib/database/books";
+import { getRecentReadBooks, type RecentReadBook } from "@/lib/bookshelf/recent-reading";
 import {
   importLocalBook,
   importLocalBookFromContent,
@@ -205,25 +207,6 @@ import {
 import "@/app/App.css";
 // 窗口显示：开屏时由 SplashScreen 处理；HMR 跳过开屏时由 App onMount 补 show
 
-// 模拟最近读过的书籍数据
-const mockRecentBooks = [
-  {
-    id: 1,
-    title: "深入理解计算机系统",
-    chapterName: "第3章 程序的机器级表示",
-  },
-  {
-    id: 2,
-    title: "设计模式：可复用面向对象软件的基础",
-    chapterName: "第5章 单例模式",
-  },
-  {
-    id: 3,
-    title: "代码整洁之道",
-    chapterName: "第7章 错误处理",
-  },
-];
-
 function isMediaViewerPage(page: PageType): page is MediaViewerPage {
   return (NON_TEXT_MEDIA_VIEWER_PAGES as PageType[]).includes(page);
 }
@@ -263,12 +246,26 @@ function AppContent() {
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
   // 数据库初始化状态（保留用于将来显示加载状态）
-  const [_dbInitialized, setDbInitialized] = createSignal(false);
+  const [dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
   const { state, toggleSidebar } = useSidebar();
   const [windowWidth, setWindowWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
+  const [recentBooks, { refetch: refetchRecentBooks }] = createResource(() => {
+    if (!dbInitialized()) return;
+    return getRecentReadBooks(5);
+  });
+
+  createEffect(() => {
+    const refreshRecentBooks = () => void refetchRecentBooks();
+    window.addEventListener("bookshelf-book-updated", refreshRecentBooks);
+    window.addEventListener("read-record-updated", refreshRecentBooks);
+    onCleanup(() => {
+      window.removeEventListener("bookshelf-book-updated", refreshRecentBooks);
+      window.removeEventListener("read-record-updated", refreshRecentBooks);
+    });
+  });
   const [showGroupManage, setShowGroupManage] = createSignal(false);
   const [showBookshelfManage, setShowBookshelfManage] = createSignal(false);
   const [showSourcesManage, setShowSourcesManage] = createSignal(false);
@@ -1036,6 +1033,26 @@ function AppContent() {
     ) {
       nav.pop();
     }
+  }
+
+  async function openRecentBook(item: RecentReadBook) {
+    if (item.book) {
+      openReaderPage(item.book);
+      return;
+    }
+    if (item.bookUrl) {
+      const book = await getBook(item.bookUrl);
+      if (book) {
+        openReaderPage(book);
+        return;
+      }
+    }
+    const book = await getBookByNameAndAuthor(item.title, item.author);
+    if (book) {
+      openReaderPage(book);
+      return;
+    }
+    openBookSearch(item.title);
   }
 
   function openReaderPage(
@@ -1971,6 +1988,9 @@ function AppContent() {
         });
 
         await initBookshelfLayoutSettings();
+        void sourcesStore.loadBookSources().catch((e) => {
+          console.warn("[sources] loadBookSources on app init", e);
+        });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('数据库初始化失败:', error);
@@ -2600,7 +2620,8 @@ function AppContent() {
             <SideBar
               currentPage={currentPage()}
               onPageChange={navigateToPage}
-              recentBooks={mockRecentBooks}
+              recentBooks={recentBooks() ?? []}
+              onOpenRecentBook={(book) => void openRecentBook(book)}
               sidebarState={state}
               onToggleSidebar={toggleSidebar}
             />
@@ -2952,7 +2973,10 @@ function AppContent() {
                   }
                 />
                 <div class={mainShellPageScroll}>
-                  <ReadRecordPage />
+                  <ReadRecordPage
+                    onOpenBook={(book) => openReaderPage(book)}
+                    onSearchBook={(name) => openBookSearch(name)}
+                  />
                 </div>
               </section>
             </Show>

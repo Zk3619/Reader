@@ -4,8 +4,8 @@ import { cn } from '@/lib/utils';
 import {
   readerDrawerOptionTabsListClass,
   readerDrawerOptionTabsTriggerClass,
-  settingsOptionTabsListClass,
-  settingsOptionTabsTriggerClass,
+  settingsOptionTabsEqualWidthListClass,
+  settingsOptionTabsEqualWidthTriggerClass,
 } from '@/lib/settings/settings-tab-styles';
 import {
   VIEWER_CHROME_LAYOUT_HINTS,
@@ -38,11 +38,11 @@ export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProp
   const tabsListClass = () =>
     props.variant === 'drawer'
       ? readerDrawerOptionTabsListClass
-      : settingsOptionTabsListClass;
+      : settingsOptionTabsEqualWidthListClass;
   const tabsTriggerClass = () =>
     props.variant === 'drawer'
       ? readerDrawerOptionTabsTriggerClass
-      : settingsOptionTabsTriggerClass;
+      : settingsOptionTabsEqualWidthTriggerClass;
 
   return (
     <div class={cn('space-y-2', props.class)}>

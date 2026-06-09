@@ -55,4 +55,5 @@ export async function flushReadingSession(book?: Book | null): Promise<void> {
     durChapterTitle: book.durChapterTitle ?? '',
     durChapterIndex: book.durChapterIndex ?? 0,
   });
+  window.dispatchEvent(new CustomEvent('read-record-updated'));
 }

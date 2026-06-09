@@ -5,6 +5,13 @@ export const settingsOptionTabsListClass =
 export const settingsOptionTabsTriggerClass =
   'flex-1 text-sm hover:bg-background/60 hover:text-foreground sm:flex-none data-[selected]:shadow-sm';
 
+/** 设置页选项 Tab：均分整行宽度（纵向布局区块，如阅读器顶栏与底栏） */
+export const settingsOptionTabsEqualWidthListClass =
+  'flex h-auto w-full gap-1 p-1';
+
+export const settingsOptionTabsEqualWidthTriggerClass =
+  'min-w-0 flex-1 text-sm hover:bg-background/60 hover:text-foreground data-[selected]:shadow-sm';
+
 /** 阅读设置抽屉：选项 Tab 均分整行宽度 */
 export const readerDrawerOptionTabsListClass =
   'flex h-auto w-full gap-1 rounded-lg border border-input bg-muted p-1.5';

@@ -77,6 +77,7 @@ import {
   ChevronUp,
   Cloud,
   Cookie,
+  Crown,
   SquareArrowRightEnter,
   SquareArrowRightExit,
 } from 'lucide-solid';
@@ -125,6 +126,7 @@ export const PlusIcon = icon(Plus);
 export const GlobeIcon = icon(Globe);
 export const LinkIcon = icon(Link);
 export const CookieIcon = icon(Cookie);
+export const CrownIcon = icon(Crown);
 export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);
