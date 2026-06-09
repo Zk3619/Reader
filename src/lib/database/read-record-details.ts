@@ -1,6 +1,36 @@
 import { getDatabase } from '@/lib/database/database-core';
 import type { ReadRecordDetail } from '@/types';
 
+export async function clearAllReadRecordDetails(): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM readRecordDetail');
+}
+
+export async function getAllReadRecordDetails(): Promise<ReadRecordDetail[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM readRecordDetail ORDER BY date DESC',
+  );
+  return rows.map(mapRow);
+}
+
+export async function getReadRecordDetail(
+  deviceId: string,
+  bookName: string,
+  bookAuthor: string,
+  date: string,
+): Promise<ReadRecordDetail | null> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM readRecordDetail
+     WHERE deviceId = ? AND bookName = ? AND bookAuthor = ? AND date = ?
+     LIMIT 1`,
+    [deviceId, bookName, bookAuthor, date],
+  );
+  const row = rows[0];
+  return row ? mapRow(row) : null;
+}
+
 export async function getReadRecordDetails(
   deviceId: string,
   bookName: string,

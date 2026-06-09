@@ -83,11 +83,12 @@ export interface AppSettings {
   innerWebRenderMode?: 'auto' | 'tauri-panel' | 'iframe';
   /** 书源页发现抽屉布局：default=按脚本 style；legado=强制三列 */
   sourceExploreDrawerLayout?: 'default' | 'legado';
-  /**
-   * MediaViewer 顶栏与底栏布局：fixed 占位 | stacked 层叠 | floating 独立悬浮控件
+  /** 阅读器顶栏与底栏布局：fixed 占位 | stacked 层叠 | floating 独立悬浮控件
    * 旧值 overlay 在加载时迁移为 stacked
    */
   viewerChromeLayout?: ViewerChromeLayout;
+  /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
+  enableReadRecord?: boolean;
 }
 
 /**
@@ -110,6 +111,7 @@ const defaultAppSettings: AppSettings = {
   innerWebRenderMode: 'auto',
   sourceExploreDrawerLayout: 'default',
   viewerChromeLayout: defaultViewerChromeLayout,
+  enableReadRecord: true,
 };
 
 /**
@@ -329,6 +331,10 @@ export const settingsStore = {
     bookInfoPresentation: 'page' | 'drawer',
   ): Promise<void> {
     await this.updateAppSettings({ bookInfoPresentation });
+  },
+
+  async setEnableReadRecord(enableReadRecord: boolean): Promise<void> {
+    await this.updateAppSettings({ enableReadRecord });
   },
 
   async setSourceExploreDrawerLayout(

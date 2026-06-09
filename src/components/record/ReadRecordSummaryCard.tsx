@@ -43,8 +43,8 @@ export function ReadRecordSummaryCard(props: ReadRecordSummaryCardProps) {
   const stackEntries = () => props.recentEntries().slice(0, 3);
 
   return (
-    <div class="flex flex-col gap-4 rounded-xl border border-border/50 bg-muted/15 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div class="space-y-1">
+    <div class="flex items-center justify-between gap-4 rounded-xl border border-border/50 bg-muted/15 p-4">
+      <div class="min-w-0 flex-1 space-y-1">
         <p class="text-xs font-medium text-muted-foreground">累计阅读成就</p>
         <p class="text-base font-semibold text-foreground">
           已读 {props.bookCount} 本书
@@ -54,7 +54,7 @@ export function ReadRecordSummaryCard(props: ReadRecordSummaryCardProps) {
         </p>
       </div>
       <Show when={stackEntries().length > 0}>
-        <div class="relative mx-auto h-24 w-28 shrink-0 sm:mx-0">
+        <div class="relative h-24 w-28 shrink-0">
           <For each={stackEntries()}>
             {(entry, index) => <BookStackCover entry={entry} index={index()} />}
           </For>

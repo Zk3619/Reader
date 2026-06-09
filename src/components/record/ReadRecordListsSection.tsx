@@ -3,22 +3,18 @@
  */
 
 import { createMemo, Show, type Accessor, type JSX } from 'solid-js';
+import { Button } from '@/components/ui/button';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
-import { MoreIcon, CrownIcon } from '@/components/shared/icons';
-import { Button } from '@/components/ui/button';
-import {
-  AppDropdownMenu,
-  AppDropdownMenuContent,
-  AppDropdownMenuItem,
-  AppDropdownMenuTrigger,
-} from '@/components/shared/AppDropdownMenu';
+import { CrownIcon } from '@/components/shared/icons';
+import { ReadRecordEntryRowMenu } from '@/components/record/ReadRecordEntryRowMenu';
 import { VirtualList } from '@/components/shared/virtual-list';
 import {
   READ_RECORD_PREVIEW_LIST_HEIGHT_CLASS,
-  READ_RECORD_PREVIEW_LIST_HEIGHT_PX,
   READ_RECORD_ROW_HEIGHT_PX,
   READ_RECORD_SECTION_CARD_CLASS,
+  READ_RECORD_VIRTUAL_LIST_CLASS,
+  READ_RECORD_VIRTUAL_LIST_ITEM_CLASS,
   readRecordEntryKey,
 } from '@/lib/record/read-record-layout';
 import {
@@ -32,6 +28,7 @@ import {
   bookshelfRowSubtitleClass,
   bookshelfRowTitleClass,
   readRecordListRowClass,
+  readRecordRowOpenButtonClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { cn } from '@/lib/utils';
 import type { Book } from '@/types';
@@ -57,6 +54,7 @@ function ReadRecordRecentRow(props: {
   entry: ReadRecordEntry;
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
+  onOpenBookInfo?: (book: Book) => void;
   onDelete: () => void;
 }) {
   const entry = () => props.entry;
@@ -74,9 +72,10 @@ function ReadRecordRecentRow(props: {
         entry().missingFromShelf && 'opacity-80',
       )}
     >
-      <button
+      <Button
         type="button"
-        class="flex min-w-0 flex-1 items-stretch gap-3 text-left"
+        variant="ghost"
+        class={readRecordRowOpenButtonClass('items-stretch')}
         onClick={handleOpen}
       >
         <ReadRecordRowCover entry={entry()} alt={entry().bookName} />
@@ -101,37 +100,14 @@ function ReadRecordRecentRow(props: {
             </Show>
           </div>
         </div>
-      </button>
-      <div class="flex shrink-0 items-center pr-1">
-        <AppDropdownMenu>
-          <AppDropdownMenuTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100 data-expanded:opacity-100"
-            aria-label="更多操作"
-            onClick={(e: MouseEvent) => e.stopPropagation()}
-          >
-            <MoreIcon class="h-4 w-4" size={16} />
-          </AppDropdownMenuTrigger>
-          <AppDropdownMenuContent align="end">
-            <Show when={entry().book}>
-              <AppDropdownMenuItem onSelect={handleOpen}>继续阅读</AppDropdownMenuItem>
-            </Show>
-            <Show when={!entry().book}>
-              <AppDropdownMenuItem onSelect={handleOpen}>搜索此书</AppDropdownMenuItem>
-            </Show>
-            <Show when={entry().hasDurationRecord}>
-              <AppDropdownMenuItem
-                class="text-destructive focus:text-destructive"
-                onSelect={() => props.onDelete()}
-              >
-                删除时长记录
-              </AppDropdownMenuItem>
-            </Show>
-          </AppDropdownMenuContent>
-        </AppDropdownMenu>
-      </div>
+      </Button>
+      <ReadRecordEntryRowMenu
+        entry={entry()}
+        onOpenBook={props.onOpenBook}
+        onSearchBook={props.onSearchBook}
+        onOpenBookInfo={props.onOpenBookInfo}
+        onDelete={props.onDelete}
+      />
     </div>
   );
 }
@@ -186,6 +162,8 @@ function ReadRecordRankRow(props: {
   rank: number;
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
+  onOpenBookInfo?: (book: Book) => void;
+  onDelete: () => void;
 }) {
   const entry = () => props.entry;
   const handleOpen = () => {
@@ -195,26 +173,39 @@ function ReadRecordRankRow(props: {
   };
 
   return (
-    <button
-      type="button"
+    <div
       class={cn(
         readRecordListRowClass(),
+        'group',
         entry().missingFromShelf && 'opacity-80',
       )}
-      onClick={handleOpen}
     >
-      <ReadRecordRankBadge rank={props.rank} />
-      <ReadRecordRowCover entry={entry()} alt={entry().bookName} />
-      <div class={bookshelfListMainClass()}>
-        <div class={bookshelfRowTitleClass(false, 'text-sm')}>{entry().bookName}</div>
-        <Show when={entry().bookAuthor}>
-          <div class={bookshelfRowSubtitleClass(true)}>{entry().bookAuthor}</div>
-        </Show>
-        <div class="text-xs leading-tight font-medium text-primary/90">
-          {formatReadDuration(entry().readTime)}
+      <Button
+        type="button"
+        variant="ghost"
+        class={readRecordRowOpenButtonClass('items-stretch')}
+        onClick={handleOpen}
+      >
+        <ReadRecordRankBadge rank={props.rank} />
+        <ReadRecordRowCover entry={entry()} alt={entry().bookName} />
+        <div class={bookshelfListMainClass()}>
+          <div class={bookshelfRowTitleClass(false, 'text-sm')}>{entry().bookName}</div>
+          <Show when={entry().bookAuthor}>
+            <div class={bookshelfRowSubtitleClass(true)}>{entry().bookAuthor}</div>
+          </Show>
+          <div class="text-xs leading-tight font-medium text-primary/90">
+            {formatReadDuration(entry().readTime)}
+          </div>
         </div>
-      </div>
-    </button>
+      </Button>
+      <ReadRecordEntryRowMenu
+        entry={entry()}
+        onOpenBook={props.onOpenBook}
+        onSearchBook={props.onSearchBook}
+        onOpenBookInfo={props.onOpenBookInfo}
+        onDelete={props.onDelete}
+      />
+    </div>
   );
 }
 
@@ -241,24 +232,31 @@ function ReadRecordVirtualPanel(props: {
       <Show
         when={props.items().length > 0}
         fallback={
-          <div class="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+          <div
+            class={cn(
+              READ_RECORD_PREVIEW_LIST_HEIGHT_CLASS,
+              'flex flex-none items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-sm text-muted-foreground',
+            )}
+          >
             {props.emptyText}
           </div>
         }
       >
-        <VirtualList
-          class={cn('min-h-0 shrink-0', READ_RECORD_PREVIEW_LIST_HEIGHT_CLASS)}
-          items={props.items}
-          estimateSize={() => READ_RECORD_ROW_HEIGHT_PX}
-          overscan={2}
-          getItemKey={(entry) => readRecordEntryKey(entry.bookName, entry.bookAuthor)}
-        >
-          {(entry, index) => (
-            <div class="box-border h-full pb-2">
-              {props.children(entry, index)}
-            </div>
-          )}
-        </VirtualList>
+        <div class={cn('flex-none min-h-0', READ_RECORD_PREVIEW_LIST_HEIGHT_CLASS)}>
+          <VirtualList
+            class={READ_RECORD_VIRTUAL_LIST_CLASS}
+            items={props.items}
+            estimateSize={() => READ_RECORD_ROW_HEIGHT_PX}
+            overscan={2}
+            getItemKey={(entry) => readRecordEntryKey(entry.bookName, entry.bookAuthor)}
+          >
+            {(entry, index) => (
+              <div class={cn(READ_RECORD_VIRTUAL_LIST_ITEM_CLASS, 'pb-2')}>
+                {props.children(entry, index)}
+              </div>
+            )}
+          </VirtualList>
+        </div>
       </Show>
     </section>
   );
@@ -269,17 +267,13 @@ export interface ReadRecordListsSectionProps {
   rankEntries: Accessor<readonly ReadRecordEntry[]>;
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
+  onOpenBookInfo?: (book: Book) => void;
   onDelete: (entry: ReadRecordEntry) => void;
 }
 
 export function ReadRecordListsSection(props: ReadRecordListsSectionProps) {
   return (
-    <div
-      class="flex flex-col gap-4 md:flex-row md:items-start"
-      style={{
-        '--read-record-preview-list-height': `${READ_RECORD_PREVIEW_LIST_HEIGHT_PX}px`,
-      }}
-    >
+    <div class="flex flex-col gap-4 md:flex-row md:items-start">
       <ReadRecordVirtualPanel
         title="最近在读"
         description="按最近阅读时间排序，点击继续阅读"
@@ -291,6 +285,7 @@ export function ReadRecordListsSection(props: ReadRecordListsSectionProps) {
             entry={entry}
             onOpenBook={props.onOpenBook}
             onSearchBook={props.onSearchBook}
+            onOpenBookInfo={props.onOpenBookInfo}
             onDelete={() => props.onDelete(entry)}
           />
         )}
@@ -308,6 +303,8 @@ export function ReadRecordListsSection(props: ReadRecordListsSectionProps) {
             rank={index + 1}
             onOpenBook={props.onOpenBook}
             onSearchBook={props.onSearchBook}
+            onOpenBookInfo={props.onOpenBookInfo}
+            onDelete={() => props.onDelete(entry)}
           />
         )}
       </ReadRecordVirtualPanel>

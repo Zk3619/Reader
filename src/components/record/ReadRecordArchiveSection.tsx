@@ -3,8 +3,10 @@
  */
 
 import { createMemo, createSignal, For, Match, Show, Switch, type Accessor } from 'solid-js';
+import { Button } from '@/components/ui/button';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
+import { ReadRecordEntryRowMenu } from '@/components/record/ReadRecordEntryRowMenu';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { VirtualList } from '@/components/shared/virtual-list';
 import {
@@ -31,6 +33,7 @@ import {
   READ_RECORD_DATE_HEADER_HEIGHT_PX,
   READ_RECORD_ROW_HEIGHT_PX,
   READ_RECORD_SECTION_CARD_CLASS,
+  READ_RECORD_VIRTUAL_LIST_CLASS,
 } from '@/lib/record/read-record-layout';
 import type { ReadRecordEntry } from '@/lib/record/read-record-presenter';
 import {
@@ -39,6 +42,7 @@ import {
   bookshelfRowSubtitleClass,
   bookshelfRowTitleClass,
   readRecordListRowClass,
+  readRecordRowOpenButtonClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import { cn } from '@/lib/utils';
 import type { Book } from '@/types';
@@ -82,6 +86,8 @@ function ReadRecordArchiveEntryRow(props: {
   mode: ReadRecordArchiveMode;
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
+  onOpenBookInfo?: (book: Book) => void;
+  onDelete?: () => void;
 }) {
   const entry = () => props.entry;
   const handleOpen = () => {
@@ -108,28 +114,41 @@ function ReadRecordArchiveEntryRow(props: {
   };
 
   return (
-    <button
-      type="button"
+    <div
       class={cn(
         readRecordListRowClass(),
+        'group',
         entry().missingFromShelf && 'opacity-80',
       )}
-      onClick={handleOpen}
     >
-      <ArchiveRowCover entry={entry()} />
-      <div class={bookshelfListMainClass()}>
-        <div class={bookshelfRowTitleClass(false, 'text-sm')}>{entry().bookName}</div>
-        <Show when={entry().bookAuthor}>
-          <div class={bookshelfRowSubtitleClass(true)}>{entry().bookAuthor}</div>
-        </Show>
-        <Show when={entry().durChapterTitle}>
-          <div class="truncate text-xs leading-tight text-muted-foreground">
-            {entry().durChapterTitle}
-          </div>
-        </Show>
-        <div class="text-xs leading-tight font-medium text-primary/90">{trailingMeta()}</div>
-      </div>
-    </button>
+      <Button
+        type="button"
+        variant="ghost"
+        class={readRecordRowOpenButtonClass('items-stretch')}
+        onClick={handleOpen}
+      >
+        <ArchiveRowCover entry={entry()} />
+        <div class={bookshelfListMainClass()}>
+          <div class={bookshelfRowTitleClass(false, 'text-sm')}>{entry().bookName}</div>
+          <Show when={entry().bookAuthor}>
+            <div class={bookshelfRowSubtitleClass(true)}>{entry().bookAuthor}</div>
+          </Show>
+          <Show when={entry().durChapterTitle}>
+            <div class="truncate text-xs leading-tight text-muted-foreground">
+              {entry().durChapterTitle}
+            </div>
+          </Show>
+          <div class="text-xs leading-tight font-medium text-primary/90">{trailingMeta()}</div>
+        </div>
+      </Button>
+      <ReadRecordEntryRowMenu
+        entry={entry()}
+        onOpenBook={props.onOpenBook}
+        onSearchBook={props.onSearchBook}
+        onOpenBookInfo={props.onOpenBookInfo}
+        onDelete={props.onDelete}
+      />
+    </div>
   );
 }
 
@@ -137,6 +156,8 @@ export interface ReadRecordArchiveSectionProps {
   entries: Accessor<readonly ReadRecordEntry[]>;
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
+  onOpenBookInfo?: (book: Book) => void;
+  onDelete?: (entry: ReadRecordEntry) => void;
 }
 
 export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
@@ -185,22 +206,28 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
         <Show
           when={rows().length > 0}
           fallback={
-            <div class="flex items-center justify-center rounded-xl border border-dashed border-border/60 bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+            <div
+              class={cn(
+                READ_RECORD_ARCHIVE_LIST_HEIGHT_CLASS,
+                'flex flex-none items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/60 bg-muted/20 p-8 text-center text-sm text-muted-foreground',
+              )}
+            >
               {mode() === 'duration' ? '暂无阅读时长统计' : '暂无阅读记录'}
             </div>
           }
         >
-          <VirtualList
-            class={cn('min-h-0', READ_RECORD_ARCHIVE_LIST_HEIGHT_CLASS)}
-            items={rows}
-            estimateSize={estimateRowSize}
-            overscan={6}
-            getItemKey={(row: ReadRecordArchiveVirtualRow) => row.key}
-          >
+          <div class={cn('flex-none min-h-0', READ_RECORD_ARCHIVE_LIST_HEIGHT_CLASS)}>
+            <VirtualList
+              class={READ_RECORD_VIRTUAL_LIST_CLASS}
+              items={rows}
+              estimateSize={estimateRowSize}
+              overscan={6}
+              getItemKey={(row: ReadRecordArchiveVirtualRow) => row.key}
+            >
             {(row) => (
               <div
                 class={cn(
-                  'box-border h-full',
+                  'box-border h-full pr-1',
                   row.kind === 'entry' && 'pb-2',
                 )}
               >
@@ -220,6 +247,12 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
                         mode={mode()}
                         onOpenBook={props.onOpenBook}
                         onSearchBook={props.onSearchBook}
+                        onOpenBookInfo={props.onOpenBookInfo}
+                        onDelete={
+                          props.onDelete
+                            ? () => props.onDelete!(entryRow().entry)
+                            : undefined
+                        }
                       />
                     )}
                   </Match>
@@ -227,6 +260,7 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
               </div>
             )}
           </VirtualList>
+          </div>
         </Show>
       </div>
     </Tabs>

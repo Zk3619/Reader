@@ -2,61 +2,81 @@
  * 阅读记录页（对齐 legado ReadRecord：概览统计 + 最近在读 / 时长排行）
  */
 
-import { createMemo, createResource, onCleanup, onMount, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ReadRecordCalendarDrawer } from '@/components/record/ReadRecordCalendarDrawer';
+import { ReadRecordGoalCard } from '@/components/record/ReadRecordGoalCard';
+import { ReadRecordHeatmap } from '@/components/record/ReadRecordHeatmap';
 import {
   ReadRecordListsSection,
   useReadRecordRankEntries,
 } from '@/components/record/ReadRecordListsSection';
 import { ReadRecordArchiveSection } from '@/components/record/ReadRecordArchiveSection';
-import { ReadRecordSummaryCard } from '@/components/record/ReadRecordSummaryCard';
-import * as readRecordsDb from '@/lib/database/read-records';
+import { ReadRecordOverviewSection } from '@/components/record/ReadRecordOverviewSection';
+import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import {
-  formatReadDuration,
-  formatRelativeLastRead,
-} from '@/lib/record/read-record-format';
+  AppDropdownMenu,
+  AppDropdownMenuCheckboxItem,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
+import { CalendarDaysIcon, MoreIcon, XIcon } from '@/components/shared/icons';
+import * as readRecordDetailsDb from '@/lib/database/read-record-details';
+import * as readRecordsDb from '@/lib/database/read-records';
+import { isMobile } from '@/lib/platform/detect';
+import {
+  filterReadRecordEntriesByDate,
+  formatSelectedDateLabel,
+  loadDailyReadStats,
+} from '@/lib/record/read-record-daily';
+import { formatDateKey } from '@/lib/record/read-record-format';
 import {
   computeReadRecordStats,
   loadReadRecordEntries,
   type ReadRecordEntry,
 } from '@/lib/record/read-record-presenter';
-import { READ_RECORD_ARCHIVE_LIST_HEIGHT_PX, READ_RECORD_SECTION_CARD_CLASS } from '@/lib/record/read-record-layout';
+import {
+  READ_RECORD_ARCHIVE_LIST_HEIGHT_PX,
+  READ_RECORD_PREVIEW_LIST_HEIGHT_PX,
+} from '@/lib/record/read-record-layout';
+import {
+  mainShellPageRoot,
+  mainShellPageScroll,
+  mainShellTabEnterClass,
+} from '@/lib/ui/viewport-classes';
+import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 import type { Book } from '@/types';
 
 export interface ReadRecordPageProps {
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
-}
-
-function RecordStatCard(props: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div
-      class={cn(
-        'rounded-xl border px-4 py-3',
-        props.highlight
-          ? 'border-primary/20 bg-primary/8'
-          : 'border-border/50 bg-card',
-      )}
-    >
-      <div class="text-xs text-muted-foreground">{props.label}</div>
-      <div
-        class={cn(
-          'mt-1 text-lg font-semibold tabular-nums',
-          props.highlight ? 'text-primary' : 'text-foreground',
-        )}
-      >
-        {props.value}
-      </div>
-    </div>
-  );
+  onOpenBookInfo?: (book: Book) => void;
 }
 
 export function ReadRecordPage(props: ReadRecordPageProps) {
+  const [calendarOpen, setCalendarOpen] = createSignal(false);
+  const [selectedDate, setSelectedDate] = createSignal<string | null>(null);
+
+  const tabEnterClass = () =>
+    mainShellTabEnterClass(settingsStore.state.app.reduceMotion, isMobile());
+
   const [entries, { refetch }] = createResource(() => loadReadRecordEntries());
+  const [dailyStats, { refetch: refetchDaily }] = createResource(
+    entries,
+    (items) => loadDailyReadStats(items ?? []),
+  );
 
   onMount(() => {
-    const refresh = () => void refetch();
+    const refresh = () => {
+      void refetch();
+      void refetchDaily();
+    };
     window.addEventListener('read-record-updated', refresh);
     window.addEventListener('bookshelf-book-updated', refresh);
     onCleanup(() => {
@@ -66,11 +86,16 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
   });
 
   const recentEntries = createMemo(() => entries() ?? []);
-  const rankEntries = useReadRecordRankEntries(entries);
-  const stats = createMemo(() => computeReadRecordStats(entries() ?? []));
-  const hasDurationRecords = createMemo(() =>
-    (entries() ?? []).some((e) => e.hasDurationRecord),
+  const filteredEntries = createMemo(() =>
+    filterReadRecordEntriesByDate(recentEntries(), selectedDate(), dailyStats()),
   );
+  const rankEntries = useReadRecordRankEntries(filteredEntries);
+  const stats = createMemo(() => computeReadRecordStats(recentEntries()));
+  const todaySeconds = createMemo(() => {
+    const todayKey = formatDateKey(Date.now());
+    return dailyStats()?.dailyReadTimes.get(todayKey) ?? 0;
+  });
+  const enableReadRecord = () => settingsStore.state.app.enableReadRecord !== false;
 
   async function handleDelete(entry: ReadRecordEntry) {
     if (!entry.hasDurationRecord) return;
@@ -84,80 +109,150 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
   }
 
   async function handleClearAll() {
-    if (!confirm('确定清空全部阅读时长记录？书架阅读进度将保留。')) return;
+    if (!confirm('确定清空全部阅读记录？书架阅读进度将保留。')) return;
     await readRecordsDb.clearAllReadRecords();
+    await readRecordDetailsDb.clearAllReadRecordDetails();
     window.dispatchEvent(new CustomEvent('read-record-updated'));
     void refetch();
   }
 
   return (
-    <div
-      class="flex min-h-0 flex-col gap-6"
-      style={{
-        '--read-record-archive-list-height': `${READ_RECORD_ARCHIVE_LIST_HEIGHT_PX}px`,
-      }}
-    >
-      <Show when={entries.loading}>
-        <p class="text-sm text-muted-foreground">加载中…</p>
-      </Show>
-
-      <Show when={!entries.loading && recentEntries().length > 0}>
-        <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'space-y-4')}>
-          <div class="flex items-center justify-between gap-2">
-            <div class="space-y-1">
-              <h3 class="font-semibold text-foreground">阅读概览</h3>
-              <p class="text-sm text-muted-foreground">累计阅读时长与在读书籍统计</p>
-            </div>
-            <Show when={hasDurationRecords()}>
-              <Button variant="ghost" size="sm" class="text-destructive" onClick={handleClearAll}>
-                清空时长
-              </Button>
-            </Show>
-          </div>
-          <ReadRecordSummaryCard
-            totalSeconds={stats().totalSeconds}
-            bookCount={stats().bookCount}
-            recentEntries={recentEntries}
+    <section class={cn(tabEnterClass(), mainShellPageRoot)}>
+      <PageToolbar
+        title="阅读记录"
+        description="查看你的阅读历史"
+        titleSlot={
+          <PageToolbarTitleDropdown
+            title="阅读记录"
+            description="查看你的阅读历史"
+            dropdownEnabled={false}
           />
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <RecordStatCard
-              label="累计阅读"
-              value={formatReadDuration(stats().totalSeconds)}
-              highlight
-            />
-            <RecordStatCard
-              label="在读书籍"
-              value={`${stats().bookCount} 本`}
-            />
-            <RecordStatCard
-              label="最近阅读"
-              value={(() => {
-                const latest = stats().latestLastRead;
-                return latest != null ? formatRelativeLastRead(latest) : '--';
-              })()}
-            />
-          </div>
-        </section>
-      </Show>
-
-      <Show
-        when={!entries.loading}
-        fallback={null}
+        }
       >
-        <ReadRecordListsSection
-          recentEntries={recentEntries}
-          rankEntries={rankEntries}
-          onOpenBook={props.onOpenBook}
-          onSearchBook={props.onSearchBook}
-          onDelete={(entry) => void handleDelete(entry)}
-        />
+        <Tooltip>
+          <TooltipTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class="size-9"
+            aria-label="打开阅读日历"
+            onClick={() => setCalendarOpen(true)}
+          >
+            <CalendarDaysIcon class="h-5 w-5" size={20} />
+          </TooltipTrigger>
+          <TooltipContent>打开阅读日历</TooltipContent>
+        </Tooltip>
+        <AppDropdownMenu>
+          <Tooltip>
+            <TooltipTrigger as="div">
+              <AppDropdownMenuTrigger
+                as={(triggerProps: Record<string, unknown>) => (
+                  <AppDropdownMenuIconTrigger triggerProps={triggerProps} class="size-9">
+                    <MoreIcon class="h-5 w-5" size={20} />
+                    <span class="sr-only">更多操作</span>
+                  </AppDropdownMenuIconTrigger>
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent>更多操作</TooltipContent>
+          </Tooltip>
+          <AppDropdownMenuContent align="end">
+            <AppDropdownMenuCheckboxItem
+              checked={enableReadRecord()}
+              closeOnSelect={false}
+              onChange={(checked) => void settingsStore.setEnableReadRecord(!!checked)}
+            >
+              启用记录
+            </AppDropdownMenuCheckboxItem>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem
+              class="text-destructive focus:text-destructive"
+              onSelect={() => void handleClearAll()}
+            >
+              清空阅读记录
+            </AppDropdownMenuItem>
+          </AppDropdownMenuContent>
+        </AppDropdownMenu>
+      </PageToolbar>
 
-        <ReadRecordArchiveSection
-          entries={recentEntries}
-          onOpenBook={props.onOpenBook}
-          onSearchBook={props.onSearchBook}
-        />
-      </Show>
-    </div>
+      <div
+        class={mainShellPageScroll}
+        style={{
+          '--read-record-preview-list-height': `${READ_RECORD_PREVIEW_LIST_HEIGHT_PX}px`,
+          '--read-record-archive-list-height': `${READ_RECORD_ARCHIVE_LIST_HEIGHT_PX}px`,
+        }}
+      >
+        <div class="flex min-h-0 flex-col gap-6 pb-4">
+          <Show when={entries.loading}>
+            <p class="text-sm text-muted-foreground">加载中…</p>
+          </Show>
+
+          <Show when={!entries.loading} fallback={null}>
+            <ReadRecordGoalCard
+              todaySeconds={todaySeconds()}
+              totalSeconds={stats().totalSeconds}
+              bookCount={stats().bookCount}
+            />
+
+            <Show when={recentEntries().length > 0}>
+              <ReadRecordOverviewSection
+                stats={stats()}
+                recentEntries={recentEntries}
+              />
+            </Show>
+
+            <Show when={!dailyStats.loading && dailyStats()}>
+              {(stats) => <ReadRecordHeatmap stats={stats()} />}
+            </Show>
+
+            <Show when={selectedDate()}>
+              {(dateKey) => (
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5">
+                  <div class="min-w-0 text-sm text-foreground">
+                    已筛选
+                    <span class="font-medium">{formatSelectedDateLabel(dateKey())}</span>
+                    的阅读记录
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:text-destructive"
+                    onClick={() => setSelectedDate(null)}
+                  >
+                    <XIcon class="mr-1 h-3.5 w-3.5" size={14} />
+                    清除筛选
+                  </Button>
+                </div>
+              )}
+            </Show>
+
+            <ReadRecordListsSection
+              recentEntries={filteredEntries}
+              rankEntries={rankEntries}
+              onOpenBook={props.onOpenBook}
+              onSearchBook={props.onSearchBook}
+              onOpenBookInfo={props.onOpenBookInfo}
+              onDelete={(entry) => void handleDelete(entry)}
+            />
+
+            <ReadRecordArchiveSection
+              entries={filteredEntries}
+              onOpenBook={props.onOpenBook}
+              onSearchBook={props.onSearchBook}
+              onOpenBookInfo={props.onOpenBookInfo}
+              onDelete={(entry) => void handleDelete(entry)}
+            />
+          </Show>
+        </div>
+      </div>
+
+      <ReadRecordCalendarDrawer
+        open={calendarOpen()}
+        onOpenChange={setCalendarOpen}
+        stats={dailyStats()}
+        selectedDate={selectedDate()}
+        onSelectedDateChange={setSelectedDate}
+      />
+    </section>
   );
 }
