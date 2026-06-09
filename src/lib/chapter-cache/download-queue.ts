@@ -1,6 +1,7 @@
 /**
  * 批量缓存章节队列（对齐 Legado CacheBook）
- * 漫画章：HTML 落盘后需等待插图全部拉取完成，才计为该章缓存完成。
+ * 图片章：HTML 落盘后需等待插图全部拉取完成，才计为该章缓存完成。
+ * 听书章：HTML 落盘后需等待音频段全部落盘，才计为该章缓存完成。
  */
 
 import { createStore } from 'solid-js/store';
@@ -15,18 +16,23 @@ import {
   promoteChapterCacheToManual,
   readCachedChapterRaw,
 } from '@/lib/chapter-cache/storage';
-import { isMangaChapterContent } from '@/lib/media/image/manga-book-detect';
+import { isAudioChapterContent } from '@/lib/media/audio/audio-book-detect';
+import {
+  isAudioChapterTracksCompleteOnDisk,
+  warmAudioForCachedChapter,
+} from '@/lib/export/export-audio';
+import { isMangaChapterContent } from '@/lib/media/image/image-book-detect';
 import {
   listFetchableMangaImageRefs,
   warmMangaImagesForCachedChapter,
-} from '@/lib/export/export-manga-images';
-import { readMangaImageFromDisk } from '@/lib/media/image/manga-image-disk-cache';
+} from '@/lib/export/export-images';
+import { readMangaImageFromDisk } from '@/lib/media/image/image-disk-cache';
 import { showAppToast } from '@/components/shared/AppToasts';
 import type { Book, BookChapter, BookSource } from '@/types';
 
 const DEFAULT_CONCURRENCY = 2;
 const MAX_RETRIES = 3;
-const MANGA_IMAGE_RETRY_DELAY_MS = 600;
+const MEDIA_WARM_RETRY_DELAY_MS = 600;
 
 export interface ChapterDownloadProgress {
   bookUrl: string;
@@ -174,9 +180,8 @@ async function notifyBookDownloadFinished(
     return;
   }
 
-  const stats = `共 ${result.totalChapters} 章，已缓存 ${result.cached} 章${
-    result.failed > 0 ? `，失败 ${result.failed} 章` : ''
-  }`;
+  const stats = `共 ${result.totalChapters} 章，已缓存 ${result.cached} 章${result.failed > 0 ? `，失败 ${result.failed} 章` : ''
+    }`;
 
   showAppToast({
     title: `离线缓存完成 · 《${name}》`,
@@ -222,13 +227,36 @@ async function warmMangaChapterWithRetry(
     );
     if (result.complete) return true;
     if (attempt < MAX_RETRIES - 1) {
-      await delay(MANGA_IMAGE_RETRY_DELAY_MS);
+      await delay(MEDIA_WARM_RETRY_DELAY_MS);
     }
   }
   return false;
 }
 
-/** 仅检查磁盘是否已有全部需拉取的漫画图（不触发网络） */
+async function warmAudioChapterWithRetry(
+  book: Book,
+  chapterIndex: number,
+  raw: string,
+  chapter: BookChapter,
+  signal: AbortSignal,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (signal.aborted) return false;
+    const result = await warmAudioForCachedChapter(
+      book,
+      chapterIndex,
+      raw,
+      chapter,
+    );
+    if (result.complete) return true;
+    if (attempt < MAX_RETRIES - 1) {
+      await delay(MEDIA_WARM_RETRY_DELAY_MS);
+    }
+  }
+  return false;
+}
+
+/** 仅检查磁盘是否已有全部需拉取的图片（不触发网络） */
 async function isMangaChapterImagesCompleteOnDisk(
   book: Book,
   raw: string,
@@ -245,6 +273,21 @@ async function isMangaChapterImagesCompleteOnDisk(
   return onDisk >= fetchable.length;
 }
 
+async function isChapterMediaCompleteOnDisk(
+  book: Book,
+  raw: string,
+  chapterUrl: string,
+  chapterIndex: number,
+): Promise<boolean> {
+  if (isMangaChapterContent(raw, chapterUrl)) {
+    return isMangaChapterImagesCompleteOnDisk(book, raw, chapterUrl);
+  }
+  if (isAudioChapterContent(raw)) {
+    return isAudioChapterTracksCompleteOnDisk(book, raw, chapterIndex);
+  }
+  return true;
+}
+
 async function ensureChapterFullyCached(
   book: Book,
   source: BookSource,
@@ -258,9 +301,12 @@ async function ensureChapterFullyCached(
   if (await chapterCacheDb.isManualCachedChapter(book.bookUrl, index)) {
     const existingRaw = await readCachedChapterRaw(book.bookUrl, index);
     if (existingRaw?.trim()) {
-      const complete = isMangaChapterContent(existingRaw, chapterUrl)
-        ? await isMangaChapterImagesCompleteOnDisk(book, existingRaw, chapterUrl)
-        : true;
+      const complete = await isChapterMediaCompleteOnDisk(
+        book,
+        existingRaw,
+        chapterUrl,
+        index,
+      );
       if (complete) return true;
     }
   }
@@ -303,7 +349,20 @@ async function ensureChapterFullyCached(
     );
     if (!ok) {
       setBookProgress(job.bookUrl, {
-        error: `第 ${index + 1} 章漫画图片未全部缓存成功`,
+        error: `第 ${index + 1} 章图片未全部缓存成功`,
+      });
+    }
+  } else if (isAudioChapterContent(raw)) {
+    ok = await warmAudioChapterWithRetry(
+      book,
+      index,
+      raw,
+      chapter,
+      job.abort.signal,
+    );
+    if (!ok) {
+      setBookProgress(job.bookUrl, {
+        error: `第 ${index + 1} 章音频未全部缓存成功`,
       });
     }
   }

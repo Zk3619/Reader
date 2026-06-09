@@ -1,7 +1,10 @@
 /**
- * 导出书籍为 TXT（对齐 Legado ExportBookService 简化版）
+ * 导出书籍正文：TXT / EPUB，单文件或按章拆分
  */
 
+import { join } from '@tauri-apps/api/path';
+import { writeFile, mkdir } from '@tauri-apps/plugin-fs';
+import { zipSync, strToU8 } from 'fflate';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook, readLocalBookContent, getLocalContent } from '@/lib/local-book';
@@ -10,28 +13,45 @@ import {
   fetchAndCacheChapterContent,
 } from '@/lib/chapter-cache/storage';
 import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
-import { saveTextFile } from '@/lib/export/save-text-file';
+import { saveTextFile, SaveTextFileCancelledError } from '@/lib/export/save-text-file';
+import { saveBinaryFile } from '@/lib/export/save-binary-file';
+import { buildEpubArchive } from '@/lib/export/export-epub';
+import type { ExportProgressCallback } from '@/lib/export/export-progress';
+import type { TextExportFormat, TextExportLayout } from '@/lib/export/cache-export-types';
+import { isTauri } from '@/lib/platform/detect';
+import { pickDirectory } from '@/lib/platform/fs/pick-directory';
+import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
 import type { Book } from '@/types';
 
 export interface ExportBookOptions {
-  /** 起始章节索引（含） */
   startIndex?: number;
-  /** 结束章节索引（含） */
   endIndex?: number;
-  /** 无缓存时是否联网拉取 */
   fetchMissing?: boolean;
-  /** 仅导出已缓存章节（未缓存章节直接跳过） */
   onlyCached?: boolean;
+  format?: TextExportFormat;
+  layout?: TextExportLayout;
+  onProgress?: ExportProgressCallback;
 }
+
+export type ExportBookChapter = {
+  index: number;
+  title: string;
+  body: string;
+};
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'export';
 }
 
-export async function buildBookTxtContent(
+function chapterFileBase(chapter: ExportBookChapter): string {
+  const num = String(chapter.index + 1).padStart(4, '0');
+  return `${num}_${sanitizeFileName(chapter.title).slice(0, 60)}`;
+}
+
+export async function buildBookChaptersForExport(
   book: Book,
   options?: ExportBookOptions,
-): Promise<string> {
+): Promise<ExportBookChapter[]> {
   const chapters = await chaptersDb.getChapterList(book.bookUrl);
   if (chapters.length === 0) {
     throw new Error('该书暂无章节目录，请先更新目录');
@@ -41,22 +61,34 @@ export async function buildBookTxtContent(
   const end = options?.endIndex ?? chapters.length - 1;
   const fetchMissing = options?.fetchMissing ?? true;
   const onlyCached = options?.onlyCached ?? false;
+  const total = Math.max(1, end - start + 1);
 
   const source = !isLocalBook(book)
     ? await sourcesDb.getSource(book.origin)
     : null;
 
-  const parts: string[] = [];
+  const result: ExportBookChapter[] = [];
+  let processed = 0;
+
+  const report = () => {
+    options?.onProgress?.({
+      phase: '读取章节',
+      current: processed,
+      total,
+    });
+  };
 
   if (isLocalBook(book)) {
     const fileContent = await readLocalBookContent(book.bookUrl);
     for (let i = start; i <= end && i < chapters.length; i++) {
       const ch = chapters[i];
       if (!ch) continue;
-      const body = await getLocalContent(book, ch, fileContent);
-      parts.push(`\n\n${ch.title}\n\n${body ?? ''}`);
+      const body = (await getLocalContent(book, ch, fileContent)) ?? '';
+      result.push({ index: i, title: ch.title, body });
+      processed += 1;
+      report();
     }
-    return parts.join('').trimStart();
+    return result;
   }
 
   if (!source?.enabled) {
@@ -70,36 +102,164 @@ export async function buildBookTxtContent(
     let raw = await readCachedChapterRaw(book.bookUrl, i);
     if (!raw?.trim() && fetchMissing) {
       const next = chapters[i + 1];
-      raw = await fetchAndCacheChapterContent(
-        source,
-        book,
-        ch,
-        next?.url,
-        i,
-      );
+      raw = await fetchAndCacheChapterContent(source, book, ch, next?.url, i);
     }
     if (!raw?.trim()) {
-      if (onlyCached) continue;
-      parts.push(`\n\n${ch.title}\n\n[本章未缓存且拉取失败]\n`);
+      if (onlyCached) {
+        processed += 1;
+        report();
+        continue;
+      }
+      result.push({
+        index: i,
+        title: ch.title,
+        body: '[本章未缓存且拉取失败]\n',
+      });
+      processed += 1;
+      report();
       continue;
     }
 
     const display = await applyChapterDisplayProcessing(raw, book, source);
-    parts.push(`\n\n${ch.title}\n\n${display}`);
+    result.push({ index: i, title: ch.title, body: display });
+    processed += 1;
+    report();
   }
 
-  const content = parts.join('').trimStart();
-  if (onlyCached && !content.trim()) {
+  if (onlyCached && result.length === 0) {
     throw new Error('该书暂无可导出的已缓存章节');
   }
-  return content;
+  return result;
 }
 
-export async function exportBookAsTxt(
+export async function buildBookTxtContent(
   book: Book,
   options?: ExportBookOptions,
+): Promise<string> {
+  const chapters = await buildBookChaptersForExport(book, options);
+  return chapters
+    .map((ch) => `\n\n${ch.title}\n\n${ch.body}`)
+    .join('')
+    .trimStart();
+}
+
+async function saveSplitChapters(
+  book: Book,
+  chapters: ExportBookChapter[],
+  format: TextExportFormat,
+  layout: TextExportLayout,
 ): Promise<void> {
-  const content = await buildBookTxtContent(book, options);
-  const fileName = `${sanitizeFileName(book.name)}.txt`;
-  await saveTextFile(fileName, content);
+  if (chapters.length === 0) {
+    throw new Error('没有可导出的章节');
+  }
+
+  const useZip = layout === 'split_zip' || (layout === 'split' && !isTauri());
+
+  if (useZip) {
+    const zipEntries: Record<string, Uint8Array> = {
+      'README.txt': strToU8(`《${book.name}》按章导出\n共 ${chapters.length} 章\n`),
+    };
+    for (const ch of chapters) {
+      const base = chapterFileBase(ch);
+      if (format === 'epub') {
+        zipEntries[`${base}.epub`] = buildEpubArchive(
+          { title: ch.title, author: book.author },
+          [{ id: 'ch1', title: ch.title, html: ch.body }],
+        );
+      } else {
+        zipEntries[`${base}.txt`] = strToU8(`${ch.title}\n\n${ch.body}`);
+      }
+    }
+    const zipped = zipSync(zipEntries);
+    await saveBinaryFile(`${sanitizeFileName(book.name)}_chapters.zip`, zipped, [
+      { name: 'ZIP', extensions: ['zip'] },
+    ]);
+    return;
+  }
+
+  const picked = await pickDirectory();
+  const basePath = formatStorageRef(picked.ref);
+  if (!basePath) throw new SaveTextFileCancelledError();
+  const bookDir = await join(basePath, sanitizeFileName(book.name));
+  await mkdir(bookDir, { recursive: true });
+
+  for (const ch of chapters) {
+    const base = chapterFileBase(ch);
+    if (format === 'epub') {
+      const bytes = buildEpubArchive(
+        { title: ch.title, author: book.author },
+        [{ id: 'ch1', title: ch.title, html: ch.body }],
+      );
+      await writeFile(await join(bookDir, `${base}.epub`), bytes);
+    } else {
+      await writeFile(
+        await join(bookDir, `${base}.txt`),
+        strToU8(`${ch.title}\n\n${ch.body}`),
+      );
+    }
+  }
+}
+
+async function saveSingleExport(
+  book: Book,
+  chapters: ExportBookChapter[],
+  format: TextExportFormat,
+): Promise<void> {
+  if (format === 'epub') {
+    const bytes = buildEpubArchive(
+      { title: book.name, author: book.author },
+      chapters.map((ch) => ({
+        id: `ch${ch.index + 1}`,
+        title: ch.title,
+        html: ch.body,
+      })),
+    );
+    await saveBinaryFile(`${sanitizeFileName(book.name)}.epub`, bytes, [
+      { name: 'EPUB', extensions: ['epub'] },
+    ]);
+    return;
+  }
+
+  const content = chapters
+    .map((ch) => `\n\n${ch.title}\n\n${ch.body}`)
+    .join('')
+    .trimStart();
+  await saveTextFile(`${sanitizeFileName(book.name)}.txt`, content);
+}
+
+export async function exportBook(
+  book: Book,
+  options?: ExportBookOptions,
+): Promise<{ exported: number }> {
+  const format = options?.format ?? 'txt';
+  const layout = options?.layout ?? 'single';
+  const chapters = await buildBookChaptersForExport(book, options);
+
+  options?.onProgress?.({
+    phase: '写入文件',
+    current: 0,
+    total: 1,
+  });
+
+  if (layout === 'single') {
+    await saveSingleExport(book, chapters, format);
+  } else {
+    await saveSplitChapters(book, chapters, format, layout);
+  }
+
+  options?.onProgress?.({
+    phase: '完成',
+    current: 1,
+    total: 1,
+  });
+
+  return { exported: chapters.length };
+}
+
+/** @deprecated 使用 exportBook */
+export async function exportBookAsTxt(
+  book: Book,
+  options?: Omit<ExportBookOptions, 'format' | 'layout'>,
+): Promise<void> {
+  await exportBook(book, { ...options, format: 'txt', layout: 'single' });
 }

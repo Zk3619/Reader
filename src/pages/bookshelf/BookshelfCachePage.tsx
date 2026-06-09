@@ -36,21 +36,30 @@ import {
   stopChapterDownload,
   stopAllChapterDownloads,
 } from '@/lib/chapter-cache';
-import { exportBookAsTxt } from '@/lib/export/export-book';
+import type { CacheExportOptions } from '@/lib/export/cache-export-types';
 import {
-  exportMangaImages,
-  isExportCancelledError,
-} from '@/lib/export/export-manga-images';
-import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
-import { resolveMangaBookFlag } from '@/lib/media/image/manga-book-detect';
+  isCacheExportCancelledError,
+  runCacheExport,
+  type CacheExportProgressState,
+} from '@/lib/export/run-cache-export';
+import { resolveAudioBookFlag } from '@/lib/media/audio/audio-book-detect';
+import {
+  getAudioCacheStatsForBook,
+  getAudioCacheStatsMap,
+  type AudioCacheBookStats,
+} from '@/lib/media/audio/audio-disk-cache';
+import { warmCachedAudioForBook } from '@/lib/media/audio/audio-chapter-warm';
+import { resolveMangaBookFlag } from '@/lib/media/image/image-book-detect';
 import {
   getMangaImageCacheStatsForBook,
   getMangaImageCacheStatsMap,
   type MangaImageCacheBookStats,
-} from '@/lib/media/image/manga-image-disk-cache';
-import { warmCachedMangaImagesForBook } from '@/lib/media/image/manga-image-warm';
+} from '@/lib/media/image/image-disk-cache';
+import { warmCachedMangaImagesForBook } from '@/lib/media/image/image-warm';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { BookshelfCacheGroupFilterDialog } from '@/components/bookshelf/BookshelfCacheGroupFilterDialog';
+import { BookshelfCacheExportDialog } from '@/components/bookshelf/BookshelfCacheExportDialog';
+import { BookshelfCacheExportProgressDialog } from '@/components/bookshelf/BookshelfCacheExportProgressDialog';
 import {
   BookshelfCacheBookCard,
   type BookshelfCacheRowState,
@@ -85,6 +94,12 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
   );
   const [userGroups, setUserGroups] = createSignal<BookGroup[]>([]);
   const [filterDialogOpen, setFilterDialogOpen] = createSignal(false);
+  const [exportDialogOpen, setExportDialogOpen] = createSignal(false);
+  const [exportTarget, setExportTarget] = createSignal<BookshelfCacheRowState | null>(null);
+  const [exportProgressOpen, setExportProgressOpen] = createSignal(false);
+  const [exportProgress, setExportProgress] = createSignal<CacheExportProgressState | null>(
+    null,
+  );
 
   const onlineBooks = createMemo(() =>
     rows.map((r) => r.book).filter((b) => !isLocalBook(b)),
@@ -137,7 +152,7 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
   );
 
   const [warmingBookUrls, setWarmingBookUrls] = createSignal<string[]>([]);
-  const warmQueue: Book[] = [];
+  const warmQueue: Array<{ book: Book; kind: 'image' | 'audio' }> = [];
   let warmPumpRunning = false;
 
   const setBookWarming = (bookUrl: string, warming: boolean) => {
@@ -152,13 +167,18 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
   async function buildRowState(
     book: Book,
     imageStatsMap?: Map<string, MangaImageCacheBookStats>,
+    audioStatsMap?: Map<string, AudioCacheBookStats>,
   ): Promise<BookshelfCacheRowState> {
     const source = await sourcesDb.getSource(book.origin);
     const stats = await getChapterCacheStatsForBook(book.bookUrl, book.name);
     const imageStats =
       imageStatsMap?.get(book.bookUrl.trim()) ??
       (await getMangaImageCacheStatsForBook(book.bookUrl));
+    const audioStats =
+      audioStatsMap?.get(book.bookUrl.trim()) ??
+      (await getAudioCacheStatsForBook(book.bookUrl));
     const isManga = await resolveMangaBookFlag(book, source);
+    const isAudioBook = await resolveAudioBookFlag(book, source);
     return {
       book,
       cached: stats.chapterCount,
@@ -167,31 +187,43 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
       cacheBytes: stats.estimatedBytes,
       imageCount: imageStats.imageCount,
       imageCacheBytes: imageStats.estimatedBytes,
+      audioTrackCount: audioStats.trackCount,
+      audioCacheBytes: audioStats.estimatedBytes,
       isManga,
+      isAudioBook,
       total: book.totalChapterNum ?? 0,
       downloadPercent: null,
     };
   }
 
-  async function pumpMangaWarmQueue() {
+  async function pumpMediaWarmQueue() {
     if (warmPumpRunning) return;
     warmPumpRunning = true;
     try {
       while (warmQueue.length > 0) {
-        const book = warmQueue.shift();
-        if (!book || warmingBookUrls().includes(book.bookUrl)) continue;
-        setBookWarming(book.bookUrl, true);
+        const item = warmQueue.shift();
+        if (!item || warmingBookUrls().includes(item.book.bookUrl)) continue;
+        setBookWarming(item.book.bookUrl, true);
         try {
-          const result = await warmCachedMangaImagesForBook(book, {
-            maxChapters: 8,
-          });
-          if (result.imagesCached > 0) {
-            await refreshBookCached(book.bookUrl);
+          if (item.kind === 'image') {
+            const result = await warmCachedMangaImagesForBook(item.book, {
+              maxChapters: 8,
+            });
+            if (result.imagesCached > 0) {
+              await refreshBookCached(item.book.bookUrl);
+            }
+          } else {
+            const result = await warmCachedAudioForBook(item.book, {
+              maxChapters: 8,
+            });
+            if (result.tracksCached > 0) {
+              await refreshBookCached(item.book.bookUrl);
+            }
           }
         } catch {
           /* ignore warm errors */
         } finally {
-          setBookWarming(book.bookUrl, false);
+          setBookWarming(item.book.bookUrl, false);
         }
         await new Promise((r) => setTimeout(r, 400));
       }
@@ -200,13 +232,20 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     }
   }
 
-  function scheduleMangaWarm(book: Book, row: BookshelfCacheRowState) {
+  function scheduleMediaWarm(book: Book, row: BookshelfCacheRowState) {
     if (chapterCacheDownloadStore.isBookActive(book.bookUrl)) return;
-    if (!row.isManga || row.cached <= 0 || row.imageCount > 0) return;
+    if (row.cached <= 0) return;
     if (warmingBookUrls().includes(book.bookUrl)) return;
-    if (warmQueue.some((b) => b.bookUrl === book.bookUrl)) return;
-    warmQueue.push(book);
-    void pumpMangaWarmQueue();
+    if (warmQueue.some((entry) => entry.book.bookUrl === book.bookUrl)) return;
+    if (row.isManga && row.imageCount <= 0) {
+      warmQueue.push({ book, kind: 'image' });
+      void pumpMediaWarmQueue();
+      return;
+    }
+    if (row.isAudioBook && row.audioTrackCount <= 0) {
+      warmQueue.push({ book, kind: 'audio' });
+      void pumpMediaWarmQueue();
+    }
   }
 
   async function refreshBookCached(bookUrl: string) {
@@ -216,19 +255,22 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     if (!book) return;
     const row = await buildRowState(book);
     setRows(i, { ...row, downloadPercent: rows[i]?.downloadPercent ?? null });
-    scheduleMangaWarm(book, row);
+    scheduleMediaWarm(book, row);
   }
 
   async function refreshCounts(books: Book[]): Promise<void> {
     const online = books.filter((b) => !isLocalBook(b));
-    const imageStatsMap = await getMangaImageCacheStatsMap();
+    const [imageStatsMap, audioStatsMap] = await Promise.all([
+      getMangaImageCacheStatsMap(),
+      getAudioCacheStatsMap(),
+    ]);
     const next = await Promise.all(
-      online.map((book) => buildRowState(book, imageStatsMap)),
+      online.map((book) => buildRowState(book, imageStatsMap, audioStatsMap)),
     );
     setRows(reconcile(next));
     queueMicrotask(() => {
       for (const row of next) {
-        scheduleMangaWarm(row.book, row);
+        scheduleMediaWarm(row.book, row);
       }
     });
   }
@@ -343,46 +385,30 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
     enqueueDownloadAll(book);
   };
 
-  const handleExportBookTxt = async (book: Book) => {
-    setExportingUrl(book.bookUrl);
-    try {
-      await exportBookAsTxt(book, { fetchMissing: false, onlyCached: true });
-      showAppToast({ title: `已导出 TXT：${book.name}` });
-    } catch (e) {
-      if (e instanceof SaveTextFileCancelledError) return;
-      showAppToast({
-        title: '导出失败',
-        description: e instanceof Error ? e.message : String(e),
-        variant: 'destructive',
-      });
-    } finally {
-      setExportingUrl(null);
-    }
+  const openExportDialog = (row: BookshelfCacheRowState) => {
+    setExportTarget(row);
+    setExportDialogOpen(true);
   };
 
-  const handleExportMangaImages = async (
-    book: Book,
-    format: 'zip' | 'folder',
-  ) => {
+  const handleConfirmExport = async (options: CacheExportOptions) => {
+    const row = exportTarget();
+    if (!row) return;
+    const book = row.book;
+    setExportDialogOpen(false);
     setExportingUrl(book.bookUrl);
+    setExportProgress({ phase: '准备导出', current: 0, total: 1 });
+    setExportProgressOpen(true);
     try {
-      const { exported } = await exportMangaImages(book, {
-        onlyCached: true,
-        format,
-      });
-      showAppToast({
-        title: `已导出图片：${book.name}`,
-        description: `共 ${exported} 张`,
-      });
+      await runCacheExport(book, options, (state) => setExportProgress(state));
     } catch (e) {
-      if (isExportCancelledError(e)) return;
-      showAppToast({
-        title: '导出图片失败',
-        description: e instanceof Error ? e.message : String(e),
-        variant: 'destructive',
-      });
+      if (!isCacheExportCancelledError(e)) {
+        /* runCacheExport 已弹出失败 Toast */
+      }
     } finally {
       setExportingUrl(null);
+      setExportProgressOpen(false);
+      setExportProgress(null);
+      setExportTarget(null);
     }
   };
 
@@ -398,7 +424,10 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
         cacheBytes: 0,
         imageCount: 0,
         imageCacheBytes: 0,
+        audioTrackCount: 0,
+        audioCacheBytes: 0,
         isManga: rows[i]?.isManga ?? false,
+        isAudioBook: rows[i]?.isAudioBook ?? false,
         downloadPercent: null,
       });
     }
@@ -489,14 +518,8 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
                 rowIndex={index}
                 exporting={exportingUrl() === row.book.bookUrl}
                 onToggleDownload={() => toggleBookDownload(row.book)}
-                onExportTxt={() => void handleExportBookTxt(row.book)}
-                onExportMangaZip={() =>
-                  void handleExportMangaImages(row.book, 'zip')
-                }
-                onExportMangaFolder={() =>
-                  void handleExportMangaImages(row.book, 'folder')
-                }
-                imageWarming={() => warmingBookUrls().includes(row.book.bookUrl)}
+                onOpenExport={() => openExportDialog(row)}
+                mediaWarming={() => warmingBookUrls().includes(row.book.bookUrl)}
                 onClear={() => void handleClearBook(row.book)}
               />
             )}
@@ -510,6 +533,23 @@ export function BookshelfCachePage(props: BookshelfCachePageProps) {
         userGroups={userGroups()}
         appliedGroupIds={appliedGroupIds()}
         onApply={handleApplyGroupFilter}
+      />
+
+      <BookshelfCacheExportDialog
+        open={exportDialogOpen()}
+        onOpenChange={setExportDialogOpen}
+        book={exportTarget()?.book ?? null}
+        totalChapters={exportTarget()?.total ?? 1}
+        isManga={exportTarget()?.isManga ?? false}
+        isAudioBook={exportTarget()?.isAudioBook ?? false}
+        exporting={exportingUrl() != null}
+        onConfirm={(options) => void handleConfirmExport(options)}
+      />
+
+      <BookshelfCacheExportProgressDialog
+        open={exportProgressOpen()}
+        bookName={exportTarget()?.book.name ?? ''}
+        progress={exportProgress()}
       />
     </div>
   );

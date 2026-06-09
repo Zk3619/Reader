@@ -22,6 +22,8 @@
   "dependencies": {
     "@corvu/drawer": "^0.2.4",
     "@corvu/resizable": "^0.2.5",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@kobalte/core": "^0.13.11",
     "@tanstack/solid-virtual": "^3.13.26",
     "@tauri-apps/api": "^2",

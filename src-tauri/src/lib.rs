@@ -9,6 +9,7 @@ mod inner_web_scripts;
 mod backstage_webview;
 mod webjs_java_rpc;
 mod android_fs_commands;
+mod media_convert;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_prevent_default::Flags;
@@ -1775,6 +1776,9 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::backstage_webview::set_cookies_for_backstage_webview,
             crate::webjs_java_rpc::webjs_java_rpc,
+            media_convert::media_convert_probe,
+            media_convert::convert_image_bytes,
+            media_convert::convert_audio_bytes,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

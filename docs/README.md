@@ -15,6 +15,7 @@
 | [UI.md](./UI.md) | 顶栏/侧栏/书架响应式 UI 规范（已有） |
 | [text-viewer-latent-capabilities.md](./text-viewer-latent-capabilities.md) | 文本阅读器已实现但未启用/未接数据的段评与 UI 能力说明 |
 | [PORTABLE.md](./PORTABLE.md) | 便携模式与数据目录（已有） |
+| [cache-export-media-convert.md](./cache-export-media-convert.md) | 缓存导出选项、格式转换平台降级、移动端 ffmpeg 说明 |
 
 ## 参考仓库（工作区根目录）
 

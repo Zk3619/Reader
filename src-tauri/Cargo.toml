@@ -45,6 +45,8 @@ tauri-plugin-log = "2.8.0"
 url = "2.5.8"
 regex = "1.11"
 zip = "8.6.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+tempfile = "3"
 tauri-plugin-store = "2.4.2"
 tauri-plugin-sql = { version = "2.3.2", features = ["sqlite"] }
 tauri-plugin-autostart = "2.5.1"
@@ -59,6 +61,23 @@ tauri-plugin-http = { version = "2.5.7", features = [
 ] }
 tauri-plugin-single-instance = "2.4.0"
 tauri-plugin-process = "2"
+
+ffmpeg-next = { version = "7.1", optional = true, default-features = false, features = [
+    "static",
+    "format",
+    "codec",
+    "software-resampling",
+] }
+
+# Windows 大型 Tauri 工程在 debug=2 时易触发 LINK LNK1318（PDB 超限）
+[profile.dev]
+debug = 1
+
+[features]
+default = []
+# 可选：启用 Rust 音频转码（ffmpeg-next 静态链接，显著增加包体与编译时间）
+# cargo build --features media-ffmpeg
+media-ffmpeg = ["dep:ffmpeg-next"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-android-fs = "28"
