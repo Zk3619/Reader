@@ -86,6 +86,14 @@ export async function deleteReadRecord(
 }
 
 /**
+ * 清空全部阅读记录
+ */
+export async function clearAllReadRecords(): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM readRecord');
+}
+
+/**
  * 将数据库行映射为ReadRecord对象
  */
 function mapRowToRecord(row: Record<string, unknown>): ReadRecord {
