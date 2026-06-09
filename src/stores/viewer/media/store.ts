@@ -218,7 +218,7 @@ export const viewerStore = {
 
     if (kind === MediaKind.text) {
       await flushReadingSession(state.guestReading ? null : book);
-      cancelPrefetchOnRead(book?.bookUrl);
+      if (book?.bookUrl) cancelPrefetchOnRead(book.bookUrl);
       resetTextViewerSession();
     } else if (kind) {
       resetMediaChapterSession();

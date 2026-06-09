@@ -26,6 +26,7 @@ export type {
   NewBookChapter,
   ChapterContent,
   ChapterCache,
+  ChapterCacheTier,
 } from '@/types/book-chapter';
 
 // 搜索相关类型

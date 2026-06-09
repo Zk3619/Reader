@@ -178,8 +178,8 @@ async function loadMangaImageObjectUrlInner(
   const bookUrl = options?.bookUrl?.trim();
   if (
     bookUrl &&
-    options.chapterIndex != null &&
-    options.pageIndex != null &&
+    options?.chapterIndex != null &&
+    options?.pageIndex != null &&
     shouldPersistToDisk(options)
   ) {
     const meta = await buildMangaImageCacheMeta(normalized, {
