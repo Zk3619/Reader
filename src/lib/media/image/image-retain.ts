@@ -2,10 +2,10 @@ import { getChapterCacheSettings } from '@/lib/chapter-cache/settings';
 
 export const MANGA_IMAGE_RETAIN_DEFAULT = 2;
 
-/** 漫画磁盘图片保留章数（当前章 ±N，对齐 Legado imageRetainNum） */
+/** 图片磁盘缓存保留章数（当前章 ±N，对齐 Legado imageRetainNum） */
 export async function getMangaImageRetainChapters(): Promise<number> {
   const settings = await getChapterCacheSettings();
-  return settings.mangaImageRetainNum;
+  return settings.imageRetainNum;
 }
 
 export async function mangaImageRetainChapterWindow(

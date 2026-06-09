@@ -50,9 +50,9 @@ import {
   type ImageViewerUiConfig,
 } from '@/lib/media/image/image-viewer-ui-config';
 import { loadImageViewerUiConfig } from '@/lib/media/image/image-viewer-config-storage';
-import { scheduleMangaImagePrefetch } from '@/lib/media/image/manga-image-prefetch';
-import { trimMangaImagesOutsideChapters } from '@/lib/media/image/manga-image-disk-cache';
-import { mangaImageRetainChapterWindow } from '@/lib/media/image/manga-image-retain';
+import { scheduleMangaImagePrefetch } from '@/lib/media/image/image-prefetch';
+import { trimMangaImagesOutsideChapters } from '@/lib/media/image/image-disk-cache';
+import { mangaImageRetainChapterWindow } from '@/lib/media/image/image-retain';
 import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 

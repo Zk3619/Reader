@@ -1,11 +1,11 @@
 /**
- * Image Viewer：章�?raw �?图片 URL 列表
+ * Image Viewer：章节 raw → 图片 URL 列表
  */
 
 import { resetChapterContentPool } from '@/lib/chapter-cache/chapter-content-pool';
 import { MediaKind } from '@/lib/book-source/book-type';
 import { countFlowImages, flowImages } from '@/lib/media/image/flow-images';
-import { commitMangaChapterToPool } from '@/lib/media/image/manga-chapter-pool';
+import { commitMangaChapterToPool } from '@/lib/media/image/image-chapter-pool';
 import {
   dispatchMediaTextFallback,
   ReaderMediaMessages,

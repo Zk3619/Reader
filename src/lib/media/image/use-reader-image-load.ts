@@ -17,7 +17,7 @@ import {
   evictMangaImageMemoryCache,
   loadMangaImageObjectUrl,
   peekMangaImageObjectUrl,
-} from '@/lib/media/image/manga-image-loader';
+} from '@/lib/media/image/image-loader';
 import { isTauri } from '@/lib/platform/detect';
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
@@ -25,7 +25,7 @@ import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
 import {
   MANGA_SCROLL_ROOT_ATTR,
   resolveMangaScrollIntersectionRoot,
-} from '@/lib/media/image/manga-scroll-root';
+} from '@/lib/media/image/image-scroll-root';
 
 export type ReaderImageLoadPhase = 'loading' | 'ready' | 'error';
 

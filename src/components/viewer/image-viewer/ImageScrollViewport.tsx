@@ -14,9 +14,9 @@ import {
 
 import { viewerStore } from '@/stores/viewer';
 
-import { MangaPageImg } from '@/components/viewer/image-viewer/MangaPageImg';
+import { MangaPageImg } from '@/components/viewer/image-viewer/ImagePageImg';
 
-import { MANGA_SCROLL_ROOT_ATTR } from '@/lib/media/image/manga-scroll-root';
+import { MANGA_SCROLL_ROOT_ATTR } from '@/lib/media/image/image-scroll-root';
 
 import type { ReaderInlineImageRef } from '@/lib/media/text/reader-content-blocks';
 

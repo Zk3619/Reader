@@ -5,7 +5,7 @@
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 const STORAGE_KEY = 'chapter_cache_settings';
-/** 设置结构版本：4 = forward/backwardPrefetchNum；3 = mangaImageRetainNum */
+/** 设置结构版本：4 = forward/backwardPrefetchNum；3 = imageRetainNum */
 const SETTINGS_SCHEMA_VERSION = 4;
 
 export interface ChapterCacheSettings {
@@ -19,8 +19,8 @@ export interface ChapterCacheSettings {
   maxBytesMb: number;
   /** 超过该天数的缓存优先清理，0 = 不按时间清理 */
   retentionDays: number;
-  /** 漫画磁盘图片保留章数（当前章 ±N，对齐 Legado imageRetainNum） */
-  mangaImageRetainNum: number;
+  /** 图片磁盘缓存保留章数（当前章 ±N，对齐 Legado imageRetainNum） */
+  imageRetainNum: number;
 }
 
 const DEFAULTS: ChapterCacheSettings = {
@@ -29,7 +29,7 @@ const DEFAULTS: ChapterCacheSettings = {
   backwardPrefetchNum: 0,
   maxBytesMb: 0,
   retentionDays: 0,
-  mangaImageRetainNum: 2,
+  imageRetainNum: 2,
 };
 
 /** @deprecated v3 字段，仅用于迁移 */
@@ -37,6 +37,7 @@ type LegacyChapterCacheSettings = Partial<ChapterCacheSettings> & {
   prefetchEnabled?: boolean;
   prefetchCount?: number;
   preDownloadNum?: number;
+  mangaImageRetainNum?: number;
 };
 
 let cached: ChapterCacheSettings | null = null;
@@ -99,13 +100,15 @@ export async function getChapterCacheSettings(): Promise<ChapterCacheSettings> {
         backwardPrefetchNum,
         maxBytesMb: clampInt(parsed.maxBytesMb ?? DEFAULTS.maxBytesMb, 0, 102_400),
         retentionDays: clampInt(parsed.retentionDays ?? DEFAULTS.retentionDays, 0, 3650),
-        mangaImageRetainNum: clampInt(
-          parsed.mangaImageRetainNum ?? DEFAULTS.mangaImageRetainNum,
+        imageRetainNum: clampInt(
+          parsed.imageRetainNum ??
+            parsed.mangaImageRetainNum ??
+            DEFAULTS.imageRetainNum,
           0,
           30,
         ),
       };
-      if (needsPersist) {
+      if (needsPersist || parsed.mangaImageRetainNum != null) {
         void setStorage(STORAGE_KEY, cached);
       }
       return cached;
@@ -135,8 +138,8 @@ export async function saveChapterCacheSettings(
     ),
     maxBytesMb: clampInt(patch.maxBytesMb ?? current.maxBytesMb, 0, 102_400),
     retentionDays: clampInt(patch.retentionDays ?? current.retentionDays, 0, 3650),
-    mangaImageRetainNum: clampInt(
-      patch.mangaImageRetainNum ?? current.mangaImageRetainNum,
+    imageRetainNum: clampInt(
+      patch.imageRetainNum ?? current.imageRetainNum,
       0,
       30,
     ),

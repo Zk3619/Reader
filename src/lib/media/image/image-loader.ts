@@ -17,12 +17,12 @@ import {
   buildMangaImageCacheMeta,
   readMangaImageFromDisk,
   writeMangaImageToDisk,
-} from '@/lib/media/image/manga-image-disk-cache';
+} from '@/lib/media/image/image-disk-cache';
 import {
   clearMangaImageLoadFailure,
   isMangaImageLoadBlocked,
   rememberMangaImageLoadFailure,
-} from '@/lib/media/image/manga-image-load-guard';
+} from '@/lib/media/image/image-load-guard';
 
 export type MangaImageLoadOptions = {
   referer?: string | null;

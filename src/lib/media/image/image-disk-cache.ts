@@ -1,6 +1,6 @@
 /**
- * 漫画插图 L2 磁盘缓存（按书分桶，与封面缓存分离）
- * Tauri：{appData}/manga-image-cache/{bookKey}/{urlKey}/image.bin + meta.json
+ * 图片章节 L2 磁盘缓存（按书分桶，与封面缓存分离）
+ * Tauri：{appData}/image-cache/{bookKey}/{urlKey}/image.bin + meta.json
  *        全局 URL 索引：_url/{urlKey}.json
  * Web：IndexedDB reader-manga-image-cache-v2（bookUrl 索引）
  */
@@ -15,9 +15,10 @@ import {
   getMangaBookFolderKey,
   getMangaImageUrlKey,
   type MangaImageUrlIndexEntry,
-} from '@/lib/media/image/manga-image-cache-path';
+} from '@/lib/media/image/image-cache-path';
 
-const MANGA_CACHE_SUBDIR = 'manga-image-cache';
+const MANGA_CACHE_SUBDIR = 'image-cache';
+const LEGACY_MANGA_CACHE_SUBDIR = 'manga-image-cache';
 const INDEX_DIR = '_url';
 const IMAGE_BIN_FILE = 'image.bin';
 const META_FILE = 'meta.json';
@@ -84,11 +85,18 @@ async function ensureMangaCacheDir(): Promise<string> {
   if (!isTauri()) return MANGA_CACHE_SUBDIR;
   if (cachedRoot) return cachedRoot;
   const appDir = await getAppDataDir();
-  const dir = await join(appDir, MANGA_CACHE_SUBDIR);
   const fs = await getFileSystem();
-  if (!(await fs.exists(dir))) {
-    await fs.mkdir(dir, true);
+  const dir = await join(appDir, MANGA_CACHE_SUBDIR);
+  const legacy = await join(appDir, LEGACY_MANGA_CACHE_SUBDIR);
+  if (await fs.exists(dir)) {
+    cachedRoot = dir;
+    return dir;
   }
+  if (await fs.exists(legacy)) {
+    cachedRoot = legacy;
+    return legacy;
+  }
+  await fs.mkdir(dir, true);
   cachedRoot = dir;
   return dir;
 }

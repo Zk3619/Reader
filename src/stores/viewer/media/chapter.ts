@@ -44,10 +44,10 @@ export function resetMediaChapterSession(): void {
   void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrls());
   void import('@/stores/viewer/media/video').then((m) => m.revokeVideoPlaybackUrls());
   void import('@/lib/media/video/video-chapter-cache').then((m) => m.clearVideoChapterCache());
-  void import('@/lib/media/image/manga-image-prefetch').then((m) =>
+  void import('@/lib/media/image/image-prefetch').then((m) =>
     m.cancelMangaImagePrefetchSession(),
   );
-  void import('@/lib/media/image/manga-chapter-pool').then((m) =>
+  void import('@/lib/media/image/image-chapter-pool').then((m) =>
     m.cancelMangaChapterPoolWarm(),
   );
 }

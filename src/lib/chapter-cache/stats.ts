@@ -1,5 +1,5 @@
 /**
- * 阅读缓存占用统计（章节正文 / 漫画图片分项；音视频播放缓存预留）
+ * 阅读缓存占用统计（章节正文 / 图片分项；音视频播放缓存预留）
  */
 
 import { getDatabase } from '@/lib/database/database-core';
@@ -13,7 +13,7 @@ import { enforceChapterCacheLimits } from '@/lib/chapter-cache/eviction';
 import {
   getMangaImageCacheStats,
   invalidateMangaImageMetaIndex,
-} from '@/lib/media/image/manga-image-disk-cache';
+} from '@/lib/media/image/image-disk-cache';
 
 const FILE_CHAPTER_ESTIMATE_BYTES = 600 * 1024;
 
@@ -81,7 +81,7 @@ async function estimateFileBackedBodyBytes(filePaths: string[]): Promise<number>
 }
 
 export async function getChapterCacheStats(): Promise<ChapterCacheStats> {
-  await enforceChapterCacheLimits().catch(() => {});
+  await enforceChapterCacheLimits().catch(() => { });
 
   const db = await getDatabase();
   const [rows, filePathRows, mangaStats] = await Promise.all([

@@ -29,7 +29,7 @@ type ChapterCacheSnapshot = {
   totalBytes: number;
   maxBytesMb: number;
   retentionDays: number;
-  mangaImageRetainNum: number;
+  imageRetainNum: number;
 };
 
 export function ChapterCacheSetting() {
@@ -45,7 +45,7 @@ export function ChapterCacheSetting() {
   const [totalBytes, setTotalBytes] = createSignal(0);
   const [maxBytesMb, setMaxBytesMb] = createSignal(0);
   const [retentionDays, setRetentionDays] = createSignal(0);
-  const [mangaImageRetainNum, setMangaImageRetainNum] = createSignal(2);
+  const [imageRetainNum, setImageRetainNum] = createSignal(2);
   const [clearing, setClearing] = createSignal(false);
   /** 数据灌入 NumberField 期间禁止误触发持久化（Kobalte 挂载时会同步 rawValue） */
   const [persistEnabled, setPersistEnabled] = createSignal(false);
@@ -65,7 +65,7 @@ export function ChapterCacheSetting() {
         totalBytes: stats.totalBytes,
         maxBytesMb: settings.maxBytesMb,
         retentionDays: settings.retentionDays,
-        mangaImageRetainNum: settings.mangaImageRetainNum,
+        imageRetainNum: settings.imageRetainNum,
       };
     },
     { refreshOnMount: true },
@@ -92,7 +92,7 @@ export function ChapterCacheSetting() {
     setTotalBytes(snap.totalBytes);
     setMaxBytesMb(snap.maxBytesMb);
     setRetentionDays(snap.retentionDays);
-    setMangaImageRetainNum(snap.mangaImageRetainNum);
+    setImageRetainNum(snap.imageRetainNum);
     queueMicrotask(() => setPersistEnabled(true));
   });
 
@@ -112,7 +112,7 @@ export function ChapterCacheSetting() {
   };
 
   const persistField = async (
-    key: 'maxBytesMb' | 'retentionDays' | 'mangaImageRetainNum',
+    key: 'maxBytesMb' | 'retentionDays' | 'imageRetainNum',
     value: number,
   ) => {
     if (!persistEnabled()) return;
@@ -121,7 +121,7 @@ export function ChapterCacheSetting() {
 
     if (key === 'maxBytesMb') setMaxBytesMb(value);
     else if (key === 'retentionDays') setRetentionDays(value);
-    else setMangaImageRetainNum(value);
+    else setImageRetainNum(value);
 
     await saveChapterCacheSettings({ [key]: value });
     patchSettingsPanelCache<ChapterCacheSnapshot>('chapter-cache', { [key]: value });
@@ -236,16 +236,16 @@ export function ChapterCacheSetting() {
         </div>
         <div class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0 flex-1 space-y-0.5">
-            <span>漫画图片保留章数（当前章 ±N）</span>
+            <span>图片缓存保留章数（当前章 ±N）</span>
             <p class="text-xs text-muted-foreground">
-              对齐 Legado imageRetainNum：阅读时仅保留当前章前后 N 章的漫画磁盘图片；用户离线缓存的章节图片不会被自动清理。
+              对齐 Legado imageRetainNum：阅读时仅保留当前章前后 N 章的磁盘图片；用户离线缓存的章节图片不会被自动清理。
             </p>
           </div>
           <SettingsNumberField
-            value={mangaImageRetainNum()}
+            value={imageRetainNum()}
             min={0}
             max={30}
-            onValueChange={(v) => void persistField('mangaImageRetainNum', v)}
+            onValueChange={(v) => void persistField('imageRetainNum', v)}
           />
         </div>
         <div class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">

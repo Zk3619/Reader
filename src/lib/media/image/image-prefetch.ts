@@ -18,7 +18,7 @@ import type { ImageViewerReadingMode } from '@/lib/media/image/image-viewer-ui-c
 import {
   loadMangaImageObjectUrl,
   peekMangaImageObjectUrl,
-} from '@/lib/media/image/manga-image-loader';
+} from '@/lib/media/image/image-loader';
 
 export type MangaImagePrefetchItem = Pick<
   ReaderInlineImageRef,
@@ -46,11 +46,11 @@ let intraPrefetchTimer: ReturnType<typeof setTimeout> | undefined;
 let nextChapterFirstImageTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingIntraPrefetch:
   | {
-      token: number;
-      indices: number[];
-      items: MangaImagePrefetchItem[];
-      ctx: MangaImagePrefetchContext;
-    }
+    token: number;
+    indices: number[];
+    items: MangaImagePrefetchItem[];
+    ctx: MangaImagePrefetchContext;
+  }
   | undefined;
 
 function chapterPageReferer(

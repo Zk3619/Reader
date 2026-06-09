@@ -8,7 +8,7 @@ const base: ChapterCacheSettings = {
   backwardPrefetchNum: 0,
   maxBytesMb: 0,
   retentionDays: 0,
-  mangaImageRetainNum: 2,
+  imageRetainNum: 2,
 };
 
 describe('collectPrefetchIndices', () => {
@@ -36,7 +36,7 @@ describe('collectPrefetchIndices', () => {
       forwardPrefetchNum: 2,
       backwardPrefetchNum: 2,
     });
-    // 向后 n=2：仅 current-2（Legado 从 current-2 起、回溯 min(5,n)=2 章）
+    // ?? n=2?? current-2?Legado ? current-2 ???? min(5,n)=2 ??
     expect(indices).toEqual([3, 6, 7]);
     expect(new Set(indices).size).toBe(indices.length);
   });

@@ -5,8 +5,8 @@
 import * as chapterCacheDb from '@/lib/database/chapter-cache';
 import * as chaptersDb from '@/lib/database/chapters';
 import { readCachedChapterRaw } from '@/lib/chapter-cache/storage';
-import { isMangaChapterContent } from '@/lib/media/image/manga-book-detect';
-import { warmMangaImagesForCachedChapter } from '@/lib/export/export-manga-images';
+import { isMangaChapterContent } from '@/lib/media/image/image-book-detect';
+import { warmMangaImagesForCachedChapter } from '@/lib/export/export-images';
 import type { Book } from '@/types';
 
 export type WarmCachedMangaImagesResult = {

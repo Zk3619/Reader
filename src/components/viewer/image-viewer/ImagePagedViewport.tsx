@@ -7,7 +7,7 @@ import {
   type Accessor,
 } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
-import { MangaPageImg } from '@/components/viewer/image-viewer/MangaPageImg';
+import { MangaPageImg } from '@/components/viewer/image-viewer/ImagePageImg';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import {
   chapterPosToPageIndex,
@@ -138,8 +138,24 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
     goToPage(target);
   };
 
+  const getBookmarkSnapshot = () => {
+    const total = pageCount();
+    const idx = pageIndex();
+    return {
+      chapterPos: pageIndexToChapterPos(idx, total),
+      pageText: '',
+      pageIndex: idx,
+      pageCount: total,
+    };
+  };
+
   createEffect(() => {
-    local.onRegisterNav?.({ goNextPage, goPrevPage, setPageProgress });
+    local.onRegisterNav?.({
+      goNextPage,
+      goPrevPage,
+      setPageProgress,
+      getBookmarkSnapshot,
+    });
   });
 
   createEffect(() => {

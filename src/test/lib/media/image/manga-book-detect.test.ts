@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isMangaBookByMeta,
   isMangaChapterContent,
-} from '@/lib/media/image/manga-book-detect';
+} from '@/lib/media/image/image-book-detect';
 import { BookType } from '@/lib/book-source/book-type';
 
 describe('manga-book-detect', () => {
