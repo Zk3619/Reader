@@ -7,6 +7,7 @@ import { isExploreDrawerSelectSection, mapRawExploreItem } from '@/lib/book-sour
 import {
   createLegadoExploreJavaDeviceHandlers,
   detectLegadoExploreDeviceTypeAndroidFirst,
+  exploreScriptNeedsBaseUrlFallback,
   LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
   patchExploreScriptForReaderWeb,
 } from '@/lib/js-engine/legado/legado-explore-java-device';
@@ -77,6 +78,21 @@ describe('qingtian explore script device gate', () => {
     expect(bundle).toContain('__readerExploreDeviceJavaShim');
     expect(bundle.indexOf('__readerExploreDeviceJavaShim')).toBeLessThan(
       bundle.indexOf('result = 1'),
+    );
+  });
+
+  it('无 jsLib BaseUrl 时 bundle 注入 BaseUrl 兜底（discovestyle 动态线路）', () => {
+    const source = loadQingtianSource();
+    const script = String(source.exploreUrl ?? '')
+      .replace(/^<js>/, '')
+      .replace(/<\/js>$/, '');
+    const patched = patchExploreScriptForReaderWeb(script);
+    expect(exploreScriptNeedsBaseUrlFallback(String(source.jsLib ?? ''), patched)).toBe(true);
+    const bundle = buildLegadoExploreScriptBundle(String(source.jsLib ?? ''), script);
+    expect(bundle).toContain('__readerExploreBaseUrlFallback');
+    expect(bundle).toContain('BaseUrl()');
+    expect(bundle.indexOf('__readerExploreBaseUrlFallback')).toBeLessThan(
+      bundle.indexOf('BaseUrl()'),
     );
   });
 

@@ -125,7 +125,7 @@ function applyBrowserCloseResult(
   state: RuleScriptBrowserState,
   r: InnerWebCloseResult,
 ): void {
-  state.awaitBody = '';
+  state.awaitBody = r.body?.trim() ?? '';
   state.awaitDone = true;
   if (import.meta.env.DEV) {
     console.log('[rule-script] startBrowserAwait 已关闭', {

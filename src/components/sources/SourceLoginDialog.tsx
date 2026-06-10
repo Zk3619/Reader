@@ -15,15 +15,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dismissScriptNoticeToasts } from '@/lib/book-source/rate-limit-guard';
-import {
-  runLoginScript,
-  runLoginScriptRust,
-  getStoredLoginInfo,
-} from '@/lib/js-engine';
+import { runLoginScript, getStoredLoginInfo } from '@/lib/js-engine';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { clearExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { clearExploreSectionsCache } from '@/lib/book-source/explore-sections';
-import { isTauri } from '@/lib/platform/detect';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import { appDialogScrollBodyNoFooter } from '@/lib/ui/viewport-classes';
 import JSON5 from 'json5';
@@ -152,8 +147,6 @@ export interface SourceLoginDialogProps {
   onOpenChange: (open: boolean) => void;
   /** 当前要登录的书源（需配置 loginUrl 或 loginUi） */
   source: BookSource | null;
-  /** 打开书源变量编辑（对齐 Legado 设置源变量） */
-  onOpenSourceVariables?: (source: BookSource) => void;
 }
 
 /**
@@ -258,20 +251,6 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
 
   const [running, setRunning] = createSignal(false);
 
-  const USE_RUST_ENGINE_KEY = 'reader_login_use_rust_engine';
-  let initialRust = false;
-  try {
-    initialRust = isTauri() && localStorage.getItem(USE_RUST_ENGINE_KEY) === '1';
-  } catch { /* ignore */ }
-  const [useRustEngine, setUseRustEngine] = createSignal(initialRust);
-  const setUseRustEngineAndStore = (v: boolean) => {
-    setUseRustEngine(v);
-    try {
-      if (v) localStorage.setItem(USE_RUST_ENGINE_KEY, '1');
-      else localStorage.removeItem(USE_RUST_ENGINE_KEY);
-    } catch { /* ignore */ }
-  };
-
   const handleFormButton = async (item: LoginUiItem) => {
     const source = props.source;
     const action = (item.action ?? '').trim();
@@ -285,36 +264,16 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
     }
     setRunning(true);
     try {
-      if (useRustEngine()) {
-        const out = await runLoginScriptRust(source, { formValues: formValues(), action });
-        if (out?.loginInfoJson) {
-          try {
-            const parsed = JSON.parse(out.loginInfoJson) as Record<string, unknown>;
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-              const next: Record<string, string> = { ...formValues() };
-              for (const [k, v] of Object.entries(parsed)) {
-                if (typeof k === 'string' && (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
-                  next[k] = v == null ? '' : String(v);
-                }
-              }
-              setFormValues(next);
-            }
-          } catch {
-            // ignore parse
-          }
-        }
+      await runLoginScript(source, { formValues: formValues(), action });
+      if (isLogoutFormAction(action)) {
+        setFormValues((prev) => {
+          const next = { ...prev };
+          if ('密钥' in next) next['密钥'] = '';
+          return next;
+        });
       } else {
-        await runLoginScript(source, { formValues: formValues(), action });
-        if (isLogoutFormAction(action)) {
-          setFormValues((prev) => {
-            const next = { ...prev };
-            if ('密钥' in next) next['密钥'] = '';
-            return next;
-          });
-        } else {
-          const stored = getStoredLoginInfo(getLegadoSourceKey(source));
-          if (Object.keys(stored).length > 0) setFormValues(stored);
-        }
+        const stored = getStoredLoginInfo(getLegadoSourceKey(source));
+        if (Object.keys(stored).length > 0) setFormValues(stored);
       }
       if (!isLogoutFormAction(action)) {
         const key = getLegadoSourceKey(source);
@@ -377,30 +336,6 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
             <p class="text-sm text-muted-foreground">
               填写后点击按钮执行登录脚本；若需打开网页（如「书源设置」），将在全屏内嵌页中打开，点右上角 √ 可同步 Cookie 并返回。
             </p>
-            <Show when={props.source && props.onOpenSourceVariables}>
-              <Button
-                type="button"
-                variant="outline"
-                class="w-full"
-                onClick={() => {
-                  const s = props.source;
-                  if (s) props.onOpenSourceVariables?.(s);
-                }}
-              >
-                设置源变量（deviceId / server 等）
-              </Button>
-            </Show>
-            <Show when={isTauri()}>
-              <label class="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useRustEngine()}
-                  onInput={(e) => setUseRustEngineAndStore(e.currentTarget.checked)}
-                  class="rounded border-input"
-                />
-                <span>使用 Rust 引擎（java.ajax 真阻塞，解析耗时准确）</span>
-              </label>
-            </Show>
             <form
               class="flex flex-col gap-3"
               onSubmit={(e) => e.preventDefault()}

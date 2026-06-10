@@ -4,9 +4,10 @@
  */
 
 import type { BookSource } from '@/types';
+import { persistExploreSourceArgsObject } from '@/lib/book-source/explore-sections';
 import {
-  createSourceVariableHandlers,
-  getSourceArgsKey,
+  isLegadoServerArgKey,
+  syncLegadoServerArgKeys,
 } from '@/lib/js-engine/legado/source-script-shared';
 
 /** 对齐 jsLib createFilter 生成的 action 字符串 */
@@ -33,23 +34,15 @@ export function runExploreShowActionNative(
   options?: RunExploreShowActionOptions,
 ): void {
   const value = String(options?.infoMap?.[parsed.title] ?? '').trim();
-  const argsKey = getSourceArgsKey(source);
-  const sourceVars = createSourceVariableHandlers(source, argsKey);
-
-  let data: Record<string, unknown> = {};
-  try {
-    const raw = sourceVars.getVariable();
-    if (raw) data = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    /* ignore */
-  }
-
-  data[parsed.paramKey] = value;
-  if (parsed.paramKey === '发现页类型') {
-    data['发现页来源'] = '番茄';
-  }
-
-  sourceVars.setVariable(JSON.stringify(data, null, 2));
+  persistExploreSourceArgsObject(source, (data) => {
+    data[parsed.paramKey] = value;
+    if (isLegadoServerArgKey(parsed.paramKey)) {
+      syncLegadoServerArgKeys(data, value);
+    }
+    if (parsed.paramKey === '发现页类型') {
+      data['发现页来源'] = '番茄';
+    }
+  });
   void options?.onRefreshExplore?.();
 }
 

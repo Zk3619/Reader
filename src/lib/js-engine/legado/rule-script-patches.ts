@@ -7,6 +7,7 @@ import {
   EXPLORE_JSLIB_CONTEXT_SHIM,
   EXPLORE_JSLIB_THIS_BIND_SHIM,
   GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
+  GYKS_SWITCH_LINE_SHIM,
 } from '@/lib/js-engine/legado/source-script-shared';
 
 /**
@@ -148,6 +149,7 @@ export function buildRuleScriptFullBody(
     EXPLORE_JSLIB_THIS_BIND_SHIM,
     RULE_SCRIPT_JSLIB_THIS_BIND_SHIM,
     EXPLORE_JSLIB_CONTEXT_SHIM,
+    GYKS_SWITCH_LINE_SHIM,
     GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
     patchedSnippet,
   ]

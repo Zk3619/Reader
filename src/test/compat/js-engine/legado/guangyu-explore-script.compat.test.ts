@@ -46,6 +46,14 @@ describe('guangyu explore sections', () => {
     expect(patched).toContain("java.openBookSearch(infoMap['搜索书名或作者'])");
   });
 
+  it('patchExploreScriptForReaderWeb discovestyle 使用动态 BaseUrl()', () => {
+    const source = loadGuangyuSource();
+    const script = extractExploreScript(String(source.exploreUrl ?? ''));
+    const patched = patchExploreScriptForReaderWeb(script);
+    expect(patched).toContain('var durl = `${BaseUrl()}/discovestyle?');
+    expect(patched).toContain("let qtsjurl = BaseUrl() + '/get_book_shelf,");
+  });
+
   it('getCloudSettings guard 不使用 this.getVariable', () => {
     const bundle = buildLegadoExploreScriptBundle(
       'function getCloudSettings(r) { return "ok"; }',

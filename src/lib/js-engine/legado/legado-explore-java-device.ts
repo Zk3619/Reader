@@ -168,9 +168,61 @@ export function patchExploreScriptGyksSearchRow(script: string): string {
   return script.replace(marker, `${LEGADO_GYKS_EXPLORE_SEARCH_ROW_PATCH}\n${marker}`);
 }
 
+/**
+ * 晴天等书源无 jsLib BaseUrl，但 patchExploreScriptGyksDynamicBaseUrl 会注入 BaseUrl() 调用。
+ * 从 getArguments(..., 'server') / base_url / host[0] 动态解析当前线路。
+ */
+export const EXPLORE_BASE_URL_FALLBACK_SHIM = `
+(function __readerExploreBaseUrlFallback() {
+  if (typeof BaseUrl === 'function') return;
+  BaseUrl = function __readerBaseUrlFromServerArg() {
+    var line = '';
+    try {
+      if (typeof source !== 'undefined' && source && typeof source.getVariable === 'function' && typeof getArguments === 'function') {
+        var v = getArguments(source.getVariable(), 'server');
+        if (v && String(v).indexOf('http') >= 0) line = String(v);
+      }
+    } catch (e1) {}
+    if (!line) {
+      try {
+        if (typeof base_url === 'string' && base_url && String(base_url).indexOf('http') >= 0) {
+          line = base_url;
+        }
+      } catch (e2) {}
+    }
+    if (!line && typeof host !== 'undefined' && host && host[0]) {
+      line = String(host[0]);
+    }
+    return String(line || '').replace(/\\/+$/, '');
+  };
+})();
+`.trim();
+
+export function exploreScriptNeedsBaseUrlFallback(jsLib: string, patchedScript: string): boolean {
+  if (/function\s+BaseUrl\s*\(/.test(jsLib)) return false;
+  return /\bBaseUrl\s*\(/.test(patchedScript);
+}
+
+/** discovestyle / 书架 ajax 须随 switchToNextLine 读最新 BaseUrl，不能只用脚本开头冻结的 base_url */
+export function patchExploreScriptGyksDynamicBaseUrl(script: string): string {
+  if (!GYKS_DISCOVERSTYLE_MARKER.test(script)) return script;
+  let out = script;
+  out = out.replace(
+    /var durl = `\$\{base_url\}\/discovestyle\?/g,
+    'var durl = `${BaseUrl()}/discovestyle?',
+  );
+  out = out.replace(
+    /let qtsjurl = base_url \+ '\/get_book_shelf,/g,
+    "let qtsjurl = BaseUrl() + '/get_book_shelf,",
+  );
+  return out;
+}
+
 export function patchExploreScriptForReaderWeb(script: string): string {
-  return patchExploreScriptGyksSearchRow(
-    patchExploreScriptQtsjGatePrelude(patchExploreScriptDeviceTypeProbe(script)),
+  return patchExploreScriptGyksDynamicBaseUrl(
+    patchExploreScriptGyksSearchRow(
+      patchExploreScriptQtsjGatePrelude(patchExploreScriptDeviceTypeProbe(script)),
+    ),
   );
 }
 

@@ -59,6 +59,17 @@ export function bindGlobalVmObject(
 }
 
 /** 将 string 键值对写入新 QuickJS 对象（避免 evalCode 泄漏 handle） */
+/** Legado StrResponse：java.startBrowserAwait(url).body() */
+export function vmNewLegadoStrResponse(vm: QuickJSContext, body: string): QuickJSHandle {
+  const obj = vm.newObject();
+  const text = String(body ?? '');
+  bindVmFunction(vm, obj, 'body', () => vm.newString(text));
+  bindVmFunction(vm, obj, 'url', () => vm.newString(''));
+  bindVmFunction(vm, obj, 'code', () => vm.newNumber(200));
+  bindVmFunction(vm, obj, 'headers', () => vm.newObject());
+  return obj;
+}
+
 export function vmNewStringRecordObject(
   vm: QuickJSContext,
   record: Record<string, string>

@@ -20,7 +20,10 @@ import {
   resolveLegadoDeviceId,
   resetLegadoDeviceId,
 } from '@/lib/book-source/source-http';
-import { patchLegadoLoginUrlScript } from '@/lib/js-engine/legado/login-script-patches';
+import {
+  patchLegadoLoginUrlScript,
+  READER_LOGIN_HEALTH_PROBE_TIMEOUT_MS,
+} from '@/lib/js-engine/legado/login-script-patches';
 import { resolveLoginScriptOnToast } from '@/lib/book-source/rate-limit-guard';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { resolveUrl, stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
@@ -48,6 +51,7 @@ import {
   type ScriptToastEntry,
 } from '@/lib/js-engine/legado/explore-inject';
 import { createLoginInjector } from '@/lib/js-engine/legado/login-inject';
+import { createLegadoStrResponse } from '@/lib/js-engine/legado/rule-script-browser';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
 import { legadoLoginScriptForReplay, wrapLegadoCatchRethrow } from '@/lib/js-engine/legado/script-wrap';
@@ -58,7 +62,11 @@ import {
   getSourceCookiesKey,
   getSourceLoginKey,
   hostsFromJsLib,
+  isLegadoServerArgKey,
   normalizeServerFieldsInSourceArgs,
+  persistSourceArgsJson,
+  readServerUrlFromSourceArgs,
+  syncLegadoServerArgKeys,
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
   storageKey,
@@ -161,6 +169,22 @@ function createBrowserCookieSyncGuard(baseUrl: string): BrowserCookieSyncGuard {
   };
 }
 
+function applyLoginScriptSetArgument(
+  source: BookSource,
+  argsKey: string,
+  key: string,
+  value: string,
+): void {
+  const raw = localStorage.getItem(argsKey) ?? '{}';
+  const obj = (JSON.parse(raw) as Record<string, string>) || {};
+  obj[key] = value;
+  normalizeServerFieldsInSourceArgs(obj);
+  if (isLegadoServerArgKey(key)) {
+    syncLegadoServerArgKeys(obj, value);
+  }
+  persistSourceArgsJson(source, argsKey, JSON.stringify(obj));
+}
+
 /** 将 control 页 Cookie 写回 source.getVariable()（对齐 applyCookieSettings / 发现页 getArguments） */
 export function syncControlSettingsToSourceArgs(
   source: BookSource,
@@ -178,7 +202,7 @@ export function syncControlSettingsToSourceArgs(
       obj[key] = value;
     }
     normalizeServerFieldsInSourceArgs(obj);
-    localStorage.setItem(argsKey, JSON.stringify(obj));
+    persistSourceArgsJson(source, argsKey, JSON.stringify(obj));
     console.warn(LOG_TAG, 'control 设置已同步到书源变量', {
       keys: [...map.keys()].filter((k) => !/^qttoken$/i.test(k)).slice(0, 12),
     });
@@ -1069,8 +1093,8 @@ async function syncLegadoCookieStoreFromHttpJar(
   try {
     const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source)));
     if (raw) {
-      const server = (JSON.parse(raw) as Record<string, unknown>).server;
-      if (typeof server === 'string' && server.trim()) urls.add(server.trim());
+      const server = readServerUrlFromSourceArgs(JSON.parse(raw) as Record<string, unknown>);
+      if (server) urls.add(server);
     }
   } catch {
     /* ignore */
@@ -1138,10 +1162,8 @@ function resolveLoginServerUrl(source: BookSource, baseUrl: string): string {
   try {
     const raw = localStorage.getItem(storageKey(STORAGE_PREFIX_ARGS, getLegadoSourceKey(source)));
     if (raw) {
-      const server = (JSON.parse(raw) as Record<string, unknown>).server;
-      if (typeof server === 'string' && /^https?:\/\//i.test(server.trim())) {
-        return normalizeBookSourceServerUrl(server.trim());
-      }
+      const server = readServerUrlFromSourceArgs(JSON.parse(raw) as Record<string, unknown>);
+      if (server) return server;
     }
   } catch {
     /* ignore */
@@ -1479,6 +1501,7 @@ async function tryRunLoginScriptQuickJS(
       wrapCatchRethrow: false,
       inject: (vm, rt) => {
         const browserAwaitDone = { value: false };
+        const browserAwaitBody = { value: '' };
         const injector = createLoginInjector({
           baseUrl,
           sourceUrl,
@@ -1518,11 +1541,7 @@ async function tryRunLoginScriptQuickJS(
           },
           setArgument: (key, value) => {
             try {
-              const raw = localStorage.getItem(argsKey) ?? '{}';
-              const obj = (JSON.parse(raw) as Record<string, string>) || {};
-              obj[key] = value;
-              normalizeServerFieldsInSourceArgs(obj);
-              localStorage.setItem(argsKey, JSON.stringify(obj));
+              applyLoginScriptSetArgument(source, argsKey, key, value);
             } catch (e) {
               console.warn(LOG_TAG, 'setArgument failed:', e);
             }
@@ -1548,11 +1567,7 @@ async function tryRunLoginScriptQuickJS(
               return typeof header === 'string' && header ? header : '{}';
             },
             setVariable: (val?: string) => {
-              try {
-                if (typeof val === 'string') localStorage.setItem(argsKey, val);
-              } catch (e) {
-                console.warn(LOG_TAG, 'source.setVariable failed:', e);
-              }
+              if (typeof val === 'string') persistSourceArgsJson(source, argsKey, val);
             },
             getLoginInfo: () => {
               try {
@@ -1647,7 +1662,9 @@ async function tryRunLoginScriptQuickJS(
               requestInScript(resolvedUrl, { ...call, source }),
           },
           startBrowserAwait: (url, title) => {
-            if (browserAwaitDone.value) return;
+            if (browserAwaitDone.value) {
+              return createLegadoStrResponse(browserAwaitBody.value);
+            }
             const raw = (url || '').trim();
             const resolved = resolveBrowserOpenUrl(raw, baseUrl);
             if (/^(legado|yuedu):\/\//i.test(resolved)) {
@@ -1662,16 +1679,18 @@ async function tryRunLoginScriptQuickJS(
                 false
               );
             }
-            if (!isOpenableUrl(resolved)) return;
+            if (!isOpenableUrl(resolved)) return createLegadoStrResponse('');
             const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
             const p = openLegadoBrowserInApp(resolved, cookieStr, title, {
               awaitClose: true,
               ...innerWebPoolOpts(source),
             })
               .then((r) => {
+                browserAwaitBody.value = r.confirmed ? (r.body?.trim() ?? '') : '';
                 console.warn(LOG_TAG, 'startBrowserAwait 已关闭', {
                   confirmed: r.confirmed,
                   cookieLen: (r.cookies ?? '').length,
+                  bodyLen: browserAwaitBody.value.length,
                 });
                 if (r.confirmed && r.cookies?.trim()) {
                   syncWebViewCookiesToStore(
@@ -1684,7 +1703,9 @@ async function tryRunLoginScriptQuickJS(
                   );
                   persistScriptCookieStoreToLocal(cookieStore, cookiesKey);
                 } else if (r.confirmed) {
-                  console.warn(LOG_TAG, 'startBrowserAwait √ 但 cookies 为空，未写入脚本表');
+                  console.warn(LOG_TAG, 'startBrowserAwait √ 但 cookies 为空，未写入脚本表', {
+                    bodyLen: browserAwaitBody.value.length,
+                  });
                 }
                 return '';
               })
@@ -1873,6 +1894,7 @@ export async function runLoginScript(
   let pending: Promise<unknown>[] = [];
   /** startBrowserAwait 已关闭内嵌页，重放脚本时不再打开 */
   let browserAwaitDone = false;
+  let browserAwaitBody = '';
   /** 恢复执行时仅屏蔽「正在检测」「请稍等」类重复提示，不屏蔽检测/登录结果通知 */
   let suppressResumeToast = false;
   const isWaitingToast = (msg?: string) =>
@@ -1982,11 +2004,7 @@ export async function runLoginScript(
         return '{}';
       },
       setVariable(val?: string): void {
-        try {
-          if (typeof val === 'string') localStorage.setItem(argsKey, val);
-        } catch (e) {
-          console.warn('[login-script] source.setVariable failed:', e);
-        }
+        if (typeof val === 'string') persistSourceArgsJson(source, argsKey, val);
       },
       getLoginInfo(): string {
         try {
@@ -2018,11 +2036,7 @@ export async function runLoginScript(
     },
     setArgument(key: string, value: string) {
       try {
-        const raw = localStorage.getItem(argsKey) ?? '{}';
-        const obj = (JSON.parse(raw) as Record<string, string>) || {};
-        obj[key] = value;
-        normalizeServerFieldsInSourceArgs(obj);
-        localStorage.setItem(argsKey, JSON.stringify(obj));
+        applyLoginScriptSetArgument(source, argsKey, key, value);
       } catch (e) {
         console.warn('[login-script] setArgument failed:', e);
       }
@@ -2062,8 +2076,8 @@ export async function runLoginScript(
         return `${y}-${M}-${day} ${h}:${m}:${s}`;
       },
       /** 在应用内打开 URL 并挂起，直至用户点击 √（与 Legado WebViewActivity menu_ok 一致） */
-      startBrowserAwait(url: string, title?: string): Promise<string> {
-        if (browserAwaitDone) return Promise.resolve('');
+      startBrowserAwait(url: string, title?: string) {
+        if (browserAwaitDone) return createLegadoStrResponse(browserAwaitBody);
         const raw = (url || '').trim();
         const resolved = resolveBrowserOpenUrl(raw, baseUrl);
         if (/^(legado|yuedu):\/\//i.test(resolved)) {
@@ -2084,7 +2098,7 @@ export async function runLoginScript(
             false
           );
         }
-        if (!ok) return Promise.resolve('');
+        if (!ok) return createLegadoStrResponse('');
         const cookieStr = cookiesForInnerWeb(cookieObj, resolved, baseUrl);
         console.warn(LOG_TAG, 'startBrowserAwait cookie', {
           resolved: resolved.slice(0, 80),
@@ -2096,9 +2110,11 @@ export async function runLoginScript(
           ...innerWebPoolOpts(source),
         })
           .then((r) => {
+            browserAwaitBody = r.confirmed ? (r.body?.trim() ?? '') : '';
             console.warn(LOG_TAG, 'startBrowserAwait 已关闭', {
               confirmed: r.confirmed,
               cookieLen: (r.cookies ?? '').length,
+              bodyLen: browserAwaitBody.length,
             });
             if (r.confirmed && r.cookies?.trim()) {
               syncWebViewCookiesToStore(
@@ -2617,9 +2633,10 @@ async function requestInScript(
   ) {
     headers['Content-Type'] = 'application/json';
   }
+  const isHealthProbe = /\/health(?:\?|$|\/)/i.test(url);
   const common = {
     headers,
-    timeout: 12000,
+    timeout: isHealthProbe ? READER_LOGIN_HEALTH_PROBE_TIMEOUT_MS : 12000,
     enableCookieJar: options.source.enabledCookieJar,
     concurrentRate: options.source.concurrentRate,
     allowNon2xx: true, // 登录/检测接口 4xx 时仍返回 body，供书源解析 code/msg

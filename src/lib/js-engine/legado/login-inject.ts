@@ -5,7 +5,8 @@
 import type { QuickJSContext } from 'quickjs-emscripten';
 import { evalCodeVoid, LEGADO_SUSPEND_MARKER, setGlobalJson, setGlobalString } from '@/lib/js-engine/core/runtime';
 import type { LegadoInjector, LegadoRunRuntime } from '@/lib/js-engine/legado/quickjs-runner';
-import { bindGlobalVmObject, bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
+import { bindGlobalVmObject, bindVmFunction, vmNewLegadoStrResponse } from '@/lib/js-engine/legado/host/bind-vm';
+import { createLegadoStrResponse } from '@/lib/js-engine/legado/rule-script-browser';
 import { bindJavaAjax, type AjaxRequestFn } from '@/lib/js-engine/legado/host/build-ajax-vm';
 import { injectDateShimVm } from '@/lib/js-engine/legado/host/date-vm';
 import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
@@ -48,7 +49,10 @@ export interface LoginInjectContext {
     putLoginInfo: (json: string) => boolean;
     getKey: () => string;
   };
-  startBrowserAwait: (url: string, title?: string) => void;
+  startBrowserAwait: (
+    url: string,
+    title?: string,
+  ) => ReturnType<typeof createLegadoStrResponse>;
   /** 登录 POST body 兜底（邮箱/密码来自表单） */
   normalizeAjaxBody?: (
     resolvedUrl: string,
@@ -152,15 +156,15 @@ export function createLoginInjector(ctx: LoginInjectContext): LegadoInjector {
       });
       bindVmFunction(vm, javaObj, 'startBrowserAwait', (u, title) => {
         try {
-          ctx.startBrowserAwait(
+          const resp = ctx.startBrowserAwait(
             String(vm.dump(u)),
-            title != null ? String(vm.dump(title)) : undefined
+            title != null ? String(vm.dump(title)) : undefined,
           );
+          return vmNewLegadoStrResponse(vm, resp.body());
         } catch (e) {
           if (e instanceof Error && e.message === LEGADO_SUSPEND_MARKER) throw e;
           throw e;
         }
-        return vm.newString('');
       });
       bindVmFunction(vm, javaObj, 'base64Encode', (s) =>
         vm.newString(ctx.java.base64Encode(String(vm.dump(s))))

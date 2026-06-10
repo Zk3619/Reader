@@ -3,9 +3,13 @@
  */
 
 import type { BookSource } from '@/types';
+import { setExploreInfoMapValue } from '@/lib/book-source/explore-info-map-store';
 import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
 import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
+import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import {
+  EXPLORE_BASE_URL_FALLBACK_SHIM,
+  exploreScriptNeedsBaseUrlFallback,
   LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
   patchExploreScriptForReaderWeb,
 } from '@/lib/js-engine/legado/legado-explore-java-device';
@@ -21,9 +25,10 @@ export const STORAGE_PREFIX_CF_UA = 'reader_source_cf_ua_';
 
 /**
  * 书源变量 JSON 里表示「当前聚合服务器」的字段名。
- * Legado 常见 `server`；光遇/晴天聚合等用 `线路`（与 jsLib BaseUrl 一致）。
+ * Legado 常见 `server`；光遇等 jsLib 书源用 `线路`（与 BaseUrl 一致）。晴天发现/登录原生用 `server`。
  */
-export const LEGADO_SERVER_ARG_KEYS = ['server', '线路'] as const;
+/** 读取聚合线路时 `线路` 优先于 `server`（光遇）；写入时两者镜像同步。 */
+export const LEGADO_SERVER_ARG_KEYS = ['线路', 'server'] as const;
 
 /** 规范化 args 对象中的服务器 URL 字段（gyks http→https 等） */
 export function normalizeServerFieldsInSourceArgs(obj: Record<string, unknown>): void {
@@ -35,11 +40,11 @@ export function normalizeServerFieldsInSourceArgs(obj: Record<string, unknown>):
   }
 }
 
-/** 从书源变量 JSON 读取第一个有效的服务器 URL */
+/** 从书源变量 JSON 读取当前聚合线路（`线路` 优先于 `server`） */
 export function readServerUrlFromSourceArgs(obj: Record<string, unknown>): string | null {
   for (const key of LEGADO_SERVER_ARG_KEYS) {
     const v = obj[key];
-    if (typeof v === 'string' && isHttpUrl(v)) {
+    if (typeof v === 'string' && isHttpUrl(v.trim())) {
       return normalizeBookSourceServerUrl(v);
     }
   }
@@ -152,6 +157,67 @@ export function loadSourceCookieStore(cookiesKey: string): Map<string, string> {
   return store;
 }
 
+function readServerUrlFromArgsJson(raw: string | null | undefined): string {
+  if (!raw?.trim()) return '';
+  try {
+    return readServerUrlFromSourceArgs(JSON.parse(raw) as Record<string, unknown>) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function isLegadoServerArgKey(key: string): boolean {
+  return (LEGADO_SERVER_ARG_KEYS as readonly string[]).includes(key);
+}
+
+/** 光遇等：线路 与 server 镜像一致，供 BaseUrl / getArguments 共用（晴天原生仅用 server） */
+export function syncLegadoServerArgKeys(
+  data: Record<string, unknown>,
+  value: string,
+): void {
+  const normalized = normalizeBookSourceServerUrl(value.trim());
+  if (!normalized) return;
+  data['线路'] = normalized;
+  data['server'] = normalized;
+}
+
+/** 写入书源变量 JSON；线路/server 变更时递增发现脚本版本 */
+function normalizeSourceArgsJsonForPersist(val: string): string {
+  const trimmed = val.trim();
+  if (!trimmed.startsWith('{')) return val;
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    normalizeServerFieldsInSourceArgs(obj);
+    const server = readServerUrlFromSourceArgs(obj);
+    if (server) syncLegadoServerArgKeys(obj, server);
+    return JSON.stringify(obj);
+  } catch {
+    return val;
+  }
+}
+
+export function persistSourceArgsJson(
+  source: BookSource,
+  argsKey: string,
+  val: string,
+): void {
+  try {
+    const toStore = normalizeSourceArgsJsonForPersist(val);
+    const prev = localStorage.getItem(argsKey);
+    localStorage.setItem(argsKey, toStore);
+    const prevServer = readServerUrlFromArgsJson(prev);
+    const nextServer = readServerUrlFromArgsJson(toStore);
+    if (prevServer !== nextServer) {
+      bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
+      if (nextServer) {
+        setExploreInfoMapValue(getLegadoSourceKey(source), '线路', nextServer);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function normalizeSourceArgsVariableJson(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed.startsWith('{')) return raw;
@@ -183,11 +249,7 @@ export function createSourceVariableHandlers(
       return typeof header === 'string' && header ? header : '{}';
     },
     setVariable(val?: string) {
-      try {
-        if (typeof val === 'string') localStorage.setItem(argsKey, val);
-      } catch {
-        /* ignore */
-      }
+      if (typeof val === 'string') persistSourceArgsJson(source, argsKey, val);
     },
   };
 }
@@ -331,6 +393,73 @@ getFanqieCookie = function() {
  * 光遇 jsLib request() 在 java.ajax 返回空或非 JSON 时会同步递归 index+1 扫完全部线路。
  * Web 端 ajax 异步/挂起首轮常为空，须禁止同步扫线，改由宿主多轮重跑 + switchToNextLine。
  */
+/**
+ * 光遇/晴天：switchToNextLine 仅用云端 hosts 时，手动 IP 线路 findIndex=-1 会被误切回 v1。
+ * 合并云端 hosts 与 jsLib 本地 hosts，并把当前线路纳入轮转序列。
+ */
+export const GYKS_SWITCH_LINE_SHIM = `
+(function __readerGyksSwitchLineFix() {
+  if (typeof switchToNextLine !== 'function') return;
+  function __readerNormalizeHost(u) {
+    if (u == null || u === '') return '';
+    return String(u).replace(/\\/+$/, '');
+  }
+  function __readerMergeHosts(cloudHosts) {
+    var seen = {};
+    var out = [];
+    function add(raw) {
+      var h = __readerNormalizeHost(raw);
+      if (!h || seen[h]) return;
+      seen[h] = true;
+      out.push(h);
+    }
+    if (cloudHosts && cloudHosts.length) {
+      for (var i = 0; i < cloudHosts.length; i++) add(cloudHosts[i]);
+    }
+    if (typeof hosts !== 'undefined' && hosts && hosts.length) {
+      for (var j = 0; j < hosts.length; j++) add(hosts[j]);
+    }
+    return out;
+  }
+  switchToNextLine = function(toast) {
+    if (toast == undefined) toast = false;
+    var currentLine = '';
+    try {
+      if (typeof BaseUrl === 'function') currentLine = __readerNormalizeHost(BaseUrl.call(this));
+    } catch (e1) {}
+    var cloud = null;
+    try {
+      cloud = typeof getVariable === 'function' ? getVariable.call(this, '云端配置') : null;
+    } catch (e2) {}
+    var hostsbk = __readerMergeHosts(cloud && cloud.hosts);
+    if (hostsbk.length === 0) return currentLine;
+    if (hostsbk.length === 1) {
+      if (typeof setVariable === 'function') setVariable.call(this, '线路', hostsbk[0], false);
+      return hostsbk[0];
+    }
+    var idx = -1;
+    for (var k = 0; k < hostsbk.length; k++) {
+      if (hostsbk[k] === currentLine) { idx = k; break; }
+    }
+    if (idx < 0 && currentLine) {
+      hostsbk = [currentLine].concat(hostsbk.filter(function(h) { return h !== currentLine; }));
+      idx = 0;
+    }
+    var nextIndex = idx < 0 ? 0 : (idx + 1) % hostsbk.length;
+    var nextLine = hostsbk[nextIndex];
+    if (typeof setVariable === 'function') setVariable.call(this, '线路', nextLine, false);
+    var switchToast = 'true';
+    try {
+      switchToast = typeof getVariable === 'function' ? (getVariable.call(this, '切换提醒') || 'true') : 'true';
+    } catch (e3) {}
+    if (toast && switchToast === 'true' && typeof java !== 'undefined' && java.longToast) {
+      java.longToast('\\n' + toast + '\\n自动切换到:' + nextLine);
+    }
+    return nextLine;
+  };
+})();
+`.trim();
+
 /** 避免 getCloudSettings 在「云端配置」为空时访问 undefined.version */
 export const EXPLORE_GET_CLOUD_SETTINGS_GUARD_SHIM = `
 (function() {
@@ -516,17 +645,23 @@ export const EXPLORE_DISCOVERSTYLE_AJAX_GUARD = `
 /** jsLib + this 绑定 + 发现页兼容 shim + 用户脚本 */
 export function buildLegadoExploreScriptBundle(jsLib: string, scriptContent: string): string {
   const body = ensureExploreScriptSetsResult(scriptContent);
-  return [
-    jsLib ? jsLib + '\n' : '',
+  const parts: string[] = [];
+  if (jsLib) parts.push(jsLib);
+  if (exploreScriptNeedsBaseUrlFallback(jsLib, body)) {
+    parts.push(EXPLORE_BASE_URL_FALLBACK_SHIM);
+  }
+  parts.push(
     EXPLORE_JSLIB_THIS_BIND_SHIM,
     EXPLORE_JSLIB_CONTEXT_SHIM,
     EXPLORE_GET_CLOUD_SETTINGS_GUARD_SHIM,
+    GYKS_SWITCH_LINE_SHIM,
     GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
     EXPLORE_DISCOVERSTYLE_AJAX_GUARD,
     // two-pass 每轮 eval 都会重跑；须在书源 device_type 探测前覆盖 java.qread/deviceID
     LEGADO_EXPLORE_DEVICE_JAVA_SHIM,
     body,
-  ].join('\n');
+  );
+  return parts.join('\n');
 }
 
 /** Legado getArguments(open_argument, key) */
