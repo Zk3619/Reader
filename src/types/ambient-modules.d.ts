@@ -27,7 +27,20 @@ declare module 'sql.js' {
   ): Promise<SqlJsStatic>;
 }
 
-/** BarcodeDetector（部分 Chromium；用于二维码扫描） */
+declare module 'jsqr' {
+  export interface QRCode {
+    data: string;
+  }
+
+  export default function jsQR(
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    options?: { inversionAttempts?: 'dontInvert' | 'onlyInvert' | 'attemptBoth' },
+  ): QRCode | null;
+}
+
+/** BarcodeDetector（部分 Chromium / Android；桌面 WebView2 不可用，已回退 jsQR） */
 interface BarcodeDetectorOptions {
   formats?: string[];
 }
