@@ -72,6 +72,8 @@ export interface InnerWebCloseResult {
   confirmed: boolean;
   cookies: string;
   url: string;
+  /** Legado startBrowserAwait().body()：线路设置等 data: HTML 页在 √ 时的 document 快照 */
+  body?: string;
 }
 
 type OpenFn = (payload: InnerWebPayload) => void;
@@ -395,6 +397,67 @@ export function openInnerWebAwait(payload: InnerWebPayload): Promise<InnerWebClo
   });
 }
 
+/** 向内嵌 iframe 请求 document HTML（代理页 postMessage；srcdoc 优先走 contentDocument） */
+async function requestIframeDocumentHtml(frameWindow: Window): Promise<string> {
+  return new Promise((resolve) => {
+    const id = `html-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timeout = window.setTimeout(() => resolve(''), 1200);
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.source !== frameWindow) return;
+      const d = ev.data as { channel?: string; id?: string; result?: unknown };
+      if (d?.channel !== INNER_WEB_MESSAGE_CHANNEL || d.id !== id) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener('message', onMsg);
+      resolve(String(d.result ?? ''));
+    };
+    window.addEventListener('message', onMsg);
+    frameWindow.postMessage(
+      { channel: INNER_WEB_MESSAGE_CHANNEL, id, method: 'readDocumentHtml' },
+      '*',
+    );
+  });
+}
+
+/** √ 前抓取内嵌页 HTML（光遇 getServerSettings 解析 serverValue 等） */
+export async function pullInnerWebDocumentHtmlFromFrames(): Promise<string> {
+  if (typeof document === 'undefined') return '';
+
+  // Tauri panel 无 iframe：须用 WebView2 ExecuteScript 从子 WebView 同步取 HTML
+  if (isTauri()) {
+    try {
+      const html = (await invoke<string>('capture_inner_web_panel_document_html')).trim();
+      console.warn('[inner-web] panel capture', { len: html.length });
+      if (html) return html;
+    } catch (e) {
+      console.warn('[inner-web] capture_inner_web_panel_document_html failed', e);
+    }
+  }
+
+  const frames = document.querySelectorAll('iframe.reader-inner-web-iframe');
+  for (const el of frames) {
+    const frame = el as HTMLIFrameElement;
+    try {
+      const doc = frame.contentDocument;
+      if (doc?.documentElement) {
+        const html = doc.documentElement.outerHTML;
+        if (html.trim()) return html;
+      }
+    } catch {
+      /* cross-origin */
+    }
+    const win = frame.contentWindow;
+    if (!win) continue;
+    try {
+      const html = (await requestIframeDocumentHtml(win)).trim();
+      if (html) return html;
+    } catch (e) {
+      console.warn('[inner-web] requestIframeDocumentHtml failed', e);
+    }
+  }
+
+  return '';
+}
+
 /** 向内嵌 iframe 请求 document.cookie（Tauri / 代理会话在 √ 前同步用） */
 async function requestIframeDocumentCookie(frameWindow: Window): Promise<string> {
   return new Promise((resolve) => {
@@ -651,17 +714,28 @@ export async function confirmInnerWebClose(
     persisted?.bookSourceUrl?.trim() ||
     undefined;
 
-  let cookies = '';
-  if (isValidCookieSyncUrl(url)) {
-    cookies = await readInnerWebCookiesForConfirm(url);
+  // 须在 panel 关闭前抓取 HTML；与 Cookie 读取并行，避免 √ 后长时间卡住
+  const needCookies = isValidCookieSyncUrl(url);
+  const [bodyResult, cookiesResult] = await Promise.all([
+    pullInnerWebDocumentHtmlFromFrames().catch((e) => {
+      console.warn('[inner-web] pullInnerWebDocumentHtmlFromFrames failed', e);
+      return '';
+    }),
+    needCookies
+      ? readInnerWebCookiesForConfirm(url).catch((e) => {
+          console.warn('[inner-web] readInnerWebCookiesForConfirm failed', e);
+          return '';
+        })
+      : Promise.resolve(''),
+  ]);
+
+  let body = bodyResult;
+  if (!body.trim()) {
+    console.warn('[inner-web] confirm: document body empty', { url: url.slice(0, 120) });
   }
 
-  // 读 Cookie 后再刷新 UI；√ 前 refresh 会导致 panel/iframe 重载、罐内 Cookie 暂不可读
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(INNER_WEB_REFRESH_EVENT));
-  }
-
-  if (url.startsWith('http') && sourceKey) {
+  let cookies = cookiesResult;
+  if (url.startsWith('http') && sourceKey && cookies.trim()) {
     try {
       const { getSource } = await import('@/lib/database/sources');
       const src = await getSource(sourceKey);
@@ -676,9 +750,10 @@ export async function confirmInnerWebClose(
     }
   }
 
-  session?.resolve({ confirmed: true, cookies, url });
+  session?.resolve({ confirmed: true, cookies, url, body });
   pendingAwait = null;
-  await requestInnerWebDismiss();
+  // 不 await：立即让登录脚本继续，关闭动画与 panel 在后台完成
+  void requestInnerWebDismiss();
 }
 
 /** 返回或取消：不确认 */

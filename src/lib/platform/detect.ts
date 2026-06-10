@@ -84,6 +84,13 @@ export function isAndroid(): boolean {
   return /android/i.test(navigator.userAgent);
 }
 
+/** 是否 macOS（含 Tauri 桌面壳） */
+export function isMacOS(): boolean {
+  if (import.meta.env.TAURI_ENV_PLATFORM === 'macos') return true;
+  if (typeof navigator === 'undefined') return false;
+  return /macintosh|mac os x/i.test(navigator.userAgent);
+}
+
 /**
  * 缓存的环境检测结果（避免重复检测）
  */

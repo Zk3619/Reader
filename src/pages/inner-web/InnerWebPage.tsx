@@ -60,6 +60,25 @@ import { cn } from '@/lib/utils';
 const INNER_WEB_YUEDU_CHANNEL = 'reader-inner-web-yuedu';
 
 /** Legado「一键导入」yuedu:// → postMessage 宿主；仅内嵌 data: HTML iframe 可注入 */
+/** Legado startBrowserAwait().body()：响应宿主 readDocumentHtml */
+function injectInnerWebDocumentBridge(frame: HTMLIFrameElement): void {
+  try {
+    const doc = frame.contentDocument;
+    const root = doc?.documentElement;
+    if (!root || doc.getElementById('reader-inner-web-doc-bridge')) return;
+    const s = doc.createElement('script');
+    s.id = 'reader-inner-web-doc-bridge';
+    s.textContent =
+      "(function(){if(document.documentElement.dataset.readerDocBridge)return;document.documentElement.dataset.readerDocBridge='1';" +
+      "window.addEventListener('message',function(ev){var d=ev.data;if(!d||d.channel!=='reader-inner-web'||!d.id)return;" +
+      "if(d.method==='readDocumentHtml'){var html='';try{html=document.documentElement?document.documentElement.outerHTML:'';}catch(e){}" +
+      "try{ev.source.postMessage({channel:'reader-inner-web',id:d.id,result:html},ev.origin||'*');}catch(e2){}}});})();";
+    root.appendChild(s);
+  } catch {
+    /* ignore */
+  }
+}
+
 function injectYueduBooksourceBridge(frame: HTMLIFrameElement): void {
   try {
     const doc = frame.contentDocument;
@@ -473,11 +492,13 @@ export function InnerWebPage(props: InnerWebPageProps) {
 
   const handleIframeLoad = (ev: Event) => {
     void reinjectCookies();
-    if (!useHtmlContent()) return;
     const el = ev.currentTarget;
     if (el instanceof HTMLIFrameElement) {
-      yueduBridgeIframe = el;
-      injectYueduBooksourceBridge(el);
+      injectInnerWebDocumentBridge(el);
+      if (useHtmlContent()) {
+        yueduBridgeIframe = el;
+        injectYueduBooksourceBridge(el);
+      }
     }
   };
 

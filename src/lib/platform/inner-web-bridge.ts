@@ -95,6 +95,8 @@ async function handleMethod(
     }
     case 'readDocumentCookie':
       return String(args?.cookie ?? '');
+    case 'readDocumentHtml':
+      return String(args?.html ?? '');
     default:
       throw new Error(`未知方法: ${method}`);
   }
