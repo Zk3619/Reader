@@ -2,14 +2,13 @@
  * 书源编辑页（对齐 Legado Max BookSourceEditActivity + web SourceEditor）
  */
 
-import { createSignal, Show, For, onMount, createMemo, type JSX } from 'solid-js';
+import { createSignal, Show, For, onMount, onCleanup, createEffect, createMemo, type JSX } from 'solid-js';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import {
   PageHeader,
   type PageHeaderAction,
   type PageHeaderDropdownItem,
 } from '@/components/shell/PageHeader';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -29,14 +28,17 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import {
-  CheckIcon,
+  CodeIcon,
   CookieIcon,
   FileTextIcon,
   MoreIcon,
   QrCodeIcon,
-  Settings2Icon,
+  SaveIcon,
+  ScanQrCodeIcon,
 } from '@/components/shared/icons';
+import { SourceCodeEditor } from '@/components/shared/SourceCodeEditor';
 import { SourceDebugPanel } from '@/components/sources/SourceDebugPanel';
+import { createSourceDebugPanelStore } from '@/lib/book-source/source-debug-panel-store';
 import {
   SourceCodeEditDialog,
   type SourceCodeEditTarget,
@@ -73,9 +75,9 @@ import {
 import * as sourcesDb from '@/lib/database/sources';
 import type { BookSource } from '@/types';
 
-/** 书源规则多行输入：最小高度 + 随内容增高，不限制最大高度 */
+/** 书源规则多行输入：最小高度 + 随内容增高，超出后内部滚动 */
 const SOURCE_EDIT_TEXTAREA_CLASS =
-  'min-h-[4.5rem] max-h-none resize-none [field-sizing:content]';
+  'min-h-[4.5rem] max-h-60 resize-none overflow-y-auto [field-sizing:content]';
 
 /** 编辑 / 调试分栏最小占比（corvu resizable 0–1） */
 const SOURCE_EDIT_PANEL_MIN_SIZE = 0.28;
@@ -112,6 +114,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
   const [codeEditOpen, setCodeEditOpen] = createSignal(false);
   const [shareQrOpen, setShareQrOpen] = createSignal(false);
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
+  const debugStore = createSourceDebugPanelStore();
 
   const isDirty = () => baseline() !== legadoEditSnapshot(draft());
   const checkKeyword = () => draft().ruleSearch?.checkKeyWord?.trim() || '我的';
@@ -120,7 +123,16 @@ export function SourceEditPage(props: SourceEditPageProps) {
   const pageDescription = () =>
     isNew() ? '填写书源规则后保存' : draft().bookSourceName || props.sourceUrl || '';
 
+  const debugSource = () => {
+    try {
+      return legadoEditToBookSource(draft());
+    } catch {
+      return null;
+    }
+  };
+
   onMount(async () => {
+    void debugStore.initHttp();
     try {
       const groups = await sourcesDb.getAllSourceGroups();
       setSourceGroups(groups);
@@ -148,6 +160,12 @@ export function SourceEditPage(props: SourceEditPageProps) {
     } finally {
       setLoading(false);
     }
+  });
+
+  onCleanup(() => debugStore.dispose());
+
+  createEffect(() => {
+    void debugStore.loadExploreSections(debugSource());
   });
 
   function cloneDraft(prev: LegadoEditSource): LegadoEditSource {
@@ -424,11 +442,12 @@ export function SourceEditPage(props: SourceEditPageProps) {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              class="h-7 px-2 text-xs"
+              size="icon"
+              class="h-7 w-7 shrink-0"
               onClick={() => openCodeEdit(field, sectionKey)}
+              aria-label={`代码编辑：${field.title}`}
             >
-              全屏
+              <CodeIcon class="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -485,16 +504,11 @@ export function SourceEditPage(props: SourceEditPageProps) {
   );
 
   const DebugPane = () => (
-    <div class="flex min-h-0 flex-1 flex-col">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <SourceDebugPanel
-        source={() => {
-          try {
-            return legadoEditToBookSource(draft());
-          } catch {
-            return null;
-          }
-        }}
-        defaultKeyword={checkKeyword()}
+        store={debugStore}
+        source={debugSource}
+        checkKeyword={checkKeyword}
         onBeforeDebug={persistDraftForDebug}
       />
     </div>
@@ -506,17 +520,15 @@ export function SourceEditPage(props: SourceEditPageProps) {
         label: '调试书源',
         onClick: () => setPageMode('debug'),
       },
+      { separatorOnly: true, label: '' },
       {
-        icon: Settings2Icon,
-        label: `规则自动补全：${autoCompleteEnabled() ? '开' : '关'}`,
-        onClick: () => {
-          const next = !autoCompleteEnabled();
-          setAutoCompleteEnabled(next);
-          writeBookSourceAutoCompleteEnabled(next);
-          showAppToast({
-            title: next ? '已开启规则自动补全' : '已关闭规则自动补全',
-            variant: 'default',
-          });
+        label: '规则自动补全',
+        checkbox: {
+          checked: () => autoCompleteEnabled(),
+          onChange: (checked) => {
+            setAutoCompleteEnabled(checked);
+            writeBookSourceAutoCompleteEnabled(checked);
+          },
         },
       },
     ];
@@ -543,7 +555,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
       },
     });
     moreItems.push(
-      { icon: QrCodeIcon, label: '扫码导入', onClick: () => setQrImportOpen(true) },
+      { icon: ScanQrCodeIcon, label: '扫码导入', onClick: () => setQrImportOpen(true) },
       { icon: QrCodeIcon, label: '分享二维码', onClick: () => setShareQrOpen(true) },
       { icon: FileTextIcon, label: '编辑 JSON', onClick: openJsonDialog },
       { label: '复制书源', onClick: () => void copySourceJson() },
@@ -558,7 +570,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         dropdownItems: moreItems,
       },
       {
-        icon: CheckIcon,
+        icon: SaveIcon,
         label: saving() ? '保存中…' : '保存并关闭',
         onClick: () => void handleSave(),
         disabled: saving() || loading(),
@@ -594,75 +606,83 @@ export function SourceEditPage(props: SourceEditPageProps) {
             </div>
           }
         >
-          {/* 窄屏：编辑 / 调试分页 Tab */}
-          <Tabs
-            value={pageMode()}
-            onChange={(v) => setPageMode(v as 'edit' | 'debug')}
-            class="flex min-h-0 flex-1 flex-col md:hidden"
-          >
-            <TabsList class="mb-2 flex h-auto w-full shrink-0 gap-1 p-1">
-              <TabsTrigger
-                value="edit"
-                class="flex-1 text-sm hover:bg-background/60 hover:text-foreground"
-              >
-                编辑
-              </TabsTrigger>
-              <TabsTrigger
+          {/* 窄屏：编辑 / 调试分页（md 以下独占） */}
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
+            <Tabs
+              value={pageMode()}
+              onChange={(v) => setPageMode(v as 'edit' | 'debug')}
+              class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            >
+              <TabsList class="mb-2 flex h-auto w-full shrink-0 gap-1 p-1">
+                <TabsTrigger
+                  value="edit"
+                  class="flex-1 text-sm hover:bg-background/60 hover:text-foreground"
+                >
+                  编辑
+                </TabsTrigger>
+                <TabsTrigger
+                  value="debug"
+                  class="flex-1 text-sm hover:bg-background/60 hover:text-foreground"
+                >
+                  调试
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="edit" class="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <EditSectionsTabs />
+              </TabsContent>
+
+              <TabsContent
                 value="debug"
-                class="flex-1 text-sm hover:bg-background/60 hover:text-foreground"
+                class="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
               >
-                调试
-              </TabsTrigger>
-            </TabsList>
+                <DebugPane />
+              </TabsContent>
+            </Tabs>
+          </div>
 
-            <TabsContent value="edit" class="mt-0 flex min-h-0 flex-1 flex-col">
-              <EditSectionsTabs />
-            </TabsContent>
-
-            <TabsContent value="debug" class="mt-0 flex min-h-0 flex-1 flex-col">
-              <DebugPane />
-            </TabsContent>
-          </Tabs>
-
-          {/* md+：左右可拖拽分栏 */}
-          <Resizable class="hidden min-h-0 flex-1 md:flex">
-            <ResizablePanel
-              initialSize={0.58}
-              minSize={SOURCE_EDIT_PANEL_MIN_SIZE}
-              class="flex min-h-0 min-w-0 flex-col pr-1"
-            >
-              <EditSectionsTabs />
-            </ResizablePanel>
-            <ResizableHandle withHandle class="mx-1" />
-            <ResizablePanel
-              initialSize={0.42}
-              minSize={SOURCE_EDIT_PANEL_MIN_SIZE}
-              class="flex min-h-0 min-w-0 flex-col pl-1"
-            >
-              <DebugPane />
-            </ResizablePanel>
-          </Resizable>
+          {/* 宽屏：左右分栏（外层 hidden，避免 Resizable 内联 display 覆盖断点） */}
+          <div class="hidden min-h-0 min-w-0 flex-1 overflow-hidden md:flex">
+            <Resizable class="size-full min-h-0 min-w-0">
+              <ResizablePanel
+                initialSize={0.58}
+                minSize={SOURCE_EDIT_PANEL_MIN_SIZE}
+                class="flex min-h-0 min-w-0 flex-col pr-1"
+              >
+                <EditSectionsTabs />
+              </ResizablePanel>
+              <ResizableHandle withHandle class="mx-1" />
+              <ResizablePanel
+                initialSize={0.42}
+                minSize={SOURCE_EDIT_PANEL_MIN_SIZE}
+                class="flex min-h-0 min-w-0 flex-col pl-1"
+              >
+                <DebugPane />
+              </ResizablePanel>
+            </Resizable>
+          </div>
         </Show>
       </div>
 
       <AppDialog open={jsonDialogOpen()} onOpenChange={setJsonDialogOpen}>
-        <AppDialogContent class="max-h-[min(90vh,720px)] max-w-2xl">
+        <AppDialogContent
+          class="flex max-h-[min(90vh,720px)] max-w-2xl flex-col"
+          portalZClass="z-[70]"
+        >
           <AppDialogHeader>
             <AppDialogTitle>编辑 JSON</AppDialogTitle>
             <AppDialogDescription>直接编辑 Legado 书源 JSON，应用后将覆盖当前表单内容。</AppDialogDescription>
           </AppDialogHeader>
-          <TextField>
-            <TextFieldTextArea
-              class={cn(
-                SOURCE_EDIT_TEXTAREA_CLASS,
-                'min-h-[min(50vh,360px)] font-mono text-xs leading-relaxed',
-              )}
-              aria-label="书源 JSON"
-              placeholder="Legado 书源 JSON"
+          <div class="min-h-0 flex-1 px-6 pb-4">
+            <SourceCodeEditor
+              class="h-[min(56vh,460px)]"
               value={jsonText()}
-              onInput={(e) => setJsonText(e.currentTarget.value)}
+              onChange={setJsonText}
+              language="json"
+              ariaLabel="书源 JSON"
+              minHeight="min(48vh, 340px)"
             />
-          </TextField>
+          </div>
           <AppDialogFooter>
             <Button variant="outline" onClick={() => setJsonDialogOpen(false)}>
               取消
@@ -711,6 +731,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         target={codeEditTarget()}
         onOpenChange={setCodeEditOpen}
         onApply={applyCodeEdit}
+        portalZClass="z-[70]"
       />
 
       <SourceShareQrDialog
@@ -723,6 +744,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         open={qrImportOpen()}
         onOpenChange={setQrImportOpen}
         portalZClass="z-[70]"
+        autoImport
         onIdentify={(raw) => {
           props.onImportFromQr?.(raw);
           setQrImportOpen(false);

@@ -1,10 +1,19 @@
 /**
- * 全屏代码/规则编辑（对齐 Legado CodeEditActivity）
+ * 书源规则/代码编辑弹窗（对齐 Legado CodeEditActivity，使用 AppDialog + CodeMirror）
  */
 
 import { createSignal, createEffect, Show } from 'solid-js';
-import { Portal } from 'solid-js/web';
 import { Button } from '@/components/ui/button';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/shared/AppDialog';
+import { SourceCodeEditor } from '@/components/shared/SourceCodeEditor';
+import { resolveSourceFieldLanguage } from '@/lib/editor/source-code-language';
 import { cn } from '@/lib/utils';
 
 export interface SourceCodeEditTarget {
@@ -19,6 +28,7 @@ export interface SourceCodeEditDialogProps {
   target: SourceCodeEditTarget | null;
   onOpenChange: (open: boolean) => void;
   onApply: (value: string, meta: { tabKey: string; fieldKey: string }) => void;
+  portalZClass?: string;
 }
 
 export function SourceCodeEditDialog(props: SourceCodeEditDialogProps) {
@@ -38,36 +48,35 @@ export function SourceCodeEditDialog(props: SourceCodeEditDialogProps) {
   }
 
   return (
-    <Show when={props.open && props.target}>
-      {(target) => (
-        <Portal mount={document.body}>
-          <div
-            class="fixed inset-0 z-70 flex flex-col bg-background"
-            role="dialog"
-            aria-modal="true"
-            aria-label="全屏编辑"
+    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
+      <Show when={props.target}>
+        {(target) => (
+          <AppDialogContent
+            class={cn('flex max-h-[min(92vh,800px)] max-w-3xl flex-col gap-4')}
+            portalZClass={props.portalZClass ?? 'z-[70]'}
           >
-            <header class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <h2 class="min-w-0 truncate text-base font-semibold">{target().title}</h2>
-              <div class="flex shrink-0 gap-2">
-                <Button variant="outline" onClick={() => props.onOpenChange(false)}>
-                  取消
-                </Button>
-                <Button onClick={handleApply}>确定</Button>
-              </div>
-            </header>
-            <textarea
-              class={cn(
-                'min-h-0 flex-1 resize-none border-0 bg-background p-4 font-mono text-sm leading-relaxed',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-              )}
-              aria-label={target().title}
-              value={text()}
-              onInput={(e) => setText(e.currentTarget.value)}
-            />
-          </div>
-        </Portal>
-      )}
-    </Show>
+            <AppDialogHeader>
+              <AppDialogTitle>{target().title}</AppDialogTitle>
+              <AppDialogDescription>全屏编辑规则或脚本，支持行号与语法高亮。</AppDialogDescription>
+            </AppDialogHeader>
+            <div class="min-h-0 flex-1 px-6 pb-4">
+              <SourceCodeEditor
+                class="h-[min(56vh,500px)]"
+                value={text()}
+                onChange={setText}
+                language={resolveSourceFieldLanguage(target().fieldKey)}
+                ariaLabel={target().title}
+              />
+            </div>
+            <AppDialogFooter>
+              <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+                取消
+              </Button>
+              <Button onClick={handleApply}>确定</Button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        )}
+      </Show>
+    </AppDialog>
   );
 }
