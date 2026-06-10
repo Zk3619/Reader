@@ -21,9 +21,11 @@ const AUTO_COMPLETE_STORAGE_KEY = 'reader_book_source_edit_auto_complete';
 
 export function readBookSourceAutoCompleteEnabled(): boolean {
   try {
-    return localStorage.getItem(AUTO_COMPLETE_STORAGE_KEY) !== '0';
+    const stored = localStorage.getItem(AUTO_COMPLETE_STORAGE_KEY);
+    if (stored === null) return false;
+    return stored !== '0';
   } catch {
-    return true;
+    return false;
   }
 }
 

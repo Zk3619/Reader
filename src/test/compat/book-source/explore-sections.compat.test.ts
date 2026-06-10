@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BookSource } from '@/types';
 import {
+  augmentExploreServerSelectSections,
   getExploreSections,
   getExploreSectionSelectDisplayValue,
   isExploreUrlScript,
@@ -92,5 +93,28 @@ describe('explore section select display value', () => {
       }),
     ).toBe('听书');
     expect(ls.has(getSourceArgsKey(source))).toBe(true);
+  });
+
+  it('augmentExploreServerSelectSections 将当前线路移到 chars 首位', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => ls.get(k) ?? null,
+      setItem: (k: string, v: string) => ls.set(k, v),
+      removeItem: (k: string) => ls.delete(k),
+    });
+
+    const ip = 'http://101.35.133.34:8888';
+    ls.set(getSourceArgsKey(source), JSON.stringify({ 线路: ip, server: ip }));
+
+    const section = {
+      title: '线路',
+      type: 'select',
+      chars: ['https://v1.gyks.cf', ip],
+      default: 'https://v1.gyks.cf',
+      paramKey: '线路',
+    };
+
+    const [augmented] = augmentExploreServerSelectSections(source, [section]);
+    expect(augmented?.chars?.[0]).toBe(ip);
+    expect(augmented?.default).toBe(ip);
   });
 });

@@ -353,6 +353,12 @@ export async function exploreBook(
         scriptNotice: noticeBus,
       });
       html = fetched.body;
+      const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =
+        await import('@/lib/book-source/book-source-debug-hook');
+      if (isBookSourceDebugSession(source.sourceUrl)) {
+        emitBookSourceDebugMessage(source.sourceUrl, `≡获取成功:${exploreUrl}`);
+        emitBookSourceDebugCapture(source.sourceUrl, BOOK_SOURCE_DEBUG_HTML.SEARCH, html);
+      }
     } catch (e) {
       if (isScriptNoticeBlockedError(e)) {
         console.warn('[explore] 命中频率限制提示，停止本次解析', {

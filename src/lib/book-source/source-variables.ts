@@ -7,8 +7,10 @@ import type { BookSource, NewBookSource } from '@/types';
 import {
   getSourceArgsKey,
   getLegadoSourceKey,
+  normalizeServerFieldsInSourceArgs,
+  readServerUrlFromSourceArgs,
+  syncLegadoServerArgKeys,
 } from '@/lib/js-engine/legado/source-script-shared';
-import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 
 function parseArgsObject(raw: string | null): Record<string, unknown> {
@@ -26,9 +28,9 @@ function parseArgsObject(raw: string | null): Record<string, unknown> {
 
 function normalizeArgsObject(obj: Record<string, unknown>): Record<string, unknown> {
   const next = { ...obj };
-  if (typeof next.server === 'string' && next.server.trim()) {
-    next.server = normalizeBookSourceServerUrl(next.server);
-  }
+  normalizeServerFieldsInSourceArgs(next);
+  const server = readServerUrlFromSourceArgs(next);
+  if (server) syncLegadoServerArgKeys(next, server);
   return next;
 }
 

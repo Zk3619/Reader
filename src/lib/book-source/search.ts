@@ -20,6 +20,12 @@ import type { BookSource, SearchRule } from '@/types';
 import type { SearchBook } from '@/types';
 import { resolveSearchRequest } from '@/lib/book-source/analyze-search-url';
 import {
+  BOOK_SOURCE_DEBUG_HTML,
+  emitBookSourceDebugCapture,
+  emitBookSourceDebugMessage,
+  isBookSourceDebugSession,
+} from '@/lib/book-source/book-source-debug-hook';
+import {
   alignUrlToBookSourceRequestOrigin,
   buildSourceRequestHeaders,
   resolveBookSourceRequestOrigin,
@@ -513,6 +519,11 @@ export async function searchBook(
       } else {
         html = await openCfPanelAndRetry();
       }
+    }
+
+    if (isBookSourceDebugSession(source.sourceUrl)) {
+      emitBookSourceDebugMessage(source.sourceUrl, `≡获取成功:${searchUrl}`);
+      emitBookSourceDebugCapture(source.sourceUrl, BOOK_SOURCE_DEBUG_HTML.SEARCH, html);
     }
 
     const contentType = detectContentType(html);

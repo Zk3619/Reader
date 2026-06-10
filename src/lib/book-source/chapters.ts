@@ -1303,6 +1303,14 @@ export async function getChapterList(
           scriptNotice: noticeBus,
         });
         fetchedBody = fetched.body;
+        if (seenTocPages.size === 1) {
+          const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =
+            await import('@/lib/book-source/book-source-debug-hook');
+          if (isBookSourceDebugSession(source.sourceUrl)) {
+            emitBookSourceDebugMessage(source.sourceUrl, `≡获取成功:${currentTocUrl}`);
+            emitBookSourceDebugCapture(source.sourceUrl, BOOK_SOURCE_DEBUG_HTML.TOC, fetchedBody);
+          }
+        }
       } catch (e) {
         if (isScriptNoticeBlockedError(e)) {
           console.warn('[chapters] 命中频率限制提示，停止本次目录解析', {

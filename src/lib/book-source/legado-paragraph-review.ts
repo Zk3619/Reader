@@ -10,7 +10,11 @@ import {
   resolveBookSourceServerUrl,
 } from '@/lib/book-source/source-http';
 import { getStoredSourceCookiesForUrl } from '@/lib/js-engine';
-import { getSourceArgsKey, getScriptBaseUrl } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  getSourceArgsKey,
+  getScriptBaseUrl,
+  readServerUrlFromSourceArgs,
+} from '@/lib/js-engine/legado/source-script-shared';
 import { shouldUseInnerWebDocumentProxy } from '@/lib/http/inner-web-proxy-session';
 import { openInnerWeb, updateInnerWebPayload } from '@/lib/platform/inner-web';
 import { injectInnerWebBaseTag } from '@/lib/platform/inner-web-document-html';
@@ -25,10 +29,8 @@ function readServerFromSourceArgs(source: BookSource): string | undefined {
   try {
     const raw = localStorage.getItem(getSourceArgsKey(source));
     if (!raw) return undefined;
-    const data = JSON.parse(raw) as { server?: unknown };
-    if (typeof data.server === 'string' && data.server.trim()) {
-      return data.server.trim().replace(/\/+$/, '');
-    }
+    const server = readServerUrlFromSourceArgs(JSON.parse(raw) as Record<string, unknown>);
+    if (server) return server.replace(/\/+$/, '');
   } catch {
     /* ignore */
   }

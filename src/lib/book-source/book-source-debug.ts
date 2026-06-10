@@ -10,8 +10,15 @@ import {
   getContent,
 } from '@/lib/book-source';
 import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
+import {
+  BOOK_SOURCE_DEBUG_HIDDEN_STATES,
+  BOOK_SOURCE_DEBUG_HTML,
+  enterBookSourceDebugSession,
+  exitBookSourceDebugSession,
+} from '@/lib/book-source/book-source-debug-hook';
 import type { BookSource } from '@/types';
 import type { BookChapter } from '@/types';
+import type { SearchBook } from '@/types';
 
 export type BookSourceDebugCallback = (state: number, message: string) => void;
 
@@ -32,11 +39,13 @@ function isAbsUrl(key: string): boolean {
   return /^https?:\/\//i.test(key.trim());
 }
 
+/** 对齐 Legado Debug [mm:ss.SSS] */
 function formatElapsed(start: number): string {
   const ms = Date.now() - start;
-  const s = Math.floor(ms / 1000);
-  const frac = String(Math.floor((ms % 1000) / 10)).padStart(2, '0');
-  return `[${String(s).padStart(2, '0')}:${frac}]`;
+  const mm = Math.floor(ms / 60_000);
+  const ss = Math.floor((ms % 60_000) / 1000);
+  const sss = ms % 1000;
+  return `[${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${String(sss).padStart(3, '0')}]`;
 }
 
 function log(
@@ -47,8 +56,46 @@ function log(
   showTime = true,
 ): void {
   if (debugCancelled) return;
+  if (!msg && state === 1) {
+    onLog(state, '');
+    return;
+  }
   const line = showTime ? `${formatElapsed(start)} ${msg}` : msg;
   onLog(state, line);
+}
+
+function applySnapshotsFromState(
+  snapshots: BookSourceDebugSnapshots,
+  state: number,
+  message: string,
+): boolean {
+  switch (state) {
+    case BOOK_SOURCE_DEBUG_HTML.SEARCH:
+      snapshots.searchHtml = message;
+      return true;
+    case BOOK_SOURCE_DEBUG_HTML.BOOK:
+      snapshots.bookHtml = message;
+      return true;
+    case BOOK_SOURCE_DEBUG_HTML.TOC:
+      snapshots.tocHtml = message;
+      return true;
+    case BOOK_SOURCE_DEBUG_HTML.CONTENT:
+      snapshots.contentHtml = message;
+      return true;
+    default:
+      return false;
+  }
+}
+
+function createDebugRouter(
+  onLog: BookSourceDebugCallback,
+  snapshots: BookSourceDebugSnapshots,
+): BookSourceDebugCallback {
+  return (state, message) => {
+    if (applySnapshotsFromState(snapshots, state, message)) return;
+    if (BOOK_SOURCE_DEBUG_HIDDEN_STATES.has(state)) return;
+    onLog(state, message);
+  };
 }
 
 function mergeBookInfo(book: ReturnType<typeof searchBookToEphemeralBook>, info: Awaited<ReturnType<typeof getBookInfo>>) {
@@ -65,6 +112,22 @@ function mergeBookInfo(book: ReturnType<typeof searchBookToEphemeralBook>, info:
   };
 }
 
+function logSearchBookSummary(
+  onLog: BookSourceDebugCallback,
+  start: number,
+  book: SearchBook,
+): void {
+  const lines = [`◇《${book.name || '未命名'}》${book.author ? ` · ${book.author}` : ''}`];
+  if (book.bookUrl) lines.push(`  bookUrl: ${book.bookUrl}`);
+  if (book.tocUrl) lines.push(`  tocUrl: ${book.tocUrl}`);
+  if (book.kind) lines.push(`  kind: ${book.kind}`);
+  log(onLog, start, lines.join('\n'));
+}
+
+function isFileSource(source: BookSource): boolean {
+  return source.sourceType === 3;
+}
+
 async function contentDebug(
   source: BookSource,
   bookUrl: string,
@@ -73,7 +136,6 @@ async function contentDebug(
   nextUrl: string | undefined,
   onLog: BookSourceDebugCallback,
   start: number,
-  snapshots: BookSourceDebugSnapshots,
 ): Promise<void> {
   log(onLog, start, '︾开始解析正文页');
   const text = await getContent(source, chapter, nextUrl, {
@@ -101,7 +163,6 @@ async function contentDebug(
   });
   if (debugCancelled) return;
   if (text) {
-    snapshots.contentHtml = text.slice(0, 8000);
     const preview = text.length > 200 ? `${text.slice(0, 200)}…` : text;
     log(onLog, start, preview);
     log(onLog, start, '︽正文页解析完成', 1000);
@@ -115,7 +176,6 @@ async function tocDebug(
   book: ReturnType<typeof searchBookToEphemeralBook>,
   onLog: BookSourceDebugCallback,
   start: number,
-  snapshots: BookSourceDebugSnapshots,
 ): Promise<void> {
   if (book.tocUrl?.trim()) {
     log(onLog, start, '≡已获取目录链接,跳过详情页');
@@ -131,10 +191,14 @@ async function tocDebug(
       log(onLog, start, '︽详情页解析失败', -1);
       return;
     }
-    snapshots.bookHtml = info.infoHtml;
     book = mergeBookInfo(book, info);
     log(onLog, start, '︽详情页解析完成');
     log(onLog, start, '', 1, false);
+
+    if (isFileSource(source)) {
+      log(onLog, start, '≡文件类书源跳过解析目录', 1000);
+      return;
+    }
   }
 
   log(onLog, start, '︾开始解析目录页');
@@ -142,10 +206,10 @@ async function tocDebug(
   const chapters = await getChapterList(source, tocUrl);
   if (debugCancelled) return;
   if (chapters.length === 0) {
-    log(onLog, start, '≡没有正文章节', -1);
+    log(onLog, start, '≡没有正文章节');
     return;
   }
-  snapshots.tocHtml = chapters[0]?.title;
+  log(onLog, start, `◇共 ${chapters.length} 个章节，首章：${chapters[0]?.title || '—'}`);
   log(onLog, start, '︽目录页解析完成');
   log(onLog, start, '', 1, false);
 
@@ -153,7 +217,7 @@ async function tocDebug(
   const list = real.length > 0 ? real : chapters;
   const first = list[0];
   const nextUrl = list[1]?.url ?? first.url;
-  await contentDebug(source, book.bookUrl, tocUrl, first, nextUrl, onLog, start, snapshots);
+  await contentDebug(source, book.bookUrl, tocUrl, first, nextUrl, onLog, start);
 }
 
 async function exploreDebug(
@@ -161,7 +225,6 @@ async function exploreDebug(
   url: string,
   onLog: BookSourceDebugCallback,
   start: number,
-  snapshots: BookSourceDebugSnapshots,
 ): Promise<void> {
   log(onLog, start, '︾开始解析发现页');
   const books = await exploreBook(source, 1, url);
@@ -170,9 +233,10 @@ async function exploreDebug(
     log(onLog, start, '︽未获取到书籍', -1);
     return;
   }
+  logSearchBookSummary(onLog, start, books[0]);
   log(onLog, start, '︽发现页解析完成');
   log(onLog, start, '', 1, false);
-  await tocDebug(source, searchBookToEphemeralBook(books[0]), onLog, start, snapshots);
+  await tocDebug(source, searchBookToEphemeralBook(books[0]), onLog, start);
 }
 
 async function searchDebug(
@@ -180,7 +244,6 @@ async function searchDebug(
   key: string,
   onLog: BookSourceDebugCallback,
   start: number,
-  snapshots: BookSourceDebugSnapshots,
 ): Promise<void> {
   log(onLog, start, '︾开始解析搜索页');
   const books = await searchBook(source, key);
@@ -189,10 +252,10 @@ async function searchDebug(
     log(onLog, start, '︽未获取到书籍', -1);
     return;
   }
-  snapshots.searchHtml = books[0].intro;
+  logSearchBookSummary(onLog, start, books[0]);
   log(onLog, start, '︽搜索页解析完成');
   log(onLog, start, '', 1, false);
-  await tocDebug(source, searchBookToEphemeralBook(books[0]), onLog, start, snapshots);
+  await tocDebug(source, searchBookToEphemeralBook(books[0]), onLog, start);
 }
 
 /**
@@ -208,11 +271,16 @@ export async function startBookSourceDebug(
   const start = Date.now();
   const snapshots: BookSourceDebugSnapshots = {};
   const trimmed = key.trim();
+  const routeLog = createDebugRouter(onLog, snapshots);
+
+  enterBookSourceDebugSession(source.sourceUrl, routeLog, (message, state = 1) => {
+    log(routeLog, start, message, state);
+  });
 
   try {
     if (trimmed.startsWith('--')) {
       const url = trimmed.slice(2).trim();
-      log(onLog, start, `⇒开始访问正文页:${url}`);
+      log(routeLog, start, `⇒开始访问正文页:${url}`);
       const chapter: BookChapter = {
         title: '调试',
         url,
@@ -223,22 +291,13 @@ export async function startBookSourceDebug(
         isVip: false,
         isPay: false,
       };
-      await contentDebug(
-        source,
-        url,
-        url,
-        chapter,
-        undefined,
-        onLog,
-        start,
-        snapshots,
-      );
+      await contentDebug(source, url, url, chapter, undefined, routeLog, start);
       return snapshots;
     }
 
     if (trimmed.startsWith('++')) {
       const url = trimmed.slice(2).trim();
-      log(onLog, start, `⇒开始访问目录页:${url}`);
+      log(routeLog, start, `⇒开始访问目录页:${url}`);
       const book = searchBookToEphemeralBook({
         bookUrl: url,
         tocUrl: url,
@@ -252,19 +311,19 @@ export async function startBookSourceDebug(
         chapterWordCount: -1,
         respondTime: 0,
       });
-      await tocDebug(source, book, onLog, start, snapshots);
+      await tocDebug(source, book, routeLog, start);
       return snapshots;
     }
 
     if (trimmed.includes('::')) {
       const url = trimmed.substring(trimmed.indexOf('::') + 2).trim();
-      log(onLog, start, `⇒开始访问发现页:${url}`);
-      await exploreDebug(source, url, onLog, start, snapshots);
+      log(routeLog, start, `⇒开始访问发现页:${url}`);
+      await exploreDebug(source, url, routeLog, start);
       return snapshots;
     }
 
     if (isAbsUrl(trimmed)) {
-      log(onLog, start, `⇒开始访问详情页:${trimmed}`);
+      log(routeLog, start, `⇒开始访问详情页:${trimmed}`);
       const book = searchBookToEphemeralBook({
         bookUrl: trimmed,
         tocUrl: '',
@@ -278,16 +337,20 @@ export async function startBookSourceDebug(
         chapterWordCount: -1,
         respondTime: 0,
       });
-      await tocDebug(source, book, onLog, start, snapshots);
+      await tocDebug(source, book, routeLog, start);
       return snapshots;
     }
 
-    log(onLog, start, `⇒开始搜索关键字:${trimmed}`);
-    await searchDebug(source, trimmed, onLog, start, snapshots);
+    log(routeLog, start, `⇒开始搜索关键字:${trimmed}`);
+    await searchDebug(source, trimmed, routeLog, start);
     return snapshots;
   } catch (e) {
     const msg = e instanceof Error ? e.stack ?? e.message : String(e);
-    log(onLog, start, msg, -1);
+    log(routeLog, start, msg, -1);
     return snapshots;
+  } finally {
+    exitBookSourceDebugSession();
   }
 }
+
+export { BOOK_SOURCE_DEBUG_HIDDEN_STATES };

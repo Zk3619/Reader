@@ -6,9 +6,19 @@
 import type { BookSource } from '@/types';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
 import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
-import { getSourceArgsKey, getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
-import { getExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
-import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
+import {
+  normalizeBookSourceServerUrl,
+  resolveBookSourceServerUrl,
+} from '@/lib/book-source/source-http';
+import {
+  getSourceArgsKey,
+  getLegadoSourceKey,
+  isLegadoServerArgKey,
+  normalizeServerFieldsInSourceArgs,
+  persistSourceArgsJson,
+  syncLegadoServerArgKeys,
+} from '@/lib/js-engine/legado/source-script-shared';
+import { getExploreInfoMap, setExploreInfoMapValue } from '@/lib/book-source/explore-info-map-store';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
 export interface ExploreSectionStyle {
@@ -106,13 +116,13 @@ export function isExploreDrawerTextSection(section: ExploreSection): boolean {
   return section.type === 'text' || section.type === 'password';
 }
 
-/** 更新发现脚本用的书源变量（对齐 Legado setArguments / show） */
-export function updateExploreSourceArgument(
+/** 写入书源变量对象（发现 select / show action 与登录切线共用） */
+export function persistExploreSourceArgsObject(
   source: BookSource,
-  paramKey: string,
-  value: string
+  mutate: (data: Record<string, unknown>) => void,
 ): void {
   const argsKey = getSourceArgsKey(source);
+  const sourceKey = getLegadoSourceKey(source);
   let data: Record<string, unknown> = {};
   try {
     const raw = localStorage.getItem(argsKey);
@@ -120,21 +130,72 @@ export function updateExploreSourceArgument(
   } catch {
     /* ignore */
   }
-  data[paramKey] = value;
-  if (paramKey === 'find_tab') {
-    data.tab = value;
-    data.find_source = '番茄';
+  mutate(data);
+  normalizeServerFieldsInSourceArgs(data);
+  const server = readServerUrlFromExploreArgs(data);
+  if (server) {
+    syncLegadoServerArgKeys(data, server);
+    setExploreInfoMapValue(sourceKey, '线路', server);
   }
-  if (paramKey === 'find_source') {
-    data.sources = value;
+  persistSourceArgsJson(source, argsKey, JSON.stringify(data));
+  clearExploreSectionsCache(sourceKey);
+}
+
+function readServerUrlFromExploreArgs(data: Record<string, unknown>): string | undefined {
+  for (const key of ['线路', 'server'] as const) {
+    const v = data[key];
+    if (typeof v === 'string' && v.trim()) {
+      return normalizeBookSourceServerUrl(v);
+    }
   }
-  try {
-    localStorage.setItem(argsKey, JSON.stringify(data));
-  } catch {
-    /* ignore */
-  }
-  clearExploreSectionsCache(getLegadoSourceKey(source));
-  bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
+  return undefined;
+}
+
+/** 更新发现脚本用的书源变量（对齐 Legado setArguments / show） */
+export function updateExploreSourceArgument(
+  source: BookSource,
+  paramKey: string,
+  value: string
+): void {
+  persistExploreSourceArgsObject(source, (data) => {
+    data[paramKey] = value;
+    if (isLegadoServerArgKey(paramKey)) {
+      syncLegadoServerArgKeys(data, value);
+    }
+    if (paramKey === 'find_tab') {
+      data.tab = value;
+      data.find_source = '番茄';
+    }
+    if (paramKey === 'find_source') {
+      data.sources = value;
+    }
+  });
+}
+
+/**
+ * 发现「线路」下拉：脚本 chars 仅含云端 hosts，须并入当前已选线路（含登录页手动 IP）。
+ */
+export function augmentExploreServerSelectSections(
+  source: BookSource,
+  sections: ExploreSection[],
+): ExploreSection[] {
+  const current = resolveBookSourceServerUrl(source);
+  if (!current) return sections;
+
+  return sections.map((section) => {
+    if (!isExploreDrawerSelectSection(section)) return section;
+    if (section.paramKey !== '线路' && section.paramKey !== 'server') return section;
+    const chars = [...(section.chars ?? [])];
+    const idx = chars.findIndex((c) => normalizeBookSourceServerUrl(c) === current);
+    if (idx === 0) {
+      return section.default === current ? section : { ...section, default: current };
+    }
+    if (idx > 0) {
+      const reordered = [chars[idx]!, ...chars.filter((_, i) => i !== idx)];
+      return { ...section, chars: reordered, default: current };
+    }
+    return { ...section, chars: [current, ...chars], default: current };
+  });
 }
 
 /** 从书源变量 localStorage 读取发现脚本参数（对齐 Legado getArguments） */
@@ -160,6 +221,10 @@ export function getExploreSectionSelectDisplayValue(
   source: BookSource,
   section: ExploreSection,
 ): string {
+  if (section.paramKey && isLegadoServerArgKey(section.paramKey)) {
+    const server = resolveBookSourceServerUrl(source);
+    if (server) return server;
+  }
   if (section.paramKey) {
     const fromArgs = readExploreSourceArgumentValue(source, section.paramKey);
     if (fromArgs) return fromArgs;
@@ -358,8 +423,9 @@ export async function getExploreSectionsAsync(
         onScriptToast: noticeBus.onScriptToast,
       });
       if (sections.length > 0) {
-        exploreSectionsMemCache.set(cacheKey, sections);
-        return sections;
+        const augmented = augmentExploreServerSelectSections(source, sections);
+        exploreSectionsMemCache.set(cacheKey, augmented);
+        return augmented;
       }
     } catch (e) {
       console.warn('[getExploreSectionsAsync] script run failed:', e);

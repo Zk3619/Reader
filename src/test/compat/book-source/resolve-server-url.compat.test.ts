@@ -52,4 +52,22 @@ describe('resolveBookSourceServerUrl', () => {
     } as BookSource);
     expect(url).toBe('https://v3.gyks.cf');
   });
+
+  it('server 与 线路 不一致时优先 线路（登录切线仅写 线路）', () => {
+    const ip = 'http://101.35.133.34:8888';
+    localStorage.setItem(
+      getSourceArgsKey({ sourceUrl } as BookSource),
+      JSON.stringify({
+        server: 'https://v1.gyks.cf',
+        线路: ip,
+        deviceId: '715526ded4651ef6',
+      }),
+    );
+    const url = resolveBookSourceServerUrl({
+      sourceUrl,
+      sourceName: 'test',
+      jsLib: GYKS_JS_LIB,
+    } as BookSource);
+    expect(url).toBe(ip);
+  });
 });

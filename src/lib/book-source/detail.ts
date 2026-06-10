@@ -718,6 +718,12 @@ export async function getBookInfo(
       timeout: 30_000,
       cfTitle: `书籍详情 — ${source.sourceName?.trim() || '书源'}`,
     });
+    const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =
+      await import('@/lib/book-source/book-source-debug-hook');
+    if (isBookSourceDebugSession(source.sourceUrl)) {
+      emitBookSourceDebugMessage(source.sourceUrl, `≡获取成功:${bookUrl}`);
+      emitBookSourceDebugCapture(source.sourceUrl, BOOK_SOURCE_DEBUG_HTML.BOOK, html);
+    }
     await assertLoginCheckPassed(source, html, bookUrl);
     if (consumeHtmlRateLimitNotice(noticeBus, html)) {
       return null;

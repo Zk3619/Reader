@@ -8,6 +8,8 @@ import {
   getExploreSectionSelectDisplayValue,
   isExploreDrawerSelectSection,
 } from '@/lib/book-source/explore-sections';
+import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
+import { isLegadoServerArgKey } from '@/lib/js-engine/legado/source-script-shared';
 import { shouldOpenExplorePageForSection } from '@/lib/book-source/explore-section-action';
 import { EXPLORE_KIND_DEFAULT_BASIS_PERCENT } from '@/lib/book-source/legado-flex-child-style';
 
@@ -93,7 +95,7 @@ export function getExploreArgumentSelectValue(
 
 /** 下拉项展示文案（线路存 URL，展示 hostname） */
 export function formatExploreSelectOptionLabel(title: string, paramKey?: string): string {
-  if (paramKey === 'server') {
+  if (paramKey && isLegadoServerArgKey(paramKey)) {
     try {
       const host = new URL(title).hostname;
       return host || title;
@@ -132,6 +134,30 @@ export type ExploreNavAutoSelection = {
   argumentUpdate?: { paramKey: string; value: string };
 };
 
+function exploreSelectOptionMatchesValue(
+  optionTitle: string,
+  current: string,
+  paramKey?: string,
+): boolean {
+  if (current === optionTitle) return true;
+  if (!paramKey || !isLegadoServerArgKey(paramKey)) return false;
+  try {
+    return normalizeBookSourceServerUrl(current) === normalizeBookSourceServerUrl(optionTitle);
+  } catch {
+    return false;
+  }
+}
+
+function isExploreSelectCurrentInOptions(
+  item: Extract<ExploreSectionNavItem, { kind: 'select' }>,
+  current: string,
+  paramKey?: string,
+): boolean {
+  const trimmed = current.trim();
+  if (!trimmed) return false;
+  return item.options.some((o) => exploreSelectOptionMatchesValue(o.title, trimmed, paramKey));
+}
+
 /**
  * 探索 hub 默认选中：导航区第一个可选项（按钮或下拉首项）。
  * 若首项为书源变量筛选且当前值未对齐，返回 argumentUpdate。
@@ -157,11 +183,14 @@ export function resolveDefaultExploreNavSelection(
   }
 
   if (first.filterSection?.paramKey) {
+    const paramKey = first.filterSection.paramKey;
     const current = getExploreArgumentSelectValue(first, selectedSection, source);
-    if (current !== opt.title) {
+    const currentValid = isExploreSelectCurrentInOptions(first, current, paramKey);
+    const matchesFirst = exploreSelectOptionMatchesValue(opt.title, current, paramKey);
+    if (!currentValid && !matchesFirst) {
       return {
         section: shouldOpenExplorePageForSection(opt) ? opt : pickDefaultExploreHubSection(sections),
-        argumentUpdate: { paramKey: first.filterSection.paramKey, value: opt.title },
+        argumentUpdate: { paramKey, value: opt.title },
       };
     }
     if (shouldOpenExplorePageForSection(opt)) {

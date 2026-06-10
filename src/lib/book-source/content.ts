@@ -613,6 +613,12 @@ async function resolveChapterRuleBody(
       absoluteUrl,
       scriptNotice,
     );
+    const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =
+      await import('@/lib/book-source/book-source-debug-hook');
+    if (isBookSourceDebugSession(source.sourceUrl)) {
+      emitBookSourceDebugMessage(source.sourceUrl, `≡获取成功:${absoluteUrl}`);
+      emitBookSourceDebugCapture(source.sourceUrl, BOOK_SOURCE_DEBUG_HTML.CONTENT, html);
+    }
     return {
       body: html,
       baseUrl: absoluteUrl,
