@@ -2624,6 +2624,7 @@ function AppContent() {
               onOpenRecentBook={(book) => void openRecentBook(book)}
               sidebarState={state}
               onToggleSidebar={toggleSidebar}
+              offsetTopAppBar={showTopNav()}
             />
           </div>
         </Show>
@@ -2903,7 +2904,6 @@ function AppContent() {
                     onSourcesImportLocal={() => void openLocalBookSourceImport()}
                     onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
                     onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
-                    showSourcesImportQR={isMobile()}
                     onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
                   />
                 </Show>
@@ -3210,6 +3210,7 @@ function AppContent() {
           open={showImportSourceQrDialog()}
           onOpenChange={setShowImportSourceQrDialog}
           portalZClass={bookSourceImportDialogPortalZ()}
+          autoImport
           onIdentify={(raw) => {
             void identifySourcesFromQrRaw(raw);
           }}
@@ -3257,7 +3258,6 @@ function AppContent() {
             if (!open) setSourceLoginDialogSource(null);
           }}
           source={sourceLoginDialogSource()}
-          onOpenSourceVariables={openSourceVariables}
         />
         <SourceVariableDialog
           open={!!sourceVariableDialogSource()}

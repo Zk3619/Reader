@@ -283,7 +283,6 @@ export interface SourcesManagePageProps {
   onSourcesImportLocal?: () => void;
   onSourcesImportNetwork?: () => void;
   onSourcesImportQR?: () => void;
-  showSourcesImportQR?: boolean;
   onOpenSourceGroupManage?: () => void;
 }
 
@@ -773,7 +772,6 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
           onSourcesImportLocal={props.onSourcesImportLocal}
           onSourcesImportNetwork={props.onSourcesImportNetwork}
           onSourcesImportQR={props.onSourcesImportQR}
-          showSourcesImportQR={props.showSourcesImportQR}
           onOpenSourceGroupManage={props.onOpenSourceGroupManage}
           enableDragSort={props.enableDragSort ?? true}
           onEnableDragSortChange={props.onEnableDragSortChange}

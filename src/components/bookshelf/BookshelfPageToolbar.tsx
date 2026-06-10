@@ -1,5 +1,5 @@
 /**
- * 书架页操作区：搜索（本地过滤 + 回车全网搜索）、更多菜单
+ * 书架页操作区：进入搜索页、更多菜单
  */
 
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
@@ -32,7 +32,6 @@ import {
 import { BookshelfLayoutDialog } from '@/components/bookshelf/BookshelfLayoutDialog';
 import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
 import type { PageType } from '@/components/shell/Navigation';
-import type { SearchMode } from '@/lib/search/search-prefs';
 import { cn } from '@/lib/utils';
 
 export interface BookshelfPageToolbarProps {
@@ -50,27 +49,8 @@ export interface BookshelfPageToolbarProps {
   onReloadLocal?: () => void;
   pendingUpdateScope?: 'total' | 'group';
   pendingUpdateBookUrls?: () => readonly string[];
-  searchQuery?: string;
-  onSearchQueryChange?: (query: string) => void;
-  /** books：书籍本地过滤 + 全网搜索；groups：仅分组名常规过滤（与分组管理页一致） */
-  searchTarget?: 'books' | 'groups';
-  searchMode?: SearchMode;
-  onSearchModeChange?: (mode: SearchMode) => void;
-  /** 回车或点击「搜索」进入全网搜索页（仅 books） */
+  /** 点击搜索图标进入全网搜索页 */
   onOpenGlobalSearch?: (query: string) => void;
-}
-
-function MenuRadioIndicator(props: { selected: boolean }) {
-  return (
-    <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-      <span class="relative flex size-4 items-center justify-center" aria-hidden>
-        <span class="size-4 rounded-full border border-primary" />
-        <Show when={props.selected}>
-          <span class="absolute size-2 rounded-full bg-primary" />
-        </Show>
-      </span>
-    </span>
-  );
 }
 
 export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
@@ -88,9 +68,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
     });
   });
 
-  const isGroupSearch = () => (props.searchTarget ?? 'books') === 'groups';
   const openGlobalSearchPage = () => {
-    props.onOpenGlobalSearch?.((props.searchQuery ?? '').trim());
+    props.onOpenGlobalSearch?.('');
   };
 
   return (
@@ -112,7 +91,7 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
             <SearchIcon class="h-4 w-4" />
             <span class="sr-only">搜索</span>
           </TooltipTrigger>
-          <TooltipContent>{isGroupSearch() ? '进入搜索页' : '进入搜索页'}</TooltipContent>
+          <TooltipContent>进入搜索页</TooltipContent>
         </Tooltip>
 
         <Show when={props.showReloadLocal}>
@@ -181,22 +160,7 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
               <FolderTreeIcon class="h-4 w-4" />
               <span>分组管理</span>
             </AppDropdownMenuItem>
-            <Show when={!isGroupSearch()}>
-              <AppDropdownMenuSeparator />
-              <AppDropdownMenuItem onSelect={() => props.onSearchModeChange?.('name')}>
-                <MenuRadioIndicator selected={(props.searchMode ?? 'name') === 'name'} />
-                <span>常规搜索</span>
-              </AppDropdownMenuItem>
-              <AppDropdownMenuItem onSelect={() => props.onSearchModeChange?.('fuzzy')}>
-                <MenuRadioIndicator selected={props.searchMode === 'fuzzy'} />
-                <span>模糊搜索</span>
-              </AppDropdownMenuItem>
-              <AppDropdownMenuItem onSelect={() => props.onSearchModeChange?.('extended')}>
-                <MenuRadioIndicator selected={props.searchMode === 'extended'} />
-                <span>扩展搜索</span>
-              </AppDropdownMenuItem>
-              <AppDropdownMenuSeparator />
-            </Show>
+            <AppDropdownMenuSeparator />
             <AppDropdownMenuItem onSelect={() => props.onOpenChapterCache?.()}>
               <DownloadIcon class="h-4 w-4" />
               <span>缓存导出</span>

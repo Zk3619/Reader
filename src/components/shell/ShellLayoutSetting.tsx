@@ -34,6 +34,12 @@ export function ShellLayoutSetting() {
       : '当前环境为桌面端，将使用顶栏布局。';
   });
 
+  const handleLayoutChange = (value: string) => {
+    const next = value as ShellLayoutPreference;
+    if (next === layout()) return;
+    void settingsStore.setShellLayout(next);
+  };
+
   return (
     <Show
       when={shell().isWide}
@@ -63,7 +69,7 @@ export function ShellLayoutSetting() {
           </div>
           <Tabs
             value={layout()}
-            onChange={(value) => void settingsStore.setShellLayout(value as ShellLayoutPreference)}
+            onChange={handleLayoutChange}
             class="w-full shrink-0 sm:w-auto"
           >
             <TabsList class={settingsOptionTabsListClass} aria-label="导航布局">

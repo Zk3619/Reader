@@ -63,6 +63,8 @@ interface SideBarProps {
   /** 由 App 层 SidebarProvider 注入，避免独立页卸载后重挂载时丢失上下文 */
   sidebarState: Accessor<"expanded" | "collapsed">;
   onToggleSidebar: () => void;
+  /** 是否为主壳顶栏留出 top 偏移（与 App 层 showTopNav 一致） */
+  offsetTopAppBar?: boolean;
 }
 
 /** 侧栏可点击项：圆角矩形背景 + 选中时左侧主色竖条（避免与右侧徽标冲突） */
@@ -104,9 +106,14 @@ export function SideBar(props: SideBarProps) {
   return (
     <Sidebar
       collapsible="icon"
-      class="inset-top-app-bar bottom-0 border-r border-sidebar-border"
+      class={cn(
+        "bottom-0! h-auto! border-r border-sidebar-border",
+        props.offsetTopAppBar
+          ? "top-[calc(var(--app-bar-height)+var(--safe-area-top-effective))]!"
+          : "top-0!",
+      )}
     >
-      <SidebarContent class="h-full overflow-y-auto mb-4">
+      <SidebarContent>
         {/* 主菜单 */}
         <SidebarGroup>
           <SidebarGroupContent>
@@ -234,34 +241,36 @@ export function SideBar(props: SideBarProps) {
       </SidebarContent>
 
       {/* 底部：收起/展开按钮 */}
-      <SidebarFooter class="border-t border-sidebar-border">
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            onClick={() => props.onToggleSidebar()}
-            tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
-            class={sidebarNavButtonClass(
-              false,
-              "group/toggle-button h-10 [&_svg]:size-4 group-data-[collapsible=icon]:justify-center"
-            )}
-          >
-            <Show
-              when={isCollapsed()}
-              fallback={
-                <>
-                  <ChevronLeftIcon class="h-4 w-4 transition-colors duration-200" size={16} />
-                  <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
-                    收起
-                  </span>
-                </>
-              }
+      <SidebarFooter class="mt-auto shrink-0 border-t border-sidebar-border">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={() => props.onToggleSidebar()}
+              tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
+              class={sidebarNavButtonClass(
+                false,
+                "group/toggle-button h-10 [&_svg]:size-4 group-data-[collapsible=icon]:justify-center"
+              )}
             >
-              <ChevronRightIcon
-                class="h-4 w-4 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto"
-                size={16}
-              />
-            </Show>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+              <Show
+                when={isCollapsed()}
+                fallback={
+                  <>
+                    <ChevronLeftIcon class="h-4 w-4 transition-colors duration-200" size={16} />
+                    <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                      收起
+                    </span>
+                  </>
+                }
+              >
+                <ChevronRightIcon
+                  class="h-4 w-4 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto"
+                  size={16}
+                />
+              </Show>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );

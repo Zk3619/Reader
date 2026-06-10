@@ -20,6 +20,7 @@ import {
   AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { cn } from '@/lib/utils';
@@ -51,9 +52,17 @@ export interface PageHeaderDropdownItem {
   /** 标签文本 */
   label: string;
   /** 点击回调 */
-  onClick: () => void;
-  /** 是否为分隔符 */
+  onClick?: () => void;
+  /** 是否为分隔符（可与菜单项同存，在项前画线） */
   separator?: boolean;
+  /** 仅渲染分隔线，不渲染菜单项 */
+  separatorOnly?: boolean;
+  /** 复选框项（与排序下拉等一致的勾选样式） */
+  checkbox?: {
+    checked: () => boolean;
+    onChange: (checked: boolean) => void;
+    closeOnSelect?: boolean;
+  };
 }
 
 export interface PageHeaderProps {
@@ -140,19 +149,38 @@ function DropdownActionButton(props: {
         <For each={props.action.dropdownItems}>
           {(item) => (
             <>
-              <Show when={item.separator}>
+              <Show when={item.separator || item.separatorOnly}>
                 <AppDropdownMenuSeparator />
               </Show>
-                <AppDropdownMenuItem onSelect={() => item.onClick()}>
-                  {(() => {
-                    if (item.icon) {
-                      const Icon = item.icon;
-                      return <Icon class="h-4 w-4" />;
-                    }
-                    return null;
-                  })()}
-                  <span>{item.label}</span>
-                </AppDropdownMenuItem>
+              <Show when={!item.separatorOnly}>
+              <Show
+                when={item.checkbox}
+                fallback={
+                  <AppDropdownMenuItem onSelect={() => item.onClick?.()}>
+                    {(() => {
+                      if (item.icon) {
+                        const Icon = item.icon;
+                        return <Icon class="h-4 w-4" />;
+                      }
+                      return null;
+                    })()}
+                    <span>{item.label}</span>
+                  </AppDropdownMenuItem>
+                }
+              >
+                {(checkbox) => (
+                  <AppDropdownMenuItem
+                    onSelect={() => checkbox().onChange(!checkbox().checked())}
+                    class="flex items-center gap-2"
+                  >
+                    <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+                      <Checkbox checked={checkbox().checked()} aria-label={item.label} />
+                    </span>
+                    <span>{item.label}</span>
+                  </AppDropdownMenuItem>
+                )}
+              </Show>
+              </Show>
             </>
           )}
         </For>

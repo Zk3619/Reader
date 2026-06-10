@@ -294,16 +294,6 @@ export async function saveSourcesPagePrefs(prefs: SourcesPagePrefs): Promise<voi
   await setStorage(SOURCES_PAGE_PREFS_KEY, prefs);
 }
 
-export async function loadBookshelfMainSearchMode(): Promise<SearchMode> {
-  const prefs = await loadBookshelfPagePrefs();
-  return prefs.searchMode;
-}
-
-export async function saveBookshelfMainSearchMode(mode: SearchMode): Promise<void> {
-  const prefs = await loadBookshelfPagePrefs();
-  await saveBookshelfPagePrefs({ ...prefs, searchMode: mode });
-}
-
 export async function loadBookshelfSearchSubPageMode(): Promise<SearchMode> {
   const prefs = await loadBookshelfPagePrefs();
   return prefs.children.search.searchMode;

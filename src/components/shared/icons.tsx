@@ -61,7 +61,10 @@ import {
   Pencil,
   Play,
   QrCode,
+  ScanQrCode,
+  Code,
   RefreshCw,
+  Save,
   Search,
   Settings,
   SlidersHorizontal,
@@ -142,6 +145,8 @@ export const ExportIcon = icon(SquareArrowRightExit);
 export const ImportIcon = icon(SquareArrowRightEnter);
 export const FileTextIcon = icon(FileText);
 export const QrCodeIcon = icon(QrCode);
+export const ScanQrCodeIcon = icon(ScanQrCode);
+export const CodeIcon = icon(Code);
 export const ChevronLeftIcon = icon(ChevronLeft);
 export const ListIcon = icon(List);
 export const ImmersiveIcon = icon(BookOpen);
@@ -156,6 +161,7 @@ export const ReplaceIcon = icon(ArrowLeftRight);
 /** UI  primitives（shadcn / 通用控件） */
 export const XIcon = icon(X);
 export const CheckIcon = icon(Check);
+export const SaveIcon = icon(Save);
 export const MinusIcon = icon(Minus);
 export const ChevronsUpDownIcon = icon(ChevronsUpDown);
 export const PanelLeftIcon = icon(PanelLeft);

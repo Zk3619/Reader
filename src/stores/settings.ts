@@ -13,10 +13,13 @@ import { createStore } from 'solid-js/store';
 import type { ShellLayoutPreference } from '@/lib/shell/layout';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import { readHmrData, writeHmrData } from '@/lib/dev/hmr-state';
 import {
   onInnerWebSessionEnded,
   resetInnerWebPanelRuntimeAvailability,
 } from '@/lib/platform/inner-web-mode';
+import { isTauri } from '@/lib/platform/detect';
+import { migrateAppStorageSettings } from '@/lib/platform/fs/migration';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 
 /**
@@ -143,6 +146,56 @@ export const settingsState = state;
  */
 const SETTINGS_STORAGE_KEY = 'app_settings';
 
+/** 与 platform/storage WebStorage 前缀一致，用于首屏同步水合 */
+const WEB_SETTINGS_STORAGE_ITEM_KEY = `store_settings.json_${SETTINGS_STORAGE_KEY}`;
+
+const HMR_SETTINGS_KEY = 'appSettingsSnapshot';
+
+let settingsHydrated = false;
+let loadSettingsPromise: Promise<void> | null = null;
+
+function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
+  return migrateAppStorageSettings({
+    ...defaultAppSettings,
+    ...stored,
+  });
+}
+
+/** Web：在首屏渲染前从 localStorage 同步恢复，避免闪回默认布局 */
+function hydrateSettingsFromWebStorageSync(): void {
+  if (isTauri() || typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(WEB_SETTINGS_STORAGE_ITEM_KEY);
+    if (!raw) return;
+    const stored = JSON.parse(raw) as Partial<AppSettings>;
+    setState('app', mergeStoredAppSettings(stored));
+  } catch (e) {
+    console.warn('[settings] Web 同步水合失败，将等待异步加载', e);
+  }
+}
+
+/** DEV HMR：模块热替换时恢复内存中的设置，避免壳层布局等偏好被重置 */
+function restoreSettingsFromHmr(): void {
+  if (!import.meta.env.DEV || !import.meta.hot) return;
+  const cached = readHmrData<Partial<AppSettings> | null>(HMR_SETTINGS_KEY, null);
+  if (!cached) return;
+  setState('app', mergeStoredAppSettings(cached));
+}
+
+function snapshotSettingsForHmr(): void {
+  if (!import.meta.env.DEV || !import.meta.hot) return;
+  writeHmrData(HMR_SETTINGS_KEY, { ...state.app });
+}
+
+restoreSettingsFromHmr();
+hydrateSettingsFromWebStorageSync();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    snapshotSettingsForHmr();
+  });
+}
+
 /**
  * 设置Store Actions
  */
@@ -152,42 +205,58 @@ export const settingsStore = {
     return state;
   },
 
+  /** 是否已完成至少一次持久化加载 */
+  isHydrated(): boolean {
+    return settingsHydrated;
+  },
+
   /**
    * 加载设置
    */
   async loadSettings(): Promise<void> {
-    setState({ loading: true, error: null });
-
-    try {
-      const stored = await getStorage<AppSettings>(SETTINGS_STORAGE_KEY);
-      if (stored) {
-        const { migrateAppStorageSettings } = await import(
-          '@/lib/platform/fs/migration'
-        );
-        const migrated = migrateAppStorageSettings({
-          ...defaultAppSettings,
-          ...stored,
-        });
-        setState({ app: migrated, loading: false });
-        if (migrated.booksStorageRoot && migrated.booksStorageRoot !== stored.booksStorageRoot) {
-          await setStorage(SETTINGS_STORAGE_KEY, migrated);
-        }
-      } else {
-        setState({ loading: false });
-      }
-    } catch (e) {
-      const error = e instanceof Error ? e.message : '加载设置失败';
-      setState({ error, loading: false });
-      console.error(error, e);
+    if (loadSettingsPromise) {
+      return loadSettingsPromise;
     }
+
+    loadSettingsPromise = (async () => {
+      setState({ loading: true, error: null });
+
+      try {
+        const stored = await getStorage<AppSettings>(SETTINGS_STORAGE_KEY);
+        if (stored) {
+          const migrated = mergeStoredAppSettings(stored);
+          setState({ app: migrated, loading: false });
+          if (migrated.booksStorageRoot && migrated.booksStorageRoot !== stored.booksStorageRoot) {
+            await setStorage(SETTINGS_STORAGE_KEY, migrated);
+          }
+        } else {
+          setState({ loading: false });
+        }
+        settingsHydrated = true;
+        snapshotSettingsForHmr();
+      } catch (e) {
+        const error = e instanceof Error ? e.message : '加载设置失败';
+        setState({ error, loading: false });
+        console.error(error, e);
+      } finally {
+        loadSettingsPromise = null;
+      }
+    })();
+
+    return loadSettingsPromise;
   },
 
   /**
    * 保存设置
    */
   async saveSettings(): Promise<void> {
+    if (!settingsHydrated) {
+      await this.loadSettings();
+    }
+
     try {
       await setStorage(SETTINGS_STORAGE_KEY, state.app);
+      snapshotSettingsForHmr();
     } catch (e) {
       const error = e instanceof Error ? e.message : '保存设置失败';
       setState({ error });

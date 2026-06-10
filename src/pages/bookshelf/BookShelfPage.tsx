@@ -107,12 +107,6 @@ import { BookshelfPageToolbar } from '@/components/bookshelf/BookshelfPageToolba
 import type { PageType } from '@/components/shell/Navigation';
 import { enqueueUpdateToc } from '@/lib/book-source/update-toc-queue';
 import { textViewerStore } from '@/stores/viewer';
-import {
-  loadBookshelfMainSearchMode,
-  saveBookshelfMainSearchMode,
-  type SearchMode,
-} from '@/lib/search/search-prefs';
-
 export interface BookShelfProps {
   /** 为 false 时保留 UI 状态但不拉取分组/书籍（侧边栏隐藏态） */
   active?: boolean | Accessor<boolean>;
@@ -148,13 +142,11 @@ export function BookShelf(props: BookShelfProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
   const [isReloadingBooks, setIsReloadingBooks] = createSignal(false);
   const [importBookshelfOpen, setImportBookshelfOpen] = createSignal(false);
-  const [shelfSearchMode, setShelfSearchMode] = createSignal<SearchMode>('name');
 
   const groupStyle = () => bookshelfLayoutStore.settings.groupStyle;
   const showGroupList = () => bookshelfStore.state.showGroupList;
   const showGroupPage = () => groupStyle() === 'normal' && showGroupList();
   const showBooksView = () => groupStyle() !== 'normal' || !showGroupList();
-  const isGroupSearchToolbar = () => showGroupPage();
   const currentGroup = () => bookshelfStore.state.currentGroup;
   const currentGroupName = () => bookshelfStore.state.currentGroupName;
   const viewMode = () => bookshelfLayoutStore.settings.viewMode;
@@ -179,14 +171,7 @@ export function BookShelf(props: BookShelfProps) {
       await initBookshelfLayoutSettings();
       await bookshelfStore.waitForStateRestore();
       void sourcesStore.loadBookSources();
-      const mode = await loadBookshelfMainSearchMode();
-      setShelfSearchMode(mode);
     })();
-  });
-
-  createEffect(() => {
-    if (!isActive() || !showBooksView()) return;
-    void loadBookshelfMainSearchMode().then((mode) => setShelfSearchMode(mode));
   });
 
   createEffect(() => {
@@ -803,17 +788,6 @@ export function BookShelf(props: BookShelfProps) {
           showReloadLocal={showBooksView() && currentGroup() === BookGroupId.Local}
           isReloadingLocal={isReloadingBooks()}
           onReloadLocal={handleReloadLocalBooks}
-          searchTarget={isGroupSearchToolbar() ? 'groups' : 'books'}
-          onSearchQueryChange={undefined}
-          searchMode={isGroupSearchToolbar() ? undefined : shelfSearchMode()}
-          onSearchModeChange={
-            isGroupSearchToolbar()
-              ? undefined
-              : (mode) => {
-                setShelfSearchMode(mode);
-                void saveBookshelfMainSearchMode(mode);
-              }
-          }
           onOpenGlobalSearch={(q) => props.onOpenBookSearch?.(q)}
         />
       </PageToolbar>
