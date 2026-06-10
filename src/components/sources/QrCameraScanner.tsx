@@ -1,20 +1,32 @@
 /**
- * 摄像头实时扫码（getUserMedia + BarcodeDetector）
+ * 摄像头实时扫码（getUserMedia + BarcodeDetector / jsQR）
  */
 
-import { onMount, onCleanup, createSignal, Show } from 'solid-js';
-import { decodeTextFromVideoElement, isCameraScanAvailable } from '@/lib/qr/decode-from-video';
+import { onCleanup, onMount, createSignal, Show } from 'solid-js';
+import {
+  decodeTextFromVideoElement,
+  isCameraInputAvailable,
+} from '@/lib/qr/decode-from-video';
+import { buildCameraVideoConstraints } from '@/lib/qr/camera-media';
+import {
+  getCameraInputUnavailableMessage,
+  getCameraStartErrorMessage,
+} from '@/lib/qr/camera-errors';
 
 export interface QrCameraScannerProps {
   onDecoded: (text: string) => void;
   onError?: (message: string) => void;
+  /** 挂载后自动请求摄像头（由父级在点击「打开摄像头」后挂载） */
+  autoStart?: boolean;
+  /** 进入扫码状态（预览已就绪） */
+  onScanning?: () => void;
 }
 
 const SCAN_INTERVAL_MS = 280;
 
 export function QrCameraScanner(props: QrCameraScannerProps) {
-  const [status, setStatus] = createSignal<'loading' | 'scanning' | 'error'>('loading');
-  const [errorText, setErrorText] = createSignal('');
+  const [started, setStarted] = createSignal(false);
+  const [status, setStatus] = createSignal<'idle' | 'loading' | 'scanning'>('idle');
 
   let videoEl: HTMLVideoElement | undefined;
   let stream: MediaStream | null = null;
@@ -29,6 +41,8 @@ export function QrCameraScanner(props: QrCameraScannerProps) {
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
     if (videoEl) videoEl.srcObject = null;
+    setStarted(false);
+    setStatus('idle');
   }
 
   async function scanFrame() {
@@ -45,57 +59,64 @@ export function QrCameraScanner(props: QrCameraScannerProps) {
     }
   }
 
-  onMount(async () => {
-    if (!isCameraScanAvailable()) {
-      const msg = '当前环境不支持摄像头扫码（需 HTTPS 或 localhost，且浏览器支持 BarcodeDetector）';
-      setErrorText(msg);
-      setStatus('error');
-      props.onError?.(msg);
+  async function ensureVideoElement(): Promise<HTMLVideoElement | null> {
+    if (videoEl) return videoEl;
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (videoEl) return videoEl;
+    }
+    return null;
+  }
+
+  async function startCamera() {
+    if (!isCameraInputAvailable()) {
+      props.onError?.(getCameraInputUnavailableMessage());
       return;
     }
 
+    setStarted(true);
+    setStatus('loading');
+
     try {
+      const el = await ensureVideoElement();
+      if (!el) {
+        throw new Error('无法初始化摄像头预览');
+      }
+
       stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: buildCameraVideoConstraints(),
         audio: false,
       });
-      if (!videoEl) {
-        stopCamera();
-        return;
-      }
-      videoEl.srcObject = stream;
-      await videoEl.play();
+      el.srcObject = stream;
+      await el.play();
       setStatus('scanning');
+      props.onScanning?.();
       scanTimer = setInterval(() => void scanFrame(), SCAN_INTERVAL_MS);
     } catch (e) {
-      const msg =
-        e instanceof Error
-          ? e.message.includes('Permission')
-            ? '未获得摄像头权限，请在浏览器设置中允许访问摄像头'
-            : e.message
-          : '无法打开摄像头';
-      setErrorText(msg);
-      setStatus('error');
-      props.onError?.(msg);
+      props.onError?.(getCameraStartErrorMessage(e));
       stopCamera();
+    }
+  }
+
+  onMount(() => {
+    if (props.autoStart) {
+      void startCamera();
     }
   });
 
   onCleanup(stopCamera);
 
   return (
-    <div class="space-y-2">
+    <Show when={started()}>
       <div class="relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-black">
         <video
           ref={videoEl}
           class="h-full w-full object-cover"
           playsinline
+          webkit-playsinline
           muted
           autoplay
+          disablepictureinpicture
         />
         <Show when={status() === 'loading'}>
           <div class="absolute inset-0 flex items-center justify-center bg-black/50 text-sm text-white">
@@ -103,12 +124,6 @@ export function QrCameraScanner(props: QrCameraScannerProps) {
           </div>
         </Show>
       </div>
-      <Show when={status() === 'scanning'}>
-        <p class="text-center text-xs text-muted-foreground">将二维码对准画面，识别成功后会自动填入</p>
-      </Show>
-      <Show when={status() === 'error'}>
-        <p class="text-center text-xs text-destructive">{errorText()}</p>
-      </Show>
-    </div>
+    </Show>
   );
 }
