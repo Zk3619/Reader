@@ -6,6 +6,7 @@ mod webview_storage;
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
+mod inner_web_panel_capture;
 mod backstage_webview;
 mod webjs_java_rpc;
 mod android_fs_commands;
@@ -807,6 +808,62 @@ async fn get_inner_web_panel_cookies_for_url(
     let mut parts: Vec<String> = Vec::new();
     merge_panel_cookies_for_url(&panel, url, &mut seen, &mut parts);
     Ok(parts.join("; "))
+}
+
+/// Tauri panel √ 前抓取 document HTML（光遇 getServerSettings 解析 serverValue）
+fn inner_web_panel_html_snapshot_store() -> &'static Mutex<String> {
+    static STORE: OnceLock<Mutex<String>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(String::new()))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn store_inner_web_panel_html_snapshot(html: String) -> Result<(), String> {
+    if let Ok(mut guard) = inner_web_panel_html_snapshot_store().lock() {
+        *guard = html;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn capture_inner_web_panel_document_html(app: tauri::AppHandle) -> Result<String, String> {
+    use std::time::Duration;
+    use tauri::Manager;
+
+    let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) else {
+        eprintln!("[inner-web] capture: panel webview not found");
+        return Ok(String::new());
+    };
+
+    #[cfg(windows)]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        inner_web_panel_capture::start_capture_panel_document_html(&panel, tx)
+            .map_err(|e| e.to_string())?;
+
+        match tokio::time::timeout(Duration::from_millis(1200), rx).await {
+            Ok(Ok(html)) => {
+                eprintln!("[inner-web] capture panel document html len={}", html.len());
+                Ok(html)
+            }
+            Ok(Err(_)) => Ok(String::new()),
+            Err(_) => {
+                eprintln!("[inner-web] capture panel document html timeout");
+                Ok(String::new())
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let html = inner_web_panel_capture::capture_panel_document_html_blocking(
+            &panel,
+            inner_web_panel_html_snapshot_store(),
+        )?;
+        eprintln!("[inner-web] capture panel document html len={}", html.len());
+        Ok(html)
+    }
 }
 
 /// √ 前强制把 panel 页 `document.cookie` 刷入 Cookie 罐（立即应用后、读罐前调用）
@@ -1739,6 +1796,10 @@ pub fn run() {
             get_inner_web_panel_current_url,
             store_inner_web_panel_user_agent,
             get_inner_web_panel_user_agent,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            store_inner_web_panel_html_snapshot,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            capture_inner_web_panel_document_html,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             flush_inner_web_panel_document_cookie,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -40,6 +40,21 @@
 
   window.__READER_INNER_WEB_PANEL_FLUSH__ = syncToHost;
 
+  /** √ 前由 Rust capture_inner_web_panel_document_html 调用，写入 serverValue 等 DOM 快照 */
+  window.__READER_INNER_WEB_PANEL_CAPTURE_HTML__ = function () {
+    try {
+      var html = document.documentElement ? document.documentElement.outerHTML : '';
+      var inv =
+        window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      if (inv && html) {
+        inv('store_inner_web_panel_html_snapshot', { html: html }).catch(function () {});
+      }
+      return html;
+    } catch (e) {
+      return '';
+    }
+  };
+
   try {
     var proto = Document.prototype;
     var desc =
