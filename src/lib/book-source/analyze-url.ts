@@ -50,6 +50,8 @@ export interface FetchByAnalyzeUrlParams {
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
   /** 拉取完成后解析 HTML 限流提示；命中 rate_limit 时抛出 ScriptNoticeBlockedError */
   scriptNotice?: ScriptNoticeBus;
+  /** HTTP 超时（毫秒），默认 30s */
+  timeoutMs?: number;
 }
 
 export interface FetchByAnalyzeUrlResult {
@@ -236,6 +238,7 @@ async function fetchHttpOnce(
   option: AnalyzeUrlOption,
   headers: Record<string, string>,
   enabledCookieJar: boolean,
+  timeoutMs?: number,
 ): Promise<string> {
   const { url: finalUrl, method, body } = prepareHttpRequest(url, option, headers);
   const res = await request(finalUrl, {
@@ -243,6 +246,7 @@ async function fetchHttpOnce(
     headers,
     body,
     enableCookieJar: enabledCookieJar,
+    timeout: timeoutMs,
   });
   return res.text();
 }
@@ -252,12 +256,13 @@ async function fetchHttpWithRetry(
   option: AnalyzeUrlOption,
   headers: Record<string, string>,
   enabledCookieJar: boolean,
+  timeoutMs?: number,
 ): Promise<string> {
   const maxAttempts = Math.max(1, (option.retry ?? 0) + 1);
   let lastError: unknown;
   for (let i = 0; i < maxAttempts; i += 1) {
     try {
-      return await fetchHttpOnce(url, option, headers, enabledCookieJar);
+      return await fetchHttpOnce(url, option, headers, enabledCookieJar, timeoutMs);
     } catch (e) {
       lastError = e;
       if (i < maxAttempts - 1) {
@@ -388,7 +393,7 @@ export async function fetchByAnalyzeUrl(
       );
     } else {
       const useCookieJar = params.source?.enabledCookieJar === true;
-      body = await fetchHttpWithRetry(url, option, headers, useCookieJar);
+      body = await fetchHttpWithRetry(url, option, headers, useCookieJar, params.timeoutMs);
     }
   }
 

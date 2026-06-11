@@ -4,7 +4,13 @@
  */
 
 import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
-import { resolveUrl, utf8FromBase64, utf8ToBase64, hexToUtf8 } from '@/lib/book-source/utils';
+import {
+  resolveUrl,
+  stripLegadoSourceUrlMarker,
+  utf8FromBase64,
+  utf8ToBase64,
+  hexToUtf8,
+} from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import {
   createQuickJSContext,
@@ -203,8 +209,8 @@ function buildLegacyScope(
       getVariable: (k?: string) => p.sourceVars.getVariable(k),
       setVariable: (v?: string) => p.sourceVars.setVariable(v),
       getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      getKey: () => p.sourceUrl,
-      getkey: () => p.sourceUrl,
+      getKey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
+      getkey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
     },
     bhost: () => (p.hosts[0] as string) || p.baseUrl || '',
     getArguments: (a: string, k?: string) => {
@@ -354,7 +360,7 @@ async function evalExprQuickJS(
     source: {
       ...p.sourceVars,
       getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      getKey: () => p.sourceUrl,
+      getKey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
     },
     searchKey: keyword,
     searchPage: page,

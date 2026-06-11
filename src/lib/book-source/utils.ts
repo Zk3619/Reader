@@ -139,6 +139,13 @@ export function isAbsoluteUrl(url: string): boolean {
  * 去掉误粘在 http(s) URL 后的 Cookie 段（如 `https://v1.gyks.cf;deviceId=xxx/health`）。
  * Legado 聚合书源偶发把 qttoken/deviceId 写入 server/线路 字段，会导致 TLS Invalid Server Name。
  */
+/** legado 书源/订阅源 sourceUrl 末尾 `##备注`，HTTP 请求基址须去掉 */
+export function stripLegadoSourceUrlMarker(url: string): string {
+  const trimmed = url.trim();
+  const marker = trimmed.indexOf('##');
+  return marker >= 0 ? trimmed.slice(0, marker).trim() : trimmed;
+}
+
 export function stripMisplacedCookieFromHttpUrl(url: string): string {
   const s = url.trim();
   if (!/^https?:\/\//i.test(s)) return s;

@@ -1,4 +1,5 @@
 import type { NewRssSource } from '@/types';
+import { stripLegadoSourceUrlMarker } from '@/lib/book-source/utils';
 
 interface LegadoRssItem {
   [key: string]: unknown;
@@ -45,6 +46,7 @@ const RSS_SCALAR_KEYS = [
   'searchUrl',
   'header',
   'loginUrl',
+  'loginUi',
   'jsLib',
   'enabledCookieJar',
   'customOrder',
@@ -68,12 +70,18 @@ function normalizeRssItem(raw: LegadoRssItem): NewRssSource | null {
   const sourceUrl = raw.sourceUrl ?? raw.rssSourceUrl;
   const sourceName = raw.sourceName ?? raw.rssSourceName;
   if (!sourceUrl || !sourceName) return null;
-  const url = String(sourceUrl).trim();
+  const url = stripLegadoSourceUrlMarker(String(sourceUrl).trim());
   const name = String(sourceName).trim();
   if (!url || !name) return null;
+  const comment =
+    typeof raw.sourceComment === 'string' ? raw.sourceComment.trim() : '';
+  const inlineComment = String(sourceUrl).includes('##')
+    ? String(sourceUrl).trim().slice(String(sourceUrl).trim().indexOf('##') + 2).trim()
+    : '';
   return {
     ...pickScalarFields(raw),
     sourceUrl: url,
+    sourceComment: comment || inlineComment || undefined,
     sourceName: name,
     enabled: raw.enabled !== false,
     singleUrl: Boolean(raw.singleUrl),

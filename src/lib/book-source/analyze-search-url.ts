@@ -8,6 +8,7 @@ import {
   collapseUrlPathSlashes,
   resolveUrl,
   sanitizeHttpHeaders,
+  stripLegadoSourceUrlMarker,
 } from '@/lib/book-source/utils';
 import {
   alignUrlToBookSourceRequestOrigin,
@@ -194,6 +195,49 @@ export async function expandHeaderTemplates(
     }
   }
   return out;
+}
+
+/**
+ * 展开 Legado 规则 URL（{{js}}、<js>、{{page}}、<1,2,3> 分页占位）
+ * 用于 RSS sortUrl、searchUrl 等（对齐 AnalyzeUrl.replaceKeyPageJs）
+ */
+export async function resolveLegadoRuleUrl(
+  ruleUrl: string,
+  source: BookSource,
+  options: { keyword?: string; page?: number } = {},
+): Promise<string> {
+  const keyword = options.keyword ?? '';
+  const page = options.page ?? 1;
+  let url = ruleUrl.trim();
+  if (!url) return '';
+
+  if (isScriptSearchUrl(url)) {
+    const script = extractSearchScript(url);
+    if (!script) return url;
+    url = await runSearchUrlScript(script, source, keyword, page);
+  } else {
+    url = await analyzeEmbeddedJsBlocks(url, source, keyword, page);
+  }
+
+  url = await expandInnerJsTemplates(url, source, keyword, page);
+  url = buildUrl(url, { key: keyword, page: String(page) });
+  url = substitutePagePlaceholders(url, page);
+
+  const { urlPart } = splitUrlAndOption(url);
+  const base =
+    resolveBookSourceRequestOrigin(source) ||
+    getScriptBaseUrl(source) ||
+    source.sourceUrl ||
+    '';
+  let absoluteUrl = urlPart.trim();
+  if (!/^https?:\/\//i.test(absoluteUrl)) {
+    absoluteUrl = resolveUrl(base, absoluteUrl);
+  }
+  const aligned = alignUrlToBookSourceRequestOrigin(
+    collapseUrlPathSlashes(absoluteUrl),
+    source,
+  );
+  return stripLegadoSourceUrlMarker(aligned.replace(/\/##[^/?#]*/g, ''));
 }
 
 /**

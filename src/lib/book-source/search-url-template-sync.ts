@@ -3,6 +3,7 @@
  */
 
 import type { BookSource } from '@/types';
+import { stripLegadoSourceUrlMarker } from '@/lib/book-source/utils';
 import {
   getScriptBaseUrl,
   getSourceCookiesKey,
@@ -59,9 +60,9 @@ function normalizeExpr(expr: string): string {
   return expr.replace(/\s+/g, ' ').trim();
 }
 
-/** Legado 书源常用 source.getKey() / source.getkey() */
+/** Legado 书源常用 source.getKey() / source.getkey()（HTTP 拼接须去掉 ##备注） */
 function evalSourceGetKey(ctx: SearchTemplateContext): string {
-  return ctx.sourceUrl;
+  return stripLegadoSourceUrlMarker(ctx.sourceUrl);
 }
 
 function evalBhost(ctx: SearchTemplateContext): string {
