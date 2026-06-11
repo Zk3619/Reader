@@ -24,6 +24,29 @@ function isLikelyArticleImageUrl(value: string): boolean {
   return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('//');
 }
 
+function inferElementContentType(element: string): 'html' | 'json' | 'text' {
+  const trimmed = element.trim();
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      JSON.parse(trimmed);
+      return 'json';
+    } catch {
+      /* fall through */
+    }
+  }
+  return 'html';
+}
+
+function looksLikeRelativeImagePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^(\.?\.?\/|\/)/.test(trimmed)) return true;
+  return /\.(jpe?g|png|gif|webp|svg|ico|bmp|avif)(\?|#|$)/i.test(trimmed);
+}
+
 function resolveArticleImageUrl(image: string | undefined, baseUrl: string): string | undefined {
   if (!image?.trim()) return undefined;
   const trimmed = image.trim();
@@ -31,6 +54,9 @@ function resolveArticleImageUrl(image: string | undefined, baseUrl: string): str
     return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('data:')
       ? trimmed
       : resolveUrl(baseUrl, trimmed);
+  }
+  if (!looksLikeRelativeImagePath(trimmed)) {
+    return undefined;
   }
   const resolved = resolveUrl(baseUrl, trimmed);
   return isLikelyArticleImageUrl(resolved) ? resolved : undefined;
@@ -49,20 +75,22 @@ export async function getRssArticles(
   const parseMode = source.ruleArticles ? 'rule' : 'default-xml';
 
   try {
-    // 展开 {{page == 1? ...}} 等 Legado 模板（对齐 AnalyzeUrl）
-    const url = await resolveLegadoRuleUrl(sortUrl, rssAsBookSource(source), { page });
+    const book = rssAsBookSource(source);
+    // 展开 {{page}} 等；HTTP 请求须规范化编码，列表规则 baseUrl 须保留 wd 明文（对齐 Legado setBaseUrl(sortUrl)）
+    const fetchUrl = await resolveLegadoRuleUrl(sortUrl, book, { page, preserveUrlOptions: true });
+    const ruleBaseUrl = await resolveLegadoRuleUrl(sortUrl, book, { page, forRuleBase: true });
 
     rssLog(source, '请求文章列表', {
       sort: sortName || '默认',
       page,
-      url: url.slice(0, 200),
+      url: fetchUrl.slice(0, 200),
       parseMode,
       cookieJar: !!source.enabledCookieJar,
     });
 
-    const { body: html, url: finalUrl } = await fetchRssPage({
+    const { body: html } = await fetchRssPage({
       source,
-      url,
+      url: fetchUrl,
       baseUrl: source.sourceUrl,
     });
 
@@ -78,7 +106,7 @@ export async function getRssArticles(
 
     if (!html.trim()) {
       rssWarn(source, '源站返回空正文，可能是源站异常或需要登录/Cookie', {
-        url: url.slice(0, 200),
+        url: fetchUrl.slice(0, 200),
       });
       return { articles: [] };
     }
@@ -99,8 +127,14 @@ export async function getRssArticles(
       return { articles };
     }
 
-    // 使用规则解析
-    const result = await parseRssByRule(source, sortName, finalUrl || url, html, contentType);
+    const result = await parseRssByRule(
+      source,
+      sortName,
+      ruleBaseUrl,
+      html,
+      contentType,
+      fetchUrl,
+    );
     rssLog(source, '规则解析完成', {
       articleCount: result.articles.length,
       hasNextPage: !!result.nextUrl,
@@ -133,7 +167,8 @@ async function parseRssByRule(
   sortName: string,
   baseUrl: string,
   content: string,
-  contentType: 'html' | 'json' | 'text'
+  contentType: 'html' | 'json' | 'text',
+  fetchUrl?: string,
 ): Promise<{ articles: RssArticle[]; nextUrl?: string }> {
   // 检查是否需要倒序
   let ruleArticles = source.ruleArticles || '';
@@ -143,12 +178,16 @@ async function parseRssByRule(
     ruleArticles = ruleArticles.substring(1);
   }
 
-  // 创建规则上下文
+  const book = rssAsBookSource(source);
+  // 规则 baseUrl 须为 forRuleBase 明文（baidu wd=♞♞《》 等）；fetchUrl 仅用于 HTTP 拉取
+  const ruleBaseUrl = baseUrl.trim() || fetchUrl?.trim() || '';
+
+  // 创建规则上下文（对齐 fetchByAnalyzeUrl：bookSource + Cookie 键一致）
   const context: RuleContext = {
     content,
     contentType,
-    baseUrl,
-    source: source as unknown as Record<string, unknown>,
+    baseUrl: ruleBaseUrl,
+    source: book as unknown as Record<string, unknown>,
   };
 
   // 获取文章列表元素
@@ -173,13 +212,13 @@ async function parseRssByRule(
     const element = listItems[index].content;
     const elementContext: RuleContext = {
       content: element,
-      contentType: 'html',
+      contentType: inferElementContentType(element),
       baseUrl,
       source: source as unknown as Record<string, unknown>,
       regexGroups: listItems[index].regexGroups,
     };
 
-    const article = await parseRssArticle(source, elementContext, baseUrl, sortName, index);
+    const article = await parseRssArticle(source, elementContext, ruleBaseUrl, sortName, index);
     if (article) {
       articles.push(article);
     }

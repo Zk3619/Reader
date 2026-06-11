@@ -79,7 +79,10 @@ async function debugSortList(
 
   try {
     const headers = parseHeaders(source.header);
-    const url = await resolveLegadoRuleUrl(sortUrl, rssAsBookSource(source), { page: 1 });
+    const url = await resolveLegadoRuleUrl(sortUrl, rssAsBookSource(source), {
+      page: 1,
+      preserveUrlOptions: true,
+    });
     const html = await get(url, {
       ...headers,
       enableCookieJar: source.enabledCookieJar,

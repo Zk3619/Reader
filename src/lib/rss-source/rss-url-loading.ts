@@ -80,22 +80,38 @@ export type RssLinkSchemeAction =
   | { type: 'external'; url: string }
   | { type: 'blocked' };
 
+/** 相对 / 协议相对链接解析为绝对 URL（对齐 WebView baseUrl） */
+export function resolveRssLinkUrl(url: string, baseUrl?: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith('#') || /^javascript:/i.test(trimmed)) {
+    return null;
+  }
+  const base = baseUrl?.trim();
+  try {
+    return new URL(trimmed, base || 'https://placeholder.invalid/').href;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 对齐 handleCommonSchemes：http(s) 在 WebView 内导航，其它 scheme 特殊处理
  */
-export function resolveRssLinkScheme(url: string): RssLinkSchemeAction {
-  const trimmed = url.trim();
+export function resolveRssLinkScheme(url: string, baseUrl?: string): RssLinkSchemeAction {
+  const resolved = resolveRssLinkUrl(url, baseUrl);
+  if (!resolved) return { type: 'blocked' };
+
   let scheme = '';
   try {
-    scheme = new URL(trimmed).protocol.replace(':', '').toLowerCase();
+    scheme = new URL(resolved).protocol.replace(':', '').toLowerCase();
   } catch {
     return { type: 'blocked' };
   }
   if (scheme === 'http' || scheme === 'https') {
-    return { type: 'navigate', url: trimmed };
+    return { type: 'navigate', url: resolved };
   }
   if (scheme === 'legado' || scheme === 'yuedu') {
-    return { type: 'import', url: trimmed };
+    return { type: 'import', url: resolved };
   }
-  return { type: 'external', url: trimmed };
+  return { type: 'external', url: resolved };
 }

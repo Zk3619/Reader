@@ -26,6 +26,13 @@ function rssAsBookSource(source: RssSource): BookSource {
   return source as unknown as BookSource;
 }
 
+/** sourceUrl 可为显示名（如「阅读订阅」），回退时避免 punycode 伪 URL */
+function rssSortFallbackUrl(source: RssSource): string {
+  const url = source.sourceUrl?.trim() ?? '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return 'http://www.baidu.com/';
+}
+
 /** 解析静态 sortUrl 文本（名称::链接，多行或 && 分隔） */
 export function parseSortUrlLines(text: string, fallbackUrl: string): SortUrlEntry[] {
   const entries: SortUrlEntry[] = [];
@@ -100,7 +107,7 @@ async function resolveJsSortUrls(source: RssSource): Promise<SortUrlEntry[]> {
 
     if (entries.length === 0) {
       const raw = await runExploreScriptRawValue(script, bookSource);
-      entries = resolveRawSortUrl(raw, source.sourceUrl);
+      entries = resolveRawSortUrl(raw, rssSortFallbackUrl(source));
     }
 
     if (entries.length > 0) {
@@ -155,17 +162,17 @@ export async function parseSortUrls(source: RssSource): Promise<SortUrlEntry[]> 
 
   if (!raw) {
     rssLog(source, '无 sortUrl，使用 sourceUrl 作为唯一分类');
-    return [{ name: '', url: source.sourceUrl }];
+    return [{ name: '', url: rssSortFallbackUrl(source) }];
   }
 
   if (raw.startsWith('<js>') || raw.startsWith('@js:')) {
     const entries = await resolveJsSortUrls(source);
     if (entries.length > 0) return entries;
     rssWarn(source, 'sortUrl JS 无结果，回退 sourceUrl');
-    return [{ name: '', url: source.sourceUrl }];
+    return [{ name: '', url: rssSortFallbackUrl(source) }];
   }
 
-  const entries = parseSortUrlLines(raw, source.sourceUrl);
+  const entries = parseSortUrlLines(raw, rssSortFallbackUrl(source));
   rssLog(source, '静态 sortUrl 解析完成', {
     count: entries.length,
     names: entries.map((e) => e.name || '默认').slice(0, 8),

@@ -37,18 +37,37 @@ import { loadRssArticleCoverBlob } from '@/lib/rss-source/rss-cover-image';
 import { RSS_FETCH_CHANNEL } from '@/lib/rss-source/rss-parent-fetch-bridge';
 import { request } from '@/lib/http';
 import { cn } from '@/lib/utils';
+import { isTauri } from '@/lib/platform/detect';
+import { invoke } from '@tauri-apps/api/core';
+import { openRssExternalLink } from '@/lib/rss-source/rss-inner-web';
+
+/** content 模式需 Cookie/Referer 时走同源代理 */
+function shouldUseRssReadDocumentProxy(
+  session: RssReadSession,
+  pageUrl: string,
+  cookies: string,
+): boolean {
+  if (!pageUrl.startsWith('http')) return false;
+  if (session.mode === 'url') return false;
+  return Boolean(cookies.trim()) || shouldUseInnerWebDocumentProxy(pageUrl, cookies);
+}
 
 function buildRssReadBridgeScript(): string {
   return (
     "(function(){if(document.documentElement.dataset.readerRssBridge)return;" +
     "document.documentElement.dataset.readerRssBridge='1';" +
     `var ch='${RSS_READ_CHANNEL}';` +
+    "function postLink(href,target){try{window.parent.postMessage({channel:ch,action:'link',href:String(href||''),target:target||null},'*');}catch(_){}}" +
+    "function postOpen(url){try{window.parent.postMessage({channel:ch,action:'openExternal',url:String(url||'')},'*');}catch(_){}}" +
+    "try{var ti=window.__TAURI_INTERNALS__||{};if(!ti.plugins)ti.plugins={};window.__TAURI_INTERNALS__=ti;if(!window.__TAURI__)window.__TAURI__={};}catch(_){}" +
+    "try{var shell=window.__TAURI__&&window.__TAURI__.shell;if(shell&&typeof shell.open==='function'){shell.open=function(u){postOpen(u);return Promise.resolve();};}}catch(_){}" +
+    "try{window.open=function(u){postOpen(u);return null;};}catch(_){}" +
     "document.addEventListener('click',function(e){" +
     "var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;" +
     "var raw=a.getAttribute('href')||'';if(!raw||raw.indexOf('javascript:')===0)return;" +
     "if(raw.charAt(0)==='#')return;" +
     "e.preventDefault();e.stopPropagation();" +
-    "try{window.parent.postMessage({channel:ch,action:'link',href:a.href,target:a.getAttribute('target')},'*');}catch(_){}" +
+    "postLink(a.href,a.getAttribute('target'));" +
     "},true);" +
     "})();"
   );
@@ -98,6 +117,8 @@ export interface RssReadWebViewProps {
   session: RssReadSession;
   class?: string;
   onLinkClick: (href: string, target?: string | null) => void | Promise<void>;
+  /** iframe 内 shell.open / 显式外链：优先 InnerWeb */
+  onOpenExternal?: (url: string) => void | Promise<void>;
   onFrameTitle?: (title: string) => void;
   javaHandlers?: RssJavaOpenHandlers;
 }
@@ -156,8 +177,7 @@ export function RssReadWebView(props: RssReadWebViewProps) {
   const wantProxy = createMemo(() => {
     const url = pageUrl();
     if (useHtml() || !url.startsWith('http') || proxyFailed()) return false;
-    const c = cookies();
-    return Boolean(c) || shouldUseInnerWebDocumentProxy(url, c);
+    return shouldUseRssReadDocumentProxy(props.session, url, cookies());
   });
 
   const navigateUrl = createMemo(() => {
@@ -215,12 +235,49 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     }
   };
 
+  const injectBridgeIntoFrameTree = (frame: HTMLIFrameElement) => {
+    injectBridgeToFrame(frame);
+    try {
+      const doc = frame.contentDocument;
+      if (!doc) return;
+      for (const el of doc.querySelectorAll('iframe')) {
+        const sub = el as HTMLIFrameElement;
+        const run = () => injectBridgeIntoFrameTree(sub);
+        try {
+          if (sub.contentDocument?.readyState === 'complete') run();
+          else sub.addEventListener('load', run, { once: true });
+        } catch {
+          /* 跨域子 frame */
+        }
+      }
+    } catch {
+      /* 跨域 */
+    }
+  };
+
+  const isRssReadMessageSource = (source: MessageEventSource | null): boolean => {
+    const frame = iframeEl();
+    if (!source || !frame?.contentWindow) return false;
+    const walk = (win: Window): boolean => {
+      if (win === source) return true;
+      try {
+        for (let i = 0; i < win.frames.length; i++) {
+          if (walk(win.frames[i]!)) return true;
+        }
+      } catch {
+        /* 跨域子 frame */
+      }
+      return false;
+    };
+    return walk(frame.contentWindow);
+  };
+
   const handleFrameLoad = () => {
     clearLoadWatchdog();
     setLoading(false);
     const frame = iframeEl();
     if (!frame) return;
-    injectBridgeToFrame(frame);
+    injectBridgeIntoFrameTree(frame);
     try {
       const doc = frame.contentDocument;
       if (doc && useHtml()) {
@@ -258,7 +315,7 @@ export function RssReadWebView(props: RssReadWebViewProps) {
 
     if (useHtml() || !url.startsWith('http') || proxyFailed()) return;
 
-    const needProxy = Boolean(c) || shouldUseInnerWebDocumentProxy(url, c);
+    const needProxy = shouldUseRssReadDocumentProxy(props.session, url, c);
     if (!needProxy) return;
 
     let cancelled = false;
@@ -390,11 +447,24 @@ export function RssReadWebView(props: RssReadWebViewProps) {
       return;
     }
 
-    if (frame && ev.source !== frame.contentWindow) return;
+    if (frame && !isRssReadMessageSource(ev.source)) return;
     if (d.channel !== RSS_READ_CHANNEL) return;
 
     if (d.action === 'link' && d.href) {
       void props.onLinkClick(d.href, d.target ?? null);
+      return;
+    }
+    if (d.action === 'openExternal' && d.url?.trim()) {
+      const url = d.url.trim();
+      if (props.onOpenExternal) {
+        void props.onOpenExternal(url);
+      } else {
+        void openRssExternalLink(props.source, url, {
+          cookies: props.session.cookies,
+          headers: props.session.headers,
+          onUnavailable: 'browser',
+        });
+      }
       return;
     }
     if (d.action === 'javaOpen' && d.name && props.javaHandlers) {
@@ -421,6 +491,10 @@ export function RssReadWebView(props: RssReadWebViewProps) {
 
   window.addEventListener('message', onMessage);
   window.addEventListener('reader-rss-read-navigate', navHandler);
+
+  if (isTauri()) {
+    void invoke('ensure_inner_web_iframe_scripts').catch(() => {});
+  }
 
   onCleanup(() => {
     clearLoadWatchdog();
@@ -453,9 +527,9 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     const headers = props.session.headers;
     const needProxy =
       !proxyFailed() &&
-      (Boolean(c) || shouldUseInnerWebDocumentProxy(url, c));
+      shouldUseRssReadDocumentProxy(props.session, url, c);
 
-    if (needProxy && c) {
+    if (needProxy) {
       try {
         if (proxySessionId) await deleteInnerWebProxySession(proxySessionId);
         const sessionId = await createInnerWebProxySession(url, c, headers);
@@ -494,7 +568,7 @@ export function RssReadWebView(props: RssReadWebViewProps) {
         ref={setIframeEl}
         class="h-full w-full border-0 bg-background"
         title={props.session.title}
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"
         onLoad={handleFrameLoad}
       />
     </div>

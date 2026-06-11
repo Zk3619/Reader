@@ -35,6 +35,15 @@ export async function refreshRssArticlesForSource(
   }
 
   const { articles } = await getRssArticles(source, sort.name, sort.url, page);
+
+  // 首页刷新：替换该分类整页列表，避免旧解析脏数据残留（如 ruleArticles 误拆字段）
+  if (page <= 1) {
+    await rssArticlesDb.deleteRssArticlesByOriginAndSort(
+      source.sourceUrl,
+      sort.name ?? '',
+    );
+  }
+
   for (const article of articles) {
     await rssArticlesDb.insertRssArticle(toNewRssArticle(article));
   }

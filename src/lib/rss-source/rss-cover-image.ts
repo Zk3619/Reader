@@ -13,12 +13,25 @@ import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 import { rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 
-export function resolveRssCoverReferer(source: RssSource): string {
+export function resolveRssCoverReferer(
+  source: RssSource,
+  imageUrl?: string,
+): string {
   const headers = parseHeaders(source.header);
   const fromHeader =
     headers.Referer ?? headers.referer ?? headers.REFERER;
   if (fromHeader?.trim()) return fromHeader.trim();
-  return source.sourceUrl.trim();
+  const sourceUrl = source.sourceUrl.trim();
+  if (/^https?:\/\//i.test(sourceUrl)) return sourceUrl;
+  const normalized = imageUrl?.trim();
+  if (normalized) {
+    try {
+      return `${new URL(normalized).origin}/`;
+    } catch {
+      // fall through
+    }
+  }
+  return 'http://www.baidu.com/';
 }
 
 export function resolveRssCoverLegadoHeaders(
@@ -36,7 +49,7 @@ export async function loadRssArticleCoverBlob(
   if (!normalized || isNoCoverImageUrl(normalized)) return null;
 
   const bookSource = rssAsBookSource(source);
-  const referer = resolveRssCoverReferer(source);
+  const referer = resolveRssCoverReferer(source, normalized);
   const legadoImageHeaders = resolveRssCoverLegadoHeaders(source);
   const sourceId = source.sourceUrl;
 

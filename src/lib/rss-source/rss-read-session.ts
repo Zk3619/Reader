@@ -15,6 +15,7 @@ import { rssContentNeedsAssetProxy } from '@/lib/rss-source/rss-content-image-pr
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 import { sanitizeHtmlInlineScripts } from '@/lib/rss-source/rss-inline-script';
 import { supplementEmptyRssGallery } from '@/lib/rss-source/rss-detail-gallery-fallback';
+import { prepareRssContentImages } from '@/lib/rss-source/rss-content-images';
 import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 import { evalJs } from '@/lib/js-engine';
 
@@ -145,6 +146,7 @@ export async function fetchRssArticleContent(
     }
 
     content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    content = prepareRssContentImages(content, articleUrl);
     const gallery = supplementEmptyRssGallery(content, body);
     content = gallery.html;
     content = sanitizeHtmlInlineScripts(content);

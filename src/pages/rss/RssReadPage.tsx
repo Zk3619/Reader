@@ -17,10 +17,12 @@ import { markRssArticleAsRead } from '@/lib/database/rss-read-records';
 import * as rssStarsDb from '@/lib/database/rss-stars';
 import type { RssArticle, RssSource } from '@/types';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { openRssExternalLink, openRssUrlInInnerWeb } from '@/lib/rss-source/rss-inner-web';
+import { onInnerWebDismissed, cancelInnerWebClose, isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import { Button } from '@/components/ui/button';
 import { RefreshIcon, StarIcon } from '@/components/shared/icons';
-import { RssReadWebView, navigateRssReadWebView } from '@/components/rss/RssReadWebView';
-import { READER_BOOKSOURCE_IMPORT_NETWORK_EVENT } from '@/lib/platform/inner-web';
+import { RssReadWebView } from '@/components/rss/RssReadWebView';
+import { handleReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
 import type { RssJavaOpenHandlers } from '@/lib/rss-source/rss-java-bridge';
 
 export interface RssReadPageProps {
@@ -60,17 +62,6 @@ function syntheticArticle(source: RssSource, link: string, title?: string): RssA
   };
 }
 
-function decodeYueduImportUrl(href: string): string | null {
-  if (!href.startsWith('yuedu:') && !href.startsWith('legado:')) return null;
-  const q = href.indexOf('?');
-  if (q < 0) return null;
-  try {
-    return new URLSearchParams(href.slice(q + 1)).get('src');
-  } catch {
-    return null;
-  }
-}
-
 export function RssReadPage(props: RssReadPageProps) {
   const [stack, setStack] = createSignal<ReadStackEntry[]>([]);
   const [loading, setLoading] = createSignal(true);
@@ -84,9 +75,13 @@ export function RssReadPage(props: RssReadPageProps) {
     return s.length > 0 ? s[s.length - 1]! : null;
   };
 
+  /** url 模式外链已交给 InnerWeb；关闭 InnerWeb 后应退出阅读页 */
+  const [urlDelegatedToInnerWeb, setUrlDelegatedToInnerWeb] = createSignal(false);
+
   /** 丢弃过期 pushEntry（StrictMode 双挂载 / 快速切换文章） */
   let loadSeq = 0;
   let loadAbort: AbortController | null = null;
+  let autoCloseOnInnerWebDismiss = false;
 
   const isLoadCurrent = (seq: number, signal: AbortSignal) =>
     seq === loadSeq && !signal.aborted;
@@ -118,6 +113,36 @@ export function RssReadPage(props: RssReadPageProps) {
         ...prev,
         { source, article, session, title },
       ]);
+
+      if (session.mode === 'url' && session.directUrl?.startsWith('http')) {
+        const openResult = await openRssUrlInInnerWeb(source, session.directUrl, {
+          title,
+          cookies: session.cookies,
+          headers: session.headers,
+          onUnavailable: 'iframe',
+        });
+        if (!isLoadCurrent(seq, controller.signal)) return;
+
+        if (openResult === 'inner-web') {
+          autoCloseOnInnerWebDismiss = true;
+          setUrlDelegatedToInnerWeb(true);
+        } else {
+          autoCloseOnInnerWebDismiss = false;
+          setUrlDelegatedToInnerWeb(false);
+          if (openResult === 'browser') {
+            if (stack().length <= 1) {
+              props.onClose();
+              return;
+            }
+            setStack((s) => s.slice(0, -1));
+            return;
+          }
+        }
+      } else {
+        autoCloseOnInnerWebDismiss = false;
+        setUrlDelegatedToInnerWeb(false);
+      }
+
       if (article?.link) {
         await markRssArticleAsRead(article.link, title);
         if (!isLoadCurrent(seq, controller.signal)) return;
@@ -140,17 +165,39 @@ export function RssReadPage(props: RssReadPageProps) {
     loadSeq += 1;
   });
 
-  useBackHandler(() => () => {
+  const popReadStackOrClose = () => {
     const s = stack();
     if (s.length > 1) {
       setStack(s.slice(0, -1));
-      return true;
+      setFrameTitle(undefined);
+      return;
     }
     props.onClose();
+  };
+
+  const handleReadBack = () => {
+    if (autoCloseOnInnerWebDismiss && isInnerWebSessionActive()) {
+      cancelInnerWebClose();
+      return;
+    }
+    popReadStackOrClose();
+  };
+
+  useBackHandler(() => () => {
+    handleReadBack();
     return true;
   });
 
   onMount(async () => {
+    const offInnerWebDismiss = onInnerWebDismissed(() => {
+      if (!autoCloseOnInnerWebDismiss) return;
+      autoCloseOnInnerWebDismiss = false;
+      setUrlDelegatedToInnerWeb(false);
+      popReadStackOrClose();
+    });
+
+    onCleanup(offInnerWebDismiss);
+
     const article = props.article ?? null;
     if (article?.link) {
       const existing = await rssStarsDb.getRssStar(article.origin, article.link);
@@ -163,13 +210,7 @@ export function RssReadPage(props: RssReadPageProps) {
   });
 
   const handleBack = () => {
-    const s = stack();
-    if (s.length > 1) {
-      setStack(s.slice(0, -1));
-      setFrameTitle(undefined);
-      return;
-    }
-    props.onClose();
+    handleReadBack();
   };
 
   const headerTitle = () => {
@@ -183,6 +224,35 @@ export function RssReadPage(props: RssReadPageProps) {
     const { source, article } = entry;
     setStack((s) => s.slice(0, -1));
     await pushEntry(source, article);
+  };
+
+  const openExternalInInnerWeb = async (
+    url: string,
+    title?: string,
+    session?: ReadStackEntry['session'],
+  ) => {
+    const entry = current();
+    const source = entry?.source ?? props.source;
+    const sess = session ?? entry?.session;
+    await openRssExternalLink(source, url, {
+      title: title ?? entry?.title,
+      cookies: sess?.cookies,
+      headers: sess?.headers,
+      onUnavailable: 'browser',
+    });
+  };
+
+  const showRssWebView = () => {
+    const entry = current();
+    if (!entry) return false;
+    if (entry.session.mode !== 'url') return true;
+    return !urlDelegatedToInnerWeb();
+  };
+
+  const webViewEntry = () => {
+    const entry = current();
+    if (!entry || !showRssWebView()) return null;
+    return entry;
   };
 
   const javaHandlers = (): RssJavaOpenHandlers => ({
@@ -207,7 +277,7 @@ export function RssReadPage(props: RssReadPageProps) {
       }
     },
     onOpenSearch: (kw) => props.onOpenSearch?.(kw),
-    onShowPhoto: (src) => window.open(src, '_blank', 'noopener,noreferrer'),
+    onShowPhoto: (src) => void openExternalInInnerWeb(src),
   });
 
   const toggleStar = async () => {
@@ -244,31 +314,27 @@ export function RssReadPage(props: RssReadPageProps) {
     );
     if (intercepted) return;
 
-    const action = resolveRssLinkScheme(href);
-    if (action.type === 'blocked') return;
+    const action = resolveRssLinkScheme(href, baseUrl);
+    if (action.type === 'blocked') {
+      showAppToast({ title: '无法打开链接', variant: 'destructive' });
+      return;
+    }
 
     if (action.type === 'import') {
-      const src = decodeYueduImportUrl(action.url);
-      if (src?.startsWith('http')) {
-        window.dispatchEvent(
-          new CustomEvent(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, {
-            detail: { url: src },
-          }),
-        );
-      }
+      await handleReaderImportDeepLink(action.url);
       return;
     }
 
     if (action.type === 'external') {
-      window.open(action.url, '_blank', 'noopener,noreferrer');
+      await openExternalInInnerWeb(action.url);
       return;
     }
 
     // http(s) 内嵌导航
     const nextUrl = action.url;
     const article = syntheticArticle(source, nextUrl);
-    if (props.onOpenArticle && target === '_blank') {
-      props.onOpenArticle(source, article);
+    if (target === '_blank') {
+      await openExternalInInnerWeb(nextUrl, article.title, session);
       return;
     }
 
@@ -277,7 +343,8 @@ export function RssReadPage(props: RssReadPageProps) {
       return;
     }
 
-    navigateRssReadWebView(nextUrl);
+    // 无 ruleContent 的外链：InnerWeb 打开，避免 RSS iframe 跨域受限
+    await openExternalInInnerWeb(nextUrl, article.title, session);
   };
 
   return (
@@ -315,19 +382,26 @@ export function RssReadPage(props: RssReadPageProps) {
         </div>
       </Show>
 
-      <Show when={current()} keyed>
+      <Show when={webViewEntry()} keyed>
         {(entry) => (
           <RssReadWebView
             source={entry.source}
             session={entry.session}
             class="flex-1"
             onLinkClick={handleLinkClick}
+            onOpenExternal={(url) => openExternalInInnerWeb(url, undefined, entry.session)}
             javaHandlers={javaHandlers()}
             onFrameTitle={(t) => {
               if (t && t !== entry.session.pageUrl) setFrameTitle(t);
             }}
           />
         )}
+      </Show>
+
+      <Show when={current()?.session.mode === 'url' && urlDelegatedToInnerWeb()}>
+        <div class="flex flex-1 items-center justify-center p-8 text-center text-muted-foreground">
+          <p>正在内嵌页中阅读…</p>
+        </div>
       </Show>
 
       <Show when={stack().length > 1}>

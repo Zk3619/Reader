@@ -8,6 +8,7 @@ import { inlineScriptTag } from '@/lib/rss-source/rss-inline-script';
 import { buildRssParentFetchBridgeScript, rssContentNeedsSubframeBridge } from '@/lib/rss-source/rss-parent-fetch-bridge';
 import { buildRssSubframeFetchPatch } from '@/lib/rss-source/rss-subframe-fetch-patch';
 import { injectRssContentImageBridge } from '@/lib/rss-source/rss-content-document';
+import { RSS_CONTENT_READER_OVERRIDE_STYLE } from '@/lib/rss-source/rss-content-images';
 
 const DEFAULT_RSS_STYLE =
   'img{max-width:100% !important; width:auto; height:auto;}' +
@@ -61,13 +62,15 @@ export function wrapRssHtmlForWebView(
   }
 
   const styleEndIndex = html.indexOf('</style>');
-  const finalStyle = style?.trim() || DEFAULT_RSS_STYLE;
+  const baseStyle = style?.trim() || DEFAULT_RSS_STYLE;
+  const finalStyle = baseStyle + RSS_CONTENT_READER_OVERRIDE_STYLE;
+  const readerOverrideTag = `<style>${RSS_CONTENT_READER_OVERRIDE_STYLE}</style>`;
 
   if (styleEndIndex >= 0) {
     if (style?.trim()) {
-      return `${html.slice(0, styleEndIndex + 8)}<style>${style}</style>${html.slice(styleEndIndex + 8)}`;
+      return `${html.slice(0, styleEndIndex + 8)}<style>${style}</style>${readerOverrideTag}${html.slice(styleEndIndex + 8)}`;
     }
-    return html;
+    return `${html.slice(0, styleEndIndex + 8)}${readerOverrideTag}${html.slice(styleEndIndex + 8)}`;
   }
 
   const headEndIndex = html.indexOf('</head>');
