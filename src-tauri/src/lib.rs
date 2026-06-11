@@ -769,6 +769,32 @@ fn get_inner_web_panel_user_agent() -> Result<String, String> {
         .unwrap_or_default())
 }
 
+fn inner_web_panel_page_title_store() -> &'static Mutex<String> {
+    static STORE: OnceLock<Mutex<String>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// panel bootstrap 上报 document.title（CF 验证后替换「Cloudflare 验证」顶栏）
+#[tauri::command]
+fn store_inner_web_panel_page_title(title: String) -> Result<(), String> {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if let Ok(mut guard) = inner_web_panel_page_title_store().lock() {
+        *guard = trimmed.to_string();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_inner_web_panel_page_title() -> Result<String, String> {
+    Ok(inner_web_panel_page_title_store()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default())
+}
+
 /// CF 挑战后 panel 可能已跳转到镜像域；读取当前 document URL
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
@@ -1339,6 +1365,31 @@ fn reader_emit_network_booksource_import(app: tauri::AppHandle, url: String) -> 
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+fn inner_web_panel_open_link(
+    app: tauri::AppHandle,
+    url: String,
+    target: Option<String>,
+) -> Result<(), String> {
+    let u = url.trim();
+    if handle_inner_web_special_uri(&app, u) {
+        return Ok(());
+    }
+    if !u.starts_with("http://") && !u.starts_with("https://") {
+        return Ok(());
+    }
+    app.emit(
+        "reader-inner-web-open-link",
+        serde_json::json!({
+            "url": u,
+            "target": target.unwrap_or_default(),
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn handle_inner_web_special_uri(app: &tauri::AppHandle, uri: &str) -> bool {
     let s = uri.trim();
     let sl = s.to_ascii_lowercase();
@@ -1803,6 +1854,8 @@ pub fn run() {
             get_inner_web_panel_current_url,
             store_inner_web_panel_user_agent,
             get_inner_web_panel_user_agent,
+            store_inner_web_panel_page_title,
+            get_inner_web_panel_page_title,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             store_inner_web_panel_html_snapshot,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1821,6 +1874,8 @@ pub fn run() {
             reload_inner_web_panel,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             close_inner_web_panel,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            inner_web_panel_open_link,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             set_inner_web_session_active,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

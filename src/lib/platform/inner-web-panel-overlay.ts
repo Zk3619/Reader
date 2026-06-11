@@ -6,6 +6,7 @@
 import { createRoot, createSignal } from 'solid-js';
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
+import { isInnerWebSessionActive } from '@/lib/platform/inner-web';
 import { useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
 
 /** 高于 .reader-inner-web-layer (z-150) 的 Portal 层级 */
@@ -106,6 +107,16 @@ export function releaseInnerWebPanelForOverlay(options?: ReleaseInnerWebPanelOpt
     pendingShowTimer = null;
     void flushPanelShow();
   }, delay);
+}
+
+/** 导入选择弹窗关闭：立即恢复子 WebView，并在 refcount 已归零时兜底 flush */
+export function releaseInnerWebPanelAfterImportDialog(): void {
+  if (!isTauri()) return;
+  releaseInnerWebPanelForOverlay({ immediate: true });
+  if (overlayRetainCount === 0 && panelSuppressed && isInnerWebSessionActive()) {
+    cancelPendingShow();
+    void flushPanelShow();
+  }
 }
 
 export function retainInnerWebPanelForOverlayUntil(ms: number): void {

@@ -93,6 +93,27 @@ let closeOverlay: CloseFn | null = null;
 let patchEmbedded: PatchFn | null = null;
 let refreshGuardInstalled = false;
 
+type InnerWebDismissListener = () => void;
+const innerWebDismissListeners = new Set<InnerWebDismissListener>();
+
+/** 内嵌页完全关闭后通知（drawer 动画结束或全屏 dismiss 完成） */
+export function onInnerWebDismissed(listener: InnerWebDismissListener): () => void {
+  innerWebDismissListeners.add(listener);
+  return () => {
+    innerWebDismissListeners.delete(listener);
+  };
+}
+
+function notifyInnerWebDismissed(): void {
+  for (const listener of innerWebDismissListeners) {
+    try {
+      listener();
+    } catch (e) {
+      console.warn('[inner-web] dismiss listener failed', e);
+    }
+  }
+}
+
 let pendingAwait: {
   resolve: (r: InnerWebCloseResult) => void;
   cookieSyncUrl?: string;
@@ -278,6 +299,7 @@ async function dismissOverlay(): Promise<void> {
   onInnerWebSessionEnded();
   setInnerWebCookiesUseMainWebview(false);
   closeOverlay?.();
+  notifyInnerWebDismissed();
   pendingDismissResolve?.();
   pendingDismissResolve = null;
 }

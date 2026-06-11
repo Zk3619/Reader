@@ -274,17 +274,34 @@ export async function openSourceSettingsInApp(
 }
 
 /**
+ * 用系统默认处理程序打开任意 scheme（http(s)、mailto、market 等）
+ */
+export async function openExternalUrl(url: string): Promise<boolean> {
+  const trimmed = url?.trim();
+  if (!trimmed || !/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return false;
+  }
+  try {
+    if (isTauri()) {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(trimmed);
+    } else {
+      window.open(trimmed, '_blank', 'noopener,noreferrer');
+    }
+    return true;
+  } catch (e) {
+    console.warn(OPEN_URL_LOG, 'openExternalUrl failed', e);
+    return false;
+  }
+}
+
+/**
  * 在系统默认浏览器中打开 URL
  */
 export async function openUrlInBrowser(url: string): Promise<void> {
   const trimmed = url?.trim();
-  if (!trimmed || (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))) {
+  if (!trimmed?.startsWith('http://') && !trimmed?.startsWith('https://')) {
     return;
   }
-  if (isTauri()) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(trimmed);
-  } else {
-    window.open(trimmed, '_blank', 'noopener,noreferrer');
-  }
+  await openExternalUrl(trimmed);
 }

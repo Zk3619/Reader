@@ -55,6 +55,11 @@ import {
 import { InnerWebHeader } from '@/components/inner-web/InnerWebHeader';
 import { useInnerWebDrawerClosing } from '@/components/inner-web/InnerWebDrawerShell';
 import { LoaderIcon } from '@/components/shared/icons';
+import {
+  buildInnerWebNavigationBridgeScript,
+  INNER_WEB_NAV_CHANNEL,
+  navigateInnerWebLink,
+} from '@/lib/platform/inner-web-navigation';
 import { cn } from '@/lib/utils';
 
 const INNER_WEB_YUEDU_CHANNEL = 'reader-inner-web-yuedu';
@@ -77,6 +82,39 @@ function injectInnerWebDocumentBridge(frame: HTMLIFrameElement): void {
   } catch {
     /* ignore */
   }
+}
+
+function injectInnerWebNavigationBridge(frame: HTMLIFrameElement): void {
+  try {
+    const doc = frame.contentDocument;
+    const root = doc?.documentElement;
+    if (!root || doc.getElementById('reader-inner-web-nav-bridge')) return;
+    const s = doc.createElement('script');
+    s.id = 'reader-inner-web-nav-bridge';
+    s.textContent = buildInnerWebNavigationBridgeScript();
+    root.appendChild(s);
+  } catch {
+    /* 跨域 iframe 无法注入 */
+  }
+}
+
+function isInnerWebFrameMessageSource(
+  source: MessageEventSource | null,
+  root: HTMLIFrameElement,
+): boolean {
+  if (!source || !root.contentWindow) return false;
+  const walk = (win: Window): boolean => {
+    if (win === source) return true;
+    try {
+      for (let i = 0; i < win.frames.length; i++) {
+        if (walk(win.frames[i]!)) return true;
+      }
+    } catch {
+      /* 跨域子 frame */
+    }
+    return false;
+  };
+  return walk(root.contentWindow);
 }
 
 function injectYueduBooksourceBridge(frame: HTMLIFrameElement): void {
@@ -119,6 +157,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const payload = () => props.payload ?? null;
   /** 挂载时的 payload，供 √ 确认与标题在 teardown 期间使用 */
   const snap = props.payload;
+  const [pageTitle, setPageTitle] = createSignal<string | undefined>(undefined);
+  const headerTitle = () => pageTitle()?.trim() || snap?.title?.trim() || '内嵌网页';
+  const applyInnerWebDocumentTitle = (raw: string | undefined) => {
+    const t = String(raw ?? '').trim();
+    if (!t) return;
+    if (/just a moment|checking your browser|attention required/i.test(t)) return;
+    if (/^Cloudflare\s*验证/i.test(t)) return;
+    setPageTitle(t);
+    updateInnerWebPayload({ title: t });
+  };
   const content = () => {
     const p = payload();
     return { url: p?.url, html: p?.html };
@@ -183,6 +231,8 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const p = payload();
     if (!p || !p.useProxyDocument || proxyFailed()) return false;
     if (p.cloudflareVerification && isTauri()) return false;
+    const cookies = initialCookies();
+    if (!cookies.trim() && !p.cloudflareVerification) return false;
     return !iframeSrc();
   };
   /** 加载遮罩（不阻止 iframe 挂载，避免 onLoad 无法触发） */
@@ -391,6 +441,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
     };
     window.addEventListener('message', onYueduBooksourceImport);
 
+    const onInnerWebNavigate = (ev: MessageEvent) => {
+      const d = ev.data as { channel?: string; href?: string; target?: string | null } | undefined;
+      if (!d || d.channel !== INNER_WEB_NAV_CHANNEL || !d.href?.trim()) return;
+      const frame = iframeEl();
+      if (frame && !isInnerWebFrameMessageSource(ev.source, frame)) return;
+      void navigateInnerWebLink(d.href, d.target ?? null);
+    };
+    window.addEventListener('message', onInnerWebNavigate);
+
     const p0 = payload() ?? snap;
     setInnerWebCookiesUseMainWebview(
       p0?.cloudflareVerification
@@ -408,7 +467,30 @@ export function InnerWebPage(props: InnerWebPageProps) {
     }
 
     createEffect(() => {
+      if (!panelMode() || !cfVerify()) return;
+      let cancelled = false;
+      const pollPanelTitle = async () => {
+        if (cancelled || !isTauri()) return;
+        try {
+          const t = (await invoke<string>('get_inner_web_panel_page_title')).trim();
+          if (t) applyInnerWebDocumentTitle(t);
+        } catch {
+          /* panel 未就绪 */
+        }
+      };
+      void pollPanelTitle();
+      const id = window.setInterval(() => void pollPanelTitle(), 1200);
+      onCleanup(() => {
+        cancelled = true;
+        window.clearInterval(id);
+      });
+    });
+
+    createEffect(() => {
       if (!panelMode()) return;
+      pageUrl();
+      initialCookies();
+      embeddedHtml();
       const el = contentEl();
       if (!el) return;
       if (useHtmlContent() && isLoading()) return;
@@ -452,6 +534,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
       panelSyncKey = '';
       window.removeEventListener(INNER_WEB_REFRESH_EVENT, onRefreshKey);
       window.removeEventListener('message', onYueduBooksourceImport);
+      window.removeEventListener('message', onInnerWebNavigate);
       resizeObserver?.disconnect();
       stopInnerWebBridge();
       proxyBootstrapInflightKey = null;
@@ -495,9 +578,18 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const el = ev.currentTarget;
     if (el instanceof HTMLIFrameElement) {
       injectInnerWebDocumentBridge(el);
+      if (cfVerify()) {
+        try {
+          applyInnerWebDocumentTitle(el.contentDocument?.title ?? '');
+        } catch {
+          /* cross-origin */
+        }
+      }
       if (useHtmlContent()) {
         yueduBridgeIframe = el;
         injectYueduBooksourceBridge(el);
+      } else if (pageUrl().startsWith('http')) {
+        injectInnerWebNavigationBridge(el);
       }
     }
   };
@@ -537,7 +629,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
     >
       <div class="reader-inner-web-toolbar-host shrink-0">
         <InnerWebHeader
-          title={snap?.title ?? '内嵌网页'}
+          title={headerTitle()}
           onBack={handleBack}
           onConfirm={handleConfirm}
           onRefresh={handleRefresh}
@@ -598,7 +690,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
                 <iframe
                   ref={setIframeEl}
                   class="reader-inner-web-iframe absolute inset-0 h-full w-full border-0 bg-background"
-                  title={snap?.title ?? '内嵌网页'}
+                  title={headerTitle()}
                   src={iframeDocumentSrc()}
                   allow="fullscreen"
                   referrerpolicy="no-referrer-when-downgrade"
@@ -610,7 +702,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
             <iframe
               ref={setIframeEl}
               class="reader-inner-web-iframe absolute inset-0 h-full w-full border-0 bg-background"
-              title={snap?.title ?? '内嵌网页'}
+              title={headerTitle()}
               srcdoc={embeddedHtml()}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
               onLoad={handleIframeLoad}

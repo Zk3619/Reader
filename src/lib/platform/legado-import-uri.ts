@@ -13,6 +13,7 @@ export type ReaderImportParsed =
   | { kind: 'rssNetwork'; src: string }
   | { kind: 'replaceRuleNetwork'; src: string }
   | { kind: 'txtTocRuleNetwork'; src: string }
+  | { kind: 'dictRuleNetwork'; src: string }
   | { kind: 'determineType'; src: string }
   | { kind: 'unsupported'; reason: string };
 
@@ -27,6 +28,18 @@ function normalizeDecodedSrc(raw: string): string | null {
   s = s.trim();
   if (!/^https:\/\//i.test(s) && !/^http:\/\//i.test(s)) return null;
   return s;
+}
+
+/** legado:// / yuedu:// 深链接（对齐 Legado ReadRssActivity.handleCommonSchemes） */
+export function isReaderImportDeepLink(uri: string): boolean {
+  const trimmed = uri.trim();
+  if (!trimmed) return false;
+  try {
+    const proto = new URL(trimmed).protocol.replace(/:$/, '').toLowerCase();
+    return proto === 'legado' || proto === 'yuedu';
+  } catch {
+    return /^legado:/i.test(trimmed) || /^yuedu:/i.test(trimmed);
+  }
 }
 
 /** 解析 legado:// / yuedu:// 或裸 http(s) URL */
@@ -73,8 +86,11 @@ export function parseReaderImportDeepLink(uri: string): ReaderImportParsed | nul
     if (/^\/texttocrule\/?$/i.test(path)) {
       return { kind: 'txtTocRuleNetwork', src };
     }
+    if (/^\/dictrule\/?$/i.test(path)) {
+      return { kind: 'dictRuleNetwork', src };
+    }
     if (
-      /^\/(theme|dictrule|httptts|readconfig|addtobookshelf)\/?$/i.test(path)
+      /^\/(theme|httptts|readconfig|addtobookshelf)\/?$/i.test(path)
     ) {
       return {
         kind: 'unsupported',

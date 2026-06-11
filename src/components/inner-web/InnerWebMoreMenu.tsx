@@ -2,7 +2,7 @@
  * 内嵌页「更多」菜单（对齐 Legado WebViewActivity 溢出菜单）
  */
 
-import { createSignal, createEffect, Show } from 'solid-js';
+import { createSignal, createEffect, Show, onMount, onCleanup } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
   AppDropdownMenu,
@@ -28,6 +28,7 @@ import {
 } from '@/lib/platform/inner-web-panel-overlay';
 import { openUrlInBrowser } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { ACCESSIBILITY_EVENTS } from '@/utils/accessibility';
 
 export interface InnerWebMoreMenuProps {
   pageUrl?: string;
@@ -58,6 +59,16 @@ export function InnerWebMoreMenu(props: InnerWebMoreMenuProps) {
       setCookieLoading(false);
       setCookieText('');
     }
+  });
+
+  onMount(() => {
+    const onDialogOpened = () => {
+      if (open()) handleMenuOpenChange(false);
+    };
+    window.addEventListener(ACCESSIBILITY_EVENTS.DIALOG_OPENED, onDialogOpened);
+    onCleanup(() =>
+      window.removeEventListener(ACCESSIBILITY_EVENTS.DIALOG_OPENED, onDialogOpened),
+    );
   });
 
   const handleOpenInBrowser = () => {
