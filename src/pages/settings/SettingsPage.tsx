@@ -411,7 +411,12 @@ export function SettingsPage(props: SettingsPageProps) {
 
             <div
               ref={hubScrollEl}
-              class={cn(mainShellPageScroll, settingsPageScrollTrackClass)}
+              class={cn(
+                settingsPageScrollTrackClass,
+                readingRuleSubOpen()
+                  ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                  : mainShellPageScroll,
+              )}
             >
               <Show when={isSearching()}>{hubSearchResults()}</Show>
               <Show when={!isSearching()}>
@@ -420,7 +425,12 @@ export function SettingsPage(props: SettingsPageProps) {
                     <TabsContent
                       value={cat.id}
                       forceMount={cat.id === 'storage' && storageTabVisited()}
-                      class="mt-0 w-full min-w-0 overflow-visible focus-visible:outline-none"
+                      class={cn(
+                        'mt-0 w-full min-w-0 focus-visible:outline-none',
+                        cat.id === 'reading' && readingRuleSubOpen()
+                          ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                          : 'overflow-visible',
+                      )}
                     >
                       <SettingsCategoryContent
                         categoryId={cat.id}
@@ -475,7 +485,12 @@ export function SettingsPage(props: SettingsPageProps) {
 
           <div
             ref={subPageScrollEl}
-            class={cn(mainShellPageScroll, settingsPageScrollTrackClass, 'pb-4')}
+            class={cn(
+              settingsPageScrollTrackClass,
+              readingRuleSubOpen()
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden pb-4'
+                : cn(mainShellPageScroll, 'pb-4'),
+            )}
           >
             <Show when={isSearching()}>{hubSearchResults()}</Show>
 
@@ -483,7 +498,14 @@ export function SettingsPage(props: SettingsPageProps) {
               <For each={SETTINGS_CATEGORIES}>
                 {(cat) => (
                   <Show when={mountedMobileSubPages().has(cat.id)}>
-                    <div class={cn(mobileSubPage() !== cat.id && 'hidden')}>
+                    <div
+                      class={cn(
+                        mobileSubPage() !== cat.id && 'hidden',
+                        cat.id === 'reading' &&
+                          readingRuleSubOpen() &&
+                          'flex min-h-0 flex-1 flex-col overflow-hidden',
+                      )}
+                    >
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}

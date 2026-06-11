@@ -181,12 +181,13 @@ import {
   type InnerWebPayload,
 } from "@/lib/platform/inner-web";
 import {
-  releaseInnerWebPanelForOverlay,
+  releaseInnerWebPanelAfterImportDialog,
   retainInnerWebPanelForOverlay,
   shouldManageInnerWebPanelOverlay,
 } from "@/lib/platform/inner-web-panel-overlay";
 import { APP_INNER_WEB_DIALOG_Z } from "@/lib/ui/overlay-z";
 import {
+  handleReaderImportDeepLink,
   parseReaderImportDeepLink,
   READER_BOOKSOURCE_IDENTIFY_EVENT,
   READER_RSS_IMPORT_EVENT,
@@ -537,12 +538,16 @@ function AppContent() {
     } catch {
       setImportRssGroupOptions([]);
     }
+    await retainImportSelectDialogPanelIfNeeded();
     setShowImportRssSelectDialog(true);
+    scheduleOverlayPositionSync();
+    requestAnimationFrame(() => scheduleOverlayPositionSync());
   };
 
   const applyRecognizedRssSources = async (sources: NewRssSource[], title = "导入订阅源") => {
     if (sources.length === 0) {
       setShowImportRssSelectDialog(false);
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title, description: "未识别到有效订阅源", variant: "default" });
       return;
     }
@@ -565,6 +570,7 @@ function AppContent() {
       await applyRecognizedRssSources(sources, "网络导入订阅源");
     } catch (err) {
       setShowImportRssSelectDialog(false);
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title: "网络导入订阅源失败", description: String(err), variant: "destructive" });
     } finally {
       setImportRssLoading(false);
@@ -594,6 +600,7 @@ function AppContent() {
       });
       showAppToast({ title: "导入订阅源", description: `已导入 ${n} 条`, variant: "default" });
       setShowImportRssSelectDialog(false);
+      releaseImportSelectDialogPanelIfNeeded();
       setImportRssCandidates([]);
       setImportRssComparisons([]);
       setImportRssSelectedUrls(new Set<string>());
@@ -739,13 +746,29 @@ function AppContent() {
     formatSourceListFilterSummary(sourceListFilter(), sourceFilterGroupOptions());
 
   /** Tauri 子 WebView 叠在主界面之上时需先 hide；与内嵌浮层 z-150 对齐的 Dialog portal */
-  let bookSourceImportPanelRetained = false;
+  let importSelectDialogPanelRetained = false;
 
-  function releaseBookSourceImportPanelIfNeeded(): void {
-    if (!bookSourceImportPanelRetained) return;
-    bookSourceImportPanelRetained = false;
-    releaseInnerWebPanelForOverlay({ overlap: true });
+  function releaseImportSelectDialogPanelIfNeeded(): void {
+    if (!importSelectDialogPanelRetained) return;
+    importSelectDialogPanelRetained = false;
+    releaseInnerWebPanelAfterImportDialog();
   }
+
+  async function retainImportSelectDialogPanelIfNeeded(): Promise<void> {
+    if (importSelectDialogPanelRetained) return;
+    const p = innerWebPayload();
+    if (!isTauri() || !shouldManageInnerWebPanelOverlay({ url: p?.url, html: p?.html })) {
+      return;
+    }
+    importSelectDialogPanelRetained = true;
+    await retainInnerWebPanelForOverlay();
+  }
+
+  /** 任意关闭路径（含 history.back / 父级 setOpen）均恢复 InnerWeb panel */
+  createEffect(() => {
+    if (showImportRssSelectDialog() || showImportSourceSelectDialog()) return;
+    releaseImportSelectDialogPanelIfNeeded();
+  });
 
   const bookSourceImportDialogPortalZ = () =>
     isInnerWebSessionActive() ? APP_INNER_WEB_DIALOG_Z : undefined;
@@ -778,15 +801,7 @@ function AppContent() {
     } catch {
       setImportGroupOptions([]);
     }
-    const p = innerWebPayload();
-    if (
-      isTauri() &&
-      shouldManageInnerWebPanelOverlay({ url: p?.url, html: p?.html }) &&
-      !bookSourceImportPanelRetained
-    ) {
-      await retainInnerWebPanelForOverlay();
-      bookSourceImportPanelRetained = true;
-    }
+    await retainImportSelectDialogPanelIfNeeded();
     setShowImportSourceSelectDialog(true);
     scheduleOverlayPositionSync();
     requestAnimationFrame(() => scheduleOverlayPositionSync());
@@ -795,7 +810,7 @@ function AppContent() {
   const applyRecognizedSources = async (sources: NewBookSource[], title = '导入书源') => {
     if (sources.length === 0) {
       setShowImportSourceSelectDialog(false);
-      releaseBookSourceImportPanelIfNeeded();
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title, description: '未识别到有效书源', variant: 'default' });
       return;
     }
@@ -818,7 +833,7 @@ function AppContent() {
       await applyRecognizedSources(sources, '网络导入书源');
     } catch (err) {
       setShowImportSourceSelectDialog(false);
-      releaseBookSourceImportPanelIfNeeded();
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title: '网络导入书源失败', description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
@@ -867,12 +882,12 @@ function AppContent() {
     } catch (err) {
       if (err instanceof DatabaseRestoreRequiredError) {
         setShowImportSourceSelectDialog(false);
-        releaseBookSourceImportPanelIfNeeded();
+        releaseImportSelectDialogPanelIfNeeded();
         await restoreDatabaseFromFile(err.file);
         return;
       }
       setShowImportSourceSelectDialog(false);
-      releaseBookSourceImportPanelIfNeeded();
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title: '本地导入书源失败', description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
@@ -909,12 +924,12 @@ function AppContent() {
       } catch (err) {
         if (err instanceof DatabaseRestoreRequiredError) {
           setShowImportSourceSelectDialog(false);
-          releaseBookSourceImportPanelIfNeeded();
+          releaseImportSelectDialogPanelIfNeeded();
           await restoreDatabaseFromFile(err.file);
           return;
         }
         setShowImportSourceSelectDialog(false);
-        releaseBookSourceImportPanelIfNeeded();
+        releaseImportSelectDialogPanelIfNeeded();
         showAppToast({
           title: '本地导入书源失败',
           description: String(err),
@@ -966,12 +981,12 @@ function AppContent() {
       } catch (err) {
         if (err instanceof DatabaseRestoreRequiredError) {
           setShowImportSourceSelectDialog(false);
-          releaseBookSourceImportPanelIfNeeded();
+          releaseImportSelectDialogPanelIfNeeded();
           await restoreDatabaseFromFile(err.file);
           return;
         }
         setShowImportSourceSelectDialog(false);
-        releaseBookSourceImportPanelIfNeeded();
+        releaseImportSelectDialogPanelIfNeeded();
         showAppToast({
           title: '目录导入书源失败',
           description: String(err),
@@ -1074,7 +1089,7 @@ function AppContent() {
       await applyRecognizedSources(sources, `${label}书源`);
     } catch (err) {
       setShowImportSourceSelectDialog(false);
-      releaseBookSourceImportPanelIfNeeded();
+      releaseImportSelectDialogPanelIfNeeded();
       showAppToast({ title: `${label}书源失败`, description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
@@ -1169,7 +1184,7 @@ function AppContent() {
         variant: 'default',
       });
       setShowImportSourceSelectDialog(false);
-      releaseBookSourceImportPanelIfNeeded();
+      releaseImportSelectDialogPanelIfNeeded();
       setImportSourceCandidates([]);
       setImportSourceComparisons([]);
       setImportSourceSelectedUrls(new Set<string>());
@@ -1264,6 +1279,32 @@ function AppContent() {
       source: params.source,
       book: params.book,
       originShell,
+    });
+  }
+
+  async function openBookInfoFromViewerBook(book: Book | null | undefined) {
+    if (!book) return;
+    if (book.origin === "local") {
+      showAppToast({
+        title: "书籍信息",
+        description: "本地书籍暂无书籍信息页",
+        variant: "default",
+      });
+      return;
+    }
+    const source = await getSource(book.origin);
+    if (!source || !source.enabled) {
+      showAppToast({
+        title: "无法打开",
+        description: "书源不存在或已禁用",
+        variant: "default",
+      });
+      return;
+    }
+    openBookInfo({
+      source,
+      book: bookToSearchBook(book),
+      originShell: nav.shellTab(),
     });
   }
 
@@ -2362,20 +2403,7 @@ function AppContent() {
             await listen<{ uri?: string }>("reader-import-deeplink", (e) => {
               const uri = e.payload?.uri?.trim();
               if (!uri) return;
-              const parsed = parseReaderImportDeepLink(uri);
-              if (!parsed) return;
-              if (parsed.kind === 'unsupported') {
-                showAppToast({ title: '暂不支持', description: parsed.reason, variant: 'default' });
-                return;
-              }
-              void handleLegadoNetworkImport(
-                parsed.kind === 'bookSourceNetwork' ||
-                  parsed.kind === 'rssNetwork' ||
-                  parsed.kind === 'replaceRuleNetwork' ||
-                  parsed.kind === 'determineType'
-                  ? parsed.src
-                  : uri
-              );
+              void handleReaderImportDeepLink(uri);
             })
           );
           unlistenFns.push(
@@ -2383,6 +2411,18 @@ function AppContent() {
               const u = e.payload?.url?.trim();
               if (u?.startsWith("http")) void identifySourcesFromNetwork(u);
             })
+          );
+          unlistenFns.push(
+            await listen<{ url?: string; target?: string | null }>(
+              "reader-inner-web-open-link",
+              (e) => {
+                const u = e.payload?.url?.trim();
+                if (!u?.startsWith("http")) return;
+                void import("@/lib/platform/inner-web-navigation").then(({ navigateInnerWebLink }) =>
+                  navigateInnerWebLink(u, e.payload?.target ?? null),
+                );
+              },
+            ),
           );
         } catch (err) {
           console.warn("[App] Tauri deeplink/import listen failed", err);
@@ -2750,7 +2790,10 @@ function AppContent() {
     push(
       "import-source-select",
       showImportSourceSelectDialog(),
-      () => setShowImportSourceSelectDialog(false),
+      () => {
+        setShowImportSourceSelectDialog(false);
+        releaseImportSelectDialogPanelIfNeeded();
+      },
     );
     push(
       "source-group-manage",
@@ -2817,7 +2860,10 @@ function AppContent() {
     push(
       "import-rss-select",
       showImportRssSelectDialog(),
-      () => setShowImportRssSelectDialog(false),
+      () => {
+        setShowImportRssSelectDialog(false);
+        releaseImportSelectDialogPanelIfNeeded();
+      },
     );
     push(
       "rss-history",
@@ -3408,61 +3454,35 @@ function AppContent() {
                     <BookReader
                 entryVisible={() => overlayEntryVisible(entry)}
                 onClose={requestCloseReader}
-                onOpenBookInfo={async () => {
-                const book = textViewerStore.state.book;
-                if (!book) return;
-                if (book.origin === "local") {
-                  showAppToast({ title: "书籍信息", description: "本地书籍暂无书籍信息页", variant: "default" });
-                  return;
-                }
-                const source = await getSource(book.origin);
-                if (!source || !source.enabled) {
-                  showAppToast({ title: "无法打开", description: "书源不存在或已禁用", variant: "default" });
-                  return;
-                }
-                const sb: SearchBook = {
-                  name: book.name,
-                  author: book.author ?? "",
-                  bookUrl: book.bookUrl,
-                  kind: book.kind,
-                  origin: book.origin,
-                  originName: book.originName,
-                  type: book.type,
-                  tocUrl: book.tocUrl,
-                  coverUrl: book.coverUrl ?? book.customCoverUrl,
-                  intro: book.intro ?? book.customIntro,
-                  latestChapterTitle: book.latestChapterTitle,
-                  time: 0,
-                  originOrder: book.originOrder ?? 0,
-                  chapterWordCount: 0,
-                  respondTime: 0,
-                };
-                openBookInfo({ source, book: sb, originShell: nav.shellTab() });
-              }}
+                onOpenBookInfo={() => void openBookInfoFromViewerBook(textViewerStore.state.book)}
                     />
                   </Match>
                   <Match when={entry.kind === "image-viewer"}>
                     <ImageViewerPage
                       entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
+                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
                     />
                   </Match>
                   <Match when={entry.kind === "audio-viewer"}>
                     <AudioViewerPage
                       entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
+                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
                     />
                   </Match>
                   <Match when={entry.kind === "video-viewer"}>
                     <VideoViewerPage
                       entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
+                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
                     />
                   </Match>
                   <Match when={entry.kind === "file-viewer"}>
                     <FileViewerPage
                       entryVisible={() => overlayEntryVisible(entry)}
                       onClose={requestCloseReader}
+                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
                     />
                   </Match>
                   <Match when={entry.kind === "explore"}>
@@ -3646,7 +3666,7 @@ function AppContent() {
           portalZClass={bookSourceImportDialogPortalZ()}
           onOpenChange={(open) => {
             setShowImportSourceSelectDialog(open);
-            if (!open) releaseBookSourceImportPanelIfNeeded();
+            if (!open) releaseImportSelectDialogPanelIfNeeded();
           }}
           onToggle={toggleImportSourceSelected}
           onSelectAllToggle={toggleImportSourceSelectAll}
@@ -3842,7 +3862,10 @@ function AppContent() {
           groupOptions={importRssGroupOptions()}
           adjustGroup={importRssAdjustGroup()}
           portalZClass={bookSourceImportDialogPortalZ()}
-          onOpenChange={setShowImportRssSelectDialog}
+          onOpenChange={(open) => {
+            setShowImportRssSelectDialog(open);
+            if (!open) releaseImportSelectDialogPanelIfNeeded();
+          }}
           onToggle={(url, checked) => {
             setImportRssSelectedUrls((prev) => {
               const next = new Set(prev);

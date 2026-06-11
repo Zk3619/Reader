@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
+import { cn } from '@/lib/utils';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
@@ -17,12 +18,9 @@ import { ReplaceRulesPage } from '@/pages/replace-rules/ReplaceRulesPage';
 import { TxtTocRulesPage } from '@/pages/txt-toc-rules/TxtTocRulesPage';
 import { DictRulesPage } from '@/pages/dict-rules/DictRulesPage';
 import { DatabaseBackup } from '@/components/shared/DatabaseBackup';
-import { Button } from '@/components/ui/button';
-import { ChevronLeftIcon } from '@/components/shared/icons';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import {
-  getReadingRuleNavEntry,
   type ReadingRulePageId,
 } from '@/lib/settings/reading-rules-nav';
 import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
@@ -41,29 +39,16 @@ function ReadingRulePageView(props: {
   page: ReadingRulePageId;
   onBack: () => void;
 }) {
-  const entry = () => getReadingRuleNavEntry(props.page);
-
   return (
-    <div class="space-y-4">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <Show when={props.page === 'txt-toc'}>
         <TxtTocRulesPage onBack={props.onBack} />
       </Show>
-      <Show when={props.page !== 'txt-toc'}>
-        <div class="flex items-center gap-2">
-          <Button variant="ghost" size="icon" class="h-9 w-9 shrink-0" onClick={props.onBack}>
-            <ChevronLeftIcon class="h-4 w-4" />
-          </Button>
-          <div class="min-w-0">
-            <h3 class="font-semibold text-foreground">{entry().title}</h3>
-            <p class="text-sm text-muted-foreground">{entry().description}</p>
-          </div>
-        </div>
-      </Show>
       <Show when={props.page === 'replace'}>
-        <ReplaceRulesPage />
+        <ReplaceRulesPage onBack={props.onBack} />
       </Show>
       <Show when={props.page === 'dict'}>
-        <DictRulesPage />
+        <DictRulesPage onBack={props.onBack} />
       </Show>
     </div>
   );
@@ -93,8 +78,15 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
     }
   });
 
+  const rulePageActive = () => props.categoryId === 'reading' && activeRulePage() != null;
+
   return (
-    <div class="w-full space-y-4">
+    <div
+      class={cn(
+        'w-full',
+        rulePageActive() ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'space-y-4',
+      )}
+    >
       <Show when={props.categoryId === 'appearance'}>
         <SettingItemAnchor id="theme" highlighted={highlight('theme')}>
           <div class="rounded-2xl border border-border/50 bg-card p-6">
