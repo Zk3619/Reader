@@ -11,6 +11,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
+import { getEnabledTxtTocRules } from '@/lib/database/txt-toc-rules';
+import {
+  encodeTocRuleStorage,
+  parseTocRuleStorage,
+  scanTxtTocMatches,
+  selectBestTxtTocRule,
+} from '@/lib/local-book/txt-toc-rule-engine';
 import type { Book, BookChapter } from '@/types';
 
 /**
@@ -204,30 +211,54 @@ export async function getTxtChapterList(
   // 解析正文头部元数据（书名、作者、简介）
   const metadata = parseTxtMetadata(content);
 
-  // 使用多规则合并解析（第一章、番外、篇外等全部识别），异常或无有效章节时按预设大小自动分章
+  // 目录规则：书籍已缓存 > readConfig.tocRule > 数据库规则自动选择 > 内置多规则 > 按大小分章
   let chapters: BookChapter[];
   let wordCount: number;
   let tocRule: string | undefined = book.tocUrl || undefined;
   const customTocRule = (book.readConfig as { tocRule?: string } | undefined)?.tocRule?.trim();
+  const storedRule = parseTocRuleStorage(book.tocUrl);
 
   try {
-    if (customTocRule) {
+    if (storedRule?.rule) {
+      const parsed = await parseChaptersWithTxtTocRule(
+        content,
+        storedRule.rule,
+        storedRule.replacement,
+        charset,
+      );
+      chapters = parsed.chapters;
+      wordCount = parsed.wordCount;
+      tocRule = encodeTocRuleStorage(storedRule.rule, storedRule.replacement);
+    } else if (customTocRule) {
       const parsed = parseChaptersWithRule(content, customTocRule, charset);
       chapters = parsed.chapters;
       wordCount = parsed.wordCount;
       if (!tocRule) tocRule = 'custom';
     } else {
-      const parsed = parseChaptersWithAllPatterns(content, charset);
-      chapters = parsed.chapters;
-      wordCount = parsed.wordCount;
+      const sample = content.slice(0, 512_000);
+      const enabledRules = await getEnabledTxtTocRules();
+      const picked = enabledRules.length > 0 ? await selectBestTxtTocRule(sample, enabledRules) : null;
+      if (picked?.rule.trim()) {
+        const parsed = await parseChaptersWithTxtTocRule(
+          content,
+          picked.rule,
+          picked.replacement,
+          charset,
+        );
+        chapters = parsed.chapters;
+        wordCount = parsed.wordCount;
+        tocRule = encodeTocRuleStorage(picked.rule, picked.replacement);
+      } else {
+        const parsed = parseChaptersWithAllPatterns(content, charset);
+        chapters = parsed.chapters;
+        wordCount = parsed.wordCount;
+        if (!tocRule && chapters.length > 0) tocRule = 'multi';
+      }
     }
-    if (!tocRule && chapters.length > 0) tocRule = 'multi';
     if (chapters.length === 0) {
-      // console.warn('[TXT解析] 未找到章节，使用自动分章');
       const fallback = parseChaptersWithoutRule(content, charset);
       chapters = fallback.chapters;
       wordCount = fallback.wordCount;
-      // console.log('[TXT解析] 自动分章结果:', { chaptersCount: chapters.length });
     }
   } catch (e) {
     console.warn('[TXT解析] 章节解析异常，按大小自动分章:', e);
@@ -463,6 +494,64 @@ function parseChaptersWithAllPatterns(
 
   for (const { index: chapterStart, title: chapterTitle } of deduped) {
     // 不再按最小间距跳过匹配，避免【第一天】～【第五天】等被合并为一章（间距过滤易误伤）
+    if (chapters.length > 0) {
+      const lastChapter = chapters[chapters.length - 1];
+      lastChapter.end = chapterStart;
+      const chapterContent = content.substring(lastChapter.start ?? 0, chapterStart);
+      lastChapter.wordCount = formatWordCount(chapterContent.length);
+      wordCount += chapterContent.length;
+    }
+
+    chapters.push({
+      url: '',
+      title: chapterTitle,
+      isVolume: /^第?[零一二三四五六七八九十百千万0-9]+[卷部篇本]/u.test(chapterTitle),
+      baseUrl: '',
+      bookUrl: '',
+      index: chapters.length,
+      isVip: false,
+      isPay: false,
+      start: chapterStart,
+      end: chapterStart,
+    });
+  }
+
+  if (chapters.length > 0) {
+    const lastChapter = chapters[chapters.length - 1];
+    lastChapter.end = content.length;
+    const chapterContent = content.substring(lastChapter.start ?? 0, content.length);
+    lastChapter.wordCount = formatWordCount(chapterContent.length);
+    wordCount += chapterContent.length;
+  }
+
+  chapters.forEach((chapter, index) => {
+    chapter.index = index;
+  });
+
+  return { chapters, wordCount };
+}
+
+/**
+ * 使用 TXT 目录规则（含可选 JS 标题净化）解析章节
+ */
+async function parseChaptersWithTxtTocRule(
+  content: string,
+  rule: string,
+  replacement: string,
+  _charset: string,
+): Promise<{ chapters: BookChapter[]; wordCount: number }> {
+  if (!rule.trim()) {
+    return parseChaptersWithoutRule(content, _charset);
+  }
+  const matches = await scanTxtTocMatches(content, rule, replacement);
+  if (matches.length === 0) {
+    return { chapters: [], wordCount: 0 };
+  }
+
+  const chapters: BookChapter[] = [];
+  let wordCount = 0;
+
+  for (const { index: chapterStart, title: chapterTitle } of matches) {
     if (chapters.length > 0) {
       const lastChapter = chapters[chapters.length - 1];
       lastChapter.end = chapterStart;
