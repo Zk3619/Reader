@@ -16,10 +16,16 @@ import { parseAjaxArgs } from '@/lib/js-engine/legado/host/parse-ajax';
 import {
   LEGADO_AJAX_PENDING_JSON,
   createSourceVariableHandlers,
-  hostsFromJsLib,
+  buildLegadoScriptSourceFace,
   getSourceArgsKey,
-  readSourceLoginInfoMap,
+  getLegadoSourceKey,
+  hostsFromJsLib,
+  createLegadoLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  legadoAesBase64DecodeToString,
+  legadoJavaMd5Encode,
+} from '@/lib/js-engine/legado/legado-java-crypto';
 import {
   buildRuleScriptFullBody,
   patchLegadoRuleScript,
@@ -533,9 +539,15 @@ export async function runLegadoRuleScript(
       }),
       source: {
         ...sourceRecord,
-        ...(bookSource
-          ? { getLoginInfoMap: () => readSourceLoginInfoMap(bookSource) }
-          : {}),
+        ...(bookSource && sourceVariableHandlers
+          ? buildLegadoScriptSourceFace(
+              bookSource,
+              sourceVariableHandlers,
+              getLegadoSourceKey(bookSource),
+            )
+          : bookSource
+            ? { getLoginInfoMap: () => createLegadoLoginInfoMap(bookSource) }
+            : {}),
         getVariable(key?: string) {
           if (sourceVariableHandlers) {
             return sourceVariableHandlers.getVariable(key);
@@ -629,6 +641,17 @@ export async function runLegadoRuleScript(
           }
           return 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36';
         },
+        md5Encode(input: unknown) {
+          return legadoJavaMd5Encode(String(input ?? ''));
+        },
+        aesBase64DecodeToString(data: unknown, key: unknown, transformation: unknown, iv: unknown) {
+          return legadoAesBase64DecodeToString(
+            String(data ?? ''),
+            String(key ?? ''),
+            String(transformation ?? ''),
+            String(iv ?? ''),
+          );
+        },
         toast(msg?: unknown, level?: unknown) {
           context.onScriptToast?.(msg, level ?? 'info');
         },
@@ -651,9 +674,7 @@ export async function runLegadoRuleScript(
           }
         },
         getString(rule: string) {
-          const hit = executeLegadoGetStringRule(String(rule ?? ''), scope, context, jsLib);
-          scope.result = hit;
-          return hit;
+          return executeLegadoGetStringRule(String(rule ?? ''), scope, context, jsLib);
         },
         setContent(content: unknown, url?: unknown) {
           return analyzeBridge.setContent(content, url);
@@ -709,6 +730,7 @@ export async function runLegadoRuleScript(
             headers: parsed.headers,
             body: parsed.body,
             source: bookSource,
+            referer: baseUrl,
           };
 
           const p = requestLegadoRuleScriptHttpAsync(resolved, req)
@@ -748,6 +770,7 @@ export async function runLegadoRuleScript(
             headers,
             body,
             source: bookSource,
+            referer: baseUrl,
           })
             .then((text) => {
               postCache.set(cacheKey, String(text ?? ''));

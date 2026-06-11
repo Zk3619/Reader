@@ -31,7 +31,7 @@ import {
   getSourceCookiesKey,
   hostsFromJsLib,
   loadSourceCookieStore,
-  readSourceLoginInfoMap,
+  buildLegadoScriptSourceFace,
 } from '@/lib/js-engine/legado/source-script-shared';
 import {
   readBookSourceQttoken,
@@ -110,11 +110,7 @@ async function tryRunExploreScriptQuickJS(
     getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
     getArgToken: () => readBookSourceQttoken(source, serverForToken),
     cookie: cookieApi,
-    source: {
-      ...sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      loginUi: source.loginUi,
-    },
+    source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
     scriptToastBuffer: toastBuffer,
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
@@ -254,11 +250,7 @@ async function tryRunExploreScriptQuickJSRaw(
     getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
     getArgToken: () => readBookSourceQttoken(source, serverForToken),
     cookie: cookieApi,
-    source: {
-      ...sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      loginUi: source.loginUi,
-    },
+    source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
     scriptToastBuffer: toastBuffer,
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
@@ -301,6 +293,7 @@ async function runExploreScriptLegacyRaw(
   options?: ExploreScriptRunOptions,
 ): Promise<unknown> {
   const baseUrl = getScriptBaseUrl(source);
+  const sourceUrl = getLegadoSourceKey(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
   const jsLib =
@@ -360,12 +353,7 @@ async function runExploreScriptLegacyRaw(
     cookie: cookieApi,
     cookieRef: cookieApi,
 
-    source: {
-      getVariable: (key?: string) => sourceVars.getVariable(key),
-      setVariable: (val?: string) => sourceVars.setVariable(val),
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      loginUi: source.loginUi,
-    },
+    source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
 
     java: {
       toast(msg?: string, level?: string) {

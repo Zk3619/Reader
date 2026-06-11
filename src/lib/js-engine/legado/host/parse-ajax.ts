@@ -10,6 +10,34 @@ export type AjaxCall = {
   callback: ((body: string) => void) | null;
 };
 
+/** Legado ajax 逗号 JSON 中的 params 对象 → URL 查询串 */
+function appendAjaxParamsToUrl(urlStr: string, params: unknown): string {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return urlStr;
+  const entries = Object.entries(params as Record<string, unknown>).filter(
+    ([, v]) => v != null && String(v).trim() !== '',
+  );
+  if (entries.length === 0) return urlStr;
+  const qs = entries
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+  return urlStr.includes('?') ? `${urlStr}&${qs}` : `${urlStr}?${qs}`;
+}
+
+function applyCommaJsonAjaxOptions(
+  opts: Record<string, unknown>,
+  state: { method: 'GET' | 'POST'; body?: string; headers: Record<string, string>; urlStr: string },
+): void {
+  state.method = ((opts.method as string) || state.method).toUpperCase() as 'GET' | 'POST';
+  if (opts.body != null) {
+    state.body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
+  }
+  const h = opts.headers as Record<string, string> | undefined;
+  if (h && typeof h === 'object') state.headers = { ...state.headers, ...h };
+  if (opts.params != null) {
+    state.urlStr = appendAjaxParamsToUrl(state.urlStr, opts.params);
+  }
+}
+
 export function parseAjaxArgs(
   url: string | Record<string, unknown>,
   optionsOrCb?: Record<string, unknown> | ((body: string) => void),
@@ -55,10 +83,12 @@ export function parseAjaxArgs(
       if (after && (after.startsWith('{') || after.startsWith('['))) {
         try {
           const opts = JSON.parse(after) as Record<string, unknown>;
-          method = ((opts.method as string) || method).toUpperCase() as 'GET' | 'POST';
-          if (opts.body != null) body = typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body);
-          const h = opts.headers as Record<string, string> | undefined;
-          if (h && typeof h === 'object') headers = { ...headers, ...h };
+          const state = { method, body, headers, urlStr };
+          applyCommaJsonAjaxOptions(opts, state);
+          method = state.method;
+          body = state.body;
+          headers = state.headers;
+          urlStr = state.urlStr;
         } catch { /* 整段当 URL */ }
       }
     }

@@ -19,7 +19,7 @@ import {
   getSourceCookiesKey,
   hostsFromJsLib,
   loadSourceCookieStore,
-  readSourceLoginInfoMap,
+  createLegadoLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { openLegadoBrowserInApp } from '@/lib/platform/open-url';
 import { tryRunExploreShowActionNative } from '@/lib/js-engine/legado/explore-show-action';
@@ -177,7 +177,7 @@ async function runExploreSectionActionLegacy(
     source: {
       getVariable: (key?: string) => sourceVars.getVariable(key),
       setVariable: (val?: string) => sourceVars.setVariable(val),
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
+      getLoginInfoMap: () => createLegadoLoginInfoMap(source),
       loginUi: source.loginUi,
     },
     java: {

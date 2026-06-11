@@ -140,6 +140,36 @@ export function readSourceLoginInfoMap(source: BookSource): Record<string, strin
   }
 }
 
+/** Legado Rhino Map 风格：getLoginInfoMap().get(name) */
+export type LegadoLoginInfoMap = {
+  get(key: string): string | null;
+};
+
+export function createLegadoLoginInfoMap(source: BookSource): LegadoLoginInfoMap {
+  const record = readSourceLoginInfoMap(source);
+  return {
+    get(key: string) {
+      const v = record[String(key)];
+      return v != null && v !== '' ? String(v) : null;
+    },
+  };
+}
+
+/** 脚本内 source 对象（对齐 Legado BookSource 脚本视图） */
+export type LegadoScriptSourceFace = {
+  getVariable: (key?: string) => string;
+  setVariable: (val?: string) => void;
+  getLoginInfoMap: () => LegadoLoginInfoMap;
+  getKey: () => string;
+  getkey: () => string;
+  variableComment: string;
+  loginUrl: string;
+  loginUi?: string;
+  jsLib: string;
+  ruleArticles: string;
+  searchUrl: string;
+};
+
 /** 加载该书源持久化 cookie 表 */
 export function loadSourceCookieStore(cookiesKey: string): Map<string, string> {
   const store = new Map<string, string>();
@@ -239,6 +269,8 @@ export function createSourceVariableHandlers(
   getVariable: (key?: string) => string;
   setVariable: (val?: string) => void;
 } {
+  /** localStorage 不可用（Node 单测）时仍须让 setcsh / getUrl 等脚本能读写 variable */
+  let memoryFallback = '';
   return {
     getVariable(_key?: string) {
       try {
@@ -247,14 +279,60 @@ export function createSourceVariableHandlers(
       } catch {
         /* ignore */
       }
+      if (memoryFallback.trim()) return memoryFallback;
       const header = (source as Record<string, unknown>).header;
-      return typeof header === 'string' && header ? header : '{}';
+      if (typeof header === 'string' && header.trim() && !header.trim().startsWith('@')) {
+        try {
+          const parsed = JSON.parse(header) as unknown;
+          if (parsed && typeof parsed === 'object') {
+            return normalizeSourceArgsVariableJson(header);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      return '{}';
     },
     setVariable(val?: string) {
-      if (typeof val === 'string') persistSourceArgsJson(source, argsKey, val);
+      if (typeof val !== 'string') return;
+      memoryFallback = normalizeSourceArgsJsonForPersist(val);
+      persistSourceArgsJson(source, argsKey, val);
     },
   };
 }
+
+/** Legado jsLib 内层 eval 读取 source.jsLib / ruleArticles / loginUrl 等做完整性校验 */
+export function buildLegadoScriptSourceFace(
+  source: BookSource,
+  sourceVars: ReturnType<typeof createSourceVariableHandlers>,
+  sourceUrl: string,
+): LegadoScriptSourceFace {
+  const raw = source as Record<string, unknown>;
+  return {
+    getVariable: (key?: string) => sourceVars.getVariable(key),
+    setVariable: (val?: string) => sourceVars.setVariable(val),
+    getLoginInfoMap: () => createLegadoLoginInfoMap(source),
+    getKey: () => stripLegadoSourceUrlMarker(sourceUrl),
+    getkey: () => stripLegadoSourceUrlMarker(sourceUrl),
+    variableComment: String(raw.variableComment ?? ''),
+    loginUrl: typeof source.loginUrl === 'string' ? source.loginUrl : '',
+    loginUi: typeof source.loginUi === 'string' ? source.loginUi : undefined,
+    jsLib: typeof raw.jsLib === 'string' ? raw.jsLib : '',
+    ruleArticles: typeof raw.ruleArticles === 'string' ? raw.ruleArticles : '',
+    searchUrl: typeof source.searchUrl === 'string' ? source.searchUrl : '',
+  };
+}
+
+/** Function 降级路径：Packages.java.lang.Thread.sleep 等 Rhino API */
+export const LEGADO_LEGACY_PACKAGES_SHIM = {
+  java: {
+    lang: {
+      Thread: {
+        sleep: (_ms?: number) => {},
+      },
+    },
+  },
+};
 
 /**
  * Legado 发现脚本常以 `JSON.stringify(finalData)` 作为末尾表达式返回值，
@@ -294,6 +372,16 @@ const EXPLORE_JSLIB_THIS_BIND_TARGETS = [
   'getServerSettings',
   'getSvgSettings',
   'login',
+  'getUrl',
+  'getKey',
+  'getSecretKey',
+  'TD',
+  'setcsh',
+  'seturlm',
+  'setzt',
+  'start',
+  'update',
+  'key',
   'toggleLogs',
   'compareVersions',
   'fetchVersionData',
@@ -308,6 +396,14 @@ const EXPLORE_JSLIB_THIS_BIND_TARGETS = [
   'getSelectedStyleName',
   'deleteCustomStyle',
 ] as const;
+
+/** jsLib 内可被 {{fn()}} 单独调用的函数名（ruleArticles / sortUrl 模板展开） */
+export const JSLIB_STANDALONE_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+  ...EXPLORE_JSLIB_THIS_BIND_TARGETS,
+  'getInfo',
+  'showPopup',
+  'token',
+]);
 
 function buildExploreJsLibThisBindLines(): string {
   const lines = [
@@ -728,6 +824,10 @@ export function ensureExploreScriptSetsResult(script: string): string {
     if (tail) {
       return `${tail[1]}${tail[2]}globalThis.result = ${tail[3]};`;
     }
+  }
+  // RSS sortUrl 等：脚本内 let result，IIFE 结束后须同步到 globalThis
+  if (/\bresult\s*=/.test(s) && !/\bglobalThis\.result\s*=/.test(s)) {
+    return `${s}\nglobalThis.result = result;`;
   }
   return s;
 }

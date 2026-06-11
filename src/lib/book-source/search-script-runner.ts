@@ -6,7 +6,6 @@
 import { getBookSourcePage, postBookSourcePage } from '@/lib/book-source/source-http-cf';
 import {
   resolveUrl,
-  stripLegadoSourceUrlMarker,
   utf8FromBase64,
   utf8ToBase64,
   hexToUtf8,
@@ -31,17 +30,24 @@ import {
   createLegadoScriptCookieApi,
 } from '@/lib/js-engine/legado/login-script-runner';
 import {
+  createLegadoScriptCache,
   createSourceVariableHandlers,
+  buildLegadoScriptSourceFace,
   buildLegadoExploreScriptBundle,
   EXPLORE_JSLIB_CONTEXT_SHIM,
+  LEGADO_LEGACY_PACKAGES_SHIM,
   getScriptBaseUrl,
   getSourceArgsKey,
   getSourceCookiesKey,
   getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
-  readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  legadoAesBase64DecodeToString,
+  legadoJavaGetWebViewUA,
+  legadoJavaMd5Encode,
+} from '@/lib/js-engine/legado/legado-java-crypto';
 
 const SCRIPT_TIMEOUT_MS = 15000;
 
@@ -139,9 +145,8 @@ async function runSearchJsFullQuickJS(
     getOrCreateDeviceId: () => 'web_reader',
     cookie: p.cookieApi,
     source: {
-      ...p.sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      getKey: () => p.sourceUrl,
+      ...buildLegadoScriptSourceFace(source, p.sourceVars, p.sourceUrl),
+      header: typeof source.header === 'string' ? source.header : undefined,
     },
     searchKey: keyword,
     searchPage: page,
@@ -170,9 +175,9 @@ async function runSearchJsFullQuickJS(
   }
 }
 
-function buildLegacyJavaApi(): Pick<
+function buildLegacyJavaApi(header?: string | null): Pick<
   Record<string, unknown>,
-  'base64Encode' | 'base64Decode' | 'hexDecodeToString'
+  'base64Encode' | 'base64Decode' | 'hexDecodeToString' | 'aesBase64DecodeToString' | 'getWebViewUA' | 'md5Encode'
 > {
   return {
     base64Encode(str: unknown) {
@@ -184,7 +189,37 @@ function buildLegacyJavaApi(): Pick<
     hexDecodeToString(hex: unknown) {
       return hexToUtf8(String(hex ?? ''));
     },
+    aesBase64DecodeToString(data: unknown, key: unknown, transformation: unknown, iv: unknown) {
+      return legadoAesBase64DecodeToString(
+        String(data ?? ''),
+        String(key ?? ''),
+        String(transformation ?? ''),
+        String(iv ?? ''),
+      );
+    },
+    getWebViewUA() {
+      return legadoJavaGetWebViewUA(header);
+    },
+    md5Encode(input: unknown) {
+      return legadoJavaMd5Encode(String(input ?? ''));
+    },
   };
+}
+
+function sourceHasJsLib(source: BookSource): boolean {
+  const jsLib = (source as Record<string, unknown>).jsLib;
+  return typeof jsLib === 'string' && jsLib.trim().length > 0;
+}
+
+/** sortUrl/header 中 {{getUrl()}} 等依赖 jsLib 的表达式 */
+function expressionLikelyNeedsJsLib(expr: string, source: BookSource): boolean {
+  if (!sourceHasJsLib(source)) return false;
+  const t = expr.trim();
+  if (!t || !/\b[a-zA-Z_$][\w$]*\s*\(/.test(t)) return false;
+  if (trySyncEvalSearchTemplate(t, buildSearchTemplateContext(source, '', 1)) != null) {
+    return false;
+  }
+  return true;
 }
 
 function buildLegacyScope(
@@ -205,13 +240,9 @@ function buildLegacyScope(
     host: p.hosts,
     result: undefined,
     cookie: p.cookieApi,
-    source: {
-      getVariable: (k?: string) => p.sourceVars.getVariable(k),
-      setVariable: (v?: string) => p.sourceVars.setVariable(v),
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      getKey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
-      getkey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
-    },
+    cache: createLegadoScriptCache(),
+    source: buildLegadoScriptSourceFace(source, p.sourceVars, p.sourceUrl),
+    Packages: LEGADO_LEGACY_PACKAGES_SHIM,
     bhost: () => (p.hosts[0] as string) || p.baseUrl || '',
     getArguments: (a: string, k?: string) => {
       try {
@@ -227,7 +258,7 @@ function buildLegacyScope(
       }
     },
     java: {
-      ...buildLegacyJavaApi(),
+      ...buildLegacyJavaApi(typeof source.header === 'string' ? source.header : undefined),
       toast(msg?: unknown, level?: unknown) {
         onScriptToast?.(msg, level ?? 'info');
       },
@@ -358,9 +389,7 @@ async function evalExprQuickJS(
     getOrCreateDeviceId: () => 'web_reader',
     cookie: p.cookieApi,
     source: {
-      ...p.sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-      getKey: () => stripLegadoSourceUrlMarker(p.sourceUrl),
+      ...buildLegadoScriptSourceFace(source, p.sourceVars, p.sourceUrl),
     },
     searchKey: keyword,
     searchPage: page,
@@ -437,7 +466,7 @@ export async function runSearchUrlScript(
 
 /**
  * 执行单条 JS 表达式（用于 {{...}} 或内嵌 <js> 块）
- * 不加载 jsLib，避免「not a function」；Legacy 使用 Function 而非 eval(return)
+ * 常见模板走同步路径；依赖 jsLib 的（如 {{getUrl()}}）回退整包 jsLib 执行
  */
 export async function evalSearchUrlExpression(
   expr: string,
@@ -449,6 +478,16 @@ export async function evalSearchUrlExpression(
   const trimmed = expr.trim();
   if (!trimmed) return prevResult;
 
+  if (expressionLikelyNeedsJsLib(trimmed, source)) {
+    const withLib = await runSearchUrlScript(
+      `result = (${trimmed});`,
+      source,
+      keyword,
+      page,
+    );
+    if (withLib.trim()) return withLib.trim();
+  }
+
   const tplCtx = buildSearchTemplateContext(source, keyword, page);
   const sync = trySyncEvalSearchTemplate(trimmed, tplCtx);
   if (sync != null) return sync;
@@ -457,6 +496,8 @@ export async function evalSearchUrlExpression(
   if (quick != null && quick !== '') return quick;
 
   const legacy = evalExprLegacy(trimmed, source, keyword, page);
-  return legacy !== '' ? legacy : prevResult;
+  if (legacy !== '') return legacy;
+
+  return prevResult;
 }
 

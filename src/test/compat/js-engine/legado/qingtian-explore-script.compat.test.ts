@@ -18,6 +18,7 @@ import {
   createSourceVariableHandlers,
   getSourceArgsKey,
   hostsFromJsLib,
+  type LegadoScriptSourceFace,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
@@ -171,9 +172,9 @@ globalThis.result = device_type;
       },
       source: {
         getVariable: () => ls.get(argsKey) ?? '',
-        setVariable: (v) => { if (v) ls.set(argsKey, v); },
-        getLoginInfoMap: () => ({}),
-      },
+        setVariable: (v?: string) => { if (v) ls.set(argsKey, v); },
+        getLoginInfoMap: () => ({ get: () => null }),
+      } as unknown as LegadoScriptSourceFace,
       request: async () => '',
     });
 
@@ -260,9 +261,9 @@ globalThis.result = JSON.stringify({ islyc, device_type, gate, qtsjLen: qtsj.len
       },
       source: {
         getVariable: () => ls.get(argsKey) ?? '',
-        setVariable: (v) => { if (v) ls.set(argsKey, v); },
-        getLoginInfoMap: () => ({}),
-      },
+        setVariable: (v?: string) => { if (v) ls.set(argsKey, v); },
+        getLoginInfoMap: () => ({ get: () => null }),
+      } as unknown as LegadoScriptSourceFace,
       request: async () => '',
     });
 
@@ -366,7 +367,7 @@ if (typeof result === "undefined") {
       source: {
         getVariable: (key?: string) => sourceVars.getVariable(key),
         setVariable: (val?: string) => sourceVars.setVariable(val),
-        getLoginInfoMap: () => ({}),
+        getLoginInfoMap: () => ({ get: () => null }),
       },
       java: {
         toast() {},

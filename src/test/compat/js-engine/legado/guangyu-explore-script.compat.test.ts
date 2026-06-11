@@ -11,10 +11,12 @@ import {
 import { patchExploreScriptForReaderWeb } from '@/lib/js-engine/legado/legado-explore-java-device';
 import {
   buildLegadoExploreScriptBundle,
+  buildLegadoScriptSourceFace,
   createSourceVariableHandlers,
   getSourceArgsKey,
   getSourceCookiesKey,
   hostsFromJsLib,
+  type LegadoScriptSourceFace,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
@@ -168,10 +170,7 @@ globalThis.result = JSON.stringify({ qttokenLen: qttoken.length, titles: qtsj.ma
           return m?.[1] ?? '';
         },
       },
-      source: {
-        ...sourceVars,
-        getLoginInfoMap: () => ({}),
-      },
+      source: buildLegadoScriptSourceFace(source, sourceVars, source.sourceUrl),
       request: async () => '',
     });
 
@@ -219,8 +218,8 @@ describe('guangyu getToken fallback via cookie.getKey', () => {
         getVariable: () =>
           JSON.stringify({ 云端配置: { hosts: [server] }, 线路: server }),
         setVariable: () => {},
-        getLoginInfoMap: () => ({}),
-      },
+        getLoginInfoMap: () => ({ get: () => null }),
+      } as unknown as LegadoScriptSourceFace,
       request: async () => '',
     });
 

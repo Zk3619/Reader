@@ -125,11 +125,26 @@ const SHOW_SOURCE_CATALOG_TAIL_FIX =
   'return showSource == "true" ? processCatalogList(data) : data;';
 
 /**
+ * 蓝奏云等书源在 with 里声明 function $(reg) 辅助函数，会遮蔽 Legado 结果变量 $，
+ * 导致后续 $= / $ = 赋值无效、JSON.stringify($) 得到 undefined。
+ */
+function patchLegadoDollarUriMatchHelper(code: string): string {
+  if (!/function\s+\$\s*\(\s*\w+\s*\)/.test(code) || !/\$\(\//.test(code)) {
+    return code;
+  }
+  let out = code;
+  out = out.replace(/function\s+\$\s*\(\s*(\w+)\s*\)/g, 'function __readerUriMatch($1)');
+  out = out.replace(/\$\(\//g, '__readerUriMatch(/');
+  return out;
+}
+
+/**
  * 修正正文/目录规则里在 `let res` 解析完成前引用未初始化 let 绑定的问题。
  * 不修改 `content = data.content` 等书源语义。
  */
 export function patchLegadoRuleScript(code: string): string {
   let out = code;
+  out = patchLegadoDollarUriMatchHelper(out);
   out = out.replace(JAVA_PUT_SOURCES_RE, "java.put('sources', res.sources)");
   out = out.replace(JAVA_PUT_TAB_RE, "java.put('tab', res.tab)");
   out = out.replace(JAVA_PUT_ITEM_ID_RE, "java.put('item_id', res.item_id)");
@@ -145,6 +160,7 @@ export function patchLegadoRuleScript(code: string): string {
   out = out.replace(RES_JSON_PARSE_RESULT_RE, RES_JSON_PARSE_RESULT_SAFE);
   out = out.replace(DATA_JSON_PARSE_RE, DATA_JSON_PARSE_SAFE);
   out = out.replace(SHOW_SOURCE_CATALOG_TAIL_RE, SHOW_SOURCE_CATALOG_TAIL_FIX);
+  out = out.replace(/\blet\s+start\s*=\s*start\s*\(\s*\)/g, 'var start = start()');
   if (/\bcontent_url\s*=/.test(out) && !/\breturn\b/.test(out)) {
     out += '\nreturn content_url;';
   }

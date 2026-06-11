@@ -16,8 +16,14 @@ import {
 import { bindJavaAjax, type AjaxRequestFn } from '@/lib/js-engine/legado/host/build-ajax-vm';
 import { injectDateShimVm } from '@/lib/js-engine/legado/host/date-vm';
 import { injectLegadoEncodingUtils } from '@/lib/js-engine/legado/host/encode-vm';
+import {
+  legadoAesBase64DecodeToString,
+  legadoJavaGetWebViewUA,
+  legadoJavaMd5Encode,
+} from '@/lib/js-engine/legado/legado-java-crypto';
 import { injectBrowserLegadoShims } from '@/lib/js-engine/legado/host/browser-shim-vm';
 import { injectRhinoLegadoShims } from '@/lib/js-engine/legado/host/rhino-shim-vm';
+import type { LegadoScriptSourceFace } from '@/lib/js-engine/legado/source-script-shared';
 import { LEGADO_EXPLORE_DEVICE_JAVA_SHIM } from '@/lib/js-engine/legado/legado-explore-java-device';
 import { createLegadoGetArguments } from '@/lib/js-engine/legado/source-script-shared';
 
@@ -65,13 +71,9 @@ export interface ExploreInjectContext {
     removeCookie: (url: string) => void;
     getKey: (cookieStrOrUrl: string, keyName?: string) => string;
   };
-  source: {
-    getVariable: (key?: string) => string;
-    setVariable: (val?: string) => void;
-    getLoginInfoMap: () => Record<string, string>;
-    getKey?: () => string;
-    /** 对齐 Legado：checkEnv 用 typeof source.loginUi == 'function' 判断改包环境 */
-    loginUi?: string;
+  source: LegadoScriptSourceFace & {
+    /** 请求头 JSON / @js（getWebViewUA 兜底） */
+    header?: string;
   };
   /** VM 执行期间仅写入此数组，禁止同步调 Solid toast */
   scriptToastBuffer?: ScriptToastEntry[];
@@ -161,18 +163,48 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       bindVmFunction(vm, sourceObj, 'setVariable', (v) => {
         ctx.source.setVariable(v ? String(vmDumpOptional(vm, v) ?? '') : undefined);
       });
-      bindVmFunction(vm, sourceObj, 'getLoginInfoMap', () =>
-        vmNewStringRecordObject(vm, ctx.source.getLoginInfoMap())
-      );
+      bindVmFunction(vm, sourceObj, 'getLoginInfoMap', () => {
+        const record = ctx.source.getLoginInfoMap();
+        const obj = vm.newObject();
+        bindVmFunction(vm, obj, 'get', (key) => {
+          const k = String(vmDumpOptional(vm, key) ?? '');
+          const v = record.get(k);
+          if (v == null) return vm.null;
+          const handle = vm.newString(v);
+          return handle;
+        });
+        return obj;
+      });
       if (ctx.source.getKey) {
-        const sourceKey = ctx.source.getKey!;
+        const sourceKey = ctx.source.getKey;
         bindVmFunction(vm, sourceObj, 'getKey', () => vm.newString(sourceKey()));
         bindVmFunction(vm, sourceObj, 'getkey', () => vm.newString(sourceKey()));
+      }
+      if (ctx.source.loginUrl) {
+        const loginUrlHandle = vm.newString(ctx.source.loginUrl);
+        vm.setProp(sourceObj, 'loginUrl', loginUrlHandle);
+        loginUrlHandle.dispose();
       }
       if (ctx.source.loginUi != null && ctx.source.loginUi !== '') {
         const loginUiHandle = vm.newString(ctx.source.loginUi);
         vm.setProp(sourceObj, 'loginUi', loginUiHandle);
         loginUiHandle.dispose();
+      }
+      if (ctx.source.variableComment) {
+        const vcHandle = vm.newString(ctx.source.variableComment);
+        vm.setProp(sourceObj, 'variableComment', vcHandle);
+        vcHandle.dispose();
+      }
+      for (const [prop, val] of [
+        ['jsLib', ctx.source.jsLib],
+        ['ruleArticles', ctx.source.ruleArticles],
+        ['searchUrl', ctx.source.searchUrl],
+      ] as const) {
+        if (val) {
+          const handle = vm.newString(val);
+          vm.setProp(sourceObj, prop, handle);
+          handle.dispose();
+        }
       }
     });
 
@@ -243,6 +275,22 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       });
       bindVmFunction(vm, javaObj, 'getCookie', (u) =>
         vm.newString(ctx.cookie.getCookie(String(vm.dump(u))))
+      );
+      bindVmFunction(vm, javaObj, 'getWebViewUA', () =>
+        vm.newString(legadoJavaGetWebViewUA(ctx.source.header)),
+      );
+      bindVmFunction(vm, javaObj, 'aesBase64DecodeToString', (data, key, transform, iv) =>
+        vm.newString(
+          legadoAesBase64DecodeToString(
+            String(vmDumpOptional(vm, data) ?? ''),
+            String(vmDumpOptional(vm, key) ?? ''),
+            String(vmDumpOptional(vm, transform) ?? ''),
+            String(vmDumpOptional(vm, iv) ?? ''),
+          ),
+        ),
+      );
+      bindVmFunction(vm, javaObj, 'md5Encode', (input) =>
+        vm.newString(legadoJavaMd5Encode(String(vmDumpOptional(vm, input) ?? ''))),
       );
 
       bindJavaAjax(vm, javaObj, rt, {

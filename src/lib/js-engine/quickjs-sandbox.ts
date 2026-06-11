@@ -26,7 +26,17 @@ import {
 } from '@/lib/js-engine/legado/rule-script-patches';
 import {
   createLegadoScriptCache,
+  buildLegadoScriptSourceFace,
+  createSourceVariableHandlers,
+  getLegadoSourceKey,
+  getSourceArgsKey,
+  LEGADO_LEGACY_PACKAGES_SHIM,
 } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  legadoAesBase64DecodeToString,
+  legadoJavaGetWebViewUA,
+  legadoJavaMd5Encode,
+} from '@/lib/js-engine/legado/legado-java-crypto';
 import { unwrapLegadoJsSnippet } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 
@@ -139,9 +149,22 @@ async function evalJsWithJsLib(
 ): Promise<unknown> {
   const resolvedJsLib = await resolveJsLibString(jsLibRaw);
   const legadoCache = createLegadoScriptCache();
-  const sourceInfo = (context.source ?? {}) as Record<string, unknown>;
+  const bookSource = context.bookSource;
+  const sourceVars =
+    bookSource != null
+      ? createSourceVariableHandlers(bookSource, getSourceArgsKey(bookSource))
+      : null;
+  const sourceFace =
+    bookSource != null && sourceVars
+      ? buildLegadoScriptSourceFace(bookSource, sourceVars, getLegadoSourceKey(bookSource))
+      : { ...(context.source ?? {}) };
+  const headerRaw =
+    bookSource && typeof bookSource.header === 'string' ? bookSource.header : undefined;
   const scopedKey = String(
-    sourceInfo.bookSourceUrl ?? sourceInfo.sourceUrl ?? context.baseUrl ?? 'global',
+    (bookSource ? getLegadoSourceKey(bookSource) : '') ||
+      (context.source as Record<string, unknown> | undefined)?.sourceUrl ||
+      context.baseUrl ||
+      'global',
   );
   let fallbackStore = fallbackScopedStore.get(scopedKey);
   if (!fallbackStore) {
@@ -213,15 +236,50 @@ async function evalJsWithJsLib(
       const list = analyzeBridge.getElements(ruleStr);
       return list[0] ?? '';
     },
+    md5Encode(input: unknown) {
+      return legadoJavaMd5Encode(String(input ?? ''));
+    },
+    aesBase64DecodeToString(data: unknown, key: unknown, transformation: unknown, iv: unknown) {
+      return legadoAesBase64DecodeToString(
+        String(data ?? ''),
+        String(key ?? ''),
+        String(transformation ?? ''),
+        String(iv ?? ''),
+      );
+    },
+    getWebViewUA() {
+      return legadoJavaGetWebViewUA(headerRaw);
+    },
+    base64Decode(str: unknown) {
+      try {
+        const s = String(str ?? '');
+        return typeof atob !== 'undefined'
+          ? decodeURIComponent(escape(atob(s)))
+          : s;
+      } catch {
+        return String(str ?? '');
+      }
+    },
+    base64Encode(str: unknown) {
+      try {
+        const s = String(str ?? '');
+        return typeof btoa !== 'undefined'
+          ? btoa(unescape(encodeURIComponent(s)))
+          : s;
+      } catch {
+        return String(str ?? '');
+      }
+    },
   };
 
   const scope: Record<string, unknown> = {
     result: normalizeJsRuleResult(context.result),
     baseUrl: context.baseUrl,
     book: context.book ?? {},
-    source: context.source ?? {},
+    source: sourceFace,
     chapter: context.chapter ?? {},
     cache: legadoCache,
+    Packages: LEGADO_LEGACY_PACKAGES_SHIM,
     java,
     JSON,
     toast(msg?: unknown, level?: unknown) {
@@ -271,9 +329,27 @@ export function wrapLegadoJsBodyWithImplicitReturn(code: string): string {
   if (!body) return body;
   const lines = body.split(/\n/).filter((l) => l.trim());
   const lastLine = (lines[lines.length - 1]?.trim() ?? '').replace(/^;+/, '').trim();
-  if (!lastLine || /^(var|let|const|if|for|while|function|else|\}|return\b)/.test(lastLine)) {
+  if (
+    !lastLine ||
+    /^(var|let|const|if|for|while|function|else|\}|return\b)/.test(lastLine) ||
+    /}\s*else\b/.test(lastLine)
+  ) {
     return body;
   }
+
+  // Legado 常见：if(result){ ... ;\nurl} — 末行 expr} 闭合 if 并以 expr 为脚本返回值
+  const blockCloseMatch = lastLine.match(/^(.+)\}$/);
+  if (blockCloseMatch) {
+    const expr = blockCloseMatch[1]!.trim();
+    if (
+      expr &&
+      !/^(var|let|const|if|for|while|function|else|return\b)/.test(expr) &&
+      !expr.includes('{')
+    ) {
+      return `${lines.slice(0, -1).join('\n')}\n}\nreturn (${expr});`;
+    }
+  }
+
   const expr = lastLine.replace(/;\s*$/, '');
   return `${lines.slice(0, -1).join('\n')}\nreturn (${expr});`;
 }

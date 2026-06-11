@@ -37,6 +37,7 @@ import {
   getLegadoSourceKey,
   hostsFromJsLib,
   loadSourceCookieStore,
+  buildLegadoScriptSourceFace,
   readSourceLoginInfoMap,
 } from '@/lib/js-engine/legado/source-script-shared';
 const SCRIPT_TIMEOUT_MS = 20000;
@@ -213,10 +214,7 @@ async function runBookInfoLegadoFieldScript(
     getArgToken: () => readBookSourceQttoken(source, baseUrl),
     getFormKey: () => String(loginInfo['密钥'] ?? '').trim(),
     cookie: cookieApi,
-    source: {
-      ...sourceVars,
-      getLoginInfoMap: () => readSourceLoginInfoMap(source),
-    },
+    source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
     request: (resolvedUrl, call) =>
       requestInScript(resolvedUrl, { ...call, source }, source),
     scriptToastBuffer: toastBuffer,

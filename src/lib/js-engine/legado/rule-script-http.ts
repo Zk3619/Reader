@@ -28,12 +28,19 @@ import {
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { parseHeaders } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
+import {
+  isAcwScChallengeHtml,
+  mergeAcwCookieIntoHeaders,
+  solveAndPersistAcwScCookie,
+} from '@/lib/http/acw-sc-challenge';
 
 export type RuleScriptHttpOptions = {
   method: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: string;
   source?: BookSource;
+  /** 规则 baseUrl，供蓝奏云等 POST 补 Referer */
+  referer?: string;
 };
 
 function applyJsonContentType(headers: Record<string, string>, body: string, method: string): void {
@@ -70,6 +77,27 @@ function buildRuleScriptRequestHeaders(
 
   applyJsonContentType(headers, options.body ?? '', options.method);
 
+  if (
+    options.method === 'POST' &&
+    options.body?.trim() &&
+    !options.body.trim().startsWith('{') &&
+    !options.body.trim().startsWith('[') &&
+    !headers['Content-Type'] &&
+    !headers['content-type']
+  ) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  }
+
+  const referer = options.referer?.trim();
+  if (referer?.startsWith('http') && !headers.Referer && !headers.referer) {
+    headers.Referer = referer;
+  }
+
+  if (/\/filemoreajax\.php/i.test(url) && options.method === 'POST') {
+    headers['X-Requested-With'] ??= 'XMLHttpRequest';
+    headers.Accept ??= 'application/json, text/javascript, */*; q=0.01';
+  }
+
   // 脚本 headers.cookie 为空 qttoken 时，回落书源 Cookie 表 / args.qttoken（对齐 Legado CookieStore）
   if (options.source) {
     const server = resolveBookSourceServerUrl(options.source);
@@ -88,6 +116,33 @@ function buildRuleScriptRequestHeaders(
   }
 
   return headers;
+}
+
+async function maybeRetryRuleScriptHttpAfterAcw(
+  url: string,
+  options: RuleScriptHttpOptions,
+  headers: Record<string, string>,
+  body: string,
+): Promise<string> {
+  if (!options.source || !isAcwScChallengeHtml(body)) return body;
+  const cookiePart = await solveAndPersistAcwScCookie(options.source, url, body);
+  if (!cookiePart) return body;
+  const retryHeaders = mergeAcwCookieIntoHeaders(headers, cookiePart);
+  const reqOpts = {
+    headers: retryHeaders,
+    timeout: 60_000,
+    enableCookieJar: options.source.enabledCookieJar,
+    concurrentRate: options.source.concurrentRate,
+  };
+  try {
+    const retryBody =
+      options.method === 'POST'
+        ? await postBookSourcePage(options.source, url, options.body ?? '', reqOpts)
+        : await getBookSourcePage(options.source, url, reqOpts);
+    return !isAcwScChallengeHtml(retryBody) ? retryBody : body;
+  } catch {
+    return body;
+  }
 }
 
 /**
@@ -196,9 +251,17 @@ export async function requestLegadoRuleScriptHttpAsync(
       ? await postBookSourcePage(options.source, url, body, reqOpts)
       : await post(url, body, reqOpts);
     logContentPostResponse(text);
-    return text;
+    const retried = await maybeRetryRuleScriptHttpAfterAcw(url, options, headers, text);
+    if (/\/filemoreajax\.php/i.test(url) && import.meta.env.DEV) {
+      const preview = retried.trim().slice(0, 120);
+      if (!preview.startsWith('{')) {
+        console.warn('[rule-script] filemoreajax 非 JSON 响应', { url: url.slice(0, 160), preview });
+      }
+    }
+    return retried;
   }
-  return options.source
-    ? getBookSourcePage(options.source, url, reqOpts)
-    : get(url, reqOpts);
+  const text = options.source
+    ? await getBookSourcePage(options.source, url, reqOpts)
+    : await get(url, reqOpts);
+  return maybeRetryRuleScriptHttpAfterAcw(url, options, headers, text);
 }
