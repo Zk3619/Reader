@@ -6,7 +6,8 @@
  */
 
 import * as cheerio from 'cheerio';
-import type { RssArticle } from '@/types';
+import type { RssArticle, RssSource } from '@/types';
+import { rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 
 /**
  * 解析标准RSS XML
@@ -14,15 +15,20 @@ import type { RssArticle } from '@/types';
 export function parseRssDefault(
   xml: string,
   sortName: string,
-  sourceUrl: string
+  sourceUrl: string,
+  source?: RssSource | string,
 ): RssArticle[] {
+  const logCtx = source ?? sourceUrl;
+
   if (!xml) {
+    rssWarn(logCtx, '默认解析：输入为空');
     return [];
   }
 
   try {
     const $ = cheerio.load(xml, { xmlMode: true });
     const articles: RssArticle[] = [];
+    let rss2Count = 0;
 
     // 解析RSS 2.0格式
     $('item').each((index, element) => {
@@ -39,6 +45,7 @@ export function parseRssDefault(
       image = enclosure || mediaContent;
 
       if (title && link) {
+        rss2Count += 1;
         articles.push({
           origin: sourceUrl,
           link,
@@ -56,8 +63,13 @@ export function parseRssDefault(
       }
     });
 
+    if (rss2Count > 0) {
+      rssLog(logCtx, '默认解析：RSS 2.0', { itemCount: rss2Count });
+    }
+
     // 如果RSS 2.0格式没有找到，尝试Atom格式
     if (articles.length === 0) {
+      let atomCount = 0;
       $('entry').each((index, element) => {
         const $entry = $(element);
         const title = $entry.find('title').text().trim();
@@ -71,6 +83,7 @@ export function parseRssDefault(
         image = mediaThumbnail;
 
         if (title && link) {
+          atomCount += 1;
           articles.push({
             origin: sourceUrl,
             link,
@@ -82,16 +95,23 @@ export function parseRssDefault(
             image: image || undefined,
             group: '默认分组',
             read: false,
-          type: 0,
-          durPos: 0,
+            type: 0,
+            durPos: 0,
           });
         }
       });
+      if (atomCount > 0) {
+        rssLog(logCtx, '默认解析：Atom', { entryCount: atomCount });
+      } else {
+        rssWarn(logCtx, '默认解析：未找到 RSS item 或 Atom entry', {
+          xmlLength: xml.length,
+        });
+      }
     }
 
     return articles;
   } catch (error) {
-    console.error('解析RSS XML失败:', error);
+    rssWarn(logCtx, '默认解析 XML 异常', { error: String(error) });
     return [];
   }
 }

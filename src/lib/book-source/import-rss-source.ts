@@ -8,6 +8,62 @@ interface LegadoRssItem {
   rssSourceName?: string;
 }
 
+/** Legado 订阅源 JSON 可导入的标量字段（对齐 RssSource.kt） */
+const RSS_SCALAR_KEYS = [
+  'sourceGroup',
+  'sourceComment',
+  'sourceIcon',
+  'variableComment',
+  'loginCheckJs',
+  'coverDecodeJs',
+  'sortUrl',
+  'singleUrl',
+  'articleStyle',
+  'ruleArticles',
+  'ruleNextPage',
+  'ruleTitle',
+  'rulePubDate',
+  'ruleDescription',
+  'ruleImage',
+  'ruleLink',
+  'ruleContent',
+  'contentWhitelist',
+  'contentBlacklist',
+  'shouldOverrideUrlLoading',
+  'style',
+  'enableJs',
+  'loadWithBaseUrl',
+  'injectJs',
+  'preloadJs',
+  'startHtml',
+  'startStyle',
+  'startJs',
+  'showWebLog',
+  'type',
+  'preload',
+  'cacheFirst',
+  'searchUrl',
+  'header',
+  'loginUrl',
+  'jsLib',
+  'enabledCookieJar',
+  'customOrder',
+  'lastUpdateTime',
+  'enabled',
+] as const;
+
+function pickScalarFields(raw: LegadoRssItem): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of RSS_SCALAR_KEYS) {
+    const v = raw[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
 function normalizeRssItem(raw: LegadoRssItem): NewRssSource | null {
   const sourceUrl = raw.sourceUrl ?? raw.rssSourceUrl;
   const sourceName = raw.sourceName ?? raw.rssSourceName;
@@ -16,20 +72,14 @@ function normalizeRssItem(raw: LegadoRssItem): NewRssSource | null {
   const name = String(sourceName).trim();
   if (!url || !name) return null;
   return {
+    ...pickScalarFields(raw),
     sourceUrl: url,
     sourceName: name,
-    sourceGroup: raw.sourceGroup != null ? String(raw.sourceGroup) : undefined,
-    sourceComment: raw.sourceComment != null ? String(raw.sourceComment) : undefined,
-    sourceIcon: raw.sourceIcon != null ? String(raw.sourceIcon) : undefined,
-    enabled: raw.enabled as boolean | undefined,
+    enabled: raw.enabled !== false,
     singleUrl: Boolean(raw.singleUrl),
-    articleStyle: typeof raw.articleStyle === 'number' ? raw.articleStyle : undefined,
-    ruleArticles: raw.ruleArticles != null ? String(raw.ruleArticles) : undefined,
-    ruleTitle: raw.ruleTitle != null ? String(raw.ruleTitle) : undefined,
-    ruleLink: raw.ruleLink != null ? String(raw.ruleLink) : undefined,
-    ruleContent: raw.ruleContent != null ? String(raw.ruleContent) : undefined,
-    header: raw.header != null ? String(raw.header) : undefined,
-    jsLib: raw.jsLib != null ? String(raw.jsLib) : undefined,
+    articleStyle: typeof raw.articleStyle === 'number' ? raw.articleStyle : 0,
+    enableJs: raw.enableJs !== false,
+    loadWithBaseUrl: raw.loadWithBaseUrl !== false,
   };
 }
 

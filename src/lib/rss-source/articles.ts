@@ -3,12 +3,14 @@
  * 对应 legado 项目的 Rss.getArticles 和 RssParserByRule
  */
 
-import { get } from '@/lib/http';
 import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
+import { fetchRssPage } from '@/lib/rss-source/fetch-rss-page';
 import type { RssSource } from '@/types';
 import type { RssArticle, NewRssArticle } from '@/types';
-import { parseHeaders, resolveUrl, detectContentType, buildUrl } from '@/lib/book-source/utils';
+import { resolveUrl, detectContentType, buildUrl } from '@/lib/book-source/utils';
 import { parseRssDefault } from '@/lib/rss-source/rss-parser-default';
+import { logRssArticleCoverParsed } from '@/lib/rss-source/rss-cover-image';
+import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 
 /**
  * 获取RSS文章列表
@@ -19,33 +21,82 @@ export async function getRssArticles(
   sortUrl: string,
   page: number = 1
 ): Promise<{ articles: RssArticle[]; nextUrl?: string }> {
-  // const startTime = Date.now();
+  const startTime = Date.now();
+  const parseMode = source.ruleArticles ? 'rule' : 'default-xml';
 
   try {
     // 构建URL（支持分页）
     const url = buildUrl(sortUrl, { page: page.toString() });
 
-    // 发起请求
-    const headers = parseHeaders(source.header);
-    const html = await get(url, {
-      ...headers,
-      enableCookieJar: source.enabledCookieJar,
-      concurrentRate: source.concurrentRate,
-      timeout: 30000,
+    rssLog(source, '请求文章列表', {
+      sort: sortName || '默认',
+      page,
+      url: url.slice(0, 200),
+      parseMode,
+      cookieJar: !!source.enabledCookieJar,
     });
 
+    const { body: html, url: finalUrl } = await fetchRssPage({
+      source,
+      url,
+      baseUrl: source.sourceUrl,
+    });
+
+    const fetchMs = Date.now() - startTime;
     const contentType = detectContentType(html);
+
+    rssLog(source, '列表响应', {
+      fetchMs,
+      contentType,
+      bodyLength: html.length,
+      bodyPreview: html.slice(0, 120),
+    });
+
+    if (!html.trim()) {
+      rssWarn(source, '源站返回空正文，可能是源站异常或需要登录/Cookie', {
+        url: url.slice(0, 200),
+      });
+      return { articles: [] };
+    }
 
     // 如果没有ruleArticles规则，使用默认RSS解析
     if (!source.ruleArticles) {
-      const articles = parseRssDefault(html, sortName, source.sourceUrl);
+      const articles = parseRssDefault(html, sortName, source.sourceUrl, source);
+      rssLog(source, '默认 XML 解析完成', {
+        articleCount: articles.length,
+        totalMs: Date.now() - startTime,
+      });
+      if (articles.length === 0) {
+        rssWarn(source, '未解析到文章：检查是否为标准 RSS/Atom，或源站返回了 HTML 错误页', {
+          contentType,
+          bodyLength: html.length,
+        });
+      }
       return { articles };
     }
 
     // 使用规则解析
-    return await parseRssByRule(source, sortName, url, html, contentType);
+    const result = await parseRssByRule(source, sortName, finalUrl || url, html, contentType);
+    rssLog(source, '规则解析完成', {
+      articleCount: result.articles.length,
+      hasNextPage: !!result.nextUrl,
+      totalMs: Date.now() - startTime,
+    });
+    if (result.articles.length === 0) {
+      rssWarn(source, '规则解析到 0 篇文章：检查 ruleArticles 等规则，或源站结构已变更', {
+        ruleArticles: source.ruleArticles.slice(0, 80),
+        contentType,
+        bodyLength: html.length,
+      });
+    }
+    return result;
   } catch (error) {
-    console.error(`获取RSS文章列表失败 [${source.sourceName}]:`, error);
+    rssError(source, '获取文章列表失败', error, {
+      sort: sortName || '默认',
+      page,
+      parseMode,
+      totalMs: Date.now() - startTime,
+    });
     return { articles: [] };
   }
 }
@@ -164,6 +215,8 @@ async function parseRssArticle(
       imageUrl = resolveUrl(baseUrl, image);
     }
 
+    logRssArticleCoverParsed(source, title, imageUrl);
+
     return {
       origin: source.sourceUrl,
       link: link || baseUrl,
@@ -179,7 +232,7 @@ async function parseRssArticle(
       durPos: 0,
     };
   } catch (error) {
-    console.error('解析RSS文章失败:', error);
+    rssError(source, '解析单篇文章失败', error, { sort: sortName, order });
     return null;
   }
 }
