@@ -61,6 +61,8 @@ const TAP_MOVE_THRESHOLD = 10;
 
 export interface ImageViewerPageProps {
   onClose: () => void;
+  /** 点击顶栏书名时进入书籍信息页 */
+  onOpenBookInfo?: () => void;
   entryVisible?: Accessor<boolean>;
 }
 
@@ -359,6 +361,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   title={book()?.name ?? ''}
                   subtitle={chapterTitle()}
                   onClose={props.onClose}
+                  onOpenBookInfo={props.onOpenBookInfo}
                   onOpenCatalog={() => setCatalogOpen(true)}
                   onOpenOfflineCache={openOfflineCacheDialog}
                   onOpenImageSettings={() => setSettingsOpen(true)}

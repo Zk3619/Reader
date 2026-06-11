@@ -15,12 +15,12 @@ import {
   ListIcon,
   SettingsIcon,
   RefreshIcon,
-  MoreIcon,
   ReplaceIcon,
   DownloadIcon,
   VolumeOnIcon,
   VolumeOffIcon,
 } from '@/components/shared/icons';
+import { ReaderMoreMenu, type ReaderMoreMenuProps } from '@/components/viewer/text-viewer/ReaderMoreMenu';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
 export interface TextViewerToolbarHeaderProps {
@@ -36,7 +36,7 @@ export interface TextViewerToolbarHeaderProps {
   onChangeSource: () => void;
   onRefreshChapter: () => void;
   onOpenOfflineCache: () => void;
-  onOpenMoreMenu: () => void;
+  moreMenu: Omit<ReaderMoreMenuProps, 'triggerClass'>;
 }
 
 /** 文本阅读器顶栏业务内容（布局由 MediaViewerHeader 提供） */
@@ -200,19 +200,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         </ViewerAppTooltipTrigger>
         <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
       </ViewerAppTooltip>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
-          as={Button}
-          variant="ghost"
-          size="icon"
-          class={iconBtn()}
-          onClick={props.onOpenMoreMenu}
-          aria-label="更多"
-        >
-          <MoreIcon class="size-5" />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+      <ReaderMoreMenu {...props.moreMenu} triggerClass={iconBtn()} />
     </>
   );
 

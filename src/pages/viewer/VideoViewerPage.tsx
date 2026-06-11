@@ -44,6 +44,8 @@ import { ArtPlayerStage } from '@/components/viewer/video/ArtPlayerStage';
 
 export interface VideoViewerPageProps {
   onClose: () => void;
+  /** 点击顶栏书名时进入书籍信息页 */
+  onOpenBookInfo?: () => void;
   entryVisible?: Accessor<boolean>;
 }
 
@@ -196,6 +198,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
                   title={book()?.name ?? ''}
                   subtitle={chapterTitle()}
                   onClose={props.onClose}
+                  onOpenBookInfo={props.onOpenBookInfo}
                   onOpenCatalog={() => setCatalogOpen(true)}
                   onOpenSpeed={() => {
                     setSpeedDraft(videoConfig().playSpeed);

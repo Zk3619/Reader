@@ -24,6 +24,8 @@ export interface MediaViewerToolbarHeaderProps {
   title: string;
   subtitle?: string;
   onClose: () => void;
+  /** 点击顶栏书名时进入书籍信息页（不传则书名不可点） */
+  onOpenBookInfo?: () => void;
   onOpenCatalog?: () => void;
   /** 离线缓存（漫画/媒体阅读器） */
   onOpenOfflineCache?: () => void;
@@ -70,9 +72,33 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
     </ViewerAppTooltip>
   );
 
+  const titleHeadingClass = () => cn('truncate text-sm font-medium');
+
   const titleNode = (inCluster: boolean) => (
-    <div class={titleWrap(inCluster)} data-tauri-drag-region={inCluster ? undefined : true}>
-      <h1 class="truncate text-sm font-medium">{props.title}</h1>
+    <div
+      class={titleWrap(inCluster)}
+      data-tauri-drag-region={inCluster || props.onOpenBookInfo ? undefined : true}
+    >
+      <Show
+        when={props.onOpenBookInfo}
+        fallback={<h1 class={titleHeadingClass()}>{props.title || '—'}</h1>}
+      >
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
+            as="button"
+            type="button"
+            class={cn(
+              titleHeadingClass(),
+              'no-drag w-full min-w-0 text-left transition-colors cursor-pointer hover:text-primary',
+            )}
+            onClick={() => props.onOpenBookInfo!()}
+            aria-label="进入书籍信息页"
+          >
+            {props.title || '—'}
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+      </Show>
       <Show when={props.subtitle}>
         <p class="truncate text-xs text-muted-foreground">{props.subtitle}</p>
       </Show>

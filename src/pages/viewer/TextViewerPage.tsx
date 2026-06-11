@@ -10,6 +10,8 @@ import { textViewerStore } from '@/stores/viewer';
 import { textViewerDualPageActive } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
@@ -42,7 +44,6 @@ import { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';
 import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
 import { ReaderOfflineCacheDialog } from '@/components/viewer/text-viewer/ReaderOfflineCacheDialog';
-import { ReaderMoreMenu } from '@/components/viewer/text-viewer/ReaderMoreMenu';
 import { DictDialog } from '@/components/dict/DictDialog';
 import { ReaderSearchDrawer } from '@/components/viewer/text-viewer/ReaderSearchDrawer';
 import { ReaderBookmarksDrawer } from '@/components/viewer/text-viewer/ReaderBookmarksDrawer';
@@ -123,7 +124,6 @@ export function BookReader(props: BookReaderProps) {
   const [readerMenuDrawerOpen, setReaderMenuDrawerOpen] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
-  const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
   const [dictWord, setDictWord] = createSignal('');
   const [searchOpen, setSearchOpen] = createSignal(false);
@@ -671,7 +671,13 @@ export function BookReader(props: BookReaderProps) {
                     void textViewerStore.refreshChapter().catch(() => undefined);
                   }}
                   onOpenOfflineCache={openOfflineCacheDialog}
-                  onOpenMoreMenu={() => setMoreMenuOpen(true)}
+                  moreMenu={{
+                    canBookmark: canUseBookmarks(),
+                    onOpenSearch: () => setSearchOpen(true),
+                    onOpenBookmarks: () => setBookmarksOpen(true),
+                    onAddBookmark: () => void handleAddBookmark(),
+                    onOpenDict: handleOpenDict,
+                  }}
                 />
               </MediaViewerHeader>
             }
@@ -860,11 +866,25 @@ export function BookReader(props: BookReaderProps) {
               class="w-full justify-start"
               onClick={() => {
                 setReaderMenuDrawerOpen(false);
-                setMoreMenuOpen(true);
+                handleOpenDict();
               }}
             >
-              更多选项
+              字典
             </Button>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class="text-sm">启用替换净化</Label>
+              <Switch
+                checked={textViewerStore.isUseReplaceRule()}
+                onChange={(enabled) => {
+                  void textViewerStore.setUseReplaceRule(enabled).catch(() => undefined);
+                }}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">启用替换净化</SwitchLabel>
+              </Switch>
+            </div>
             {/* 阅读进度状态栏的显示风格 */}
             <div class="flex items-center justify-between gap-3 py-2">
               <span class="text-sm text-foreground">阅读进度状态栏的显示风格</span>
@@ -963,16 +983,6 @@ export function BookReader(props: BookReaderProps) {
         book={book() ?? null}
         chapterIndex={textViewerStore.state.chapterIndex}
         catalogSize={catalogSize()}
-      />
-
-      <ReaderMoreMenu
-        open={moreMenuOpen()}
-        onOpenChange={setMoreMenuOpen}
-        canBookmark={canUseBookmarks()}
-        onOpenSearch={() => setSearchOpen(true)}
-        onOpenBookmarks={() => setBookmarksOpen(true)}
-        onAddBookmark={() => void handleAddBookmark()}
-        onOpenDict={handleOpenDict}
       />
 
       <DictDialog open={dictOpen()} onOpenChange={setDictOpen} word={dictWord()} />

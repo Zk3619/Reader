@@ -10,7 +10,6 @@ import { useAppDrawerOverlayLock, syncAppDrawerOverlayLock } from '@/components/
 
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuGroupLabel,
@@ -26,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import {
   popperContentViewportPanel,
@@ -67,6 +67,51 @@ export const AppDropdownMenuItem: Component<AppDropdownMenuItemProps> = (props) 
         deferUntilMenuDismissed(action);
       }}
     />
+  );
+};
+
+/** 下拉菜单内复选行：左侧 Checkbox + 标签（与书架管理等页一致） */
+export type AppDropdownMenuCheckboxItemProps = Omit<
+  ComponentProps<typeof DropdownMenuItem>,
+  'onSelect' | 'children'
+> & {
+  checked: boolean;
+  onChange?: (checked: boolean) => void;
+  children?: JSX.Element;
+  /** Checkbox 的 aria-label；默认取 children 文本 */
+  'aria-label'?: string;
+  /** 勾选切换立即执行（默认 false；与 closeOnSelect=false 搭配时须为 false） */
+  deferOnSelect?: boolean;
+};
+
+export const AppDropdownMenuCheckboxItem: Component<AppDropdownMenuCheckboxItemProps> = (
+  props,
+) => {
+  const [local, rest] = splitProps(props, [
+    'checked',
+    'onChange',
+    'children',
+    'class',
+    'aria-label',
+    'deferOnSelect',
+  ]);
+  const checkboxLabel = () => {
+    if (local['aria-label']) return local['aria-label'];
+    if (typeof local.children === 'string') return local.children;
+    return '选项';
+  };
+  return (
+    <AppDropdownMenuItem
+      {...rest}
+      class={cn('flex items-center gap-2', local.class)}
+      deferOnSelect={local.deferOnSelect ?? false}
+      onSelect={() => local.onChange?.(!local.checked)}
+    >
+      <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+        <Checkbox checked={local.checked} aria-label={checkboxLabel()} />
+      </span>
+      <span>{local.children}</span>
+    </AppDropdownMenuItem>
   );
 };
 
@@ -294,7 +339,6 @@ export function AppDropdownMenuIconTrigger(
 export {
   DropdownMenuTrigger as AppDropdownMenuTrigger,
   DropdownMenuSeparator as AppDropdownMenuSeparator,
-  DropdownMenuCheckboxItem as AppDropdownMenuCheckboxItem,
   DropdownMenuRadioGroup as AppDropdownMenuRadioGroup,
   DropdownMenuRadioItem as AppDropdownMenuRadioItem,
   DropdownMenuGroup as AppDropdownMenuGroup,

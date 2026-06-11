@@ -2,33 +2,49 @@
  * 阅读器「更多」菜单（对齐 Legado book_read 溢出项子集）
  */
 
-import { Show } from 'solid-js';
+import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import {
-  ViewerAppDrawer,
-  ViewerAppDrawerBody,
-  ViewerAppDrawerClose,
-  ViewerAppDrawerContent,
-  ViewerAppDrawerHeader,
+  AppDropdownMenu,
+  AppDropdownMenuCheckboxItem,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
+import {
+  ViewerAppDropdownMenuContent,
+  ViewerAppTooltip,
+  ViewerAppTooltipContent,
+  ViewerAppTooltipTrigger,
 } from '@/components/viewer/viewer-app-overlay';
-import { hDrawerPanel } from '@/lib/ui/viewport-classes';
+import { MoreIcon } from '@/components/shared/icons';
+import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 
 export interface ReaderMoreMenuProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   onOpenSearch: () => void;
   onOpenBookmarks: () => void;
   onAddBookmark: () => void;
   onOpenDict?: () => void;
   canBookmark: boolean;
+  /** 工具栏图标按钮 class（与 MediaViewer chrome 一致） */
+  triggerClass?: string;
 }
 
 export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
+  const [open, setOpen] = createSignal(false);
   const replaceEnabled = () => textViewerStore.isUseReplaceRule();
+
+  onMount(() => {
+    const handleDialogOpened = () => {
+      setOpen(false);
+      blurActiveElement();
+    };
+    window.addEventListener('dialog-opened', handleDialogOpened);
+    onCleanup(() => {
+      window.removeEventListener('dialog-opened', handleDialogOpened);
+    });
+  });
 
   const handleToggleReplace = async (enabled: boolean) => {
     try {
@@ -39,74 +55,39 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   };
 
   return (
-    <ViewerAppDrawer open={props.open} onOpenChange={props.onOpenChange} snapPoints={[0, 1]} defaultSnapPoint={1}>
-      <ViewerAppDrawerContent
-        class={cn('flex flex-col', hDrawerPanel, 'max-h-[75dvh]')}
-        showNativeDragHandle={false}
-      >
-        <ViewerAppDrawerHeader title="更多" />
-        <ViewerAppDrawerBody class="gap-1 px-2 pb-6">
-          <Button
-            variant="ghost"
-            class="w-full justify-start"
-            onClick={() => {
-              props.onOpenChange(false);
-              props.onOpenSearch();
-            }}
-          >
-            全书搜索
-          </Button>
-          <Show when={props.onOpenDict}>
-            <Button
-              variant="ghost"
-              class="w-full justify-start"
-              onClick={() => {
-                props.onOpenChange(false);
-                props.onOpenDict?.();
-              }}
-            >
-              字典
-            </Button>
-          </Show>
-          <Show when={props.canBookmark}>
-            <Button
-              variant="ghost"
-              class="w-full justify-start"
-              onClick={() => {
-                props.onOpenChange(false);
-                props.onAddBookmark();
-              }}
-            >
-              添加书签
-            </Button>
-            <Button
-              variant="ghost"
-              class="w-full justify-start"
-              onClick={() => {
-                props.onOpenChange(false);
-                props.onOpenBookmarks();
-              }}
-            >
-              本书书签
-            </Button>
-          </Show>
-          <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
-            <Label class="text-sm">启用替换净化</Label>
-            <Switch
-              checked={replaceEnabled()}
-              onChange={handleToggleReplace}
-            >
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">启用替换净化</SwitchLabel>
-            </Switch>
-          </div>
-          <ViewerAppDrawerClose as="button" class="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
-            关闭
-          </ViewerAppDrawerClose>
-        </ViewerAppDrawerBody>
-      </ViewerAppDrawerContent>
-    </ViewerAppDrawer>
+    <AppDropdownMenu open={open()} onOpenChange={setOpen}>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger as="div">
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger
+                triggerProps={triggerProps}
+                class={cn('no-drag', props.triggerClass)}
+                aria-label="更多"
+              >
+                <MoreIcon class="size-5" />
+              </AppDropdownMenuIconTrigger>
+            )}
+          />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+      <ViewerAppDropdownMenuContent layout="min" align="end">
+        <AppDropdownMenuItem onSelect={props.onOpenSearch}>全书搜索</AppDropdownMenuItem>
+        <Show when={props.onOpenDict}>
+          <AppDropdownMenuItem onSelect={() => props.onOpenDict?.()}>字典</AppDropdownMenuItem>
+        </Show>
+        <Show when={props.canBookmark}>
+          <AppDropdownMenuItem onSelect={props.onAddBookmark}>添加书签</AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={props.onOpenBookmarks}>本书书签</AppDropdownMenuItem>
+        </Show>
+        <AppDropdownMenuCheckboxItem
+          checked={replaceEnabled()}
+          onChange={(checked) => void handleToggleReplace(checked)}
+        >
+          启用替换净化
+        </AppDropdownMenuCheckboxItem>
+      </ViewerAppDropdownMenuContent>
+    </AppDropdownMenu>
   );
 }

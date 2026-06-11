@@ -55,7 +55,6 @@ import {
   Monitor,
   Moon,
   Music,
-  Newspaper,
   PanelLeft,
   Plus,
   Pencil,
@@ -112,7 +111,7 @@ export const BookCoverIcon = icon(BookImage);
 export const BookshelfIcon = icon(LibraryBig);
 export const BookSourceIcon = icon(BookText);
 /** 主导航「订阅」Tab 图标 */
-export const RssTabIcon = icon(Newspaper);
+export const RssTabIcon = icon(Rss);
 export const RssIcon = icon(Rss);
 export const BookmarkIcon = icon(Bookmark);
 export const RecordIcon = icon(Clock);

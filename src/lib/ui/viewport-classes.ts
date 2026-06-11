@@ -138,6 +138,14 @@ export const mainShellPageScroll = cn(
   'main-shell-page-scroll flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1',
 );
 
+/** 设置内嵌规则管理页（TXT/替换/字典）：占满父级高度，列表区内滚、底栏固定于组件底部 */
+export const settingsRuleManagePageRoot =
+  'flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card';
+
+/** 规则管理页列表滚动区 */
+export const settingsRuleManagePageListScroll =
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background/40';
+
 /** 独立全屏页主内容可滚动区（触摸端底留白，桌面无额外底距） */
 export const standalonePageScroll = cn(
   'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both',

@@ -29,6 +29,8 @@ import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface FileViewerPageProps {
   onClose: () => void;
+  /** 点击顶栏书名时进入书籍信息页 */
+  onOpenBookInfo?: () => void;
   entryVisible?: Accessor<boolean>;
 }
 
@@ -68,6 +70,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
                   title={book()?.name ?? ''}
                   subtitle={chapterTitle()}
                   onClose={props.onClose}
+                  onOpenBookInfo={props.onOpenBookInfo}
                   onOpenCatalog={() => setCatalogOpen(true)}
                   onRefresh={() => {
                     if (!viewerStore.isOpen()) {
