@@ -59,14 +59,17 @@
 
 ## 阶段 3：订阅 RSS P1（2 周）
 
-| 任务 | Max 对照 | 层 |
-|------|----------|-----|
-| RSS 源列表/编辑/导入 | `RssSourceActivity` | 前端 |
-| 订阅 Tab 实装 | `RssFragment` | 前端 |
-| 文章列表与阅读 | `RssReadActivity` | 前端 |
-| RSS 规则解析 | model/rss | 前端 |
+**状态**：核心流程已实现（`pages/rss/`）；待补 WebSocket 调试台与规则订阅完善。
 
-**验收**：添加 RSS 源 → 拉文章 → 阅读 → 收藏（若 Max 支持）。
+| 任务 | Max 对照 | 层 | 状态 |
+|------|----------|-----|------|
+| RSS 源列表/编辑/导入 | `RssSourceActivity` | 前端 | ✅ |
+| 订阅 Tab 实装 | `RssFragment` | 前端 | ✅ |
+| 文章列表与阅读 | `RssReadActivity` | 前端 | ✅ |
+| RSS 规则解析 | model/rss | 前端 | 🟡 |
+| RSS 调试 WebSocket | `RssSourceDebugActivity` | 前端 | ⬜ |
+
+**验收**：添加 RSS 源 → 拉文章 → 阅读 → 收藏（若 Max 支持）。——**主路径已满足**。
 
 ---
 

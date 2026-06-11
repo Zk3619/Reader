@@ -120,7 +120,7 @@ flowchart TB
 
 | Max（Android） | Reader 目标位置 | 实现层 |
 |----------------|-----------------|--------|
-| `ui/main` 书架/发现/订阅/我的 | `pages/bookshelf`、`discover`、占位 subscription | 前端 |
+| `ui/main` 书架/发现/订阅/我的 | `pages/bookshelf`、`discover`、`pages/rss` | 前端 |
 | `ui/book/read` | `pages/reader/*` | 前端（排版 DOM/CSS） |
 | `model/webBook` | `lib/book-source/*` | 前端 |
 | `model/analyzeRule` | `lib/rule-engine/*` | 前端 |

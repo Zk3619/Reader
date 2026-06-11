@@ -62,7 +62,7 @@ src/
 ├── pages/                    # 与 Max 主 Tab + 独立页面对齐
 │   ├── bookshelf/
 │   ├── sources/              # 书源 + 编辑 + 调试
-│   ├── subscription/         # RSS（待实现）
+│   ├── rss/                  # RSS 订阅（主列表、源管理、编辑、文章、阅读、规则订阅、收藏）
 │   ├── bookmark/
 │   ├── record/               # 阅读记录
 │   ├── discover/
@@ -74,6 +74,7 @@ src/
 │   ├── layout/               # Navigation, SideBar, BottomBar
 │   ├── reader/
 │   ├── sources/
+│   ├── rss/
 │   └── ui/                   # shadcn 风格基元
 ├── stores/                   # 与 Max ViewModel 职责对应
 ├── lib/
@@ -85,6 +86,8 @@ src/
 │   ├── remote-book/          # WebDAV
 │   ├── backup/               # Legado 备份 zip（规划）
 │   ├── import/               # legado:// 与文件导入
+│   ├── rss/                  # 订阅列表筛选、分组
+│   ├── rss-source/           # sortUrl、刷新文章、规则订阅更新、调试
 │   └── platform/
 └── types/                    # Book, BookSource, RssSource…
 ```

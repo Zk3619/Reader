@@ -126,13 +126,16 @@ web/    HttpServer :1234 · WebSocket :1235
 
 **Max 参考**：`model/rss/`、`ui/rss/`
 
-| 步骤 | 动作 |
-|------|------|
-| 1 | `pages/subscription/` 源列表 CRUD（复用书源页模式） |
-| 2 | 文章列表 + 阅读页（可简化 WebView 或纯文本） |
-| 3 | `rule-engine` 增加 Rss 规则类型（若与 BookSource 不同） |
+**Reader 现状**（`pages/rss/` + `components/rss/` + `lib/rss-source/`）：
 
-DAO 已存在，**纯前端 + 已有表**即可。
+| 步骤 | 动作 | 状态 |
+|------|------|------|
+| 1 | `pages/rss/` 源列表 CRUD、导入、拖拽排序、分组筛选 | ✅ |
+| 2 | 文章列表 + 阅读页 + 收藏 | ✅ |
+| 3 | RSS 规则解析与源调试面板 | 🟡（无 WebSocket 调试台） |
+| 4 | 规则订阅 `RuleSubPage` | 🟡 |
+
+`PageType` 为 `"rss"`（界面文案仍为「订阅」）；持久化偏好兼容旧键 `subscription_page_prefs`。
 
 ### 4.5 阅读记录与书签（P1）
 
@@ -267,7 +270,7 @@ pnpm add lucide-solid
 | ReadBookActivity | `pages/reader` |
 | ExploreShowActivity | `pages/discover` |
 | BookInfoActivity | `pages/book-info` |
-| Rss* | `pages/subscription`（待建） |
+| Rss* | `pages/rss`（`RssPage`、`RssSourcesManagePage`、`RssArticleListPage`、`RssReadPage`、`RuleSubPage` 等） |
 | ConfigActivity | `pages/settings` |
 | DebugToolsActivity | `pages/debug`（待建） |
 

@@ -11,7 +11,7 @@
 |------|-----|--------|--------|
 | 书架 Tab | ✅ | ✅ | — |
 | 发现 Tab | ✅ | ✅（DiscoverPage） | — |
-| 订阅 Tab | ✅ | ⬜ 占位 | P1 |
+| 订阅 Tab | ✅ | ✅ `pages/rss/RssPage` | — |
 | 我的/设置 | ✅ | ✅ settings | — |
 | 顶栏响应式 | ✅ | 🟡 见 UI.md | P1 |
 | 侧栏最近阅读 | ✅ | 🟡 mock | P1 |
@@ -59,7 +59,7 @@
 | 校源 CheckSource | ✅ | ⬜ | P2 |
 | 书源搜索对话框 | ✅ | ✅ | — |
 | @webjs / 智能导入 | ✅ Max | ⬜ | P2 |
-| 规则订阅 ruleSubs | ✅ | ⬜ DB 有 | P3 |
+| 规则订阅 ruleSubs | ✅ | 🟡 `RuleSubPage` | P3 |
 
 ---
 
@@ -99,9 +99,12 @@
 
 | 功能 | Max | Reader | 优先级 |
 |------|-----|--------|--------|
-| RSS 源管理 | ✅ | ⬜ 表有 | P1 |
-| 订阅文章列表 | ✅ | ⬜ | P1 |
-| RSS 阅读 | ✅ | ⬜ | P1 |
+| RSS 源管理 | ✅ | ✅ `RssSourcesManagePage`（CRUD/导入/排序/筛选） | — |
+| 订阅主页（列表/网格/搜索） | ✅ | ✅ `RssPage` | — |
+| 订阅文章列表 | ✅ | ✅ `RssArticleListPage` | — |
+| RSS 阅读 | ✅ | ✅ `RssReadPage` | — |
+| RSS 收藏 | ✅ | ✅ `RssFavoritesPage` | — |
+| RSS 源调试 | ✅ | 🟡 `RssSourceDebugPanel`（非 WS） | P2 |
 | RSS 调试 WS | ✅ | ⬜ | P2 |
 
 ---
