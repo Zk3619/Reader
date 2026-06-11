@@ -5,7 +5,7 @@
 import type { BookSource } from '@/types';
 import { setExploreInfoMapValue } from '@/lib/book-source/explore-info-map-store';
 import { normalizeBookSourceServerUrl } from '@/lib/book-source/source-http';
-import { stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
+import { stripLegadoSourceUrlMarker, stripMisplacedCookieFromHttpUrl } from '@/lib/book-source/utils';
 import { bumpExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import {
   EXPLORE_BASE_URL_FALLBACK_SHIM,
@@ -89,7 +89,9 @@ export function getScriptBaseUrl(source: BookSource): string {
   } catch {
     /* ignore */
   }
-  const u = stripMisplacedCookieFromHttpUrl((source.sourceUrl ?? '').trim());
+  const u = stripLegadoSourceUrlMarker(
+    stripMisplacedCookieFromHttpUrl((source.sourceUrl ?? '').trim()),
+  );
   if (u && isHttpUrl(u)) return normalizeBookSourceServerUrl(u);
   const candidates = [
     (source as Record<string, unknown>).exploreUrl,

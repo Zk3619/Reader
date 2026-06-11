@@ -23,6 +23,11 @@ class LegadoJsoupElements {
     return new LegadoJsoupElement(this.nodes.eq(i));
   }
 
+  /** Jsoup Elements.first */
+  first(): LegadoJsoupElement {
+    return this.get(0);
+  }
+
   /** Jsoup Elements.select：对每个元素执行 select 并合并结果 */
   select(selector: string): LegadoJsoupElements {
     const sel = String(selector ?? '').trim();
@@ -38,6 +43,23 @@ class LegadoJsoupElements {
     });
     const $ = cheerio.load('');
     return new LegadoJsoupElements($(merged));
+  }
+
+  /** Jsoup Elements.text：合并全部匹配元素的文本 */
+  text(): string {
+    return this.nodes.text();
+  }
+
+  attr(name: string): string {
+    if (this.nodes.length === 0) return '';
+    return this.nodes.eq(0).attr(String(name ?? '')) ?? '';
+  }
+
+  html(): string {
+    return this.nodes
+      .map((_, el) => cheerio.load(el as any).html() ?? '')
+      .get()
+      .join('');
   }
 }
 
@@ -58,6 +80,12 @@ class LegadoJsoupElement {
 
   attr(name: string): string {
     return this.el.attr(String(name ?? '')) ?? '';
+  }
+
+  /** 单元素 outerHTML（列表项序列化） */
+  outerHtml(): string {
+    if (this.el.length === 0) return '';
+    return this.el.toString();
   }
 }
 
@@ -81,6 +109,62 @@ class LegadoJsoupDocument extends LegadoJsoupElement {
 export function parseLegadoJsoupHtml(html: string): LegadoJsoupDocument {
   const $ = cheerio.load(String(html ?? ''), { xml: false });
   return new LegadoJsoupDocument($);
+}
+
+/** 规则 @js 是否把 result 当作 Jsoup Element（如 result.select(...).text()） */
+export function ruleJsExpectsHtmlElement(code: string): boolean {
+  return /\bresult\.(select|text|attr|html|ownText|data)\s*\(/.test(String(code ?? ''));
+}
+
+/**
+ * 将列表项 HTML 包装为 Legado Jsoup 元素（对齐 AnalyzeRule 传入的 Element）
+ */
+/** 是否为 Jsoup Elements 集合（含 size/get，区别于单 Element） */
+export function isLegadoJsoupElementsCollection(value: unknown): value is LegadoJsoupElements {
+  return (
+    value != null &&
+    typeof value === 'object' &&
+    typeof (value as LegadoJsoupElements).size === 'function' &&
+    typeof (value as LegadoJsoupElements).get === 'function'
+  );
+}
+
+/** 将 @js 列表规则产出的 Elements 展开为 outerHTML 字符串列表 */
+export function expandLegadoJsoupElements(value: unknown): string[] | null {
+  if (!isLegadoJsoupElementsCollection(value)) return null;
+  const n = value.size();
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const html = value.get(i).outerHtml().trim();
+    if (html) out.push(html);
+  }
+  return out;
+}
+
+export function wrapRuleJsHtmlResult(
+  raw: unknown,
+  options: { content?: string; contentType?: 'html' | 'json' | 'text' },
+): unknown {
+  if (options.contentType === 'json') {
+    return raw ?? null;
+  }
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    typeof (raw as { select?: unknown }).select === 'function'
+  ) {
+    return raw;
+  }
+  if (raw && typeof raw === 'object') {
+    return raw;
+  }
+  const content = String(options.content ?? '');
+  const fromRaw = typeof raw === 'string' ? raw : '';
+  const html = fromRaw.trim().includes('<') ? fromRaw : content;
+  if (!html.trim().includes('<')) {
+    return raw ?? null;
+  }
+  return parseLegadoJsoupHtml(html);
 }
 
 /** 注入 rule-script-runner scope：org.jsoup.Jsoup.parse */

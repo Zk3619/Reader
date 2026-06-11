@@ -43,6 +43,7 @@ export const RULE_SCRIPT_JSLIB_THIS_BIND_SHIM = `
       java: { get: function() { return java; }, configurable: true },
       cache: { get: function() { return cache; }, configurable: true },
       source: { get: function() { return source; }, configurable: true },
+      baseUrl: { get: function() { return baseUrl; }, configurable: true },
     });
   } catch (e) {}
   if (typeof createSvg === 'function') {
@@ -67,6 +68,18 @@ export const RULE_SCRIPT_JSLIB_THIS_BIND_SHIM = `
     var __readerSc = showCmt;
     showCmt = function() {
       return __readerSc.apply(__ctx, arguments);
+    };
+  }
+  if (typeof danyeHtml === 'function') {
+    var __readerDanyeHtml = danyeHtml;
+    danyeHtml = function() {
+      return __readerDanyeHtml.apply(__ctx, arguments);
+    };
+  }
+  if (typeof duoyeHtml === 'function') {
+    var __readerDuoyeHtml = duoyeHtml;
+    duoyeHtml = function() {
+      return __readerDuoyeHtml.apply(__ctx, arguments);
     };
   }
 })();

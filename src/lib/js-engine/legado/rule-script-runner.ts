@@ -24,8 +24,10 @@ import {
   buildRuleScriptFullBody,
   patchLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-patches';
+import { resolveJsLibString } from '@/lib/js-engine/legado/resolve-js-lib';
 import { legadoCookieGetKey } from '@/lib/js-engine/legado/login-script-runner';
 import { javaGetString, type JavaGetStringContext } from '@/lib/rule-engine/java-get-string';
+import { createRuleJavaAnalyzeBridge } from '@/lib/rule-engine/rule-java-analyze-bridge';
 import { splitSourceRule } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 import type { JsContext } from '@/lib/js-engine/quickjs-sandbox';
@@ -40,7 +42,11 @@ import {
   isRuleScriptBrowserSuspend,
   rethrowDeferredRuleScriptSuspend,
 } from '@/lib/js-engine/legado/rule-script-browser';
-import { createLegadoJsoupScopeBindings } from '@/lib/js-engine/legado/legado-jsoup';
+import {
+  createLegadoJsoupScopeBindings,
+  ruleJsExpectsHtmlElement,
+  wrapRuleJsHtmlResult,
+} from '@/lib/js-engine/legado/legado-jsoup';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
 import { READER_LAST_BROWSER_URL_KEY } from '@/lib/js-engine/legado/rule-script-browser';
@@ -80,7 +86,8 @@ export function needsLegadoRuleScriptRunner(code: string): boolean {
     /\bPackages\.java\b/.test(t) ||
     /\bsource\.bookSourceComment\b/.test(t) ||
     /\bsource\.getVariable\b/.test(t) ||
-    /\bsource\.setVariable\b/.test(t)
+    /\bsource\.setVariable\b/.test(t) ||
+    ruleJsExpectsHtmlElement(t)
   );
 }
 
@@ -367,8 +374,9 @@ export async function runLegadoRuleScript(
   const sourceRecord = normalizeSourceForLegado(
     context.source as Record<string, unknown> | undefined,
   );
-  const jsLib =
-    typeof sourceRecord.jsLib === 'string' ? (sourceRecord.jsLib as string) : '';
+  const jsLib = await resolveJsLibString(
+    typeof sourceRecord.jsLib === 'string' ? (sourceRecord.jsLib as string) : '',
+  );
   const chapterRecord = (context.chapter ?? {}) as Record<string, unknown>;
   const bookRecord: Record<string, unknown> = {
     type: 0,
@@ -399,12 +407,22 @@ export async function runLegadoRuleScript(
   const initialResult = normalizeJsRuleResult(context.result);
   const ruleInputText =
     typeof ruleContent === 'string' ? ruleContent : String(ruleContent ?? '');
-  /** 章节 HTML 规则脚本里 result 须为字符串，避免 .match 在对象上失败 */
-  const scriptResultBinding =
-    typeof initialResult === 'string' ? initialResult : ruleInputText;
+  /** 章节 HTML：result 为字符串；列表项 @js：result 为 Jsoup Element（result.select 等） */
+  const scriptResultBinding = ruleJsExpectsHtmlElement(script)
+    ? wrapRuleJsHtmlResult(initialResult, {
+        content: ruleInputText,
+        contentType: context.ruleContentType,
+      })
+    : typeof initialResult === 'string'
+      ? initialResult
+      : ruleInputText;
 
   const baseUrl = context.baseUrl || String(sourceRecord.bookSourceUrl ?? sourceRecord.sourceUrl ?? '');
   const hostList = hostsFromJsLib(sourceRecord.jsLib);
+  const analyzeBridge = createRuleJavaAnalyzeBridge({
+    baseUrl,
+    initialContent: ruleInputText,
+  });
 
   const readSourceVariable = (): string => {
     if (!bookSource || typeof localStorage === 'undefined') return '';
@@ -636,6 +654,19 @@ export async function runLegadoRuleScript(
           const hit = executeLegadoGetStringRule(String(rule ?? ''), scope, context, jsLib);
           scope.result = hit;
           return hit;
+        },
+        setContent(content: unknown, url?: unknown) {
+          return analyzeBridge.setContent(content, url);
+        },
+        setBaseUrl(url: unknown) {
+          return analyzeBridge.setBaseUrl(url);
+        },
+        getElements(ruleStr: string) {
+          return analyzeBridge.getElements(ruleStr);
+        },
+        getElement(ruleStr: string) {
+          const list = analyzeBridge.getElements(ruleStr);
+          return list[0] ?? '';
         },
         /** 对齐 Legado / explore-script-runner：脚本常用 java.getCookie(url) */
         getCookie(url: string) {

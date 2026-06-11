@@ -12,10 +12,21 @@ import {
   setGlobalString,
 } from '@/lib/js-engine/core/runtime';
 import { javaGetString } from '@/lib/rule-engine/java-get-string';
+import { createRuleJavaAnalyzeBridge } from '@/lib/rule-engine/rule-java-analyze-bridge';
 import {
   needsLegadoRuleScriptRunner,
   runLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-runner';
+import {
+  resolveJsLibString,
+  scriptReferencesJsLibFunctions,
+} from '@/lib/js-engine/legado/resolve-js-lib';
+import {
+  buildRuleScriptFullBody,
+} from '@/lib/js-engine/legado/rule-script-patches';
+import {
+  createLegadoScriptCache,
+} from '@/lib/js-engine/legado/source-script-shared';
 import { unwrapLegadoJsSnippet } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 
@@ -66,6 +77,11 @@ export function isJsSandboxFallback(): boolean {
   return isQuickJSFallback();
 }
 
+function shouldPrependJsLib(script: string, jsLibRaw: string): boolean {
+  if (!jsLibRaw.trim()) return false;
+  return scriptReferencesJsLibFunctions(script);
+}
+
 export async function evalJs(code: string, context: JsContext): Promise<unknown> {
   if (!code) return null;
   const script = unwrapLegadoJsSnippet(code);
@@ -83,10 +99,24 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
     }
   }
 
+  const jsLibRaw =
+    typeof context.source?.jsLib === 'string' ? (context.source.jsLib as string) : '';
+  if (shouldPrependJsLib(script, jsLibRaw)) {
+    try {
+      return await evalJsWithJsLib(script, context, jsLibRaw);
+    } catch (error) {
+      console.error('JS执行错误(jsLib):', error, '代码:', script);
+      return null;
+    }
+  }
+
   const needsRuleJava =
     /\bjava\.getString\b/.test(script) ||
     (/\bjava\.put\b/.test(script) && context.variables != null) ||
     /\bjava\.(?:toast|longToast)\b/.test(script) ||
+    /\bjava\.setContent\b/.test(script) ||
+    /\bjava\.getElements\b/.test(script) ||
+    /\bjava\.getElement\b/.test(script) ||
     /(?:^|[^.\w])(?:toast|longToast)\s*\(/m.test(script);
 
   try {
@@ -100,6 +130,117 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
     console.error('JS执行错误:', error, '代码:', script);
     return null;
   }
+}
+
+async function evalJsWithJsLib(
+  code: string,
+  context: JsContext,
+  jsLibRaw: string,
+): Promise<unknown> {
+  const resolvedJsLib = await resolveJsLibString(jsLibRaw);
+  const legadoCache = createLegadoScriptCache();
+  const sourceInfo = (context.source ?? {}) as Record<string, unknown>;
+  const scopedKey = String(
+    sourceInfo.bookSourceUrl ?? sourceInfo.sourceUrl ?? context.baseUrl ?? 'global',
+  );
+  let fallbackStore = fallbackScopedStore.get(scopedKey);
+  if (!fallbackStore) {
+    fallbackStore = new Map<string, unknown>();
+    fallbackScopedStore.set(scopedKey, fallbackStore);
+  }
+
+  const ruleContent =
+    context.ruleContent ??
+    (typeof context.result === 'string' ? context.result : '');
+  const analyzeBridge = createRuleJavaAnalyzeBridge({
+    baseUrl: context.baseUrl,
+    initialContent: ruleContent,
+  });
+
+  const toStringSafe = (input: unknown): string => {
+    if (input == null) return '';
+    return typeof input === 'string' ? input : String(input);
+  };
+  const readVariable = (key: string): string => {
+    const k = key.trim();
+    if (!k) return '';
+    const fromVars = context.variables?.[k];
+    if (fromVars != null) return toStringSafe(fromVars);
+    const hit = fallbackStore.get(k);
+    return hit == null ? '' : toStringSafe(hit);
+  };
+
+  const java = {
+    log(..._args: unknown[]) {},
+    toast(...args: unknown[]) {
+      context.onScriptToast?.(args[0], 'info');
+    },
+    longToast(...args: unknown[]) {
+      context.onScriptToast?.(args[0], 'warning');
+    },
+    put(key: string, val: unknown) {
+      const k = String(key);
+      fallbackStore.set(k, val);
+      if (context.variables) context.variables[k] = val;
+      legadoCache.put(k, val);
+    },
+    get(keyOrUrl: string) {
+      const candidate = toStringSafe(keyOrUrl);
+      if (/^https?:\/\//i.test(candidate)) return '';
+      const fromCache = legadoCache.get(candidate);
+      if (fromCache != null && fromCache !== 0) return toStringSafe(fromCache);
+      return readVariable(candidate);
+    },
+    getString(rule: string) {
+      return javaGetString(rule, {
+        content: ruleContent,
+        contentType: context.ruleContentType,
+        baseUrl: context.baseUrl,
+        variables: context.variables,
+        getVariable: readVariable,
+      });
+    },
+    setContent(content: unknown, url?: unknown) {
+      return analyzeBridge.setContent(content, url);
+    },
+    setBaseUrl(url: unknown) {
+      return analyzeBridge.setBaseUrl(url);
+    },
+    getElements(ruleStr: string) {
+      return analyzeBridge.getElements(ruleStr);
+    },
+    getElement(ruleStr: string) {
+      const list = analyzeBridge.getElements(ruleStr);
+      return list[0] ?? '';
+    },
+  };
+
+  const scope: Record<string, unknown> = {
+    result: normalizeJsRuleResult(context.result),
+    baseUrl: context.baseUrl,
+    book: context.book ?? {},
+    source: context.source ?? {},
+    chapter: context.chapter ?? {},
+    cache: legadoCache,
+    java,
+    JSON,
+    toast(msg?: unknown, level?: unknown) {
+      context.onScriptToast?.(msg, level ?? 'info');
+    },
+    longToast(msg?: unknown) {
+      context.onScriptToast?.(msg, 'warning');
+    },
+  };
+
+  const userBody = wrapLegadoJsBodyWithImplicitReturn(code);
+  const fullBody = buildRuleScriptFullBody(userBody, resolvedJsLib);
+  const fn = new Function('__scope__', `with (__scope__) {\n${fullBody}\n}`);
+  const out = fn(scope);
+  if (out === undefined || out === null) {
+    const bound = scope.result;
+    return bound === undefined || bound === null ? null : bound;
+  }
+  return out;
 }
 
 async function evalJsQuickJS(code: string, context: JsContext): Promise<unknown> {
@@ -205,6 +346,11 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     context.ruleContent ??
     (typeof context.result === 'string' ? context.result : '');
 
+  const analyzeBridge = createRuleJavaAnalyzeBridge({
+    baseUrl: context.baseUrl,
+    initialContent: ruleContent,
+  });
+
   const readVariable = (key: string): string => {
     const k = key.trim();
     if (!k) return '';
@@ -300,6 +446,19 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     },
     getResponse(url: string, headers?: unknown) {
       return xhrRequest('GET', toStringSafe(url), undefined, parseHeaderObject(headers)).text;
+    },
+    setContent(content: unknown, url?: unknown) {
+      return analyzeBridge.setContent(content, url);
+    },
+    setBaseUrl(url: unknown) {
+      return analyzeBridge.setBaseUrl(url);
+    },
+    getElements(ruleStr: string) {
+      return analyzeBridge.getElements(ruleStr);
+    },
+    getElement(ruleStr: string) {
+      const list = analyzeBridge.getElements(ruleStr);
+      return list[0] ?? '';
     },
   };
 
