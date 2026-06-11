@@ -21,6 +21,7 @@ import {
   detectSourceRuleMode,
   hasEmbeddedLegadoScript,
   isAtomicLegadoScriptRule,
+  isLegadoHtmlTemplateRule,
   legadoListRuleNeedsAllSuffix,
   unwrapLegadoJsSnippet,
   shieldInlineReplacementJsInPattern,
@@ -36,6 +37,11 @@ import { compileSourceRule } from '@/lib/rule-engine/source-rule';
 import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
 import { evalJs } from '@/lib/js-engine';
 import { normalizeJsRuleResult, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
+import {
+  expandLegadoJsoupElements,
+  ruleJsExpectsHtmlElement,
+  wrapRuleJsHtmlResult,
+} from '@/lib/js-engine/legado/legado-jsoup';
 import { parseWebJsListResult, runWebJs } from '@/lib/rule-engine/webjs-runner';
 import { isRuleExpression } from '@/lib/rule-engine/rule-expression';
 import type { BookSource } from '@/types';
@@ -89,10 +95,18 @@ export interface RuleContext {
   nonBlockingBrowserAwait?: boolean;
 }
 
-/** 规则链下一段的 content：对象须 JSON 化，供 $.content 等 JSONPath 使用 */
+/** 规则链下一段的 content：Jsoup Elements → 单项 outerHTML；其它对象 JSON 化 */
 function serializeJsSegmentResult(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
+  const expanded = expandLegadoJsoupElements(value);
+  if (expanded?.length === 1) return expanded[0]!;
+  if (expanded && expanded.length > 1) {
+    return expanded.join('\n');
+  }
+  if (typeof value === 'object' && 'outerHtml' in value && typeof (value as { outerHtml: () => string }).outerHtml === 'function') {
+    return (value as { outerHtml: () => string }).outerHtml();
+  }
   if (typeof value === 'object') {
     try {
       return JSON.stringify(value);
@@ -101,6 +115,19 @@ function serializeJsSegmentResult(value: unknown): string {
     }
   }
   return String(value);
+}
+
+function jsSegmentResultToList(value: unknown): string[] {
+  const expanded = expandLegadoJsoupElements(value);
+  if (expanded) return expanded.filter((x) => x.trim().length > 0);
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => jsSegmentResultToList(item))
+      .filter((x) => x.trim().length > 0);
+  }
+  const s = serializeJsSegmentResult(value);
+  return s.trim() ? [s] : [];
 }
 
 function inferContentTypeFromSerialized(value: string): 'html' | 'json' | 'text' {
@@ -117,7 +144,11 @@ function inferContentTypeFromSerialized(value: string): 'html' | 'json' | 'text'
   return inferContentType(t);
 }
 
-function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
+function buildRuleJsContext(
+  context: RuleContext,
+  result?: unknown,
+  ruleScript?: string,
+): JsContext {
   const content =
     typeof context.content === 'string' ? context.content : String(context.content ?? '');
   const sourceRaw = (context.source ?? {}) as Record<string, unknown>;
@@ -128,8 +159,15 @@ function buildRuleJsContext(context: RuleContext, result?: unknown): JsContext {
     sourceComment: comment,
     bookSourceUrl: sourceRaw.bookSourceUrl ?? sourceRaw.sourceUrl ?? '',
   };
+  let jsResult = normalizeJsRuleResult(result ?? context.result ?? context.content);
+  if (ruleScript && ruleJsExpectsHtmlElement(ruleScript)) {
+    jsResult = wrapRuleJsHtmlResult(jsResult, {
+      content,
+      contentType: context.contentType,
+    });
+  }
   return {
-    result: normalizeJsRuleResult(result ?? context.result ?? context.content),
+    result: jsResult,
     baseUrl: context.baseUrl || '',
     book: context.book,
     source,
@@ -396,9 +434,9 @@ async function expandTemplates(
             innerResults = await analyzeRule(stripped, context);
           }
         }
-        expanded += innerResults[0] ?? '';
+        expanded += innerResults.filter((r) => r?.trim()).join('\n');
       } else {
-        const jsResult = await evalJs(innerExpr, buildRuleJsContext(context));
+        const jsResult = await evalJs(innerExpr, buildRuleJsContext(context, undefined, innerExpr));
         expanded += jsResult == null ? '' : String(jsResult);
       }
     }
@@ -457,7 +495,7 @@ async function prepareRule(
     regexGroups: context.regexGroups,
     expandTemplate: (inner) => analyzeString(inner, context),
     expandJs: async (js) => {
-      const v = await evalJs(js, buildRuleJsContext(context));
+      const v = await evalJs(js, buildRuleJsContext(context, undefined, js));
       return v == null ? '' : String(v);
     },
   });
@@ -503,6 +541,16 @@ function expandLegadoReplacementGroups(
     const idx = Number(groupIndex);
     return match[idx] ?? '';
   });
+}
+
+/** 多元素 CSS 等结果以 \\n 拼接后再做 ##\\n##$ 分隔符替换（绅士会所 ruleContent） */
+function shouldJoinResultsBeforeLegadoReplace(
+  replaceRegex: string,
+  resultCount: number,
+): boolean {
+  if (resultCount <= 1) return false;
+  // JSON 书源常为字面量 \n（两字符），亦可能是真实换行
+  return replaceRegex === '\n' || replaceRegex === '\\n';
 }
 
 /** 对齐 Legado AnalyzeRule.replaceRegex */
@@ -595,15 +643,9 @@ async function executeRuleByMode(
     case 'webjs':
       return runWebJsSegment(ruleBody, context);
     case 'js': {
-      const jsResult = await evalJs(unwrapLegadoJsSnippet(ruleBody), buildRuleJsContext(context));
-      if (jsResult == null) return [];
-      if (Array.isArray(jsResult)) {
-        return jsResult
-          .map((x) => serializeJsSegmentResult(x))
-          .filter((x) => x.trim().length > 0);
-      }
-      const s = serializeJsSegmentResult(jsResult);
-      return s.trim() ? [s] : [];
+      const jsSnippet = unwrapLegadoJsSnippet(ruleBody);
+      const jsResult = await evalJs(jsSnippet, buildRuleJsContext(context, undefined, jsSnippet));
+      return jsSegmentResultToList(jsResult);
     }
     default:
       return [];
@@ -641,23 +683,34 @@ async function executeSourceRuleSegment(
     const result = applyJsonTemplate(mainRule, context.content);
     let results = result.trim() ? [result] : [];
     if (tail.replaceRegex && results.length > 0) {
-      results = await Promise.all(
-        results.map((r) =>
-          applyLegadoReplaceRegex(
-            r,
-            tail.replaceRegex,
-            tail.replacement,
-            tail.replaceFirst,
-            context,
+      if (shouldJoinResultsBeforeLegadoReplace(tail.replaceRegex, results.length)) {
+        const joined = results.join('\n');
+        const replaced = await applyLegadoReplaceRegex(
+          joined,
+          tail.replaceRegex,
+          tail.replacement,
+          tail.replaceFirst,
+          context,
+        );
+        results = replaced.trim() ? [replaced] : [];
+      } else {
+        results = await Promise.all(
+          results.map((r) =>
+            applyLegadoReplaceRegex(
+              r,
+              tail.replaceRegex,
+              tail.replacement,
+              tail.replaceFirst,
+              context,
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
     return results.filter((r) => r && r.trim().length > 0);
   }
 
   const compiled = await prepareRule(mainRule, context);
-  const mode = detectSourceRuleMode(compiled, segment.mode);
   const firstTemplateIdx = segment.ruleStr.indexOf('{{');
   const templatePrefix = firstTemplateIdx >= 0 ? segment.ruleStr.slice(0, firstTemplateIdx) : '';
   const templateShouldUseLiteralBase =
@@ -667,9 +720,10 @@ async function executeSourceRuleSegment(
     (firstTemplateIdx === 0 || !templatePrefix.includes('##'));
   let results: string[] = [];
 
-  if (templateShouldUseLiteralBase && mode === 'default' && compiled.trim()) {
+  if (templateShouldUseLiteralBase && compiled.trim()) {
     results = [compiled];
   } else if (compiled.trim() || !tail.replaceRegex) {
+    const mode = detectSourceRuleMode(compiled, segment.mode);
     const body = mode === 'regex' && compiled.startsWith(':') ? compiled.slice(1).trim() : compiled;
     results = await executeRuleByMode(mode, body, context);
     if (
@@ -695,17 +749,29 @@ async function executeSourceRuleSegment(
   }
 
   if (tail.replaceRegex && results.length > 0) {
-    results = await Promise.all(
-      results.map((r) =>
-        applyLegadoReplaceRegex(
-          r,
-          tail.replaceRegex,
-          tail.replacement,
-          tail.replaceFirst,
-          context,
+    if (shouldJoinResultsBeforeLegadoReplace(tail.replaceRegex, results.length)) {
+      const joined = results.join('\n');
+      const replaced = await applyLegadoReplaceRegex(
+        joined,
+        tail.replaceRegex,
+        tail.replacement,
+        tail.replaceFirst,
+        context,
+      );
+      results = replaced.trim() ? [replaced] : [];
+    } else {
+      results = await Promise.all(
+        results.map((r) =>
+          applyLegadoReplaceRegex(
+            r,
+            tail.replaceRegex,
+            tail.replacement,
+            tail.replaceFirst,
+            context,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   return results.filter((r) => r && r.trim().length > 0);
@@ -763,22 +829,14 @@ export async function analyzeElements(
       if (seg.mode === 'js') {
         const jsInput: unknown =
           elements.length > 0 ? elements : decodePossibleJsonArray(current);
-        const v = await evalJs(seg.ruleStr, buildRuleJsContext(context, jsInput));
-        if (v == null) {
+        const v = await evalJs(seg.ruleStr, buildRuleJsContext(context, jsInput, seg.ruleStr));
+        elements = jsSegmentResultToList(v);
+        if (elements.length === 0) {
           current = '';
           currentType = 'text';
-          elements = [];
           continue;
         }
-        if (Array.isArray(v)) {
-          elements = v
-            .map((x) => serializeJsSegmentResult(x))
-            .filter((x) => x.trim().length > 0);
-          current = elements[0] ?? '';
-        } else {
-          current = serializeJsSegmentResult(v);
-          elements = current.trim() ? [current] : [];
-        }
+        current = elements[0] ?? '';
         currentType = inferContentType(current);
         continue;
       }
@@ -890,15 +948,28 @@ export async function analyzeRule(
   let currentContent = context.content;
   let currentType = context.contentType ?? inferContentType(currentContent);
   let lastResults: string[] = [];
+  let prevNonJsMissed = false;
 
-  for (const seg of segments) {
+  for (let i = 0; i < segments.length; i += 1) {
+    const seg = segments[i]!;
+    let resultForSegment: unknown = currentContent;
+    if (seg.mode === 'js') {
+      if (i === 0) {
+        resultForSegment = currentContent;
+      } else if (prevNonJsMissed) {
+        resultForSegment = '';
+      } else if (lastResults.length > 0) {
+        resultForSegment = lastResults.join('\n');
+      }
+    }
     const subContext: RuleContext = {
       ...context,
       content: currentContent,
       contentType: currentType,
-      result: currentContent,
+      result: resultForSegment,
     };
     lastResults = await executeSourceRuleSegment(seg, subContext);
+    prevNonJsMissed = seg.mode !== 'js' && lastResults.length === 0;
     if (lastResults.length > 0) {
       currentContent = lastResults.join('\n');
       currentType = inferContentTypeFromSerialized(currentContent);
@@ -921,7 +992,11 @@ export async function analyzeString(
   const trimmed = rule.trim();
   if (!trimmed) return '';
 
-  if (!isAtomicLegadoScriptRule(trimmed) && !hasEmbeddedLegadoScript(trimmed)) {
+  if (
+    !isAtomicLegadoScriptRule(trimmed) &&
+    !hasEmbeddedLegadoScript(trimmed) &&
+    !isLegadoHtmlTemplateRule(trimmed)
+  ) {
     const { parts, op } = splitRuleByOperators(trimmed);
     if (op === '||' && parts.length > 1) {
       for (const part of parts) {

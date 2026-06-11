@@ -80,9 +80,20 @@ export function hasEmbeddedLegadoScript(ruleStr: string): boolean {
 }
 
 /** 无 <js> 包裹时仍应走 Js 模式（避免被 default/CSS 解析） */
+/** RSS/书源 {{}} HTML 模板：内联脚本含 ||/&&，不得按规则运算符切分 */
+export function isLegadoHtmlTemplateRule(ruleStr: string): boolean {
+  const t = ruleStr.trim();
+  if (!t.includes('{{')) return false;
+  if (/^<!DOCTYPE\s+html/i.test(t) || /^<html[\s>]/i.test(t)) return true;
+  return /<head[\s>]/i.test(t) && /<body[\s>]/i.test(t);
+}
+
 export function isLikelyJavaScriptRule(ruleStr: string): boolean {
   const t = ruleStr.trim();
   if (!t) return false;
+  // RSS/书源 HTML 模板（含内联 script 与 ${}）不得当作纯 JS 规则
+  if (/^<!DOCTYPE\s+html/i.test(t) || /^<html[\s>]/i.test(t)) return false;
+  if (/<head[\s>]/i.test(t) && /<body[\s>]/i.test(t)) return false;
   if (/^<js[\s>]/i.test(t)) return true;
   if (/^@js:/i.test(t)) return true;
   if (/^\s*(let|const|var|function)\s+/.test(t)) return true;
@@ -195,44 +206,112 @@ export function splitPutRule(rule: string, putMap: Record<string, string>): stri
   return result.trim();
 }
 
-/** splitSourceRule 主规则与 ## 替换尾（@all 等提取器后缀须留在主规则内） */
-function splitMainAndReplaceShielded(shielded: string): {
-  mainRule: string;
-  replaceTail: string;
-} {
-  let mainRule = stripReplacementTail(shielded);
-  const mainOffset = shielded.indexOf(mainRule);
-  let suffix =
-    mainOffset >= 0 ? shielded.slice(mainOffset + mainRule.length) : '';
-  if (suffix.trim() && !suffix.trimStart().startsWith('##')) {
-    mainRule += suffix;
-    suffix = '';
+/** CSS/提取规则后的 ## 替换 与下一段 <js> 之间常以空行分隔 */
+const RULE_SEGMENT_BOUNDARY_RE = /\n\s*\n\s*(?=<js>|@js:|@webjs:)/i;
+const REPLACE_TAIL_JS_SHIELD_OPEN = '<js_shield>';
+const REPLACE_TAIL_JS_SHIELD_CLOSE = '</js_shield>';
+
+function hasLegadoJsSegmentBoundaryAfterReplace(plain: string): boolean {
+  const main = stripReplacementTail(plain);
+  const idx = plain.indexOf(main);
+  if (idx < 0) return false;
+  return RULE_SEGMENT_BOUNDARY_RE.test(plain.slice(idx + main.length));
+}
+
+/** ##regex##replacement 内的 <js> 不是独立规则段（fooTail##foo<js>"Tail"</js>##X） */
+function shieldJsInsideReplaceTail(plain: string): string {
+  const main = stripReplacementTail(plain);
+  const idx = plain.indexOf(main);
+  if (idx < 0) return plain;
+  const afterMain = plain.slice(idx + main.length);
+  if (!afterMain.trimStart().startsWith('##')) return plain;
+  const boundaryRel = afterMain.search(RULE_SEGMENT_BOUNDARY_RE);
+  const replaceEnd = boundaryRel >= 0 ? boundaryRel : afterMain.length;
+  const replaceTail = afterMain.slice(0, replaceEnd);
+  const rest = afterMain.slice(replaceEnd);
+  const shieldedTail = replaceTail
+    .replace(
+      /<js>([\s\S]*?)<\/js>/gi,
+      (_, body) => `${REPLACE_TAIL_JS_SHIELD_OPEN}${body}${REPLACE_TAIL_JS_SHIELD_CLOSE}`,
+    )
+    .replace(/@webjs:/gi, '@webjs_split_shield:')
+    .replace(/@js:/gi, '@js_split_shield:');
+  return plain.slice(0, idx + main.length) + shieldedTail + rest;
+}
+
+function unshieldJsInsideReplaceTail(rule: string): string {
+  let out = rule;
+  if (out.includes(REPLACE_TAIL_JS_SHIELD_OPEN)) {
+    out = out.replace(
+      new RegExp(
+        `${REPLACE_TAIL_JS_SHIELD_OPEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s\\S]*?)${REPLACE_TAIL_JS_SHIELD_CLOSE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+        'g',
+      ),
+      '<js>$1</js>',
+    );
   }
-  const replaceTail = suffix.trimStart().startsWith('##') ? suffix : '';
-  return { mainRule, replaceTail };
+  return out.replace(/@js_split_shield:/gi, '@js:').replace(/@webjs_split_shield:/gi, '@webjs:');
+}
+
+function normalizeSplitRuleText(text: string): string {
+  return unshieldJsInsideReplaceTail(unshieldInlineReplacementJs(text)).trim();
+}
+
+/**
+ * Legado ##regex##replacement 仅作用于紧邻主规则的一段；
+ * 其后 <js>/HTML 模板须继续拆段（绅士会所 ruleContent 等）。
+ */
+function remainderAfterLegadoReplace(plain: string): {
+  headWithReplace: string;
+  rest: string;
+} {
+  const mainRule = stripReplacementTail(plain);
+  const mainIdx = plain.indexOf(mainRule);
+  if (mainIdx < 0) return { headWithReplace: plain, rest: '' };
+  let openPos = mainIdx + mainRule.length;
+  while (openPos < plain.length && /\s/.test(plain[openPos]!)) openPos += 1;
+  if (plain.slice(openPos, openPos + 2) !== '##') {
+    return { headWithReplace: plain, rest: '' };
+  }
+  const boundaryRel = plain.slice(openPos).search(RULE_SEGMENT_BOUNDARY_RE);
+  const headChunkEnd = boundaryRel >= 0 ? openPos + boundaryRel : plain.length;
+  const parsed = splitLegadoReplaceTail(plain.slice(mainIdx, headChunkEnd));
+  if (!parsed.replaceRegex && !parsed.replacement) {
+    return { headWithReplace: plain, rest: '' };
+  }
+  let replaceSuffix = `##${parsed.replaceRegex}##${parsed.replacement}`;
+  if (parsed.replaceFirst) replaceSuffix += '###';
+  let replaceEnd = openPos + replaceSuffix.length;
+  if (plain.slice(openPos, replaceEnd) !== replaceSuffix) {
+    const bounded = plain.slice(openPos, headChunkEnd).replace(/\s+$/, '');
+    replaceEnd = openPos + bounded.length;
+  }
+  return {
+    headWithReplace: plain.slice(mainIdx, replaceEnd),
+    rest: plain.slice(replaceEnd),
+  };
 }
 
 /**
  * 分解规则（对齐 Legado splitSourceRule）
  * @param allInOne 列表规则以 `:` 开头时整段走 Regex（getElement/getElements）
  */
-export function splitSourceRule(ruleStr: string, allInOne = false): LegadoSourceRuleSegment[] {
-  if (!ruleStr?.trim()) return [];
-
-  const shielded = shieldInlineReplacementJs(ruleStr);
-  const { mainRule: mainShielded, replaceTail: replaceShielded } =
-    splitMainAndReplaceShielded(shielded);
+function splitSourceRuleInner(
+  shielded: string,
+  allInOne: boolean,
+  plainForSoloJs: string,
+): LegadoSourceRuleSegment[] {
   const ruleList: LegadoSourceRuleSegment[] = [];
   let mode: RuleMode = 'default';
   let start = 0;
 
-  if (allInOne && mainShielded.startsWith(':')) {
+  if (allInOne && shielded.startsWith(':')) {
     mode = 'regex';
     start = 1;
   }
 
   const addDefault = (text: string) => {
-    const tmp = unshieldInlineReplacementJs(text).trim();
+    const tmp = normalizeSplitRuleText(text);
     if (!tmp) return;
     if (tmp.startsWith('##') && ruleList.length > 0) {
       const prev = ruleList[ruleList.length - 1]!;
@@ -256,23 +335,23 @@ export function splitSourceRule(ruleStr: string, allInOne = false): LegadoSource
     ruleList.push({ mode, ruleStr: tmp });
   };
 
-  while (start < mainShielded.length) {
-    const atJs = scanAtJsRule(mainShielded, start);
-    const webJs = scanWebJsRule(mainShielded, start);
+  while (start < shielded.length) {
+    const atJs = scanAtJsRule(shielded, start);
+    const webJs = scanWebJsRule(shielded, start);
     JS_PATTERN.lastIndex = start;
-    const wrapped = JS_PATTERN.exec(mainShielded);
+    const wrapped = JS_PATTERN.exec(shielded);
     const wrappedIdx = wrapped?.index ?? Number.POSITIVE_INFINITY;
     const atJsIdx = atJs?.index ?? Number.POSITIVE_INFINITY;
     const webJsIdx = webJs?.index ?? Number.POSITIVE_INFINITY;
     const nextIdx = Math.min(wrappedIdx, atJsIdx, webJsIdx);
 
     if (nextIdx === Number.POSITIVE_INFINITY) {
-      addDefault(mainShielded.slice(start));
+      addDefault(shielded.slice(start));
       break;
     }
 
     if (nextIdx > start) {
-      addDefault(mainShielded.slice(start, nextIdx));
+      addDefault(shielded.slice(start, nextIdx));
     }
 
     if (wrapped && wrapped.index === nextIdx) {
@@ -294,15 +373,11 @@ export function splitSourceRule(ruleStr: string, allInOne = false): LegadoSource
       continue;
     }
 
-    addDefault(mainShielded.slice(start));
+    addDefault(shielded.slice(start));
     break;
   }
 
-  if (replaceShielded.trim()) {
-    addDefault(replaceShielded);
-  }
-
-  const plain = unshieldInlineReplacementJs(ruleStr).trim();
+  const plain = plainForSoloJs.trim();
   if (ruleList.length === 1 && ruleList[0].mode === 'default' && isLikelyJavaScriptRule(ruleList[0].ruleStr)) {
     const solo = ruleList[0].ruleStr;
     // 含 ## 替换尾时保持 default，由 executeSourceRuleSegment + splitLegadoReplaceTail 处理
@@ -314,6 +389,30 @@ export function splitSourceRule(ruleStr: string, allInOne = false): LegadoSource
   }
 
   return ruleList;
+}
+
+export function splitSourceRule(ruleStr: string, allInOne = false): LegadoSourceRuleSegment[] {
+  if (!ruleStr?.trim()) return [];
+  const plain = shieldJsInsideReplaceTail(ruleStr.trim());
+  const shielded = shieldInlineReplacementJs(plain);
+  // 仅当 ## 替换后有空行接 <js> 时再拆段（绅士会所 ruleContent）；其余保持整段 split
+  if (hasLegadoJsSegmentBoundaryAfterReplace(plain)) {
+    const { headWithReplace, rest } = remainderAfterLegadoReplace(plain);
+    const headSegments = splitSourceRuleInner(
+      shieldInlineReplacementJs(headWithReplace),
+      allInOne,
+      headWithReplace,
+    );
+    const restTrim = rest.trim();
+    if (!restTrim) return headSegments;
+    const restSegments = splitSourceRuleInner(
+      shieldInlineReplacementJs(restTrim),
+      allInOne,
+      restTrim,
+    );
+    return [...headSegments, ...restSegments];
+  }
+  return splitSourceRuleInner(shielded, allInOne, plain);
 }
 
 /** 从 ## 中分离主规则与替换段（忽略 {{}} / <js> 内的 ##） */
@@ -375,7 +474,8 @@ export function splitLegadoReplaceTail(rule: string): {
   }
   const mainRule = stripReplacementTail(trimmed);
   const tailStart = trimmed.indexOf(mainRule) + mainRule.length;
-  const tailRaw = trimmed.slice(tailStart).replace(/^\s*##\s*/, '');
+  // 仅剥离开头 ##；勿在 ## 后再吞 \s，否则 ##\n##$ 会把换行从 replaceRegex 吃掉
+  const tailRaw = trimmed.slice(tailStart).replace(/^\s*##/, '');
   if (!tailRaw) {
     return { rule: mainRule.trim(), replaceRegex: '', replacement: '', replaceFirst: false };
   }
@@ -388,7 +488,8 @@ export function splitLegadoReplaceTail(rule: string): {
       replaceFirst: false,
     };
   }
-  let replaceRegex = tailRaw.slice(0, sep).trim();
+  // 勿 trim：##\n##$ 等模式的 replaceRegex 可能仅为换行等空白
+  let replaceRegex = tailRaw.slice(0, sep);
   let replacement = tailRaw.slice(sep + 2);
   let replaceFirst = false;
   if (replacement.endsWith('###')) {

@@ -174,6 +174,7 @@ const EXTRACTOR_KEYWORDS = new Set(['text', 'textnodes', 'owntext', 'html', 'all
 const ATTR_EXTRACTOR_NAMES = new Set([
   'href',
   'src',
+  'srcset',
   'alt',
   'title',
   'content',
@@ -273,7 +274,7 @@ function parseCssSegment(rule: string, html: string): string[] {
     // Legado 兼容：末段形如 ".c_row" / "#id" / "tr" 应作为嵌套选择器，而不是 @tr 属性。
     const nestedCount = nestedSelectorTail ? tail.length : Math.max(0, tail.length - 1);
     for (let i = 0; i < nestedCount; i += 1) {
-      elements = selectWithLegacyIndex($, elements, tail[i] || '*');
+      elements = selectWithLegacyIndexInChain($, elements, tail[i] || '*');
     }
 
     const ext = nestedSelectorTail
@@ -291,7 +292,7 @@ function parseCssSegment(rule: string, html: string): string[] {
       ? resolveListItemContextElements($)
       : selectWithLegacyIndex($, null, root || '*');
   for (const nested of nestedSelectors) {
-    elements = selectWithLegacyIndex($, elements, nested);
+    elements = selectWithLegacyIndexInChain($, elements, nested);
   }
   return extractElements($, elements, extractor);
 }
@@ -536,6 +537,33 @@ function selectByLegadoBeforeRule(
     default:
       return scope ? (scope as any).find(trimmed) : $(trimmed);
   }
+}
+
+function selectorHasLegacyIndex(selector: string): boolean {
+  const bracket = parseBracketIndexSpec(selector);
+  if (bracket) return true;
+  const { index } = parseSelectorWithLegacyIndex(selector);
+  return index != null && index !== '';
+}
+
+/** @ 链中间段：带索引（如 a.0）时按每个父节点分别取子元素，避免全局只保留第一个 */
+function selectWithLegacyIndexInChain(
+  $: cheerio.CheerioAPI,
+  scope: cheerio.Cheerio<any>,
+  selectorWithIndex: string,
+): cheerio.Cheerio<any> {
+  if (!scope || scope.length === 0) return $('');
+  if (scope.length > 1 && selectorHasLegacyIndex(selectorWithIndex)) {
+    const merged: any[] = [];
+    scope.each((_, parent) => {
+      const hit = selectWithLegacyIndex($, $(parent), selectorWithIndex);
+      hit.each((_, el) => {
+        merged.push(el);
+      });
+    });
+    return $(merged);
+  }
+  return selectWithLegacyIndex($, scope, selectorWithIndex);
 }
 
 function selectWithLegacyIndex<T>(

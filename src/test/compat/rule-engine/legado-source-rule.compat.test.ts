@@ -3,6 +3,7 @@ import { analyzeString } from '@/lib/rule-engine/analyze-rule';
 import {
   hasEmbeddedLegadoScript,
   isAtomicLegadoScriptRule,
+  splitLegadoReplaceTail,
   splitSourceRule,
   unwrapLegadoJsSnippet,
 } from '@/lib/rule-engine/legado-source-rule';
@@ -96,6 +97,31 @@ describe('splitSourceRule JSON @all extractor', () => {
   });
 });
 
+describe('splitLegadoReplaceTail', () => {
+  it('preserves newline-only replaceRegex (##\\n##$)', () => {
+    const tail = splitLegadoReplaceTail(`.content@tag.img@src##\n##$`);
+    expect(tail.replaceRegex).toBe('\n');
+    expect(tail.replacement).toBe('$');
+  });
+
+  it('preserves literal backslash-n from JSON (##\\\\n##$)', () => {
+    const tail = splitLegadoReplaceTail('.content@tag.img@src##\\n##$');
+    expect(tail.replaceRegex).toBe('\\n');
+    expect(tail.replacement).toBe('$');
+  });
+});
+
+describe('splitSourceRule ##replace + trailing <js>/HTML', () => {
+  it('keeps ##\\n##$ on CSS segment and splits following <js> + template', () => {
+    const rule = `.content@tag.img@data-original##\n##$\n\n<js>\nlist=result.split('$')\nlist\n</js>\n<ul>{{result}}</ul>`;
+    const segments = splitSourceRule(rule);
+    expect(segments.map((s) => s.mode)).toEqual(['default', 'js', 'default']);
+    expect(segments[0]?.ruleStr).toContain('##\n##$');
+    expect(segments[1]?.mode).toBe('js');
+    expect(segments[2]?.ruleStr).toContain('{{result}}');
+  });
+});
+
 describe('splitSourceRule inline <js>result</js>', () => {
   it('does not split replacement placeholder as independent js segment', () => {
     const rule =
@@ -117,6 +143,24 @@ data;
     expect(segments[0]?.mode).toBe('js');
     expect(segments[1]?.mode).toBe('default');
     expect(segments[1]?.ruleStr).toBe('$.content');
+  });
+});
+
+describe('analyzeRule js + ##replace', () => {
+  it('splitSourceRule keeps js shell with ## replace tail', () => {
+    const rule = '<js>"A"</js>##{{@js:"A"}}##Z';
+    const segments = splitSourceRule(rule);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]?.mode).toBe('default');
+    expect(segments[0]?.ruleStr).toContain('##{{@js:"A"}}##Z');
+  });
+
+  it('applies {{}} replace after <js> segment', async () => {
+    const out = await analyzeString('<js>"A"</js>##{{@js:"A"}}##Z', {
+      content: 'noop',
+      contentType: 'text',
+    });
+    expect(out).toBe('Z');
   });
 });
 
