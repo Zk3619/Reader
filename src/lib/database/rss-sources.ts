@@ -174,11 +174,67 @@ export async function updateRssSource(source: RssSource): Promise<void> {
 }
 
 /**
+ * 获取所有 RSS 源分组名
+ */
+export async function getAllRssSourceGroups(): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT DISTINCT sourceGroup FROM rssSources
+     WHERE sourceGroup IS NOT NULL AND TRIM(sourceGroup) != ''
+     ORDER BY sourceGroup ASC`
+  );
+  return rows.map((row) => String(row.sourceGroup ?? '').trim()).filter(Boolean);
+}
+
+/**
+ * 更新单条 customOrder（置顶/置底）
+ */
+export async function updateRssSourceOrder(
+  sourceUrl: string,
+  customOrder: number,
+): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('UPDATE rssSources SET customOrder = ? WHERE sourceUrl = ?', [
+    customOrder,
+    sourceUrl,
+  ]);
+}
+
+/**
+ * 批量更新 customOrder
+ */
+export async function updateRssSourceOrders(
+  orders: { sourceUrl: string; customOrder: number }[],
+): Promise<void> {
+  const db = await getDatabase();
+  for (const { sourceUrl, customOrder } of orders) {
+    await db.execute(
+      'UPDATE rssSources SET customOrder = ? WHERE sourceUrl = ?',
+      [customOrder, sourceUrl],
+    );
+  }
+}
+
+/**
  * 删除RSS源
  */
 export async function deleteRssSource(sourceUrl: string): Promise<void> {
   const db = await getDatabase();
   await db.execute('DELETE FROM rssSources WHERE sourceUrl = ?', [sourceUrl]);
+}
+
+/**
+ * 仅更新 sourceGroup 字段
+ */
+export async function updateRssSourceGroupField(
+  sourceUrl: string,
+  sourceGroup: string | undefined,
+): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('UPDATE rssSources SET sourceGroup = ? WHERE sourceUrl = ?', [
+    sourceGroup ?? null,
+    sourceUrl,
+  ]);
 }
 
 /**

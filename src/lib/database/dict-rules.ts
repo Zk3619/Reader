@@ -1,6 +1,14 @@
 import { getDatabase } from '@/lib/database/database-core';
 import type { DictRule } from '@/types';
 
+export async function getEnabledDictRules(): Promise<DictRule[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM dictRules WHERE enabled = 1 ORDER BY sortNumber ASC'
+  );
+  return rows.map(mapRow);
+}
+
 export async function getAllDictRules(): Promise<DictRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(

@@ -11,6 +11,8 @@ import {
   type DatabaseAdapter,
 } from '@/lib/platform/database';
 import { DEFAULT_KEYBOARD_ASSISTS } from '@/lib/database/default-keyboard-assists';
+import { DEFAULT_TXT_TOC_RULES } from '@/lib/database/default-txt-toc-rules';
+import { DEFAULT_DICT_RULES } from '@/lib/database/default-dict-rules';
 import { LEGADO_SCHEMA_VERSION } from '@/lib/database/migration-v96';
 
 let db: DatabaseAdapter | null = null;
@@ -219,6 +221,40 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
         `INSERT OR REPLACE INTO keyboardAssists (type, key, value, serialNo)
          VALUES (?, ?, ?, ?)`,
         [assist.type, assist.key, assist.value, assist.serialNo]
+      );
+    }
+  }
+
+  const txtTocRows = await db.select<{ count: number }>(
+    'SELECT COUNT(*) as count FROM txtTocRules'
+  );
+  if ((txtTocRows[0]?.count ?? 0) === 0) {
+    for (const rule of DEFAULT_TXT_TOC_RULES) {
+      await db.execute(
+        `INSERT OR REPLACE INTO txtTocRules (id, name, rule, replacement, example, serialNumber, enable)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          rule.id,
+          rule.name,
+          rule.rule,
+          rule.replacement,
+          rule.example ?? null,
+          rule.serialNumber,
+          rule.enable ? 1 : 0,
+        ]
+      );
+    }
+  }
+
+  const dictRows = await db.select<{ count: number }>(
+    'SELECT COUNT(*) as count FROM dictRules'
+  );
+  if ((dictRows[0]?.count ?? 0) === 0) {
+    for (const rule of DEFAULT_DICT_RULES) {
+      await db.execute(
+        `INSERT OR REPLACE INTO dictRules (name, urlRule, showRule, enabled, sortNumber)
+         VALUES (?, ?, ?, ?, ?)`,
+        [rule.name, rule.urlRule, rule.showRule, rule.enabled ? 1 : 0, rule.sortNumber]
       );
     }
   }

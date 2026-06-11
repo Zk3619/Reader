@@ -22,7 +22,7 @@ export async function upsertRuleSub(sub: RuleSub): Promise<void> {
         sub.type,
         sub.customOrder,
         sub.autoUpdate ? 1 : 0,
-        sub.update ? 1 : 0,
+        sub.update,
         sub.updateInterval,
         sub.silentUpdate ? 1 : 0,
         sub.js ?? null,
@@ -43,7 +43,7 @@ export async function upsertRuleSub(sub: RuleSub): Promise<void> {
       sub.type,
       sub.customOrder,
       sub.autoUpdate ? 1 : 0,
-      sub.update ? 1 : 0,
+      sub.update,
       sub.updateInterval,
       sub.silentUpdate ? 1 : 0,
       sub.js ?? null,
@@ -58,6 +58,23 @@ export async function deleteRuleSub(id: number): Promise<void> {
   await db.execute('DELETE FROM ruleSubs WHERE id = ?', [id]);
 }
 
+export async function findRuleSubByUrl(url: string): Promise<RuleSub | null> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM ruleSubs WHERE url = ? LIMIT 1',
+    [url.trim()],
+  );
+  return rows[0] ? mapRow(rows[0]) : null;
+}
+
+export async function getMaxRuleSubOrder(): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<{ maxOrder: number | null }>(
+    'SELECT MAX(customOrder) AS maxOrder FROM ruleSubs',
+  );
+  return Number(rows[0]?.maxOrder ?? 0);
+}
+
 function mapRow(row: Record<string, unknown>): RuleSub {
   return {
     id: row.id != null ? Number(row.id) : undefined,
@@ -66,7 +83,7 @@ function mapRow(row: Record<string, unknown>): RuleSub {
     type: Number(row.type ?? 0),
     customOrder: Number(row.customOrder ?? 0),
     autoUpdate: Boolean(row.autoUpdate ?? 0),
-    update: Boolean(row.update ?? 0),
+    update: Number(row.update ?? 0),
     updateInterval: Number(row.updateInterval ?? 0),
     silentUpdate: Boolean(row.silentUpdate ?? 0),
     js: row.js ? String(row.js) : undefined,

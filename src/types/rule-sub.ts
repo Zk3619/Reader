@@ -6,7 +6,8 @@ export interface RuleSub {
   type: number;
   customOrder: number;
   autoUpdate: boolean;
-  update: boolean;
+  /** 上次更新时间戳 */
+  update: number;
   updateInterval: number;
   silentUpdate: boolean;
   js?: string;

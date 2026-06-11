@@ -7,6 +7,17 @@ import { getDatabase } from '@/lib/database/database-core';
 import type { RssReadRecord } from '@/types';
 
 /**
+ * 获取全部阅读记录（按阅读时间倒序）
+ */
+export async function getAllRssReadRecords(): Promise<RssReadRecord[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM rssReadRecords ORDER BY readTime DESC',
+  );
+  return rows.map((row) => mapRowToRecord(row));
+}
+
+/**
  * 获取阅读记录
  */
 export async function getRssReadRecord(
