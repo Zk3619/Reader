@@ -38,6 +38,15 @@ import {
 import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
 import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
 import {
+  RssPage,
+  RssSourcesManagePage,
+  RssSourceEditPage,
+  RssArticleListPage,
+  RssReadPage,
+  RuleSubPage,
+  RssFavoritesPage,
+} from "@/pages/rss";
+import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
 } from "@/lib/media/text/reader-media-messages";
@@ -56,12 +65,22 @@ import { ImportSourceLocalDialog } from "@/components/sources/ImportSourceLocalD
 import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog";
 import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
+import { ImportRssSourceSelectDialog } from "@/components/rss/ImportRssSourceSelectDialog";
+import { RssPageToolbar } from "@/components/rss/RssPageToolbar";
+import { RssSourcesManageFilterDialog } from "@/components/rss/RssSourcesManageFilterDialog";
+import { RssReadHistoryDialog } from "@/components/rss/RssReadHistoryDialog";
+import {
+  EMPTY_RSS_SOURCE_LIST_FILTER,
+  buildRssManageFilterDomainOptions,
+  hasEffectiveRssSourceListFilter,
+  type RssSourceListFilterCriteria,
+} from "@/lib/rss/rss-source-list-filter";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
 import { bookshelfStore } from "@/stores/bookshelf";
 import { sourcesStore } from "@/stores/sources";
 import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
-import type { Book, BookSource, NewBookSource, SearchBook } from "@/types";
+import type { Book, BookSource, NewBookSource, NewRssSource, RssArticle, RssReadRecord, RssSource, SearchBook } from "@/types";
 import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/ReaderGuestAddToShelfDialog";
 import {
   freezeMediaViewerChromeAutoHide,
@@ -82,7 +101,6 @@ import { cn } from "@/lib/utils";
 import {
   mainShellInset,
   mainShellPageRoot,
-  mainShellPageScroll,
   mainShellTabEnterClass,
 } from "@/lib/ui/viewport-classes";
 import { Toaster } from "@/components/ui/sonner";
@@ -138,7 +156,15 @@ import {
   type SourceListFilterCriteria,
 } from "@/lib/sources/source-list-filter";
 import type { SourceSortMode } from "@/lib/sources/source-sort";
-import { loadSourcesPagePrefs, saveSourcesPagePrefs } from "@/lib/search/search-prefs";
+import {
+  loadSourcesPagePrefs,
+  saveSourcesPagePrefs,
+  loadRssPagePrefs,
+  saveRssPagePrefs,
+  type RssLayoutMode,
+} from "@/lib/search/search-prefs";
+import type { SearchMode as RssSearchMode } from "@/lib/search/search-prefs";
+import { openRssSourceLogin } from "@/lib/rss/open-rss-source-login";
 import { openSourceSettingsInApp } from "@/lib/platform/open-url";
 import { getStoredSourceCookiesForInnerWeb } from "@/lib/js-engine";
 import {
@@ -181,9 +207,19 @@ import { pickLocalBookSourceDirectory } from "@/lib/book-source/pick-local-books
 import {
   importLegadoJsonFromNetworkUrl,
   importReplaceRulesFromNetworkUrl,
-  importRssFromNetworkUrl,
 } from "@/lib/book-source/import-network-sidecar";
+import {
+  buildRssImportComparisons,
+  defaultRssImportSelection,
+  importSelectedRssSources,
+  resolveRssSourcesFromNetworkUrl,
+  type ImportRssSourceComparison,
+} from "@/lib/book-source/import-rss-resolver";
+import { getAllRssSourceGroups, getRssSource } from "@/lib/database/rss-sources";
+import { runAutoRuleSubUpdates } from "@/lib/rss-source";
 import { importDatabase } from "@/lib/database/export-import";
+import { RssOverlayShell } from "@/components/rss/RssOverlayShell";
+import { getRssOverlayPortalMount } from "@/lib/rss/rss-overlay-portal";
 import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
@@ -213,6 +249,7 @@ function isMediaViewerPage(page: PageType): page is MediaViewerPage {
 
 function normalizeRestoredPage(page: string): PageType {
   if (page === "import") return "bookshelf";
+  if (page === "subscription") return "rss";
   const viewer = normalizeMediaViewerPage(page);
   if (viewer) return viewer;
   return page as PageType;
@@ -354,6 +391,217 @@ function AppContent() {
   const [sourceFilterDialogOpen, setSourceFilterDialogOpen] = createSignal(false);
   const [sourceListFilter, setSourceListFilter] = createSignal<SourceListFilterCriteria>(EMPTY_SOURCE_LIST_FILTER);
 
+  /** 订阅：源管理全屏叠层 */
+  const [showRssManage, setShowRssManage] = createSignal(false);
+  /** null=关闭；'new'=新建；string=编辑 RSS 源 URL */
+  const [rssEditTarget, setRssEditTarget] = createSignal<null | "new" | string>(null);
+  /** RSS 文章列表 */
+  const [rssArticleListTarget, setRssArticleListTarget] = createSignal<{
+    sourceUrl: string;
+    sortName?: string;
+  } | null>(null);
+  /** RSS 阅读 */
+  const [rssReadTarget, setRssReadTarget] = createSignal<{
+    source: RssSource;
+    article?: RssArticle | null;
+    openUrl?: string;
+    useStartHtml?: boolean;
+  } | null>(null);
+  /** 从收藏进入阅读时暂存，关闭阅读后恢复收藏页 */
+  const [rssReadResumeFavorites, setRssReadResumeFavorites] = createSignal(false);
+  const [showRuleSub, setShowRuleSub] = createSignal(false);
+  const [showRssFavorites, setShowRssFavorites] = createSignal(false);
+  const [showImportRssNetworkDialog, setShowImportRssNetworkDialog] = createSignal(false);
+  const [importRssNetworkPresetUrl, setImportRssNetworkPresetUrl] = createSignal("");
+  const [showImportRssSelectDialog, setShowImportRssSelectDialog] = createSignal(false);
+  const [importRssLoading, setImportRssLoading] = createSignal(false);
+  const [importRssCandidates, setImportRssCandidates] = createSignal<NewRssSource[]>([]);
+  const [importRssComparisons, setImportRssComparisons] = createSignal<ImportRssSourceComparison[]>([]);
+  const [importRssSelectedUrls, setImportRssSelectedUrls] = createSignal<Set<string>>(new Set());
+  const [importRssKeepName, setImportRssKeepName] = createSignal(false);
+  const [importRssKeepGroup, setImportRssKeepGroup] = createSignal(false);
+  const [importRssKeepEnable, setImportRssKeepEnable] = createSignal(false);
+  const [importRssGroupName, setImportRssGroupName] = createSignal("");
+  const [importRssGroupOptions, setImportRssGroupOptions] = createSignal<string[]>([]);
+  const [importRssAdjustGroup, setImportRssAdjustGroup] = createSignal(false);
+
+  const [rssSearchQuery, setRssSearchQuery] = createSignal("");
+  const [rssPageFilter, setRssPageFilter] = createSignal<RssSourceListFilterCriteria>(
+    EMPTY_RSS_SOURCE_LIST_FILTER,
+  );
+  const [rssGroups, setRssGroups] = createSignal<string[]>([]);
+  const [rssEnabledSources, setRssEnabledSources] = createSignal<RssSource[]>([]);
+  const [rssCount, setRssCount] = createSignal(0);
+  const [rssHistoryOpen, setRssHistoryOpen] = createSignal(false);
+  const [rssPageFilterOpen, setRssPageFilterOpen] = createSignal(false);
+  const [rssLayoutMode, setRssLayoutMode] = createSignal<RssLayoutMode>('list');
+  const [rssSearchMode, setRssSearchMode] = createSignal<RssSearchMode>('name');
+
+  function openRssEditor(source?: RssSource) {
+    setRssEditTarget(source ? source.sourceUrl : "new");
+  }
+
+  function openRssArticles(source: RssSource) {
+    if (source.singleUrl) {
+      openRssRead(source, {
+        origin: source.sourceUrl,
+        link: source.sourceUrl,
+        title: source.sourceName,
+        sort: "",
+        order: 0,
+        group: "默认分组",
+        read: false,
+        type: source.type ?? 0,
+        durPos: 0,
+      });
+      return;
+    }
+    if (source.startHtml?.trim() && !source.ruleArticles?.trim()) {
+      setRssReadTarget({ source, useStartHtml: true });
+      return;
+    }
+    setRssArticleListTarget({ sourceUrl: source.sourceUrl });
+  }
+
+  function closeRssRead() {
+    setRssReadTarget(null);
+    if (rssReadResumeFavorites()) {
+      setShowRssFavorites(true);
+      setRssReadResumeFavorites(false);
+    }
+  }
+
+  function openRssRead(
+    source: RssSource,
+    article?: RssArticle | null,
+    opts?: { openUrl?: string; useStartHtml?: boolean },
+  ) {
+    if (showRssFavorites()) {
+      setRssReadResumeFavorites(true);
+      setShowRssFavorites(false);
+    }
+    setRssReadTarget({
+      source,
+      article: article ?? null,
+      openUrl: opts?.openUrl,
+      useStartHtml: opts?.useStartHtml,
+    });
+  }
+
+  async function openRssFromHistoryRecord(record: RssReadRecord) {
+    const source = await getRssSource(record.origin);
+    if (!source) {
+      showAppToast({ title: "订阅源已不存在", variant: "destructive" });
+      return;
+    }
+    setRssReadResumeFavorites(false);
+    setRssHistoryOpen(false);
+    openRssRead(source, {
+      origin: record.origin,
+      link: record.record,
+      sort: record.sort,
+      title: record.title ?? record.record,
+      order: 0,
+      group: "默认分组",
+      read: true,
+      type: record.type,
+      durPos: record.durPos,
+      pubDate: record.pubDate,
+      image: record.image,
+    });
+  }
+
+  function openRssNetworkImport(url?: string) {
+    if (url?.trim()) {
+      void identifyRssFromNetworkUrl(url.trim());
+      return;
+    }
+    setShowImportRssNetworkDialog(true);
+  }
+
+  const openImportRssSelectLoading = async () => {
+    const app = settingsStore.state.app;
+    setImportRssKeepName(app.importKeepName ?? false);
+    setImportRssKeepGroup(app.importKeepGroup ?? false);
+    setImportRssKeepEnable(app.importKeepEnable ?? false);
+    setImportRssGroupName("");
+    setImportRssAdjustGroup(false);
+    setImportRssLoading(true);
+    setImportRssCandidates([]);
+    setImportRssComparisons([]);
+    setImportRssSelectedUrls(new Set<string>());
+    try {
+      setImportRssGroupOptions(await getAllRssSourceGroups());
+    } catch {
+      setImportRssGroupOptions([]);
+    }
+    setShowImportRssSelectDialog(true);
+  };
+
+  const applyRecognizedRssSources = async (sources: NewRssSource[], title = "导入订阅源") => {
+    if (sources.length === 0) {
+      setShowImportRssSelectDialog(false);
+      showAppToast({ title, description: "未识别到有效订阅源", variant: "default" });
+      return;
+    }
+    const comparisons = await buildRssImportComparisons(sources);
+    setImportRssCandidates(sources);
+    setImportRssComparisons(comparisons);
+    setImportRssSelectedUrls(defaultRssImportSelection(comparisons));
+    setImportRssLoading(false);
+  };
+
+  const identifyRssFromNetworkUrl = async (url: string) => {
+    const normalized = url.trim();
+    if (!/^https?:\/\//i.test(normalized)) {
+      showAppToast({ title: "网络导入订阅源", description: "链接无效", variant: "destructive" });
+      return;
+    }
+    await openImportRssSelectLoading();
+    try {
+      const sources = await resolveRssSourcesFromNetworkUrl(normalized);
+      await applyRecognizedRssSources(sources, "网络导入订阅源");
+    } catch (err) {
+      setShowImportRssSelectDialog(false);
+      showAppToast({ title: "网络导入订阅源失败", description: String(err), variant: "destructive" });
+    } finally {
+      setImportRssLoading(false);
+    }
+  };
+
+  const confirmImportSelectedRssSources = async () => {
+    const selected = new Set(importRssSelectedUrls());
+    const list = importRssCandidates().filter((s) => selected.has(s.sourceUrl));
+    if (list.length === 0) {
+      showAppToast({ title: "导入订阅源", description: "请先选择订阅源", variant: "default" });
+      return;
+    }
+    try {
+      setImportRssLoading(true);
+      await settingsStore.setImportSourceKeepOptions({
+        importKeepName: importRssKeepName(),
+        importKeepGroup: importRssKeepGroup(),
+        importKeepEnable: importRssKeepEnable(),
+      });
+      const n = await importSelectedRssSources(list, {
+        keepName: importRssKeepName(),
+        keepGroup: importRssKeepGroup(),
+        keepEnable: importRssKeepEnable(),
+        groupName: importRssGroupName(),
+        adjustGroup: importRssAdjustGroup(),
+      });
+      showAppToast({ title: "导入订阅源", description: `已导入 ${n} 条`, variant: "default" });
+      setShowImportRssSelectDialog(false);
+      setImportRssCandidates([]);
+      setImportRssComparisons([]);
+      setImportRssSelectedUrls(new Set<string>());
+    } catch (err) {
+      showAppToast({ title: "导入订阅源失败", description: String(err), variant: "destructive" });
+    } finally {
+      setImportRssLoading(false);
+    }
+  };
+
   createEffect(() => {
     writeHmrData("currentPage", currentPage());
   });
@@ -363,6 +611,15 @@ function AppContent() {
     currentPage();
     showGroupManage();
     showSourcesManage();
+    showRssManage();
+    showRuleSub();
+    showRssFavorites();
+    showImportRssSelectDialog();
+    rssHistoryOpen();
+    rssPageFilterOpen();
+    rssArticleListTarget();
+    rssReadTarget();
+    rssEditTarget();
     showBookshelfManage();
     showBookshelfCache();
     nav.top();
@@ -413,6 +670,24 @@ function AppContent() {
       setSourceEnableDragSort(p.enableDragSort);
     });
   });
+
+  createEffect(() => {
+    if (currentPage() !== "rss") return;
+    void loadRssPagePrefs().then((p) => {
+      setRssLayoutMode(p.layoutMode);
+      setRssSearchMode(p.searchMode);
+    });
+  });
+
+  const persistRssLayoutMode = (mode: RssLayoutMode) => {
+    setRssLayoutMode(mode);
+    void loadRssPagePrefs().then((p) => saveRssPagePrefs({ ...p, layoutMode: mode }));
+  };
+
+  const persistRssSearchMode = (mode: RssSearchMode) => {
+    setRssSearchMode(mode);
+    void loadRssPagePrefs().then((p) => saveRssPagePrefs({ ...p, searchMode: mode }));
+  };
 
   const persistSearchMode = (mode: SourceSearchMode) => {
     setSourceSearchMode(mode);
@@ -731,12 +1006,7 @@ function AppContent() {
       return;
     }
     if (parsed?.kind === 'rssNetwork') {
-      try {
-        const n = await importRssFromNetworkUrl(parsed.src);
-        showAppToast({ title: '导入 RSS', description: `已导入 ${n} 条`, variant: 'default' });
-      } catch (err) {
-        showAppToast({ title: '导入 RSS 失败', description: String(err), variant: 'destructive' });
-      }
+      void identifyRssFromNetworkUrl(parsed.src);
       return;
     }
     if (parsed?.kind === 'replaceRuleNetwork') {
@@ -759,9 +1029,12 @@ function AppContent() {
           void identifySourcesFromNetwork(parsed.src);
           return;
         }
-        const label = result.kind === 'rss' ? 'RSS 源' : '替换规则';
+        if (result.kind === 'rss') {
+          void identifyRssFromNetworkUrl(parsed.src);
+          return;
+        }
         showAppToast({
-          title: `导入${label}`,
+          title: '导入替换规则',
           description: `已导入 ${result.count} 条`,
           variant: 'default',
         });
@@ -1991,6 +2264,12 @@ function AppContent() {
         void sourcesStore.loadBookSources().catch((e) => {
           console.warn("[sources] loadBookSources on app init", e);
         });
+        void sourcesStore.loadRssSources().catch((e) => {
+          console.warn("[rss] loadRssSources on app init", e);
+        });
+        void runAutoRuleSubUpdates().catch((e) => {
+          console.warn("[rss] runAutoRuleSubUpdates on app init", e);
+        });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('数据库初始化失败:', error);
@@ -2039,15 +2318,15 @@ function AppContent() {
     const onRssImport = (ev: Event) => {
       const u = (ev as CustomEvent<{ url?: string }>).detail?.url?.trim();
       if (!u) return;
-      void importRssFromNetworkUrl(u)
-        .then((n) =>
-          showAppToast({ title: '导入 RSS', description: `已导入 ${n} 条`, variant: 'default' })
-        )
-        .catch((err) =>
-          showAppToast({ title: '导入 RSS 失败', description: String(err), variant: 'destructive' })
-        );
+      void identifyRssFromNetworkUrl(u);
     };
     window.addEventListener(READER_RSS_IMPORT_EVENT, onRssImport);
+    const onRssImportNetwork = (ev: Event) => {
+      const u = (ev as CustomEvent<{ url?: string }>).detail?.url?.trim();
+      if (!u) return;
+      openRssNetworkImport(u);
+    };
+    window.addEventListener("rss-import-network", onRssImportNetwork);
     const onReplaceImport = (ev: Event) => {
       const u = (ev as CustomEvent<{ url?: string }>).detail?.url?.trim();
       if (!u) return;
@@ -2110,6 +2389,7 @@ function AppContent() {
       window.removeEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
       window.removeEventListener(READER_BOOKSOURCE_IDENTIFY_EVENT, onBookSourceIdentify);
       window.removeEventListener(READER_RSS_IMPORT_EVENT, onRssImport);
+      window.removeEventListener("rss-import-network", onRssImportNetwork);
       window.removeEventListener(READER_REPLACE_RULE_IMPORT_EVENT, onReplaceImport);
       for (const fn of unlistenFns) {
         try {
@@ -2518,6 +2798,27 @@ function AppContent() {
       () => setSourceFilterDialogOpen(false),
     );
     push("sources-manage", showSourcesManage(), () => setShowSourcesManage(false));
+    push("rss-manage", showRssManage(), () => setShowRssManage(false));
+    push("rule-sub", showRuleSub(), () => setShowRuleSub(false));
+    push("rss-favorites", showRssFavorites(), () => setShowRssFavorites(false));
+    push("rss-article-list", !!rssArticleListTarget(), () => setRssArticleListTarget(null));
+    push("rss-read", !!rssReadTarget(), () => closeRssRead());
+    push("rss-edit", !!rssEditTarget(), () => setRssEditTarget(null));
+    push(
+      "import-rss-select",
+      showImportRssSelectDialog(),
+      () => setShowImportRssSelectDialog(false),
+    );
+    push(
+      "rss-history",
+      rssHistoryOpen(),
+      () => setRssHistoryOpen(false),
+    );
+    push(
+      "rss-page-filter",
+      rssPageFilterOpen(),
+      () => setRssPageFilterOpen(false),
+    );
     push("group-manage", showGroupManage(), () => setShowGroupManage(false));
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
@@ -2911,26 +3212,117 @@ function AppContent() {
             </section>
 
             {/* 订阅视图 */}
-            <Show when={currentPage() === "subscription"}>
-              <section
-                class={cn(shellTabEnter(), mainShellPageRoot)}
-              >
-                <PageToolbar
-                  title="订阅"
-                  description="管理你的订阅内容"
-                  titleSlot={
-                    <PageToolbarTitleDropdown
-                      title="订阅"
-                      description="管理你的订阅内容"
-                      dropdownEnabled={false}
+            <Show when={currentPage() === "rss"}>
+              <section class={cn(shellTabEnter(), mainShellPageRoot, 'flex min-h-0 flex-1 flex-col')}>
+                <div
+                  class={cn(
+                    'flex min-h-0 flex-1 flex-col',
+                    (showRssManage() || showRuleSub()) && 'hidden pointer-events-none',
+                  )}
+                >
+                  <PageToolbar
+                    title="订阅"
+                    description={
+                      hasEffectiveRssSourceListFilter(
+                        rssPageFilter(),
+                        rssGroups(),
+                        buildRssManageFilterDomainOptions(rssEnabledSources()),
+                      )
+                        ? `共 ${rssCount()} 个订阅源 · 已筛选`
+                        : `共 ${rssCount()} 个订阅源`
+                    }
+                    titleSlot={
+                      <PageToolbarTitleDropdown
+                        title="订阅"
+                        description={
+                          hasEffectiveRssSourceListFilter(
+                            rssPageFilter(),
+                            rssGroups(),
+                            buildRssManageFilterDomainOptions(rssEnabledSources()),
+                          )
+                            ? `共 ${rssCount()} 个订阅源 · 已筛选`
+                            : `共 ${rssCount()} 个订阅源`
+                        }
+                        dropdownEnabled={false}
+                      />
+                    }
+                  >
+                    <RssPageToolbar
+                      searchQuery={rssSearchQuery()}
+                      onSearchQueryChange={setRssSearchQuery}
+                      onOpenHistory={() => setRssHistoryOpen(true)}
+                      onOpenFavorites={() => setShowRssFavorites(true)}
+                      onOpenFilter={() => setRssPageFilterOpen(true)}
+                      onOpenManage={() => setShowRssManage(true)}
+                      onOpenRuleSub={() => setShowRuleSub(true)}
+                      filterActive={hasEffectiveRssSourceListFilter(
+                        rssPageFilter(),
+                        rssGroups(),
+                        buildRssManageFilterDomainOptions(rssEnabledSources()),
+                      )}
+                      layoutMode={rssLayoutMode()}
+                      onLayoutModeChange={persistRssLayoutMode}
+                      searchMode={rssSearchMode()}
+                      onSearchModeChange={persistRssSearchMode}
                     />
-                  }
-                />
-                <div class={mainShellPageScroll}>
-                  <div class="rounded-2xl border border-border/50 bg-card p-6 text-center text-muted-foreground">
-                    <p>订阅功能开发中...</p>
-                  </div>
+                  </PageToolbar>
+                  <RssSourcesManageFilterDialog
+                    open={rssPageFilterOpen()}
+                    onOpenChange={setRssPageFilterOpen}
+                    sourceGroups={rssGroups()}
+                    sources={rssEnabledSources()}
+                    appliedFilter={rssPageFilter()}
+                    onApply={setRssPageFilter}
+                  />
+                  <RssReadHistoryDialog
+                    open={rssHistoryOpen()}
+                    onOpenChange={setRssHistoryOpen}
+                    onOpenRecord={(record) => void openRssFromHistoryRecord(record)}
+                  />
+                  <RssPage
+                    searchQuery={rssSearchQuery()}
+                    searchMode={rssSearchMode()}
+                    layoutMode={rssLayoutMode()}
+                    appliedFilter={rssPageFilter()}
+                    onGroupsLoaded={setRssGroups}
+                    onSourcesLoaded={setRssEnabledSources}
+                    onSourceCountChange={setRssCount}
+                    onOpenSourceArticles={(source) => openRssArticles(source)}
+                    onOpenManage={() => setShowRssManage(true)}
+                    onSourceEdit={(source) => openRssEditor(source)}
+                  />
                 </div>
+                <Show when={showRssManage()}>
+                  <RssSourcesManagePage
+                    onClose={() => setShowRssManage(false)}
+                    onSourceEdit={(source) => openRssEditor(source)}
+                    onSourcesNew={() => openRssEditor()}
+                  />
+                </Show>
+                <Show when={showRuleSub()}>
+                  <RuleSubPage
+                    onClose={() => setShowRuleSub(false)}
+                    onImportBookFromUrl={(url) => void identifySourcesFromNetwork(url)}
+                    onImportRssFromUrl={(url) => openRssNetworkImport(url)}
+                    onImportReplaceFromUrl={(url) => {
+                      void importReplaceRulesFromNetworkUrl(url)
+                        .then((n) =>
+                          showAppToast({
+                            title: '导入替换规则',
+                            description: `已导入 ${n} 条`,
+                            variant: 'default',
+                          }),
+                        )
+                        .catch((err) =>
+                          showAppToast({
+                            title: '导入替换规则失败',
+                            description: String(err),
+                            variant: 'destructive',
+                          }),
+                        );
+                    }}
+                  />
+                </Show>
               </section>
             </Show>
 
@@ -3325,6 +3717,153 @@ function AppContent() {
             </Portal>
           )}
         </Show>
+        <Show when={rssEditTarget()} keyed>
+          {(target) => (
+            <Portal mount={document.body}>
+              <RssSourceEditPage
+                sourceUrl={target === "new" ? undefined : (target as string)}
+                onClose={() => setRssEditTarget(null)}
+                onOpenLogin={(source) =>
+                  void openRssSourceLogin(source, setSourceLoginDialogSource)
+                }
+              />
+            </Portal>
+          )}
+        </Show>
+        <Show when={rssArticleListTarget()} keyed>
+          {(target) => (
+            <Portal mount={getRssOverlayPortalMount()}>
+              <RssOverlayShell zClass="z-[110]">
+                <RssArticleListPage
+                  sourceUrl={target.sourceUrl}
+                  initialSortName={target.sortName}
+                  onClose={() => setRssArticleListTarget(null)}
+                  onOpenArticle={(source, article) => openRssRead(source, article)}
+                />
+              </RssOverlayShell>
+            </Portal>
+          )}
+        </Show>
+        <Show when={rssReadTarget()} keyed>
+          {(target) => (
+            <Portal mount={getRssOverlayPortalMount()}>
+              <RssOverlayShell zClass="z-[115]">
+                <RssReadPage
+                  source={target.source}
+                  article={target.article}
+                  openUrl={target.openUrl}
+                  useStartHtml={target.useStartHtml}
+                  onClose={() => closeRssRead()}
+                  onOpenArticle={(source, article) => openRssRead(source, article)}
+                  onOpenLogin={(source) =>
+                    void openRssSourceLogin(source, setSourceLoginDialogSource)
+                  }
+                  onOpenSort={(source, sortName) => {
+                    setRssReadTarget(null);
+                    setRssReadResumeFavorites(false);
+                    setRssArticleListTarget({
+                      sourceUrl: source.sourceUrl,
+                      sortName,
+                    });
+                  }}
+                  onOpenSearch={(keyword) => openBookSearch(keyword)}
+                />
+              </RssOverlayShell>
+            </Portal>
+          )}
+        </Show>
+        <Show when={showRuleSub()}>
+          <Portal mount={document.body}>
+            <RuleSubPage
+              onClose={() => setShowRuleSub(false)}
+              onImportRssFromUrl={(url) => openRssNetworkImport(url)}
+            />
+          </Portal>
+        </Show>
+        <Show when={showRssFavorites()}>
+          <Portal mount={document.body}>
+            <RssFavoritesPage
+              onClose={() => setShowRssFavorites(false)}
+              onOpenArticle={(source, article) => openRssRead(source, article)}
+            />
+          </Portal>
+        </Show>
+        <ImportSourceNetworkDialog
+          open={showImportRssNetworkDialog()}
+          onOpenChange={(open) => {
+            setShowImportRssNetworkDialog(open);
+            if (!open) setImportRssNetworkPresetUrl("");
+          }}
+          presetUrl={importRssNetworkPresetUrl()}
+          title="网络导入订阅源"
+          description="输入订阅源 JSON 链接（http/https），兼容 legado 格式。"
+          placeholder="https://example.com/rssSources.json"
+          onIdentify={(url) => void identifyRssFromNetworkUrl(url)}
+        />
+        <ImportRssSourceSelectDialog
+          open={showImportRssSelectDialog()}
+          loading={importRssLoading()}
+          sources={importRssCandidates()}
+          comparisons={importRssComparisons()}
+          selectedUrls={importRssSelectedUrls()}
+          keepName={importRssKeepName()}
+          keepGroup={importRssKeepGroup()}
+          keepEnable={importRssKeepEnable()}
+          groupName={importRssGroupName()}
+          groupOptions={importRssGroupOptions()}
+          adjustGroup={importRssAdjustGroup()}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          onOpenChange={setShowImportRssSelectDialog}
+          onToggle={(url, checked) => {
+            setImportRssSelectedUrls((prev) => {
+              const next = new Set(prev);
+              if (checked) next.add(url);
+              else next.delete(url);
+              return next;
+            });
+          }}
+          onSelectAllToggle={() => {
+            const candidates = importRssCandidates();
+            const all = importRssSelectedUrls().size === candidates.length;
+            setImportRssSelectedUrls(
+              all ? new Set<string>() : new Set(candidates.map((s) => s.sourceUrl)),
+            );
+          }}
+          onInvertSelect={() => {
+            const current = importRssSelectedUrls();
+            const next = new Set<string>();
+            for (const s of importRssCandidates()) {
+              if (!current.has(s.sourceUrl)) next.add(s.sourceUrl);
+            }
+            setImportRssSelectedUrls(next);
+          }}
+          onSelectNewToggle={() => {
+            const urls = importRssComparisons().filter((c) => c.isNew).map((c) => c.source.sourceUrl);
+            const all = urls.every((u) => importRssSelectedUrls().has(u));
+            const next = new Set(importRssSelectedUrls());
+            for (const u of urls) {
+              if (all) next.delete(u);
+              else next.add(u);
+            }
+            setImportRssSelectedUrls(next);
+          }}
+          onSelectUpdateToggle={() => {
+            const urls = importRssComparisons().filter((c) => c.isUpdate).map((c) => c.source.sourceUrl);
+            const all = urls.every((u) => importRssSelectedUrls().has(u));
+            const next = new Set(importRssSelectedUrls());
+            for (const u of urls) {
+              if (all) next.delete(u);
+              else next.add(u);
+            }
+            setImportRssSelectedUrls(next);
+          }}
+          onKeepNameChange={setImportRssKeepName}
+          onKeepGroupChange={setImportRssKeepGroup}
+          onKeepEnableChange={setImportRssKeepEnable}
+          onGroupNameChange={setImportRssGroupName}
+          onAdjustGroupChange={setImportRssAdjustGroup}
+          onConfirm={() => void confirmImportSelectedRssSources()}
+        />
       </div>
     );
   };

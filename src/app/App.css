@@ -1420,6 +1420,29 @@ body.reader-inner-web-session .reader-inner-web-layer {
   pointer-events: auto !important;
 }
 
+/*
+ * RSS 文章列表 / 阅读页 Portal 宿主
+ * Solid Portal wrapper 无尺寸时，子树 fixed 无法可靠铺满视口。
+ */
+#reader-rss-overlay-portal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 108;
+  pointer-events: none;
+}
+
+#reader-rss-overlay-portal-host > div {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+}
+
+#reader-rss-overlay-portal-host [data-rss-overlay-shell] {
+  pointer-events: auto;
+}
+
 /* 内嵌页 Portal 下拉/对话框：须高于 .reader-inner-web-layer (z-150) */
 body.reader-inner-web-session [data-kb-popper-content-wrapper] {
   z-index: 160 !important;

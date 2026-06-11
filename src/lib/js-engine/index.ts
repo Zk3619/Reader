@@ -36,7 +36,11 @@ export {
   type UrlWithCookies,
 } from '@/lib/js-engine/legado/login-script-runner';
 
-export { extractExploreScript, runExploreScript } from '@/lib/js-engine/legado/explore-script-runner';
+export {
+  extractExploreScript,
+  runExploreScript,
+  runExploreScriptRawValue,
+} from '@/lib/js-engine/legado/explore-script-runner';
 export {
   getScriptBaseUrl,
   getLegadoSourceKey,

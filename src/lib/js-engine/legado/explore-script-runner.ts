@@ -200,15 +200,106 @@ export async function runExploreScript(
     }
   }
 
-  return runExploreScriptLegacy(scriptContent, source, options);
+  const raw = await runExploreScriptLegacyRaw(scriptContent, source, options);
+  const sections = parseScriptResult(raw);
+  logExploreScriptDiagnostics(sections, 'legacy');
+  console.log('[explore-script] legacy final:', sections.length, 'sections');
+  return sections;
 }
 
-/** Function + with 降级路径 */
-async function runExploreScriptLegacy(
+/** 执行发现脚本并返回原始结果（用于 sortUrl 等需解析纯文本的场景） */
+export async function runExploreScriptRawValue(
   scriptContent: string,
   source: BookSource,
   options?: ExploreScriptRunOptions,
-): Promise<ExploreSection[]> {
+): Promise<unknown> {
+  const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+  if (!expectsDiscovestyle) {
+    const quickRaw = await tryRunExploreScriptQuickJSRaw(scriptContent, source, options);
+    if (quickRaw !== undefined) return quickRaw;
+  }
+  return runExploreScriptLegacyRaw(scriptContent, source, options);
+}
+
+async function tryRunExploreScriptQuickJSRaw(
+  scriptContent: string,
+  source: BookSource,
+  options?: ExploreScriptRunOptions,
+): Promise<unknown | undefined> {
+  await initQuickJSRuntime();
+  if (isQuickJSFallback()) return undefined;
+
+  const baseUrl = getScriptBaseUrl(source);
+  const sourceUrl = getLegadoSourceKey(source);
+  const argsKey = getSourceArgsKey(source);
+  const cookiesKey = getSourceCookiesKey(source);
+  const jsLib =
+    typeof (source as Record<string, unknown>).jsLib === 'string'
+      ? ((source as Record<string, unknown>).jsLib as string)
+      : '';
+  const hosts = hostsFromJsLib(jsLib);
+  const hostList = hosts.length > 0 ? hosts : baseUrl ? [baseUrl] : [];
+
+  const cookieStore = loadSourceCookieStore(cookiesKey);
+  const cookieApi = createLegadoScriptCookieApi(source, baseUrl, cookieStore, { hostList });
+  const sourceVars = createSourceVariableHandlers(source, argsKey);
+  const fullScript = buildLegadoExploreScriptBundle(jsLib, scriptContent);
+  const serverForToken = resolveBookSourceServerUrl(source) ?? baseUrl;
+  const toastBuffer: Array<{ msg: unknown; level: unknown }> = [];
+  const injector = createExploreInjector({
+    baseUrl,
+    sourceUrl,
+    host: hostList,
+    resolveUrl,
+    getOrCreateDeviceId: () => resolveBookSourceDeviceId(source),
+    getArgToken: () => readBookSourceQttoken(source, serverForToken),
+    cookie: cookieApi,
+    source: {
+      ...sourceVars,
+      getLoginInfoMap: () => readSourceLoginInfoMap(source),
+      loginUi: source.loginUi,
+    },
+    scriptToastBuffer: toastBuffer,
+    request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+  });
+
+  try {
+    const expectsDiscovestyle = scriptContent.includes(GYKS_DISCOVERSTYLE_MARKER);
+    const raw = await runLegadoScriptQuickJS({
+      script: fullScript,
+      baseUrl,
+      timeoutMs: SCRIPT_TIMEOUT_MS,
+      mode: 'two-pass',
+      twoPassMaxRounds: expectsDiscovestyle ? 10 : 6,
+      twoPassContinueWhile: expectsDiscovestyle
+        ? (result, { round, maxRounds, hadPending }) => {
+            const sectionCount = parseScriptResult(result).length;
+            const incomplete = sectionCount < GYKS_DISCOVERSTYLE_MIN_SECTIONS;
+            return round < maxRounds - 1 && (hadPending || incomplete);
+          }
+        : undefined,
+      inject: injector,
+      beforeEval: (vm) => {
+        evalCodeVoid(vm, 'globalThis.result = undefined;');
+        evalCodeVoid(vm, LEGADO_EXPLORE_DEVICE_JAVA_SHIM);
+      },
+    });
+    return raw;
+  } catch {
+    return undefined;
+  } finally {
+    setTimeout(() => {
+      flushExploreScriptToastBuffer(toastBuffer, options?.onScriptToast);
+    }, 0);
+  }
+}
+
+/** Function + with 降级路径 */
+async function runExploreScriptLegacyRaw(
+  scriptContent: string,
+  source: BookSource,
+  options?: ExploreScriptRunOptions,
+): Promise<unknown> {
   const baseUrl = getScriptBaseUrl(source);
   const argsKey = getSourceArgsKey(source);
   const cookiesKey = getSourceCookiesKey(source);
@@ -382,11 +473,7 @@ async function runExploreScriptLegacy(
     return scopeObj.result;
   })();
 
-  const raw = await Promise.race([runPromise, timeoutPromise]);
-  const sections = parseScriptResult(raw);
-  logExploreScriptDiagnostics(sections, 'legacy');
-  console.log('[explore-script] legacy final:', sections.length, 'sections');
-  return sections;
+  return Promise.race([runPromise, timeoutPromise]);
 }
 
 async function requestInScript(

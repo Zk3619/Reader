@@ -35,6 +35,7 @@ import {
 } from '@/lib/settings/settings-catalog';
 import { SETTINGS_MOBILE_QUICK_PAGES } from '@/lib/settings/settings-mobile-nav';
 import { SettingsCategoryContent } from '@/pages/settings/SettingsCategoryContent';
+import type { ReadingRulePageId } from '@/lib/settings/reading-rules-nav';
 
 export interface SettingsPageProps {
   /** 移动端子页面开关变化，供 App 注册系统返回层 */
@@ -74,6 +75,10 @@ export function SettingsPage(props: SettingsPageProps) {
   const [storageTabVisited, setStorageTabVisited] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [highlightedItemId, setHighlightedItemId] = createSignal<string | null>(null);
+  const [pendingReadingRulePage, setPendingReadingRulePage] =
+    createSignal<ReadingRulePageId | null>(null);
+  const [readingRuleSubOpen, setReadingRuleSubOpen] = createSignal(false);
+  const readingRuleCloseRef: { current: () => void } = { current: () => {} };
 
   let hubScrollEl: HTMLDivElement | undefined;
   let subPageScrollEl: HTMLDivElement | undefined;
@@ -104,12 +109,25 @@ export function SettingsPage(props: SettingsPageProps) {
 
   function notifySubPageState() {
     const sub = mobileSubPage();
-    const open = useMobileLayout() && sub != null;
-    props.onSubPageOpenChange?.(open, open ? closeSubPage : undefined);
+    const ruleOpen = readingRuleSubOpen();
+    const open = useMobileLayout() && (sub != null || ruleOpen);
+    props.onSubPageOpenChange?.(
+      open,
+      open
+        ? () => {
+            if (readingRuleSubOpen()) {
+              readingRuleCloseRef.current();
+              return;
+            }
+            closeSubPage();
+          }
+        : undefined,
+    );
   }
 
   createEffect(() => {
     mobileSubPage();
+    readingRuleSubOpen();
     useMobileLayout();
     notifySubPageState();
   });
@@ -188,8 +206,17 @@ export function SettingsPage(props: SettingsPageProps) {
     }, 2400);
   }
 
+  function readingRulePageForSettingItem(itemId: string): ReadingRulePageId | null {
+    if (itemId === 'txt-toc-rules') return 'txt-toc';
+    if (itemId === 'replace-rules') return 'replace';
+    if (itemId === 'dict-rules') return 'dict';
+    return null;
+  }
+
   async function navigateToSettingItem(itemId: string, categoryId: SettingsCategoryId) {
     setSearchQuery('');
+    const rulePage = readingRulePageForSettingItem(itemId);
+    if (rulePage) setPendingReadingRulePage(rulePage);
     if (useMobileLayout()) {
       openSubPage(categoryId);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -398,6 +425,14 @@ export function SettingsPage(props: SettingsPageProps) {
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
+                        pendingReadingRulePage={
+                          cat.id === 'reading' ? pendingReadingRulePage() : null
+                        }
+                        onPendingReadingRulePageConsumed={() => setPendingReadingRulePage(null)}
+                        onReadingRulePageChange={(open, close) => {
+                          setReadingRuleSubOpen(open);
+                          readingRuleCloseRef.current = close ?? (() => {});
+                        }}
                       />
                     </TabsContent>
                   )}
@@ -420,7 +455,17 @@ export function SettingsPage(props: SettingsPageProps) {
                 dropdownEnabled={false}
               />
             }
-            leading={<SettingsToolbarLeading onBack={closeSubPage} />}
+            leading={
+              <SettingsToolbarLeading
+                onBack={() => {
+                  if (readingRuleSubOpen()) {
+                    readingRuleCloseRef.current();
+                    return;
+                  }
+                  closeSubPage();
+                }}
+              />
+            }
           >
             <SettingsPageToolbar
               searchQuery={searchQuery()}
@@ -442,6 +487,14 @@ export function SettingsPage(props: SettingsPageProps) {
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
+                        pendingReadingRulePage={
+                          cat.id === 'reading' ? pendingReadingRulePage() : null
+                        }
+                        onPendingReadingRulePageConsumed={() => setPendingReadingRulePage(null)}
+                        onReadingRulePageChange={(open, close) => {
+                          setReadingRuleSubOpen(open);
+                          readingRuleCloseRef.current = close ?? (() => {});
+                        }}
                       />
                     </div>
                   </Show>

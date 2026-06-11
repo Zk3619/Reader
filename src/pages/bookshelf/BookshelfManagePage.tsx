@@ -736,7 +736,6 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
                     triggerProps={props}
                     variant="outline"
                     size="sm"
-                    disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
                     操作
@@ -745,13 +744,13 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
                 )}
               />
               <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem onSelect={() => batchAllowUpdate(true)}>允许更新</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchAllowUpdate(false)}>禁止更新</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => openGroupPick('move')}>移入分组</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchAllowUpdate(true)}>允许更新</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchAllowUpdate(false)}>禁止更新</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('move')}>移入分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
                 <AppDropdownMenuItem
                   disabled={!canSelectRangesByPairs()}
                   onSelect={() => selectRangesByPairs()}
@@ -759,6 +758,7 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
                   选中区间
                 </AppDropdownMenuItem>
                 <AppDropdownMenuItem
+                  disabled={selectedCount() === 0}
                   class="text-destructive focus:text-destructive"
                   onSelect={() => openBatchDeleteConfirm()}
                 >
@@ -784,7 +784,6 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
                     triggerProps={props}
                     variant="outline"
                     size="sm"
-                    disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
                     更多
@@ -794,17 +793,18 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
               />
               <AppDropdownMenuContent layout="compact">
                 <AppDropdownMenuItem
+                  disabled={selectedCount() === 0}
                   class="text-destructive focus:text-destructive"
                   onSelect={() => openBatchDeleteConfirm()}
                 >
                   删除所选
                 </AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchAllowUpdate(true)}>允许更新</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchAllowUpdate(false)}>禁止更新</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchAllowUpdate(true)}>允许更新</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchAllowUpdate(false)}>禁止更新</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
                 <AppDropdownMenuItem
                   disabled={!canSelectRangesByPairs()}
                   onSelect={() => selectRangesByPairs()}

@@ -78,7 +78,9 @@ export function needsLegadoRuleScriptRunner(code: string): boolean {
     /\bgetArguments\b/.test(t) ||
     /\bsrc\.match\b/.test(t) ||
     /\bPackages\.java\b/.test(t) ||
-    /\bsource\.bookSourceComment\b/.test(t)
+    /\bsource\.bookSourceComment\b/.test(t) ||
+    /\bsource\.getVariable\b/.test(t) ||
+    /\bsource\.setVariable\b/.test(t)
   );
 }
 

@@ -64,6 +64,7 @@ import {
   ScanQrCode,
   Code,
   RefreshCw,
+  Rss,
   Save,
   Search,
   Settings,
@@ -109,7 +110,9 @@ function icon(LucideIconComponent: LucideIcon): Component<IconProps> {
 export const BookCoverIcon = icon(BookImage);
 export const BookshelfIcon = icon(LibraryBig);
 export const BookSourceIcon = icon(BookText);
-export const SubscriptionIcon = icon(Newspaper);
+/** 主导航「订阅」Tab 图标 */
+export const RssTabIcon = icon(Newspaper);
+export const RssIcon = icon(Rss);
 export const BookmarkIcon = icon(Bookmark);
 export const RecordIcon = icon(Clock);
 export const SettingsIcon = icon(Settings);

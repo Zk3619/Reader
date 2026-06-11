@@ -7,7 +7,7 @@ import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/Bookshelf
 import {
   BookshelfIcon,
   BookSourceIcon,
-  SubscriptionIcon,
+  RssTabIcon,
   BookmarkIcon,
   BookInfoIcon,
   RecordIcon,
@@ -22,7 +22,7 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any> }> = {
   scout: { label: "探索", icon: BookOpenIcon },
   sources: { label: "书源", icon: BookSourceIcon },
   explore: { label: "发现", icon: BookSourceIcon },
-  subscription: { label: "订阅", icon: SubscriptionIcon },
+  rss: { label: "订阅", icon: RssTabIcon },
   bookmark: { label: "书签", icon: BookmarkIcon },
   record: { label: "记录", icon: RecordIcon },
   settings: { label: "设置", icon: SettingsIcon },
@@ -49,7 +49,7 @@ export function BottomBar(props: BottomBarProps) {
   }
 
   // 底栏显示的页面（书架、书源、订阅、其他）
-  const bottomBarPages: PageType[] = ["bookshelf", "scout", "sources", "subscription", "settings"];
+  const bottomBarPages: PageType[] = ["bookshelf", "scout", "sources", "rss", "settings"];
 
   return (
     <div class={cn(

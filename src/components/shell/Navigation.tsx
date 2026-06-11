@@ -22,7 +22,7 @@ import { useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import {
   BookshelfIcon,
   BookSourceIcon,
-  SubscriptionIcon,
+  RssTabIcon,
   BookmarkIcon,
   RecordIcon,
   SettingsIcon,
@@ -38,7 +38,7 @@ export type PageType =
   | "scout"
   | "sources"
   | "explore"
-  | "subscription"
+  | "rss"
   | "bookmark"
   | "record"
   | "settings"
@@ -60,7 +60,7 @@ const pageConfig: Record<PageType, { label: string; icon: Component<any>; descri
   scout: { label: "探索", icon: BookOpenIcon, description: "浏览书源发现分类与书籍" },
   sources: { label: "书源", icon: BookSourceIcon, description: "浏览和添加书源" },
   explore: { label: "发现", icon: BookSourceIcon, description: "书源发现分类书籍列表" },
-  subscription: { label: "订阅", icon: SubscriptionIcon, description: "订阅更新" },
+  rss: { label: "订阅", icon: RssTabIcon, description: "订阅更新" },
   bookmark: { label: "书签", icon: BookmarkIcon, description: "查看书签" },
   record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
   settings: { label: "设置", icon: SettingsIcon, description: "应用设置" },

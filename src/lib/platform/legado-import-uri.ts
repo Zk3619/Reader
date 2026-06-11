@@ -12,6 +12,7 @@ export type ReaderImportParsed =
   | { kind: 'bookSourceNetwork'; src: string }
   | { kind: 'rssNetwork'; src: string }
   | { kind: 'replaceRuleNetwork'; src: string }
+  | { kind: 'txtTocRuleNetwork'; src: string }
   | { kind: 'determineType'; src: string }
   | { kind: 'unsupported'; reason: string };
 
@@ -69,8 +70,11 @@ export function parseReaderImportDeepLink(uri: string): ReaderImportParsed | nul
     if (/^\/replacerule\/?$/i.test(path)) {
       return { kind: 'replaceRuleNetwork', src };
     }
+    if (/^\/texttocrule\/?$/i.test(path)) {
+      return { kind: 'txtTocRuleNetwork', src };
+    }
     if (
-      /^\/(theme|texttocrule|dictrule|httptts|readconfig|addtobookshelf)\/?$/i.test(path)
+      /^\/(theme|dictrule|httptts|readconfig|addtobookshelf)\/?$/i.test(path)
     ) {
       return {
         kind: 'unsupported',

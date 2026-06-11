@@ -30,7 +30,7 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
     id: 'reading',
     label: '阅读体验',
-    description: '替换规则、目录安全、内嵌网页等阅读相关选项',
+    description: 'TXT 目录、替换净化、字典规则与阅读相关选项',
   },
   {
     id: 'sources',
@@ -93,11 +93,32 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['发现', '抽屉', '书源页', '分类', '布局'],
   },
   {
+    id: 'reading-rules-hub',
+    categoryId: 'reading',
+    title: '阅读规则',
+    description: 'TXT 目录、替换净化、字典规则入口',
+    keywords: ['阅读规则', '规则', '目录', '字典', '替换'],
+  },
+  {
+    id: 'txt-toc-rules',
+    categoryId: 'reading',
+    title: 'TXT 目录规则',
+    description: '本地 TXT 分章与目录识别',
+    keywords: ['txt', '目录规则', '分章', '本地书', 'toc'],
+  },
+  {
     id: 'replace-rules',
     categoryId: 'reading',
-    title: '替换规则',
-    description: '正文替换规则管理',
-    keywords: ['替换规则', '替换', '正文', '规则'],
+    title: '替换净化',
+    description: '正文与标题替换规则管理',
+    keywords: ['替换规则', '替换', '净化', '正文', '规则'],
+  },
+  {
+    id: 'dict-rules',
+    categoryId: 'reading',
+    title: '字典规则',
+    description: '阅读选词查词典',
+    keywords: ['字典', '词典', '查词', 'dict'],
   },
   {
     id: 'toc-pagination-safety',

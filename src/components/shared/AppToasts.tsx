@@ -280,14 +280,20 @@ function resolvePerToastIcon(variant: ResolvedToastVariant): JSX.Element | null 
   return createAppToastIcon(variant)
 }
 
+let cachedAppToastIcons: ToastIcons | undefined
+
 /** 供 Toaster 默认 icons（单条 toast 仍应走 resolvePerToastIcon 注入独立 icon） */
 export function createAppToastIcons(): ToastIcons {
-  return {
-    success: createAppToastIcon("success"),
-    info: createAppToastIcon("info"),
-    warning: createAppToastIcon("warning"),
-    error: createAppToastIcon("error"),
-  }
+  if (cachedAppToastIcons) return cachedAppToastIcons
+  createRoot(() => {
+    cachedAppToastIcons = {
+      success: createAppToastIcon("success"),
+      info: createAppToastIcon("info"),
+      warning: createAppToastIcon("warning"),
+      error: createAppToastIcon("error"),
+    }
+  })
+  return cachedAppToastIcons!
 }
 
 function resolveProgress(

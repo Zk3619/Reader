@@ -23,6 +23,7 @@ export interface ReaderMoreMenuProps {
   onOpenSearch: () => void;
   onOpenBookmarks: () => void;
   onAddBookmark: () => void;
+  onOpenDict?: () => void;
   canBookmark: boolean;
 }
 
@@ -55,6 +56,18 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
           >
             全书搜索
           </Button>
+          <Show when={props.onOpenDict}>
+            <Button
+              variant="ghost"
+              class="w-full justify-start"
+              onClick={() => {
+                props.onOpenChange(false);
+                props.onOpenDict?.();
+              }}
+            >
+              字典
+            </Button>
+          </Show>
           <Show when={props.canBookmark}>
             <Button
               variant="ghost"

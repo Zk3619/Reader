@@ -1,7 +1,7 @@
 import { fuzzyMatchQuery } from '@/lib/sources/source-list-filter';
 import { getBookshelfBookSourceName } from '@/lib/bookshelf/book-source-name';
 import { bookshelfLocalSearchMode, matchesSearchMode } from '@/lib/search/search-match';
-import type { Book, BookGroup, BookSource } from '@/types';
+import type { Book, BookGroup, BookSource, RssSource } from '@/types';
 import type { SearchMode } from '@/lib/search/search-prefs';
 
 /** 书架：常规=书名/作者连续包含；模糊=书名/作者字符序；扩展=书名/作者/分类/简介字符序 */
@@ -65,6 +65,32 @@ export function filterBookSources(sources: BookSource[], query: string, mode: Se
       return fuzzyMatchQuery(q, name) || fuzzyMatchQuery(q, s.sourceUrl || '');
     }
     return name.toLowerCase().includes(qLower);
+  });
+}
+
+/** 订阅源：常规=名称；模糊=名称；扩展=名称+URL+分组（模糊） */
+export function filterRssSources(sources: RssSource[], query: string, mode: SearchMode): RssSource[] {
+  const q = query.trim();
+  if (!q) return sources;
+  const qLower = q.toLowerCase();
+  return sources.filter((s) => {
+    const name = s.sourceName || '';
+    const group = s.sourceGroup || '';
+    if (mode === 'fuzzy') {
+      return fuzzyMatchQuery(q, name);
+    }
+    if (mode === 'extended') {
+      return (
+        fuzzyMatchQuery(q, name) ||
+        fuzzyMatchQuery(q, s.sourceUrl || '') ||
+        fuzzyMatchQuery(q, group)
+      );
+    }
+    return (
+      name.toLowerCase().includes(qLower) ||
+      s.sourceUrl.toLowerCase().includes(qLower) ||
+      group.toLowerCase().includes(qLower)
+    );
   });
 }
 

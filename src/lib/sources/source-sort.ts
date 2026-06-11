@@ -23,6 +23,13 @@ export const SOURCE_MANAGE_SORT_OPTIONS: { value: SourceSortMode; label: string 
   { value: 'respond-time', label: '响应时间排序' },
 ];
 
+export const RSS_MANAGE_SORT_OPTIONS: { value: SourceSortMode; label: string }[] = [
+  { value: 'manual', label: '手动排序' },
+  { value: 'name', label: '名称排序' },
+  { value: 'url', label: '地址排序' },
+  { value: 'update-time', label: '更新时间排序' },
+];
+
 export type SourceManageGroupMode = 'flat' | 'by-group' | 'by-domain';
 
 export function sortBookSources(

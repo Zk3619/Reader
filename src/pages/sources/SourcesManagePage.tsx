@@ -904,7 +904,6 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                     triggerProps={p}
                     variant="outline"
                     size="sm"
-                    disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
                     操作
@@ -913,15 +912,19 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                 )}
               />
               <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem class="text-destructive focus:text-destructive" onSelect={() => openBatchDeleteConfirm()}>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem
+                  disabled={selectedCount() === 0}
+                  class="text-destructive focus:text-destructive"
+                  onSelect={() => openBatchDeleteConfirm()}
+                >
                   删除所选
                 </AppDropdownMenuItem>
               </AppDropdownMenuContent>
@@ -938,7 +941,6 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                     triggerProps={p}
                     variant="outline"
                     size="sm"
-                    disabled={selectedCount() === 0}
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
                     更多
@@ -947,14 +949,14 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                 )}
               />
               <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>

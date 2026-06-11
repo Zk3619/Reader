@@ -50,6 +50,18 @@ export function shouldUseInnerWebSrcdoc(
   return !shouldPreferInnerWebUrlOverHtml(u, h);
 }
 
+/** 将预取 HTML 挂到 blob:，对齐 Legado loadDataWithBaseURL（Tauri 下 srcdoc 脚本/iframe 易失效） */
+export function buildBlobDocumentUrl(html: string): string {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  return URL.createObjectURL(blob);
+}
+
+export function revokeBlobDocumentUrl(url: string | undefined): void {
+  if (url?.startsWith('blob:')) {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** iframe 有 http(s) url 且无 base 时优先 url；有 HTML 且已注入 base 时用 srcdoc */
 export function shouldPreferInnerWebUrlOverHtml(
   url: string | undefined,

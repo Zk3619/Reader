@@ -21,6 +21,10 @@ const BOOKSHELF_PAGE_PREFS_KEY = 'bookshelf_page_prefs';
 const LEGACY_LAYOUT_KEY = 'bookshelf-layout-settings';
 const LEGACY_SHOW_GROUP_LIST_KEY = 'bookshelf_showGroupList';
 const SOURCES_PAGE_PREFS_KEY = 'sources_page_prefs';
+const RSS_PAGE_PREFS_KEY = 'rss_page_prefs';
+const LEGACY_RSS_PAGE_PREFS_KEY = 'subscription_page_prefs';
+
+export type RssLayoutMode = 'list' | 'grid';
 
 /** 搜索模式：常规 / 模糊 / 扩展 / 不过滤（在线搜索见 search-match.ts；各页本地扩展字段可能不同） */
 export type SearchMode = 'name' | 'fuzzy' | 'extended' | 'unfiltered';
@@ -92,6 +96,27 @@ const DEFAULT_SOURCES_PAGE_PREFS: SourcesPagePrefs = {
   searchMode: 'name',
   enableDragSort: true,
 };
+
+export interface RssPagePrefs {
+  layoutMode: RssLayoutMode;
+  searchMode: SearchMode;
+}
+
+const DEFAULT_RSS_PAGE_PREFS: RssPagePrefs = {
+  layoutMode: 'list',
+  searchMode: 'name',
+};
+
+function normalizeRssLayoutMode(value: unknown): RssLayoutMode {
+  return value === 'grid' ? 'grid' : 'list';
+}
+
+function normalizeRssPagePrefs(raw: Record<string, unknown>): RssPagePrefs {
+  return {
+    layoutMode: normalizeRssLayoutMode(raw.layoutMode),
+    searchMode: normalizeSearchMode(raw.searchMode),
+  };
+}
 
 const GROUP_STYLES: GroupStyle[] = ['dropdown', 'tabs', 'normal'];
 const VIEW_MODES: ViewMode[] = [
@@ -340,4 +365,20 @@ export async function saveGroupManageSubPageMode(mode: SearchMode): Promise<void
       groupManage: { ...prefs.children.groupManage, searchMode: mode },
     },
   });
+}
+
+export async function loadRssPagePrefs(): Promise<RssPagePrefs> {
+  const stored = await getStorage<Record<string, unknown>>(RSS_PAGE_PREFS_KEY);
+  if (stored && typeof stored === 'object') {
+    return normalizeRssPagePrefs(stored);
+  }
+  const legacy = await getStorage<Record<string, unknown>>(LEGACY_RSS_PAGE_PREFS_KEY);
+  if (legacy && typeof legacy === 'object') {
+    return normalizeRssPagePrefs(legacy);
+  }
+  return { ...DEFAULT_RSS_PAGE_PREFS };
+}
+
+export async function saveRssPagePrefs(prefs: RssPagePrefs): Promise<void> {
+  await setStorage(RSS_PAGE_PREFS_KEY, prefs);
 }

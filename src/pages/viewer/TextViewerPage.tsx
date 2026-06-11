@@ -43,6 +43,7 @@ import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
 import { ReaderOfflineCacheDialog } from '@/components/viewer/text-viewer/ReaderOfflineCacheDialog';
 import { ReaderMoreMenu } from '@/components/viewer/text-viewer/ReaderMoreMenu';
+import { DictDialog } from '@/components/dict/DictDialog';
 import { ReaderSearchDrawer } from '@/components/viewer/text-viewer/ReaderSearchDrawer';
 import { ReaderBookmarksDrawer } from '@/components/viewer/text-viewer/ReaderBookmarksDrawer';
 import { ReaderChangeSourceDialog } from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
@@ -123,6 +124,8 @@ export function BookReader(props: BookReaderProps) {
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [dictOpen, setDictOpen] = createSignal(false);
+  const [dictWord, setDictWord] = createSignal('');
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [bookmarksOpen, setBookmarksOpen] = createSignal(false);
   const [contentEnterKey, setContentEnterKey] = createSignal(0);
@@ -223,6 +226,19 @@ export function BookReader(props: BookReaderProps) {
   const canUseBookmarks = () => {
     const b = book();
     return !!b && !textViewerStore.isGuestReading();
+  };
+
+  const handleOpenDict = () => {
+    const selected = selectionTextFromDocument().trim();
+    if (!selected) {
+      showAppToast({
+        title: '请先选中要查询的文字',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setDictWord(selected.slice(0, 120));
+    setDictOpen(true);
   };
 
   const handleAddBookmark = async () => {
@@ -956,7 +972,10 @@ export function BookReader(props: BookReaderProps) {
         onOpenSearch={() => setSearchOpen(true)}
         onOpenBookmarks={() => setBookmarksOpen(true)}
         onAddBookmark={() => void handleAddBookmark()}
+        onOpenDict={handleOpenDict}
       />
+
+      <DictDialog open={dictOpen()} onOpenChange={setDictOpen} word={dictWord()} />
 
       <ReaderSearchDrawer
         open={searchOpen()}

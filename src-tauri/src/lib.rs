@@ -1626,15 +1626,22 @@ pub fn run() {
     let builder = builder
         // 暂时禁用 updater 插件，需要配置 tauri.conf.json
         // .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::Builder::new().build())
-        // .plugin(tauri_plugin_clipboard::init()) // 如果需要可以取消注释
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                window.show().unwrap();
-                window.set_focus().unwrap();
-            }
-            emit_argv_import_deeplinks(&app, argv);
-        }));
+        .plugin(tauri_plugin_autostart::Builder::new().build());
+    // .plugin(tauri_plugin_clipboard::init()) // 如果需要可以取消注释
+
+    // 发布版单实例：二次启动时聚焦已有窗口。dev 配置下禁用，避免残留 reader.exe
+    // 导致 `tauri dev` 子进程秒退、Vite 被一并关掉。
+    #[cfg(all(not(target_os = "android"), not(target_os = "ios"), not(debug_assertions)))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        eprintln!("[reader] 检测到二次启动，转发到已有实例");
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else if let Err(e) = create_main_window_if_missing(&app) {
+            eprintln!("[reader] 无法恢复主窗口: {e}");
+        }
+        emit_argv_import_deeplinks(&app, argv);
+    }));
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder

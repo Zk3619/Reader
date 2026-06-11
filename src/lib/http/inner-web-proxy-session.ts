@@ -73,7 +73,24 @@ export function buildInnerWebDocumentProxyUrl(
   targetUrl: string,
 ): string {
   const trimmed = targetUrl.trim();
-  return `${proxyPath()}?target=${encodeURIComponent(trimmed)}&session=${encodeURIComponent(sessionId)}`;
+  return `${resolveInnerWebProxyPath()}?target=${encodeURIComponent(trimmed)}&session=${encodeURIComponent(sessionId)}`;
+}
+
+/** 供 iframe 内联脚本拼接代理 URL */
+export function resolveInnerWebProxyPath(): string {
+  return proxyPath();
+}
+
+/** blob/srcdoc 正文内须用应用源绝对地址，避免 <base href> 把 /__reader_http 解析到书源域 */
+export function resolveAbsoluteInnerWebProxyBase(): string {
+  const path = resolveInnerWebProxyPath();
+  if (typeof window === 'undefined') return path;
+  try {
+    const u = new URL(path, window.location.href);
+    return `${u.origin}${u.pathname}`.replace(/\/$/, '');
+  } catch {
+    return path;
+  }
 }
 
 export async function readInnerWebProxySessionCookies(sessionId: string): Promise<string> {
