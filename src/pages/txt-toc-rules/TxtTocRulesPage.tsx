@@ -13,6 +13,7 @@ import {
   TxtTocRulesToolbarLeading,
 } from '@/components/txt-toc-rules/TxtTocRulesPageToolbar';
 import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
@@ -68,6 +69,7 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
   const [importUrlOpen, setImportUrlOpen] = createSignal(false);
   const [importUrl, setImportUrl] = createSignal('');
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
+  const [codeImportOpen, setCodeImportOpen] = createSignal(false);
 
   const filteredRules = createMemo(() => filterTxtTocRules(rules(), searchQuery()));
   const selectedCount = () => selectedIds().size;
@@ -168,46 +170,54 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
     }
   };
 
-  const handleQrIdentify = async (raw: string) => {
+  const handleRawTextIdentify = async (
+    raw: string,
+    via: 'qr' | 'code' = 'qr',
+    close?: () => void,
+  ) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
+    const label = via === 'qr' ? '二维码导入' : '代码导入';
 
     const parsed = parseReaderImportDeepLink(trimmed);
     if (parsed?.kind === 'txtTocRuleNetwork') {
       const ok = await importFromNetworkUrl(parsed.src);
-      if (ok) setQrImportOpen(false);
+      if (ok) close?.();
       return;
     }
     if (parsed?.kind === 'determineType') {
       const ok = await importFromNetworkUrl(parsed.src);
-      if (ok) setQrImportOpen(false);
+      if (ok) close?.();
       return;
     }
     if (parsed?.kind === 'unsupported') {
-      showAppToast({ title: '二维码导入', description: parsed.reason, variant: 'default' });
+      showAppToast({ title: label, description: parsed.reason, variant: 'default' });
       return;
     }
 
     const directCount = await importTxtTocRulesFromJson(trimmed);
     if (directCount > 0) {
       await reload();
-      setQrImportOpen(false);
+      close?.();
       showAppToast({ title: `已导入 ${directCount} 条规则` });
       return;
     }
 
     if (/^https?:\/\//i.test(trimmed)) {
       const ok = await importFromNetworkUrl(trimmed);
-      if (ok) setQrImportOpen(false);
+      if (ok) close?.();
       return;
     }
 
     showAppToast({
-      title: '无法识别二维码内容',
+      title: via === 'qr' ? '无法识别二维码内容' : '无法识别代码内容',
       description: '请使用 TXT 目录规则 JSON 或规则链接',
       variant: 'destructive',
     });
   };
+
+  const handleQrIdentify = (raw: string) =>
+    void handleRawTextIdentify(raw, 'qr', () => setQrImportOpen(false));
 
   const pageDescription = () => {
     const total = rules().length;
@@ -322,6 +332,7 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
           onImportLocal={importLocalJson}
           onImportNetwork={() => setImportUrlOpen(true)}
           onImportQR={() => setQrImportOpen(true)}
+          onImportCode={() => setCodeImportOpen(true)}
           onImportDefault={() => void importDefault()}
         />
       </PageToolbar>
@@ -463,7 +474,18 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
         open={qrImportOpen()}
         onOpenChange={setQrImportOpen}
         autoImport
+        title="二维码导入 TXT 目录规则"
+        description="使用摄像头扫码或选择图片识别 TXT 目录规则二维码。"
         onIdentify={(raw) => void handleQrIdentify(raw)}
+      />
+
+      <ImportCodeDialog
+        open={codeImportOpen()}
+        onOpenChange={setCodeImportOpen}
+        title="代码导入 TXT 目录规则"
+        description="粘贴 TXT 目录规则 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 地址。"
+        confirmLabel="导入"
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'code', () => setCodeImportOpen(false))}
       />
 
       <AppDialog open={importUrlOpen()} onOpenChange={setImportUrlOpen}>

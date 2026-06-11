@@ -20,6 +20,7 @@ import {
   FolderPlusIcon,
   LinkIcon,
   ScanQrCodeIcon,
+  CodeIcon,
   ChevronLeftIcon,
   XIcon,
 } from '@/components/shared/icons';
@@ -31,6 +32,7 @@ export interface TxtTocRulesPageToolbarProps {
   onImportLocal?: () => void;
   onImportNetwork?: () => void;
   onImportQR?: () => void;
+  onImportCode?: () => void;
   onImportDefault?: () => void;
 }
 
@@ -156,6 +158,10 @@ export function TxtTocRulesPageToolbar(props: TxtTocRulesPageToolbarProps) {
           <AppDropdownMenuItem onSelect={() => props.onImportQR?.()}>
             <ScanQrCodeIcon class="h-4 w-4" />
             <span>二维码导入</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => props.onImportCode?.()}>
+            <CodeIcon class="h-4 w-4" />
+            <span>代码导入</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem onSelect={() => props.onImportDefault?.()}>
             <FileTextIcon class="h-4 w-4" />

@@ -17,38 +17,3 @@ bookSourceType 为 2 时如 图库漫画 ，其对应书籍没有正确进入 im
 
 
 @Reader TXT目录规则页，移除已禁用的文本提示，并将第一行改为类似书源管理页的独立页头部，右侧按钮为可展开的搜索、更多。更多下拉中应包含本地导入、网络导入、二维码导入、导入默认规则。
-
-
-@Reader [rss] [美人图 - 秀人] 刷新完成 
-{sort: '首页', fetched: 30, persisted: 30, totalMs: 9520}
-rss-source-logger.ts:52 [rss] [美人图 - 秀人] AnalyzeUrl 请求 
-{url: 'https://meirentu.club/pic/106808366552.html'}
-rss-source-logger.ts:52 [rss] [美人图 - 秀人] AnalyzeUrl 请求 
-{url: 'https://meirentu.club/pic/106808366552.html'}
-rss-source-logger.ts:52 [rss] [美人图 - 秀人] AnalyzeUrl 响应 
-{finalUrl: 'https://meirentu.club/pic/106808366552.html', bodyLength: 14073, usedWebView: false}
-rss-source-logger.ts:52 [rss] [美人图 - 秀人] 正文解析完成 
-{length: 4568, hasScript: true, hasImgList: true}
-RssReadPage.tsx:103
- An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
-index.ts:688
- [HTTP] 发送请求失败: 
-{url: 'https://meirentu.club/pic/106808366552.html', originalUrl: 'https://meirentu.club/pic/106808366552.html', error: '请求发送失败: error sending request for url (https://mei…ic/106808366552.html) (根本原因: operation timed out)', stack: undefined, suggestion: '可能是网络连接问题或服务器拒绝请求'}
-rss-source-logger.ts:83
- [rss] [美人图 - 秀人] AnalyzeUrl 请求失败 
-{url: 'https://meirentu.club/pic/106808366552.html', error: {…}}
-rss-source-logger.ts:83
- [rss] [美人图 - 秀人] 正文拉取失败 
-{link: 'https://meirentu.club/pic/106808366552.html', error: {…}}
-rss-source-logger.ts:65
- [rss] [美人图 - 秀人] 正文失败，回退直链模式 
-{link: 'https://meirentu.club/pic/106808366552.html'}
-link
-: 
-"https://meirentu.club/pic/106808366552.html"
-[[Prototype]]
-: 
-Object
-(匿名)	@	rss-source-logger.ts:65
-(匿名)	@	rss-read-session.ts:224
-仍未能正确加载内容，而请求地址我能通过浏览器直接访问到内容。必要时可参考@legados-main 

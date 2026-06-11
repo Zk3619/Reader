@@ -5,6 +5,9 @@
 import { createSignal, For, Show } from 'solid-js';
 import * as replaceDb from '@/lib/database/replace-rules';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
+import { importReplaceRulesFromJson } from '@/lib/book-source/import-replace-rule';
+import { importReplaceRulesFromNetworkUrl } from '@/lib/book-source/import-network-sidecar';
+import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -13,10 +16,29 @@ import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/te
 import {
   AppDialog,
   AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuButtonTrigger,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
+import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
+import {
+  ChevronDownIcon,
+  CodeIcon,
+  FolderPlusIcon,
+  ImportIcon,
+  LinkIcon,
+  ScanQrCodeIcon,
+} from '@/components/shared/icons';
 
 function emptyRule(): Omit<ReplaceRule, 'id'> {
   return {
@@ -37,6 +59,10 @@ export function ReplaceRulesPage() {
   const [loading, setLoading] = createSignal(true);
   const [editOpen, setEditOpen] = createSignal(false);
   const [draft, setDraft] = createSignal<ReplaceRule | Omit<ReplaceRule, 'id'>>(emptyRule());
+  const [importUrlOpen, setImportUrlOpen] = createSignal(false);
+  const [importUrl, setImportUrl] = createSignal('');
+  const [qrImportOpen, setQrImportOpen] = createSignal(false);
+  const [codeImportOpen, setCodeImportOpen] = createSignal(false);
 
   const reload = async () => {
     setLoading(true);
@@ -80,6 +106,101 @@ export function ReplaceRulesPage() {
     await reload();
   };
 
+  const finishImport = async (count: number) => {
+    if (count > 0) {
+      invalidateReplaceRulesCache();
+      await reload();
+      showAppToast({ title: `已导入 ${count} 条规则` });
+      return true;
+    }
+    showAppToast({ title: '未识别到有效规则', variant: 'destructive' });
+    return false;
+  };
+
+  const importLocalJson = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.txt,application/json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const count = await importReplaceRulesFromJson(await file.text());
+      await finishImport(count);
+    };
+    input.click();
+  };
+
+  const importFromNetworkUrl = async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      showAppToast({ title: '请输入规则 URL', variant: 'destructive' });
+      return false;
+    }
+    try {
+      const count = await importReplaceRulesFromNetworkUrl(trimmed);
+      return finishImport(count);
+    } catch (e) {
+      showAppToast({
+        title: '导入失败',
+        description: e instanceof Error ? e.message : '请检查网络或 URL',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  };
+
+  const importFromUrl = async () => {
+    const ok = await importFromNetworkUrl(importUrl());
+    if (ok) {
+      setImportUrlOpen(false);
+      setImportUrl('');
+    }
+  };
+
+  const handleRawTextIdentify = async (
+    raw: string,
+    via: 'qr' | 'code' = 'qr',
+    close?: () => void,
+  ) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const label = via === 'qr' ? '二维码导入' : '代码导入';
+
+    const parsed = parseReaderImportDeepLink(trimmed);
+    if (parsed?.kind === 'replaceRuleNetwork') {
+      const ok = await importFromNetworkUrl(parsed.src);
+      if (ok) close?.();
+      return;
+    }
+    if (parsed?.kind === 'determineType') {
+      const ok = await importFromNetworkUrl(parsed.src);
+      if (ok) close?.();
+      return;
+    }
+    if (parsed?.kind === 'unsupported') {
+      showAppToast({ title: label, description: parsed.reason, variant: 'default' });
+      return;
+    }
+
+    const directCount = await importReplaceRulesFromJson(trimmed);
+    if (await finishImport(directCount)) {
+      close?.();
+      return;
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      const ok = await importFromNetworkUrl(trimmed);
+      if (ok) close?.();
+      return;
+    }
+
+    showAppToast({
+      title: via === 'qr' ? '无法识别二维码内容' : '无法识别代码内容',
+      description: '请使用替换规则 JSON 或规则链接',
+      variant: 'destructive',
+    });
+  };
+
   void reload();
 
   return (
@@ -106,6 +227,35 @@ export function ReplaceRulesPage() {
         >
           全部禁用
         </Button>
+        <AppDropdownMenu>
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuButtonTrigger triggerProps={triggerProps} variant="outline">
+                <ImportIcon class="h-4 w-4" />
+                <span>导入</span>
+                <ChevronDownIcon class="h-4 w-4 opacity-50" />
+              </AppDropdownMenuButtonTrigger>
+            )}
+          />
+          <AppDropdownMenuContent layout="compact">
+            <AppDropdownMenuItem onSelect={() => importLocalJson()}>
+              <FolderPlusIcon class="h-4 w-4" />
+              <span>本地导入</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem onSelect={() => setImportUrlOpen(true)}>
+              <LinkIcon class="h-4 w-4" />
+              <span>网络导入</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem onSelect={() => setQrImportOpen(true)}>
+              <ScanQrCodeIcon class="h-4 w-4" />
+              <span>二维码导入</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem onSelect={() => setCodeImportOpen(true)}>
+              <CodeIcon class="h-4 w-4" />
+              <span>代码导入</span>
+            </AppDropdownMenuItem>
+          </AppDropdownMenuContent>
+        </AppDropdownMenu>
       </div>
 
       <Show when={loading()}>
@@ -153,6 +303,46 @@ export function ReplaceRulesPage() {
           )}
         </For>
       </ul>
+
+      <ImportSourceQrDialog
+        open={qrImportOpen()}
+        onOpenChange={setQrImportOpen}
+        autoImport
+        title="二维码导入替换规则"
+        description="使用摄像头扫码或选择图片识别替换规则二维码。"
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'qr', () => setQrImportOpen(false))}
+      />
+
+      <ImportCodeDialog
+        open={codeImportOpen()}
+        onOpenChange={setCodeImportOpen}
+        title="代码导入替换规则"
+        description="粘贴替换规则 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 地址。"
+        confirmLabel="导入"
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'code', () => setCodeImportOpen(false))}
+      />
+
+      <AppDialog open={importUrlOpen()} onOpenChange={setImportUrlOpen}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>网络导入</AppDialogTitle>
+            <AppDialogDescription>输入替换规则 JSON 文件的 URL</AppDialogDescription>
+          </AppDialogHeader>
+          <TextField class="px-6">
+            <TextFieldInput
+              placeholder="https://..."
+              value={importUrl()}
+              onInput={(e) => setImportUrl(e.currentTarget.value)}
+            />
+          </TextField>
+          <AppDialogFooter class="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setImportUrlOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void importFromUrl()}>导入</Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
 
       <AppDialog open={editOpen()} onOpenChange={setEditOpen}>
         <AppDialogContent class="max-w-lg">

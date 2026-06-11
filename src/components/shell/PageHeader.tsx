@@ -44,6 +44,8 @@ export interface PageHeaderAction {
   isDropdown?: boolean;
   /** 下拉菜单项列表 */
   dropdownItems?: PageHeaderDropdownItem[];
+  /** 下拉菜单 Portal z-index（RSS/阅读器叠层内需高于 z-[110]） */
+  dropdownPortalZClass?: string;
 }
 
 export interface PageHeaderDropdownItem {
@@ -63,6 +65,27 @@ export interface PageHeaderDropdownItem {
     onChange: (checked: boolean) => void;
     closeOnSelect?: boolean;
   };
+  /** 单选项（与订阅页更多菜单一致的圆形指示器） */
+  radio?: {
+    selected: () => boolean;
+    onSelect: () => void;
+  };
+}
+
+function MenuRadioIndicator(props: { selected: boolean }) {
+  return (
+    <span
+      class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none"
+      aria-label={props.selected ? '已选' : '未选'}
+    >
+      <span class="relative flex size-4 items-center justify-center" aria-hidden>
+        <span class="size-4 rounded-full border border-primary" />
+        <Show when={props.selected}>
+          <span class="absolute size-2 rounded-full bg-primary" />
+        </Show>
+      </span>
+    </span>
+  );
 }
 
 export interface PageHeaderProps {
@@ -145,7 +168,10 @@ function DropdownActionButton(props: {
         </TooltipTrigger>
         <TooltipContent>{props.action.label}</TooltipContent>
       </Tooltip>
-      <AppDropdownMenuContent layout="compact">
+      <AppDropdownMenuContent
+        layout="compact"
+        portalZClass={props.action.dropdownPortalZClass}
+      >
         <For each={props.action.dropdownItems}>
           {(item) => (
             <>
@@ -154,28 +180,43 @@ function DropdownActionButton(props: {
               </Show>
               <Show when={!item.separatorOnly}>
               <Show
-                when={item.checkbox}
+                when={item.radio}
                 fallback={
-                  <AppDropdownMenuItem onSelect={() => item.onClick?.()}>
-                    {(() => {
-                      if (item.icon) {
-                        const Icon = item.icon;
-                        return <Icon class="h-4 w-4" />;
-                      }
-                      return null;
-                    })()}
-                    <span>{item.label}</span>
-                  </AppDropdownMenuItem>
+                  <Show
+                    when={item.checkbox}
+                    fallback={
+                      <AppDropdownMenuItem onSelect={() => item.onClick?.()}>
+                        {(() => {
+                          if (item.icon) {
+                            const Icon = item.icon;
+                            return <Icon class="h-4 w-4" />;
+                          }
+                          return null;
+                        })()}
+                        <span>{item.label}</span>
+                      </AppDropdownMenuItem>
+                    }
+                  >
+                    {(checkbox) => (
+                      <AppDropdownMenuItem
+                        onSelect={() => checkbox().onChange(!checkbox().checked())}
+                        class="flex items-center gap-2"
+                      >
+                        <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
+                          <Checkbox checked={checkbox().checked()} aria-label={item.label} />
+                        </span>
+                        <span>{item.label}</span>
+                      </AppDropdownMenuItem>
+                    )}
+                  </Show>
                 }
               >
-                {(checkbox) => (
+                {(radio) => (
                   <AppDropdownMenuItem
-                    onSelect={() => checkbox().onChange(!checkbox().checked())}
+                    onSelect={() => radio().onSelect()}
                     class="flex items-center gap-2"
                   >
-                    <span class="flex h-4 w-4 shrink-0 items-center justify-center pointer-events-none">
-                      <Checkbox checked={checkbox().checked()} aria-label={item.label} />
-                    </span>
+                    <MenuRadioIndicator selected={radio().selected()} />
                     <span>{item.label}</span>
                   </AppDropdownMenuItem>
                 )}

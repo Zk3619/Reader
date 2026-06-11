@@ -16,7 +16,16 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuButtonTrigger,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { ChevronDownIcon, CodeIcon, FolderPlusIcon, ImportIcon } from '@/components/shared/icons';
 
 function emptyRule(): DictRule {
   return {
@@ -35,6 +44,7 @@ export function DictRulesPage() {
   const [draft, setDraft] = createSignal<DictRule>(emptyRule());
   const [isNew, setIsNew] = createSignal(true);
   const [originalName, setOriginalName] = createSignal('');
+  const [codeImportOpen, setCodeImportOpen] = createSignal(false);
 
   const reload = async () => {
     setLoading(true);
@@ -79,22 +89,33 @@ export function DictRulesPage() {
     await reload();
   };
 
-  const importJson = async () => {
+  const finishImport = async (count: number) => {
+    await reload();
+    showAppToast({
+      title: count > 0 ? `已导入 ${count} 条规则` : '未识别到有效规则',
+      variant: count > 0 ? 'default' : 'destructive',
+    });
+    return count > 0;
+  };
+
+  const importLocalJson = () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,application/json';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const text = await file.text();
-      const count = await importDictRulesFromJson(text);
-      await reload();
-      showAppToast({
-        title: count > 0 ? `已导入 ${count} 条规则` : '未识别到有效规则',
-        variant: count > 0 ? 'default' : 'destructive',
-      });
+      const count = await importDictRulesFromJson(await file.text());
+      await finishImport(count);
     };
     input.click();
+  };
+
+  const importFromCode = async (text: string) => {
+    const count = await importDictRulesFromJson(text);
+    if (await finishImport(count)) {
+      setCodeImportOpen(false);
+    }
   };
 
   void reload();
@@ -103,9 +124,27 @@ export function DictRulesPage() {
     <div class="space-y-4">
       <div class="flex flex-wrap gap-2">
         <Button onClick={openNew}>新建规则</Button>
-        <Button variant="outline" onClick={() => void importJson()}>
-          导入 JSON
-        </Button>
+        <AppDropdownMenu>
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuButtonTrigger triggerProps={triggerProps} variant="outline">
+                <ImportIcon class="h-4 w-4" />
+                <span>导入</span>
+                <ChevronDownIcon class="h-4 w-4 opacity-50" />
+              </AppDropdownMenuButtonTrigger>
+            )}
+          />
+          <AppDropdownMenuContent layout="compact">
+            <AppDropdownMenuItem onSelect={() => importLocalJson()}>
+              <FolderPlusIcon class="h-4 w-4" />
+              <span>本地导入</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem onSelect={() => setCodeImportOpen(true)}>
+              <CodeIcon class="h-4 w-4" />
+              <span>代码导入</span>
+            </AppDropdownMenuItem>
+          </AppDropdownMenuContent>
+        </AppDropdownMenu>
       </div>
 
       <Show when={loading()}>
@@ -156,6 +195,15 @@ export function DictRulesPage() {
           )}
         </For>
       </ul>
+
+      <ImportCodeDialog
+        open={codeImportOpen()}
+        onOpenChange={setCodeImportOpen}
+        title="代码导入字典规则"
+        description="粘贴字典规则 JSON 数组或对象，兼容 legado 格式。"
+        confirmLabel="导入"
+        onIdentify={(text) => void importFromCode(text)}
+      />
 
       <AppDialog open={editOpen()} onOpenChange={setEditOpen}>
         <AppDialogContent class="max-w-lg max-h-[85dvh] overflow-y-auto">

@@ -31,6 +31,8 @@ export interface ImportSourceQrDialogProps {
   cameraOnly?: boolean;
   /** 扫码/识图后自动导入（无粘贴输入） */
   autoImport?: boolean;
+  title?: string;
+  description?: string;
 }
 
 type QrInputMode = 'paste' | 'camera';
@@ -144,11 +146,12 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
     <AppDialog open={props.open} onOpenChange={handleOpenChange} modal>
       <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
-          <AppDialogTitle>二维码导入书源</AppDialogTitle>
+          <AppDialogTitle>{props.title ?? '二维码导入书源'}</AppDialogTitle>
           <AppDialogDescription>
-            {useAutoImport()
-              ? '使用摄像头扫码或选择图片识别书源二维码。'
-              : '粘贴、摄像头扫描或从图片识别（`yuedu://`、`legado://`、书源 JSON 或 http/https 地址）。'}
+            {props.description ??
+              (useAutoImport()
+                ? '使用摄像头扫码或选择图片识别书源二维码。'
+                : '粘贴、摄像头扫描或从图片识别（`yuedu://`、`legado://`、书源 JSON 或 http/https 地址）。')}
           </AppDialogDescription>
         </AppDialogHeader>
         <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">

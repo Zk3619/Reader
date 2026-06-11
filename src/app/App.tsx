@@ -64,6 +64,7 @@ import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetw
 import { ImportSourceLocalDialog } from "@/components/sources/ImportSourceLocalDialog";
 import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog";
 import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
+import { ImportCodeDialog } from "@/components/shared/ImportCodeDialog";
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
 import { ImportRssSourceSelectDialog } from "@/components/rss/ImportRssSourceSelectDialog";
 import { RssPageToolbar } from "@/components/rss/RssPageToolbar";
@@ -330,6 +331,7 @@ function AppContent() {
     number | undefined
   >();
   const [showImportSourceQrDialog, setShowImportSourceQrDialog] = createSignal(false);
+  const [showImportSourceCodeDialog, setShowImportSourceCodeDialog] = createSignal(false);
   const [showImportSourceSelectDialog, setShowImportSourceSelectDialog] = createSignal(false);
   const [importSourceNetworkPresetUrl, setImportSourceNetworkPresetUrl] = createSignal("");
   const [importSourceLoading, setImportSourceLoading] = createSignal(false);
@@ -1047,10 +1049,11 @@ function AppContent() {
     void identifySourcesFromNetwork(parsed?.src ?? url);
   };
 
-  const identifySourcesFromQrRaw = async (raw: string) => {
+  const identifySourcesFromRawText = async (raw: string, via: 'qr' | 'code' = 'qr') => {
+    const label = via === 'qr' ? '二维码导入' : '代码导入';
     const parsed = parseReaderImportDeepLink(raw);
     if (parsed?.kind === 'unsupported') {
-      showAppToast({ title: '二维码导入', description: parsed.reason, variant: 'default' });
+      showAppToast({ title: label, description: parsed.reason, variant: 'default' });
       return;
     }
     if (parsed) {
@@ -1061,22 +1064,24 @@ function AppContent() {
           parsed.kind === 'determineType'
           ? parsed.src
           : raw,
-        '二维码导入'
+        label
       );
       return;
     }
     await openImportSourceSelectLoading();
     try {
       const { sources } = await resolveBookSourcesFromText(raw);
-      await applyRecognizedSources(sources, '二维码导入书源');
+      await applyRecognizedSources(sources, `${label}书源`);
     } catch (err) {
       setShowImportSourceSelectDialog(false);
       releaseBookSourceImportPanelIfNeeded();
-      showAppToast({ title: '二维码导入书源失败', description: String(err), variant: 'destructive' });
+      showAppToast({ title: `${label}书源失败`, description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
     }
   };
+
+  const identifySourcesFromQrRaw = (raw: string) => identifySourcesFromRawText(raw, 'qr');
 
   const toggleImportSourceSelected = (sourceUrl: string, checked: boolean) => {
     setImportSourceSelectedUrls((prev) => {
@@ -2768,6 +2773,11 @@ function AppContent() {
       () => setShowImportSourceQrDialog(false),
     );
     push(
+      "import-source-code",
+      showImportSourceCodeDialog(),
+      () => setShowImportSourceCodeDialog(false),
+    );
+    push(
       "import-book-local",
       showImportBookLocalDialog(),
       () => setShowImportBookLocalDialog(false),
@@ -3205,6 +3215,7 @@ function AppContent() {
                     onSourcesImportLocal={() => void openLocalBookSourceImport()}
                     onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
                     onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                    onSourcesImportCode={() => setShowImportSourceCodeDialog(true)}
                     onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
                   />
                 </Show>
@@ -3290,6 +3301,9 @@ function AppContent() {
                     onOpenSourceArticles={(source) => openRssArticles(source)}
                     onOpenManage={() => setShowRssManage(true)}
                     onSourceEdit={(source) => openRssEditor(source)}
+                    onSourceLogin={(source) =>
+                      void openRssSourceLogin(source, setSourceLoginDialogSource)
+                    }
                   />
                 </div>
                 <Show when={showRssManage()}>
@@ -3607,6 +3621,16 @@ function AppContent() {
             void identifySourcesFromQrRaw(raw);
           }}
         />
+        <ImportCodeDialog
+          open={showImportSourceCodeDialog()}
+          onOpenChange={setShowImportSourceCodeDialog}
+          portalZClass={bookSourceImportDialogPortalZ()}
+          title="代码导入书源"
+          description="粘贴书源 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 书源地址。"
+          onIdentify={(raw) => {
+            void identifySourcesFromRawText(raw, 'code');
+          }}
+        />
         <ImportSourceSelectDialog
           open={showImportSourceSelectDialog()}
           loading={importSourceLoading()}
@@ -3739,6 +3763,11 @@ function AppContent() {
                   initialSortName={target.sortName}
                   onClose={() => setRssArticleListTarget(null)}
                   onOpenArticle={(source, article) => openRssRead(source, article)}
+                  onSourceEdit={openRssEditor}
+                  onOpenSourceVariables={(source) =>
+                    openSourceVariables(source as unknown as BookSource)
+                  }
+                  onOpenHistoryRecord={(record) => void openRssFromHistoryRecord(record)}
                 />
               </RssOverlayShell>
             </Portal>
