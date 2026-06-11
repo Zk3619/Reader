@@ -18,12 +18,44 @@ import {
 } from '@/lib/js-engine/legado/source-script-shared';
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 
+/** 去掉路径末尾多余斜杠（如 cdn.sshs.rip/…/hash.webp/ 会 404） */
+function stripTrailingSlashFromImagePath(pathname: string): string {
+  if (pathname.length <= 1) return pathname;
+  return pathname.replace(/\/+$/, '');
+}
+
+/**
+ * 绅士会所等站：data-original 常为 `…/hash.` 占位，浏览器侧拼成 `hash.webp` 才能访问。
+ */
+function repairSshsRipImagePath(pathname: string, hostname: string): string {
+  if (!/cdn\.sshs\.rip$/i.test(hostname)) return pathname;
+  if (/\/[a-f0-9]{32}\.$/i.test(pathname)) {
+    return `${pathname}webp`;
+  }
+  return pathname;
+}
+
+function repairHttpImagePath(pathname: string, hostname: string): string {
+  return repairSshsRipImagePath(stripTrailingSlashFromImagePath(pathname), hostname);
+}
+
 /** 规范化封面地址（协议相对 //…；剥离 Legado ,{"headers":…} 后缀） */
 export function normalizeImageUrl(url: string): string {
   const { url: bare } = parseLegadoUrlWithOptions(url.trim());
-  const trimmed = bare.trim();
+  let trimmed = bare.trim();
   if (trimmed.startsWith('//') && typeof window !== 'undefined') {
-    return `${window.location.protocol}${trimmed}`;
+    trimmed = `${window.location.protocol}${trimmed}`;
+  }
+  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+  try {
+    const u = new URL(trimmed);
+    const path = repairHttpImagePath(u.pathname, u.hostname);
+    if (path !== u.pathname) {
+      u.pathname = path;
+      return u.toString();
+    }
+  } catch {
+    /* ignore */
   }
   return trimmed;
 }

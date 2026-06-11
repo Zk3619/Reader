@@ -2,9 +2,33 @@ import { describe, expect, it } from 'vitest';
 import {
   buildProxiedImageRefererAttempts,
   filterProxiedImageRefererAttempts,
+  normalizeImageUrl,
   resolveCoverRequestHeaders,
 } from '@/lib/http/resolve-cover-referer';
 import type { BookSource } from '@/types';
+
+describe('normalizeImageUrl', () => {
+  it('去掉 cdn.sshs.rip 图片路径末尾斜杠', () => {
+    const raw =
+      'https://cdn.sshs.rip/36/a4/36981556a8db192bb71b3d32aeafdda4.webp/';
+    expect(normalizeImageUrl(raw)).toBe(
+      'https://cdn.sshs.rip/36/a4/36981556a8db192bb71b3d32aeafdda4.webp',
+    );
+  });
+
+  it('cdn.sshs.rip hash. 占位补全为 hash.webp', () => {
+    const raw =
+      'https://cdn.sshs.rip/f2/5c/f2eef9f213035104a1f695d2760b125c.';
+    expect(normalizeImageUrl(raw)).toBe(
+      'https://cdn.sshs.rip/f2/5c/f2eef9f213035104a1f695d2760b125c.webp',
+    );
+  });
+
+  it('其它站点图片 URL 不受影响', () => {
+    const raw = 'https://cdn.example/a.webp?x=1';
+    expect(normalizeImageUrl(raw)).toBe(raw);
+  });
+});
 
 describe('resolveCoverRequestHeaders', () => {
   it('无章节页时剥掉书源跨域 Referer 后回退图床同源', () => {
