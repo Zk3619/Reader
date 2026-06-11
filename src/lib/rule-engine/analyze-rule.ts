@@ -77,6 +77,9 @@ export interface RuleContext {
   baseUrl?: string;
   /** 上一步结果（HTML/JSON 字符串或 JSON 列表项对象，供 @js 使用） */
   result?: unknown;
+  /** RSS/书源列表项 JSON（多段规则中 content 变为 HTML 后仍供 {{$.x}} 使用） */
+  listItem?: string;
+  listItemContentType?: 'html' | 'json' | 'text';
   /** 变量存储 */
   variables?: Record<string, unknown>;
   /** 书籍信息 */
@@ -393,15 +396,45 @@ function resolveJsonTemplatePath(pathTrim: string, jsonString: string): string {
   return '';
 }
 
+/** 嵌入反引号模板字面量时转义，避免标题/url 中的 ` 或 ${ 破坏 @js 脚本 */
+function escapeJsTemplateLiteralSegment(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+}
+
 /**
  * Legado 模板语法：{{$.path}} 用 JSONPath 结果替换
  * 当规则含 {{ }} 且内容为 JSON 时，不当作 CSS，而是做模板替换
  */
 function applyJsonTemplate(rule: string, jsonString: string): string {
   const placeholderRegex = /\{\{(\$[^}]*)\}\}/g;
-  return rule.replace(placeholderRegex, (_, path: string) =>
-    resolveJsonTemplatePath(path.trim(), jsonString)
+  return rule.replace(placeholderRegex, (match, path: string, offset: number) => {
+    const resolved = resolveJsonTemplatePath(path.trim(), jsonString);
+    const before = rule.slice(Math.max(0, offset - 1), offset);
+    const after = rule.slice(offset + match.length, offset + match.length + 1);
+    if (before === '`' && after === '`') {
+      return escapeJsTemplateLiteralSegment(resolved);
+    }
+    return resolved;
+  });
+}
+
+function isJsonLikeContent(content: string, contentType?: string): boolean {
+  const trimmed = content.trim();
+  return (
+    contentType === 'json' ||
+    (trimmed.startsWith('{') && inferContentType(trimmed) === 'json')
   );
+}
+
+/** {{$.path}} 应读取列表项 JSON，而非上一段 HTML 模板 */
+function resolveJsonTemplateSource(context: RuleContext): string {
+  if (context.listItem && isJsonLikeContent(context.listItem, context.listItemContentType)) {
+    return context.listItem;
+  }
+  if (isJsonLikeContent(context.content, context.contentType)) {
+    return context.content;
+  }
+  return context.listItem ?? context.content;
 }
 
 /**
@@ -425,7 +458,16 @@ async function expandTemplates(
     const innerExpr = match[1]?.trim() ?? '';
     if (innerExpr) {
       if (isRuleExpression(innerExpr)) {
-        let innerResults = await analyzeRule(innerExpr, context);
+        const isJsonPath = innerExpr.startsWith('$.') || innerExpr.startsWith('$[');
+        const ruleContext =
+          isJsonPath && context.listItem
+            ? {
+                ...context,
+                content: context.listItem,
+                contentType: context.listItemContentType ?? 'json',
+              }
+            : context;
+        let innerResults = await analyzeRule(innerExpr, ruleContext);
         // 对齐 legado 容错：当内层混合规则（常见 {{xpath##...}}）失败时，
         // 退化到其主规则部分，避免整段模板直接坍塌为空。
         if (innerResults.length === 0 && innerExpr.includes('##')) {
@@ -485,6 +527,54 @@ function decodePossibleJsonArray(input: string): unknown {
   } catch {
     return input;
   }
+}
+
+function isJsonObjectContent(s: string): boolean {
+  const t = s.trim();
+  if (!t.startsWith('{')) return false;
+  try {
+    const v = JSON.parse(t) as unknown;
+    return v !== null && typeof v === 'object' && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+}
+
+function isJsonArrayContent(s: string): boolean {
+  const t = s.trim();
+  if (!t.startsWith('[')) return false;
+  try {
+    return Array.isArray(JSON.parse(t) as unknown);
+  } catch {
+    return false;
+  }
+}
+
+/** <js> 产出 JSON 数组后，下一段 $.[*] 须对整段数组执行一次，勿按元素拆开 */
+function consolidateJsListArrayOutput(
+  value: unknown,
+  list: string[],
+): { elements: string[]; current: string; currentType: 'json' } | null {
+  if (Array.isArray(value)) {
+    const serialized = JSON.stringify(value);
+    return { elements: [serialized], current: serialized, currentType: 'json' };
+  }
+  if (list.length > 1 && list.every(isJsonObjectContent)) {
+    const serialized = JSON.stringify(list.map((e) => JSON.parse(e) as unknown));
+    return { elements: [serialized], current: serialized, currentType: 'json' };
+  }
+  const only = list.length === 1 ? list[0]?.trim() : '';
+  if (only?.startsWith('[') && only.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(only) as unknown;
+      if (Array.isArray(parsed)) {
+        return { elements: [only], current: only, currentType: 'json' };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
 }
 
 async function prepareRule(
@@ -626,6 +716,10 @@ async function executeRuleByMode(
         }
         const fieldValue = readJsonListItemField(context, ruleBody);
         if (fieldValue) return [fieldValue];
+        if (isLegadoHtmlTemplateRule(ruleBody)) {
+          const literal = ruleBody.trim();
+          return literal ? [literal] : [];
+        }
         // CSS/XPath 等规则在 JSON 列表项上未命中时勿泄漏规则字面量（如 a.author@text）
         if (isRuleExpression(ruleBody)) return [];
         // {{$.x}} 模板展开后的元数据（如 已完结,0分,tags）不是 CSS，勿对 JSON 正文做 select
@@ -673,14 +767,58 @@ async function executeSourceRuleSegment(
   // 先在原始规则上分离 ## 替换尾（{{}} / <js>result</js> 内 ## 不参与切分），再展开主规则
   const tail = splitLegadoReplaceTail(rawRule);
   let mainRule = tail.rule;
+  const templateJson = resolveJsonTemplateSource(context);
+  const jsonLikeContent = isJsonLikeContent(
+    templateJson,
+    context.listItemContentType ?? context.contentType,
+  );
+
+  const applyJsonTemplateJsResults = async (templated: string): Promise<string[]> => {
+    const jsResults = await executeRuleByMode(segment.mode, templated, context);
+    let results = jsResults.filter((r) => r && r.trim().length > 0);
+    if (tail.replaceRegex && results.length > 0) {
+      if (shouldJoinResultsBeforeLegadoReplace(tail.replaceRegex, results.length)) {
+        const joined = results.join('\n');
+        const replaced = await applyLegadoReplaceRegex(
+          joined,
+          tail.replaceRegex,
+          tail.replacement,
+          tail.replaceFirst,
+          context,
+        );
+        results = replaced.trim() ? [replaced] : [];
+      } else {
+        results = await Promise.all(
+          results.map((r) =>
+            applyLegadoReplaceRegex(
+              r,
+              tail.replaceRegex,
+              tail.replacement,
+              tail.replaceFirst,
+              context,
+            ),
+          ),
+        );
+      }
+    }
+    return results.filter((r) => r && r.trim().length > 0);
+  };
+
+  // {{$.x}} + <js>：先按列表项 JSON 填模板再执行脚本（勿走 expandTemplates 或直出字符串）
+  if (
+    (segment.mode === 'js' || segment.mode === 'webjs') &&
+    jsonLikeContent &&
+    isJsonTemplateRule(mainRule)
+  ) {
+    const templated = applyJsonTemplate(mainRule, templateJson);
+    return applyJsonTemplateJsResults(templated);
+  }
+
   if (context.contentType !== 'json' && mainRule.includes('{{') && mainRule.includes('}}')) {
     mainRule = await expandTemplates(mainRule, context);
   }
-  const jsonLikeContent =
-    context.contentType === 'json' ||
-    (context.content.trim().startsWith('{') && inferContentType(context.content) === 'json');
   if (jsonLikeContent && isJsonTemplateRule(mainRule)) {
-    const result = applyJsonTemplate(mainRule, context.content);
+    const result = applyJsonTemplate(mainRule, templateJson);
     let results = result.trim() ? [result] : [];
     if (tail.replaceRegex && results.length > 0) {
       if (shouldJoinResultsBeforeLegadoReplace(tail.replaceRegex, results.length)) {
@@ -836,9 +974,29 @@ export async function analyzeElements(
           currentType = 'text';
           continue;
         }
+        const consolidated = consolidateJsListArrayOutput(v, elements);
+        if (consolidated) {
+          elements = consolidated.elements;
+          current = consolidated.current;
+          currentType = consolidated.currentType;
+          continue;
+        }
         current = elements[0] ?? '';
         currentType = inferContentType(current);
         continue;
+      }
+      if (isJsonPathListRule(seg.ruleStr.trim())) {
+        const arrayDoc = elements.find(isJsonArrayContent);
+        if (arrayDoc) {
+          elements = [arrayDoc];
+          current = arrayDoc;
+          currentType = 'json';
+        } else if (elements.length > 1 && elements.every(isJsonObjectContent)) {
+          const serialized = JSON.stringify(elements.map((e) => JSON.parse(e) as unknown));
+          elements = [serialized];
+          current = serialized;
+          currentType = 'json';
+        }
       }
       if (elements.length > 0) {
         const merged: string[] = [];
@@ -947,6 +1105,12 @@ export async function analyzeRule(
 
   let currentContent = context.content;
   let currentType = context.contentType ?? inferContentType(currentContent);
+  const listItemContent = context.listItem ?? context.content;
+  const listItemContentType =
+    context.listItemContentType ??
+    (context.listItem ? inferContentType(context.listItem) : undefined) ??
+    context.contentType ??
+    inferContentType(listItemContent);
   let lastResults: string[] = [];
   let prevNonJsMissed = false;
 
@@ -967,6 +1131,8 @@ export async function analyzeRule(
       content: currentContent,
       contentType: currentType,
       result: resultForSegment,
+      listItem: listItemContent,
+      listItemContentType,
     };
     lastResults = await executeSourceRuleSegment(seg, subContext);
     prevNonJsMissed = seg.mode !== 'js' && lastResults.length === 0;

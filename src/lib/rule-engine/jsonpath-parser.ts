@@ -34,14 +34,27 @@ function stripJsonPathExtractor(path: string): string {
   return trimmed;
 }
 
+/**
+ * Legado 列表规则 `$.[*]`：根为 JSON 数组时只取数组元素。
+ * jsonpath-plus 的 `$.[*]` 还会递归展开对象字段，导致 4 条变 20 条。
+ */
+function normalizeLegadoListJsonPath(path: string, json: unknown): string {
+  const trimmed = path.trim();
+  if (Array.isArray(json) && trimmed === '$.[*]') {
+    return '$[*]';
+  }
+  return path;
+}
+
 function parseJsonPathSingle(jsonPath: string, jsonString: string): string[] {
   if (!jsonPath || !jsonString) return [];
   const path = stripJsonPathExtractor(jsonPath);
   if (!path) return [];
   try {
     const json = JSON.parse(jsonString);
+    const effectivePath = normalizeLegadoListJsonPath(path, json);
     const results = JSONPath({
-      path,
+      path: effectivePath,
       json,
       wrap: true,
     });

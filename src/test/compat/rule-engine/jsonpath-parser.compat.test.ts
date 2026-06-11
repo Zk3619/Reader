@@ -15,4 +15,15 @@ describe('jsonpath parser legado compatibility', () => {
     const out = parseJsonPath('前缀{$.data.title}后缀', json);
     expect(out[0]).toBe('前缀嵌套标题后缀');
   });
+
+  it('$.[*] on root array returns elements only (not object fields)', () => {
+    const json = JSON.stringify([
+      { index: 'https://a/', src: 'https://img/a.png', text: 'A', intro: 'IA' },
+      { index: 'https://b/', src: 'https://img/b.png', text: 'B', intro: 'IB' },
+    ]);
+    const out = parseJsonPath('$.[*]', json);
+    expect(out).toHaveLength(2);
+    expect(JSON.parse(out[0]!)).toMatchObject({ text: 'A' });
+    expect(JSON.parse(out[1]!)).toMatchObject({ text: 'B' });
+  });
 });

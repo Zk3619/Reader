@@ -3,6 +3,7 @@ import { analyzeString } from '@/lib/rule-engine/analyze-rule';
 import {
   hasEmbeddedLegadoScript,
   isAtomicLegadoScriptRule,
+  isLegadoHtmlTemplateRule,
   splitLegadoReplaceTail,
   splitSourceRule,
   unwrapLegadoJsSnippet,
@@ -40,6 +41,14 @@ let tab = result.tab || '小说';
     );
     expect(wrapped).toContain("return ('https://example.com/' + x + '.jpg')");
     expect(wrapped).not.toMatch(/return \(.*;\);/);
+  });
+
+  it('wrapLegadoJsBodyWithImplicitReturn 处理 if 块末行 url} 闭合', () => {
+    const wrapped = wrapLegadoJsBodyWithImplicitReturn(
+      "url=`https://example.com`\nif(result){url+=`/tp/`;\nurl}",
+    );
+    expect(wrapped).toContain('}\nreturn (url);');
+    expect(wrapped).not.toContain('return (url});');
   });
 
   it('wrapLegadoJsBodyWithImplicitReturn 仍包装含嵌套 return 的正文脚本末行', () => {
@@ -177,5 +186,23 @@ JSON.stringify({ content: '<img src="https://cdn.example/a.jpg">' });
       result: hexBody,
     });
     expect(out).toContain('<img src="https://cdn.example/a.jpg">');
+  });
+});
+
+describe('isLegadoHtmlTemplateRule', () => {
+  it('HTML 片段 + {{}} 识别为模板，不依赖 ❗️ 序号标记', () => {
+    const fragment =
+      '❗️0、3、开始❗️\n<style>body{}</style>\n<script>var x=result.tab||1;</script>\n{{}}';
+    expect(isLegadoHtmlTemplateRule(fragment)).toBe(true);
+  });
+
+  it('无 {{}} 的 HTML 片段（阅读订阅 description 块）仍识别为模板', () => {
+    const fragment =
+      '❗️0、3、开始❗️\n<style>body{}</style>\n<script>var x=result.tab||1;</script>\n❗️0、3、结束❗️';
+    expect(isLegadoHtmlTemplateRule(fragment)).toBe(true);
+  });
+
+  it('纯 JS 脚本不是 HTML 模板', () => {
+    expect(isLegadoHtmlTemplateRule("var tab=result.tab||'小说';")).toBe(false);
   });
 });

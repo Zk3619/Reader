@@ -5,7 +5,13 @@
 import type { BookSource } from '@/types';
 import { request } from '@/lib/http';
 import { parseHeaders, resolveUrl, sanitizeHttpHeaders } from '@/lib/book-source/utils';
-import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
+import { buildSourceRequestHeaders, setCfActiveRequestOrigin } from '@/lib/book-source/source-http';
+import {
+  isJsMirrorJumpPage,
+  looksLikeJsMirrorJumpResolved,
+  resolveJsMirrorJumpTargets,
+} from '@/lib/http/resolve-js-mirror-jump';
+import { maybeBypassAcwScChallenge } from '@/lib/http/acw-sc-challenge';
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { extractHostListFromJsLib } from '@/lib/book-source/utils';
 import { evalJs } from '@/lib/js-engine';
@@ -273,6 +279,45 @@ async function fetchHttpWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+async function maybeFollowJsMirrorJump(
+  body: string,
+  url: string,
+  option: AnalyzeUrlOption,
+  headers: Record<string, string>,
+  enabledCookieJar: boolean,
+  timeoutMs: number | undefined,
+  source: BookSource | undefined,
+): Promise<{ body: string; url: string } | null> {
+  if (!isJsMirrorJumpPage(body)) return null;
+
+  const targets = resolveJsMirrorJumpTargets(body, url);
+  if (targets.length === 0) return null;
+
+  for (const mirrorUrl of targets) {
+    try {
+      const mirrorBody = await fetchHttpWithRetry(
+        mirrorUrl,
+        option,
+        headers,
+        enabledCookieJar,
+        timeoutMs,
+      );
+      if (!looksLikeJsMirrorJumpResolved(mirrorBody)) continue;
+      if (source) {
+        try {
+          setCfActiveRequestOrigin(source, new URL(mirrorUrl).origin);
+        } catch {
+          /* ignore */
+        }
+      }
+      return { body: mirrorBody, url: mirrorUrl };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 /** 按 Legado AnalyzeUrl 拉取页面正文 */
 function finishAnalyzeUrlBody(
   body: string,
@@ -394,6 +439,33 @@ export async function fetchByAnalyzeUrl(
     } else {
       const useCookieJar = params.source?.enabledCookieJar === true;
       body = await fetchHttpWithRetry(url, option, headers, useCookieJar, params.timeoutMs);
+      const acwBypass = await maybeBypassAcwScChallenge(
+        body,
+        url,
+        option,
+        headers,
+        useCookieJar,
+        params.timeoutMs,
+        params.source,
+        fetchHttpWithRetry,
+      );
+      if (acwBypass) {
+        body = acwBypass.body;
+        url = acwBypass.url;
+      }
+      const jumped = await maybeFollowJsMirrorJump(
+        body,
+        url,
+        option,
+        headers,
+        useCookieJar,
+        params.timeoutMs,
+        params.source,
+      );
+      if (jumped) {
+        body = jumped.body;
+        url = jumped.url;
+      }
     }
   }
 

@@ -79,13 +79,27 @@ export function hasEmbeddedLegadoScript(ruleStr: string): boolean {
   return splitSourceRule(ruleStr).some((s) => s.mode === 'js' || s.mode === 'webjs');
 }
 
+/** 含常见 HTML 标记（片段或完整文档） */
+function containsLegadoHtmlMarkup(text: string): boolean {
+  return /<(?:!DOCTYPE|html|head|body|style|script|div|span|p|a|input|button|iframe|table|ul|ol|li|h[1-6]|img|form|textarea|select|meta|link|label|section|article|nav|header|footer)[\s>/!]/i.test(
+    text,
+  );
+}
+
 /** 无 <js> 包裹时仍应走 Js 模式（避免被 default/CSS 解析） */
 /** RSS/书源 {{}} HTML 模板：内联脚本含 ||/&&，不得按规则运算符切分 */
 export function isLegadoHtmlTemplateRule(ruleStr: string): boolean {
   const t = ruleStr.trim();
-  if (!t.includes('{{')) return false;
+  if (!t) return false;
   if (/^<!DOCTYPE\s+html/i.test(t) || /^<html[\s>]/i.test(t)) return true;
-  return /<head[\s>]/i.test(t) && /<body[\s>]/i.test(t);
+  if (/<head[\s>]/i.test(t) && /<body[\s>]/i.test(t)) return true;
+  // splitSourceRule 拆出的 HTML 段：内联 script 的 || 属于 JavaScript，非规则运算符
+  if (!containsLegadoHtmlMarkup(t)) return false;
+  if (t.includes('{{')) return true;
+  // 无 {{ 的 HTML 片段（如阅读订阅 ruleDescription 块）仍应字面量输出
+  return /<(?:style|script|input|button|iframe|textarea|form|div|span|a|p|table|ul|ol|li|h[1-6]|img|select|label|section|article|nav|header|footer|meta|link)[\s>/!]/i.test(
+    t,
+  );
 }
 
 export function isLikelyJavaScriptRule(ruleStr: string): boolean {
@@ -378,7 +392,12 @@ function splitSourceRuleInner(
   }
 
   const plain = plainForSoloJs.trim();
-  if (ruleList.length === 1 && ruleList[0].mode === 'default' && isLikelyJavaScriptRule(ruleList[0].ruleStr)) {
+  if (
+    ruleList.length === 1 &&
+    ruleList[0].mode === 'default' &&
+    isLikelyJavaScriptRule(ruleList[0].ruleStr) &&
+    !isLegadoHtmlTemplateRule(ruleList[0].ruleStr)
+  ) {
     const solo = ruleList[0].ruleStr;
     // 含 ## 替换尾时保持 default，由 executeSourceRuleSegment + splitLegadoReplaceTail 处理
     if (stripReplacementTail(solo).trim() === solo.trim()) {
@@ -547,9 +566,16 @@ export function detectSourceRuleMode(ruleStr: string, preset?: RuleMode): RuleMo
   if (lower.startsWith('@json:')) return 'json';
   if (lower.startsWith('@webjs:')) return 'webjs';
   if (lower.startsWith('@js:')) return 'js';
-  if (isLikelyJavaScriptRule(ruleStr)) return 'js';
   if (ruleStr.startsWith('//')) return 'xpath';
   if (ruleStr.startsWith('$.') || ruleStr.startsWith('$[')) return 'json';
   if (ruleStr.startsWith('/') && !ruleStr.startsWith('//')) return 'xpath';
+  // splitSourceRule 已定为 default 的段：Legado 不因 script 形似 JS 升格；## 尾前的 <js> 壳仍按 js 执行
+  if (preset === 'default') {
+    const trimmed = ruleStr.trim();
+    if (/^<js>[\s\S]*<\/js>$/i.test(trimmed)) return 'js';
+    return 'default';
+  }
+  if (isLegadoHtmlTemplateRule(ruleStr)) return 'default';
+  if (isLikelyJavaScriptRule(ruleStr)) return 'js';
   return 'default';
 }

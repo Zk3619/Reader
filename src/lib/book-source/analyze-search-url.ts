@@ -204,7 +204,14 @@ export async function expandHeaderTemplates(
 export async function resolveLegadoRuleUrl(
   ruleUrl: string,
   source: BookSource,
-  options: { keyword?: string; page?: number } = {},
+  options: {
+    keyword?: string;
+    page?: number;
+    /** RSS 列表规则 baseUrl：勿经 URL 构造编码查询串 */
+    forRuleBase?: boolean;
+    /** HTTP 拉取时保留 AnalyzeUrl JSON 尾缀（method/body 等） */
+    preserveUrlOptions?: boolean;
+  } = {},
 ): Promise<string> {
   const keyword = options.keyword ?? '';
   const page = options.page ?? 1;
@@ -223,7 +230,7 @@ export async function resolveLegadoRuleUrl(
   url = buildUrl(url, { key: keyword, page: String(page) });
   url = substitutePagePlaceholders(url, page);
 
-  const { urlPart } = splitUrlAndOption(url);
+  const { urlPart, optionsJson } = splitUrlAndOption(url);
   const base =
     resolveBookSourceRequestOrigin(source) ||
     getScriptBaseUrl(source) ||
@@ -233,11 +240,13 @@ export async function resolveLegadoRuleUrl(
   if (!/^https?:\/\//i.test(absoluteUrl)) {
     absoluteUrl = resolveUrl(base, absoluteUrl);
   }
-  const aligned = alignUrlToBookSourceRequestOrigin(
-    collapseUrlPathSlashes(absoluteUrl),
-    source,
-  );
-  return stripLegadoSourceUrlMarker(aligned.replace(/\/##[^/?#]*/g, ''));
+  const normalized = options.forRuleBase ? absoluteUrl : collapseUrlPathSlashes(absoluteUrl);
+  const aligned = alignUrlToBookSourceRequestOrigin(normalized, source);
+  const result = stripLegadoSourceUrlMarker(aligned.replace(/\/##[^/?#]*/g, ''));
+  if (options.preserveUrlOptions && optionsJson && !options.forRuleBase) {
+    return `${result},${optionsJson}`;
+  }
+  return result;
 }
 
 /**
