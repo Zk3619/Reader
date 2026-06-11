@@ -194,6 +194,54 @@ export async function deleteReplaceRule(id: number): Promise<void> {
   await db.execute('DELETE FROM replace_rules WHERE id = ?', [id]);
 }
 
+export async function deleteReplaceRules(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDatabase();
+  const placeholders = ids.map(() => '?').join(',');
+  await db.execute(`DELETE FROM replace_rules WHERE id IN (${placeholders})`, ids);
+}
+
+export async function setReplaceRulesEnabled(ids: number[], enabled: boolean): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDatabase();
+  const placeholders = ids.map(() => '?').join(',');
+  await db.execute(
+    `UPDATE replace_rules SET isEnabled = ? WHERE id IN (${placeholders})`,
+    [enabled ? 1 : 0, ...ids],
+  );
+}
+
+async function getSortOrderBounds(): Promise<{ min: number; max: number }> {
+  const db = await getDatabase();
+  const rows = await db.select<{ minOrder: number | null; maxOrder: number | null }>(
+    'SELECT MIN(sortOrder) as minOrder, MAX(sortOrder) as maxOrder FROM replace_rules',
+  );
+  return {
+    min: Number(rows[0]?.minOrder ?? 0),
+    max: Number(rows[0]?.maxOrder ?? 0),
+  };
+}
+
+export async function moveReplaceRulesToTop(rules: ReplaceRule[]): Promise<void> {
+  if (rules.length === 0) return;
+  const { min } = await getSortOrderBounds();
+  let order = min - 1;
+  for (const rule of rules) {
+    await updateReplaceRule({ ...rule, order });
+    order -= 1;
+  }
+}
+
+export async function moveReplaceRulesToBottom(rules: ReplaceRule[]): Promise<void> {
+  if (rules.length === 0) return;
+  const { max } = await getSortOrderBounds();
+  let order = max + 1;
+  for (const rule of rules) {
+    await updateReplaceRule({ ...rule, order });
+    order += 1;
+  }
+}
+
 /**
  * 启用/禁用所有替换规则
  */

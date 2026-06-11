@@ -1,18 +1,34 @@
 /**
- * 替换规则管理（对齐 Legado 替换规则页）
+ * 替换净化规则管理（对齐 Legado ReplaceRuleActivity + TXT 目录规则页交互）
  */
 
-import { createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import * as replaceDb from '@/lib/database/replace-rules';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
 import { importReplaceRulesFromJson } from '@/lib/book-source/import-replace-rule';
 import { importReplaceRulesFromNetworkUrl } from '@/lib/book-source/import-network-sidecar';
+import { filterReplaceRules } from '@/lib/replace-rules/filter-replace-rules';
+import { ReplaceRuleListItem } from '@/components/replace-rules/ReplaceRuleListItem';
+import {
+  ReplaceRuleEditDialog,
+  type ReplaceRuleDraft,
+} from '@/components/replace-rules/ReplaceRuleEditDialog';
+import {
+  ReplaceRulesPageToolbar,
+  ReplaceRulesToolbarLeading,
+} from '@/components/replace-rules/ReplaceRulesPageToolbar';
+import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
+import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
+import {
+  settingsRuleManagePageListScroll,
+  settingsRuleManagePageRoot,
+} from '@/lib/ui/viewport-classes';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import {
   AppDialog,
   AppDialogContent,
@@ -28,17 +44,12 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
-import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
-import {
-  ChevronDownIcon,
-  CodeIcon,
-  FolderPlusIcon,
-  ImportIcon,
-  LinkIcon,
-  ScanQrCodeIcon,
-} from '@/components/shared/icons';
+import { ChevronDownIcon, LinkIcon } from '@/components/shared/icons';
+
+const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
+const BATCH_MENU_CHEVRON_CLASS =
+  'h-4 w-4 shrink-0 opacity-50 transition-transform duration-200 group-data-expanded/trigger:rotate-180';
 
 function emptyRule(): Omit<ReplaceRule, 'id'> {
   return {
@@ -54,15 +65,29 @@ function emptyRule(): Omit<ReplaceRule, 'id'> {
   };
 }
 
-export function ReplaceRulesPage() {
+export interface ReplaceRulesPageProps {
+  onBack?: () => void;
+}
+
+export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const [rules, setRules] = createSignal<ReplaceRule[]>([]);
   const [loading, setLoading] = createSignal(true);
+  const [searchQuery, setSearchQuery] = createSignal('');
+  const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set());
   const [editOpen, setEditOpen] = createSignal(false);
-  const [draft, setDraft] = createSignal<ReplaceRule | Omit<ReplaceRule, 'id'>>(emptyRule());
+  const [editingRule, setEditingRule] = createSignal<ReplaceRuleDraft | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
   const [importUrlOpen, setImportUrlOpen] = createSignal(false);
   const [importUrl, setImportUrl] = createSignal('');
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
   const [codeImportOpen, setCodeImportOpen] = createSignal(false);
+
+  const filteredRules = createMemo(() => filterReplaceRules(rules(), searchQuery()));
+  const selectedCount = () => selectedIds().size;
+  const filteredSelectedCount = () =>
+    filteredRules().filter((r) => selectedIds().has(r.id)).length;
+  const allFilteredSelected = () =>
+    filteredRules().length > 0 && filteredSelectedCount() === filteredRules().length;
 
   const reload = async () => {
     setLoading(true);
@@ -73,37 +98,40 @@ export function ReplaceRulesPage() {
     }
   };
 
+  const clearSelection = () => setSelectedIds(new Set<number>());
+
+  const toggleSelection = (id: number) => {
+    const next = new Set(selectedIds());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const selectedRules = () => rules().filter((r) => selectedIds().has(r.id));
+
   const openNew = () => {
-    setDraft(emptyRule());
+    setEditingRule(emptyRule());
     setEditOpen(true);
   };
 
   const openEdit = (rule: ReplaceRule) => {
-    setDraft({ ...rule });
+    setEditingRule({ ...rule });
     setEditOpen(true);
   };
 
-  const saveDraft = async () => {
-    const d = draft();
-    if (!d.pattern.trim()) {
-      showAppToast({ title: '请填写匹配内容', variant: 'destructive' });
-      return;
-    }
-    if ('id' in d && d.id) {
-      await replaceDb.updateReplaceRule(d as ReplaceRule);
+  const saveRule = async (rule: ReplaceRuleDraft) => {
+    const all = rules();
+    const order =
+      rule.order ||
+      (all.length > 0 ? Math.max(...all.map((r) => r.order)) + 1 : 0);
+    if ('id' in rule && rule.id) {
+      await replaceDb.updateReplaceRule({ ...(rule as ReplaceRule), order });
     } else {
-      await replaceDb.insertReplaceRule({ ...(d as Omit<ReplaceRule, 'id'>), id: 0 });
+      await replaceDb.insertReplaceRule({ ...(rule as Omit<ReplaceRule, 'id'>), id: 0, order });
     }
     invalidateReplaceRulesCache();
-    setEditOpen(false);
     await reload();
     showAppToast({ title: '已保存' });
-  };
-
-  const remove = async (id: number) => {
-    await replaceDb.deleteReplaceRule(id);
-    invalidateReplaceRulesCache();
-    await reload();
   };
 
   const finishImport = async (count: number) => {
@@ -201,108 +229,257 @@ export function ReplaceRulesPage() {
     });
   };
 
+  const pageDescription = () => {
+    const total = rules().length;
+    const filtered = filteredRules().length;
+    if (searchQuery().trim()) {
+      return `共 ${total} 条 · 筛选 ${filtered} 条`;
+    }
+    return `共 ${total} 条规则`;
+  };
+
+  const batchEnable = async (enabled: boolean) => {
+    const ids = selectedRules().map((r) => r.id);
+    if (ids.length === 0) return;
+    await replaceDb.setReplaceRulesEnabled(ids, enabled);
+    invalidateReplaceRulesCache();
+    await reload();
+    clearSelection();
+    showAppToast({ title: enabled ? '已启用所选' : '已禁用所选' });
+  };
+
+  const batchDelete = async () => {
+    const ids = selectedRules().map((r) => r.id);
+    if (ids.length === 0) return;
+    await replaceDb.deleteReplaceRules(ids);
+    invalidateReplaceRulesCache();
+    setDeleteConfirmOpen(false);
+    clearSelection();
+    await reload();
+    showAppToast({ title: '已删除所选规则' });
+  };
+
+  const batchExport = () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    const json = JSON.stringify(selected, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `replaceRule_${selected.length}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showAppToast({ title: `已导出 ${selected.length} 条规则` });
+  };
+
+  const batchPinTop = async () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    await replaceDb.moveReplaceRulesToTop(selected);
+    invalidateReplaceRulesCache();
+    await reload();
+    clearSelection();
+    showAppToast({ title: '已置顶所选' });
+  };
+
+  const batchPinBottom = async () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    await replaceDb.moveReplaceRulesToBottom(selected);
+    invalidateReplaceRulesCache();
+    await reload();
+    clearSelection();
+    showAppToast({ title: '已置底所选' });
+  };
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected()) {
+      const next = new Set(selectedIds());
+      for (const r of filteredRules()) next.delete(r.id);
+      setSelectedIds(next);
+      return;
+    }
+    const next = new Set(selectedIds());
+    for (const r of filteredRules()) next.add(r.id);
+    setSelectedIds(next);
+  };
+
+  const invertSelection = () => {
+    const next = new Set(selectedIds());
+    for (const r of filteredRules()) {
+      if (next.has(r.id)) next.delete(r.id);
+      else next.add(r.id);
+    }
+    setSelectedIds(next);
+  };
+
   void reload();
 
   return (
-    <div class="space-y-4">
-      <div class="flex flex-wrap gap-2">
-        <Button onClick={openNew}>新建规则</Button>
-        <Button
-          variant="outline"
-          onClick={async () => {
-            await replaceDb.enableAllReplaceRules(true);
-            invalidateReplaceRulesCache();
-            await reload();
-          }}
-        >
-          全部启用
-        </Button>
-        <Button
-          variant="outline"
-          onClick={async () => {
-            await replaceDb.enableAllReplaceRules(false);
-            invalidateReplaceRulesCache();
-            await reload();
-          }}
-        >
-          全部禁用
-        </Button>
-        <AppDropdownMenu>
-          <AppDropdownMenuTrigger
-            as={(triggerProps: Record<string, unknown>) => (
-              <AppDropdownMenuButtonTrigger triggerProps={triggerProps} variant="outline">
-                <ImportIcon class="h-4 w-4" />
-                <span>导入</span>
-                <ChevronDownIcon class="h-4 w-4 opacity-50" />
-              </AppDropdownMenuButtonTrigger>
-            )}
+    <div class={settingsRuleManagePageRoot}>
+      <PageToolbar
+        class="border-b border-border/50 px-3 py-2 sm:px-4"
+        title="替换净化"
+        description={pageDescription()}
+        titleSlot={
+          <PageToolbarTitleDropdown
+            title="替换净化"
+            description={pageDescription()}
+            dropdownEnabled={false}
           />
-          <AppDropdownMenuContent layout="compact">
-            <AppDropdownMenuItem onSelect={() => importLocalJson()}>
-              <FolderPlusIcon class="h-4 w-4" />
-              <span>本地导入</span>
-            </AppDropdownMenuItem>
-            <AppDropdownMenuItem onSelect={() => setImportUrlOpen(true)}>
-              <LinkIcon class="h-4 w-4" />
-              <span>网络导入</span>
-            </AppDropdownMenuItem>
-            <AppDropdownMenuItem onSelect={() => setQrImportOpen(true)}>
-              <ScanQrCodeIcon class="h-4 w-4" />
-              <span>二维码导入</span>
-            </AppDropdownMenuItem>
-            <AppDropdownMenuItem onSelect={() => setCodeImportOpen(true)}>
-              <CodeIcon class="h-4 w-4" />
-              <span>代码导入</span>
-            </AppDropdownMenuItem>
-          </AppDropdownMenuContent>
-        </AppDropdownMenu>
-      </div>
+        }
+        leading={
+          props.onBack ? <ReplaceRulesToolbarLeading onBack={props.onBack} /> : undefined
+        }
+      >
+        <ReplaceRulesPageToolbar
+          searchQuery={searchQuery()}
+          onSearchQueryChange={setSearchQuery}
+          onNewRule={openNew}
+          onImportLocal={importLocalJson}
+          onImportNetwork={() => setImportUrlOpen(true)}
+          onImportQR={() => setQrImportOpen(true)}
+          onImportCode={() => setCodeImportOpen(true)}
+        />
+      </PageToolbar>
 
-      <Show when={loading()}>
-        <p class="text-sm text-muted-foreground">加载中…</p>
-      </Show>
-
-      <ul class="space-y-2">
-        <For each={rules()}>
-          {(rule) => (
-            <li class="rounded-xl border border-border/50 bg-card p-4">
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0 flex-1">
-                  <div class="font-medium">{rule.name}</div>
-                  <div class="mt-1 font-mono text-xs text-muted-foreground break-all">
-                    {rule.pattern}
-                  </div>
-                  <div class="mt-1 text-xs text-muted-foreground">
-                    {rule.isEnabled ? '已启用' : '已禁用'}
-                    {rule.group ? ` · ${rule.group}` : ''}
-                  </div>
-                </div>
-                <Switch
-                  checked={rule.isEnabled}
-                  onChange={async (v) => {
-                    await replaceDb.updateReplaceRule({ ...rule, isEnabled: !!v });
+      <div class={settingsRuleManagePageListScroll}>
+        <Show when={loading()}>
+          <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        </Show>
+        <Show when={!loading() && filteredRules().length === 0}>
+          <p class="px-4 py-8 text-center text-sm text-muted-foreground">
+            {searchQuery().trim() ? '没有匹配的规则' : '暂无替换规则，可通过右上角「更多」新建或导入'}
+          </p>
+        </Show>
+        <Show when={!loading() && filteredRules().length > 0}>
+          <ul>
+            <For each={filteredRules()}>
+              {(rule) => (
+                <ReplaceRuleListItem
+                  rule={rule}
+                  selected={selectedIds().has(rule.id)}
+                  onToggleSelection={() => toggleSelection(rule.id)}
+                  onSelectionChange={(checked) => {
+                    const next = new Set(selectedIds());
+                    if (checked) next.add(rule.id);
+                    else next.delete(rule.id);
+                    setSelectedIds(next);
+                  }}
+                  onEnableChange={async (enabled) => {
+                    await replaceDb.updateReplaceRule({ ...rule, isEnabled: enabled });
                     invalidateReplaceRulesCache();
                     await reload();
                   }}
-                >
-                  <SwitchControl>
-                    <SwitchThumb />
-                  </SwitchControl>
-                  <SwitchLabel class="sr-only">启用</SwitchLabel>
-                </Switch>
-              </div>
-              <div class="mt-3 flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => openEdit(rule)}>
-                  编辑
-                </Button>
-                <Button size="sm" variant="ghost" class="text-destructive" onClick={() => void remove(rule.id)}>
-                  删除
-                </Button>
-              </div>
-            </li>
-          )}
-        </For>
-      </ul>
+                  onEdit={() => openEdit(rule)}
+                  onMoveTop={async () => {
+                    await replaceDb.moveReplaceRulesToTop([rule]);
+                    invalidateReplaceRulesCache();
+                    await reload();
+                  }}
+                  onMoveBottom={async () => {
+                    await replaceDb.moveReplaceRulesToBottom([rule]);
+                    invalidateReplaceRulesCache();
+                    await reload();
+                  }}
+                  onDelete={async () => {
+                    await replaceDb.deleteReplaceRule(rule.id);
+                    invalidateReplaceRulesCache();
+                    const next = new Set(selectedIds());
+                    next.delete(rule.id);
+                    setSelectedIds(next);
+                    await reload();
+                  }}
+                />
+              )}
+            </For>
+          </ul>
+        </Show>
+      </div>
+
+      <div class="shrink-0 border-t border-border/50 bg-card px-2 py-2 sm:px-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleSelectAll}
+              disabled={filteredRules().length === 0}
+            >
+              {allFilteredSelected() ? '取消全选' : '全选'}({filteredSelectedCount()}/
+              {filteredRules().length})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={invertSelection}
+              disabled={filteredRules().length === 0}
+            >
+              反选
+            </Button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={selectedCount() === 0}
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              删除
+            </Button>
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(p: Record<string, unknown>) => (
+                  <AppDropdownMenuButtonTrigger
+                    triggerProps={p}
+                    variant="outline"
+                    size="sm"
+                    class={BATCH_MENU_TRIGGER_CLASS}
+                  >
+                    更多
+                    <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
+                  </AppDropdownMenuButtonTrigger>
+                )}
+              />
+              <AppDropdownMenuContent layout="compact" align="end">
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchEnable(true)}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchEnable(false)}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={batchExport}>导出所选</AppDropdownMenuItem>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
+          </div>
+        </div>
+      </div>
+
+      <ReplaceRuleEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        rule={editingRule()}
+        onSave={saveRule}
+      />
+
+      <AppDialog open={deleteConfirmOpen()} onOpenChange={setDeleteConfirmOpen}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选规则？</AppDialogTitle>
+            <AppDialogDescription>
+              将删除 {selectedCount()} 条替换规则，此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter class="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void batchDelete()}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
 
       <ImportSourceQrDialog
         open={qrImportOpen()}
@@ -329,11 +506,15 @@ export function ReplaceRulesPage() {
             <AppDialogDescription>输入替换规则 JSON 文件的 URL</AppDialogDescription>
           </AppDialogHeader>
           <TextField class="px-6">
-            <TextFieldInput
-              placeholder="https://..."
-              value={importUrl()}
-              onInput={(e) => setImportUrl(e.currentTarget.value)}
-            />
+            <div class="relative">
+              <LinkIcon class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <TextFieldInput
+                class="pl-8"
+                placeholder="https://..."
+                value={importUrl()}
+                onInput={(e) => setImportUrl(e.currentTarget.value)}
+              />
+            </div>
           </TextField>
           <AppDialogFooter class="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setImportUrlOpen(false)}>
@@ -341,70 +522,6 @@ export function ReplaceRulesPage() {
             </Button>
             <Button onClick={() => void importFromUrl()}>导入</Button>
           </AppDialogFooter>
-        </AppDialogContent>
-      </AppDialog>
-
-      <AppDialog open={editOpen()} onOpenChange={setEditOpen}>
-        <AppDialogContent class="max-w-lg">
-          <AppDialogHeader>
-            <AppDialogTitle>{'id' in draft() && (draft() as ReplaceRule).id ? '编辑规则' : '新建规则'}</AppDialogTitle>
-          </AppDialogHeader>
-          <div class="space-y-3 px-6 pb-6">
-            <div>
-              <Label>名称</Label>
-              <TextField class="mt-1">
-                <TextFieldInput
-                  value={draft().name}
-                  onInput={(e) => setDraft({ ...draft(), name: e.currentTarget.value })}
-                />
-              </TextField>
-            </div>
-            <div>
-              <Label>匹配（正则或文本）</Label>
-              <TextField class="mt-1">
-                <TextFieldTextArea
-                  value={draft().pattern}
-                  onInput={(e) => setDraft({ ...draft(), pattern: e.currentTarget.value })}
-                  rows={3}
-                />
-              </TextField>
-            </div>
-            <div>
-              <Label>替换为</Label>
-              <TextField class="mt-1">
-                <TextFieldTextArea
-                  value={draft().replacement}
-                  onInput={(e) => setDraft({ ...draft(), replacement: e.currentTarget.value })}
-                  rows={2}
-                />
-              </TextField>
-            </div>
-            <div class="flex gap-4">
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft().scopeContent}
-                  onChange={(e) =>
-                    setDraft({ ...draft(), scopeContent: e.currentTarget.checked })
-                  }
-                />
-                作用于正文
-              </label>
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft().scopeTitle}
-                  onChange={(e) =>
-                    setDraft({ ...draft(), scopeTitle: e.currentTarget.checked })
-                  }
-                />
-                作用于标题
-              </label>
-            </div>
-            <Button class="w-full" onClick={() => void saveDraft()}>
-              保存
-            </Button>
-          </div>
         </AppDialogContent>
       </AppDialog>
     </div>

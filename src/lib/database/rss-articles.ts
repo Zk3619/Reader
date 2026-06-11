@@ -156,6 +156,20 @@ export async function updateRssArticle(article: RssArticle): Promise<void> {
 }
 
 /**
+ * 删除指定来源与分类下的 RSS 文章（首页刷新前清空旧列表）
+ */
+export async function deleteRssArticlesByOriginAndSort(
+  origin: string,
+  sort: string,
+): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM rssArticles WHERE origin = ? AND sort = ?', [
+    origin,
+    sort,
+  ]);
+}
+
+/**
  * 删除来源的所有RSS文章
  */
 export async function deleteRssArticlesByOrigin(origin: string): Promise<void> {

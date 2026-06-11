@@ -17,6 +17,10 @@ import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
+import {
+  settingsRuleManagePageListScroll,
+  settingsRuleManagePageRoot,
+} from '@/lib/ui/viewport-classes';
 import type { TxtTocRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
@@ -309,7 +313,7 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
   void reload();
 
   return (
-    <div class="flex min-h-[min(70dvh,640px)] flex-col overflow-hidden rounded-xl border border-border/50 bg-card">
+    <div class={settingsRuleManagePageRoot}>
       <PageToolbar
         class="border-b border-border/50 px-3 py-2 sm:px-4"
         title="TXT 目录规则"
@@ -337,7 +341,7 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
         />
       </PageToolbar>
 
-      <div class="min-h-0 flex-1 overflow-y-auto bg-background/40">
+      <div class={settingsRuleManagePageListScroll}>
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>

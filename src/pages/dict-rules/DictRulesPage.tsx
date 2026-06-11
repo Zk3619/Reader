@@ -1,18 +1,35 @@
 /**
- * 字典规则管理（对齐 Legado DictRuleActivity）
+ * 字典规则管理（对齐 Legado DictRuleActivity + TXT 目录规则页交互）
  */
 
-import { createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import * as dictDb from '@/lib/database/dict-rules';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
+import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
+import { filterDictRules } from '@/lib/dict-rules/filter-dict-rules';
+import { DictRuleListItem } from '@/components/dict-rules/DictRuleListItem';
+import { DictRuleEditDialog } from '@/components/dict-rules/DictRuleEditDialog';
+import {
+  DictRulesPageToolbar,
+  DictRulesToolbarLeading,
+} from '@/components/dict-rules/DictRulesPageToolbar';
+import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
+import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
+import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
+import {
+  settingsRuleManagePageListScroll,
+  settingsRuleManagePageRoot,
+} from '@/lib/ui/viewport-classes';
 import type { DictRule } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import {
   AppDialog,
   AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
@@ -23,9 +40,12 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { ChevronDownIcon, CodeIcon, FolderPlusIcon, ImportIcon } from '@/components/shared/icons';
+import { ChevronDownIcon, LinkIcon } from '@/components/shared/icons';
+
+const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
+const BATCH_MENU_CHEVRON_CLASS =
+  'h-4 w-4 shrink-0 opacity-50 transition-transform duration-200 group-data-expanded/trigger:rotate-180';
 
 function emptyRule(): DictRule {
   return {
@@ -37,14 +57,30 @@ function emptyRule(): DictRule {
   };
 }
 
-export function DictRulesPage() {
+export interface DictRulesPageProps {
+  onBack?: () => void;
+}
+
+export function DictRulesPage(props: DictRulesPageProps) {
   const [rules, setRules] = createSignal<DictRule[]>([]);
   const [loading, setLoading] = createSignal(true);
+  const [searchQuery, setSearchQuery] = createSignal('');
+  const [selectedNames, setSelectedNames] = createSignal<Set<string>>(new Set());
   const [editOpen, setEditOpen] = createSignal(false);
-  const [draft, setDraft] = createSignal<DictRule>(emptyRule());
-  const [isNew, setIsNew] = createSignal(true);
+  const [editingRule, setEditingRule] = createSignal<DictRule | null>(null);
   const [originalName, setOriginalName] = createSignal('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
+  const [importUrlOpen, setImportUrlOpen] = createSignal(false);
+  const [importUrl, setImportUrl] = createSignal('');
+  const [qrImportOpen, setQrImportOpen] = createSignal(false);
   const [codeImportOpen, setCodeImportOpen] = createSignal(false);
+
+  const filteredRules = createMemo(() => filterDictRules(rules(), searchQuery()));
+  const selectedCount = () => selectedNames().size;
+  const filteredSelectedCount = () =>
+    filteredRules().filter((r) => selectedNames().has(r.name)).length;
+  const allFilteredSelected = () =>
+    filteredRules().length > 0 && filteredSelectedCount() === filteredRules().length;
 
   const reload = async () => {
     setLoading(true);
@@ -55,38 +91,40 @@ export function DictRulesPage() {
     }
   };
 
+  const clearSelection = () => setSelectedNames(new Set<string>());
+
+  const toggleSelection = (name: string) => {
+    const next = new Set(selectedNames());
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setSelectedNames(next);
+  };
+
+  const selectedRules = () => rules().filter((r) => selectedNames().has(r.name));
+
   const openNew = () => {
-    setDraft(emptyRule());
-    setIsNew(true);
+    setEditingRule(emptyRule());
     setOriginalName('');
     setEditOpen(true);
   };
 
   const openEdit = (rule: DictRule) => {
-    setDraft({ ...rule });
-    setIsNew(false);
+    setEditingRule({ ...rule });
     setOriginalName(rule.name);
     setEditOpen(true);
   };
 
-  const saveDraft = async () => {
-    const d = draft();
-    if (!d.name.trim()) {
-      showAppToast({ title: '请填写规则名称', variant: 'destructive' });
-      return;
+  const saveRule = async (rule: DictRule, prevName?: string) => {
+    const all = rules();
+    const sortNumber =
+      rule.sortNumber ||
+      (all.length > 0 ? Math.max(...all.map((r) => r.sortNumber)) + 1 : 0);
+    if (prevName && prevName !== rule.name) {
+      await dictDb.deleteDictRule(prevName);
     }
-    if (!isNew() && originalName() && originalName() !== d.name) {
-      await dictDb.deleteDictRule(originalName());
-    }
-    await dictDb.upsertDictRule(d);
-    setEditOpen(false);
+    await dictDb.upsertDictRule({ ...rule, sortNumber });
     await reload();
     showAppToast({ title: '已保存' });
-  };
-
-  const remove = async (name: string) => {
-    await dictDb.deleteDictRule(name);
-    await reload();
   };
 
   const finishImport = async (count: number) => {
@@ -111,153 +149,371 @@ export function DictRulesPage() {
     input.click();
   };
 
-  const importFromCode = async (text: string) => {
-    const count = await importDictRulesFromJson(text);
-    if (await finishImport(count)) {
-      setCodeImportOpen(false);
+  const importFromNetworkUrl = async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      showAppToast({ title: '请输入规则 URL', variant: 'destructive' });
+      return false;
     }
+    try {
+      const text = await fetchBookSourceJsonText(trimmed);
+      const count = await importDictRulesFromJson(text);
+      return finishImport(count);
+    } catch (e) {
+      showAppToast({
+        title: '导入失败',
+        description: e instanceof Error ? e.message : '请检查网络或 URL',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  };
+
+  const importFromUrl = async () => {
+    const ok = await importFromNetworkUrl(importUrl());
+    if (ok) {
+      setImportUrlOpen(false);
+      setImportUrl('');
+    }
+  };
+
+  const handleRawTextIdentify = async (
+    raw: string,
+    via: 'qr' | 'code' = 'qr',
+    close?: () => void,
+  ) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const label = via === 'qr' ? '二维码导入' : '代码导入';
+
+    const parsed = parseReaderImportDeepLink(trimmed);
+    if (parsed?.kind === 'dictRuleNetwork') {
+      const ok = await importFromNetworkUrl(parsed.src);
+      if (ok) close?.();
+      return;
+    }
+    if (parsed?.kind === 'determineType') {
+      const ok = await importFromNetworkUrl(parsed.src);
+      if (ok) close?.();
+      return;
+    }
+    if (parsed?.kind === 'unsupported') {
+      showAppToast({ title: label, description: parsed.reason, variant: 'default' });
+      return;
+    }
+
+    const directCount = await importDictRulesFromJson(trimmed);
+    if (await finishImport(directCount)) {
+      close?.();
+      return;
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      const ok = await importFromNetworkUrl(trimmed);
+      if (ok) close?.();
+      return;
+    }
+
+    showAppToast({
+      title: via === 'qr' ? '无法识别二维码内容' : '无法识别代码内容',
+      description: '请使用字典规则 JSON 或规则链接',
+      variant: 'destructive',
+    });
+  };
+
+  const pageDescription = () => {
+    const total = rules().length;
+    const filtered = filteredRules().length;
+    if (searchQuery().trim()) {
+      return `共 ${total} 条 · 筛选 ${filtered} 条`;
+    }
+    return `共 ${total} 条规则`;
+  };
+
+  const importDefault = async () => {
+    const count = await dictDb.importDefaultDictRules();
+    await reload();
+    showAppToast({ title: `已导入默认规则（${count} 条）` });
+  };
+
+  const batchEnable = async (enabled: boolean) => {
+    const names = selectedRules().map((r) => r.name);
+    if (names.length === 0) return;
+    await dictDb.setDictRulesEnabled(names, enabled);
+    await reload();
+    clearSelection();
+    showAppToast({ title: enabled ? '已启用所选' : '已禁用所选' });
+  };
+
+  const batchDelete = async () => {
+    const names = selectedRules().map((r) => r.name);
+    if (names.length === 0) return;
+    await dictDb.deleteDictRules(names);
+    setDeleteConfirmOpen(false);
+    clearSelection();
+    await reload();
+    showAppToast({ title: '已删除所选规则' });
+  };
+
+  const batchExport = () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    const json = JSON.stringify(selected, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dictRule_${selected.length}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showAppToast({ title: `已导出 ${selected.length} 条规则` });
+  };
+
+  const batchPinTop = async () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    await dictDb.moveDictRulesToTop(selected);
+    await reload();
+    clearSelection();
+    showAppToast({ title: '已置顶所选' });
+  };
+
+  const batchPinBottom = async () => {
+    const selected = selectedRules();
+    if (selected.length === 0) return;
+    await dictDb.moveDictRulesToBottom(selected);
+    await reload();
+    clearSelection();
+    showAppToast({ title: '已置底所选' });
+  };
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected()) {
+      const next = new Set(selectedNames());
+      for (const r of filteredRules()) next.delete(r.name);
+      setSelectedNames(next);
+      return;
+    }
+    const next = new Set(selectedNames());
+    for (const r of filteredRules()) next.add(r.name);
+    setSelectedNames(next);
+  };
+
+  const invertSelection = () => {
+    const next = new Set(selectedNames());
+    for (const r of filteredRules()) {
+      if (next.has(r.name)) next.delete(r.name);
+      else next.add(r.name);
+    }
+    setSelectedNames(next);
   };
 
   void reload();
 
   return (
-    <div class="space-y-4">
-      <div class="flex flex-wrap gap-2">
-        <Button onClick={openNew}>新建规则</Button>
-        <AppDropdownMenu>
-          <AppDropdownMenuTrigger
-            as={(triggerProps: Record<string, unknown>) => (
-              <AppDropdownMenuButtonTrigger triggerProps={triggerProps} variant="outline">
-                <ImportIcon class="h-4 w-4" />
-                <span>导入</span>
-                <ChevronDownIcon class="h-4 w-4 opacity-50" />
-              </AppDropdownMenuButtonTrigger>
-            )}
+    <div class={settingsRuleManagePageRoot}>
+      <PageToolbar
+        class="border-b border-border/50 px-3 py-2 sm:px-4"
+        title="字典规则"
+        description={pageDescription()}
+        titleSlot={
+          <PageToolbarTitleDropdown
+            title="字典规则"
+            description={pageDescription()}
+            dropdownEnabled={false}
           />
-          <AppDropdownMenuContent layout="compact">
-            <AppDropdownMenuItem onSelect={() => importLocalJson()}>
-              <FolderPlusIcon class="h-4 w-4" />
-              <span>本地导入</span>
-            </AppDropdownMenuItem>
-            <AppDropdownMenuItem onSelect={() => setCodeImportOpen(true)}>
-              <CodeIcon class="h-4 w-4" />
-              <span>代码导入</span>
-            </AppDropdownMenuItem>
-          </AppDropdownMenuContent>
-        </AppDropdownMenu>
-      </div>
+        }
+        leading={
+          props.onBack ? <DictRulesToolbarLeading onBack={props.onBack} /> : undefined
+        }
+      >
+        <DictRulesPageToolbar
+          searchQuery={searchQuery()}
+          onSearchQueryChange={setSearchQuery}
+          onNewRule={openNew}
+          onImportLocal={importLocalJson}
+          onImportNetwork={() => setImportUrlOpen(true)}
+          onImportQR={() => setQrImportOpen(true)}
+          onImportCode={() => setCodeImportOpen(true)}
+          onImportDefault={() => void importDefault()}
+        />
+      </PageToolbar>
 
-      <Show when={loading()}>
-        <p class="text-sm text-muted-foreground">加载中…</p>
-      </Show>
-
-      <ul class="space-y-2">
-        <For each={rules()}>
-          {(rule) => (
-            <li class="rounded-xl border border-border/50 bg-card p-4">
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0 flex-1">
-                  <div class="font-medium">{rule.name}</div>
-                  <div class="mt-1 font-mono text-xs text-muted-foreground break-all line-clamp-2">
-                    {rule.urlRule}
-                  </div>
-                  <div class="mt-1 text-xs text-muted-foreground">
-                    {rule.enabled ? '已启用' : '已禁用'} · 排序 {rule.sortNumber}
-                  </div>
-                </div>
-                <Switch
-                  checked={rule.enabled}
-                  onChange={async (v) => {
-                    await dictDb.upsertDictRule({ ...rule, enabled: !!v });
+      <div class={settingsRuleManagePageListScroll}>
+        <Show when={loading()}>
+          <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
+        </Show>
+        <Show when={!loading() && filteredRules().length === 0}>
+          <p class="px-4 py-8 text-center text-sm text-muted-foreground">
+            {searchQuery().trim() ? '没有匹配的规则' : '暂无字典规则，可通过右上角「更多」新建或导入'}
+          </p>
+        </Show>
+        <Show when={!loading() && filteredRules().length > 0}>
+          <ul>
+            <For each={filteredRules()}>
+              {(rule) => (
+                <DictRuleListItem
+                  rule={rule}
+                  selected={selectedNames().has(rule.name)}
+                  onToggleSelection={() => toggleSelection(rule.name)}
+                  onSelectionChange={(checked) => {
+                    const next = new Set(selectedNames());
+                    if (checked) next.add(rule.name);
+                    else next.delete(rule.name);
+                    setSelectedNames(next);
+                  }}
+                  onEnableChange={async (enabled) => {
+                    await dictDb.upsertDictRule({ ...rule, enabled });
                     await reload();
                   }}
-                >
-                  <SwitchControl>
-                    <SwitchThumb />
-                  </SwitchControl>
-                  <SwitchLabel class="sr-only">启用</SwitchLabel>
-                </Switch>
-              </div>
-              <div class="mt-3 flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => openEdit(rule)}>
-                  编辑
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  class="text-destructive"
-                  onClick={() => void remove(rule.name)}
-                >
-                  删除
-                </Button>
-              </div>
-            </li>
-          )}
-        </For>
-      </ul>
+                  onEdit={() => openEdit(rule)}
+                  onMoveTop={async () => {
+                    await dictDb.moveDictRulesToTop([rule]);
+                    await reload();
+                  }}
+                  onMoveBottom={async () => {
+                    await dictDb.moveDictRulesToBottom([rule]);
+                    await reload();
+                  }}
+                  onDelete={async () => {
+                    await dictDb.deleteDictRule(rule.name);
+                    const next = new Set(selectedNames());
+                    next.delete(rule.name);
+                    setSelectedNames(next);
+                    await reload();
+                  }}
+                />
+              )}
+            </For>
+          </ul>
+        </Show>
+      </div>
+
+      <div class="shrink-0 border-t border-border/50 bg-card px-2 py-2 sm:px-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleSelectAll}
+              disabled={filteredRules().length === 0}
+            >
+              {allFilteredSelected() ? '取消全选' : '全选'}({filteredSelectedCount()}/
+              {filteredRules().length})
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={invertSelection}
+              disabled={filteredRules().length === 0}
+            >
+              反选
+            </Button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={selectedCount() === 0}
+              onClick={() => setDeleteConfirmOpen(true)}
+            >
+              删除
+            </Button>
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(p: Record<string, unknown>) => (
+                  <AppDropdownMenuButtonTrigger
+                    triggerProps={p}
+                    variant="outline"
+                    size="sm"
+                    class={BATCH_MENU_TRIGGER_CLASS}
+                  >
+                    更多
+                    <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
+                  </AppDropdownMenuButtonTrigger>
+                )}
+              />
+              <AppDropdownMenuContent layout="compact" align="end">
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchEnable(true)}>启用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchEnable(false)}>禁用所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinTop()}>置顶所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinBottom()}>置底所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={batchExport}>导出所选</AppDropdownMenuItem>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
+          </div>
+        </div>
+      </div>
+
+      <DictRuleEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        rule={editingRule()}
+        originalName={originalName()}
+        onSave={saveRule}
+      />
+
+      <AppDialog open={deleteConfirmOpen()} onOpenChange={setDeleteConfirmOpen}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选规则？</AppDialogTitle>
+            <AppDialogDescription>
+              将删除 {selectedCount()} 条字典规则，此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter class="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void batchDelete()}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
+
+      <ImportSourceQrDialog
+        open={qrImportOpen()}
+        onOpenChange={setQrImportOpen}
+        autoImport
+        title="二维码导入字典规则"
+        description="使用摄像头扫码或选择图片识别字典规则二维码。"
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'qr', () => setQrImportOpen(false))}
+      />
 
       <ImportCodeDialog
         open={codeImportOpen()}
         onOpenChange={setCodeImportOpen}
         title="代码导入字典规则"
-        description="粘贴字典规则 JSON 数组或对象，兼容 legado 格式。"
+        description="粘贴字典规则 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 地址。"
         confirmLabel="导入"
-        onIdentify={(text) => void importFromCode(text)}
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'code', () => setCodeImportOpen(false))}
       />
 
-      <AppDialog open={editOpen()} onOpenChange={setEditOpen}>
-        <AppDialogContent class="max-w-lg max-h-[85dvh] overflow-y-auto">
+      <AppDialog open={importUrlOpen()} onOpenChange={setImportUrlOpen}>
+        <AppDialogContent>
           <AppDialogHeader>
-            <AppDialogTitle>{isNew() ? '新建规则' : '编辑规则'}</AppDialogTitle>
+            <AppDialogTitle>网络导入</AppDialogTitle>
+            <AppDialogDescription>输入字典规则 JSON 文件的 URL</AppDialogDescription>
           </AppDialogHeader>
-          <div class="space-y-3 px-6 pb-6">
-            <div>
-              <Label>名称（主键）</Label>
-              <TextField class="mt-1">
-                <TextFieldInput
-                  value={draft().name}
-                  onInput={(e) => setDraft({ ...draft(), name: e.currentTarget.value })}
-                />
-              </TextField>
+          <TextField class="px-6">
+            <div class="relative">
+              <LinkIcon class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <TextFieldInput
+                class="pl-8"
+                placeholder="https://..."
+                value={importUrl()}
+                onInput={(e) => setImportUrl(e.currentTarget.value)}
+              />
             </div>
-            <div>
-              <Label>请求 URL 规则</Label>
-              <TextField class="mt-1">
-                <TextFieldTextArea
-                  value={draft().urlRule}
-                  onInput={(e) => setDraft({ ...draft(), urlRule: e.currentTarget.value })}
-                  rows={4}
-                  class="font-mono text-xs"
-                />
-              </TextField>
-            </div>
-            <div>
-              <Label>结果解析规则</Label>
-              <TextField class="mt-1">
-                <TextFieldTextArea
-                  value={draft().showRule}
-                  onInput={(e) => setDraft({ ...draft(), showRule: e.currentTarget.value })}
-                  rows={4}
-                  class="font-mono text-xs"
-                />
-              </TextField>
-            </div>
-            <div>
-              <Label>排序</Label>
-              <TextField class="mt-1">
-                <TextFieldInput
-                  type="number"
-                  value={String(draft().sortNumber)}
-                  onInput={(e) =>
-                    setDraft({ ...draft(), sortNumber: Number(e.currentTarget.value) || 0 })
-                  }
-                />
-              </TextField>
-            </div>
-            <Button class="w-full" onClick={() => void saveDraft()}>
-              保存
+          </TextField>
+          <AppDialogFooter class="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setImportUrlOpen(false)}>
+              取消
             </Button>
-          </div>
+            <Button onClick={() => void importFromUrl()}>导入</Button>
+          </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>
     </div>
