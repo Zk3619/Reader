@@ -3,7 +3,9 @@
  */
 
 import { get } from '@/lib/http';
+import { resolveLegadoRuleUrl } from '@/lib/book-source/analyze-search-url';
 import { buildUrl, parseHeaders } from '@/lib/book-source/utils';
+import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 import { getRssArticles, getRssContent } from '@/lib/rss-source';
 import { parseSortUrls } from '@/lib/rss-source/sort-urls';
 import type { RssArticle, RssSource } from '@/types';
@@ -77,7 +79,7 @@ async function debugSortList(
 
   try {
     const headers = parseHeaders(source.header);
-    const url = buildUrl(sortUrl, { page: '1' });
+    const url = await resolveLegadoRuleUrl(sortUrl, rssAsBookSource(source), { page: 1 });
     const html = await get(url, {
       ...headers,
       enableCookieJar: source.enabledCookieJar,

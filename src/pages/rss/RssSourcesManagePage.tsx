@@ -41,6 +41,7 @@ import {
 } from '@/lib/rss/rss-source-list-filter';
 import { ImportSourceNetworkDialog } from '@/components/sources/ImportSourceNetworkDialog';
 import { ImportSourceQrDialog } from '@/components/sources/ImportSourceQrDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { ImportRssSourceSelectDialog } from '@/components/rss/ImportRssSourceSelectDialog';
 import { pickLocalBookSourceFiles } from '@/lib/book-source/pick-local-booksource-file';
 import { parseRssSourceJson } from '@/lib/book-source/import-rss-source';
@@ -110,6 +111,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
   const [selectedUrls, setSelectedUrls] = createSignal<Set<string>>(new Set());
   const [showNetworkImport, setShowNetworkImport] = createSignal(false);
   const [showQrImport, setShowQrImport] = createSignal(false);
+  const [showCodeImport, setShowCodeImport] = createSignal(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = createSignal(false);
   const [deleteTarget, setDeleteTarget] = createSignal<RssSource | null>(null);
   const [batchDeleteCount, setBatchDeleteCount] = createSignal(0);
@@ -684,10 +686,11 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     }
   };
 
-  const handleQrIdentify = async (raw: string) => {
+  const handleRawTextIdentify = async (raw: string, via: 'qr' | 'code' = 'qr') => {
+    const label = via === 'qr' ? '二维码导入' : '代码导入';
     const parsed = parseReaderImportDeepLink(raw);
     if (parsed?.kind === 'unsupported') {
-      showAppToast({ title: '二维码导入', description: parsed.reason, variant: 'default' });
+      showAppToast({ title: label, description: parsed.reason, variant: 'default' });
       return;
     }
     if (parsed?.kind === 'rssNetwork') {
@@ -697,11 +700,11 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     await openImportSelectLoading();
     try {
       const list = await resolveRssSourcesFromText(raw);
-      await applyRecognizedRssSources(list, '二维码导入');
+      await applyRecognizedRssSources(list, label);
     } catch (e) {
       setShowImportSelect(false);
       showAppToast({
-        title: '二维码导入失败',
+        title: `${label}失败`,
         description: e instanceof Error ? e.message : String(e),
         variant: 'destructive',
       });
@@ -709,6 +712,8 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       setImportLoading(false);
     }
   };
+
+  const handleQrIdentify = (raw: string) => handleRawTextIdentify(raw, 'qr');
 
   const confirmImportSelected = async () => {
     const selected = new Set(importSelectedUrls());
@@ -861,6 +866,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
           onSourcesImportLocal={() => void handleLocalImport()}
           onSourcesImportNetwork={() => setShowNetworkImport(true)}
           onSourcesImportQR={() => setShowQrImport(true)}
+          onSourcesImportCode={() => setShowCodeImport(true)}
           enableDragSort={enableDragSort()}
           onEnableDragSortChange={setEnableDragSort}
         />
@@ -1093,6 +1099,14 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
         open={showQrImport()}
         onOpenChange={setShowQrImport}
         onIdentify={(raw) => void handleQrIdentify(raw)}
+      />
+
+      <ImportCodeDialog
+        open={showCodeImport()}
+        onOpenChange={setShowCodeImport}
+        title="代码导入订阅源"
+        description="粘贴订阅源 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 地址。"
+        onIdentify={(raw) => void handleRawTextIdentify(raw, 'code')}
       />
 
       <ImportRssSourceSelectDialog

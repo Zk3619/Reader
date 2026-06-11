@@ -48,6 +48,8 @@ export async function loadRssArticleCoverBlob(
     legadoImageHeaders,
     bookUrl: normalized,
     skipDiskRead: true,
+    /** 跨境 CDN 在 Referer 走 download_binary 时易超时，对齐正文页 60s */
+    timeoutMs: 60_000,
   });
 
   if (!blob && import.meta.env.DEV) {

@@ -2,7 +2,7 @@
  * RSS 文章阅读页（WebView 模式，对齐 Legado ReadRssActivity）
  */
 
-import { createSignal, Show, onMount, For } from 'solid-js';
+import { createSignal, Show, onMount, onCleanup, For } from 'solid-js';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { PageHeader } from '@/components/shell/PageHeader';
 import {
@@ -84,11 +84,23 @@ export function RssReadPage(props: RssReadPageProps) {
     return s.length > 0 ? s[s.length - 1]! : null;
   };
 
+  /** 丢弃过期 pushEntry（StrictMode 双挂载 / 快速切换文章） */
+  let loadSeq = 0;
+  let loadAbort: AbortController | null = null;
+
+  const isLoadCurrent = (seq: number, signal: AbortSignal) =>
+    seq === loadSeq && !signal.aborted;
+
   async function pushEntry(
     source: RssSource,
     article: RssArticle | null,
     opts?: { openUrl?: string; useStartHtml?: boolean },
   ) {
+    loadAbort?.abort();
+    const controller = new AbortController();
+    loadAbort = controller;
+    const seq = ++loadSeq;
+
     setLoading(true);
     setLoadError(null);
     setFrameTitle(undefined);
@@ -99,6 +111,8 @@ export function RssReadPage(props: RssReadPageProps) {
         openUrl: opts?.openUrl,
         useStartHtml: opts?.useStartHtml,
       });
+      if (!isLoadCurrent(seq, controller.signal)) return;
+
       const title = article?.title ?? session.title;
       setStack((prev) => [
         ...prev,
@@ -106,15 +120,25 @@ export function RssReadPage(props: RssReadPageProps) {
       ]);
       if (article?.link) {
         await markRssArticleAsRead(article.link, title);
+        if (!isLoadCurrent(seq, controller.signal)) return;
         window.dispatchEvent(new CustomEvent('rss-articles-refresh'));
       }
     } catch (e) {
+      if (!isLoadCurrent(seq, controller.signal)) return;
       console.error('加载 RSS 阅读会话失败:', e);
       setLoadError(e instanceof Error ? e.message : '加载失败');
     } finally {
-      setLoading(false);
+      if (isLoadCurrent(seq, controller.signal)) {
+        setLoading(false);
+      }
     }
   }
+
+  onCleanup(() => {
+    loadAbort?.abort();
+    loadAbort = null;
+    loadSeq += 1;
+  });
 
   useBackHandler(() => () => {
     const s = stack();
@@ -312,7 +336,7 @@ export function RssReadPage(props: RssReadPageProps) {
             {(item, i) => (
               <button
                 type="button"
-                class="max-w-[8rem] truncate rounded px-2 py-0.5 hover:bg-muted"
+                class="max-w-32 truncate rounded px-2 py-0.5 hover:bg-muted"
                 classList={{ 'bg-muted font-medium text-foreground': i() === stack().length - 1 }}
                 onClick={() => setStack(stack().slice(0, i() + 1))}
               >

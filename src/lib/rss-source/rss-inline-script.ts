@@ -12,3 +12,10 @@ export function inlineScriptTag(code: string | undefined | null): string {
   if (!body) return '';
   return `<script>${body}</script>`;
 }
+
+/** 防止 analyze 结果内联脚本中的 </script> 被 HTML 解析器截断 */
+export function sanitizeHtmlInlineScripts(html: string): string {
+  return html.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi, (_m, open, body, close) => {
+    return `${open}${escapeInlineScriptSource(body)}${close}`;
+  });
+}

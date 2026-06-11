@@ -18,6 +18,8 @@ import {
 export interface RssPageSourceItemActions {
   onOpen: (source: RssSource) => void;
   onEdit?: (source: RssSource) => void;
+  onLogin?: (source: RssSource) => void;
+  hasLogin?: (source: RssSource) => boolean;
   onPinTop: (source: RssSource) => void;
   onPinBottom: (source: RssSource) => void;
   onToggleEnable: (source: RssSource) => void;
@@ -44,6 +46,11 @@ function RssPageSourceContextMenu(props: {
         <AppContextMenuItem onSelect={() => props.actions.onEdit?.(props.source)}>
           编辑
         </AppContextMenuItem>
+        <Show when={props.actions.hasLogin?.(props.source)}>
+          <AppContextMenuItem onSelect={() => props.actions.onLogin?.(props.source)}>
+            登录
+          </AppContextMenuItem>
+        </Show>
         <AppContextMenuItem onSelect={() => props.actions.onPinTop(props.source)}>
           置顶
         </AppContextMenuItem>

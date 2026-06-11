@@ -7,10 +7,34 @@ import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule
 import { fetchRssPage } from '@/lib/rss-source/fetch-rss-page';
 import type { RssSource } from '@/types';
 import type { RssArticle, NewRssArticle } from '@/types';
-import { resolveUrl, detectContentType, buildUrl } from '@/lib/book-source/utils';
+import { resolveLegadoRuleUrl } from '@/lib/book-source/analyze-search-url';
+import { resolveUrl, detectContentType } from '@/lib/book-source/utils';
+import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 import { parseRssDefault } from '@/lib/rss-source/rss-parser-default';
 import { logRssArticleCoverParsed } from '@/lib/rss-source/rss-cover-image';
 import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
+
+function isLikelyArticleImageUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('<') || trimmed.includes('href=') || trimmed.includes('%3C')) {
+    return false;
+  }
+  if (/^data:image\//i.test(trimmed)) return true;
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('//');
+}
+
+function resolveArticleImageUrl(image: string | undefined, baseUrl: string): string | undefined {
+  if (!image?.trim()) return undefined;
+  const trimmed = image.trim();
+  if (isLikelyArticleImageUrl(trimmed)) {
+    return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('data:')
+      ? trimmed
+      : resolveUrl(baseUrl, trimmed);
+  }
+  const resolved = resolveUrl(baseUrl, trimmed);
+  return isLikelyArticleImageUrl(resolved) ? resolved : undefined;
+}
 
 /**
  * 获取RSS文章列表
@@ -25,8 +49,8 @@ export async function getRssArticles(
   const parseMode = source.ruleArticles ? 'rule' : 'default-xml';
 
   try {
-    // 构建URL（支持分页）
-    const url = buildUrl(sortUrl, { page: page.toString() });
+    // 展开 {{page == 1? ...}} 等 Legado 模板（对齐 AnalyzeUrl）
+    const url = await resolveLegadoRuleUrl(sortUrl, rssAsBookSource(source), { page });
 
     rssLog(source, '请求文章列表', {
       sort: sortName || '默认',
@@ -209,11 +233,7 @@ async function parseRssArticle(
       ? await analyzeString(source.ruleImage, context)
       : undefined;
 
-    // 解析图片URL（如果是相对URL，转换为绝对URL）
-    let imageUrl: string | undefined;
-    if (image) {
-      imageUrl = resolveUrl(baseUrl, image);
-    }
+    const imageUrl = resolveArticleImageUrl(image, baseUrl);
 
     logRssArticleCoverParsed(source, title, imageUrl);
 

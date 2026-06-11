@@ -18,6 +18,11 @@ export function rssSourceAsBookSource(source: RssSource): BookSource {
   } as unknown as BookSource;
 }
 
+/** 订阅源是否支持登录（对齐 legado RssAdapter：loginUrl 非空） */
+export function rssSourceHasLogin(source: RssSource): boolean {
+  return !!(source.loginUrl?.trim() || source.loginUi?.trim());
+}
+
 export async function openRssSourceLogin(
   source: RssSource,
   openDialog: (book: BookSource) => void,

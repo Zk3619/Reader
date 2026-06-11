@@ -21,6 +21,7 @@ import {
   FolderPlusIcon,
   LinkIcon,
   ScanQrCodeIcon,
+  CodeIcon,
   ChevronLeftIcon,
   XIcon,
 } from '@/components/shared/icons';
@@ -42,6 +43,7 @@ export interface RssSourcesManagePageToolbarProps {
   onSourcesImportLocal?: () => void;
   onSourcesImportNetwork?: () => void;
   onSourcesImportQR?: () => void;
+  onSourcesImportCode?: () => void;
   enableDragSort?: boolean;
   onEnableDragSortChange?: (value: boolean) => void;
 }
@@ -193,6 +195,10 @@ export function RssSourcesManagePageToolbar(props: RssSourcesManagePageToolbarPr
           <AppDropdownMenuItem onSelect={() => props.onSourcesImportQR?.()}>
             <ScanQrCodeIcon class="h-4 w-4" />
             <span>二维码导入</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => props.onSourcesImportCode?.()}>
+            <CodeIcon class="h-4 w-4" />
+            <span>代码导入</span>
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>

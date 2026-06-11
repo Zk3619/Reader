@@ -17,6 +17,16 @@ export async function getAllRssReadRecords(): Promise<RssReadRecord[]> {
   return rows.map((row) => mapRowToRecord(row));
 }
 
+/** 按订阅源 origin 筛选阅读记录（对齐 Legado getRecordsByOrigin） */
+export async function getRssReadRecordsByOrigin(origin: string): Promise<RssReadRecord[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM rssReadRecords WHERE origin = ? ORDER BY readTime DESC',
+    [origin],
+  );
+  return rows.map((row) => mapRowToRecord(row));
+}
+
 /**
  * 获取阅读记录
  */

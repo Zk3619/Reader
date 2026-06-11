@@ -2,7 +2,7 @@
  * RSS 阅读 WebView：iframe + Cookie 代理，对齐 Legado ReadRssActivity WebView
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js';
 import type { RssReadSession } from '@/lib/rss-source/rss-read-session';
 import type { RssSource } from '@/types';
 import {
@@ -28,10 +28,10 @@ import {
 } from '@/lib/rss-source/rss-parent-fetch-bridge';
 import { buildRssSubframeFetchPatch } from '@/lib/rss-source/rss-subframe-fetch-patch';
 import {
-  buildRssDataDocumentUrl,
+  needsRssScriptRevive,
   reviveRssInlineScripts,
   RSS_IMG_CHANNEL,
-  shouldUseRssContentSrcdoc,
+  writeRssContentDocumentToFrame,
 } from '@/lib/rss-source/rss-content-document';
 import { loadRssArticleCoverBlob } from '@/lib/rss-source/rss-cover-image';
 import { RSS_FETCH_CHANNEL } from '@/lib/rss-source/rss-parent-fetch-bridge';
@@ -109,6 +109,7 @@ export function RssReadWebView(props: RssReadWebViewProps) {
   const [proxyFailed, setProxyFailed] = createSignal(false);
   let proxySessionId: string | undefined;
   let contentProxySessionIdRef: string | undefined;
+  let contentDocRevoke: (() => void) | undefined;
   let appliedLoadKey = '';
   let loadWatchdog: ReturnType<typeof setTimeout> | undefined;
 
@@ -124,8 +125,6 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     if (!useHtml()) return '';
     return wrapRssDocumentHtml(props.session);
   });
-
-  const useSrcdocForContent = createMemo(() => shouldUseRssContentSrcdoc());
 
   const fetchSubframeHtml = async (url: string): Promise<string> => {
     const trimmed = url.trim();
@@ -183,6 +182,26 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     onCleanup(uninstall);
   });
 
+  const ensureSubframeFetchBridge = (frame: HTMLIFrameElement) => {
+    try {
+      const doc = frame.contentDocument;
+      const win = doc?.defaultView as
+        | (Window & { __READER_RSS_FETCH__?: unknown; __READER_RSS_IFRAME_PATCH__?: unknown })
+        | null;
+      if (!doc || props.session.enableJs === false) return;
+      const html = props.session.html ?? '';
+      if (!rssContentNeedsSubframeBridge(html, true)) return;
+      if (!win?.__READER_RSS_FETCH__) {
+        injectScriptIntoFrame(frame, 'reader-rss-fetch-bridge', buildRssParentFetchBridgeScript());
+      }
+      if (!win?.__READER_RSS_IFRAME_PATCH__) {
+        injectScriptIntoFrame(frame, 'reader-rss-iframe-patch', buildRssSubframeFetchPatch());
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   const injectBridgeToFrame = (frame: HTMLIFrameElement) => {
     try {
       const doc = frame.contentDocument;
@@ -205,18 +224,12 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     try {
       const doc = frame.contentDocument;
       if (doc && useHtml()) {
-        const win = doc.defaultView as (Window & { __READER_RSS_FETCH__?: unknown }) | null;
-        if (
-          props.session.enableJs !== false &&
-          rssContentNeedsSubframeBridge(props.session.html ?? '', true) &&
-          !win?.__READER_RSS_FETCH__
-        ) {
-          injectScriptIntoFrame(frame, 'reader-rss-fetch-bridge', buildRssParentFetchBridgeScript());
-          injectScriptIntoFrame(frame, 'reader-rss-iframe-patch', buildRssSubframeFetchPatch());
-        }
-        const revived = reviveRssInlineScripts(doc);
-        if (import.meta.env.DEV && revived > 0) {
-          console.info('[RssReadWebView] 复活正文脚本', revived);
+        ensureSubframeFetchBridge(frame);
+        if (needsRssScriptRevive(doc)) {
+          const revived = reviveRssInlineScripts(doc);
+          if (import.meta.env.DEV && revived > 0) {
+            console.info('[RssReadWebView] 复活正文脚本', revived);
+          }
         }
       }
     } catch {
@@ -279,16 +292,11 @@ export function RssReadWebView(props: RssReadWebViewProps) {
       const html = embeddedHtml();
       if (!html || appliedLoadKey === key) return;
       appliedLoadKey = key;
-      frame.removeAttribute('src');
-      if (useSrcdocForContent()) {
-        frame.removeAttribute('src');
-        frame.srcdoc = html;
-      } else {
-        frame.removeAttribute('srcdoc');
-        frame.src = buildRssDataDocumentUrl(html);
-      }
+      contentDocRevoke?.();
+      contentDocRevoke = writeRssContentDocumentToFrame(frame, html);
       setLoading(true);
       armLoadWatchdog();
+      handleFrameLoad();
       return;
     }
 
@@ -301,132 +309,134 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     armLoadWatchdog();
   });
 
-  onMount(() => {
-    const onMessage = (ev: MessageEvent) => {
-      const d = ev.data as {
-        channel?: string;
-        action?: string;
-        href?: string;
-        target?: string;
-        name?: string;
-        url?: string;
-        title?: string;
-        origin?: string;
-        src?: string;
-        id?: string;
-        ok?: boolean;
-        body?: string;
-        error?: string;
-      };
-      if (!d?.channel) return;
-      const frame = iframeEl();
-
-      if (d.channel === RSS_FETCH_CHANNEL && d.id && d.url) {
-        void (async () => {
-          const target = frame?.contentWindow;
-          if (!target) return;
-          try {
-            const body = await fetchSubframeHtml(String(d.url));
-            if (import.meta.env.DEV) {
-              console.info('[RssReadWebView] 分页 HTML', {
-                url: String(d.url).slice(0, 120),
-                length: body.length,
-              });
-            }
-            target.postMessage(
-              { channel: RSS_FETCH_CHANNEL, id: d.id, ok: true, body },
-              '*',
-            );
-          } catch (e) {
-            console.warn('[RssReadWebView] 分页 HTML 失败', d.url, e);
-            target.postMessage(
-              {
-                channel: RSS_FETCH_CHANNEL,
-                id: d.id,
-                ok: false,
-                error: e instanceof Error ? e.message : String(e),
-              },
-              '*',
-            );
-          }
-        })();
-        return;
-      }
-
-      if (d.channel === RSS_IMG_CHANNEL && d.id && d.url) {
-        void (async () => {
-          const target = frame?.contentWindow;
-          if (!target) return;
-          try {
-            const blobUrl = await loadRssArticleCoverBlob(props.source, String(d.url));
-            if (!blobUrl) throw new Error('图片加载失败');
-            target.postMessage(
-              { channel: RSS_IMG_CHANNEL, id: d.id, ok: true, blobUrl },
-              '*',
-            );
-          } catch (e) {
-            if (import.meta.env.DEV) {
-              console.warn('[RssReadWebView] 正文图失败', d.url, e);
-            }
-            target.postMessage(
-              {
-                channel: RSS_IMG_CHANNEL,
-                id: d.id,
-                ok: false,
-                error: e instanceof Error ? e.message : String(e),
-              },
-              '*',
-            );
-          }
-        })();
-        return;
-      }
-
-      if (frame && ev.source !== frame.contentWindow) return;
-      if (d.channel !== RSS_READ_CHANNEL) return;
-
-      if (d.action === 'link' && d.href) {
-        void props.onLinkClick(d.href, d.target ?? null);
-        return;
-      }
-      if (d.action === 'javaOpen' && d.name && props.javaHandlers) {
-        void handleRssJavaOpen(
-          props.source,
-          props.javaHandlers,
-          d.name,
-          d.url,
-          d.title,
-          d.origin,
-        );
-        return;
-      }
-      if (d.action === 'showPhoto' && d.src?.trim()) {
-        props.javaHandlers?.onShowPhoto?.(d.src.trim(), props.source.sourceUrl);
-      }
+  /** 须在 document.write 正文脚本之前注册，否则分页 fetch postMessage 会丢失 */
+  const onMessage = (ev: MessageEvent) => {
+    const d = ev.data as {
+      channel?: string;
+      action?: string;
+      href?: string;
+      target?: string;
+      name?: string;
+      url?: string;
+      title?: string;
+      origin?: string;
+      src?: string;
+      id?: string;
+      ok?: boolean;
+      body?: string;
+      error?: string;
     };
-    window.addEventListener('message', onMessage);
+    if (!d?.channel) return;
+    const frame = iframeEl();
 
-    const navHandler = (ev: Event) => {
-      const url = (ev as CustomEvent<{ url: string }>).detail?.url?.trim();
-      if (!url) return;
-      void navigateTo(url);
-    };
-    window.addEventListener('reader-rss-read-navigate', navHandler);
+    if (d.channel === RSS_FETCH_CHANNEL && d.id && d.url) {
+      void (async () => {
+        const target = frame?.contentWindow;
+        if (!target) return;
+        try {
+          const body = await fetchSubframeHtml(String(d.url));
+          if (import.meta.env.DEV) {
+            console.info('[RssReadWebView] 分页 HTML', {
+              url: String(d.url).slice(0, 120),
+              length: body.length,
+            });
+          }
+          target.postMessage(
+            { channel: RSS_FETCH_CHANNEL, id: d.id, ok: true, body },
+            '*',
+          );
+        } catch (e) {
+          console.warn('[RssReadWebView] 分页 HTML 失败', d.url, e);
+          target.postMessage(
+            {
+              channel: RSS_FETCH_CHANNEL,
+              id: d.id,
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            },
+            '*',
+          );
+        }
+      })();
+      return;
+    }
 
-    onCleanup(() => {
-      clearLoadWatchdog();
-      window.removeEventListener('message', onMessage);
-      window.removeEventListener('reader-rss-read-navigate', navHandler);
-      if (proxySessionId) {
-        void deleteInnerWebProxySession(proxySessionId);
-        proxySessionId = undefined;
-      }
-      const proxyId = contentProxySessionIdRef ?? props.session.contentProxySessionId;
-      if (proxyId) {
-        void deleteInnerWebProxySession(proxyId);
-        contentProxySessionIdRef = undefined;
-      }
-    });
+    if (d.channel === RSS_IMG_CHANNEL && d.id && d.url) {
+      void (async () => {
+        const target = frame?.contentWindow;
+        if (!target) return;
+        try {
+          const blobUrl = await loadRssArticleCoverBlob(props.source, String(d.url));
+          if (!blobUrl) throw new Error('图片加载失败');
+          target.postMessage(
+            { channel: RSS_IMG_CHANNEL, id: d.id, ok: true, blobUrl },
+            '*',
+          );
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.warn('[RssReadWebView] 正文图失败', d.url, e);
+          }
+          target.postMessage(
+            {
+              channel: RSS_IMG_CHANNEL,
+              id: d.id,
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            },
+            '*',
+          );
+        }
+      })();
+      return;
+    }
+
+    if (frame && ev.source !== frame.contentWindow) return;
+    if (d.channel !== RSS_READ_CHANNEL) return;
+
+    if (d.action === 'link' && d.href) {
+      void props.onLinkClick(d.href, d.target ?? null);
+      return;
+    }
+    if (d.action === 'javaOpen' && d.name && props.javaHandlers) {
+      void handleRssJavaOpen(
+        props.source,
+        props.javaHandlers,
+        d.name,
+        d.url,
+        d.title,
+        d.origin,
+      );
+      return;
+    }
+    if (d.action === 'showPhoto' && d.src?.trim()) {
+      props.javaHandlers?.onShowPhoto?.(d.src.trim(), props.source.sourceUrl);
+    }
+  };
+
+  const navHandler = (ev: Event) => {
+    const url = (ev as CustomEvent<{ url: string }>).detail?.url?.trim();
+    if (!url) return;
+    void navigateTo(url);
+  };
+
+  window.addEventListener('message', onMessage);
+  window.addEventListener('reader-rss-read-navigate', navHandler);
+
+  onCleanup(() => {
+    clearLoadWatchdog();
+    window.removeEventListener('message', onMessage);
+    window.removeEventListener('reader-rss-read-navigate', navHandler);
+    contentDocRevoke?.();
+    contentDocRevoke = undefined;
+    if (proxySessionId) {
+      void deleteInnerWebProxySession(proxySessionId);
+      proxySessionId = undefined;
+    }
+    const proxyId = contentProxySessionIdRef ?? props.session.contentProxySessionId;
+    if (proxyId) {
+      void deleteInnerWebProxySession(proxyId);
+      contentProxySessionIdRef = undefined;
+    }
   });
 
   createEffect(() => {

@@ -41,6 +41,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { rssSourceHasLogin } from '@/lib/rss/open-rss-source-login';
 
 export interface RssPageProps {
   searchQuery?: string;
@@ -53,6 +54,7 @@ export interface RssPageProps {
   onOpenSourceArticles: (source: RssSource) => void;
   onOpenManage: () => void;
   onSourceEdit?: (source: RssSource) => void;
+  onSourceLogin?: (source: RssSource) => void;
 }
 
 export function RssPage(props: RssPageProps) {
@@ -196,6 +198,8 @@ export function RssPage(props: RssPageProps) {
   const itemActions = (): RssPageSourceItemActions => ({
     onOpen: (source) => props.onOpenSourceArticles(source),
     onEdit: props.onSourceEdit,
+    onLogin: props.onSourceLogin,
+    hasLogin: rssSourceHasLogin,
     onPinTop: (source) => void handlePinSource(source),
     onPinBottom: (source) => void handlePinToBottom(source),
     onToggleEnable: (source) => void handleToggleEnable(source),

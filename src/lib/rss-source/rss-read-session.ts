@@ -13,6 +13,8 @@ import { wrapRssHtmlForWebView, wrapRssStartHtml } from '@/lib/rss-source/rss-ht
 import { createInnerWebProxySession } from '@/lib/http/inner-web-proxy-session';
 import { rssContentNeedsAssetProxy } from '@/lib/rss-source/rss-content-image-proxy';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
+import { sanitizeHtmlInlineScripts } from '@/lib/rss-source/rss-inline-script';
+import { supplementEmptyRssGallery } from '@/lib/rss-source/rss-detail-gallery-fallback';
 import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 import { evalJs } from '@/lib/js-engine';
 
@@ -132,7 +134,7 @@ export async function fetchRssArticleContent(
       contentType: body.trim().startsWith('{') ? 'json' : 'html',
       baseUrl,
       result: body,
-      variables: { redirectUrl: finalUrl },
+      variables: { redirectUrl: finalUrl, title: article.title },
       source: source as unknown as Record<string, unknown>,
     };
 
@@ -143,12 +145,23 @@ export async function fetchRssArticleContent(
     }
 
     content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    const gallery = supplementEmptyRssGallery(content, body);
+    content = gallery.html;
+    content = sanitizeHtmlInlineScripts(content);
     content = await processContent(content, article.title, source.sourceUrl);
+    const imgCount = (content.match(/<img\b/gi) ?? []).length;
     rssLog(source, '正文解析完成', {
       length: content.length,
+      imgCount,
+      galleryFallback: gallery.supplemented,
       hasScript: /<script[\s>]/i.test(content),
-      hasImgList: /id=["']imgList["']/i.test(content),
     });
+    if (imgCount === 0) {
+      rssWarn(source, '正文无图片：ruleContent 选择器可能未匹配当前页面结构', {
+        link: articleUrl.slice(0, 200),
+        bodyLength: body.length,
+      });
+    }
     return content;
   } catch (e) {
     rssError(source, '正文拉取失败', e, { link: articleUrl.slice(0, 200) });

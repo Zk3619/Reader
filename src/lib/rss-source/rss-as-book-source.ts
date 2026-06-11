@@ -3,13 +3,16 @@
  */
 
 import type { BookSource, RssSource } from '@/types';
+import { stripLegadoSourceUrlMarker } from '@/lib/book-source/utils';
 
 /** 将 RssSource 映射为 BookSource 形态，供 fetchByAnalyzeUrl / Cookie 池使用 */
 export function rssAsBookSource(source: RssSource): BookSource {
   const s = source as RssSource & Partial<BookSource>;
+  const sourceUrl = stripLegadoSourceUrlMarker(source.sourceUrl.trim());
   return {
     ...s,
-    bookSourceUrl: s.bookSourceUrl ?? source.sourceUrl,
+    sourceUrl,
+    bookSourceUrl: s.bookSourceUrl?.trim() ?? sourceUrl,
     bookSourceName: s.bookSourceName ?? source.sourceName,
     sourceType: s.sourceType ?? source.type ?? 0,
     enableExplore: s.enableExplore ?? false,

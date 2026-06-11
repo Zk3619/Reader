@@ -12,7 +12,10 @@ import {
 } from '@/components/shared/AppDialog';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
-import { getAllRssReadRecords } from '@/lib/database/rss-read-records';
+import {
+  getAllRssReadRecords,
+  getRssReadRecordsByOrigin,
+} from '@/lib/database/rss-read-records';
 import type { RssReadRecord } from '@/types';
 import { cn } from '@/lib/utils';
 import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
@@ -20,6 +23,8 @@ import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
 export interface RssReadHistoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 仅显示指定订阅源的记录（对齐 Legado ReadRecordDialog sourceUrl 过滤） */
+  origin?: string;
   onOpenRecord?: (record: RssReadRecord) => void;
 }
 
@@ -48,7 +53,12 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
   async function reload() {
     setLoading(true);
     try {
-      setRecords(await getAllRssReadRecords());
+      const origin = props.origin?.trim();
+      setRecords(
+        origin
+          ? await getRssReadRecordsByOrigin(origin)
+          : await getAllRssReadRecords(),
+      );
     } finally {
       setLoading(false);
     }

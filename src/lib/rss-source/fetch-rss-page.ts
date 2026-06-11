@@ -51,20 +51,52 @@ function resolveRssPageUrl(source: RssSource, url: string, baseUrl?: string): st
   }
 }
 
+/** 合并同源并发 AnalyzeUrl，避免双挂载/重复拉取导致一次成功一次超时 */
+const inflightRssPages = new Map<string, Promise<FetchRssPageResult>>();
+
+const RSS_PAGE_FETCH_TIMEOUT_MS = 60_000;
+
+function rssPageInflightKey(source: RssSource, pageUrl: string): string {
+  return `${source.sourceUrl.trim()}\0${pageUrl}`;
+}
+
 /**
  * 按 AnalyzeUrl 拉取 RSS 正文页 HTML
  */
 export async function fetchRssPage(params: FetchRssPageParams): Promise<FetchRssPageResult> {
-  const book = rssAsBookSource(params.source);
   const pageUrl = resolveRssPageUrl(params.source, params.url, params.baseUrl);
+  const inflightKey = rssPageInflightKey(params.source, pageUrl);
+  const existing = inflightRssPages.get(inflightKey);
+  if (existing) return existing;
+
+  const promise = fetchRssPageOnce(params, pageUrl);
+  inflightRssPages.set(inflightKey, promise);
+  try {
+    return await promise;
+  } finally {
+    if (inflightRssPages.get(inflightKey) === promise) {
+      inflightRssPages.delete(inflightKey);
+    }
+  }
+}
+
+async function fetchRssPageOnce(
+  params: FetchRssPageParams,
+  pageUrl: string,
+): Promise<FetchRssPageResult> {
+  const book = rssAsBookSource(params.source);
 
   rssLog(params.source, 'AnalyzeUrl 请求', { url: pageUrl.slice(0, 200) });
 
   const buildParams = () => ({
     ruleUrl: pageUrl,
     source: book,
-    baseUrl: params.baseUrl ?? resolveBookSourceRequestOrigin(book) ?? params.source.sourceUrl,
+    baseUrl:
+      params.baseUrl?.trim() ||
+      resolveBookSourceRequestOrigin(book) ||
+      params.source.sourceUrl.trim(),
     cookies: resolveSourceCookiesForHttp(book, pageUrl),
+    timeoutMs: RSS_PAGE_FETCH_TIMEOUT_MS,
   });
 
   const maybeRetryAfterCf = async (): Promise<FetchRssPageResult> => {

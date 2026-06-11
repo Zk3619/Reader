@@ -2,7 +2,7 @@
  * RSS 正文 HTML 文档：data/srcdoc 加载 + 脚本复活 + 图片桥接
  */
 
-import { isTauri } from '@/lib/platform/detect';
+import { buildBlobDocumentUrl, revokeBlobDocumentUrl } from '@/lib/platform/inner-web-document-html';
 import { inlineScriptTag } from '@/lib/rss-source/rss-inline-script';
 
 export const RSS_IMG_CHANNEL = 'reader-rss-img';
@@ -13,9 +13,56 @@ export function buildRssDataDocumentUrl(html: string): string {
   return `data:text/html;charset=utf-8;base64,${b64}`;
 }
 
-/** RSS ruleContent 始终用预取 HTML，不走书源直连 URL */
+/**
+ * RSS ruleContent 不用 srcdoc（内联脚本在部分 WebView 不执行）。
+ * 统一走 writeRssContentDocumentToFrame（对齐 Legado loadDataWithBaseURL）。
+ */
 export function shouldUseRssContentSrcdoc(): boolean {
-  return !isTauri();
+  return false;
+}
+
+/** 正文脚本是否仍停在模板初始文案（未执行或执行失败） */
+export function needsRssScriptRevive(doc: Document): boolean {
+  const bar = doc.getElementById('statusBar');
+  if (!bar) return false;
+  const text = bar.textContent?.trim() ?? '';
+  return text === '加载中…' || text === '加载中...' || text === '加载中';
+}
+
+/**
+ * 将预取 HTML 写入 iframe（document.write + blob 回退），保证 head/body 脚本按序执行。
+ * 返回 revoke，用于释放 blob: URL。
+ */
+export function writeRssContentDocumentToFrame(
+  frame: HTMLIFrameElement,
+  html: string,
+): () => void {
+  frame.removeAttribute('srcdoc');
+  let blobUrl: string | undefined;
+
+  const tryDocumentWrite = (): boolean => {
+    try {
+      const doc = frame.contentDocument;
+      if (!doc) return false;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (!tryDocumentWrite()) {
+    blobUrl = buildBlobDocumentUrl(html);
+    frame.src = blobUrl;
+  } else {
+    frame.removeAttribute('src');
+  }
+
+  return () => {
+    if (blobUrl) revokeBlobDocumentUrl(blobUrl);
+  };
 }
 
 /** 正文内 CDN 图经父页 fetch→blob（iframe 无法带 Referer） */
@@ -107,15 +154,23 @@ export function injectRssContentImageBridge(html: string): string {
   return `<head>${tag}</head>${html}`;
 }
 
-/** WebView 偶发不执行 body 内联脚本：加载后克隆重插 */
+/** WebView 偶发不执行 body 内联脚本：加载后克隆重插（须在 fetch/iframe 补丁注入之后） */
 export function reviveRssInlineScripts(doc: Document): number {
   const scripts = doc.querySelectorAll('body script:not([src])');
   let count = 0;
   scripts.forEach((old) => {
+    if (old.getAttribute('data-reader-revived') === '1') return;
     const code = old.textContent?.trim();
     if (!code) return;
+    try {
+      new Function(code);
+    } catch {
+      old.setAttribute('data-reader-revived', '1');
+      return;
+    }
     const neu = doc.createElement('script');
     neu.textContent = code;
+    neu.setAttribute('data-reader-revived', '1');
     old.parentNode?.replaceChild(neu, old);
     count += 1;
   });
