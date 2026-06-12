@@ -43,6 +43,7 @@ export const RULE_SCRIPT_JSLIB_THIS_BIND_SHIM = `
       java: { get: function() { return java; }, configurable: true },
       cache: { get: function() { return cache; }, configurable: true },
       source: { get: function() { return source; }, configurable: true },
+      cookie: { get: function() { return cookie; }, configurable: true },
       baseUrl: { get: function() { return baseUrl; }, configurable: true },
     });
   } catch (e) {}
@@ -80,6 +81,12 @@ export const RULE_SCRIPT_JSLIB_THIS_BIND_SHIM = `
     var __readerDuoyeHtml = duoyeHtml;
     duoyeHtml = function() {
       return __readerDuoyeHtml.apply(__ctx, arguments);
+    };
+  }
+  if (typeof getTimeList === 'function') {
+    var __readerGetTimeList = getTimeList;
+    getTimeList = function() {
+      return __readerGetTimeList.apply(__ctx, arguments);
     };
   }
 })();
@@ -161,6 +168,9 @@ export function patchLegadoRuleScript(code: string): string {
   out = out.replace(DATA_JSON_PARSE_RE, DATA_JSON_PARSE_SAFE);
   out = out.replace(SHOW_SOURCE_CATALOG_TAIL_RE, SHOW_SOURCE_CATALOG_TAIL_FIX);
   out = out.replace(/\blet\s+start\s*=\s*start\s*\(\s*\)/g, 'var start = start()');
+  // with(__scope__) 下 let/const baseUrl 会 TDZ，无法再读 scope 注入的 baseUrl（微博博主 ruleArticles/ruleNextPage）
+  out = out.replace(/\blet\s+baseUrl\s*=/g, 'baseUrl =');
+  out = out.replace(/\bconst\s+baseUrl\s*=/g, 'baseUrl =');
   if (/\bcontent_url\s*=/.test(out) && !/\breturn\b/.test(out)) {
     out += '\nreturn content_url;';
   }

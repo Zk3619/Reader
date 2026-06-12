@@ -17,26 +17,10 @@ import {
   needsLegadoRuleScriptRunner,
   runLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-runner';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 import {
-  resolveJsLibString,
   scriptReferencesJsLibFunctions,
 } from '@/lib/js-engine/legado/resolve-js-lib';
-import {
-  buildRuleScriptFullBody,
-} from '@/lib/js-engine/legado/rule-script-patches';
-import {
-  createLegadoScriptCache,
-  buildLegadoScriptSourceFace,
-  createSourceVariableHandlers,
-  getLegadoSourceKey,
-  getSourceArgsKey,
-  LEGADO_LEGACY_PACKAGES_SHIM,
-} from '@/lib/js-engine/legado/source-script-shared';
-import {
-  legadoAesBase64DecodeToString,
-  legadoJavaGetWebViewUA,
-  legadoJavaMd5Encode,
-} from '@/lib/js-engine/legado/legado-java-crypto';
 import { unwrapLegadoJsSnippet } from '@/lib/rule-engine/legado-source-rule';
 import type { BookSource } from '@/types';
 
@@ -97,25 +81,20 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
   const script = unwrapLegadoJsSnippet(code);
   if (!script) return null;
 
-  if (needsLegadoRuleScriptRunner(script)) {
+  const jsLibRaw =
+    typeof context.source?.jsLib === 'string' ? (context.source.jsLib as string) : '';
+  const useRuleScriptRunner =
+    needsLegadoRuleScriptRunner(script) || shouldPrependJsLib(script, jsLibRaw);
+
+  if (useRuleScriptRunner) {
     try {
       return await runLegadoRuleScript(script, context, context.bookSource);
     } catch (e) {
+      if (e instanceof SuspendScript) throw e;
       console.error('[js-engine] rule-script 执行失败:', e);
       if (context.nonBlockingBrowserAwait) {
         throw e;
       }
-      return null;
-    }
-  }
-
-  const jsLibRaw =
-    typeof context.source?.jsLib === 'string' ? (context.source.jsLib as string) : '';
-  if (shouldPrependJsLib(script, jsLibRaw)) {
-    try {
-      return await evalJsWithJsLib(script, context, jsLibRaw);
-    } catch (error) {
-      console.error('JS执行错误(jsLib):', error, '代码:', script);
       return null;
     }
   }
@@ -140,165 +119,6 @@ export async function evalJs(code: string, context: JsContext): Promise<unknown>
     console.error('JS执行错误:', error, '代码:', script);
     return null;
   }
-}
-
-async function evalJsWithJsLib(
-  code: string,
-  context: JsContext,
-  jsLibRaw: string,
-): Promise<unknown> {
-  const resolvedJsLib = await resolveJsLibString(jsLibRaw);
-  const legadoCache = createLegadoScriptCache();
-  const bookSource = context.bookSource;
-  const sourceVars =
-    bookSource != null
-      ? createSourceVariableHandlers(bookSource, getSourceArgsKey(bookSource))
-      : null;
-  const sourceFace =
-    bookSource != null && sourceVars
-      ? buildLegadoScriptSourceFace(bookSource, sourceVars, getLegadoSourceKey(bookSource))
-      : { ...(context.source ?? {}) };
-  const headerRaw =
-    bookSource && typeof bookSource.header === 'string' ? bookSource.header : undefined;
-  const scopedKey = String(
-    (bookSource ? getLegadoSourceKey(bookSource) : '') ||
-      (context.source as Record<string, unknown> | undefined)?.sourceUrl ||
-      context.baseUrl ||
-      'global',
-  );
-  let fallbackStore = fallbackScopedStore.get(scopedKey);
-  if (!fallbackStore) {
-    fallbackStore = new Map<string, unknown>();
-    fallbackScopedStore.set(scopedKey, fallbackStore);
-  }
-
-  const ruleContent =
-    context.ruleContent ??
-    (typeof context.result === 'string' ? context.result : '');
-  const analyzeBridge = createRuleJavaAnalyzeBridge({
-    baseUrl: context.baseUrl,
-    initialContent: ruleContent,
-  });
-
-  const toStringSafe = (input: unknown): string => {
-    if (input == null) return '';
-    return typeof input === 'string' ? input : String(input);
-  };
-  const readVariable = (key: string): string => {
-    const k = key.trim();
-    if (!k) return '';
-    const fromVars = context.variables?.[k];
-    if (fromVars != null) return toStringSafe(fromVars);
-    const hit = fallbackStore.get(k);
-    return hit == null ? '' : toStringSafe(hit);
-  };
-
-  const java = {
-    log(..._args: unknown[]) {},
-    toast(...args: unknown[]) {
-      context.onScriptToast?.(args[0], 'info');
-    },
-    longToast(...args: unknown[]) {
-      context.onScriptToast?.(args[0], 'warning');
-    },
-    put(key: string, val: unknown) {
-      const k = String(key);
-      fallbackStore.set(k, val);
-      if (context.variables) context.variables[k] = val;
-      legadoCache.put(k, val);
-    },
-    get(keyOrUrl: string) {
-      const candidate = toStringSafe(keyOrUrl);
-      if (/^https?:\/\//i.test(candidate)) return '';
-      const fromCache = legadoCache.get(candidate);
-      if (fromCache != null && fromCache !== 0) return toStringSafe(fromCache);
-      return readVariable(candidate);
-    },
-    getString(rule: string) {
-      return javaGetString(rule, {
-        content: ruleContent,
-        contentType: context.ruleContentType,
-        baseUrl: context.baseUrl,
-        variables: context.variables,
-        getVariable: readVariable,
-      });
-    },
-    setContent(content: unknown, url?: unknown) {
-      return analyzeBridge.setContent(content, url);
-    },
-    setBaseUrl(url: unknown) {
-      return analyzeBridge.setBaseUrl(url);
-    },
-    getElements(ruleStr: string) {
-      return analyzeBridge.getElements(ruleStr);
-    },
-    getElement(ruleStr: string) {
-      const list = analyzeBridge.getElements(ruleStr);
-      return list[0] ?? '';
-    },
-    md5Encode(input: unknown) {
-      return legadoJavaMd5Encode(String(input ?? ''));
-    },
-    aesBase64DecodeToString(data: unknown, key: unknown, transformation: unknown, iv: unknown) {
-      return legadoAesBase64DecodeToString(
-        String(data ?? ''),
-        String(key ?? ''),
-        String(transformation ?? ''),
-        String(iv ?? ''),
-      );
-    },
-    getWebViewUA() {
-      return legadoJavaGetWebViewUA(headerRaw);
-    },
-    base64Decode(str: unknown) {
-      try {
-        const s = String(str ?? '');
-        return typeof atob !== 'undefined'
-          ? decodeURIComponent(escape(atob(s)))
-          : s;
-      } catch {
-        return String(str ?? '');
-      }
-    },
-    base64Encode(str: unknown) {
-      try {
-        const s = String(str ?? '');
-        return typeof btoa !== 'undefined'
-          ? btoa(unescape(encodeURIComponent(s)))
-          : s;
-      } catch {
-        return String(str ?? '');
-      }
-    },
-  };
-
-  const scope: Record<string, unknown> = {
-    result: normalizeJsRuleResult(context.result),
-    baseUrl: context.baseUrl,
-    book: context.book ?? {},
-    source: sourceFace,
-    chapter: context.chapter ?? {},
-    cache: legadoCache,
-    Packages: LEGADO_LEGACY_PACKAGES_SHIM,
-    java,
-    JSON,
-    toast(msg?: unknown, level?: unknown) {
-      context.onScriptToast?.(msg, level ?? 'info');
-    },
-    longToast(msg?: unknown) {
-      context.onScriptToast?.(msg, 'warning');
-    },
-  };
-
-  const userBody = wrapLegadoJsBodyWithImplicitReturn(code);
-  const fullBody = buildRuleScriptFullBody(userBody, resolvedJsLib);
-  const fn = new Function('__scope__', `with (__scope__) {\n${fullBody}\n}`);
-  const out = fn(scope);
-  if (out === undefined || out === null) {
-    const bound = scope.result;
-    return bound === undefined || bound === null ? null : bound;
-  }
-  return out;
 }
 
 async function evalJsQuickJS(code: string, context: JsContext): Promise<unknown> {
@@ -455,7 +275,9 @@ function evalJsFallback(code: string, context: JsContext): unknown {
     },
     hexDecodeToString(hex: string): string {
       try {
-        const bytes = new Uint8Array((hex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)));
+        const text = String(hex ?? '').trim();
+        if (/^https?:\/\//i.test(text)) return text;
+        const bytes = new Uint8Array((text.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)));
         return new TextDecoder('utf-8').decode(bytes);
       } catch {
         return String(hex);

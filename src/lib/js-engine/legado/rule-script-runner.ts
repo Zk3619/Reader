@@ -3,6 +3,7 @@
  * 对齐 Legado AnalyzeRule.evalJS bindings：src、java.getString(含嵌套 <js>)、java.ajax 同步语义
  */
 
+import { HttpError } from '@/lib/http';
 import { extractApiContent } from '@/lib/book-source/extract-api-content';
 import { resolveUrl } from '@/lib/book-source/utils';
 import {
@@ -21,6 +22,8 @@ import {
   getLegadoSourceKey,
   hostsFromJsLib,
   createLegadoLoginInfoMap,
+  readSourceLoginInfoJson,
+  writeSourceLoginInfo,
 } from '@/lib/js-engine/legado/source-script-shared';
 import {
   legadoAesBase64DecodeToString,
@@ -31,6 +34,13 @@ import {
   patchLegadoRuleScript,
 } from '@/lib/js-engine/legado/rule-script-patches';
 import { resolveJsLibString } from '@/lib/js-engine/legado/resolve-js-lib';
+import { runWebJs } from '@/lib/rule-engine/webjs-runner';
+import {
+  buildLatencyCheckWebViewCacheKey,
+  extractLatencyCheckUrls,
+  isLatencyCheckWebViewHtml,
+  probeUrlLatencyList,
+} from '@/lib/js-engine/legado/rule-script-webview-latency';
 import { legadoCookieGetKey } from '@/lib/js-engine/legado/login-script-runner';
 import { javaGetString, type JavaGetStringContext } from '@/lib/rule-engine/java-get-string';
 import { createRuleJavaAnalyzeBridge } from '@/lib/rule-engine/rule-java-analyze-bridge';
@@ -406,6 +416,7 @@ export async function runLegadoRuleScript(
   }
 
   const ajaxCache = new Map<string, string>();
+  const ajaxFailedKeys = new Set<string>();
   const postCache = new Map<string, string>();
   let pending: Promise<void>[] = [];
   const browserState = createRuleScriptBrowserState();
@@ -478,6 +489,10 @@ export async function runLegadoRuleScript(
     remove(key: string) {
       legadoMemory.delete(String(key));
     },
+    /** 对齐 Legado Rhino cache.delete（辞晨 TD 等 jsLib） */
+    delete(key: string) {
+      legadoMemory.delete(String(key));
+    },
     putMemory(key: string, value: unknown) {
       legadoMemory.set(String(key), value);
     },
@@ -546,7 +561,12 @@ export async function runLegadoRuleScript(
               getLegadoSourceKey(bookSource),
             )
           : bookSource
-            ? { getLoginInfoMap: () => createLegadoLoginInfoMap(bookSource) }
+            ? {
+                getLoginInfoMap: () => createLegadoLoginInfoMap(bookSource),
+                getLoginInfo: () => readSourceLoginInfoJson(bookSource),
+                putLoginInfo: (jsonStr: string) =>
+                  writeSourceLoginInfo(bookSource, String(jsonStr ?? '')),
+              }
             : {}),
         getVariable(key?: string) {
           if (sourceVariableHandlers) {
@@ -589,9 +609,48 @@ export async function runLegadoRuleScript(
           const k = String(key);
           if (context.variables) context.variables[k] = val;
         },
-        get(key: string) {
-          const v = context.variables?.[String(key).trim()];
-          return v == null ? '' : String(v);
+        /** 变量 @get 或 Legado JsExtensions.get(url, headers) → StrResponse.body() */
+        get(urlArg: unknown, headersArg?: unknown) {
+          const first = String(urlArg ?? '').trim();
+          const isHttpGet =
+            headersArg !== undefined &&
+            headersArg !== null &&
+            typeof headersArg === 'object';
+          if (!isHttpGet && first && !/^https?:\/\//i.test(first)) {
+            const v = context.variables?.[first];
+            return v == null ? '' : String(v);
+          }
+          if (!first) return createLegadoStrResponse('');
+          const resolved = /^https?:\/\//i.test(first)
+            ? first
+            : resolveUrl(baseUrl, first);
+          const headers = parseHeaderObject(headersArg);
+          const cacheKey = buildRuleScriptAjaxCacheKey(resolved, 'GET', '');
+          const cached = ajaxCache.get(cacheKey);
+          if (cached !== undefined) {
+            return createLegadoStrResponse(cached);
+          }
+          const p = requestLegadoRuleScriptHttpAsync(resolved, {
+            method: 'GET',
+            headers,
+            source: bookSource,
+            referer: baseUrl,
+          })
+            .then((text) => {
+              const body = String(text ?? '');
+              ajaxCache.set(cacheKey, body);
+            })
+            .catch((e) => {
+              console.warn('[rule-script] get failed:', resolved, e);
+              ajaxCache.set(cacheKey, '');
+            });
+          pending.push(p);
+          throw new SuspendScript(
+            p.then(() => ''),
+            POST_SUSPEND_WRITE_INDEX,
+            resolved,
+            Date.now(),
+          );
         },
         base64Decode(str: string) {
           try {
@@ -613,7 +672,8 @@ export async function runLegadoRuleScript(
         },
         hexDecodeToString(hex: string) {
           try {
-            const text = String(hex ?? '');
+            const text = String(hex ?? '').trim();
+            if (/^https?:\/\//i.test(text)) return text;
             const bytes = new Uint8Array(
               (text.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)),
             );
@@ -724,6 +784,9 @@ export async function runLegadoRuleScript(
           if (ajaxCache.has(cacheKey)) {
             return ajaxCache.get(cacheKey) ?? '';
           }
+          if (ajaxFailedKeys.has(cacheKey)) {
+            return '';
+          }
 
           const req = {
             method: parsed.method,
@@ -741,6 +804,15 @@ export async function runLegadoRuleScript(
               }
             })
             .catch((e) => {
+              if (
+                e instanceof HttpError &&
+                e.status >= 400 &&
+                e.status < 500 &&
+                e.status !== 408 &&
+                e.status !== 429
+              ) {
+                ajaxFailedKeys.add(cacheKey);
+              }
               console.warn('[rule-script] ajax failed:', resolved, e);
             });
 
@@ -804,6 +876,63 @@ export async function runLegadoRuleScript(
             String(url ?? ''),
             title == null ? undefined : String(title),
           );
+        },
+        webView(html?: unknown, url?: unknown, js?: unknown) {
+          const htmlStr = html != null ? String(html) : '';
+          const urlStr = url != null ? String(url).trim() : '';
+          const extractExpr = (js != null && String(js).trim()
+            ? String(js).trim()
+            : 'result'
+          ).replace(/^self\./, '');
+
+          const latencyUrls = isLatencyCheckWebViewHtml(htmlStr)
+            ? extractLatencyCheckUrls(htmlStr)
+            : null;
+          const cacheKey = latencyUrls
+            ? buildLatencyCheckWebViewCacheKey(latencyUrls)
+            : `webView:\0${urlStr}\0${htmlStr.length}\0${extractExpr}`;
+          const cached = ajaxCache.get(cacheKey);
+          if (cached !== undefined) {
+            return cached;
+          }
+
+          const p = latencyUrls
+            ? probeUrlLatencyList(latencyUrls)
+                .then((body) => {
+                  ajaxCache.set(cacheKey, body);
+                })
+                .catch((e) => {
+                  console.warn('[rule-script] 线路延迟探测失败:', e);
+                  ajaxCache.set(
+                    cacheKey,
+                    JSON.stringify(latencyUrls.map(() => 5000)),
+                  );
+                })
+            : runWebJs({
+                html: htmlStr,
+                url: /^https?:\/\//i.test(urlStr) ? urlStr : undefined,
+                baseUrl: /^https?:\/\//i.test(baseUrl)
+                  ? baseUrl
+                  : /^https?:\/\//i.test(urlStr)
+                    ? urlStr
+                    : '',
+                script: `return (${extractExpr});`,
+                source: bookSource,
+                jsLib,
+                timeoutMs: SCRIPT_TIMEOUT_MS,
+                delayMs: 6000,
+                isRule: true,
+              })
+                .then((body) => {
+                  ajaxCache.set(cacheKey, String(body ?? ''));
+                })
+                .catch((e) => {
+                  console.warn('[rule-script] webView failed:', e);
+                  ajaxCache.set(cacheKey, '[]');
+                });
+
+          pending.push(p);
+          return LEGADO_AJAX_PENDING_JSON;
         },
       },
     };

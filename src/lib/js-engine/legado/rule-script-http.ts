@@ -26,6 +26,7 @@ import {
   mergeLegadoCookieHeaderStrings,
   normalizeLegadoCookieHeader,
 } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
+import { readLoginHeaderMap } from '@/lib/js-engine/legado/source-script-shared';
 import { parseHeaders } from '@/lib/book-source/utils';
 import type { BookSource } from '@/types';
 import {
@@ -64,8 +65,12 @@ function buildRuleScriptRequestHeaders(
     ? resolveSourceCookiesForHttp(options.source, url).trim()
     : '';
 
+  const loginHeaders = options.source ? readLoginHeaderMap(options.source) : {};
   // Legado AnalyzeUrl.setCookie：CookieStore 先合并，urlOption（脚本 headers）同名键覆盖
-  let headers = mergeAjaxCookieHeaders({ ...baseHeaders, ...scriptHeaders }, stored);
+  let headers = mergeAjaxCookieHeaders(
+    { ...baseHeaders, ...loginHeaders, ...scriptHeaders },
+    stored,
+  );
   const deviceId = resolveLegadoDeviceId(
     headers.Cookie ?? stored,
     options.source,
@@ -92,7 +97,6 @@ function buildRuleScriptRequestHeaders(
   if (referer?.startsWith('http') && !headers.Referer && !headers.referer) {
     headers.Referer = referer;
   }
-
   if (/\/filemoreajax\.php/i.test(url) && options.method === 'POST') {
     headers['X-Requested-With'] ??= 'XMLHttpRequest';
     headers.Accept ??= 'application/json, text/javascript, */*; q=0.01';

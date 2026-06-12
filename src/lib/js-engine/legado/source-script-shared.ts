@@ -18,6 +18,8 @@ import { parseHostsFromJsLib } from '@/lib/js-engine/legado/jslib-hosts';
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
 export const STORAGE_PREFIX_LOGIN = 'reader_source_login_';
+/** 对齐 Legado CacheManager loginHeader_${key} */
+export const STORAGE_PREFIX_LOGIN_HEADER = 'reader_login_header_';
 /** CF 挑战后 panel 实际停留的 origin（镜像域，如 banzhu77777777.net） */
 export const STORAGE_PREFIX_CF_ORIGIN = 'reader_source_cf_origin_';
 /** CF 挑战时 panel 的 navigator.userAgent（须与后续 HTTP 一致） */
@@ -140,6 +142,25 @@ export function readSourceLoginInfoMap(source: BookSource): Record<string, strin
   }
 }
 
+/** 读取书源登录 JSON 字符串（对齐 Legado source.getLoginInfo） */
+export function readSourceLoginInfoJson(source: BookSource): string {
+  try {
+    return localStorage.getItem(getSourceLoginKey(source)) ?? '{}';
+  } catch {
+    return '{}';
+  }
+}
+
+/** 写入书源登录 JSON（对齐 Legado source.putLoginInfo） */
+export function writeSourceLoginInfo(source: BookSource, jsonStr: string): boolean {
+  try {
+    localStorage.setItem(getSourceLoginKey(source), String(jsonStr ?? ''));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Legado Rhino Map 风格：getLoginInfoMap().get(name) */
 export type LegadoLoginInfoMap = {
   get(key: string): string | null;
@@ -160,6 +181,11 @@ export type LegadoScriptSourceFace = {
   getVariable: (key?: string) => string;
   setVariable: (val?: string) => void;
   getLoginInfoMap: () => LegadoLoginInfoMap;
+  getLoginInfo: () => string;
+  putLoginInfo: (jsonStr: string) => boolean;
+  getLoginHeader: () => string;
+  putLoginHeader: (headerJson: string) => void;
+  removeLoginHeader: () => void;
   getKey: () => string;
   getkey: () => string;
   variableComment: string;
@@ -169,6 +195,70 @@ export type LegadoScriptSourceFace = {
   ruleArticles: string;
   searchUrl: string;
 };
+
+export function getLoginHeaderStorageKey(source: BookSource): string {
+  return storageKey(STORAGE_PREFIX_LOGIN_HEADER, getLegadoSourceKey(source));
+}
+
+export function readLoginHeaderJson(source: BookSource): string {
+  try {
+    return localStorage.getItem(getLoginHeaderStorageKey(source)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function readLoginHeaderMap(source: BookSource): Record<string, string> {
+  const raw = readLoginHeaderJson(source).trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v != null && String(v).trim() !== '') out[k] = String(v);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** 对齐 Legado putLoginHeader：持久化登录头，Cookie 写入书源 cookie 表 */
+export function putLoginHeader(source: BookSource, headerJson: string): void {
+  const trimmed = headerJson.trim();
+  if (!trimmed) return;
+  try {
+    localStorage.setItem(getLoginHeaderStorageKey(source), trimmed);
+  } catch {
+    /* ignore */
+  }
+  const map = readLoginHeaderMap(source);
+  const cookie = (map.Cookie ?? map.cookie ?? '').trim();
+  if (!cookie) return;
+  const cookiesKey = getSourceCookiesKey(source);
+  const store = loadSourceCookieStore(cookiesKey);
+  const sourceKey = getLegadoSourceKey(source);
+  for (const origin of ['https://m.weibo.cn', 'https://weibo.com', sourceKey]) {
+    store.set(origin, cookie);
+  }
+  const obj: Record<string, string> = {};
+  store.forEach((v, k) => {
+    obj[k] = v;
+  });
+  try {
+    localStorage.setItem(cookiesKey, JSON.stringify(obj));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function removeLoginHeader(source: BookSource): void {
+  try {
+    localStorage.removeItem(getLoginHeaderStorageKey(source));
+  } catch {
+    /* ignore */
+  }
+}
 
 /** 加载该书源持久化 cookie 表 */
 export function loadSourceCookieStore(cookiesKey: string): Map<string, string> {
@@ -228,6 +318,20 @@ function normalizeSourceArgsJsonForPersist(val: string): string {
   }
 }
 
+/** 清除非 JSON 的源变量（花瓣搜索关键词等纯文本，非「设置源变量」里的对象） */
+export function clearPlainTextSourceVariable(source: BookSource): void {
+  const argsKey = getSourceArgsKey(source);
+  try {
+    const raw = localStorage.getItem(argsKey);
+    if (raw == null || raw === '') return;
+    if (raw.trim().startsWith('{')) return;
+    localStorage.removeItem(argsKey);
+    bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function persistSourceArgsJson(
   source: BookSource,
   argsKey: string,
@@ -280,18 +384,9 @@ export function createSourceVariableHandlers(
         /* ignore */
       }
       if (memoryFallback.trim()) return memoryFallback;
-      const header = (source as Record<string, unknown>).header;
-      if (typeof header === 'string' && header.trim() && !header.trim().startsWith('@')) {
-        try {
-          const parsed = JSON.parse(header) as unknown;
-          if (parsed && typeof parsed === 'object') {
-            return normalizeSourceArgsVariableJson(header);
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-      return '{}';
+      // 对齐 Legado：未设置源变量时返回空串。HTTP header 仅用于请求头，不能回退到 getVariable()
+      // （微博博主等源用 getVariable() 判断搜索关键词，误读 header 会拼出错误 API URL）
+      return '';
     },
     setVariable(val?: string) {
       if (typeof val !== 'string') return;
@@ -312,6 +407,11 @@ export function buildLegadoScriptSourceFace(
     getVariable: (key?: string) => sourceVars.getVariable(key),
     setVariable: (val?: string) => sourceVars.setVariable(val),
     getLoginInfoMap: () => createLegadoLoginInfoMap(source),
+    getLoginInfo: () => readSourceLoginInfoJson(source),
+    putLoginInfo: (jsonStr: string) => writeSourceLoginInfo(source, jsonStr),
+    getLoginHeader: () => readLoginHeaderJson(source),
+    putLoginHeader: (headerJson: string) => putLoginHeader(source, headerJson),
+    removeLoginHeader: () => removeLoginHeader(source),
     getKey: () => stripLegadoSourceUrlMarker(sourceUrl),
     getkey: () => stripLegadoSourceUrlMarker(sourceUrl),
     variableComment: String(raw.variableComment ?? ''),
@@ -414,6 +514,7 @@ function buildExploreJsLibThisBindLines(): string {
     '      java: { get: function() { return java; }, configurable: true },',
     '      cache: { get: function() { return cache; }, configurable: true },',
     '      source: { get: function() { return source; }, configurable: true },',
+    '      cookie: { get: function() { return cookie; }, configurable: true },',
     '    });',
     '  } catch (e) {}',
   ];
@@ -786,6 +887,7 @@ export function createLegadoScriptCache(): {
   put: (key: string, value: unknown) => void;
   get: (key: string) => unknown;
   remove: (key: string) => void;
+  delete: (key: string) => void;
   putMemory: (key: string, value: unknown) => void;
   getFromMemory: (key: string) => unknown;
 } {
@@ -798,6 +900,9 @@ export function createLegadoScriptCache(): {
       return legadoMemory.has(String(key)) ? legadoMemory.get(String(key)) : null;
     },
     remove(key: string) {
+      legadoMemory.delete(String(key));
+    },
+    delete(key: string) {
       legadoMemory.delete(String(key));
     },
     putMemory(key: string, value: unknown) {

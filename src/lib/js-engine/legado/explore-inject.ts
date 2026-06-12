@@ -23,6 +23,10 @@ import {
 } from '@/lib/js-engine/legado/legado-java-crypto';
 import { injectBrowserLegadoShims } from '@/lib/js-engine/legado/host/browser-shim-vm';
 import { injectRhinoLegadoShims } from '@/lib/js-engine/legado/host/rhino-shim-vm';
+import { isSourceVerificationCancelledError } from '@/lib/book-source/source-verification';
+import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
+import { writeLegadoAjaxCache } from '@/lib/js-engine/legado/host/ajax-coordinator';
 import type { LegadoScriptSourceFace } from '@/lib/js-engine/legado/source-script-shared';
 import { LEGADO_EXPLORE_DEVICE_JAVA_SHIM } from '@/lib/js-engine/legado/legado-explore-java-device';
 import { createLegadoGetArguments } from '@/lib/js-engine/legado/source-script-shared';
@@ -89,6 +93,8 @@ export interface ExploreInjectContext {
   onRefreshExplore?: () => void | Promise<void>;
   /** java.openBookSearch(keyword) */
   onOpenSearch?: (query: string) => void;
+  /** java.getVerificationCode(imageUrl) */
+  onVerificationCode?: (imageUrl: string) => Promise<string>;
   /** 扩展 java API（发现 action 内 startBrowser / showBrowser 等） */
   javaExtensions?: {
     startBrowser?: (url: string, title?: string) => void;
@@ -98,6 +104,8 @@ export interface ExploreInjectContext {
       preloadJs?: string | null,
       config?: string | null,
     ) => void;
+    /** 图片验证码 / 自定义输入（sortUrl 搜索关键词等） */
+    getVerificationCode?: (imageUrl: string) => Promise<string>;
   };
 }
 
@@ -218,6 +226,9 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       bindVmFunction(vm, javaObj, 'log', (...args) => {
         const parts = args.map((a) => vm.dump(a));
         const msg = parts.map((p) => String(p ?? '')).join(' ');
+        if (msg === LEGADO_SUSPEND_MARKER || msg.includes(LEGADO_SUSPEND_MARKER)) {
+          return;
+        }
         if (msg.includes('线路报错，自动切换下一个')) {
           if (import.meta.env.DEV) {
             console.debug('[explore-script]', msg);
@@ -292,6 +303,42 @@ export function createExploreInjector(ctx: ExploreInjectContext): LegadoInjector
       bindVmFunction(vm, javaObj, 'md5Encode', (input) =>
         vm.newString(legadoJavaMd5Encode(String(vmDumpOptional(vm, input) ?? ''))),
       );
+      bindVmFunction(vm, javaObj, 'getVerificationCode', (imageUrl) => {
+        const url = String(vmDumpOptional(vm, imageUrl) ?? '');
+        const cached = rt.coordinator.getCachedResponse(url);
+        if (cached !== undefined) return vm.newString(cached);
+        const ask = ctx.javaExtensions?.getVerificationCode ?? ctx.onVerificationCode;
+        if (!ask) return vm.newString('');
+
+        const requestStart = Date.now();
+        const promise = ask(url).then(
+          (text) => {
+            const body = text ?? '';
+            rt.coordinator.recordDuration(url, Date.now() - requestStart);
+            writeLegadoAjaxCache(rt.coordinator.cache, url, body);
+            return body;
+          },
+          (error) => {
+            rt.coordinator.recordDuration(url, Date.now() - requestStart);
+            if (isSourceVerificationCancelledError(error)) {
+              throw error;
+            }
+            writeLegadoAjaxCache(rt.coordinator.cache, url, '');
+            return '';
+          },
+        );
+
+        // two-pass：同步返回空串，脚本 try/catch 不会吞挂起标记；第二轮从 cache 回放用户输入
+        if (rt.coordinator.mode === 'two-pass') {
+          rt.pending.push(promise);
+          return vm.newString('');
+        }
+
+        const writeIdx = rt.coordinator.writeIndex;
+        rt.coordinator.writeIndex += 1;
+        rt.coordinator.pendingSuspend = new SuspendScript(promise, writeIdx, url, requestStart);
+        throw new Error(LEGADO_SUSPEND_MARKER);
+      });
 
       bindJavaAjax(vm, javaObj, rt, {
         baseUrl: ctx.baseUrl,
