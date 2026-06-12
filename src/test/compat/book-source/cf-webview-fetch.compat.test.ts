@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import type { BookSource } from '@/types';
 import {
   cookieHeaderHasCfClearance,
+  isCfFetchRetryableError,
   shouldUseCfWebViewFetch,
 } from '@/lib/book-source/cf-webview-fetch';
 import { setCfActiveRequestOrigin } from '@/lib/book-source/source-http';
@@ -58,5 +59,11 @@ describe('CF WebView fetch', () => {
   it('Legado 占位 Cookie 1 不算真实 Cookie', () => {
     expect(isLegadoPlaceholderCookieHeader('1')).toBe(true);
     expect(isLegadoPlaceholderCookieHeader('cf_clearance=x')).toBe(false);
+  });
+
+  it('识别 CF WebView 拉取可重试错误', () => {
+    expect(isCfFetchRetryableError(new Error('WebJs 执行超时'))).toBe(true);
+    expect(isCfFetchRetryableError(new Error('内嵌 panel 未打开'))).toBe(true);
+    expect(isCfFetchRetryableError(new Error('普通网络错误'))).toBe(false);
   });
 });

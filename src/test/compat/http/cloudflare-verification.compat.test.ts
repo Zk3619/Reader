@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   cookieHeaderLooksCfCleared,
   isCloudflareBlockedResponse,
+  resolveCfBlockedOrigin,
   resolveCloudflareVerificationUrl,
   shouldOfferCloudflareVerification,
 } from '@/lib/http/cloudflare-verification';
@@ -86,6 +87,22 @@ describe('cloudflare-verification', () => {
         { sourceUrl: 'https://banzhu66666.net/' } as never,
       ),
     ).toBe('https://banzhu66666.net');
+  });
+
+  it('重定向到不同域被 CF 拦截时，在响应域过验证', () => {
+    expect(
+      resolveCfBlockedOrigin(
+        'https://jm18c-uoi.net/albums?o=mr',
+        'https://18comic.vip/albums?o=mr',
+      ),
+    ).toBe('https://18comic.vip');
+    expect(
+      resolveCloudflareVerificationUrl(
+        'https://jm18c-uoi.net/albums?o=mr',
+        { sourceUrl: 'https://jm18c-uoi.net/' } as never,
+        'https://18comic.vip/albums?o=mr',
+      ),
+    ).toBe('https://18comic.vip');
   });
 
   it('请求非 http 时回退书源 sourceUrl', () => {

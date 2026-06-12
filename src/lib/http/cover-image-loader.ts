@@ -100,8 +100,11 @@ async function withCoverDiskSlot<T>(fn: () => Promise<T>): Promise<T> {
 const coverLoadByBookUrl = new Map<string, Promise<string | null>>();
 
 const MAX_COVER_NETWORK_CONCURRENT = 4;
+const MAX_RSS_THUMBNAIL_NETWORK_CONCURRENT = 10;
 let coverNetworkActive = 0;
 const coverNetworkWaiters: Array<() => void> = [];
+let rssThumbnailNetworkActive = 0;
+const rssThumbnailNetworkWaiters: Array<() => void> = [];
 
 /** Tauri 下列表快滑时限制同时进行中的封面 load 条数（含读盘），避免 plugin 队列挂起 */
 const MAX_COVER_LOADS_IN_FLIGHT = isTauri() ? 8 : 32;
@@ -125,18 +128,34 @@ function releaseCoverLoadSlot(): void {
   if (next) next();
 }
 
-async function withCoverNetworkSlot<T>(fn: () => Promise<T>): Promise<T> {
-  while (coverNetworkActive >= MAX_COVER_NETWORK_CONCURRENT) {
+async function withCoverNetworkSlot<T>(
+  fn: () => Promise<T>,
+  pool: 'default' | 'rss-thumbnail' = 'default',
+): Promise<T> {
+  const max =
+    pool === 'rss-thumbnail'
+      ? MAX_RSS_THUMBNAIL_NETWORK_CONCURRENT
+      : MAX_COVER_NETWORK_CONCURRENT;
+  const waiters =
+    pool === 'rss-thumbnail' ? rssThumbnailNetworkWaiters : coverNetworkWaiters;
+  const active = () =>
+    pool === 'rss-thumbnail' ? rssThumbnailNetworkActive : coverNetworkActive;
+  const setActive = (n: number) => {
+    if (pool === 'rss-thumbnail') rssThumbnailNetworkActive = n;
+    else coverNetworkActive = n;
+  };
+
+  while (active() >= max) {
     await new Promise<void>((resolve) => {
-      coverNetworkWaiters.push(resolve);
+      waiters.push(resolve);
     });
   }
-  coverNetworkActive += 1;
+  setActive(active() + 1);
   try {
     return await fn();
   } finally {
-    coverNetworkActive -= 1;
-    const next = coverNetworkWaiters.shift();
+    setActive(Math.max(0, active() - 1));
+    const next = waiters.shift();
     if (next) next();
   }
 }
@@ -171,9 +190,18 @@ export type CoverImageLoadOptions = {
   readerInlineQueuePriority?: ReaderInlineImageFetchPriority;
   /** 虚拟列表：跳过 L2 读盘，仅 L1 + 网络（避免 exists 风暴） */
   skipDiskRead?: boolean;
+  /** RSS 列表缩略图：更高网络并发、不占封面 load 槽 */
+  rssListThumbnail?: boolean;
 };
 
 /** 无真实封面：占位图 URL / 空 / 未解析规则 */
+/** data:/blob: 可直接作 <img src>，无需 HTTP 拉取 */
+export function isInlineCoverImageUrl(url: string | null | undefined): boolean {
+  const t = url?.trim();
+  if (!t) return false;
+  return /^data:image\//i.test(t) || t.startsWith('blob:');
+}
+
 export function isNoCoverImageUrl(url: string | null | undefined): boolean {
   const t = url?.trim();
   if (!t) return true;
@@ -275,8 +303,8 @@ export function hasLegadoImageFetchHeaders(
   if (!legadoImageHeaders) return false;
   return Boolean(
     pickLegadoHeader(legadoImageHeaders, 'Referer') ||
-      pickLegadoHeader(legadoImageHeaders, 'User-Agent') ||
-      pickLegadoHeader(legadoImageHeaders, 'Cookie'),
+    pickLegadoHeader(legadoImageHeaders, 'User-Agent') ||
+    pickLegadoHeader(legadoImageHeaders, 'Cookie'),
   );
 }
 
@@ -518,6 +546,7 @@ async function fetchCoverImageBytesOnce(
     note: describeImageFetchForLog(normalized, fetchUrl).file,
   });
 
+  const networkPool = options?.rssListThumbnail ? 'rss-thumbnail' : 'default';
   const response = await withCoverNetworkSlot(async () => {
     const doRequest = () =>
       request(fetchUrl, {
@@ -531,11 +560,11 @@ async function fetchCoverImageBytesOnce(
 
     return options?.readerInlineQueue
       ? await withReaderInlineImageFetchSlot(
-          doRequest,
-          options.readerInlineQueuePriority ?? 'high',
-        )
+        doRequest,
+        options.readerInlineQueuePriority ?? 'high',
+      )
       : await doRequest();
-  });
+  }, networkPool);
 
   if (!response.ok) {
     if (import.meta.env.DEV) {
@@ -728,13 +757,13 @@ async function flushPendingDiskPersist(): Promise<void> {
     if (!key) continue;
     const prev = diskWriteByBook.get(key);
     const run = (async () => {
-      if (prev) await prev.catch(() => {});
+      if (prev) await prev.catch(() => { });
       await writeCoverToDisk(key, item.coverUrl, item.bytes, item.mime);
     })().finally(() => {
       if (diskWriteByBook.get(key) === run) diskWriteByBook.delete(key);
     });
     diskWriteByBook.set(key, run);
-    await run.catch(() => {});
+    await run.catch(() => { });
   }
   if (isTauri() && pendingDiskPersist.size > 0) {
     queueDiskPersistFlushWhenIdle();
@@ -1114,11 +1143,12 @@ export async function loadCoverImageObjectUrl(
   }
 
   const run = (async () => {
-    await acquireCoverLoadSlot();
+    const skipLoadSlot = options?.rssListThumbnail && options?.skipDiskRead;
+    if (!skipLoadSlot) await acquireCoverLoadSlot();
     try {
       return await loadCoverImageObjectUrlInner(url, options);
     } finally {
-      releaseCoverLoadSlot();
+      if (!skipLoadSlot) releaseCoverLoadSlot();
       coverLoadInflight.delete(inflightKey);
       if (bookUrlTrim) coverLoadByBookUrl.delete(bookUrlTrim);
     }

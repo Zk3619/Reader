@@ -78,9 +78,11 @@ async function withCfRetry(
   fetchOnce: () => Promise<string>,
   opts?: { cfTitle?: string },
 ): Promise<string> {
-  const openCfAndRetry = async (): Promise<string> => {
+  const openCfAndRetry = async (cfError?: unknown): Promise<string> => {
+    const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
     const verified = await resolveCloudflareViaInnerWeb({
       url: getUrl(),
+      blockedUrl,
       source,
       title: opts?.cfTitle,
     });
@@ -94,7 +96,7 @@ async function withCfRetry(
   try {
     let html = await fetchOnce();
     if (isCloudflareBlockedResponse(200, html)) {
-      html = await openCfAndRetry();
+      html = await openCfAndRetry(undefined);
     }
     return html;
   } catch (e) {
@@ -103,15 +105,15 @@ async function withCfRetry(
       try {
         let html = await fetchOnce();
         if (isCloudflareBlockedResponse(200, html)) {
-          html = await openCfAndRetry();
+          html = await openCfAndRetry(undefined);
         }
         return html;
       } catch (retryErr) {
         if (!shouldOfferCloudflareVerification(retryErr)) throw retryErr;
-        return openCfAndRetry();
+        return openCfAndRetry(retryErr);
       }
     }
-    return openCfAndRetry();
+    return openCfAndRetry(e);
   }
 }
 

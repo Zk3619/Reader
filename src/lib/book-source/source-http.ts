@@ -24,6 +24,7 @@ import {
   getLegadoSourceKey,
   hostsFromJsLib,
   normalizeServerFieldsInSourceArgs,
+  readLoginHeaderMap,
   readServerUrlFromSourceArgs,
   STORAGE_PREFIX_CF_ORIGIN,
   STORAGE_PREFIX_CF_UA,
@@ -550,7 +551,7 @@ export function buildSourceRequestHeaders(
   requestUrl: string,
 ): Record<string, string> {
   const alignedUrl = alignUrlToBookSourceRequestOrigin(requestUrl, source);
-  const headers = parseHeaders(source.header);
+  const headers = { ...parseHeaders(source.header), ...readLoginHeaderMap(source) };
   alignRefererToRequestOrigin(headers, source);
   const cfUa = getCfActiveUserAgent(source);
   if (cfUa) {

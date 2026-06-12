@@ -24,13 +24,28 @@ export function shouldUseInnerWebDocumentProxy(
   initialCookies?: string,
 ): boolean {
   if (typeof window === 'undefined') return false;
-  if (!pageUrl.trim().startsWith('http')) return false;
-  if (!initialCookies?.trim()) return false;
-  // Tauri 桌面 panel 由原生 WebView 注入 Cookie；仅 iframe 回退等场景走同源代理
+  const url = pageUrl.trim();
+  if (!url.startsWith('http')) return false;
+
+  // Tauri 桌面 panel 由原生 WebView 直连，不走同源代理
   if (isTauri() && !isMobile()) {
-    if (resolveInnerWebUsesTauriPanel({ url: pageUrl })) return false;
+    if (resolveInnerWebUsesTauriPanel({ url })) return false;
   }
-  return true;
+
+  // 纯 Web iframe：跨域页常设 X-Frame-Options / CSP frame-ancestors，须走 __reader_http
+  if (!isTauri()) return true;
+
+  // Tauri iframe 回退：有 Cookie 须注入时才走代理
+  return Boolean(initialCookies?.trim());
+}
+
+/** 是否须 __reader_http 文档代理（含显式 useProxyDocument） */
+export function needsInnerWebDocumentProxy(
+  pageUrl: string,
+  options?: { useProxyDocument?: boolean; initialCookies?: string },
+): boolean {
+  if (options?.useProxyDocument) return true;
+  return shouldUseInnerWebDocumentProxy(pageUrl, options?.initialCookies);
 }
 
 export async function createInnerWebProxySession(
@@ -79,6 +94,39 @@ export function buildInnerWebDocumentProxyUrl(
 /** 供 iframe 内联脚本拼接代理 URL */
 export function resolveInnerWebProxyPath(): string {
   return proxyPath();
+}
+
+/** 规范化 inner-web 文档 target URL（去 hash、尾斜杠） */
+export function normalizeInnerWebTargetUrl(url: string): string {
+  try {
+    const u = new URL(url.trim());
+    u.hash = '';
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    return `${u.origin}${path}${u.search}`;
+  } catch {
+    return url.trim();
+  }
+}
+
+/** 从 iframe src 解析 __reader_http 的 target 参数；非代理 src 则返回原 URL */
+export function resolveInnerWebProxyIframeTarget(
+  iframeSrc: string | undefined,
+  baseOrigin?: string,
+): string | null {
+  const raw = iframeSrc?.trim();
+  if (!raw) return null;
+  try {
+    const base =
+      baseOrigin ??
+      (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const u = new URL(raw, base);
+    if (u.pathname.includes(PROXY_SEGMENT)) {
+      return u.searchParams.get('target');
+    }
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
 /** blob/srcdoc 正文内须用应用源绝对地址，避免 <base href> 把 /__reader_http 解析到书源域 */
@@ -136,5 +184,51 @@ export async function deleteInnerWebProxySession(sessionId: string): Promise<voi
     });
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * 纯 Web：经 __reader_http 会话拉取 HTML（cf_clearance 须与过验证时同一代理链路）。
+ */
+export async function fetchHtmlViaInnerWebProxySession(
+  pageUrl: string,
+  cookies: string,
+  forwardHeaders?: Record<string, string>,
+  options?: { cloudflareChallenge?: boolean },
+): Promise<string> {
+  const target = pageUrl.trim();
+  if (!target.startsWith('http')) {
+    throw new Error('代理会话拉取需要 http(s) URL');
+  }
+  if (typeof window === 'undefined') {
+    throw new Error('代理会话拉取仅适用于浏览器环境');
+  }
+
+  const sessionId = await createInnerWebProxySession(
+    target,
+    cookies,
+    forwardHeaders,
+    options,
+  );
+  try {
+    const proxyFetchUrl = `${resolveInnerWebProxyPath()}?target=${encodeURIComponent(target)}&session=${encodeURIComponent(sessionId)}`;
+    const res = await fetch(proxyFetchUrl, {
+      method: 'GET',
+      credentials: 'same-origin',
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      const { HttpError } = await import('@/lib/http');
+      throw new HttpError(
+        res.status,
+        res.statusText || 'Error',
+        target,
+        `代理会话拉取 HTTP ${res.status}`,
+        body || undefined,
+      );
+    }
+    return body;
+  } finally {
+    await deleteInnerWebProxySession(sessionId);
   }
 }

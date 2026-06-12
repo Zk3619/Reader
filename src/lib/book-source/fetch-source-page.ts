@@ -98,14 +98,16 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
     };
   };
 
-  const maybeRetryAfterCf = async (): Promise<{
+  const maybeRetryAfterCf = async (cfError?: unknown): Promise<{
     body: string;
     url: string;
     usedWebView: boolean;
   }> => {
     const target = resolvePageUrl();
+    const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
     const verified = await resolveCloudflareViaInnerWeb({
       url: target,
+      blockedUrl,
       source: params.source,
     });
     if (!verified) {
@@ -126,7 +128,7 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
       !fetched.usedWebView &&
       isCloudflareBlockedResponse(200, fetched.body)
     ) {
-      fetched = await maybeRetryAfterCf();
+      fetched = await maybeRetryAfterCf(undefined);
     }
     await assertLoginCheckPassed(params.source, fetched.body, pageUrl);
     return fetched;
@@ -141,7 +143,7 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
           /* 对齐 Legado：首包 403 已写入 Set-Cookie，再试一次；仍失败则开内嵌页 */
         }
       }
-      const fetched = await maybeRetryAfterCf();
+      const fetched = await maybeRetryAfterCf(e);
       await assertLoginCheckPassed(params.source, fetched.body, fetched.url || urlPart);
       return fetched;
     }

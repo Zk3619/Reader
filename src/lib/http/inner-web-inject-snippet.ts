@@ -10,6 +10,17 @@ export { extractProxiedDocumentQuery, patchProxiedDocumentLocationQuery };
 export const INNER_WEB_CF_RELAX_CSP_META =
   `<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; img-src 'self' https: http: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: blob:; connect-src 'self' https: http: blob:; frame-src 'self' https: http:; style-src 'self' 'unsafe-inline' https: http:;">`;
 
+/** 移除 meta refresh，避免 iframe 代理页内导航风暴 */
+export function stripInnerWebMetaRefresh(html: string): string {
+  return html.replace(/<meta\b[^>]*>/gi, (tag) => {
+    if (!/\bhttp-equiv\s*=\s*["']?refresh["']?/i.test(tag)) return tag;
+    return '';
+  });
+}
+
+/** @deprecated 使用 stripInnerWebMetaRefresh */
+export const stripImportDeepLinkMetaRefresh = stripInnerWebMetaRefresh;
+
 /** CF 挑战页 CSP 仅允许 img-src 'self'（localhost），须移除 meta 才能让书源域资源加载 */
 export function stripInnerWebCspMetaTags(html: string): string {
   return html.replace(
@@ -41,6 +52,19 @@ export function buildInnerWebInjectScript(options: {
   const channel = 'reader-inner-web';
   return `(function(){
 var NativeUSP=window.URLSearchParams;
+var __readerNativeHrefGet=(function(){
+  try{
+    var d=Object.getOwnPropertyDescriptor(Location.prototype,'href');
+    if(d&&d.get)return function(loc){return d.get.call(loc);};
+  }catch(e){}
+  return function(loc){return String(loc.href||'');};
+})();
+function actualFrameHref(){
+  return __readerNativeHrefGet(window.location);
+}
+function isProxyFrameDocument(){
+  try{return window.location.pathname.indexOf('__reader_http')>=0;}catch(e){return false;}
+}
 var DOC_TARGET=${JSON.stringify(documentTargetUrl)};
 var DOC_QUERY=${JSON.stringify(documentQuery)};
 var CF_CHALLENGE=${JSON.stringify(cloudflareChallenge)};
@@ -122,7 +146,56 @@ var ORIGIN=${JSON.stringify(targetOrigin)};
 var PAGE=${JSON.stringify(targetPageUrl)};
 var SESSION=${JSON.stringify(sessionId)};
 var CHANNEL=${JSON.stringify(channel)};
+var NAV_CHANNEL='reader-inner-web-navigate';
 var store=${JSON.stringify(cookie)};
+function isImportDeepLink(u){
+  return /^(legado|yuedu):\\/\\//i.test(String(u||'').trim());
+}
+function navigateToHost(href,target){
+  try{
+    var h=typeof resolveNavigateHref==='function'?resolveNavigateHref(href):String(href||'').trim();
+    if(!h)return;
+    var now=Date.now();
+    var norm=typeof normalizeHrefForCompare==='function'?normalizeHrefForCompare(h):h;
+    if(norm===__readerHostNavNorm&&now-__readerHostNavAt<1500)return;
+    __readerHostNavNorm=norm;
+    __readerHostNavAt=now;
+    window.parent.postMessage({channel:NAV_CHANNEL,href:h,target:target||null},'*');
+  }catch(e){}
+}
+var __readerHostNavNorm='';
+var __readerHostNavAt=0;
+var __readerLastNavNorm='';
+var __readerLastNavAt=0;
+function normalizeHrefForCompare(u){
+  try{
+    var url=new URL(String(u),DOC_TARGET||actualFrameHref());
+    url.hash='';
+    var p=url.pathname.replace(/\\/+$/,'')||'/';
+    return url.origin+p+url.search;
+  }catch(e){return String(u);}
+}
+function navTargetKey(url){
+  try{
+    if(typeof resolveToTarget==='function'){
+      var t=resolveToTarget(String(url||''));
+      if(t&&/^https?:\\/\\//i.test(t))return normalizeHrefForCompare(t);
+    }
+  }catch(e){}
+  return normalizeHrefForCompare(url);
+}
+function shouldSkipRepeatedNav(url){
+  try{
+    var key=navTargetKey(url);
+    if(key===navTargetKey(actualFrameHref()))return true;
+    if(DOC_TARGET&&key===normalizeHrefForCompare(DOC_TARGET))return true;
+    var now=Date.now();
+    if(key===__readerLastNavNorm&&now-__readerLastNavAt<1500)return true;
+    __readerLastNavNorm=key;
+    __readerLastNavAt=now;
+  }catch(e){}
+  return false;
+}
 function mergeCookie(prev,add){
   var map={};
   String(prev||'').split(';').forEach(function(p){
@@ -180,6 +253,28 @@ function resolveToTarget(url){
   }
   return new URL(s,PAGE).href;
 }
+function resolveNavigateHref(url){
+  try{
+    var s=String(url||'').trim();
+    if(!s)return '';
+    if(/^https?:\\/\\//i.test(s))return resolveToTarget(s);
+    return resolveToTarget(s);
+  }catch(e){return String(url||'');}
+}
+function shouldNavigateDocumentViaHost(url){
+  return isImportDeepLink(url);
+}
+function shouldProxyDocumentNavigate(abs){
+  if(!isProxyFrameDocument())return false;
+  if(isBrowserDirectPath(abs))return false;
+  return /^https?:\\/\\//i.test(String(abs||''));
+}
+function navigateInFrame(url){
+  if(isImportDeepLink(url)){navigateToHost(url);return;}
+  var rw=rewriteHistoryUrl(url);
+  if(shouldSkipRepeatedNav(rw))return;
+  try{Location.prototype.assign.call(window.location,rw);}catch(e){window.location.assign(rw);}
+}
 function isBrowserDirectPath(abs){
   try{return new URL(abs).pathname.indexOf('/cdn-cgi/')!==-1;}catch(e){return false;}
 }
@@ -226,6 +321,10 @@ function rewriteHistoryUrl(url){
   if(url==null||url==='')return url;
   try{
     var s=String(url);
+    if(isImportDeepLink(s)){
+      navigateToHost(s);
+      return window.location.href;
+    }
     if(s.charAt(0)==='#'||/^javascript:/i.test(s))return url;
     if(isProxyFrameUrl(s))return new URL(s, PROXY_ORIGIN).href;
     var canon=canonicalizeProxyHistoryUrl(s);
@@ -234,6 +333,7 @@ function rewriteHistoryUrl(url){
     if(isProxyFrameUrl(abs))return new URL(String(abs), PROXY_ORIGIN).href;
     canon=canonicalizeProxyHistoryUrl(abs);
     if(canon)return canon;
+    if(shouldProxyDocumentNavigate(abs))return proxyUrl(abs);
     if(new URL(abs).origin===ORIGIN)return proxyUrl(abs);
     return url;
   }catch(e){return url;}
@@ -253,14 +353,81 @@ function patchLocationNavigate(){
   var loc=Location.prototype;
   var rawAssign=loc.assign;
   if(rawAssign){
-    loc.assign=function(url){return rawAssign.call(this,rewriteHistoryUrl(url));};
+    loc.assign=function(url){
+      if(shouldNavigateDocumentViaHost(url)){navigateToHost(url);return;}
+      var rw=rewriteHistoryUrl(url);
+      if(shouldSkipRepeatedNav(rw))return;
+      return rawAssign.call(this,rw);
+    };
   }
   var rawReplace=loc.replace;
   if(rawReplace){
-    loc.replace=function(url){return rawReplace.call(this,rewriteHistoryUrl(url));};
+    loc.replace=function(url){
+      if(shouldNavigateDocumentViaHost(url)){navigateToHost(url);return;}
+      var rw=rewriteHistoryUrl(url);
+      if(shouldSkipRepeatedNav(rw))return;
+      return rawReplace.call(this,rw);
+    };
   }
 }
 patchLocationNavigate();
+function patchLocationHrefSetter(){
+  try{
+    var loc=window.location;
+    var proto=Location.prototype;
+    var desc=Object.getOwnPropertyDescriptor(proto,'href');
+    if(!desc||!desc.set)return;
+    var rawSet=desc.set;
+    var rawGet=desc.get;
+    Object.defineProperty(proto,'href',{
+      configurable:true,
+      enumerable:desc.enumerable!==false,
+      get:function(){
+        if(!CF_CHALLENGE&&DOC_TARGET&&this===loc)return DOC_TARGET;
+        return rawGet?rawGet.call(this):'';
+      },
+      set:function(v){
+        if(isImportDeepLink(v)){navigateToHost(v);return;}
+        var rw=rewriteHistoryUrl(v);
+        if(shouldSkipRepeatedNav(rw))return;
+        return rawSet.call(this,rw);
+      }
+    });
+  }catch(e){}
+}
+patchLocationHrefSetter();
+function interceptMetaRefresh(){
+  try{
+    document.querySelectorAll('meta[http-equiv]').forEach(function(m){
+      if(String(m.getAttribute('http-equiv')).toLowerCase()!=='refresh')return;
+      var c=String(m.getAttribute('content')||'');
+      m.remove();
+      var um=c.match(/url\\s*=\\s*([^;\\s]+)/i);
+      if(!um)return;
+      var u=um[1].replace(/^['"]|['"]$/g,'');
+      var dm=c.match(/^\\s*(\\d+)/);
+      var delay=dm?parseInt(dm[1],10)||0:0;
+      if(isImportDeepLink(u)){
+        if(delay<=0)navigateToHost(u);
+        else setTimeout(function(){navigateToHost(u);},delay*1000);
+      }else if(/^https?:\\/\\//i.test(u)){
+        if(delay<=0)navigateInFrame(u);
+        else setTimeout(function(){navigateInFrame(u);},delay*1000);
+      }
+    });
+  }catch(e){}
+}
+interceptMetaRefresh();
+if(typeof MutationObserver!=='undefined'){
+  new MutationObserver(interceptMetaRefresh).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['http-equiv','content']});
+}
+try{
+  var rawOpen=window.open;
+  window.open=function(u,t,f){
+    if(isImportDeepLink(u)){navigateToHost(u,t);return null;}
+    return rawOpen.apply(window,arguments);
+  };
+}catch(e){}
 if(CF_CHALLENGE){
   function stripRuntimeCspMetas(){
     try{
@@ -278,6 +445,7 @@ function maybeProxyResourceUrl(url){
     var s=String(url);
     if(s.charAt(0)==='#'||/^javascript:/i.test(s)||/^data:/i.test(s)||/^blob:/i.test(s))return url;
     var abs=resolveToTarget(s);
+    if(isProxyFrameDocument()&&shouldProxyDocumentNavigate(abs))return proxyUrl(abs);
     if(shouldProxy(abs))return proxyUrl(abs);
     if(abs.startsWith('http'))return abs;
     return url;
@@ -298,6 +466,9 @@ function patchDynamicResources(){
   if(typeof HTMLLinkElement!=='undefined'){
     patchElementUrlProperty(HTMLLinkElement.prototype,'href');
   }
+  if(typeof HTMLAnchorElement!=='undefined'){
+    patchElementUrlProperty(HTMLAnchorElement.prototype,'href');
+  }
   if(typeof HTMLImageElement!=='undefined'){
     patchElementUrlProperty(HTMLImageElement.prototype,'src');
   }
@@ -309,6 +480,18 @@ function patchDynamicResources(){
   };
 }
 patchDynamicResources();
+function bindImportDeepLinkCapture(){
+  document.addEventListener('click',function(e){
+    var a=e.target&&e.target.closest&&e.target.closest('a[href]');
+    if(!a)return;
+    var raw=a.getAttribute('href')||'';
+    if(!isImportDeepLink(raw)&&!isImportDeepLink(a.href))return;
+    e.preventDefault();
+    e.stopPropagation();
+    navigateToHost(a.href,a.getAttribute('target'));
+  },true);
+}
+bindImportDeepLinkCapture();
 function withDirectInit(init){
   var o=Object.assign({},init||{});
   if(!o.credentials)o.credentials='include';
@@ -439,7 +622,7 @@ export function injectHtmlForInnerWeb(
   const origin = new URL(docUrl).origin;
   const pageBase = resolveInnerWebDocumentBaseUrl(docUrl);
   const docQuery = extractProxiedDocumentQuery(docUrl);
-  let patched = patchProxiedDocumentLocationQuery(html, docUrl);
+  let patched = stripInnerWebMetaRefresh(patchProxiedDocumentLocationQuery(html, docUrl));
   if (cloudflareChallenge) {
     patched = stripInnerWebCspMetaTags(patched);
   }

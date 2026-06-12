@@ -438,13 +438,18 @@ async function forwardToTarget(
       session &&
       (ct.toLowerCase().includes('text/html') || rewritten.trimStart().startsWith('<'))
     ) {
+      const documentTarget = rewriteBase || target;
+      if (session.target !== documentTarget) {
+        session.target = documentTarget;
+        innerWebSessions.set(sessionId, session);
+      }
       rewritten = injectHtmlForInnerWeb(
         rewritten,
         rewriteBase,
         session.cookies ?? '',
         sessionId,
         PROXY_PATH,
-        session?.target ?? target,
+        documentTarget,
         session.cloudflareChallenge === true,
       );
     }

@@ -29,11 +29,35 @@ export function cookieHeaderLooksCfCleared(cookieHeader: string): boolean {
   return /(?:^|;\s*)(?:cf_clearance|__cf_bm)=/i.test(cookieHeader.trim());
 }
 
+/**
+ * HTTP 跟随重定向后实际被 CF 拦截的 origin。
+ * 请求域与响应域不同时（如禁漫发布域 → 18comic 镜像），须在响应域过验证。
+ */
+export function resolveCfBlockedOrigin(
+  requestUrl: string,
+  blockedUrl?: string,
+): string | null {
+  const req = requestUrl.trim();
+  const blocked = blockedUrl?.trim();
+  if (!blocked?.startsWith('http') || !req.startsWith('http')) return null;
+  try {
+    const b = new URL(blocked);
+    const r = new URL(req);
+    if (b.hostname !== r.hostname) return b.origin;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /** 验证页用站点 origin，确保 cf_clearance 对整个域名生效 */
 export function resolveCloudflareVerificationUrl(
   requestUrl: string,
   source?: BookSource,
+  blockedUrl?: string,
 ): string {
+  const redirected = resolveCfBlockedOrigin(requestUrl, blockedUrl);
+  if (redirected) return redirected;
   if (source) {
     const active = getCfActiveRequestOrigin(source);
     if (active) return active;
@@ -148,11 +172,17 @@ export async function resolveCloudflareViaInnerWeb(options: {
   url: string;
   source: BookSource;
   title?: string;
+  /** 403/503 响应的最终 URL（重定向后与请求不同域时） */
+  blockedUrl?: string;
 }): Promise<boolean> {
   const requestUrl = options.url.trim();
   if (!requestUrl.startsWith('http')) return false;
 
-  const verifyUrl = resolveCloudflareVerificationUrl(requestUrl, options.source);
+  const verifyUrl = resolveCloudflareVerificationUrl(
+    requestUrl,
+    options.source,
+    options.blockedUrl,
+  );
   const sourceKey = (options.source.bookSourceUrl ?? options.source.sourceUrl)?.trim();
   const cookies = resolveSourceCookiesForHttp(options.source, verifyUrl);
   const pageTitle =
@@ -203,16 +233,20 @@ export async function resolveCloudflareViaInnerWeb(options: {
     const active = mirror ?? catalog;
     if (active) {
       setCfActiveRequestOrigin(options.source, active);
-      if (isTauri()) {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          const panelUa = (await invoke<string>('get_inner_web_panel_user_agent')).trim();
-          if (panelUa) {
-            setCfActiveUserAgent(options.source, panelUa);
-          }
-        } catch {
-          /* ignore */
-        }
+      const panelUa =
+        result.panelUserAgent?.trim() ||
+        (isTauri()
+          ? await (async () => {
+              try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                return (await invoke<string>('get_inner_web_panel_user_agent')).trim();
+              } catch {
+                return '';
+              }
+            })()
+          : '');
+      if (panelUa) {
+        setCfActiveUserAgent(options.source, panelUa);
       }
       console.warn('[cf-verify] 已记录 CF 活跃域（后续发现/请求将使用该 origin）', {
         catalog,

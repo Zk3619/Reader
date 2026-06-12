@@ -7,10 +7,17 @@ import type { BookSource } from '@/types';
 import { request, HttpError } from '@/lib/http';
 import { isCloudflareBlockedResponse } from '@/lib/http/cloudflare-verification';
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
-import { getCfActiveRequestOrigin } from '@/lib/book-source/source-http';
+import {
+  getCfActiveRequestOrigin,
+  getCfActiveUserAgent,
+  LEGADO_GYKS_DESKTOP_UA,
+} from '@/lib/book-source/source-http';
 import { syncSourceCookiePool } from '@/lib/book-source/source-cookie-pool';
 import { applyCfBrowserDocumentHeaders } from '@/lib/book-source/cf-browser-headers';
 import { decodeBookSourceResponseBytes } from '@/lib/book-source/response-charset';
+import { fetchHtmlViaInnerWebProxySession } from '@/lib/http/inner-web-proxy-session';
+import { releaseCfDeferredInnerWebDismiss } from '@/lib/platform/inner-web';
+import { ensureInnerWebPanelForCfFetch } from '@/lib/platform/inner-web-tauri';
 import { isMobile, isTauri } from '@/lib/platform/detect';
 
 function throwCfChallengeError(pageUrl: string, kind: 'GET' | 'POST'): never {
@@ -38,6 +45,68 @@ export function shouldUseCfWebViewFetch(
   return cookieHeaderHasCfClearance(cookieHeader);
 }
 
+/** CF WebView 拉取失败（超时/挑战/panel 未就绪）时可重新走内嵌页验证 */
+export function isCfFetchRetryableError(error: unknown): boolean {
+  if (typeof window === 'undefined') return false;
+  if (error instanceof HttpError && (error.status === 403 || error.status === 503)) {
+    return isCloudflareBlockedResponse(error.status, error.body ?? '');
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return /CF 拉取|WebJs 执行超时|内嵌 panel 未打开|内嵌网页面板未打开|挑战页|返回空正文/i.test(
+    msg,
+  );
+}
+
+/** panel 抓取前等待 SPA 列表渲染（由调用方传入 CSS 选择器，Rust 不写死站点路径） */
+export interface CfPanelWaitOptions {
+  selector: string;
+  minCount?: number;
+  timeoutMs?: number;
+}
+
+export interface CfWebViewFetchOptions {
+  panelWait?: CfPanelWaitOptions;
+}
+
+async function fetchPageHtmlViaTauriCfPanel(
+  pageUrl: string,
+  cookies: string,
+  userAgent: string,
+  delayMs: number,
+  panelWait?: CfPanelWaitOptions,
+): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await ensureInnerWebPanelForCfFetch({
+    seedUrl: pageUrl,
+    cookies,
+    userAgent,
+  });
+  const invokeFetch = () =>
+    invoke<string>('fetch_inner_web_panel_html', {
+      url: pageUrl,
+      cookies: cookies || undefined,
+      userAgent: userAgent || undefined,
+      delayMs,
+      waitSelector: panelWait?.selector?.trim() || undefined,
+      waitMinCount: panelWait?.minCount,
+      waitTimeoutMs: panelWait?.timeoutMs,
+    });
+  try {
+    return await invokeFetch();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/内嵌 panel 未打开|内嵌网页面板未打开/i.test(msg)) {
+      await ensureInnerWebPanelForCfFetch({
+        seedUrl: pageUrl,
+        cookies,
+        userAgent,
+      });
+      return await invokeFetch();
+    }
+    throw e;
+  }
+}
+
 async function fetchPageHtmlViaCfHttp(
   url: string,
   headers: Record<string, string>,
@@ -59,6 +128,7 @@ export async function fetchPageHtmlViaCfWebView(
   url: string,
   cookies: string,
   headers: Record<string, string>,
+  options?: CfWebViewFetchOptions,
 ): Promise<string> {
   const pageUrl = url.trim();
   if (!pageUrl.startsWith('http')) {
@@ -79,25 +149,44 @@ export async function fetchPageHtmlViaCfWebView(
 
   let html = '';
 
+  try {
   if (isTauri() && !isMobile()) {
-    const { runBackstageFetchHtml } = await import('@/lib/rule-engine/webjs-tauri');
-    const cookiesOnly = cookieMerged;
-    const headersForWebview = { ...hdrs };
-    delete headersForWebview.Cookie;
-    delete headersForWebview.cookie;
-    html = await runBackstageFetchHtml({
-      url: pageUrl,
-      cookies: cookiesOnly,
-      headers: headersForWebview,
-      delayMs: 2200,
-      timeoutMs: 90_000,
-    });
+    const cfUa = getCfActiveUserAgent(source)?.trim() || LEGADO_GYKS_DESKTOP_UA;
+    const delayMs = options?.panelWait
+      ? 5000
+      : cookieHeaderHasCfClearance(cookieMerged)
+        ? 4000
+        : 2200;
+    // cf_clearance 绑定 panel WebView 指纹；backstage 实例不同会导致 403/超时
+    html = await fetchPageHtmlViaTauriCfPanel(
+      pageUrl,
+      cookieMerged,
+      cfUa,
+      delayMs,
+      options?.panelWait,
+    );
+  } else if (!isTauri()) {
+    const headersForSession = { ...hdrs };
+    delete headersForSession.Cookie;
+    delete headersForSession.cookie;
+    /** 与 CF 验证 panel 一致：勿注入书源 Android UA，由代理使用浏览器 UA */
+    delete headersForSession['User-Agent'];
+    delete headersForSession['user-agent'];
+    html = await fetchHtmlViaInnerWebProxySession(
+      pageUrl,
+      cookieMerged,
+      headersForSession,
+      { cloudflareChallenge: cookieHeaderHasCfClearance(cookieMerged) },
+    );
   } else {
     html = await fetchPageHtmlViaCfHttp(
       pageUrl,
       hdrs,
       source.enabledCookieJar === true,
     );
+  }
+  } finally {
+    releaseCfDeferredInnerWebDismiss();
   }
 
   if (!html.trim()) {
