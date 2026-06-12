@@ -117,6 +117,10 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
           </div>
           <div>
             <Label>标题净化脚本（可选 JS）</Label>
+            <p class="mt-1 text-xs text-muted-foreground">
+              可用变量：result、index、prevTitle、prevLength、lastVolumeTitle、book；
+              java.putVolume(title) 插入卷节点；返回空字符串则跳过该匹配。
+            </p>
             <TextField class="mt-1">
               <TextFieldTextArea
                 value={draft()?.replacement ?? ''}

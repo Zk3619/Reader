@@ -9,6 +9,7 @@
  * 4. 解析文件名提取书名和作者
  */
 
+import { isLocalOrigin } from '@/lib/book-source/book-type';
 import type { Book, BookChapter } from '@/types';
 import { parseStorageRef } from '@/lib/platform/fs/storage-ref';
 import { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
@@ -92,9 +93,8 @@ export function isAndroidContentUri(path: string): boolean {
 /**
  * 判断是否是本地书籍
  */
-export function isLocalBook(book: Book): boolean {
-  // 本地书籍的origin通常是 "local" 或 "local::文件名"
-  return book.origin === 'local' || book.origin.startsWith('local::');
+export function isLocalBook(book: Pick<Book, 'origin'>): boolean {
+  return isLocalOrigin(book.origin);
 }
 
 export {
@@ -127,7 +127,16 @@ export async function getLocalChapterList(
 export async function getLocalChapterListWithMetadata(
   book: Book,
   fileContent: string | ArrayBuffer
-): Promise<{ chapters: BookChapter[]; title?: string; author?: string; intro?: string; coverUrl?: string; charset?: string }> {
+): Promise<{
+  chapters: BookChapter[];
+  title?: string;
+  author?: string;
+  intro?: string;
+  coverUrl?: string;
+  charset?: string;
+  tocRule?: string;
+  offsetUnit?: import('@/lib/local-book/local-txt-file-meta').TxtOffsetUnit;
+}> {
   // 首先尝试通过文件名检测类型
   let fileType = detectFileType(book.originName);
 
@@ -139,13 +148,14 @@ export async function getLocalChapterListWithMetadata(
   switch (fileType) {
     case 'txt': {
       const result = await getTxtChapterList(book, fileContent, book.charset);
-      if (result.tocRule && !book.tocUrl) book.tocUrl = result.tocRule;
       return {
         chapters: result.chapters,
         title: result.title,
         author: result.author,
         intro: result.intro,
         charset: result.charset,
+        tocRule: result.tocRule,
+        offsetUnit: result.offsetUnit,
       };
     }
 
@@ -318,3 +328,10 @@ export {
   resolveAndroidOriginFileName,
 } from '@/lib/local-book/import';
 export type { ImportResult, LocalBookPickResult } from '@/lib/local-book/import';
+export {
+  buildTxtTocRuleStorage,
+  ensureLocalTxtCatalogFresh,
+  getBookTxtTocRuleStorage,
+  reparseLocalTxtBook,
+} from '@/lib/local-book/reparse-txt-book';
+export type { ReparseLocalTxtBookOptions, ReparseTxtBookResult } from '@/lib/local-book/reparse-txt-book';

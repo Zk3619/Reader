@@ -34,6 +34,7 @@ export interface TxtTocRulesPageToolbarProps {
   onImportQR?: () => void;
   onImportCode?: () => void;
   onImportDefault?: () => void;
+  onBatchReparse?: () => void;
 }
 
 export function TxtTocRulesToolbarLeading(props: { onBack: () => void }) {
@@ -166,6 +167,10 @@ export function TxtTocRulesPageToolbar(props: TxtTocRulesPageToolbarProps) {
           <AppDropdownMenuItem onSelect={() => props.onImportDefault?.()}>
             <FileTextIcon class="h-4 w-4" />
             <span>导入默认规则</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => props.onBatchReparse?.()}>
+            <FileTextIcon class="h-4 w-4" />
+            <span>批量重解析书架</span>
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>

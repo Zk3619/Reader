@@ -12,12 +12,23 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
 import { getEnabledTxtTocRules } from '@/lib/database/txt-toc-rules';
+import { txtOffsetsAreBytes, type TxtOffsetUnit } from '@/lib/local-book/local-txt-file-meta';
 import {
   encodeTocRuleStorage,
+  isLegacyTocUrlAsBookPath,
+  isStoredTxtTocRule,
   parseTocRuleStorage,
   scanTxtTocMatches,
   selectBestTxtTocRule,
+  toTxtTocJsBook,
 } from '@/lib/local-book/txt-toc-rule-engine';
+import {
+  decodeUtf8HeadSample,
+  detectUtf8BomSkip,
+  parseChaptersWithTxtTocRuleStream,
+  TXT_STREAM_BUFFER_SIZE,
+  utf8CharIndexToFileByteOffset,
+} from '@/lib/local-book/txt-stream-parser';
 import type { Book, BookChapter } from '@/types';
 
 /**
@@ -39,6 +50,8 @@ export interface TxtParseResult {
   wordCount: number;
   charset: string;
   tocRule?: string;
+  /** 章节 start/end 单位 */
+  offsetUnit?: TxtOffsetUnit;
   /** 从正文解析出的书名（首行等） */
   title?: string;
   /** 从正文解析出的作者（作者：xxx） */
@@ -89,6 +102,9 @@ const DEFAULT_CHAPTER_PATTERNS: RegExp[] = [
  * 没有目录时，每个章节的最大长度（10KB）
  */
 const MAX_LENGTH_WITH_NO_TOC = 10 * 1024;
+
+/** 有目录规则时，单章超过此长度将自动拆分（对齐 Legado maxLengthWithToc ≈ 3 万字） */
+const MAX_LENGTH_WITH_TOC = 102_400;
 
 /** 章节匹配视为有效的最小间距（字节），避免把段落内相似行当成章节 */
 /** 判断两条是否同为【第X天】且其一为另一前缀（行首整行匹配 vs 补采短匹配视为同一章） */
@@ -191,13 +207,36 @@ export async function getTxtChapterList(
   fileContent: string | ArrayBuffer,
   charset: string = 'utf-8'
 ): Promise<TxtParseResult> {
-  // 将文件内容转换为字符串（支持 ArrayBuffer 时先尝试 BOM 与编码检测）
   let content: string;
+  let rawBuffer: ArrayBuffer | null = null;
+  let useByteOffsets = false;
+  let bomSkip = 0;
+  let offsetUnit: TxtOffsetUnit = 'char';
+
   if (fileContent instanceof ArrayBuffer) {
-    const detected = await detectEncodingFromBuffer(fileContent);
+    rawBuffer = fileContent;
+    bomSkip = detectUtf8BomSkip(new Uint8Array(fileContent));
+    const headOnly = fileContent.byteLength > TXT_STREAM_BUFFER_SIZE + bomSkip;
+    const detectBuffer = headOnly
+      ? fileContent.slice(0, bomSkip + TXT_STREAM_BUFFER_SIZE)
+      : fileContent;
+    const detected = await detectEncodingFromBuffer(detectBuffer);
     charset = detected.charset;
-    content = detected.text;
     if (!book.charset) book.charset = charset;
+
+    const charsetLower = charset.toLowerCase();
+    if (charsetLower === 'utf-8' && headOnly) {
+      useByteOffsets = true;
+      offsetUnit = 'byte';
+      content = decodeUtf8HeadSample(fileContent);
+    } else if (headOnly && charsetLower !== 'utf-8') {
+      const full = await detectEncodingFromBuffer(fileContent);
+      charset = full.charset;
+      content = normalizeLineEndings(full.text);
+      if (!book.charset) book.charset = charset;
+    } else {
+      content = normalizeLineEndings(detected.text);
+    }
   } else {
     content = fileContent;
     if (!book.charset) {
@@ -211,40 +250,81 @@ export async function getTxtChapterList(
   // 解析正文头部元数据（书名、作者、简介）
   const metadata = parseTxtMetadata(content);
 
-  // 目录规则：书籍已缓存 > readConfig.tocRule > 数据库规则自动选择 > 内置多规则 > 按大小分章
+  // 目录规则：书籍 tocUrl 缓存 > readConfig.tocRule > 数据库规则自动选择 > 内置多规则 > 按大小分章
   let chapters: BookChapter[];
   let wordCount: number;
-  let tocRule: string | undefined = book.tocUrl || undefined;
-  const customTocRule = (book.readConfig as { tocRule?: string } | undefined)?.tocRule?.trim();
-  const storedRule = parseTocRuleStorage(book.tocUrl);
+  let tocRule: string | undefined;
+  const readConfig = book.readConfig as { tocRule?: string; splitLongChapter?: boolean } | undefined;
+  const customTocRule = readConfig?.tocRule?.trim();
+  const splitLongChapter = readConfig?.splitLongChapter !== false;
+  const tocUrlForRule = isLegacyTocUrlAsBookPath(book.tocUrl, book.bookUrl) ? '' : book.tocUrl;
+  const storedRule = isStoredTxtTocRule(tocUrlForRule) ? parseTocRuleStorage(tocUrlForRule) : null;
 
   try {
-    if (storedRule?.rule) {
-      const parsed = await parseChaptersWithTxtTocRule(
-        content,
-        storedRule.rule,
-        storedRule.replacement,
-        charset,
-      );
+    if (storedRule) {
+      const parsed = storedRule.rule.trim()
+        ? useByteOffsets && rawBuffer
+          ? await parseChaptersWithTxtTocRuleStream(
+              rawBuffer,
+              storedRule.rule,
+              storedRule.replacement,
+              splitLongChapter,
+              book,
+            )
+          : await parseChaptersWithTxtTocRule(
+              content,
+              storedRule.rule,
+              storedRule.replacement,
+              charset,
+              splitLongChapter,
+              book,
+            )
+        : parseChaptersWithoutRule(content, charset);
       chapters = parsed.chapters;
       wordCount = parsed.wordCount;
       tocRule = encodeTocRuleStorage(storedRule.rule, storedRule.replacement);
+      if (!storedRule.rule.trim()) offsetUnit = 'char';
     } else if (customTocRule) {
-      const parsed = parseChaptersWithRule(content, customTocRule, charset);
+      const parsed = useByteOffsets && rawBuffer
+        ? await parseChaptersWithTxtTocRuleStream(
+            rawBuffer,
+            customTocRule,
+            '',
+            splitLongChapter,
+            book,
+          )
+        : await parseChaptersWithTxtTocRule(
+            content,
+            customTocRule,
+            '',
+            charset,
+            splitLongChapter,
+            book,
+          );
       chapters = parsed.chapters;
       wordCount = parsed.wordCount;
-      if (!tocRule) tocRule = 'custom';
+      tocRule = encodeTocRuleStorage(customTocRule, '');
     } else {
-      const sample = content.slice(0, 512_000);
+      const sample = content.slice(0, TXT_STREAM_BUFFER_SIZE);
       const enabledRules = await getEnabledTxtTocRules();
       const picked = enabledRules.length > 0 ? await selectBestTxtTocRule(sample, enabledRules) : null;
       if (picked?.rule.trim()) {
-        const parsed = await parseChaptersWithTxtTocRule(
-          content,
-          picked.rule,
-          picked.replacement,
-          charset,
-        );
+        const parsed = useByteOffsets && rawBuffer
+          ? await parseChaptersWithTxtTocRuleStream(
+              rawBuffer,
+              picked.rule,
+              picked.replacement,
+              splitLongChapter,
+              book,
+            )
+          : await parseChaptersWithTxtTocRule(
+              content,
+              picked.rule,
+              picked.replacement,
+              charset,
+              splitLongChapter,
+              book,
+            );
         chapters = parsed.chapters;
         wordCount = parsed.wordCount;
         tocRule = encodeTocRuleStorage(picked.rule, picked.replacement);
@@ -252,7 +332,8 @@ export async function getTxtChapterList(
         const parsed = parseChaptersWithAllPatterns(content, charset);
         chapters = parsed.chapters;
         wordCount = parsed.wordCount;
-        if (!tocRule && chapters.length > 0) tocRule = 'multi';
+        offsetUnit = 'char';
+        if (chapters.length > 0) tocRule = 'multi';
       }
     }
     if (chapters.length === 0) {
@@ -270,8 +351,15 @@ export async function getTxtChapterList(
   // 若有正文前导（书名/简介等）且首个章节并非从 0 开始，则插入“简介”章，便于在目录中阅读
   if (metadata.bodyStart > 0 && chapters.length > 0) {
     const firstStart = chapters[0].start ?? 0;
-    if (firstStart > 0) {
-      const introBlock = content.substring(0, firstStart).trim();
+    const introEnd =
+      offsetUnit === 'byte' && rawBuffer
+        ? utf8CharIndexToFileByteOffset(content, metadata.bodyStart, bomSkip)
+        : metadata.bodyStart;
+    if (firstStart > introEnd && introEnd > 0) {
+      const introBlock =
+        offsetUnit === 'byte' && rawBuffer
+          ? new TextDecoder('utf-8').decode(rawBuffer.slice(bomSkip, introEnd)).trim()
+          : content.substring(0, metadata.bodyStart).trim();
       if (introBlock.length > 20) {
         const introChapter: BookChapter = {
           url: '',
@@ -282,8 +370,8 @@ export async function getTxtChapterList(
           index: 0,
           isVip: false,
           isPay: false,
-          start: 0,
-          end: firstStart,
+          start: offsetUnit === 'byte' ? bomSkip : 0,
+          end: introEnd,
           wordCount: formatWordCount(introBlock.length),
         };
         chapters.unshift(introChapter);
@@ -310,6 +398,7 @@ export async function getTxtChapterList(
     wordCount,
     charset,
     tocRule,
+    offsetUnit,
     title: metadata.title,
     author: metadata.author,
     intro: metadata.intro,
@@ -329,6 +418,32 @@ export async function getTxtContent(
   fileContent: string | ArrayBuffer,
   charset: string = 'utf-8'
 ): Promise<string> {
+  const useByteSlice =
+    txtOffsetsAreBytes(book) &&
+    fileContent instanceof ArrayBuffer &&
+    chapter.start != null &&
+    chapter.end != null;
+
+  if (useByteSlice) {
+    const start = chapter.start!;
+    const end = chapter.end!;
+    if (start >= end) return '';
+    const slice = fileContent.slice(start, end);
+    let body = normalizeLineEndings(new TextDecoder(charset, { fatal: false }).decode(slice));
+    body = body.replace(/\s+$/, '');
+    if (!chapter.title) return body;
+    const firstLineEnd = body.indexOf('\n');
+    const firstLine = firstLineEnd === -1 ? body : body.slice(0, firstLineEnd);
+    if (firstLine.trim() === chapter.title) {
+      body = firstLineEnd === -1 ? '' : body.slice(firstLineEnd + 1);
+      while (body.startsWith('\n')) {
+        body = body.slice(1);
+      }
+    }
+    body = body.replace(/^[\n\s]+/, '　　');
+    return body;
+  }
+
   // 将文件内容转换为字符串（与解析章节时一致，统一换行符以便 start/end 对齐）
   let content: string;
   if (fileContent instanceof ArrayBuffer) {
@@ -416,6 +531,8 @@ export async function getTxtContent(
         body = body.slice(1);
       }
     }
+    // 对齐 Legado TextFile.padRegex：段首空白统一为全角缩进
+    body = body.replace(/^[\n\s]+/, '　　');
     return body;
   }
 
@@ -531,6 +648,47 @@ function parseChaptersWithAllPatterns(
   return { chapters, wordCount };
 }
 
+function isVolumeTitle(title: string): boolean {
+  return /^第?[零一二三四五六七八九十百千万0-9]+[卷部篇本]/u.test(title);
+}
+
+/**
+ * 超长章节按固定长度再切分（对齐 Legado splitLongChapter）
+ */
+function splitOversizedChapter(
+  content: string,
+  start: number,
+  end: number,
+  baseTitle: string,
+  charset: string,
+): BookChapter[] {
+  const slice = content.substring(start, end);
+  if (slice.length <= MAX_LENGTH_WITH_TOC) {
+    return [{
+      url: '',
+      title: baseTitle,
+      isVolume: false,
+      baseUrl: '',
+      bookUrl: '',
+      index: 0,
+      isVip: false,
+      isPay: false,
+      start,
+      end,
+      wordCount: formatWordCount(slice.length),
+    }];
+  }
+
+  const split = parseChaptersWithoutRule(slice, charset);
+  return split.chapters.map((ch, i) => ({
+    ...ch,
+    title: `${baseTitle}(${i + 1})`,
+    start: start + (ch.start ?? 0),
+    end: start + (ch.end ?? 0),
+    isVolume: false,
+  }));
+}
+
 /**
  * 使用 TXT 目录规则（含可选 JS 标题净化）解析章节
  */
@@ -538,12 +696,15 @@ async function parseChaptersWithTxtTocRule(
   content: string,
   rule: string,
   replacement: string,
-  _charset: string,
+  charset: string,
+  splitLongChapter = true,
+  book?: Book,
 ): Promise<{ chapters: BookChapter[]; wordCount: number }> {
   if (!rule.trim()) {
-    return parseChaptersWithoutRule(content, _charset);
+    return parseChaptersWithoutRule(content, charset);
   }
-  const matches = await scanTxtTocMatches(content, rule, replacement);
+  const jsBook = book ? toTxtTocJsBook(book) : undefined;
+  const matches = await scanTxtTocMatches(content, rule, replacement, jsBook);
   if (matches.length === 0) {
     return { chapters: [], wordCount: 0 };
   }
@@ -551,19 +712,45 @@ async function parseChaptersWithTxtTocRule(
   const chapters: BookChapter[] = [];
   let wordCount = 0;
 
-  for (const { index: chapterStart, title: chapterTitle } of matches) {
+  for (const match of matches) {
+    const { index: chapterStart, title: chapterTitle, precedingContent, isVolume } = match;
+
     if (chapters.length > 0) {
       const lastChapter = chapters[chapters.length - 1];
-      lastChapter.end = chapterStart;
-      const chapterContent = content.substring(lastChapter.start ?? 0, chapterStart);
-      lastChapter.wordCount = formatWordCount(chapterContent.length);
-      wordCount += chapterContent.length;
+      const segStart = lastChapter.start ?? 0;
+      const segEnd = chapterStart;
+      const chapterContent = content.substring(segStart, segEnd);
+      const segLen = segEnd - segStart;
+
+      if (
+        splitLongChapter &&
+        !lastChapter.isVolume &&
+        segLen > MAX_LENGTH_WITH_TOC
+      ) {
+        chapters.pop();
+        const splitParts = splitOversizedChapter(
+          content,
+          segStart,
+          segEnd,
+          lastChapter.title,
+          charset,
+        );
+        chapters.push(...splitParts);
+        wordCount += segLen;
+      } else {
+        lastChapter.end = segEnd;
+        if (!lastChapter.isVolume && chapterContent.trim() === '') {
+          lastChapter.isVolume = true;
+        }
+        lastChapter.wordCount = formatWordCount(chapterContent.length);
+        wordCount += chapterContent.length;
+      }
     }
 
     chapters.push({
       url: '',
       title: chapterTitle,
-      isVolume: /^第?[零一二三四五六七八九十百千万0-9]+[卷部篇本]/u.test(chapterTitle),
+      isVolume: isVolume === true || isVolumeTitle(chapterTitle),
       baseUrl: '',
       bookUrl: '',
       index: chapters.length,
@@ -572,14 +759,34 @@ async function parseChaptersWithTxtTocRule(
       start: chapterStart,
       end: chapterStart,
     });
+
+    // 标题与正文之间无内容时，上一章为卷名（Legado isVolume 逻辑）
+    if (chapters.length >= 2 && precedingContent.trim() === '') {
+      const prev = chapters[chapters.length - 2];
+      if (!prev.isVolume) prev.isVolume = true;
+    }
   }
 
   if (chapters.length > 0) {
     const lastChapter = chapters[chapters.length - 1];
-    lastChapter.end = content.length;
-    const chapterContent = content.substring(lastChapter.start ?? 0, content.length);
-    lastChapter.wordCount = formatWordCount(chapterContent.length);
-    wordCount += chapterContent.length;
+    const finalEnd = content.length;
+    const chapterContent = content.substring(lastChapter.start ?? 0, finalEnd);
+
+    if (
+      splitLongChapter &&
+      finalEnd - (lastChapter.start ?? 0) > MAX_LENGTH_WITH_TOC
+    ) {
+      const parentTitle = lastChapter.title;
+      const parentStart = lastChapter.start ?? 0;
+      chapters.pop();
+      const splitParts = splitOversizedChapter(content, parentStart, finalEnd, parentTitle, charset);
+      chapters.push(...splitParts);
+      wordCount += chapterContent.length;
+    } else {
+      lastChapter.end = finalEnd;
+      lastChapter.wordCount = formatWordCount(chapterContent.length);
+      wordCount += chapterContent.length;
+    }
   }
 
   chapters.forEach((chapter, index) => {
@@ -592,7 +799,7 @@ async function parseChaptersWithTxtTocRule(
 /**
  * 使用单规则解析章节（保留供 tocUrl 指定规则时使用）
  */
-function parseChaptersWithRule(
+export function parseChaptersWithRule(
   content: string,
   rule: string,
   charset: string

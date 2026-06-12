@@ -2,9 +2,10 @@
  * TXT 目录规则管理（对齐 Legado TxtTocRuleActivity + 书源管理页交互）
  */
 
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import * as txtTocDb from '@/lib/database/txt-toc-rules';
 import { importTxtTocRulesFromJson } from '@/lib/book-source/import-txt-toc-rule';
+import { batchReparseLocalTxtBooks, listLocalTxtBooks } from '@/lib/local-book/batch-reparse-local-txt';
 import { filterTxtTocRules } from '@/lib/txt-toc-rules/filter-txt-toc-rules';
 import { TxtTocRuleListItem } from '@/components/txt-toc-rules/TxtTocRuleListItem';
 import { TxtTocRuleEditDialog } from '@/components/txt-toc-rules/TxtTocRuleEditDialog';
@@ -17,10 +18,8 @@ import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
-import {
-  settingsRuleManagePageListScroll,
-  settingsRuleManagePageRoot,
-} from '@/lib/ui/viewport-classes';
+import { VirtualRuleManageList } from '@/components/replace-rules/VirtualRuleManageList';
+import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
 import type { TxtTocRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
@@ -74,6 +73,11 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
   const [importUrl, setImportUrl] = createSignal('');
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
   const [codeImportOpen, setCodeImportOpen] = createSignal(false);
+  const [batchReparseOpen, setBatchReparseOpen] = createSignal(false);
+  const [batchReparseOnlyModified, setBatchReparseOnlyModified] = createSignal(false);
+  const [batchReparseRunning, setBatchReparseRunning] = createSignal(false);
+  const [batchReparseProgress, setBatchReparseProgress] = createSignal('');
+  const [localTxtBookCount, setLocalTxtBookCount] = createSignal(0);
 
   const filteredRules = createMemo(() => filterTxtTocRules(rules(), searchQuery()));
   const selectedCount = () => selectedIds().size;
@@ -310,10 +314,53 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
     setSelectedIds(next);
   };
 
+  const openBatchReparse = async () => {
+    setBatchReparseProgress('');
+    setBatchReparseOnlyModified(false);
+    try {
+      const books = await listLocalTxtBooks();
+      setLocalTxtBookCount(books.length);
+    } catch {
+      setLocalTxtBookCount(0);
+    }
+    setBatchReparseOpen(true);
+  };
+
+  const runBatchReparse = async (force: boolean) => {
+    if (batchReparseRunning()) return;
+    setBatchReparseRunning(true);
+    setBatchReparseProgress('准备中…');
+    try {
+      const result = await batchReparseLocalTxtBooks({
+        onlyModified: !force && batchReparseOnlyModified(),
+        force,
+        onProgress: (p) => {
+          setBatchReparseProgress(
+            `${p.done}/${p.total} ${p.bookName}${p.status === 'failed' ? '（失败）' : ''}`,
+          );
+        },
+      });
+      setBatchReparseOpen(false);
+      showAppToast({
+        title: '批量重解析完成',
+        description: `成功 ${result.success}，失败 ${result.failed}，跳过 ${result.skipped}`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '批量重解析失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setBatchReparseRunning(false);
+      setBatchReparseProgress('');
+    }
+  };
+
   void reload();
 
   return (
-    <div class={settingsRuleManagePageRoot}>
+    <div class={mainShellPageRoot}>
       <PageToolbar
         class="border-b border-border/50 px-3 py-2 sm:px-4"
         title="TXT 目录规则"
@@ -338,10 +385,11 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
           onImportQR={() => setQrImportOpen(true)}
           onImportCode={() => setCodeImportOpen(true)}
           onImportDefault={() => void importDefault()}
+          onBatchReparse={() => void openBatchReparse()}
         />
       </PageToolbar>
 
-      <div class={settingsRuleManagePageListScroll}>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/40">
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
@@ -351,43 +399,45 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
           </p>
         </Show>
         <Show when={!loading() && filteredRules().length > 0}>
-          <ul>
-            <For each={filteredRules()}>
-              {(rule) => (
-                <TxtTocRuleListItem
-                  rule={rule}
-                  selected={selectedIds().has(rule.id)}
-                  onToggleSelection={() => toggleSelection(rule.id)}
-                  onSelectionChange={(checked) => {
-                    const next = new Set(selectedIds());
-                    if (checked) next.add(rule.id);
-                    else next.delete(rule.id);
-                    setSelectedIds(next);
-                  }}
-                  onEnableChange={async (enabled) => {
-                    await txtTocDb.upsertTxtTocRule({ ...rule, enable: enabled });
-                    await reload();
-                  }}
-                  onEdit={() => openEdit(rule)}
-                  onMoveTop={async () => {
-                    await txtTocDb.moveTxtTocRulesToTop([rule]);
-                    await reload();
-                  }}
-                  onMoveBottom={async () => {
-                    await txtTocDb.moveTxtTocRulesToBottom([rule]);
-                    await reload();
-                  }}
-                  onDelete={async () => {
-                    await txtTocDb.deleteTxtTocRule(rule.id);
-                    const next = new Set(selectedIds());
-                    next.delete(rule.id);
-                    setSelectedIds(next);
-                    await reload();
-                  }}
-                />
-              )}
-            </For>
-          </ul>
+          <VirtualRuleManageList
+            class="h-full min-h-0 flex-1"
+            items={filteredRules}
+            getItemKey={(rule) => rule.id}
+          >
+            {(rule) => (
+              <TxtTocRuleListItem
+                rule={rule}
+                selected={selectedIds().has(rule.id)}
+                onToggleSelection={() => toggleSelection(rule.id)}
+                onSelectionChange={(checked) => {
+                  const next = new Set(selectedIds());
+                  if (checked) next.add(rule.id);
+                  else next.delete(rule.id);
+                  setSelectedIds(next);
+                }}
+                onEnableChange={async (enabled) => {
+                  await txtTocDb.upsertTxtTocRule({ ...rule, enable: enabled });
+                  await reload();
+                }}
+                onEdit={() => openEdit(rule)}
+                onMoveTop={async () => {
+                  await txtTocDb.moveTxtTocRulesToTop([rule]);
+                  await reload();
+                }}
+                onMoveBottom={async () => {
+                  await txtTocDb.moveTxtTocRulesToBottom([rule]);
+                  await reload();
+                }}
+                onDelete={async () => {
+                  await txtTocDb.deleteTxtTocRule(rule.id);
+                  const next = new Set(selectedIds());
+                  next.delete(rule.id);
+                  setSelectedIds(next);
+                  await reload();
+                }}
+              />
+            )}
+          </VirtualRuleManageList>
         </Show>
       </div>
 
@@ -491,6 +541,53 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
         confirmLabel="导入"
         onIdentify={(raw) => void handleRawTextIdentify(raw, 'code', () => setCodeImportOpen(false))}
       />
+
+      <AppDialog open={batchReparseOpen()} onOpenChange={setBatchReparseOpen}>
+        <AppDialogContent>
+          <AppDialogHeader>
+            <AppDialogTitle>批量重解析书架</AppDialogTitle>
+            <AppDialogDescription>
+              对书架中 {localTxtBookCount()} 本本地 TXT 按当前目录规则重新分章。文件在外部被修改过的书会在打开时自动重解析；此处可手动全量或按变更批量刷新。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <div class="space-y-3 px-6 text-sm">
+            <label class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={batchReparseOnlyModified()}
+                disabled={batchReparseRunning()}
+                onChange={(e) => setBatchReparseOnlyModified(e.currentTarget.checked)}
+              />
+              <span>仅重解析检测到文件变更的书（mtime / 大小）</span>
+            </label>
+            <Show when={batchReparseProgress()}>
+              <p class="text-muted-foreground">{batchReparseProgress()}</p>
+            </Show>
+          </div>
+          <AppDialogFooter class="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              disabled={batchReparseRunning()}
+              onClick={() => setBatchReparseOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="outline"
+              disabled={batchReparseRunning() || localTxtBookCount() === 0}
+              onClick={() => void runBatchReparse(false)}
+            >
+              {batchReparseRunning() ? '处理中…' : '开始'}
+            </Button>
+            <Button
+              disabled={batchReparseRunning() || localTxtBookCount() === 0}
+              onClick={() => void runBatchReparse(true)}
+            >
+              强制全部
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
 
       <AppDialog open={importUrlOpen()} onOpenChange={setImportUrlOpen}>
         <AppDialogContent>

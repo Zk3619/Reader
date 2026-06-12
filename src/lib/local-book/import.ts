@@ -51,6 +51,7 @@ import {
   formatBookName,
   formatBookAuthor,
 } from '@/lib/local-book/index';
+import { captureLocalTxtFileMeta, mergeLocalTxtFileMeta } from '@/lib/local-book/local-txt-file-meta';
 import type { Book, BookChapter } from '@/types';
 import type { NewBookChapter } from '@/types/book-chapter';
 import * as booksDb from '@/lib/database/books';
@@ -612,7 +613,7 @@ export async function importLocalBookFromContent(
   const now = Date.now();
   const bookStub: Book = {
     bookUrl: finalBookUrl,
-    tocUrl: finalBookUrl,
+    tocUrl: '',
     origin: 'local',
     originName: originFileName,
     name,
@@ -636,6 +637,9 @@ export async function importLocalBookFromContent(
 
   const listResult = await getLocalChapterListWithMetadata(bookStub, content);
   chapters = listResult.chapters;
+  if (listResult.tocRule) {
+    bookStub.tocUrl = listResult.tocRule;
+  }
 
   // console.log('[导入] 解析结果:', {
   //   title: listResult.title,
@@ -660,6 +664,10 @@ export async function importLocalBookFromContent(
   if (listResult.charset) {
     bookStub.charset = listResult.charset;
   }
+  bookStub.variable = mergeLocalTxtFileMeta(bookStub.variable, {
+    ...(await captureLocalTxtFileMeta(bookStub.bookUrl)),
+    txtOffsetUnit: listResult.offsetUnit ?? 'char',
+  });
 
   bookStub.totalChapterNum = chapters.length;
   bookStub.latestChapterTitle = chapters.length > 0 ? chapters[chapters.length - 1]?.title : undefined;
@@ -721,7 +729,6 @@ export async function importLocalBookFromContent(
 
         finalBookUrl = newFilePath;
         bookStub.bookUrl = finalBookUrl;
-        bookStub.tocUrl = finalBookUrl;
         bookStub.originName = newFileName;
 
         // console.log('[导入] 文件重命名成功:', { finalBookUrl, originName: bookStub.originName });
