@@ -61,6 +61,7 @@ tauri-plugin-http = { version = "2.5.7", features = [
 ] }
 tauri-plugin-single-instance = "2.4.0"
 tauri-plugin-process = "2"
+if-addrs = "0.14.0"
 
 ffmpeg-next = { version = "7.1", optional = true, default-features = false, features = [
     "static",

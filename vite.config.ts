@@ -3,6 +3,7 @@ import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { readerHttpProxy } from "./vite-plugins/reader-http-proxy";
+import { legadoWebApiServer } from "./vite-plugins/legado-web-api-server";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -13,7 +14,7 @@ export default defineConfig(async () => ({
     include: ['src/test/**/*.test.ts'],
     setupFiles: ['./src/test/vitest.setup.ts'],
   },
-  plugins: [solid(), tailwindcss(), readerHttpProxy()],
+  plugins: [solid(), tailwindcss(), readerHttpProxy(), legadoWebApiServer()],
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
   base: process.env.NODE_ENV === "production" ? "./" : "",
   assetsInclude: ["**/*.wasm"],

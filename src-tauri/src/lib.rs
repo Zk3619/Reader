@@ -1,4 +1,7 @@
 mod data_migration;
+mod web_service;
+mod web_static;
+mod local_addresses;
 mod http_cookies;
 mod window_state;
 mod portable_paths;
@@ -2107,6 +2110,10 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::backstage_webview::set_cookies_for_backstage_webview,
             crate::webjs_java_rpc::webjs_java_rpc,
+            web_service::web_api_complete_cmd,
+            web_service::start_reader_web_service_cmd,
+            web_service::stop_reader_web_service_cmd,
+            local_addresses::get_local_network_addresses_cmd,
             media_convert::media_convert_probe,
             media_convert::convert_image_bytes,
             media_convert::convert_audio_bytes,

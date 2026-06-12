@@ -1,0 +1,41 @@
+/** Legado HttpServer.kt 注册的 API 路径 */
+
+export const LEGADO_API_PATHS = new Set([
+  '/getBookSource',
+  '/getBookSources',
+  '/getBookshelf',
+  '/getChapterList',
+  '/refreshToc',
+  '/getBookContent',
+  '/cover',
+  '/image',
+  '/getReadConfig',
+  '/getRssSource',
+  '/getRssSources',
+  '/getReplaceRules',
+  '/backupPreview',
+  '/backup',
+  '/saveBookSource',
+  '/saveBookSources',
+  '/deleteBookSources',
+  '/saveBook',
+  '/deleteBook',
+  '/saveBookProgress',
+  '/addLocalBook',
+  '/saveReadConfig',
+  '/saveRssSource',
+  '/saveRssSources',
+  '/deleteRssSources',
+  '/saveReplaceRule',
+  '/deleteReplaceRule',
+  '/testReplaceRule',
+]);
+
+export function normalizeLegadoApiPath(path: string): string {
+  const raw = path.split('?')[0] ?? path;
+  return raw.endsWith('/') && raw.length > 1 ? raw.slice(0, -1) : raw;
+}
+
+export function isLegadoWebApiPath(path: string): boolean {
+  return LEGADO_API_PATHS.has(normalizeLegadoApiPath(path));
+}
