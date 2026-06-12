@@ -12,6 +12,7 @@ import {
   stopInnerWebBridge,
 } from '@/lib/platform/inner-web-bridge';
 import {
+  bumpInnerWebPanelSessionEpoch,
   closeInnerWebTauriPanel,
   setInnerWebSessionActive,
 } from '@/lib/platform/inner-web-tauri';
@@ -33,6 +34,7 @@ import {
   resolveInnerWebPresentation,
   type InnerWebPresentation,
 } from '@/lib/platform/inner-web-presentation';
+import { resetInnerWebPanelOverlayOnDismiss } from '@/lib/platform/inner-web-panel-overlay';
 
 export {
   getInnerWebCookiesUseMainWebview,
@@ -74,6 +76,8 @@ export interface InnerWebCloseResult {
   url: string;
   /** Legado startBrowserAwait().body()：线路设置等 data: HTML 页在 √ 时的 document 快照 */
   body?: string;
+  /** Tauri panel 过 CF 时的 navigator.userAgent（须在 panel 关闭前读取） */
+  panelUserAgent?: string;
 }
 
 type OpenFn = (payload: InnerWebPayload) => void;
@@ -122,6 +126,24 @@ let pendingAwait: {
 
 /** 纯 Web 内嵌页文档代理会话（供 confirm 时读取 Cookie） */
 let activeWebProxySessionId: string | null = null;
+
+/** Tauri CF 验证 √ 后暂缓关闭 panel，供同实例 WebView 拉取列表/正文 */
+let cfPanelDeferredDismiss = false;
+
+export function isCfPanelDeferredDismiss(): boolean {
+  return cfPanelDeferredDismiss;
+}
+
+function markCfPanelDeferredDismiss(): void {
+  cfPanelDeferredDismiss = true;
+}
+
+/** CF 拉取结束后关闭 panel / 内嵌页 */
+export function releaseCfDeferredInnerWebDismiss(): void {
+  if (!cfPanelDeferredDismiss) return;
+  cfPanelDeferredDismiss = false;
+  void requestInnerWebDismiss();
+}
 
 export function setActiveWebProxySessionId(sessionId: string | null): void {
   activeWebProxySessionId = sessionId;
@@ -282,26 +304,38 @@ function setSessionActive(active: boolean, payload?: InnerWebPayload): void {
   }
 }
 
+let dismissOverlayInflight: Promise<void> | null = null;
+
 async function dismissOverlay(): Promise<void> {
-  suppressLoginDialogDismiss();
-  stopInnerWebBridge();
-  try {
-    await closeInnerWebTauriPanel();
-    const { closeInnerWebChildWindow } = await import('./inner-web-child-window');
-    await closeInnerWebChildWindow();
-  } catch (e) {
-    console.warn('[inner-web] close inner web views failed', e);
-  }
-  await waitPointerGestureEnd();
-  clearInnerWebSessionStorage();
-  clearInnerWebSessionBodyClasses();
-  await setInnerWebSessionActive(false);
-  onInnerWebSessionEnded();
-  setInnerWebCookiesUseMainWebview(false);
-  closeOverlay?.();
-  notifyInnerWebDismissed();
-  pendingDismissResolve?.();
-  pendingDismissResolve = null;
+  if (dismissOverlayInflight) return dismissOverlayInflight;
+
+  dismissOverlayInflight = (async () => {
+    bumpInnerWebPanelSessionEpoch();
+    suppressLoginDialogDismiss();
+    stopInnerWebBridge();
+    try {
+      await closeInnerWebTauriPanel();
+      const { closeInnerWebChildWindow } = await import('./inner-web-child-window');
+      await closeInnerWebChildWindow();
+    } catch (e) {
+      console.warn('[inner-web] close inner web views failed', e);
+    }
+    resetInnerWebPanelOverlayOnDismiss();
+    await waitPointerGestureEnd();
+    clearInnerWebSessionStorage();
+    clearInnerWebSessionBodyClasses();
+    await setInnerWebSessionActive(false);
+    onInnerWebSessionEnded();
+    setInnerWebCookiesUseMainWebview(false);
+    closeOverlay?.();
+    notifyInnerWebDismissed();
+    pendingDismissResolve?.();
+    pendingDismissResolve = null;
+  })().finally(() => {
+    dismissOverlayInflight = null;
+  });
+
+  return dismissOverlayInflight;
 }
 
 function isDrawerInnerWebSession(payload?: InnerWebPayload | null): boolean {
@@ -371,6 +405,12 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
     }
     openEmbedded(normalized);
     setSessionActive(true, normalized);
+    if (useInnerWebTauriPanel({ url, html })) {
+      resetInnerWebPanelOverlayOnDismiss();
+      void invoke('set_inner_web_panel_visible', { visible: true }).catch((e) => {
+        console.warn('[inner-web] set_inner_web_panel_visible(true) failed', e);
+      });
+    }
     return true;
   } catch (e) {
     console.error('[inner-web] openInnerWeb failed', e);
@@ -736,9 +776,9 @@ export async function confirmInnerWebClose(
     persisted?.bookSourceUrl?.trim() ||
     undefined;
 
-  // 须在 panel 关闭前抓取 HTML；与 Cookie 读取并行，避免 √ 后长时间卡住
+  // 须在 panel 关闭前抓取 HTML / Cookie / UA；并行读取，避免 √ 后 panel 已销毁
   const needCookies = isValidCookieSyncUrl(url);
-  const [bodyResult, cookiesResult] = await Promise.all([
+  const [bodyResult, cookiesResult, panelUaResult] = await Promise.all([
     pullInnerWebDocumentHtmlFromFrames().catch((e) => {
       console.warn('[inner-web] pullInnerWebDocumentHtmlFromFrames failed', e);
       return '';
@@ -746,6 +786,12 @@ export async function confirmInnerWebClose(
     needCookies
       ? readInnerWebCookiesForConfirm(url).catch((e) => {
           console.warn('[inner-web] readInnerWebCookiesForConfirm failed', e);
+          return '';
+        })
+      : Promise.resolve(''),
+    isTauri()
+      ? invoke<string>('get_inner_web_panel_user_agent').catch((e) => {
+          console.warn('[inner-web] get_inner_web_panel_user_agent failed', e);
           return '';
         })
       : Promise.resolve(''),
@@ -759,21 +805,37 @@ export async function confirmInnerWebClose(
   let cookies = cookiesResult;
   if (url.startsWith('http') && sourceKey && cookies.trim()) {
     try {
+      const { syncSourceCookiesAfterInnerWeb } = await import(
+        '@/lib/book-source/source-cookie-pool'
+      );
       const { getSource } = await import('@/lib/database/sources');
       const src = await getSource(sourceKey);
       if (src) {
-        const { syncSourceCookiesAfterInnerWeb } = await import(
-          '@/lib/book-source/source-cookie-pool'
-        );
         cookies = await syncSourceCookiesAfterInnerWeb(src, url, cookies);
+      } else {
+        const { getRssSource } = await import('@/lib/database/rss-sources');
+        const { rssAsBookSource } = await import('@/lib/rss-source/rss-as-book-source');
+        const rss = await getRssSource(sourceKey);
+        if (rss) {
+          cookies = await syncSourceCookiesAfterInnerWeb(rssAsBookSource(rss), url, cookies);
+        }
       }
     } catch (e) {
       console.warn('[inner-web] cookie pool sync failed', e);
     }
   }
 
-  session?.resolve({ confirmed: true, cookies, url, body });
+  const panelUserAgent = String(panelUaResult ?? '').trim() || undefined;
+  session?.resolve({ confirmed: true, cookies, url, body, panelUserAgent });
   pendingAwait = null;
+  const sessionPayload = loadPersistedInnerWebSession();
+  if (sessionPayload?.cloudflareVerification && isTauri()) {
+    markCfPanelDeferredDismiss();
+    void invoke('set_inner_web_panel_visible', { visible: false }).catch(() => {
+      /* panel 可能已隐藏 */
+    });
+    return;
+  }
   // 不 await：立即让登录脚本继续，关闭动画与 panel 在后台完成
   void requestInnerWebDismiss();
 }

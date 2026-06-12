@@ -36,6 +36,13 @@ function cancelPendingShow(): void {
   }
 }
 
+export function resetInnerWebPanelOverlayOnDismiss(): void {
+  cancelPendingShow();
+  overlayRetainCount = 0;
+  panelSuppressed = false;
+  syncPanelMaskVisible();
+}
+
 export function isInnerWebPanelMaskVisible(): boolean {
   return panelMaskVisible();
 }

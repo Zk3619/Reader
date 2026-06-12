@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const openInnerWeb = vi.fn((_opts?: unknown) => true);
-const loadPersistedInnerWebSession = vi.fn(() => null);
+const loadPersistedInnerWebSession = vi.fn(
+  () => null as { url: string; title: string } | null,
+);
 
 vi.mock('@/lib/platform/inner-web', () => ({
   openInnerWeb: (opts: unknown) => openInnerWeb(opts),
@@ -23,6 +25,10 @@ vi.mock('@/components/shared/AppToasts', () => ({
   showAppToast: vi.fn(),
 }));
 
+vi.mock('@/lib/http/inner-web-proxy-session', () => ({
+  shouldUseInnerWebDocumentProxy: vi.fn(() => false),
+}));
+
 describe('buildInnerWebNavigationBridgeScript', () => {
   it('使用 window 标记且包含 shell.open 拦截', async () => {
     const { buildInnerWebNavigationBridgeScript } = await import(
@@ -31,6 +37,7 @@ describe('buildInnerWebNavigationBridgeScript', () => {
     const script = buildInnerWebNavigationBridgeScript();
     expect(script).toContain('__READER_INNER_WEB_NAV__');
     expect(script).not.toContain('document.documentElement.dataset');
+    expect(script).toContain('isImportScheme');
     expect(script).toContain('shellOpen');
   });
 });
@@ -56,6 +63,18 @@ describe('navigateInnerWebLink', () => {
     const ok = await navigateInnerWebLink(uri);
     expect(ok).toBe(true);
     expect(handleReaderImportDeepLink).toHaveBeenCalledWith(uri);
+    expect(openInnerWeb).not.toHaveBeenCalled();
+  });
+
+  it('相同 http URL 不重复导航', async () => {
+    openInnerWeb.mockClear();
+    loadPersistedInnerWebSession.mockReturnValue({
+      url: 'https://ged520.yeoi.me/',
+      title: '网页',
+    });
+    const { navigateInnerWebLink } = await import('@/lib/platform/inner-web-navigation');
+    const ok = await navigateInnerWebLink('https://ged520.yeoi.me/');
+    expect(ok).toBe(true);
     expect(openInnerWeb).not.toHaveBeenCalled();
   });
 });

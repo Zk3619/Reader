@@ -23,6 +23,20 @@ export interface InnerWebPanelRect {
 /** 串行化 open/close，避免并发 add_child 报 label already exists */
 let panelOpQueue: Promise<void> = Promise.resolve();
 
+/**
+ * 每次关闭 / dismiss 递增；进行中的 open 若 epoch 已过期则不再创建子 WebView。
+ * 修复返回时框架已关但 stale syncTauriPanel 仍调用 open 导致页面残留。
+ */
+let panelSessionEpoch = 0;
+
+export function getInnerWebPanelSessionEpoch(): number {
+  return panelSessionEpoch;
+}
+
+export function bumpInnerWebPanelSessionEpoch(): void {
+  panelSessionEpoch++;
+}
+
 function runSerializedPanelOp<T>(fn: () => Promise<T>): Promise<T> {
   const run = panelOpQueue.then(fn, fn);
   panelOpQueue = run.then(
@@ -71,7 +85,9 @@ export async function openInnerWebTauriPanel(
       : '';
   if (!navigationUrl.startsWith('http') && !navigationUrl.startsWith('data:text/html')) return;
 
+  const epoch = getInnerWebPanelSessionEpoch();
   await runSerializedPanelOp(async () => {
+    if (epoch !== getInnerWebPanelSessionEpoch()) return;
     const ua = opts.userAgent?.trim();
     await invoke('open_inner_web_panel', {
       url: navigationUrl,
@@ -106,6 +122,7 @@ export async function reloadInnerWebTauriPanel(): Promise<void> {
 
 export async function closeInnerWebTauriPanel(): Promise<void> {
   if (!isTauri()) return;
+  bumpInnerWebPanelSessionEpoch();
   await runSerializedPanelOp(async () => {
     try {
       await invoke('close_inner_web_panel');
@@ -113,4 +130,35 @@ export async function closeInnerWebTauriPanel(): Promise<void> {
       console.warn('[inner-web-tauri] close_inner_web_panel failed', e);
     }
   });
+}
+
+/** CF 拉取：确保 panel WebView 存在（复用 reader-inner-web 配置目录中的 cf_clearance 指纹） */
+export async function ensureInnerWebPanelForCfFetch(opts: {
+  seedUrl: string;
+  cookies?: string;
+  userAgent?: string;
+}): Promise<void> {
+  if (!isTauri()) return;
+  const seed = opts.seedUrl.trim();
+  if (!seed.startsWith('http')) return;
+
+  let navUrl = seed;
+  try {
+    navUrl = `${new URL(seed).origin}/`;
+  } catch {
+    /* keep seed */
+  }
+
+  await runSerializedPanelOp(async () => {
+    await invoke('open_inner_web_panel', {
+      url: navUrl,
+      cookies: (opts.cookies ?? '').trim(),
+      x: -10_000,
+      y: -10_000,
+      width: 1,
+      height: 1,
+      userAgent: opts.userAgent?.trim() || undefined,
+    });
+  });
+  await new Promise((r) => setTimeout(r, 400));
 }

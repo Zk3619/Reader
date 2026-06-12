@@ -27,8 +27,10 @@ import {
   useInnerWebTauriPanel,
 } from '@/lib/platform/inner-web-mode';
 import {
+  bumpInnerWebPanelSessionEpoch,
   closeInnerWebTauriPanel,
   focusInnerWebTauriPanel,
+  getInnerWebPanelSessionEpoch,
   openInnerWebTauriPanel,
   repositionInnerWebTauriPanel,
   reloadInnerWebTauriPanel,
@@ -39,7 +41,9 @@ import {
   buildInnerWebDocumentProxyUrl,
   createInnerWebProxySession,
   deleteInnerWebProxySession,
-  shouldUseInnerWebDocumentProxy,
+  needsInnerWebDocumentProxy,
+  normalizeInnerWebTargetUrl,
+  resolveInnerWebProxyIframeTarget,
 } from '@/lib/http/inner-web-proxy-session';
 import {
   getActiveWebProxySessionId,
@@ -59,6 +63,7 @@ import {
   buildInnerWebNavigationBridgeScript,
   INNER_WEB_NAV_CHANNEL,
   navigateInnerWebLink,
+  normalizeInnerWebNavigateUrl,
 } from '@/lib/platform/inner-web-navigation';
 import { cn } from '@/lib/utils';
 
@@ -153,6 +158,19 @@ function measureContentRect(el: HTMLElement): InnerWebPanelRect {
   };
 }
 
+function innerWebPanelRectsNearEqual(
+  a: InnerWebPanelRect,
+  b: InnerWebPanelRect,
+  eps = 2,
+): boolean {
+  return (
+    Math.abs(a.x - b.x) <= eps &&
+    Math.abs(a.y - b.y) <= eps &&
+    Math.abs(a.width - b.width) <= eps &&
+    Math.abs(a.height - b.height) <= eps
+  );
+}
+
 export function InnerWebPage(props: InnerWebPageProps) {
   const payload = () => props.payload ?? null;
   /** 挂载时的 payload，供 √ 确认与标题在 teardown 期间使用 */
@@ -164,8 +182,12 @@ export function InnerWebPage(props: InnerWebPageProps) {
     if (!t) return;
     if (/just a moment|checking your browser|attention required/i.test(t)) return;
     if (/^Cloudflare\s*验证/i.test(t)) return;
+    const current = payload()?.title?.trim();
+    if (pageTitle()?.trim() === t && current === t) return;
     setPageTitle(t);
-    updateInnerWebPayload({ title: t });
+    if (current !== t) {
+      updateInnerWebPayload({ title: t });
+    }
   };
   const content = () => {
     const p = payload();
@@ -207,13 +229,23 @@ export function InnerWebPage(props: InnerWebPageProps) {
       proxyFailed: proxyFailed(),
     });
   };
-  /** 代理 doc 就绪前禁止回退到书源直连 URL */
+  /** 代理 doc 就绪前禁止回退到书源直连 URL（避免 X-Frame-Options 拦截） */
   const iframeDocumentSrc = () => {
     const src = iframeSrc();
     if (src) return src;
     const p = payload();
-    if (!p || (p.useProxyDocument && !proxyFailed())) return undefined;
+    if (!p) return undefined;
     const url = pageUrl();
+    const cookies = initialCookies();
+    if (
+      needsInnerWebDocumentProxy(url, {
+        useProxyDocument: p.useProxyDocument,
+        initialCookies: cookies,
+      }) &&
+      !proxyFailed()
+    ) {
+      return undefined;
+    }
     return url.startsWith('http') ? url : undefined;
   };
   const embeddedHtml = () => {
@@ -229,10 +261,13 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const waitingForProxySrc = () => {
     if (!iframeMode()) return false;
     const p = payload();
-    if (!p || !p.useProxyDocument || proxyFailed()) return false;
+    if (!p || proxyFailed()) return false;
     if (p.cloudflareVerification && isTauri()) return false;
+    const url = pageUrl();
     const cookies = initialCookies();
-    if (!cookies.trim() && !p.cloudflareVerification) return false;
+    if (!needsInnerWebDocumentProxy(url, { useProxyDocument: p.useProxyDocument, initialCookies: cookies })) {
+      return false;
+    }
     return !iframeSrc();
   };
   /** 加载遮罩（不阻止 iframe 挂载，避免 onLoad 无法触发） */
@@ -266,21 +301,51 @@ export function InnerWebPage(props: InnerWebPageProps) {
   /** 合并短时间内的重复 sync（createEffect 与 payload 更新） */
   let panelSyncInflight: Promise<void> | null = null;
   let panelSyncKey = '';
+  let panelSyncReadyKey = '';
   let panelSyncGeneration = 0;
+  let syncingIframeDocument = false;
 
+  const invalidateIframeForUrlChange = () => {
+    if (webProxySessionId) {
+      void deleteInnerWebProxySession(webProxySessionId);
+      webProxySessionId = undefined;
+      setActiveWebProxySessionId(null);
+    }
+    setIframeSrc(undefined);
+    proxyBootstrapReadyKey = null;
+    proxyBootstrapInflightKey = null;
+  };
+
+  /** 宿主显式改 url 时重建 iframe；页内 http 导航由 inject 在帧内完成并同步 pageUrl */
   createEffect(() => {
     const url = pageUrl();
-    if (!iframeMode() || !url.startsWith('http') || proxyFailed() || iframeSrc()) return;
+    if (!iframeMode() || !url.startsWith('http') || proxyFailed() || syncingIframeDocument) return;
+
+    const currentSrc = iframeSrc();
+    if (currentSrc) {
+      const target = resolveInnerWebProxyIframeTarget(currentSrc);
+      const loaded = target ?? currentSrc;
+      if (normalizeInnerWebTargetUrl(loaded) !== normalizeInnerWebTargetUrl(url)) {
+        invalidateIframeForUrlChange();
+      } else {
+        return;
+      }
+    }
+
+    if (iframeSrc()) return;
+
     const p = payload();
     if (!p) return;
     if (p.cloudflareVerification && isTauri()) return;
     const cookies = initialCookies();
-    const wantProxy =
-      Boolean(p.useProxyDocument) ||
-      shouldUseInnerWebDocumentProxy(url, cookies);
+    const wantProxy = needsInnerWebDocumentProxy(url, {
+      useProxyDocument: p.useProxyDocument,
+      initialCookies: cookies,
+    });
     const sessionCookies = cookies.trim();
     if (!wantProxy) return;
-    if (!sessionCookies && !p.cloudflareVerification) return;
+    // Tauri iframe 无 Cookie 时仍直连；纯 Web / CF 须建代理会话（可空 Cookie）
+    if (!sessionCookies && !p.cloudflareVerification && isTauri()) return;
 
     const key = `${url}\0${sessionCookies}`;
     if (proxyBootstrapReadyKey === key || proxyBootstrapInflightKey === key) return;
@@ -350,11 +415,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
     if (panelSyncInflight && panelSyncKey === key) {
       return panelSyncInflight;
     }
+    if (!rect && key === panelSyncReadyKey) {
+      return;
+    }
     panelSyncKey = key;
     const generation = ++panelSyncGeneration;
 
     const job = (async () => {
+      const epoch = getInnerWebPanelSessionEpoch();
       try {
+        if (epoch !== getInnerWebPanelSessionEpoch()) return;
         const p = payload();
         /** CF：勿覆盖 panel UA，使 clearance 与 WebView2 真实 TLS UA 一致 */
         const ua = cfVerify()
@@ -378,8 +448,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
         } else {
           return;
         }
+        if (epoch !== getInnerWebPanelSessionEpoch() || generation !== panelSyncGeneration) {
+          void closeInnerWebTauriPanel();
+          return;
+        }
+        panelSyncReadyKey = key;
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
+            if (epoch !== getInnerWebPanelSessionEpoch() || generation !== panelSyncGeneration) {
+              return;
+            }
             void focusInnerWebTauriPanel();
           });
         });
@@ -446,7 +524,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
       if (!d || d.channel !== INNER_WEB_NAV_CHANNEL || !d.href?.trim()) return;
       const frame = iframeEl();
       if (frame && !isInnerWebFrameMessageSource(ev.source, frame)) return;
-      void navigateInnerWebLink(d.href, d.target ?? null);
+      const href = d.href.trim();
+      const current = pageUrl();
+      if (
+        current &&
+        normalizeInnerWebNavigateUrl(href) === normalizeInnerWebNavigateUrl(current)
+      ) {
+        return;
+      }
+      void navigateInnerWebLink(href, d.target ?? null);
     };
     window.addEventListener('message', onInnerWebNavigate);
 
@@ -519,8 +605,24 @@ export function InnerWebPage(props: InnerWebPageProps) {
           return;
         }
         if (typeof ResizeObserver !== 'undefined') {
+          let rafPending = false;
+          let lastRepositionRect: InnerWebPanelRect | null = null;
           resizeObserver = new ResizeObserver(() => {
-            void repositionInnerWebTauriPanel(measureContentRect(el));
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(() => {
+              rafPending = false;
+              if (cancelled) return;
+              const rect = measureContentRect(el);
+              if (
+                lastRepositionRect &&
+                innerWebPanelRectsNearEqual(lastRepositionRect, rect)
+              ) {
+                return;
+              }
+              lastRepositionRect = rect;
+              void repositionInnerWebTauriPanel(rect);
+            });
           });
           resizeObserver.observe(el);
         }
@@ -530,8 +632,11 @@ export function InnerWebPage(props: InnerWebPageProps) {
 
     onCleanup(() => {
       cancelled = true;
+      panelSyncGeneration++;
+      bumpInnerWebPanelSessionEpoch();
       panelSyncInflight = null;
       panelSyncKey = '';
+      panelSyncReadyKey = '';
       window.removeEventListener(INNER_WEB_REFRESH_EVENT, onRefreshKey);
       window.removeEventListener('message', onYueduBooksourceImport);
       window.removeEventListener('message', onInnerWebNavigate);
@@ -573,10 +678,32 @@ export function InnerWebPage(props: InnerWebPageProps) {
     }
   };
 
+  const syncIframeDocumentFromLoad = (frame: HTMLIFrameElement) => {
+    if (!frame.src.startsWith('http')) return;
+    syncingIframeDocument = true;
+    try {
+      setIframeSrc(frame.src);
+      const target = resolveInnerWebProxyIframeTarget(frame.src);
+      if (!target?.startsWith('http')) return;
+      const current = pageUrl();
+      if (normalizeInnerWebTargetUrl(target) !== normalizeInnerWebTargetUrl(current)) {
+        updateInnerWebPayload({
+          url: target,
+          cookieSyncUrl: target,
+        });
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      syncingIframeDocument = false;
+    }
+  };
+
   const handleIframeLoad = (ev: Event) => {
     void reinjectCookies();
     const el = ev.currentTarget;
     if (el instanceof HTMLIFrameElement) {
+      syncIframeDocumentFromLoad(el);
       injectInnerWebDocumentBridge(el);
       if (cfVerify()) {
         try {
@@ -589,7 +716,15 @@ export function InnerWebPage(props: InnerWebPageProps) {
         yueduBridgeIframe = el;
         injectYueduBooksourceBridge(el);
       } else if (pageUrl().startsWith('http')) {
-        injectInnerWebNavigationBridge(el);
+        const p = payload();
+        const cookies = initialCookies();
+        const wantProxy = needsInnerWebDocumentProxy(pageUrl(), {
+          useProxyDocument: p?.useProxyDocument,
+          initialCookies: cookies,
+        });
+        if (!wantProxy || proxyFailed()) {
+          injectInnerWebNavigationBridge(el);
+        }
       }
     }
   };
