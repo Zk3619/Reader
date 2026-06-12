@@ -89,7 +89,7 @@ function StyleSingle(props: RssArticleListItemsProps) {
             <ArticleThumb
               article={article}
               source={props.source}
-              class="aspect-[16/10] w-full object-cover"
+              class="aspect-16/10 w-full object-cover"
             />
             <div class="space-y-1 p-3">
               <ArticleTitle article={article} lines={2} />
@@ -127,7 +127,7 @@ function StyleGrid(props: RssArticleListItemsProps & { cols: 2 | 3 }) {
               source={props.source}
               class={cn(
                 'w-full object-cover',
-                props.cols === 2 ? 'aspect-[3/4]' : 'aspect-[2/3]',
+                props.cols === 2 ? 'aspect-3/4' : 'aspect-2/3',
               )}
             />
             <div class="space-y-0.5 p-2">
