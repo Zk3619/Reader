@@ -225,6 +225,12 @@ import { getRssOverlayPortalMount } from "@/lib/rss/rss-overlay-portal";
 import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
 import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
 import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
+import { SourceVerificationDialog } from "@/components/sources/SourceVerificationDialog";
+import {
+  registerSourceVerificationHandler,
+  SourceVerificationCancelledError,
+  type SourceVerificationRequest,
+} from "@/lib/book-source/source-verification";
 import { readHmrData, writeHmrData } from "@/lib/dev/hmr-state";
 import { OverlayStackEntry } from "@/components/navigation/OverlayStackEntry";
 import { dismissFloatingOverlaysForShellChange } from "@/utils/accessibility";
@@ -352,6 +358,12 @@ function AppContent() {
   const [sourceLoginDialogSource, setSourceLoginDialogSource] = createSignal<BookSource | null>(null);
   const [sourceVariableDialogSource, setSourceVariableDialogSource] =
     createSignal<BookSource | null>(null);
+  const [sourceVerificationRequest, setSourceVerificationRequest] =
+    createSignal<SourceVerificationRequest | null>(null);
+  let sourceVerificationCompleter: {
+    resolve: (value: string) => void;
+    reject: (reason?: unknown) => void;
+  } | null = null;
 
   function openSourceVariables(source: BookSource) {
     setSourceVariableDialogSource(source);
@@ -363,6 +375,11 @@ function AppContent() {
   if (initialInnerWeb) {
     applyRestoredInnerWebSession(initialInnerWeb);
   }
+  createEffect(() => {
+    if (!innerWebPayload() && isInnerWebSessionActive()) {
+      cancelInnerWebClose();
+    }
+  });
   const [pendingImportFile, setPendingImportFile] = createSignal<{
     bookUrl: string;
     fileName: string;
@@ -1517,6 +1534,20 @@ function AppContent() {
     window.addEventListener(READER_MEDIA_TEXT_FALLBACK_EVENT, onMediaTextFallback);
     onCleanup(() => {
       window.removeEventListener(READER_MEDIA_TEXT_FALLBACK_EVENT, onMediaTextFallback);
+    });
+  });
+
+  onMount(() => {
+    registerSourceVerificationHandler((request) => {
+      return new Promise<string>((resolve, reject) => {
+        sourceVerificationCompleter = { resolve, reject };
+        setSourceVerificationRequest(request);
+      });
+    });
+    onCleanup(() => {
+      registerSourceVerificationHandler(null);
+      sourceVerificationCompleter?.reject(new SourceVerificationCancelledError());
+      sourceVerificationCompleter = null;
     });
   });
 
@@ -2780,7 +2811,7 @@ function AppContent() {
     };
 
     push("source-edit", sourceEditTarget() !== null, () => setSourceEditTarget(null));
-    push("inner-web", Boolean(innerWebPayload()), () => setInnerWebPayload(null));
+    push("inner-web", Boolean(innerWebPayload()), () => cancelInnerWebClose());
     push("source-login", Boolean(sourceLoginDialogSource()), () => setSourceLoginDialogSource(null));
     push(
       "source-variable",
@@ -3702,6 +3733,19 @@ function AppContent() {
             if (!open) setSourceVariableDialogSource(null);
           }}
         />
+        <SourceVerificationDialog
+          request={sourceVerificationRequest()}
+          onSubmit={(value) => {
+            sourceVerificationCompleter?.resolve(value);
+            sourceVerificationCompleter = null;
+            setSourceVerificationRequest(null);
+          }}
+          onCancel={() => {
+            sourceVerificationCompleter?.reject(new SourceVerificationCancelledError());
+            sourceVerificationCompleter = null;
+            setSourceVerificationRequest(null);
+          }}
+        />
         <ReaderGuestAddToShelfDialog
           open={guestAddToShelfOpen()}
           bookName={
@@ -3720,10 +3764,7 @@ function AppContent() {
           onDecline={() => void finishCloseReader()}
           onConfirm={() => void confirmGuestAddToShelf()}
         />
-        <InnerWebHost
-          payload={innerWebPayload()}
-          onClose={() => setInnerWebPayload(null)}
-        />
+        <InnerWebHost payload={innerWebPayload()} onClose={cancelInnerWebClose} />
         <Show when={sourceEditTarget()} keyed>
           {(target) => (
             <Portal mount={document.body}>

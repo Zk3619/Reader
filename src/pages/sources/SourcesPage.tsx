@@ -5,6 +5,7 @@
 import { createSignal, createEffect, createResource, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import {
+  clearSourceCookieAndCfRecord,
   deleteBookSourceWithSessionPurge,
 } from '@/lib/book-source/purge-source-session';
 import * as sourcesDb from '@/lib/database/sources';
@@ -496,6 +497,22 @@ export function SourcesPage(props: SourcesPageProps) {
     showAppToast({ title: '已刷新', description: `「${source.sourceName}」`, variant: 'default' });
   }
 
+  async function handleClearCookieCf(source: BookSource) {
+    try {
+      await clearSourceCookieAndCfRecord(source);
+      showAppToast({
+        title: '已清除',
+        description: `「${source.sourceName}」的 Cookie/CF 记录`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '清除失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
   async function handleConfirmDelete() {
     const source = sourceToDelete();
     if (!source) return;
@@ -578,6 +595,7 @@ export function SourcesPage(props: SourcesPageProps) {
                 onSourceVariables={props.onSourceVariables}
                 onSourceSearch={props.onSourceSearch}
                 onSourceRefresh={handleSourceRefresh}
+                onClearCookieCf={(s) => void handleClearCookieCf(s)}
                 onDeleteSource={(s) => {
                   setSourceToDelete(s);
                   setDeleteDialogOpen(true);

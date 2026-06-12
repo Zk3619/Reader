@@ -1,12 +1,10 @@
 检索项目，为除了@Reader/src/components/ui 的所有纵向滚动区域设立统一的 my-2， 考虑创建共享组件 AppScrollArea
 
 
-禁漫天堂
 Strip 直播
 微博博主
 樱花动漫
 AI风月
-花瓣
 Pixiv
 
 inner-web tauri panel 直接返回时经常没有自动关闭页面，只关闭了框架

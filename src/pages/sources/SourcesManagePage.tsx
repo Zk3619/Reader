@@ -14,6 +14,7 @@ import {
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import * as sourcesDb from '@/lib/database/sources';
 import {
+  clearSourceCookieAndCfRecord,
   deleteBookSourceWithSessionPurge,
   purgeBookSourceSession,
 } from '@/lib/book-source/purge-source-session';
@@ -164,6 +165,7 @@ interface SourceManageListItemProps {
   onSourceEdit?: (source: BookSource) => void;
   onSourceVariables?: (source: BookSource) => void;
   onPinSource: (source: BookSource) => void;
+  onClearCookieCf?: (source: BookSource) => void;
   onDeleteSource: (source: BookSource) => void;
   onEnableChange: (source: BookSource, enabled: boolean) => Promise<void>;
 }
@@ -257,6 +259,9 @@ function SourceManageListItem(props: SourceManageListItemProps) {
             </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onPinSource(props.source)}>
               置顶
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => props.onClearCookieCf?.(props.source)}>
+              清除 Cookie/CF 记录
             </AppContextMenuItem>
             <AppContextMenuItem
               class="text-destructive focus:text-destructive"
@@ -532,6 +537,22 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     } catch (e) {
       console.error('置顶失败:', e);
       showAppToast({ title: '置顶失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+    }
+  }
+
+  async function handleClearCookieCf(source: BookSource) {
+    try {
+      await clearSourceCookieAndCfRecord(source);
+      showAppToast({
+        title: '已清除',
+        description: `「${source.sourceName}」的 Cookie/CF 记录`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '清除失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -861,6 +882,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                   onSourceEdit={props.onSourceEdit}
                   onSourceVariables={props.onSourceVariables}
                   onPinSource={handlePinSource}
+                  onClearCookieCf={(s) => void handleClearCookieCf(s)}
                   onDeleteSource={(s) => {
                     setSourceToDelete(s);
                     setDeleteDialogOpen(true);
