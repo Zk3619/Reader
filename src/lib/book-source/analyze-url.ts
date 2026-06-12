@@ -4,8 +4,18 @@
 
 import type { BookSource } from '@/types';
 import { request } from '@/lib/http';
-import { parseHeaders, resolveUrl, sanitizeHttpHeaders } from '@/lib/book-source/utils';
-import { buildSourceRequestHeaders, setCfActiveRequestOrigin } from '@/lib/book-source/source-http';
+import {
+  decodeDataUriBase64Payload,
+  legadoDataUrlRuleBody,
+  parseHeaders,
+  resolveUrl,
+  sanitizeHttpHeaders,
+} from '@/lib/book-source/utils';
+import {
+  alignUrlToBookSourceRequestOrigin,
+  buildSourceRequestHeaders,
+  setCfActiveRequestOrigin,
+} from '@/lib/book-source/source-http';
 import {
   isJsMirrorJumpPage,
   looksLikeJsMirrorJumpResolved,
@@ -20,6 +30,7 @@ import { runWebJs } from '@/lib/rule-engine/webjs-runner';
 import {
   fetchPageHtmlViaCfWebView,
   shouldUseCfWebViewFetch,
+  type CfPanelWaitOptions,
 } from '@/lib/book-source/cf-webview-fetch';
 import type { RunWebJsOptions } from '@/lib/rule-engine/webjs-script';
 import {
@@ -58,6 +69,8 @@ export interface FetchByAnalyzeUrlParams {
   scriptNotice?: ScriptNoticeBus;
   /** HTTP 超时（毫秒），默认 30s */
   timeoutMs?: number;
+  /** CF panel 拉取前等待 SPA 列表渲染（仅 Tauri 桌面端） */
+  cfPanelWait?: CfPanelWaitOptions;
 }
 
 export interface FetchByAnalyzeUrlResult {
@@ -350,7 +363,37 @@ export async function fetchByAnalyzeUrl(
   const option = parseAnalyzeUrlOption(optionsJson);
 
   let url = urlPart.trim();
-  const baseUrl = params.baseUrl || option.origin || getScriptBaseUrl(params.source!) || url;
+  if (/^data:/i.test(url)) {
+    const dataUrlFull = optionsJson ? `${url},${optionsJson}` : preprocessedRuleUrl.trim();
+    const typedBody = legadoDataUrlRuleBody(dataUrlFull);
+    if (typedBody != null) {
+      return {
+        body: finishAnalyzeUrlBody(typedBody, params.scriptNotice),
+        url: dataUrlFull,
+        usedWebView: false,
+      };
+    }
+    const bytes = decodeDataUriBase64Payload(url);
+    if (bytes?.length) {
+      const text = new TextDecoder().decode(bytes);
+      return {
+        body: finishAnalyzeUrlBody(text, params.scriptNotice),
+        url: dataUrlFull,
+        usedWebView: false,
+      };
+    }
+    return {
+      body: '',
+      url: dataUrlFull,
+      usedWebView: false,
+    };
+  }
+
+  const baseUrl =
+    params.baseUrl ||
+    option.origin ||
+    (params.source ? getScriptBaseUrl(params.source) : '') ||
+    url;
 
   if (option.js) {
     url = await runOptionJs(option.js, {
@@ -367,6 +410,9 @@ export async function fetchByAnalyzeUrl(
   }
 
   url = applyServerId(url, option, params.source);
+  if (params.source) {
+    url = alignUrlToBookSourceRequestOrigin(url, params.source);
+  }
 
   let headers: Record<string, string>;
   if (params.source) {
@@ -435,6 +481,7 @@ export async function fetchByAnalyzeUrl(
         url,
         params.cookies?.trim() ?? '',
         headers,
+        params.cfPanelWait ? { panelWait: params.cfPanelWait } : undefined,
       );
     } else {
       const useCookieJar = params.source?.enabledCookieJar === true;

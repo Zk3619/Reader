@@ -93,6 +93,7 @@ export interface SourcePageListItemProps {
   onSourceVariables?: (source: BookSource) => void;
   onSourceSearch?: (source: BookSource) => void;
   onSourceRefresh: (source: BookSource) => void;
+  onClearCookieCf?: (source: BookSource) => void;
   onDeleteSource: (source: BookSource) => void;
   hasLogin: (source: BookSource) => boolean;
   hasSearch: (source: BookSource) => boolean;
@@ -181,6 +182,9 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
             </Show>
             <AppContextMenuItem onSelect={() => props.onSourceRefresh(props.source)}>
               刷新
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => props.onClearCookieCf?.(props.source)}>
+              清除 Cookie/CF 记录
             </AppContextMenuItem>
             <AppContextMenuItem
               class="text-destructive focus:text-destructive"

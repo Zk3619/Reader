@@ -48,8 +48,44 @@ import {
   legadoJavaGetWebViewUA,
   legadoJavaMd5Encode,
 } from '@/lib/js-engine/legado/legado-java-crypto';
+import {
+  isSourceVerificationCancelledError,
+  promptSourceVerificationCode,
+} from '@/lib/book-source/source-verification';
+import { clearPlainTextSourceVariable } from '@/lib/js-engine/legado/source-script-shared';
 
 const SCRIPT_TIMEOUT_MS = 15000;
+/** 含 getVerificationCode 的 sortUrl 需等待用户输入 */
+const VERIFICATION_SCRIPT_TIMEOUT_MS = 60_000;
+
+function buildSearchVerificationHandler(source: BookSource) {
+  return async (imageUrl: string) => {
+    try {
+      return await promptSourceVerificationCode({
+        imageUrl,
+        sourceKey: getLegadoSourceKey(source),
+        sourceName: source.sourceName,
+      });
+    } catch (error) {
+      if (isSourceVerificationCancelledError(error)) {
+        clearPlainTextSourceVariable(source);
+      }
+      throw error;
+    }
+  };
+}
+
+/** sortUrl/searchUrl 中 {{...}} 为语句块（花瓣搜索输入框等），不能包在 return() 里 */
+export function isLegadoStatementSearchExpression(expr: string): boolean {
+  const t = expr.trim();
+  if (!t) return false;
+  if (/\bjava\.getVerificationCode\b/.test(t)) return true;
+  if (/\b(let|const|var)\b/.test(t)) return true;
+  if (/\b(if|for|while|try|switch)\s*\(/.test(t)) return true;
+  if (/^[a-zA-Z_$][\w$]*\s*=/.test(t) && t.includes(';')) return true;
+  if ((t.match(/;/g) ?? []).length >= 1 && !/^\(.*\)$/.test(t)) return true;
+  return false;
+}
 
 export function extractSearchScript(searchUrl: string | undefined): string | null {
   if (typeof searchUrl !== 'string') return null;
@@ -150,6 +186,7 @@ async function runSearchJsFullQuickJS(
     },
     searchKey: keyword,
     searchPage: page,
+    onVerificationCode: buildSearchVerificationHandler(source),
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
     scriptToastBuffer: toastBuffer,
   });
@@ -259,6 +296,10 @@ function buildLegacyScope(
     },
     java: {
       ...buildLegacyJavaApi(typeof source.header === 'string' ? source.header : undefined),
+      getVerificationCode(_imageUrl?: unknown) {
+        console.warn('[search-script] getVerificationCode 需要 QuickJS 环境');
+        return '';
+      },
       toast(msg?: unknown, level?: unknown) {
         onScriptToast?.(msg, level ?? 'info');
       },
@@ -367,6 +408,54 @@ async function runSearchJsFullLegacy(
   return scriptResultToString(raw);
 }
 
+/** 语句型 {{...}}：支持 java.getVerificationCode 挂起与用户输入 */
+async function evalStatementSearchUrlExpression(
+  expr: string,
+  source: BookSource,
+  keyword: string,
+  page: number,
+): Promise<string | null> {
+  await initQuickJSRuntime();
+  if (isQuickJSFallback()) {
+    const legacy = (await runSearchJsFullLegacy(expr, source, keyword, page)).trim();
+    return legacy || null;
+  }
+
+  const p = buildSearchInjectParams(source, keyword, page);
+  const script = buildLegadoExploreScriptBundle(p.jsLib, expr);
+  const injector = createExploreInjector({
+    baseUrl: p.baseUrl,
+    sourceUrl: p.sourceUrl,
+    host: p.hosts,
+    resolveUrl,
+    getOrCreateDeviceId: () => 'web_reader',
+    cookie: p.cookieApi,
+    source: {
+      ...buildLegadoScriptSourceFace(source, p.sourceVars, p.sourceUrl),
+      header: typeof source.header === 'string' ? source.header : undefined,
+    },
+    searchKey: keyword,
+    searchPage: page,
+    onVerificationCode: buildSearchVerificationHandler(source),
+    request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+  });
+
+  try {
+    const raw = await runLegadoScriptQuickJS({
+      script,
+      baseUrl: p.baseUrl,
+      timeoutMs: VERIFICATION_SCRIPT_TIMEOUT_MS,
+      mode: 'two-pass',
+      inject: injector,
+    });
+    return scriptResultToString(raw);
+  } catch (e) {
+    if (isSourceVerificationCancelledError(e)) throw e;
+    console.warn('[search-script] 语句表达式 QuickJS 失败:', e, expr.slice(0, 80));
+    return null;
+  }
+}
+
 /** 轻量求值 {{...}} / 内嵌短 JS（不加载 jsLib，避免污染全局） */
 async function evalExprQuickJS(
   expr: string,
@@ -393,6 +482,7 @@ async function evalExprQuickJS(
     },
     searchKey: keyword,
     searchPage: page,
+    onVerificationCode: buildSearchVerificationHandler(source),
     request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
   });
 
@@ -409,7 +499,9 @@ async function evalExprQuickJS(
     evalCodeVoid(vm, EXPLORE_JSLIB_CONTEXT_SHIM);
 
     const safeExpr = expr.trim();
-    const script = `(function(){ try { return (${safeExpr}); } catch(e) { return ""; } })();`;
+    const script = isLegadoStatementSearchExpression(safeExpr)
+      ? safeExpr
+      : `(function(){ try { return (${safeExpr}); } catch(e) { return ""; } })();`;
     const r = vm.evalCode(script);
     if (r.error) {
       const err = vm.dump(r.error);
@@ -491,6 +583,11 @@ export async function evalSearchUrlExpression(
   const tplCtx = buildSearchTemplateContext(source, keyword, page);
   const sync = trySyncEvalSearchTemplate(trimmed, tplCtx);
   if (sync != null) return sync;
+
+  if (isLegadoStatementSearchExpression(trimmed)) {
+    const statement = await evalStatementSearchUrlExpression(trimmed, source, keyword, page);
+    if (statement != null && statement !== '') return statement;
+  }
 
   const quick = await evalExprQuickJS(trimmed, source, keyword, page);
   if (quick != null && quick !== '') return quick;

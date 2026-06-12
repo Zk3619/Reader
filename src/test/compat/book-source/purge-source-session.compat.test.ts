@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import type { BookSource } from '@/types';
 import {
+  clearSourceCookieAndCfRecord,
   collectBookSourceKeyAliases,
   purgeBookSourceSession,
 } from '@/lib/book-source/purge-source-session';
@@ -8,6 +9,7 @@ import {
   getLegadoSourceKey,
   storageKey,
   STORAGE_PREFIX_ARGS,
+  STORAGE_PREFIX_CF_ORIGIN,
   STORAGE_PREFIX_COOKIES,
   STORAGE_PREFIX_LOGIN,
 } from '@/lib/js-engine/legado/source-script-shared';
@@ -67,5 +69,20 @@ describe('purgeBookSourceSession', () => {
     expect(ls.has(storageKey(STORAGE_PREFIX_COOKIES, legadoKey))).toBe(false);
     expect(ls.has(storageKey(STORAGE_PREFIX_LOGIN, legadoKey))).toBe(false);
     expect(getExploreSourceArgsVersion(legadoKey)).toBe(0);
+  });
+
+  it('仅清除 Cookie/CF 记录，保留登录与源变量', async () => {
+    const legadoKey = getLegadoSourceKey(SOURCE);
+    ls.set(storageKey(STORAGE_PREFIX_ARGS, legadoKey), '{"server":"https://v1.example.com"}');
+    ls.set(storageKey(STORAGE_PREFIX_COOKIES, legadoKey), '{"https://v1.example.com/control":"qttoken=x"}');
+    ls.set(storageKey(STORAGE_PREFIX_LOGIN, legadoKey), '{"email":"a@b.c"}');
+    ls.set(storageKey(STORAGE_PREFIX_CF_ORIGIN, legadoKey), 'https://mirror.example.com');
+
+    await clearSourceCookieAndCfRecord(SOURCE);
+
+    expect(ls.has(storageKey(STORAGE_PREFIX_ARGS, legadoKey))).toBe(true);
+    expect(ls.has(storageKey(STORAGE_PREFIX_LOGIN, legadoKey))).toBe(true);
+    expect(ls.has(storageKey(STORAGE_PREFIX_COOKIES, legadoKey))).toBe(false);
+    expect(ls.has(storageKey(STORAGE_PREFIX_CF_ORIGIN, legadoKey))).toBe(false);
   });
 });

@@ -486,9 +486,11 @@ export async function searchBook(
       return html;
     };
 
-    const openCfPanelAndRetry = async (): Promise<string> => {
+    const openCfPanelAndRetry = async (cfError?: unknown): Promise<string> => {
+      const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
       const verified = await resolveCloudflareViaInnerWeb({
         url: searchUrl,
+        blockedUrl,
         source,
       });
       if (!verified) {
@@ -502,7 +504,7 @@ export async function searchBook(
     try {
       html = await fetchSearchHtml();
       if (isCloudflareBlockedResponse(200, html)) {
-        html = await openCfPanelAndRetry();
+        html = await openCfPanelAndRetry(undefined);
       }
     } catch (e) {
       if (!shouldOfferCloudflareVerification(e)) throw e;
@@ -510,14 +512,14 @@ export async function searchBook(
         try {
           html = await fetchSearchHtml();
           if (isCloudflareBlockedResponse(200, html)) {
-            html = await openCfPanelAndRetry();
+            html = await openCfPanelAndRetry(undefined);
           }
         } catch (retryErr) {
           if (!shouldOfferCloudflareVerification(retryErr)) throw retryErr;
-          html = await openCfPanelAndRetry();
+          html = await openCfPanelAndRetry(retryErr);
         }
       } else {
-        html = await openCfPanelAndRetry();
+        html = await openCfPanelAndRetry(e);
       }
     }
 

@@ -15,7 +15,10 @@ import {
   buildSourceRequestHeaders,
   resolveBookSourceRequestOrigin,
 } from '@/lib/book-source/source-http';
-import { getScriptBaseUrl } from '@/lib/js-engine/legado/source-script-shared';
+import {
+  getLegadoSourceKey,
+  getScriptBaseUrl,
+} from '@/lib/js-engine/legado/source-script-shared';
 import {
   evalSearchUrlExpression,
   extractSearchScript,
@@ -45,6 +48,59 @@ export type ResolvedSearchRequest = {
 export { isScriptSearchUrl };
 
 const JS_BLOCK_RE = /<js>([\s\S]*?)<\/js>|@js:([^\s@]+)/g;
+
+/** 同一 sortUrl + 页码的 JS/{{}} 展开结果（避免 fetchUrl / ruleBaseUrl 各跑一遍脚本） */
+const legadoRuleUrlExpandedCache = new Map<string, string>();
+
+function legadoRuleUrlExpandCacheKey(
+  source: BookSource,
+  ruleUrl: string,
+  keyword: string,
+  page: number,
+): string {
+  return `${getLegadoSourceKey(source)}\0${ruleUrl}\0${keyword}\0${page}`;
+}
+
+async function expandLegadoRuleUrlRaw(
+  ruleUrl: string,
+  source: BookSource,
+  keyword: string,
+  page: number,
+): Promise<string> {
+  const trimmed = ruleUrl.trim();
+  if (!trimmed) return '';
+
+  const cacheKey = legadoRuleUrlExpandCacheKey(source, trimmed, keyword, page);
+  const cached = legadoRuleUrlExpandedCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let url = trimmed;
+  if (isScriptSearchUrl(url)) {
+    const script = extractSearchScript(url);
+    if (!script) {
+      legadoRuleUrlExpandedCache.set(cacheKey, url);
+      return url;
+    }
+    url = await runSearchUrlScript(script, source, keyword, page);
+  } else {
+    url = await analyzeEmbeddedJsBlocks(url, source, keyword, page);
+  }
+
+  url = await expandInnerJsTemplates(url, source, keyword, page);
+  url = buildUrl(url, { key: keyword, page: String(page) });
+  url = substitutePagePlaceholders(url, page);
+
+  legadoRuleUrlExpandedCache.set(cacheKey, url);
+  return url;
+}
+
+/** 每次拉取文章列表前调用，避免沿用上次的展开结果，同时仍可在同一次请求内复用缓存 */
+export function invalidateLegadoRuleUrlExpandCache(source: BookSource): void {
+  const prefix = `${getLegadoSourceKey(source)}\0`;
+  for (const key of legadoRuleUrlExpandedCache.keys()) {
+    if (key.startsWith(prefix)) legadoRuleUrlExpandedCache.delete(key);
+  }
+}
 
 function substitutePagePlaceholders(input: string, page: number): string {
   return input.replace(/<([^>]+)>/g, (_, inner: string) => {
@@ -215,20 +271,8 @@ export async function resolveLegadoRuleUrl(
 ): Promise<string> {
   const keyword = options.keyword ?? '';
   const page = options.page ?? 1;
-  let url = ruleUrl.trim();
+  const url = await expandLegadoRuleUrlRaw(ruleUrl, source, keyword, page);
   if (!url) return '';
-
-  if (isScriptSearchUrl(url)) {
-    const script = extractSearchScript(url);
-    if (!script) return url;
-    url = await runSearchUrlScript(script, source, keyword, page);
-  } else {
-    url = await analyzeEmbeddedJsBlocks(url, source, keyword, page);
-  }
-
-  url = await expandInnerJsTemplates(url, source, keyword, page);
-  url = buildUrl(url, { key: keyword, page: String(page) });
-  url = substitutePagePlaceholders(url, page);
 
   const { urlPart, optionsJson } = splitUrlAndOption(url);
   const base =

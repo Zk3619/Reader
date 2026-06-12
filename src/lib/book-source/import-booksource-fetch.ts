@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
+import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
 
 export const REQUEST_WITHOUT_UA_SUFFIX = '#requestWithoutUA';
 
@@ -30,11 +31,21 @@ export async function fetchBookSourceJsonText(urlRaw: string): Promise<string> {
     });
   }
 
-  const headers: HeadersInit = {};
+  const headers: Record<string, string> = {};
   if (withoutUa) {
     headers['User-Agent'] = 'null';
   }
-  const res = await fetch(url, { mode: 'cors', headers });
+
+  const proxied = toWebHttpProxyRequest(url, {
+    method: 'GET',
+    headers,
+    redirect: 'follow',
+  });
+
+  const res = await fetch(
+    proxied?.url ?? url,
+    proxied?.init ?? { mode: 'cors', headers },
+  );
   if (!res.ok) throw new Error(`请求失败: ${res.status}`);
   return res.text();
 }

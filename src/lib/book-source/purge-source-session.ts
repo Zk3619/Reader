@@ -5,6 +5,8 @@
 import { deleteCookie } from '@/lib/http/cookie-manager';
 import * as sourcesDb from '@/lib/database/sources';
 import { clearExploreSectionsCache } from '@/lib/book-source/explore-sections';
+import { getCfActiveRequestOrigin } from '@/lib/book-source/source-http';
+import { readSourceCookieStore } from '@/lib/js-engine/legado/login-script-runner';
 import {
   getScriptBaseUrl,
   getLegadoSourceKey,
@@ -26,6 +28,12 @@ const STORAGE_PREFIXES = [
   STORAGE_PREFIX_ARGS,
   STORAGE_PREFIX_COOKIES,
   STORAGE_PREFIX_LOGIN,
+  STORAGE_PREFIX_CF_ORIGIN,
+  STORAGE_PREFIX_CF_UA,
+] as const;
+
+const COOKIE_CF_STORAGE_PREFIXES = [
+  STORAGE_PREFIX_COOKIES,
   STORAGE_PREFIX_CF_ORIGIN,
   STORAGE_PREFIX_CF_UA,
 ] as const;
@@ -63,15 +71,7 @@ function collectPageCacheSourceIds(source: BookSource): string[] {
 }
 
 function removeLocalStorageForAliases(aliases: string[]): void {
-  for (const alias of aliases) {
-    for (const prefix of STORAGE_PREFIXES) {
-      try {
-        localStorage.removeItem(storageKey(prefix, alias));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  removeLocalStoragePrefixesForAliases(aliases, STORAGE_PREFIXES);
 }
 
 function clearInMemoryCaches(source: BookSource, aliases: string[]): void {
@@ -87,16 +87,31 @@ function clearInMemoryCaches(source: BookSource, aliases: string[]): void {
   }
 }
 
-async function clearHttpCookiesForSource(source: BookSource): Promise<void> {
+function collectSourceHttpCookieHosts(source: BookSource): Set<string> {
   const hosts = new Set<string>();
-  const baseUrl = getScriptBaseUrl(source);
-  if (baseUrl?.trim()) hosts.add(baseUrl.trim());
-  for (const h of hostsFromJsLib((source as Record<string, unknown>).jsLib)) {
-    if (h?.trim()) hosts.add(h.trim());
-  }
-  const su = (source.sourceUrl ?? '').trim();
-  if (/^https?:\/\//i.test(su)) hosts.add(su);
+  const add = (raw: string | null | undefined) => {
+    const t = raw?.trim();
+    if (!t) return;
+    if (/^https?:\/\//i.test(t)) {
+      try {
+        hosts.add(new URL(t).origin);
+      } catch {
+        hosts.add(t);
+      }
+      return;
+    }
+    hosts.add(`https://${t}`);
+  };
 
+  add(getScriptBaseUrl(source));
+  for (const h of hostsFromJsLib((source as Record<string, unknown>).jsLib)) add(h);
+  add(source.sourceUrl);
+  add(getCfActiveRequestOrigin(source));
+  for (const key of readSourceCookieStore(source).keys()) add(key);
+  return hosts;
+}
+
+async function clearHttpCookiesForHosts(hosts: Iterable<string>): Promise<void> {
   for (const host of hosts) {
     try {
       if (/^https?:\/\//i.test(host)) await deleteCookie(host);
@@ -104,6 +119,37 @@ async function clearHttpCookiesForSource(source: BookSource): Promise<void> {
       /* ignore */
     }
   }
+}
+
+async function clearHttpCookiesForSource(source: BookSource): Promise<void> {
+  await clearHttpCookiesForHosts(collectSourceHttpCookieHosts(source));
+}
+
+function removeLocalStoragePrefixesForAliases(
+  aliases: string[],
+  prefixes: readonly (typeof STORAGE_PREFIXES)[number][],
+): void {
+  for (const alias of aliases) {
+    for (const prefix of prefixes) {
+      try {
+        localStorage.removeItem(storageKey(prefix, alias));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/**
+ * 清除该书源的 Cookie 池与 CF 活跃域记录（保留登录信息、源变量与发现缓存）。
+ */
+export async function clearSourceCookieAndCfRecord(source: BookSource): Promise<void> {
+  if (!source || typeof source !== 'object') return;
+
+  const aliases = collectBookSourceKeyAliases(source);
+  const hosts = collectSourceHttpCookieHosts(source);
+  removeLocalStoragePrefixesForAliases(aliases, COOKIE_CF_STORAGE_PREFIXES);
+  await clearHttpCookiesForHosts(hosts);
 }
 
 /**
