@@ -1,5 +1,4 @@
-import { createEffect, createSignal, For, Show } from 'solid-js';
-import { cn } from '@/lib/utils';
+import { For, Show } from 'solid-js';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
@@ -14,79 +13,24 @@ import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
 import { CoverCacheSetting } from '@/components/settings/CoverCacheSetting';
 import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
 import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
-import { ReplaceRulesPage } from '@/pages/replace-rules/ReplaceRulesPage';
-import { TxtTocRulesPage } from '@/pages/txt-toc-rules/TxtTocRulesPage';
-import { DictRulesPage } from '@/pages/dict-rules/DictRulesPage';
+import { ReplacePurifySetting } from '@/components/settings/ReplacePurifySetting';
 import { DatabaseBackup } from '@/components/shared/DatabaseBackup';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
-import {
-  type ReadingRulePageId,
-} from '@/lib/settings/reading-rules-nav';
+import { type ReadingRulePageId } from '@/lib/settings/reading-rules-nav';
 import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
 
 export interface SettingsCategoryContentProps {
   categoryId: SettingsCategoryId;
   highlightedItemId?: string | null;
-  /** 搜索跳转时打开指定规则子页 */
-  pendingReadingRulePage?: ReadingRulePageId | null;
-  onPendingReadingRulePageConsumed?: () => void;
-  /** 阅读规则子页开关，供设置页注册系统返回层 */
-  onReadingRulePageChange?: (open: boolean, close?: () => void) => void;
-}
-
-function ReadingRulePageView(props: {
-  page: ReadingRulePageId;
-  onBack: () => void;
-}) {
-  return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <Show when={props.page === 'txt-toc'}>
-        <TxtTocRulesPage onBack={props.onBack} />
-      </Show>
-      <Show when={props.page === 'replace'}>
-        <ReplaceRulesPage onBack={props.onBack} />
-      </Show>
-      <Show when={props.page === 'dict'}>
-        <DictRulesPage onBack={props.onBack} />
-      </Show>
-    </div>
-  );
+  onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
 }
 
 export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
   const highlight = (id: string) => props.highlightedItemId === id;
-  const [activeRulePage, setActiveRulePage] = createSignal<ReadingRulePageId | null>(null);
-
-  const closeRulePage = () => setActiveRulePage(null);
-
-  createEffect(() => {
-    if (props.categoryId !== 'reading') {
-      setActiveRulePage(null);
-      props.onReadingRulePageChange?.(false);
-      return;
-    }
-    const page = activeRulePage();
-    props.onReadingRulePageChange?.(page != null, page ? closeRulePage : undefined);
-  });
-
-  createEffect(() => {
-    const pending = props.pendingReadingRulePage;
-    if (props.categoryId === 'reading' && pending) {
-      setActiveRulePage(pending);
-      props.onPendingReadingRulePageConsumed?.();
-    }
-  });
-
-  const rulePageActive = () => props.categoryId === 'reading' && activeRulePage() != null;
 
   return (
-    <div
-      class={cn(
-        'w-full',
-        rulePageActive() ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'space-y-4',
-      )}
-    >
+    <div class="w-full space-y-4">
       <Show when={props.categoryId === 'appearance'}>
         <SettingItemAnchor id="theme" highlighted={highlight('theme')}>
           <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -142,24 +86,21 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       </Show>
 
       <Show when={props.categoryId === 'reading'}>
-        <Show
-          when={!activeRulePage()}
-          fallback={
-            <ReadingRulePageView page={activeRulePage()!} onBack={closeRulePage} />
-          }
-        >
-          <SettingItemAnchor id="reading-rules-hub" highlighted={highlight('reading-rules-hub')}>
-            <ReadingRulesHub onOpen={setActiveRulePage} />
-          </SettingItemAnchor>
+        <SettingItemAnchor id="reading-rules-hub" highlighted={highlight('reading-rules-hub')}>
+          <ReadingRulesHub onOpen={(page) => props.onOpenReadingRulePage?.(page)} />
+        </SettingItemAnchor>
 
-          <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
-            <TocPaginationSafetySetting />
-          </SettingItemAnchor>
+        <SettingItemAnchor id="replace-purify-prefs" highlighted={highlight('replace-purify-prefs')}>
+          <ReplacePurifySetting />
+        </SettingItemAnchor>
 
-          <SettingItemAnchor id="inner-web-render" highlighted={highlight('inner-web-render')}>
-            <InnerWebRenderModeSetting />
-          </SettingItemAnchor>
-        </Show>
+        <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
+          <TocPaginationSafetySetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="inner-web-render" highlighted={highlight('inner-web-render')}>
+          <InnerWebRenderModeSetting />
+        </SettingItemAnchor>
       </Show>
 
       <Show when={props.categoryId === 'sources'}>

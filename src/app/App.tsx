@@ -6,6 +6,10 @@ import { PageToolbarTitleDropdown } from "@/components/shell/PageToolbarTitleDro
 import { SourcesPageToolbar } from "@/components/sources/SourcesPageToolbar";
 import { SourcesFilterDialog } from "@/components/sources/SourcesFilterDialog";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
+import type { ReadingRulePageId } from "@/lib/settings/reading-rules-nav";
+import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
+import { TxtTocRulesPage } from "@/pages/txt-toc-rules/TxtTocRulesPage";
+import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
 import {
@@ -290,6 +294,7 @@ function AppContent() {
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
+  const [readingRulePage, setReadingRulePage] = createSignal<ReadingRulePageId | null>(null);
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
@@ -2347,6 +2352,15 @@ function AppContent() {
         void runAutoRuleSubUpdates().catch((e) => {
           console.warn("[rss] runAutoRuleSubUpdates on app init", e);
         });
+
+        if (isDesktopTauri()) {
+          const { ensureWebApiBridge, tryAutoStartWebService } = await import('@/lib/web-api/bridge');
+          await ensureWebApiBridge();
+          await tryAutoStartWebService();
+        } else {
+          const { tryAutoStartWebService } = await import('@/lib/web-api/bridge');
+          await tryAutoStartWebService();
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('数据库初始化失败:', error);
@@ -2910,6 +2924,7 @@ function AppContent() {
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
     push("settings-sub", settingsSubPageOpen(), () => settingsSubPageCloseRef.current());
+    push("reading-rule-page", readingRulePage() != null, () => setReadingRulePage(null));
     push(
       "sources-explore-drawer",
       currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
@@ -3462,13 +3477,33 @@ function AppContent() {
                 currentPage() === "settings" ? shellTabEnter() : "hidden",
               )}
             >
-              <SettingsPage
-                onSubPageOpenChange={(open, close) => {
-                  setSettingsSubPageOpen(open);
-                  settingsSubPageCloseRef.current = close ?? (() => {});
-                }}
-                onNavigateToPage={navigateToPage}
-              />
+              <div
+                class={cn(
+                  "flex min-h-0 flex-1 flex-col w-full",
+                  readingRulePage() && "hidden pointer-events-none",
+                )}
+              >
+                <SettingsPage
+                  onSubPageOpenChange={(open, close) => {
+                    setSettingsSubPageOpen(open);
+                    settingsSubPageCloseRef.current = close ?? (() => {});
+                  }}
+                  onNavigateToPage={navigateToPage}
+                  onOpenReadingRulePage={(page) => {
+                    setReadingRulePage(page);
+                    navigateToPage("settings");
+                  }}
+                />
+              </div>
+              <Show when={readingRulePage() === "txt-toc"}>
+                <TxtTocRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
+              <Show when={readingRulePage() === "replace"}>
+                <ReplaceRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
+              <Show when={readingRulePage() === "dict"}>
+                <DictRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
             </section>
           </main>
         </div>

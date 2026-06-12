@@ -1,10 +1,13 @@
 检索项目，为除了@Reader/src/components/ui 的所有纵向滚动区域设立统一的 my-2， 考虑创建共享组件 AppScrollArea
 
 
-Strip 直播
-微博博主
-樱花动漫
-AI风月
-Pixiv
+验证 TXT 目录规则
+验证 替换净化 规则
+补全字典规则实现并验证
+验证 Web 服务
 
-inner-web tauri panel 直接返回时经常没有自动关闭页面，只关闭了框架
+
+
+
+
+模型在四角的削切和直角基础上添加圆润

@@ -121,6 +121,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['字典', '词典', '查词', 'dict'],
   },
   {
+    id: 'replace-purify-prefs',
+    categoryId: 'reading',
+    title: '替换净化选项',
+    description: '新书默认启用替换、保护特殊 HTML',
+    keywords: ['替换净化', '默认', 'usehtml', 'adaptSpecialStyle', 'replaceEnableDefault'],
+  },
+  {
     id: 'toc-pagination-safety',
     categoryId: 'reading',
     title: '目录分页安全阈值',

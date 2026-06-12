@@ -42,6 +42,8 @@ export interface SettingsPageProps {
   onSubPageOpenChange?: (open: boolean, close?: () => void) => void;
   /** 移动端主列表跳转到书签 / 阅读记录等独立页 */
   onNavigateToPage?: (page: PageType) => void;
+  /** 打开阅读规则独立页（TXT 目录 / 替换净化 / 字典） */
+  onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
@@ -75,10 +77,6 @@ export function SettingsPage(props: SettingsPageProps) {
   const [storageTabVisited, setStorageTabVisited] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [highlightedItemId, setHighlightedItemId] = createSignal<string | null>(null);
-  const [pendingReadingRulePage, setPendingReadingRulePage] =
-    createSignal<ReadingRulePageId | null>(null);
-  const [readingRuleSubOpen, setReadingRuleSubOpen] = createSignal(false);
-  const readingRuleCloseRef: { current: () => void } = { current: () => {} };
 
   let hubScrollEl: HTMLDivElement | undefined;
   let subPageScrollEl: HTMLDivElement | undefined;
@@ -109,25 +107,12 @@ export function SettingsPage(props: SettingsPageProps) {
 
   function notifySubPageState() {
     const sub = mobileSubPage();
-    const ruleOpen = readingRuleSubOpen();
-    const open = useMobileLayout() && (sub != null || ruleOpen);
-    props.onSubPageOpenChange?.(
-      open,
-      open
-        ? () => {
-            if (readingRuleSubOpen()) {
-              readingRuleCloseRef.current();
-              return;
-            }
-            closeSubPage();
-          }
-        : undefined,
-    );
+    const open = useMobileLayout() && sub != null;
+    props.onSubPageOpenChange?.(open, open ? closeSubPage : undefined);
   }
 
   createEffect(() => {
     mobileSubPage();
-    readingRuleSubOpen();
     useMobileLayout();
     notifySubPageState();
   });
@@ -216,7 +201,16 @@ export function SettingsPage(props: SettingsPageProps) {
   async function navigateToSettingItem(itemId: string, categoryId: SettingsCategoryId) {
     setSearchQuery('');
     const rulePage = readingRulePageForSettingItem(itemId);
-    if (rulePage) setPendingReadingRulePage(rulePage);
+    if (rulePage) {
+      props.onOpenReadingRulePage?.(rulePage);
+      if (useMobileLayout()) {
+        openSubPage('reading');
+      } else {
+        setActiveTab('reading');
+      }
+      flashHighlight(itemId);
+      return;
+    }
     if (useMobileLayout()) {
       openSubPage(categoryId);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -409,15 +403,7 @@ export function SettingsPage(props: SettingsPageProps) {
               />
             </PageToolbar>
 
-            <div
-              ref={hubScrollEl}
-              class={cn(
-                settingsPageScrollTrackClass,
-                readingRuleSubOpen()
-                  ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-                  : mainShellPageScroll,
-              )}
-            >
+            <div ref={hubScrollEl} class={cn(settingsPageScrollTrackClass, mainShellPageScroll)}>
               <Show when={isSearching()}>{hubSearchResults()}</Show>
               <Show when={!isSearching()}>
                 <For each={SETTINGS_CATEGORIES}>
@@ -425,24 +411,12 @@ export function SettingsPage(props: SettingsPageProps) {
                     <TabsContent
                       value={cat.id}
                       forceMount={cat.id === 'storage' && storageTabVisited()}
-                      class={cn(
-                        'mt-0 w-full min-w-0 focus-visible:outline-none',
-                        cat.id === 'reading' && readingRuleSubOpen()
-                          ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-                          : 'overflow-visible',
-                      )}
+                      class="mt-0 w-full min-w-0 overflow-visible focus-visible:outline-none"
                     >
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
-                        pendingReadingRulePage={
-                          cat.id === 'reading' ? pendingReadingRulePage() : null
-                        }
-                        onPendingReadingRulePageConsumed={() => setPendingReadingRulePage(null)}
-                        onReadingRulePageChange={(open, close) => {
-                          setReadingRuleSubOpen(open);
-                          readingRuleCloseRef.current = close ?? (() => {});
-                        }}
+                        onOpenReadingRulePage={props.onOpenReadingRulePage}
                       />
                     </TabsContent>
                   )}
@@ -465,17 +439,7 @@ export function SettingsPage(props: SettingsPageProps) {
                 dropdownEnabled={false}
               />
             }
-            leading={
-              <SettingsToolbarLeading
-                onBack={() => {
-                  if (readingRuleSubOpen()) {
-                    readingRuleCloseRef.current();
-                    return;
-                  }
-                  closeSubPage();
-                }}
-              />
-            }
+            leading={<SettingsToolbarLeading onBack={closeSubPage} />}
           >
             <SettingsPageToolbar
               searchQuery={searchQuery()}
@@ -483,40 +447,18 @@ export function SettingsPage(props: SettingsPageProps) {
             />
           </PageToolbar>
 
-          <div
-            ref={subPageScrollEl}
-            class={cn(
-              settingsPageScrollTrackClass,
-              readingRuleSubOpen()
-                ? 'flex min-h-0 flex-1 flex-col overflow-hidden pb-4'
-                : cn(mainShellPageScroll, 'pb-4'),
-            )}
-          >
+          <div ref={subPageScrollEl} class={cn(settingsPageScrollTrackClass, mainShellPageScroll, 'pb-4')}>
             <Show when={isSearching()}>{hubSearchResults()}</Show>
 
             <Show when={!isSearching()}>
               <For each={SETTINGS_CATEGORIES}>
                 {(cat) => (
                   <Show when={mountedMobileSubPages().has(cat.id)}>
-                    <div
-                      class={cn(
-                        mobileSubPage() !== cat.id && 'hidden',
-                        cat.id === 'reading' &&
-                          readingRuleSubOpen() &&
-                          'flex min-h-0 flex-1 flex-col overflow-hidden',
-                      )}
-                    >
+                    <div class={cn(mobileSubPage() !== cat.id && 'hidden')}>
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
-                        pendingReadingRulePage={
-                          cat.id === 'reading' ? pendingReadingRulePage() : null
-                        }
-                        onPendingReadingRulePageConsumed={() => setPendingReadingRulePage(null)}
-                        onReadingRulePageChange={(open, close) => {
-                          setReadingRuleSubOpen(open);
-                          readingRuleCloseRef.current = close ?? (() => {});
-                        }}
+                        onOpenReadingRulePage={props.onOpenReadingRulePage}
                       />
                     </div>
                   </Show>

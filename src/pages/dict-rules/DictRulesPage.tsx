@@ -2,7 +2,7 @@
  * 字典规则管理（对齐 Legado DictRuleActivity + TXT 目录规则页交互）
  */
 
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import * as dictDb from '@/lib/database/dict-rules';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
@@ -18,10 +18,8 @@ import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
-import {
-  settingsRuleManagePageListScroll,
-  settingsRuleManagePageRoot,
-} from '@/lib/ui/viewport-classes';
+import { VirtualRuleManageList } from '@/components/replace-rules/VirtualRuleManageList';
+import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
 import type { DictRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
@@ -311,7 +309,7 @@ export function DictRulesPage(props: DictRulesPageProps) {
   void reload();
 
   return (
-    <div class={settingsRuleManagePageRoot}>
+    <div class={mainShellPageRoot}>
       <PageToolbar
         class="border-b border-border/50 px-3 py-2 sm:px-4"
         title="字典规则"
@@ -339,7 +337,7 @@ export function DictRulesPage(props: DictRulesPageProps) {
         />
       </PageToolbar>
 
-      <div class={settingsRuleManagePageListScroll}>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/40">
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
@@ -349,43 +347,45 @@ export function DictRulesPage(props: DictRulesPageProps) {
           </p>
         </Show>
         <Show when={!loading() && filteredRules().length > 0}>
-          <ul>
-            <For each={filteredRules()}>
-              {(rule) => (
-                <DictRuleListItem
-                  rule={rule}
-                  selected={selectedNames().has(rule.name)}
-                  onToggleSelection={() => toggleSelection(rule.name)}
-                  onSelectionChange={(checked) => {
-                    const next = new Set(selectedNames());
-                    if (checked) next.add(rule.name);
-                    else next.delete(rule.name);
-                    setSelectedNames(next);
-                  }}
-                  onEnableChange={async (enabled) => {
-                    await dictDb.upsertDictRule({ ...rule, enabled });
-                    await reload();
-                  }}
-                  onEdit={() => openEdit(rule)}
-                  onMoveTop={async () => {
-                    await dictDb.moveDictRulesToTop([rule]);
-                    await reload();
-                  }}
-                  onMoveBottom={async () => {
-                    await dictDb.moveDictRulesToBottom([rule]);
-                    await reload();
-                  }}
-                  onDelete={async () => {
-                    await dictDb.deleteDictRule(rule.name);
-                    const next = new Set(selectedNames());
-                    next.delete(rule.name);
-                    setSelectedNames(next);
-                    await reload();
-                  }}
-                />
-              )}
-            </For>
-          </ul>
+          <VirtualRuleManageList
+            class="h-full min-h-0 flex-1"
+            items={filteredRules}
+            getItemKey={(rule) => rule.name}
+          >
+            {(rule) => (
+              <DictRuleListItem
+                rule={rule}
+                selected={selectedNames().has(rule.name)}
+                onToggleSelection={() => toggleSelection(rule.name)}
+                onSelectionChange={(checked) => {
+                  const next = new Set(selectedNames());
+                  if (checked) next.add(rule.name);
+                  else next.delete(rule.name);
+                  setSelectedNames(next);
+                }}
+                onEnableChange={async (enabled) => {
+                  await dictDb.upsertDictRule({ ...rule, enabled });
+                  await reload();
+                }}
+                onEdit={() => openEdit(rule)}
+                onMoveTop={async () => {
+                  await dictDb.moveDictRulesToTop([rule]);
+                  await reload();
+                }}
+                onMoveBottom={async () => {
+                  await dictDb.moveDictRulesToBottom([rule]);
+                  await reload();
+                }}
+                onDelete={async () => {
+                  await dictDb.deleteDictRule(rule.name);
+                  const next = new Set(selectedNames());
+                  next.delete(rule.name);
+                  setSelectedNames(next);
+                  await reload();
+                }}
+              />
+            )}
+          </VirtualRuleManageList>
         </Show>
       </div>
 

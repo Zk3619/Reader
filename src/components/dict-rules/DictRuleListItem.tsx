@@ -12,6 +12,7 @@ import {
   AppDropdownMenuTrigger,
   AppDropdownMenuIconTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { RULE_MANAGE_ROW_HEIGHT_PX } from '@/components/replace-rules/VirtualRuleManageList';
 
 export interface DictRuleListItemProps {
   rule: DictRule;
@@ -29,14 +30,15 @@ export function DictRuleListItem(props: DictRuleListItemProps) {
   const subtitle = () => props.rule.urlRule.trim() || '（空 URL 规则）';
 
   return (
-    <li class="border-b border-border/40 last:border-b-0">
-      <div
-        class={cn(
-          'flex min-h-14 cursor-pointer items-center gap-2 px-2 py-2 transition-colors sm:gap-3 sm:px-3',
-          'hover:bg-accent/30',
-          props.selected && 'bg-accent/20',
-        )}
-        onClick={props.onToggleSelection}
+    <div
+      class={cn(
+        'border-b border-border/40',
+        'flex cursor-pointer items-center gap-2 px-2 sm:gap-3 sm:px-3',
+        'hover:bg-accent/30',
+        props.selected && 'bg-accent/20',
+      )}
+      style={{ height: `${RULE_MANAGE_ROW_HEIGHT_PX}px` }}
+      onClick={props.onToggleSelection}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
@@ -118,7 +120,6 @@ export function DictRuleListItem(props: DictRuleListItemProps) {
             </AppDropdownMenuContent>
           </AppDropdownMenu>
         </div>
-      </div>
-    </li>
+    </div>
   );
 }
