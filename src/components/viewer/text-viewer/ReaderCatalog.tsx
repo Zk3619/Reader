@@ -16,8 +16,8 @@ import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-
 import {
   buildChapterRowMetas,
   CATALOG_ROW_HEIGHT_PX,
-  formatTocChapterDisplayTitle,
 } from '@/lib/catalog/chapter-list-layout';
+import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { isLocalBook } from '@/lib/local-book';
 import { cn } from '@/lib/utils';
 
@@ -50,6 +50,15 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
   const isChapterCached = (idx: number) => cachedIndices().has(idx);
 
   const rows = createMemo(() => buildChapterRowMetas(catalog()));
+  const { resolveTitle } = useChapterDisplayTitles(
+    catalog,
+    () => textViewerStore.state.book,
+    () => textViewerStore.state.book?.origin,
+    () => textViewerStore.isUseReplaceRule(),
+    () => ({
+      chineseConverterType: textViewerStore.state.config.chineseConverterType ?? 0,
+    }),
+  );
 
   let scrollContainer: HTMLDivElement | undefined;
   let lastScrolledToIndex = -1;
@@ -123,7 +132,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
               >
                 <span class="flex w-full min-w-0 items-center gap-2">
                   <span class="min-w-0 flex-1 truncate">
-                    {formatTocChapterDisplayTitle(chapter.title, index)}
+                    {resolveTitle(index, chapter)}
                   </span>
                   <ChapterCacheCloudIcon
                     enabled={showCacheHint()}
@@ -153,7 +162,7 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
             >
               <span class="flex w-full min-w-0 items-center gap-2">
                 <span class="min-w-0 flex-1 truncate">
-                  {formatTocChapterDisplayTitle(chapter.title, index)}
+                  {resolveTitle(index, chapter)}
                 </span>
                 <ChapterCacheCloudIcon
                   enabled={showCacheHint()}

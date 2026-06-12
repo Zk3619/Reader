@@ -3,7 +3,7 @@
  */
 
 import type { MediaKind } from '@/lib/book-source/book-type';
-import type { Book, BookChapter } from '@/types';
+import type { Book, BookChapter, ReplaceRule } from '@/types';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 
 /** 所有 Viewer 共享的基础状态 */
@@ -32,6 +32,8 @@ export interface ViewerState extends BaseViewerState {
   primaryUrl: string | null;
   loading: boolean;
   error: string | null;
+  /** 当前章实际命中的替换规则（Legado effectiveReplaceRules） */
+  effectiveReplaceRules: ReplaceRule[];
 }
 
 /** 共享 Store 能力 */

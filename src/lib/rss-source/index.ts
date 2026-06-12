@@ -15,6 +15,10 @@ export {
   type RssReadSession,
   type RssReadLoadMode,
 } from '@/lib/rss-source/rss-read-session';
+export {
+  getRssArticleDisplayTitle,
+  processRssArticleContentForDisplay,
+} from '@/lib/rss-source/rss-content-display-processing';
 export { wrapRssHtmlForWebView, wrapRssStartHtml } from '@/lib/rss-source/rss-html';
 export {
   handleRssJavaOpen,

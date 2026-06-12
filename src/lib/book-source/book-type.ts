@@ -65,6 +65,14 @@ export function isLocalOrigin(origin: string): boolean {
   return origin === 'local' || origin.startsWith('local::') || origin === 'loc_book';
 }
 
+/** 数据库 WHERE：本地书（勿用 type&4，type=4 亦为 Legado 短剧/视频） */
+export const SQL_LOCAL_BOOK_CONDITION =
+  `(origin = 'local' OR origin LIKE 'local::%' OR origin = 'loc_book')`;
+
+/** 数据库 WHERE：非本地书 */
+export const SQL_NETWORK_BOOK_CONDITION =
+  `(origin <> 'local' AND origin NOT LIKE 'local::%' AND origin <> 'loc_book')`;
+
 /** 书源 sourceType / bookSourceType 枚举（0–4），与 Legado BookType 位标志区分 */
 export function isBookSourceTypeEnum(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= BookSourceType.video;

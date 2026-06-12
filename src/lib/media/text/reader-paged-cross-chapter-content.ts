@@ -9,6 +9,7 @@ import type { Book, BookChapter } from '@/types';
 export async function resolveAdjacentChapterContent(
   book: Book,
   chapterIndex: number,
+  chapter?: BookChapter | null,
 ): Promise<string | null> {
   if (chapterIndex < 0) return null;
 
@@ -22,7 +23,12 @@ export async function resolveAdjacentChapterContent(
     !isLocalBook(book) && book.origin
       ? await sourcesDb.getSource(book.origin)
       : null;
-  const processed = await applyChapterDisplayProcessing(raw, book, source);
+  const processed = await applyChapterDisplayProcessing(
+    raw,
+    book,
+    source,
+    chapter ?? undefined,
+  );
   return processed?.trim() ? processed : null;
 }
 

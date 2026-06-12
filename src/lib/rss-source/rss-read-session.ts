@@ -6,7 +6,7 @@ import type { RssArticle, RssSource } from '@/types';
 import { resolveUrl } from '@/lib/book-source/utils';
 import { buildSourceRequestHeaders } from '@/lib/book-source/source-http';
 import { analyzeString, type RuleContext } from '@/lib/rule-engine';
-import { processContent } from '@/lib/book-source/content-processor';
+import { processRssArticleContentForDisplay, getRssArticleDisplayTitle } from '@/lib/rss-source/rss-content-display-processing';
 import { getStoredSourceCookiesForInnerWeb } from '@/lib/js-engine';
 import { fetchRssPage } from '@/lib/rss-source/fetch-rss-page';
 import { wrapRssHtmlForWebView, wrapRssStartHtml } from '@/lib/rss-source/rss-html';
@@ -150,7 +150,7 @@ export async function fetchRssArticleContent(
     const gallery = supplementEmptyRssGallery(content, body);
     content = gallery.html;
     content = sanitizeHtmlInlineScripts(content);
-    content = await processContent(content, article.title, source.sourceUrl);
+    content = await processRssArticleContentForDisplay(content, source, article);
     const imgCount = (content.match(/<img\b/gi) ?? []).length;
     rssLog(source, '正文解析完成', {
       length: content.length,
@@ -206,7 +206,10 @@ export async function prepareRssReadSession(
   const pageUrl = article
     ? absoluteArticleUrl(article)
     : openUrl || source.sourceUrl;
-  const title = article?.title ?? source.sourceName;
+  const title =
+    article != null
+      ? await getRssArticleDisplayTitle(source, article)
+      : source.sourceName;
 
   const ruleContent = source.ruleContent?.trim();
   const useUrlMode = !ruleContent || source.singleUrl;

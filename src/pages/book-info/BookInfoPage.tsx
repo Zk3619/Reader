@@ -62,7 +62,15 @@ import {
   shouldFetchCoverAsBlob,
 } from '@/lib/http/cover-image-loader';
 import { pageCacheStore } from '@/stores/page-cache';
-import { isLocalBook } from '@/lib/local-book';
+import {
+  detectFileType,
+  isLocalBook,
+  readLocalBookContent,
+  reparseLocalTxtBook,
+} from '@/lib/local-book';
+import { matchTxtTocRuleByStorage } from '@/lib/local-book/txt-toc-rule-engine';
+import * as txtTocDb from '@/lib/database/txt-toc-rules';
+import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/txt-toc-rules/TxtTocRulePickDialog';
 import type { Book, BookChapter, BookGroup, BookSource, SearchBook } from '@/types';
 
 /** 模糊背景 / 大图：跨域用 blob，同源可直接用 coverUrl */
@@ -103,22 +111,39 @@ function InfoRowWithAction(props: {
   actionLabel: string;
   onAction: () => void;
   actionDisabled?: boolean;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  secondaryActionDisabled?: boolean;
 }) {
   return (
     <div class={INFO_ROW_CLASS}>
       <props.icon class="h-[18px] w-[18px] text-muted-foreground shrink-0" size={18} />
       <span class="shrink-0 text-foreground/70">{props.label}</span>
       <span class="min-w-0 flex-1 truncate leading-snug">{props.children}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        class={cn(INFO_ROW_ACTION_CLASS, 'self-center')}
-        disabled={props.actionDisabled}
-        onClick={() => props.onAction()}
-      >
-        {props.actionLabel}
-      </Button>
+      <div class="flex shrink-0 items-center gap-0.5 self-center">
+        <Show when={props.secondaryActionLabel && props.onSecondaryAction}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class={INFO_ROW_ACTION_CLASS}
+            disabled={props.secondaryActionDisabled}
+            onClick={() => props.onSecondaryAction?.()}
+          >
+            {props.secondaryActionLabel}
+          </Button>
+        </Show>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          class={INFO_ROW_ACTION_CLASS}
+          disabled={props.actionDisabled}
+          onClick={() => props.onAction()}
+        >
+          {props.actionLabel}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -204,6 +229,21 @@ function isOnlineSearchBook(book: Pick<SearchBook, 'origin'>): boolean {
   return o !== 'local' && !o.startsWith('local::');
 }
 
+function isLocalTxtBook(book: Pick<SearchBook, 'origin' | 'originName' | 'bookUrl'>): boolean {
+  if (!isLocalBook(book as Book)) return false;
+  if (detectFileType(book.originName) === 'txt') return true;
+  const urlName = book.bookUrl.replace(/^.*[/\\]/, '');
+  return detectFileType(urlName) === 'txt';
+}
+
+async function resolveTxtTocRuleDisplayName(tocUrl: string | undefined): Promise<string> {
+  const rules = await txtTocDb.getAllTxtTocRules();
+  const matched = matchTxtTocRuleByStorage(tocUrl, rules);
+  if (matched) return matched.name;
+  if (!tocUrl?.trim()) return '自动识别';
+  return '自定义';
+}
+
 function resolveInitialPreloadedChapters(
   cacheKey: string | undefined,
   cachedBook: ReturnType<typeof pageCacheStore.getBookInfoCache>,
@@ -274,12 +314,17 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [userGroups, setUserGroups] = createSignal<BookGroup[]>([]);
   const [showGroupPick, setShowGroupPick] = createSignal(false);
   const [showTocDialog, setShowTocDialog] = createSignal(false);
+  const [txtTocRuleOpen, setTxtTocRuleOpen] = createSignal(false);
+  const [txtTocSample, setTxtTocSample] = createSignal('');
+  const [txtTocRuleName, setTxtTocRuleName] = createSignal('');
+  const [txtTocReparsing, setTxtTocReparsing] = createSignal(false);
 
   createEffect(() => {
     if (props.shellActive !== false) return;
     setShowTocDialog(false);
     setShowCoverDialog(false);
     setShowGroupPick(false);
+    setTxtTocRuleOpen(false);
   });
 
   // 检测主题变化
@@ -479,16 +524,24 @@ export function BookInfoPage(props: BookInfoPageProps) {
       setBookSource(source ?? undefined);
     }
 
-    if (isOnlineSearchBook(props.book) && !preloadedChapters()?.length) {
+    if (!preloadedChapters()?.length) {
       const inDb = await getDbChapterList(props.book.bookUrl);
-      const savedShelfBook = shelfBook();
-      const bookForStaleCheck = savedShelfBook ?? props.book;
-      if (
-        inDb.length > 0 &&
-        !shelfCachedChapterListLooksStale(inDb, bookForStaleCheck)
-      ) {
-        commitPreloadedChapters(props.book, inDb);
+      if (isLocalBook(props.book)) {
+        if (inDb.length > 0) commitPreloadedChapters(props.book, inDb);
+      } else if (isOnlineSearchBook(props.book)) {
+        const savedShelfBook = shelfBook();
+        const bookForStaleCheck = savedShelfBook ?? props.book;
+        if (
+          inDb.length > 0 &&
+          !shelfCachedChapterListLooksStale(inDb, bookForStaleCheck)
+        ) {
+          commitPreloadedChapters(props.book, inDb);
+        }
       }
+    }
+
+    if (isLocalTxtBook(props.book)) {
+      await refreshLocalTxtTocRuleName(props.book);
     }
 
     const bookUrl = props.book.bookUrl || props.book.tocUrl;
@@ -732,6 +785,9 @@ export function BookInfoPage(props: BookInfoPageProps) {
       const book = currentBook();
       if (source && isOnlineSearchBook(book)) {
         await preloadChapterList(book, source);
+      } else if (isLocalBook(book)) {
+        const inDb = await getDbChapterList(book.bookUrl);
+        if (inDb.length > 0) commitPreloadedChapters(book, inDb);
       }
       list = preloadedChapters();
     }
@@ -745,6 +801,62 @@ export function BookInfoPage(props: BookInfoPageProps) {
       return;
     }
 
+  };
+
+  const refreshLocalTxtTocRuleName = async (book: SearchBook) => {
+    const sb = shelfBook();
+    setTxtTocRuleName(await resolveTxtTocRuleDisplayName(sb?.tocUrl ?? book.tocUrl));
+  };
+
+  const openLocalTxtTocRulePicker = async () => {
+    const book = currentBook();
+    if (!book.bookUrl) return;
+    try {
+      const buf = await readLocalBookContent(book.bookUrl);
+      const sampleBytes = buf.byteLength > 512_000 ? buf.slice(0, 512_000) : buf;
+      setTxtTocSample(new TextDecoder('utf-8', { fatal: false }).decode(sampleBytes));
+      setTxtTocRuleOpen(true);
+    } catch (e) {
+      showAppToast({
+        title: '无法读取书籍',
+        description: e instanceof Error ? e.message : '读取文件失败',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleLocalTxtTocRuleConfirm = async (pick: TxtTocRulePickResult) => {
+    const book = currentBook();
+    if (!book.bookUrl || txtTocReparsing()) return;
+    setTxtTocReparsing(true);
+    try {
+      const result = await reparseLocalTxtBook(book.bookUrl, pick.tocRuleStorage, {
+        splitLongChapter: pick.splitLongChapter,
+      });
+      commitPreloadedChapters(book, await getDbChapterList(book.bookUrl));
+      setBookData((b) => ({ ...b, totalChapterNum: result.chapterCount }));
+      await refreshShelfBook();
+      await refreshLocalTxtTocRuleName(book);
+      showAppToast({
+        title: '目录已更新',
+        description: `共 ${result.chapterCount} 章`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '重新分章失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    } finally {
+      setTxtTocReparsing(false);
+    }
+  };
+
+  const localTxtTocSummary = () => {
+    const count = preloadedChapters()?.length ?? shelfBook()?.totalChapterNum ?? 0;
+    const rule = txtTocRuleName();
+    if (count > 0) return `共 ${count} 章 · ${rule}`;
+    return rule || '暂无目录';
   };
 
   const handleCoverUrlRefreshed = (fresh: string) => {
@@ -891,7 +1003,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         <Show when={isMeaningful(currentBook().chapterWordCountText) || isMeaningful(currentBook().wordCount)}>
           <InfoRow icon={WordCountIcon} label="字数：">{currentBook().chapterWordCountText || currentBook().wordCount}</InfoRow>
         </Show>
-        {/* 目录 + 查看目录 */}
+        {/* 目录 + 查看目录（在线书） */}
         <Show when={isOnlineSearchBook(currentBook())}>
           <InfoRowWithAction
             icon={TocMetaIcon}
@@ -900,6 +1012,20 @@ export function BookInfoPage(props: BookInfoPageProps) {
             onAction={() => void handleViewToc()}
           >
             {tocRowText()}
+          </InfoRowWithAction>
+        </Show>
+        {/* 本地 TXT：目录 + 目录规则 */}
+        <Show when={isLocalTxtBook(currentBook())}>
+          <InfoRowWithAction
+            icon={TocMetaIcon}
+            label="目录："
+            actionLabel="查看目录"
+            onAction={() => void handleViewToc()}
+            secondaryActionLabel="目录规则"
+            onSecondaryAction={() => void openLocalTxtTocRulePicker()}
+            secondaryActionDisabled={txtTocReparsing()}
+          >
+            {localTxtTocSummary()}
           </InfoRowWithAction>
         </Show>
       </div>
@@ -1240,6 +1366,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         open={showTocDialog()}
         onOpenChange={setShowTocDialog}
         inDrawer={!isPagePresentation()}
+        book={currentBook()}
         bookName={currentBook().name}
         bookUrl={currentBook().bookUrl}
         showChapterCacheHint={showChapterCacheHint()}
@@ -1248,6 +1375,15 @@ export function BookInfoPage(props: BookInfoPageProps) {
         error={tocLoadError()}
         currentChapterIndex={shelfBook()?.durChapterIndex ?? 0}
         onSelectChapter={(index) => void handleSelectChapterFromToc(index)}
+      />
+
+      <TxtTocRulePickDialog
+        open={txtTocRuleOpen()}
+        onOpenChange={setTxtTocRuleOpen}
+        currentTocUrl={shelfBook()?.tocUrl ?? currentBook().tocUrl}
+        sampleText={txtTocSample()}
+        splitLongChapter={shelfBook()?.readConfig?.splitLongChapter !== false}
+        onConfirm={handleLocalTxtTocRuleConfirm}
       />
     </div>
   );

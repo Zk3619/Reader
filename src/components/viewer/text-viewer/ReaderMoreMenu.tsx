@@ -2,8 +2,11 @@
  * 阅读器「更多」菜单（对齐 Legado book_read 溢出项子集）
  */
 
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
+import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
+import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
+import { ContentEditDialog } from '@/components/viewer/text-viewer/ContentEditDialog';
 import {
   AppDropdownMenu,
   AppDropdownMenuCheckboxItem,
@@ -20,6 +23,7 @@ import {
 import { MoreIcon } from '@/components/shared/icons';
 import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
+import type { ChineseConverterType } from '@/lib/replace-rules/chinese-converter';
 
 export interface ReaderMoreMenuProps {
   onOpenSearch: () => void;
@@ -33,7 +37,17 @@ export interface ReaderMoreMenuProps {
 
 export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   const [open, setOpen] = createSignal(false);
+  const [effectiveOpen, setEffectiveOpen] = createSignal(false);
+  const [contentEditOpen, setContentEditOpen] = createSignal(false);
   const replaceEnabled = () => textViewerStore.isUseReplaceRule();
+  const reSegmentEnabled = () => textViewerStore.isReSegment();
+  const removeDuplicateTitleEnabled = () => textViewerStore.isRemoveDuplicateTitle();
+  const chineseT2sEnabled = () => textViewerStore.getChineseConverterType() === 1;
+  const chineseS2tEnabled = () => textViewerStore.getChineseConverterType() === 2;
+  const canEditCachedContent = () => {
+    const book = textViewerStore.state.book;
+    return !!book && isLocalBookContentEditable(book);
+  };
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -54,7 +68,32 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
     }
   };
 
+  const handleToggleReSegment = async (enabled: boolean) => {
+    try {
+      await textViewerStore.setReSegment(enabled);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleRemoveDuplicateTitle = async (enabled: boolean) => {
+    try {
+      await textViewerStore.setRemoveDuplicateTitle(enabled);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleChineseConverter = async (type: ChineseConverterType) => {
+    try {
+      await textViewerStore.setChineseConverterType(type);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
+    <>
     <AppDropdownMenu open={open()} onOpenChange={setOpen}>
       <ViewerAppTooltip>
         <ViewerAppTooltipTrigger as="div">
@@ -87,7 +126,56 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
         >
           启用替换净化
         </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuCheckboxItem
+          checked={reSegmentEnabled()}
+          onChange={(checked) => void handleToggleReSegment(checked)}
+        >
+          重新分段
+        </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuCheckboxItem
+          checked={removeDuplicateTitleEnabled()}
+          onChange={(checked) => void handleToggleRemoveDuplicateTitle(checked)}
+        >
+          去除重复标题
+        </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuCheckboxItem
+          checked={chineseT2sEnabled()}
+          onChange={(checked) => {
+            void handleChineseConverter(checked ? 1 : chineseS2tEnabled() ? 2 : 0);
+          }}
+        >
+          繁转简
+        </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuCheckboxItem
+          checked={chineseS2tEnabled()}
+          onChange={(checked) => {
+            void handleChineseConverter(checked ? 2 : chineseT2sEnabled() ? 1 : 0);
+          }}
+        >
+          简转繁
+        </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setOpen(false);
+            setEffectiveOpen(true);
+          }}
+        >
+          生效的替换规则
+        </AppDropdownMenuItem>
+        <Show when={canEditCachedContent()}>
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setOpen(false);
+              setContentEditOpen(true);
+            }}
+          >
+            编辑正文
+          </AppDropdownMenuItem>
+        </Show>
       </ViewerAppDropdownMenuContent>
     </AppDropdownMenu>
+    <EffectiveReplacesDialog open={effectiveOpen()} onOpenChange={setEffectiveOpen} />
+    <ContentEditDialog open={contentEditOpen()} onOpenChange={setContentEditOpen} />
+    </>
   );
 }

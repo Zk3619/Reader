@@ -13,6 +13,9 @@ import {
   fetchAndCacheChapterContent,
 } from '@/lib/chapter-cache/storage';
 import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
+import { getChapterDisplayTitle } from '@/lib/replace-rules/chapter-display-title';
+import { isExportReplaceEnabledForBook, getExportNoChapterName } from '@/lib/replace-rules/export-replace-policy';
+import { isReplaceRuleEnabledForBook } from '@/lib/replace-rules/replace-rule-policy';
 import { saveTextFile, SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import { saveBinaryFile } from '@/lib/export/save-binary-file';
 import { buildEpubArchive } from '@/lib/export/export-epub';
@@ -78,13 +81,29 @@ export async function buildBookChaptersForExport(
     });
   };
 
+  const useReplace = isExportReplaceEnabledForBook(isReplaceRuleEnabledForBook(book));
+  const exportFormat = options?.format ?? 'txt';
+  const exportProcessing = {
+    useReplace,
+    reSegment: false,
+    chineseConvert: false,
+    removeDuplicateTitle: true,
+    forceRemoveTitle: exportFormat === 'epub',
+  };
+
   if (isLocalBook(book)) {
     const fileContent = await readLocalBookContent(book.bookUrl);
     for (let i = start; i <= end && i < chapters.length; i++) {
       const ch = chapters[i];
       if (!ch) continue;
-      const body = (await getLocalContent(book, ch, fileContent)) ?? '';
-      result.push({ index: i, title: ch.title, body });
+      const raw = (await getLocalContent(book, ch, fileContent)) ?? '';
+      const body = useReplace
+        ? await applyChapterDisplayProcessing(raw, book, null, ch, undefined, exportProcessing)
+        : raw;
+      const title = useReplace
+        ? await getChapterDisplayTitle(ch.title, book, book.origin, i)
+        : ch.title;
+      result.push({ index: i, title, body });
       processed += 1;
       report();
     }
@@ -120,8 +139,13 @@ export async function buildBookChaptersForExport(
       continue;
     }
 
-    const display = await applyChapterDisplayProcessing(raw, book, source);
-    result.push({ index: i, title: ch.title, body: display });
+    const body = useReplace
+      ? await applyChapterDisplayProcessing(raw, book, source, ch, undefined, exportProcessing)
+      : raw;
+    const title = useReplace
+      ? await getChapterDisplayTitle(ch.title, book, source?.sourceUrl ?? book.origin, i)
+      : ch.title;
+    result.push({ index: i, title, body: body });
     processed += 1;
     report();
   }
@@ -137,8 +161,11 @@ export async function buildBookTxtContent(
   options?: ExportBookOptions,
 ): Promise<string> {
   const chapters = await buildBookChaptersForExport(book, options);
+  const includeChapterName = !getExportNoChapterName();
   return chapters
-    .map((ch) => `\n\n${ch.title}\n\n${ch.body}`)
+    .map((ch) =>
+      includeChapterName ? `\n\n${ch.title}\n\n${ch.body}` : `\n\n${ch.body}`,
+    )
     .join('')
     .trimStart();
 }
@@ -167,7 +194,9 @@ async function saveSplitChapters(
           [{ id: 'ch1', title: ch.title, html: ch.body }],
         );
       } else {
-        zipEntries[`${base}.txt`] = strToU8(`${ch.title}\n\n${ch.body}`);
+        zipEntries[`${base}.txt`] = strToU8(
+          getExportNoChapterName() ? `${ch.body}` : `${ch.title}\n\n${ch.body}`,
+        );
       }
     }
     const zipped = zipSync(zipEntries);
@@ -194,7 +223,7 @@ async function saveSplitChapters(
     } else {
       await writeFile(
         await join(bookDir, `${base}.txt`),
-        strToU8(`${ch.title}\n\n${ch.body}`),
+        strToU8(getExportNoChapterName() ? `${ch.body}` : `${ch.title}\n\n${ch.body}`),
       );
     }
   }
@@ -221,7 +250,9 @@ async function saveSingleExport(
   }
 
   const content = chapters
-    .map((ch) => `\n\n${ch.title}\n\n${ch.body}`)
+    .map((ch) =>
+      getExportNoChapterName() ? `\n\n${ch.body}` : `\n\n${ch.title}\n\n${ch.body}`,
+    )
     .join('')
     .trimStart();
   await saveTextFile(`${sanitizeFileName(book.name)}.txt`, content);

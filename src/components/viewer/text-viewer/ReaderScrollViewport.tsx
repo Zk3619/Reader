@@ -39,6 +39,8 @@ export interface ReaderScrollViewportProps extends ReaderContentProps {
   /** 外层正文滚动容器（TextViewerPage 的 overflow-y-auto 节点） */
   getScrollContainer: Accessor<HTMLDivElement | null | undefined>;
   onRegisterNav?: (api: ReaderScrollNavApi) => void;
+  /** 净化后的章节标题（对齐 Legado getDisplayTitle / 分页模式） */
+  resolveChapterTitle?: (index: number) => string | undefined;
 }
 
 const SCROLL_LOAD_ROOT_MARGIN = '0px 0px 240px 0px';
@@ -48,6 +50,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
   const [local, contentProps] = splitProps(props, [
     'getScrollContainer',
     'onRegisterNav',
+    'resolveChapterTitle',
   ]);
 
   const catalog = () => textViewerStore.state.catalog;
@@ -76,7 +79,10 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     return list.length > 0 ? list[list.length - 1]!.index : -1;
   });
 
-  const chapterTitle = (index: number) => catalog()[index]?.title ?? '';
+  const chapterTitle = (index: number) => {
+    const resolved = local.resolveChapterTitle?.(index);
+    return resolved ?? catalog()[index]?.title ?? '';
+  };
 
   const scrollEl = () => local.getScrollContainer() ?? null;
 
@@ -286,12 +292,44 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     });
   });
 
+  const refreshLoadedChapterContents = async () => {
+    const list = loadedChapters();
+    if (list.length === 0 || !showContent()) return;
+
+    const refreshed: LoadedScrollChapter[] = [];
+    for (const ch of list) {
+      try {
+        const content =
+          ch.index === storeChapterIndex()
+            ? storeContent()
+            : await fetchProcessedChapterContent(ch.index);
+        refreshed.push({
+          index: ch.index,
+          content,
+          title: chapterTitle(ch.index),
+        });
+      } catch (e) {
+        console.error('[ReaderScrollViewport] 刷新章节正文失败', ch.index, e);
+        refreshed.push({ ...ch, title: chapterTitle(ch.index) });
+      }
+    }
+    setLoadedChapters(refreshed);
+  };
+
   onMount(() => {
     local.onRegisterNav?.({
       scrollToChapterProgress,
       scrollToProgressInCurrentChapter,
     });
     bindLoadObserver();
+
+    const onDisplayProcessingChanged = () => {
+      void refreshLoadedChapterContents();
+    };
+    window.addEventListener('reader-scroll-chapters-refresh', onDisplayProcessingChanged);
+    onCleanup(() => {
+      window.removeEventListener('reader-scroll-chapters-refresh', onDisplayProcessingChanged);
+    });
   });
 
   onCleanup(() => {
@@ -314,7 +352,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
               stagedChapter={{
                 chapterIndex: chapter.index,
                 content: chapter.content,
-                chapterTitle: chapter.title,
+                chapterTitle: chapterTitle(chapter.index),
               }}
             />
           </section>

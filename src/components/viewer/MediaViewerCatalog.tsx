@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button';
 import {
   buildChapterRowMetas,
   CATALOG_ROW_HEIGHT_PX,
-  formatTocChapterDisplayTitle,
 } from '@/lib/catalog/chapter-list-layout';
+import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { cn } from '@/lib/utils';
 
 export interface MediaViewerCatalogProps {
@@ -27,6 +27,12 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
   const catalog = () => viewerStore.state.catalog;
   const chapterIndex = () => viewerStore.state.chapterIndex;
   const rows = createMemo(() => buildChapterRowMetas(catalog()));
+  const { resolveTitle } = useChapterDisplayTitles(
+    catalog,
+    () => viewerStore.state.book,
+    () => viewerStore.state.book?.origin,
+    () => viewerStore.state.book?.readConfig?.useReplaceRule !== false,
+  );
 
   let scrollContainer: HTMLDivElement | undefined;
   let lastScrolledToIndex = -1;
@@ -103,7 +109,7 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
               onClick={() => props.onSelectChapter(index)}
             >
               <span class="min-w-0 flex-1 truncate">
-                {formatTocChapterDisplayTitle(chapter.title, index)}
+                {resolveTitle(index, chapter)}
               </span>
             </Button>
           </div>

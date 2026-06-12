@@ -214,7 +214,7 @@ async function prefetchNextChapterFirstImageIfReady(
   const nextIdx = chapterIndex + 1;
   if (nextIdx >= catalog.length) return;
 
-  const content = await resolveAdjacentChapterContent(book, nextIdx);
+  const content = await resolveAdjacentChapterContent(book, nextIdx, catalog[nextIdx]);
   if (token !== prefetchSession || !content?.trim()) return;
 
   const chapter = catalog[nextIdx];

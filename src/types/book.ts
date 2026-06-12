@@ -13,8 +13,12 @@ export interface ReadConfig {
   reverseToc?: boolean;
   /** 使用替换规则 */
   useReplaceRule?: boolean;
+  /** 重新分段（Legado reSegment，默认关闭） */
+  reSegment?: boolean;
   /** 本地书自定义目录正则（legado 风格），如 "^\s*第[一二三四五六七八九十百千\\d]+章\\s*.*$" */
   tocRule?: string;
+  /** 超长章节自动拆分（Legado splitLongChapter，默认开启） */
+  splitLongChapter?: boolean;
   /** 音频片头跳过秒数（Legado openCredits） */
   openCredits?: number;
   /** 音频片尾跳过秒数（Legado closeCredits） */

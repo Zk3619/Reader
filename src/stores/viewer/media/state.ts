@@ -27,6 +27,7 @@ export const initialViewerState: ViewerState = {
   primaryUrl: null,
   loading: false,
   error: null,
+  effectiveReplaceRules: [],
 };
 
 export const [state, setState] = createStore<ViewerState>({ ...initialViewerState });

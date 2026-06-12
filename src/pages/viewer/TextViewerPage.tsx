@@ -48,6 +48,8 @@ import { DictDialog } from '@/components/dict/DictDialog';
 import { ReaderSearchDrawer } from '@/components/viewer/text-viewer/ReaderSearchDrawer';
 import { ReaderBookmarksDrawer } from '@/components/viewer/text-viewer/ReaderBookmarksDrawer';
 import { ReaderChangeSourceDialog } from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
+import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
+import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { ReaderClickRegionalOverlay } from '@/components/viewer/text-viewer/ReaderClickRegionalOverlay';
 import { shouldShowClickActionHint } from '@/lib/media/text/reader-click-hint-storage';
 import { resolveClickZone } from '@/lib/media/text/reader-click-region';
@@ -67,7 +69,13 @@ import {
 import type { Bookmark } from '@/types';
 import { cn } from '@/lib/utils';
 import { isMobile } from '@/lib/platform/detect';
-import { isLocalBook } from '@/lib/local-book';
+import {
+  detectFileType,
+  isLocalBook,
+  readLocalBookContent,
+  reparseLocalTxtBook,
+} from '@/lib/local-book';
+import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/txt-toc-rules/TxtTocRulePickDialog';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
@@ -130,10 +138,14 @@ export function BookReader(props: BookReaderProps) {
   const [bookmarksOpen, setBookmarksOpen] = createSignal(false);
   const [contentEnterKey, setContentEnterKey] = createSignal(0);
   const [changeSourceOpen, setChangeSourceOpen] = createSignal(false);
+  const [txtTocRuleOpen, setTxtTocRuleOpen] = createSignal(false);
+  const [txtTocSample, setTxtTocSample] = createSignal('');
+  const [txtTocReparsing, setTxtTocReparsing] = createSignal(false);
   const [clickRegionalOpen, setClickRegionalOpen] = createSignal(false);
   const [clickRegionalMarkHint, setClickRegionalMarkHint] = createSignal(false);
   const [readAloudActive, setReadAloudActive] = createSignal(false);
   const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
+  const [effectiveReplacesOpen, setEffectiveReplacesOpen] = createSignal(false);
   /** 阅读进度状态栏选项行：整行可点触发 radio，仅本弹窗使用 */
   const statusBarOptionRowClass =
     'flex cursor-pointer items-center rounded-md px-2 py-1.5 hover:bg-muted/50 has-[[data-checked]]:bg-accent has-[[data-checked]]:text-accent-foreground'
@@ -155,6 +167,57 @@ export function BookReader(props: BookReaderProps) {
 
   const book = () => textViewerStore.state.book;
   const catalogSize = () => textViewerStore.state.catalog.length;
+
+  const isLocalTxtBook = () => {
+    const b = book();
+    if (!b || !isLocalBook(b)) return false;
+    if (detectFileType(b.originName) === 'txt') return true;
+    const urlName = b.bookUrl.replace(/^.*[/\\]/, '');
+    return detectFileType(urlName) === 'txt';
+  };
+
+  const openTxtTocRulePicker = async () => {
+    const b = book();
+    if (!b) return;
+    try {
+      const buf = await readLocalBookContent(b.bookUrl);
+      const sampleBytes = buf.byteLength > 512_000 ? buf.slice(0, 512_000) : buf;
+      setTxtTocSample(new TextDecoder('utf-8', { fatal: false }).decode(sampleBytes));
+      setTxtTocRuleOpen(true);
+    } catch (e) {
+      showAppToast({
+        title: '无法读取书籍',
+        description: e instanceof Error ? e.message : '读取文件失败',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleTxtTocRuleConfirm = async (pick: TxtTocRulePickResult) => {
+    const b = book();
+    if (!b || txtTocReparsing()) return;
+    setTxtTocReparsing(true);
+    try {
+      const result = await reparseLocalTxtBook(b.bookUrl, pick.tocRuleStorage, {
+        splitLongChapter: pick.splitLongChapter,
+      });
+      await textViewerStore.openBook(result.book);
+      await textViewerStore.loadChapter(result.book.durChapterIndex, { forceRefresh: true });
+      setCatalogScrollTop(0);
+      showAppToast({
+        title: '目录已更新',
+        description: `共 ${result.chapterCount} 章`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '重新分章失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    } finally {
+      setTxtTocReparsing(false);
+    }
+  };
   const openOfflineCacheDialog = () => {
     const blocked = getOfflineCacheBlockedReason(
       book(),
@@ -173,6 +236,19 @@ export function BookReader(props: BookReaderProps) {
   const catalog = () => textViewerStore.state.catalog;
   const chapterIndex = () => textViewerStore.state.chapterIndex;
   const currentChapter = () => catalog()[chapterIndex()];
+  const { resolveTitle } = useChapterDisplayTitles(
+    catalog,
+    book,
+    () => book()?.origin,
+    () => textViewerStore.isUseReplaceRule(),
+    () => ({
+      chineseConverterType: textViewerStore.state.config.chineseConverterType ?? 0,
+    }),
+  );
+  const displayChapterTitle = (index?: number) => {
+    const idx = index ?? chapterIndex();
+    return resolveTitle(idx, catalog()[idx]);
+  };
   const showContent = () => textViewerStore.state.showContent;
   const content = () => textViewerStore.state.content;
   const chapterPos = () => textViewerStore.state.chapterPos;
@@ -605,6 +681,7 @@ export function BookReader(props: BookReaderProps) {
                 onRegisterNav={(api) => {
                   scrollNav = api;
                 }}
+                resolveChapterTitle={displayChapterTitle}
                 {...readerContentShared}
                 dualPage={dualPageActive()}
               />
@@ -617,6 +694,7 @@ export function BookReader(props: BookReaderProps) {
         pageAnim={normalizedPageAnim}
         class="h-full min-h-full"
         {...readerContentShared}
+        resolveChapterTitle={displayChapterTitle}
         onRequestPrevChapter={() => handlePrev()}
         onRequestNextChapter={() => handleNext()}
         onRegisterNav={(api) => {
@@ -686,7 +764,7 @@ export function BookReader(props: BookReaderProps) {
                 <TextViewerBottomChrome
                   isWideScreen={isWideScreen()}
                   bottomBarThemeClasses={bottomBarThemeClasses()}
-                  chapterTitle={currentChapter()?.title ?? ''}
+                  chapterTitle={displayChapterTitle()}
                   chapterWordCountText={chapterWordCountText()}
                   chapterProgressPercent={chapterProgressPercent()}
                   bookProgressPercent={bookProgressPercent()}
@@ -776,7 +854,22 @@ export function BookReader(props: BookReaderProps) {
             class={mediaViewerCatalogDrawerContentClass()}
             showNativeDragHandle={false}
           >
-            <ViewerAppDrawerHeader title="目录" />
+            <ViewerAppDrawerHeader
+              title="目录"
+              actions={
+                <Show when={isLocalTxtBook()}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-8 shrink-0 px-2 text-xs"
+                    disabled={txtTocReparsing()}
+                    onClick={() => void openTxtTocRulePicker()}
+                  >
+                    目录规则
+                  </Button>
+                </Show>
+              }
+            />
             <ViewerAppDrawerBody>
               <Show when={catalogOpen()}>
                 <ReaderCatalog
@@ -885,6 +978,80 @@ export function BookReader(props: BookReaderProps) {
                 <SwitchLabel class="sr-only">启用替换净化</SwitchLabel>
               </Switch>
             </div>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class="text-sm">重新分段</Label>
+              <Switch
+                checked={textViewerStore.isReSegment()}
+                onChange={(enabled) => {
+                  void textViewerStore.setReSegment(enabled).catch(() => undefined);
+                }}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">重新分段</SwitchLabel>
+              </Switch>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class="text-sm">去除重复标题</Label>
+              <Switch
+                checked={textViewerStore.isRemoveDuplicateTitle()}
+                onChange={(enabled) => {
+                  void textViewerStore.setRemoveDuplicateTitle(enabled).catch(() => undefined);
+                }}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">去除重复标题</SwitchLabel>
+              </Switch>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class="text-sm">繁转简</Label>
+              <Switch
+                checked={textViewerStore.getChineseConverterType() === 1}
+                onChange={(enabled) => {
+                  void textViewerStore
+                    .setChineseConverterType(
+                      enabled ? 1 : textViewerStore.getChineseConverterType() === 2 ? 2 : 0,
+                    )
+                    .catch(() => undefined);
+                }}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">繁转简</SwitchLabel>
+              </Switch>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class="text-sm">简转繁</Label>
+              <Switch
+                checked={textViewerStore.getChineseConverterType() === 2}
+                onChange={(enabled) => {
+                  void textViewerStore
+                    .setChineseConverterType(
+                      enabled ? 2 : textViewerStore.getChineseConverterType() === 1 ? 1 : 0,
+                    )
+                    .catch(() => undefined);
+                }}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">简转繁</SwitchLabel>
+              </Switch>
+            </div>
+            <Button
+              variant="ghost"
+              class="w-full justify-start"
+              onClick={() => {
+                setReaderMenuDrawerOpen(false);
+                setEffectiveReplacesOpen(true);
+              }}
+            >
+              生效的替换规则
+            </Button>
             {/* 阅读进度状态栏的显示风格 */}
             <div class="flex items-center justify-between gap-3 py-2">
               <span class="text-sm text-foreground">阅读进度状态栏的显示风格</span>
@@ -977,6 +1144,11 @@ export function BookReader(props: BookReaderProps) {
         </ViewerAppDialogContent>
       </ViewerAppDialog>
 
+      <EffectiveReplacesDialog
+        open={effectiveReplacesOpen()}
+        onOpenChange={setEffectiveReplacesOpen}
+      />
+
       <ReaderOfflineCacheDialog
         open={offlineCacheDialogOpen()}
         onOpenChange={setOfflineCacheDialogOpen}
@@ -1007,6 +1179,15 @@ export function BookReader(props: BookReaderProps) {
         onChanged={async (nextBook) => {
           await textViewerStore.openBook(nextBook);
         }}
+      />
+
+      <TxtTocRulePickDialog
+        open={txtTocRuleOpen()}
+        onOpenChange={setTxtTocRuleOpen}
+        currentTocUrl={book()?.tocUrl}
+        sampleText={txtTocSample()}
+        splitLongChapter={book()?.readConfig?.splitLongChapter !== false}
+        onConfirm={handleTxtTocRuleConfirm}
       />
 
       <ReaderClickRegionalOverlay

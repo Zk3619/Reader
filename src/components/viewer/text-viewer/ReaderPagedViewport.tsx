@@ -153,6 +153,8 @@ export interface ReaderPagedViewportProps extends ReaderContentProps {
   onRequestPrevChapter: () => void | Promise<void>;
   onRequestNextChapter: () => void | Promise<void>;
   onRegisterNav?: (api: ReaderPagedNavApi) => void;
+  /** 章节展示标题（含替换净化）；缺省用目录原始 title */
+  resolveChapterTitle?: (index: number) => string | undefined;
 }
 
 export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
@@ -161,6 +163,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     'onRequestPrevChapter',
     'onRequestNextChapter',
     'onRegisterNav',
+    'resolveChapterTitle',
   ]);
 
   const [pageIndex, setPageIndex] = createSignal(0);
@@ -429,12 +432,17 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const currentChapterTitle = () => {
-    const catalog = viewerState.catalog;
     const idx = viewerState.chapterIndex;
-    return catalog[idx]?.title;
+    const resolved = local.resolveChapterTitle?.(idx);
+    if (resolved?.trim()) return resolved;
+    return viewerState.catalog[idx]?.title;
   };
 
-  const chapterTitleAt = (index: number) => viewerState.catalog[index]?.title;
+  const chapterTitleAt = (index: number) => {
+    const resolved = local.resolveChapterTitle?.(index);
+    if (resolved?.trim()) return resolved;
+    return viewerState.catalog[index]?.title;
+  };
 
   /** 跨章 prev 落点：跳过尾部空白页，不改动全局 pageStarts */
   const prevChapterLandingPage = (l: ReaderChapterLayout) =>
@@ -1469,7 +1477,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (incomingIdx == null) return false;
 
     const title = chapterTitleAt(incomingIdx);
-    const content = await resolveAdjacentChapterContent(book, incomingIdx);
+    const content = await resolveAdjacentChapterContent(
+      book,
+      incomingIdx,
+      viewerState.catalog[incomingIdx],
+    );
 
     if (!isCrossChapterPrepareCurrent(turn, prepareToken, direction)) return false;
 

@@ -226,6 +226,12 @@ export interface TextViewerUiConfig {
   imageStyle: TextViewerImageStyle;
   /** 顶栏与底栏布局（仅文本阅读器；未配置时沿用应用设置） */
   viewerChromeLayout: ViewerChromeLayout;
+  /** 替换净化前保护 <usehtml> 块（Legado adaptSpecialStyle，默认开启） */
+  adaptSpecialStyle?: boolean;
+  /** 简繁转换：0 关 / 1 繁转简 / 2 简转繁（Legado chineseConverterType） */
+  chineseConverterType?: 0 | 1 | 2;
+  /** 去除正文开头重复章节标题（Legado removeSameTitle，默认开启） */
+  removeDuplicateTitle?: boolean;
 }
 
 export const defaultTextViewerUiConfig: TextViewerUiConfig = {
@@ -258,4 +264,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   speakSpeed: 5,
   imageStyle: 'DEFAULT',
   viewerChromeLayout: defaultViewerChromeLayout,
+  adaptSpecialStyle: true,
+  chineseConverterType: 0,
+  removeDuplicateTitle: true,
 };

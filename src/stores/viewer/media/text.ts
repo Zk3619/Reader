@@ -6,13 +6,21 @@ import { MediaKind } from '@/lib/book-source/book-type';
 import * as chaptersDb from '@/lib/database/chapters';
 import * as booksDb from '@/lib/database/books';
 import * as sourcesDb from '@/lib/database/sources';
-import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-book';
+import { updateReplaceRule } from '@/lib/database/replace-rules';
+import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
+import { isReplaceRuleEnabledForBook } from '@/lib/replace-rules/replace-rule-policy';
+import {
+  preloadChineseConverter,
+  type ChineseConverterType,
+} from '@/lib/replace-rules/chinese-converter';
+import { isLocalBook, getLocalContent, readLocalBookContent, ensureLocalTxtCatalogFresh } from '@/lib/local-book';
 import { normalizeCatalogChapterIndices } from '@/lib/chapter-cache/catalog-cache-index';
 import {
   readCachedChapterRaw,
   fetchAndCacheChapterContent,
 } from '@/lib/chapter-cache/storage';
-import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-processing';
+import { applyChapterDisplayProcessingWithMeta } from '@/lib/chapter-cache/display-processing';
+import type { Book, BookChapter, BookProgress, BookSource, ReplaceRule } from '@/types';
 import { scheduleChapterBodyCachePrefetch } from '@/lib/chapter-cache/prefetch';
 import {
   getPooledChapterContent,
@@ -44,7 +52,6 @@ import {
   markPagedChapterEntry,
   type PagedChapterEntry,
 } from '@/lib/media/text/reader-paged-chapter-entry';
-import type { Book, BookChapter, BookProgress, BookSource } from '@/types';
 import { state, setState } from '@/stores/viewer/media/state';
 import {
   clampChapterIndex,
@@ -192,15 +199,43 @@ async function warmAdjacentChaptersFromCache(
     const raw = await readCachedChapterRaw(book.bookUrl, idx);
     if (!raw?.trim()) continue;
     try {
-      const processed = await applyChapterDisplayProcessing(raw, book, source);
-      setAdjacentChapterInPool(book.bookUrl, currentIndex, idx, processed);
+      const processed = await applyDisplayProcessing(raw, book, source, catalog[idx]);
+      setAdjacentChapterInPool(book.bookUrl, currentIndex, idx, processed.content);
     } catch (e) {
       console.warn('[reader] 预载相邻缓存章失败', idx, e);
     }
   }
 }
 
-function commitChapterContent(index: number, content: string, book: Book): void {
+function readerDisplayUiConfig() {
+  return {
+    adaptSpecialStyle: state.config.adaptSpecialStyle,
+    chineseConverterType: state.config.chineseConverterType,
+    removeDuplicateTitle: state.config.removeDuplicateTitle,
+  };
+}
+
+async function applyDisplayProcessing(
+  raw: string,
+  book: Book,
+  source: Awaited<ReturnType<typeof sourcesDb.getSource>> | null,
+  chapter: BookChapter | undefined,
+) {
+  return applyChapterDisplayProcessingWithMeta(
+    raw,
+    book,
+    source,
+    chapter,
+    readerDisplayUiConfig(),
+  );
+}
+
+function commitChapterContent(
+  index: number,
+  content: string,
+  book: Book,
+  effectiveReplaceRules: ReplaceRule[] = [],
+): void {
   markSessionContentReady(book.bookUrl);
   setCurrentChapterInPool(book.bookUrl, index, content);
   setState({
@@ -210,10 +245,67 @@ function commitChapterContent(index: number, content: string, book: Book): void 
     contentFetching: false,
     contentBootstrapping: false,
     showContent: true,
+    effectiveReplaceRules,
   });
   const catalog = state.catalog;
   if (catalog.length > 0) {
     scheduleChapterBodyCachePrefetch(book, catalog, index);
+  }
+}
+
+async function reprocessDisplayedChapterImpl(index?: number): Promise<void> {
+  if (!state.book) return;
+  const idx = index ?? state.chapterIndex;
+  const book = state.book;
+  const chapter = state.catalog[idx];
+  if (!chapter) return;
+
+  resetChapterContentPool(book.bookUrl);
+
+  if (isLocalBook(book)) {
+    setState({ contentLoading: true });
+    try {
+      const cachedRaw = await readCachedChapterRaw(book.bookUrl, idx);
+      let raw = cachedRaw?.trim() ?? '';
+      if (!raw) {
+        const fileContent = await readLocalBookContent(book.bookUrl);
+        raw =
+          (await getLocalContent(book, chapter, fileContent)) ?? state.content;
+      }
+      const result = await applyDisplayProcessing(raw, book, null, chapter);
+      commitChapterContent(idx, result.content, book, result.effectiveReplaceRules);
+    } finally {
+      setState({ contentLoading: false });
+    }
+    return;
+  }
+
+  const source =
+    book.origin && book.origin !== 'local'
+      ? await sourcesDb.getSource(book.origin)
+      : null;
+
+  const raw = await readCachedChapterRaw(book.bookUrl, idx);
+  if (raw?.trim()) {
+    const result = await applyDisplayProcessing(raw, book, source, chapter);
+    commitChapterContent(idx, result.content, book, result.effectiveReplaceRules);
+    return;
+  }
+
+  if (state.content) {
+    const result = await applyDisplayProcessing(
+      state.content,
+      book,
+      source,
+      chapter,
+    );
+    commitChapterContent(idx, result.content, book, result.effectiveReplaceRules);
+  }
+}
+
+function notifyScrollChaptersRefresh(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reader-scroll-chapters-refresh'));
   }
 }
 
@@ -226,6 +318,7 @@ function beginSessionContentLoad(bookUrl: string): void {
 }
 
 let chaptersUpdatedListenerInstalled = false;
+let replaceRulesRefreshListenerInstalled = false;
 
 function applyPartialCatalogUpdateImpl(
   chapters: BookChapter[],
@@ -247,6 +340,18 @@ function applyPartialCatalogUpdateImpl(
   if (options.isComplete && state.book) {
     void persistCatalogToDbIfNeeded(state.book, chapters, state.guestReading);
   }
+}
+
+function ensureReplaceRulesRefreshListener(): void {
+  if (replaceRulesRefreshListenerInstalled) return;
+  replaceRulesRefreshListenerInstalled = true;
+  window.addEventListener('replace-rules-refresh', () => {
+    const book = state.book;
+    if (!book || state.kind !== MediaKind.text) return;
+    void reprocessDisplayedChapterImpl()
+      .then(notifyScrollChaptersRefresh)
+      .catch(console.error);
+  });
 }
 
 function ensureChaptersUpdatedListener(): void {
@@ -328,24 +433,30 @@ export async function openTextBook(
 ): Promise<void> {
   await hydrateReaderConfig();
   ensureChaptersUpdatedListener();
+  ensureReplaceRulesRefreshListener();
   hasEnteredContent = false;
   resetChapterContentPool(book.bookUrl);
 
   const guestReading =
     !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
 
-  if (!guestReading) {
-    startReadingSession(book);
+  let activeBook = book;
+  if (!guestReading && isLocalBook(book)) {
+    activeBook = await ensureLocalTxtCatalogFresh(book);
   }
 
-  if (state.book?.bookUrl !== book.bookUrl || !state.contentLoading) {
+  if (!guestReading) {
+    startReadingSession(activeBook);
+  }
+
+  if (state.book?.bookUrl !== activeBook.bookUrl || !state.contentLoading) {
     setState({
       kind: MediaKind.text,
-      book,
+      book: activeBook,
       guestReading,
       contentFetching: false,
     });
-    beginSessionContentLoad(book.bookUrl);
+    beginSessionContentLoad(activeBook.bookUrl);
   } else {
     setState({ kind: MediaKind.text, guestReading });
   }
@@ -354,31 +465,31 @@ export async function openTextBook(
     const initialCatalog = options?.initialCatalog?.length
       ? options.initialCatalog
       : undefined;
-    const rawIndex = book.durChapterIndex ?? 0;
-    const chapterPos = book.durChapterPos ?? 0;
-    const reverseToc = book.readConfig?.reverseToc === true;
+    const rawIndex = activeBook.durChapterIndex ?? 0;
+    const chapterPos = activeBook.durChapterPos ?? 0;
+    const reverseToc = activeBook.readConfig?.reverseToc === true;
 
     let catalogToUse: BookChapter[] = [];
     if (initialCatalog) {
       catalogToUse = normalizeCatalogChapterIndices(initialCatalog);
     } else if (!guestReading) {
       catalogToUse = normalizeCatalogChapterIndices(
-        await chaptersDb.getChapterList(book.bookUrl),
+        await chaptersDb.getChapterList(activeBook.bookUrl),
       );
     }
 
     const source =
-      !isLocalBook(book) && book.origin
-        ? await sourcesDb.getSource(book.origin)
+      !isLocalBook(activeBook) && activeBook.origin
+        ? await sourcesDb.getSource(activeBook.origin)
         : null;
 
-    if (catalogToUse.length === 0 && source && book.tocUrl) {
-      await fetchChapterListDeduped(source, book.tocUrl, {
+    if (catalogToUse.length === 0 && source && activeBook.tocUrl) {
+      await fetchChapterListDeduped(source, activeBook.tocUrl, {
         reverseToc,
-        bookVariable: book.variable,
+        bookVariable: activeBook.variable,
         onPartial: async (partial) => {
           if (partial.chapters.length === 0) return;
-          if (state.book?.bookUrl !== book.bookUrl) return;
+          if (state.book?.bookUrl !== activeBook.bookUrl) return;
 
           const idx = clampChapterIndex(rawIndex, partial.chapters.length);
           setState({
@@ -398,7 +509,7 @@ export async function openTextBook(
           }
 
           if (partial.isComplete) {
-            await persistCatalogToDbIfNeeded(book, partial.chapters, guestReading);
+            await persistCatalogToDbIfNeeded(activeBook, partial.chapters, guestReading);
           }
         },
       });
@@ -408,7 +519,7 @@ export async function openTextBook(
         hasEnteredContent = true;
         await loadTextChapter(idx);
       } else if (!hasEnteredContent) {
-        markSessionContentReady(book.bookUrl);
+        markSessionContentReady(activeBook.bookUrl);
         setState({
           content: '暂无章节',
           contentLoading: false,
@@ -427,10 +538,10 @@ export async function openTextBook(
       chapterPos,
       contentFetching: false,
     });
-    beginSessionContentLoad(book.bookUrl);
+    beginSessionContentLoad(activeBook.bookUrl);
 
     if (catalogToUse.length === 0) {
-      markSessionContentReady(book.bookUrl);
+      markSessionContentReady(activeBook.bookUrl);
       setState({
         content: '暂无章节',
         contentLoading: false,
@@ -445,15 +556,15 @@ export async function openTextBook(
       hasEnteredContent = true;
       await loadTextChapter(chapterIndex);
     } else {
-      beginSessionContentLoad(book.bookUrl);
+      beginSessionContentLoad(activeBook.bookUrl);
     }
 
-    if (source && book.tocUrl && isChapterListFetchInFlight(source, book.tocUrl)) {
-      attachTocProgressWhileReadingImpl(book, source, guestReading);
+    if (source && activeBook.tocUrl && isChapterListFetchInFlight(source, activeBook.tocUrl)) {
+      attachTocProgressWhileReadingImpl(activeBook, source, guestReading);
       return;
     }
 
-    await persistCatalogToDbIfNeeded(book, catalogToUse, guestReading);
+    await persistCatalogToDbIfNeeded(activeBook, catalogToUse, guestReading);
 
     if (!hasEnteredContent) {
       await loadTextChapter(chapterIndex);
@@ -530,9 +641,15 @@ export async function loadTextChapter(
   if (isLocalBook(book)) {
     setState({ contentLoading: true, chapterIndex: index });
     try {
-      const fileContent = await readLocalBookContent(book.bookUrl);
-      const content = (await getLocalContent(book, chapter, fileContent)) ?? '';
-      commitChapterContent(index, content, book);
+      const chapter = catalog[index];
+      const cachedRaw = await readCachedChapterRaw(book.bookUrl, index);
+      let raw = cachedRaw?.trim() ?? '';
+      if (!raw && chapter) {
+        const fileContent = await readLocalBookContent(book.bookUrl);
+        raw = (await getLocalContent(book, chapter, fileContent)) ?? '';
+      }
+      const result = await applyDisplayProcessing(raw, book, null, chapter);
+      commitChapterContent(index, result.content, book, result.effectiveReplaceRules);
       await saveTextProgress();
     } catch (e) {
       console.error('加载本地章节失败:', e);
@@ -566,12 +683,8 @@ export async function loadTextChapter(
     const cachedRaw = await readCachedChapterRaw(book.bookUrl, index);
     if (cachedRaw?.trim()) {
       try {
-        const content = await applyChapterDisplayProcessing(
-          cachedRaw,
-          book,
-          source,
-        );
-        commitChapterContent(index, content, book);
+        const result = await applyDisplayProcessing(cachedRaw, book, source, chapter);
+        commitChapterContent(index, result.content, book, result.effectiveReplaceRules);
         void warmAdjacentChaptersFromCache(book, catalog, index, source);
         await saveTextProgress();
         return;
@@ -598,9 +711,10 @@ export async function loadTextChapter(
       nextChapterUrl,
       index,
     );
-    const content = raw ? await applyChapterDisplayProcessing(raw, book, source) : '';
-
-    commitChapterContent(index, content, book);
+    const result = raw
+      ? await applyDisplayProcessing(raw, book, source, chapter)
+      : { content: '', effectiveReplaceRules: [], sameTitleRemoved: false };
+    commitChapterContent(index, result.content, book, result.effectiveReplaceRules);
     void warmAdjacentChaptersFromCache(book, catalog, index, source);
     await saveTextProgress();
   } catch (e) {
@@ -643,11 +757,11 @@ export async function fetchProcessedChapterContent(index: number): Promise<strin
     !isLocalBook(book) && book.origin
       ? await sourcesDb.getSource(book.origin)
       : null;
-  const content = raw
-    ? await applyChapterDisplayProcessing(raw, book, source)
-    : '';
-  setAdjacentChapterInPool(book.bookUrl, state.chapterIndex, index, content);
-  return content;
+  const result = raw
+    ? await applyDisplayProcessing(raw, book, source, chapter)
+    : { content: '', effectiveReplaceRules: [], sameTitleRemoved: false };
+  setAdjacentChapterInPool(book.bookUrl, state.chapterIndex, index, result.content);
+  return result.content;
 }
 
 export async function saveTextProgress(): Promise<void> {
@@ -851,7 +965,7 @@ export const textViewerTextApi = {
   isUseReplaceRule(): boolean {
     const book = state.book;
     if (!book) return true;
-    return book.readConfig?.useReplaceRule !== false;
+    return isReplaceRuleEnabledForBook(book);
   },
 
   /**
@@ -865,51 +979,60 @@ export const textViewerTextApi = {
     if (!state.guestReading) {
       await booksDb.updateBook({ ...book, readConfig });
     }
-    await this.reprocessDisplayedChapter();
+    await reprocessDisplayedChapterImpl();
+    notifyScrollChaptersRefresh();
+  },
+
+  isReSegment(): boolean {
+    return state.book?.readConfig?.reSegment === true;
+  },
+
+  async setReSegment(enabled: boolean): Promise<void> {
+    if (!state.book) return;
+    const book = state.book;
+    const readConfig = { ...book.readConfig, reSegment: enabled };
+    setState('book', { ...book, readConfig });
+    if (!state.guestReading) {
+      await booksDb.updateBook({ ...book, readConfig });
+    }
+    await reprocessDisplayedChapterImpl();
+    notifyScrollChaptersRefresh();
+  },
+
+  getChineseConverterType(): ChineseConverterType {
+    return (state.config.chineseConverterType ?? 0) as ChineseConverterType;
+  },
+
+  async setChineseConverterType(type: ChineseConverterType): Promise<void> {
+    this.setConfig({ chineseConverterType: type });
+    if (type !== 0) await preloadChineseConverter(type);
+    await reprocessDisplayedChapterImpl();
+    notifyScrollChaptersRefresh();
+  },
+
+  isRemoveDuplicateTitle(): boolean {
+    return state.config.removeDuplicateTitle !== false;
+  },
+
+  async setRemoveDuplicateTitle(enabled: boolean): Promise<void> {
+    this.setConfig({ removeDuplicateTitle: enabled });
+    await reprocessDisplayedChapterImpl();
+    notifyScrollChaptersRefresh();
+  },
+
+  /** 禁用一条生效的替换规则并刷新当前章 */
+  async disableEffectiveReplaceRule(ruleId: number): Promise<void> {
+    const rule = state.effectiveReplaceRules.find((r) => r.id === ruleId);
+    if (!rule) return;
+    await updateReplaceRule({ ...rule, isEnabled: false });
+    invalidateReplaceRulesCache();
+    await reprocessDisplayedChapterImpl();
+    notifyScrollChaptersRefresh();
   },
 
   /** 用当前缓存 raw 重新应用展示处理（替换规则开关等，不触发网络） */
   async reprocessDisplayedChapter(index?: number): Promise<void> {
-    if (!state.book) return;
-    const idx = index ?? state.chapterIndex;
-    const book = state.book;
-    const chapter = state.catalog[idx];
-    if (!chapter) return;
-
-    if (isLocalBook(book)) {
-      setState({ contentLoading: true });
-      try {
-        const fileContent = await readLocalBookContent(book.bookUrl);
-        const raw =
-          (await getLocalContent(book, chapter, fileContent)) ?? state.content;
-        const content = await applyChapterDisplayProcessing(raw, book, null);
-        commitChapterContent(idx, content, book);
-      } finally {
-        setState({ contentLoading: false });
-      }
-      return;
-    }
-
-    const source =
-      book.origin && book.origin !== 'local'
-        ? await sourcesDb.getSource(book.origin)
-        : null;
-
-    const raw = await readCachedChapterRaw(book.bookUrl, idx);
-    if (raw?.trim()) {
-      const content = await applyChapterDisplayProcessing(raw, book, source);
-      commitChapterContent(idx, content, book);
-      return;
-    }
-
-    if (state.content) {
-      const content = await applyChapterDisplayProcessing(
-        state.content,
-        book,
-        source,
-      );
-      commitChapterContent(idx, content, book);
-    }
+    await reprocessDisplayedChapterImpl(index);
   },
 
   /**

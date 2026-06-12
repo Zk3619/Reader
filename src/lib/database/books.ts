@@ -3,6 +3,10 @@
  * 对应 legado 项目的 BookDao.kt
  */
 
+import {
+  SQL_LOCAL_BOOK_CONDITION,
+  SQL_NETWORK_BOOK_CONDITION,
+} from '@/lib/book-source/book-type';
 import { getDatabase } from '@/lib/database/database-core';
 import type { Book, NewBook } from '@/types';
 import { BookGroupId } from '@/types/book-group';
@@ -40,20 +44,20 @@ export async function getBooksByGroup(groupId: number): Promise<Book[]> {
       query = 'SELECT * FROM books ORDER BY durChapterTime DESC';
       break;
     case BookGroupId.Local:
-      query = 'SELECT * FROM books WHERE type & 4 > 0 ORDER BY "order"';
+      query = `SELECT * FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION} ORDER BY "order"`;
       break;
     case BookGroupId.Audio:
       query = 'SELECT * FROM books WHERE type & 2 > 0 ORDER BY "order"';
       break;
     case BookGroupId.NetNone:
       query = `SELECT * FROM books 
-        WHERE type & 2 = 0 AND type & 4 = 0 
+        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND type & 2 = 0 
         AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0
         ORDER BY "order"`;
       break;
     case BookGroupId.LocalNone:
       query = `SELECT * FROM books 
-        WHERE type & 4 > 0 
+        WHERE ${SQL_LOCAL_BOOK_CONDITION} 
         AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0
         ORDER BY "order"`;
       break;
@@ -83,19 +87,19 @@ export async function getBookCountByGroup(groupId: number): Promise<number> {
       query = 'SELECT COUNT(*) as count FROM books';
       break;
     case BookGroupId.Local:
-      query = 'SELECT COUNT(*) as count FROM books WHERE type & 4 > 0';
+      query = `SELECT COUNT(*) as count FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION}`;
       break;
     case BookGroupId.Audio:
       query = 'SELECT COUNT(*) as count FROM books WHERE type & 2 > 0';
       break;
     case BookGroupId.NetNone:
       query = `SELECT COUNT(*) as count FROM books 
-        WHERE type & 2 = 0 AND type & 4 = 0 
+        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND type & 2 = 0 
         AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0`;
       break;
     case BookGroupId.LocalNone:
       query = `SELECT COUNT(*) as count FROM books 
-        WHERE type & 4 > 0 
+        WHERE ${SQL_LOCAL_BOOK_CONDITION} 
         AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0`;
       break;
     case BookGroupId.Error:

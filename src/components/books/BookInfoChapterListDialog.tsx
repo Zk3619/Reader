@@ -29,15 +29,17 @@ import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-
 import {
   buildChapterRowMetas,
   CATALOG_ROW_HEIGHT_PX,
-  formatTocChapterDisplayTitle,
 } from '@/lib/catalog/chapter-list-layout';
+import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { cn } from '@/lib/utils';
-import type { BookChapter } from '@/types';
+import type { Book, BookChapter, SearchBook } from '@/types';
 
 export interface BookInfoChapterListDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   bookName: string;
+  /** 用于替换净化标题展示 */
+  book?: Book | SearchBook;
   /** 在线书 URL，用于查询章节缓存 */
   bookUrl?: string;
   /** 是否显示未缓存云标（本地书为 false） */
@@ -80,6 +82,12 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
   const isChapterCached = (idx: number) => cachedIndices().has(idx);
 
   const rows = createMemo(() => buildChapterRowMetas(props.chapters));
+  const { resolveTitle } = useChapterDisplayTitles(
+    () => props.chapters,
+    () => props.book,
+    () => props.book?.origin,
+    () => (props.book as Book | undefined)?.readConfig?.useReplaceRule !== false,
+  );
 
   let scrollContainer: HTMLDivElement | undefined;
 
@@ -160,7 +168,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
                       >
                         <span class="flex w-full min-w-0 items-center gap-2">
                           <span class="min-w-0 flex-1 truncate">
-                            {formatTocChapterDisplayTitle(chapter.title, index)}
+                            {resolveTitle(index, chapter)}
                           </span>
                           <ChapterCacheCloudIcon
                             enabled={cacheHintEnabled()}

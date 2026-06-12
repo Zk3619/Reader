@@ -125,6 +125,11 @@ export interface FileSystemAdapter {
   getFileSize(path: string): Promise<number>;
 
   /**
+   * 获取文件修改时间（毫秒时间戳），不可用时返回 null
+   */
+  getFileMtime(path: string): Promise<number | null>;
+
+  /**
    * 计算文件的 SHA-256 哈希值（用于文件内容比较）
    */
   getFileHash(path: string): Promise<string>;
@@ -276,6 +281,19 @@ class TauriFileSystemAdapter implements FileSystemAdapter {
     }
     const metadata = await fsStat(path);
     return metadata.size ?? 0;
+  }
+
+  async getFileMtime(path: string): Promise<number | null> {
+    if (isStorageRefString(path)) {
+      const ref = parseStorageRef(path);
+      if (ref.kind === 'path' || ref.kind === 'uri') {
+        const metadata = await fsStat(ref.value);
+        return metadata.mtime?.getTime() ?? null;
+      }
+      return null;
+    }
+    const metadata = await fsStat(path);
+    return metadata.mtime?.getTime() ?? null;
   }
 
   async getFileHash(path: string): Promise<string> {
@@ -473,6 +491,10 @@ class WebFileSystemAdapter implements FileSystemAdapter {
   async getFileSize(path: string): Promise<number> {
     const content = await this.readFromIndexedDB(path);
     return content ? content.byteLength : 0;
+  }
+
+  async getFileMtime(_path: string): Promise<number | null> {
+    return null;
   }
 
   async getFileHash(path: string): Promise<string> {
