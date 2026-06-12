@@ -1,25 +1,70 @@
 /**
  * 内容处理器
  * 对应 legado 项目的 ContentProcessor.kt
- * 
+ *
  * 功能：
- * 1. 应用替换规则到内容
+ * 1. 应用替换规则到正文/标题
  * 2. 处理图片样式
- * 3. 处理内容净化
  */
 
 import {
   getEnabledRulesByContentScope,
   getEnabledRulesByTitleScope,
 } from '@/lib/database/replace-rules';
-import type { ReplaceRule } from '@/types';
+import {
+  applyReplaceRulesToText,
+  buildReplaceBookContext,
+  trimContentLinesForReplace,
+  type ReplaceBookContext,
+} from '@/lib/replace-rules/replace-text';
+import type { Book, BookChapter, ReplaceRule } from '@/types';
 import { scanImgTags, upsertImgTagStyle } from '@/lib/media/text/scan-img-tags';
 
-/** 对齐 Legado ContentProcessor.upReplaceRules：导入书源后使替换规则缓存失效 */
+type RuleCacheKey = string;
+
+const titleRulesCache = new Map<RuleCacheKey, ReplaceRule[]>();
+const contentRulesCache = new Map<RuleCacheKey, ReplaceRule[]>();
+
+function ruleCacheKey(name: string, origin: string): RuleCacheKey {
+  return `${name}\0${origin}`;
+}
+
+function clearRuleCaches(): void {
+  titleRulesCache.clear();
+  contentRulesCache.clear();
+}
+
+async function getCachedTitleRules(name: string, origin: string): Promise<ReplaceRule[]> {
+  const key = ruleCacheKey(name, origin);
+  const cached = titleRulesCache.get(key);
+  if (cached) return cached;
+  const rules = await getEnabledRulesByTitleScope(name, origin);
+  titleRulesCache.set(key, rules);
+  return rules;
+}
+
+async function getCachedContentRules(name: string, origin: string): Promise<ReplaceRule[]> {
+  const key = ruleCacheKey(name, origin);
+  const cached = contentRulesCache.get(key);
+  if (cached) return cached;
+  const rules = await getEnabledRulesByContentScope(name, origin);
+  contentRulesCache.set(key, rules);
+  return rules;
+}
+
+/** 对齐 Legado ContentProcessor.upReplaceRules：导入/编辑规则后使缓存失效 */
 export function invalidateReplaceRulesCache(): void {
+  clearRuleCaches();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('replace-rules-refresh'));
   }
+}
+
+export interface ProcessContentOptions {
+  book?: Book;
+  chapter?: BookChapter;
+  /** 标题替换：结果为空时保留原文 */
+  keepTitleOnBlank?: boolean;
 }
 
 /**
@@ -28,22 +73,23 @@ export function invalidateReplaceRulesCache(): void {
 export async function processContent(
   content: string,
   bookName?: string,
-  sourceUrl?: string
+  sourceUrl?: string,
+  options?: ProcessContentOptions,
 ): Promise<string> {
-  if (!content) {
-    return content;
-  }
+  if (!content) return content;
 
-  // 获取启用的替换规则（作用于正文）
-  const rules = await getEnabledRulesByContentScope(bookName || '', sourceUrl || '');
+  const name = bookName || '';
+  const origin = sourceUrl || '';
+  const rules = await getCachedContentRules(name, origin);
+  if (rules.length === 0) return content;
 
-  // 按顺序应用替换规则
-  let processedContent = content;
-  for (const rule of rules) {
-    processedContent = applyReplaceRule(processedContent, rule);
-  }
-
-  return processedContent;
+  const prepared = trimContentLinesForReplace(content);
+  const replaceBook = options?.book ? buildReplaceBookContext(options.book) : undefined;
+  const { text } = await applyReplaceRulesToText(prepared, rules, {
+    book: replaceBook,
+    chapter: options?.chapter,
+  });
+  return text;
 }
 
 /**
@@ -52,76 +98,30 @@ export async function processContent(
 export async function processTitle(
   title: string,
   bookName?: string,
-  sourceUrl?: string
+  sourceUrl?: string,
+  options?: { book?: Book; chapter?: BookChapter },
 ): Promise<string> {
-  if (!title) {
-    return title;
-  }
+  if (!title) return title;
 
-  // 获取启用的替换规则（作用于标题）
-  const rules = await getEnabledRulesByTitleScope(bookName || '', sourceUrl || '');
+  const name = bookName || '';
+  const origin = sourceUrl || '';
+  const rules = await getCachedTitleRules(name, origin);
+  if (rules.length === 0) return title;
 
-  // 按顺序应用替换规则
-  let processedTitle = title;
-  for (const rule of rules) {
-    processedTitle = applyReplaceRule(processedTitle, rule);
-  }
-
-  return processedTitle;
-}
-
-/**
- * 转义正则表达式特殊字符
- */
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 应用单个替换规则
- */
-function applyReplaceRule(text: string, rule: ReplaceRule): string {
-  if (!rule.isEnabled || !rule.pattern) {
-    return text;
-  }
-
-  try {
-    // 检查作用范围
-    if (rule.scope) {
-      // 如果指定了作用范围，需要检查是否匹配
-      // 这里简化处理，实际legado会检查bookName和sourceUrl是否匹配scope
-      // TODO: 实现完整的作用范围检查
-    }
-
-    // 检查排除范围
-    if (rule.excludeScope) {
-      // 如果指定了排除范围，需要检查是否匹配
-      // TODO: 实现完整的排除范围检查
-    }
-
-    // 应用替换
-    if (rule.isRegex) {
-      // 正则表达式替换
-      const regex = new RegExp(rule.pattern, 'g');
-      return text.replace(regex, rule.replacement || '');
-    } else {
-      // 普通字符串替换（使用全局正则代替replaceAll以兼容ES2020）
-      const regex = new RegExp(escapeRegExp(rule.pattern), 'g');
-      return text.replace(regex, rule.replacement || '');
-    }
-  } catch (error) {
-    console.warn(`替换规则执行失败 [${rule.name}]:`, error);
-    return text;
-  }
+  const normalized = title.replace(/\r\n?/g, '');
+  const replaceBook = options?.book ? buildReplaceBookContext(options.book) : undefined;
+  const { text } = await applyReplaceRulesToText(normalized, rules, {
+    book: replaceBook,
+    chapter: options?.chapter,
+    keepOnBlank: true,
+  });
+  return text;
 }
 
 /**
  * 处理图片样式
  */
-export function processImageStyle(
-  content: string,
-  imageStyle?: string
-): string {
+export function processImageStyle(content: string, imageStyle?: string): string {
   if (!content || !imageStyle) {
     return content;
   }
@@ -158,3 +158,5 @@ export function processImageStyle(
   out += content.slice(lastIndex);
   return out;
 }
+
+export type { ReplaceBookContext };

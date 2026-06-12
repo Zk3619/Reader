@@ -247,7 +247,7 @@ async function tryDirectContentApiForChapter(
     [book?.tocUrl, book?.bookUrl],
   );
 }
-import { processContent, processImageStyle } from '@/lib/book-source/content-processor';
+import { processImageStyle } from '@/lib/book-source/content-processor';
 import { logContentImageDiagnostics } from '@/lib/book-source/content-image-debug';
 import { summarizeContentPostItemId } from '@/lib/book-source/content-post-debug';
 import {
@@ -1144,14 +1144,7 @@ export async function getContent(
       content = cleanContent(content, contentBaseUrl, 'light');
     }
 
-    if (
-      book &&
-      !options?.skipReplaceRules &&
-      !isImageHeavyContent(content) &&
-      !browserPlaceholder
-    ) {
-      content = await processContent(content, book.name, source.sourceUrl);
-    }
+    // 替换净化在展示层 processChapterContentForDisplay 统一处理；缓存仅存 raw 正文
 
     if (isImageHeavyContent(content)) {
       logContentImageDiagnostics(content, '最终正文');

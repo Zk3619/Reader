@@ -2,7 +2,7 @@
  * 替换净化规则编辑（对齐 Legado ReplaceEditActivity）
  */
 
-import { createSignal, createEffect } from 'solid-js';
+import { createSignal, createEffect, Show } from 'solid-js';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,8 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { isReplaceRuleValid } from '@/lib/replace-rules/replace-text';
+import { testReplaceRule } from '@/lib/replace-rules/test-replace-rule';
 
 export type ReplaceRuleDraft = ReplaceRule | Omit<ReplaceRule, 'id'>;
 
@@ -27,19 +29,20 @@ export interface ReplaceRuleEditDialogProps {
 function validateRule(rule: ReplaceRuleDraft): string | null {
   if (!rule.name.trim()) return '名称不能为空';
   if (!rule.pattern.trim()) return '请填写匹配内容';
-  if (rule.isRegex) {
-    try {
-      // eslint-disable-next-line no-new
-      new RegExp(rule.pattern);
-    } catch (e) {
-      return e instanceof Error ? `正则语法错误：${e.message}` : '正则语法错误';
+  if (!isReplaceRuleValid(rule)) {
+    if (rule.isRegex && rule.pattern.endsWith('|') && !rule.pattern.endsWith('\\|')) {
+      return '正则末尾不能为未转义的 |';
     }
+    return '正则语法错误或不支持';
   }
   return null;
 }
 
 export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
   const [draft, setDraft] = createSignal<ReplaceRuleDraft | null>(null);
+  const [testSample, setTestSample] = createSignal('');
+  const [testResult, setTestResult] = createSignal('');
+  const [testing, setTesting] = createSignal(false);
 
   createEffect(() => {
     if (props.open && props.rule) {
@@ -95,6 +98,25 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
     }
     await props.onSave(d);
     props.onOpenChange(false);
+  };
+
+  const runTest = async () => {
+    const d = draft();
+    if (!d) return;
+    const err = validateRule(d);
+    if (err) {
+      showAppToast({ title: err, variant: 'destructive' });
+      return;
+    }
+    setTesting(true);
+    try {
+      const out = await testReplaceRule(d, testSample());
+      setTestResult(out);
+    } catch (e) {
+      setTestResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
   };
 
   const isEditing = () => 'id' in (draft() ?? {}) && Boolean((draft() as ReplaceRule).id);
@@ -226,6 +248,36 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
               />
             </TextField>
           </div>
+          <div>
+            <Label>测试文本</Label>
+            <TextField class="mt-1">
+              <TextFieldTextArea
+                value={testSample()}
+                onInput={(e) => setTestSample(e.currentTarget.value)}
+                rows={3}
+                class="font-mono text-xs"
+                placeholder="粘贴待测试正文片段"
+              />
+            </TextField>
+          </div>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={testing()}
+              onClick={() => void runTest()}
+            >
+              {testing() ? '测试中…' : '测试规则'}
+            </Button>
+          </div>
+          <Show when={testResult()}>
+            <div>
+              <Label>测试结果</Label>
+              <pre class="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
+                {testResult()}
+              </pre>
+            </div>
+          </Show>
         </div>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => void copyRuleJson()}>

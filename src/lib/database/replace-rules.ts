@@ -242,6 +242,15 @@ export async function moveReplaceRulesToBottom(rules: ReplaceRule[]): Promise<vo
   }
 }
 
+/** 按给定 id 顺序重写 sortOrder（拖拽排序） */
+export async function reorderReplaceRules(orderedIds: number[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  const db = await getDatabase();
+  for (let i = 0; i < orderedIds.length; i++) {
+    await db.execute('UPDATE replace_rules SET sortOrder = ? WHERE id = ?', [i, orderedIds[i]!]);
+  }
+}
+
 /**
  * 启用/禁用所有替换规则
  */

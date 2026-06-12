@@ -1,5 +1,12 @@
 import type { ReplaceRule } from '@/types';
 import * as replaceDb from '@/lib/database/replace-rules';
+import { isReplaceRuleValid } from '@/lib/replace-rules/replace-text';
+import {
+  mergeReplaceRuleForImport,
+  type ImportReplaceRuleOptions,
+} from '@/lib/book-source/import-replace-rule-merge';
+
+export type { ImportReplaceRuleOptions } from '@/lib/book-source/import-replace-rule-merge';
 
 interface LegadoReplaceItem {
   [key: string]: unknown;
@@ -7,36 +14,66 @@ interface LegadoReplaceItem {
   name?: string;
   group?: string;
   pattern?: string;
+  regex?: string;
   replacement?: string;
   scope?: string;
+  useTo?: string;
   scopeTitle?: boolean;
   scopeContent?: boolean;
   excludeScope?: string;
   isEnabled?: boolean;
+  enable?: boolean;
   isRegex?: boolean;
   timeoutMillisecond?: number;
   order?: number;
   sortOrder?: number;
+  serialNumber?: number;
+  replaceSummary?: string;
 }
 
-function normalizeReplaceItem(raw: LegadoReplaceItem, fallbackOrder: number): Omit<ReplaceRule, 'id'> {
-  return {
-    name: String(raw.name ?? '导入规则'),
+function readBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return undefined;
+}
+
+/** 对齐 Legado ReplaceAnalyzer.jsonToReplaceRule 旧版字段 */
+export function normalizeReplaceItem(
+  raw: LegadoReplaceItem,
+  fallbackOrder: number,
+): Omit<ReplaceRule, 'id'> | null {
+  const pattern = String(raw.pattern ?? raw.regex ?? '').trim();
+  if (!pattern) return null;
+
+  const name = String(raw.name ?? raw.replaceSummary ?? '导入规则').trim() || '导入规则';
+  const scopeRaw = raw.scope ?? raw.useTo;
+  const enabled = readBool(raw.isEnabled) ?? readBool(raw.enable);
+
+  const rule: Omit<ReplaceRule, 'id'> = {
+    name,
     group: raw.group != null ? String(raw.group) : undefined,
-    pattern: String(raw.pattern ?? ''),
+    pattern,
     replacement: String(raw.replacement ?? ''),
-    scope: raw.scope != null ? String(raw.scope) : undefined,
+    scope: scopeRaw != null ? String(scopeRaw) : undefined,
     scopeTitle: Boolean(raw.scopeTitle),
     scopeContent: raw.scopeContent !== false,
     excludeScope: raw.excludeScope != null ? String(raw.excludeScope) : undefined,
-    isEnabled: raw.isEnabled !== false,
+    isEnabled: enabled !== false,
     isRegex: raw.isRegex !== false,
     timeoutMillisecond: Number(raw.timeoutMillisecond ?? 3000),
-    order: Number(raw.order ?? raw.sortOrder ?? fallbackOrder),
+    order: Number(raw.order ?? raw.sortOrder ?? raw.serialNumber ?? fallbackOrder),
   };
+
+  return isReplaceRuleValid(rule) ? rule : null;
 }
 
-export function parseReplaceRuleJson(jsonText: string): Omit<ReplaceRule, 'id'>[] {
+export interface ReplaceRuleImportItem {
+  rule: Omit<ReplaceRule, 'id'>;
+  idHint?: number;
+}
+
+export function parseReplaceRuleImportItems(jsonText: string): ReplaceRuleImportItem[] {
   const trimmed = jsonText.replace(/^\uFEFF/, '').trim();
   if (!trimmed) return [];
   let data: unknown;
@@ -46,38 +83,86 @@ export function parseReplaceRuleJson(jsonText: string): Omit<ReplaceRule, 'id'>[
     return [];
   }
   const items = Array.isArray(data) ? data : [data];
-  const out: Omit<ReplaceRule, 'id'>[] = [];
+  const out: ReplaceRuleImportItem[] = [];
   items.forEach((item, index) => {
     if (!item || typeof item !== 'object') return;
-    out.push(normalizeReplaceItem(item as LegadoReplaceItem, index));
+    const legado = item as LegadoReplaceItem;
+    const rule = normalizeReplaceItem(legado, index);
+    if (!rule) return;
+    const idHint = Number(legado.id ?? 0);
+    out.push({
+      rule,
+      idHint: idHint > 0 ? idHint : undefined,
+    });
   });
   return out;
 }
 
-export async function importReplaceRulesFromJson(jsonText: string): Promise<number> {
-  const rules = parseReplaceRuleJson(jsonText);
-  let count = 0;
-  for (const rule of rules) {
-    if (!rule.pattern) continue;
-    await replaceDb.insertReplaceRule({
-      id: 0,
-      name: rule.name,
-      group: rule.group,
-      pattern: rule.pattern,
-      replacement: rule.replacement,
-      scope: rule.scope,
-      scopeTitle: rule.scopeTitle,
-      scopeContent: rule.scopeContent,
-      excludeScope: rule.excludeScope,
-      isEnabled: rule.isEnabled,
-      isRegex: rule.isRegex,
-      timeoutMillisecond: rule.timeoutMillisecond,
-      order: rule.order,
-    });
-    count += 1;
+export function parseReplaceRuleJson(jsonText: string): Omit<ReplaceRule, 'id'>[] {
+  return parseReplaceRuleImportItems(jsonText).map((item) => item.rule);
+}
+
+/** Web API / 单条保存：兼容 Legado 旧字段与 id */
+export function parseSingleReplaceRulePayload(raw: string): ReplaceRule | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as LegadoReplaceItem;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const base = normalizeReplaceItem(parsed, 0);
+    if (!base) return null;
+    const id = Number(parsed.id ?? 0);
+    return { ...base, id: Number.isFinite(id) ? id : 0 };
+  } catch {
+    return null;
   }
-  if (count > 0) {
+}
+
+async function upsertImportedRule(
+  rule: Omit<ReplaceRule, 'id'>,
+  idHint?: number,
+  options: ImportReplaceRuleOptions = {},
+): Promise<'inserted' | 'updated' | 'skipped'> {
+  if (idHint != null && idHint > 0) {
+    const existing = await replaceDb.getReplaceRuleById(idHint);
+    if (existing) {
+      const merged = mergeReplaceRuleForImport(rule, existing, options);
+      if (
+        existing.pattern === merged.pattern &&
+        existing.replacement === merged.replacement &&
+        existing.name === merged.name &&
+        (existing.group ?? '') === (merged.group ?? '') &&
+        existing.isEnabled === merged.isEnabled
+      ) {
+        return 'skipped';
+      }
+      await replaceDb.updateReplaceRule({ ...existing, ...merged, id: idHint });
+      return 'updated';
+    }
+  }
+  await replaceDb.insertReplaceRule({ ...rule, id: 0 });
+  return 'inserted';
+}
+
+export async function importReplaceRuleItems(
+  items: ReplaceRuleImportItem[],
+  options: ImportReplaceRuleOptions = {},
+): Promise<number> {
+  let count = 0;
+  for (const { rule, idHint } of items) {
+    const existing =
+      idHint != null && idHint > 0 ? await replaceDb.getReplaceRuleById(idHint) : null;
+    const merged = mergeReplaceRuleForImport(rule, existing, options);
+    const action = await upsertImportedRule(merged, idHint, options);
+    if (action !== 'skipped') count += 1;
+  }
+  if (count > 0 && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('replace-rules-refresh'));
   }
   return count;
+}
+
+export async function importReplaceRulesFromJson(jsonText: string): Promise<number> {
+  const items = parseReplaceRuleImportItems(jsonText);
+  if (items.length === 0) return 0;
+  return importReplaceRuleItems(items);
 }

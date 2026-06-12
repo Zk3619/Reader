@@ -5,10 +5,28 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
 import * as replaceDb from '@/lib/database/replace-rules';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
-import { importReplaceRulesFromJson } from '@/lib/book-source/import-replace-rule';
-import { importReplaceRulesFromNetworkUrl } from '@/lib/book-source/import-network-sidecar';
-import { filterReplaceRules } from '@/lib/replace-rules/filter-replace-rules';
+import { parseReplaceRuleImportItems } from '@/lib/book-source/import-replace-rule';
+import {
+  buildImportReplaceRuleComparisons,
+  defaultImportReplaceRuleSelection,
+  importSelectedReplaceRules,
+  resolveReplaceRulesFromNetworkUrl,
+  resolveReplaceRulesFromText,
+  type ImportReplaceRuleComparison,
+} from '@/lib/book-source/import-replace-rule-resolver';
+import {
+  filterReplaceRulesList,
+  replaceRuleGroupFilterKey,
+  replaceRuleGroupFilterTitle,
+  type ReplaceRuleGroupFilter,
+  UNGROUPED_REPLACE_RULE_LABEL,
+} from '@/lib/replace-rules/filter-replace-rules';
 import { ReplaceRuleListItem } from '@/components/replace-rules/ReplaceRuleListItem';
+import { VirtualRuleManageList } from '@/components/replace-rules/VirtualRuleManageList';
+import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
+import type { Id } from '@thisbeyond/solid-dnd';
+import type { ImportReplaceRuleOptions } from '@/lib/book-source/import-replace-rule-resolver';
+import { ImportReplaceRuleSelectDialog } from '@/components/replace-rules/ImportReplaceRuleSelectDialog';
 import {
   ReplaceRuleEditDialog,
   type ReplaceRuleDraft,
@@ -22,10 +40,7 @@ import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { parseReaderImportDeepLink } from '@/lib/platform/legado-import-uri';
-import {
-  settingsRuleManagePageListScroll,
-  settingsRuleManagePageRoot,
-} from '@/lib/ui/viewport-classes';
+import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
@@ -46,6 +61,7 @@ import {
 } from '@/components/shared/AppDropdownMenu';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ChevronDownIcon, LinkIcon } from '@/components/shared/icons';
+import { cn } from '@/lib/utils';
 
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
 const BATCH_MENU_CHEVRON_CLASS =
@@ -71,8 +87,10 @@ export interface ReplaceRulesPageProps {
 
 export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const [rules, setRules] = createSignal<ReplaceRule[]>([]);
+  const [ruleGroups, setRuleGroups] = createSignal<string[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [groupFilter, setGroupFilter] = createSignal<ReplaceRuleGroupFilter>({ kind: 'all' });
   const [selectedIds, setSelectedIds] = createSignal<Set<number>>(new Set());
   const [editOpen, setEditOpen] = createSignal(false);
   const [editingRule, setEditingRule] = createSignal<ReplaceRuleDraft | null>(null);
@@ -81,8 +99,53 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const [importUrl, setImportUrl] = createSignal('');
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
   const [codeImportOpen, setCodeImportOpen] = createSignal(false);
+  const [importSelectOpen, setImportSelectOpen] = createSignal(false);
+  const [importLoading, setImportLoading] = createSignal(false);
+  const [importComparisons, setImportComparisons] = createSignal<ImportReplaceRuleComparison[]>([]);
+  const [importSelectedKeys, setImportSelectedKeys] = createSignal(new Set<string>());
+  const [importKeepGroup, setImportKeepGroup] = createSignal(true);
+  const [importKeepEnable, setImportKeepEnable] = createSignal(true);
+  const [importGroupName, setImportGroupName] = createSignal('');
+  const [importAdjustGroup, setImportAdjustGroup] = createSignal(false);
 
-  const filteredRules = createMemo(() => filterReplaceRules(rules(), searchQuery()));
+  const filteredRules = createMemo(() =>
+    filterReplaceRulesList(rules(), searchQuery(), groupFilter()),
+  );
+  const listSortableEnabled = createMemo(
+    () =>
+      groupFilter().kind === 'all' &&
+      !searchQuery().trim() &&
+      filteredRules().length === rules().length,
+  );
+
+  const groupCounts = createMemo(() => {
+    const all = rules();
+    const byGroup = new Map<string, number>();
+    let ungrouped = 0;
+    let enabled = 0;
+    let disabled = 0;
+    for (const rule of all) {
+      if (rule.isEnabled) enabled += 1;
+      else disabled += 1;
+      const group = rule.group?.trim();
+      if (!group || group.includes(UNGROUPED_REPLACE_RULE_LABEL)) {
+        ungrouped += 1;
+      } else {
+        byGroup.set(group, (byGroup.get(group) ?? 0) + 1);
+      }
+    }
+    return { all: all.length, enabled, disabled, ungrouped, byGroup };
+  });
+
+  const importGroupOptions = createMemo(() => {
+    const names = new Set(ruleGroups());
+    for (const c of importComparisons()) {
+      const g = c.item.rule.group?.trim();
+      if (g) names.add(g);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  });
+
   const selectedCount = () => selectedIds().size;
   const filteredSelectedCount = () =>
     filteredRules().filter((r) => selectedIds().has(r.id)).length;
@@ -92,7 +155,12 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const reload = async () => {
     setLoading(true);
     try {
-      setRules(await replaceDb.getAllReplaceRules());
+      const [all, groups] = await Promise.all([
+        replaceDb.getAllReplaceRules(),
+        replaceDb.getAllRuleGroups(),
+      ]);
+      setRules(all);
+      setRuleGroups(groups.sort((a, b) => a.localeCompare(b, 'zh-CN')));
     } finally {
       setLoading(false);
     }
@@ -145,6 +213,45 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
     return false;
   };
 
+  const beginImportSelect = async (text: string) => {
+    const items = await resolveReplaceRulesFromText(text);
+    if (items.length === 0) {
+      showAppToast({ title: '未识别到有效规则', variant: 'destructive' });
+      return;
+    }
+    setImportLoading(true);
+    setImportSelectOpen(true);
+    try {
+      const comparisons = await buildImportReplaceRuleComparisons(items);
+      setImportComparisons(comparisons);
+      setImportSelectedKeys(defaultImportReplaceRuleSelection(comparisons));
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const confirmImportSelect = async () => {
+    const selected = importSelectedKeys();
+    const items = importComparisons()
+      .filter((c) => selected.has(c.key))
+      .map((c) => c.item);
+    setImportLoading(true);
+    try {
+      const count = await importSelectedReplaceRules(items, {
+        keepGroup: importKeepGroup(),
+        keepEnable: importKeepEnable(),
+        groupName: importGroupName(),
+        adjustGroup: importAdjustGroup(),
+      } satisfies ImportReplaceRuleOptions);
+      setImportSelectOpen(false);
+      setImportComparisons([]);
+      setImportSelectedKeys(new Set<string>());
+      await finishImport(count);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const importLocalJson = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -152,8 +259,7 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const count = await importReplaceRulesFromJson(await file.text());
-      await finishImport(count);
+      await beginImportSelect(await file.text());
     };
     input.click();
   };
@@ -165,8 +271,18 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
       return false;
     }
     try {
-      const count = await importReplaceRulesFromNetworkUrl(trimmed);
-      return finishImport(count);
+      const items = await resolveReplaceRulesFromNetworkUrl(trimmed);
+      if (items.length === 0) {
+        showAppToast({ title: '未识别到有效规则', variant: 'destructive' });
+        return false;
+      }
+      setImportLoading(true);
+      setImportSelectOpen(true);
+      const comparisons = await buildImportReplaceRuleComparisons(items);
+      setImportComparisons(comparisons);
+      setImportSelectedKeys(defaultImportReplaceRuleSelection(comparisons));
+      setImportLoading(false);
+      return true;
     } catch (e) {
       showAppToast({
         title: '导入失败',
@@ -210,8 +326,17 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
       return;
     }
 
-    const directCount = await importReplaceRulesFromJson(trimmed);
-    if (await finishImport(directCount)) {
+    const directItems = parseReplaceRuleImportItems(trimmed);
+    if (directItems.length > 0) {
+      setImportLoading(true);
+      setImportSelectOpen(true);
+      try {
+        const comparisons = await buildImportReplaceRuleComparisons(directItems);
+        setImportComparisons(comparisons);
+        setImportSelectedKeys(defaultImportReplaceRuleSelection(comparisons));
+      } finally {
+        setImportLoading(false);
+      }
       close?.();
       return;
     }
@@ -232,11 +357,54 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const pageDescription = () => {
     const total = rules().length;
     const filtered = filteredRules().length;
-    if (searchQuery().trim()) {
-      return `共 ${total} 条 · 筛选 ${filtered} 条`;
+    const parts: string[] = [`共 ${total} 条`];
+    if (groupFilter().kind !== 'all' || searchQuery().trim()) {
+      parts.push(`筛选 ${filtered} 条`);
+    } else {
+      parts.push('规则');
     }
-    return `共 ${total} 条规则`;
+    if (listSortableEnabled()) parts.push('可拖拽排序');
+    return parts.join(' · ');
   };
+
+  const enableAll = async (enabled: boolean) => {
+    await replaceDb.enableAllReplaceRules(enabled);
+    invalidateReplaceRulesCache();
+    await reload();
+    clearSelection();
+    showAppToast({ title: enabled ? '已全部启用' : '已全部禁用' });
+  };
+
+  const handleRulesReorder = async (orderedIds: Id[]) => {
+    try {
+      await replaceDb.reorderReplaceRules(orderedIds.map((id) => Number(id)));
+      invalidateReplaceRulesCache();
+      const byId = new Map(rules().map((r) => [r.id, r]));
+      const next = orderedIds
+        .map((id) => byId.get(Number(id)))
+        .filter((r): r is ReplaceRule => r != null);
+      setRules(next);
+    } catch (e) {
+      showAppToast({
+        title: '排序失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+      await reload();
+    }
+  };
+
+  const listSortable = createMemo(():
+    | VirtualListSortableConfig<ReplaceRule>
+    | undefined => {
+    if (!listSortableEnabled()) return undefined;
+    return {
+      enabled: listSortableEnabled,
+      ids: () => filteredRules().map((r) => r.id),
+      onReorder: handleRulesReorder,
+      persistOnly: true,
+    };
+  });
 
   const batchEnable = async (enabled: boolean) => {
     const ids = selectedRules().map((r) => r.id);
@@ -314,20 +482,61 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
     setSelectedIds(next);
   };
 
+  const activeGroupName = (): string | null => {
+    const gf = groupFilter();
+    return gf.kind === 'group' ? gf.name : null;
+  };
+
   void reload();
 
   return (
-    <div class={settingsRuleManagePageRoot}>
+    <div class={mainShellPageRoot}>
       <PageToolbar
         class="border-b border-border/50 px-3 py-2 sm:px-4"
         title="替换净化"
         description={pageDescription()}
         titleSlot={
           <PageToolbarTitleDropdown
-            title="替换净化"
+            title={replaceRuleGroupFilterTitle(groupFilter())}
             description={pageDescription()}
-            dropdownEnabled={false}
-          />
+            selectionKey={replaceRuleGroupFilterKey(groupFilter())}
+            dropdownEnabled={true}
+          >
+            <AppDropdownMenuItem
+              class={cn(groupFilter().kind === 'all' && 'bg-accent/50')}
+              onSelect={() => setGroupFilter({ kind: 'all' })}
+            >
+              全部规则 ({groupCounts().all})
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              class={cn(groupFilter().kind === 'enabled' && 'bg-accent/50')}
+              onSelect={() => setGroupFilter({ kind: 'enabled' })}
+            >
+              已启用 ({groupCounts().enabled})
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              class={cn(groupFilter().kind === 'disabled' && 'bg-accent/50')}
+              onSelect={() => setGroupFilter({ kind: 'disabled' })}
+            >
+              已禁用 ({groupCounts().disabled})
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              class={cn(groupFilter().kind === 'ungrouped' && 'bg-accent/50')}
+              onSelect={() => setGroupFilter({ kind: 'ungrouped' })}
+            >
+              {UNGROUPED_REPLACE_RULE_LABEL} ({groupCounts().ungrouped})
+            </AppDropdownMenuItem>
+            <For each={ruleGroups()}>
+              {(group) => (
+                <AppDropdownMenuItem
+                  class={cn(activeGroupName() === group && 'bg-accent/50')}
+                  onSelect={() => setGroupFilter({ kind: 'group', name: group })}
+                >
+                  {group} ({groupCounts().byGroup.get(group) ?? 0})
+                </AppDropdownMenuItem>
+              )}
+            </For>
+          </PageToolbarTitleDropdown>
         }
         leading={
           props.onBack ? <ReplaceRulesToolbarLeading onBack={props.onBack} /> : undefined
@@ -344,57 +553,62 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
         />
       </PageToolbar>
 
-      <div class={settingsRuleManagePageListScroll}>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-background/40">
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
         <Show when={!loading() && filteredRules().length === 0}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">
-            {searchQuery().trim() ? '没有匹配的规则' : '暂无替换规则，可通过右上角「更多」新建或导入'}
+            {searchQuery().trim() || groupFilter().kind !== 'all'
+              ? '没有匹配的规则'
+              : '暂无替换规则，可通过右上角「更多」新建或导入'}
           </p>
         </Show>
         <Show when={!loading() && filteredRules().length > 0}>
-          <ul>
-            <For each={filteredRules()}>
-              {(rule) => (
-                <ReplaceRuleListItem
-                  rule={rule}
-                  selected={selectedIds().has(rule.id)}
-                  onToggleSelection={() => toggleSelection(rule.id)}
-                  onSelectionChange={(checked) => {
-                    const next = new Set(selectedIds());
-                    if (checked) next.add(rule.id);
-                    else next.delete(rule.id);
-                    setSelectedIds(next);
-                  }}
-                  onEnableChange={async (enabled) => {
-                    await replaceDb.updateReplaceRule({ ...rule, isEnabled: enabled });
-                    invalidateReplaceRulesCache();
-                    await reload();
-                  }}
-                  onEdit={() => openEdit(rule)}
-                  onMoveTop={async () => {
-                    await replaceDb.moveReplaceRulesToTop([rule]);
-                    invalidateReplaceRulesCache();
-                    await reload();
-                  }}
-                  onMoveBottom={async () => {
-                    await replaceDb.moveReplaceRulesToBottom([rule]);
-                    invalidateReplaceRulesCache();
-                    await reload();
-                  }}
-                  onDelete={async () => {
-                    await replaceDb.deleteReplaceRule(rule.id);
-                    invalidateReplaceRulesCache();
-                    const next = new Set(selectedIds());
-                    next.delete(rule.id);
-                    setSelectedIds(next);
-                    await reload();
-                  }}
-                />
-              )}
-            </For>
-          </ul>
+          <VirtualRuleManageList
+            class="h-full min-h-0 flex-1"
+            items={filteredRules}
+            getItemKey={(rule) => rule.id}
+            sortable={listSortable()}
+          >
+            {(rule) => (
+              <ReplaceRuleListItem
+                rule={rule}
+                selected={selectedIds().has(rule.id)}
+                onToggleSelection={() => toggleSelection(rule.id)}
+                onSelectionChange={(checked) => {
+                  const next = new Set(selectedIds());
+                  if (checked) next.add(rule.id);
+                  else next.delete(rule.id);
+                  setSelectedIds(next);
+                }}
+                onEnableChange={async (enabled) => {
+                  await replaceDb.updateReplaceRule({ ...rule, isEnabled: enabled });
+                  invalidateReplaceRulesCache();
+                  await reload();
+                }}
+                onEdit={() => openEdit(rule)}
+                onMoveTop={async () => {
+                  await replaceDb.moveReplaceRulesToTop([rule]);
+                  invalidateReplaceRulesCache();
+                  await reload();
+                }}
+                onMoveBottom={async () => {
+                  await replaceDb.moveReplaceRulesToBottom([rule]);
+                  invalidateReplaceRulesCache();
+                  await reload();
+                }}
+                onDelete={async () => {
+                  await replaceDb.deleteReplaceRule(rule.id);
+                  invalidateReplaceRulesCache();
+                  const next = new Set(selectedIds());
+                  next.delete(rule.id);
+                  setSelectedIds(next);
+                  await reload();
+                }}
+              />
+            )}
+          </VirtualRuleManageList>
         </Show>
       </div>
 
@@ -449,6 +663,8 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinTop()}>置顶所选</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void batchPinBottom()}>置底所选</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={batchExport}>导出所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => void enableAll(true)}>全部启用</AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => void enableAll(false)}>全部禁用</AppDropdownMenuItem>
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
@@ -524,6 +740,56 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>
+
+      <ImportReplaceRuleSelectDialog
+        open={importSelectOpen()}
+        loading={importLoading()}
+        comparisons={importComparisons()}
+        selectedKeys={importSelectedKeys()}
+        keepGroup={importKeepGroup()}
+        keepEnable={importKeepEnable()}
+        groupName={importGroupName()}
+        groupOptions={importGroupOptions()}
+        adjustGroup={importAdjustGroup()}
+        onKeepGroupChange={setImportKeepGroup}
+        onKeepEnableChange={setImportKeepEnable}
+        onGroupNameChange={setImportGroupName}
+        onAdjustGroupChange={setImportAdjustGroup}
+        onOpenChange={setImportSelectOpen}
+        onToggle={(key, checked) => {
+          const next = new Set(importSelectedKeys());
+          if (checked) next.add(key);
+          else next.delete(key);
+          setImportSelectedKeys(next);
+        }}
+        onSelectAllToggle={() => {
+          const all = importComparisons();
+          if (importSelectedKeys().size === all.length) {
+            setImportSelectedKeys(new Set<string>());
+            return;
+          }
+          setImportSelectedKeys(new Set(all.map((c) => c.key)));
+        }}
+        onInvertSelect={() => {
+          const next = new Set(importSelectedKeys());
+          for (const c of importComparisons()) {
+            if (next.has(c.key)) next.delete(c.key);
+            else next.add(c.key);
+          }
+          setImportSelectedKeys(next);
+        }}
+        onSelectNewToggle={() => {
+          setImportSelectedKeys(
+            new Set(importComparisons().filter((c) => c.isNew).map((c) => c.key)),
+          );
+        }}
+        onSelectUpdateToggle={() => {
+          setImportSelectedKeys(
+            new Set(importComparisons().filter((c) => c.isUpdate).map((c) => c.key)),
+          );
+        }}
+        onConfirm={() => void confirmImportSelect()}
+      />
     </div>
   );
 }
