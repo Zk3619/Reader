@@ -761,8 +761,54 @@ fn store_inner_web_panel_user_agent(ua: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn read_inner_web_panel_live_string(
+    app: &tauri::AppHandle,
+    js_expr: &str,
+) -> Result<String, String> {
+    use std::time::Duration;
+    use tauri::Manager;
+
+    let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) else {
+        return Ok(String::new());
+    };
+
+    #[cfg(windows)]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        inner_web_panel_capture::start_eval_panel_js_string(&panel, js_expr, tx)
+            .map_err(|e| e.to_string())?;
+        match tokio::time::timeout(Duration::from_millis(800), rx).await {
+            Ok(Ok(value)) => Ok(value.trim().to_string()),
+            _ => Ok(String::new()),
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = panel;
+        let _ = js_expr;
+        Ok(String::new())
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+async fn read_inner_web_panel_live_string(
+    _app: &tauri::AppHandle,
+    _js_expr: &str,
+) -> Result<String, String> {
+    Ok(String::new())
+}
+
 #[tauri::command]
-fn get_inner_web_panel_user_agent() -> Result<String, String> {
+async fn get_inner_web_panel_user_agent(app: tauri::AppHandle) -> Result<String, String> {
+    let live = read_inner_web_panel_live_string(&app, "navigator.userAgent").await?;
+    if !live.is_empty() {
+        if let Ok(mut guard) = inner_web_panel_user_agent_store().lock() {
+            *guard = live.clone();
+        }
+        return Ok(live);
+    }
     Ok(inner_web_panel_user_agent_store()
         .lock()
         .map(|g| g.clone())
@@ -788,7 +834,14 @@ fn store_inner_web_panel_page_title(title: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_inner_web_panel_page_title() -> Result<String, String> {
+async fn get_inner_web_panel_page_title(app: tauri::AppHandle) -> Result<String, String> {
+    let live = read_inner_web_panel_live_string(&app, "document.title").await?;
+    if !live.is_empty() {
+        if let Ok(mut guard) = inner_web_panel_page_title_store().lock() {
+            *guard = live.clone();
+        }
+        return Ok(live);
+    }
     Ok(inner_web_panel_page_title_store()
         .lock()
         .map(|g| g.clone())
@@ -849,6 +902,102 @@ fn store_inner_web_panel_html_snapshot(html: String) -> Result<(), String> {
         *guard = html;
     }
     Ok(())
+}
+
+/// 轮询 panel DOM，直到 `selector` 匹配节点数达到 `min_count`（用于 SPA 列表页渲染完成后再抓 HTML）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn wait_inner_web_panel_selector(
+    app: &tauri::AppHandle,
+    selector: &str,
+    timeout_ms: u64,
+    min_count: u32,
+) {
+    use std::time::Duration;
+
+    let selector = selector.trim();
+    if selector.is_empty() || min_count == 0 {
+        return;
+    }
+    let js_count = format!(
+        r#"(()=>{{try{{return String(document.querySelectorAll({}).length);}}catch(e){{return '0';}}}})()"#,
+        serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".to_string())
+    );
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms.max(500));
+    while std::time::Instant::now() < deadline {
+        let count = read_inner_web_panel_live_string(app, &js_count)
+            .await
+            .unwrap_or_default();
+        if count.parse::<u32>().unwrap_or(0) >= min_count {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(350)).await;
+    }
+}
+
+/// CF 验证后：在同一 panel WebView 内导航并抓取 HTML（cf_clearance 绑定此实例指纹）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn fetch_inner_web_panel_html(
+    app: tauri::AppHandle,
+    url: String,
+    cookies: Option<String>,
+    user_agent: Option<String>,
+    delay_ms: Option<u64>,
+    wait_selector: Option<String>,
+    wait_min_count: Option<u32>,
+    wait_timeout_ms: Option<u64>,
+) -> Result<String, String> {
+    use std::time::Duration;
+    use tauri::Manager;
+
+    let url = url.trim();
+    if !url.starts_with("http") {
+        return Err("URL 无效".to_string());
+    }
+
+    let panel = app
+        .get_webview(INNER_WEB_PANEL_LABEL)
+        .ok_or_else(|| "内嵌 panel 未打开".to_string())?;
+
+    if let Some(cookies) = cookies.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        apply_http_cookies_to_webview(&panel, url, cookies)?;
+    }
+    if let Some(ua) = user_agent.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        apply_user_agent_override_to_webview(&panel, ua)?;
+    }
+
+    let nav = format!(
+        "window.location.assign({});",
+        serde_json::to_string(url).map_err(|e| e.to_string())?
+    );
+    panel.eval(&nav).map_err(|e| e.to_string())?;
+    let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+
+    let delay = delay_ms.unwrap_or(3500).clamp(500, 30_000);
+    tokio::time::sleep(Duration::from_millis(delay)).await;
+
+    if let Some(sel) = wait_selector.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let min_count = wait_min_count.unwrap_or(4).max(1);
+        let timeout = wait_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
+        wait_inner_web_panel_selector(&app, sel, timeout, min_count).await;
+    }
+
+    capture_inner_web_panel_document_html(app).await
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+async fn fetch_inner_web_panel_html(
+    _app: tauri::AppHandle,
+    _url: String,
+    _cookies: Option<String>,
+    _user_agent: Option<String>,
+    _delay_ms: Option<u64>,
+    _wait_selector: Option<String>,
+    _wait_min_count: Option<u32>,
+    _wait_timeout_ms: Option<u64>,
+) -> Result<String, String> {
+    Err("移动端不支持 panel CF 拉取".to_string())
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -928,6 +1077,28 @@ async fn sync_document_cookies_for_inner_web(
 
 /// 在主窗口内嵌 https 子 WebView（同窗口多 WebView，工具栏保留在主 WebView 层）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn normalize_inner_web_document_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(mut u) = url::Url::parse(trimmed) else {
+        return trimmed.to_string();
+    };
+    u.set_fragment(None);
+    let path_owned = u.path().trim_end_matches('/').to_string();
+    let path = if path_owned.is_empty() {
+        "/".to_string()
+    } else {
+        path_owned
+    };
+    u.set_path(&path);
+    u.to_string()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn inner_web_document_urls_equivalent(a: &str, b: &str) -> bool {
+    normalize_inner_web_document_url(a) == normalize_inner_web_document_url(b)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 async fn open_inner_web_panel(
     app: tauri::AppHandle,
@@ -990,12 +1161,23 @@ async fn open_inner_web_panel(
             if let Some(ref ua) = panel_user_agent {
                 apply_user_agent_override_to_webview(&panel, ua)?;
             }
-            let nav = format!(
-                "window.location.replace({});",
-                serde_json::to_string(&url).unwrap()
-            );
-            panel.eval(&nav).map_err(|e| e.to_string())?;
-            let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+            let should_nav = panel
+                .url()
+                .ok()
+                .map(|current| {
+                    let cs = current.to_string();
+                    !(cs.starts_with("http://") || cs.starts_with("https://"))
+                        || !inner_web_document_urls_equivalent(&cs, &url)
+                })
+                .unwrap_or(true);
+            if should_nav {
+                let nav = format!(
+                    "window.location.replace({});",
+                    serde_json::to_string(&url).unwrap()
+                );
+                panel.eval(&nav).map_err(|e| e.to_string())?;
+                let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+            }
             let _ = panel.set_focus();
             return Ok(());
         }
@@ -1090,6 +1272,12 @@ async fn close_inner_web_panel(app: tauri::AppHandle) -> Result<(), String> {
 
     if let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) {
         panel.close().map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut guard) = inner_web_panel_user_agent_store().lock() {
+        guard.clear();
+    }
+    if let Ok(mut guard) = inner_web_panel_page_title_store().lock() {
+        guard.clear();
     }
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.set_focus();
@@ -1375,17 +1563,36 @@ fn inner_web_panel_open_link(
     if handle_inner_web_special_uri(&app, u) {
         return Ok(());
     }
-    if !u.starts_with("http://") && !u.starts_with("https://") {
+    if u.starts_with("http://") || u.starts_with("https://") {
+        if let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) {
+            let should_nav = panel
+                .url()
+                .ok()
+                .map(|current| {
+                    let cs = current.to_string();
+                    !(cs.starts_with("http://") || cs.starts_with("https://"))
+                        || !inner_web_document_urls_equivalent(&cs, u)
+                })
+                .unwrap_or(true);
+            if should_nav {
+                let nav = format!(
+                    "window.location.assign({});",
+                    serde_json::to_string(u).unwrap()
+                );
+                panel.eval(&nav).map_err(|e| e.to_string())?;
+                let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+            }
+        }
+        app.emit(
+            "reader-inner-web-open-link",
+            serde_json::json!({
+                "url": u,
+                "target": target.unwrap_or_default(),
+            }),
+        )
+        .map_err(|e| e.to_string())?;
         return Ok(());
     }
-    app.emit(
-        "reader-inner-web-open-link",
-        serde_json::json!({
-            "url": u,
-            "target": target.unwrap_or_default(),
-        }),
-    )
-    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1860,6 +2067,7 @@ pub fn run() {
             store_inner_web_panel_html_snapshot,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             capture_inner_web_panel_document_html,
+            fetch_inner_web_panel_html,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             flush_inner_web_panel_document_cookie,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

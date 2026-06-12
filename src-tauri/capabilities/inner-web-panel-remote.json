@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "inner-web-panel-remote",
+  "description": "Inner-web panel child WebView: minimal IPC for external https pages (CSP blocks ipc.localhost without remote)",
+  "webviews": ["reader-inner-web", "reader-inner-web-child"],
+  "windows": ["reader-inner-web-child"],
+  "platforms": ["linux", "macOS", "windows"],
+  "remote": {
+    "urls": ["https://**", "http://**"]
+  },
+  "permissions": [
+    "allow-inner-web-panel-cookie-sync",
+    "allow-inner-web-panel-nav",
+    "allow-inner-web-panel-html-snapshot"
+  ]
+}

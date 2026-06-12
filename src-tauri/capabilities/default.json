@@ -4,10 +4,18 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "reader-inner-web",
     "reader-inner-web-child"
   ],
+  "remote": {
+    "urls": [
+      "http://localhost:**",
+      "http://127.0.0.1:**",
+      "https://localhost:**",
+      "https://127.0.0.1:**"
+    ]
+  },
   "permissions": [
+    "app-commands",
     "core:default",
     "core:window:default",
     "core:window:allow-minimize",

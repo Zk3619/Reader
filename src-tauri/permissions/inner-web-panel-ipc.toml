@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-inner-web-panel-cookie-sync"
+description = "Allow inner-web panel to sync document.cookie to the host cookie store"
+commands.allow = ["sync_document_cookies_for_inner_web"]
+
+[[permission]]
+identifier = "allow-inner-web-panel-nav"
+description = "Allow inner-web panel to request in-app link navigation"
+commands.allow = ["inner_web_panel_open_link"]
+
+[[permission]]
+identifier = "allow-inner-web-panel-html-snapshot"
+description = "Allow inner-web panel to store HTML snapshots on confirm"
+commands.allow = ["store_inner_web_panel_html_snapshot"]

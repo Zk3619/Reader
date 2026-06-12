@@ -15,14 +15,16 @@ fn parse_execute_script_json(json: &str) -> String {
 }
 
 #[cfg(all(not(any(target_os = "android", target_os = "ios")), windows))]
-pub fn start_capture_panel_document_html(
+fn start_execute_panel_script(
     panel: &tauri::Webview,
+    js: &str,
     tx: tokio::sync::oneshot::Sender<String>,
 ) -> Result<(), String> {
     use std::sync::{Arc, Mutex};
     use webview2_com::ExecuteScriptCompletedHandler;
     use windows::core::HSTRING;
 
+    let js_owned = js.to_string();
     let tx_slot = Arc::new(Mutex::new(Some(tx)));
     let tx_fail = tx_slot.clone();
     let err_slot = Arc::new(Mutex::new(None::<String>));
@@ -36,7 +38,7 @@ pub fn start_capture_panel_document_html(
                     .CoreWebView2()
                     .map_err(|e| e.to_string())?
             };
-            let js = HSTRING::from(CAPTURE_JS);
+            let js = HSTRING::from(js_owned);
             let tx_slot_cb = tx_slot.clone();
             unsafe {
                 webview
@@ -44,13 +46,13 @@ pub fn start_capture_panel_document_html(
                         &js,
                         &ExecuteScriptCompletedHandler::create(Box::new(
                             move |error_code, json: String| {
-                                let html = if error_code.is_ok() {
+                                let value = if error_code.is_ok() {
                                     parse_execute_script_json(&json)
                                 } else {
                                     String::new()
                                 };
                                 if let Some(sender) = tx_slot_cb.lock().unwrap().take() {
-                                    let _ = sender.send(html);
+                                    let _ = sender.send(value);
                                 }
                                 Ok(())
                             },
@@ -76,6 +78,28 @@ pub fn start_capture_panel_document_html(
         return Err(e);
     }
     Ok(())
+}
+
+#[cfg(all(not(any(target_os = "android", target_os = "ios")), windows))]
+pub fn start_capture_panel_document_html(
+    panel: &tauri::Webview,
+    tx: tokio::sync::oneshot::Sender<String>,
+) -> Result<(), String> {
+    start_execute_panel_script(panel, CAPTURE_JS, tx)
+}
+
+/// 从 panel 子 WebView 读取 JS 表达式字符串（宿主侧 ExecuteScript，不依赖外部页 IPC）
+#[cfg(all(not(any(target_os = "android", target_os = "ios")), windows))]
+pub fn start_eval_panel_js_string(
+    panel: &tauri::Webview,
+    js_expr: &str,
+    tx: tokio::sync::oneshot::Sender<String>,
+) -> Result<(), String> {
+    let js = format!(
+        r#"(function(){{try{{return JSON.stringify(String({expr}));}}catch(e){{return '""';}}}})()"#,
+        expr = js_expr
+    );
+    start_execute_panel_script(panel, &js, tx)
 }
 
 /// 非 Windows：eval + invoke 快照（在 blocking 线程调用，避免卡 UI）
