@@ -303,6 +303,13 @@ export function RssReadWebView(props: RssReadWebViewProps) {
     }
   };
 
+  /** document.write 后同步注入会阻塞主线程滚动，推迟到下一帧 */
+  const scheduleHandleFrameLoad = () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => handleFrameLoad());
+    });
+  };
+
   /** 会话切换：重置代理并拉取 proxy 文档 URL */
   createEffect(() => {
     loadKey();
@@ -353,7 +360,7 @@ export function RssReadWebView(props: RssReadWebViewProps) {
       contentDocRevoke = writeRssContentDocumentToFrame(frame, html);
       setLoading(true);
       armLoadWatchdog();
-      handleFrameLoad();
+      scheduleHandleFrameLoad();
       return;
     }
 

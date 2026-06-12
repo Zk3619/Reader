@@ -152,6 +152,7 @@ function StyleWaterfall(props: RssArticleListItemsProps) {
             title={article.title}
             class={cn(
               'mb-2 w-full break-inside-avoid overflow-hidden rounded-xl border border-border/50 bg-card text-left shadow-sm transition-colors hover:bg-accent/30',
+              '[content-visibility:auto] [contain-intrinsic-size:auto_12rem]',
               article.read && 'opacity-70',
             )}
             onClick={() => props.onSelect(article)}

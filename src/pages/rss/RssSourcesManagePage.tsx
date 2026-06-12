@@ -87,6 +87,8 @@ import {
   removeRssGroupsFromSource,
 } from '@/lib/rss/rss-source-groups';
 import { ChevronDownIcon, MoreIcon } from '@/components/shared/icons';
+import { clearSourceCookieAndCfRecord } from '@/lib/book-source/purge-source-session';
+import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
 const BATCH_MENU_CHEVRON_CLASS =
@@ -296,6 +298,22 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     } catch (e) {
       showAppToast({
         title: '置底失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
+  async function handleClearCookieCf(source: RssSource) {
+    try {
+      await clearSourceCookieAndCfRecord(rssAsBookSource(source));
+      showAppToast({
+        title: '已清除',
+        description: `「${source.sourceName}」的 Cookie/CF 记录`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '清除失败',
         description: e instanceof Error ? e.message : '请稍后重试',
         variant: 'destructive',
       });
@@ -820,6 +838,9 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
                 </AppDropdownMenuItem>
                 <AppDropdownMenuItem onSelect={() => void handlePinToBottom(source)}>
                   置底
+                </AppDropdownMenuItem>
+                <AppDropdownMenuItem onSelect={() => void handleClearCookieCf(source)}>
+                  清除 Cookie/CF 记录
                 </AppDropdownMenuItem>
                 <AppDropdownMenuItem
                   class="text-destructive focus:text-destructive"

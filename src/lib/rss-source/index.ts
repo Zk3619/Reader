@@ -37,8 +37,11 @@ export {
 
 // 刷新文章
 export {
+  fetchRssArticlesForSource,
+  persistRssArticlesForSource,
   refreshRssArticlesForSource,
   refreshAllEnabledRssSources,
+  type FetchRssArticlesResult,
 } from '@/lib/rss-source/refresh-articles';
 
 // 规则订阅

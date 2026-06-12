@@ -23,6 +23,7 @@ export interface RssPageSourceItemActions {
   onPinTop: (source: RssSource) => void;
   onPinBottom: (source: RssSource) => void;
   onToggleEnable: (source: RssSource) => void;
+  onClearCookieCf?: (source: RssSource) => void;
   onDelete: (source: RssSource) => void;
 }
 
@@ -59,6 +60,9 @@ function RssPageSourceContextMenu(props: {
         </AppContextMenuItem>
         <AppContextMenuItem onSelect={() => props.actions.onToggleEnable(props.source)}>
           {props.source.enabled ? '禁用' : '启用'}
+        </AppContextMenuItem>
+        <AppContextMenuItem onSelect={() => props.actions.onClearCookieCf?.(props.source)}>
+          清除 Cookie/CF 记录
         </AppContextMenuItem>
         <AppContextMenuItem
           class="text-destructive focus:text-destructive"
@@ -149,7 +153,7 @@ export function RssPageSourceGridItem(props: {
         >
           <p
             class={cn(
-              'line-clamp-2 w-full break-words text-center text-xs font-medium leading-4 text-foreground',
+              'line-clamp-2 w-full wrap-break-word text-center text-xs font-medium leading-4 text-foreground',
             )}
           >
             {props.source.sourceName}

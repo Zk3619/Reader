@@ -6,6 +6,30 @@
 import { getDatabase } from '@/lib/database/database-core';
 import type { RssArticle, NewRssArticle } from '@/types';
 
+const RSS_ARTICLE_INSERT_SQL = `INSERT OR REPLACE INTO rssArticles (
+  origin, sort, title, "order", link, pubDate,
+  description, content, image, "group", read, variable, type, durPos
+) VALUES `;
+
+function rssArticleInsertParams(article: NewRssArticle): unknown[] {
+  return [
+    article.origin,
+    article.sort ?? '',
+    article.title,
+    article.order ?? 0,
+    article.link,
+    article.pubDate ?? null,
+    article.description ?? null,
+    article.content ?? null,
+    article.image ?? null,
+    article.group ?? '默认分组',
+    article.read ? 1 : 0,
+    article.variable ?? null,
+    (article as RssArticle).type ?? 0,
+    (article as RssArticle).durPos ?? 0,
+  ];
+}
+
 /**
  * 根据来源和分类获取RSS文章
  */
@@ -46,26 +70,8 @@ export async function getRssArticle(
 export async function insertRssArticle(article: NewRssArticle): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO rssArticles (
-      origin, sort, title, "order", link, pubDate,
-      description, content, image, "group", read, variable, type, durPos
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      article.origin,
-      article.sort ?? '',
-      article.title,
-      article.order ?? 0,
-      article.link,
-      article.pubDate ?? null,
-      article.description ?? null,
-      article.content ?? null,
-      article.image ?? null,
-      article.group ?? '默认分组',
-      article.read ? 1 : 0,
-      article.variable ?? null,
-      (article as RssArticle).type ?? 0,
-      (article as RssArticle).durPos ?? 0,
-    ]
+    `${RSS_ARTICLE_INSERT_SQL}(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    rssArticleInsertParams(article),
   );
 }
 
@@ -99,13 +105,21 @@ export async function appendRssArticle(article: NewRssArticle): Promise<void> {
 }
 
 /**
- * 批量插入RSS文章
+ * 批量插入RSS文章（多行 VALUES，减少往返与 Web 端 IndexedDB 持久化次数）
  */
 export async function insertRssArticles(
-  articles: NewRssArticle[]
+  articles: NewRssArticle[],
 ): Promise<void> {
-  for (const article of articles) {
-    await insertRssArticle(article);
+  if (articles.length === 0) return;
+
+  const db = await getDatabase();
+  const batchSize = 50;
+
+  for (let offset = 0; offset < articles.length; offset += batchSize) {
+    const batch = articles.slice(offset, offset + batchSize);
+    const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+    const params = batch.flatMap((article) => rssArticleInsertParams(article));
+    await db.execute(`${RSS_ARTICLE_INSERT_SQL}${placeholders}`, params);
   }
 }
 

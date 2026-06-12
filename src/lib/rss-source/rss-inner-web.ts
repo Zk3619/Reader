@@ -53,8 +53,8 @@ export async function openRssUrlInInnerWeb(
     initialCookies: cookies || undefined,
     bookSourceUrl,
     proxyForwardHeaders: headers,
-    /** 无 Cookie 时直链加载，对齐 Legado loadUrl；有 Cookie 才走文档代理 */
-    useProxyDocument: Boolean(cookies),
+    /** 始终走文档代理以注入页内链接导航（对齐 Legado WebView 内 http 跳转） */
+    useProxyDocument: true,
   });
 
   if (opened) return 'inner-web';

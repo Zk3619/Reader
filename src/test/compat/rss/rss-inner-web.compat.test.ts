@@ -54,7 +54,7 @@ describe('openRssUrlInInnerWeb', () => {
     expect(openInnerWeb).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'https://example.com/page',
-        useProxyDocument: false,
+        useProxyDocument: true,
         proxyForwardHeaders: expect.objectContaining({
           'User-Agent': expect.stringContaining('Android'),
         }),

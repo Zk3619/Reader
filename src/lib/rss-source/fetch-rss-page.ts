@@ -15,9 +15,14 @@ import {
   resolveCloudflareViaInnerWeb,
   shouldOfferCloudflareVerification,
 } from '@/lib/http/cloudflare-verification';
+import {
+  isCfFetchRetryableError,
+  type CfPanelWaitOptions,
+} from '@/lib/book-source/cf-webview-fetch';
 import { HttpError } from '@/lib/http';
 import { resolveUrl } from '@/lib/book-source/utils';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
+import { releaseCfDeferredInnerWebDismiss } from '@/lib/platform/inner-web';
 import { rssError, rssLog } from '@/lib/rss-source/rss-source-logger';
 
 export interface FetchRssPageParams {
@@ -56,6 +61,34 @@ const inflightRssPages = new Map<string, Promise<FetchRssPageResult>>();
 
 const RSS_PAGE_FETCH_TIMEOUT_MS = 60_000;
 
+/** 从 ruleArticles 的 || 分支提取 CSS，供 panel 等待 SPA 列表渲染（不写死站点路径） */
+export function resolveRssListPanelWait(
+  source: RssSource,
+): CfPanelWaitOptions | undefined {
+  const rule = source.ruleArticles?.trim();
+  if (!rule) return undefined;
+
+  const selectors: string[] = [];
+  for (const raw of rule.split('||')) {
+    const part = raw.trim();
+    if (!part || part.startsWith(':')) continue;
+    const cssAll = part.match(/^@css:(.+?)@all$/i)?.[1]?.trim();
+    if (cssAll) {
+      selectors.push(cssAll);
+      continue;
+    }
+    const className = part.match(/^class\.([^\s@|&.]+)/)?.[1]?.trim();
+    if (className) {
+      selectors.push(`.${className}`);
+    }
+  }
+
+  if (selectors.length === 0) {
+    return { selector: 'a[href]', minCount: 6, timeoutMs: 18_000 };
+  }
+  return { selector: selectors.join(', '), minCount: 4, timeoutMs: 18_000 };
+}
+
 function rssPageInflightKey(source: RssSource, pageUrl: string): string {
   return `${source.sourceUrl.trim()}\0${pageUrl}`;
 }
@@ -88,20 +121,26 @@ async function fetchRssPageOnce(
 
   rssLog(params.source, 'AnalyzeUrl 请求', { url: pageUrl.slice(0, 200) });
 
-  const buildParams = () => ({
-    ruleUrl: pageUrl,
-    source: book,
-    baseUrl:
-      params.baseUrl?.trim() ||
-      resolveBookSourceRequestOrigin(book) ||
-      params.source.sourceUrl.trim(),
-    cookies: resolveSourceCookiesForHttp(book, pageUrl),
-    timeoutMs: RSS_PAGE_FETCH_TIMEOUT_MS,
-  });
+  const buildParams = (requestUrl = pageUrl) => {
+    const alignedUrl = alignUrlToBookSourceRequestOrigin(requestUrl, book);
+    return {
+      ruleUrl: alignedUrl,
+      source: book,
+      baseUrl:
+        params.baseUrl?.trim() ||
+        resolveBookSourceRequestOrigin(book) ||
+        params.source.sourceUrl.trim(),
+      cookies: resolveSourceCookiesForHttp(book, alignedUrl),
+      timeoutMs: RSS_PAGE_FETCH_TIMEOUT_MS,
+      cfPanelWait: resolveRssListPanelWait(params.source),
+    };
+  };
 
-  const maybeRetryAfterCf = async (): Promise<FetchRssPageResult> => {
+  const maybeRetryAfterCf = async (cfError?: unknown): Promise<FetchRssPageResult> => {
+    const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
     const verified = await resolveCloudflareViaInnerWeb({
       url: pageUrl,
+      blockedUrl,
       source: book,
     });
     if (!verified) {
@@ -112,13 +151,22 @@ async function fetchRssPageOnce(
         '需要完成 Cloudflare 验证（未完成或 Cookie 未同步）',
       );
     }
-    return fetchByAnalyzeUrl(buildParams());
+    const retryParams = buildParams();
+    rssLog(params.source, 'CF 验证后重试', {
+      url: retryParams.ruleUrl.slice(0, 200),
+      hasCfClearance: /cf_clearance=/i.test(retryParams.cookies ?? ''),
+    });
+    try {
+      return await fetchByAnalyzeUrl(retryParams);
+    } finally {
+      releaseCfDeferredInnerWebDismiss();
+    }
   };
 
   try {
     let fetched = await fetchByAnalyzeUrl(buildParams());
     if (!fetched.usedWebView && isCloudflareBlockedResponse(200, fetched.body)) {
-      fetched = await maybeRetryAfterCf();
+      fetched = await maybeRetryAfterCf(undefined);
     }
     await assertLoginCheckPassed(book, fetched.body, fetched.url || pageUrl);
     rssLog(params.source, 'AnalyzeUrl 响应', {
@@ -128,7 +176,7 @@ async function fetchRssPageOnce(
     });
     return fetched;
   } catch (e) {
-    if (shouldOfferCloudflareVerification(e)) {
+    if (shouldOfferCloudflareVerification(e) || isCfFetchRetryableError(e)) {
       if (params.source.enabledCookieJar) {
         try {
           const fetched = await fetchByAnalyzeUrl(buildParams());
@@ -139,7 +187,7 @@ async function fetchRssPageOnce(
         }
       }
       try {
-        return await maybeRetryAfterCf();
+        return await maybeRetryAfterCf(e);
       } catch (cfErr) {
         rssError(params.source, 'CF 验证后仍失败', cfErr, { url: pageUrl.slice(0, 200) });
         throw cfErr;

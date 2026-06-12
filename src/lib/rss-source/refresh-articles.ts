@@ -6,25 +6,25 @@ import { getRssArticles, toNewRssArticle } from '@/lib/rss-source';
 import { parseSortUrls } from '@/lib/rss-source/sort-urls';
 import * as rssArticlesDb from '@/lib/database/rss-articles';
 import * as rssSourcesDb from '@/lib/database/rss-sources';
-import type { RssSource } from '@/types';
+import type { RssArticle, RssSource } from '@/types';
 import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
 
-export async function refreshRssArticlesForSource(
+export type FetchRssArticlesResult = {
+  articles: RssArticle[];
+  sortName: string;
+};
+
+async function resolveSortEntry(
   source: RssSource,
   sortName?: string,
-  page = 1,
-): Promise<number> {
-  const startTime = Date.now();
-  rssLog(source, '开始刷新文章', { sortName: sortName ?? '(默认)', page });
-
+): Promise<{ name: string; url: string } | null> {
   const sorts = await parseSortUrls(source);
   const sort =
     sortName != null
       ? sorts.find((s) => s.name === sortName) ?? sorts[0]
       : sorts[0];
   if (!sort) {
-    rssWarn(source, '刷新中止：无可用分类地址');
-    return 0;
+    return null;
   }
 
   if (sortName != null && !sorts.some((s) => s.name === sortName)) {
@@ -34,32 +34,76 @@ export async function refreshRssArticlesForSource(
     });
   }
 
+  return sort;
+}
+
+/** 仅网络拉取与规则解析，不写库 */
+export async function fetchRssArticlesForSource(
+  source: RssSource,
+  sortName?: string,
+  page = 1,
+): Promise<FetchRssArticlesResult> {
+  const startTime = Date.now();
+  rssLog(source, '开始拉取文章', { sortName: sortName ?? '(默认)', page });
+
+  const sort = await resolveSortEntry(source, sortName);
+  if (!sort) {
+    rssWarn(source, '拉取中止：无可用分类地址');
+    return { articles: [], sortName: sortName ?? '' };
+  }
+
   const { articles } = await getRssArticles(source, sort.name, sort.url, page);
 
-  // 首页刷新：替换该分类整页列表，避免旧解析脏数据残留（如 ruleArticles 误拆字段）
+  rssLog(source, '拉取完成', {
+    sort: sort.name || '默认',
+    fetched: articles.length,
+    totalMs: Date.now() - startTime,
+  });
+
+  return { articles, sortName: sort.name ?? '' };
+}
+
+/** 将已解析文章写入本地库 */
+export async function persistRssArticlesForSource(
+  source: RssSource,
+  sortName: string,
+  articles: RssArticle[],
+  page = 1,
+): Promise<void> {
+  const startTime = Date.now();
+
   if (page <= 1) {
     await rssArticlesDb.deleteRssArticlesByOriginAndSort(
       source.sourceUrl,
-      sort.name ?? '',
+      sortName,
     );
   }
 
-  for (const article of articles) {
-    await rssArticlesDb.insertRssArticle(toNewRssArticle(article));
-  }
+  await rssArticlesDb.insertRssArticles(articles.map(toNewRssArticle));
 
   await rssSourcesDb.updateRssSource({
     ...source,
     lastUpdateTime: Date.now(),
   });
 
-  rssLog(source, '刷新完成', {
-    sort: sort.name || '默认',
-    fetched: articles.length,
+  rssLog(source, '持久化完成', {
+    sort: sortName || '默认',
     persisted: articles.length,
     totalMs: Date.now() - startTime,
   });
+}
 
+export async function refreshRssArticlesForSource(
+  source: RssSource,
+  sortName?: string,
+  page = 1,
+): Promise<number> {
+  const { articles, sortName: resolvedSort } = await fetchRssArticlesForSource(
+    source,
+    sortName,
+    page,
+  );
+  await persistRssArticlesForSource(source, resolvedSort, articles, page);
   return articles.length;
 }
 

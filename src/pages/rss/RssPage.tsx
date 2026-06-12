@@ -42,6 +42,8 @@ import {
 } from '@/components/shared/AppDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { rssSourceHasLogin } from '@/lib/rss/open-rss-source-login';
+import { clearSourceCookieAndCfRecord } from '@/lib/book-source/purge-source-session';
+import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 
 export interface RssPageProps {
   searchQuery?: string;
@@ -195,6 +197,22 @@ export function RssPage(props: RssPageProps) {
     }
   }
 
+  async function handleClearCookieCf(source: RssSource) {
+    try {
+      await clearSourceCookieAndCfRecord(rssAsBookSource(source));
+      showAppToast({
+        title: '已清除',
+        description: `「${source.sourceName}」的 Cookie/CF 记录`,
+      });
+    } catch (e) {
+      showAppToast({
+        title: '清除失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
   const itemActions = (): RssPageSourceItemActions => ({
     onOpen: (source) => props.onOpenSourceArticles(source),
     onEdit: props.onSourceEdit,
@@ -203,6 +221,7 @@ export function RssPage(props: RssPageProps) {
     onPinTop: (source) => void handlePinSource(source),
     onPinBottom: (source) => void handlePinToBottom(source),
     onToggleEnable: (source) => void handleToggleEnable(source),
+    onClearCookieCf: (source) => void handleClearCookieCf(source),
     onDelete: (source) => {
       setDeleteTarget(source);
       setDeleteDialogOpen(true);
@@ -227,7 +246,7 @@ export function RssPage(props: RssPageProps) {
           >
             <div class="flex flex-wrap gap-3 py-2">
               <For each={Array.from({ length: 9 })}>
-                {() => <div class="h-[7rem] w-[5.5rem] animate-pulse rounded-xl bg-muted/40" />}
+                {() => <div class="h-28 w-22 animate-pulse rounded-xl bg-muted/40" />}
               </For>
             </div>
           </Show>

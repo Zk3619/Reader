@@ -4,10 +4,19 @@
  */
 
 import { analyzeListElements, analyzeString, type RuleContext } from '@/lib/rule-engine';
+import { loadHtmlForCss } from '@/lib/rule-engine/css-parser';
 import { fetchRssPage } from '@/lib/rss-source/fetch-rss-page';
 import type { RssSource } from '@/types';
 import type { RssArticle, NewRssArticle } from '@/types';
-import { resolveLegadoRuleUrl } from '@/lib/book-source/analyze-search-url';
+import {
+  invalidateLegadoRuleUrlExpandCache,
+  resolveLegadoRuleUrl,
+} from '@/lib/book-source/analyze-search-url';
+import {
+  clearSourceVerificationResultCache,
+  isSourceVerificationCancelledError,
+} from '@/lib/book-source/source-verification';
+import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
 import { resolveUrl, detectContentType } from '@/lib/book-source/utils';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
 import { parseRssDefault } from '@/lib/rss-source/rss-parser-default';
@@ -47,6 +56,26 @@ function looksLikeRelativeImagePath(value: string): boolean {
   return /\.(jpe?g|png|gif|webp|svg|ico|bmp|avif)(\?|#|$)/i.test(trimmed);
 }
 
+/** 用 cheerio 统计列表相关 DOM，区分「正文含 album 字符串」与「可解析的 a[href]」 */
+function inspectRssListDomHints(html: string) {
+  try {
+    const $ = loadHtmlForCss(html);
+    return {
+      anchorAlbumHints: $('a[href*="/album/"]').length,
+      thumbOverlayHints: $('.thumb-overlay').length,
+      videoTitleHints: $('.video-title').length,
+      listColHints: $('.list-col').length,
+    };
+  } catch {
+    return {
+      anchorAlbumHints: 0,
+      thumbOverlayHints: 0,
+      videoTitleHints: 0,
+      listColHints: 0,
+    };
+  }
+}
+
 function resolveArticleImageUrl(image: string | undefined, baseUrl: string): string | undefined {
   if (!image?.trim()) return undefined;
   const trimmed = image.trim();
@@ -76,6 +105,9 @@ export async function getRssArticles(
 
   try {
     const book = rssAsBookSource(source);
+    const sourceKey = getLegadoSourceKey(book);
+    invalidateLegadoRuleUrlExpandCache(book);
+    clearSourceVerificationResultCache(sourceKey);
     // 展开 {{page}} 等；HTTP 请求须规范化编码，列表规则 baseUrl 须保留 wd 明文（对齐 Legado setBaseUrl(sortUrl)）
     const fetchUrl = await resolveLegadoRuleUrl(sortUrl, book, { page, preserveUrlOptions: true });
     const ruleBaseUrl = await resolveLegadoRuleUrl(sortUrl, book, { page, forRuleBase: true });
@@ -141,14 +173,22 @@ export async function getRssArticles(
       totalMs: Date.now() - startTime,
     });
     if (result.articles.length === 0) {
+      const domHints = inspectRssListDomHints(html);
       rssWarn(source, '规则解析到 0 篇文章：检查 ruleArticles 等规则，或源站结构已变更', {
-        ruleArticles: source.ruleArticles.slice(0, 80),
+        ruleArticles: source.ruleArticles.slice(0, 120),
         contentType,
         bodyLength: html.length,
+        listItemCount: result.listItemCount,
+        skippedNoTitle: result.skippedNoTitle,
+        albumLinkHints: (html.match(/\/album\/\d+/g) || []).length,
+        ...domHints,
       });
     }
-    return result;
+    return { articles: result.articles, nextUrl: result.nextUrl };
   } catch (error) {
+    if (isSourceVerificationCancelledError(error)) {
+      throw error;
+    }
     rssError(source, '获取文章列表失败', error, {
       sort: sortName || '默认',
       page,
@@ -169,7 +209,12 @@ async function parseRssByRule(
   content: string,
   contentType: 'html' | 'json' | 'text',
   fetchUrl?: string,
-): Promise<{ articles: RssArticle[]; nextUrl?: string }> {
+): Promise<{
+  articles: RssArticle[];
+  nextUrl?: string;
+  listItemCount?: number;
+  skippedNoTitle?: number;
+}> {
   // 检查是否需要倒序
   let ruleArticles = source.ruleArticles || '';
   let reverse = false;
@@ -208,6 +253,7 @@ async function parseRssByRule(
 
   // 解析每个文章
   const articles: RssArticle[] = [];
+  let skippedNoTitle = 0;
   for (let index = 0; index < listItems.length; index++) {
     const element = listItems[index].content;
     const elementContext: RuleContext = {
@@ -221,6 +267,8 @@ async function parseRssByRule(
     const article = await parseRssArticle(source, elementContext, ruleBaseUrl, sortName, index);
     if (article) {
       articles.push(article);
+    } else {
+      skippedNoTitle += 1;
     }
   }
 
@@ -229,7 +277,12 @@ async function parseRssByRule(
     articles.reverse();
   }
 
-  return { articles, nextUrl };
+  return {
+    articles,
+    nextUrl,
+    listItemCount: listItems.length,
+    skippedNoTitle,
+  };
 }
 
 /**

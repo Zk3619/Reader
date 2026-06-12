@@ -10,6 +10,11 @@ import {
   For,
   Show,
 } from 'solid-js';
+import {
+  createVirtualListScrollCoalesce,
+  setCoverLoadScrollIdleProbe,
+  VirtualListScrollCoalesceContext,
+} from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -31,7 +36,11 @@ import {
   parseSortUrls,
   pickDefaultSortEntry,
 } from '@/lib/rss-source/sort-urls';
-import { refreshRssArticlesForSource } from '@/lib/rss-source/refresh-articles';
+import { isSourceVerificationCancelledError } from '@/lib/book-source/source-verification';
+import {
+  fetchRssArticlesForSource,
+  persistRssArticlesForSource,
+} from '@/lib/rss-source/refresh-articles';
 import type { RssArticle, RssReadRecord, RssSource } from '@/types';
 import { RssArticleListItems } from '@/components/rss/RssArticleListItems';
 import {
@@ -62,6 +71,12 @@ export interface RssArticleListPageProps {
 }
 
 export function RssArticleListPage(props: RssArticleListPageProps) {
+  const scrollCoalesce = createVirtualListScrollCoalesce();
+  onMount(() => {
+    setCoverLoadScrollIdleProbe(() => scrollCoalesce.isScrollIdle());
+  });
+  onCleanup(() => setCoverLoadScrollIdleProbe(null));
+
   const [source, setSource] = createSignal<RssSource | null>(null);
   const [articles, setArticles] = createSignal<RssArticle[]>([]);
   const [sorts, setSorts] = createSignal<{ name: string; url: string }[]>([]);
@@ -115,6 +130,21 @@ export function RssArticleListPage(props: RssArticleListPageProps) {
     }
   }
 
+  function schedulePersistArticles(
+    s: RssSource,
+    resolvedSort: string,
+    fetched: RssArticle[],
+  ): void {
+    void persistRssArticlesForSource(s, resolvedSort, fetched)
+      .then(() => {
+        window.dispatchEvent(new CustomEvent('rss-articles-refresh'));
+        return loadArticles(resolvedSort);
+      })
+      .catch((e) => {
+        console.error('[RSS] 文章持久化失败', e);
+      });
+  }
+
   async function refreshAndLoadArticles(
     sortName: string,
     options?: { silent?: boolean; kind?: RefreshKind },
@@ -124,14 +154,19 @@ export function RssArticleListPage(props: RssArticleListPageProps) {
     const kind = options?.kind ?? (options?.silent ? null : 'content');
     if (kind) setRefreshKind(kind);
     try {
-      const count = await refreshRssArticlesForSource(s, sortName);
-      await loadArticles(sortName);
+      const { articles: fetched, sortName: resolvedSort } =
+        await fetchRssArticlesForSource(s, sortName);
+      setArticles(fetched);
+      schedulePersistArticles(s, resolvedSort, fetched);
       if (!options?.silent) {
-        showAppToast({ title: '刷新完成', description: `${count} 篇文章` });
+        showAppToast({ title: '刷新完成', description: `${fetched.length} 篇文章` });
       }
-      window.dispatchEvent(new CustomEvent('rss-articles-refresh'));
-      return count;
+      return fetched.length;
     } catch (e) {
+      if (isSourceVerificationCancelledError(e)) {
+        setArticles([]);
+        return 0;
+      }
       await loadArticles(sortName);
       showAppToast({
         title: '刷新失败',
@@ -182,17 +217,22 @@ export function RssArticleListPage(props: RssArticleListPageProps) {
       if (!latest) return;
       setSource(latest);
       const sortName = await reloadSorts(latest);
-      const count = await refreshRssArticlesForSource(latest, sortName);
-      await loadArticles(sortName);
-      showAppToast({ title: '刷新完成', description: `${count} 篇文章` });
-      window.dispatchEvent(new CustomEvent('rss-articles-refresh'));
+      const { articles: fetched, sortName: resolvedSort } =
+        await fetchRssArticlesForSource(latest, sortName);
+      setArticles(fetched);
+      schedulePersistArticles(latest, resolvedSort, fetched);
+      showAppToast({ title: '刷新完成', description: `${fetched.length} 篇文章` });
     } catch (e) {
-      await loadArticles(activeSort());
-      showAppToast({
-        title: '刷新失败',
-        description: e instanceof Error ? e.message : '请稍后重试',
-        variant: 'destructive',
-      });
+      if (isSourceVerificationCancelledError(e)) {
+        setArticles([]);
+      } else {
+        await loadArticles(activeSort());
+        showAppToast({
+          title: '刷新失败',
+          description: e instanceof Error ? e.message : '请稍后重试',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setRefreshKind(null);
     }
@@ -361,36 +401,41 @@ export function RssArticleListPage(props: RssArticleListPageProps) {
         </div>
       </Show>
 
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2">
-        <Show when={loading()}>
-          <div class="space-y-2 py-4">
-            <For each={Array.from({ length: 8 })}>
-              {() => <div class="h-16 animate-pulse rounded-lg bg-muted/40" />}
-            </For>
-          </div>
-        </Show>
+      <VirtualListScrollCoalesceContext.Provider value={scrollCoalesce}>
+        <div
+          class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2"
+          onScroll={() => scrollCoalesce.markScrolling()}
+        >
+          <Show when={loading()}>
+            <div class="space-y-2 py-4">
+              <For each={Array.from({ length: 8 })}>
+                {() => <div class="h-16 animate-pulse rounded-lg bg-muted/40" />}
+              </For>
+            </div>
+          </Show>
 
-        <Show when={!loading() && refreshKind() === null && articles().length === 0}>
-          <div class="rounded-2xl border border-border/50 bg-card p-8 text-center text-muted-foreground">
-            <p class="mb-4">暂无文章</p>
-            <Button disabled={headerBusy()} onClick={() => void handleRefreshAll()}>
-              刷新
-            </Button>
-          </div>
-        </Show>
+          <Show when={!loading() && refreshKind() === null && articles().length === 0}>
+            <div class="rounded-2xl border border-border/50 bg-card p-8 text-center text-muted-foreground">
+              <p class="mb-4">暂无文章</p>
+              <Button disabled={headerBusy()} onClick={() => void handleRefreshAll()}>
+                刷新
+              </Button>
+            </div>
+          </Show>
 
-        <Show when={!loading() && articles().length > 0}>
-          <RssArticleListItems
-            articles={articles()}
-            source={source()!}
-            articleStyle={source()?.articleStyle ?? 0}
-            onSelect={(article) => {
-              const s = source();
-              if (s) props.onOpenArticle(s, article);
-            }}
-          />
-        </Show>
-      </div>
+          <Show when={!loading() && articles().length > 0}>
+            <RssArticleListItems
+              articles={articles()}
+              source={source()!}
+              articleStyle={source()?.articleStyle ?? 0}
+              onSelect={(article) => {
+                const s = source();
+                if (s) props.onOpenArticle(s, article);
+              }}
+            />
+          </Show>
+        </div>
+      </VirtualListScrollCoalesceContext.Provider>
 
       <RssReadHistoryDialog
         open={historyOpen()}
