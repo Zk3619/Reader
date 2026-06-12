@@ -66,7 +66,8 @@ function parseJsonPathSingle(jsonPath: string, jsonString: string): string[] {
   }
 }
 
-function expandInnerJsonRules(rule: string, jsonString: string): string {
+/** 展开规则中的 {$....} 内嵌 JSONPath（对齐 Legado AnalyzeByJSonPath.innerRule） */
+export function expandInnerJsonRules(rule: string, jsonString: string): string {
   // {{$.x}} 由 analyze-rule.applyJsonTemplate 处理；此处 innerRule 会误留 {vip}
   if (/\{\{\s*\$/.test(rule)) {
     return rule;

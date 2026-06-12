@@ -16,6 +16,10 @@ import {
   stripLegadoRuleModePrefix,
 } from '@/lib/rule-engine/legado-source-rule';
 import { mergeRulePartsSync, RuleAnalyzer } from '@/lib/rule-engine/rule-analyzer';
+import {
+  getRegexElements,
+  regexGroupsToElementContent,
+} from '@/lib/rule-engine/regex-parser';
 
 /**
  * 解析CSS选择器规则（支持 Legado && / || / %%）
@@ -40,6 +44,40 @@ export function parseCss(rule: string, html: string): string[] {
  * Legado AnalyzeByJSoup.getElements：纯 CSS 列表（如 dl dd,dt），逗号作选择器而非运算符。
  * 规则可为 `selector` 或 `selector@all`。
  */
+/** Legado ElementsSingle：class.x / tag.x / id.x / children / text.x */
+function isLegadoBuiltinSelector(selector: string): boolean {
+  return /^(children|class|tag|id|text)(\.|$)/.test(selector.trim());
+}
+
+/**
+ * ruleArticles / bookList：对齐 Legado getElements，|| 分支优先返回元素 outerHtml（勿用 @text）。
+ */
+export function selectListElementsOuterHtmlRule(rule: string, html: string): string[] {
+  if (!rule?.trim() || !html) return [];
+  if (isLikelyJavaScriptRule(rule)) return [];
+
+  return mergeRulePartsSync(rule, (part) => selectListElementsOuterHtmlPart(part, html), (x) => x);
+}
+
+function selectListElementsOuterHtmlPart(part: string, html: string): string[] {
+  const trimmed = stripLegadoRuleModePrefix(part.trim());
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith(':')) {
+    return parseCssSegment(trimmed, html).filter((s) => s.trim().startsWith('<'));
+  }
+
+  if (!trimmed.includes('@')) {
+    const direct = selectElementsOuterHtml(trimmed, html);
+    if (direct.length > 0) return direct;
+    return selectElementsOuterHtml(`${trimmed}@all`, html);
+  }
+
+  const nested = parseCssSegment(trimmed, html);
+  const htmlItems = nested.filter((s) => s.trim().startsWith('<'));
+  return htmlItems.length > 0 ? htmlItems : [];
+}
+
 export function selectElementsOuterHtml(rule: string, html: string): string[] {
   const trimmed = stripLegadoRuleModePrefix(rule.trim());
   if (!trimmed || !html || isLikelyJavaScriptRule(trimmed)) return [];
@@ -47,10 +85,19 @@ export function selectElementsOuterHtml(rule: string, html: string): string[] {
   const allSuffix = trimmed.match(/^(.+?)@all$/i);
   const selector = (allSuffix ? allSuffix[1] : trimmed).trim();
   if (!selector || selector.includes('@')) return [];
-  if (!isValidCssSelector(selector)) return [];
 
   try {
     const $ = loadHtmlForCss(html);
+    if (isLegadoBuiltinSelector(selector) || isLegadoIndexedTagSelector(selector)) {
+      const elements = selectWithLegacyIndex($, null, selector);
+      const results: string[] = [];
+      elements.each((_, element) => {
+        results.push($(element).toString());
+      });
+      return results.filter((r) => r.trim().length > 0);
+    }
+    if (!isValidCssSelector(selector)) return [];
+
     const results: string[] = [];
     $(selector).each((_, element) => {
       results.push($(element).toString());
@@ -66,10 +113,14 @@ function isLegadoIndexedTagSelector(selector: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9]*\.-?\d+(?::(-?\d+))?(?::(-?\d+))?$/.test(selector.trim());
 }
 
-/** 可走 selectWithLegacyIndex（含 td.N / tag.N，不可交给 cheerio 当 class 选择器） */
+/** 可走 selectWithLegacyIndex（含 td.N / tag.N / class.x，不可交给 cheerio 当 CSS 选择器） */
 function usesLegacyIndexSelector(selector: string): boolean {
   const s = selector.trim();
-  return isValidCssSelector(s) || isLegadoIndexedTagSelector(s);
+  return (
+    isLegadoBuiltinSelector(s) ||
+    isValidCssSelector(s) ||
+    isLegadoIndexedTagSelector(s)
+  );
 }
 
 /**
@@ -78,6 +129,7 @@ function usesLegacyIndexSelector(selector: string): boolean {
 export function isValidCssSelector(selector: string): boolean {
   const s = selector.trim();
   if (!s) return false;
+  if (isLegadoBuiltinSelector(s)) return false;
   if (s.startsWith('//')) return false;
   if (isLegadoIndexedTagSelector(s)) return false;
   if (s === '*') return true;
@@ -225,6 +277,17 @@ function isJsonDocumentContent(html: string): boolean {
 function parseCssSegment(rule: string, html: string): string[] {
   const normalizedRule = normalizeCssRule(rule);
   if (!normalizedRule) return [];
+
+  // Legado :regex 列表项（支持 ruleArticles 的 || 分支，如 ||:<a href=...>）
+  const colonTrimmed = normalizedRule.trim();
+  if (colonTrimmed.startsWith(':')) {
+    const regexBody = colonTrimmed.slice(1).trim();
+    if (regexBody) {
+      return getRegexElements(regexBody, html)
+        .map((groups) => regexGroupsToElementContent(groups))
+        .filter((s) => s.trim().length > 0);
+    }
+  }
 
   // JSON 正文上误走 CSS：JSONPath（$.x）交 analyzeRule；其它非选择器勿泄漏整段 JSON
   if (isJsonDocumentContent(html)) {
@@ -580,6 +643,10 @@ function selectWithLegacyIndex<T>(
     return applyBracketIndex($, selected, bracket.spec);
   }
   const { selector, index, end, step, splitMode } = parseSelectorWithLegacyIndex(selectorWithIndex);
+  if (isLegadoBuiltinSelector(selector)) {
+    const selected = selectByLegadoBeforeRule($, scope, selector);
+    return applyLegacyIndex($, selected, index, end, step, splitMode);
+  }
   if (!isValidCssSelector(selector)) {
     if (looksLikeCompoundCssSelector(selector)) {
       try {
@@ -591,19 +658,16 @@ function selectWithLegacyIndex<T>(
     }
     return scope ? (scope as any) : $('');
   }
-  const isLegadoBuiltin = /^(children|class|tag|id|text)(\.|$)/.test(selector);
-  const selected = isLegadoBuiltin
-    ? selectByLegadoBeforeRule($, scope, selector)
-    : scope
-      ? (() => {
-          const $scope = scope as any;
-          // 对齐 JSoup: Element.select("img") 在元素自身命中时也可返回自身。
-          const selfMatched = $scope.filter(selector);
-          const descendants = $scope.find(selector);
-          return selfMatched.add(descendants);
-        })()
-      : $(selector);
-  return applyLegacyIndex($, selected, index, end, step, splitMode);
+  const matched = scope
+    ? (() => {
+        const $scope = scope as any;
+        // 对齐 JSoup: Element.select("img") 在元素自身命中时也可返回自身。
+        const selfMatched = $scope.filter(selector);
+        const descendants = $scope.find(selector);
+        return selfMatched.add(descendants);
+      })()
+    : $(selector);
+  return applyLegacyIndex($, matched, index, end, step, splitMode);
 }
 
 /**

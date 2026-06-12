@@ -9,7 +9,11 @@
  * 4. 调用相应的解析器
  */
 
-import { parseCss, selectElementsOuterHtml } from '@/lib/rule-engine/css-parser';
+import {
+  parseCss,
+  selectElementsOuterHtml,
+  selectListElementsOuterHtmlRule,
+} from '@/lib/rule-engine/css-parser';
 import { parseXPath } from '@/lib/rule-engine/xpath-parser';
 import { parseJsonPath } from '@/lib/rule-engine/jsonpath-parser';
 import {
@@ -33,10 +37,12 @@ import {
   type LegadoSourceRuleSegment,
 } from '@/lib/rule-engine/legado-source-rule';
 import { readJsonListItemField } from '@/lib/book-source/json-list-context';
+import { expandInnerJsonRules } from '@/lib/rule-engine/jsonpath-parser';
 import { compileSourceRule } from '@/lib/rule-engine/source-rule';
 import { splitRuleByOperators } from '@/lib/rule-engine/rule-analyzer';
 import { evalJs } from '@/lib/js-engine';
 import { normalizeJsRuleResult, type JsContext } from '@/lib/js-engine/quickjs-sandbox';
+import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 import {
   expandLegadoJsoupElements,
   ruleJsExpectsHtmlElement,
@@ -577,6 +583,26 @@ function consolidateJsListArrayOutput(
   return null;
 }
 
+/** 展开 {{}} 内 JS（含 startBrowserAwait / java.get 挂起重试） */
+export async function evalRuleTemplateJs(
+  js: string,
+  context: RuleContext,
+): Promise<unknown> {
+  const maxRounds = 8;
+  for (let round = 0; round < maxRounds; round++) {
+    try {
+      return await evalJs(js, buildRuleJsContext(context, undefined, js));
+    } catch (e) {
+      if (e instanceof SuspendScript) {
+        await e.promise;
+        continue;
+      }
+      throw e;
+    }
+  }
+  return null;
+}
+
 async function prepareRule(
   rule: string,
   context: RuleContext,
@@ -585,7 +611,7 @@ async function prepareRule(
     regexGroups: context.regexGroups,
     expandTemplate: (inner) => analyzeString(inner, context),
     expandJs: async (js) => {
-      const v = await evalJs(js, buildRuleJsContext(context, undefined, js));
+      const v = await evalRuleTemplateJs(js, context);
       return v == null ? '' : String(v);
     },
   });
@@ -716,6 +742,12 @@ async function executeRuleByMode(
         }
         const fieldValue = readJsonListItemField(context, ruleBody);
         if (fieldValue) return [fieldValue];
+        if (ruleBody.includes('{$.')) {
+          const expanded = expandInnerJsonRules(ruleBody, context.content);
+          if (expanded !== ruleBody && expanded.trim()) {
+            return [expanded];
+          }
+        }
         if (isLegadoHtmlTemplateRule(ruleBody)) {
           const literal = ruleBody.trim();
           return literal ? [literal] : [];
@@ -1044,9 +1076,14 @@ export async function analyzeElements(
       .filter((s) => s.trim().length > 0);
   }
 
-  const directList = selectElementsOuterHtml(compiled, context.content);
+  const directList = selectListElementsOuterHtmlRule(compiled, context.content);
   if (directList.length > 0) {
     return directList;
+  }
+
+  const plainOuterList = selectElementsOuterHtml(compiled, context.content);
+  if (plainOuterList.length > 0) {
+    return plainOuterList;
   }
 
   if (

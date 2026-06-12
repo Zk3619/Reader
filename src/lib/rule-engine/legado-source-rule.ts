@@ -568,7 +568,11 @@ export function detectSourceRuleMode(ruleStr: string, preset?: RuleMode): RuleMo
   if (lower.startsWith('@js:')) return 'js';
   if (ruleStr.startsWith('//')) return 'xpath';
   if (ruleStr.startsWith('$.') || ruleStr.startsWith('$[')) return 'json';
-  if (ruleStr.startsWith('/') && !ruleStr.startsWith('//')) return 'xpath';
+  // /{$.field} 为 URL 路径模板（Strip 直播 ruleLink 等），非 XPath；对齐 Legado isJSON 时走 JsonPath.innerRule
+  if (ruleStr.startsWith('/') && !ruleStr.startsWith('//')) {
+    if (ruleStr.includes('{$.')) return 'default';
+    return 'xpath';
+  }
   // splitSourceRule 已定为 default 的段：Legado 不因 script 形似 JS 升格；## 尾前的 <js> 壳仍按 js 执行
   if (preset === 'default') {
     const trimmed = ruleStr.trim();
