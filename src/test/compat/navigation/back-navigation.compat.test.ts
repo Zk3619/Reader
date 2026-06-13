@@ -2,10 +2,12 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   __resetBackNavigationForTests,
   consumeBackNavigation,
+  markBackNavigationPreservedHistory,
   registerBackHandler,
   stepRootExitConfirm,
   takeLayerClosedViaBackNavigation,
   triggerBackNavigation,
+  wasLastBackNavigationHistoryPreserved,
 } from '@/lib/navigation/back-navigation';
 
 describe('back-navigation', () => {
@@ -36,6 +38,16 @@ describe('back-navigation', () => {
     expect(takeLayerClosedViaBackNavigation()).toBe(false);
     consumeBackNavigation();
     expect(takeLayerClosedViaBackNavigation()).toBe(true);
+    expect(takeLayerClosedViaBackNavigation()).toBe(false);
+  });
+
+  it('preserved history does not mark layer closed', () => {
+    registerBackHandler(() => {
+      markBackNavigationPreservedHistory();
+      return true;
+    });
+    consumeBackNavigation();
+    expect(wasLastBackNavigationHistoryPreserved()).toBe(true);
     expect(takeLayerClosedViaBackNavigation()).toBe(false);
   });
 

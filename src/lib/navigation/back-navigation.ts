@@ -28,6 +28,9 @@ let rootExitArmedAt = 0;
 let appExitInProgress = false;
 /** 系统返回已关闭一层 UI 时置位，避免 AppBackNavigationBridge 再次 pop history 误关下一层 */
 let closedLayerViaBackNavigation = false;
+/** 本次返回仅唤出阅读器顶底栏等，未关闭可返回层（勿 pop history / 勿标记已关层） */
+let backNavigationPreservedHistory = false;
+let lastConsumePreservedHistory = false;
 
 /** @internal 测试专用 */
 export function __resetBackNavigationForTests(): void {
@@ -36,6 +39,8 @@ export function __resetBackNavigationForTests(): void {
   skipNextPop = false;
   consumingBackNavigation = false;
   closedLayerViaBackNavigation = false;
+  backNavigationPreservedHistory = false;
+  lastConsumePreservedHistory = false;
   installed = false;
   rootExitArmedAt = 0;
   appExitInProgress = false;
@@ -75,10 +80,27 @@ export function registerBackHandler(handler: BackHandler): () => void {
   };
 }
 
+/** 可返回层 close 内若仅唤出顶底栏、未真正关层，须先调用此项 */
+export function markBackNavigationPreservedHistory(): void {
+  backNavigationPreservedHistory = true;
+}
+
+export function wasLastBackNavigationHistoryPreserved(): boolean {
+  return lastConsumePreservedHistory;
+}
+
 export function consumeBackNavigation(): boolean {
+  lastConsumePreservedHistory = false;
   for (let i = handlerStack.length - 1; i >= 0; i--) {
     if (handlerStack[i].handler()) {
-      closedLayerViaBackNavigation = true;
+      if (backNavigationPreservedHistory) {
+        backNavigationPreservedHistory = false;
+        lastConsumePreservedHistory = true;
+        restoreHistoryEntry();
+        historyDepth += 1;
+      } else {
+        closedLayerViaBackNavigation = true;
+      }
       return true;
     }
   }
@@ -129,7 +151,9 @@ export function popBackHistoryProgrammatic(): void {
 
 function restoreHistoryEntry(): void {
   skipNextPop = true;
-  history.pushState({ [HISTORY_KEY]: historyDepth }, '');
+  if (typeof history !== 'undefined') {
+    history.pushState({ [HISTORY_KEY]: historyDepth }, '');
+  }
 }
 
 async function exitApplication(): Promise<void> {
@@ -193,7 +217,9 @@ export function triggerBackNavigation(): boolean {
   consumingBackNavigation = true;
   try {
     if (consumeBackNavigation()) {
-      if (historyDepth > 0) popBackHistoryProgrammatic();
+      if (!wasLastBackNavigationHistoryPreserved() && historyDepth > 0) {
+        popBackHistoryProgrammatic();
+      }
       return true;
     }
     return false;
