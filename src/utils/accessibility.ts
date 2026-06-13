@@ -166,6 +166,56 @@ export function blurAfterMenuTriggerRefocus(): void {
   });
 }
 
+/** 重置单个 Tooltip trigger 的 hover/focus 状态（含尚未打开的 warmup 计时） */
+export function resetKobalteTooltipTrigger(trigger: HTMLElement | null | undefined): void {
+  if (!trigger) return;
+  trigger.dispatchEvent(
+    new PointerEvent('pointerleave', {
+      bubbles: true,
+      cancelable: true,
+      pointerType: 'mouse',
+    }),
+  );
+  trigger.blur();
+}
+
+export function resetReaderMenuTooltipTrigger(): void {
+  if (typeof document === 'undefined') return;
+  resetKobalteTooltipTrigger(
+    document.querySelector<HTMLElement>('[data-reader-menu-trigger]'),
+  );
+}
+
+/** Corvu 抽屉关闭后可能 refocus 打开入口，避免 Tooltip 因 focus 误弹出 */
+export function dismissOpenKobalteTooltips(): void {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll<HTMLElement>('[role="tooltip"][data-expanded]').forEach((content) => {
+    const id = content.id;
+    if (!id) return;
+    const trigger = document.querySelector<HTMLElement>(`[aria-describedby="${CSS.escape(id)}"]`);
+    resetKobalteTooltipTrigger(trigger);
+  });
+  resetReaderMenuTooltipTrigger();
+}
+
+/** 遮罩消失后 pointer 仍停在 trigger 上时会误触发 hover tooltip，需延迟恢复 */
+export const SETTINGS_DRAWER_TOOLTIP_RESUME_MS = 900;
+
+/** Corvu 抽屉关闭后可能 refocus 打开入口或触发 hover，避免 Tooltip 误弹出 */
+export function blurAfterDrawerTriggerRefocus(): void {
+  dismissOpenKobalteTooltips();
+  queueMicrotask(() => {
+    blurActiveElement();
+    releasePageFocus();
+    dismissOpenKobalteTooltips();
+    requestAnimationFrame(() => {
+      blurActiveElement();
+      releasePageFocus();
+      dismissOpenKobalteTooltips();
+    });
+  });
+}
+
 export function shouldPreventMenuCloseAutoFocus(): boolean {
   return preventMenuCloseAutoFocus;
 }

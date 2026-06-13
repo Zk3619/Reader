@@ -35,7 +35,7 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
     id: 'sources',
     label: '书源与发现',
-    description: '书源导入黑名单',
+    description: 'Web 服务、书源导入黑名单',
   },
   {
     id: 'storage',
@@ -123,9 +123,16 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
   {
     id: 'replace-purify-prefs',
     categoryId: 'reading',
-    title: '替换净化选项',
-    description: '新书默认启用替换、保护特殊 HTML',
-    keywords: ['替换净化', '默认', 'usehtml', 'adaptSpecialStyle', 'replaceEnableDefault'],
+    title: '替换净化设置',
+    description: '启用替换净化、导出选项、保护特殊 HTML（在替换净化页设置按钮）',
+    keywords: ['替换净化', '全局', 'usehtml', 'adaptSpecialStyle', 'replaceEnableDefault', '导出'],
+  },
+  {
+    id: 'web-service',
+    categoryId: 'sources',
+    title: 'Web 服务',
+    description: 'Legado 兼容 REST + Web UI',
+    keywords: ['web', '服务', 'api', 'token', '端口', '局域网', '传书', '写源'],
   },
   {
     id: 'toc-pagination-safety',

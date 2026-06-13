@@ -30,6 +30,7 @@ import {
   prepareForAppDialogOpen,
   releasePageFocus,
 } from '@/utils/accessibility';
+import { restoreAppModalSideEffects } from '@/lib/ui/overlay-cleanup';
 
 /** 与 WindowControlButtons 关闭钮一致（ghost + destructive hover） */
 export const APP_DIALOG_CLOSE_BUTTON_CLASS =
@@ -58,7 +59,7 @@ const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
     <DialogPrimitive.Portal mount={resolveMount()} {...rest}>
       <div
         class={cn(
-          'fixed inset-0 flex items-start justify-center sm:items-center',
+          'pointer-events-none fixed inset-0 flex items-start justify-center sm:items-center',
           local.wrapperClass,
         )}
       >
@@ -117,6 +118,9 @@ export const AppDialog: Component<AppDialogProps> = (props) => {
   const handleOpenChange = (open: boolean) => {
     if (!local.disableAccessibilityAnnounce && !open) {
       clearFocusBeforeModal();
+      restoreAppModalSideEffects();
+      // 关闭动画结束后再次清理，避免残留遮罩挡住抽屉遮罩点击
+      window.setTimeout(() => restoreAppModalSideEffects(), 220);
     }
     local.onOpenChange(open);
   };
@@ -158,7 +162,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
     <AppDialogPortal wrapperClass={portalZ()} portalToBody={portalToBody()}>
       <DialogOverlay
         data-app-overlay-backdrop=""
-        class={cn(overlayZ(), appBlockDrag, overlayCls())}
+        class={cn('pointer-events-auto', overlayZ(), appBlockDrag, overlayCls())}
       />
       <DialogPrimitive.Content
         data-app-overlay-surface=""
@@ -183,6 +187,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
           APP_DIALOG_CONTENT_LAYOUT_CLASS,
           dialogContentMotionClass,
           appBlockDrag,
+          'pointer-events-auto',
           zOverride() ?? contentZ(),
           layout() === 'app' && `${dialogViewportLimits} flex flex-col overflow-hidden p-0`,
           (props as AppDialogContentProps<T>).class

@@ -5,6 +5,7 @@ import {
   MEDIA_VIEWER_OVERLAY_LAYER_Z,
   type OverlayLayerZ,
 } from '@/lib/ui/overlay-z';
+import { dismissViewerBodyOverlays } from '@/lib/ui/overlay-cleanup';
 
 const [activeOverlayLayer, setActiveOverlayLayer] = createRoot(() =>
   createSignal<OverlayLayerZ>(APP_OVERLAY_LAYER_Z),
@@ -19,8 +20,15 @@ export function resolveOverlayLayerForNavTop(top: OverlayEntry | undefined): Ove
 }
 
 /** 由 App 在 nav.top() 变化时同步浮层 z-index 档位（阅读器内浮层用 ViewerApp* + portalToBody） */
-export function publishActiveOverlayLayer(top: OverlayEntry | undefined): void {
+export function publishActiveOverlayLayer(
+  top: OverlayEntry | undefined,
+  entries: OverlayEntry[] = [],
+): void {
   setActiveOverlayLayer(() => resolveOverlayLayerForNavTop(top));
+  const hasViewerEntry = entries.some((entry) => isViewerOverlayKind(entry.kind));
+  if (!hasViewerEntry) {
+    dismissViewerBodyOverlays();
+  }
 }
 
 export function useOverlayLayerZ(): OverlayLayerZ {

@@ -78,6 +78,13 @@ import {
 import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/txt-toc-rules/TxtTocRulePickDialog';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { VIEWER_SHELL_OVERLAY_EVENTS } from '@/lib/ui/overlay-cleanup';
+import {
+  blurAfterDrawerTriggerRefocus,
+  dismissOpenKobalteTooltips,
+  resetReaderMenuTooltipTrigger,
+  SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
+} from '@/utils/accessibility';
 import {
   MediaViewerShell,
   MediaViewerShellMain,
@@ -130,6 +137,8 @@ export function BookReader(props: BookReaderProps) {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   /** 设置抽屉（另外的菜单）：仅窄屏底栏的「设置」打开 */
   const [readerMenuDrawerOpen, setReaderMenuDrawerOpen] = createSignal(false);
+  /** 设置抽屉开/关期间暂停顶栏「设置」Tooltip（遮罩消失后 hover 会误触发） */
+  const [settingsTooltipSuspended, setSettingsTooltipSuspended] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
@@ -146,6 +155,47 @@ export function BookReader(props: BookReaderProps) {
   const [readAloudActive, setReadAloudActive] = createSignal(false);
   const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
   const [effectiveReplacesOpen, setEffectiveReplacesOpen] = createSignal(false);
+  /** 设置抽屉内 Dialog 关闭后的短暂保护，避免同一次点击/失焦误关抽屉 */
+  const [readerMenuDrawerDismissGuard, setReaderMenuDrawerDismissGuard] = createSignal(false);
+  const readerMenuDrawerBlockOutsideDismiss = () =>
+    statusBarStyleDialogOpen() ||
+    effectiveReplacesOpen() ||
+    readerMenuDrawerDismissGuard();
+
+  let readerMenuDrawerWasOpen = false;
+  const openReaderMenuDrawer = () => {
+    setSettingsTooltipSuspended(true);
+    resetReaderMenuTooltipTrigger();
+    dismissOpenKobalteTooltips();
+    setReaderMenuDrawerOpen(true);
+  };
+  createEffect(() => {
+    const open = readerMenuDrawerOpen();
+    if (open) {
+      readerMenuDrawerWasOpen = true;
+      setSettingsTooltipSuspended(true);
+      dismissOpenKobalteTooltips();
+      return;
+    }
+    if (!readerMenuDrawerWasOpen) return;
+    readerMenuDrawerWasOpen = false;
+    blurAfterDrawerTriggerRefocus();
+    const timer = window.setTimeout(
+      () => setSettingsTooltipSuspended(false),
+      SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
+    );
+    onCleanup(() => window.clearTimeout(timer));
+  });
+
+  createEffect(() => {
+    const nestedDialogOpen = statusBarStyleDialogOpen() || effectiveReplacesOpen();
+    if (nestedDialogOpen) {
+      setReaderMenuDrawerDismissGuard(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setReaderMenuDrawerDismissGuard(false), 200);
+    onCleanup(() => window.clearTimeout(timer));
+  });
   /** 阅读进度状态栏选项行：整行可点触发 radio，仅本弹窗使用 */
   const statusBarOptionRowClass =
     'flex cursor-pointer items-center rounded-md px-2 py-1.5 hover:bg-muted/50 has-[[data-checked]]:bg-accent has-[[data-checked]]:text-accent-foreground'
@@ -159,6 +209,38 @@ export function BookReader(props: BookReaderProps) {
   const [panelEntering, setPanelEntering] = createSignal(false);
   const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
   const [isWideScreen, setIsWideScreen] = createSignal(window.innerWidth >= 480);
+
+  const closeReaderShellOverlays = () => {
+    setCatalogOpen(false);
+    setSettingsOpen(false);
+    setReaderMenuDrawerOpen(false);
+    setStatusBarStyleDialogOpen(false);
+    setOfflineCacheDialogOpen(false);
+    setDictOpen(false);
+    setSearchOpen(false);
+    setBookmarksOpen(false);
+    setChangeSourceOpen(false);
+    setTxtTocRuleOpen(false);
+    setClickRegionalOpen(false);
+    setClickActionPickerOpen(false);
+    setEffectiveReplacesOpen(false);
+    setCommentsOpen(false);
+    setPanelClosing(false);
+    setPanelEntering(false);
+  };
+
+  onMount(() => {
+    const onShellClose = () => closeReaderShellOverlays();
+    window.addEventListener(VIEWER_SHELL_OVERLAY_EVENTS.CLOSE_ALL, onShellClose);
+    onCleanup(() => {
+      window.removeEventListener(VIEWER_SHELL_OVERLAY_EVENTS.CLOSE_ALL, onShellClose);
+    });
+  });
+
+  createEffect(() => {
+    if (props.entryVisible?.() !== false) return;
+    closeReaderShellOverlays();
+  });
 
   let tapStartTime = 0;
   let tapStartX = 0;
@@ -602,6 +684,7 @@ export function BookReader(props: BookReaderProps) {
   onCleanup(() => {
     stopReadAloud();
     setReadAloudActive(false);
+    closeReaderShellOverlays();
   });
 
   const onContentPointerDown = (e: MouseEvent | TouchEvent) => {
@@ -731,7 +814,8 @@ export function BookReader(props: BookReaderProps) {
                   onOpenCatalog={() => setCatalogOpen(true)}
                   onReadAloud={handleReadAloud}
                   onOpenSettings={() => setSettingsOpen(true)}
-                  onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+                  onOpenReaderMenu={openReaderMenuDrawer}
+                  settingsTooltipSuspended={settingsTooltipSuspended()}
                   onChangeSource={() => {
                     const b = book();
                     if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
@@ -776,7 +860,7 @@ export function BookReader(props: BookReaderProps) {
                   onReadAloud={handleReadAloud}
                   readAloudActive={readAloudActive()}
                   onOpenSettings={() => setSettingsOpen(true)}
-                  onOpenReaderMenu={() => setReaderMenuDrawerOpen(true)}
+                  onOpenReaderMenu={openReaderMenuDrawer}
                 />
               </MediaViewerFooter>
             }
@@ -906,14 +990,14 @@ export function BookReader(props: BookReaderProps) {
         </ViewerAppDrawerContent>
       </ViewerAppDrawer>
 
-      {/* 设置抽屉：仅关闭/全开两档，保证可滚动区高度固定、滚动正常。从本抽屉内打开「阅读进度状态栏」对话框时禁止因焦点/点击移出而关闭，避免抽屉被误关、对话框随之关闭并触发设置按钮 tooltip */}
+      {/* 设置抽屉：从本抽屉内打开对话框时禁止因焦点/点击移出而关闭（与「阅读进度状态栏」相同） */}
       <ViewerAppDrawer
         open={readerMenuDrawerOpen()}
         onOpenChange={setReaderMenuDrawerOpen}
         snapPoints={[0, 1]}
         defaultSnapPoint={1}
-        closeOnOutsideFocus={!statusBarStyleDialogOpen()}
-        closeOnOutsidePointer={!statusBarStyleDialogOpen()}
+        closeOnOutsideFocus={!readerMenuDrawerBlockOutsideDismiss()}
+        closeOnOutsidePointer={!readerMenuDrawerBlockOutsideDismiss()}
       >
         <ViewerAppDrawerContent
           class={cn('flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
@@ -1045,10 +1129,7 @@ export function BookReader(props: BookReaderProps) {
             <Button
               variant="ghost"
               class="w-full justify-start"
-              onClick={() => {
-                setReaderMenuDrawerOpen(false);
-                setEffectiveReplacesOpen(true);
-              }}
+              onClick={() => setEffectiveReplacesOpen(true)}
             >
               生效的替换规则
             </Button>
@@ -1147,6 +1228,7 @@ export function BookReader(props: BookReaderProps) {
       <EffectiveReplacesDialog
         open={effectiveReplacesOpen()}
         onOpenChange={setEffectiveReplacesOpen}
+        shellActive={props.entryVisible?.() ?? true}
       />
 
       <ReaderOfflineCacheDialog

@@ -29,6 +29,16 @@ export function isAppFloatingOverlayTarget(target: EventTarget | null | undefine
   );
 }
 
+/** 是否点击在仍打开中的 AppDialog 遮罩/内容（勿匹配已关闭残留节点） */
+export function isAppExpandedDialogOverlayTarget(target: EventTarget | null | undefined): boolean {
+  if (!(target instanceof Element)) return false;
+  return !!(
+    target.closest('[data-app-overlay-backdrop][data-expanded]') ||
+    target.closest('[data-app-overlay-surface][data-expanded]') ||
+    target.closest('[role="dialog"][data-expanded]')
+  );
+}
+
 /** 是否点击在应用 Toast 层（`.reader-toast-host` / solid-sonner） */
 export function isAppToastTarget(target: EventTarget | null | undefined): boolean {
   if (!(target instanceof Element)) return false;
@@ -52,7 +62,8 @@ function outsidePointerTarget(event: AppOutsidePointerEvent): EventTarget | null
 }
 
 export function preventDrawerDismissForFloatingOverlay(event: AppOutsidePointerEvent): void {
-  if (isAppFloatingOverlayTarget(outsidePointerTarget(event))) {
+  const target = outsidePointerTarget(event);
+  if (isAppFloatingOverlayTarget(target) || isAppExpandedDialogOverlayTarget(target)) {
     event.preventDefault();
   }
 }

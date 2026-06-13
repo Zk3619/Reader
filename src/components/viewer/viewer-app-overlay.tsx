@@ -78,6 +78,29 @@ export const ViewerAppDialogContent: Component<ViewerAppDialogContentProps> = (p
   );
 };
 
+/** 阅读器内已有一层 Dialog 时的第二层（如生效规则 → 编辑规则） */
+export const VIEWER_STACKED_DIALOG_Z = {
+  dialogOverlay: 'z-[136]',
+  dialog: 'z-[137]',
+} as const;
+
+export type ViewerAppStackedDialogContentProps = Omit<AppDialogContentProps, 'portalToBody'>;
+
+export const ViewerAppStackedDialogContent: Component<ViewerAppStackedDialogContentProps> = (
+  props,
+) => {
+  const [local, rest] = splitProps(props, ['class', 'overlayClass']);
+  return (
+    <AppDialogContent
+      portalToBody
+      portalZClass={VIEWER_STACKED_DIALOG_Z.dialogOverlay}
+      overlayClass={cn(VIEWER_STACKED_DIALOG_Z.dialogOverlay, local.overlayClass)}
+      class={cn(VIEWER_STACKED_DIALOG_Z.dialog, local.class)}
+      {...rest}
+    />
+  );
+};
+
 export type ViewerAppDropdownMenuContentProps = Omit<
   ComponentProps<typeof AppDropdownMenuContent>,
   'portalToBody'

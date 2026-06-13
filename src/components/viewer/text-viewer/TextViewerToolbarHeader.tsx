@@ -33,6 +33,8 @@ export interface TextViewerToolbarHeaderProps {
   onReadAloud: () => void;
   onOpenSettings: () => void;
   onOpenReaderMenu: () => void;
+  /** 设置抽屉开/关期间暂停「设置」Tooltip，避免遮罩消失后 hover 误触发 */
+  settingsTooltipSuspended?: boolean;
   onChangeSource: () => void;
   onRefreshChapter: () => void;
   onOpenOfflineCache: () => void;
@@ -147,7 +149,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           </ViewerAppTooltipTrigger>
           <ViewerAppTooltipContent>界面</ViewerAppTooltipContent>
         </ViewerAppTooltip>
-        <ViewerAppTooltip>
+        <ViewerAppTooltip disabled={props.settingsTooltipSuspended}>
           <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
@@ -155,6 +157,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             class={iconBtn()}
             onClick={props.onOpenReaderMenu}
             aria-label="设置"
+            data-reader-menu-trigger=""
           >
             <SettingsIcon class="size-5" />
           </ViewerAppTooltipTrigger>

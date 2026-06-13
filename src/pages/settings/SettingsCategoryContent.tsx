@@ -13,7 +13,7 @@ import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
 import { CoverCacheSetting } from '@/components/settings/CoverCacheSetting';
 import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
 import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
-import { ReplacePurifySetting } from '@/components/settings/ReplacePurifySetting';
+import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { DatabaseBackup } from '@/components/shared/DatabaseBackup';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
@@ -90,10 +90,6 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
           <ReadingRulesHub onOpen={(page) => props.onOpenReadingRulePage?.(page)} />
         </SettingItemAnchor>
 
-        <SettingItemAnchor id="replace-purify-prefs" highlighted={highlight('replace-purify-prefs')}>
-          <ReplacePurifySetting />
-        </SettingItemAnchor>
-
         <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
           <TocPaginationSafetySetting />
         </SettingItemAnchor>
@@ -104,6 +100,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       </Show>
 
       <Show when={props.categoryId === 'sources'}>
+        <SettingItemAnchor id="web-service" highlighted={highlight('web-service')}>
+          <WebServiceSettingBlock />
+        </SettingItemAnchor>
+
         <SettingItemAnchor id="source-blocklist" highlighted={highlight('source-blocklist')}>
           <SourceBlocklistSetting />
         </SettingItemAnchor>

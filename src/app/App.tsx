@@ -92,6 +92,11 @@ import {
   resumeMediaViewerChromeAutoHide,
 } from "@/lib/media/media-viewer-chrome-auto-hide-registry";
 import { publishActiveOverlayLayer } from "@/lib/ui/overlay-layer-active";
+import {
+  afterViewerShellOverlaysClosed,
+  dismissViewerBodyOverlays,
+  requestCloseViewerShellOverlays,
+} from "@/lib/ui/overlay-cleanup";
 import { APP_TOAST_Z } from "@/lib/ui/overlay-z";
 import { scheduleOverlayPositionSync } from "@/lib/ui/overlay-position-sync";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
@@ -277,7 +282,7 @@ function AppContent() {
   const isStandalonePage = nav.isStandaloneVisible;
 
   createEffect(() => {
-    publishActiveOverlayLayer(nav.top());
+    publishActiveOverlayLayer(nav.top(), nav.entries());
   });
 
   const navigateToPage = (page: PageType) => {
@@ -302,10 +307,11 @@ function AppContent() {
   const [windowWidth, setWindowWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
-  const [recentBooks, { refetch: refetchRecentBooks }] = createResource(() => {
-    if (!dbInitialized()) return;
-    return getRecentReadBooks(5);
-  });
+  const [recentBooks, { refetch: refetchRecentBooks }] = createResource(
+    () => dbInitialized(),
+    (initialized) => (initialized ? getRecentReadBooks(5) : Promise.resolve([])),
+    { initialValue: [] as RecentReadBook[] },
+  );
 
   createEffect(() => {
     const refreshRecentBooks = () => void refetchRecentBooks();
@@ -1561,6 +1567,9 @@ function AppContent() {
     setGuestAddToShelfBusy(false);
     const top = nav.top();
     if (!top || !isViewerOverlayKind(top.kind)) return;
+    requestCloseViewerShellOverlays();
+    await afterViewerShellOverlaysClosed();
+    dismissViewerBodyOverlays();
     nav.pop();
     if (top.kind === "text-viewer") {
       await textViewerStore.closeBook();
@@ -3023,7 +3032,7 @@ function AppContent() {
             <SideBar
               currentPage={currentPage()}
               onPageChange={navigateToPage}
-              recentBooks={recentBooks() ?? []}
+              recentBooks={recentBooks()}
               onOpenRecentBook={(book) => void openRecentBook(book)}
               sidebarState={state}
               onToggleSidebar={toggleSidebar}
