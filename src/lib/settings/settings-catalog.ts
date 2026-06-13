@@ -100,6 +100,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['阅读规则', '规则', '目录', '字典', '替换'],
   },
   {
+    id: 'chapter-body-prefetch',
+    categoryId: 'reading',
+    title: '章节正文预下载',
+    description: '阅读时向前/向后预下载相邻章节正文',
+    keywords: ['预下载', '章节', '正文', '向前', '向后', '缓存', '阅读'],
+  },
+  {
     id: 'txt-toc-rules',
     categoryId: 'reading',
     title: 'TXT 目录规则',

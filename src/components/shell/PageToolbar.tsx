@@ -9,6 +9,10 @@ import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { Separator } from '@/components/ui/separator';
 import { isMobile } from '@/lib/platform/detect';
+import {
+  createTauriWindowChromeDblClickHandler,
+  shouldEnableTauriWindowChrome,
+} from '@/lib/platform/tauri-window-chrome';
 import { cn } from '@/lib/utils';
 import { pageToolbarBelowScroll, pageToolbarShellTop } from '@/lib/ui/viewport-classes';
 
@@ -56,8 +60,11 @@ export interface PageToolbarProps {
 export function PageToolbar(props: PageToolbarProps) {
   const shell = useShellLayout();
   const insetTopSafeArea = () => props.insetTopSafeArea ?? shell().insetTopSafeArea;
-  /** 移动壳层 + 桌面/Web 环境：顶栏无 Navigation，在 PageToolbar 补主题与窗口控制 */
+  /** 移动壳层 + 桌面/Web 环境：顶栏无 Navigation，补主题、窗口控制与拖拽区 */
   const showMobileShellDesktopChrome = () => shell().useMobileShell && !isMobile();
+  const enableTauriWindowChrome = () =>
+    shouldEnableTauriWindowChrome(shell().useMobileShell);
+  const onTauriWindowChromeDblClick = createTauriWindowChromeDblClickHandler();
   const [belowScrollRef, setBelowScrollRef] = createSignal<HTMLDivElement | undefined>(undefined);
 
   createEffect(() => {
@@ -83,11 +90,16 @@ export function PageToolbar(props: PageToolbarProps) {
         insetTopSafeArea() ? pageToolbarShellTop : 'pt-4',
         props.class
       )}
+      data-tauri-drag-region={enableTauriWindowChrome() ? true : undefined}
+      onDblClick={enableTauriWindowChrome() ? onTauriWindowChromeDblClick : undefined}
     >
       <div class="flex min-w-0 items-center justify-between gap-4">
-        <div class="flex min-w-0 flex-1 items-center gap-3">
+        <div
+          class="flex min-w-0 flex-1 items-center gap-3"
+          data-tauri-drag-region={enableTauriWindowChrome() ? true : undefined}
+        >
           <Show when={props.leading}>
-            <div class="flex shrink-0 items-center">{props.leading}</div>
+            <div class="flex shrink-0 items-center no-drag">{props.leading}</div>
           </Show>
           <Show
             when={props.titleSlot}
@@ -99,7 +111,7 @@ export function PageToolbar(props: PageToolbarProps) {
           </Show>
         </div>
         <Show when={props.children || showMobileShellDesktopChrome()}>
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 no-drag">
             {props.children}
             <Show when={props.children && showMobileShellDesktopChrome()}>
               <Separator orientation="vertical" class="mx-1 h-6" />

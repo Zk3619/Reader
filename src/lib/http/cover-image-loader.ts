@@ -13,6 +13,7 @@ import {
 } from '@/lib/cover/cover-disk-cache';
 import { isTauri } from '@/lib/platform/detect';
 import { request } from '@/lib/http';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 import {
   isSignedCoverUrl,
   isSignedImageUrlExpired,
@@ -857,7 +858,7 @@ function scheduleBackgroundCoverUpdate(
     return;
   }
 
-  void (async () => {
+  void withIgnoredPageNavigationAbort(async () => {
     if (!canRefreshCoverUrlForBook(bookUrl)) return;
     const fresh = await maybeRefreshCoverUrl(normalized, {
       ...options,
@@ -866,7 +867,7 @@ function scheduleBackgroundCoverUpdate(
     if (fresh !== normalized) {
       await patchCoverDiskMetaLastUrl(bookUrl, fresh);
     }
-  })().catch(() => { });
+  }).catch(() => { });
 }
 
 /**

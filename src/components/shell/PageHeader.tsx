@@ -26,6 +26,7 @@ import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { cn } from '@/lib/utils';
 import { ChevronLeftIcon, ThemeLightIcon, ThemeDarkIcon } from '@/components/shared/icons';
 import { isTauri, isMobile } from '@/lib/platform/detect';
+import { createTauriWindowChromeDblClickHandler } from '@/lib/platform/tauri-window-chrome';
 
 export interface PageHeaderAction {
   /** 图标组件 */
@@ -253,6 +254,7 @@ export function PageHeader(props: PageHeaderProps) {
   const showThemeToggle = props.showThemeToggle !== false;
   const showWindowControls = props.showWindowControls !== false;
   const pinToTop = props.pinToTop === true;
+  const onTauriWindowChromeDblClick = createTauriWindowChromeDblClickHandler();
 
   return (
     <header
@@ -264,6 +266,7 @@ export function PageHeader(props: PageHeaderProps) {
       )}
       data-page-header
       data-tauri-drag-region={props.draggable}
+      onDblClick={props.draggable ? onTauriWindowChromeDblClick : undefined}
     >
       <div class="flex h-14 items-center gap-3 px-4">
       {/* 返回按钮 */}

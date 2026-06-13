@@ -48,3 +48,32 @@ export function tryFormatDisplayUpdateTime(raw: string | number | undefined | nu
   return formatDateFromMs(ms);
 }
 
+/** 将展示用更新时间或时间戳解析为毫秒；无法解析时返回 null */
+export function parseUpdateTimeToMs(raw: string | number | undefined | null): number | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s || s === 'undefined' || s === 'null' || s === '--' || s === '未知') return null;
+
+  if (/^-?\d+(\.\d+)?$/.test(s)) {
+    let ms = Number(s);
+    if (!Number.isFinite(ms) || ms <= 0) return null;
+    if (ms < 1e12) ms *= 1000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    if (y < 1970 || y > 2100) return null;
+    return ms;
+  }
+
+  const normalized = s
+    .replace(/年/g, '-')
+    .replace(/月/g, '-')
+    .replace(/日/g, '')
+    .replace(/\./g, '-');
+  const parsed = Date.parse(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  const y = new Date(parsed).getFullYear();
+  if (y < 1970 || y > 2100) return null;
+  return parsed;
+}
+

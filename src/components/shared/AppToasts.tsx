@@ -5,7 +5,10 @@
 
 import type { JSX } from "solid-js"
 import { createRoot, createSignal, onCleanup, onMount } from "solid-js"
+import { Portal } from "solid-js/web"
 import { toast, type ExternalToast, type ToasterProps } from "solid-sonner"
+import { Toaster } from "@/components/ui/sonner"
+import { APP_TOAST_Z } from "@/lib/ui/overlay-z"
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { isMobile } from "@/lib/platform/detect"
@@ -334,6 +337,52 @@ export function SonnerInteractionFix() {
     })
   })
   return null
+}
+
+/** 与 `applyThemeToDocument` 写入的 `html.dark` 同步，避免 Sonner `theme="system"` 只看 OS 偏好 */
+export function useToastTheme(): () => "light" | "dark" {
+  const [isDark, setIsDark] = createSignal(
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  )
+
+  onMount(() => {
+    const sync = () => setIsDark(document.documentElement.classList.contains("dark"))
+    const observer = new MutationObserver(sync)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    onCleanup(() => observer.disconnect())
+    sync()
+  })
+
+  return () => (isDark() ? "dark" : "light")
+}
+
+export type AppToastHostProps = {
+  icons: NonNullable<ToasterProps["icons"]>
+}
+
+/** Portal 到 body 的全局 Toaster 宿主（须与应用主题一致） */
+export function AppToastHost(props: AppToastHostProps) {
+  const theme = useToastTheme()
+
+  return (
+    <Portal mount={document.body}>
+      <div class="reader-toast-host" data-kb-top-layer style={appToastHostStyle()}>
+        <SonnerInteractionFix />
+        <Toaster
+          duration={DEFAULT_TOAST_DURATION}
+          theme={theme()}
+          position="bottom-right"
+          expand={getAppToastVisibleLimit() > 1}
+          visibleToasts={getAppToastVisibleLimit()}
+          closeButton
+          richColors={false}
+          icons={props.icons}
+          swipeDirections={["bottom", "right"]}
+          class={APP_TOAST_Z}
+        />
+      </div>
+    </Portal>
+  )
 }
 
 function toastOptions(props: {

@@ -5,10 +5,34 @@ export function isAbortError(error: unknown): boolean {
   return false;
 }
 
-/** 合并超时与用户 AbortSignal */
+/** 合并多个 AbortSignal（任一 abort 即触发） */
+export function combineAbortSignals(
+  ...signals: (AbortSignal | undefined)[]
+): AbortSignal | undefined {
+  const defined = signals.filter((s): s is AbortSignal => s != null);
+  if (defined.length === 0) return undefined;
+  if (defined.length === 1) return defined[0];
+
+  const merged = new AbortController();
+  const onAbort = () => {
+    if (!merged.signal.aborted) merged.abort();
+  };
+
+  for (const signal of defined) {
+    if (signal.aborted) {
+      onAbort();
+      return merged.signal;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  return merged.signal;
+}
+
+/** 合并超时与一个或多个用户 AbortSignal */
 export function mergeAbortSignals(
   timeoutMs: number,
-  userSignal?: AbortSignal,
+  ...userSignals: (AbortSignal | undefined)[]
 ): { signal: AbortSignal; dispose: () => void } {
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
@@ -17,13 +41,17 @@ export function mergeAbortSignals(
     clearTimeout(timeoutId);
   };
 
-  if (!userSignal) {
+  const signals = userSignals.filter((s): s is AbortSignal => s != null);
+
+  if (signals.length === 0) {
     return { signal: timeoutController.signal, dispose };
   }
 
-  if (userSignal.aborted) {
-    dispose();
-    return { signal: userSignal, dispose: () => {} };
+  for (const signal of signals) {
+    if (signal.aborted) {
+      dispose();
+      return { signal, dispose: () => {} };
+    }
   }
 
   const merged = new AbortController();
@@ -32,13 +60,17 @@ export function mergeAbortSignals(
     dispose();
   };
 
-  userSignal.addEventListener('abort', onAbort, { once: true });
+  for (const signal of signals) {
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
   timeoutController.signal.addEventListener('abort', onAbort, { once: true });
 
   return {
     signal: merged.signal,
     dispose: () => {
-      userSignal.removeEventListener('abort', onAbort);
+      for (const signal of signals) {
+        signal.removeEventListener('abort', onAbort);
+      }
       timeoutController.signal.removeEventListener('abort', onAbort);
       dispose();
     },

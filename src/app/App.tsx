@@ -91,15 +91,21 @@ import {
   freezeMediaViewerChromeAutoHide,
   resumeMediaViewerChromeAutoHide,
 } from "@/lib/media/media-viewer-chrome-auto-hide-registry";
+import { tryRevealMediaViewerChromeOnSystemBack } from "@/lib/media/media-viewer-chrome-back";
+import {
+  markBackNavigationPreservedHistory,
+  ROOT_EXIT_CONFIRM_MS,
+} from "@/lib/navigation/back-navigation";
+import { bumpPageNavigationScope } from "@/lib/navigation/page-navigation-scope";
 import { publishActiveOverlayLayer } from "@/lib/ui/overlay-layer-active";
 import {
   afterViewerShellOverlaysClosed,
   dismissViewerBodyOverlays,
   requestCloseViewerShellOverlays,
 } from "@/lib/ui/overlay-cleanup";
-import { APP_TOAST_Z } from "@/lib/ui/overlay-z";
 import { scheduleOverlayPositionSync } from "@/lib/ui/overlay-position-sync";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
+import { ensureShelfBookReadyForReading } from "@/lib/bookshelf/save-book-to-shelf";
 import { getReaderProgressSnapshot } from "@/lib/bookshelf/reading-progress-snapshot";
 import { getAllSourceGroups, getSource } from "@/lib/database/sources";
 import {
@@ -113,8 +119,7 @@ import {
   mainShellPageRoot,
   mainShellTabEnterClass,
 } from "@/lib/ui/viewport-classes";
-import { Toaster } from "@/components/ui/sonner";
-import { showAppToast, DEFAULT_TOAST_DURATION, SonnerInteractionFix, appToastHostStyle, createAppToastIcons, getAppToastVisibleLimit } from "@/components/shared/AppToasts";
+import { showAppToast, AppToastHost, createAppToastIcons } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
 import { clearAppDataDirCache } from "@/lib/platform/app-data-dir";
 import { isDesktopTauri } from "@/lib/platform/webview-storage";
@@ -680,6 +685,13 @@ function AppContent() {
     showBookshelfCache();
     nav.top();
     dismissFloatingOverlaysForShellChange();
+  });
+
+  /** 切换页面 / 叠层时中止上一页进行中的 HTTP 请求 */
+  createEffect(() => {
+    const page = currentPage();
+    const overlayId = nav.top()?.id ?? "shell";
+    bumpPageNavigationScope(`${page}\0${overlayId}`);
   });
 
   /** DEV HMR：页面仍停在媒体阅读器但 store 已重置时，尝试从缓存会话恢复或退回书架 */
@@ -1473,10 +1485,14 @@ function AppContent() {
 
     const loadBook = async () => {
       try {
+        const { isLocalBook } = await import("@/lib/local-book");
+        const activeBook = isLocalBook(book)
+          ? book
+          : await ensureShelfBookReadyForReading(book);
         if (kind === MediaKind.text) {
-          await textViewerStore.openBook(book, { initialCatalog });
+          await textViewerStore.openBook(activeBook, { initialCatalog });
         } else {
-          await viewerStore.openBook(book, kind, { initialCatalog });
+          await viewerStore.openBook(activeBook, kind, { initialCatalog });
         }
       } catch (e) {
         console.error("打开书籍失败:", e);
@@ -2967,6 +2983,14 @@ function AppContent() {
     // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
     if (nav.top()) {
       push("overlay-nav", true, () => {
+        if (tryRevealMediaViewerChromeOnSystemBack()) {
+          markBackNavigationPreservedHistory();
+          showAppToast({
+            title: "再按一次退出阅读器",
+            duration: ROOT_EXIT_CONFIRM_MS,
+          });
+          return;
+        }
         const top = nav.top();
         if (!top) return;
         if (top.kind === "text-viewer" || isViewerOverlayKind(top.kind)) {
@@ -4060,23 +4084,7 @@ function App() {
   return (
     <SidebarProvider style={appSidebarStyle}>
       <AppContent />
-      <Portal mount={document.body}>
-        <div class="reader-toast-host" data-kb-top-layer style={appToastHostStyle()}>
-          <SonnerInteractionFix />
-          <Toaster
-            duration={DEFAULT_TOAST_DURATION}
-            theme="system"
-            position="bottom-right"
-            expand={getAppToastVisibleLimit() > 1}
-            visibleToasts={getAppToastVisibleLimit()}
-            closeButton
-            richColors={false}
-            icons={appToastIcons}
-            swipeDirections={["bottom", "right"]}
-            class={APP_TOAST_Z}
-          />
-        </div>
-      </Portal>
+      <AppToastHost icons={appToastIcons} />
     </SidebarProvider>
   );
 }

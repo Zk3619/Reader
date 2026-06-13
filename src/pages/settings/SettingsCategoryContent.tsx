@@ -13,6 +13,7 @@ import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
 import { CoverCacheSetting } from '@/components/settings/CoverCacheSetting';
 import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
 import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
+import { ChapterBodyPrefetchSetting } from '@/components/settings/ChapterBodyPrefetchSetting';
 import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { DatabaseBackup } from '@/components/shared/DatabaseBackup';
 import { settingsStore } from '@/stores/settings';
@@ -88,6 +89,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       <Show when={props.categoryId === 'reading'}>
         <SettingItemAnchor id="reading-rules-hub" highlighted={highlight('reading-rules-hub')}>
           <ReadingRulesHub onOpen={(page) => props.onOpenReadingRulePage?.(page)} />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="chapter-body-prefetch" highlighted={highlight('chapter-body-prefetch')}>
+          <ChapterBodyPrefetchSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>

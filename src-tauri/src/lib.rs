@@ -570,7 +570,13 @@ pub(crate) fn apply_http_cookies_to_webview(
 const INNER_WEB_PANEL_LABEL: &str = "reader-inner-web";
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const INNER_WEB_PANEL_INIT_SCRIPT: &str = include_str!("../scripts/inner_web_panel_bootstrap.js");
+fn inner_web_panel_init_script() -> String {
+    format!(
+        "{}\n{}",
+        include_str!("../scripts/inner_web_panel_bootstrap.js"),
+        include_str!("../scripts/inner_web_host_fixes.txt"),
+    )
+}
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn inner_web_panel_command_lock() -> &'static tokio::sync::Mutex<()> {
@@ -976,7 +982,8 @@ async fn fetch_inner_web_panel_html(
         serde_json::to_string(url).map_err(|e| e.to_string())?
     );
     panel.eval(&nav).map_err(|e| e.to_string())?;
-    let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+    let init_script = inner_web_panel_init_script();
+    let _ = panel.eval(&init_script);
 
     let delay = delay_ms.unwrap_or(3500).clamp(500, 30_000);
     tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -1181,7 +1188,8 @@ async fn open_inner_web_panel(
                     serde_json::to_string(&url).unwrap()
                 );
                 panel.eval(&nav).map_err(|e| e.to_string())?;
-                let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+                let init_script = inner_web_panel_init_script();
+    let _ = panel.eval(&init_script);
             }
             let _ = panel.set_focus();
             return Ok(());
@@ -1193,8 +1201,9 @@ async fn open_inner_web_panel(
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
     let app_for_nav = app.clone();
+    let panel_init_script = inner_web_panel_init_script();
     let mut webview_builder = WebviewBuilder::new(INNER_WEB_PANEL_LABEL, WebviewUrl::External(target_url))
-        .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
+        .initialization_script(&panel_init_script)
         .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
         .focused(true);
     if let Ok(config_path) = portable_paths::config_file_path() {
@@ -1350,12 +1359,13 @@ async fn open_inner_web_child_window(
         .ok_or_else(|| "主窗口不存在".to_string())?;
 
     let app_for_nav = app.clone();
+    let child_init_script = inner_web_panel_init_script();
     let mut child_builder = WebviewWindowBuilder::new(
         &app,
         INNER_WEB_CHILD_LABEL,
         WebviewUrl::External(target_url),
     )
-    .initialization_script(INNER_WEB_PANEL_INIT_SCRIPT)
+    .initialization_script(&child_init_script)
     .on_navigation(move |url| !handle_inner_web_special_uri(&app_for_nav, url.as_str()))
     .parent(&parent)
     .map_err(|e| e.to_string())?
@@ -1585,7 +1595,8 @@ fn inner_web_panel_open_link(
                     serde_json::to_string(u).unwrap()
                 );
                 panel.eval(&nav).map_err(|e| e.to_string())?;
-                let _ = panel.eval(INNER_WEB_PANEL_INIT_SCRIPT);
+                let init_script = inner_web_panel_init_script();
+    let _ = panel.eval(&init_script);
             }
         }
         app.emit(

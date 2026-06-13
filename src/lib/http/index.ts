@@ -23,7 +23,13 @@ import {
 } from '@/lib/book-source/utils';
 import { isTauri } from '@/lib/platform/detect';
 import { toWebHttpProxyRequest } from '@/lib/http/web-http-proxy';
-import { isAbortError, mergeAbortSignals, raceWithAbortSignal } from '@/lib/http/abort';
+import {
+  combineAbortSignals,
+  isAbortError,
+  mergeAbortSignals,
+  raceWithAbortSignal,
+} from '@/lib/http/abort';
+import { getPageNavigationSignal } from '@/lib/navigation/page-navigation-scope';
 import { decodeBookSourceResponseBytes } from '@/lib/book-source/response-charset';
 
 export { isAbortError } from '@/lib/http/abort';
@@ -176,8 +182,10 @@ export interface RequestOptions {
   concurrentRate?: string; // 并发速率限制，格式：10/1s 表示每秒10个请求
   /** 为 true 时 4xx/5xx 不抛错，仍返回 response，便于登录脚本 ajax 解析 body（如 code/msg） */
   allowNon2xx?: boolean;
-  /** 外部取消（如探索页切换分类）；与 timeout 合并，用户取消时保留 AbortError */
+  /** 外部取消（如探索页切换分类）；与 timeout / 页面导航合并，用户取消时保留 AbortError */
   signal?: AbortSignal;
+  /** 不受页面切换取消（后台下载、全局初始化等） */
+  ignorePageNavigationAbort?: boolean;
   /** 对齐 Legado ruleContent ajax：仅使用传入 headers（不加 Accept 等浏览器默认头） */
   legadoMinimalHeaders?: boolean;
 }
@@ -312,9 +320,13 @@ async function executeRequest(
     enableCookieJar = false,
     signal: userSignal,
     legadoMinimalHeaders = false,
+    ignorePageNavigationAbort = false,
   } = options;
 
-  if (userSignal?.aborted) {
+  const pageSignal = ignorePageNavigationAbort ? undefined : getPageNavigationSignal();
+  const combinedSignal = combineAbortSignals(userSignal, pageSignal);
+
+  if (combinedSignal?.aborted) {
     throw new DOMException('The operation was aborted.', 'AbortError');
   }
 
@@ -386,7 +398,7 @@ async function executeRequest(
             timeout,
             legadoMinimalHeaders,
           ),
-          userSignal,
+          combinedSignal,
         );
       } else {
       // 使用 Tauri 环境
@@ -414,7 +426,7 @@ async function executeRequest(
 
         const tauriResponse = await raceWithAbortSignal(
           tauriFetch(normalizedUrl, tauriOptions),
-          userSignal,
+          combinedSignal,
         );
 
         // 转换Tauri响应headers
@@ -560,7 +572,7 @@ async function executeRequest(
               timeout,
               legadoMinimalHeaders,
             ),
-            userSignal,
+            combinedSignal,
           );
 
           if (!isDangerousSettingsError) {
@@ -586,7 +598,7 @@ async function executeRequest(
       }
     } else {
       // 浏览器环境：Cookie 为 forbidden 头，须走同源 __reader_http 代理（见 web-http-proxy.ts）
-      const { signal, dispose } = mergeAbortSignals(timeout, userSignal);
+      const { signal, dispose } = mergeAbortSignals(timeout, userSignal, pageSignal);
 
       try {
         const proxied = toWebHttpProxyRequest(normalizedUrl, {
@@ -660,7 +672,7 @@ async function executeRequest(
     };
   } catch (error: any) {
     if (isAbortError(error)) {
-      if (userSignal?.aborted) throw error;
+      if (userSignal?.aborted || pageSignal?.aborted) throw error;
       throw new HttpError(408, 'Request Timeout', normalizedUrl, '请求超时');
     }
 
