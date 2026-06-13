@@ -15,11 +15,11 @@ import {
 } from '@/components/viewer/MediaViewerShell';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
 import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
+import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
 import { VideoSettingsDialog } from '@/components/viewer/video/VideoSettingsDialog';
 import {
   ViewerAppDialog,
@@ -38,6 +38,7 @@ import {
   persistVideoPlaySpeed,
 } from '@/lib/media/video/book-video-config';
 import { parseVideoPlaybackExtrasFromRaw } from '@/lib/media/video/artplayer/parse-playback-extras';
+import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
 import { useArtplayer } from '@/lib/media/video/artplayer/use-artplayer';
 import { useVideoFullscreen } from '@/lib/media/video/use-video-fullscreen';
 import { ArtPlayerStage } from '@/components/viewer/video/ArtPlayerStage';
@@ -114,6 +115,11 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
   });
 
   const chapterTitle = () => catalog()[chapterIndex()]?.title ?? '';
+  const embeddedBrowserPlayback = () =>
+    !url() &&
+    !error() &&
+    !stageLoading() &&
+    isLegadoBrowserPlaceholderContent(rawContent());
 
   const fullscreen = useVideoFullscreen(() => videoStageEl);
 
@@ -187,6 +193,20 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
     return s === 1 ? undefined : `${s.toFixed(1)}x`;
   };
 
+  const catalogProgressValue = () => {
+    const total = catalog().length;
+    if (total <= 1) return 0;
+    return chapterIndex() / (total - 1);
+  };
+
+  const handleCatalogProgressChange = (values: number[]) => {
+    const total = catalog().length;
+    if (total <= 1) return;
+    const p = Math.max(0, Math.min(1, values[0] ?? 0));
+    const idx = Math.round(p * (total - 1));
+    if (idx !== chapterIndex()) void goChapterTo(idx);
+  };
+
   return (
     <>
       <MediaViewerShell entryVisible={props.entryVisible}>
@@ -224,10 +244,19 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
             }
             footer={
               <MediaViewerFooter visible={fullscreen.isFullscreen() ? false : undefined}>
-                <MediaViewerChapterNavFooter
+                <MediaViewerProgressBottomChrome
                   chapterIndex={chapterIndex()}
-                  catalogLength={playableCatalogLength()}
+                  catalogLength={catalog().length}
                   loading={loading()}
+                  chapterTitle={chapterTitle()}
+                  statusMeta={
+                    <span>
+                      {chapterIndex() + 1} / {playableCatalogLength()} 集
+                    </span>
+                  }
+                  progressValue={catalogProgressValue()}
+                  onProgressChange={handleCatalogProgressChange}
+                  showProgressSlider={catalog().length > 1}
                   onPrev={() => void goChapterDelta(-1)}
                   onNext={() => void goChapterDelta(1)}
                 />
@@ -239,6 +268,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
             class={cn(
               mainStageClass(),
               'flex items-center justify-center bg-black',
+              mediaViewerMobileContentOverflowClass(),
               fullscreen.isFullscreen() && 'z-50',
             )}
           >
@@ -250,6 +280,13 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               onRetry={() => void viewerStore.refreshChapter()}
               class="absolute inset-0"
             />
+            <Show when={embeddedBrowserPlayback()}>
+              <div class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center">
+                <p class="max-w-sm text-sm text-white/80">
+                  本集已在播放浮层中打开，请在内嵌页观看；切换章节将自动打开对应集数。
+                </p>
+              </div>
+            </Show>
           </div>
 
           <Show when={fullscreen.isFullscreen()}>

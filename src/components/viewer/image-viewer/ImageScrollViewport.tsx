@@ -24,7 +24,7 @@ import { chapterPosToPageIndex } from '@/lib/media/image/image-paged-layout';
 
 import { mangaLazyLoadRootMarginPx } from '@/lib/media/image/image-viewer-ui-config';
 
-import { useMediaViewerMainScrollClass } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaContentScrollClass } from '@/lib/viewer/viewer-chrome-layout';
 
 import { cn } from '@/lib/utils';
 
@@ -74,7 +74,7 @@ export interface ImageScrollViewportProps {
 
 export function ImageScrollViewport(props: ImageScrollViewportProps) {
 
-  const scrollRootClass = useMediaViewerMainScrollClass('scroll-gutter-stable-both bg-background/90');
+  const scrollRootClass = useMediaContentScrollClass('bg-background/90');
 
   let scrollRootEl: HTMLDivElement | undefined;
 

@@ -4,10 +4,11 @@
  */
 
 import type { Book, BookChapter, BookSource } from '@/types';
+import { shouldFetchReaderInlineImageAsBlob } from '@/lib/http/cover-image-loader';
 import {
-  READER_INLINE_IMAGE_DEFAULT_RETRIES,
-  shouldFetchReaderInlineImageAsBlob,
-} from '@/lib/http/cover-image-loader';
+  MANGA_IMAGE_DEFAULT_RETRIES,
+  MANGA_IMAGE_FETCH_TIMEOUT_MS,
+} from '@/lib/media/image/image-fetch-config';
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import { toProxiedImageUrl } from '@/lib/http/proxy-image-url';
 import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
@@ -37,7 +38,7 @@ export type MangaImagePrefetchContext = {
 const NEAR_END_THRESHOLD_SCROLL = 3;
 const NEAR_END_THRESHOLD_PAGED = 1;
 
-const INTRA_PREFETCH_DEBOUNCE_MS = 80;
+const INTRA_PREFETCH_DEBOUNCE_MS = 400;
 const NEXT_CHAPTER_PREFETCH_DEBOUNCE_MS = 300;
 
 let prefetchSession = 0;
@@ -150,10 +151,11 @@ export function prefetchMangaImage(
       pageIndex,
       readerInlineQueue: true,
       readerInlineQueuePriority: 'low',
-      maxRetries: READER_INLINE_IMAGE_DEFAULT_RETRIES,
-      timeoutMs: 25_000,
+      maxRetries: MANGA_IMAGE_DEFAULT_RETRIES,
+      timeoutMs: MANGA_IMAGE_FETCH_TIMEOUT_MS,
       diskOnly: true,
       persistToDisk: ctx.persistToDisk !== false,
+      skipFailureGuard: true,
     }).then((url) => {
       if (url && typeof URL !== 'undefined') {
         try {

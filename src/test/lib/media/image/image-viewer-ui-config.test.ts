@@ -13,8 +13,9 @@ describe('image-viewer-ui-config manga scroll', () => {
     expect(mangaLazyLoadRootMarginPx(1, 200)).toBe(
       MANGA_LAZY_LOAD_ROOT_MARGIN_WITH_PREFETCH_PX,
     );
-    expect(mangaLazyLoadRootMarginPx(10)).toBeLessThanOrEqual(
-      MANGA_LAZY_LOAD_ROOT_MARGIN_FULL_PX,
+    expect(mangaLazyLoadRootMarginPx(10, 1200)).toBeLessThan(400);
+    expect(mangaLazyLoadRootMarginPx(10, 1200)).toBeGreaterThanOrEqual(
+      MANGA_LAZY_LOAD_ROOT_MARGIN_WITH_PREFETCH_PX,
     );
   });
 
@@ -28,11 +29,12 @@ describe('image-viewer-ui-config manga scroll', () => {
     expect(defaultImageViewerUiConfig.mangaEstimatedPageHeightPx).toBe(1200);
   });
 
-  it('uses estimated page height for IO margin', () => {
+  it('narrows IO margin with prefetch using estimated page height', () => {
     const low = mangaLazyLoadRootMarginPx(2, 400);
     const high = mangaLazyLoadRootMarginPx(2, 2000);
-    expect(low).toBeLessThan(high);
-    expect(high).toBe(MANGA_LAZY_LOAD_ROOT_MARGIN_FULL_PX);
+    expect(low).toBe(80);
+    expect(high).toBe(300);
+    expect(high).toBeGreaterThan(low);
   });
 });
 

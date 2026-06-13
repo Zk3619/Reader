@@ -13,6 +13,7 @@ import {
   createMediaViewerChromeInputHandlers,
   type MediaViewerChromeInputHandlers,
 } from '@/lib/media/media-viewer-chrome-input';
+import { registerMediaViewerChromeBackSession } from '@/lib/media/media-viewer-chrome-back';
 import {
   MediaViewerShellContextProvider,
   type MediaViewerShellContextValue,
@@ -166,6 +167,31 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
       : null;
 
   const registryToken = Symbol('media-viewer-chrome-auto-hide');
+  const chromeBackToken = Symbol('media-viewer-chrome-back');
+
+  const syncChromeBackRegistry = () => {
+    if (!chromeBarsCollapsible()) {
+      registerMediaViewerChromeBackSession(null, chromeBackToken);
+      return;
+    }
+    const entryVisible = local.entryVisible?.() ?? true;
+    if (!entryVisible) {
+      registerMediaViewerChromeBackSession(null, chromeBackToken);
+      return;
+    }
+    registerMediaViewerChromeBackSession(
+      {
+        isChromeVisible: headerVisible,
+        chromeBarsCollapsible,
+        revealChrome: () => {
+          setHeaderVisible(true);
+          activeChromeInput()?.resetDismissGestureState();
+          if (useAutoHide()) chromeAutoHide.scheduleHide();
+        },
+      },
+      chromeBackToken,
+    );
+  };
 
   const syncChromeAutoHideRegistry = () => {
     if (!useAutoHide()) {
@@ -214,6 +240,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     if (entryVisible !== undefined && !entryVisible()) return;
     revealChromeSession();
     syncChromeAutoHideRegistry();
+    syncChromeBackRegistry();
   });
 
   createEffect(() => {
@@ -231,8 +258,13 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     }
   });
 
+  createEffect(() => {
+    syncChromeBackRegistry();
+  });
+
   onCleanup(() => {
     registerMediaViewerChromeAutoHideSession(null, registryToken);
+    registerMediaViewerChromeBackSession(null, chromeBackToken);
     appFocus?.dispose();
     internalChromeInput?.dispose();
     chromeAutoHide.dispose();

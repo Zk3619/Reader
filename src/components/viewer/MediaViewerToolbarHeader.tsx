@@ -74,6 +74,24 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
 
   const titleHeadingClass = () => cn('truncate text-sm font-medium');
 
+  const catalogButton = () => (
+    <Show when={props.onOpenCatalog}>
+      <ViewerAppTooltip>
+        <ViewerAppTooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class={iconBtn()}
+          onClick={props.onOpenCatalog}
+          aria-label="目录"
+        >
+          <ListIcon class="h-5 w-5" />
+        </ViewerAppTooltipTrigger>
+        <ViewerAppTooltipContent>目录</ViewerAppTooltipContent>
+      </ViewerAppTooltip>
+    </Show>
+  );
+
   const titleNode = (inCluster: boolean) => (
     <div
       class={titleWrap(inCluster)}
@@ -220,21 +238,6 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
           <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
         </ViewerAppTooltip>
       </Show>
-      <Show when={props.onOpenCatalog}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
-            as={Button}
-            variant="ghost"
-            size="icon"
-            class={iconBtn()}
-            onClick={props.onOpenCatalog}
-            aria-label="目录"
-          >
-            <ListIcon class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>目录</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-      </Show>
     </>
   );
 
@@ -262,6 +265,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
           </Show>
           <div class="flex items-center gap-0.5 no-drag">
             {actionButtons()}
+            {catalogButton()}
             {windowChrome()}
           </div>
         </>
@@ -284,6 +288,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
         )}
       >
         {actionButtons()}
+        {catalogButton()}
         {windowChrome()}
       </div>
     </Show>

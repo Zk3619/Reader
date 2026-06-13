@@ -5,6 +5,7 @@
 
 import * as sourcesDb from '@/lib/database/sources';
 import { MediaKind } from '@/lib/book-source/book-type';
+import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
 import { preloadNextVideoChapter } from '@/lib/media/video/preload-video-chapter';
 import { resolveVideoFromRawContent } from '@/lib/media/video/resolve-video-from-raw';
 import {
@@ -46,6 +47,17 @@ export async function applyVideoFromRaw(
   const forceRefresh = options?.forceRefresh === true;
 
   revokeVideoPlaybackUrls();
+
+  /** 光遇等：正文为内嵌页占位，实际在 startBrowser 浮层播放 */
+  if (isLegadoBrowserPlaceholderContent(raw)) {
+    setState({
+      rawContent: raw,
+      mediaUrls: [],
+      primaryUrl: null,
+      error: null,
+    });
+    return;
+  }
 
   const book = state.book;
   if (book && chapter && !forceRefresh) {

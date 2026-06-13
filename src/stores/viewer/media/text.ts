@@ -484,50 +484,92 @@ export async function openTextBook(
         : null;
 
     if (catalogToUse.length === 0 && source && activeBook.tocUrl) {
-      await fetchChapterListDeduped(source, activeBook.tocUrl, {
-        reverseToc,
-        bookVariable: activeBook.variable,
-        onPartial: async (partial) => {
-          if (partial.chapters.length === 0) return;
-          if (state.book?.bookUrl !== activeBook.bookUrl) return;
+      setState({
+        catalog: [],
+        chapterIndex: rawIndex,
+        chapterPos,
+        contentFetching: false,
+      });
+      beginSessionContentLoad(activeBook.bookUrl);
 
-          const idx = clampChapterIndex(rawIndex, partial.chapters.length);
-          setState({
-            catalog: normalizeCatalogChapterIndices(partial.chapters),
-            chapterIndex: idx,
-            chapterPos,
+      const runTocFetch = async () => {
+        try {
+          const chapters = await fetchChapterListDeduped(source, activeBook.tocUrl, {
+            reverseToc,
+            bookVariable: activeBook.variable,
+            onPartial: async (partial) => {
+              if (partial.chapters.length === 0) return;
+              if (state.book?.bookUrl !== activeBook.bookUrl) return;
+
+              const idx = clampChapterIndex(rawIndex, partial.chapters.length);
+              setState({
+                catalog: normalizeCatalogChapterIndices(partial.chapters),
+                chapterIndex: idx,
+                chapterPos,
+              });
+
+              if (!hasEnteredContent && rawIndex < partial.chapters.length) {
+                hasEnteredContent = true;
+                await loadTextChapter(idx);
+              } else if (hasEnteredContent) {
+                applyPartialCatalogUpdateImpl(partial.chapters, {
+                  isComplete: partial.isComplete,
+                  preserveContent: true,
+                });
+              }
+
+              if (partial.isComplete) {
+                await persistCatalogToDbIfNeeded(activeBook, partial.chapters, guestReading);
+              }
+            },
           });
 
-          if (!hasEnteredContent && rawIndex < partial.chapters.length) {
+          if (state.book?.bookUrl !== activeBook.bookUrl) return;
+
+          if (!hasEnteredContent && chapters.length > 0) {
+            const idx = clampChapterIndex(rawIndex, chapters.length);
+            setState({
+              catalog: normalizeCatalogChapterIndices(chapters),
+              chapterIndex: idx,
+              chapterPos,
+            });
             hasEnteredContent = true;
             await loadTextChapter(idx);
-          } else if (hasEnteredContent) {
-            applyPartialCatalogUpdateImpl(partial.chapters, {
-              isComplete: partial.isComplete,
-              preserveContent: true,
+            await persistCatalogToDbIfNeeded(activeBook, chapters, guestReading);
+            return;
+          }
+
+          if (!hasEnteredContent) {
+            markSessionContentReady(activeBook.bookUrl);
+            setState({
+              content: '暂无章节',
+              contentLoading: false,
+              contentFetching: false,
+              contentBootstrapping: false,
+              showContent: true,
             });
+            return;
           }
 
-          if (partial.isComplete) {
-            await persistCatalogToDbIfNeeded(activeBook, partial.chapters, guestReading);
+          if (chapters.length > 0) {
+            await persistCatalogToDbIfNeeded(activeBook, chapters, guestReading);
           }
-        },
-      });
+        } catch (e) {
+          if (state.book?.bookUrl !== activeBook.bookUrl) return;
+          const error = e instanceof Error ? e.message : '加载目录失败';
+          console.error(error, e);
+          markSessionContentReady(activeBook.bookUrl);
+          setState({
+            content: `加载失败：${error}`,
+            contentLoading: false,
+            contentFetching: false,
+            contentBootstrapping: false,
+            showContent: true,
+          });
+        }
+      };
 
-      if (!hasEnteredContent && state.catalog.length > 0) {
-        const idx = clampChapterIndex(rawIndex, state.catalog.length);
-        hasEnteredContent = true;
-        await loadTextChapter(idx);
-      } else if (!hasEnteredContent) {
-        markSessionContentReady(activeBook.bookUrl);
-        setState({
-          content: '暂无章节',
-          contentLoading: false,
-          contentFetching: false,
-          contentBootstrapping: false,
-          showContent: true,
-        });
-      }
+      void runTocFetch();
       return;
     }
 

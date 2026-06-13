@@ -14,6 +14,8 @@ import {
   pageIndexToChapterPos,
 } from '@/lib/media/image/image-paged-layout';
 import { cn } from '@/lib/utils';
+import { isMobile } from '@/lib/platform/detect';
+import { mediaViewerContentScrollClass } from '@/components/viewer/viewer-chrome';
 import type { MangaPageItem } from '@/components/viewer/image-viewer/ImageScrollViewport';
 import type { BookSource } from '@/types';
 
@@ -186,6 +188,7 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
       ref={setViewportEl}
       class={cn(
         'reader-paged-viewport relative flex h-full min-h-0 w-full items-center justify-center overflow-auto bg-black/90',
+        isMobile() && mediaViewerContentScrollClass,
         local.class,
       )}
     >

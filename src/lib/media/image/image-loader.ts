@@ -5,11 +5,14 @@
 import { isTauri } from '@/lib/platform/detect';
 import {
   fetchReaderInlineImageBytes,
-  READER_INLINE_IMAGE_DEFAULT_RETRIES,
-  READER_INLINE_IMAGE_RETRY_DELAY_MS,
   shouldFetchReaderInlineImageAsBlob,
   type CoverImageLoadOptions,
 } from '@/lib/http/cover-image-loader';
+import {
+  MANGA_IMAGE_DEFAULT_RETRIES,
+  MANGA_IMAGE_FETCH_TIMEOUT_MS,
+  MANGA_IMAGE_RETRY_DELAY_MS,
+} from '@/lib/media/image/image-fetch-config';
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import type { BookSource } from '@/types';
 import type { ReaderInlineImageFetchPriority } from '@/lib/http/reader-inline-image-queue';
@@ -38,8 +41,10 @@ export type MangaImageLoadOptions = {
   readerInlineQueuePriority?: ReaderInlineImageFetchPriority;
   /** 预取：写入磁盘，内存仅短暂持有 */
   diskOnly?: boolean;
-  /** 阅读时是否持久化到磁盘（离线 warm 应始终 true） */
+  /** 阅读时是否写入漫画磁盘缓存 */
   persistToDisk?: boolean;
+  /** 预取失败不计入冷却（避免视口外预取失败导致进入时连续报错） */
+  skipFailureGuard?: boolean;
 };
 
 const MAX_MANGA_MEMORY = isTauri() ? 256 : 64;
@@ -83,9 +88,9 @@ function toCoverFetchOptions(options?: MangaImageLoadOptions): CoverImageLoadOpt
     referer: options?.referer,
     source: options?.source,
     legadoImageHeaders: options?.legadoImageHeaders,
-    maxRetries: options?.maxRetries ?? READER_INLINE_IMAGE_DEFAULT_RETRIES,
-    retryDelayMs: options?.retryDelayMs ?? READER_INLINE_IMAGE_RETRY_DELAY_MS,
-    timeoutMs: options?.timeoutMs ?? 25_000,
+    maxRetries: options?.maxRetries ?? MANGA_IMAGE_DEFAULT_RETRIES,
+    retryDelayMs: options?.retryDelayMs ?? MANGA_IMAGE_RETRY_DELAY_MS,
+    timeoutMs: options?.timeoutMs ?? MANGA_IMAGE_FETCH_TIMEOUT_MS,
     readerInlineQueue: options?.readerInlineQueue,
     readerInlineQueuePriority: options?.readerInlineQueuePriority,
   };
@@ -169,7 +174,9 @@ async function loadMangaImageObjectUrlInner(
 
   const data = await fetchReaderInlineImageBytes(raw, toCoverFetchOptions(options));
   if (!data) {
-    rememberMangaImageLoadFailure(normalized, sid);
+    if (!options?.skipFailureGuard) {
+      rememberMangaImageLoadFailure(normalized, sid);
+    }
     return null;
   }
 
@@ -262,7 +269,9 @@ export async function cacheMangaImagesFromChapterHtml(
       readerInlineQueuePriority: 'low',
       diskOnly: true,
       persistToDisk: true,
-      maxRetries: READER_INLINE_IMAGE_DEFAULT_RETRIES,
+      maxRetries: MANGA_IMAGE_DEFAULT_RETRIES,
+      timeoutMs: MANGA_IMAGE_FETCH_TIMEOUT_MS,
+      skipFailureGuard: true,
     });
     if (url) {
       cached += 1;

@@ -49,6 +49,20 @@ export function clearMangaImageLoadFailure(
   failures.delete(guardKey(url, sourceId));
 }
 
+/** 冷却期内展示用提示；未阻断时返回 null */
+export function mangaImageLoadBlockedHint(
+  url: string,
+  sourceId?: string,
+): string | null {
+  const key = guardKey(url, sourceId);
+  const entry = failures.get(key);
+  if (!entry || entry.count < MAX_FAILURES || Date.now() >= entry.until) {
+    return null;
+  }
+  const mins = Math.max(1, Math.ceil((entry.until - Date.now()) / 60_000));
+  return `加载失败，约 ${mins} 分钟后可重试`;
+}
+
 export function clearAllMangaImageLoadFailures(): void {
   failures.clear();
 }

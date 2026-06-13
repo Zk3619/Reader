@@ -1,5 +1,6 @@
 import { createMemo } from 'solid-js';
 import { useMediaViewerChromeLayoutOverride } from '@/components/viewer/MediaViewerChromeLayoutProvider';
+import { isMobile } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import {
@@ -7,6 +8,7 @@ import {
   mediaViewerChromeFloatingIconButtonClass,
   mediaViewerChromeFloatingPillClass,
   mediaViewerChromeHitTargetClass,
+  mediaViewerContentScrollClass,
 } from '@/components/viewer/viewer-chrome';
 import { settingsState } from '@/stores/settings';
 
@@ -30,6 +32,25 @@ export function useViewerChromeLayout() {
     }
     return normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
   });
+}
+
+/** image/video/audio/file 正文滚动 gutter：移动端无滚动条与双侧预留 */
+function mediaContentScrollGutterClass() {
+  return isMobile() ? mediaViewerContentScrollClass : 'scroll-gutter-stable-both';
+}
+
+/** 四 media-viewer 正文滚动区：固定模式占 flex-1，层叠/悬浮为 absolute inset-0 */
+export function useMediaContentScrollClass(extra?: string) {
+  const layout = useViewerChromeLayout();
+  return createMemo(() =>
+    cn(
+      layout() === 'fixed'
+        ? 'min-h-0 flex-1 overflow-y-auto'
+        : 'media-viewer-main-scroll absolute inset-0 overflow-y-auto',
+      mediaContentScrollGutterClass(),
+      extra,
+    ),
+  );
 }
 
 /** 正文滚动区 class：固定模式占 flex-1，层叠/悬浮为 absolute inset-0 */
@@ -78,4 +99,11 @@ export function useMediaViewerChromeFloating() {
     isFloating() ? 'size-10 shrink-0' : '',
   );
   return { layout, isFloating, iconButtonClass, pillClass, clusterClass, inlineIconClass };
+}
+
+/** 移动端 media 正文区：隐藏滚动条且不预留 scrollbar-gutter */
+export function mediaViewerMobileContentOverflowClass(): string {
+  return isMobile()
+    ? cn(mediaViewerContentScrollClass, 'overflow-x-hidden overflow-y-auto')
+    : '';
 }

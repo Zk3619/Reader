@@ -52,7 +52,7 @@ export const MANGA_LAZY_LOAD_ROOT_MARGIN_FULL_PX = 720;
 export const MANGA_LAZY_LOAD_ROOT_MARGIN_WITH_PREFETCH_PX = 80;
 
 /**
- * 懒加载 IO 边距：有章内预取时按「页数 × 预估页高 × 系数」与预取分工。
+ * 懒加载 IO 边距：有章内预取时仅保留窄缓冲（预取负责向前拉图），无预取时用整屏边距。
  */
 export function mangaLazyLoadRootMarginPx(
   mangaPreDownloadNum: number,
@@ -61,11 +61,9 @@ export function mangaLazyLoadRootMarginPx(
   if (mangaPreDownloadNum <= 0) {
     return MANGA_LAZY_LOAD_ROOT_MARGIN_FULL_PX;
   }
-  const dynamic = Math.round(
-    mangaPreDownloadNum * estimatedPageHeightPx * 0.35,
-  );
+  const narrow = Math.round(estimatedPageHeightPx * 0.15);
   return Math.min(
-    MANGA_LAZY_LOAD_ROOT_MARGIN_FULL_PX,
-    Math.max(MANGA_LAZY_LOAD_ROOT_MARGIN_WITH_PREFETCH_PX, dynamic),
+    320,
+    Math.max(MANGA_LAZY_LOAD_ROOT_MARGIN_WITH_PREFETCH_PX, narrow),
   );
 }

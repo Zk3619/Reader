@@ -5,7 +5,7 @@
  * - 大目录使用虚拟列表，打开抽屉不阻塞主线程
  */
 
-import { createEffect, createMemo } from 'solid-js';
+import { createEffect, createMemo, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
 import {
@@ -97,7 +97,21 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
     });
   });
 
+  const catalogLoading = () => {
+    const s = textViewerStore.state;
+    return (
+      s.catalog.length === 0 &&
+      (s.contentBootstrapping || (s.contentLoading && !s.showContent))
+    );
+  };
+
   return (
+    <Show
+      when={!catalogLoading()}
+      fallback={
+        <p class="px-4 py-8 text-center text-sm text-muted-foreground">正在加载目录…</p>
+      }
+    >
     <VirtualChapterList
       class={cn('reader-catalog-scroll', props.drawerBottom && 'px-2')}
       count={rows().length}
@@ -174,5 +188,6 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
         );
       }}
     </VirtualChapterList>
+    </Show>
   );
 }

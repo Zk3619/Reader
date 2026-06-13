@@ -980,7 +980,7 @@ export function BookReader(props: BookReaderProps) {
           showNativeDragHandle={false}
         >
           <ViewerAppDrawerHeader title="阅读设置" />
-          <ViewerAppDrawerBody class="px-4 pb-2 pt-1 overflow-y-auto scroll-gutter-stable-both mb-4">
+          <ViewerAppDrawerBody class="mb-4 min-w-0 flex-1 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-4 pb-2 pt-1">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
               showReadWidth={() => isWideScreen() || !isMobile()}

@@ -9,10 +9,13 @@ import {
   evictCoverImageMemoryCache,
   isCrossOriginCoverUrl,
   loadCoverImageObjectUrl,
-  READER_INLINE_IMAGE_DEFAULT_RETRIES,
-  READER_INLINE_IMAGE_RETRY_DELAY_MS,
   shouldFetchReaderInlineImageAsBlob,
 } from '@/lib/http/cover-image-loader';
+import {
+  MANGA_IMAGE_DEFAULT_RETRIES,
+  MANGA_IMAGE_FETCH_TIMEOUT_MS,
+  MANGA_IMAGE_RETRY_DELAY_MS,
+} from '@/lib/media/image/image-fetch-config';
 import {
   evictMangaImageMemoryCache,
   loadMangaImageObjectUrl,
@@ -26,6 +29,11 @@ import {
   MANGA_SCROLL_ROOT_ATTR,
   resolveMangaScrollIntersectionRoot,
 } from '@/lib/media/image/image-scroll-root';
+import {
+  clearMangaImageLoadFailure,
+  isMangaImageLoadBlocked,
+  mangaImageLoadBlockedHint,
+} from '@/lib/media/image/image-load-guard';
 
 export type ReaderImageLoadPhase = 'loading' | 'ready' | 'error';
 
@@ -58,6 +66,29 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
   const [forceBlobFetch, setForceBlobFetch] = createSignal(false);
   const [inView, setInView] = createSignal(!(input.getDeferUntilVisible?.() ?? false));
   const [containerEl, setContainerEl] = createSignal<HTMLDivElement | undefined>();
+  /** 本轮加载失败后暂停自动重试（滚动进出视口不重复拉取/闪占位） */
+  const [failedNorm, setFailedNorm] = createSignal<string | null>(null);
+  const [readyGeneration, setReadyGeneration] = createSignal(-1);
+
+  const sourceId = () =>
+    input.getSource?.()?.sourceUrl ?? input.getSource?.()?.sourceName;
+
+  const failureHint = (norm: string) => {
+    const blocked = mangaImageLoadBlockedHint(norm, sourceId());
+    if (blocked) return blocked;
+    const retries = usesMangaCache()
+      ? MANGA_IMAGE_DEFAULT_RETRIES
+      : 3;
+    return !isTauri() && isCrossOriginCoverUrl(norm)
+      ? '跨域图片加载失败（可尝试桌面版 Tauri 或刷新本章）'
+      : `加载失败，已自动重试 ${retries} 次`;
+  };
+
+  const markLoadFailed = (norm: string) => {
+    setFailedNorm(norm);
+    setPhase('error');
+    setStatusHint(failureHint(norm));
+  };
 
   const legadoImage = () => {
     const parsed = parseLegadoUrlWithOptions(input.getSrc()?.trim() ?? '');
@@ -106,9 +137,11 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
     referer: input.getReferer?.(),
     source: input.getSource?.() ?? null,
     legadoImageHeaders: legadoImage().headers,
-    maxRetries: READER_INLINE_IMAGE_DEFAULT_RETRIES,
-    retryDelayMs: READER_INLINE_IMAGE_RETRY_DELAY_MS,
-    timeoutMs: 30_000,
+    maxRetries: usesMangaCache() ? MANGA_IMAGE_DEFAULT_RETRIES : 3,
+    retryDelayMs: usesMangaCache()
+      ? MANGA_IMAGE_RETRY_DELAY_MS
+      : 900,
+    timeoutMs: usesMangaCache() ? MANGA_IMAGE_FETCH_TIMEOUT_MS : 30_000,
     readerInlineQueue: input.getUseFetchQueue?.() ?? false,
     readerInlineQueuePriority: 'high' as const,
     bookUrl: input.getBookUrl?.(),
@@ -119,13 +152,16 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
 
   const retry = () => {
     const norm = normalizedSrc();
+    const sid = sourceId();
     if (norm) {
       if (usesMangaCache()) {
         evictMangaImageMemoryCache(norm, input.getSource?.() ?? null);
+        clearMangaImageLoadFailure(norm, sid);
       } else {
         evictCoverImageMemoryCache(norm, input.getSource?.() ?? null);
       }
     }
+    setFailedNorm(null);
     setForceBlobFetch(true);
     setLoadGeneration((g) => g + 1);
   };
@@ -144,9 +180,12 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
       ? document.querySelector(input.getScrollRootSelector()!)
       : resolveMangaScrollIntersectionRoot(el, rootAttr);
 
-    const rootMarginPx = Math.max(
-      160,
-      input.getLazyLoadRootMarginPx?.() ?? 480,
+    const rootMarginPx = Math.min(
+      320,
+      Math.max(
+        120,
+        input.getLazyLoadRootMarginPx?.() ?? 480,
+      ),
     );
     const markInViewIfVisible = () => {
       const elRect = el.getBoundingClientRect();
@@ -172,13 +211,12 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
             setInView(true);
             continue;
           }
+          setInView(false);
           if (!input.getDeferUntilVisible?.() || !usesMangaCache()) continue;
           const norm = normalizedSrc();
-          if (norm) {
-            evictMangaImageMemoryCache(norm, input.getSource?.() ?? null);
-          }
+          if (!norm || failedNorm() === norm) continue;
+          evictMangaImageMemoryCache(norm, input.getSource?.() ?? null);
           setBlobSrc(null);
-          setInView(false);
         }
       },
       {
@@ -216,31 +254,53 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
       }),
       (cur) => {
         const { norm } = cur;
-        setStatusHint('');
-
         if (!norm) {
           setBlobSrc(null);
+          setFailedNorm(null);
           setPhase('error');
           setStatusHint('无效图片地址');
           return;
         }
 
+        if (failedNorm() && failedNorm() !== norm) {
+          setFailedNorm(null);
+        }
+
         if (cur.defer && !cur.visible) {
           setBlobSrc(null);
+          if (failedNorm() === norm) {
+            setPhase('error');
+            return;
+          }
           setPhase('loading');
           setStatusHint('滚动到此处后加载');
           return;
         }
 
+        if (failedNorm() === norm) {
+          setPhase('error');
+          setStatusHint(failureHint(norm));
+          return;
+        }
+
+        if (usesMangaCache() && isMangaImageLoadBlocked(norm, sourceId())) {
+          markLoadFailed(norm);
+          return;
+        }
+
+        setStatusHint('');
+
         if (norm.startsWith('data:')) {
           setBlobSrc(norm);
           setPhase('ready');
+          setReadyGeneration(cur.gen);
           return;
         }
 
         if (!usesBlobFetch()) {
           setBlobSrc(null);
           setPhase('ready');
+          setReadyGeneration(cur.gen);
           return;
         }
 
@@ -255,6 +315,7 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
         if (peeked) {
           setBlobSrc(peeked);
           setPhase('ready');
+          setReadyGeneration(cur.gen);
           setStatusHint('');
           return;
         }
@@ -266,16 +327,13 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
         void loadPromise.then((url) => {
           if (cancelled) return;
           if (url) {
+            setFailedNorm(null);
             setBlobSrc(url);
             setPhase('ready');
+            setReadyGeneration(cur.gen);
             setStatusHint('');
           } else {
-            setPhase('error');
-            setStatusHint(
-              !isTauri() && isCrossOriginCoverUrl(norm)
-                ? '跨域图片加载失败（可尝试桌面版 Tauri 或刷新本章）'
-                : `加载失败，已自动重试 ${READER_INLINE_IMAGE_DEFAULT_RETRIES} 次`,
-            );
+            markLoadFailed(norm);
           }
         });
 
@@ -287,7 +345,11 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
   );
 
   const onImgError = () => {
-    setPhase('error');
+    if (phase() !== 'ready' || readyGeneration() !== loadGeneration()) return;
+    if (input.getDeferUntilVisible?.() && !inView()) return;
+    const norm = normalizedSrc();
+    if (!norm) return;
+    markLoadFailed(norm);
     setStatusHint('图片显示失败，点击重试');
   };
 
@@ -298,5 +360,6 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
     retry,
     bindContainer,
     onImgError,
+    isLoadFailureSuspended: () => failedNorm() !== null,
   };
 }

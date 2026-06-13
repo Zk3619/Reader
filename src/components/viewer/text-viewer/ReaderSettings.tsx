@@ -4,8 +4,8 @@
  */
 
 import { For, Show, onMount, createSignal } from 'solid-js';
-import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { textViewerStore } from '@/stores/viewer';
+import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import type {
   TextViewerUiConfig as ReadConfig,
   TextViewerDualPageMode as ReaderDualPageMode,
@@ -90,7 +90,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
   const dualPageMiddleVisible = () => config().dualPage !== 'off';
 
   return (
-    <div class="flex flex-1 flex-col gap-6 overflow-y-auto scroll-gutter-stable-both pt-4 pb-2 mb-4">
+    <div class="flex w-full min-w-0 flex-col gap-6 pt-4 pb-2">
       <div class="space-y-3">
         <Label>顶栏与底栏布局</Label>
         <p class="text-xs text-muted-foreground">
@@ -101,6 +101,13 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           value={() => config().viewerChromeLayout}
           onChange={(layout) => setConfig({ viewerChromeLayout: layout })}
         />
+      </div>
+
+      <div class="space-y-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
+        <ChapterBodyPrefetchControls viewer="text" />
+        <p class="text-xs text-muted-foreground">
+          与全局设置「阅读体验 → 章节正文预下载」同步；容量与清理见「存储与缓存 → 阅读缓存」。
+        </p>
       </div>
 
       {/* 主题 */}
@@ -572,7 +579,6 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </div>
       </Show>
 
-      <ChapterBodyPrefetchControls viewer="text" />
 
       {/* 分页引擎（调试） */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
@@ -589,7 +595,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           </Show>
           <p class="text-xs text-muted-foreground">
             canvas：纯文本 Canvas 预排；dom：HTML/插图 DOM 测量；canvas+dom：Canvas 初算后经 DOM 精修。
-            正文预下载见上方「章节正文预下载」；全局容量与清理见设置页「章节正文缓存」。
+            正文预下载见设置页「阅读体验」；全局容量与清理见设置页「章节正文缓存」。
           </p>
         </div>
       </Show>

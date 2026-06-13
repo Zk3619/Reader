@@ -12,10 +12,11 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
+import { cn } from '@/lib/utils';
 import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
+import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
@@ -41,7 +42,9 @@ function isPdfUrl(url: string): boolean {
 export function FileViewerPage(props: FileViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
-  const mainStageClass = useMediaViewerMainStageClass('flex flex-col bg-muted/30');
+  const mainStageClass = useMediaViewerMainStageClass(
+    cn('flex flex-col bg-muted/30', mediaViewerMobileContentOverflowClass()),
+  );
 
   const book = () => viewerStore.state.book;
   const catalog = () => viewerStore.state.catalog;
@@ -57,6 +60,20 @@ export function FileViewerPage(props: FileViewerPageProps) {
     const next = chapterIndex() + delta;
     if (next < 0 || next >= catalog().length) return;
     await viewerStore.loadChapter(next);
+  };
+
+  const catalogProgressValue = () => {
+    const total = catalog().length;
+    if (total <= 1) return 0;
+    return chapterIndex() / (total - 1);
+  };
+
+  const handleCatalogProgressChange = (values: number[]) => {
+    const total = catalog().length;
+    if (total <= 1) return;
+    const p = Math.max(0, Math.min(1, values[0] ?? 0));
+    const idx = Math.round(p * (total - 1));
+    if (idx !== chapterIndex()) void viewerStore.loadChapter(idx);
   };
 
   return (
@@ -85,10 +102,19 @@ export function FileViewerPage(props: FileViewerPageProps) {
             }
             footer={
               <MediaViewerFooter>
-                <MediaViewerChapterNavFooter
+                <MediaViewerProgressBottomChrome
                   chapterIndex={chapterIndex()}
                   catalogLength={catalog().length}
                   loading={loading()}
+                  chapterTitle={chapterTitle()}
+                  statusMeta={
+                    <span>
+                      {chapterIndex() + 1} / {catalog().length} 章
+                    </span>
+                  }
+                  progressValue={catalogProgressValue()}
+                  onProgressChange={handleCatalogProgressChange}
+                  showProgressSlider={catalog().length > 1}
                   onPrev={() => void goChapter(-1)}
                   onNext={() => void goChapter(1)}
                 />

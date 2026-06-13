@@ -62,3 +62,6 @@ export const mediaViewerMainStageClass = 'media-viewer-main-stage absolute inset
 
 export const mediaViewerMainScrollClass =
   'media-viewer-main-scroll absolute inset-0 overflow-y-auto';
+
+/** 四 media-viewer 移动端正文滚动：无滚动条、无双侧 gutter 预留 */
+export const mediaViewerContentScrollClass = 'media-viewer-content-scroll';

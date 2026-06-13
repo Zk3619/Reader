@@ -27,10 +27,11 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
+import { cn } from '@/lib/utils';
 import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
+import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
 import { AudioViewerOfflineCacheDialog } from '@/components/viewer/audio/AudioViewerOfflineCacheDialog';
 import { AudioSkipCreditsDialog } from '@/components/viewer/audio/AudioSkipCreditsDialog';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
@@ -64,7 +65,6 @@ import {
 } from '@/lib/media/audio/play-mode';
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
 import { AudioPlayMode, MAX_PLAY_SPEED, MIN_PLAY_SPEED } from '@/lib/media/audio/types';
-import { cn } from '@/lib/utils';
 
 export interface AudioViewerPageProps {
   onClose: () => void;
@@ -104,7 +104,10 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const [speedDraft, setSpeedDraft] = createSignal(1);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const mainStageClass = useMediaViewerMainStageClass(
-    'flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6',
+    cn(
+      'flex flex-col items-center justify-center gap-4 bg-linear-to-b from-background via-background to-muted/40 px-6',
+      mediaViewerMobileContentOverflowClass(),
+    ),
   );
 
   const book = () => viewerStore.state.book;
@@ -215,6 +218,20 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
 
   const SEEK_STEP_SEC = 15;
 
+  const catalogProgressValue = () => {
+    const total = catalog().length;
+    if (total <= 1) return 0;
+    return chapterIndex() / (total - 1);
+  };
+
+  const handleCatalogProgressChange = (values: number[]) => {
+    const total = catalog().length;
+    if (total <= 1) return;
+    const p = Math.max(0, Math.min(1, values[0] ?? 0));
+    const idx = Math.round(p * (total - 1));
+    if (idx !== chapterIndex()) void goChapterTo(idx);
+  };
+
   return (
     <>
       <MediaViewerShell entryVisible={props.entryVisible}>
@@ -245,10 +262,19 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
             }
             footer={
               <MediaViewerFooter>
-                <MediaViewerChapterNavFooter
+                <MediaViewerProgressBottomChrome
                   chapterIndex={chapterIndex()}
                   catalogLength={catalog().length}
                   loading={loading()}
+                  chapterTitle={chapterTitle()}
+                  statusMeta={
+                    <span>
+                      {chapterIndex() + 1} / {catalog().length} 章
+                    </span>
+                  }
+                  progressValue={catalogProgressValue()}
+                  onProgressChange={handleCatalogProgressChange}
+                  showProgressSlider={catalog().length > 1}
                   onPrev={() => void goChapterDelta(-1)}
                   onNext={() => void goChapterDelta(1)}
                 />

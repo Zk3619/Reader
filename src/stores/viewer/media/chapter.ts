@@ -3,6 +3,7 @@
  */
 
 import * as chaptersDb from '@/lib/database/chapters';
+import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
 import * as booksDb from '@/lib/database/books';
 import * as sourcesDb from '@/lib/database/sources';
 import { isLocalBook, getLocalContent, readLocalBookContent } from '@/lib/local-book';
@@ -18,6 +19,7 @@ import {
   toNewBookChapter,
 } from '@/lib/book-source/chapters';
 import { updateBookChapterMeta } from '@/lib/bookshelf/save-book-to-shelf';
+import { ensureShelfBookReadyForReading } from '@/lib/bookshelf/save-book-to-shelf';
 import { MediaKind } from '@/lib/book-source/book-type';
 import {
   warnChapterCacheHit,
@@ -102,7 +104,7 @@ export async function loadChapterRaw(
 
   if (!forceRefresh) {
     const cached = await readCachedChapterRaw(book.bookUrl, index);
-    if (cached?.trim()) {
+    if (cached?.trim() && !isLegadoBrowserPlaceholderContent(cached)) {
       warnChapterCacheHit(index, cached, chapter.title);
       return cached;
     }
@@ -169,30 +171,42 @@ export async function openMediaBookWithKind(
   }
   setState({ guestReading });
 
-  const rawIndex = book.durChapterIndex ?? 0;
-  const chapterPos = book.durChapterPos ?? 0;
-  const reverseToc = book.readConfig?.reverseToc === true;
-
-  let catalogToUse = options?.initialCatalog?.length ? options.initialCatalog : [];
-  if (!catalogToUse.length && !guestReading) {
-    const inDb = await chaptersDb.getChapterList(book.bookUrl);
+  let activeBook = book;
+  if (!guestReading && !isLocalBook(book)) {
+    activeBook = await ensureShelfBookReadyForReading(book);
     if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
       setState({ loading: false });
       return;
     }
-    if (inDb.length > 0 && !shelfCachedChapterListLooksStale(inDb, book)) {
+    setState({ book: activeBook });
+  }
+
+  const rawIndex = activeBook.durChapterIndex ?? 0;
+  const chapterPos = activeBook.durChapterPos ?? 0;
+  const reverseToc = activeBook.readConfig?.reverseToc === true;
+
+  let catalogToUse = options?.initialCatalog?.length ? options.initialCatalog : [];
+  if (!catalogToUse.length && !guestReading) {
+    const inDb = await chaptersDb.getChapterList(activeBook.bookUrl);
+    if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
+      setState({ loading: false });
+      return;
+    }
+    if (inDb.length > 0 && !shelfCachedChapterListLooksStale(inDb, activeBook)) {
       catalogToUse = inDb;
     }
   }
 
   const source =
-    !isLocalBook(book) && book.origin ? await sourcesDb.getSource(book.origin) : null;
+    !isLocalBook(activeBook) && activeBook.origin
+      ? await sourcesDb.getSource(activeBook.origin)
+      : null;
 
-  if (catalogToUse.length === 0 && source && book.tocUrl) {
-    const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
+  if (catalogToUse.length === 0 && source && activeBook.tocUrl) {
+    const chapters = await fetchChapterListDeduped(source, activeBook.tocUrl, {
       reverseToc,
-      bookUrl: book.bookUrl,
-      bookVariable: book.variable,
+      bookUrl: activeBook.bookUrl,
+      bookVariable: activeBook.variable,
       onPartial: async (partial) => {
         if (partial.chapters.length === 0) return;
         if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) return;
@@ -202,7 +216,7 @@ export async function openMediaBookWithKind(
           await loadChapter(idx);
         }
         if (partial.isComplete) {
-          await persistCatalogToDb(book, partial.chapters, guestReading);
+          await persistCatalogToDb(activeBook, partial.chapters, guestReading);
         }
       },
     });
@@ -238,7 +252,7 @@ export async function openMediaBookWithKind(
     setState({ loading: false });
     return;
   }
-  await persistCatalogToDb(book, catalogToUse, guestReading);
+  await persistCatalogToDb(activeBook, catalogToUse, guestReading);
   if (!isMediaOpenStillActive(book.bookUrl, kind, openSeq)) {
     setState({ loading: false });
     return;

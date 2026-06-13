@@ -168,6 +168,8 @@ export function MangaPageImg(props: MangaPageImgProps) {
 
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 
+            load.isLoadFailureSuspended() && 'opacity-90',
+
           )}
 
           onClick={(e) => {
@@ -184,7 +186,16 @@ export function MangaPageImg(props: MangaPageImgProps) {
 
           <span class="text-sm text-muted-foreground">图片加载失败</span>
 
-          <span class="text-[11px] opacity-80">{load.statusHint() || '点击重试'}</span>
+          <Show
+            when={!load.isLoadFailureSuspended()}
+            fallback={
+              <span class="text-[11px] opacity-80">
+                {load.statusHint() || '请稍后重试'}
+              </span>
+            }
+          >
+            <span class="text-[11px] opacity-80">{load.statusHint() || '点击重试'}</span>
+          </Show>
 
         </button>
 

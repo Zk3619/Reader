@@ -6,7 +6,11 @@ import * as chaptersDb from '@/lib/database/chapters';
 import { deleteCachedChapter } from '@/lib/chapter-cache/storage';
 import { MediaKind } from '@/lib/book-source/book-type';
 import { clearChapterContentPool } from '@/lib/chapter-cache/chapter-content-pool';
-import { cancelPrefetchOnRead } from '@/lib/chapter-cache/prefetch';
+import {
+  cancelPrefetchOnRead,
+  restartChapterBodyCachePrefetch,
+  subscribeChapterPrefetchSettingsChange,
+} from '@/lib/chapter-cache/prefetch';
 import { isLocalBook } from '@/lib/local-book';
 import { flushReadingSession } from '@/lib/media/text/reading-session';
 import type { Book, BookChapter } from '@/types';
@@ -250,3 +254,10 @@ export const viewerStore = {
     await loadTextChapter(chapterIndex);
   },
 };
+
+subscribeChapterPrefetchSettingsChange(() => {
+  const book = state.book;
+  if (!book || state.guestReading) return;
+  if (state.catalog.length === 0) return;
+  restartChapterBodyCachePrefetch(book, state.catalog, state.chapterIndex);
+});

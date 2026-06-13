@@ -21,10 +21,11 @@ import {
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
+import { isMobile } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
 import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerChapterNavFooter } from '@/components/viewer/MediaViewerChapterNavFooter';
+import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
@@ -32,7 +33,6 @@ import {
   ViewerAppDrawerHeader,
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
-import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ImageViewerOfflineCacheDialog } from '@/components/viewer/image-viewer/ImageViewerOfflineCacheDialog';
@@ -148,6 +148,8 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   const mangaPreDownloadNum = () => uiConfig().mangaPreDownloadNum;
   const isPagedMode = () => readingMode() === 'paged';
 
+  const chapterPos = () => viewerStore.state.chapterPos;
+
   const chapterProgressPercent = () => {
     const total = totalPages();
     if (total <= 0) return 0;
@@ -156,7 +158,9 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   };
 
   const contentMaxWidthStyle = () => ({
-    'max-width': `${IMAGE_VIEWER_CONTENT_MAX_REM * uiConfig().contentScale}rem`,
+    'max-width': isMobile()
+      ? '100%'
+      : `${IMAGE_VIEWER_CONTENT_MAX_REM * uiConfig().contentScale}rem`,
   });
 
   onMount(() => {
@@ -373,34 +377,24 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
             }
             footer={
               <MediaViewerFooter>
-                <MediaViewerChapterNavFooter
+                <MediaViewerProgressBottomChrome
                   chapterIndex={chapterIndex()}
                   catalogLength={catalog().length}
                   loading={loading()}
+                  chapterTitle={chapterTitle()}
+                  statusMeta={
+                    <Show when={totalPages() > 0}>
+                      <span>
+                        {viewPage()} / {totalPages()} 页
+                      </span>
+                    </Show>
+                  }
+                  chapterProgressPercent={chapterProgressPercent()}
+                  progressValue={chapterPos()}
+                  onProgressChange={handleChapterProgressChange}
+                  showProgressSlider={totalPages() > 1}
                   onPrev={handlePrevChapter}
                   onNext={handleNextChapter}
-                  center={
-                    <div class="flex min-w-0 flex-1 flex-col items-center gap-1 px-2">
-                      <span class="text-xs tabular-nums text-muted-foreground">
-                        {totalPages() > 0 ? `${viewPage()} / ${totalPages()} 页` : ''}
-                      </span>
-                      <Show when={totalPages() > 1}>
-                        <Slider
-                          class="h-4 w-full max-w-xs"
-                          value={[chapterProgressPercent() / 100]}
-                          minValue={0}
-                          maxValue={1}
-                          step={0.001}
-                          onChange={handleChapterProgressChange}
-                        >
-                          <SliderTrack>
-                            <SliderFill />
-                            <SliderThumb />
-                          </SliderTrack>
-                        </Slider>
-                      </Show>
-                    </div>
-                  }
                 />
               </MediaViewerFooter>
             }

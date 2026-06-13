@@ -68,6 +68,7 @@ export async function applyChangeSource(
 
   const tocUrl = info.tocUrl?.trim() || hit.tocUrl || hit.bookUrl;
   const chapters = await fetchChapterListDeduped(source, tocUrl, {
+    persistTocFetch: true,
     reverseToc: oldBook.readConfig?.reverseToc === true,
     bookVariable: oldBook.variable,
   });
