@@ -36,6 +36,52 @@ interface PrefetchSession {
 
 const sessions = new Map<string, PrefetchSession>();
 
+type ChapterPrefetchSettingsListener = () => void;
+const prefetchSettingsListeners = new Set<ChapterPrefetchSettingsListener>();
+
+/** 章节正文预下载配置变更（向前/向后章数） */
+export function subscribeChapterPrefetchSettingsChange(
+  listener: ChapterPrefetchSettingsListener,
+): () => void {
+  prefetchSettingsListeners.add(listener);
+  return () => prefetchSettingsListeners.delete(listener);
+}
+
+function notifyChapterPrefetchSettingsChange(): void {
+  for (const listener of prefetchSettingsListeners) {
+    listener();
+  }
+}
+
+function clearPrefetchSessionState(bookUrl: string): void {
+  cancelPrefetchOnRead(bookUrl);
+  for (const key of sessionDone) {
+    if (key.startsWith(`${bookUrl}#`)) {
+      sessionDone.delete(key);
+    }
+  }
+  for (const key of sessionFailCount.keys()) {
+    if (key.startsWith(`${bookUrl}#`)) {
+      sessionFailCount.delete(key);
+    }
+  }
+}
+
+/** 预下载设置变更后：取消进行中的任务并按新配置重新调度 */
+export function restartChapterBodyCachePrefetch(
+  book: Book,
+  catalog: BookChapter[],
+  currentIndex: number,
+): void {
+  if (book.origin === 'local' || book.origin?.startsWith('local::')) return;
+  clearPrefetchSessionState(book.bookUrl);
+  scheduleChapterBodyCachePrefetch(book, catalog, currentIndex);
+}
+
+export function onChapterPrefetchSettingsSaved(): void {
+  notifyChapterPrefetchSettingsChange();
+}
+
 function taskKey(bookUrl: string, index: number): string {
   return `${bookUrl}#${index}`;
 }

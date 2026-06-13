@@ -146,6 +146,17 @@ export async function saveChapterCacheSettings(
   };
   cached = next;
   await setStorage(STORAGE_KEY, next);
+  const prefetchChanged =
+    (patch.forwardPrefetchNum !== undefined &&
+      patch.forwardPrefetchNum !== current.forwardPrefetchNum) ||
+    (patch.backwardPrefetchNum !== undefined &&
+      patch.backwardPrefetchNum !== current.backwardPrefetchNum);
+  if (prefetchChanged) {
+    const { onChapterPrefetchSettingsSaved } = await import(
+      '@/lib/chapter-cache/prefetch'
+    );
+    onChapterPrefetchSettingsSaved();
+  }
   return next;
 }
 

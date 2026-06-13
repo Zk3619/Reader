@@ -22,6 +22,9 @@ export { useChapterBodyPrefetchSettings } from '@/lib/chapter-cache/use-chapter-
 export {
   prefetchChaptersOnRead,
   scheduleChapterBodyCachePrefetch,
+  restartChapterBodyCachePrefetch,
+  subscribeChapterPrefetchSettingsChange,
+  onChapterPrefetchSettingsSaved,
   cancelPrefetchOnRead,
   collectPrefetchIndices,
 } from '@/lib/chapter-cache/prefetch';

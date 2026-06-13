@@ -20,6 +20,7 @@ import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import { SaveBinaryFileCancelledError } from '@/lib/export/save-binary-file';
 import { DEFAULT_CACHE_EXPORT_OPTIONS, type CacheExportOptions } from '@/lib/export/cache-export-types';
 import type { Book } from '@/types';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 
 export type CacheExportProgressState = {
   phase: string;
@@ -41,13 +42,14 @@ export async function runCacheExport(
   options: CacheExportOptions,
   onDialogProgress?: (state: CacheExportProgressState) => void,
 ): Promise<{ exported: number; kindLabel: string }> {
-  const merged = { ...DEFAULT_CACHE_EXPORT_OPTIONS, ...options };
-  const onProgress: ExportProgressCallback = createExportProgressReporter(
-    book.name,
-    onDialogProgress,
-  );
+  return withIgnoredPageNavigationAbort(async () => {
+    const merged = { ...DEFAULT_CACHE_EXPORT_OPTIONS, ...options };
+    const onProgress: ExportProgressCallback = createExportProgressReporter(
+      book.name,
+      onDialogProgress,
+    );
 
-  try {
+    try {
     if (merged.kind === 'text') {
       const { exported } = await exportBook(book, {
         startIndex: merged.startIndex,
@@ -107,4 +109,5 @@ export async function runCacheExport(
     finishExportProgressToast(false, '');
     throw e;
   }
+  });
 }

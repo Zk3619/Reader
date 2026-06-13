@@ -28,6 +28,7 @@ import {
 } from '@/lib/export/export-images';
 import { readMangaImageFromDisk } from '@/lib/media/image/image-disk-cache';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 import type { Book, BookChapter, BookSource } from '@/types';
 
 const DEFAULT_CONCURRENCY = 2;
@@ -199,7 +200,7 @@ function pump(): void {
     activeJobs.set(job.bookUrl, job);
     running += 1;
     syncActiveUrls();
-    void runBookJob(job)
+    void withIgnoredPageNavigationAbort(() => runBookJob(job))
       .then((result) => notifyBookDownloadFinished(job, result))
       .finally(() => {
         activeJobs.delete(job.bookUrl);

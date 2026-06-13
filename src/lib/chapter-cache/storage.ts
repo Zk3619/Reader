@@ -183,10 +183,13 @@ export async function fetchAndCacheChapterContent(
       ? { cacheIndex: cacheIndexOrOptions }
       : (cacheIndexOrOptions ?? {});
   const { getContent } = await import('@/lib/book-source/content');
+  const { isLegadoBrowserPlaceholderContent } = await import(
+    '@/lib/book-source/extract-rule-content'
+  );
   const raw = await getContent(source, chapter, nextChapterUrl, book, {
     skipReplaceRules: true,
   });
-  if (raw) {
+  if (raw && !isLegadoBrowserPlaceholderContent(raw)) {
     const idx =
       options.cacheIndex ?? catalogCacheIndex(chapter.index, chapter);
     await writeCachedChapterRaw(book, idx, raw, {

@@ -170,7 +170,7 @@ export function ChapterCacheSetting() {
     <div class="rounded-2xl border border-border/50 bg-card p-6">
       <h3 class="mb-2 font-semibold text-foreground">阅读缓存</h3>
       <p class="mb-4 text-sm text-muted-foreground">
-        章节正文（文本/漫画 HTML/音视频章页面等）与漫画图片分开展示占用。阅读时自动写入的正文受下方容量与保留期约束；书架「离线缓存」与阅读器缓存按钮写入的内容归用户管理，不受自动清理影响。大章节正文（&gt;512KB）会落盘到应用数据目录。向前/向后预下载在各阅读器设置中配置。
+        章节正文（文本/漫画 HTML/音视频章页面等）与漫画图片分开展示占用。阅读时自动写入的正文受下方容量与保留期约束；书架「离线缓存」与阅读器缓存按钮写入的内容归用户管理，不受自动清理影响。大章节正文（&gt;512KB）会落盘到应用数据目录。向前/向后预下载见「阅读体验」中的章节正文预下载。
       </p>
 
       <Show when={panel.error()}>
