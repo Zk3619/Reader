@@ -48,6 +48,8 @@ function mimeForExt(ext: string): string {
       return 'font/woff';
     case 'woff2':
       return 'font/woff2';
+    case 'md':
+      return 'text/markdown; charset=utf-8';
     default:
       return 'application/octet-stream';
   }

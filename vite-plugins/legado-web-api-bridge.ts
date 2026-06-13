@@ -8,6 +8,7 @@ export type LegadoBridgeRequest = {
   method: string;
   body: string | null;
   query: Record<string, string>;
+  headers?: Record<string, string>;
 };
 
 type PendingBridge = {

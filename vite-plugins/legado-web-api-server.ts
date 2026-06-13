@@ -11,6 +11,8 @@ import {
   enqueueLegadoBridgeRequest,
   registerLegadoBridgeSseClient,
 } from './legado-web-api-bridge';
+import { multipartToAddLocalBookJson, parseMultipartFormData } from './multipart-node';
+import { setLegadoWsAuth, startLegadoWsServer, stopLegadoWsServer } from './legado-web-ws-server';
 import {
   buildApiInfoJson,
   buildNetAddressesJson,
@@ -20,10 +22,12 @@ import {
 const LEGADO_API_PATHS = new Set([
   '/getBookSource', '/getBookSources', '/getBookshelf', '/getChapterList', '/refreshToc',
   '/getBookContent', '/cover', '/image', '/getReadConfig', '/getRssSource', '/getRssSources',
-  '/getReplaceRules', '/backupPreview', '/backup', '/saveBookSource', '/saveBookSources',
+  '/getRssSorts', '/getRssArticles', '/refreshRssArticles', '/getRssArticleRead', '/clearRssArticles',
+  '/getRssReadRecords', '/getRssStars', '/deleteRssReadRecord', '/saveRssStar', '/deleteRssStar',
+  '/getReplaceRules', '/backupPreview', '/backup', '/restoreBackup', '/saveBookSource', '/saveBookSources',
   '/deleteBookSources', '/saveBook', '/deleteBook', '/saveBookProgress', '/addLocalBook',
   '/saveReadConfig', '/saveRssSource', '/saveRssSources', '/deleteRssSources',
-  '/saveReplaceRule', '/deleteReplaceRule', '/testReplaceRule',
+  '/saveReplaceRule', '/deleteReplaceRule', '/testReplaceRule', '/debugBookSource', '/debugRssSource',
 ]);
 
 function normalizeLegadoApiPath(path: string): string {
@@ -38,13 +42,36 @@ function isLegadoWebApiPath(path: string): boolean {
 const BRIDGE_STREAM = '/__legado_bridge/stream';
 const BRIDGE_COMPLETE = '/__legado_bridge/complete';
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBodyBuffer(req: IncomingMessage, max = 64 * 1024 * 1024): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    let total = 0;
+    req.on('data', (c) => {
+      const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
+      total += buf.length;
+      if (total > max) {
+        reject(new Error('body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(buf);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return readBodyBuffer(req).then((b) => b.toString('utf8'));
+}
+
+function collectHeaders(req: IncomingMessage): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === 'string') out[k.toLowerCase()] = v;
+    else if (Array.isArray(v)) out[k.toLowerCase()] = v[0] ?? '';
+  }
+  return out;
 }
 
 function parseQuery(url: string): Record<string, string> {
@@ -137,8 +164,19 @@ async function handleLegadoHttpRequest(
 
   let body: string | null = null;
   if (method === 'POST') {
-    const text = await readBody(req);
-    body = text.trim() ? text : null;
+    const contentType = req.headers['content-type'] ?? '';
+    if (pathOnly === '/addLocalBook' && contentType.includes('multipart/form-data')) {
+      const buf = await readBodyBuffer(req);
+      const fields = parseMultipartFormData(buf, contentType);
+      body = multipartToAddLocalBookJson(fields);
+    } else if (pathOnly === '/restoreBackup' && contentType.includes('multipart/form-data')) {
+      const buf = await readBodyBuffer(req);
+      const fields = parseMultipartFormData(buf, contentType);
+      body = multipartToAddLocalBookJson(fields);
+    } else {
+      const text = await readBody(req);
+      body = text.trim() ? text : null;
+    }
   }
 
   const id = randomUUID();
@@ -149,6 +187,7 @@ async function handleLegadoHttpRequest(
       method,
       body,
       query: parseQuery(rawUrl),
+      headers: collectHeaders(req),
     });
     const parsed = JSON.parse(serialized) as {
       kind?: string;
@@ -252,6 +291,9 @@ function startLegadoHttpServer(port: number): void {
     console.warn('[legado-web-api] 启动失败', e);
     httpServer = null;
   });
+  if (port < 65535) {
+    startLegadoWsServer(port + 1);
+  }
 }
 
 export function legadoWebApiServer(): Plugin {

@@ -3,7 +3,6 @@
  */
 
 import {
-  addLocalBookApi,
   deleteBookApi,
   getBookContentApi,
   getBookshelfApi,
@@ -22,7 +21,11 @@ import {
   saveBookSourceApi,
   saveBookSourcesApi,
 } from '@/lib/web-api/book-source-controller';
-import { backupApi, getBackupPreviewApi } from '@/lib/web-api/backup-controller';
+import { debugBookSourceApi } from '@/lib/web-api/book-source-debug-controller';
+import { debugRssSourceApi } from '@/lib/web-api/rss-source-debug-controller';
+import { assertWebApiAuthorized } from '@/lib/web-api/auth';
+import { addLocalBookApi } from '@/lib/web-api/wifi-upload';
+import { backupApi, getBackupPreviewApi, restoreBackupApi } from '@/lib/web-api/backup-controller';
 import {
   deleteReplaceRuleApi,
   getAllReplaceRulesApi,
@@ -36,6 +39,18 @@ import {
   saveRssSourceApi,
   saveRssSourcesApi,
 } from '@/lib/web-api/rss-source-controller';
+import {
+  clearRssArticlesApi,
+  deleteRssReadRecordApi,
+  deleteRssStarApi,
+  getRssArticleReadApi,
+  getRssArticlesApi,
+  getRssReadRecordsApi,
+  getRssSortsApi,
+  getRssStarsApi,
+  refreshRssArticlesApi,
+  saveRssStarApi,
+} from '@/lib/web-api/rss-article-controller';
 import { normalizeLegadoApiPath, isLegadoWebApiPath } from '@/lib/web-api/paths';
 import { parseQueryString } from '@/lib/web-api/query';
 import { jsonApiResult, type WebApiDispatchResult } from '@/lib/web-api/response';
@@ -48,6 +63,7 @@ export interface WebApiRequest {
   method: WebApiMethod;
   body?: string | null;
   query?: Record<string, string>;
+  headers?: Record<string, string>;
 }
 
 export { isLegadoWebApiPath };
@@ -63,6 +79,33 @@ export async function dispatchLegadoWebApi(
 
   if (method === 'OPTIONS') {
     return jsonApiResult(legadoOk(null));
+  }
+
+  if (path === '/__internal/wsBookSourceDebug' && method === 'POST') {
+    return jsonApiResult(await debugBookSourceApi(request.body ?? null));
+  }
+
+  if (path === '/__internal/wsRssSourceDebug' && method === 'POST') {
+    const { runRssSourceDebugWebSocket } = await import('@/lib/web-api/rss-source-debug-ws');
+    const messages: string[] = [];
+    await runRssSourceDebugWebSocket(request.body ?? '', async (text) => {
+      messages.push(text);
+    });
+    return jsonApiResult(legadoOk({ messages }));
+  }
+
+  if (path === '/__internal/wsSearchBook' && method === 'POST') {
+    const { runSearchBookWebSocket } = await import('@/lib/web-api/search-book-ws');
+    const messages: string[] = [];
+    await runSearchBookWebSocket(request.body ?? '', async (text) => {
+      messages.push(text);
+    });
+    return jsonApiResult(legadoOk({ messages }));
+  }
+
+  if (path !== '/api') {
+    const authErr = await assertWebApiAuthorized(request);
+    if (authErr) return jsonApiResult(authErr);
   }
 
   if (method === 'GET' && path === '/api') {
@@ -84,6 +127,20 @@ export async function dispatchLegadoWebApi(
         return jsonApiResult(await getAllRssSourcesApi());
       case '/getRssSource':
         return jsonApiResult(await getRssSourceApi(query));
+      case '/getRssSorts':
+        return jsonApiResult(await getRssSortsApi(query));
+      case '/getRssArticles':
+        return jsonApiResult(await getRssArticlesApi(query));
+      case '/refreshRssArticles':
+        return jsonApiResult(await refreshRssArticlesApi(query));
+      case '/getRssArticleRead':
+        return jsonApiResult(await getRssArticleReadApi(query));
+      case '/clearRssArticles':
+        return jsonApiResult(await clearRssArticlesApi(query));
+      case '/getRssReadRecords':
+        return jsonApiResult(await getRssReadRecordsApi(query));
+      case '/getRssStars':
+        return jsonApiResult(await getRssStarsApi(query));
       case '/getReplaceRules':
         return jsonApiResult(await getAllReplaceRulesApi());
       case '/getBookshelf':
@@ -137,9 +194,21 @@ export async function dispatchLegadoWebApi(
       case '/saveBookProgress':
         return jsonApiResult(await saveBookProgressApi(body));
       case '/addLocalBook':
-        return jsonApiResult(await addLocalBookApi());
+        return jsonApiResult(await addLocalBookApi(body));
+      case '/restoreBackup':
+        return jsonApiResult(await restoreBackupApi(body));
       case '/saveReadConfig':
         return jsonApiResult(await saveReadConfigApi(body));
+      case '/debugBookSource':
+        return jsonApiResult(await debugBookSourceApi(body));
+      case '/debugRssSource':
+        return jsonApiResult(await debugRssSourceApi(body));
+      case '/deleteRssReadRecord':
+        return jsonApiResult(await deleteRssReadRecordApi(body));
+      case '/saveRssStar':
+        return jsonApiResult(await saveRssStarApi(body));
+      case '/deleteRssStar':
+        return jsonApiResult(await deleteRssStarApi(body));
       default:
         break;
     }

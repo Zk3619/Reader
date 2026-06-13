@@ -348,9 +348,7 @@ export async function saveBookProgressApi(postData: string | null): Promise<Lega
 
 
 export async function addLocalBookApi(): Promise<LegadoReturnData<boolean>> {
-
-  return legadoErr('请使用应用内「导入本地书籍」功能');
-
+  return legadoErr('请使用 multipart 上传（fileName + fileData）');
 }
 
 

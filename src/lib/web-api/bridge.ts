@@ -1,13 +1,16 @@
 /**
- * Web 服务桥接：Tauri Rust HTTP / 纯 Web Vite SSE
+ * Web 服务桥接：Tauri Rust HTTP / 纯 Web Vite SSE / WebSocket 调试
  */
 
 import { isTauri } from '@/lib/platform/detect';
 import { dispatchLegadoWebApi, type WebApiRequest } from '@/lib/web-api/dispatch';
 import { serializeWebApiDispatchResult } from '@/lib/web-api/response';
-
+import { runBookSourceDebugWebSocket } from '@/lib/web-api/book-source-debug-ws';
+import { runRssSourceDebugWebSocket } from '@/lib/web-api/rss-source-debug-ws';
+import { runSearchBookWebSocket } from '@/lib/web-api/search-book-ws';
 
 export const WEB_API_REQUEST_EVENT = 'reader-web-api-request';
+export const WEB_WS_DEBUG_EVENT = 'reader-web-ws-debug';
 
 export type WebApiRequestPayload = {
   id: string;
@@ -15,9 +18,17 @@ export type WebApiRequestPayload = {
   method: string;
   body?: string | null;
   query?: Record<string, string>;
+  headers?: Record<string, string>;
+};
+
+export type WebWsDebugPayload = {
+  id: string;
+  path: string;
+  message: string;
 };
 
 let tauriBridgeInstalled = false;
+let tauriWsBridgeInstalled = false;
 let browserBridgeActive = false;
 let browserEventSource: EventSource | null = null;
 
@@ -27,6 +38,7 @@ async function handleWebApiRequest(payload: {
   method: string;
   body?: string | null;
   query?: Record<string, string>;
+  headers?: Record<string, string>;
 }): Promise<string> {
   try {
     const result = await dispatchLegadoWebApi({
@@ -34,6 +46,7 @@ async function handleWebApiRequest(payload: {
       method: payload.method.toUpperCase() as WebApiRequest['method'],
       body: payload.body ?? null,
       query: payload.query,
+      headers: payload.headers,
     });
     return serializeWebApiDispatchResult(result);
   } catch (e) {
@@ -53,9 +66,39 @@ export async function ensureWebApiBridge(): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
 
   await listen<WebApiRequestPayload>(WEB_API_REQUEST_EVENT, async (event) => {
-    const { id, path, method, body, query } = event.payload;
-    const response = await handleWebApiRequest({ id, path, method, body, query });
+    const { id, path, method, body, query, headers } = event.payload;
+    const response = await handleWebApiRequest({ id, path, method, body, query, headers });
     await invoke('web_api_complete_cmd', { id, response });
+  });
+}
+
+export async function ensureWebWsDebugBridge(): Promise<void> {
+  if (!isTauri() || tauriWsBridgeInstalled) return;
+  tauriWsBridgeInstalled = true;
+
+  const { listen } = await import('@tauri-apps/api/event');
+  const { invoke } = await import('@tauri-apps/api/core');
+
+  await listen<WebWsDebugPayload>(WEB_WS_DEBUG_EVENT, async (event) => {
+    const { id, path, message } = event.payload;
+    const send = async (text: string) => {
+      await invoke('web_ws_send_cmd', { id, text });
+    };
+
+    switch (path) {
+      case '/bookSourceDebug':
+        await runBookSourceDebugWebSocket(message, send);
+        break;
+      case '/rssSourceDebug':
+        await runRssSourceDebugWebSocket(message, send);
+        break;
+      case '/searchBook':
+        await runSearchBookWebSocket(message, send);
+        break;
+      default:
+        return;
+    }
+    await invoke('web_ws_close_cmd', { id });
   });
 }
 
@@ -77,6 +120,7 @@ async function connectBrowserBridge(): Promise<void> {
           method?: string;
           body?: string | null;
           query?: Record<string, string>;
+          headers?: Record<string, string>;
         };
         if (parsed.type !== 'request' || !parsed.id || !parsed.path || !parsed.method) return;
         const response = await handleWebApiRequest({
@@ -85,6 +129,7 @@ async function connectBrowserBridge(): Promise<void> {
           method: parsed.method,
           body: parsed.body ?? null,
           query: parsed.query,
+          headers: parsed.headers,
         });
         await fetch('/__legado_bridge/complete', {
           method: 'POST',
@@ -113,8 +158,19 @@ function disconnectBrowserBridge(): void {
 export async function startReaderWebService(port?: number): Promise<void> {
   if (isTauri()) {
     await ensureWebApiBridge();
+    await ensureWebWsDebugBridge();
     const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('start_reader_web_service_cmd', { port: port ?? null });
+    const {
+      getWebServicePort,
+      isWebServiceAuthEnabled,
+      getWebServiceToken,
+    } = await import('@/lib/web-api/config');
+    const p = port ?? (await getWebServicePort());
+    await invoke('start_reader_web_service_cmd', {
+      port: p,
+      authEnabled: await isWebServiceAuthEnabled(),
+      authToken: await getWebServiceToken(),
+    });
     return;
   }
   await connectBrowserBridge();
