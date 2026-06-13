@@ -1,9 +1,34 @@
 //! Web 服务 UI 静态资源（web-service-dist）
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use tauri::{AppHandle, Manager};
+
+static WEB_UI_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn init_web_ui_root(app: &AppHandle) {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("web-service-dist"));
+        candidates.push(res.clone());
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web-service-dist"),
+    );
+    for root in candidates {
+        if root.join("index.html").is_file() {
+            let _ = WEB_UI_ROOT.set(root);
+            return;
+        }
+    }
+}
 
 pub fn web_ui_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web-service-dist")
+    WEB_UI_ROOT
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../web-service-dist"))
 }
 
 pub fn mime_for_extension(ext: &str) -> &'static str {
@@ -19,6 +44,7 @@ pub fn mime_for_extension(ext: &str) -> &'static str {
         "ico" => "image/x-icon",
         "woff" => "font/woff",
         "woff2" => "font/woff2",
+        "md" => "text/markdown; charset=utf-8",
         "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }

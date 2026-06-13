@@ -1,6 +1,8 @@
 mod data_migration;
 mod web_service;
 mod web_static;
+mod web_multipart;
+mod web_socket;
 mod local_addresses;
 mod http_cookies;
 mod window_state;
@@ -2113,6 +2115,8 @@ pub fn run() {
             web_service::web_api_complete_cmd,
             web_service::start_reader_web_service_cmd,
             web_service::stop_reader_web_service_cmd,
+            web_socket::web_ws_send_cmd,
+            web_socket::web_ws_close_cmd,
             local_addresses::get_local_network_addresses_cmd,
             media_convert::media_convert_probe,
             media_convert::convert_image_bytes,

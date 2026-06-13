@@ -4418,6 +4418,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "sha1 0.10.6",
  "tauri",
  "tauri-build",
  "tauri-plugin-android-fs",

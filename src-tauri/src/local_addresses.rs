@@ -1,6 +1,5 @@
-//! 枚举本机可用于局域网访问的 IPv4 地址
+//! 枚举本机可用于局域网访问的 IPv4 地址（桌面 / Android / iOS）
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_local_network_addresses() -> Vec<String> {
     let mut addrs = vec!["127.0.0.1".to_string()];
     if let Ok(ifaces) = if_addrs::get_if_addrs() {
@@ -15,11 +14,6 @@ pub fn get_local_network_addresses() -> Vec<String> {
     addrs.sort();
     addrs.dedup();
     addrs
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn get_local_network_addresses() -> Vec<String> {
-    vec!["127.0.0.1".to_string()]
 }
 
 #[tauri::command]

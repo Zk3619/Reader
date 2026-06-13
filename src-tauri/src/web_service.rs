@@ -1,7 +1,6 @@
 //! Legado 兼容 Web 服务 HTTP 层（替换规则 API；业务逻辑在前端 dispatch）
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-mod desktop {
+mod server {
     use std::collections::HashMap;
     use std::fs;
     use std::io::{Read, Write};
@@ -17,9 +16,12 @@ mod desktop {
     use uuid::Uuid;
 
     use crate::local_addresses;
+    use crate::web_multipart;
+    use crate::web_socket;
     use crate::web_static;
 
     const REQUEST_EVENT: &str = "reader-web-api-request";
+    const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
     static WEB_SERVICE_PORT: AtomicU16 = AtomicU16::new(1122);
 
     #[derive(Clone, Serialize)]
@@ -30,6 +32,10 @@ mod desktop {
         method: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         body: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<HashMap<String, String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<HashMap<String, String>>,
     }
 
     struct PendingMap {
@@ -41,6 +47,8 @@ mod desktop {
         stop: Arc<AtomicBool>,
         pending: Arc<PendingMap>,
         handle: Mutex<Option<JoinHandle<()>>>,
+        auth_enabled: Mutex<bool>,
+        auth_token: Mutex<String>,
     }
 
     fn runtime() -> &'static WebServiceRuntime {
@@ -52,7 +60,90 @@ mod desktop {
                 cvar: Condvar::new(),
             }),
             handle: Mutex::new(None),
+            auth_enabled: Mutex::new(false),
+            auth_token: Mutex::new(String::new()),
         })
+    }
+
+    pub fn set_web_http_auth(enabled: bool, token: String) {
+        let rt = runtime();
+        *rt.auth_enabled.lock().unwrap() = enabled;
+        *rt.auth_token.lock().unwrap() = token.clone();
+        web_socket::set_web_ws_auth(enabled, token);
+    }
+
+    fn parse_query(path: &str) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        let Some(qs) = path.split('?').nth(1) else {
+            return out;
+        };
+        for pair in qs.split('&').filter(|s| !s.is_empty()) {
+            if let Some((k, v)) = pair.split_once('=') {
+                out.insert(k.to_string(), v.to_string());
+            }
+        }
+        out
+    }
+
+    fn parse_request_headers(header_block: &str) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for line in header_block.lines().skip(1) {
+            if let Some((k, v)) = line.split_once(':') {
+                out.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
+            }
+        }
+        out
+    }
+
+    fn extract_token(
+        query: &HashMap<String, String>,
+        headers: &HashMap<String, String>,
+    ) -> Option<String> {
+        if let Some(t) = query.get("token") {
+            if !t.is_empty() {
+                return Some(t.clone());
+            }
+        }
+        if let Some(auth) = headers.get("authorization") {
+            let t = auth
+                .strip_prefix("Bearer ")
+                .or_else(|| auth.strip_prefix("bearer "))
+                .unwrap_or(auth)
+                .trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+        headers.get("token").cloned()
+    }
+
+    fn check_http_auth(
+        path_only: &str,
+        query: &HashMap<String, String>,
+        headers: &HashMap<String, String>,
+    ) -> Option<String> {
+        if path_only == "/api" {
+            return None;
+        }
+        let rt = runtime();
+        if !*rt.auth_enabled.lock().unwrap() {
+            return None;
+        }
+        let expected = rt.auth_token.lock().unwrap().clone();
+        if expected.is_empty() {
+            return Some(
+                r#"{"isSuccess":false,"errorMsg":"Web 服务已启用认证但未配置 Token","data":null}"#
+                    .to_string(),
+            );
+        }
+        let token = extract_token(query, headers);
+        if token.as_deref() != Some(expected.as_str()) {
+            return Some(
+                r#"{"isSuccess":false,"errorMsg":"Unauthorized: invalid or missing token","data":null}"#
+                    .to_string(),
+            );
+        }
+        None
     }
 
     fn cors_headers(origin: Option<&str>) -> String {
@@ -120,9 +211,20 @@ mod desktop {
                 | "/getReadConfig"
                 | "/getRssSource"
                 | "/getRssSources"
+                | "/getRssSorts"
+                | "/getRssArticles"
+                | "/refreshRssArticles"
+                | "/getRssArticleRead"
+                | "/clearRssArticles"
+                | "/getRssReadRecords"
+                | "/getRssStars"
+                | "/deleteRssReadRecord"
+                | "/saveRssStar"
+                | "/deleteRssStar"
                 | "/getReplaceRules"
                 | "/backupPreview"
                 | "/backup"
+                | "/restoreBackup"
                 | "/saveBookSource"
                 | "/saveBookSources"
                 | "/deleteBookSources"
@@ -137,6 +239,8 @@ mod desktop {
                 | "/saveReplaceRule"
                 | "/deleteReplaceRule"
                 | "/testReplaceRule"
+                | "/debugBookSource"
+                | "/debugRssSource"
         )
     }
 
@@ -222,6 +326,21 @@ mod desktop {
         );
     }
 
+    fn read_full_body(
+        stream: &mut std::net::TcpStream,
+        initial: &[u8],
+        content_length: usize,
+    ) -> Vec<u8> {
+        let mut body = initial.to_vec();
+        if content_length > body.len() && content_length <= MAX_BODY_BYTES {
+            let mut rest = vec![0u8; content_length - body.len()];
+            if stream.read_exact(&mut rest).is_ok() {
+                body.extend_from_slice(&rest);
+            }
+        }
+        body
+    }
+
     fn handle_connection(app: AppHandle, pending: Arc<PendingMap>, mut stream: std::net::TcpStream) {
         let mut buffer = [0u8; 8192];
         let read = match stream.read(&mut buffer) {
@@ -237,17 +356,21 @@ mod desktop {
         let path = parts.next().unwrap_or("/").to_string();
 
         let header_end = request.find("\r\n\r\n").unwrap_or(read);
-        let headers = &request[..header_end.min(read)];
+        let header_block = &request[..header_end.min(read)];
         let body_start = header_end + 4;
-        let mut body = if body_start < read {
-            request[body_start..read].to_string()
+        let initial_body = if body_start < read {
+            buffer[body_start..read].to_vec()
         } else {
-            String::new()
+            Vec::new()
         };
 
+        let req_headers = parse_request_headers(header_block);
+        let query = parse_query(&path);
         let mut content_length = 0usize;
         let mut origin: Option<String> = None;
-        for line in headers.lines().skip(1) {
+        let mut content_type = String::new();
+
+        for line in header_block.lines().skip(1) {
             let lower = line.to_ascii_lowercase();
             if let Some(v) = lower.strip_prefix("content-length:") {
                 content_length = v.trim().parse().unwrap_or(0);
@@ -255,23 +378,19 @@ mod desktop {
             if let Some(v) = line.strip_prefix("Origin:").or_else(|| line.strip_prefix("origin:")) {
                 origin = Some(v.trim().to_string());
             }
-        }
-
-        if content_length > body.len() && content_length <= 1024 * 1024 {
-            let mut rest = vec![0u8; content_length - body.len()];
-            if stream.read_exact(&mut rest).is_ok() {
-                body.push_str(&String::from_utf8_lossy(&rest));
+            if let Some(v) = lower.strip_prefix("content-type:") {
+                content_type = v.trim().to_string();
             }
         }
 
+        let body_bytes = read_full_body(&mut stream, &initial_body, content_length);
         let origin_ref = origin.as_deref();
+        let path_only = path.split('?').next().unwrap_or(&path).to_string();
 
         if method == "OPTIONS" {
             write_http_response(stream, "204 No Content", "text/plain", "", origin_ref);
             return;
         }
-
-        let path_only = path.split('?').next().unwrap_or(&path).to_string();
 
         if method == "GET" && path_only == "/__reader/net-addresses" {
             let body = build_net_addresses_json();
@@ -303,12 +422,40 @@ mod desktop {
             return;
         }
 
+        if let Some(auth_err) = check_http_auth(&path_only, &query, &req_headers) {
+            write_http_response(stream, "401 Unauthorized", "application/json; charset=utf-8", &auth_err, origin_ref);
+            return;
+        }
+
+        let mut body_json: Option<String> = None;
+        if method == "POST" && path_only == "/addLocalBook" && content_type.contains("multipart/form-data") {
+            let fields = web_multipart::parse_multipart(&body_bytes, &content_type);
+            body_json = web_multipart::multipart_to_add_local_book_json(&fields);
+        } else if method == "POST" && path_only == "/restoreBackup" && content_type.contains("multipart/form-data") {
+            let fields = web_multipart::parse_multipart(&body_bytes, &content_type);
+            body_json = web_multipart::multipart_to_add_local_book_json(&fields);
+        } else if !body_bytes.is_empty() {
+            body_json = Some(String::from_utf8_lossy(&body_bytes).into_owned());
+        }
+
+        let bridge_headers: HashMap<String, String> = req_headers
+            .iter()
+            .filter(|(k, _)| matches!(k.as_str(), "authorization" | "token"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
         let id = Uuid::new_v4().to_string();
         let payload = WebApiRequestPayload {
             id: id.clone(),
             path: path.clone(),
             method: method.clone(),
-            body: if body.is_empty() { None } else { Some(body) },
+            body: body_json,
+            query: if query.is_empty() { None } else { Some(query) },
+            headers: if bridge_headers.is_empty() {
+                None
+            } else {
+                Some(bridge_headers)
+            },
         };
 
         if app.emit(REQUEST_EVENT, payload).is_err() {
@@ -322,9 +469,15 @@ mod desktop {
             return;
         }
 
+        let timeout_secs = if path_only == "/addLocalBook" || path_only == "/restoreBackup" || path_only == "/debugBookSource" || path_only == "/debugRssSource" {
+            120
+        } else {
+            45
+        };
+
         let response = {
             let mut map = pending.map.lock().unwrap();
-            let deadline = std::time::Instant::now() + Duration::from_secs(45);
+            let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
             loop {
                 if let Some(resp) = map.remove(&id) {
                     break resp;
@@ -361,7 +514,10 @@ mod desktop {
     pub fn start_reader_web_service(app: AppHandle, port: u16) -> Result<(), String> {
         stop_reader_web_service()?;
 
+        web_static::init_web_ui_root(&app);
+
         WEB_SERVICE_PORT.store(port, Ordering::Relaxed);
+        web_socket::set_ws_app_handle(app.clone());
 
         let rt = runtime();
         rt.stop.store(false, Ordering::SeqCst);
@@ -392,12 +548,17 @@ mod desktop {
         });
 
         *rt.handle.lock().map_err(|e| e.to_string())? = Some(handle);
+
+        if port < 65535 {
+            web_socket::start_web_ws_server(port + 1)?;
+        }
         Ok(())
     }
 
     pub fn stop_reader_web_service() -> Result<(), String> {
         let rt = runtime();
         rt.stop.store(true, Ordering::SeqCst);
+        let _ = web_socket::stop_web_ws_server();
         if let Some(handle) = rt.handle.lock().map_err(|e| e.to_string())?.take() {
             let _ = handle.join();
         }
@@ -405,23 +566,7 @@ mod desktop {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub use desktop::{start_reader_web_service, stop_reader_web_service, web_api_complete};
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn web_api_complete(_id: String, _response: String) -> Result<(), String> {
-    Err("Web 服务仅支持桌面端".into())
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn start_reader_web_service(_app: tauri::AppHandle, _port: u16) -> Result<(), String> {
-    Err("Web 服务仅支持桌面端".into())
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn stop_reader_web_service() -> Result<(), String> {
-    Ok(())
-}
+pub use server::{set_web_http_auth, start_reader_web_service, stop_reader_web_service, web_api_complete};
 
 #[tauri::command]
 pub fn web_api_complete_cmd(id: String, response: String) -> Result<(), String> {
@@ -429,8 +574,14 @@ pub fn web_api_complete_cmd(id: String, response: String) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn start_reader_web_service_cmd(app: tauri::AppHandle, port: Option<u16>) -> Result<(), String> {
+pub fn start_reader_web_service_cmd(
+    app: tauri::AppHandle,
+    port: Option<u16>,
+    auth_enabled: Option<bool>,
+    auth_token: Option<String>,
+) -> Result<(), String> {
     let p = port.unwrap_or(1122);
+    set_web_http_auth(auth_enabled.unwrap_or(false), auth_token.unwrap_or_default());
     start_reader_web_service(app, p)
 }
 
