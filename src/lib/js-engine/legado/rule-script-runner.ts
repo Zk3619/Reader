@@ -476,6 +476,7 @@ export async function runLegadoRuleScript(
   const legadoTab = chapterVars.tab || String(chapterRecord.tab ?? '');
   const legadoTitle = chapterVars.title || String(chapterRecord.title ?? '');
   const legadoBookId = chapterVars.book_id || '';
+  const legadoItemId = chapterVars.item_id || String(chapterRecord.item_id ?? '');
   const legadoUrl = chapterVars.url || String(chapterRecord.url ?? '');
 
   const legadoMemory = new Map<string, unknown>();
@@ -545,6 +546,7 @@ export async function runLegadoRuleScript(
       sources: legadoSources,
       tab: legadoTab,
       book_id: legadoBookId,
+      item_id: legadoItemId,
       url: legadoUrl,
       getArguments,
       book: Object.assign(bookRecord, {
@@ -944,6 +946,9 @@ export async function runLegadoRuleScript(
       variables: context.variables as Record<string, unknown> | undefined,
       scope,
       nonBlockingBrowserAwait: context.nonBlockingBrowserAwait,
+      chapter: chapterRecord,
+      ruleContent,
+      initialResult,
     });
     return scope;
   };

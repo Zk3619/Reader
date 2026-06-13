@@ -41,4 +41,15 @@ describe('extractContentFromRuleOutput', () => {
     expect(out).toContain('请刷新尝试播放');
     expect(out).toMatch(/^<p>/);
   });
+
+  it('光遇短剧内嵌页占位正文识别', async () => {
+    const { isLegadoBrowserPlaceholderContent } = await import(
+      '@/lib/book-source/extract-rule-content'
+    );
+    expect(
+      isLegadoBrowserPlaceholderContent(
+        '【右上角刷新】开启播放(下一集请切换下一章刷新)\n播放直链：',
+      ),
+    ).toBe(true);
+  });
 });

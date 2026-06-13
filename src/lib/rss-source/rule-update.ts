@@ -14,6 +14,7 @@ import * as ruleSubsDb from '@/lib/database/rule-subs';
 import type { RuleSub } from '@/types';
 import { settingsStore } from '@/stores/settings';
 import { rssError, rssLog, rssWarn } from '@/lib/rss-source/rss-source-logger';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 
 /** 规则订阅类型：0=书源, 1=订阅源, 2=替换规则 */
 export const RULE_SUB_TYPE_BOOK = 0;
@@ -95,20 +96,22 @@ export async function applyRuleSubUpdate(sub: RuleSub): Promise<number> {
 }
 
 export async function runAutoRuleSubUpdates(): Promise<number> {
-  const subs = await ruleSubsDb.getAllRuleSubs();
-  const now = Date.now();
-  const due = subs.filter(
-    (sub) => sub.autoUpdate && sub.silentUpdate && isRuleSubDue(sub, now),
-  );
-  rssLog('规则订阅', `自动更新开始，待处理 ${due.length} 条`);
-  let total = 0;
-  for (const sub of due) {
-    try {
-      total += await applyRuleSubUpdate(sub);
-    } catch (e) {
-      rssError(sub.name, '规则订阅自动更新失败', e);
+  return withIgnoredPageNavigationAbort(async () => {
+    const subs = await ruleSubsDb.getAllRuleSubs();
+    const now = Date.now();
+    const due = subs.filter(
+      (sub) => sub.autoUpdate && sub.silentUpdate && isRuleSubDue(sub, now),
+    );
+    rssLog('规则订阅', `自动更新开始，待处理 ${due.length} 条`);
+    let total = 0;
+    for (const sub of due) {
+      try {
+        total += await applyRuleSubUpdate(sub);
+      } catch (e) {
+        rssError(sub.name, '规则订阅自动更新失败', e);
+      }
     }
-  }
-  rssLog('规则订阅', '自动更新结束', { imported: total });
-  return total;
+    rssLog('规则订阅', '自动更新结束', { imported: total });
+    return total;
+  });
 }

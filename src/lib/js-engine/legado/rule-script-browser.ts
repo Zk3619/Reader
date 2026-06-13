@@ -9,6 +9,10 @@ import {
 } from '@/lib/book-source/source-http';
 import { openLegadoBrowserInApp } from '@/lib/platform/open-url';
 import type { InnerWebCloseResult } from '@/lib/platform/inner-web';
+import {
+  normalizeOnlineVideoBrowserUrl,
+  resolveOnlineVideoBrowserHints,
+} from '@/lib/platform/online-video-browser-url';
 import { SuspendScript } from '@/lib/js-engine/legado/suspend-script';
 import type { BookSource } from '@/types';
 
@@ -155,9 +159,33 @@ export function createRuleScriptBrowserHandlers(options: {
   scope: Record<string, unknown>;
   /** 正文视频书源：打开播放页后继续执行，不等待 √ */
   nonBlockingBrowserAwait?: boolean;
+  chapter?: Record<string, unknown>;
+  ruleContent?: string;
+  initialResult?: unknown;
 }): RuleScriptBrowserHandlers {
-  const { bookSource, baseUrl, state, pending, variables, scope, nonBlockingBrowserAwait } =
-    options;
+  const {
+    bookSource,
+    baseUrl,
+    state,
+    pending,
+    variables,
+    scope,
+    nonBlockingBrowserAwait,
+    chapter,
+    ruleContent,
+    initialResult,
+  } = options;
+
+  const resolveBrowserUrl = (raw: string): string => {
+    const resolved = resolveRuleScriptBrowserUrl(raw, baseUrl);
+    const hints = resolveOnlineVideoBrowserHints({
+      variables,
+      chapter,
+      ruleContent,
+      initialResult,
+    });
+    return normalizeOnlineVideoBrowserUrl(resolved, hints);
+  };
 
   const rememberBrowserUrl = (resolved: string) => {
     if (variables && isOpenableBrowserUrl(resolved)) {
@@ -168,7 +196,7 @@ export function createRuleScriptBrowserHandlers(options: {
 
   return {
     startBrowser(url: string, title?: string) {
-      const resolved = resolveRuleScriptBrowserUrl(String(url ?? ''), baseUrl);
+      const resolved = resolveBrowserUrl(String(url ?? ''));
       if (!isOpenableBrowserUrl(resolved)) return;
       rememberBrowserUrl(resolved);
       const cookieStr = resolveRuleScriptBrowserCookies(bookSource, resolved, baseUrl);
@@ -185,7 +213,7 @@ export function createRuleScriptBrowserHandlers(options: {
       if (state.awaitDone) {
         return createLegadoStrResponse(state.awaitBody);
       }
-      const resolved = resolveRuleScriptBrowserUrl(String(url ?? ''), baseUrl);
+      const resolved = resolveBrowserUrl(String(url ?? ''));
       if (!isOpenableBrowserUrl(resolved)) {
         state.awaitDone = true;
         return createLegadoStrResponse('');

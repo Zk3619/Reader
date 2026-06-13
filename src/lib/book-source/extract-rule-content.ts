@@ -10,7 +10,7 @@ import {
 } from '@/lib/book-source/extract-api-content';
 
 /** Legado ruleContent 在 startBrowserAwait 后返回的短提示，非 API 正文 */
-export const LEGADO_BROWSER_PLACEHOLDER_RE = /请.*刷新|在内嵌|内嵌页/;
+export const LEGADO_BROWSER_PLACEHOLDER_RE = /请.*刷新|在内嵌|内嵌页|右上角刷新|播放直链/;
 
 export function isLegadoBrowserPlaceholderContent(text: string): boolean {
   const t = text.trim();

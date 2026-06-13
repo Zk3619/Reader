@@ -43,6 +43,7 @@ const SCRIPT_TIMEOUT_MS = 30_000;
 
 export type ExploreScriptRunOptions = {
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  signal?: AbortSignal;
 };
 
 /** 从 exploreUrl 中提取 @js: / <js>...</js> 内的脚本内容 */
@@ -112,7 +113,8 @@ async function tryRunExploreScriptQuickJS(
     cookie: cookieApi,
     source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
     scriptToastBuffer: toastBuffer,
-    request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+    request: (resolvedUrl, call) =>
+      requestInScript(resolvedUrl, { ...call, source, signal: options?.signal }),
   });
 
   try {
@@ -148,6 +150,7 @@ async function tryRunExploreScriptQuickJS(
     }
     return sections;
   } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e;
     console.warn('[explore-script] QuickJS 失败，降级 Function', e);
     return null;
   } finally {
@@ -252,7 +255,8 @@ async function tryRunExploreScriptQuickJSRaw(
     cookie: cookieApi,
     source: buildLegadoScriptSourceFace(source, sourceVars, sourceUrl),
     scriptToastBuffer: toastBuffer,
-    request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+    request: (resolvedUrl, call) =>
+      requestInScript(resolvedUrl, { ...call, source, signal: options?.signal }),
   });
 
   try {
@@ -380,7 +384,8 @@ async function runExploreScriptLegacyRaw(
         baseUrl,
         resolveUrl,
         getCookie: (url) => cookieApi.getCookie(url),
-        request: (resolvedUrl, call) => requestInScript(resolvedUrl, { ...call, source }),
+        request: (resolvedUrl, call) =>
+      requestInScript(resolvedUrl, { ...call, source, signal: options?.signal }),
         applyDuration: applyAjaxDuration,
         getArgToken: () => readBookSourceQttoken(source, serverForToken),
         getDeviceId: () => resolveBookSourceDeviceId(source),
@@ -471,11 +476,16 @@ async function requestInScript(
     headers?: Record<string, string>;
     body?: string;
     source: BookSource;
+    signal?: AbortSignal;
   }
 ): Promise<string> {
+  if (options.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
   const httpOpts = {
     headers: options.headers,
     timeout: 12_000,
+    signal: options.signal,
   };
   if (options.method === 'POST') {
     return postBookSourcePage(options.source, url, options.body ?? '', httpOpts);

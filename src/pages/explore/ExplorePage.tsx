@@ -25,9 +25,12 @@ import {
   getExploreSectionsAsync,
   isExploreUrlScript,
   resolveExploreSectionsFromResource,
+  resolveExploreSectionsResourceError,
+  isExploreSectionsAbortError,
   shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
+import { getPageNavigationRevision } from '@/lib/navigation/page-navigation-scope';
 import { applyExploreSelectChange } from '@/lib/book-source/explore-select-change';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
@@ -104,7 +107,9 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
       const s = selectedSource();
       const v = exploreArgsVersion();
       if (!s) return null;
-      if (isExploreUrlScript(s.exploreUrl)) return { source: s, argsVersion: v };
+      if (isExploreUrlScript(s.exploreUrl)) {
+        return { source: s, argsVersion: v, navRevision: getPageNavigationRevision() };
+      }
       return null;
     },
     (ctx) => getExploreSectionsAsync(ctx!.source, ctx!.argsVersion),
@@ -118,20 +123,19 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     return `${s.sourceUrl}\0${exploreArgsVersion()}`;
   };
 
-  const hasSectionsSnapshot = () => {
-    const snap = sectionsSnapshot();
-    return !!(snap && snap.key === sectionsSnapshotKey());
-  };
-
   const sectionsLoading = createMemo(() => {
     if (!isActive() || !usesScriptExplore()) return false;
-    if (hasSectionsSnapshot()) return false;
-    return shouldShowExploreSectionsSkeleton(
-      true,
-      exploreArgsVersion(),
-      loadedExploreArgsVersion(),
-      dynamicSections,
-    );
+    if (
+      shouldShowExploreSectionsSkeleton(
+        true,
+        exploreArgsVersion(),
+        loadedExploreArgsVersion(),
+        dynamicSections,
+      )
+    ) {
+      return true;
+    }
+    return false;
   });
 
   const sections = createMemo((): ExploreSection[] => {
@@ -162,10 +166,10 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     return !!(selectedSource() && sec?.url?.trim());
   };
 
-  const sectionsError = () =>
-    isExploreUrlScript(selectedSource()?.exploreUrl) && dynamicSections.state === 'errored'
-      ? dynamicSections.error
-      : undefined;
+  const sectionsError = () => {
+    if (!isExploreUrlScript(selectedSource()?.exploreUrl)) return undefined;
+    return resolveExploreSectionsResourceError(dynamicSections);
+  };
 
   async function loadSources() {
     try {
@@ -197,6 +201,16 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     if (!isActive()) return;
     if (sources().length > 0) return;
     void loadSources();
+  });
+
+  /** 切页中止后重新进入：若 resource 仍停在 AbortError，主动重拉 */
+  let exploreWasActive = false;
+  createEffect(() => {
+    const active = isActive();
+    if (active && !exploreWasActive && usesScriptExplore() && isExploreSectionsAbortError(dynamicSections)) {
+      void refetchExploreSections();
+    }
+    exploreWasActive = active;
   });
 
   onMount(() => {
@@ -283,6 +297,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   async function handleSelectFilterChange(section: ExploreSection, value: string) {
     const s = selectedSource();
     if (!s) return;
+    setLoadedExploreArgsVersion(-1);
     await applyExploreSelectChange(s, section, value, {
       onRefreshExplore: async () => {
         clearExploreSectionsCache(getLegadoSourceKey(s));

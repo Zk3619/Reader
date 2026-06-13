@@ -52,6 +52,7 @@ import {
   isScriptNoticeBlockedError,
 } from '@/lib/book-source/rate-limit-guard';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
 const HARD_TOC_PAGINATION_MAX_PAGES = 5000;
@@ -74,7 +75,15 @@ export interface GetChapterListOptions {
   bookUrl?: string;
   /** 脚本 toast 回调（内部透传） */
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  /**
+   * 书架写库 / 手动更新目录等后台任务：与详情页 UI 预加载分开去重，且切页不中止。
+   * 勿与仅用于展示的 preloadChapterList 共用同一 in-flight 条目。
+   */
+  persistTocFetch?: boolean;
 }
+
+/** 目录并发去重作用域：UI 预加载随切页取消；persist 写库不受切页影响 */
+export type TocFetchScope = 'ui' | 'persist';
 
 type TocPartialListener = NonNullable<GetChapterListOptions['onPartial']>;
 
@@ -87,12 +96,31 @@ type TocFetchEntry = {
 
 const tocFetchInFlight = new Map<string, TocFetchEntry>();
 
-export function tocFetchKey(source: BookSource, tocUrl: string): string {
-  return `${source.bookSourceUrl}\0${tocUrl}`;
+export function tocFetchKey(
+  source: BookSource,
+  tocUrl: string,
+  scope: TocFetchScope = 'ui',
+): string {
+  return `${source.bookSourceUrl}\0${tocUrl}\0${scope}`;
 }
 
-export function isChapterListFetchInFlight(source: BookSource, tocUrl: string): boolean {
-  return tocFetchInFlight.has(tocFetchKey(source, tocUrl));
+export function isChapterListFetchInFlight(
+  source: BookSource,
+  tocUrl: string,
+  scope?: TocFetchScope,
+): boolean {
+  if (scope) {
+    return tocFetchInFlight.has(tocFetchKey(source, tocUrl, scope));
+  }
+  return (
+    tocFetchInFlight.has(tocFetchKey(source, tocUrl, 'ui')) ||
+    tocFetchInFlight.has(tocFetchKey(source, tocUrl, 'persist'))
+  );
+}
+
+/** @internal 测试重置 */
+export function __resetTocFetchInFlightForTests(): void {
+  tocFetchInFlight.clear();
 }
 
 function dispatchTocPartialListeners(
@@ -106,13 +134,14 @@ function dispatchTocPartialListeners(
   }
 }
 
-/** 同一 tocUrl 并发去重；支持多个 onPartial 订阅（详情预加载 + 后台上架） */
+/** 同一 tocUrl + 作用域并发去重；支持多个 onPartial 订阅（详情预加载 + 后台上架） */
 export function fetchChapterListDeduped(
   source: BookSource,
   tocUrl: string,
   options?: GetChapterListOptions,
 ): Promise<BookChapter[]> {
-  const key = tocFetchKey(source, tocUrl);
+  const scope: TocFetchScope = options?.persistTocFetch ? 'persist' : 'ui';
+  const key = tocFetchKey(source, tocUrl, scope);
   const existing = tocFetchInFlight.get(key);
   if (existing) {
     if (options?.onPartial) {
@@ -135,13 +164,19 @@ export function fetchChapterListDeduped(
     lastPartial: null,
   };
 
-  entry.promise = getChapterList(source, tocUrl, {
-    ...options,
-    onPartial: (partial) => {
-      entry.lastPartial = partial;
-      dispatchTocPartialListeners(listeners, partial);
-    },
-  }).finally(() => {
+  const runFetch = () =>
+    getChapterList(source, tocUrl, {
+      ...options,
+      onPartial: (partial) => {
+        entry.lastPartial = partial;
+        dispatchTocPartialListeners(listeners, partial);
+      },
+    });
+
+  entry.promise = (scope === 'persist'
+    ? withIgnoredPageNavigationAbort(runFetch)
+    : runFetch()
+  ).finally(() => {
     tocFetchInFlight.delete(key);
   });
 

@@ -4,12 +4,16 @@ import {
   augmentExploreServerSelectSections,
   getExploreSections,
   getExploreSectionSelectDisplayValue,
+  isExploreSectionsAbortError,
+  isExploreSectionsResourcePending,
   isExploreUrlScript,
   parseNameUrlExploreSections,
   readExploreSourceArgumentValue,
+  resolveExploreSectionsResourceError,
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
-import { getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import { getLegadoSourceKey, getSourceArgsKey } from '@/lib/js-engine/legado/source-script-shared';
+import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 
 describe('explore sections name::url syntax', () => {
   it('parses newline-separated Legado exploreUrl entries', () => {
@@ -116,5 +120,72 @@ describe('explore section select display value', () => {
     const [augmented] = augmentExploreServerSelectSections(source, [section]);
     expect(augmented?.chars?.[0]).toBe(ip);
     expect(augmented?.default).toBe(ip);
+  });
+
+  it('updateExploreSourceArgument 非线路字段也会 bump args 版本', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => ls.get(k) ?? null,
+      setItem: (k: string, v: string) => ls.set(k, v),
+      removeItem: (k: string) => ls.delete(k),
+    });
+
+    const bumpSource = {
+      bookSourceUrl: 'https://bump.example.com',
+      sourceUrl: 'https://bump.example.com',
+      sourceName: 'bump',
+    } as BookSource;
+    const key = getLegadoSourceKey(bumpSource);
+    const before = getExploreSourceArgsVersion(key);
+    updateExploreSourceArgument(bumpSource, 'find_tab', '听书');
+    expect(getExploreSourceArgsVersion(key)).toBe(before + 1);
+    updateExploreSourceArgument(bumpSource, 'find_tab', '听书');
+    expect(getExploreSourceArgsVersion(key)).toBe(before + 1);
+    updateExploreSourceArgument(bumpSource, 'find_tab', '小说');
+    expect(getExploreSourceArgsVersion(key)).toBe(before + 2);
+  });
+});
+
+describe('explore sections resource abort', () => {
+  function mockExploreResource(
+    state: string,
+    loading: boolean,
+    error: unknown,
+  ) {
+    const resource = (() => undefined) as {
+      state: string;
+      loading: boolean;
+      error: unknown;
+      (): undefined;
+    };
+    resource.state = state;
+    resource.loading = loading;
+    resource.error = error;
+    return resource;
+  }
+
+  it('treats AbortError as non-persistent error', () => {
+    const abortResource = mockExploreResource(
+      'errored',
+      false,
+      new DOMException('The operation was aborted.', 'AbortError'),
+    );
+    expect(isExploreSectionsAbortError(abortResource)).toBe(true);
+    expect(resolveExploreSectionsResourceError(abortResource)).toBeUndefined();
+  });
+
+  it('shows skeleton instead of error while abort is pending retry', () => {
+    const abortResource = mockExploreResource(
+      'errored',
+      false,
+      new DOMException('The operation was aborted.', 'AbortError'),
+    );
+    expect(isExploreSectionsResourcePending(true, abortResource)).toBe(true);
+  });
+
+  it('keeps real errors visible', () => {
+    const realErrorResource = mockExploreResource('errored', false, new Error('network down'));
+    expect(isExploreSectionsAbortError(realErrorResource)).toBe(false);
+    expect(resolveExploreSectionsResourceError(realErrorResource)).toBe(realErrorResource.error);
+    expect(isExploreSectionsResourcePending(true, realErrorResource)).toBe(false);
   });
 });

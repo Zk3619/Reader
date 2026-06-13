@@ -76,6 +76,7 @@ export async function updateBookToc(bookUrl: string): Promise<string> {
 
     const tocUrl = working.tocUrl?.trim() || working.bookUrl;
     const chapters = await fetchChapterListDeduped(source, tocUrl, {
+      persistTocFetch: true,
       reverseToc: working.readConfig?.reverseToc === true,
       bookVariable: working.variable,
     });

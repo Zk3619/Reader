@@ -340,14 +340,14 @@ export function persistSourceArgsJson(
   try {
     const toStore = normalizeSourceArgsJsonForPersist(val);
     const prev = localStorage.getItem(argsKey);
+    if (prev === toStore) return;
     localStorage.setItem(argsKey, toStore);
+    const sourceKey = getLegadoSourceKey(source);
+    bumpExploreSourceArgsVersion(sourceKey);
     const prevServer = readServerUrlFromArgsJson(prev);
     const nextServer = readServerUrlFromArgsJson(toStore);
-    if (prevServer !== nextServer) {
-      bumpExploreSourceArgsVersion(getLegadoSourceKey(source));
-      if (nextServer) {
-        setExploreInfoMapValue(getLegadoSourceKey(source), '线路', nextServer);
-      }
+    if (nextServer && prevServer !== nextServer) {
+      setExploreInfoMapValue(sourceKey, '线路', nextServer);
     }
   } catch {
     /* ignore */

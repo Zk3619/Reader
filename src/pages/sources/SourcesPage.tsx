@@ -17,9 +17,11 @@ import {
   isExploreDrawerButtonSection,
   isExploreUrlScript,
   resolveExploreSectionsFromResource,
+  resolveExploreSectionsResourceError,
   shouldShowExploreSectionsSkeleton,
   type ExploreSection,
 } from '@/lib/book-source/explore-sections';
+import { getPageNavigationRevision } from '@/lib/navigation/page-navigation-scope';
 import { applyExploreSelectChange } from '@/lib/book-source/explore-select-change';
 import { getExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { runExploreSectionAction } from '@/lib/js-engine/legado/explore-section-action-runner';
@@ -324,7 +326,9 @@ export function SourcesPage(props: SourcesPageProps) {
     () => {
       const v = exploreArgsVersion();
       const s = expandedSource();
-      return s && isExploreUrlScript(s.exploreUrl) ? { source: s, argsVersion: v } : null;
+      return s && isExploreUrlScript(s.exploreUrl)
+        ? { source: s, argsVersion: v, navRevision: getPageNavigationRevision() }
+        : null;
     },
     (ctx) => getExploreSectionsAsync(ctx.source, ctx.argsVersion)
   );
@@ -372,12 +376,13 @@ export function SourcesPage(props: SourcesPageProps) {
 
   const drawerSectionsError = () => {
     const s = expandedSource();
-    return !!s && isExploreUrlScript(s.exploreUrl) && dynamicSections.state === 'errored';
+    if (!s || !isExploreUrlScript(s.exploreUrl)) return false;
+    return resolveExploreSectionsResourceError(dynamicSections) != null;
   };
 
   const drawerSectionsErrorMessage = () => {
-    const err = dynamicSections.error;
-    return err instanceof Error ? err.message : undefined;
+    const err = resolveExploreSectionsResourceError(dynamicSections);
+    return err instanceof Error ? err.message : err != null ? String(err) : undefined;
   };
 
   async function handleExploreSelectChange(
@@ -385,6 +390,7 @@ export function SourcesPage(props: SourcesPageProps) {
     section: ExploreSection,
     value: string,
   ) {
+    setLoadedExploreArgsVersion(-1);
     await applyExploreSelectChange(source, section, value, {
       onRefreshExplore: async () => {
         clearExploreSectionsCache(getLegadoSourceKey(source));

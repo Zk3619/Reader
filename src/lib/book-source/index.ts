@@ -25,9 +25,11 @@ export {
   getChapterList,
   fetchChapterListDeduped,
   isChapterListFetchInFlight,
+  tocFetchKey,
   toNewBookChapter,
   type PartialChapterList,
   type GetChapterListOptions,
+  type TocFetchScope,
 } from '@/lib/book-source/chapters';
 
 // 书架更新目录

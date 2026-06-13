@@ -4,8 +4,14 @@
  */
 
 import type { BookSource } from '@/types';
+import { isAbortError } from '@/lib/http';
 import { extractExploreScript, runExploreScript } from '@/lib/js-engine';
-import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
+import {
+  cancelAllExploreSectionsFetches,
+  cancelExploreSectionsFetch,
+  beginExploreSectionsFetch,
+  isExploreSectionsFetchSuperseded,
+} from '@/lib/book-source/explore-sections-fetch';
 import {
   normalizeBookSourceServerUrl,
   resolveBookSourceServerUrl,
@@ -19,6 +25,7 @@ import {
   syncLegadoServerArgKeys,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { getExploreInfoMap, setExploreInfoMapValue } from '@/lib/book-source/explore-info-map-store';
+import { createScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 
 /** Legado 发现项布局样式（flex），用于多列/占比显示 */
 export interface ExploreSectionStyle {
@@ -396,8 +403,10 @@ function exploreSectionsCacheKey(source: BookSource, argsVersion: number): strin
 export function clearExploreSectionsCache(sourceUrl?: string): void {
   if (!sourceUrl) {
     exploreSectionsMemCache.clear();
+    cancelAllExploreSectionsFetches();
     return;
   }
+  cancelExploreSectionsFetch(sourceUrl);
   for (const key of exploreSectionsMemCache.keys()) {
     if (key.startsWith(`${sourceUrl}\0`)) exploreSectionsMemCache.delete(key);
   }
@@ -413,22 +422,37 @@ export async function getExploreSectionsAsync(
 ): Promise<ExploreSection[]> {
   const script = extractExploreScript(source.exploreUrl);
   if (script) {
+    const sourceKey = getLegadoSourceKey(source);
     const cacheKey = exploreSectionsCacheKey(source, argsVersion);
     const hit = exploreSectionsMemCache.get(cacheKey);
     if (hit) return hit;
 
+    const { generation, signal } = beginExploreSectionsFetch(sourceKey);
     try {
       const noticeBus = createScriptNoticeBus(source.sourceName, '发现');
       const sections = await runExploreScript(script, source, {
         onScriptToast: noticeBus.onScriptToast,
+        signal,
       });
+      if (isExploreSectionsFetchSuperseded(sourceKey, generation)) {
+        throw new DOMException('Explore sections fetch superseded', 'AbortError');
+      }
       if (sections.length > 0) {
         const augmented = augmentExploreServerSelectSections(source, sections);
         exploreSectionsMemCache.set(cacheKey, augmented);
         return augmented;
       }
     } catch (e) {
+      if (
+        isExploreSectionsFetchSuperseded(sourceKey, generation) ||
+        (e instanceof DOMException && e.name === 'AbortError')
+      ) {
+        throw e;
+      }
       console.warn('[getExploreSectionsAsync] script run failed:', e);
+    }
+    if (isExploreSectionsFetchSuperseded(sourceKey, generation)) {
+      throw new DOMException('Explore sections fetch superseded', 'AbortError');
     }
     return [{ title: '发现', url: source.exploreUrl }];
   }
@@ -446,6 +470,7 @@ export function isExploreUrlScript(exploreUrl: string | undefined): boolean {
 export type ExploreSectionsResource = {
   state: string;
   loading: boolean;
+  error?: unknown;
   (): ExploreSection[] | undefined;
 };
 
@@ -455,12 +480,27 @@ export function resolveExploreSectionsFromResource(resource: ExploreSectionsReso
   return [];
 }
 
+/** 页面切换 / 筛选代次取消导致的 AbortError（不应持久展示为错误） */
+export function isExploreSectionsAbortError(resource: ExploreSectionsResource): boolean {
+  return resource.state === 'errored' && isAbortError(resource.error);
+}
+
+/** 供探索/书源页展示：忽略导航中止类错误 */
+export function resolveExploreSectionsResourceError(
+  resource: ExploreSectionsResource,
+): unknown | undefined {
+  if (resource.state !== 'errored') return undefined;
+  if (isAbortError(resource.error)) return undefined;
+  return resource.error;
+}
+
 /** 脚本分类是否处于加载/重载（含 refreshing、loading，不仅 pending） */
 export function isExploreSectionsResourcePending(
   usesScriptExplore: boolean,
   resource: ExploreSectionsResource,
 ): boolean {
   if (!usesScriptExplore) return false;
+  if (isExploreSectionsAbortError(resource)) return true;
   if (resource.state === 'errored') return false;
   return (
     resource.loading ||

@@ -97,7 +97,7 @@ export async function openParagraphReviewFromClick(
   const cookies = getStoredSourceCookiesForUrl(source, absoluteUrl);
   const title = `${parsed.sources || '段评'}段评`;
   const headers = buildSourceRequestHeaders(source, absoluteUrl);
-  const useDocumentProxy = shouldUseInnerWebDocumentProxy(absoluteUrl, cookies);
+  const useDocumentProxy = shouldUseInnerWebDocumentProxy(absoluteUrl);
 
   try {
     const opened = openInnerWeb({
