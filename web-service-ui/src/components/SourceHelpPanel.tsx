@@ -11,14 +11,14 @@ const BOOK_LINKS = [
   { href: '#/help?doc=httpTTSHelp', label: '在线朗读规则' },
   { href: '#/help?doc=webDavBookHelp', label: 'WebDav 书籍教程' },
   { href: '#/help?doc=webDavHelp', label: 'WebDav 备份教程' },
-  { href: '#/help?doc=书源字段规则类型', label: '书源字段规则类型' },
+  { href: '#/help?doc=bookSourceFieldRuleTypes', label: '书源字段规则类型' },
   { href: 'https://regexr-cn.com/', label: '正则在线验证', external: true },
 ];
 
 const RSS_LINKS = [
   { href: '#/help?doc=rssRuleHelp', label: '订阅源规则' },
-  { href: '#/help?doc=订阅源机制详解', label: '订阅源机制详解' },
-  { href: '#/help?doc=订阅源字段规则类型', label: '订阅源字段规则类型' },
+  { href: '#/help?doc=rssMechanismHelp', label: '订阅源机制详解' },
+  { href: '#/help?doc=rssFieldRuleTypes', label: '订阅源字段规则类型' },
   { href: '#/help?doc=debugHelp', label: '调试说明' },
   { href: '#/help?doc=jsHelp', label: 'JavaScript 说明' },
   { href: '#/help?doc=regexHelp', label: '正则表达式' },
