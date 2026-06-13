@@ -7,6 +7,7 @@ import { BookmarkEditDialog } from '@/components/bookmark/BookmarkEditDialog';
 import { BookmarkRowMenu } from '@/components/bookmark/BookmarkRowMenu';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
+import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { Button } from '@/components/ui/button';
 import { getBookByNameAndAuthor } from '@/lib/database/books';
 import * as bookmarksDb from '@/lib/database/bookmarks';
@@ -29,6 +30,7 @@ const BOOKMARK_GROUP_CARD_CLASS =
 
 export interface BookmarkPageProps {
   onOpenBookmark?: (bookmark: Bookmark, book: Book) => void;
+  onBack?: () => void;
 }
 
 function BookmarkBookGroupCard(props: {
@@ -162,6 +164,7 @@ export function BookmarkPage(props: BookmarkPageProps) {
             dropdownEnabled={false}
           />
         }
+        leading={props.onBack ? <SettingsToolbarLeading onBack={props.onBack} /> : undefined}
       />
 
       <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}>

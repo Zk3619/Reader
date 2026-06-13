@@ -285,6 +285,22 @@ function AppContent() {
     publishActiveOverlayLayer(nav.top(), nav.entries());
   });
 
+  const [settingsQuickPageReturn, setSettingsQuickPageReturn] = createSignal<
+    'bookmark' | 'record' | null
+  >(null);
+
+  const returnFromSettingsQuickPage = () => {
+    setSettingsQuickPageReturn(null);
+    nav.navigateShell('settings');
+  };
+
+  const navigateFromSettingsQuickPage = (page: PageType) => {
+    if (page === 'bookmark' || page === 'record') {
+      setSettingsQuickPageReturn(page);
+    }
+    navigateToPage(page);
+  };
+
   const navigateToPage = (page: PageType) => {
     if (page === "book-search") {
       openBookSearch();
@@ -293,6 +309,9 @@ function AppContent() {
     if (page === "remote-book") {
       nav.push({ kind: "remote-book", originShell: nav.shellTab() });
       return;
+    }
+    if (page !== settingsQuickPageReturn()) {
+      setSettingsQuickPageReturn(null);
     }
     nav.navigateShell(page);
   };
@@ -2933,6 +2952,11 @@ function AppContent() {
     push("bookshelf-manage", showBookshelfManage(), () => setShowBookshelfManage(false));
     push("bookshelf-cache", showBookshelfCache(), () => setShowBookshelfCache(false));
     push("settings-sub", settingsSubPageOpen(), () => settingsSubPageCloseRef.current());
+    push(
+      "settings-quick-page",
+      settingsQuickPageReturn() != null && currentPage() === settingsQuickPageReturn(),
+      returnFromSettingsQuickPage,
+    );
     push("reading-rule-page", readingRulePage() != null, () => setReadingRulePage(null));
     push(
       "sources-explore-drawer",
@@ -3444,6 +3468,11 @@ function AppContent() {
             {/* 书签视图 */}
             <Show when={currentPage() === "bookmark"}>
               <BookmarkPage
+                onBack={
+                  settingsQuickPageReturn() === 'bookmark'
+                    ? returnFromSettingsQuickPage
+                    : undefined
+                }
                 onOpenBookmark={(bookmark, book) => {
                   openReaderPage({
                     ...book,
@@ -3457,6 +3486,11 @@ function AppContent() {
             {/* 记录视图 */}
             <Show when={currentPage() === "record"}>
               <ReadRecordPage
+                onBack={
+                  settingsQuickPageReturn() === 'record'
+                    ? returnFromSettingsQuickPage
+                    : undefined
+                }
                 onOpenBook={(book) => openReaderPage(book)}
                 onSearchBook={(name) => openBookSearch(name)}
                 onOpenBookInfo={async (book) => {
@@ -3497,7 +3531,7 @@ function AppContent() {
                     setSettingsSubPageOpen(open);
                     settingsSubPageCloseRef.current = close ?? (() => {});
                   }}
-                  onNavigateToPage={navigateToPage}
+                  onNavigateToPage={navigateFromSettingsQuickPage}
                   onOpenReadingRulePage={(page) => {
                     setReadingRulePage(page);
                     navigateToPage("settings");

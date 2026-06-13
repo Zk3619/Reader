@@ -16,6 +16,7 @@ import { ReadRecordArchiveSection } from '@/components/record/ReadRecordArchiveS
 import { ReadRecordOverviewSection } from '@/components/record/ReadRecordOverviewSection';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
+import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import {
   AppDropdownMenu,
   AppDropdownMenuCheckboxItem,
@@ -57,6 +58,7 @@ export interface ReadRecordPageProps {
   onOpenBook?: (book: Book) => void;
   onSearchBook?: (bookName: string) => void;
   onOpenBookInfo?: (book: Book) => void;
+  onBack?: () => void;
 }
 
 export function ReadRecordPage(props: ReadRecordPageProps) {
@@ -128,6 +130,7 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
             dropdownEnabled={false}
           />
         }
+        leading={props.onBack ? <SettingsToolbarLeading onBack={props.onBack} /> : undefined}
       >
         <Tooltip>
           <TooltipTrigger
