@@ -49,7 +49,7 @@ function shouldUseRssReadDocumentProxy(
 ): boolean {
   if (!pageUrl.startsWith('http')) return false;
   if (session.mode === 'url') return false;
-  return Boolean(cookies.trim()) || shouldUseInnerWebDocumentProxy(pageUrl, cookies);
+  return Boolean(cookies.trim()) || shouldUseInnerWebDocumentProxy(pageUrl);
 }
 
 function buildRssReadBridgeScript(): string {

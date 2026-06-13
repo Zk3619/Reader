@@ -65,12 +65,28 @@ import {
   navigateInnerWebLink,
   normalizeInnerWebNavigateUrl,
 } from '@/lib/platform/inner-web-navigation';
+import { INNER_WEB_HOST_FIXES_SCRIPT } from '@/lib/platform/inner-web-host-fixes';
 import { cn } from '@/lib/utils';
 
 const INNER_WEB_YUEDU_CHANNEL = 'reader-inner-web-yuedu';
 
 /** Legado「一键导入」yuedu:// → postMessage 宿主；仅内嵌 data: HTML iframe 可注入 */
 /** Legado startBrowserAwait().body()：响应宿主 readDocumentHtml */
+function injectInnerWebHostFixes(frame: HTMLIFrameElement): void {
+  try {
+    const doc = frame.contentDocument;
+    const root = doc?.documentElement;
+    if (!root || doc.getElementById('reader-inner-web-host-fixes')) return;
+    const s = doc.createElement('script');
+    s.id = 'reader-inner-web-host-fixes';
+    s.textContent = INNER_WEB_HOST_FIXES_SCRIPT;
+    const head = doc.head || root;
+    head.insertBefore(s, head.firstChild);
+  } catch {
+    /* 跨域 iframe 由 Tauri document-start 注入 */
+  }
+}
+
 function injectInnerWebDocumentBridge(frame: HTMLIFrameElement): void {
   try {
     const doc = frame.contentDocument;
@@ -703,6 +719,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
     void reinjectCookies();
     const el = ev.currentTarget;
     if (el instanceof HTMLIFrameElement) {
+      injectInnerWebHostFixes(el);
       syncIframeDocumentFromLoad(el);
       injectInnerWebDocumentBridge(el);
       if (cfVerify()) {

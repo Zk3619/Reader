@@ -30,19 +30,19 @@ describe('shouldUseInnerWebDocumentProxy', () => {
   });
 
   it('Tauri panel 默认不走代理', () => {
-    expect(shouldUseInnerWebDocumentProxy('https://example.com', 'a=1')).toBe(false);
+    expect(shouldUseInnerWebDocumentProxy('https://example.com')).toBe(false);
   });
 
-  it('Tauri iframe 回退无 Cookie 时不走代理', async () => {
+  it('Tauri iframe 回退有 Cookie 时也不走 __reader_http（用原生 Cookie 注入）', async () => {
     const { resolveInnerWebUsesTauriPanel } = await import('@/lib/platform/inner-web-mode');
     vi.mocked(resolveInnerWebUsesTauriPanel).mockReturnValue(false);
-    expect(shouldUseInnerWebDocumentProxy('https://example.com', '')).toBe(false);
-    expect(shouldUseInnerWebDocumentProxy('https://example.com', 'a=1')).toBe(true);
+    expect(shouldUseInnerWebDocumentProxy('https://example.com')).toBe(false);
+    expect(shouldUseInnerWebDocumentProxy('https://example.com')).toBe(false);
   });
 
   it('纯 Web 跨域 http 无 Cookie 也走代理（去 X-Frame-Options）', () => {
     isTauri.mockReturnValue(false);
-    expect(shouldUseInnerWebDocumentProxy('https://www.24ao.cc/', '')).toBe(true);
+    expect(shouldUseInnerWebDocumentProxy('https://www.24ao.cc/')).toBe(true);
   });
 
   it('needsInnerWebDocumentProxy 尊重 useProxyDocument', () => {

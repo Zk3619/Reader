@@ -14,7 +14,11 @@ mod windows_impl {
         if BOOTSTRAP_INSTALLED.load(Ordering::SeqCst) {
             return Ok(());
         }
-        let script = include_str!("../scripts/inner_web_iframe_bootstrap.js").to_string();
+        let script = format!(
+            "{}\n{}",
+            include_str!("../scripts/inner_web_iframe_bootstrap.js"),
+            include_str!("../scripts/inner_web_host_fixes.txt"),
+        );
         let err_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
         let err_capture = err_slot.clone();
         window

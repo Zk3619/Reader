@@ -1,11 +1,10 @@
 /**
- * 纯 Web 内嵌页：通过 Vite /__reader_http 会话在 iframe 内注入 Cookie 并代理 API。
+ * 内嵌网页文档代理：纯 Web 走 Vite /__reader_http；Tauri 用 panel 或 iframe + Cookie 注入。
  */
 
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 import { encodeLegadoForwardHeaders } from '@/lib/http/legado-forward-headers';
-import { isMobile, isTauri } from '@/lib/platform/detect';
-import { resolveInnerWebUsesTauriPanel } from '@/lib/platform/inner-web-mode';
+import { isTauri } from '@/lib/platform/detect';
 
 const PROXY_SEGMENT = '__reader_http';
 
@@ -19,24 +18,16 @@ function proxyPath(): string {
   return new URL(PROXY_SEGMENT, new URL(baseUrl, window.location.href)).pathname;
 }
 
-export function shouldUseInnerWebDocumentProxy(
-  pageUrl: string,
-  initialCookies?: string,
-): boolean {
+export function shouldUseInnerWebDocumentProxy(pageUrl: string): boolean {
   if (typeof window === 'undefined') return false;
   const url = pageUrl.trim();
   if (!url.startsWith('http')) return false;
 
-  // Tauri 桌面 panel 由原生 WebView 直连，不走同源代理
-  if (isTauri() && !isMobile()) {
-    if (resolveInnerWebUsesTauriPanel({ url })) return false;
-  }
+  // Tauri：panel 直连或 iframe + set_cookies_for_inner_web；不走 Vite __reader_http（生产包无此中间件）
+  if (isTauri()) return false;
 
   // 纯 Web iframe：跨域页常设 X-Frame-Options / CSP frame-ancestors，须走 __reader_http
-  if (!isTauri()) return true;
-
-  // Tauri iframe 回退：有 Cookie 须注入时才走代理
-  return Boolean(initialCookies?.trim());
+  return true;
 }
 
 /** 是否须 __reader_http 文档代理（含显式 useProxyDocument） */
@@ -45,7 +36,7 @@ export function needsInnerWebDocumentProxy(
   options?: { useProxyDocument?: boolean; initialCookies?: string },
 ): boolean {
   if (options?.useProxyDocument) return true;
-  return shouldUseInnerWebDocumentProxy(pageUrl, options?.initialCookies);
+  return shouldUseInnerWebDocumentProxy(pageUrl);
 }
 
 export async function createInnerWebProxySession(

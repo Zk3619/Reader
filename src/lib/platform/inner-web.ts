@@ -64,8 +64,7 @@ export interface InnerWebPayload {
   /** 创建代理会话时附带的书源请求头（User-Agent 等） */
   proxyForwardHeaders?: Record<string, string>;
   /**
-   * Cloudflare 验证：桌面 Tauri 也强制 iframe + __reader_http 代理（读取 HttpOnly cf_clearance）。
-   * 不影响 innerWebRenderMode 的其它内嵌页。
+   * Cloudflare 验证：Tauri 用原生 panel；纯 Web 走 __reader_http 同源代理。
    */
   cloudflareVerification?: boolean;
 }

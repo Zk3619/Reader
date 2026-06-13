@@ -1,0 +1,268 @@
+/**
+ * 内嵌书源页宿主修复（document-start 注入）：
+ * - 屏蔽 Cloudflare Insights 等统计脚本
+ * - HTTPS 页将媒体 HTTP 直链升级为 HTTPS（配合 upgrade-insecure-requests）
+ * - 节流「读取/保存进度」控制台刷屏
+ */
+(function () {
+  if (window.__READER_HOST_FIXES__) return;
+  window.__READER_HOST_FIXES__ = true;
+
+  var PAGE_IS_HTTPS = location.protocol === 'https:';
+
+  function isBlockedAnalyticsUrl(url) {
+    var s = String(url || '').trim();
+    if (!s) return false;
+    return (
+      /cloudflareinsights\.com/i.test(s) ||
+      /\/beacon\.min\.js/i.test(s) ||
+      /\/cdn-cgi\/rum/i.test(s)
+    );
+  }
+
+  /** HTTPS 文档内将 http 媒体地址升级为 https（通用，非特定书源域） */
+  function upgradeInsecureMediaUrl(url) {
+    var s = String(url || '').trim();
+    if (!PAGE_IS_HTTPS || !/^http:\/\//i.test(s)) return url;
+    return s.replace(/^http:/i, 'https:');
+  }
+
+  function patchUrlProperty(proto, prop, transform) {
+    if (!proto) return;
+    var desc = Object.getOwnPropertyDescriptor(proto, prop);
+    if (!desc || !desc.set) return;
+    Object.defineProperty(proto, prop, {
+      configurable: true,
+      enumerable: desc.enumerable !== false,
+      get: desc.get,
+      set: function (v) {
+        desc.set.call(this, transform(v));
+      },
+    });
+  }
+
+  function blockAnalyticsResource(url) {
+    return isBlockedAnalyticsUrl(url) ? '' : url;
+  }
+
+  function sanitizeScriptElement(script) {
+    if (!script || script.tagName !== 'SCRIPT') return script;
+    var src = script.getAttribute('src') || script.src || '';
+    if (isBlockedAnalyticsUrl(src)) {
+      try {
+        script.removeAttribute('src');
+        script.parentNode && script.parentNode.removeChild(script);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    return script;
+  }
+
+  patchUrlProperty(HTMLScriptElement.prototype, 'src', blockAnalyticsResource);
+  patchUrlProperty(HTMLImageElement.prototype, 'src', function (v) {
+    return blockAnalyticsResource(upgradeInsecureMediaUrl(v));
+  });
+  patchUrlProperty(HTMLMediaElement.prototype, 'src', upgradeInsecureMediaUrl);
+  if (typeof HTMLSourceElement !== 'undefined') {
+    patchUrlProperty(HTMLSourceElement.prototype, 'src', upgradeInsecureMediaUrl);
+  }
+
+  try {
+    var rawSetAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      var n = String(name).toLowerCase();
+      if (n === 'src' || n === 'href') {
+        if (this.tagName === 'SCRIPT') value = blockAnalyticsResource(value);
+        else if (this.tagName === 'VIDEO' || this.tagName === 'AUDIO' || this.tagName === 'SOURCE') {
+          value = upgradeInsecureMediaUrl(value);
+        }
+      }
+      return rawSetAttribute.call(this, name, value);
+    };
+  } catch (e) {
+    /* ignore */
+  }
+
+  try {
+    var rawAppendChild = Node.prototype.appendChild;
+    Node.prototype.appendChild = function (child) {
+      sanitizeScriptElement(child);
+      return rawAppendChild.call(this, child);
+    };
+    var rawInsertBefore = Node.prototype.insertBefore;
+    Node.prototype.insertBefore = function (child, ref) {
+      sanitizeScriptElement(child);
+      return rawInsertBefore.call(this, child, ref);
+    };
+  } catch (e) {
+    /* ignore */
+  }
+
+  try {
+    var rawCreateElement = Document.prototype.createElement;
+    Document.prototype.createElement = function (tagName, options) {
+      var el = rawCreateElement.call(this, tagName, options);
+      if (String(tagName).toLowerCase() === 'script') {
+        var desc = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+        if (desc && desc.set) {
+          Object.defineProperty(el, 'src', {
+            configurable: true,
+            enumerable: true,
+            get: desc.get ? function () {
+              return desc.get.call(el);
+            } : undefined,
+            set: function (v) {
+              desc.set.call(el, blockAnalyticsResource(v));
+            },
+          });
+        }
+      }
+      return el;
+    };
+  } catch (e) {
+    /* ignore */
+  }
+
+  try {
+    var rawFetch = window.fetch;
+    if (rawFetch) {
+      window.fetch = function (input, init) {
+        var url = typeof input === 'string' ? input : input && input.url;
+        if (isBlockedAnalyticsUrl(url)) {
+          return Promise.resolve(new Response('', { status: 204, statusText: 'No Content' }));
+        }
+        return rawFetch.apply(this, arguments);
+      };
+    }
+  } catch (e) {
+    /* ignore */
+  }
+
+  try {
+    if (navigator.sendBeacon) {
+      var rawSendBeacon = navigator.sendBeacon.bind(navigator);
+      navigator.sendBeacon = function (url, data) {
+        if (isBlockedAnalyticsUrl(url)) return true;
+        return rawSendBeacon(url, data);
+      };
+    }
+  } catch (e) {
+    /* ignore */
+  }
+
+  try {
+    var XO = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (isBlockedAnalyticsUrl(url)) {
+        return XO.call(this, method, 'about:blank');
+      }
+      return XO.apply(this, arguments);
+    };
+  } catch (e) {
+    /* ignore */
+  }
+
+  var progressLogState = { key: '', at: 0, progress: -1 };
+  var PROGRESS_READ_RE = /读取保存的进度/;
+  var PROGRESS_SAVE_RE = /保存进度/;
+  var READ_DEDUPE_MS = 3000;
+  var SAVE_THROTTLE_MS = 5000;
+  var SAVE_PROGRESS_DELTA = 0.05;
+
+  try {
+    var rawLog = console.log.bind(console);
+    console.log = function () {
+      var args = Array.prototype.slice.call(arguments);
+      var first = args[0];
+      if (typeof first === 'string' && (PROGRESS_READ_RE.test(first) || PROGRESS_SAVE_RE.test(first))) {
+        var now = Date.now();
+        var payload = args[1];
+        var itemId = payload && payload.itemId != null ? String(payload.itemId) : '';
+        var isRead = PROGRESS_READ_RE.test(first);
+        var key = (isRead ? 'read:' : 'save:') + itemId;
+        if (isRead) {
+          if (key === progressLogState.key && now - progressLogState.at < READ_DEDUPE_MS) {
+            return;
+          }
+        } else {
+          var progress =
+            payload && typeof payload.progress === 'number' ? payload.progress : 0;
+          if (
+            key === progressLogState.key &&
+            now - progressLogState.at < SAVE_THROTTLE_MS &&
+            Math.abs(progress - progressLogState.progress) < SAVE_PROGRESS_DELTA
+          ) {
+            return;
+          }
+          progressLogState.progress = progress;
+        }
+        progressLogState.key = key;
+        progressLogState.at = now;
+      }
+      return rawLog.apply(console, args);
+    };
+  } catch (e) {
+    /* ignore */
+  }
+
+  function scrubBlockedScripts(root) {
+    try {
+      (root || document).querySelectorAll('script[src]').forEach(function (node) {
+        var src = node.getAttribute('src') || '';
+        if (isBlockedAnalyticsUrl(src)) node.remove();
+      });
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function injectUpgradeInsecureMeta() {
+    if (!PAGE_IS_HTTPS) return;
+    try {
+      var head = document.head || document.documentElement;
+      if (!head || document.querySelector('meta[data-reader-upgrade-insecure]')) return;
+      var meta = document.createElement('meta');
+      meta.setAttribute('data-reader-upgrade-insecure', '1');
+      meta.httpEquiv = 'Content-Security-Policy';
+      meta.content = 'upgrade-insecure-requests';
+      head.insertBefore(meta, head.firstChild);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function installDomObservers() {
+    var root = document.documentElement;
+    if (!root || !(root instanceof Node)) return;
+    scrubBlockedScripts(document);
+    injectUpgradeInsecureMeta();
+    if (typeof MutationObserver === 'undefined') return;
+    try {
+      new MutationObserver(function (mutations) {
+        mutations.forEach(function (m) {
+          m.addedNodes.forEach(function (node) {
+            if (!(node instanceof Element)) return;
+            if (node.tagName === 'SCRIPT') {
+              sanitizeScriptElement(node);
+              return;
+            }
+            scrubBlockedScripts(node);
+          });
+        });
+      }).observe(root, { childList: true, subtree: true });
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function onDomReady() {
+    installDomObservers();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onDomReady);
+  } else {
+    onDomReady();
+  }
+})();

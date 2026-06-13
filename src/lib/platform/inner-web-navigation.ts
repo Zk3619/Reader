@@ -29,7 +29,7 @@ export function buildInnerWebNavigationBridgeScript(): string {
     `var ch='${ch}';` +
     "function isImportScheme(h){return /^(legado|yuedu):\\/\\//i.test(String(h||'').trim());}" +
     "function nav(href,target){try{window.parent.postMessage({channel:ch,href:String(href||''),target:target||null},'*');}catch(_){}}" +
-    "function installShellOpenShim(){try{var ti=window.__TAURI_INTERNALS__||{};if(!ti.plugins)ti.plugins={};window.__TAURI_INTERNALS__=ti;if(!window.__TAURI__)window.__TAURI__={};var shellOpen=function(u){if(isImportScheme(u)){nav(u,'_blank');return Promise.resolve();}return Promise.reject(new Error('unsupported'));};var shellWrap={open:shellOpen};window.__TAURI__.shell=shellWrap;try{Object.defineProperty(window.__TAURI__,'shell',{configurable:true,enumerable:true,get:function(){return shellWrap;}});}catch(_){}}catch(_){}}" +
+    "function installShellOpenShim(){try{var ti=window.__TAURI_INTERNALS__&&typeof window.__TAURI_INTERNALS__==='object'?window.__TAURI_INTERNALS__:{};if(!ti.plugins)ti.plugins={};window.__TAURI_INTERNALS__=ti;if(!window.__TAURI__)window.__TAURI__={};var shellOpen=function(u){if(isImportScheme(u)){nav(u,'_blank');return Promise.resolve();}return Promise.reject(new Error('unsupported'));};var shellWrap={open:shellOpen};window.__TAURI__.shell=shellWrap;try{Object.defineProperty(window.__TAURI__,'shell',{configurable:true,enumerable:true,get:function(){return shellWrap;}});}catch(_){}}catch(_){}}" +
     "installShellOpenShim();" +
     "try{var rawOpen=window.open;window.open=function(u,t,f){if(isImportScheme(u)){nav(u,t||'_blank');return null;}return rawOpen.apply(window,arguments);};}catch(_){}" +
     "function bindLinkCapture(){document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;var raw=a.getAttribute('href')||'';if(!raw||/^javascript:/i.test(raw)||raw.charAt(0)==='#')return;if(!isImportScheme(raw)&&!isImportScheme(a.href))return;e.preventDefault();e.stopPropagation();nav(a.href,a.getAttribute('target'));},true);}" +
@@ -53,7 +53,7 @@ function mergeInnerWebNavigatePayload(
   }
   const norm = normalizedUrl ?? normalizeInnerWebNavigateUrl(trimmed);
   const useProxyDocument =
-    shouldUseInnerWebDocumentProxy(norm, cookies) ||
+    shouldUseInnerWebDocumentProxy(norm) ||
     Boolean(current?.useProxyDocument);
   return {
     title: current?.title ?? '网页',

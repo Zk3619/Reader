@@ -154,7 +154,10 @@
 
   function installShellOpenShim() {
     try {
-      var ti = window.__TAURI_INTERNALS__ || {};
+      var ti =
+        window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__ === 'object'
+          ? window.__TAURI_INTERNALS__
+          : {};
       if (!ti.plugins) ti.plugins = {};
       window.__TAURI_INTERNALS__ = ti;
       if (!window.__TAURI__) window.__TAURI__ = {};

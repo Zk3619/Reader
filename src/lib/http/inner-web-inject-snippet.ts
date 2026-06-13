@@ -3,6 +3,7 @@ import {
   extractProxiedDocumentQuery,
   patchProxiedDocumentLocationQuery,
 } from '@/lib/platform/inner-web-proxied-query';
+import { INNER_WEB_HOST_FIXES_SCRIPT } from '@/lib/platform/inner-web-host-fixes';
 
 export { extractProxiedDocumentQuery, patchProxiedDocumentLocationQuery };
 
@@ -635,7 +636,7 @@ export function injectHtmlForInnerWeb(
     sessionId,
     proxyPath,
     cloudflareChallenge,
-  })}</script>`;
+  })}</script><script>${INNER_WEB_HOST_FIXES_SCRIPT}</script>`;
   const baseTag = cloudflareChallenge ? '' : `<base href="${pageBase}">`;
   const cfCspTag = cloudflareChallenge ? INNER_WEB_CF_RELAX_CSP_META : '';
   if (/<head[\s>]/i.test(patched)) {
