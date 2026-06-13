@@ -16,6 +16,12 @@ import {
   type PartialChapterList,
 } from '@/lib/book-source/chapters';
 import { resolveBookType } from '@/lib/book-source/book-type';
+import {
+  mergeShelfBookFromNewBook,
+  shelfBookInfoMetadataChanged,
+  syncShelfBookFromSearchBook,
+} from '@/lib/bookshelf/merge-shelf-book-info';
+import { ensureShelfBookMetadataForReading } from '@/lib/bookshelf/ensure-shelf-book-for-reading';
 import { mergeBookContentVariable } from '@/lib/book-source/utils';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
@@ -24,6 +30,7 @@ import {
   type ShelfReadingProgressInput,
 } from '@/lib/bookshelf/reading-progress-snapshot';
 import type { Book, BookChapter, NewBook, SearchBook } from '@/types';
+import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
 
 /** true=阻塞拉目录；false=不拉；'background'=先上架再后台拉（默认，对齐 legado） */
 export type ChapterFetchMode = boolean | 'background';
@@ -103,7 +110,7 @@ async function fetchChaptersForBook(
   const source = await sourcesDb.getSource(incoming.origin);
   if (!source) return [];
   const tocUrl = incoming.tocUrl || bookUrl;
-  return fetchChapterListDeduped(source, tocUrl);
+  return fetchChapterListDeduped(source, tocUrl, { persistTocFetch: true });
 }
 
 async function applyGroupMask(bookUrl: string, groupId?: number): Promise<void> {
@@ -203,40 +210,44 @@ export function notifyChaptersUpdated(
 
 /** 拉取并写入目录：分页过程中仅更新书籍元数据，完成后一次性写入章节表 */
 export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> {
-  if (isLocalBook(book) || !book.tocUrl || !book.origin) return;
+  return withIgnoredPageNavigationAbort(async () => {
+    if (isLocalBook(book) || !book.origin) return;
 
-  const source = await sourcesDb.getSource(book.origin);
-  if (!source) return;
+    book = await ensureShelfBookMetadataForReading(book);
+    if (!book.tocUrl) return;
 
-  const count = await chaptersDb.getChapterCount(book.bookUrl);
-  const tocInFlight = isChapterListFetchInFlight(source, book.tocUrl);
-  if (count > 0) {
-    const saved = await booksDb.getBook(book.bookUrl);
-    if (saved) {
-      const existing = await chaptersDb.getChapterList(book.bookUrl);
-      if (existing.length > 0 && shelfBookNeedsChapterMeta(saved)) {
-        await updateBookChapterMeta(book.bookUrl, existing);
-        notifyShelfBookMeta(book.bookUrl);
-      }
-      const afterMeta = await booksDb.getBook(book.bookUrl);
-      if (
-        afterMeta &&
-        !shelfBookNeedsChapterMeta(afterMeta) &&
-        !tocInFlight &&
-        !shelfCachedChapterListLooksStale(existing, afterMeta)
-      ) {
-        return;
-      }
-      if (existing.length > 0 && shelfCachedChapterListLooksStale(existing, book)) {
-        console.log('[saveBookToShelf] 本地目录不完整，重新拉取', {
-          cached: existing.length,
-          expected: book.totalChapterNum ?? 0,
-        });
+    const source = await sourcesDb.getSource(book.origin);
+    if (!source) return;
+
+    const count = await chaptersDb.getChapterCount(book.bookUrl);
+    const persistTocInFlight = isChapterListFetchInFlight(source, book.tocUrl, 'persist');
+    if (count > 0) {
+      const saved = await booksDb.getBook(book.bookUrl);
+      if (saved) {
+        const existing = await chaptersDb.getChapterList(book.bookUrl);
+        if (existing.length > 0 && shelfBookNeedsChapterMeta(saved)) {
+          await updateBookChapterMeta(book.bookUrl, existing);
+          notifyShelfBookMeta(book.bookUrl);
+        }
+        const afterMeta = await booksDb.getBook(book.bookUrl);
+        if (
+          afterMeta &&
+          !shelfBookNeedsChapterMeta(afterMeta) &&
+          !persistTocInFlight &&
+          !shelfCachedChapterListLooksStale(existing, afterMeta)
+        ) {
+          return;
+        }
+        if (existing.length > 0 && shelfCachedChapterListLooksStale(existing, book)) {
+          console.log('[saveBookToShelf] 本地目录不完整，重新拉取', {
+            cached: existing.length,
+            expected: book.totalChapterNum ?? 0,
+          });
+        }
       }
     }
-  }
 
-  let lastMetaPersistAt = 0;
+    let lastMetaPersistAt = 0;
 
   const onPartial = async (partial: PartialChapterList) => {
     if (partial.chapters.length === 0) return;
@@ -268,6 +279,7 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
 
   try {
     const chapters = await fetchChapterListDeduped(source, book.tocUrl, {
+      persistTocFetch: true,
       reverseToc: book.readConfig?.reverseToc === true,
       onPartial,
       bookUrl: book.bookUrl,
@@ -281,21 +293,56 @@ export async function fetchAndPersistChaptersForBook(book: Book): Promise<void> 
   } catch (e) {
     console.warn('[saveBookToShelf] 后台拉取目录失败:', e);
   }
+  });
 }
 
 function scheduleBackgroundChapterFetch(book: Book): void {
   void fetchAndPersistChaptersForBook(book);
 }
 
-/** 在线书架书是否仍缺目录或 latestChapterTitle / totalChapterNum 元数据 */
+/** 打开阅读器前：补全详情元数据并在无目录时阻塞拉取写入 DB */
+export async function ensureShelfBookReadyForReading(book: Book): Promise<Book> {
+  if (isLocalBook(book) || !book.origin) return book;
+
+  let saved = await ensureShelfBookMetadataForReading(book);
+  saved = (await booksDb.getBook(saved.bookUrl)) ?? saved;
+
+  const count = await chaptersDb.getChapterCount(saved.bookUrl);
+  let needFetch = false;
+
+  if (count === 0) {
+    needFetch = onlineBookNeedsChapterRepair(saved) || Boolean(saved.tocUrl?.trim());
+  } else {
+    const existing = await chaptersDb.getChapterList(saved.bookUrl);
+    if (shelfCachedChapterListLooksStale(existing, saved)) {
+      needFetch = true;
+    }
+  }
+
+  if (needFetch) {
+    await fetchAndPersistChaptersForBook(saved);
+    saved = (await booksDb.getBook(saved.bookUrl)) ?? saved;
+  }
+
+  return saved;
+}
+
+/**
+ * 打开阅读器前：是否仍缺目录或 tocUrl / latestChapterTitle 等元数据。
+ * 勿用于书架被动拉取——缺元数据不等于需要重新请求目录接口。
+ */
 export function onlineBookNeedsChapterRepair(book: Book): boolean {
-  if (isLocalBook(book) || !book.tocUrl || !book.origin) return false;
+  if (isLocalBook(book) || !book.origin) return false;
+  const tocUrl = book.tocUrl?.trim();
+  if (!tocUrl || tocUrl === book.bookUrl) return true;
   return (book.totalChapterNum ?? 0) <= 0 || !book.latestChapterTitle?.trim();
 }
 
 const CHAPTER_REPAIR_MAX_CONCURRENT = 2;
 let chapterRepairActive = 0;
 const chapterRepairQueue: Book[] = [];
+/** 本会话已入队的被动补救，避免每次 loadBooks 重复拉取 */
+const passiveChapterRepairEnqueued = new Set<string>();
 
 function pumpChapterRepairQueue(): void {
   while (chapterRepairActive < CHAPTER_REPAIR_MAX_CONCURRENT && chapterRepairQueue.length > 0) {
@@ -308,11 +355,20 @@ function pumpChapterRepairQueue(): void {
   }
 }
 
-/** 书架加载后后台补救（加入书架时拉目录中断、进程退出等） */
-export function scheduleShelfChapterRepairs(books: Book[]): void {
+/**
+ * 书架加载后后台补救：仅 DB 尚无章节（入架时后台拉取中断等）。
+ * 已有章节的元数据缺口由 fetchAndPersistChaptersForBook 本地同步，不重复请求目录。
+ */
+export async function scheduleShelfChapterRepairs(books: Book[]): Promise<void> {
   for (const book of books) {
-    if (!onlineBookNeedsChapterRepair(book)) continue;
+    if (isLocalBook(book) || !book.origin) continue;
+    if (passiveChapterRepairEnqueued.has(book.bookUrl)) continue;
     if (chapterRepairQueue.some((b) => b.bookUrl === book.bookUrl)) continue;
+
+    const count = await chaptersDb.getChapterCount(book.bookUrl);
+    if (count > 0) continue;
+
+    passiveChapterRepairEnqueued.add(book.bookUrl);
     chapterRepairQueue.push(book);
   }
   pumpChapterRepairQueue();
@@ -333,23 +389,16 @@ export async function saveBookToShelf(
 
   const existingByUrl = await booksDb.getBook(bookUrl);
   if (existingByUrl) {
-    const patch = incoming.variable
-      ? (JSON.parse(incoming.variable) as { source?: string })
-      : {};
-    const mergedVariable = mergeBookContentVariable(existingByUrl.variable, patch);
-    let patched = existingByUrl;
-    if (mergedVariable && mergedVariable !== existingByUrl.variable) {
-      patched = {
-        ...existingByUrl,
-        variable: mergedVariable,
-      };
+    const patched = mergeShelfBookFromNewBook(existingByUrl, incoming);
+    if (shelfBookInfoMetadataChanged(existingByUrl, patched)) {
       await booksDb.updateBook(patched);
+      notifyShelfBookMeta(bookUrl);
     }
     if (fetchMode === 'blocking') {
       const chapters = options?.chapters ?? (await fetchChaptersForBook(incoming, bookUrl));
       await persistChaptersForSave(bookUrl, chapters, 'blocking');
     } else if (fetchMode === 'background') {
-      scheduleBackgroundChapterFetch(existingByUrl);
+      scheduleBackgroundChapterFetch(patched);
     } else if (options?.chapters && options.chapters.length > 0) {
       schedulePersistChaptersToShelf(bookUrl, options.chapters);
     }
@@ -427,5 +476,21 @@ export async function addSearchBookToShelf(
   sb: SearchBook,
   options?: SaveBookToShelfOptions
 ): Promise<Book | null> {
-  return saveBookToShelf(searchBookToNewBook(sb), options);
+  const wantsBackgroundFetch =
+    resolveFetchMode(options) === 'background' && !(options?.chapters?.length);
+  const saved = await saveBookToShelf(searchBookToNewBook(sb), {
+    ...options,
+    fetchChapters: wantsBackgroundFetch ? false : options?.fetchChapters,
+  });
+  if (!saved) return null;
+
+  const book = (await syncShelfBookFromSearchBook(sb)) ?? saved;
+
+  if (wantsBackgroundFetch && isOnlineBook(book.origin)) {
+    scheduleBackgroundChapterFetch(book);
+  }
+
+  return book;
 }
+
+export { syncShelfBookFromSearchBook };

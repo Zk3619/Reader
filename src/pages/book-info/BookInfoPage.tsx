@@ -27,7 +27,7 @@ import {
   GroupFolderIcon,
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
+import { addSearchBookToShelf, syncShelfBookFromSearchBook } from '@/lib/bookshelf/save-book-to-shelf';
 import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
 import {
   dedupeLegadoSourceChapterTitle,
@@ -356,6 +356,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setShelfBook((await getBook(url)) ?? null);
   };
 
+  /** 详情页数据回写书架（已在架时补全作者等缺失字段） */
+  const syncShelfBookIfNeeded = async (detail: SearchBook) => {
+    if (!isInShelf()) return;
+    const updated = await syncShelfBookFromSearchBook(detail);
+    if (updated) setShelfBook(updated);
+  };
+
   const commitPreloadedChapters = (book: SearchBook, chapters: BookChapter[]) => {
     if (chapters.length === 0) return;
     setPreloadedChapters(chapters);
@@ -497,6 +504,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
           pageCacheStore.setBookInfoCache(bookUrl, mergedBook, preloadedChapters() ?? undefined);
         }
         void preloadChapterList(mergedBook, source);
+        void syncShelfBookIfNeeded(mergedBook);
       } else {
         const errorMsg = '获取书籍详情失败，返回数据为空';
         console.warn('[BookInfo]', errorMsg);
@@ -614,18 +622,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
       source = (await getSource(book.origin)) ?? undefined;
       if (source) setBookSource(source);
     }
+
     if (source && isOnlineSearchBook(book)) {
-      await preloadChapterList(book, source);
+      void preloadChapterList(book, source);
     }
-    const list = preloadedChapters();
-    if (!list?.length) {
-      showAppToast({
-        title: '无法开始阅读',
-        description: tocLoadError() || '目录为空，请检查网络或书源规则',
-        variant: 'error',
-      });
-      return;
-    }
+
     await openBookAtChapter();
   }
 
