@@ -3,6 +3,7 @@
  */
 
 import { createSignal, createEffect, Show } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -13,17 +14,25 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import {
+  ViewerAppDialog,
+  ViewerAppStackedDialogContent,
+} from '@/components/viewer/viewer-app-overlay';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { isReplaceRuleValid } from '@/lib/replace-rules/replace-text';
 import { testReplaceRule } from '@/lib/replace-rules/test-replace-rule';
 
 export type ReplaceRuleDraft = ReplaceRule | Omit<ReplaceRule, 'id'>;
 
+export type ReplaceRuleEditDialogOverlayLayer = 'app' | 'viewer-stacked';
+
 export interface ReplaceRuleEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rule: ReplaceRuleDraft | null;
   onSave: (rule: ReplaceRuleDraft) => Promise<void>;
+  /** @default 'app' */
+  overlayLayer?: ReplaceRuleEditDialogOverlayLayer;
 }
 
 function validateRule(rule: ReplaceRuleDraft): string | null {
@@ -120,10 +129,25 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
   };
 
   const isEditing = () => 'id' in (draft() ?? {}) && Boolean((draft() as ReplaceRule).id);
+  const useViewerStacked = () => (props.overlayLayer ?? 'app') === 'viewer-stacked';
+  const dialogShell = () => (useViewerStacked() ? ViewerAppDialog : AppDialog);
+  const dialogPanel = () => (useViewerStacked() ? ViewerAppStackedDialogContent : AppDialogContent);
+
+  const handleOpenChange = (open: boolean) => {
+    props.onOpenChange(open);
+  };
 
   return (
-    <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class="flex max-h-[90dvh] max-w-lg flex-col overflow-hidden">
+    <Dynamic
+      component={dialogShell()}
+      open={props.open}
+      onOpenChange={handleOpenChange}
+      modal={useViewerStacked() ? false : undefined}
+    >
+      <Dynamic
+        component={dialogPanel()}
+        class="flex max-h-[90dvh] max-w-lg flex-col overflow-hidden"
+      >
         <AppDialogHeader>
           <AppDialogTitle>{isEditing() ? '编辑替换规则' : '新建替换规则'}</AppDialogTitle>
         </AppDialogHeader>
@@ -292,7 +316,7 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
           </Button>
           <Button onClick={() => void save()}>保存</Button>
         </div>
-      </AppDialogContent>
-    </AppDialog>
+      </Dynamic>
+    </Dynamic>
   );
 }

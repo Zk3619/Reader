@@ -12,7 +12,7 @@ export type ReplacePolicyBook = Pick<Book, 'name' | 'origin' | 'type'> &
 
 const STORAGE_KEY = 'reader_replace_enable_default';
 
-/** 新书未显式设置 useReplaceRule 时的全局默认（Legado replaceEnableDefault，默认 true） */
+/** 全局替换净化开关：书籍未显式设置 useReplaceRule 时生效（Legado replaceEnableDefault，默认 true） */
 export function getReplaceEnableDefault(): boolean {
   if (typeof localStorage === 'undefined') return true;
   const raw = localStorage.getItem(STORAGE_KEY);

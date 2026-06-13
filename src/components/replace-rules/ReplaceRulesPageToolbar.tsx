@@ -16,6 +16,7 @@ import {
 import {
   SearchIcon,
   MoreIcon,
+  SettingsIcon,
   FileTextIcon,
   FolderPlusIcon,
   LinkIcon,
@@ -24,6 +25,7 @@ import {
   ChevronLeftIcon,
   XIcon,
 } from '@/components/shared/icons';
+import { ReplacePurifySettingsDialog } from '@/components/replace-rules/ReplacePurifySettingsDialog';
 
 export interface ReplaceRulesPageToolbarProps {
   searchQuery?: string;
@@ -56,6 +58,7 @@ export function ReplaceRulesToolbarLeading(props: { onBack: () => void }) {
 
 export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [searchExpanded, setSearchExpanded] = createSignal(false);
   const searchQueryRef: { current: string } = { current: '' };
 
@@ -126,6 +129,23 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
           </Show>
         </div>
       </Show>
+
+      <Tooltip>
+        <TooltipTrigger
+          as={Button}
+          variant="ghost"
+          size="icon"
+          class="h-9 w-9 shrink-0"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="设置"
+          type="button"
+        >
+          <SettingsIcon class="h-4 w-4" />
+        </TooltipTrigger>
+        <TooltipContent>设置</TooltipContent>
+      </Tooltip>
+
+      <ReplacePurifySettingsDialog open={settingsOpen()} onOpenChange={setSettingsOpen} />
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
         <Tooltip>
