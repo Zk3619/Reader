@@ -157,6 +157,10 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
       goPrevPage,
       setPageProgress,
       getBookmarkSnapshot,
+      canGoNextPage: () => {
+        const idx = pageIndex();
+        return idx < pageCount() - 1 || !isAtLastChapter();
+      },
     });
   });
 

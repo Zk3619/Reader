@@ -60,6 +60,9 @@ import {
 } from '@/stores/viewer/media/chapter';
 import {
   defaultTextViewerUiConfig,
+  normalizeAutoPageProgressEdge,
+  normalizeAutoPageStyle,
+  normalizeAutoReadSpeed,
   normalizeSimulationDragZonePercent,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
@@ -136,6 +139,11 @@ async function hydrateReaderConfig(): Promise<void> {
         saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
       ),
       theme: normalizeReaderThemeId(saved.theme),
+      autoReadSpeed: normalizeAutoReadSpeed(saved.autoReadSpeed),
+      autoPageStyle: normalizeAutoPageStyle(saved.autoPageStyle as string | undefined),
+      autoPageProgressEdge: normalizeAutoPageProgressEdge(
+        saved.autoPageProgressEdge as string | undefined,
+      ),
     }));
   }
 }

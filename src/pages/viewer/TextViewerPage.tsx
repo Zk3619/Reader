@@ -3,7 +3,7 @@
  * 参考 legado ReadBookActivity：全屏阅读、顶部栏、正文区、目录与设置
  */
 
-import { createSignal, Show, Index, onMount, onCleanup, createEffect, type Accessor } from 'solid-js';
+import { createSignal, Show, Index, onMount, onCleanup, createEffect, on, type Accessor } from 'solid-js';
 import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
@@ -96,12 +96,16 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import {
-  useMediaViewerMainScrollClass,
-  useMediaViewerMainStageClass,
-} from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainScrollClass, useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
 import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
+import { ReaderAutoPageOverlay } from '@/components/viewer/text-viewer/ReaderAutoPageOverlay';
+import { useTextViewerAutoPager } from '@/lib/media/text/use-text-viewer-auto-pager';
+import { normalizeAutoReadSpeed } from '@/lib/media/text/text-viewer-auto-pager';
+import {
+  textViewerDualPageActive,
+  type TextViewerDualPageMode,
+} from '@/lib/media/text/reader-ui-config';
 
 /** 区分轻点与滑动：移动超过阈值则不触发分区单击 */
 const TAP_MOVE_THRESHOLD = 10;
@@ -115,14 +119,24 @@ export interface BookReaderProps {
 }
 
 /** 在 Shell 内挂载，供分区「菜单」动作与 Shell 顶栏显隐同步 */
-function BookReaderChromeBridge(props: { onReady: (toggleBars: () => void) => void }) {
+function BookReaderChromeBridge(props: {
+  onReady: (toggleBars: () => void) => void;
+  onChromeBarsVisible?: (visible: boolean) => void;
+}) {
   const shell = useMediaViewerShell();
   onMount(() => props.onReady(() => shell.toggleBars()));
+  createEffect(() => {
+    props.onChromeBarsVisible?.(shell.headerVisible());
+  });
   return null;
 }
 
 export function BookReader(props: BookReaderProps) {
   let toggleChromeBars: () => void = () => undefined;
+  const chromeLayout = useViewerChromeLayout();
+  const [chromeBarsVisible, setChromeBarsVisible] = createSignal(true);
+  /** 视口尺寸变化时重判双页（按页模式依赖视口宽高） */
+  const [dualPageLayoutProbe, setDualPageLayoutProbe] = createSignal(0);
 
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -379,7 +393,12 @@ export function BookReader(props: BookReaderProps) {
   };
 
   let scrollContainer: HTMLDivElement | null = null;
-  const getScrollContainer = () => scrollContainer;
+  const [scrollContainerEl, setScrollContainerEl] = createSignal<HTMLDivElement | null>(null);
+  const getScrollContainer = () => scrollContainerEl() ?? scrollContainer;
+  const bindScrollContainerRef = (el: HTMLDivElement) => {
+    scrollContainer = el;
+    setScrollContainerEl(el);
+  };
   let lastChapterIndex = -1;
 
   // 换书时重置章节切换动画追踪
@@ -504,6 +523,7 @@ export function BookReader(props: BookReaderProps) {
       },
     });
     if (ok) {
+      autoPager.stop();
       setReadAloudActive(true);
       showAppToast({ title: '开始朗读' });
     }
@@ -516,7 +536,59 @@ export function BookReader(props: BookReaderProps) {
     normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
   const isPagedMode = () => isTextViewerPagedAnim(normalizedPageAnim());
 
-  const dualPageActive = () => false;
+  const autoPagePaused = () =>
+    catalogOpen() ||
+    settingsOpen() ||
+    readerMenuDrawerOpen() ||
+    searchOpen() ||
+    bookmarksOpen() ||
+    dictOpen() ||
+    changeSourceOpen() ||
+    offlineCacheDialogOpen() ||
+    clickRegionalOpen() ||
+    commentsOpen() ||
+    (chromeLayout() !== 'fixed' && chromeBarsVisible());
+
+  const canGoNextPage = () => {
+    if (isPagedMode() && pagedNav) return pagedNav.canGoNextPage();
+    const catalog = textViewerStore.state.catalog;
+    return (
+      catalog.length > 0 &&
+      textViewerStore.state.chapterIndex < catalog.length - 1
+    );
+  };
+
+  const isDualPageLayoutActive = () => {
+    const mode = (textViewerStore.state.config.dualPage ?? 'auto') as TextViewerDualPageMode;
+    if (mode === 'off') return false;
+    if (isPagedMode()) {
+      return pagedNav?.isDualPageLayoutActive?.() ?? false;
+    }
+    return textViewerDualPageActive(mode, isWideScreen());
+  };
+
+  const dualPageActive = () => isDualPageLayoutActive();
+
+  const stopAutoPageIfDualLayout = () => {
+    if (isDualPageLayoutActive() && autoPager.active()) {
+      autoPager.stop();
+    }
+  };
+
+  const handleAutoPageToggle = (enabled: boolean) => {
+    if (enabled && isDualPageLayoutActive()) {
+      showAppToast({
+        title: '双页模式不支持自动翻页',
+        description: '请关闭双页或切换到单页阅读后再开启',
+      });
+      return;
+    }
+    autoPager.setEnabled(enabled);
+    if (enabled) {
+      setReadAloudActive(false);
+      showAppToast({ title: '已开启自动翻页' });
+    }
+  };
 
   const goNextPage = () => {
     if (isPagedMode() && pagedNav) {
@@ -533,6 +605,44 @@ export function BookReader(props: BookReaderProps) {
     }
     void handlePrev();
   };
+
+  const autoPager = useTextViewerAutoPager({
+    isScrollMode: () => !isPagedMode(),
+    getScrollContainer,
+    goNextPage,
+    canGoNextPage,
+    drivePagedReveal: (progress) => pagedNav?.driveAutoPagerReveal?.(progress) ?? false,
+    isPaused: autoPagePaused,
+  });
+
+  const handleAutoReadSpeedChange = (speed: number) => {
+    textViewerStore.setConfig({ autoReadSpeed: normalizeAutoReadSpeed(speed) });
+  };
+
+  createEffect(() => {
+    dualPageLayoutProbe();
+    textViewerStore.state.config.dualPage;
+    isWideScreen();
+    isPagedMode();
+    stopAutoPageIfDualLayout();
+  });
+
+  createEffect(() => {
+    const el = scrollContainerEl();
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      setDualPageLayoutProbe((p) => p + 1);
+    });
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
+  });
+
+  createEffect(
+    on(normalizedPageAnim, (_anim, prevAnim) => {
+      if (prevAnim === undefined) return;
+      if (autoPager.active()) autoPager.stop();
+    }),
+  );
 
   const runClickAction = (action: ReaderClickActionId) => {
     switch (action) {
@@ -619,6 +729,7 @@ export function BookReader(props: BookReaderProps) {
     const handleResize = () => {
       const w = window.innerWidth;
       setIsWideScreen(w >= 480);
+      setDualPageLayoutProbe((p) => p + 1);
     };
     window.addEventListener('resize', handleResize);
     onCleanup(() => window.removeEventListener('resize', handleResize));
@@ -728,12 +839,23 @@ export function BookReader(props: BookReaderProps) {
       tapStartTime = 0;
       return;
     }
+    if (autoPager.active()) {
+      toggleChromeBars();
+      tapStartTime = 0;
+      return;
+    }
     if (!isPagedMode()) {
       toggleChromeBars();
       tapStartTime = 0;
       return;
     }
     runRegionalClick(e);
+  };
+
+  const autoPageOverlayVisible = () => {
+    if (!autoPager.active() || !isPagedMode() || isDualPageLayoutActive()) return false;
+    const style = textViewerStore.state.config.autoPageStyle ?? 'scanLine';
+    return style === 'scanLine' || style === 'progressBar';
   };
 
   const scrollContentClass = useMediaViewerMainScrollClass('reader-text-scroll');
@@ -778,6 +900,7 @@ export function BookReader(props: BookReaderProps) {
       <ReaderPagedViewport
         pageAnim={normalizedPageAnim}
         class="h-full min-h-full"
+        suppressPointerTurn={() => autoPager.active()}
         {...readerContentShared}
         resolveChapterTitle={displayChapterTitle}
         onRequestPrevChapter={() => handlePrev()}
@@ -800,9 +923,12 @@ export function BookReader(props: BookReaderProps) {
         chromePointerInput
         contentPrimaryAction={contentPrimaryAction}
       >
-        <BookReaderChromeBridge onReady={(toggle) => {
-          toggleChromeBars = toggle;
-        }} />
+        <BookReaderChromeBridge
+          onReady={(toggle) => {
+            toggleChromeBars = toggle;
+          }}
+          onChromeBarsVisible={setChromeBarsVisible}
+        />
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={
@@ -842,6 +968,9 @@ export function BookReader(props: BookReaderProps) {
                     onOpenBookmarks: () => setBookmarksOpen(true),
                     onAddBookmark: () => void handleAddBookmark(),
                     onOpenDict: handleOpenDict,
+                    autoPageActive: () => autoPager.active(),
+                    autoPageBlocked: () => isDualPageLayoutActive(),
+                    onAutoPageToggle: handleAutoPageToggle,
                   }}
                 />
               </MediaViewerHeader>
@@ -864,6 +993,9 @@ export function BookReader(props: BookReaderProps) {
                   readAloudActive={readAloudActive()}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onOpenReaderMenu={openReaderMenuDrawer}
+                  autoPageActive={() => autoPager.active() && !isDualPageLayoutActive()}
+                  autoReadSpeed={() => autoPager.speed()}
+                  onAutoReadSpeedChange={handleAutoReadSpeedChange}
                 />
               </MediaViewerFooter>
             }
@@ -872,13 +1004,17 @@ export function BookReader(props: BookReaderProps) {
             when={isWideScreen() && (commentsOpen() || panelClosing())}
             fallback={
               <div
-                ref={(el) => {
-                  if (el) scrollContainer = el;
-                }}
+                ref={bindScrollContainerRef}
                 class={mainContentClass()}
                 onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
                 onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
               >
+                <ReaderAutoPageOverlay
+                  visible={autoPageOverlayVisible()}
+                  style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
+                  progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
+                  progress={autoPager.screenProgress()}
+                />
                 {renderTextBody()}
               </div>
             }
@@ -886,13 +1022,17 @@ export function BookReader(props: BookReaderProps) {
             <div class="flex min-h-0 flex-1">
               <div class="relative min-w-0 flex-1 overflow-hidden">
                 <div
-                  ref={(el) => {
-                    if (el) scrollContainer = el;
-                  }}
+                  ref={bindScrollContainerRef}
                   class={mainContentClass()}
                   onPointerDown={onContentPointerDown}
                   onPointerMove={onContentPointerMove}
                 >
+                  <ReaderAutoPageOverlay
+                    visible={autoPageOverlayVisible()}
+                    style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
+                    progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
+                    progress={autoPager.screenProgress()}
+                  />
                   {renderTextBody()}
                 </div>
               </div>
@@ -1050,6 +1190,24 @@ export function BookReader(props: BookReaderProps) {
               字典
             </Button>
             <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+              <Label class={cn('text-sm', isDualPageLayoutActive() && 'text-muted-foreground')}>
+                自动翻页
+                <Show when={isDualPageLayoutActive()}>
+                  <span class="ml-1 text-xs">（双页不可用）</span>
+                </Show>
+              </Label>
+              <Switch
+                checked={autoPager.active() && !isDualPageLayoutActive()}
+                disabled={isDualPageLayoutActive()}
+                onChange={(enabled) => handleAutoPageToggle(enabled)}
+              >
+                <SwitchControl>
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">自动翻页</SwitchLabel>
+              </Switch>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
               <Label class="text-sm">启用替换净化</Label>
               <Switch
                 checked={textViewerStore.isUseReplaceRule()}
@@ -1091,41 +1249,66 @@ export function BookReader(props: BookReaderProps) {
                 <SwitchLabel class="sr-only">去除重复标题</SwitchLabel>
               </Switch>
             </div>
-            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
-              <Label class="text-sm">繁转简</Label>
-              <Switch
-                checked={textViewerStore.getChineseConverterType() === 1}
-                onChange={(enabled) => {
+            <div class="px-3 py-2">
+              <div class="mb-2 text-sm text-foreground">简繁转换</div>
+              <RadioGroup
+                value={String(textViewerStore.getChineseConverterType())}
+                onChange={(value) => {
                   void textViewerStore
-                    .setChineseConverterType(
-                      enabled ? 1 : textViewerStore.getChineseConverterType() === 2 ? 2 : 0,
-                    )
+                    .setChineseConverterType(Number(value) as 0 | 1 | 2)
                     .catch(() => undefined);
                 }}
+                class="flex flex-col gap-1"
               >
-                <SwitchControl>
-                  <SwitchThumb />
-                </SwitchControl>
-                <SwitchLabel class="sr-only">繁转简</SwitchLabel>
-              </Switch>
-            </div>
-            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
-              <Label class="text-sm">简转繁</Label>
-              <Switch
-                checked={textViewerStore.getChineseConverterType() === 2}
-                onChange={(enabled) => {
-                  void textViewerStore
-                    .setChineseConverterType(
-                      enabled ? 2 : textViewerStore.getChineseConverterType() === 1 ? 1 : 0,
-                    )
-                    .catch(() => undefined);
-                }}
-              >
-                <SwitchControl>
-                  <SwitchThumb />
-                </SwitchControl>
-                <SwitchLabel class="sr-only">简转繁</SwitchLabel>
-              </Switch>
+                <div
+                  class={statusBarOptionRowClass}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      triggerStatusBarOptionRadio(e.currentTarget);
+                    }
+                  }}
+                >
+                  <RadioGroupItem value="0" class="w-full">
+                    <RadioGroupItemLabel>不转换</RadioGroupItemLabel>
+                  </RadioGroupItem>
+                </div>
+                <div
+                  class={statusBarOptionRowClass}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      triggerStatusBarOptionRadio(e.currentTarget);
+                    }
+                  }}
+                >
+                  <RadioGroupItem value="1" class="w-full">
+                    <RadioGroupItemLabel>繁转简</RadioGroupItemLabel>
+                  </RadioGroupItem>
+                </div>
+                <div
+                  class={statusBarOptionRowClass}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => triggerStatusBarOptionRadio(e.currentTarget)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      triggerStatusBarOptionRadio(e.currentTarget);
+                    }
+                  }}
+                >
+                  <RadioGroupItem value="2" class="w-full">
+                    <RadioGroupItemLabel>简转繁</RadioGroupItemLabel>
+                  </RadioGroupItem>
+                </div>
+              </RadioGroup>
             </div>
             <Button
               variant="ghost"

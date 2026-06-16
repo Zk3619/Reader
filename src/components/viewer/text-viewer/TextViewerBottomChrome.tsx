@@ -1,3 +1,4 @@
+import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
   ViewerAppTooltip,
@@ -16,6 +17,11 @@ import { cn } from '@/lib/utils';
 import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import { textViewerStore } from '@/stores/viewer';
+import {
+  TEXT_VIEWER_AUTO_READ_SPEED_MAX,
+  TEXT_VIEWER_AUTO_READ_SPEED_MIN,
+  normalizeAutoReadSpeed,
+} from '@/lib/media/text/text-viewer-auto-pager';
 
 export interface TextViewerBottomChromeProps {
   isWideScreen: boolean;
@@ -34,6 +40,9 @@ export interface TextViewerBottomChromeProps {
   readAloudActive: boolean;
   onOpenSettings: () => void;
   onOpenReaderMenu: () => void;
+  autoPageActive?: boolean | (() => boolean);
+  autoReadSpeed?: number | (() => number);
+  onAutoReadSpeedChange?: (speed: number) => void;
 }
 
 /**
@@ -49,8 +58,55 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
   const hideOperationBar = () => props.isWideScreen;
   const pillBtn = () => cn(floating.isFloating() && floating.pillClass());
 
+  const resolveProp = <T,>(value: T | (() => T) | undefined, fallback: T): T => {
+    if (value === undefined) return fallback;
+    return typeof value === 'function' ? (value as () => T)() : value;
+  };
+
+  const autoPageActive = () => resolveProp(props.autoPageActive, false);
+  const autoReadSpeed = () => resolveProp(props.autoReadSpeed, normalizeAutoReadSpeed(undefined));
+
   return (
     <MediaViewerBottomChromeContent>
+      <Show when={autoPageActive()}>
+        <div
+          class={cn(
+            'flex w-full min-w-0 items-center gap-3 px-4 py-2 text-xs',
+            props.bottomBarThemeClasses,
+            !props.bottomBarThemeClasses &&
+              !floating.isFloating() &&
+              'border-b border-border/40',
+            floating.isFloating() &&
+              cn(
+                floating.pillClass(),
+                'mx-auto max-w-[min(100%,24rem)]',
+                hideOperationBar() && 'mb-2',
+              ),
+          )}
+        >
+          <span class="w-14 shrink-0 text-muted-foreground">自动翻页</span>
+          <div class="min-w-0 flex-1 basis-0">
+            <Slider
+              value={[autoReadSpeed()]}
+              minValue={TEXT_VIEWER_AUTO_READ_SPEED_MIN}
+              maxValue={TEXT_VIEWER_AUTO_READ_SPEED_MAX}
+              step={1}
+              onChange={(values) => {
+                const next = normalizeAutoReadSpeed(values[0]);
+                props.onAutoReadSpeedChange?.(next);
+              }}
+              class="py-1"
+            >
+              <SliderTrack>
+                <SliderFill />
+                <SliderThumb />
+              </SliderTrack>
+            </Slider>
+          </div>
+          <span class="shrink-0 tabular-nums">{autoReadSpeed()}s</span>
+        </div>
+      </Show>
+
       <div
         class={cn(
           mediaViewerChromeBottomRowClass,

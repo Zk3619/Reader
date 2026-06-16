@@ -258,6 +258,10 @@ export function ReaderContent(props: ReaderContentProps) {
 
   const showMeasureOrLiveBody = () => {
     if (props.measureHost) return Boolean(content()?.trim());
+    // 按页模式 reveal 前：hidden live 层仍需测量块以完成 DOM 分页（不依赖 showContent）
+    if (props.pagedLayout && props.measureBlocks) {
+      return Boolean(content()?.trim()) && !contentLoading() && !showReaderSkeleton();
+    }
     return !showReaderSkeleton() && !contentLoading() && showContent();
   };
 

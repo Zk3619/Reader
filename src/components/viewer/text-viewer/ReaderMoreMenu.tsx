@@ -2,7 +2,7 @@
  * 阅读器「更多」菜单（对齐 Legado book_read 溢出项子集）
  */
 
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
 import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
@@ -15,6 +15,10 @@ import {
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import {
+  AppManualRadioGroup,
+  AppManualRadioOption,
+} from '@/components/shared/AppManualRadio';
+import {
   ViewerAppDropdownMenuContent,
   ViewerAppTooltip,
   ViewerAppTooltipContent,
@@ -24,6 +28,12 @@ import { MoreIcon } from '@/components/shared/icons';
 import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
 import type { ChineseConverterType } from '@/lib/replace-rules/chinese-converter';
+import {
+  TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS,
+  TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS,
+  type TextViewerAutoPageStyle,
+  type TextViewerAutoPageProgressEdge,
+} from '@/lib/media/text/text-viewer-auto-pager';
 
 export interface ReaderMoreMenuProps {
   onOpenSearch: () => void;
@@ -31,6 +41,10 @@ export interface ReaderMoreMenuProps {
   onAddBookmark: () => void;
   onOpenDict?: () => void;
   canBookmark: boolean;
+  autoPageActive?: boolean | (() => boolean);
+  onAutoPageToggle?: (enabled: boolean) => void;
+  /** 双页排版下不可开启自动翻页 */
+  autoPageBlocked?: boolean | (() => boolean);
   /** 工具栏图标按钮 class（与 MediaViewer chrome 一致） */
   triggerClass?: string;
 }
@@ -42,8 +56,7 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   const replaceEnabled = () => textViewerStore.isUseReplaceRule();
   const reSegmentEnabled = () => textViewerStore.isReSegment();
   const removeDuplicateTitleEnabled = () => textViewerStore.isRemoveDuplicateTitle();
-  const chineseT2sEnabled = () => textViewerStore.getChineseConverterType() === 1;
-  const chineseS2tEnabled = () => textViewerStore.getChineseConverterType() === 2;
+  const chineseConverterType = () => textViewerStore.getChineseConverterType();
   const canEditCachedContent = () => {
     const book = textViewerStore.state.book;
     return !!book && isLocalBookContentEditable(book);
@@ -92,6 +105,28 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
     }
   };
 
+  const isAutoPageActive = () => {
+    const v = props.autoPageActive;
+    return typeof v === 'function' ? v() : (v ?? false);
+  };
+
+  const isAutoPageBlocked = () => {
+    const v = props.autoPageBlocked;
+    return typeof v === 'function' ? v() : (v ?? false);
+  };
+
+  const autoPageStyle = () => textViewerStore.state.config.autoPageStyle ?? 'scanLine';
+  const autoPageProgressEdge = () =>
+    textViewerStore.state.config.autoPageProgressEdge ?? 'bottom';
+
+  const setAutoPageStyle = (style: TextViewerAutoPageStyle) => {
+    textViewerStore.setConfig({ autoPageStyle: style });
+  };
+
+  const setAutoPageProgressEdge = (edge: TextViewerAutoPageProgressEdge) => {
+    textViewerStore.setConfig({ autoPageProgressEdge: edge });
+  };
+
   return (
     <>
     <AppDropdownMenu open={open()} onOpenChange={setOpen}>
@@ -120,6 +155,51 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
           <AppDropdownMenuItem onSelect={props.onAddBookmark}>添加书签</AppDropdownMenuItem>
           <AppDropdownMenuItem onSelect={props.onOpenBookmarks}>本书书签</AppDropdownMenuItem>
         </Show>
+        <Show when={props.onAutoPageToggle}>
+          <AppDropdownMenuCheckboxItem
+            checked={isAutoPageActive() && !isAutoPageBlocked()}
+            onChange={(checked) => {
+              if (isAutoPageBlocked()) return;
+              props.onAutoPageToggle?.(checked);
+            }}
+            class={isAutoPageBlocked() ? 'opacity-50' : undefined}
+          >
+            自动翻页
+            <Show when={isAutoPageBlocked()}>
+              <span class="ml-1 text-xs text-muted-foreground">（双页不可用）</span>
+            </Show>
+          </AppDropdownMenuCheckboxItem>
+        </Show>
+        <div class="px-2 py-1.5">
+          <div class="mb-1 px-2 text-xs text-muted-foreground">自动翻页方式（按页模式）</div>
+          <AppManualRadioGroup>
+            <For each={['scanLine', 'progressBar', 'reveal'] as TextViewerAutoPageStyle[]}>
+              {(style) => (
+                <AppManualRadioOption
+                  selected={autoPageStyle() === style}
+                  onSelect={() => setAutoPageStyle(style)}
+                >
+                  {TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS[style]}
+                </AppManualRadioOption>
+              )}
+            </For>
+          </AppManualRadioGroup>
+          <Show when={autoPageStyle() === 'progressBar'}>
+            <div class="mt-2 mb-1 px-2 text-xs text-muted-foreground">进度条位置</div>
+            <AppManualRadioGroup>
+              <For each={['top', 'bottom'] as TextViewerAutoPageProgressEdge[]}>
+                {(edge) => (
+                  <AppManualRadioOption
+                    selected={autoPageProgressEdge() === edge}
+                    onSelect={() => setAutoPageProgressEdge(edge)}
+                  >
+                    {TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS[edge]}
+                  </AppManualRadioOption>
+                )}
+              </For>
+            </AppManualRadioGroup>
+          </Show>
+        </div>
         <AppDropdownMenuCheckboxItem
           checked={replaceEnabled()}
           onChange={(checked) => void handleToggleReplace(checked)}
@@ -138,22 +218,29 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
         >
           去除重复标题
         </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuCheckboxItem
-          checked={chineseT2sEnabled()}
-          onChange={(checked) => {
-            void handleChineseConverter(checked ? 1 : chineseS2tEnabled() ? 2 : 0);
-          }}
-        >
-          繁转简
-        </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuCheckboxItem
-          checked={chineseS2tEnabled()}
-          onChange={(checked) => {
-            void handleChineseConverter(checked ? 2 : chineseT2sEnabled() ? 1 : 0);
-          }}
-        >
-          简转繁
-        </AppDropdownMenuCheckboxItem>
+        <div class="px-2 py-1.5">
+          <div class="mb-1 px-2 text-xs text-muted-foreground">简繁转换</div>
+          <AppManualRadioGroup>
+            <AppManualRadioOption
+              selected={chineseConverterType() === 0}
+              onSelect={() => void handleChineseConverter(0)}
+            >
+              不转换
+            </AppManualRadioOption>
+            <AppManualRadioOption
+              selected={chineseConverterType() === 1}
+              onSelect={() => void handleChineseConverter(1)}
+            >
+              繁转简
+            </AppManualRadioOption>
+            <AppManualRadioOption
+              selected={chineseConverterType() === 2}
+              onSelect={() => void handleChineseConverter(2)}
+            >
+              简转繁
+            </AppManualRadioOption>
+          </AppManualRadioGroup>
+        </div>
         <AppDropdownMenuItem
           onSelect={() => {
             setOpen(false);

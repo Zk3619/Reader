@@ -235,6 +235,58 @@ export interface TextViewerUiConfig {
   chineseConverterType?: 0 | 1 | 2;
   /** 去除正文开头重复章节标题（Legado removeSameTitle，默认开启） */
   removeDuplicateTitle?: boolean;
+  /** 自动翻页速度：滚完一屏高度所需秒数（Legado autoReadSpeed，默认 10） */
+  autoReadSpeed?: number;
+  /** 自动翻页按页时的视觉/翻页行为 */
+  autoPageStyle?: TextViewerAutoPageStyle;
+  /** 进度条模式：进度条贴在内容区顶部或底部 */
+  autoPageProgressEdge?: TextViewerAutoPageProgressEdge;
+}
+
+/** 按页自动翻页：扫描线 / 横向进度条 / 扫描揭示下一页（对齐 Legado 非滚动 AutoPager） */
+export type TextViewerAutoPageStyle = 'scanLine' | 'progressBar' | 'reveal';
+
+export type TextViewerAutoPageProgressEdge = 'top' | 'bottom';
+
+export const TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS: Record<TextViewerAutoPageStyle, string> = {
+  scanLine: '扫描线',
+  progressBar: '进度条',
+  reveal: '揭示下一页',
+};
+
+export const TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS: Record<
+  TextViewerAutoPageProgressEdge,
+  string
+> = {
+  top: '顶部',
+  bottom: '底部',
+};
+
+export function normalizeAutoPageStyle(
+  value: string | undefined | null,
+): TextViewerAutoPageStyle {
+  if (value === 'progressBar' || value === 'reveal') return value;
+  return 'scanLine';
+}
+
+export function normalizeAutoPageProgressEdge(
+  value: string | undefined | null,
+): TextViewerAutoPageProgressEdge {
+  return value === 'top' ? 'top' : 'bottom';
+}
+
+export const TEXT_VIEWER_AUTO_READ_SPEED_MIN = 1;
+export const TEXT_VIEWER_AUTO_READ_SPEED_MAX = 120;
+export const TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT = 10;
+
+export function normalizeAutoReadSpeed(value: number | undefined | null): number {
+  if (value == null || !Number.isFinite(value)) {
+    return TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT;
+  }
+  return Math.min(
+    TEXT_VIEWER_AUTO_READ_SPEED_MAX,
+    Math.max(TEXT_VIEWER_AUTO_READ_SPEED_MIN, Math.round(value)),
+  );
 }
 
 export const defaultTextViewerUiConfig: TextViewerUiConfig = {
@@ -271,4 +323,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   adaptSpecialStyle: true,
   chineseConverterType: 0,
   removeDuplicateTitle: true,
+  autoReadSpeed: TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT,
+  autoPageStyle: 'scanLine',
+  autoPageProgressEdge: 'bottom',
 };

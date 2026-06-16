@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   Index,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -165,6 +166,8 @@ export interface ReaderPagedViewportProps extends ReaderContentProps {
   onRequestPrevChapter: () => void | Promise<void>;
   onRequestNextChapter: () => void | Promise<void>;
   onRegisterNav?: (api: ReaderPagedNavApi) => void;
+  /** 自动翻页进行中：禁用拖拽翻页，避免与揭示动画冲突 */
+  suppressPointerTurn?: Accessor<boolean>;
   /** 章节展示标题（含替换净化）；缺省用目录原始 title */
   resolveChapterTitle?: (index: number) => string | undefined;
 }
@@ -175,6 +178,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     'onRequestPrevChapter',
     'onRequestNextChapter',
     'onRegisterNav',
+    'suppressPointerTurn',
     'resolveChapterTitle',
   ]);
 
@@ -189,6 +193,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const [turnDir, setTurnDir] = createSignal<PagedTurnDirection>('next');
   /** 跨章 staging 就绪/精修时 bump，驱动 Solid 重绘（incomingLayout 存于非响应式对象） */
   const [crossChapterStagingTick, setCrossChapterStagingTick] = createSignal(0);
+  /** 自动翻页「揭示下一页」：0=关闭，(0,1]=扫描线进度（Legado 顶向下 clip 下一页） */
+  const [autoPagerScanRatio, setAutoPagerScanRatio] = createSignal(0);
   /** 仿真 prev：屏外幕帘克隆宿主页码（仅用于 clone，不驱动 live 渲染） */
   const [curtainCloneHostPage, setCurtainCloneHostPage] = createSignal<number | null>(null);
 
@@ -231,6 +237,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let turnCurtainPrepInFlight = false;
   let turnCurtainPrepToken = 0;
   let dragAxis: 'none' | 'x' | 'y' = 'none';
+  /** 自动翻页「揭示下一页」会话 */
+  let autoPagerRevealActive = false;
   /** 滑动拖拽像素偏移；覆盖/仿真 anim 用 turnAnimProgressRef，避免每帧触发 Solid 重绘 */
   let dragOffsetPxRef = 0;
   /** 覆盖/仿真 anim 进度 0–1（imperative，不驱动 JSX） */
@@ -614,6 +622,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       const max = Math.max(0, normalized.pageStarts.length - 1);
       return i <= max ? i : max;
     });
+    if (nextComplete) {
+      revealPagedChapterWhenReady();
+    }
   };
 
   const withMeasureNeutralOffset = <T,>(fn: () => T): T => {
@@ -684,17 +695,33 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return !pagedChapterReadyForDisplay();
   };
 
+  const resolveMeasureHostContentRoot = (): HTMLElement | null => {
+    const attached =
+      dualMeasureContentEl &&
+      (typeof document === 'undefined' || document.contains(dualMeasureContentEl))
+        ? dualMeasureContentEl
+        : null;
+    if (attached && measureRootHasUsableBlocks(attached)) {
+      return attached;
+    }
+    const hostRoot = viewportEl?.querySelector<HTMLElement>(
+      '.reader-dual-measure-host [data-reader-content]',
+    );
+    if (!(hostRoot instanceof HTMLElement)) return null;
+    bindDualMeasureContentRoot(hostRoot);
+    return measureRootHasUsableBlocks(hostRoot) ? hostRoot : null;
+  };
+
   const resolveContentRootForLayout = (): HTMLElement | null => {
-    if (dualPageMeasureIntent()) {
+    // 仅双栏展示时限定屏外测量根；单栏下仍可用 live/idle 兜底（避免 intent 为真但尚未双栏时测不到 DOM）
+    if (dualPageMeasureIntent() && pagedLayoutDualPage()) {
       if (!measureHostColumnWidthReady()) return null;
-      if (dualMeasureContentEl && measureRootHasUsableBlocks(dualMeasureContentEl)) {
-        return dualMeasureContentEl;
-      }
-      return null;
+      return resolveMeasureHostContentRoot();
     }
 
     const candidates: HTMLElement[] = [];
-    if (dualMeasureContentEl) candidates.push(dualMeasureContentEl);
+    const measureHost = resolveMeasureHostContentRoot();
+    if (measureHost) candidates.push(measureHost);
     if (idleContentRoot) candidates.push(idleContentRoot);
     const live =
       liveInnerEl?.querySelector<HTMLElement>('[data-reader-content]') ??
@@ -750,15 +777,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const dualMeasureBlocksReady = (): boolean => {
-    if (dualPageMeasureIntent()) {
+    if (dualPageMeasureIntent() && pagedLayoutDualPage()) {
       if (!measureHostColumnWidthReady()) return false;
-      return Boolean(
-        dualMeasureContentEl && measureRootHasUsableBlocks(dualMeasureContentEl),
-      );
+      return Boolean(resolveMeasureHostContentRoot());
     }
-    if (dualMeasureContentEl && measureRootHasUsableBlocks(dualMeasureContentEl)) {
-      return true;
-    }
+    if (resolveMeasureHostContentRoot()) return true;
     if (idleContentRoot && measureRootHasUsableBlocks(idleContentRoot)) {
       return true;
     }
@@ -786,7 +809,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return `incoming:${turn.incomingChapterIndex}:${buildContentRevision(turn.incomingContent)}`;
     }
     viewerState.chapterIndex;
-    return `${viewerState.chapterIndex}:${buildContentRevision(viewerState.content)}:${layoutSignature()}`;
+    return `${viewerState.chapterIndex}:${buildContentRevision(viewerState.content)}`;
   });
 
   const measureHostStagedChapter = createMemo(() => {
@@ -2852,57 +2875,66 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     revealPagedChapterWhenReady();
   });
 
-  createEffect(() => {
-    viewerState.chapterIndex;
-    if (crossChapterCommitInFlight) return;
-    if (crossChapterTurn) {
-      if (!crossChapterTurn.chapterCommitted) return;
-      lastMeasureTriggerKey = '';
-      lastLayoutRemeasureKey = '';
-      cancelDualMeasureRetry();
-      lastClipLayoutOuterH = 0;
-      warmAdjacentLayoutsFromPool();
-      kickoffCrossChapterTurn();
-      scheduleRemeasure({
-        immediate: true,
-        bypassCache: true,
-        force: true,
-        allowDuringTurn: true,
-      });
-      return;
-    }
-    lastMeasureTriggerKey = '';
-    lastLayoutRemeasureKey = '';
-    cancelDualMeasureRetry();
-    progressRestoredKey = '';
-    lastClipLayoutOuterH = 0;
-    skipChapterPosSync = true;
-    cancelAnimFrame();
-    clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
-    clearSimulationCurl(curtainSlideMountEl);
-    turnCurtainKey = '';
-    setTurnStage('idle');
-    setPageIndex(0);
-    setChapterLayout(null);
-    idleContentRoot = undefined;
-    dualMeasureContentEl = undefined;
-    idleContentRootChapter = -1;
-    idleContentRevision = '';
-    clearChapterLayoutCache();
-    cancelAdjacentChapterLayoutPrefetch();
-    setPagedLayoutEngine('idle');
-    queueMicrotask(() => {
-      if (viewerState.content?.trim()) {
-        scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
-      }
-    });
-  });
+  createEffect(
+    on(
+      () => viewerState.chapterIndex,
+      (_ch, prevCh) => {
+        if (crossChapterCommitInFlight) return;
+        if (crossChapterTurn) {
+          if (!crossChapterTurn.chapterCommitted) return;
+          lastMeasureTriggerKey = '';
+          lastLayoutRemeasureKey = '';
+          cancelDualMeasureRetry();
+          lastClipLayoutOuterH = 0;
+          warmAdjacentLayoutsFromPool();
+          kickoffCrossChapterTurn();
+          scheduleRemeasure({
+            immediate: true,
+            bypassCache: true,
+            force: true,
+            allowDuringTurn: true,
+          });
+          return;
+        }
 
-  /** 测量根随章切换重挂载时丢弃旧 contentRoot 绑定 */
-  createEffect(() => {
-    void measureHostMountKey();
-    dualMeasureContentEl = undefined;
-  });
+        // 初次挂载：测量根 ref 已绑定，勿清空 dualMeasureContentEl（否则单栏首屏 DOM 分页永久卡住）
+        if (prevCh === undefined) {
+          queueMicrotask(() => {
+            if (viewerState.content?.trim()) {
+              scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+            }
+          });
+          return;
+        }
+
+        lastMeasureTriggerKey = '';
+        lastLayoutRemeasureKey = '';
+        cancelDualMeasureRetry();
+        progressRestoredKey = '';
+        lastClipLayoutOuterH = 0;
+        skipChapterPosSync = true;
+        cancelAnimFrame();
+        clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
+        clearSimulationCurl(curtainSlideMountEl);
+        turnCurtainKey = '';
+        setTurnStage('idle');
+        setPageIndex(0);
+        setChapterLayout(null);
+        idleContentRoot = undefined;
+        dualMeasureContentEl = undefined;
+        idleContentRootChapter = -1;
+        idleContentRevision = '';
+        clearChapterLayoutCache();
+        cancelAdjacentChapterLayoutPrefetch();
+        setPagedLayoutEngine('idle');
+        queueMicrotask(() => {
+          if (viewerState.content?.trim()) {
+            scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+          }
+        });
+      },
+    ),
+  );
 
   /** 跨章提前切章后正文晚到：作废 Canvas 占位排版并强制 DOM 重测 */
   createEffect(() => {
@@ -2985,15 +3017,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       contentRoot: idleContentRoot,
     });
   };
-
-  createEffect(() => {
-    local.onRegisterNav?.({
-      goNextPage,
-      goPrevPage,
-      setPageProgress,
-      getBookmarkSnapshot,
-    });
-  });
 
   createEffect(() => {
     const stage = turnStage();
@@ -3323,6 +3346,118 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     finishDragStart();
   };
 
+  const resetAutoPagerReveal = () => {
+    autoPagerRevealActive = false;
+    setAutoPagerScanRatio(0);
+  };
+
+  const commitInstantNextPage = (): boolean => {
+    const from = pageIndex();
+    if (from < pageCount() - 1) {
+      const target = from + 1;
+      skipChapterPosSync = true;
+      setPageIndex(target);
+      const total = pageCount();
+      textViewerStore.setChapterPos(total <= 1 ? 0 : target / (total - 1));
+      queueMicrotask(() => {
+        skipChapterPosSync = false;
+      });
+      return true;
+    }
+    if (!isAtLastChapter()) {
+      goNextPage();
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * 揭示下一页：扫描线以上 clip 显示下一页，以下保留当前页（对齐 Legado AutoPager 非滚动路径）
+   * 覆盖 / 滑动 / 仿真 / 无动画均走同一纵向揭示，不触发横向拖拽翻页动画。
+   */
+  const driveAutoPagerReveal = (progress: number): boolean => {
+    if (progress <= 0) {
+      resetAutoPagerReveal();
+      return false;
+    }
+    const fromPage = pageIndex();
+    const ratio = Math.min(1, Math.max(0, progress));
+
+    if (!autoPagerRevealActive && ratio > 0) {
+      if (!canDragTowardNext(fromPage)) return false;
+      autoPagerRevealActive = true;
+    }
+
+    if (turnVisualActive()) {
+      return false;
+    }
+
+    setAutoPagerScanRatio(ratio);
+
+    if (ratio >= 1) {
+      autoPagerRevealActive = false;
+      setAutoPagerScanRatio(0);
+      return commitInstantNextPage();
+    }
+    return false;
+  };
+
+  const renderAutoPagerScanReveal = () => {
+    const ratio = autoPagerScanRatio();
+    if (ratio <= 0 || turnVisualActive() || pagedLayoutDualPage()) return null;
+
+    const current = pageIndex();
+    const nextPage = current + 1;
+    if (nextPage >= pageCount()) return null;
+
+    const clipH = pageContentClipPx();
+    if (clipH <= 0) return null;
+    const revealH = Math.max(0, Math.min(clipH, Math.round(clipH * ratio)));
+    if (revealH <= 0) return null;
+
+    const extent = contentExtentPx();
+    const yOff = contentOffsetY(nextPage);
+    const themeCls = theme();
+
+    return (
+      <div class="reader-auto-pager-scan pointer-events-none absolute inset-0 z-[6]" aria-hidden>
+        <div class="absolute inset-x-0 top-0 overflow-hidden" style={{ height: `${revealH}px` }}>
+          <div
+            data-reader-render-page={nextPage}
+            class={cn('reader-paged-live-inner h-full w-full', themeCls.bg)}
+            style={{
+              transform: mergePagedContentTransforms(yOff) ?? undefined,
+              'min-height': extent > 0 ? `${extent}px` : undefined,
+            }}
+          >
+            <ReaderContent
+              {...contentProps}
+              dualPage={false}
+              measureBlocks={false}
+              pagedLayout
+            />
+          </div>
+        </div>
+        <div
+          class="absolute left-0 right-0 h-0.5 bg-primary shadow-sm"
+          style={{ top: `${revealH}px` }}
+        />
+      </div>
+    );
+  };
+
+  createEffect(() => {
+    local.onRegisterNav?.({
+      goNextPage,
+      goPrevPage,
+      setPageProgress,
+      getBookmarkSnapshot,
+      canGoNextPage: () => canDragTowardNext(pageIndex()),
+      driveAutoPagerReveal,
+      isDualPageLayoutActive: () => pagedLayoutDualPage(),
+    });
+  });
+
   const width = viewportWidth;
 
   const releaseDragPointerCapture = (e: PointerEvent) => {
@@ -3355,6 +3490,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const onPointerDown = (e: PointerEvent) => {
+    if (local.suppressPointerTurn?.()) return;
     if (isTurnAnimating() || e.button !== 0) return;
     if (!e.isPrimary) return;
     if (isMediaViewerInteractiveClick(e.target)) return;
@@ -3966,7 +4102,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             <ReaderContent
               {...contentProps}
               dualPage={false}
-              measureBlocks={dualSpreadLayoutReady() || (!dual && layoutAwaitingMeasure())}
+              measureBlocks={
+                dualSpreadLayoutReady() ||
+                (!dual && (layoutAwaitingMeasure() || hideUntilRevealed))
+              }
               pagedLayout
               dualSpreadRender={dualSpreadLayoutReady()}
               showChapterTitle={showChapterTitleForSpreadColumn('left', page)}
@@ -4185,6 +4324,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
                 {renderCurtainCloneHost()}
                 {renderLiveChapter()}
                 {renderIncomingStagingChapter()}
+                {renderAutoPagerScanReveal()}
               </div>
             </div>
           </div>
