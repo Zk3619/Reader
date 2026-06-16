@@ -97,7 +97,6 @@ const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
 
 export function AudioViewerPage(props: AudioViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
-  const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [skipCreditsOpen, setSkipCreditsOpen] = createSignal(false);
   const [speedDialogOpen, setSpeedDialogOpen] = createSignal(false);
   const [timerDialogOpen, setTimerDialogOpen] = createSignal(false);
@@ -480,8 +479,6 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
         open={catalogOpen()}
         onOpenChange={setCatalogOpen}
         loading={bootstrapping()}
-        initialScrollTop={catalogScrollTop()}
-        onScrollTop={setCatalogScrollTop}
         onSelectChapter={(index) => {
           setCatalogOpen(false);
           void goChapterTo(index);

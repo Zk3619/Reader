@@ -41,7 +41,6 @@ function isPdfUrl(url: string): boolean {
 
 export function FileViewerPage(props: FileViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
-  const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const mainStageClass = useMediaViewerMainStageClass(
     cn('flex flex-col bg-muted/30', mediaViewerMobileContentOverflowClass()),
   );
@@ -193,8 +192,6 @@ export function FileViewerPage(props: FileViewerPageProps) {
             <MediaViewerCatalog
               open={catalogOpen()}
               loading={bootstrapping()}
-              initialScrollTop={catalogScrollTop()}
-              onScrollTop={setCatalogScrollTop}
               onSelectChapter={(index) => {
                 setCatalogOpen(false);
                 void viewerStore.loadChapter(index);

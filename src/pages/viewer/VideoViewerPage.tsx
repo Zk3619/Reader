@@ -87,7 +87,6 @@ function VideoArtPlayerStage(props: {
 
 export function VideoViewerPage(props: VideoViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
-  const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [speedDialogOpen, setSpeedDialogOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [speedDraft, setSpeedDraft] = createSignal(1);
@@ -322,8 +321,6 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
         open={catalogOpen()}
         onOpenChange={setCatalogOpen}
         loading={bootstrapping()}
-        initialScrollTop={catalogScrollTop()}
-        onScrollTop={setCatalogScrollTop}
         onSelectChapter={(index) => {
           setCatalogOpen(false);
           if (catalog()[index]?.isVolume) return;

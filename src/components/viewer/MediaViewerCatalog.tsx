@@ -17,8 +17,6 @@ export interface MediaViewerCatalogProps {
   open?: boolean;
   /** 目录拉取中（无章节数据时显示占位） */
   loading?: boolean;
-  initialScrollTop?: number;
-  onScrollTop?: (scrollTop: number) => void;
   /** 底部抽屉模式（移动端），避免选中行圆角被裁切 */
   drawerBottom?: boolean;
 }
@@ -35,29 +33,32 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
   );
 
   let scrollContainer: HTMLDivElement | undefined;
-  let lastScrolledToIndex = -1;
+  let catalogWasOpen = false;
+  let lastCatalogLength = 0;
+
+  const scrollToCurrentChapter = (behavior: ScrollBehavior = 'smooth') => {
+    const el = scrollContainer;
+    if (!el || !(props.open ?? false) || catalog().length === 0) return;
+    scrollCatalogIndexIntoView(el, chapterIndex(), CATALOG_ROW_HEIGHT_PX, behavior);
+  };
 
   createEffect(() => {
-    if (!props.open || catalog().length === 0) return;
-    const idx = chapterIndex();
-    if (idx === lastScrolledToIndex) return;
-    if (!scrollContainer) return;
-    lastScrolledToIndex = idx;
-    requestAnimationFrame(() => {
-      if (!scrollContainer) return;
-      scrollCatalogIndexIntoView(scrollContainer, idx, CATALOG_ROW_HEIGHT_PX, 'smooth');
-      props.onScrollTop?.(scrollContainer.scrollTop);
-    });
-  });
+    const open = props.open ?? false;
+    const len = catalog().length;
+    const lenChangedWhileOpen = open && len !== lastCatalogLength;
+    lastCatalogLength = len;
 
-  createEffect(() => {
-    if (!props.open || !scrollContainer) return;
-    const initial = props.initialScrollTop ?? 0;
-    if (initial <= 0) return;
-    lastScrolledToIndex = chapterIndex();
-    requestAnimationFrame(() => {
-      if (scrollContainer) scrollContainer.scrollTop = initial;
-    });
+    if (!open) {
+      catalogWasOpen = false;
+      return;
+    }
+    if (len === 0) return;
+
+    const justOpened = !catalogWasOpen;
+    catalogWasOpen = true;
+    if (!justOpened && !lenChangedWhileOpen) return;
+
+    requestAnimationFrame(() => scrollToCurrentChapter('smooth'));
   });
 
   const catalogLoading = () => props.loading === true && catalog().length === 0;
@@ -80,9 +81,6 @@ export function MediaViewerCatalog(props: MediaViewerCatalogProps) {
       count={rows().length}
       onScrollContainer={(el) => {
         scrollContainer = el;
-      }}
-      onScroll={(el) => {
-        props.onScrollTop?.(el.scrollTop);
       }}
     >
       {(index) => {

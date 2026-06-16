@@ -14,8 +14,6 @@ export interface MediaViewerCatalogDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   loading?: boolean;
-  initialScrollTop?: number;
-  onScrollTop?: (scrollTop: number) => void;
   onSelectChapter: (index: number) => void;
 }
 
@@ -39,8 +37,6 @@ export function MediaViewerCatalogDrawer(props: MediaViewerCatalogDrawerProps) {
           <MediaViewerCatalog
             open={props.open}
             loading={props.loading}
-            initialScrollTop={props.initialScrollTop}
-            onScrollTop={props.onScrollTop}
             onSelectChapter={props.onSelectChapter}
             drawerBottom={side() === 'bottom'}
           />
