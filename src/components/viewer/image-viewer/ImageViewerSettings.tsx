@@ -15,7 +15,6 @@ import {
   type ImageViewerReadingMode,
   type ImageViewerUiConfig,
 } from '@/lib/media/image/image-viewer-ui-config';
-import { saveImageViewerUiConfig } from '@/lib/media/image/image-viewer-config-storage';
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
 import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { ZoomIn, ZoomOut } from 'lucide-solid';
@@ -37,12 +36,13 @@ export interface ImageViewerSettingsProps {
   config: () => ImageViewerUiConfig;
   onChange: (patch: Partial<ImageViewerUiConfig>) => void;
   onClose?: () => void;
+  /** 打开全屏九宫格点击区域配置（翻页模式） */
+  onOpenClickRegionalConfig?: () => void;
 }
 
 export function ImageViewerSettings(props: ImageViewerSettingsProps) {
   const setConfig = (patch: Partial<ImageViewerUiConfig>) => {
     props.onChange(patch);
-    void saveImageViewerUiConfig({ ...props.config(), ...patch });
   };
 
   const nudgeContentScale = (delta: number) => {
@@ -68,20 +68,20 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
           >
             <TabsTrigger
               value="scroll"
-              class="h-8 rounded-md px-2 text-xs data-[selected]:bg-background data-[selected]:shadow-sm"
+              class="h-8 rounded-md px-2 text-xs data-selected:bg-background data-selected:shadow-sm"
             >
               {READING_MODE_LABELS.scroll}
             </TabsTrigger>
             <TabsTrigger
               value="paged"
-              class="h-8 rounded-md px-2 text-xs data-[selected]:bg-background data-[selected]:shadow-sm"
+              class="h-8 rounded-md px-2 text-xs data-selected:bg-background data-selected:shadow-sm"
             >
               {READING_MODE_LABELS.paged}
             </TabsTrigger>
           </TabsList>
         </Tabs>
         <p class="text-xs text-muted-foreground">
-          滚动为纵向连续阅读；翻页为单张全屏切换，点击左右区域换页。
+          滚动为纵向连续阅读，单击切换顶底栏；翻页为单张全屏切换，支持九宫格点击区域。
         </p>
       </div>
 
@@ -130,6 +130,23 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
       </div>
 
       <Show when={props.config().readingMode === 'paged'}>
+        <div class="space-y-3">
+          <Label>点击区域</Label>
+          <p class="text-xs text-muted-foreground">
+            全屏配置九宫格分区与动作，与文本阅读器翻页模式一致。
+          </p>
+          <Button
+            variant="outline"
+            class="w-full"
+            onClick={() => {
+              props.onOpenClickRegionalConfig?.();
+              props.onClose?.();
+            }}
+          >
+            点击区域设置
+          </Button>
+        </div>
+
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label>翻页预加载上限</Label>
@@ -271,7 +288,6 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
         class="w-full"
         onClick={() => {
           props.onChange(defaultImageViewerUiConfig);
-          void saveImageViewerUiConfig(defaultImageViewerUiConfig);
           props.onClose?.();
         }}
       >

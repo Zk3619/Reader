@@ -44,12 +44,21 @@ import {
 } from '@/components/viewer/image-viewer/ImageScrollViewport';
 import { ImagePagedViewport } from '@/components/viewer/image-viewer/ImagePagedViewport';
 import { ImageViewerSettings } from '@/components/viewer/image-viewer/ImageViewerSettings';
+import { ClickRegionalOverlay } from '@/components/viewer/ClickRegionalOverlay';
+import type { ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
+import {
+  findPagedClickContainer,
+  resolveRegionalClickAction,
+} from '@/lib/media/viewer-regional-click';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import {
   defaultImageViewerUiConfig,
   type ImageViewerUiConfig,
 } from '@/lib/media/image/image-viewer-ui-config';
-import { loadImageViewerUiConfig } from '@/lib/media/image/image-viewer-config-storage';
+import {
+  loadImageViewerUiConfig,
+  saveImageViewerUiConfig,
+} from '@/lib/media/image/image-viewer-config-storage';
 import { scheduleMangaImagePrefetch } from '@/lib/media/image/image-prefetch';
 import { trimMangaImagesOutsideChapters } from '@/lib/media/image/image-disk-cache';
 import { mangaImageRetainChapterWindow } from '@/lib/media/image/image-retain';
@@ -75,10 +84,11 @@ function ImageViewerChromeBridge(props: { onReady: (toggleBars: () => void) => v
 export function ImageViewerPage(props: ImageViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [clickRegionalOpen, setClickRegionalOpen] = createSignal(false);
+  const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [uiConfig, setUiConfig] = createSignal<ImageViewerUiConfig>(defaultImageViewerUiConfig);
   const [configLoaded, setConfigLoaded] = createSignal(false);
-  const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
   const [batchRetryToken, setBatchRetryToken] = createSignal(0);
   const [viewPage, setViewPage] = createSignal(1);
@@ -253,6 +263,36 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     void handlePrevChapter();
   };
 
+  const runClickAction = (action: ReaderClickActionId) => {
+    switch (action) {
+      case 'menu':
+        toggleChromeBars();
+        break;
+      case 'nextPage':
+        goNextPage();
+        break;
+      case 'prevPage':
+        goPrevPage();
+        break;
+      case 'nextChapter':
+        void handleNextChapter();
+        break;
+      case 'prevChapter':
+        void handlePrevChapter();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const patchUiConfig = (patch: Partial<ImageViewerUiConfig>) => {
+    setUiConfig((prev) => {
+      const next = { ...prev, ...patch };
+      void saveImageViewerUiConfig(next);
+      return next;
+    });
+  };
+
   const handleChapterProgressChange = (values: number[]) => {
     const p = Math.max(0, Math.min(1, values[0] ?? 0));
     viewerStore.setChapterPos(p);
@@ -300,27 +340,30 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       tapStartTime = 0;
       return;
     }
-    const target =
-      (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
-        '.reader-paged-viewport',
-      ) ?? (e.currentTarget as HTMLElement | null);
-    if (!target) return;
-    const rect = target.getBoundingClientRect();
-    const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
-
-    if (isPagedMode()) {
-      if (xRatio < 1 / 3) goPrevPage();
-      else if (xRatio > 2 / 3) goNextPage();
-      else toggleChromeBars();
-    } else {
+    if (!isPagedMode()) {
       toggleChromeBars();
+      tapStartTime = 0;
+      return;
     }
+    const container = findPagedClickContainer(e);
+    const action = resolveRegionalClickAction(
+      e,
+      container,
+      uiConfig().clickRegion,
+      uiConfig().clickActions,
+    );
+    if (action) runClickAction(action);
     tapStartTime = 0;
   };
 
   onMount(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (clickRegionalOpen()) {
+          if (clickActionPickerOpen()) return;
+          setClickRegionalOpen(false);
+          return;
+        }
         setCatalogOpen(false);
         setSettingsOpen(false);
         if (!catalogOpen() && !settingsOpen()) toggleChromeBars();
@@ -483,8 +526,6 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
         open={catalogOpen()}
         onOpenChange={setCatalogOpen}
         loading={bootstrapping()}
-        initialScrollTop={catalogScrollTop()}
-        onScrollTop={setCatalogScrollTop}
         onSelectChapter={(index) => {
           setCatalogOpen(false);
           void viewerStore.loadChapter(index);
@@ -513,12 +554,24 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
           <ViewerAppDrawerBody class="mb-4 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 pt-1">
             <ImageViewerSettings
               config={uiConfig}
-              onChange={(patch) => setUiConfig((prev) => ({ ...prev, ...patch }))}
+              onChange={patchUiConfig}
               onClose={() => setSettingsOpen(false)}
+              onOpenClickRegionalConfig={() => setClickRegionalOpen(true)}
             />
           </ViewerAppDrawerBody>
         </ViewerAppDrawerContent>
       </ViewerAppDrawer>
+
+      <ClickRegionalOverlay
+        open={clickRegionalOpen()}
+        onClose={() => setClickRegionalOpen(false)}
+        onPickerOpenChange={setClickActionPickerOpen}
+        config={() => ({
+          clickActions: uiConfig().clickActions,
+          clickRegion: uiConfig().clickRegion,
+        })}
+        onPatch={patchUiConfig}
+      />
     </>
   );
 }

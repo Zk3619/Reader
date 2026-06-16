@@ -14,6 +14,13 @@ import {
   type ImageViewerReadingMode,
   type ImageViewerUiConfig,
 } from '@/lib/media/image/image-viewer-ui-config';
+import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
+import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
+import {
+  clampClickRegion,
+  DEFAULT_CLICK_REGION,
+  type ReaderClickRegion,
+} from '@/lib/media/text/reader-click-region';
 import { isTextViewerPagedAnim, normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { settingsState } from '@/stores/settings';
@@ -57,6 +64,27 @@ function normalizeReadingMode(raw: unknown): ImageViewerReadingMode {
   return defaultImageViewerUiConfig.readingMode;
 }
 
+function mergeClickActions(saved: Partial<ReaderClickActions> | undefined): ReaderClickActions {
+  if (!saved || typeof saved !== 'object') return { ...DEFAULT_CLICK_ACTIONS };
+  return { ...DEFAULT_CLICK_ACTIONS, ...saved };
+}
+
+function mergeClickRegion(saved: Partial<ReaderClickRegion> | undefined): ReaderClickRegion {
+  if (!saved || typeof saved !== 'object') {
+    return clampClickRegion({ ...DEFAULT_CLICK_REGION });
+  }
+  return clampClickRegion({
+    xSplits: [
+      saved.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
+      saved.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
+    ] as [number, number],
+    ySplits: [
+      saved.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
+      saved.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
+    ] as [number, number],
+  });
+}
+
 function mergeConfig(raw: Partial<ImageViewerUiConfig & { pageAnim?: string }> | null): ImageViewerUiConfig {
   const base = { ...defaultImageViewerUiConfig };
   if (!raw || typeof raw !== 'object') return base;
@@ -85,6 +113,8 @@ function mergeConfig(raw: Partial<ImageViewerUiConfig & { pageAnim?: string }> |
     viewerChromeLayout: normalizeViewerChromeLayout(
       raw.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
     ),
+    clickActions: mergeClickActions(raw.clickActions),
+    clickRegion: mergeClickRegion(raw.clickRegion),
   };
 }
 

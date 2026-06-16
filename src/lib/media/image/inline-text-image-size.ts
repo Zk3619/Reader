@@ -1,4 +1,7 @@
 import type { LegadoImageLayout } from '@/lib/js-engine/legado/legado-image-options';
+import { isInlineLegadoImageLayout } from '@/lib/js-engine/legado/legado-image-options';
+import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
+import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 
 /** 从 data:image/svg+xml;base64,... 解析 intrinsic 尺寸 */
 export function parseSvgDataUrlIntrinsicSize(
@@ -47,4 +50,32 @@ export function computeInlineTextImageSize(
     return { width: base, height: base * (h / w) };
   }
   return { width: base * (w / h), height: base };
+}
+
+/** 由 src + layout 同步推算行内图占位（段评 SVG 等，无需等 decode） */
+export function resolveInlineTextImageSizeFromSrc(
+  src: string,
+  fontSizePx: number,
+  layout: LegadoImageLayout,
+): { width: number; height: number } | null {
+  if (!isInlineLegadoImageLayout(layout)) return null;
+  const norm = normalizeImageUrl(parseLegadoUrlWithOptions(src.trim()).url.trim());
+  if (!norm) return null;
+  const intrinsic = parseSvgDataUrlIntrinsicSize(norm);
+  const fallback = Math.max(12, fontSizePx);
+  return computeInlineTextImageSize(
+    intrinsic ?? { width: fallback, height: fallback },
+    fallback,
+    layout,
+  );
+}
+
+/** 行内段评/小图标加载不应触发整章重排 */
+export function isReaderInlineMeasureImage(img: HTMLImageElement): boolean {
+  if (img.closest('[data-legado-cmt], [data-reader-inline-img]')) return true;
+  if (img.classList.contains('align-text-bottom')) return true;
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  if (nw > 0 && nh > 0 && Math.max(nw, nh) <= 96) return true;
+  return false;
 }

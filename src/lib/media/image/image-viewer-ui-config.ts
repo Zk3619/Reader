@@ -4,6 +4,13 @@
 
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
+import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
+import {
+  clampClickRegion,
+  DEFAULT_CLICK_REGION,
+  type ReaderClickRegion,
+} from '@/lib/media/text/reader-click-region';
 
 export type ImageViewerReadingMode = 'scroll' | 'paged';
 
@@ -22,6 +29,10 @@ export type ImageViewerUiConfig = {
   mangaEstimatedPageHeightPx: number;
   /** 顶栏与底栏布局（仅漫画阅读器；未配置时沿用应用设置） */
   viewerChromeLayout: ViewerChromeLayout;
+  /** 翻页模式九宫格点击动作 */
+  clickActions: ReaderClickActions;
+  /** 翻页模式九宫格区域分界 */
+  clickRegion: ReaderClickRegion;
 };
 
 export const IMAGE_VIEWER_MANGA_PRELOAD_MIN = 1;
@@ -44,6 +55,8 @@ export const defaultImageViewerUiConfig: ImageViewerUiConfig = {
   mangaDiskCacheWhileReading: true,
   mangaEstimatedPageHeightPx: IMAGE_VIEWER_ESTIMATED_PAGE_HEIGHT_DEFAULT,
   viewerChromeLayout: defaultViewerChromeLayout,
+  clickActions: { ...DEFAULT_CLICK_ACTIONS },
+  clickRegion: clampClickRegion({ ...DEFAULT_CLICK_REGION }),
 };
 
 /** 无主动预取时 IO 下边距（约 1 屏） */
