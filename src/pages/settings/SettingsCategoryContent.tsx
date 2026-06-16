@@ -15,7 +15,7 @@ import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
 import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
 import { ChapterBodyPrefetchSetting } from '@/components/settings/ChapterBodyPrefetchSetting';
 import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
-import { DatabaseBackup } from '@/components/shared/DatabaseBackup';
+import { DataBackupSetting } from '@/components/settings/DataBackupSetting';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import { type ReadingRulePageId } from '@/lib/settings/reading-rules-nav';
@@ -134,12 +134,12 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
         <SettingItemAnchor id="database-backup" highlighted={highlight('database-backup')}>
           <div class="rounded-2xl border border-border/50 bg-card p-6">
             <div class="mb-4">
-              <h3 class="mb-2 font-semibold text-foreground">数据备份</h3>
+              <h3 class="mb-2 font-semibold text-foreground">数据备份与恢复</h3>
               <p class="text-sm text-muted-foreground">
-                导出数据库备份文件，或从备份文件恢复数据
+                导出 ZIP 本地备份，或从 ZIP / 数据库文件恢复（参考 Legado 备份格式）
               </p>
             </div>
-            <DatabaseBackup />
+            <DataBackupSetting />
           </div>
         </SettingItemAnchor>
       </Show>

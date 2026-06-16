@@ -193,8 +193,8 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
   {
     id: 'database-backup',
     categoryId: 'storage',
-    title: '数据备份',
-    description: '导出或恢复数据库备份',
+    title: '数据备份与恢复',
+    description: '导出 ZIP 本地备份或从备份恢复',
     keywords: ['备份', '恢复', '数据库', '导出', '导入'],
   },
   {
