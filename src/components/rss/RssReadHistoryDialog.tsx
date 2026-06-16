@@ -2,7 +2,10 @@
  * RSS 阅读历史记录对话框（对齐 Legado ReadRecordDialog）
  */
 
-import { createSignal, createMemo, createEffect, For, Show } from 'solid-js';
+import { createSignal, createEffect, Show } from 'solid-js';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
+import { rssReadRecordMatchesSearch } from '@/lib/rss/rss-read-record-filter';
+import { VirtualList } from '@/components/shared/virtual-list';
 import {
   AppDialog,
   AppDialogContent,
@@ -40,15 +43,14 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
   const [loading, setLoading] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
 
-  const filteredRecords = createMemo(() => {
-    const q = searchQuery().trim().toLowerCase();
-    if (!q) return records();
-    return records().filter(
-      (r) =>
-        (r.title?.toLowerCase().includes(q) ?? false) ||
-        r.record.toLowerCase().includes(q),
-    );
-  });
+  const { filtered: filteredRecords, filtering, progressText: filterProgressText } =
+    useChunkedFilter({
+      items: records,
+      deps: () => searchQuery(),
+      isPassThrough: () => records().length > 0 && !searchQuery().trim(),
+      match: (record) => rssReadRecordMatchesSearch(record, searchQuery()),
+      progressLabel: '正在筛选阅读记录',
+    });
 
   async function reload() {
     setLoading(true);
@@ -96,16 +98,28 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
             <div class="py-8 text-center text-sm text-muted-foreground">加载中…</div>
           </Show>
 
-          <Show when={!loading() && filteredRecords().length === 0}>
+          <Show when={filtering() && filterProgressText()}>
+            <div class="pb-2 text-center text-xs text-muted-foreground">
+              {filterProgressText()}
+            </div>
+          </Show>
+
+          <Show when={!loading() && filteredRecords().length === 0 && !filtering()}>
             <div class="rounded-lg border border-border/50 bg-muted/20 p-6 text-center text-sm text-muted-foreground">
               暂无阅读记录
             </div>
           </Show>
 
-          <ul class="space-y-1">
-            <For each={filteredRecords()}>
+          <Show when={filteredRecords().length > 0}>
+            <VirtualList
+              class="space-y-1"
+              items={filteredRecords}
+              estimateSize={() => 64}
+              overscan={4}
+              getItemKey={(record) => `${record.origin}::${record.record}`}
+            >
               {(record) => (
-                <li>
+                <div class="pb-1">
                   <button
                     type="button"
                     class="flex w-full flex-col gap-0.5 rounded-lg border border-border/50 bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent/30"
@@ -125,10 +139,10 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
                       </span>
                     </Show>
                   </button>
-                </li>
+                </div>
               )}
-            </For>
-          </ul>
+            </VirtualList>
+          </Show>
         </div>
       </AppDialogContent>
     </AppDialog>

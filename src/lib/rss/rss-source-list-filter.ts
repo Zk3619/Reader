@@ -101,33 +101,40 @@ function rssMatchesSpecialFilter(source: RssSource, filter: RssSourceSpecialFilt
   }
 }
 
+export function rssSourceMatchesCriteria(
+  source: RssSource,
+  criteria: RssSourceListFilterCriteria,
+  allGroupNames?: string[],
+  allDomainNames?: string[],
+): boolean {
+  const c =
+    allGroupNames !== undefined
+      ? normalizeRssSourceListFilter(criteria, allGroupNames, allDomainNames ?? [])
+      : criteria;
+  if (c.groupNames.length > 0) {
+    if (!c.groupNames.some((name) => sourceMatchesGroup(source as unknown as BookSource, name)))
+      return false;
+  }
+  if (c.domainNames.length > 0) {
+    if (!c.domainNames.includes(getSourceDomain(source.sourceUrl))) return false;
+  }
+  if (c.enabledStates.length > 0) {
+    const state: SourceEnabledFilter = source.enabled ? 'enabled' : 'disabled';
+    if (!c.enabledStates.includes(state)) return false;
+  }
+  if (c.specialFilters.length > 0) {
+    if (!c.specialFilters.some((f) => rssMatchesSpecialFilter(source, f))) return false;
+  }
+  return true;
+}
+
 export function filterRssSourcesByCriteria(
   sources: RssSource[],
   criteria: RssSourceListFilterCriteria,
   allGroupNames?: string[],
   allDomainNames?: string[],
 ): RssSource[] {
-  const c =
-    allGroupNames !== undefined
-      ? normalizeRssSourceListFilter(criteria, allGroupNames, allDomainNames ?? [])
-      : criteria;
-  return sources.filter((s) => {
-    if (c.groupNames.length > 0) {
-      if (!c.groupNames.some((name) => sourceMatchesGroup(s as unknown as BookSource, name)))
-        return false;
-    }
-    if (c.domainNames.length > 0) {
-      if (!c.domainNames.includes(getSourceDomain(s.sourceUrl))) return false;
-    }
-    if (c.enabledStates.length > 0) {
-      const state: SourceEnabledFilter = s.enabled ? 'enabled' : 'disabled';
-      if (!c.enabledStates.includes(state)) return false;
-    }
-    if (c.specialFilters.length > 0) {
-      if (!c.specialFilters.some((f) => rssMatchesSpecialFilter(s, f))) return false;
-    }
-    return true;
-  });
+  return sources.filter((s) => rssSourceMatchesCriteria(s, criteria, allGroupNames, allDomainNames));
 }
 
 export function formatRssSourceListFilterSummary(

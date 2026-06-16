@@ -12,6 +12,7 @@ import {
   Show,
 } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as rssSourcesDb from '@/lib/database/rss-sources';
 import { deleteRssArticlesByOrigin } from '@/lib/database/rss-articles';
 import type { BookSource, NewRssSource, RssSource } from '@/types';
@@ -29,12 +30,11 @@ import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { sortBookSources, type SourceSortMode } from '@/lib/sources/source-sort';
+import { type SourceSortMode } from '@/lib/sources/source-sort';
 import {
   EMPTY_RSS_SOURCE_LIST_FILTER,
   buildRssManageFilterGroupOptions,
   buildRssManageFilterDomainOptions,
-  filterRssSourcesByCriteria,
   formatRssSourceListFilterSummary,
   formatRssSourceListToolbarDescription,
   hasEffectiveRssSourceListFilter,
@@ -89,6 +89,15 @@ import {
 import { ChevronDownIcon, MoreIcon } from '@/components/shared/icons';
 import { clearSourceCookieAndCfRecord } from '@/lib/book-source/purge-source-session';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
+import {
+  dispatchRssSourcesRefresh,
+  RSS_SOURCES_REFRESH_EVENT,
+} from '@/lib/rss/rss-sources-refresh-event';
+import {
+  rssManagePageFilterIsPassThrough,
+  rssManagePageItemMatches,
+  sortRssSourcesCopy,
+} from '@/lib/rss/rss-manage-page-filter';
 
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
 const BATCH_MENU_CHEVRON_CLASS =
@@ -158,10 +167,6 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     }
   }
 
-  function notifyRefresh() {
-    window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
-  }
-
   onMount(() => {
     void loadSources();
     void loadGroups();
@@ -169,8 +174,8 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       void loadSources();
       void loadGroups();
     };
-    window.addEventListener('rss-sources-refresh', handler);
-    onCleanup(() => window.removeEventListener('rss-sources-refresh', handler));
+    window.addEventListener(RSS_SOURCES_REFRESH_EVENT, handler);
+    onCleanup(() => window.removeEventListener(RSS_SOURCES_REFRESH_EVENT, handler));
   });
 
   createEffect(() => {
@@ -182,28 +187,37 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
   const filterGroupOptions = createMemo(() => buildRssManageFilterGroupOptions(sourceGroups()));
   const filterDomainOptions = createMemo(() => buildRssManageFilterDomainOptions(sources()));
 
-  const filteredSources = createMemo(() => {
-    let list = sources();
-    list = filterRssSourcesByCriteria(
-      list,
-      appliedFilter(),
-      filterGroupOptions(),
-      filterDomainOptions(),
-    );
-    const q = searchQuery().trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (s) =>
-          s.sourceName.toLowerCase().includes(q) ||
-          s.sourceUrl.toLowerCase().includes(q) ||
-          (s.sourceGroup?.toLowerCase().includes(q) ?? false),
-      );
-    }
-    return sortBookSources(
-      list as unknown as BookSource[],
-      sortMode(),
-      sortReverse(),
-    ) as unknown as RssSource[];
+  const filterDeps = createMemo(() => ({
+    criteria: appliedFilter(),
+    query: searchQuery(),
+    sortMode: sortMode(),
+    sortReverse: sortReverse(),
+    groups: filterGroupOptions(),
+    domains: filterDomainOptions(),
+  }));
+
+  const { filtered: filteredSources, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: sources,
+    deps: () => filterDeps(),
+    isPassThrough: () =>
+      rssManagePageFilterIsPassThrough(
+        sources(),
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().domains,
+        filterDeps().query,
+      ),
+    match: (source) =>
+      rssManagePageItemMatches(
+        source,
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().domains,
+        filterDeps().query,
+      ),
+    postProcess: (matched) =>
+      sortRssSourcesCopy(matched, filterDeps().sortMode, filterDeps().sortReverse),
+    progressLabel: '正在筛选订阅源',
   });
 
   const pageDescription = () => {
@@ -269,7 +283,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     const minOrder = list.length > 0 ? Math.min(...list.map((s) => s.customOrder)) : 0;
     try {
       await rssSourcesDb.updateRssSourceOrder(source.sourceUrl, minOrder - 1);
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({
         title: '已置顶',
         description: `「${source.sourceName}」已移至列表顶部`,
@@ -289,7 +303,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     const maxOrder = list.length > 0 ? Math.max(...list.map((s) => s.customOrder)) : 0;
     try {
       await rssSourcesDb.updateRssSourceOrder(source.sourceUrl, maxOrder + 1);
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({
         title: '已置底',
         description: `「${source.sourceName}」已移至列表底部`,
@@ -330,7 +344,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
         const source = byUrl.get(String(orderedIds[i]));
         if (source) source.customOrder = i;
       }
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
     } catch (e) {
       showAppToast({
         title: '排序失败',
@@ -417,7 +431,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     setSources((prev) =>
       prev.map((s) => (s.sourceUrl === source.sourceUrl ? { ...s, enabled } : s)),
     );
-    notifyRefresh();
+    dispatchRssSourcesRefresh({ reason: 'source-updated' });
   };
 
   const confirmDelete = async () => {
@@ -429,7 +443,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
     setDeleteDialogOpen(false);
     setDeleteTarget(null);
     await loadSources();
-    notifyRefresh();
+    dispatchRssSourcesRefresh({ reason: 'source-removed', invalidateCache: true });
   };
 
   function openBatchDeleteConfirm() {
@@ -449,7 +463,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       clearSelection();
       showAppToast({ title: '已删除', description: `已删除 ${urls.length} 个订阅源` });
       await loadSources();
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-removed', invalidateCache: true });
     } catch (e) {
       showAppToast({
         title: '批量删除失败',
@@ -466,7 +480,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       for (const url of urls) {
         await rssSourcesDb.enableRssSource(url, enabled);
       }
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-batch-updated' });
       showAppToast({
         title: enabled ? '已启用' : '已禁用',
         description: `已${enabled ? '启用' : '禁用'} ${urls.length} 个订阅源`,
@@ -491,7 +505,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       for (let i = 0; i < urls.length; i++) {
         await rssSourcesDb.updateRssSourceOrder(urls[i]!, minOrder - 1 - i);
       }
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({ title: '已置顶', description: `已将 ${urls.length} 个订阅源移至顶部` });
       clearSelection();
       await loadSources();
@@ -513,7 +527,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       for (let i = 0; i < urls.length; i++) {
         await rssSourcesDb.updateRssSourceOrder(urls[i]!, maxOrder + 1 + i);
       }
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({ title: '已置底', description: `已将 ${urls.length} 个订阅源移至底部` });
       clearSelection();
       await loadSources();
@@ -590,7 +604,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       }
       setGroupDialogOpen(false);
       setGroupDialogInput('');
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-batch-updated' });
       showAppToast({ title: '已添加分组', description: `已为 ${urls.length} 个订阅源添加「${name}」` });
       clearSelection();
       await loadSources();
@@ -618,7 +632,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       }
       setRemoveGroupDialogOpen(false);
       setGroupDialogInput('');
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-batch-updated' });
       showAppToast({ title: '已移除分组', description: `已从 ${urls.length} 个订阅源移除「${name}」` });
       clearSelection();
       await loadSources();
@@ -903,6 +917,11 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
       />
 
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+        <Show when={filtering() && filterProgressText()}>
+          <div class="shrink-0 px-3 pb-2 text-center text-xs text-muted-foreground">
+            {filterProgressText()}
+          </div>
+        </Show>
         <Show when={showSkeleton()}>
           <ul class="shrink-0 space-y-2 px-1">
             <For each={Array.from({ length: 8 })}>
@@ -920,7 +939,7 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
           </div>
         </Show>
 
-        <Show when={!showSkeleton() && sources().length > 0 && filteredSources().length === 0}>
+        <Show when={!showSkeleton() && sources().length > 0 && filteredSources().length === 0 && !filtering()}>
           <div class="flex flex-1 items-center justify-center px-1">
             <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
               <p>无匹配订阅源</p>

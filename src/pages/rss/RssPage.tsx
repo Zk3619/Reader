@@ -4,7 +4,7 @@
 
 import {
   createSignal,
-  createMemo,
+  createEffect,
   onMount,
   onCleanup,
   For,
@@ -16,12 +16,8 @@ import { deleteRssArticlesByOrigin } from '@/lib/database/rss-articles';
 import { sortBookSources } from '@/lib/sources/source-sort';
 import {
   EMPTY_RSS_SOURCE_LIST_FILTER,
-  buildRssManageFilterDomainOptions,
-  buildRssManageFilterGroupOptions,
-  filterRssSourcesByCriteria,
   type RssSourceListFilterCriteria,
 } from '@/lib/rss/rss-source-list-filter';
-import { filterRssSources } from '@/lib/search/search-filters';
 import type { RssLayoutMode, SearchMode } from '@/lib/search/search-prefs';
 import type { RssSource } from '@/types';
 import { cn } from '@/lib/utils';
@@ -32,6 +28,7 @@ import {
   RssPageSourceListItem,
   type RssPageSourceItemActions,
 } from '@/components/rss/RssPageSourceItems';
+import { VirtualRssSourceList } from '@/components/rss/VirtualRssSourceList';
 import {
   AppDialog,
   AppDialogContent,
@@ -44,6 +41,23 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import { rssSourceHasLogin } from '@/lib/rss/open-rss-source-login';
 import { clearSourceCookieAndCfRecord } from '@/lib/book-source/purge-source-session';
 import { rssAsBookSource } from '@/lib/rss-source/rss-as-book-source';
+import {
+  clearRssSourcesSessionCache,
+  getRssSourcesSessionCache,
+  setRssSourcesSessionCache,
+  setRssSourcesSessionMeta,
+} from '@/lib/rss/rss-sources-session-cache';
+import {
+  dispatchRssSourcesRefresh,
+  readRssSourcesRefreshDetail,
+  RSS_SOURCES_REFRESH_EVENT,
+} from '@/lib/rss/rss-sources-refresh-event';
+import {
+  filterRssPageSourcesChunked,
+  isChunkedFilterAbortError,
+  type RssSourcesFilterMeta,
+} from '@/lib/rss/rss-sources-chunked-filter';
+
 
 export interface RssPageProps {
   searchQuery?: string;
@@ -61,78 +75,178 @@ export interface RssPageProps {
 
 export function RssPage(props: RssPageProps) {
   const [sources, setSources] = createSignal<RssSource[]>([]);
+  const [filteredSources, setFilteredSources] = createSignal<RssSource[]>([]);
+  const [filterMeta, setFilterMeta] = createSignal<RssSourcesFilterMeta>({
+    groupNames: [],
+    domainNames: [],
+  });
+  const [sourcesRevision, setSourcesRevision] = createSignal(0);
+  const [filterMetaRevision, setFilterMetaRevision] = createSignal(-1);
+  const [filtering, setFiltering] = createSignal(false);
+  const [filterProgressText, setFilterProgressText] = createSignal('');
   const [loading, setLoading] = createSignal(true);
+  const [scrollElement, setScrollElement] = createSignal<HTMLDivElement | undefined>();
   const [deleteDialogOpen, setDeleteDialogOpen] = createSignal(false);
   const [deleteTarget, setDeleteTarget] = createSignal<RssSource | null>(null);
+  let loadSequence = 0;
+  let filterJobId = 0;
 
   const showSkeleton = useSkeletonLoading(loading, { delay: 100, minDisplayTime: 300 });
 
-  async function loadSources() {
-    setLoading(true);
+  function syncLoadResult(sorted: RssSource[], meta?: RssSourcesFilterMeta) {
+    const nextRevision = sourcesRevision() + 1;
+    setSourcesRevision(nextRevision);
+    setSources(sorted);
+    setRssSourcesSessionCache(sorted, meta);
+    props.onSourcesLoaded?.(sorted);
+    props.onSourceCountChange?.(sorted.length);
+    if (meta) {
+      setFilterMeta(meta);
+      setFilterMetaRevision(nextRevision);
+      props.onGroupsLoaded?.(meta.groupNames);
+    }
+  }
+
+  async function yieldToBrowser() {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+  }
+
+  async function loadSources(options?: { keepCurrent?: boolean; force?: boolean }) {
+    const currentLoadId = ++loadSequence;
+    if (!options?.keepCurrent) setLoading(true);
     try {
+      if (!options?.force) {
+        const cached = getRssSourcesSessionCache();
+        if (cached) {
+          syncLoadResult(cached.sources, cached.meta);
+          setFilteredSources(cached.sources);
+          setLoading(false);
+          return;
+        }
+      }
       const list = await rssSourcesDb.getEnabledRssSources();
+      await yieldToBrowser();
       const sorted = sortBookSources(
         list as unknown as import('@/types').BookSource[],
         'manual',
         false,
       ) as unknown as RssSource[];
-      setSources(sorted);
-
-      const groupSet = new Set<string>();
-      for (const s of sorted) {
-        const g = s.sourceGroup?.trim();
-        if (g) groupSet.add(g);
-      }
-      props.onGroupsLoaded?.([...groupSet].sort((a, b) => a.localeCompare(b, 'zh-CN')));
-      props.onSourcesLoaded?.(sorted);
-      props.onSourceCountChange?.(sorted.length);
+      if (currentLoadId !== loadSequence) return;
+      syncLoadResult(sorted);
     } catch (e) {
       console.error('加载订阅源失败:', e);
+      if (currentLoadId !== loadSequence) return;
       setSources([]);
+      setFilteredSources([]);
       props.onSourceCountChange?.(0);
     } finally {
-      setLoading(false);
+      if (currentLoadId === loadSequence) {
+        setLoading(false);
+      }
     }
-  }
-
-  function notifyRefresh() {
-    window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
   }
 
   onMount(() => {
-    void loadSources();
-    const handler = () => void loadSources();
-    window.addEventListener('rss-sources-refresh', handler);
-    onCleanup(() => window.removeEventListener('rss-sources-refresh', handler));
+    const cached = getRssSourcesSessionCache();
+    if (cached) {
+      syncLoadResult(cached.sources, cached.meta);
+      setFilteredSources(cached.sources);
+      setLoading(false);
+      void loadSources({ keepCurrent: true, force: true });
+    } else {
+      void loadSources();
+    }
+    const handler = (event: Event) => {
+      const detail = readRssSourcesRefreshDetail(event);
+      if (detail.invalidateCache || detail.reason === 'source-added' || detail.reason === 'source-removed') {
+        clearRssSourcesSessionCache();
+      }
+      void loadSources({ keepCurrent: true, force: true });
+    };
+    window.addEventListener(RSS_SOURCES_REFRESH_EVENT, handler);
+    onCleanup(() => window.removeEventListener(RSS_SOURCES_REFRESH_EVENT, handler));
   });
 
-  const filteredSources = createMemo(() => {
+  createEffect(() => {
     const all = sources();
-    const allGroups = buildRssManageFilterGroupOptions(
-      [...new Set(all.map((s) => s.sourceGroup?.trim()).filter(Boolean) as string[])],
-    );
-    const allDomains = buildRssManageFilterDomainOptions(all);
-    let list = filterRssSourcesByCriteria(
-      all,
-      props.appliedFilter ?? EMPTY_RSS_SOURCE_LIST_FILTER,
-      allGroups,
-      allDomains,
-    );
-    const q = (props.searchQuery ?? '').trim();
-    if (q) {
-      list = filterRssSources(list, q, props.searchMode ?? 'name');
+    const revision = sourcesRevision();
+    const criteria = props.appliedFilter ?? EMPTY_RSS_SOURCE_LIST_FILTER;
+    const searchQuery = (props.searchQuery ?? '').trim();
+    const searchMode = props.searchMode ?? 'name';
+    const canReuseMeta = filterMetaRevision() === revision;
+    const reuseMeta = canReuseMeta ? filterMeta() : undefined;
+
+    const jobId = ++filterJobId;
+
+    if (all.length === 0) {
+      setFilteredSources([]);
+      setFiltering(false);
+      setFilterProgressText('');
+      return;
     }
-    return list;
+
+    setFiltering(true);
+
+    void (async () => {
+      try {
+        const result = await filterRssPageSourcesChunked({
+          sources: all,
+          criteria,
+          searchQuery,
+          searchMode,
+          meta: reuseMeta,
+          shouldAbort: () => jobId !== filterJobId,
+          onProgress: (progress) => {
+            if (jobId !== filterJobId) return;
+            if (progress.phase === 'meta') {
+              setFilterProgressText(`正在分析订阅源 ${progress.processed}/${progress.total}`);
+              return;
+            }
+            if (progress.phase === 'filter') {
+              setFilterProgressText(
+                `正在筛选 ${progress.processed}/${progress.total}（已匹配 ${progress.matched}）`,
+              );
+              return;
+            }
+            setFilterProgressText('');
+          },
+          onPartialResult: (matched) => {
+            if (jobId !== filterJobId) return;
+            setFilteredSources([...matched]);
+          },
+        });
+        if (jobId !== filterJobId) return;
+
+        setFilterMeta(result.meta);
+        setFilterMetaRevision(revision);
+        setRssSourcesSessionMeta(result.meta);
+        setFilteredSources(result.filtered);
+        props.onGroupsLoaded?.(result.meta.groupNames);
+        setFilterProgressText('');
+        setFiltering(false);
+      } catch (error) {
+        if (isChunkedFilterAbortError(error)) return;
+        console.error('筛选订阅源失败:', error);
+        if (jobId !== filterJobId) return;
+        setFilteredSources([]);
+        setFilterProgressText('');
+        setFiltering(false);
+      }
+    })();
   });
+
+  const layoutMode = () => props.layoutMode ?? 'list';
 
   async function handlePinSource(source: RssSource) {
     const all = await rssSourcesDb.getAllRssSources();
     const minOrder = all.length > 0 ? Math.min(...all.map((s) => s.customOrder)) : 0;
     try {
       await rssSourcesDb.updateRssSourceOrder(source.sourceUrl, minOrder - 1);
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({ title: '已置顶', description: `「${source.sourceName}」已移至列表顶部` });
-      await loadSources();
+      await loadSources({ keepCurrent: true, force: true });
     } catch (e) {
       showAppToast({
         title: '置顶失败',
@@ -147,9 +261,9 @@ export function RssPage(props: RssPageProps) {
     const maxOrder = all.length > 0 ? Math.max(...all.map((s) => s.customOrder)) : 0;
     try {
       await rssSourcesDb.updateRssSourceOrder(source.sourceUrl, maxOrder + 1);
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-reordered' });
       showAppToast({ title: '已置底', description: `「${source.sourceName}」已移至列表底部` });
-      await loadSources();
+      await loadSources({ keepCurrent: true, force: true });
     } catch (e) {
       showAppToast({
         title: '置底失败',
@@ -162,12 +276,12 @@ export function RssPage(props: RssPageProps) {
   async function handleToggleEnable(source: RssSource) {
     try {
       await rssSourcesDb.enableRssSource(source.sourceUrl, !source.enabled);
-      notifyRefresh();
+      dispatchRssSourcesRefresh({ reason: 'source-updated' });
       showAppToast({
         title: source.enabled ? '已禁用' : '已启用',
         description: source.sourceName,
       });
-      await loadSources();
+      await loadSources({ keepCurrent: true, force: true });
     } catch (e) {
       showAppToast({
         title: '操作失败',
@@ -186,8 +300,9 @@ export function RssPage(props: RssPageProps) {
       showAppToast({ title: '已删除', description: target.sourceName });
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
-      notifyRefresh();
-      await loadSources();
+      clearRssSourcesSessionCache();
+      dispatchRssSourcesRefresh({ reason: 'source-removed', invalidateCache: true });
+      await loadSources({ keepCurrent: true, force: true });
     } catch (e) {
       showAppToast({
         title: '删除失败',
@@ -229,10 +344,17 @@ export function RssPage(props: RssPageProps) {
   });
 
   const isGrid = () => (props.layoutMode ?? 'list') === 'grid';
+  const showFilterProgress = () =>
+    !showSkeleton() && filtering() && filterProgressText().length > 0;
+  const showEmptyState = () =>
+    !showSkeleton() && !filtering() && filteredSources().length === 0;
 
   return (
     <div class={cn('flex min-h-0 flex-1 flex-col', mainShellPageScroll)}>
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+      <div
+        ref={setScrollElement}
+        class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4"
+      >
         <Show when={showSkeleton()}>
           <Show
             when={isGrid()}
@@ -252,7 +374,11 @@ export function RssPage(props: RssPageProps) {
           </Show>
         </Show>
 
-        <Show when={!showSkeleton() && filteredSources().length === 0}>
+        <Show when={showFilterProgress()}>
+          <div class="py-2 text-center text-xs text-muted-foreground">{filterProgressText()}</div>
+        </Show>
+
+        <Show when={showEmptyState()}>
           <div class="rounded-2xl border border-border/50 bg-card p-8 text-center text-muted-foreground">
             <p class="mb-4">
               {sources().length === 0 ? '暂无已启用的订阅源' : '没有匹配的订阅源'}
@@ -263,24 +389,18 @@ export function RssPage(props: RssPageProps) {
           </div>
         </Show>
 
-        <Show when={!showSkeleton() && filteredSources().length > 0 && !isGrid()}>
-          <div class="space-y-2 py-2">
-            <For each={filteredSources()}>
-              {(source) => (
-                <RssPageSourceListItem source={source} actions={itemActions()} />
-              )}
-            </For>
-          </div>
-        </Show>
-
-        <Show when={!showSkeleton() && filteredSources().length > 0 && isGrid()}>
-          <div class="flex flex-wrap gap-3 py-2">
-            <For each={filteredSources()}>
-              {(source) => (
-                <RssPageSourceGridItem source={source} actions={itemActions()} />
-              )}
-            </For>
-          </div>
+        <Show when={!showSkeleton() && filteredSources().length > 0}>
+          <VirtualRssSourceList
+            sources={filteredSources}
+            layoutMode={layoutMode}
+            externalScrollElement={scrollElement}
+            renderListItem={(source) => (
+              <RssPageSourceListItem source={source} actions={itemActions()} />
+            )}
+            renderGridItem={(source) => (
+              <RssPageSourceGridItem source={source} actions={itemActions()} />
+            )}
+          />
         </Show>
       </div>
 

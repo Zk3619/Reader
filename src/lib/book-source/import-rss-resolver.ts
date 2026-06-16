@@ -6,6 +6,7 @@ import * as rssSourcesDb from '@/lib/database/rss-sources';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
 import { parseRssSourceJson } from '@/lib/book-source/import-rss-source';
 import { mergeRssSourceForImport, type ImportRssSourceOptions } from '@/lib/book-source/import-rss-merge';
+import { dispatchRssSourcesRefresh } from '@/lib/rss/rss-sources-refresh-event';
 import type { NewRssSource } from '@/types';
 
 export type { ImportRssSourceComparison } from '@/lib/book-source/import-rss-compare';
@@ -37,7 +38,7 @@ export async function importSelectedRssSources(
     inserted += 1;
   }
   if (inserted > 0) {
-    window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
+    dispatchRssSourcesRefresh({ reason: 'source-added', invalidateCache: true });
   }
   return inserted;
 }

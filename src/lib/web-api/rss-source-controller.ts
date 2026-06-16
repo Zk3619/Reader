@@ -14,6 +14,7 @@ import { legadoErr, legadoOk, type LegadoReturnData } from '@/lib/web-api/return
 
 import { queryParam } from '@/lib/web-api/query';
 
+import { dispatchRssSourcesRefresh } from '@/lib/rss/rss-sources-refresh-event';
 import type { NewRssSource, RssSource } from '@/types';
 
 
@@ -106,6 +107,10 @@ export async function saveRssSourceApi(postData: string | null): Promise<LegadoR
 
   await rssDb.insertRssSource(source);
 
+  if (typeof window !== 'undefined') {
+    dispatchRssSourcesRefresh({ reason: 'source-added', invalidateCache: true });
+  }
+
   return legadoOk(null);
 
 }
@@ -136,6 +141,10 @@ export async function saveRssSourcesApi(
 
   if (saved.length === 0) return legadoErr('转换源失败');
 
+  if (typeof window !== 'undefined') {
+    dispatchRssSourcesRefresh({ reason: 'source-added', invalidateCache: true });
+  }
+
   return legadoOk(saved);
 
 }
@@ -159,7 +168,7 @@ export async function deleteRssSourcesApi(postData: string | null): Promise<Lega
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
+    dispatchRssSourcesRefresh({ reason: 'source-removed', invalidateCache: true });
   }
 
   return legadoOk('已执行');

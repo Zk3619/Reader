@@ -8,6 +8,7 @@ import { autoCompleteRule } from '@/lib/book-source/rule-complete';
 import { parseRssSourceJson } from '@/lib/book-source/import-rss-source';
 import * as rssSourcesDb from '@/lib/database/rss-sources';
 import { clearSortUrlCache } from '@/lib/rss-source/sort-urls';
+import { dispatchRssSourcesRefresh } from '@/lib/rss/rss-sources-refresh-event';
 
 const AUTO_COMPLETE_STORAGE_KEY = 'reader_rss_source_edit_auto_complete';
 
@@ -164,20 +165,26 @@ export async function saveRssEditSource(
     lastUpdateTime: Date.now(),
   };
 
+  let isNew = false;
   if (originalUrl && originalUrl !== url) {
     await rssSourcesDb.deleteRssSource(originalUrl);
     await rssSourcesDb.insertRssSource(toSave);
+    isNew = true;
   } else {
     const existing = await rssSourcesDb.getRssSource(url);
     if (existing) {
       await rssSourcesDb.updateRssSource(toSave);
     } else {
       await rssSourcesDb.insertRssSource(toSave);
+      isNew = true;
     }
   }
 
   clearSortUrlCache(toSave);
-  window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
+  dispatchRssSourcesRefresh({
+    reason: isNew ? 'source-added' : 'source-updated',
+    invalidateCache: isNew || Boolean(originalUrl && originalUrl !== url),
+  });
 
   const saved = await rssSourcesDb.getRssSource(url);
   if (!saved) {

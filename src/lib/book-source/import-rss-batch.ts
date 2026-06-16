@@ -1,3 +1,4 @@
+import { dispatchRssSourcesRefresh } from '@/lib/rss/rss-sources-refresh-event';
 import type { NewRssSource } from '@/types';
 import * as rssDb from '@/lib/database/rss-sources';
 
@@ -9,7 +10,7 @@ export async function importRssSourcesFromList(sources: NewRssSource[]): Promise
     count += 1;
   }
   if (count > 0) {
-    window.dispatchEvent(new CustomEvent('rss-sources-refresh'));
+    dispatchRssSourcesRefresh({ reason: 'source-added', invalidateCache: true });
   }
   return count;
 }
