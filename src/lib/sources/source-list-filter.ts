@@ -219,27 +219,33 @@ function sourceMatchesSpecialFilter(source: BookSource, filter: SourceSpecialFil
 }
 
 /** 按筛选弹窗条件过滤书源（各维度内 OR，维度间 AND） */
+export function sourceMatchesCriteria(
+  source: BookSource,
+  criteria: SourceListFilterCriteria,
+  allGroupNames?: string[],
+): boolean {
+  const c =
+    allGroupNames !== undefined
+      ? normalizeSourceListFilter(criteria, allGroupNames)
+      : criteria;
+  if (c.groupNames.length > 0) {
+    if (!c.groupNames.some((name) => sourceMatchesGroup(source, name))) return false;
+  }
+  if (c.enabledStates.length > 0) {
+    const state: SourceEnabledFilter = source.enabled ? 'enabled' : 'disabled';
+    if (!c.enabledStates.includes(state)) return false;
+  }
+  if (c.specialFilters.length > 0) {
+    if (!c.specialFilters.some((f) => sourceMatchesSpecialFilter(source, f))) return false;
+  }
+  return true;
+}
+
 export function filterSourcesByCriteria(
   sources: BookSource[],
   criteria: SourceListFilterCriteria,
   allGroupNames?: string[],
 ): BookSource[] {
-  const c =
-    allGroupNames !== undefined
-      ? normalizeSourceListFilter(criteria, allGroupNames)
-      : criteria;
-  return sources.filter((s) => {
-    if (c.groupNames.length > 0) {
-      if (!c.groupNames.some((name) => sourceMatchesGroup(s, name))) return false;
-    }
-    if (c.enabledStates.length > 0) {
-      const state: SourceEnabledFilter = s.enabled ? 'enabled' : 'disabled';
-      if (!c.enabledStates.includes(state)) return false;
-    }
-    if (c.specialFilters.length > 0) {
-      if (!c.specialFilters.some((f) => sourceMatchesSpecialFilter(s, f))) return false;
-    }
-    return true;
-  });
+  return sources.filter((s) => sourceMatchesCriteria(s, criteria, allGroupNames));
 }
 
