@@ -11,7 +11,6 @@
 
 import { simulationDragZoneBoundaryPx } from '@/lib/media/text/reader-ui-config';
 import type { TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
-import { captureElementToDataUrl } from '@/lib/media/text/reader-paged-turn-snapshot';
 import {
   buildPageSurfaceClone,
   READER_PAGED_TURN_CONTENT_CLIP_CLASS,
@@ -423,6 +422,18 @@ function folderCreaseShadowGradient(degrees: number, isRtOrLb: boolean): string 
 }
 
 let backSnapshotGeneration = 0;
+let lastCurlGeometryKey = '';
+
+function curlGeometryKey(g: SimulationCurlGeometry): string {
+  return [
+    g.pageMinusCurlPath,
+    g.nextAreaPath,
+    g.backAreaPath,
+    fmtMatrix(g.backMatrix),
+    g.degrees,
+    g.isRtOrLb ? '1' : '0',
+  ].join('|');
+}
 
 /**
  * 仿真 PREV：在 turn 层 path1 区贴当前页（Legado curBitmap），勿依赖 live 透显。
@@ -489,31 +500,6 @@ function createDomBackInner(front: HTMLElement, pageBg: string): HTMLElement {
   return inner;
 }
 
-function scheduleBitmapBackInner(
-  front: HTMLElement,
-  back: HTMLElement,
-  width: number,
-  height: number,
-  pageBg: string,
-): void {
-  const gen = ++backSnapshotGeneration;
-  void captureElementToDataUrl(front, width, height).then((url) => {
-    if (!url || gen !== backSnapshotGeneration || !back.isConnected) return;
-    const inner = back.querySelector<HTMLElement>(`.${BACK_INNER_CLASS}`);
-    if (!inner) return;
-    inner.replaceChildren();
-    inner.style.backgroundColor = pageBg;
-    const img = document.createElement('img');
-    img.src = url;
-    img.draggable = false;
-    img.decoding = 'sync';
-    img.className = 'reader-paged-sim-back-img block h-full w-full pointer-events-none';
-    img.style.width = `${width}px`;
-    img.style.height = `${height}px`;
-    inner.appendChild(img);
-  });
-}
-
 /**
  * 应用/更新仿真卷曲。front 幕帘（当前页 clone）须已挂载。首次克隆背面，后续仅更新。
  *
@@ -526,25 +512,25 @@ export function updateSimulationCurl(params: {
   geometry: SimulationCurlGeometry;
   /** 页面底色；缺省从 front 向上解析 */
   pageBg?: string;
-  /** 背面优先栅格化快照（对齐 Legado bitmap + 减轻 DOM 镜像发糊） */
-  useBitmapBack?: boolean;
 }): void {
   const { slideMount, geometry: g } = params;
   if (!slideMount) return;
+  const geomKey = curlGeometryKey(g);
+  if (geomKey === lastCurlGeometryKey) return;
+  lastCurlGeometryKey = geomKey;
+
   const front = slideMount.querySelector<HTMLElement>(`.${FRONT_SLIDE_CLASS}`);
   if (!front) return;
 
   const pageBg = params.pageBg ?? resolveOpaquePageBackground(front);
-  const mountW = slideMount.clientWidth;
-  const mountH = slideMount.clientHeight;
 
+  if (!front.style.willChange) front.style.willChange = 'clip-path';
   front.style.clipPath = `path(evenodd, '${g.pageMinusCurlPath}')`;
-  front.style.willChange = 'clip-path';
 
   const nextArea = slideMount.querySelector<HTMLElement>(`.${NEXT_AREA_CLASS}`);
   if (nextArea) {
+    if (!nextArea.style.willChange) nextArea.style.willChange = 'clip-path';
     nextArea.style.clipPath = `path('${g.nextAreaPath}')`;
-    nextArea.style.willChange = 'clip-path';
   }
 
   let back = slideMount.querySelector<HTMLElement>(`.${BACK_CLASS}`);
@@ -556,9 +542,6 @@ export function updateSimulationCurl(params: {
     back.style.backgroundColor = pageBg;
     back.appendChild(createDomBackInner(front, pageBg));
     slideMount.appendChild(back);
-    if (params.useBitmapBack && mountW > 0 && mountH > 0) {
-      scheduleBitmapBackInner(front, back, mountW, mountH, pageBg);
-    }
   }
   back.style.backgroundColor = pageBg;
   back.style.clipPath = `path('${g.backAreaPath}')`;
@@ -577,9 +560,12 @@ export function updateSimulationCurl(params: {
     slideMount.insertBefore(foldShadow, back);
   }
   foldShadow.style.clipPath = `path('${g.nextAreaPath}')`;
-  foldShadow.style.backgroundColor = 'transparent';
-  foldShadow.style.backgroundImage = nextAreaShadowGradient(g.degrees, g.isRtOrLb);
-  foldShadow.style.mixBlendMode = 'multiply';
+  const foldGrad = nextAreaShadowGradient(g.degrees, g.isRtOrLb);
+  if (foldShadow.style.backgroundImage !== foldGrad) {
+    foldShadow.style.backgroundColor = 'transparent';
+    foldShadow.style.backgroundImage = foldGrad;
+    foldShadow.style.opacity = '0.85';
+  }
 
   // 镜像折痕阴影（与下层同结构，尺寸/方向对齐折线）
   let creaseShadow = back.querySelector<HTMLElement>(`.${CREASE_SHADOW_CLASS}`);
@@ -588,14 +574,18 @@ export function updateSimulationCurl(params: {
     creaseShadow.className = `${CREASE_SHADOW_CLASS} pointer-events-none absolute inset-0`;
     back.appendChild(creaseShadow);
   }
-  creaseShadow.style.backgroundColor = 'transparent';
-  creaseShadow.style.backgroundImage = folderCreaseShadowGradient(g.degrees, g.isRtOrLb);
-  creaseShadow.style.mixBlendMode = 'multiply';
+  const creaseGrad = folderCreaseShadowGradient(g.degrees, g.isRtOrLb);
+  if (creaseShadow.style.backgroundImage !== creaseGrad) {
+    creaseShadow.style.backgroundColor = 'transparent';
+    creaseShadow.style.backgroundImage = creaseGrad;
+    creaseShadow.style.opacity = '0.85';
+  }
 }
 
 export function clearSimulationCurl(slideMount: HTMLElement | undefined): void {
   if (!slideMount) return;
   backSnapshotGeneration += 1;
+  lastCurlGeometryKey = '';
   const front = slideMount.querySelector<HTMLElement>(`.${FRONT_SLIDE_CLASS}`);
   if (front) {
     front.style.clipPath = '';

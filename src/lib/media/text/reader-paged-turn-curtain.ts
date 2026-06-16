@@ -1,3 +1,4 @@
+import { READER_THEME_DEFAULT_BG } from '@/lib/media/text/reader-theme-classes';
 import { mergePagedContentTransforms } from '@/lib/media/text/reader-paged-turn-style';
 import type { TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 
@@ -33,7 +34,7 @@ export function resolveOpaquePageBackground(startEl: HTMLElement): string {
     }
     node = node.parentElement;
   }
-  return '#f5f0e6';
+  return READER_THEME_DEFAULT_BG;
 }
 
 /** 克隆 live 页面表面（幕帘 / 仿真下层区共用） */

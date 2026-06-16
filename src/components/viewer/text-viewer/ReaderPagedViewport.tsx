@@ -21,6 +21,8 @@ import {
   pageCountFromChapterLayout,
   buildReaderLayoutSignature,
   chapterLayoutsEqual,
+  isChapterLayoutCompleteForContent,
+  needsDomChapterLayout,
   type ReaderChapterLayout,
 } from '@/lib/media/text/reader-chapter-layout';
 import {
@@ -68,6 +70,16 @@ import {
   updateSimulationCurl,
 } from '@/lib/media/text/reader-paged-simulation-curl';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { isReaderInlineMeasureImage } from '@/lib/media/image/inline-text-image-size';
+import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
+import {
+  isTouchLikePointer,
+  markPagedTurnPointerConsumed,
+  readerPagedViewportTouchAction,
+  resolvePagedDragAxis,
+  shouldPreventTouchDefaultForPagedDrag,
+  shouldSuppressPagedTapAfterPointer,
+} from '@/lib/media/text/reader-paged-pointer-gesture';
 import type { TextViewerPageAnim, TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import {
   textViewerDualPageActiveInViewport,
@@ -119,7 +131,7 @@ import {
 const PAGE_TURN_MS = 320;
 /** 偏移落入此区间视为未选方向，用于换向时重置翻页态 */
 const DRAG_DIRECTION_DEADZONE_PX = 8;
-const LAYOUT_REMEASURE_DEBOUNCE_MS = 120;
+const LAYOUT_REMEASURE_DEBOUNCE_MS = 200;
 const VIEWPORT_RESIZE_EPS_PX = 2;
 const CROSS_CHAPTER_LAYOUT_TIMEOUT_MS = 5000;
 
@@ -175,7 +187,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const [turnFrom, setTurnFrom] = createSignal(0);
   const [turnTo, setTurnTo] = createSignal(0);
   const [turnDir, setTurnDir] = createSignal<PagedTurnDirection>('next');
-  const [turnProgress, setTurnProgress] = createSignal(0);
   /** 跨章 staging 就绪/精修时 bump，驱动 Solid 重绘（incomingLayout 存于非响应式对象） */
   const [crossChapterStagingTick, setCrossChapterStagingTick] = createSignal(0);
   /** 仿真 prev：屏外幕帘克隆宿主页码（仅用于 clone，不驱动 live 渲染） */
@@ -211,6 +222,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let lastClipLayoutOuterH = 0;
 
   let dragPointerId: number | null = null;
+  let dragPointerCaptured = false;
   let dragStartX = 0;
   let dragStartY = 0;
   let dragStartPageIndex = 0;
@@ -219,8 +231,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let turnCurtainPrepInFlight = false;
   let turnCurtainPrepToken = 0;
   let dragAxis: 'none' | 'x' | 'y' = 'none';
-  /** 滑动拖拽像素偏移；避免每帧 setTurnProgress 触发 Solid 重绘 */
+  /** 滑动拖拽像素偏移；覆盖/仿真 anim 用 turnAnimProgressRef，避免每帧触发 Solid 重绘 */
   let dragOffsetPxRef = 0;
+  /** 覆盖/仿真 anim 进度 0–1（imperative，不驱动 JSX） */
+  let turnAnimProgressRef = 0;
+  let incomingStagingTransformEl: HTMLDivElement | undefined;
+  let stagingDualLeftShiftEl: HTMLDivElement | undefined;
+  let stagingDualRightShiftEl: HTMLDivElement | undefined;
   let crossChapterTurn: CrossChapterTurnState | null = null;
   let crossChapterLayoutTimer: ReturnType<typeof setTimeout> | undefined;
   /** 仿真卷曲：最近指针 client 坐标 + 页脚 + 动画段插值参数 */
@@ -238,6 +255,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       initial: number;
     }
     | null = null;
+  /** 仿真卷曲：合并同帧多次 pointermove 为单次 paint */
+  let simCurlPaintRaf = 0;
+  let simCurlPaintStage: TurnStage = 'idle';
+  let simCurlPaintProgress = 0;
+  /** 仿真翻页 live 层已应用的页码，避免每帧重复写 transform */
+  let simLiveTransformPage = -1;
   /** finishTurn 异步切章期间，阻止 chapterIndex effect 重置排版 */
   let crossChapterCommitInFlight = false;
   let idleContentRootChapter = -1;
@@ -407,18 +430,20 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     });
   });
 
-  /** 当前视口模式下的章节排版是否完整（双页须 dualPage + rightPageStarts + segments） */
+  /** 当前视口模式下的章节排版是否完整（双页须 dualPage + rightPageStarts + segments；须 DOM 时校验 engine） */
   const isChapterLayoutComplete = (
     l: ReaderChapterLayout | null | undefined,
     ch: number,
+    content?: string,
   ): boolean => {
-    if (!l || l.chapterIndex !== ch || l.segments.length === 0) return false;
-    if (pagedLayoutDualPage()) {
-      if (!l.dualPage) return false;
-      if (!l.rightPageStarts?.length) return false;
-    }
-    return true;
+    const raw = content ?? viewerState.content;
+    return isChapterLayoutCompleteForContent(l, ch, raw, {
+      dualPage: pagedLayoutDualPage(),
+    });
   };
+
+  const isProvisionalCanvasLayout = (l: ReaderChapterLayout | null | undefined) =>
+    Boolean(l && l.engine === 'canvas' && l.isLayoutComplete === false);
 
   const normalizeAppliedLayout = (next: ReaderChapterLayout): ReaderChapterLayout => {
     if (
@@ -470,7 +495,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       chapterTitle,
     });
     const cached = getCachedChapterLayout(cacheKey);
-    if (cached && isChapterLayoutComplete(cached, chapterIndex)) return cached;
+    if (cached && isChapterLayoutComplete(cached, chapterIndex, content)) return cached;
 
     const next = layoutReaderChapter({
       chapterIndex,
@@ -487,7 +512,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       clipHeightPx: pageWindow.clipHeight,
       horizontalInsetOnSlot: true,
     });
-    if (!isChapterLayoutComplete(next, chapterIndex)) return null;
+    if (!isChapterLayoutComplete(next, chapterIndex, content)) return null;
     return next;
   };
 
@@ -531,7 +556,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         horizontalInsetOnSlot: true,
       }),
     );
-    if (!isChapterLayoutComplete(layout, chapterIndex)) return null;
+    if (!isChapterLayoutComplete(layout, chapterIndex, content)) return null;
     return normalizeAppliedLayout({ ...layout, isLayoutComplete: true });
   };
 
@@ -566,6 +591,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     }
     if (!isCrossChapterPrepareCurrent(turn, prepareToken)) return null;
     if (turn.incomingChapterIndex !== chapterIndex) return null;
+    if (needsDomChapterLayout(content)) return null;
     return buildIncomingChapterLayout(chapterIndex, content, chapterTitle);
   };
 
@@ -630,6 +656,32 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const layoutAwaitingMeasure = () => {
     const ch = viewerState.chapterIndex;
     return Boolean(viewerState.content?.trim()) && !isChapterLayoutComplete(layout(), ch);
+  };
+
+  /** 骨架屏期间完成拉取 + DOM 分页后再展示 live 正文 */
+  const pagedChapterReadyForDisplay = () => {
+    const ch = viewerState.chapterIndex;
+    const content = viewerState.content;
+    if (!content?.trim()) return false;
+    if (viewerState.contentLoading || viewerState.contentFetching) return false;
+    const l = layout();
+    if (l != null && l.chapterIndex !== ch) return false;
+    return isChapterLayoutComplete(l, ch, content);
+  };
+
+  const revealPagedChapterWhenReady = () => {
+    if (pagedChapterReadyForDisplay()) {
+      textViewerStore.revealPagedChapterContent();
+    }
+  };
+
+  /** 跨章已切 store 但新章 DOM 分页尚未完成 */
+  const isCrossChapterLayoutPending = () => {
+    const turn = crossChapterTurn;
+    if (!turn?.chapterCommitted) return false;
+    const ch = viewerState.chapterIndex;
+    if (ch === turn.fromChapterIndex) return false;
+    return !pagedChapterReadyForDisplay();
   };
 
   const resolveContentRootForLayout = (): HTMLElement | null => {
@@ -843,6 +895,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     pageIndex: number,
     layoutOverride?: ReaderChapterLayout | null,
   ): boolean | undefined => {
+    if ((viewerState.config.chapterTitleStyle ?? 'center') === 'none') return false;
     const l = dualSpreadLayoutForRender(layoutOverride);
     if (!l || !pagedLayoutDualPage() || l.segments.length === 0) {
       return column === 'left' ? undefined : false;
@@ -977,6 +1030,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         );
       } finally {
         remeasureInFlight = false;
+        queueMicrotask(() => revealPagedChapterWhenReady());
       }
     };
 
@@ -1128,11 +1182,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const tryApplyCachedChapterLayout = (): boolean => {
     if (!crossChapterTurn) return false;
     if (viewerState.chapterIndex === crossChapterTurn.fromChapterIndex) return false;
-    if (!viewerState.content?.trim()) return false;
+    const content = viewerState.content;
+    if (!content?.trim()) return false;
 
     const cached = getCachedChapterLayout(buildCurrentChapterLayoutCacheKey());
     if (!cached || cached.chapterIndex !== viewerState.chapterIndex) return false;
-    if (!isCrossChapterLayoutReady(cached, viewerState.chapterIndex)) return false;
+    if (!isCrossChapterLayoutReady(cached, viewerState.chapterIndex, content)) return false;
     applyLayout(cached, true);
     return true;
   };
@@ -1140,9 +1195,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const tryApplyProvisionalChapterLayout = (): boolean => {
     if (!crossChapterTurn) return false;
     if (viewerState.chapterIndex === crossChapterTurn.fromChapterIndex) return false;
-    if (!viewerState.content?.trim()) return false;
+    const content = viewerState.content;
+    if (!content?.trim()) return false;
+    if (needsDomChapterLayout(content)) return false;
     const l = layout();
-    if (l && isCrossChapterLayoutReady(l, viewerState.chapterIndex)) return false;
+    if (l && isCrossChapterLayoutReady(l, viewerState.chapterIndex, content)) return false;
 
     const pageWindow = pageWindowMetrics();
     const layoutWidth = slotContentInnerWidth();
@@ -1153,7 +1210,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const dual = pagedLayoutDualPage();
     const next = layoutReaderChapter({
       chapterIndex: viewerState.chapterIndex,
-      content: viewerState.content,
+      content,
       chapterTitle: currentChapterTitle(),
       viewportWidth: layoutWidth,
       viewportHeight: height,
@@ -1166,8 +1223,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       clipHeightPx: pageWindow.clipHeight,
       horizontalInsetOnSlot: true,
     });
-    if (!isCrossChapterLayoutReady(next, viewerState.chapterIndex)) return false;
-    applyLayout(next, false);
+    if (!isCrossChapterLayoutReady(next, viewerState.chapterIndex, content)) return false;
+    applyLayout({ ...next, isLayoutComplete: false }, false);
     return true;
   };
 
@@ -1198,9 +1255,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
     if (turn.chapterCommitted) {
       if (viewerState.chapterIndex === turn.fromChapterIndex) return false;
-      if (!viewerState.showContent || !viewerState.content?.trim()) return false;
+      if (!viewerState.content?.trim()) return false;
       const l = layout();
-      if (!l || !isCrossChapterLayoutReady(l, viewerState.chapterIndex)) return false;
+      if (!l || !isCrossChapterLayoutReady(l, viewerState.chapterIndex, viewerState.content)) {
+        return false;
+      }
     } else {
       if (!turn.incomingLayout || !turn.incomingContent?.trim()) return false;
     }
@@ -1390,8 +1449,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     clipEl?.clientWidth || viewportEl?.clientWidth || 0;
 
   /** 跨章 staging/落点须满足与 idle 相同的双栏完整性，避免占位 layout 冒充就绪 */
-  const isCrossChapterLayoutReady = (l: ReaderChapterLayout, ch: number) =>
-    isChapterLayoutComplete(l, ch);
+  const isCrossChapterLayoutReady = (
+    l: ReaderChapterLayout,
+    ch: number,
+    content?: string,
+  ) => isChapterLayoutComplete(l, ch, content);
 
   const clearCrossChapterLayoutTimer = () => {
     if (crossChapterLayoutTimer !== undefined) {
@@ -1637,7 +1699,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     setTurnFrom(fromPage);
     setTurnTo(fromPage);
     setTurnDir(direction);
-    setTurnProgress(0);
     if (liveInnerEl) beginTurnCurtain(fromPage, liveInnerEl);
     warmAdjacentLayoutsFromPool();
 
@@ -1756,10 +1817,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     clearSimulationCurl(curtainSlideMountEl);
     simCorner = null;
     curlAnim = null;
+    simLiveTransformPage = -1;
+    cancelSimulationCurlPaint();
     turnCurtainKey = '';
     dragOffsetPxRef = 0;
+    turnAnimProgressRef = 0;
+    incomingStagingTransformEl = undefined;
+    stagingDualLeftShiftEl = undefined;
+    stagingDualRightShiftEl = undefined;
     clearSlidePanelStyles();
-    setTurnProgress(0);
     setTurnStage('idle');
     dragPointerId = null;
     dragAxis = 'none';
@@ -1781,6 +1847,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         if (!isChapterLayoutComplete(layout(), ch)) {
           scheduleRemeasureWhenMeasureBlocksReady({ bypassCache: true });
         }
+        revealPagedChapterWhenReady();
       });
     };
 
@@ -1793,7 +1860,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           if (
             stagedLayout &&
             stagedLayout.chapterIndex === ch &&
-            isChapterLayoutComplete(stagedLayout, ch)
+            isChapterLayoutComplete(stagedLayout, ch, viewerState.content)
           ) {
             applyLayout(
               normalizeAppliedLayout({ ...stagedLayout, isLayoutComplete: true }),
@@ -1808,7 +1875,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           finalize(revertPage);
         } finally {
           crossChapterCommitInFlight = false;
-          scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+          requestAnimationFrame(() => {
+            scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+          });
         }
       })();
       return;
@@ -1827,6 +1896,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     });
 
   const cancelAnimFrame = () => {
+    cancelSimulationCurlPaint();
     if (animFrame !== undefined) {
       cancelAnimationFrame(animFrame);
       animFrame = undefined;
@@ -2092,6 +2162,37 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     ensureTurnCurtainAttached(turnLayerEl, curtainSlideMountEl);
   };
 
+  /** Solid 重绘后恢复仿真幕帘 + 卷曲（anim 阶段须重挂，否则翻起页消失） */
+  const syncSimulationTurnAfterSolidRender = () => {
+    if (anim() !== 'simulation') return;
+    const stage = turnStage();
+    if (stage === 'idle') return;
+    syncTurnCurtainAfterRender();
+    const progress =
+      stage === 'anim'
+        ? turnAnimProgressRef
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              viewportWidth() > 0
+                ? Math.abs(dragOffsetPxRef) / viewportWidth()
+                : 0,
+            ),
+          );
+    renderSimulationCurl(stage, progress);
+    if (!liveInnerEl) return;
+    const livePage = liveRenderPage();
+    if (simLiveTransformPage !== livePage) {
+      simLiveTransformPage = livePage;
+      if (pagedLayoutDualPage()) {
+        applyLiveDualSpreadPageTransforms(livePage);
+      } else {
+        applyLivePageTransforms(livePage);
+      }
+    }
+  };
+
   /** 仿真分区 / 卷曲盒：与满视口 turn-layer 对齐的本地坐标与宽度 */
   const simulationInteractionWidth = () =>
     viewportEl?.clientWidth ?? curtainSlideMountEl?.clientWidth ?? 0;
@@ -2168,8 +2269,67 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     updateSimulationCurl({
       slideMount: mount,
       geometry,
-      useBitmapBack: viewerState.config.pagedTurnUseBitmap,
     });
+  };
+
+  const cancelSimulationCurlPaint = () => {
+    if (simCurlPaintRaf) {
+      cancelAnimationFrame(simCurlPaintRaf);
+      simCurlPaintRaf = 0;
+    }
+  };
+
+  /** drag/anim 合并为每显示帧单次 clip-path 更新 */
+  const scheduleSimulationCurl = (stage: TurnStage, progressRatio: number) => {
+    simCurlPaintStage = stage;
+    simCurlPaintProgress = progressRatio;
+    if (simCurlPaintRaf) return;
+    simCurlPaintRaf = requestAnimationFrame(() => {
+      simCurlPaintRaf = 0;
+      renderSimulationCurl(simCurlPaintStage, simCurlPaintProgress);
+    });
+  };
+
+  /** 覆盖/仿真翻页视觉（imperative，避免每帧 Solid 重绘） */
+  const syncPagedTurnVisuals = (
+    stage: TurnStage,
+    progress: number,
+    dragPx?: number,
+  ) => {
+    const mode = anim();
+    if (mode === 'slide') return;
+    syncCurtainLayerTransform(stage, progress, dragPx);
+
+    if (mode === 'cover' && crossChapterTurn?.incomingLayout) {
+      const extra = readerPagedLayerTransform('cover', 'incoming', turnDir(), progress);
+      const page = incomingDisplayPage();
+      const il = crossChapterTurn.incomingLayout;
+      const y = Math.round(il.pageStarts[page] ?? 0);
+      if (pagedLayoutDualPage() && stagingDualLeftShiftEl && stagingDualRightShiftEl) {
+        const offsets = dualSpreadYOffset(effectiveDualLayout(il), page);
+        applyDualSpreadPageTransforms(
+          stagingDualLeftShiftEl,
+          stagingDualRightShiftEl,
+          offsets,
+          extra,
+        );
+      } else if (incomingStagingTransformEl) {
+        incomingStagingTransformEl.style.transform =
+          mergePagedContentTransforms(y, extra) ?? '';
+        incomingStagingTransformEl.style.willChange = 'transform';
+      }
+      return;
+    }
+
+    if (
+      mode !== 'cover' &&
+      mode !== 'simulation' &&
+      turnVisualActive() &&
+      pagedLayoutDualPage()
+    ) {
+      const extra = readerPagedLayerTransform(mode, 'incoming', turnDir(), progress);
+      applyLiveDualSpreadPageTransforms(incomingDisplayPage(), extra);
+    }
   };
 
   const syncCurtainLayerTransform = (stage: TurnStage, progressRatio: number, dragPx?: number) => {
@@ -2183,16 +2343,21 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return;
     }
     if (anim() === 'simulation') {
-      // 仿真卷曲：不平移整层，改在幕帘上以贝塞尔 clip-path 还原翻起页 + 镜像背面 + 阴影。
       setTurnCurtainTransform(turnLayerEl, undefined);
-      renderSimulationCurl(stage, Math.max(0, Math.min(1, progressRatio)));
-      // 下层 live：仿真 prev 保持当前页；path1 内容由 mountSimulationNextAreaPanel 承担
+      if (stage === 'anim') {
+        renderSimulationCurl(stage, Math.max(0, Math.min(1, progressRatio)));
+      } else {
+        scheduleSimulationCurl(stage, Math.max(0, Math.min(1, progressRatio)));
+      }
       if (liveInnerEl) {
         const livePage = liveRenderPage();
-        if (pagedLayoutDualPage()) {
-          applyLiveDualSpreadPageTransforms(livePage);
-        } else {
-          applyLivePageTransforms(livePage);
+        if (simLiveTransformPage !== livePage) {
+          simLiveTransformPage = livePage;
+          if (pagedLayoutDualPage()) {
+            applyLiveDualSpreadPageTransforms(livePage);
+          } else {
+            applyLivePageTransforms(livePage);
+          }
         }
       }
       return;
@@ -2208,10 +2373,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const turnAnimProgress = () => {
     const stage = turnStage();
-    if (stage === 'anim') return turnProgress();
+    if (stage === 'anim') return turnAnimProgressRef;
     if (stage === 'drag') {
       const w = viewportWidth();
-      return w > 0 ? Math.min(1, Math.abs(turnProgress()) / w) : 0;
+      return w > 0 ? Math.min(1, Math.abs(dragOffsetPxRef) / w) : 0;
     }
     return 0;
   };
@@ -2255,7 +2420,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       if (animMode === 'slide') {
         syncSlideTurnVisuals('anim', t);
       } else {
-        setTurnProgress(t);
+        turnAnimProgressRef = t;
+        syncPagedTurnVisuals('anim', t);
       }
       if (t < 1) {
         animFrame = requestAnimationFrame(tick);
@@ -2268,7 +2434,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       queueMicrotask(() => {
         skipChapterPosSync = false;
         if (animMode === 'slide' && turnStage() === 'anim') {
-          syncSlideTurnVisuals('anim', turnProgress());
+          syncSlideTurnVisuals('anim', turnAnimProgressRef);
         }
       });
     };
@@ -2305,15 +2471,72 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         };
       }
 
-      setTurnProgress(animInitial);
-      setTurnStage('anim');
-      animStart = performance.now();
+      turnAnimProgressRef = animInitial;
 
-      if (animMode === 'slide') {
-        syncSlideTurnVisuals('anim', animInitial);
+      const startAnimLoop = () => {
+        setTurnStage('anim');
+        animStart = performance.now();
+        if (animMode === 'slide') {
+          syncSlideTurnVisuals('anim', animInitial);
+        }
+        if (animMode === 'simulation') {
+          queueMicrotask(() => {
+            syncSimulationTurnAfterSolidRender();
+            animFrame = requestAnimationFrame(tick);
+          });
+          return;
+        }
+        animFrame = requestAnimationFrame(tick);
+      };
+
+      if (animMode === 'simulation') {
+        requestAnimationFrame(startAnimLoop);
+        return;
       }
 
-      animFrame = requestAnimationFrame(tick);
+      startAnimLoop();
+    };
+
+    const beginSimulationDragCommitAnim = () => {
+      syncTurnCurtainAfterRender();
+      skipChapterPosSync = true;
+      const livePage = turnLiveDisplayPage(from, target, direction);
+      const commitAnim = () => {
+        resumeChapterSync();
+        beginAnim();
+      };
+      if (pageIndex() !== livePage) {
+        requestAnimationFrame(() => {
+          setPageIndex(livePage);
+          queueMicrotask(() => {
+            syncSimulationTurnAfterSolidRender();
+            commitAnim();
+          });
+        });
+        return;
+      }
+      commitAnim();
+    };
+
+    const runSimulationTurnPrep = () => {
+      const curtainPage = turnCurtainClonePage(from, target, direction);
+      const livePage = turnLiveDisplayPage(from, target, direction);
+      if (!getPersistedTurnSlide()) {
+        beginTurnCurtain(curtainPage, liveInnerEl ?? undefined);
+      }
+      if (direction === 'prev' && liveInnerEl) {
+        mountSimulationPrevNextArea(livePage, liveInnerEl);
+      }
+      syncTurnCurtainAfterRender();
+      skipChapterPosSync = true;
+      requestAnimationFrame(() => {
+        setPageIndex(livePage);
+        queueMicrotask(() => {
+          syncSimulationTurnAfterSolidRender();
+          resumeChapterSync();
+          beginAnim();
+        });
+      });
     };
 
     if (options?.skipCurtain) {
@@ -2322,6 +2545,16 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       setPageIndex(turnLiveDisplayPage(from, target, direction));
       resumeChapterSync();
       beginAnim();
+      return;
+    }
+
+    if (animMode === 'simulation' && turnStage() === 'idle') {
+      runSimulationTurnPrep();
+      return;
+    }
+
+    if (turnStage() === 'drag' && animMode === 'simulation') {
+      beginSimulationDragCommitAnim();
       return;
     }
 
@@ -2352,7 +2585,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const commitDragTurn = (target: number, direction: PagedTurnDirection) => {
-    const dragStartPx = anim() === 'slide' ? dragOffsetPxRef : turnProgress();
+    const dragStartPx = dragOffsetPxRef;
     const fromPage = turnFrom();
     dragPointerId = null;
     dragAxis = 'none';
@@ -2393,34 +2626,18 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     runAnimatedTurn(target, target > pageIndex() ? 'next' : 'prev');
   };
 
-  /** 双栏 spread：Solid 重绘会清空 imperative 右栏镜像，须在页码/正文就绪后同步 */
+  /** 双栏 spread：Solid 重绘会清空 imperative 右栏镜像，须在页码/正文就绪后同步（翻页中由 rAF 驱动） */
   createEffect(() => {
     if (!pagedLayoutDualPage()) return;
+    if (turnVisualActive()) return;
     const page = incomingDisplayPage();
     pagingLayout();
     contentRootReady();
     crossChapterStagingTick();
-    const turning = turnVisualActive();
-    const slideActive = slideTurnActive();
-    let extraTransform: string | undefined;
-    if (
-      turning &&
-      !slideActive &&
-      anim() !== 'cover' &&
-      anim() !== 'slide' &&
-      anim() !== 'simulation'
-    ) {
-      extraTransform = readerPagedLayerTransform(
-        anim(),
-        'incoming',
-        turnDir(),
-        turnAnimProgress(),
-      );
-    }
     void page;
     scheduleDualSpreadPageTransforms(() => {
       if (!dualLeftShiftEl || !dualRightShiftEl) return;
-      applyLiveDualSpreadPageTransforms(incomingDisplayPage(), extraTransform);
+      applyLiveDualSpreadPageTransforms(page);
     });
   });
 
@@ -2576,7 +2793,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (turnStage() !== 'idle' || !idleContentRoot) return;
     const images = idleContentRoot.querySelectorAll('img');
     let imageRemeasureTimer: ReturnType<typeof setTimeout> | undefined;
-    const onLoad = () => {
+    const onLoad = (e: Event) => {
+      const img = e.currentTarget as HTMLImageElement;
+      if (isReaderInlineMeasureImage(img)) return;
       if (imageRemeasureTimer !== undefined) clearTimeout(imageRemeasureTimer);
       imageRemeasureTimer = setTimeout(
         () => scheduleRemeasure({ immediate: false, bypassCache: true }),
@@ -2603,27 +2822,35 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   });
 
   const showPagedLoading = () => {
-    if (isCrossChapterTurnActive()) return false;
     if (viewerState.contentFetching) return true;
     if (
       viewerState.contentBootstrapping &&
-      !viewerState.showContent &&
       !viewerState.content?.trim()
     ) {
       return true;
     }
-    if (viewerState.contentLoading && !viewerState.showContent) return true;
-    const l = layout();
-    if (l != null && l.chapterIndex !== viewerState.chapterIndex) return true;
-    if (
-      viewerState.showContent &&
-      Boolean(viewerState.content?.trim()) &&
-      !isChapterLayoutComplete(l, viewerState.chapterIndex)
-    ) {
-      return true;
+    if (viewerState.contentLoading) return true;
+    if (!viewerState.content?.trim()) return true;
+    if (isCrossChapterLayoutPending()) return true;
+    // 跨章拖拽预览（未切 store）：沿用 outgoing/incoming staging，不挡骨架
+    if (isCrossChapterTurnActive() && !crossChapterTurn?.chapterCommitted) {
+      return false;
     }
+    if (!pagedChapterReadyForDisplay()) return true;
+    if (!viewerState.showContent) return true;
     return false;
   };
+
+  createEffect(() => {
+    viewerState.chapterIndex;
+    viewerState.content;
+    viewerState.contentLoading;
+    viewerState.contentFetching;
+    viewerState.showContent;
+    layout();
+    contentRootReady();
+    revealPagedChapterWhenReady();
+  });
 
   createEffect(() => {
     viewerState.chapterIndex;
@@ -2677,6 +2904,29 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     dualMeasureContentEl = undefined;
   });
 
+  /** 跨章提前切章后正文晚到：作废 Canvas 占位排版并强制 DOM 重测 */
+  createEffect(() => {
+    const turn = crossChapterTurn;
+    if (!turn?.chapterCommitted) return;
+    viewerState.showContent;
+    const content = viewerState.content;
+    const ch = viewerState.chapterIndex;
+    if (!content?.trim() || ch === turn.fromChapterIndex) return;
+    const l = layout();
+    if (!l || l.chapterIndex !== ch) return;
+    if (isChapterLayoutComplete(l, ch, content)) return;
+    if (
+      l.segments.length > 0 &&
+      (isProvisionalCanvasLayout(l) ||
+        (needsDomChapterLayout(content) &&
+          l.engine !== 'dom' &&
+          l.engine !== 'canvas+dom'))
+    ) {
+      setChapterLayout(null);
+    }
+    scheduleRemeasureWhenMeasureBlocksReady({ bypassCache: true });
+  });
+
   /** 跨章翻页：新章排版就绪后启动 incoming 动画 */
   createEffect(() => {
     if (!crossChapterTurn) return;
@@ -2695,6 +2945,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     viewerState.content;
     pageIndex();
     turnStage();
+    if (anim() === 'simulation' && turnStage() !== 'idle') {
+      queueMicrotask(syncSimulationTurnAfterSolidRender);
+      return;
+    }
     queueMicrotask(syncTurnCurtainAfterRender);
   });
 
@@ -2748,6 +3002,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     pageIndex();
     turnFrom();
     turnTo();
+    if (anim() === 'simulation') {
+      queueMicrotask(syncSimulationTurnAfterSolidRender);
+      return;
+    }
     queueMicrotask(syncTurnCurtainAfterRender);
   });
 
@@ -2758,16 +3016,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     pageIndex();
     turnFrom();
     turnTo();
+    if (anim() === 'simulation') {
+      queueMicrotask(syncSimulationTurnAfterSolidRender);
+      return;
+    }
     queueMicrotask(syncTurnCurtainAfterRender);
-  });
-
-  createEffect(() => {
-    const stage = turnStage();
-    if (stage !== 'anim') return;
-    if (anim() === 'slide') return;
-    turnDir();
-    const progress = turnProgress();
-    syncCurtainLayerTransform('anim', progress);
   });
 
   let resizeObserver: ResizeObserver | undefined;
@@ -2911,11 +3164,17 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     clearTurnPageCurtain(turnLayerEl, curtainSlideMountEl);
     clearSimulationCurl(curtainSlideMountEl);
     simCorner = null;
+    simLiveTransformPage = -1;
+    cancelSimulationCurlPaint();
+    dragPointerCaptured = false;
     curlAnim = null;
     turnCurtainKey = '';
     dragOffsetPxRef = 0;
+    turnAnimProgressRef = 0;
+    incomingStagingTransformEl = undefined;
+    stagingDualLeftShiftEl = undefined;
+    stagingDualRightShiftEl = undefined;
     clearSlidePanelStyles();
-    setTurnProgress(0);
     setTurnStage('idle');
     skipChapterPosSync = true;
     setPageIndex(dragStartPageIndex);
@@ -2954,7 +3213,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       }
       const w = width();
       const ratio = w > 0 ? Math.min(1, Math.abs(offset) / w) : 0;
-      syncCurtainLayerTransform('drag', ratio);
+      syncPagedTurnVisuals('drag', ratio);
       return;
     }
     if (anim() === 'slide') {
@@ -2963,12 +3222,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return;
     }
     if (anim() === 'simulation') {
-      syncCurtainLayerTransform('drag', 0);
+      dragOffsetPxRef = offset;
+      syncPagedTurnVisuals('drag', 0);
       return;
     }
     const w = width();
     const ratio = w > 0 ? Math.min(1, Math.abs(offset) / w) : 0;
-    syncCurtainLayerTransform('drag', ratio);
+    dragOffsetPxRef = offset;
+    syncPagedTurnVisuals('drag', ratio);
   };
 
   const beginCrossChapterDragTurn = (
@@ -3000,7 +3261,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (liveInnerEl) beginTurnCurtain(fromPage, liveInnerEl);
     setTurnStage('drag');
     dragOffsetPxRef = offset;
-    setTurnProgress(offset);
     applyDragTurnProgress(offset);
     // 拖拽预览阶段只解析已缓存相邻章用于跟手预览；相邻章未缓存不在拖拽中切 store，
     // 推迟到松手提交再加载，避免拖拽途中「立即切换」。
@@ -3040,7 +3300,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       dragTurnInitialized = true;
       setTurnStage('drag');
       dragOffsetPxRef = offset;
-      setTurnProgress(offset);
       applyDragTurnProgress(offset);
     };
     if (to !== fromPage && outgoingRoot) {
@@ -3066,12 +3325,47 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const width = viewportWidth;
 
+  const releaseDragPointerCapture = (e: PointerEvent) => {
+    if (!dragPointerCaptured) return;
+    dragPointerCaptured = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const finalizePointerGesture = (e: PointerEvent) => {
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    if (
+      shouldSuppressPagedTapAfterPointer(dx, dy, {
+        dragTurnInitialized,
+        turnStage: turnStage(),
+      })
+    ) {
+      markPagedTurnPointerConsumed();
+      if (isTouchLikePointer(e)) {
+        e.preventDefault();
+      }
+    }
+    releaseDragPointerCapture(e);
+    dragPointerId = null;
+    dragAxis = 'none';
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     if (isTurnAnimating() || e.button !== 0) return;
+    if (!e.isPrimary) return;
+    if (isMediaViewerInteractiveClick(e.target)) return;
+    if (dragPointerId !== null && dragPointerId !== e.pointerId) {
+      resetActiveDragTurn();
+    }
     if (turnStage() === 'drag') {
       resetActiveDragTurn();
     }
     dragPointerId = e.pointerId;
+    dragPointerCaptured = false;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     simPointerClientX = e.clientX;
@@ -3080,21 +3374,34 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     dragStartPageIndex = pageIndex();
     dragTurnInitialized = false;
     dragAxis = 'none';
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    if (dragPointerId !== e.pointerId || isTurnAnimating() || turnCurtainPrepInFlight) return;
+    if (dragPointerId !== e.pointerId || isTurnAnimating() || turnCurtainPrepInFlight) {
+      return;
+    }
     simPointerClientX = e.clientX;
     simPointerClientY = e.clientY;
     const dx = e.clientX - dragStartX;
     const dy = e.clientY - dragStartY;
     if (dragAxis === 'none') {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      dragAxis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      const axis = resolvePagedDragAxis(dx, dy);
+      if (axis === 'none') return;
+      dragAxis = axis;
       if (dragAxis === 'y') return;
+      if (!dragPointerCaptured) {
+        dragPointerCaptured = true;
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          dragPointerCaptured = false;
+        }
+      }
     }
     if (dragAxis !== 'x') return;
+    if (shouldPreventTouchDefaultForPagedDrag(e, dragAxis)) {
+      e.preventDefault();
+    }
     e.stopPropagation();
 
     const w = width();
@@ -3107,7 +3414,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (dragTurnInitialized && turnStage() === 'drag') {
       if (intent === 'neutral') {
         resetActiveDragTurn();
-        setTurnProgress(offset);
+        dragOffsetPxRef = offset;
         return;
       }
       if (intent !== turnDir()) {
@@ -3118,7 +3425,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     }
 
     if (intent === 'neutral') {
-      setTurnProgress(offset);
+      dragOffsetPxRef = offset;
       return;
     }
 
@@ -3130,29 +3437,30 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       return;
     }
 
-    if (anim() === 'slide') {
-      applyDragTurnProgress(offset);
-    } else {
-      setTurnProgress(offset);
-      applyDragTurnProgress(offset);
-    }
+    dragOffsetPxRef = offset;
+    applyDragTurnProgress(offset);
   };
 
   const onPointerUp = (e: PointerEvent) => {
     if (dragPointerId !== e.pointerId) return;
-    dragPointerId = null;
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
+
+    if (turnStage() !== 'drag') {
+      finalizePointerGesture(e);
+      return;
     }
 
-    if (turnStage() !== 'drag') return;
-
-    const offset = anim() === 'slide' ? dragOffsetPxRef : turnProgress();
+    const offset = dragOffsetPxRef;
     const w = width();
     const commitThreshold = textViewerPagedDragCommitThresholdPx(w, viewerState.config);
     const commit = w > 0 && Math.abs(offset) >= commitThreshold;
+
+    markPagedTurnPointerConsumed();
+    if (isTouchLikePointer(e)) {
+      e.preventDefault();
+    }
+    releaseDragPointerCapture(e);
+    dragPointerId = null;
+    dragAxis = 'none';
 
     if (commit && !simulationDragCommitOk(offset)) {
       finishTurn(dragStartPageIndex, { cancel: true });
@@ -3281,7 +3589,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (turnStage() === 'drag') {
       applyDragTurnProgress(dragOffsetPxRef);
     } else if (turnStage() === 'anim' && anim() === 'slide') {
-      syncSlideTurnVisuals('anim', turnProgress());
+      syncSlideTurnVisuals('anim', turnAnimProgressRef);
     }
   };
 
@@ -3294,6 +3602,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     turning: boolean;
     hideLive?: boolean;
     bindLiveInner?: boolean;
+    /** 跨章 staging：捕获 shift 节点供 imperative 翻页动画 */
+    captureStagingShifts?: boolean;
     innerRef?: (el: HTMLDivElement | undefined) => void;
     onMountContent?: (root: HTMLElement | null) => void;
     leftContent: JSX.Element;
@@ -3347,6 +3657,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             <div
               ref={(el) => {
                 if (bindLive) dualLeftShiftEl = el ?? undefined;
+                else if (options.captureStagingShifts) stagingDualLeftShiftEl = el ?? undefined;
                 if (el) scheduleDualSpreadPageTransforms(applySpreadTransforms);
               }}
               class={READER_PAGED_DUAL_SHIFT_CLASS}
@@ -3378,6 +3689,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             <div
               ref={(el) => {
                 if (bindLive) dualRightShiftEl = el ?? undefined;
+                else if (options.captureStagingShifts) stagingDualRightShiftEl = el ?? undefined;
                 if (el) scheduleDualSpreadPageTransforms(applySpreadTransforms);
               }}
               class={READER_PAGED_DUAL_SHIFT_CLASS}
@@ -3400,16 +3712,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const extent = il.contentExtent;
     const turning = turnVisualActive();
     const dual = pagedLayoutDualPage();
-
-    let extraTransform: string | undefined;
-    if (turning && anim() !== 'slide' && anim() !== 'simulation') {
-      extraTransform = readerPagedLayerTransform(
-        anim(),
-        'incoming',
-        turnDir(),
-        turnAnimProgress(),
-      );
-    }
 
     const stagingLeft = (
       <Index each={incomingStagingMountKey()}>
@@ -3473,10 +3775,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             page,
             extent,
             layoutOverride: il,
-            extraTransform,
             slideActive: false,
             turning,
             bindLiveInner: false,
+            captureStagingShifts: true,
             onMountContent: (root) => {
               if (root) queueMicrotask(() => refineStagingLayoutFromDom(root));
             },
@@ -3497,11 +3799,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         )}
       >
         <div
+          ref={(el) => {
+            incomingStagingTransformEl = el ?? undefined;
+          }}
           class="h-full w-full"
           style={{
-            transform: mergePagedContentTransforms(y, extraTransform) || undefined,
+            transform: mergePagedContentTransforms(y) || undefined,
             'min-height': extent > 0 ? `${extent}px` : undefined,
-            'will-change': turning && anim() !== 'slide' ? 'transform' : undefined,
           }}
         >
           <div
@@ -3623,6 +3927,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const page = liveRenderPage();
     const extent = contentExtentPx();
     const turning = turnVisualActive();
+    const simTurning = turning && anim() === 'simulation';
 
     let extraTransform: string | undefined;
     if (
@@ -3642,6 +3947,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const slideActive = slideTurnActive();
     const turn = crossChapterTurn;
     const hideLive = Boolean(turn && showIncomingStaging());
+    const hideUntilRevealed = !viewerState.showContent;
 
     const dual = pagedLayoutDualPage();
 
@@ -3703,7 +4009,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           extraTransform,
           slideActive,
           turning,
-          hideLive,
+          hideLive: hideLive || hideUntilRevealed,
           leftContent: leftChapterBody,
           rightContent: rightChapterBody,
         });
@@ -3754,7 +4060,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           extraTransform,
           slideActive,
           turning,
-          hideLive,
+          hideLive: hideLive || hideUntilRevealed,
           leftContent: interimLeft,
           rightContent: interimRight,
         });
@@ -3768,7 +4074,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           class={cn('reader-paged-live-inner h-full w-full', theme().bg)}
           aria-hidden="true"
           style={{
-            visibility: hideLive ? 'hidden' : undefined,
+            visibility: hideLive || hideUntilRevealed ? 'hidden' : undefined,
           }}
         />
       );
@@ -3776,7 +4082,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
     const chapterBody = leftChapterBody;
 
-    const transform = mergePagedContentTransforms(contentOffsetY(page), extraTransform);
+    const transform = simTurning
+      ? undefined
+      : mergePagedContentTransforms(contentOffsetY(page), extraTransform);
 
     return (
       <div
@@ -3790,8 +4098,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             ? mergePagedContentTransforms(contentOffsetY(page))
             : transform || undefined,
           'min-height': extent > 0 ? `${extent}px` : undefined,
-          'will-change': turning && !slideActive ? 'transform' : undefined,
-          visibility: hideLive ? 'hidden' : undefined,
+          'will-change': turning && !slideActive && !simTurning ? 'transform' : undefined,
+          visibility: hideLive || hideUntilRevealed ? 'hidden' : undefined,
         }}
       >
         {chapterBody}
@@ -3844,7 +4152,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               )}
               style={
                 anim() === 'slide' || anim() === 'simulation'
-                  ? undefined
+                  ? { contain: 'layout style paint' }
                   : pagedContentSlotStyle(slotInset)
               }
             />
@@ -3915,11 +4223,18 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         theme().text,
       )}
       data-dual-page={pagedLayoutDualPage() ? '' : undefined}
-      style={{ 'touch-action': 'pan-x pinch-zoom' }}
+      style={{ 'touch-action': readerPagedViewportTouchAction() }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onLostPointerCapture={(e) => {
+        if (dragPointerId === e.pointerId) {
+          dragPointerCaptured = false;
+          dragPointerId = null;
+          dragAxis = 'none';
+        }
+      }}
     >
       <div class={cn('relative z-10 h-full min-h-0 w-full', theme().bg)}>
         <div

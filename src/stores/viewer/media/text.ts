@@ -63,6 +63,10 @@ import {
   normalizeSimulationDragZonePercent,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
+import {
+  isReaderNightTheme,
+  normalizeReaderThemeId,
+} from '@/lib/media/text/reader-theme-classes';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { migrateReaderImageStyle } from '@/lib/js-engine/legado/legado-image-options';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
@@ -131,6 +135,7 @@ async function hydrateReaderConfig(): Promise<void> {
       viewerChromeLayout: normalizeViewerChromeLayout(
         saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
       ),
+      theme: normalizeReaderThemeId(saved.theme),
     }));
   }
 }
@@ -230,6 +235,15 @@ async function applyDisplayProcessing(
   );
 }
 
+function isScrollReadingMode(): boolean {
+  return normalizeTextViewerPageAnim(state.config.pageAnim) === 'scroll';
+}
+
+/** 按页模式：正文先写入 state，待 DOM 分页完成后再 reveal */
+function shouldRevealChapterContentImmediately(): boolean {
+  return isScrollReadingMode();
+}
+
 function commitChapterContent(
   index: number,
   content: string,
@@ -244,7 +258,7 @@ function commitChapterContent(
     contentLoading: false,
     contentFetching: false,
     contentBootstrapping: false,
-    showContent: true,
+    showContent: shouldRevealChapterContentImmediately(),
     effectiveReplaceRules,
   });
   const catalog = state.catalog;
@@ -624,10 +638,6 @@ export async function openTextBook(
   }
 }
 
-function isScrollReadingMode(): boolean {
-  return normalizeTextViewerPageAnim(state.config.pageAnim) === 'scroll';
-}
-
 function beginChapterLoadUi(index: number): void {
   const entry = consumePagedChapterEntry();
   setState({
@@ -855,7 +865,7 @@ export const textViewerTextApi = {
 
   /** 是否夜间模式 */
   get isNight() {
-    return state.config.theme === 6;
+    return isReaderNightTheme(state.config.theme);
   },
 
   /** 设置书籍初始状态（用于立即显示 skeleton） */
@@ -898,7 +908,7 @@ export const textViewerTextApi = {
           contentLoading: false,
           contentFetching: false,
           contentBootstrapping: false,
-          showContent: true,
+          showContent: shouldRevealChapterContentImmediately(),
         });
         const source = state.book.origin
           ? await sourcesDb.getSource(state.book.origin)
@@ -938,7 +948,7 @@ export const textViewerTextApi = {
           contentLoading: false,
           contentFetching: false,
           contentBootstrapping: false,
-          showContent: true,
+          showContent: shouldRevealChapterContentImmediately(),
         });
         const source = state.book.origin
           ? await sourcesDb.getSource(state.book.origin)
@@ -1096,6 +1106,13 @@ export const textViewerTextApi = {
    */
   setShowContent(visible: boolean): void {
     setState({ showContent: visible });
+  },
+
+  /** 按页模式：DOM 分页完成后由 ReaderPagedViewport 调用以展示正文 */
+  revealPagedChapterContent(): void {
+    if (shouldRevealChapterContentImmediately()) return;
+    if (state.showContent) return;
+    setState({ showContent: true });
   },
 
   /**

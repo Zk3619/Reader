@@ -98,6 +98,20 @@ function relativeBottom(rootRect: DOMRect, el: Element): number {
   return el.getBoundingClientRect().bottom - rootRect.top;
 }
 
+/** 章节标题 measure-block：间距在 wrapper padding 上，须按整块测量 */
+function isChapterTitleMeasureBlock(block: HTMLElement): boolean {
+  return (
+    block.querySelector('h2') != null &&
+    block.querySelector('.reader-p') == null &&
+    block.querySelector('figure') == null
+  );
+}
+
+/** 段落内含行内图（段评 SVG 等）：须按 .reader-p 整块测量，不可只量 span 文字 */
+function paragraphHasInlineMeasureContent(textEl: HTMLElement): boolean {
+  return textEl.querySelector('img, figure, svg, [data-legado-cmt]') != null;
+}
+
 /** 块在排版流中的底（含段距 margin；wrapper 矩形常不含子段落 margin） */
 function blockFlowBottom(
   rootRect: DOMRect,
@@ -295,6 +309,34 @@ export function measureLayoutSegments(
       block.querySelector<HTMLElement>('.reader-p') ??
       block.querySelector<HTMLElement>('h2');
     if (!textEl) return;
+
+    if (isChapterTitleMeasureBlock(block)) {
+      const blockTop = relativeTop(rootRect, block);
+      const blockBottom = relativeBottom(rootRect, block);
+      if (blockBottom <= blockTop + 0.5) return;
+      const lineHeightPx = readLineHeightPx(textEl, fontSize, lineSpacing);
+      const textContentBottom = readParagraphGlyphBottom(rootRect, textEl, lineHeightPx);
+      segments.push({
+        top: blockTop,
+        bottom: blockBottom,
+        textBottom: textContentBottom,
+        blockIndex,
+      });
+      return;
+    }
+
+    if (paragraphHasInlineMeasureContent(textEl)) {
+      const blockTop = relativeTop(rootRect, textEl);
+      const blockBottom = relativeBottom(rootRect, textEl);
+      if (blockBottom <= blockTop + 0.5) return;
+      segments.push({
+        top: blockTop,
+        bottom: blockBottom,
+        textBottom: blockBottom,
+        blockIndex,
+      });
+      return;
+    }
 
     const blockTop = relativeTop(rootRect, textEl);
     const blockBottom = blockFlowBottom(

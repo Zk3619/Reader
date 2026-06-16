@@ -44,7 +44,10 @@ export interface ReaderScrollViewportProps extends ReaderContentProps {
 }
 
 const SCROLL_LOAD_ROOT_MARGIN = '0px 0px 240px 0px';
+const SCROLL_PREPEND_ROOT_MARGIN = '240px 0px 0px 0px';
 const SCROLL_PROGRESS_SAVE_MS = 500;
+/** 距栈顶该范围内视为「顶到上一章边界」，预载后定位到上一章末尾 */
+const SCROLL_PREPEND_TO_LAST_THRESHOLD_PX = 12;
 
 export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
   const [local, contentProps] = splitProps(props, [
@@ -62,9 +65,12 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
 
   const [loadedChapters, setLoadedChapters] = createSignal<LoadedScrollChapter[]>([]);
   const [loadingMore, setLoadingMore] = createSignal(false);
+  const [loadingPrev, setLoadingPrev] = createSignal(false);
 
   let loadSentinel: HTMLDivElement | undefined;
+  let prependSentinel: HTMLDivElement | undefined;
   let loadObserver: IntersectionObserver | undefined;
+  let prependObserver: IntersectionObserver | undefined;
   let scrollSaveTimer: number | null = null;
   let isRestoringScroll = false;
   let suppressProgressSync = false;
@@ -77,6 +83,11 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
   const lastLoadedIndex = createMemo(() => {
     const list = loadedChapters();
     return list.length > 0 ? list[list.length - 1]!.index : -1;
+  });
+
+  const firstLoadedIndex = createMemo(() => {
+    const list = loadedChapters();
+    return list.length > 0 ? list[0]!.index : -1;
   });
 
   const chapterTitle = (index: number) => {
@@ -111,6 +122,13 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     return collectScrollChapterSections(root);
   };
 
+  const finishScrollRestore = () => {
+    requestAnimationFrame(() => {
+      isRestoringScroll = false;
+      suppressProgressSync = false;
+    });
+  };
+
   const applyScrollToChapter = (
     chapterIndex: number,
     pos: number,
@@ -131,10 +149,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     if (syncStore) {
       textViewerStore.setScrollReadingPosition(chapterIndex, pos);
     }
-    requestAnimationFrame(() => {
-      isRestoringScroll = false;
-      suppressProgressSync = false;
-    });
+    finishScrollRestore();
     return true;
   };
 
@@ -187,7 +202,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
 
   const appendNextChapter = async () => {
     const list = loadedChapters();
-    if (list.length === 0 || loadingMore()) return;
+    if (list.length === 0 || loadingMore() || loadingPrev()) return;
     const last = list[list.length - 1]!.index;
     const next = last + 1;
     if (next >= catalog().length) return;
@@ -207,11 +222,83 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     }
   };
 
+  const restoreScrollAfterPrepend = (prevIndex: number, scrollBefore: number) => {
+    const root = scrollEl();
+    if (!root) return;
+
+    const adjust = () => {
+      const section = getSections().find((s) => s.index === prevIndex);
+      if (!section || section.height <= 0) return false;
+
+      suppressProgressSync = true;
+      isRestoringScroll = true;
+
+      if (scrollBefore <= SCROLL_PREPEND_TO_LAST_THRESHOLD_PX) {
+        root.scrollTop = scrollTopForChapterPos(
+          section.top,
+          section.height,
+          root.clientHeight,
+          1,
+        );
+        chapterIndexChangedByScroll = true;
+        textViewerStore.setScrollReadingPosition(prevIndex, 1);
+      } else {
+        root.scrollTop = scrollBefore + section.height;
+      }
+
+      finishScrollRestore();
+      return true;
+    };
+
+    requestAnimationFrame(() => {
+      if (adjust()) return;
+      requestAnimationFrame(() => {
+        adjust();
+      });
+    });
+  };
+
+  const prependPrevChapter = async () => {
+    const list = loadedChapters();
+    if (list.length === 0 || loadingPrev() || loadingMore()) return;
+    const first = list[0]!.index;
+    const prev = first - 1;
+    if (prev < 0) return;
+    if (list.some((ch) => ch.index === prev)) return;
+
+    const root = scrollEl();
+    if (!root) return;
+    const scrollBefore = root.scrollTop;
+
+    setLoadingPrev(true);
+    try {
+      const content = await fetchProcessedChapterContent(prev);
+      setLoadedChapters((prevList) => [
+        { index: prev, content, title: chapterTitle(prev) },
+        ...prevList,
+      ]);
+      restoreScrollAfterPrepend(prev, scrollBefore);
+    } catch (e) {
+      console.error('[ReaderScrollViewport] 预载上一章失败', e);
+    } finally {
+      setLoadingPrev(false);
+    }
+  };
+
   const handleLoadSentinel = (entries: IntersectionObserverEntry[]) => {
-    if (loadingMore() || contentLoading()) return;
+    if (loadingMore() || loadingPrev() || contentLoading()) return;
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       void appendNextChapter();
+      return;
+    }
+  };
+
+  const handlePrependSentinel = (entries: IntersectionObserverEntry[]) => {
+    if (loadingPrev() || loadingMore() || contentLoading()) return;
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      void prependPrevChapter();
       return;
     }
   };
@@ -226,6 +313,23 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
       threshold: 0,
     });
     loadObserver.observe(loadSentinel);
+  };
+
+  const bindPrependObserver = () => {
+    prependObserver?.disconnect();
+    const root = scrollEl();
+    if (!root || !prependSentinel) return;
+    prependObserver = new IntersectionObserver(handlePrependSentinel, {
+      root,
+      rootMargin: SCROLL_PREPEND_ROOT_MARGIN,
+      threshold: 0,
+    });
+    prependObserver.observe(prependSentinel);
+  };
+
+  const bindObservers = () => {
+    bindLoadObserver();
+    bindPrependObserver();
   };
 
   // 书内正文就绪：初始化章节栈或滚到栈内目标章
@@ -258,7 +362,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     lastNavigationKey = key;
     resetLoadedFromStore();
     requestAnimationFrame(() => {
-      bindLoadObserver();
+      bindObservers();
       scrollToChapterWithRetry(idx, storeChapterPos());
     });
   });
@@ -286,7 +390,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     const root = scrollEl();
     if (!root) return;
     root.addEventListener('scroll', syncProgressFromScroll, { passive: true });
-    bindLoadObserver();
+    bindObservers();
     onCleanup(() => {
       root.removeEventListener('scroll', syncProgressFromScroll);
     });
@@ -321,7 +425,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
       scrollToChapterProgress,
       scrollToProgressInCurrentChapter,
     });
-    bindLoadObserver();
+    bindObservers();
 
     const onDisplayProcessingChanged = () => {
       void refreshLoadedChapterContents();
@@ -335,11 +439,30 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
   onCleanup(() => {
     if (scrollSaveTimer !== null) clearTimeout(scrollSaveTimer);
     loadObserver?.disconnect();
+    prependObserver?.disconnect();
     loadObserver = undefined;
+    prependObserver = undefined;
   });
 
   return (
     <div class={cn('reader-scroll-viewport min-h-full w-full', contentProps.class)}>
+      <Show when={loadingPrev()}>
+        <div class="reader-scroll-loading-prev py-4 text-center text-sm text-muted-foreground">
+          加载上一章…
+        </div>
+      </Show>
+
+      <Show when={loadedChapters().length > 0 && firstLoadedIndex() > 0}>
+        <div
+          ref={(el) => {
+            prependSentinel = el;
+            bindPrependObserver();
+          }}
+          class="reader-scroll-prepend-sentinel h-px w-full shrink-0"
+          aria-hidden="true"
+        />
+      </Show>
+
       <For each={loadedChapters()}>
         {(chapter) => (
           <section

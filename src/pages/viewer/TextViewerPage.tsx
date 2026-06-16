@@ -7,8 +7,7 @@ import { createSignal, Show, Index, onMount, onCleanup, createEffect, type Acces
 import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
-import { textViewerDualPageActive } from '@/lib/media/text/reader-ui-config';
-import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { readerThemeBarClasses, readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
@@ -52,7 +51,11 @@ import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveRep
 import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { ReaderClickRegionalOverlay } from '@/components/viewer/text-viewer/ReaderClickRegionalOverlay';
 import { shouldShowClickActionHint } from '@/lib/media/text/reader-click-hint-storage';
-import { resolveClickZone } from '@/lib/media/text/reader-click-region';
+import {
+  findPagedClickContainer,
+  resolveRegionalClickAction,
+} from '@/lib/media/viewer-regional-click';
+import { shouldSuppressPagedRegionalTap } from '@/lib/media/text/reader-paged-pointer-gesture';
 import { getHttpTTS } from '@/lib/database/http-tts';
 import {
   startReadAloud,
@@ -82,6 +85,7 @@ import { VIEWER_SHELL_OVERLAY_EVENTS } from '@/lib/ui/overlay-cleanup';
 import {
   blurAfterDrawerTriggerRefocus,
   dismissOpenKobalteTooltips,
+  resetReaderCatalogTooltipTrigger,
   resetReaderMenuTooltipTrigger,
   SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
 } from '@/utils/accessibility';
@@ -102,17 +106,6 @@ import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextView
 /** 区分轻点与滑动：移动超过阈值则不触发分区单击 */
 const TAP_MOVE_THRESHOLD = 10;
 
-/** 阅读器主题 0–6 的底栏配色（与 ReaderContent 正文一致，窄屏+移动端时使用）；边框与背景对比明显，各主题下都清晰可见 */
-const READER_THEME_BAR: Record<number, { bg: string; text: string; border: string }> = {
-  0: { bg: 'bg-[#f5f0e6]', text: 'text-[#5b4636]', border: 'border-t-[#9c8b7a]' },
-  1: { bg: 'bg-[#e8f5e9]', text: 'text-[#2e7d32]', border: 'border-t-[#43a047]' },
-  2: { bg: 'bg-[#f5e6d3]', text: 'text-[#5d4e37]', border: 'border-t-[#a08060]' },
-  3: { bg: 'bg-[#e3f2fd]', text: 'text-[#1565c0]', border: 'border-t-[#1976d2]' },
-  4: { bg: 'bg-[#f3e5f5]', text: 'text-[#6a1b9a]', border: 'border-t-[#7b1fa2]' },
-  5: { bg: 'bg-[#263238]', text: 'text-[#b0bec5]', border: 'border-t-[#546e7a]' },
-  6: { bg: 'bg-[#1e1e1e]', text: 'text-[#cfcfcf]', border: 'border-t-[#616161]' },
-};
-
 export interface BookReaderProps {
   onClose: () => void;
   /** 点击顶栏书名时进入书籍信息页（不传则书名不可点） */
@@ -132,13 +125,13 @@ export function BookReader(props: BookReaderProps) {
   let toggleChromeBars: () => void = () => undefined;
 
   const [catalogOpen, setCatalogOpen] = createSignal(false);
-  /** 目录列表滚动位置缓存（关闭时保存，再次打开时恢复），换书时清零 */
-  const [catalogScrollTop, setCatalogScrollTop] = createSignal(0);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   /** 设置抽屉（另外的菜单）：仅窄屏底栏的「设置」打开 */
   const [readerMenuDrawerOpen, setReaderMenuDrawerOpen] = createSignal(false);
   /** 设置抽屉开/关期间暂停顶栏「设置」Tooltip（遮罩消失后 hover 会误触发） */
   const [settingsTooltipSuspended, setSettingsTooltipSuspended] = createSignal(false);
+  /** 目录抽屉开/关期间暂停顶栏「目录」Tooltip */
+  const [catalogTooltipSuspended, setCatalogTooltipSuspended] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
@@ -187,6 +180,31 @@ export function BookReader(props: BookReaderProps) {
     onCleanup(() => window.clearTimeout(timer));
   });
 
+  let catalogDrawerWasOpen = false;
+  const openCatalog = () => {
+    setCatalogTooltipSuspended(true);
+    resetReaderCatalogTooltipTrigger();
+    dismissOpenKobalteTooltips();
+    setCatalogOpen(true);
+  };
+  createEffect(() => {
+    const open = catalogOpen();
+    if (open) {
+      catalogDrawerWasOpen = true;
+      setCatalogTooltipSuspended(true);
+      dismissOpenKobalteTooltips();
+      return;
+    }
+    if (!catalogDrawerWasOpen) return;
+    catalogDrawerWasOpen = false;
+    blurAfterDrawerTriggerRefocus();
+    const timer = window.setTimeout(
+      () => setCatalogTooltipSuspended(false),
+      SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
+    );
+    onCleanup(() => window.clearTimeout(timer));
+  });
+
   createEffect(() => {
     const nestedDialogOpen = statusBarStyleDialogOpen() || effectiveReplacesOpen();
     if (nestedDialogOpen) {
@@ -207,7 +225,6 @@ export function BookReader(props: BookReaderProps) {
   const [panelClosing, setPanelClosing] = createSignal(false);
   /** 宽屏下段评面板刚打开，用于进入动画（从右侧滑入） */
   const [panelEntering, setPanelEntering] = createSignal(false);
-  const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
   const [isWideScreen, setIsWideScreen] = createSignal(window.innerWidth >= 480);
 
   const closeReaderShellOverlays = () => {
@@ -285,7 +302,6 @@ export function BookReader(props: BookReaderProps) {
       });
       await textViewerStore.openBook(result.book);
       await textViewerStore.loadChapter(result.book.durChapterIndex, { forceRefresh: true });
-      setCatalogScrollTop(0);
       showAppToast({
         title: '目录已更新',
         description: `共 ${result.chapterCount} 章`,
@@ -358,7 +374,7 @@ export function BookReader(props: BookReaderProps) {
   const bottomBarThemeClasses = () => {
     if (!isNarrowAndMobile()) return null;
     if (textViewerStore.state.config.statusBarDisplayStyle !== 'always') return null;
-    const t = READER_THEME_BAR[readerTheme()] ?? READER_THEME_BAR[0];
+    const t = readerThemeBarClasses(readerTheme());
     return `border-t ${t.border} ${t.bg} ${t.text}`;
   };
 
@@ -366,16 +382,10 @@ export function BookReader(props: BookReaderProps) {
   const getScrollContainer = () => scrollContainer;
   let lastChapterIndex = -1;
 
-  // 监听书籍变化，重置目录滚动缓存
+  // 换书时重置章节切换动画追踪
   createEffect(() => {
-    const currentBook = book();
-    if (!currentBook) {
-      lastChapterIndex = -1;
-      setCatalogScrollTop(0);
-    } else {
-      lastChapterIndex = -1;
-      setCatalogScrollTop(0);
-    }
+    book();
+    lastChapterIndex = -1;
   });
 
   const handlePrev = () => void textViewerStore.prevChapter();
@@ -506,14 +516,7 @@ export function BookReader(props: BookReaderProps) {
     normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
   const isPagedMode = () => isTextViewerPagedAnim(normalizedPageAnim());
 
-  const dualPageActive = () => {
-    if (isPagedMode()) return false;
-    return textViewerDualPageActive(
-      textViewerStore.state.config.dualPage ?? 'auto',
-      isWideScreen(),
-      viewportWidth(),
-    );
-  };
+  const dualPageActive = () => false;
 
   const goNextPage = () => {
     if (isPagedMode() && pagedNav) {
@@ -615,7 +618,6 @@ export function BookReader(props: BookReaderProps) {
   onMount(() => {
     const handleResize = () => {
       const w = window.innerWidth;
-      setViewportWidth(w);
       setIsWideScreen(w >= 480);
     };
     window.addEventListener('resize', handleResize);
@@ -634,7 +636,7 @@ export function BookReader(props: BookReaderProps) {
 
   onMount(() => {
     void shouldShowClickActionHint().then((show) => {
-      if (show) openClickRegionalConfig(true);
+      if (show && isPagedMode()) openClickRegionalConfig(true);
     });
   });
 
@@ -706,28 +708,28 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const runRegionalClick = (e: MouseEvent) => {
-    const pagedViewport =
-      scrollContainer?.querySelector<HTMLElement>('.reader-paged-viewport') ?? null;
-    const t =
-      (isPagedMode() ? pagedViewport : null) ??
-      scrollContainer ??
-      (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
-        '.reader-paged-viewport',
-      ) ??
-      (e.currentTarget as HTMLElement | null);
-    if (!t) return;
-    const rect = t.getBoundingClientRect();
-    const xRatio = (e.clientX - rect.left) / Math.max(rect.width, 1);
-    const yRatio = (e.clientY - rect.top) / Math.max(rect.height, 1);
-    const zone = resolveClickZone(xRatio, yRatio, textViewerStore.state.config.clickRegion);
-    const actions = textViewerStore.state.config.clickActions;
-    const action = actions[zone] ?? 'menu';
-    runClickAction(action);
+    const t = findPagedClickContainer(e, scrollContainer);
+    const action = resolveRegionalClickAction(
+      e,
+      t,
+      textViewerStore.state.config.clickRegion,
+      textViewerStore.state.config.clickActions,
+    );
+    if (action) runClickAction(action);
     tapStartTime = 0;
   };
 
   const contentPrimaryAction = (e: MouseEvent) => {
+    if (shouldSuppressPagedRegionalTap()) {
+      tapStartTime = 0;
+      return;
+    }
     if (tapMoved) {
+      tapStartTime = 0;
+      return;
+    }
+    if (!isPagedMode()) {
+      toggleChromeBars();
       tapStartTime = 0;
       return;
     }
@@ -811,11 +813,12 @@ export function BookReader(props: BookReaderProps) {
                   onOpenBookInfo={props.onOpenBookInfo}
                   isWideScreen={isWideScreen()}
                   readAloudActive={readAloudActive()}
-                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onOpenCatalog={openCatalog}
                   onReadAloud={handleReadAloud}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onOpenReaderMenu={openReaderMenuDrawer}
                   settingsTooltipSuspended={settingsTooltipSuspended()}
+                  catalogTooltipSuspended={catalogTooltipSuspended()}
                   onChangeSource={() => {
                     const b = book();
                     if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
@@ -856,7 +859,7 @@ export function BookReader(props: BookReaderProps) {
                   onChapterProgressChange={handleChapterProgressChange}
                   onPrevChapter={handlePrev}
                   onNextChapter={handleNext}
-                  onOpenCatalog={() => setCatalogOpen(true)}
+                  onOpenCatalog={openCatalog}
                   onReadAloud={handleReadAloud}
                   readAloudActive={readAloudActive()}
                   onOpenSettings={() => setSettingsOpen(true)}
@@ -873,8 +876,8 @@ export function BookReader(props: BookReaderProps) {
                   if (el) scrollContainer = el;
                 }}
                 class={mainContentClass()}
-                onPointerDown={onContentPointerDown}
-                onPointerMove={onContentPointerMove}
+                onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
+                onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
               >
                 {renderTextBody()}
               </div>
@@ -959,8 +962,6 @@ export function BookReader(props: BookReaderProps) {
                 <ReaderCatalog
                   open
                   drawerBottom={mediaViewerCatalogDrawerSide() === 'bottom'}
-                  initialScrollTop={catalogScrollTop()}
-                  onScrollTop={setCatalogScrollTop}
                   onSelectChapter={(index: number) => {
                     textViewerStore.jumpToChapter(index);
                     setCatalogOpen(false);
