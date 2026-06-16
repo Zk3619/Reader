@@ -5,7 +5,6 @@
 export const BOOK_SOURCE_IMPORT_EXTENSIONS = [
   'json',
   'txt',
-  'zip',
   'db',
   'sqlite',
   'sqlite3',
@@ -19,7 +18,6 @@ export function isBookSourceImportFileName(fileName: string): boolean {
 export function mimeForBookSourceFileName(fileName: string): string {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.json')) return 'application/json';
-  if (lower.endsWith('.zip')) return 'application/zip';
   if (
     lower.endsWith('.db') ||
     lower.endsWith('.sqlite') ||
@@ -33,6 +31,5 @@ export function mimeForBookSourceFileName(fileName: string): string {
 export const BOOK_SOURCE_FILE_PICKER_FILTERS = [
   { name: '书源与备份', extensions: [...BOOK_SOURCE_IMPORT_EXTENSIONS] },
   { name: 'JSON', extensions: ['json'] },
-  { name: 'ZIP 备份', extensions: ['zip'] },
   { name: '数据库备份', extensions: ['db', 'sqlite', 'sqlite3'] },
 ];

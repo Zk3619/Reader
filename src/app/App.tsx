@@ -218,6 +218,7 @@ import {
   resolveBookSourcesFromText,
   type ImportSourceComparison,
 } from "@/lib/book-source/import-booksource-resolver";
+import type { BookSourceImportProgress } from "@/lib/book-source/import-progress";
 import { pickLocalBookSourceFiles } from "@/lib/book-source/pick-local-booksource-file";
 import { pickLocalBookSourceDirectory } from "@/lib/book-source/pick-local-booksource-directory";
 import {
@@ -377,6 +378,7 @@ function AppContent() {
   const [showImportSourceSelectDialog, setShowImportSourceSelectDialog] = createSignal(false);
   const [importSourceNetworkPresetUrl, setImportSourceNetworkPresetUrl] = createSignal("");
   const [importSourceLoading, setImportSourceLoading] = createSignal(false);
+  const [importSourceProgress, setImportSourceProgress] = createSignal<BookSourceImportProgress | null>(null);
   const [importSourceCandidates, setImportSourceCandidates] = createSignal<NewBookSource[]>([]);
   const [importSourceComparisons, setImportSourceComparisons] = createSignal<ImportSourceComparison[]>([]);
   const [importSourceSelectedUrls, setImportSourceSelectedUrls] = createSignal<Set<string>>(new Set());
@@ -837,6 +839,7 @@ function AppContent() {
       nav.navigateShell('sources');
     }
     setImportSourceLoading(true);
+    setImportSourceProgress({ stage: 'parse', message: '正在准备导入…' });
     setImportSourceCandidates([]);
     setImportSourceComparisons([]);
     setImportSourceSelectedUrls(new Set<string>());
@@ -866,18 +869,24 @@ function AppContent() {
     requestAnimationFrame(() => scheduleOverlayPositionSync());
   };
 
+  const reportImportSourceProgress = (progress: BookSourceImportProgress) => {
+    setImportSourceProgress(progress);
+  };
+
   const applyRecognizedSources = async (sources: NewBookSource[], title = '导入书源') => {
     if (sources.length === 0) {
       setShowImportSourceSelectDialog(false);
       releaseImportSelectDialogPanelIfNeeded();
+      setImportSourceProgress(null);
       showAppToast({ title, description: '未识别到有效书源', variant: 'default' });
       return;
     }
-    const comparisons = await buildImportComparisons(sources);
+    const comparisons = await buildImportComparisons(sources, reportImportSourceProgress);
     setImportSourceCandidates(sources);
     setImportSourceComparisons(comparisons);
     setImportSourceSelectedUrls(defaultImportSelection(comparisons));
     setImportSourceLoading(false);
+    setImportSourceProgress(null);
   };
 
   const identifySourcesFromNetwork = async (url: string) => {
@@ -888,20 +897,25 @@ function AppContent() {
     }
     await openImportSourceSelectLoading();
     try {
-      const { sources } = await resolveBookSourcesFromNetworkUrl(normalized);
+      const { sources } = await resolveBookSourcesFromNetworkUrl(
+        normalized,
+        reportImportSourceProgress,
+      );
       await applyRecognizedSources(sources, '网络导入书源');
     } catch (err) {
       setShowImportSourceSelectDialog(false);
       releaseImportSelectDialogPanelIfNeeded();
+      setImportSourceProgress(null);
       showAppToast({ title: '网络导入书源失败', description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
+      setImportSourceProgress(null);
     }
   };
 
   const restoreDatabaseFromFile = async (file: File) => {
     const ok = confirm(
-      '检测到数据库备份（.db）。恢复将替换当前全部数据且不可撤销。\n\n是否立即恢复？也可稍后在「设置 → 数据备份」中操作。'
+      '检测到数据库备份（.db）。恢复将替换当前全部数据且不可撤销。\n\n是否立即恢复？也可稍后在「设置 → 存储与缓存 → 数据备份」中操作。'
     );
     if (!ok) return;
     try {
@@ -929,10 +943,11 @@ function AppContent() {
   const identifySourcesFromLocalFile = async (file: File) => {
     await openImportSourceSelectLoading();
     try {
+      reportImportSourceProgress({ stage: 'file', message: '正在解析文件…', current: 1, total: 1 });
       const { sources, sideImportSummary } = await resolveBookSourcesFromFile(file);
       if (sideImportSummary?.length) {
         showAppToast({
-          title: 'ZIP 附带导入',
+          title: '附带导入',
           description: sideImportSummary.join('、'),
           variant: 'default',
         });
@@ -950,6 +965,7 @@ function AppContent() {
       showAppToast({ title: '本地导入书源失败', description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
+      setImportSourceProgress(null);
     }
   };
 
@@ -968,7 +984,10 @@ function AppContent() {
       }
       await openImportSourceSelectLoading();
       try {
-        const { sources, sideImportSummary } = await resolveBookSourcesFromLocalFiles(files);
+        const { sources, sideImportSummary } = await resolveBookSourcesFromLocalFiles(
+          files,
+          reportImportSourceProgress,
+        );
         if (sideImportSummary?.length) {
           showAppToast({
             title: '多文件导入',
@@ -996,6 +1015,7 @@ function AppContent() {
         });
       } finally {
         setImportSourceLoading(false);
+      setImportSourceProgress(null);
       }
     } catch (err) {
       showAppToast({
@@ -1024,7 +1044,8 @@ function AppContent() {
       await openImportSourceSelectLoading();
       try {
         const { sources, sideImportSummary } = await resolveBookSourcesFromLocalFiles(
-          picked.files
+          picked.files,
+          reportImportSourceProgress,
         );
         if (sideImportSummary?.length) {
           showAppToast({
@@ -1053,6 +1074,7 @@ function AppContent() {
         });
       } finally {
         setImportSourceLoading(false);
+      setImportSourceProgress(null);
       }
     } catch (err) {
       showAppToast({
@@ -1144,7 +1166,7 @@ function AppContent() {
     }
     await openImportSourceSelectLoading();
     try {
-      const { sources } = await resolveBookSourcesFromText(raw);
+      const { sources } = await resolveBookSourcesFromText(raw, reportImportSourceProgress);
       await applyRecognizedSources(sources, `${label}书源`);
     } catch (err) {
       setShowImportSourceSelectDialog(false);
@@ -1152,6 +1174,7 @@ function AppContent() {
       showAppToast({ title: `${label}书源失败`, description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
+      setImportSourceProgress(null);
     }
   };
 
@@ -1251,6 +1274,7 @@ function AppContent() {
       showAppToast({ title: '导入书源失败', description: String(err), variant: 'destructive' });
     } finally {
       setImportSourceLoading(false);
+      setImportSourceProgress(null);
     }
   };
 
@@ -3787,6 +3811,7 @@ function AppContent() {
         <ImportSourceSelectDialog
           open={showImportSourceSelectDialog()}
           loading={importSourceLoading()}
+          loadingMessage={importSourceProgress()?.message}
           sources={importSourceCandidates()}
           comparisons={importSourceComparisons()}
           selectedUrls={importSourceSelectedUrls()}

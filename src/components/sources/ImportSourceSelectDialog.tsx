@@ -17,6 +17,7 @@ import type { NewBookSource } from '@/types';
 export interface ImportSourceSelectDialogProps {
   open: boolean;
   loading: boolean;
+  loadingMessage?: string;
   sources: NewBookSource[];
   comparisons: ImportSourceComparison[];
   selectedUrls: Set<string>;
@@ -142,8 +143,11 @@ export function ImportSourceSelectDialog(props: ImportSourceSelectDialogProps) {
           <Show
             when={!props.loading}
             fallback={
-              <div class="flex min-h-40 items-center justify-center rounded-lg border border-border/50 bg-muted/20">
+              <div class="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-border/50 bg-muted/20 px-4">
                 <div class="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
+                <Show when={props.loadingMessage}>
+                  <p class="text-center text-sm text-muted-foreground">{props.loadingMessage}</p>
+                </Show>
               </div>
             }
           >

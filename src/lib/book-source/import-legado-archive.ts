@@ -9,13 +9,6 @@ import {
   parseReplaceRuleJson,
 } from '@/lib/book-source/import-replace-rule';
 import { importRssSourcesFromList } from '@/lib/book-source/import-rss-batch';
-import {
-  extractLegadoZipEntries,
-  pickZipEntry,
-  LEGADO_ZIP_BOOK_SOURCE_NAMES,
-  LEGADO_ZIP_RSS_NAMES,
-  LEGADO_ZIP_REPLACE_RULE_NAMES,
-} from '@/lib/book-source/legado-zip';
 import type { NewBookSource } from '@/types';
 
 export class DatabaseRestoreRequiredError extends Error {
@@ -40,32 +33,9 @@ export async function resolveLegadoArchiveFromFile(
   }
 
   if (lower.endsWith('.zip')) {
-    const entries = await extractLegadoZipEntries(file);
-    const bookJson = pickZipEntry(entries, [
-      ...LEGADO_ZIP_BOOK_SOURCE_NAMES,
-      'booksource.json',
-    ]);
-    const rssJson = pickZipEntry(entries, LEGADO_ZIP_RSS_NAMES);
-    const replaceJson = pickZipEntry(entries, LEGADO_ZIP_REPLACE_RULE_NAMES);
-
-    const sideImportSummary: string[] = [];
-    if (rssJson) {
-      const rss = parseRssSourceJson(rssJson);
-      if (rss.length > 0) {
-        const n = await importRssSourcesFromList(rss);
-        sideImportSummary.push(`RSS 源 ${n} 条`);
-      }
-    }
-    if (replaceJson) {
-      const n = await importReplaceRulesFromJson(replaceJson);
-      if (n > 0) sideImportSummary.push(`替换规则 ${n} 条`);
-    }
-
-    const bookSources = bookJson ? parseBookSourceJson(bookJson) : [];
-    if (bookSources.length === 0 && sideImportSummary.length === 0) {
-      throw new Error('ZIP 中未找到可识别的书源或配置 JSON');
-    }
-    return { bookSources, sideImportSummary };
+    throw new Error(
+      'ZIP 备份包请前往「设置 → 存储与缓存 → 数据备份」恢复，本地书源导入仅支持 JSON / TXT'
+    );
   }
 
   const text = await file.text();
@@ -90,5 +60,5 @@ export async function resolveLegadoArchiveFromFile(
     throw new Error(`已导入替换规则 ${n} 条（非书源 JSON）`);
   }
 
-  throw new Error('未能识别文件内容，请确认是 legado 书源 JSON 或备份 ZIP');
+  throw new Error('未能识别文件内容，请确认是 legado 书源 JSON');
 }

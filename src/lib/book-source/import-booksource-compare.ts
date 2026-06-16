@@ -3,7 +3,10 @@
  */
 
 import { getSource } from '@/lib/database/sources';
+import type { BookSourceImportProgressCallback } from '@/lib/book-source/import-progress';
 import type { BookSource, NewBookSource } from '@/types';
+
+const COMPARE_BATCH_SIZE = 64;
 
 export interface ImportSourceComparison {
   source: NewBookSource;
@@ -12,19 +15,41 @@ export interface ImportSourceComparison {
   isUpdate: boolean;
 }
 
+async function compareOneSource(source: NewBookSource): Promise<ImportSourceComparison> {
+  const existing = await getSource(source.sourceUrl);
+  const incomingTime =
+    typeof source.lastUpdateTime === 'number' ? source.lastUpdateTime : 0;
+  const existingTime =
+    typeof existing?.lastUpdateTime === 'number' ? existing.lastUpdateTime : 0;
+  const isNew = !existing;
+  const isUpdate = !!existing && existingTime < incomingTime;
+  return { source, existing, isNew, isUpdate };
+}
+
 export async function buildImportComparisons(
-  sources: NewBookSource[]
+  sources: NewBookSource[],
+  onProgress?: BookSourceImportProgressCallback,
 ): Promise<ImportSourceComparison[]> {
   const result: ImportSourceComparison[] = [];
-  for (const source of sources) {
-    const existing = await getSource(source.sourceUrl);
-    const incomingTime =
-      typeof source.lastUpdateTime === 'number' ? source.lastUpdateTime : 0;
-    const existingTime =
-      typeof existing?.lastUpdateTime === 'number' ? existing.lastUpdateTime : 0;
-    const isNew = !existing;
-    const isUpdate = !!existing && existingTime < incomingTime;
-    result.push({ source, existing, isNew, isUpdate });
+  const total = sources.length;
+  onProgress?.({
+    stage: 'compare',
+    message: total > 0 ? `正在比对书源… (0/${total})` : '正在比对书源…',
+    current: 0,
+    total,
+  });
+
+  for (let i = 0; i < sources.length; i += COMPARE_BATCH_SIZE) {
+    const batch = sources.slice(i, i + COMPARE_BATCH_SIZE);
+    const batchResults = await Promise.all(batch.map((source) => compareOneSource(source)));
+    result.push(...batchResults);
+    const done = Math.min(i + COMPARE_BATCH_SIZE, total);
+    onProgress?.({
+      stage: 'compare',
+      message: `正在比对书源… (${done}/${total})`,
+      current: done,
+      total,
+    });
   }
   return result;
 }

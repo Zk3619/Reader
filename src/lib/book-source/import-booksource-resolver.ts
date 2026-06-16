@@ -19,6 +19,7 @@ import * as sourcesDb from '@/lib/database/sources';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
 import { syncBooksOriginNameForSource } from '@/lib/bookshelf/sync-book-origin-name';
 import { seedBookSourceArgsFromHeader } from '@/lib/book-source/source-variables';
+import type { BookSourceImportProgressCallback } from '@/lib/book-source/import-progress';
 
 export type { ImportBookSourceOptions } from '@/lib/book-source/import-booksource-merge';
 export {
@@ -39,11 +40,17 @@ export interface ImportBookSourcesResult {
   blocked: Array<{ sourceName: string; sourceUrl: string }>;
 }
 
-export async function resolveBookSourcesFromNetworkUrl(urlRaw: string): Promise<ResolvedBookSources> {
+export async function resolveBookSourcesFromNetworkUrl(
+  urlRaw: string,
+  onProgress?: BookSourceImportProgressCallback,
+): Promise<ResolvedBookSources> {
   const url = urlRaw.trim();
   if (!url) return { sources: [] };
 
+  onProgress?.({ stage: 'fetch', message: '正在下载书源…' });
   const text = await fetchBookSourceJsonText(url);
+
+  onProgress?.({ stage: 'parse', message: '正在解析书源…' });
   const direct = parseBookSourceJson(text);
   if (direct.length > 0) {
     return { sources: direct };
@@ -51,12 +58,30 @@ export async function resolveBookSourcesFromNetworkUrl(urlRaw: string): Promise<
 
   const nestedUrls = extractSourceUrlsEnvelope(text);
   if (nestedUrls.length > 0) {
-    const merged: NewBookSource[] = [];
-    for (const nestedUrl of nestedUrls) {
-      const sub = await resolveBookSourcesFromNetworkUrl(nestedUrl);
-      merged.push(...sub.sources);
-    }
-    return { sources: merged };
+    const total = nestedUrls.length;
+    let completed = 0;
+    onProgress?.({
+      stage: 'fetch',
+      message: `正在下载子链接… (0/${total})`,
+      current: 0,
+      total,
+    });
+
+    const nestedResults = await Promise.all(
+      nestedUrls.map(async (nestedUrl) => {
+        const sub = await resolveBookSourcesFromNetworkUrl(nestedUrl);
+        completed += 1;
+        onProgress?.({
+          stage: 'fetch',
+          message: `正在下载子链接… (${completed}/${total})`,
+          current: completed,
+          total,
+        });
+        return sub.sources;
+      }),
+    );
+
+    return { sources: nestedResults.flat() };
   }
 
   return { sources: [] };
@@ -76,19 +101,28 @@ export async function resolveBookSourcesFromFile(file: File): Promise<ResolvedBo
 
 /** 目录批量：合并多文件书源，附带项去重；仅含 .db 时抛出 DatabaseRestoreRequiredError */
 export async function resolveBookSourcesFromLocalFiles(
-  files: File[]
+  files: File[],
+  onProgress?: BookSourceImportProgressCallback,
 ): Promise<ResolvedBookSources> {
   const eligible = files.filter((f) => isBookSourceImportFileName(f.name));
   if (eligible.length === 0) {
-    throw new Error('未找到符合条件的书源文件（json / txt / zip / db）');
+    throw new Error('未找到符合条件的书源文件（json / txt / db）');
   }
 
   const byUrl = new Map<string, NewBookSource>();
   const sideSet = new Set<string>();
   const dbFiles: File[] = [];
   const fileErrors: string[] = [];
+  const total = eligible.length;
 
-  for (const file of eligible) {
+  for (let i = 0; i < eligible.length; i++) {
+    const file = eligible[i]!;
+    onProgress?.({
+      stage: 'file',
+      message: `正在解析文件… (${i + 1}/${total})`,
+      current: i + 1,
+      total,
+    });
     try {
       const archive = await resolveLegadoArchiveFromFile(file);
       if (archive instanceof DatabaseRestoreRequiredError) {
@@ -133,11 +167,15 @@ export async function resolveBookSourcesFromLocalFiles(
   };
 }
 
-export async function resolveBookSourcesFromText(text: string): Promise<ResolvedBookSources> {
+export async function resolveBookSourcesFromText(
+  text: string,
+  onProgress?: BookSourceImportProgressCallback,
+): Promise<ResolvedBookSources> {
   const trimmed = text.trim();
   if (/^https?:\/\//i.test(trimmed)) {
-    return resolveBookSourcesFromNetworkUrl(trimmed);
+    return resolveBookSourcesFromNetworkUrl(trimmed, onProgress);
   }
+  onProgress?.({ stage: 'parse', message: '正在解析书源…' });
   return { sources: parseBookSourceJson(text) };
 }
 
