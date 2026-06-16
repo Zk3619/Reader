@@ -2,11 +2,12 @@
  * 字典规则管理（对齐 Legado DictRuleActivity + TXT 目录规则页交互）
  */
 
-import { createMemo, createSignal, Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as dictDb from '@/lib/database/dict-rules';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
-import { filterDictRules } from '@/lib/dict-rules/filter-dict-rules';
+import { dictRuleMatchesSearch } from '@/lib/dict-rules/filter-dict-rules';
 import { DictRuleListItem } from '@/components/dict-rules/DictRuleListItem';
 import { DictRuleEditDialog } from '@/components/dict-rules/DictRuleEditDialog';
 import {
@@ -73,7 +74,13 @@ export function DictRulesPage(props: DictRulesPageProps) {
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
   const [codeImportOpen, setCodeImportOpen] = createSignal(false);
 
-  const filteredRules = createMemo(() => filterDictRules(rules(), searchQuery()));
+  const { filtered: filteredRules, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: rules,
+    deps: searchQuery,
+    isPassThrough: () => !searchQuery().trim(),
+    match: (rule) => dictRuleMatchesSearch(rule, searchQuery()),
+    progressLabel: '正在筛选规则',
+  });
   const selectedCount = () => selectedNames().size;
   const filteredSelectedCount = () =>
     filteredRules().filter((r) => selectedNames().has(r.name)).length;
@@ -341,7 +348,10 @@ export function DictRulesPage(props: DictRulesPageProps) {
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
-        <Show when={!loading() && filteredRules().length === 0}>
+        <Show when={!loading() && filtering() && filterProgressText()}>
+          <p class="px-4 py-2 text-center text-xs text-muted-foreground">{filterProgressText()}</p>
+        </Show>
+        <Show when={!loading() && !filtering() && filteredRules().length === 0}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">
             {searchQuery().trim() ? '没有匹配的规则' : '暂无字典规则，可通过右上角「更多」新建或导入'}
           </p>

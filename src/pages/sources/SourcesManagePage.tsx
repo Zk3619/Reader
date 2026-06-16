@@ -12,6 +12,7 @@ import {
   Show,
 } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as sourcesDb from '@/lib/database/sources';
 import {
   clearSourceCookieAndCfRecord,
@@ -69,9 +70,12 @@ import {
 } from '@/components/shared/AppDialog';
 import { validateSources, type SourceValidationResult, type ValidateResultKind } from '@/lib/book-source/validate';
 import { Badge } from '@/components/ui/badge';
-import { filterBookSources } from '@/lib/search/search-filters';
 import {
-  filterSourcesByCriteria,
+  bookSourcePageFilterIsPassThrough,
+  bookSourcePageItemMatches,
+  sortBookSourcesCopy,
+} from '@/lib/sources/book-source-page-filter';
+import {
   formatSourceListFilterSummary,
   formatSourceListToolbarDescription,
   buildSourceFilterGroupOptions,
@@ -82,7 +86,6 @@ import {
   type SourceListFilterCriteria,
 } from '@/lib/sources/source-list-filter';
 import {
-  sortBookSources,
   getSourceDomain,
   SOURCE_MANAGE_SORT_OPTIONS,
   type SourceSortMode,
@@ -364,14 +367,36 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
 
   const filterGroupOptions = createMemo(() => buildSourceFilterGroupOptions(sourceGroups()));
 
-  const filteredSources = createMemo(() => {
-    let list = sources();
-    list = filterSourcesByCriteria(list, appliedFilter(), filterGroupOptions());
-    const q = searchQuery().trim();
-    if (q) {
-      list = filterBookSources(list, q, props.sourceSearchMode ?? 'name');
-    }
-    return sortBookSources(list, sortMode(), sortReverse());
+  const filterDeps = createMemo(() => ({
+    criteria: appliedFilter(),
+    query: searchQuery(),
+    mode: props.sourceSearchMode ?? 'name',
+    sortMode: sortMode(),
+    sortReverse: sortReverse(),
+    groups: filterGroupOptions(),
+  }));
+
+  const { filtered: filteredSources, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: sources,
+    deps: () => filterDeps(),
+    isPassThrough: () =>
+      bookSourcePageFilterIsPassThrough(
+        sources(),
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().query,
+      ),
+    match: (source) =>
+      bookSourcePageItemMatches(
+        source,
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().query,
+        filterDeps().mode,
+      ),
+    postProcess: (matched) =>
+      sortBookSourcesCopy(matched, filterDeps().sortMode, filterDeps().sortReverse),
+    progressLabel: '正在筛选书源',
   });
 
   const pageDescription = () => {
@@ -810,6 +835,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       />
 
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+        <Show when={filtering() && filterProgressText()}>
+          <div class="shrink-0 px-3 pb-2 text-center text-xs text-muted-foreground">
+            {filterProgressText()}
+          </div>
+        </Show>
         <Show when={error()}>
           <p class="shrink-0 px-1 pb-2 text-sm text-destructive">{error()}</p>
         </Show>
@@ -834,7 +864,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
             </div>
           </div>
         </Show>
-        <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0}>
+        <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0 && !filtering()}>
           <div class="flex flex-1 items-center justify-center px-1">
             <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
               <p>无匹配书源</p>

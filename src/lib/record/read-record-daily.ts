@@ -100,21 +100,28 @@ export async function loadDailyReadStats(
 }
 
 /** 按日历选中日期筛选阅读记录（对齐 legados-main selectedDate） */
+export function readRecordEntryMatchesDate(
+  entry: ReadRecordEntry,
+  dateKey: string | null | undefined,
+  stats?: DailyReadStats,
+): boolean {
+  if (!dateKey) return true;
+
+  const keys = stats?.entriesByDate.get(dateKey);
+  if (keys && keys.size > 0) {
+    return keys.has(readRecordEntryKey(entry.bookName, entry.bookAuthor));
+  }
+
+  return entry.lastRead > 0 && formatDateKey(entry.lastRead) === dateKey;
+}
+
 export function filterReadRecordEntriesByDate(
   entries: readonly ReadRecordEntry[],
   dateKey: string | null | undefined,
   stats?: DailyReadStats,
 ): readonly ReadRecordEntry[] {
   if (!dateKey) return entries;
-
-  const keys = stats?.entriesByDate.get(dateKey);
-  if (keys && keys.size > 0) {
-    return entries.filter((entry) =>
-      keys.has(readRecordEntryKey(entry.bookName, entry.bookAuthor)),
-    );
-  }
-
-  return entries.filter((entry) => entry.lastRead > 0 && formatDateKey(entry.lastRead) === dateKey);
+  return entries.filter((entry) => readRecordEntryMatchesDate(entry, dateKey, stats));
 }
 
 export function parseDateKey(dateKey: string): Date | null {

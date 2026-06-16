@@ -17,13 +17,16 @@ import * as groupsDb from '@/lib/database/book-groups';
 import {
   formatBookshelfManageFilterSummary,
   formatBookshelfManageToolbarDescription,
-  effectiveBookshelfManageGroupIds,
-  effectiveBookshelfManageSourceNames,
   hasEffectiveBookshelfManageFilter,
   loadBookshelfManagePrefs,
   saveBookshelfManagePrefs,
 } from '@/lib/bookshelf/bookshelf-manage-prefs';
-import { filterBookshelfManageBooks } from '@/lib/search/search-filters';
+import {
+  bookshelfManagePageFilterIsPassThrough,
+  bookshelfManagePageItemMatches,
+  resolveBookshelfManageEffectiveFilters,
+} from '@/lib/bookshelf/bookshelf-manage-page-filter';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import {
   patchBooksGroupFieldInPlace,
   stabilizeBookListByRef,
@@ -141,35 +144,61 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
   );
 
   let filteredBooksCache: Book[] = [];
-  const filteredBooks = createMemo(() => {
-    const q = searchQuery().trim();
-    const mode = searchMode();
-    const effGroupIds = filterByBookGroup()
-      ? effectiveBookshelfManageGroupIds(appliedBookGroupIds(), allBookGroupIds())
-      : [];
-    const effSourceNames = filterBySource()
-      ? effectiveBookshelfManageSourceNames(appliedSourceNames(), sourceNames())
-      : [];
-    const nameMap = userGroupNameMap();
-    let list = books();
-    if (effGroupIds.length > 0) {
-      list = list.filter((b) => effGroupIds.some((gid) => gid > 0 && (b.group & gid) !== 0));
-    }
-    if (effSourceNames.length > 0) {
-      list = list.filter((b) => effSourceNames.includes(getBookshelfBookSourceName(b)));
-    }
-    if (q) {
-      list = filterBookshelfManageBooks(list, q, mode, (b) => {
-        const names: string[] = [];
-        for (const [id, name] of nameMap) {
-          if ((b.group & id) !== 0) names.push(name);
-        }
-        return names;
+  const filterDeps = createMemo(() => ({
+    q: searchQuery(),
+    mode: searchMode(),
+    filterByBookGroup: filterByBookGroup(),
+    filterBySource: filterBySource(),
+    appliedBookGroupIds: appliedBookGroupIds(),
+    appliedSourceNames: appliedSourceNames(),
+    allBookGroupIds: allBookGroupIds(),
+    allSourceNames: sourceNames(),
+    nameMap: userGroupNameMap(),
+  }));
+
+  const { filtered: filteredBooks, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: books,
+    deps: () => filterDeps(),
+    isPassThrough: () =>
+      bookshelfManagePageFilterIsPassThrough(books(), {
+        filterByBookGroup: filterDeps().filterByBookGroup,
+        filterBySource: filterDeps().filterBySource,
+        appliedBookGroupIds: filterDeps().appliedBookGroupIds,
+        appliedSourceNames: filterDeps().appliedSourceNames,
+        allBookGroupIds: filterDeps().allBookGroupIds,
+        allSourceNames: filterDeps().allSourceNames,
+        searchQuery: filterDeps().q,
+      }),
+    match: (book) => {
+      const { effGroupIds, effSourceNames } = resolveBookshelfManageEffectiveFilters(
+        filterDeps().filterByBookGroup,
+        filterDeps().filterBySource,
+        filterDeps().appliedBookGroupIds,
+        filterDeps().appliedSourceNames,
+        filterDeps().allBookGroupIds,
+        filterDeps().allSourceNames,
+      );
+      const nameMap = filterDeps().nameMap;
+      return bookshelfManagePageItemMatches(book, {
+        effGroupIds,
+        effSourceNames,
+        searchQuery: filterDeps().q,
+        searchMode: filterDeps().mode,
+        groupNamesForBook: (b) => {
+          const names: string[] = [];
+          for (const [id, name] of nameMap) {
+            if ((b.group & id) !== 0) names.push(name);
+          }
+          return names;
+        },
       });
-    }
-    const stabilized = stabilizeBookListByRef(filteredBooksCache, list);
-    filteredBooksCache = stabilized;
-    return stabilized;
+    },
+    postProcess: (matched) => {
+      const stabilized = stabilizeBookListByRef(filteredBooksCache, matched);
+      filteredBooksCache = stabilized;
+      return stabilized;
+    },
+    progressLabel: '正在筛选书籍',
   });
 
   const listSortableEnabled = createMemo(
@@ -654,7 +683,13 @@ export function BookshelfManagePage(props: BookshelfManagePageProps) {
           </ul>
         </Show>
 
-        <Show when={!loading() && !showSkeleton() && filteredBooks().length === 0}>
+        <Show when={filtering() && filterProgressText()}>
+          <div class="shrink-0 pb-2 text-center text-xs text-muted-foreground">
+            {filterProgressText()}
+          </div>
+        </Show>
+
+        <Show when={!loading() && !showSkeleton() && filteredBooks().length === 0 && !filtering()}>
           <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
             <p>暂无书籍</p>
           </div>

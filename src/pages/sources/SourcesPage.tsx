@@ -4,6 +4,7 @@
 
 import { createSignal, createEffect, createResource, createMemo, onMount, onCleanup, Show } from 'solid-js';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import {
   clearSourceCookieAndCfRecord,
   deleteBookSourceWithSessionPurge,
@@ -63,7 +64,6 @@ import type { Id } from '@thisbeyond/solid-dnd';
 import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
-  filterSourcesByCriteria,
   buildSourceFilterGroupOptions,
   getEffectiveSourceListFilter,
   hasEffectiveSourceListFilter,
@@ -72,8 +72,12 @@ import {
   shouldGroupSourcesByGroupName,
   type SourceSearchMode,
 } from '@/lib/sources/source-list-filter';
-import { filterBookSources } from '@/lib/search/search-filters';
-import { sortBookSources, type SourceManageGroupMode, type SourceSortMode } from '@/lib/sources/source-sort';
+import {
+  bookSourcePageFilterIsPassThrough,
+  bookSourcePageItemMatches,
+  sortBookSourcesCopy,
+} from '@/lib/sources/book-source-page-filter';
+import { type SourceManageGroupMode, type SourceSortMode } from '@/lib/sources/source-sort';
 
 export interface SourcesPageProps {
   /** 搜索关键词，在当前列表内过滤书源 */
@@ -196,19 +200,36 @@ export function SourcesPage(props: SourcesPageProps) {
     buildSourceFilterGroupOptions(props.filterGroupNames ?? []),
   );
 
-  /** 在当前分组内按全局搜索模式过滤，并应用对话框筛选与排序 */
-  const filteredSources = createMemo(() => {
-    let list = sources();
-    list = filterSourcesByCriteria(
-      list,
-      props.appliedFilter ?? EMPTY_SOURCE_LIST_FILTER,
-      filterGroupOptions(),
-    );
-    const q = (props.sourceSearchQuery ?? '').trim();
-    if (q) {
-      list = filterBookSources(list, q, props.sourceSearchMode ?? 'name');
-    }
-    return sortBookSources(list, props.sortMode ?? 'manual', props.sortReverse ?? false);
+  const filterDeps = createMemo(() => ({
+    criteria: props.appliedFilter ?? EMPTY_SOURCE_LIST_FILTER,
+    query: props.sourceSearchQuery ?? '',
+    mode: props.sourceSearchMode ?? 'name',
+    sortMode: props.sortMode ?? 'manual',
+    sortReverse: props.sortReverse ?? false,
+    groups: filterGroupOptions(),
+  }));
+
+  const { filtered: filteredSources, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: sources,
+    deps: () => filterDeps(),
+    isPassThrough: () =>
+      bookSourcePageFilterIsPassThrough(
+        sources(),
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().query,
+      ),
+    match: (source) =>
+      bookSourcePageItemMatches(
+        source,
+        filterDeps().criteria,
+        filterDeps().groups,
+        filterDeps().query,
+        filterDeps().mode,
+      ),
+    postProcess: (matched) =>
+      sortBookSourcesCopy(matched, filterDeps().sortMode, filterDeps().sortReverse),
+    progressLabel: '正在筛选书源',
   });
 
   createEffect(() => {
@@ -539,6 +560,9 @@ export function SourcesPage(props: SourcesPageProps) {
       <Show when={error()}>
         <p class="shrink-0 px-1 pb-2 text-sm text-destructive">{error()}</p>
       </Show>
+      <Show when={filtering() && filterProgressText()}>
+        <p class="shrink-0 px-1 pb-2 text-center text-xs text-muted-foreground">{filterProgressText()}</p>
+      </Show>
       <Show when={showSkeleton()}>
         <ul class="shrink-0 space-y-2 px-1">
           {[1, 2, 3, 4, 5].map(() => (
@@ -557,7 +581,7 @@ export function SourcesPage(props: SourcesPageProps) {
           </div>
         </div>
       </Show>
-      <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0}>
+      <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0 && !filtering()}>
         <div class="flex flex-1 items-center justify-center px-1">
           <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
             <p>无匹配书源</p>

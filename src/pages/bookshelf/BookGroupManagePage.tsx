@@ -26,7 +26,8 @@ import {
   pinGroupToBottom,
   pinGroupToTop,
 } from '@/lib/bookshelf/book-group-order';
-import { filterBookGroups } from '@/lib/search/search-filters';
+import { bookGroupMatchesSearch } from '@/lib/search/search-filters';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import * as groupsDb from '@/lib/database/book-groups';
 import { BookGroupId } from '@/types';
@@ -206,9 +207,14 @@ export function BookGroupManage(props: BookGroupManageProps) {
   const [enableDragSort, setEnableDragSort] = createSignal(true);
   const [coverPreviewGroup, setCoverPreviewGroup] = createSignal<BookGroup | null>(null);
 
-  const filteredGroups = createMemo(() =>
-    filterBookGroups(groups(), searchQuery(), getGroupDisplayName, searchMode()),
-  );
+  const { filtered: filteredGroups, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: groups,
+    deps: () => ({ q: searchQuery(), mode: searchMode() }),
+    isPassThrough: () => groups().length > 0 && !searchQuery().trim(),
+    match: (group) =>
+      bookGroupMatchesSearch(group, searchQuery(), getGroupDisplayName, searchMode()),
+    progressLabel: '正在筛选分组',
+  });
 
   const listSortableEnabled = createMemo(
     () =>
@@ -457,9 +463,15 @@ export function BookGroupManage(props: BookGroupManageProps) {
           </div>
         </Show>
 
+        <Show when={filtering() && filterProgressText()}>
+          <div class="shrink-0 pb-2 text-center text-xs text-muted-foreground">
+            {filterProgressText()}
+          </div>
+        </Show>
+
         <Show when={!loading() && groups().length > 0}>
           <Show
-            when={filteredGroups().length > 0}
+            when={filteredGroups().length > 0 || filtering()}
             fallback={
               <div class="flex flex-col items-center justify-center rounded-xl border border-border/50 bg-card py-12">
                 <SearchIcon class="mb-4 h-12 w-12 text-muted-foreground" size={48} />

@@ -2,7 +2,8 @@
  * 阅读记录归档区：按时间 / 日期 / 时长切换展示完整记录
  */
 
-import { createMemo, createSignal, For, Match, Show, Switch, type Accessor } from 'solid-js';
+import { createSignal, For, Match, Show, Switch, type Accessor } from 'solid-js';
+import { useChunkedDerived } from '@/lib/hooks/useChunkedDerived';
 import { Button } from '@/components/ui/button';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
@@ -163,9 +164,11 @@ export interface ReadRecordArchiveSectionProps {
 export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
   const [mode, setMode] = createSignal<ReadRecordArchiveMode>(loadReadRecordArchiveMode());
 
-  const rows = createMemo(() =>
-    buildReadRecordArchiveRows(props.entries(), mode()),
-  );
+  const { value: rows, computing, progressText } = useChunkedDerived({
+    deps: () => ({ entries: props.entries(), mode: mode() }),
+    compute: () => buildReadRecordArchiveRows(props.entries(), mode()),
+    progressLabel: '正在整理阅读记录',
+  });
 
   function handleModeChange(next: string) {
     const value = next as ReadRecordArchiveMode;
@@ -203,8 +206,11 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
       </TabsList>
 
       <div class="mt-4 space-y-3">
+        <Show when={computing() && progressText()}>
+          <p class="text-center text-xs text-muted-foreground">{progressText()}</p>
+        </Show>
         <Show
-          when={rows().length > 0}
+          when={rows().length > 0 || computing()}
           fallback={
             <div
               class={cn(

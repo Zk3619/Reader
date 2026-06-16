@@ -2,11 +2,12 @@
  * TXT 目录规则管理（对齐 Legado TxtTocRuleActivity + 书源管理页交互）
  */
 
-import { createMemo, createSignal, Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as txtTocDb from '@/lib/database/txt-toc-rules';
 import { importTxtTocRulesFromJson } from '@/lib/book-source/import-txt-toc-rule';
 import { batchReparseLocalTxtBooks, listLocalTxtBooks } from '@/lib/local-book/batch-reparse-local-txt';
-import { filterTxtTocRules } from '@/lib/txt-toc-rules/filter-txt-toc-rules';
+import { txtTocRuleMatchesSearch } from '@/lib/txt-toc-rules/filter-txt-toc-rules';
 import { TxtTocRuleListItem } from '@/components/txt-toc-rules/TxtTocRuleListItem';
 import { TxtTocRuleEditDialog } from '@/components/txt-toc-rules/TxtTocRuleEditDialog';
 import {
@@ -79,7 +80,13 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
   const [batchReparseProgress, setBatchReparseProgress] = createSignal('');
   const [localTxtBookCount, setLocalTxtBookCount] = createSignal(0);
 
-  const filteredRules = createMemo(() => filterTxtTocRules(rules(), searchQuery()));
+  const { filtered: filteredRules, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: rules,
+    deps: searchQuery,
+    isPassThrough: () => !searchQuery().trim(),
+    match: (rule) => txtTocRuleMatchesSearch(rule, searchQuery()),
+    progressLabel: '正在筛选规则',
+  });
   const selectedCount = () => selectedIds().size;
   const filteredSelectedCount = () =>
     filteredRules().filter((r) => selectedIds().has(r.id)).length;
@@ -393,7 +400,10 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
-        <Show when={!loading() && filteredRules().length === 0}>
+        <Show when={!loading() && filtering() && filterProgressText()}>
+          <p class="px-4 py-2 text-center text-xs text-muted-foreground">{filterProgressText()}</p>
+        </Show>
+        <Show when={!loading() && !filtering() && filteredRules().length === 0}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">
             {searchQuery().trim() ? '没有匹配的规则' : '暂无目录规则，可通过右上角「更多」新建或导入'}
           </p>

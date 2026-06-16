@@ -31,10 +31,11 @@ import * as readRecordDetailsDb from '@/lib/database/read-record-details';
 import * as readRecordsDb from '@/lib/database/read-records';
 import { isMobile } from '@/lib/platform/detect';
 import {
-  filterReadRecordEntriesByDate,
+  readRecordEntryMatchesDate,
   formatSelectedDateLabel,
   loadDailyReadStats,
 } from '@/lib/record/read-record-daily';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import { formatDateKey } from '@/lib/record/read-record-format';
 import {
   computeReadRecordStats,
@@ -88,10 +89,27 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
   });
 
   const recentEntries = createMemo(() => entries() ?? []);
-  const filteredEntries = createMemo(() =>
-    filterReadRecordEntriesByDate(recentEntries(), selectedDate(), dailyStats()),
-  );
+
+  const dateFilterDeps = createMemo(() => ({
+    dateKey: selectedDate(),
+    stats: dailyStats(),
+  }));
+
+  const {
+    filtered: filteredEntries,
+    filtering: dateFiltering,
+    progressText: dateFilterProgress,
+  } = useChunkedFilter({
+    items: recentEntries,
+    deps: () => dateFilterDeps(),
+    isPassThrough: () => !dateFilterDeps().dateKey,
+    match: (entry) =>
+      readRecordEntryMatchesDate(entry, dateFilterDeps().dateKey, dateFilterDeps().stats),
+    progressLabel: '正在筛选阅读记录',
+  });
+
   const rankEntries = useReadRecordRankEntries(filteredEntries);
+
   const stats = createMemo(() => computeReadRecordStats(recentEntries()));
   const todaySeconds = createMemo(() => {
     const todayKey = formatDateKey(Date.now());
@@ -227,6 +245,10 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
                   </Button>
                 </div>
               )}
+            </Show>
+
+            <Show when={dateFiltering() && dateFilterProgress()}>
+              <p class="text-center text-xs text-muted-foreground">{dateFilterProgress()}</p>
             </Show>
 
             <ReadRecordListsSection

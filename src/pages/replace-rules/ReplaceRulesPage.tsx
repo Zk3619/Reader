@@ -3,6 +3,7 @@
  */
 
 import { createMemo, createSignal, For, Show } from 'solid-js';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as replaceDb from '@/lib/database/replace-rules';
 import { invalidateReplaceRulesCache } from '@/lib/book-source/content-processor';
 import { parseReplaceRuleImportItems } from '@/lib/book-source/import-replace-rule';
@@ -15,7 +16,7 @@ import {
   type ImportReplaceRuleComparison,
 } from '@/lib/book-source/import-replace-rule-resolver';
 import {
-  filterReplaceRulesList,
+  replaceRuleMatchesListFilter,
   replaceRuleGroupFilterKey,
   replaceRuleGroupFilterTitle,
   type ReplaceRuleGroupFilter,
@@ -108,9 +109,22 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
   const [importGroupName, setImportGroupName] = createSignal('');
   const [importAdjustGroup, setImportAdjustGroup] = createSignal(false);
 
-  const filteredRules = createMemo(() =>
-    filterReplaceRulesList(rules(), searchQuery(), groupFilter()),
-  );
+  const filterDeps = createMemo(() => ({
+    query: searchQuery(),
+    groupFilter: groupFilter(),
+  }));
+
+  const isFilterPassThrough = () =>
+    !filterDeps().query.trim() && filterDeps().groupFilter.kind === 'all';
+
+  const { filtered: filteredRules, filtering, progressText: filterProgressText } = useChunkedFilter({
+    items: rules,
+    deps: () => filterDeps(),
+    isPassThrough: isFilterPassThrough,
+    match: (rule) =>
+      replaceRuleMatchesListFilter(rule, filterDeps().query, filterDeps().groupFilter),
+    progressLabel: '正在筛选规则',
+  });
   const listSortableEnabled = createMemo(
     () =>
       groupFilter().kind === 'all' &&
@@ -557,7 +571,10 @@ export function ReplaceRulesPage(props: ReplaceRulesPageProps) {
         <Show when={loading()}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">加载中…</p>
         </Show>
-        <Show when={!loading() && filteredRules().length === 0}>
+        <Show when={!loading() && filtering() && filterProgressText()}>
+          <p class="px-4 py-2 text-center text-xs text-muted-foreground">{filterProgressText()}</p>
+        </Show>
+        <Show when={!loading() && !filtering() && filteredRules().length === 0}>
           <p class="px-4 py-8 text-center text-sm text-muted-foreground">
             {searchQuery().trim() || groupFilter().kind !== 'all'
               ? '没有匹配的规则'

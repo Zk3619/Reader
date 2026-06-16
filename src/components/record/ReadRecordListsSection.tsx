@@ -2,7 +2,8 @@
  * 阅读记录页：最近在读 / 阅读时长排行虚拟列表
  */
 
-import { createMemo, Show, type Accessor, type JSX } from 'solid-js';
+import { Show, type Accessor, type JSX } from 'solid-js';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import { Button } from '@/components/ui/button';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
@@ -313,11 +314,13 @@ export function ReadRecordListsSection(props: ReadRecordListsSectionProps) {
 }
 
 export function useReadRecordRankEntries(
-  entries: Accessor<readonly ReadRecordEntry[] | undefined>,
+  entries: Accessor<readonly ReadRecordEntry[]>,
 ) {
-  return createMemo(() =>
-    [...(entries() ?? [])]
-      .filter((e) => e.hasDurationRecord && e.readTime > 0)
-      .sort((a, b) => b.readTime - a.readTime),
-  );
+  return useChunkedFilter({
+    items: entries,
+    isPassThrough: () => false,
+    match: (e) => e.hasDurationRecord && e.readTime > 0,
+    postProcess: (matched) => [...matched].sort((a, b) => b.readTime - a.readTime),
+    progressLabel: '正在排序阅读时长',
+  }).filtered;
 }

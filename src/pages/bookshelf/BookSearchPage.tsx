@@ -6,7 +6,6 @@
 import {
   createSignal,
   createEffect,
-  createMemo,
   onMount,
   onCleanup,
   Show,
@@ -30,7 +29,8 @@ import { clearCoverSession } from '@/lib/http/cover-session';
 import { SearchHistoryChip } from '@/components/bookshelf/SearchHistoryChip';
 import { BookSearchScopeDialog } from '@/components/bookshelf/BookSearchScopeDialog';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
-import { filterBookshelfBooks } from '@/lib/search/search-filters';
+import { bookshelfBookMatchesSearch } from '@/lib/search/search-filters';
+import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import {
   loadBookshelfSearchSubPageMode,
   saveBookshelfSearchSubPageMode,
@@ -226,11 +226,15 @@ export function BookSearchPage(props: BookSearchPageProps) {
     }
   });
 
-  const filteredLocal = createMemo(() => {
-    const q = query().trim();
-    if (!q) return [];
-    return filterBookshelfBooks(localBooks(), q, searchMode());
-  });
+  const { filtered: filteredLocal, filtering: localFiltering, progressText: localFilterProgress } =
+    useChunkedFilter({
+      items: localBooks,
+      deps: () => ({ q: query(), mode: searchMode() }),
+      isPassThrough: () => !query().trim(),
+      postProcess: () => [],
+      match: (book) => bookshelfBookMatchesSearch(book, query(), searchMode()),
+      progressLabel: '正在搜索书架',
+    });
 
   createEffect(() => {
     const q = query().trim();
@@ -693,7 +697,10 @@ export function BookSearchPage(props: BookSearchPageProps) {
                     </li>
                   )}
                 </For>
-                <Show when={filteredLocal().length === 0}>
+                <Show when={localFiltering() && localFilterProgress()}>
+                  <li class="py-2 text-center text-xs text-muted-foreground">{localFilterProgress()}</li>
+                </Show>
+                <Show when={filteredLocal().length === 0 && !localFiltering()}>
                   <li class="py-2 text-sm text-muted-foreground">书架中没有匹配书籍</li>
                 </Show>
               </ul>
