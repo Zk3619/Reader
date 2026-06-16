@@ -35,6 +35,8 @@ export interface TextViewerToolbarHeaderProps {
   onOpenReaderMenu: () => void;
   /** 设置抽屉开/关期间暂停「设置」Tooltip，避免遮罩消失后 hover 误触发 */
   settingsTooltipSuspended?: boolean;
+  /** 目录抽屉开/关期间暂停「目录」Tooltip */
+  catalogTooltipSuspended?: boolean;
   onChangeSource: () => void;
   onRefreshChapter: () => void;
   onOpenOfflineCache: () => void;
@@ -101,7 +103,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
   const actionButtons = () => (
     <>
       <Show when={props.isWideScreen}>
-        <ViewerAppTooltip>
+        <ViewerAppTooltip disabled={props.catalogTooltipSuspended}>
           <ViewerAppTooltipTrigger
             as={Button}
             variant="ghost"
@@ -112,6 +114,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
               props.onOpenCatalog();
             }}
             aria-label="目录"
+            data-reader-catalog-trigger=""
           >
             <ListIcon class="size-5" />
           </ViewerAppTooltipTrigger>

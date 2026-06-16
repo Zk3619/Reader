@@ -9,7 +9,7 @@ import {
   setCachedChapterLayout,
   chapterLayoutCacheSize,
 } from '@/lib/media/text/reader-chapter-layout-cache';
-import { layoutReaderChapter } from '@/lib/media/text/reader-chapter-layout';
+import { layoutReaderChapter, isChapterLayoutCompleteForContent } from '@/lib/media/text/reader-chapter-layout';
 import { layoutPlainTextChapterCanvas } from '@/lib/media/text/canvas-text-chapter-layout';
 import {
   buildChapterLayoutCacheKey,
@@ -133,6 +133,53 @@ describe('layoutReaderChapter incomplete cache', () => {
 
     expect(hit.dualPage).toBe(true);
     expect(hit.segments.length).toBeGreaterThan(0);
+  });
+});
+
+describe('isChapterLayoutCompleteForContent', () => {
+  const baseLayout: ReaderChapterLayout = {
+    chapterIndex: 1,
+    engine: 'canvas',
+    pages: [{ index: 0, startY: 0, endY: 100, displayHeight: 100, chapterPosition: 0 }],
+    pageStarts: [0],
+    clipHeight: 500,
+    viewportHeight: 600,
+    viewportWidth: 400,
+    contentExtent: 100,
+    padTop: 24,
+    padBottom: 8,
+    segments: [{ top: 0, bottom: 100 }],
+    cacheKey: 'k',
+  };
+
+  it('rejects canvas layout when content requires dom', () => {
+    expect(
+      isChapterLayoutCompleteForContent(
+        baseLayout,
+        1,
+        '<p>x</p><img src="a">',
+      ),
+    ).toBe(false);
+  });
+
+  it('accepts dom engine for complex html', () => {
+    expect(
+      isChapterLayoutCompleteForContent(
+        { ...baseLayout, engine: 'dom' },
+        1,
+        '<p>x</p><img src="a">',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects provisional canvas placeholder', () => {
+    expect(
+      isChapterLayoutCompleteForContent(
+        { ...baseLayout, isLayoutComplete: false },
+        1,
+        '纯文本',
+      ),
+    ).toBe(false);
   });
 });
 

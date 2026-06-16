@@ -186,6 +186,13 @@ export function resetReaderMenuTooltipTrigger(): void {
   );
 }
 
+export function resetReaderCatalogTooltipTrigger(): void {
+  if (typeof document === 'undefined') return;
+  document
+    .querySelectorAll<HTMLElement>('[data-reader-catalog-trigger]')
+    .forEach((trigger) => resetKobalteTooltipTrigger(trigger));
+}
+
 /** Corvu 抽屉关闭后可能 refocus 打开入口，避免 Tooltip 因 focus 误弹出 */
 export function dismissOpenKobalteTooltips(): void {
   if (typeof document === 'undefined') return;
@@ -196,6 +203,7 @@ export function dismissOpenKobalteTooltips(): void {
     resetKobalteTooltipTrigger(trigger);
   });
   resetReaderMenuTooltipTrigger();
+  resetReaderCatalogTooltipTrigger();
 }
 
 /** 遮罩消失后 pointer 仍停在 trigger 上时会误触发 hover tooltip，需延迟恢复 */

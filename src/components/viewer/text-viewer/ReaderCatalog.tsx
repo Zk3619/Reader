@@ -1,10 +1,3 @@
-/**
- * 阅读器目录列表
- * 参考 legado：卷/章层级、当前章节高亮、点击跳转、自动滚动到当前章节
- * - 卷（isVolume）作为分组标题展示，其下章节缩进
- * - 大目录使用虚拟列表，打开抽屉不阻塞主线程
- */
-
 import { createEffect, createMemo, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
@@ -24,12 +17,8 @@ import { cn } from '@/lib/utils';
 export interface ReaderCatalogProps {
   onSelectChapter: (index: number) => void;
   onClose?: () => void;
-  /** 目录是否打开，用于触发滚动到当前章节（仅当当前章变化时滚动，避免每次打开都重滚） */
+  /** 目录是否打开，用于打开时滚动到当前章节 */
   open?: boolean;
-  /** 缓存的滚动位置，打开时恢复 */
-  initialScrollTop?: number;
-  /** 滚动时上报，用于关闭后缓存 */
-  onScrollTop?: (scrollTop: number) => void;
   /** 底部抽屉模式（移动端），避免选中行圆角被裁切 */
   drawerBottom?: boolean;
 }
@@ -61,40 +50,32 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
   );
 
   let scrollContainer: HTMLDivElement | undefined;
-  let lastScrolledToIndex = -1;
+  let catalogWasOpen = false;
   let lastCatalogLength = 0;
 
-  createEffect(() => {
-    const list = catalog();
-    if (list.length !== lastCatalogLength) {
-      lastCatalogLength = list.length;
-      lastScrolledToIndex = -1;
-    }
-    if (!props.open || list.length === 0) return;
-    const idx = chapterIndex();
-    if (idx === lastScrolledToIndex) return;
-    if (!scrollContainer) return;
-    lastScrolledToIndex = idx;
-    requestAnimationFrame(() => {
-      if (!scrollContainer) return;
-      scrollCatalogIndexIntoView(
-        scrollContainer,
-        idx,
-        CATALOG_ROW_HEIGHT_PX,
-        'smooth',
-      );
-      props.onScrollTop?.(scrollContainer.scrollTop);
-    });
-  });
+  const scrollToCurrentChapter = (behavior: ScrollBehavior = 'smooth') => {
+    const el = scrollContainer;
+    if (!el || !(props.open ?? false) || catalog().length === 0) return;
+    scrollCatalogIndexIntoView(el, chapterIndex(), CATALOG_ROW_HEIGHT_PX, behavior);
+  };
 
   createEffect(() => {
-    if (!props.open || !scrollContainer) return;
-    const initial = props.initialScrollTop ?? 0;
-    if (initial <= 0) return;
-    lastScrolledToIndex = chapterIndex();
-    requestAnimationFrame(() => {
-      if (scrollContainer) scrollContainer.scrollTop = initial;
-    });
+    const open = props.open ?? false;
+    const len = catalog().length;
+    const lenChangedWhileOpen = open && len !== lastCatalogLength;
+    lastCatalogLength = len;
+
+    if (!open) {
+      catalogWasOpen = false;
+      return;
+    }
+    if (len === 0) return;
+
+    const justOpened = !catalogWasOpen;
+    catalogWasOpen = true;
+    if (!justOpened && !lenChangedWhileOpen) return;
+
+    requestAnimationFrame(() => scrollToCurrentChapter('smooth'));
   });
 
   const catalogLoading = () => {
@@ -117,9 +98,6 @@ export function ReaderCatalog(props: ReaderCatalogProps) {
       count={rows().length}
       onScrollContainer={(el) => {
         scrollContainer = el;
-      }}
-      onScroll={(el) => {
-        props.onScrollTop?.(el.scrollTop);
       }}
     >
       {(index) => {

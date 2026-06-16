@@ -6,6 +6,7 @@ import { splitRawIntoParagraphSegments } from '@/lib/media/text/reader-content-b
 import type { ReaderChapterLayout } from '@/lib/media/text/reader-chapter-layout-types';
 import { textViewerLayoutContentWidth, textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { readerChapterTitleSpacingPx } from '@/lib/media/text/reader-chapter-title-style';
 import {
   computePageStartsFromSegments,
   pageDisplayHeight,
@@ -117,14 +118,17 @@ function buildCanvasSegments(params: CanvasTextLayoutParams): {
   const segments: ReaderLayoutSegment[] = [];
   let y = 0;
 
-  if (chapterTitle?.trim()) {
+  const titleStyle = config.chapterTitleStyle ?? 'center';
+  const titleSpacing = readerChapterTitleSpacingPx(titleStyle, config, 'paged');
+  if (titleSpacing && chapterTitle?.trim()) {
+    y += titleSpacing.marginTopPx;
     const titleLines = wrapParagraphToLines(ctx, chapterTitle.trim(), contentWidth);
     const titleLineH = fontSize * (config.spacing.line + 0.2);
     for (const _line of titleLines) {
       segments.push({ top: y, bottom: y + titleLineH });
       y += titleLineH;
     }
-    y += paragraphGap;
+    y += titleSpacing.marginBottomPx;
   }
 
   const plain = stripHtmlToPlain(raw);

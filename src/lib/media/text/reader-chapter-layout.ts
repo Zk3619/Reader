@@ -26,7 +26,33 @@ export { clearChapterLayoutCache } from '@/lib/media/text/reader-chapter-layout-
 export { layoutReaderChapterStream } from '@/lib/media/text/reader-chapter-layout-stream';
 export type { StreamLayoutOptions, LayoutProgressListener } from '@/lib/media/text/reader-chapter-layout-stream';
 export { buildReaderLayoutSignature } from '@/lib/media/text/reader-layout-signature';
-export { needsDomChapterLayout, canUseCanvasChapterLayout } from '@/lib/media/text/reader-content-complexity';
+export {
+  needsDomChapterLayout,
+  canUseCanvasChapterLayout,
+} from '@/lib/media/text/reader-content-complexity';
+import { needsDomChapterLayout } from '@/lib/media/text/reader-content-complexity';
+
+/** 章节排版是否可用于按页展示（含 DOM 引擎校验） */
+export function isChapterLayoutCompleteForContent(
+  layout: ReaderChapterLayout | null | undefined,
+  chapterIndex: number,
+  content: string,
+  options?: { dualPage?: boolean },
+): boolean {
+  if (!layout || layout.chapterIndex !== chapterIndex || layout.segments.length === 0) {
+    return false;
+  }
+  if (options?.dualPage) {
+    if (!layout.dualPage) return false;
+    if (!layout.rightPageStarts?.length) return false;
+  }
+  if (layout.isLayoutComplete === false) return false;
+  const raw = content?.trim() ?? '';
+  if (raw && needsDomChapterLayout(raw)) {
+    if (layout.engine !== 'dom' && layout.engine !== 'canvas+dom') return false;
+  }
+  return true;
+}
 
 export interface LayoutReaderChapterInput {
   chapterIndex: number;

@@ -45,6 +45,7 @@ export function buildReaderLayoutSignature(
     config.textFullJustify ? 1 : 0,
     config.textBottomJustify ? 1 : 0,
     config.useZhLayout ? 1 : 0,
+    config.chapterTitleStyle,
     dualActive ? '1:dp9' : 0,
   ].join('\0');
 }

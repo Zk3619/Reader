@@ -45,15 +45,16 @@ import {
   pagedLayoutEngine,
   pagedLayoutPrefetchStatus,
 } from '@/lib/media/text/reader-paged-layout-debug';
-const themeLabels: Record<number, string> = {
-  0: '默认',
-  1: '护眼绿',
-  2: '羊皮纸',
-  3: '淡蓝',
-  4: '淡紫',
-  5: '深色',
-  6: '夜间',
-};
+import {
+  READER_THEME_IDS,
+  READER_THEME_LABELS,
+  readerThemePalette,
+} from '@/lib/media/text/reader-theme-classes';
+import {
+  TEXT_VIEWER_CHAPTER_TITLE_STYLE_LABELS,
+  TEXT_VIEWER_CHAPTER_TITLE_STYLE_OPTIONS,
+  type TextViewerChapterTitleStyle,
+} from '@/lib/media/text/reader-chapter-title-style';
 
 export interface ReaderSettingsProps {
   onClose?: () => void;
@@ -87,7 +88,8 @@ export function ReaderSettings(props: ReaderSettingsProps) {
     });
   };
 
-  const dualPageMiddleVisible = () => config().dualPage !== 'off';
+  const dualPageMiddleVisible = () =>
+    isTextViewerPagedAnim(config().pageAnim) && config().dualPage !== 'off';
 
   return (
     <div class="flex w-full min-w-0 flex-col gap-6 pt-4 pb-2">
@@ -114,18 +116,53 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       <div class="space-y-3">
         <Label>主题</Label>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <For each={[0, 1, 2, 3, 4, 5, 6]}>
+          <For each={[...READER_THEME_IDS]}>
             {(themeId) => (
               <Button
                 variant={config().theme === themeId ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setConfig({ theme: themeId })}
               >
-                {themeLabels[themeId] ?? themeId}
+                <span class="flex items-center gap-2">
+                  <span
+                    class="size-3 shrink-0 rounded-full border border-border/40"
+                    style={{
+                      'background-color': readerThemePalette(themeId).bg,
+                      'box-shadow': `inset 0 0 0 1px ${readerThemePalette(themeId).text}33`,
+                    }}
+                    aria-hidden="true"
+                  />
+                  {READER_THEME_LABELS[themeId]}
+                </span>
               </Button>
             )}
           </For>
         </div>
+      </div>
+
+      {/* 章节标题 */}
+      <div class="space-y-3">
+        <Label>章节标题</Label>
+        <p class="text-xs text-muted-foreground">
+          控制章节名在阅读视图中的位置与间距；间距会随字号、行距、字距、段距变化。
+        </p>
+        <Tabs
+          value={config().chapterTitleStyle ?? 'center'}
+          onChange={(value) =>
+            setConfig({ chapterTitleStyle: value as TextViewerChapterTitleStyle })
+          }
+          class="w-full"
+        >
+          <TabsList class={readerDrawerOptionTabsListClass} aria-label="章节标题渲染">
+            <For each={TEXT_VIEWER_CHAPTER_TITLE_STYLE_OPTIONS}>
+              {(style) => (
+                <TabsTrigger value={style} class={readerDrawerOptionTabsTriggerClass}>
+                  {TEXT_VIEWER_CHAPTER_TITLE_STYLE_LABELS[style]}
+                </TabsTrigger>
+              )}
+            </For>
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* 字体大小 */}
@@ -235,7 +272,7 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div>
           <Label>边距</Label>
           <p class="mt-1 text-xs text-muted-foreground">
-            四边间距由 content-slot 统一控制；双页滚动时可设置列间中心间距。
+            四边间距由 content-slot 统一控制；按页双页阅读时可设置列间中心间距。
           </p>
         </div>
         <div class="space-y-2">
@@ -343,27 +380,29 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       </div>
 
       {/* 双页 */}
-      <div class="space-y-3">
-        <Label>双页阅读</Label>
-        <p class="text-xs text-muted-foreground">
-          宽屏下分栏显示；「自动」在视口 ≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px 或横屏时启用（按页模式）。
-        </p>
-        <Tabs
-          value={config().dualPage}
-          onChange={(value) => setConfig({ dualPage: value as ReaderDualPageMode })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="双页阅读">
-            <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
-              {(mode) => (
-                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
-                  {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
-      </div>
+      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+        <div class="space-y-3">
+          <Label>双页阅读</Label>
+          <p class="text-xs text-muted-foreground">
+            宽屏下分栏显示；「自动」在视口 ≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px 或横屏时启用（按页模式）。
+          </p>
+          <Tabs
+            value={config().dualPage}
+            onChange={(value) => setConfig({ dualPage: value as ReaderDualPageMode })}
+            class="w-full"
+          >
+            <TabsList class={readerDrawerOptionTabsListClass} aria-label="双页阅读">
+              <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
+                {(mode) => (
+                  <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
+                    {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
+                  </TabsTrigger>
+                )}
+              </For>
+            </TabsList>
+          </Tabs>
+        </div>
+      </Show>
 
       {/* 插图样式 */}
       <div class="space-y-3">
@@ -476,23 +515,25 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Show>
       </div>
 
-      {/* 点击区域 */}
-      <div class="space-y-3">
-        <Label>点击区域</Label>
-        <p class="text-xs text-muted-foreground">
-          全屏配置九宫格分区、动作与区域大小，与 Legado 点击区域设置一致。
-        </p>
-        <Button
-          variant="outline"
-          class="w-full"
-          onClick={() => {
-            props.onOpenClickRegionalConfig?.();
-            props.onClose?.();
-          }}
-        >
-          点击区域设置
-        </Button>
-      </div>
+      {/* 点击区域（仅按页翻页） */}
+      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+        <div class="space-y-3">
+          <Label>点击区域</Label>
+          <p class="text-xs text-muted-foreground">
+            全屏配置九宫格分区与动作；滚动模式下单击/双击切换顶底栏。
+          </p>
+          <Button
+            variant="outline"
+            class="w-full"
+            onClick={() => {
+              props.onOpenClickRegionalConfig?.();
+              props.onClose?.();
+            }}
+          >
+            点击区域设置
+          </Button>
+        </div>
+      </Show>
 
       {/* 翻页模式 */}
       <div class="space-y-3">

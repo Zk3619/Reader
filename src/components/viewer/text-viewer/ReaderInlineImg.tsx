@@ -2,19 +2,16 @@
  * 文本正文插图：行内/块级排版 + 段评点击；加载逻辑见 use-reader-image-load
  */
 
-import { createEffect, createSignal, Show } from 'solid-js';
+import { createMemo, Show } from 'solid-js';
 import type { BookSource } from '@/types';
-import { parseLegadoUrlWithOptions } from '@/lib/js-engine/legado/parse-legado-url-options';
 import {
   isInlineLegadoImageLayout,
   type LegadoImageLayout,
 } from '@/lib/js-engine/legado/legado-image-options';
 import {
-  computeInlineTextImageSize,
-  parseSvgDataUrlIntrinsicSize,
+  resolveInlineTextImageSizeFromSrc,
 } from '@/lib/media/image/inline-text-image-size';
 import { createReaderImageLoad } from '@/lib/media/image/use-reader-image-load';
-import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import { LoaderIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 
@@ -36,10 +33,6 @@ export interface ReaderInlineImgProps {
 }
 
 export function ReaderInlineImg(props: ReaderInlineImgProps) {
-  const [inlineSize, setInlineSize] = createSignal<{ width: number; height: number } | null>(
-    null,
-  );
-
   const load = createReaderImageLoad({
     getSrc: () => props.src,
     getReferer: () => props.referer,
@@ -55,26 +48,13 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
 
   const fontSizePx = () => Math.max(12, props.fontSizePx ?? 18);
 
-  const updateInlineSizeFromIntrinsic = (w: number, h: number) => {
+  /** 首帧即预留占位，避免测量/翻页后 decode 引起行高突变 */
+  const inlineSize = createMemo(() => {
     const layout = props.layout;
-    if (!layout || !isInlineLegadoImageLayout(layout)) return;
-    setInlineSize(computeInlineTextImageSize({ width: w, height: h }, fontSizePx(), layout));
-  };
-
-  createEffect(() => {
-    if (!isInline()) {
-      setInlineSize(null);
-      return;
-    }
+    if (!layout || !isInlineLegadoImageLayout(layout)) return null;
     const url = props.src?.trim() ?? '';
-    const layout = props.layout;
-    if (!url || !layout) return;
-    const norm = normalizeImageUrl(parseLegadoUrlWithOptions(url).url.trim());
-    if (!norm) return;
-    const parsed = parseSvgDataUrlIntrinsicSize(norm);
-    if (parsed) {
-      updateInlineSizeFromIntrinsic(parsed.width, parsed.height);
-    }
+    if (!url) return null;
+    return resolveInlineTextImageSizeFromSrc(url, fontSizePx(), layout);
   });
 
   const styleClass = () => {
@@ -90,7 +70,18 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
     return 'mx-auto block max-w-full h-auto';
   };
 
-  const inlineStyle = (): Record<string, string> | undefined => {
+  const reservedBoxStyle = (): Record<string, string> | undefined => {
+    const size = inlineSize();
+    if (!size || !isInline()) return undefined;
+    return {
+      width: `${size.width}px`,
+      height: `${size.height}px`,
+      'min-width': `${size.width}px`,
+      'min-height': `${size.height}px`,
+    };
+  };
+
+  const imgStyle = (): Record<string, string> | undefined => {
     const size = inlineSize();
     if (!size || !isInline()) return undefined;
     return {
@@ -107,16 +98,6 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
     props.onLegadoCommentClick?.(click);
   };
 
-  const handleImgLoad = (e: Event) => {
-    const img = e.currentTarget as HTMLImageElement;
-    if (!isInline() || !props.layout) return;
-    const w = img.naturalWidth;
-    const h = img.naturalHeight;
-    if (w > 0 && h > 0) {
-      updateInlineSizeFromIntrinsic(w, h);
-    }
-  };
-
   const placeholderClass = () =>
     cn(
       'flex flex-col items-center justify-center gap-2 rounded-md bg-muted/30 px-4 text-center text-xs text-muted-foreground',
@@ -125,26 +106,33 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
 
   const wrapperClass = () =>
     cn(
-      isInline() ? 'relative inline-flex align-baseline' : 'relative w-full',
+      isInline() ? 'relative inline-flex shrink-0 align-baseline' : 'relative w-full',
       props.class,
     );
+
+  const showLoadingPlaceholder = () =>
+    load.phase() === 'loading' && !(isInline() && inlineSize());
 
   const imgEl = () => (
     <img
       src={load.displaySrc()!}
       alt=""
       class={styleClass()}
-      style={inlineStyle()}
+      style={imgStyle()}
       decoding="async"
       referrerPolicy="no-referrer"
-      onLoad={handleImgLoad}
       onError={load.onImgError}
     />
   );
 
   return (
-    <div ref={load.bindContainer} class={wrapperClass()}>
-      <Show when={load.phase() === 'loading'}>
+    <div
+      ref={load.bindContainer}
+      class={wrapperClass()}
+      style={reservedBoxStyle()}
+      data-reader-inline-img={isInline() ? '' : undefined}
+    >
+      <Show when={showLoadingPlaceholder()}>
         <div class={placeholderClass()} aria-busy="true" aria-live="polite">
           <Show when={!isInline()}>
             <LoaderIcon class="h-6 w-6 shrink-0 animate-spin text-muted-foreground" />

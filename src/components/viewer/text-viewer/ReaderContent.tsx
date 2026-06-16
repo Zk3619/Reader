@@ -21,6 +21,13 @@ import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderCon
 import { getSource } from '@/lib/database/sources';
 import { isMangaChapterContent } from '@/lib/media/image/image-book-detect';
 import type { BookSource } from '@/types';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import {
+  readerChapterTitleSpacingPx,
+  shouldRenderChapterTitle,
+} from '@/lib/media/text/reader-chapter-title-style';
+import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 
 type ReaderDisplayBlockLocal = ReaderDisplayBlock;
 
@@ -67,9 +74,6 @@ function toDisplayBlocks(
   const built = buildReaderDisplayBlocks(raw, bookImageStyle);
   return expandParagraphBlocks(built, chapterTitle);
 }
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { READER_THEME_CLASSES as themeClasses } from '@/lib/media/text/reader-theme-classes';
 
 export interface ReaderContentProps {
   class?: string;
@@ -242,8 +246,15 @@ export function ReaderContent(props: ReaderContentProps) {
     if (props.dualSpreadRender && props.showChapterTitle === undefined) {
       return props.visibleBlockIndices === undefined;
     }
-    return Boolean(currentChapter()?.title);
+    const style = config().chapterTitleStyle ?? 'center';
+    return shouldRenderChapterTitle(style, currentChapter()?.title);
   };
+
+  const chapterTitleSpacing = createMemo(() => {
+    const style = config().chapterTitleStyle ?? 'center';
+    const context = props.pagedLayout ? 'paged' : 'scroll';
+    return readerChapterTitleSpacingPx(style, config(), context);
+  });
 
   const showMeasureOrLiveBody = () => {
     if (props.measureHost) return Boolean(content()?.trim());
@@ -310,8 +321,8 @@ export function ReaderContent(props: ReaderContentProps) {
       ref={(el) => props.onMeasureRoot?.(el ?? null)}
       class={cn(
         'reader-content w-full px-0 selection:bg-primary/20',
-        themeClasses[config().theme]?.bg ?? themeClasses[0].bg,
-        themeClasses[config().theme]?.text ?? themeClasses[0].text,
+        readerThemeClasses(config().theme).bg,
+        readerThemeClasses(config().theme).text,
         props.class,
         props.dualSpreadRender
           ? 'min-h-0! h-auto! py-0'
@@ -369,10 +380,24 @@ export function ReaderContent(props: ReaderContentProps) {
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
             <Show when={showChapterTitleBlock()}>
               <div
-                class="mb-4 flex items-center justify-center gap-2"
+                class={cn(
+                  'flex items-center gap-2',
+                  chapterTitleSpacing()?.align === 'center' && 'justify-center',
+                )}
+                style={{
+                  'padding-top': `${chapterTitleSpacing()?.marginTopPx ?? 0}px`,
+                  'padding-bottom': `${chapterTitleSpacing()?.marginBottomPx ?? 0}px`,
+                }}
                 data-reader-measure-block={props.measureBlocks ? '' : undefined}
               >
-                <h2 class="text-center text-lg font-semibold">
+                <h2
+                  class={cn(
+                    'text-lg font-semibold',
+                    chapterTitleSpacing()?.align === 'center'
+                      ? 'text-center'
+                      : 'w-full text-left',
+                  )}
+                >
                   {currentChapter()!.title}
                 </h2>
                 <Show when={!props.hideCommentBubbles && (getCount(0) ?? 0) > 0}>

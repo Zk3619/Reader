@@ -10,6 +10,7 @@ import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
 import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickRegion } from '@/lib/media/text/reader-click-region';
+import type { TextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
 
 /** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 滑动 / 仿真 / 无动画 */
 export type TextViewerPageAnim =
@@ -209,6 +210,8 @@ export interface TextViewerUiConfig {
   /** 仿真翻页：左右拖拽分区宽度（视口宽度 25% / 50% / 75%） */
   simulationDragZonePercent: TextViewerSimulationDragZonePercent;
   dualPage: TextViewerDualPageMode;
+  /** 章节标题渲染：不渲染 / 居中 / 左上角 */
+  chapterTitleStyle: TextViewerChapterTitleStyle;
   /** 两端对齐（Legado textFullJustify） */
   textFullJustify: boolean;
   /** 末行底对齐（Legado textBottomJustify，按页微调行距） */
@@ -249,10 +252,11 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   pagedDragCommitPercent: TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT,
   simulationDragZonePercent: TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT,
   dualPage: 'auto',
+  chapterTitleStyle: 'center',
   textFullJustify: true,
   textBottomJustify: true,
   useZhLayout: false,
-  pagedTurnUseBitmap: true,
+  pagedTurnUseBitmap: false,
   volumeKeyTurnPage: true,
   clickActions: { ...DEFAULT_CLICK_ACTIONS },
   clickRegion: {
