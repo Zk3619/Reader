@@ -25,9 +25,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import {
-  popperContentViewportScroll,
+  popperMenuPanelShell,
   popperOverflowPadding,
 } from '@/lib/ui/viewport-classes';
+import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { blurActiveElement } from '@/utils/accessibility';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
@@ -57,7 +58,7 @@ const TRIGGER_LAYOUT_CLASS: Record<AppSelectTriggerLayout, string> = {
 export type AppSelectContentLayout = 'plain';
 
 const CONTENT_LAYOUT_CLASS: Record<AppSelectContentLayout, string> = {
-  plain: popperContentViewportScroll,
+  plain: popperMenuPanelShell,
 };
 
 function mergeOpenChange(
@@ -160,9 +161,17 @@ export const AppSelectItem: Component<ComponentProps<typeof SelectItem>> = (prop
   return <SelectItem class={cn(APP_SELECT_ITEM_CLASS, local.class)} {...rest} />;
 };
 
+export const AppSelectListbox: Component<ComponentProps<typeof SelectListbox>> = (props) => {
+  const [local, rest] = splitProps(props, ['class']);
+  return (
+    <PopperScrollViewport class="px-1">
+      <SelectListbox class={cn('p-0', local.class)} {...rest} />
+    </PopperScrollViewport>
+  );
+};
+
 export {
   SelectValue as AppSelectValue,
   SelectIcon as AppSelectIcon,
-  SelectListbox as AppSelectListbox,
   SelectItemIndicator as AppSelectItemIndicator,
 };

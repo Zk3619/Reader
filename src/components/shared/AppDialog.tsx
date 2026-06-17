@@ -20,9 +20,9 @@ import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMountAccessor } from '@/lib/ui/overlay-portal-mount';
-import { appBlockDrag, dialogViewportLimits } from '@/lib/ui/viewport-classes';
+import { appBlockDrag, dialogContentInPortal, dialogPortalShell, dialogViewportMaxBounds, dialogViewportMinBounds } from '@/lib/ui/viewport-classes';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
 import {
@@ -36,8 +36,10 @@ import { restoreAppModalSideEffects } from '@/lib/ui/overlay-cleanup';
 export const APP_DIALOG_CLOSE_BUTTON_CLASS =
   'h-9 w-9 shrink-0 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors';
 
-const APP_DIALOG_CONTENT_LAYOUT_CLASS =
-  'fixed left-1/2 top-1/2 grid max-h-screen w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto border bg-background p-6 shadow-lg rounded-lg';
+const APP_DIALOG_CONTENT_IN_PORTAL_CLASS = dialogContentInPortal;
+
+const APP_DIALOG_CONTENT_SURFACE_CLASS =
+  'border bg-background shadow-lg rounded-lg';
 
 type AppDialogPortalProps = DialogPrimitive.DialogPortalProps & {
   wrapperClass?: string;
@@ -59,7 +61,8 @@ const AppDialogPortal: Component<AppDialogPortalProps> = (props) => {
     <DialogPrimitive.Portal mount={resolveMount()} {...rest}>
       <div
         class={cn(
-          'pointer-events-none fixed inset-0 flex items-start justify-center sm:items-center',
+          'pointer-events-none fixed inset-0 overflow-hidden',
+          dialogPortalShell,
           local.wrapperClass,
         )}
       >
@@ -77,7 +80,7 @@ export type AppDialogContentProps<T extends ValidComponent = 'div'> =
     portalZClass?: string | undefined;
     overlayClass?: string | undefined;
     /**
-     * app：视口限制 + flex 纵向堆叠 + p-0（与 BookshelfLayoutDialog 等一致）
+     * app：视口 min/max + w-max/h-fit 自适应 + flex 纵向堆叠 + p-0
      * plain：不附加默认尺寸类，用于内嵌页 Cookie 等简单对话框
      */
     layout?: 'app' | 'plain';
@@ -150,14 +153,14 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
   const userOnPointerDownOutside = () =>
     (props as AppDialogContentProps<T>).onPointerDownOutside;
   const userOnInteractOutside = () => (props as AppDialogContentProps<T>).onInteractOutside;
-  const layer = useOverlayLayerZ();
   const layout = () => (props as AppDialogContentProps<T>).layout ?? 'app';
   const portalToBody = () => (props as AppDialogContentProps<T>).portalToBody === true;
+  const userClass = () => (props as AppDialogContentProps<T>).class;
   const zOverride = () => (props as AppDialogContentProps<T>).portalZClass;
-  const portalZ = () => zOverride() ?? layer.dialogOverlay;
-  const contentZ = () => layer.dialog;
   const overlayCls = () => (props as AppDialogContentProps<T>).overlayClass;
-  const overlayZ = () => overlayCls() ?? zOverride() ?? layer.dialogOverlay;
+  const portalZ = () => zOverride() ?? overlayLayerZ().dialogOverlay;
+  const overlayZ = () => overlayCls() ?? zOverride() ?? overlayLayerZ().dialogOverlay;
+  const contentZ = () => zOverride() ?? overlayLayerZ().dialog;
   return (
     <AppDialogPortal wrapperClass={portalZ()} portalToBody={portalToBody()}>
       <DialogOverlay
@@ -184,13 +187,18 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
           userOnInteractOutside()?.(e);
         }}
         class={cn(
-          APP_DIALOG_CONTENT_LAYOUT_CLASS,
+          APP_DIALOG_CONTENT_IN_PORTAL_CLASS,
+          APP_DIALOG_CONTENT_SURFACE_CLASS,
           dialogContentMotionClass,
           appBlockDrag,
           'pointer-events-auto',
-          zOverride() ?? contentZ(),
-          layout() === 'app' && `${dialogViewportLimits} flex flex-col overflow-hidden p-0`,
-          (props as AppDialogContentProps<T>).class
+          contentZ(),
+          layout() === 'app' && 'flex min-h-0 max-h-full flex-col overflow-hidden p-0',
+          layout() === 'plain' &&
+            'grid min-h-0 max-h-full w-full max-w-lg gap-4 overflow-y-auto p-6',
+          dialogViewportMaxBounds,
+          userClass(),
+          dialogViewportMinBounds,
         )}
       >
         {(props as AppDialogContentProps<T>).children}
@@ -276,6 +284,9 @@ export const AppDialogFooter: Component<ComponentProps<'div'>> = (props) => {
 };
 
 export { DialogTitle as AppDialogTitle, DialogDescription as AppDialogDescription };
+
+/** 弹窗正文可滚动区（外框固定留白 + 内轨滚动） */
+export { DialogScrollViewport as AppDialogScrollBody } from '@/components/shared/DialogScrollViewport';
 
 /** 与 AppDialog 配套的触发器，仍来自 Kobalte Dialog 原语 */
 export { DialogTrigger } from '@/components/ui/dialog';

@@ -25,24 +25,25 @@ import {
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import {
-  popperContentViewportScroll,
+  popperMenuPanelShell,
   popperOverflowPadding,
 } from '@/lib/ui/viewport-classes';
+import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { blurActiveElement } from '@/utils/accessibility';
 
-/** 常规右键菜单：最小宽度 + 不超过锚点方向可用高度时纵向滚动 */
+/** 常规右键菜单：最小宽度 + 内层 PopperScrollViewport 纵向滚动 */
 export const APP_CONTEXT_MENU_CONTENT_COMPACT = cn(
   'min-w-32 max-w-[min(280px,calc(100dvw-2rem))]',
-  popperContentViewportScroll
+  popperMenuPanelShell,
 );
 
 export type AppContextMenuContentLayout = 'compact' | 'plain';
 
 const CONTENT_LAYOUT_CLASS: Record<AppContextMenuContentLayout, string> = {
   compact: APP_CONTEXT_MENU_CONTENT_COMPACT,
-  plain: popperContentViewportScroll,
+  plain: popperMenuPanelShell,
 };
 
 function mergeOpenChange(
@@ -90,7 +91,7 @@ type AppContextMenuContentProps = ComponentProps<typeof ContextMenuContent> & {
 };
 
 export const AppContextMenuContent: Component<AppContextMenuContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass']);
+  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'children']);
   const layout = () => local.layout ?? 'compact';
   const layer = useOverlayLayerZ();
   const mount = useOverlayPortalMount();
@@ -100,7 +101,9 @@ export const AppContextMenuContent: Component<AppContextMenuContentProps> = (pro
       mount={mount}
       {...rest}
       class={cn(CONTENT_LAYOUT_CLASS[layout()], popperZ(), local.class)}
-    />
+    >
+      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+    </ContextMenuContent>
   );
 };
 
@@ -109,14 +112,16 @@ type AppContextMenuSubContentProps = ComponentProps<typeof ContextMenuSubContent
 };
 
 export const AppContextMenuSubContent: Component<AppContextMenuSubContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
+  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
   const layer = useOverlayLayerZ();
   const popperZ = () => local.portalZClass ?? layer.popper;
   return (
     <ContextMenuSubContent
       {...rest}
-      class={cn(popperZ(), local.class)}
-    />
+      class={cn(popperMenuPanelShell, popperZ(), local.class)}
+    >
+      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+    </ContextMenuSubContent>
   );
 };
 

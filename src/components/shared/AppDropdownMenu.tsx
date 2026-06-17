@@ -29,11 +29,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import {
   popperContentViewportPanel,
-  popperContentViewportScroll,
+  popperMenuPanelShell,
   popperOverflowPadding,
-  scrollEdgeBottomInset,
-  scrollGutterStableBoth,
 } from '@/lib/ui/viewport-classes';
+import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import {
   blurActiveElement,
   blurAfterMenuTriggerRefocus,
@@ -133,12 +132,9 @@ export const APP_DROPDOWN_MENU_CONTENT_TITLE_WIDE = cn(
 /** 内嵌页等窄菜单 */
 export const APP_DROPDOWN_MENU_CONTENT_MIN = 'min-w-40';
 
-/** 标题下拉内可滚动列表容器 */
-export const APP_DROPDOWN_MENU_TITLE_LIST_CLASS = cn(
-  'flex min-h-0 flex-1 w-full min-w-0 flex-col gap-2 p-2 overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth,
-  scrollEdgeBottomInset,
-);
+/** 标题下拉内列表内容区（滚动由 AppDropdownMenuContent 内 PopperScrollViewport 承担） */
+export const APP_DROPDOWN_MENU_TITLE_LIST_CLASS =
+  'flex min-h-0 flex-1 w-full min-w-0 flex-col gap-2 px-2';
 
 export type AppDropdownMenuContentLayout =
   | 'compact'
@@ -147,12 +143,15 @@ export type AppDropdownMenuContentLayout =
   | 'min'
   | 'plain';
 
+const SCROLL_INNER_LAYOUTS = new Set<AppDropdownMenuContentLayout>(['compact', 'min', 'plain']);
+const TITLE_SCROLL_LAYOUTS = new Set<AppDropdownMenuContentLayout>(['title', 'titleWide']);
+
 const CONTENT_LAYOUT_CLASS: Record<AppDropdownMenuContentLayout, string> = {
-  compact: cn(APP_DROPDOWN_MENU_CONTENT_COMPACT, popperContentViewportScroll),
+  compact: cn(APP_DROPDOWN_MENU_CONTENT_COMPACT, popperMenuPanelShell),
   title: APP_DROPDOWN_MENU_CONTENT_TITLE,
   titleWide: APP_DROPDOWN_MENU_CONTENT_TITLE_WIDE,
-  min: cn(APP_DROPDOWN_MENU_CONTENT_MIN, popperContentViewportScroll),
-  plain: popperContentViewportScroll,
+  min: cn(APP_DROPDOWN_MENU_CONTENT_MIN, popperMenuPanelShell),
+  plain: popperMenuPanelShell,
 };
 
 /**
@@ -241,11 +240,14 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
     'portalZClass',
     'portalToBody',
     'onCloseAutoFocus',
+    'children',
   ]);
   const layout = () => local.layout ?? 'compact';
   const layer = useOverlayLayerZ();
   const userOnCloseAutoFocus = local.onCloseAutoFocus;
   const popperZ = () => local.portalZClass ?? layer.popper;
+  const useInnerScroll = () => SCROLL_INNER_LAYOUTS.has(layout());
+  const useTitleScroll = () => TITLE_SCROLL_LAYOUTS.has(layout());
   return (
     <DropdownMenuContent
       {...rest}
@@ -259,7 +261,17 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
         popperZ(),
         local.class
       )}
-    />
+    >
+      {useInnerScroll() ? (
+        <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+      ) : useTitleScroll() ? (
+        <PopperScrollViewport class="flex min-h-0 flex-1 flex-col">
+          {local.children}
+        </PopperScrollViewport>
+      ) : (
+        local.children
+      )}
+    </DropdownMenuContent>
   );
 };
 
@@ -268,14 +280,16 @@ type AppDropdownMenuSubContentProps = ComponentProps<typeof DropdownMenuSubConte
 };
 
 export const AppDropdownMenuSubContent: Component<AppDropdownMenuSubContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
+  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
   const layer = useOverlayLayerZ();
   const popperZ = () => local.portalZClass ?? layer.popper;
   return (
     <DropdownMenuSubContent
       {...rest}
-      class={cn(popperZ(), local.class)}
-    />
+      class={cn(popperMenuPanelShell, popperZ(), local.class)}
+    >
+      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+    </DropdownMenuSubContent>
   );
 };
 

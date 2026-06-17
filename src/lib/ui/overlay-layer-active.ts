@@ -31,6 +31,12 @@ export function publishActiveOverlayLayer(
   }
 }
 
-export function useOverlayLayerZ(): OverlayLayerZ {
+/** 在 JSX / createMemo 中调用以订阅当前浮层档位（勿在组件初始化时缓存返回值） */
+export function overlayLayerZ(): OverlayLayerZ {
   return activeOverlayLayer();
+}
+
+/** @deprecated 优先在模板内使用 overlayLayerZ()，避免初始化时快照导致阅读器内 Dialog 被遮挡 */
+export function useOverlayLayerZ(): OverlayLayerZ {
+  return overlayLayerZ();
 }

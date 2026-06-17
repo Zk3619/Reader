@@ -17,12 +17,16 @@ export const hViewport = 'h-dvh';
 /** 对话框最大宽度（85% 视口） */
 export const maxWDialog = 'max-w-[85dvw]';
 
+/** 对话框最小宽度（不小于 18rem，且不超过视口 85%） */
+export const minWDialog = 'min-w-[min(18rem,85dvw)]';
+
 /**
  * 弹窗内虚拟长列表区固定宽/高（与 dialogViewportLimits 的 w-max 配合）。
  * 避免可视行内容变化导致弹窗宽度抖动；高度与目录弹窗历史尺寸一致。
  */
 export const dialogVirtualListPanelWidth = 'w-[min(32rem,85dvw)] shrink-0';
-export const dialogVirtualListPanelMaxHeight = 'max-h-[min(70dvh,520px)]';
+export const dialogVirtualListPanelMaxHeight =
+  'max-h-[min(60dvh,calc(85dvh-8rem))]';
 export const dialogVirtualListPanelMinHeight = 'min-h-[200px]';
 export const dialogVirtualListPanelHeight = cn(
   dialogVirtualListPanelMaxHeight,
@@ -33,14 +37,55 @@ export const dialogVirtualListPanelSize = cn(
   dialogVirtualListPanelHeight,
 );
 
-/** 对话框最大高度（85% 视口） */
-export const maxHDialog = 'max-h-[85dvh]';
+/** 对话框与视口上下各至少留白 1rem（与 85dvh 上限取较小值） */
+export const dialogViewportMarginY = '1rem';
+
+/** AppDialog Portal 内边距：弹窗相对视口留白，配合子级 max-h-full */
+export const dialogPortalInset = 'p-4';
 
 /**
- * 对话框尺寸：按内容收缩，宽/高不超过视口 85%。
+ * AppDialog Portal 布局：始终垂直居中。
+ * 勿用 sm: 切换顶对齐（640px 与壳层 480/768 断点不一致，会导致桌面窄窗顶距过小）。
+ */
+export const dialogPortalShell = cn(
+  'flex items-center justify-center',
+  dialogPortalInset,
+);
+
+/** 置于 Portal 内时的弹窗外壳：相对定位 + 占满留白内可用高宽 */
+export const dialogContentInPortal = cn(
+  'relative w-max min-h-0 max-h-full max-w-full',
+);
+
+/**
+ * 弹窗内宽表单横排样式（须配合 useDialogFormWideLayout 条件挂载，勿用 min-[480px] 媒体查询）。
+ */
+export const dialogFormRowWide = 'flex-row items-center gap-6';
+export const dialogFormCoverAsideWide = 'block w-64 shrink-0';
+
+/** 对话框最大高度（85% 视口，且不低于上下各 1rem 边距） */
+export const maxHDialog = 'max-h-[min(85dvh,calc(100dvh-2rem))]';
+
+/** 对话框最小高度（保证顶栏/底栏不局促，高内容仍由 h-fit 撑开） */
+export const minHDialog = 'min-h-[min(10rem,35dvh)]';
+
+/**
+ * 对话框尺寸：按内容收缩（w-max / h-fit），宽/高限制在视口 85% 内。
  * 覆盖 dialog.tsx 默认的 w-full；勿在内容区使用 flex-1，否则高度会顶满 max-h。
  */
-export const dialogViewportLimits = `w-max max-w-[85dvw] h-fit ${maxHDialog}`;
+export const dialogViewportLimits = cn(
+  'w-max h-fit',
+  minWDialog,
+  minHDialog,
+  maxWDialog,
+  maxHDialog,
+);
+
+/** 挂到 AppDialogContent：先铺宽度上限，业务 class 可再收窄 max-w */
+export const dialogViewportMaxBounds = maxWDialog;
+
+/** 挂到 AppDialogContent 末尾：最小宽高 + 高度上限，不被业务 class 覆盖 */
+export const dialogViewportMinBounds = cn(minWDialog, minHDialog, maxHDialog);
 
 /** 导航 mega menu、封面预览等（80% 视口） */
 export const maxHViewport80 = 'max-h-[80dvh]';
@@ -74,10 +119,13 @@ export const maxHTitleMenu = 'max-h-[min(24rem,calc(100dvh-11rem))]';
 export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
 
 /**
- * 滚动区垂直留白：顶恒 mt-2；底仅触摸端（App.css `.app-scroll-bottom-inset`）。
- * 主壳 Tab 无底栏时的底留白亦仅在触摸端由 App.css 注入。
+ * 滚动视口内上下留白（加在 overflow-y-auto 元素上，内容滚入/滚出时不贴边）。
+ * 桌面端 py-2；触摸端底边取 max(py-2, 安全区)。
  */
-export const scrollEdgeBottomInset = 'mt-2 app-scroll-bottom-inset';
+export const scrollEdgeInset = 'py-2 app-scroll-edge-inset';
+
+/** @deprecated 使用 scrollEdgeInset */
+export const scrollEdgeBottomInset = scrollEdgeInset;
 
 /**
  * 贴底 chrome 内边距（底栏、抽屉、阅读器底栏）。
@@ -101,18 +149,36 @@ export const appBlockDrag = 'app-block-drag';
 /** 浮层遮罩 scrim（半透明 + Tauri 拖拽拦截，供 inner-web / 居中卡片等） */
 export const appOverlayScrim = cn(appBlockDrag, 'bg-background/40');
 
+/** 标题下拉等：外层限高，内层列表滚动 */
+export const popperContentViewportPanel = cn(
+  'max-h-[var(--kb-popper-content-available-height)]',
+  'flex flex-col min-h-0 overflow-hidden'
+);
+
+/** Popper 菜单/Select 外层：限高裁切，滚动交给内层 PopperScrollViewport */
+export const popperMenuPanelShell = cn(popperContentViewportPanel, 'overflow-hidden p-0');
+
+/** Popper 内层：固定上下留白的外框（不滚动，裁切内层） */
+export const popperMenuScrollFrame = cn(
+  'flex min-h-0 w-full flex-1 flex-col overflow-hidden max-h-[var(--kb-popper-content-available-height)]',
+  scrollEdgeInset,
+);
+
+/** Popper 内层滚动轨（置于 popperMenuScrollFrame 内） */
+export const popperMenuScrollTrack = cn(
+  'min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain',
+  scrollGutterStableBoth,
+);
+
+/** @deprecated 使用 popperMenuScrollFrame + popperMenuScrollTrack */
+export const popperMenuScrollBody = popperMenuScrollTrack;
+
 /** 不超过锚点方向可用高度（`--kb-popper-content-available-height`），面板内纵向滚动 */
 export const popperContentViewportScroll = cn(
   'max-h-[var(--kb-popper-content-available-height)]',
   'overflow-y-auto overflow-x-hidden overscroll-contain',
   scrollGutterStableBoth,
-  scrollEdgeBottomInset,
-);
-
-/** 标题下拉等：外层限高，内层列表滚动 */
-export const popperContentViewportPanel = cn(
-  'max-h-[var(--kb-popper-content-available-height)]',
-  'flex flex-col min-h-0 overflow-hidden'
+  scrollEdgeInset,
 );
 
 /** Sidebar inset 变体：四周留白 spacing(4) = 1rem */
@@ -135,7 +201,8 @@ export const mainShellPageRoot = 'flex flex-col flex-1 min-h-0 w-full overflow-h
 
 /** 侧边栏 Tab 页主内容可滚动区（书架列表、书源列表、探索书籍区等） */
 export const mainShellPageScroll = cn(
-  'main-shell-page-scroll flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both py-1',
+  'main-shell-page-scroll flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both',
+  scrollEdgeInset,
 );
 
 /** 设置内嵌规则管理页（TXT/替换/字典）：占满父级高度，列表区内滚、底栏固定于组件底部 */
@@ -143,29 +210,92 @@ export const settingsRuleManagePageRoot =
   'flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card';
 
 /** 规则管理页列表滚动区 */
-export const settingsRuleManagePageListScroll =
-  'min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background/40';
+export const settingsRuleManagePageListScroll = cn(
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background/40',
+  scrollEdgeInset,
+);
 
 /** 独立全屏页主内容可滚动区（触摸端底留白，桌面无额外底距） */
 export const standalonePageScroll = cn(
   'flex-1 min-h-0 overflow-y-auto scroll-gutter-stable-both',
-  scrollEdgeBottomInset,
+  scrollEdgeInset,
 );
 
-/** 弹窗内可滚动主体（无底栏/DialogFooter 时）；含 px-6 pt-4，底边用 scrollEdgeBottomInset 替代 pb */
-export const appDialogScrollBodyNoFooter = cn(
-  'min-h-0 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-6 pt-4 pb-2',
-  scrollEdgeBottomInset,
+/** 弹窗内滚动外框：固定上下留白 + 水平 px-6，不滚动 */
+export const dialogScrollFrame = cn(
+  'flex min-h-0 w-full flex-col overflow-hidden px-6',
+  scrollEdgeInset,
 );
 
-/** 多区块设置类弹窗正文：固定最大高度，避免 h-fit 随单选切换重算导致整体塌缩 */
-export const appDialogSettingsScrollBody = cn(
-  'flex-1 min-h-0 max-h-[min(65dvh,32rem)] space-y-4 overflow-y-auto overscroll-contain px-6 py-4',
-  scrollEdgeBottomInset,
+/** 外框占满 Header / Footer 之间的剩余高度 */
+export const dialogScrollFrameFlex = cn(dialogScrollFrame, 'flex-1');
+
+/** 弹窗内滚动轨（置于 dialogScrollFrame 内） */
+export const dialogScrollTrack = cn(
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain contain-layout',
+  scrollGutterStableBoth,
 );
 
-/** 书架/探索等宽设置弹窗外壳：稳定宽高，内部正文用 appDialogSettingsScrollBody */
-export const appDialogSettingsShell = 'w-[min(42rem,85dvw)] min-h-[min(75dvh,36rem)]';
+/** 弹窗内嵌套小列表外框（分组筛选等） */
+export const dialogNestedScrollFrame = cn(
+  'flex max-h-[min(16rem,50vh)] min-h-0 w-full flex-col overflow-hidden rounded-md border border-border/50 bg-muted/20 px-1',
+  scrollEdgeInset,
+);
+
+export const dialogNestedScrollTrack = cn(
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+  scrollGutterStableBoth,
+);
+
+/** 弹窗正文 track 修饰：垂直间距 */
+export const appDialogScrollBodySpaceY2 = 'space-y-2';
+export const appDialogScrollBodySpaceY3 = 'space-y-3';
+export const appDialogScrollBodySpaceY4 = 'space-y-4';
+export const appDialogScrollBodyMaxH60 = 'max-h-[60dvh]';
+export const appDialogScrollBodyMaxH70 = 'max-h-[min(70vh,36rem)]';
+
+/** @deprecated 使用 DialogScrollViewport + dialogScrollFrameFlex */
+export const appDialogScrollBodyNoFooter = dialogScrollFrameFlex;
+
+/** @deprecated 使用 DialogScrollViewport */
+export const appDialogScrollBody = '';
+
+/** @deprecated 使用 DialogScrollViewport frameClass={dialogScrollFrameFlex} */
+export const appDialogScrollBodyFlex = dialogScrollFrameFlex;
+
+export const appDialogScrollBodyFlexSpaceY3 = appDialogScrollBodySpaceY3;
+export const appDialogScrollBodyFlexSpaceY4 = appDialogScrollBodySpaceY4;
+
+export const appDialogScrollBodyMaxH70SpaceY4 = cn(
+  appDialogScrollBodySpaceY4,
+  appDialogScrollBodyMaxH70,
+);
+
+/** @deprecated 使用 DialogScrollViewport nested */
+export const appDialogNestedPanelScroll = dialogNestedScrollFrame;
+
+/** 弹窗内虚拟长列表 track（与 dialogVirtualListPanelHeight 配合，外层用 DialogScrollViewport） */
+export const dialogVirtualListScroll = 'min-h-0 flex-1 space-y-2';
+
+/** 多区块设置类弹窗：外框 flex-1，track 限高 */
+export const appDialogSettingsScrollFrame = dialogScrollFrameFlex;
+export const appDialogSettingsScrollTrack = cn(
+  dialogScrollTrack,
+  'space-y-4',
+);
+
+/** @deprecated 使用 DialogScrollViewport frameClass/trackClass */
+export const appDialogSettingsScrollBody = appDialogSettingsScrollTrack;
+
+/** Popper 内嵌套可滚动列表（下拉选项分组等） */
+export const popperNestedListScroll = cn(
+  'overflow-y-auto overflow-x-hidden overscroll-contain',
+  scrollGutterStableBoth,
+  scrollEdgeInset,
+);
+
+/** 书架/探索等宽设置弹窗外壳：稳定宽度，高度由视口与滚动区约束 */
+export const appDialogSettingsShell = 'w-[min(42rem,85dvw)]';
 
 /**
  * 主壳 Tab 页入场动画。移动端省略位移，减少 Popper 首次测量错误。
@@ -193,7 +323,7 @@ export const appDrawerTopSafeArea = 'safe-area-inset-top';
  * 抽屉内纵向滚动：双侧 stable 沟槽防抖动；横向用较小 px-2，为沟槽留出净宽（分类 grid 见 SourceExploreDrawerContent）。
  */
 export const appDrawerScrollBody = cn(
-  'min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pt-1',
+  'min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-2',
   scrollGutterStableBoth,
-  scrollEdgeBottomInset,
+  scrollEdgeInset,
 );

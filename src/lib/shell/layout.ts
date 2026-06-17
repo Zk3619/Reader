@@ -47,11 +47,12 @@ export function resolveShellLayout(input: ShellLayoutInput): ShellLayoutResolved
     input.isMobileDevice,
   );
 
-  const useMobileShellFromPreference = isWide && effectivePreference === 'mobile';
-  const useDesktopShellFromPreference = isWide && effectivePreference === 'desktop';
+  const useDesktopShell = isWide && effectivePreference === 'desktop';
 
-  const useMobileShell = isCompactMobile || useMobileShellFromPreference;
-  const useDesktopShell = useDesktopShellFromPreference;
+  /** 移动底栏：显式移动布局（任意宽度）或移动端设备紧凑宽度 */
+  const useMobileShell =
+    effectivePreference === 'mobile' || isCompactMobile;
+
   const showSidebar =
     useDesktopShell && input.windowWidth >= SHELL_SIDEBAR_MIN_WIDTH;
 
@@ -63,7 +64,8 @@ export function resolveShellLayout(input: ShellLayoutInput): ShellLayoutResolved
     useDesktopShell,
     showSidebar,
     showTopNavigation:
-      useDesktopShell || (isCompact && !input.isMobileDevice),
+      !useMobileShell &&
+      (useDesktopShell || (isCompact && !input.isMobileDevice)),
     showBottomBar: useMobileShell,
     insetTopSafeArea: useMobileShell,
   };

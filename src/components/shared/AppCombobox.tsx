@@ -3,12 +3,12 @@
  */
 
 import { createFilter } from '@kobalte/core';
+import * as ComboboxPrimitive from '@kobalte/core/combobox';
 import type { Component } from 'solid-js';
 import { createMemo, splitProps } from 'solid-js';
 
 import {
   Combobox,
-  ComboboxContent,
   ComboboxControl,
   ComboboxInput,
   ComboboxItem,
@@ -17,6 +17,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
+import { popperMenuPanelShell } from '@/lib/ui/viewport-classes';
+import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 
 export type AppComboboxProps = {
   options: string[];
@@ -68,7 +70,15 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
         <ComboboxInput />
         <ComboboxTrigger />
       </ComboboxControl>
-      <ComboboxContent mount={mount} class={cn(layer.popper, local.contentClass)} />
+      <ComboboxPrimitive.Portal mount={mount}>
+        <ComboboxPrimitive.Content
+          class={cn(popperMenuPanelShell, layer.popper, local.contentClass)}
+        >
+          <PopperScrollViewport class="px-1">
+            <ComboboxPrimitive.Listbox class="m-0 p-0" />
+          </PopperScrollViewport>
+        </ComboboxPrimitive.Content>
+      </ComboboxPrimitive.Portal>
     </Combobox>
   );
 };
