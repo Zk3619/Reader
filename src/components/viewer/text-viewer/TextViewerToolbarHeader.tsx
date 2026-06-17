@@ -38,6 +38,8 @@ export interface TextViewerToolbarHeaderProps {
   /** 目录抽屉开/关期间暂停「目录」Tooltip */
   catalogTooltipSuspended?: boolean;
   onChangeSource: () => void;
+  /** 在线书架书才显示换源（对齐 Legado menu_group_on_line） */
+  canChangeSource?: boolean;
   onRefreshChapter: () => void;
   onOpenOfflineCache: () => void;
   moreMenu: Omit<ReaderMoreMenuProps, 'triggerClass'>;
@@ -167,19 +169,21 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           <ViewerAppTooltipContent>设置</ViewerAppTooltipContent>
         </ViewerAppTooltip>
       </Show>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
-          as={Button}
-          variant="ghost"
-          size="icon"
-          class={iconBtn()}
-          onClick={props.onChangeSource}
-          aria-label="换源"
-        >
-          <ReplaceIcon class="size-5" />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+      <Show when={props.canChangeSource !== false}>
+        <ViewerAppTooltip>
+          <ViewerAppTooltipTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class={iconBtn()}
+            onClick={props.onChangeSource}
+            aria-label="换源"
+          >
+            <ReplaceIcon class="size-5" />
+          </ViewerAppTooltipTrigger>
+          <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
+        </ViewerAppTooltip>
+      </Show>
       <ViewerAppTooltip>
         <ViewerAppTooltipTrigger
           as={Button}

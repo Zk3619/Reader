@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computePageStartsFromSegments,
+  contentExtentFromSegments,
   dualSpreadColumnContentSpanPx,
   pageContentSpanPx,
   pageDisplayHeight,
@@ -116,6 +117,25 @@ describe('computePageStartsFromSegments', () => {
     expect(pageDisplayHeight(1, starts, clipHeight, 768, segments)).toBe(32);
   });
 
+  it('pageDisplayHeight extends to page break when segment straddles from prior page', () => {
+    const clipHeight = 749;
+    const segments = [{ top: 717, bottom: 768 }];
+    const starts = [0, 736];
+    expect(pageDisplayHeight(0, starts, clipHeight, 768, segments)).toBe(736);
+    expect(
+      pageContentSpanPx(
+        0,
+        {
+          pageStarts: starts,
+          clipHeight,
+          contentExtent: 768,
+          segments,
+        },
+        749,
+      ),
+    ).toBe(736);
+  });
+
   it('paginates oversized block that started on a prior page', () => {
     const clipHeight = 749;
     const segments = [{ top: 0, bottom: 1500 }];
@@ -173,7 +193,7 @@ describe('pageContentSpanPx', () => {
     expect(pageContentSpanPx(0, layout, 697)).toBe(697);
   });
 
-  it('uses displayHeight when shorter than break span (paragraph gap)', () => {
+  it('uses break span up to next page start (not displayHeight shrink)', () => {
     const layout = {
       pageStarts: [0, 400],
       clipHeight: 500,
@@ -183,7 +203,7 @@ describe('pageContentSpanPx', () => {
         { top: 400, bottom: 780 },
       ],
     };
-    expect(pageContentSpanPx(0, layout, 500)).toBe(380);
+    expect(pageContentSpanPx(0, layout, 500)).toBe(400);
   });
 });
 
@@ -209,6 +229,22 @@ describe('lastNonBlankPageIndex', () => {
   it('keeps last page when only a straddling segment tail is visible', () => {
     const segments = [{ top: 717, bottom: 768 }];
     expect(lastNonBlankPageIndex([0, 736], segments, 768)).toBe(1);
+  });
+});
+
+describe('contentExtentFromSegments', () => {
+  it('prefers segment bottoms over inflated scrollHeight', () => {
+    const segments = [
+      { top: 0, bottom: 320 },
+      { top: 320, bottom: 640 },
+    ];
+    const root = { scrollHeight: 1200, offsetHeight: 1200 } as HTMLElement;
+    expect(contentExtentFromSegments(segments, root)).toBe(640);
+  });
+
+  it('falls back to scrollHeight when segments are empty', () => {
+    const root = { scrollHeight: 900, offsetHeight: 880 } as HTMLElement;
+    expect(contentExtentFromSegments([], root)).toBe(900);
   });
 });
 

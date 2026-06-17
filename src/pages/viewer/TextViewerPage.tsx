@@ -22,7 +22,8 @@ import {
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
 } from '@/components/viewer/viewer-app-overlay';
-import { hDrawerPanel } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, hDrawerPanel } from '@/lib/ui/viewport-classes';
+import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import {
   mediaViewerCatalogDrawerContentClass,
   mediaViewerCatalogDrawerSide,
@@ -69,7 +70,7 @@ import {
   addReaderBookmark,
   selectionTextFromDocument,
 } from '@/lib/media/text/reader-bookmark';
-import type { Bookmark } from '@/types';
+import type { Bookmark, BookSource } from '@/types';
 import { cn } from '@/lib/utils';
 import { isMobile } from '@/lib/platform/detect';
 import {
@@ -98,6 +99,7 @@ import {
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainScrollClass, useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
+import { TextViewerChapterSourceBar } from '@/components/viewer/text-viewer/TextViewerChapterSourceBar';
 import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
 import { ReaderAutoPageOverlay } from '@/components/viewer/text-viewer/ReaderAutoPageOverlay';
 import { useTextViewerAutoPager } from '@/lib/media/text/use-text-viewer-auto-pager';
@@ -114,6 +116,10 @@ export interface BookReaderProps {
   onClose: () => void;
   /** 点击顶栏书名时进入书籍信息页（不传则书名不可点） */
   onOpenBookInfo?: () => void;
+  /** 书源：编辑 / 登录 / 设置源变量（顶栏章节书源栏） */
+  onSourceEdit?: (source: BookSource) => void;
+  onSourceLogin?: (source: BookSource) => void;
+  onSourceVariables?: (source: BookSource) => void;
   /** 导航栈条目是否栈顶可见 */
   entryVisible?: Accessor<boolean>;
 }
@@ -240,6 +246,25 @@ export function BookReader(props: BookReaderProps) {
   /** 宽屏下段评面板刚打开，用于进入动画（从右侧滑入） */
   const [panelEntering, setPanelEntering] = createSignal(false);
   const [isWideScreen, setIsWideScreen] = createSignal(window.innerWidth >= 480);
+
+  const canChangeSource = () => {
+    const b = book();
+    return !!b && !textViewerStore.isGuestReading() && !isLocalBook(b);
+  };
+
+  const openChangeSource = () => {
+    const b = book();
+    if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
+      showAppToast({
+        title: '无法换源',
+        description: textViewerStore.isGuestReading()
+          ? '试读请先加入书架'
+          : '本地书不支持换源',
+      });
+      return;
+    }
+    setChangeSourceOpen(true);
+  };
 
   const closeReaderShellOverlays = () => {
     setCatalogOpen(false);
@@ -932,7 +957,18 @@ export function BookReader(props: BookReaderProps) {
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={
-              <MediaViewerHeader>
+              <MediaViewerHeader
+                subHeader={
+                  <TextViewerChapterSourceBar
+                    book={book()}
+                    chapter={currentChapter()}
+                    chapterTitle={displayChapterTitle()}
+                    onSourceEdit={props.onSourceEdit}
+                    onSourceLogin={props.onSourceLogin}
+                    onSourceVariables={props.onSourceVariables}
+                  />
+                }
+              >
                 <TextViewerToolbarHeader
                   bookName={book()?.name ?? ''}
                   onClose={props.onClose}
@@ -945,19 +981,8 @@ export function BookReader(props: BookReaderProps) {
                   onOpenReaderMenu={openReaderMenuDrawer}
                   settingsTooltipSuspended={settingsTooltipSuspended()}
                   catalogTooltipSuspended={catalogTooltipSuspended()}
-                  onChangeSource={() => {
-                    const b = book();
-                    if (!b || textViewerStore.isGuestReading() || isLocalBook(b)) {
-                      showAppToast({
-                        title: '无法换源',
-                        description: textViewerStore.isGuestReading()
-                          ? '试读请先加入书架'
-                          : '本地书不支持换源',
-                      });
-                      return;
-                    }
-                    setChangeSourceOpen(true);
-                  }}
+                  onChangeSource={openChangeSource}
+                  canChangeSource={canChangeSource()}
                   onRefreshChapter={() => {
                     void textViewerStore.refreshChapter().catch(() => undefined);
                   }}
@@ -1189,6 +1214,18 @@ export function BookReader(props: BookReaderProps) {
             >
               字典
             </Button>
+            <Show when={canChangeSource()}>
+              <Button
+                variant="ghost"
+                class="w-full justify-start"
+                onClick={() => {
+                  setReaderMenuDrawerOpen(false);
+                  openChangeSource();
+                }}
+              >
+                换源
+              </Button>
+            </Show>
             <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
               <Label class={cn('text-sm', isDualPageLayoutActive() && 'text-muted-foreground')}>
                 自动翻页
@@ -1347,7 +1384,7 @@ export function BookReader(props: BookReaderProps) {
           <ViewerAppDialogHeader>
             <ViewerAppDialogTitle>阅读进度状态栏的显示风格</ViewerAppDialogTitle>
           </ViewerAppDialogHeader>
-          <div class="min-h-0 overflow-y-auto overscroll-contain px-6 pt-4 pb-2 contain-layout mb-4">
+          <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
             <RadioGroup
               value={textViewerStore.state.config.statusBarDisplayStyle}
               onChange={(value) => {
@@ -1405,7 +1442,7 @@ export function BookReader(props: BookReaderProps) {
                 </RadioGroupItem>
               </div>
             </RadioGroup>
-          </div>
+          </AppDialogScrollBody>
         </ViewerAppDialogContent>
       </ViewerAppDialog>
 
@@ -1442,8 +1479,13 @@ export function BookReader(props: BookReaderProps) {
         open={changeSourceOpen()}
         onOpenChange={setChangeSourceOpen}
         book={book() ?? null}
-        onChanged={async (nextBook) => {
+        chapterIndex={chapterIndex()}
+        chapterTitle={displayChapterTitle()}
+        onBookChanged={async (nextBook) => {
           await textViewerStore.openBook(nextBook);
+        }}
+        onChapterReplaced={() => {
+          void textViewerStore.reprocessDisplayedChapter();
         }}
       />
 

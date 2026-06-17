@@ -1421,12 +1421,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return pageContentSpanPx(page, spanLayout, liveClip);
   };
 
-  /** 页窗总高 = 排版区 clipHeight（恒定）；正文裁切另见 pageContentClipPx */
-  const pageWindowHeightForDisplay = () => clipViewportHeightPx();
-
-  /** 当前页正文可见高度（≤ 页窗高），避免缩页窗导致“少行” */
+  /** 当前页正文裁切高度（= 页界 nextStart − pageStart，≤ liveClip） */
   const pageContentClipPx = () =>
     pageWindowSpanPx(incomingDisplayPage()) ?? clipViewportHeightPx();
+
+  /** 页窗与 content-clip 同高，避免 page-window 满高 + clip 缩窗在底部形成错误占位 */
+  const pageWindowHeightForDisplay = () => pageContentClipPx();
 
   const dualSpreadColumnClipPx = (
     page: number,
@@ -3420,7 +3420,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const themeCls = theme();
 
     return (
-      <div class="reader-auto-pager-scan pointer-events-none absolute inset-0 z-[6]" aria-hidden>
+      <div class="reader-auto-pager-scan pointer-events-none absolute inset-0 z-6" aria-hidden>
         <div class="absolute inset-x-0 top-0 overflow-hidden" style={{ height: `${revealH}px` }}>
           <div
             data-reader-render-page={nextPage}
@@ -4249,7 +4249,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const renderPagedWindow = () => {
     const themeCls = theme();
     const pageWindowH = pageWindowHeightForDisplay();
-    const contentClipH = pageContentClipPx();
     const slotInset = pagedSlotInsetFromConfig();
     const slideActive = slideTurnActive();
 
@@ -4318,8 +4317,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               style={pageWindowH != null ? { height: `${pageWindowH}px` } : undefined}
             >
               <div
-                class="reader-paged-page-content-clip relative w-full overflow-hidden"
-                style={{ height: `${contentClipH}px` }}
+                class="reader-paged-page-content-clip relative h-full w-full overflow-hidden"
               >
                 {renderCurtainCloneHost()}
                 {renderLiveChapter()}

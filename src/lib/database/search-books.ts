@@ -94,6 +94,63 @@ export async function clearSearchBooks(): Promise<void> {
   await db.execute('DELETE FROM searchBooks');
 }
 
+function sourceMatchesGroup(sourceGroup: string | undefined, filterGroup: string): boolean {
+  if (!filterGroup) return true;
+  if (!sourceGroup?.trim()) return false;
+  const parts = sourceGroup.split(/[,，;；]\s*/).map((s) => s.trim());
+  return parts.includes(filterGroup);
+}
+
+/**
+ * 换源：读取缓存的搜索结果（对齐 Legado SearchBookDao.changeSourceByGroup）
+ */
+export async function queryChangeSourceBooks(params: {
+  name: string;
+  author: string;
+  checkAuthor: boolean;
+  searchGroup: string;
+  screenKey?: string;
+}): Promise<SearchBook[]> {
+  const db = await getDatabase();
+  const name = params.name.trim();
+  const author = params.checkAuthor ? params.author.trim() : '';
+  const screen = params.screenKey?.trim() ?? '';
+
+  let sql = 'SELECT * FROM searchBooks WHERE name = ?';
+  const args: unknown[] = [name];
+  if (author) {
+    sql += ' AND author = ?';
+    args.push(author);
+  }
+  if (screen) {
+    sql += ' AND (name LIKE ? OR originName LIKE ? OR latestChapterTitle LIKE ?)';
+    const like = `%${screen}%`;
+    args.push(like, like, like);
+  }
+  sql += ' ORDER BY originOrder ASC, respondTime ASC';
+
+  const rows = await db.select<Record<string, unknown>>(sql, args);
+  let books = rows.map((row) => mapRowToSearchBook(row));
+  if (params.searchGroup) {
+    const { getAllSources } = await import('@/lib/database/sources');
+    const allowed = new Set(
+      (await getAllSources())
+        .filter((s) => s.enabled && sourceMatchesGroup(s.sourceGroup, params.searchGroup))
+        .map((s) => s.sourceUrl),
+    );
+    books = books.filter((b) => allowed.has(b.origin));
+  }
+  return books;
+}
+
+/**
+ * 删除指定书源下的换源缓存结果
+ */
+export async function deleteChangeSourceBooksByOrigin(origin: string): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM searchBooks WHERE origin = ?', [origin]);
+}
+
 /**
  * 将数据库行映射为SearchBook对象
  */

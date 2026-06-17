@@ -17,6 +17,7 @@ import { isLocalBook, getLocalContent, readLocalBookContent, ensureLocalTxtCatal
 import { normalizeCatalogChapterIndices } from '@/lib/chapter-cache/catalog-cache-index';
 import {
   readCachedChapterRaw,
+  writeCachedChapterRaw,
   fetchAndCacheChapterContent,
 } from '@/lib/chapter-cache/storage';
 import { applyChapterDisplayProcessingWithMeta } from '@/lib/chapter-cache/display-processing';
@@ -1093,6 +1094,27 @@ export const textViewerTextApi = {
   /** 用当前缓存 raw 重新应用展示处理（替换规则开关等，不触发网络） */
   async reprocessDisplayedChapter(index?: number): Promise<void> {
     await reprocessDisplayedChapterImpl(index);
+  },
+
+  /**
+   * 单章换源：写入当前章缓存并刷新展示（对齐 Legado replaceContent / saveContent）
+   */
+  async replaceChapterContent(raw: string, chapterIndex?: number): Promise<void> {
+    if (!state.book) return;
+    const idx = chapterIndex ?? state.chapterIndex;
+    const chapter = state.catalog[idx];
+    if (!chapter) return;
+
+    await writeCachedChapterRaw(state.book, idx, raw);
+    resetChapterContentPool(state.book.bookUrl);
+
+    const source =
+      state.book.origin && state.book.origin !== 'local'
+        ? await sourcesDb.getSource(state.book.origin)
+        : null;
+    const result = await applyDisplayProcessing(raw, state.book, source, chapter);
+    commitChapterContent(idx, result.content, state.book, result.effectiveReplaceRules);
+    notifyScrollChaptersRefresh();
   },
 
   /**

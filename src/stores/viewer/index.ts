@@ -37,6 +37,8 @@ export const textViewerStore = {
   loadChapter: (index: number, options?: { forceRefresh?: boolean }) =>
     viewerStore.loadChapter(index, options),
   refreshChapter: (index?: number) => viewerStore.refreshChapter(index),
+  replaceChapterContent: (raw: string, chapterIndex?: number) =>
+    textViewerTextApi.replaceChapterContent(raw, chapterIndex),
   saveProgress: () => viewerStore.saveProgress(),
   closeBook: () => viewerStore.closeBook(),
   loadCatalog: (bookUrl: string) => viewerStore.loadCatalog(bookUrl),

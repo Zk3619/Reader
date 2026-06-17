@@ -339,16 +339,13 @@ export function measureLayoutSegments(
     }
 
     const blockTop = relativeTop(rootRect, textEl);
-    const blockBottom = blockFlowBottom(
-      rootRect,
-      textEl,
-      fontSize,
-      lineSpacing,
-      paragraphSpacing,
+    const lineHeightPx = readLineHeightPx(textEl, fontSize, lineSpacing);
+    const blockBottom = Math.max(
+      blockFlowBottom(rootRect, textEl, fontSize, lineSpacing, paragraphSpacing),
+      blockTop + lineHeightPx,
     );
     if (blockBottom <= blockTop + 0.5) return;
 
-    const lineHeightPx = readLineHeightPx(textEl, fontSize, lineSpacing);
     const textContentBottom = readParagraphGlyphBottom(rootRect, textEl, lineHeightPx);
 
     const blockH = blockBottom - blockTop;
@@ -425,7 +422,8 @@ export function contentExtentFromSegments(
   measureRoot: HTMLElement,
 ): number {
   const fromSeg = segments.reduce((max, s) => Math.max(max, s.bottom), 0);
-  return Math.max(fromSeg, measureRoot.scrollHeight, measureRoot.offsetHeight);
+  if (fromSeg > 0.5) return fromSeg;
+  return Math.max(measureRoot.scrollHeight, measureRoot.offsetHeight);
 }
 
 export function measureLineMetrics(
@@ -477,15 +475,8 @@ export function pageDisplayHeight(
 
   let lastBottom = start;
   for (const seg of segments) {
-    if (seg.top >= maxEnd - 0.5) continue;
-    if (seg.bottom <= start + 0.5) continue;
-    if (seg.bottom > maxEnd + 0.5) {
-      if (seg.top >= start - 0.5) {
-        lastBottom = Math.max(lastBottom, seg.top);
-      }
-      continue;
-    }
-    lastBottom = Math.max(lastBottom, seg.bottom);
+    if (!segmentOverlapsRange(seg, start, maxEnd)) continue;
+    lastBottom = Math.max(lastBottom, Math.min(seg.bottom, maxEnd));
   }
 
   const contentSpan = Math.max(1, Math.ceil(lastBottom - start));
@@ -524,19 +515,9 @@ function columnPageContentSpanPx(
       ? Math.min(layout.clipHeight, Math.max(1, pageEnd - start))
       : liveClip;
 
-  if (columnSegments.length === 0) {
-    return Math.min(liveClip, breakSpan);
-  }
-
-  const displayH = pageDisplayHeight(
-    pageIndex,
-    columnStarts,
-    layout.clipHeight,
-    layout.contentExtent,
-    columnSegments,
-  );
-
-  return Math.min(liveClip, breakSpan, Math.max(1, displayH));
+  // 裁切高度仅跟页界 breakSpan 对齐；勿再用 displayHeight 缩窗（会在 page-window 底部留出错误占位并裁切正文）
+  void columnSegments;
+  return Math.min(liveClip, breakSpan);
 }
 
 /**
@@ -561,7 +542,7 @@ export function dualSpreadColumnContentSpanPx(
 }
 
 /**
- * 单页正文裁切高度：nextStart − pageStart 防漏页；displayHeight 贴齐末行；
+ * 单页正文裁切高度：nextStart − pageStart 防漏页/半行；
  * liveClipHeight 对齐 DOM page-window，避免 layout.clipHeight 与实测偏差裁切。
  * 双栏时取左右栏较大值作为外层 clip，各 pane 另用 dualSpreadColumnContentSpanPx。
  */
