@@ -4,6 +4,7 @@
 
 import { createSignal } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogFooter,
@@ -90,7 +91,7 @@ export function ImportBookshelfDialog(props: ImportBookshelfDialogProps) {
           <AppDialogTitle>导入书单</AppDialogTitle>
         </AppDialogHeader>
 
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody>
           <div class="space-y-2">
             <Label for="import-bookshelf-content">书单内容</Label>
             <p class="text-sm text-muted-foreground">
@@ -107,7 +108,7 @@ export function ImportBookshelfDialog(props: ImportBookshelfDialogProps) {
               />
             </TextField>
           </div>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter class="flex-wrap gap-2 sm:justify-between">
           <Button

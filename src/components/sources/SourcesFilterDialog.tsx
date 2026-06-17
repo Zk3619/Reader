@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import {
   AppDialog,
+  AppDialogScrollBody,
   AppDialogContent,
   AppDialogDescription,
   AppDialogFooter,
@@ -26,7 +27,7 @@ import {
   type SourceSpecialFilter,
 } from '@/lib/sources/source-list-filter';
 import { cn } from '@/lib/utils';
-import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
+import { dialogNestedScrollFrame, dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 
 /** 分组列表可视高度（虚拟列表须固定高度，不可用 flex-1 撑开） */
 const GROUP_LIST_VIEWPORT_CLASS = 'h-64 max-h-[50vh] shrink-0';
@@ -42,10 +43,6 @@ export interface SourcesFilterDialogProps {
 const GROUP_ROW_HEIGHT = 40;
 const listItemClass =
   'flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-accent/40';
-
-/** 与 BookshelfManageFilterDialog 可滚动列表区一致 */
-const filterScrollPanelClass =
-  'max-h-[min(16rem,50vh)] overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/20 p-1';
 
 function FilterSectionActions(props: {
   label: string;
@@ -193,7 +190,7 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent layout="app" class="max-h-[85dvh]! w-full max-w-lg">
+      <AppDialogContent layout="app" class="max-w-lg">
         <AppDialogHeader class="shrink-0 px-6 pt-6">
           <AppDialogTitle>筛选</AppDialogTitle>
           <AppDialogDescription>
@@ -201,12 +198,7 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div
-          class={cn(
-            'min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4',
-            scrollGutterStableBoth,
-          )}
-        >
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
           <div class="flex flex-col gap-4">
             <div class="flex min-w-0 flex-col gap-2">
               <FilterSectionActions
@@ -223,7 +215,12 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
               <Show
                 when={groupOptions().length > 0}
                 fallback={
-                  <div class={cn(filterScrollPanelClass, 'px-2 py-3 text-sm text-muted-foreground')}>
+                  <div
+                    class={cn(
+                      dialogNestedScrollFrame,
+                      'px-2 py-3 text-sm text-muted-foreground',
+                    )}
+                  >
                     暂无书源分组
                   </div>
                 }
@@ -262,7 +259,7 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
                 onClear={clearStateFilters}
                 onInvert={invertStateFilters}
               />
-              <div class={filterScrollPanelClass}>
+              <AppDialogScrollBody nested>
                 <ul class="space-y-0.5">
                   {SOURCE_ENABLED_FILTER_OPTIONS.map((opt) => (
                     <li>
@@ -287,10 +284,10 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </AppDialogScrollBody>
             </div>
           </div>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" type="button" onClick={() => props.onOpenChange(false)}>

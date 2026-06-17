@@ -11,6 +11,8 @@ import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chro
 
 export interface MediaViewerHeaderProps {
   children: JSX.Element;
+  /** 主工具栏下方的附加行（如文本阅读器章节/书源栏） */
+  subHeader?: JSX.Element;
   /** 覆盖应用设置中的布局（一般无需指定） */
   layout?: ViewerChromeLayout;
   visible?: boolean;
@@ -18,7 +20,7 @@ export interface MediaViewerHeaderProps {
 }
 
 export function MediaViewerHeader(props: MediaViewerHeaderProps) {
-  const [local] = splitProps(props, ['children', 'layout', 'visible', 'class']);
+  const [local] = splitProps(props, ['children', 'subHeader', 'layout', 'visible', 'class']);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
   const layout = () => local.layout ?? chromeLayout();
@@ -43,6 +45,13 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
     </div>
   );
 
+  const chromeBody = () => (
+    <>
+      {toolbarRow()}
+      <Show when={local.subHeader}>{local.subHeader}</Show>
+    </>
+  );
+
   return (
     <>
       <Show when={layout() === 'floating'}>
@@ -52,7 +61,9 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
-          {toolbarRow()}
+          <div class="pointer-events-none flex w-full min-w-0 flex-col gap-0.5">
+            {chromeBody()}
+          </div>
         </MediaViewerFloatingTopChrome>
       </Show>
       <Show when={layout() === 'stacked'}>
@@ -71,11 +82,11 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
         >
           <div
             class={cn(
-              'reader-chrome-overlay-panel__surface',
+              'reader-chrome-overlay-panel__surface flex flex-col',
               mediaViewerChromeTopSurfaceClass,
             )}
           >
-            {toolbarRow()}
+            {chromeBody()}
           </div>
         </header>
       </Show>
@@ -89,7 +100,7 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           data-tauri-drag-region
           onClick={(e) => e.stopPropagation()}
         >
-          {toolbarRow()}
+          {chromeBody()}
         </header>
       </Show>
     </>

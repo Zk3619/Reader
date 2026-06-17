@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 书源图片验证码 / 自定义输入（对齐 Legado VerificationCodeDialog）
  */
@@ -6,6 +7,7 @@ import { createSignal, createEffect, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -55,7 +57,7 @@ export function SourceVerificationDialog(props: SourceVerificationDialogProps) {
 
         <Show when={props.request}>
           {(req) => (
-            <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+            <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
               <div class="flex min-h-30 items-center justify-center overflow-hidden rounded-lg border border-border/50 bg-muted/20 p-6 sm:p-8">
                 <img
                   src={req().imageUrl}
@@ -78,7 +80,7 @@ export function SourceVerificationDialog(props: SourceVerificationDialogProps) {
                   }}
                 />
               </TextField>
-            </div>
+            </AppDialogScrollBody>
           )}
         </Show>
 

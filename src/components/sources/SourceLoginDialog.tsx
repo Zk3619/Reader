@@ -1,3 +1,4 @@
+import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 /**
  * 书源登录对话框：loginUi 表单 + loginUrl 脚本。
  * 脚本内 java.startBrowser / startBrowserAwait 与「书源设置」相同，走 InnerWeb 浮层（工具栏 + √）。
@@ -6,6 +7,7 @@
 
 import { createSignal, createMemo, createEffect, Show, For, onCleanup, onMount } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -20,7 +22,6 @@ import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared'
 import { clearExploreInfoMap } from '@/lib/book-source/explore-info-map-store';
 import { clearExploreSectionsCache } from '@/lib/book-source/explore-sections';
 import { shouldSuppressLoginDialogDismiss, isInnerWebSessionActive } from '@/lib/platform/inner-web';
-import { appDialogScrollBodyNoFooter } from '@/lib/ui/viewport-classes';
 import JSON5 from 'json5';
 import type { BookSource } from '@/types';
 
@@ -316,6 +317,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal={!innerWebActive()}>
       <AppDialogContent
+        portalToBody
         onPointerDownOutside={blockDialogDismissWhileInnerWeb}
         onInteractOutside={blockDialogDismissWhileInnerWeb}
         onFocusOutside={blockDialogFocusOutsideWhileInnerWeb}
@@ -329,7 +331,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class={appDialogScrollBodyNoFooter}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
         {/* loginUi 为 JSON 表单，渲染表单并执行登录脚本 */}
         <Show when={useFormMode()}>
           <div class="flex flex-col gap-4">
@@ -436,7 +438,7 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
             </p>
           </div>
         </Show>
-        </div>
+        </AppDialogScrollBody>
       </AppDialogContent>
     </AppDialog>
   );

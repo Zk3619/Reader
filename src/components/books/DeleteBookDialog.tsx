@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 删除书籍确认对话框
  * 询问用户是否删除本地文件，并允许记住选择
@@ -5,6 +6,7 @@
 
 import { createEffect, createSignal, Show } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -78,7 +80,7 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
           <AppDialogDescription>确定删除《{props.book?.name}》吗？</AppDialogDescription>
         </AppDialogHeader>
         <Show when={isLocal()}>
-          <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
             <div class="flex items-center space-x-2">
               <Checkbox
                 id="delete-file"
@@ -111,7 +113,7 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
                 </div>
               </Label>
             </div>
-          </div>
+          </AppDialogScrollBody>
         </Show>
         <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>

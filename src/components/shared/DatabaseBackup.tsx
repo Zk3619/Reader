@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 数据库备份/恢复组件
  * 提供数据库导出和导入功能的 UI 界面
@@ -6,6 +7,7 @@
 import { createSignal, Show, onMount, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -119,7 +121,7 @@ export function DatabaseBackup() {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
           {/* 数据库位置信息 */}
           <div class="rounded-lg border border-border/50 bg-muted/50 p-3 text-sm">
             <div class="mb-2 font-semibold">数据库文件位置：</div>
@@ -204,7 +206,7 @@ export function DatabaseBackup() {
               {error()}
             </div>
           </Show>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" onClick={() => setShowDialog(false)}>

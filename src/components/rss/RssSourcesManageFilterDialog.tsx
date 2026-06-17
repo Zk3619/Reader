@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import {
   AppDialog,
+  AppDialogScrollBody,
   AppDialogContent,
   AppDialogDescription,
   AppDialogFooter,
@@ -27,14 +28,12 @@ import {
 import type { SourceEnabledFilter } from '@/lib/sources/source-list-filter';
 import type { RssSource } from '@/types';
 import { cn } from '@/lib/utils';
-import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
+import { dialogNestedScrollFrame, dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 
 const GROUP_ROW_HEIGHT = 40;
 const GROUP_LIST_VIEWPORT_CLASS = 'h-64 max-h-[50vh] shrink-0';
 const listItemClass =
   'flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-accent/40';
-const filterScrollPanelClass =
-  'max-h-[min(16rem,50vh)] overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/20 p-1';
 
 export interface RssSourcesManageFilterDialogProps {
   open: boolean;
@@ -192,7 +191,7 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent layout="app" class="max-h-[85dvh]! w-full max-w-lg">
+      <AppDialogContent layout="app" class="max-w-lg">
         <AppDialogHeader class="shrink-0 px-6 pt-6">
           <AppDialogTitle>筛选</AppDialogTitle>
           <AppDialogDescription>
@@ -200,12 +199,7 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div
-          class={cn(
-            'min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4',
-            scrollGutterStableBoth,
-          )}
-        >
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
           <div class="flex flex-col gap-4">
             <div class="flex min-w-0 flex-col gap-2">
               <FilterSectionActions
@@ -222,7 +216,12 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
               <Show
                 when={groupOptions().length > 0}
                 fallback={
-                  <div class={cn(filterScrollPanelClass, 'px-2 py-3 text-sm text-muted-foreground')}>
+                  <div
+                    class={cn(
+                      dialogNestedScrollFrame,
+                      'px-2 py-3 text-sm text-muted-foreground',
+                    )}
+                  >
                     暂无订阅分组
                   </div>
                 }
@@ -272,7 +271,12 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
               <Show
                 when={domainOptions().length > 0}
                 fallback={
-                  <div class={cn(filterScrollPanelClass, 'px-2 py-3 text-sm text-muted-foreground')}>
+                  <div
+                    class={cn(
+                      dialogNestedScrollFrame,
+                      'px-2 py-3 text-sm text-muted-foreground',
+                    )}
+                  >
                     暂无域名
                   </div>
                 }
@@ -316,7 +320,7 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
                 onClear={clearStateFilters}
                 onInvert={invertStateFilters}
               />
-              <div class={filterScrollPanelClass}>
+              <AppDialogScrollBody nested>
                 <ul class="space-y-0.5">
                   {SOURCE_ENABLED_FILTER_OPTIONS.map((opt) => (
                     <li>
@@ -341,10 +345,10 @@ export function RssSourcesManageFilterDialog(props: RssSourcesManageFilterDialog
                     </li>
                   ))}
                 </ul>
-              </div>
+              </AppDialogScrollBody>
             </div>
           </div>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" type="button" onClick={() => props.onOpenChange(false)}>

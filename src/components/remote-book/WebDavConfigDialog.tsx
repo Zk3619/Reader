@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * WebDav 配置对话框
  * 用于配置 WebDav 服务器信息
@@ -5,6 +6,7 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -121,7 +123,7 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
             配置 WebDav 服务器信息以访问远程书籍
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
           <div class="space-y-2">
             <Label for="webdav-url">服务器地址 *</Label>
             <TextField>
@@ -175,7 +177,7 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
               远程书籍存储的根目录路径，默认为 "books"
             </p>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter>
           <Button
             variant="outline"

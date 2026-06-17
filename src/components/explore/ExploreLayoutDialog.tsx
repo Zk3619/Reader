@@ -1,3 +1,4 @@
+import { appDialogScrollBodyMaxH70SpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 探索页布局偏好对话框
  */
@@ -5,6 +6,7 @@
 import { createEffect, createSignal, For, onMount, Show } from 'solid-js';
 import { setupAccessibilityListeners } from '@/utils/accessibility';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -164,7 +166,7 @@ export function ExploreLayoutDialog(props: ExploreLayoutDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 max-h-[min(70vh,36rem)] space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody class={appDialogScrollBodyMaxH70SpaceY4}>
           <Show when={!props.hideSourcePreferences}>
             <section class={sectionPanelClass}>
               <Label class={sectionTitleClass}>书源展示偏好</Label>
@@ -323,7 +325,7 @@ export function ExploreLayoutDialog(props: ExploreLayoutDialogProps) {
               </div>
             </Show>
           </section>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>

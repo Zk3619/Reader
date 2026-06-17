@@ -1,3 +1,4 @@
+import { appDialogScrollBodyMaxH60 } from '@/lib/ui/viewport-classes';
 /**
  * 内嵌页「更多」菜单（对齐 Legado WebViewActivity 溢出菜单）
  */
@@ -12,6 +13,7 @@ import {
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -151,7 +153,7 @@ export function InnerWebMoreMenu(props: InnerWebMoreMenuProps) {
             <AppDialogTitle>Cookie</AppDialogTitle>
             <AppDialogDescription class="sr-only">当前页面 Cookie 字符串</AppDialogDescription>
           </AppDialogHeader>
-          <div class="min-h-0 max-h-[60dvh] overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <AppDialogScrollBody class={appDialogScrollBodyMaxH60}>
             <Show
               when={!cookieLoading()}
               fallback={
@@ -164,7 +166,7 @@ export function InnerWebMoreMenu(props: InnerWebMoreMenuProps) {
                 {cookieText()}
               </pre>
             </Show>
-          </div>
+          </AppDialogScrollBody>
           <AppDialogFooter>
             <Button variant="outline" onClick={() => handleCookieDialogOpenChange(false)}>
               关闭

@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 导入操作选择对话框
  * 每次导入本地书籍时让用户选择复制、移动或无动作
@@ -5,6 +6,7 @@
 
 import { createSignal, createEffect, createResource } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -78,7 +80,7 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
               : '请选择导入书籍时的操作方式。选「无动作」时书架将直接引用所选文件，不复制到书籍库目录。'}
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
           <RadioGroup value={action()} onChange={(value) => setAction(value as ImportAction)}>
             <RadioGroupItem value="copy" class="py-2">
               <RadioGroupItemLabel class="flex-1 cursor-pointer">
@@ -123,7 +125,7 @@ export function ImportActionDialog(props: ImportActionDialogProps) {
               记住我的选择
             </Label>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消

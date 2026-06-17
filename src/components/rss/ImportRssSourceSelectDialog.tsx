@@ -1,5 +1,7 @@
+import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
 import { For, Show } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -88,14 +90,14 @@ export function ImportRssSourceSelectDialog(props: ImportRssSourceSelectDialogPr
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalToBody portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
+      <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
           <AppDialogTitle>导入订阅源</AppDialogTitle>
           <AppDialogDescription>
             默认勾选新增或远程更新时间更晚的订阅源。可保留本地名称、分组与启用状态。
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
           <Show when={!props.loading}>
             <section class="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
               <p class="text-xs font-medium text-muted-foreground">导入选项</p>
@@ -199,7 +201,7 @@ export function ImportRssSourceSelectDialog(props: ImportRssSourceSelectDialogPr
               </div>
             </Show>
           </Show>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter class="w-full flex-wrap items-center justify-start gap-2 sm:justify-start!">
           <Button variant="outline" onClick={props.onSelectAllToggle} disabled={props.loading || props.sources.length === 0}>
             {allSelected() ? '取消选中' : '全选'} {selectedCountText()}

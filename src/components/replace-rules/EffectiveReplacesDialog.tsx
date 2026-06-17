@@ -1,3 +1,4 @@
+import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 /**
  * 当前章生效的替换规则（对齐 Legado EffectiveReplacesDialog）
  */
@@ -10,6 +11,7 @@ import {
   ReplaceRuleEditDialog,
   type ReplaceRuleDraft,
 } from '@/components/replace-rules/ReplaceRuleEditDialog';
+import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -84,12 +86,12 @@ export function EffectiveReplacesDialog(props: EffectiveReplacesDialogProps) {
   return (
     <>
       <ViewerAppDialog open={props.open} onOpenChange={handleOpenChange} modal={false}>
-        <ViewerAppDialogContent class="flex max-h-[70dvh] max-w-md flex-col overflow-hidden">
+        <ViewerAppDialogContent class="flex max-w-md flex-col overflow-hidden">
           <ViewerAppDialogHeader>
             <ViewerAppDialogTitle>生效的替换规则</ViewerAppDialogTitle>
           </ViewerAppDialogHeader>
 
-          <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-2">
+          <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
             <Show
               when={items().length > 0}
               fallback={
@@ -123,7 +125,7 @@ export function EffectiveReplacesDialog(props: EffectiveReplacesDialogProps) {
                 </For>
               </ul>
             </Show>
-          </div>
+          </AppDialogScrollBody>
 
           <div class="border-t border-border px-6 py-4">
             <Button variant="outline" class="w-full" onClick={() => handleOpenChange(false)}>

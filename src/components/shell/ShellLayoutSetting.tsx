@@ -48,9 +48,9 @@ export function ShellLayoutSetting() {
           <div class="space-y-1">
             <h3 class="font-semibold text-foreground">导航布局</h3>
             <p class="text-sm text-muted-foreground">
-              {shell().isCompactMobile
-                ? '当前为移动端且窗口宽度不足 480px，已使用底部导航栏。'
-                : '当前窗口宽度不足 480px，仍使用顶部导航栏。'}
+              {shell().useMobileShell
+                ? '当前为移动导航布局，已使用底部导航栏。'
+                : '当前为桌面导航布局，窗口宽度不足 480px 时仍使用顶部导航栏。'}
             </p>
           </div>
         </div>
@@ -61,7 +61,7 @@ export function ShellLayoutSetting() {
           <div class="space-y-1">
             <h3 class="font-semibold text-foreground">导航布局</h3>
             <p class="text-sm text-muted-foreground">
-              桌面布局使用顶部导航栏；窗口宽度 ≥768px 时另显示侧边栏。移动布局使用底部导航栏。自动根据当前运行环境（桌面端 / 移动端）选择布局。仅移动端且宽度不足 480px 时会强制使用底栏。
+              桌面布局使用顶部导航栏；窗口宽度 ≥768px 时另显示侧边栏。移动布局使用底部导航栏（任意窗口宽度，含不足 480px）。自动根据当前运行环境选择布局；移动端设备且宽度不足 480px 时也会使用底栏。
             </p>
             <Show when={autoEffectiveHint()}>
               <p class="text-sm text-primary">{autoEffectiveHint()}</p>

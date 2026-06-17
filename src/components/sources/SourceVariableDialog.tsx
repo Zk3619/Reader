@@ -6,6 +6,7 @@ import { createSignal, createEffect, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   formatBookSourceVariableComment,
@@ -56,7 +57,10 @@ export function SourceVariableDialog(props: SourceVariableDialogProps) {
       {(source) => (
         <Portal mount={document.body}>
           <div
-            class="fixed inset-0 z-[70] flex flex-col bg-background"
+            class={cn(
+              'fixed inset-0 flex flex-col bg-background',
+              overlayLayerZ().dialog,
+            )}
             role="dialog"
             aria-modal="true"
             aria-label="设置源变量"

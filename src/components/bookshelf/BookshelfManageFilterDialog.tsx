@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -151,7 +152,7 @@ export function BookshelfManageFilterDialog(props: BookshelfManageFilterDialogPr
                   setDraftGroupIds(allGroupIds().filter((id) => !cur.has(id)));
                 }}
               />
-              <div class="max-h-[min(16rem,50vh)] overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/20 p-1">
+              <AppDialogScrollBody nested>
                 <Show
                   when={bookGroups().length > 0}
                   fallback={
@@ -174,7 +175,7 @@ export function BookshelfManageFilterDialog(props: BookshelfManageFilterDialogPr
                     </For>
                   </ul>
                 </Show>
-              </div>
+              </AppDialogScrollBody>
             </div>
           </Show>
 
@@ -193,7 +194,7 @@ export function BookshelfManageFilterDialog(props: BookshelfManageFilterDialogPr
                   );
                 }}
               />
-              <div class="max-h-[min(16rem,50vh)] overflow-y-auto overscroll-contain rounded-md border border-border/50 bg-muted/20 p-1">
+              <AppDialogScrollBody nested>
                 <Show
                   when={props.sourceNames.length > 0}
                   fallback={
@@ -216,7 +217,7 @@ export function BookshelfManageFilterDialog(props: BookshelfManageFilterDialogPr
                     </For>
                   </ul>
                 </Show>
-              </div>
+              </AppDialogScrollBody>
             </div>
           </Show>
         </div>

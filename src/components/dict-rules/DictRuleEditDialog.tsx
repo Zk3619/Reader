@@ -1,3 +1,4 @@
+import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 字典规则编辑（对齐 Legado DictRuleEditDialog）
  */
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogHeader,
@@ -85,11 +87,11 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class="flex max-h-[90dvh] max-w-lg flex-col overflow-hidden">
+      <AppDialogContent class="flex max-w-lg flex-col overflow-hidden">
         <AppDialogHeader>
           <AppDialogTitle>{isEditing() ? '编辑字典规则' : '新建字典规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 pb-2">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
           <div>
             <Label>名称（主键）</Label>
             <TextField class="mt-1">
@@ -142,7 +144,7 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
               />
             </TextField>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => void copyRuleJson()}>
             复制规则

@@ -73,7 +73,7 @@ export function DictDialog(props: DictDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class="flex max-h-[85dvh] max-w-2xl flex-col overflow-hidden">
+      <AppDialogContent class="flex max-w-2xl flex-col overflow-hidden">
         <AppDialogHeader>
           <AppDialogTitle>字典：{props.word || '（未选词）'}</AppDialogTitle>
         </AppDialogHeader>

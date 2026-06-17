@@ -1,3 +1,4 @@
+import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 替换净化规则编辑（对齐 Legado ReplaceEditActivity）
  */
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogHeader,
@@ -151,7 +153,7 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
         <AppDialogHeader>
           <AppDialogTitle>{isEditing() ? '编辑替换规则' : '新建替换规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 pb-2">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
           <div>
             <Label>名称</Label>
             <TextField class="mt-1">
@@ -302,7 +304,7 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
               </pre>
             </div>
           </Show>
-        </div>
+        </AppDialogScrollBody>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => void copyRuleJson()}>
             复制规则

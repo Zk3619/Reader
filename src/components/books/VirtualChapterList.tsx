@@ -3,7 +3,7 @@
  * 网格按行虚拟化请用 VirtualGridRowsList；可排序列表请直接用 VirtualList + sortable。
  */
 
-import { createMemo, type JSX } from 'solid-js';
+import { createMemo, type Accessor, type JSX } from 'solid-js';
 import { VirtualList } from '@/components/shared/virtual-list';
 import { virtualListScrollToIndex } from '@/components/shared/virtual-list/scroll-into-view';
 import { CATALOG_ROW_HEIGHT_PX } from '@/lib/catalog/chapter-list-layout';
@@ -19,6 +19,8 @@ export interface VirtualChapterListProps {
   /** 滚动容器就绪 */
   onScrollContainer?: (el: HTMLDivElement) => void;
   onScroll?: (el: HTMLDivElement) => void;
+  /** 使用外层滚动容器（如 AppDialogScrollBody 内轨） */
+  externalScrollElement?: Accessor<HTMLDivElement | null | undefined>;
   children: (index: number) => JSX.Element;
 }
 
@@ -35,6 +37,7 @@ export function VirtualChapterList(props: VirtualChapterListProps) {
       overscan={props.overscan ?? DEFAULT_OVERSCAN}
       onScrollContainer={props.onScrollContainer}
       onScroll={props.onScroll}
+      externalScrollElement={props.externalScrollElement}
     >
       {(index) => props.children(index)}
     </VirtualList>

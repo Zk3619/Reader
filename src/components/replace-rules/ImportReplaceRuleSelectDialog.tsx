@@ -1,5 +1,7 @@
+import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 import { For, Show } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -74,14 +76,14 @@ export function ImportReplaceRuleSelectDialog(props: ImportReplaceRuleSelectDial
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent portalToBody portalZClass={props.portalZClass} class="max-h-[min(90vh,720px)]">
+      <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
           <AppDialogTitle>导入替换规则</AppDialogTitle>
           <AppDialogDescription>
             默认勾选新增或内容有变化的规则。更新已有规则时可保留本地分组与启用状态。
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
           <Show when={!props.loading}>
             <section class="mb-3 space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
               <p class="text-xs font-medium text-muted-foreground">导入选项</p>
@@ -183,7 +185,7 @@ export function ImportReplaceRuleSelectDialog(props: ImportReplaceRuleSelectDial
               </div>
             </Show>
           </Show>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter class="w-full flex-wrap items-center justify-start gap-2 sm:justify-start!">
           <Button
             variant="outline"

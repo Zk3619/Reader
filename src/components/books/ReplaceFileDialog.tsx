@@ -1,3 +1,4 @@
+import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 文件替换确认对话框
  * 当导入的书籍文件已存在时，询问用户是否替换
@@ -5,6 +6,7 @@
 
 import { createSignal, Show, createEffect} from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -84,7 +86,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
             文件《{props.fileName}》已存在于书籍目录中，请选择操作方式。
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
           <RadioGroup value={action()} onChange={(value) => setAction(value as ReplaceFileAction)}>
             <Show when={props.isSameSize && props.isSameContent}>
               {/* 文件大小和内容都相同：确定是同一文件，提供恢复选项 */}
@@ -158,7 +160,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
             </div>
           </Label>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
             取消

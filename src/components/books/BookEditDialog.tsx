@@ -7,6 +7,7 @@ import { createSignal, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -27,6 +28,12 @@ import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { FormCoverPreview } from '@/components/shared/FormCoverPreview';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import { pickLocalImageAsDataUrl } from '@/lib/platform/image-data-url';
+import {
+  dialogFormCoverAsideWide,
+  dialogFormRowWide,
+} from '@/lib/ui/viewport-classes';
+import { useDialogFormWideLayout } from '@/lib/shell/dialog-form-layout';
+import { cn } from '@/lib/utils';
 import * as booksDb from '@/lib/database/books';
 import * as groupsDb from '@/lib/database/book-groups';
 import type { Book } from '@/types';
@@ -41,6 +48,7 @@ export interface BookEditDialogProps {
 }
 
 export function BookEditDialog(props: BookEditDialogProps) {
+  const wideForm = useDialogFormWideLayout();
   const [name, setName] = createSignal('');
   const [author, setAuthor] = createSignal('');
   const [cover, setCover] = createSignal('');
@@ -115,9 +123,9 @@ export function BookEditDialog(props: BookEditDialogProps) {
           <AppDialogDescription>修改书名、作者、封面或所属分组</AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-          <div class="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
-            <div class="hidden shrink-0 md:block md:w-64">
+        <AppDialogScrollBody>
+          <div class={cn('flex flex-col gap-4', wideForm() && dialogFormRowWide)}>
+            <div class={cn('shrink-0', wideForm() ? dialogFormCoverAsideWide : 'hidden')}>
               <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
             </div>
 
@@ -162,7 +170,7 @@ export function BookEditDialog(props: BookEditDialogProps) {
                   </Button>
                 </div>
 
-                <div class="md:hidden">
+                <div class={cn(wideForm() ? 'hidden' : undefined)}>
                   <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
                 </div>
               </div>
@@ -203,7 +211,7 @@ export function BookEditDialog(props: BookEditDialogProps) {
               </div>
             </div>
           </div>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>

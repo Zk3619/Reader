@@ -5,6 +5,7 @@
 
 import { createEffect, createSignal } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -56,7 +57,7 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
               '输入书源 JSON 的链接（http/https），将拉取并导入，兼容 legado 书源格式。桌面端由应用内网络拉取，不受跨域限制；浏览器环境下若遇跨域请改用「本地导入」。'}
           </AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody>
           <section class="rounded-lg border border-border/50 bg-muted/20 p-4">
             <TextField>
               <TextFieldInput
@@ -66,7 +67,7 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
               />
             </TextField>
           </section>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消

@@ -94,7 +94,7 @@ export function TxtTocRulePickDialog(props: TxtTocRulePickDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class="flex max-h-[85dvh] max-w-lg flex-col gap-3 sm:max-w-xl">
+      <AppDialogContent class="flex max-w-lg flex-col gap-3 sm:max-w-xl">
         <AppDialogHeader>
           <AppDialogTitle>TXT 目录规则</AppDialogTitle>
         </AppDialogHeader>

@@ -4,6 +4,7 @@
 
 import { Show } from 'solid-js';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -37,7 +38,7 @@ export function ImportLocalChoiceDialog(props: ImportLocalChoiceDialogProps) {
           <AppDialogTitle>{props.title}</AppDialogTitle>
           <AppDialogDescription>{props.description}</AppDialogDescription>
         </AppDialogHeader>
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+        <AppDialogScrollBody>
           <div class="grid gap-3 sm:grid-cols-2">
             <Button
               variant="outline"
@@ -68,7 +69,7 @@ export function ImportLocalChoiceDialog(props: ImportLocalChoiceDialogProps) {
               </Show>
             </Button>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <AppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)} disabled={props.busy}>
             取消

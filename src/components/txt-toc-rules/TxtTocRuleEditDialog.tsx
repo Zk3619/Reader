@@ -1,3 +1,4 @@
+import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * TXT 目录规则编辑（对齐 Legado TxtTocRuleEditDialog）
  */
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogHeader,
@@ -90,11 +92,11 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent class="flex max-h-[90dvh] max-w-lg flex-col overflow-hidden">
+      <AppDialogContent class="flex max-w-lg flex-col overflow-hidden">
         <AppDialogHeader>
           <AppDialogTitle>{props.rule?.id ? '编辑目录规则' : '新建目录规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 pb-2">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
           <div>
             <Label>名称</Label>
             <TextField class="mt-1">
@@ -143,7 +145,7 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
               />
             </TextField>
           </div>
-        </div>
+        </AppDialogScrollBody>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => void copyRuleJson()}>
             复制规则

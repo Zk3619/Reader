@@ -8,6 +8,7 @@ import { rssReadRecordMatchesSearch } from '@/lib/rss/rss-read-record-filter';
 import { VirtualList } from '@/components/shared/virtual-list';
 import {
   AppDialog,
+  AppDialogScrollBody,
   AppDialogContent,
   AppDialogDescription,
   AppDialogHeader,
@@ -20,8 +21,7 @@ import {
   getRssReadRecordsByOrigin,
 } from '@/lib/database/rss-read-records';
 import type { RssReadRecord } from '@/types';
-import { cn } from '@/lib/utils';
-import { scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 
 export interface RssReadHistoryDialogProps {
   open: boolean;
@@ -39,6 +39,7 @@ function formatReadTime(ts?: number): string {
 }
 
 export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
+  let scrollTrack: HTMLDivElement | undefined;
   const [records, setRecords] = createSignal<RssReadRecord[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
@@ -72,7 +73,7 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
-      <AppDialogContent layout="app" class="max-h-[85dvh]! w-full max-w-lg">
+      <AppDialogContent layout="app" class="max-w-lg">
         <AppDialogHeader class="shrink-0 px-6 pt-6">
           <AppDialogTitle>阅读记录</AppDialogTitle>
           <AppDialogDescription>点击条目可重新打开文章</AppDialogDescription>
@@ -88,11 +89,11 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
           </TextField>
         </div>
 
-        <div
-          class={cn(
-            'min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4',
-            scrollGutterStableBoth,
-          )}
+        <AppDialogScrollBody
+          frameClass={dialogScrollFrameFlex}
+          trackRef={(el) => {
+            scrollTrack = el;
+          }}
         >
           <Show when={loading()}>
             <div class="py-8 text-center text-sm text-muted-foreground">加载中…</div>
@@ -116,6 +117,7 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
               items={filteredRecords}
               estimateSize={() => 64}
               overscan={4}
+              externalScrollElement={() => scrollTrack ?? null}
               getItemKey={(record) => `${record.origin}::${record.record}`}
             >
               {(record) => (
@@ -143,7 +145,7 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
               )}
             </VirtualList>
           </Show>
-        </div>
+        </AppDialogScrollBody>
       </AppDialogContent>
     </AppDialog>
   );

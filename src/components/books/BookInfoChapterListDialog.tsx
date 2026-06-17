@@ -6,6 +6,7 @@ import { Show, createEffect, createMemo, onCleanup } from 'solid-js';
 import {
   AppDialog,
   AppDialogHeader,
+  AppDialogScrollBody,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { BookInfoDrawerDialogContent } from '@/pages/book-info/book-info-drawer-overlay';
@@ -15,10 +16,10 @@ import {
 } from '@/components/shared/app-drawer-overlay-lock';
 import { Button } from '@/components/ui/button';
 import {
-  dialogVirtualListPanelHeight,
-  dialogVirtualListPanelMaxHeight,
+  dialogScrollFrameFlex,
+  dialogVirtualListPanelMinHeight,
   dialogVirtualListPanelWidth,
-  scrollGutterStableBoth,
+  dialogVirtualListScroll,
 } from '@/lib/ui/viewport-classes';
 import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
 import {
@@ -89,13 +90,13 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
     () => (props.book as Book | undefined)?.readConfig?.useReplaceRule !== false,
   );
 
-  let scrollContainer: HTMLDivElement | undefined;
+  let scrollTrack: HTMLDivElement | undefined;
 
   createEffect(() => {
     if (!props.open) return;
     const idx = props.currentChapterIndex ?? -1;
     requestAnimationFrame(() => {
-      const el = scrollContainer;
+      const el = scrollTrack;
       if (!el) return;
       if (idx >= 0 && rows().length > 0) {
         scrollCatalogIndexIntoView(el, idx, CATALOG_ROW_HEIGHT_PX, 'auto');
@@ -111,12 +112,13 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
         <AppDialogHeader>
           <AppDialogTitle class="text-base">目录 · {props.bookName}</AppDialogTitle>
         </AppDialogHeader>
-        <div
-          class={cn(
-            'flex flex-col overflow-hidden',
-            dialogVirtualListPanelHeight,
-            scrollGutterStableBoth,
-          )}
+        <AppDialogScrollBody
+          compact
+          frameClass={cn(dialogScrollFrameFlex, dialogVirtualListPanelMinHeight)}
+          class={dialogVirtualListScroll}
+          trackRef={(el) => {
+            scrollTrack = el;
+          }}
         >
           <Show
             when={!props.loading}
@@ -133,11 +135,8 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
               }
             >
               <VirtualChapterList
-                class={cn('min-h-0 w-full flex-1', dialogVirtualListPanelMaxHeight)}
                 count={rows().length}
-                onScrollContainer={(el) => {
-                  scrollContainer = el;
-                }}
+                externalScrollElement={() => scrollTrack ?? null}
               >
                 {(index) => {
                   const row = rows()[index];
@@ -183,7 +182,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
               </VirtualChapterList>
             </Show>
           </Show>
-        </div>
+        </AppDialogScrollBody>
       </BookInfoDrawerDialogContent>
     </AppDialog>
   );

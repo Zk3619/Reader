@@ -17,6 +17,7 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -27,6 +28,11 @@ import {
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { FormCoverPreview } from '@/components/shared/FormCoverPreview';
 import { cn } from '@/lib/utils';
+import {
+  dialogFormCoverAsideWide,
+  dialogFormRowWide,
+} from '@/lib/ui/viewport-classes';
+import { useDialogFormWideLayout } from '@/lib/shell/dialog-form-layout';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import { pickLocalImageAsDataUrl } from '@/lib/platform/image-data-url';
 import * as groupsDb from '@/lib/database/book-groups';
@@ -59,6 +65,7 @@ export interface BookGroupFormDialogProps {
 }
 
 export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
+  const wideForm = useDialogFormWideLayout();
   const [form, setForm] = createSignal<Partial<BookGroup>>({
     groupName: '',
     cover: '',
@@ -196,10 +203,10 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
           </AppDialogDescription>
         </AppDialogHeader>
 
-        <div class="min-h-0 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
-          <div class="flex flex-col gap-4 md:flex-row md:items-center md:gap-6">
-            {/* md+：左侧封面预览 */}
-            <div class="hidden shrink-0 md:block md:w-64">
+        <AppDialogScrollBody>
+          <div class={cn('flex flex-col gap-4', wideForm() && dialogFormRowWide)}>
+            {/* 宽屏：左侧封面预览 */}
+            <div class={cn('shrink-0', wideForm() ? dialogFormCoverAsideWide : 'hidden')}>
               <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
             </div>
 
@@ -238,7 +245,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
                 </div>
 
                 {/* 小于 md：封面预览在输入框下方 */}
-                <div class="md:hidden">
+                <div class={cn(wideForm() ? 'hidden' : undefined)}>
                   <FormCoverPreview cover={cover} onPickCover={pickCoverFromLocal} />
                 </div>
               </div>
@@ -305,7 +312,7 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
               </div>
             </div>
           </div>
-        </div>
+        </AppDialogScrollBody>
 
         <AppDialogFooter>
           <Button variant="outline" onClick={handleCancel}>
