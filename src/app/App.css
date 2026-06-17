@@ -966,7 +966,7 @@
   overflow: hidden;
 }
 
-/** 单页正文裁切（高度 = nextStart − pageStart，≤ page-window 全高）；page-window 恒为 clipHeight */
+/** 单页正文裁切（高度 = nextStart − pageStart，与 page-window 同高）；inset 由 content-slot 承担 */
 .reader-paged-page-content-clip {
   position: relative;
   width: 100%;
@@ -976,13 +976,6 @@
 .reader-paged-clip {
   isolation: isolate;
 }
-
-.reader-text-content-slot {
-  /* 四边 inset 由内联 style 控制；滚动模式下同时承担阅读器主题底 */
-}
-
-/** @deprecated 使用 .reader-text-content-slot */
-.reader-paged-content-slot {}
 
 .reader-paged-live-inner {
   position: relative;
@@ -1445,7 +1438,7 @@ body.reader-inner-web-session .reader-inner-web-layer {
   pointer-events: none;
 }
 
-#reader-rss-overlay-portal-host > div {
+#reader-rss-overlay-portal-host>div {
   position: fixed !important;
   inset: 0 !important;
   width: 100% !important;
@@ -1972,9 +1965,16 @@ body.reader-inner-web-session--drawer {
   margin-bottom: 0;
 }
 
-/** 滚动区末尾：顶恒 mt-2，底仅触摸端 mb-2（见 scrollEdgeBottomInset） */
+/** 滚动视口内上下留白：桌面 py-2；触摸端底边 max(py-2, 安全区) */
+.app-scroll-edge-inset {
+  padding-top: 0.5rem;
+  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective, 0px));
+}
+
+/** @deprecated 使用 .app-scroll-edge-inset */
 .app-scroll-bottom-inset {
-  margin-bottom: 0;
+  padding-top: 0.5rem;
+  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective, 0px));
 }
 
 html.keyboard-open .reader-footer.safe-area-inset-bottom,
@@ -2002,8 +2002,9 @@ html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
     margin-bottom: var(--safe-area-bottom-effective);
   }
 
+  .app-scroll-edge-inset,
   .app-scroll-bottom-inset {
-    margin-bottom: var(--safe-area-bottom-effective);
+    padding-bottom: max(0.5rem, var(--safe-area-bottom-effective));
   }
 
   .safe-area-min-height-bottom {
@@ -2037,8 +2038,9 @@ html[data-touch-ui] .app-bottom-edge-inset {
   margin-bottom: var(--safe-area-bottom-effective);
 }
 
+html[data-touch-ui] .app-scroll-edge-inset,
 html[data-touch-ui] .app-scroll-bottom-inset {
-  margin-bottom: var(--safe-area-bottom-effective);
+  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective));
 }
 
 html[data-touch-ui] .safe-area-min-height-bottom {

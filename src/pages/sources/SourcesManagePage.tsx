@@ -1,5 +1,5 @@
 /**
- * 书源管理：多选列表 + 启用开关 + 批量操作
+ * ????????? + ???? + ????
  */
 
 import {
@@ -21,7 +21,7 @@ import {
 } from '@/lib/book-source/purge-source-session';
 import type { BookSource } from '@/types';
 import { cn } from '@/lib/utils';
-import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
+import { mainShellPageRoot, appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import {
@@ -61,6 +61,7 @@ import {
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import {
+  AppDialogScrollBody,
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
@@ -220,7 +221,7 @@ function SourceManageListItem(props: SourceManageListItemProps) {
               <Checkbox
                 checked={props.selected}
                 onChange={(checked: boolean) => props.onSelectionChange(checked)}
-                aria-label={`选择 ${props.source.sourceName}`}
+                aria-label={`?? ${props.source.sourceName}`}
               />
             </div>
             <div class="min-w-0 flex-1 flex items-center gap-2 overflow-hidden">
@@ -245,7 +246,7 @@ function SourceManageListItem(props: SourceManageListItemProps) {
               <Switch
                 checked={props.source.enabled}
                 onChange={(checked: boolean) => void props.onEnableChange(props.source, checked)}
-                aria-label={props.source.enabled ? '禁用书源' : '启用书源'}
+                aria-label={props.source.enabled ? '????' : '????'}
               >
                 <SwitchControl class="data-disabled:cursor-not-allowed">
                   <SwitchThumb />
@@ -255,22 +256,22 @@ function SourceManageListItem(props: SourceManageListItemProps) {
           </AppContextMenuTrigger>
           <AppContextMenuContent>
             <AppContextMenuItem onSelect={() => props.onSourceEdit?.(props.source)}>
-              编辑
+              ??
             </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onSourceVariables?.(props.source)}>
-              设置源变量
+              ?????
             </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onPinSource(props.source)}>
-              置顶
+              ??
             </AppContextMenuItem>
             <AppContextMenuItem onSelect={() => props.onClearCookieCf?.(props.source)}>
-              清除 Cookie/CF 记录
+              ?? Cookie/CF ??
             </AppContextMenuItem>
             <AppContextMenuItem
               class="text-destructive focus:text-destructive"
               onSelect={() => props.onDeleteSource(props.source)}
             >
-              删除
+              ??
             </AppContextMenuItem>
           </AppContextMenuContent>
         </AppContextMenu>
@@ -325,7 +326,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       const list = await sourcesDb.getAllSources();
       setSources(list);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载书源失败';
+      const msg = e instanceof Error ? e.message : '??????';
       setError(msg);
       setSources([]);
     } finally {
@@ -338,7 +339,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       const groups = await sourcesDb.getAllSourceGroups();
       setSourceGroups(groups);
     } catch (e) {
-      console.error('加载书源分组失败:', e);
+      console.error('????????:', e);
     }
   }
 
@@ -396,7 +397,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       ),
     postProcess: (matched) =>
       sortBookSourcesCopy(matched, filterDeps().sortMode, filterDeps().sortReverse),
-    progressLabel: '正在筛选书源',
+    progressLabel: '??????',
   });
 
   const pageDescription = () => {
@@ -409,7 +410,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         count,
       });
     }
-    return `共 ${count} 个书源`;
+    return `? ${count} ???`;
   };
 
   const filterTooltip = () =>
@@ -451,7 +452,7 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
 
   const sortableSourceIds = createMemo(() => filteredSources().map((s) => s.sourceUrl));
 
-  /** 平铺 + 手动排序 + 拖拽开关开启时挂载拖拽上下文 */
+  /** ?? + ???? + ?????????????? */
   const sourceListSortable = createMemo(():
     | VirtualListSortableConfig<SourceManageListRow>
     | undefined => {
@@ -478,8 +479,8 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       notifySourcesRefresh();
     } catch (e) {
       showAppToast({
-        title: '排序失败',
-        description: e instanceof Error ? e.message : '请稍后重试',
+        title: '????',
+        description: e instanceof Error ? e.message : '?????',
         variant: 'destructive',
       });
       await loadSources();
@@ -558,10 +559,10 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       await sourcesDb.updateSourceOrder(source.sourceUrl, minOrder - 1);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已置顶', description: `「${source.sourceName}」已移至列表顶部`, variant: 'default' });
+      showAppToast({ title: '???', description: `?${source.sourceName}????????`, variant: 'default' });
     } catch (e) {
-      console.error('置顶失败:', e);
-      showAppToast({ title: '置顶失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      console.error('????:', e);
+      showAppToast({ title: '????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -569,13 +570,13 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       await clearSourceCookieAndCfRecord(source);
       showAppToast({
-        title: '已清除',
-        description: `「${source.sourceName}」的 Cookie/CF 记录`,
+        title: '???',
+        description: `?${source.sourceName}?? Cookie/CF ??`,
       });
     } catch (e) {
       showAppToast({
-        title: '清除失败',
-        description: e instanceof Error ? e.message : '请稍后重试',
+        title: '????',
+        description: e instanceof Error ? e.message : '?????',
         variant: 'destructive',
       });
     }
@@ -587,11 +588,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       await deleteBookSourceWithSessionPurge(source);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已删除书源', description: `「${source.sourceName}」已删除`, variant: 'default' });
+      showAppToast({ title: '?????', description: `?${source.sourceName}????`, variant: 'default' });
       setSourceToDelete(null);
     } catch (e) {
-      console.error('删除书源失败:', e);
-      showAppToast({ title: '删除书源失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      console.error('??????:', e);
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -601,11 +602,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       for (const url of urls) await sourcesDb.enableSource(url, true);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已启用', description: `已启用 ${urls.length} 个书源`, variant: 'default' });
+      showAppToast({ title: '???', description: `??? ${urls.length} ???`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量启用失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -615,11 +616,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       for (const url of urls) await sourcesDb.enableSource(url, false);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已禁用', description: `已禁用 ${urls.length} 个书源`, variant: 'default' });
+      showAppToast({ title: '???', description: `??? ${urls.length} ???`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量禁用失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -640,11 +641,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         await sourcesDb.deleteSource(url);
       }
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已删除', description: `已删除 ${urls.length} 个书源`, variant: 'default' });
+      showAppToast({ title: '???', description: `??? ${urls.length} ???`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量删除失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -658,11 +659,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         await sourcesDb.updateSourceOrder(urls[i], minOrder - 1 - i);
       }
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已置顶', description: `已将 ${urls.length} 个书源移至顶部`, variant: 'default' });
+      showAppToast({ title: '???', description: `?? ${urls.length} ???????`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量置顶失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -676,11 +677,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         await sourcesDb.updateSourceOrder(urls[i], maxOrder + 1 + i);
       }
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已置底', description: `已将 ${urls.length} 个书源移至底部`, variant: 'default' });
+      showAppToast({ title: '???', description: `?? ${urls.length} ???????`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量置底失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '??????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -694,13 +695,13 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `书源_${selected.length}个_${Date.now()}.json`;
+      a.download = `??_${selected.length}?_${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      showAppToast({ title: '已导出', description: `已导出 ${selected.length} 个书源`, variant: 'default' });
+      showAppToast({ title: '???', description: `??? ${selected.length} ???`, variant: 'default' });
       clearSelection();
     } catch (e) {
-      showAppToast({ title: '导出失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -722,9 +723,9 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       const ok = results.filter((r) =>
         [r.search, r.explore, r.toc, r.content].every((c) => c.kind === 'success' || c.kind === 'skip'),
       ).length;
-      showAppToast({ title: '校验完成', description: `${ok}/${results.length} 个书源通过`, variant: 'default' });
+      showAppToast({ title: '????', description: `${ok}/${results.length} ?????`, variant: 'default' });
     } catch (e) {
-      showAppToast({ title: '校验失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
       setValidateResults([]);
     } finally {
       setValidateLoading(false);
@@ -738,11 +739,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       for (const url of urls) await sourcesDb.enableExplore(url, true);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已启用发现', description: `已为 ${urls.length} 个书源启用发现`, variant: 'default' });
+      showAppToast({ title: '?????', description: `?? ${urls.length} ???????`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量启用发现失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '????????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
@@ -752,25 +753,25 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     try {
       for (const url of urls) await sourcesDb.enableExplore(url, false);
       window.dispatchEvent(new CustomEvent('sources-refresh'));
-      showAppToast({ title: '已禁用发现', description: `已为 ${urls.length} 个书源禁用发现`, variant: 'default' });
+      showAppToast({ title: '?????', description: `?? ${urls.length} ???????`, variant: 'default' });
       clearSelection();
       loadSources();
     } catch (e) {
-      showAppToast({ title: '批量禁用发现失败', description: e instanceof Error ? e.message : '请稍后重试', variant: 'destructive' });
+      showAppToast({ title: '????????', description: e instanceof Error ? e.message : '?????', variant: 'destructive' });
     }
   }
 
   function checkLabel(kind: ValidateResultKind, message?: string): string {
     switch (kind) {
-      case 'success': return '通过';
-      case 'skip': return '跳过';
-      case 'timeout': return '超时';
-      case 'network_error': return '网络错误';
-      case 'js_error': return 'JS错误';
-      case 'search_empty': return '搜索为空';
-      case 'explore_empty': return '发现为空';
-      case 'toc_empty': return '目录为空';
-      case 'content_empty': return '正文为空';
+      case 'success': return '??';
+      case 'skip': return '??';
+      case 'timeout': return '??';
+      case 'network_error': return '????';
+      case 'js_error': return 'JS??';
+      case 'search_empty': return '????';
+      case 'explore_empty': return '????';
+      case 'toc_empty': return '????';
+      case 'content_empty': return '????';
       default: return message || kind;
     }
   }
@@ -790,11 +791,11 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
   return (
     <div class={cn('@container', mainShellPageRoot)}>
       <PageToolbar
-        title="书源管理"
+        title="????"
         description={pageDescription()}
         titleSlot={
           <PageToolbarTitleDropdown
-            title="书源管理"
+            title="????"
             description={pageDescription()}
             dropdownEnabled={false}
           />
@@ -859,16 +860,16 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         <Show when={!loading() && !showSkeleton() && sources().length === 0}>
           <div class="flex flex-1 items-center justify-center px-1">
             <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-              <p>暂无书源</p>
-              <p class="mt-1">可通过「更多」新建或导入书源</p>
+              <p>????</p>
+              <p class="mt-1">??????????????</p>
             </div>
           </div>
         </Show>
         <Show when={!loading() && !showSkeleton() && sources().length > 0 && filteredSources().length === 0 && !filtering()}>
           <div class="flex flex-1 items-center justify-center px-1">
             <div class="rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center text-sm text-muted-foreground">
-              <p>无匹配书源</p>
-              <p class="mt-1">尝试修改搜索关键词或筛选条件</p>
+              <p>?????</p>
+              <p class="mt-1">??????????????</p>
             </div>
           </div>
         </Show>
@@ -924,8 +925,8 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                       loadSources();
                     } catch (e) {
                       showAppToast({
-                        title: '操作失败',
-                        description: e instanceof Error ? e.message : '请稍后重试',
+                        title: '????',
+                        description: e instanceof Error ? e.message : '?????',
                         variant: 'destructive',
                       });
                     }
@@ -941,13 +942,13 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={toggleSelectAll} disabled={filteredSources().length === 0}>
-              {allFilteredSelected() ? '取消全选' : '全选'}({filteredSelectedCount()}/{filteredSources().length})
+              {allFilteredSelected() ? '????' : '??'}({filteredSelectedCount()}/{filteredSources().length})
             </Button>
             <Button variant="outline" size="sm" onClick={clearSelection} disabled={selectedCount() === 0}>
-              取消选中
+              ????
             </Button>
             <Button variant="outline" size="sm" onClick={invertSelection} disabled={filteredSources().length === 0}>
-              反选
+              ??
             </Button>
           </div>
           <div class="flex min-[448px]:hidden! items-center gap-2">
@@ -960,33 +961,33 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                     size="sm"
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
-                    操作
+                    ??
                     <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
                   </AppDropdownMenuButtonTrigger>
                 )}
               />
               <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>????</AppDropdownMenuItem>
                 <AppDropdownMenuItem
                   disabled={selectedCount() === 0}
                   class="text-destructive focus:text-destructive"
                   onSelect={() => openBatchDeleteConfirm()}
                 >
-                  删除所选
+                  ????
                 </AppDropdownMenuItem>
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
           <div class="hidden min-[448px]:flex xl:hidden! items-center gap-2">
             <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>
-              删除所选
+              ????
             </Button>
             <AppDropdownMenu>
               <AppDropdownMenuTrigger
@@ -997,33 +998,33 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                     size="sm"
                     class={BATCH_MENU_TRIGGER_CLASS}
                   >
-                    更多
+                    ??
                     <ChevronDownIcon class={BATCH_MENU_CHEVRON_CLASS} />
                   </AppDropdownMenuButtonTrigger>
                 )}
               />
               <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>启用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>禁用所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>启用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>禁用发现</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>置顶所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>置底所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>导出所选</AppDropdownMenuItem>
-                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>校验所选</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnable()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisable()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchEnableExplore()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchDisableExplore()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToTop()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchPinToBottom()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchExport()}>????</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchValidate()}>????</AppDropdownMenuItem>
               </AppDropdownMenuContent>
             </AppDropdownMenu>
           </div>
           <div class="hidden xl:flex! flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={batchEnable} disabled={selectedCount() === 0}>启用所选</Button>
-            <Button variant="outline" size="sm" onClick={batchDisable} disabled={selectedCount() === 0}>禁用所选</Button>
-            <Button variant="outline" size="sm" onClick={batchEnableExplore} disabled={selectedCount() === 0}>启用发现</Button>
-            <Button variant="outline" size="sm" onClick={batchDisableExplore} disabled={selectedCount() === 0}>禁用发现</Button>
-            <Button variant="outline" size="sm" onClick={batchPinToTop} disabled={selectedCount() === 0}>置顶所选</Button>
-            <Button variant="outline" size="sm" onClick={batchPinToBottom} disabled={selectedCount() === 0}>置底所选</Button>
-            <Button variant="outline" size="sm" onClick={batchExport} disabled={selectedCount() === 0}>导出所选</Button>
-            <Button variant="outline" size="sm" onClick={batchValidate} disabled={selectedCount() === 0}>校验所选</Button>
-            <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>删除所选</Button>
+            <Button variant="outline" size="sm" onClick={batchEnable} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchDisable} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchEnableExplore} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchDisableExplore} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchPinToTop} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchPinToBottom} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchExport} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="outline" size="sm" onClick={batchValidate} disabled={selectedCount() === 0}>????</Button>
+            <Button variant="destructive" size="sm" onClick={openBatchDeleteConfirm} disabled={selectedCount() === 0}>????</Button>
           </div>
         </div>
       </div>
@@ -1038,14 +1039,14 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       <AppDialog open={batchDeleteCount() > 0} onOpenChange={(open) => !open && setBatchDeleteCount(0)}>
         <AppDialogContent>
           <AppDialogHeader>
-            <AppDialogTitle>删除所选书源</AppDialogTitle>
+            <AppDialogTitle>??????</AppDialogTitle>
             <AppDialogDescription>
-              确定删除所选 {batchDeleteCount()} 个书源？删除后无法恢复。
+              ?????? {batchDeleteCount()} ????????????
             </AppDialogDescription>
           </AppDialogHeader>
           <AppDialogFooter>
-            <Button variant="outline" onClick={() => setBatchDeleteCount(0)}>取消</Button>
-            <Button variant="destructive" onClick={handleBatchDeleteConfirm}>删除</Button>
+            <Button variant="outline" onClick={() => setBatchDeleteCount(0)}>??</Button>
+            <Button variant="destructive" onClick={handleBatchDeleteConfirm}>??</Button>
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>
@@ -1053,19 +1054,19 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       <AppDialog open={validateDialogOpen()} onOpenChange={setValidateDialogOpen}>
         <AppDialogContent>
           <AppDialogHeader>
-            <AppDialogTitle>书源校验结果</AppDialogTitle>
+            <AppDialogTitle>??????</AppDialogTitle>
             <AppDialogDescription>
               <Show when={validateLoading() && validateProgress()}>
-                {validateProgress()!.current} / {validateProgress()!.total}：{validateProgress()!.name || '…'}
+                {validateProgress()!.current} / {validateProgress()!.total}?{validateProgress()!.name || '�'}
               </Show>
               <Show when={!validateLoading() && validateResults().length > 0}>
-                共 {validateResults().length} 个书源，可查看各检查项结果。
+                ? {validateResults().length} ??????????????
               </Show>
             </AppDialogDescription>
           </AppDialogHeader>
-          <div class="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-6 py-4 contain-layout">
+          <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
             <Show when={validateLoading() && validateResults().length === 0}>
-              <p class="text-sm text-muted-foreground">正在校验中…</p>
+              <p class="text-sm text-muted-foreground">?????�</p>
             </Show>
             <For each={validateResults()}>
               {(r) => (
@@ -1076,28 +1077,28 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                   </Tooltip>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">搜索</span>
+                      <span class="text-muted-foreground">??</span>
                       <Badge variant={checkVariant(r.search.kind)} class="w-fit">{checkLabel(r.search.kind, r.search.message)}</Badge>
                     </div>
                     <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">发现</span>
+                      <span class="text-muted-foreground">??</span>
                       <Badge variant={checkVariant(r.explore.kind)} class="w-fit">{checkLabel(r.explore.kind, r.explore.message)}</Badge>
                     </div>
                     <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">目录</span>
+                      <span class="text-muted-foreground">??</span>
                       <Badge variant={checkVariant(r.toc.kind)} class="w-fit">{checkLabel(r.toc.kind, r.toc.message)}</Badge>
                     </div>
                     <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">正文</span>
+                      <span class="text-muted-foreground">??</span>
                       <Badge variant={checkVariant(r.content.kind)} class="w-fit">{checkLabel(r.content.kind, r.content.message)}</Badge>
                     </div>
                   </div>
                 </div>
               )}
             </For>
-          </div>
+          </AppDialogScrollBody>
           <AppDialogFooter>
-            <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>关闭</Button>
+            <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>??</Button>
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>

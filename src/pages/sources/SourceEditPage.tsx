@@ -4,6 +4,8 @@
 
 import { createSignal, Show, For, onMount, onCleanup, createEffect, createMemo, type JSX } from 'solid-js';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { cn } from '@/lib/utils';
 import {
   PageHeader,
   type PageHeaderAction,
@@ -582,7 +584,10 @@ export function SourceEditPage(props: SourceEditPageProps) {
 
   return (
     <section
-      class="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
+      class={cn(
+        'fixed inset-0 flex flex-col overflow-hidden bg-background',
+        overlayLayerZ().dialog,
+      )}
       role="dialog"
       aria-modal="true"
       aria-label={pageTitle()}

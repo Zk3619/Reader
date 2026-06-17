@@ -28,7 +28,7 @@ import {
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { addSearchBookToShelf, syncShelfBookFromSearchBook } from '@/lib/bookshelf/save-book-to-shelf';
-import { searchBookToEphemeralBook } from '@/lib/bookshelf/book-to-search-book';
+import { searchBookToEphemeralBook, bookToSearchBook } from '@/lib/bookshelf/book-to-search-book';
 import {
   dedupeLegadoSourceChapterTitle,
   mergeBookContentVariable,
@@ -71,6 +71,13 @@ import {
 import { matchTxtTocRuleByStorage } from '@/lib/local-book/txt-toc-rule-engine';
 import * as txtTocDb from '@/lib/database/txt-toc-rules';
 import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/txt-toc-rules/TxtTocRulePickDialog';
+import {
+  ReaderChangeSourceDialog,
+} from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
+import {
+  applyChangeSource,
+  resolveChangeSource,
+} from '@/lib/media/text/change-source';
 import type { Book, BookChapter, BookGroup, BookSource, SearchBook } from '@/types';
 
 /** 模糊背景 / 大图：跨域用 blob，同源可直接用 coverUrl */
@@ -270,6 +277,8 @@ export interface BookInfoPageProps {
   continueReading?: boolean;
   onBack: () => void;
   onOpenBook: (book: Book, initialCatalog?: BookChapter[], source?: BookSource) => void;
+  /** 阅读器内打开详情时换源成功后同步刷新阅读会话 */
+  onBookSourceChanged?: (book: Book) => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
@@ -318,6 +327,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [txtTocSample, setTxtTocSample] = createSignal('');
   const [txtTocRuleName, setTxtTocRuleName] = createSignal('');
   const [txtTocReparsing, setTxtTocReparsing] = createSignal(false);
+  const [changeSourceOpen, setChangeSourceOpen] = createSignal(false);
 
   createEffect(() => {
     if (props.shellActive !== false) return;
@@ -325,6 +335,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setShowCoverDialog(false);
     setShowGroupPick(false);
     setTxtTocRuleOpen(false);
+    setChangeSourceOpen(false);
   });
 
   // 检测主题变化
@@ -739,12 +750,60 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   const cacheBookInfoKey = () => props.book.tocUrl || props.book.bookUrl;
 
+  const resolveChangeSourceBook = (): Book | null => {
+    const sb = shelfBook();
+    if (sb && !isLocalBook(sb)) return sb;
+    const detail = currentBook();
+    if (!isOnlineSearchBook(detail)) return null;
+    return searchBookToEphemeralBook(detail, bookSource() ?? props.source);
+  };
+
   const handleChangeSource = () => {
-    showAppToast({
-      title: '换源',
-      description: '整书换源功能开发中，敬请期待',
-      variant: 'default',
-    });
+    if (!resolveChangeSourceBook()) {
+      showAppToast({
+        title: '无法换源',
+        description: '本地书不支持换源',
+      });
+      return;
+    }
+    setChangeSourceOpen(true);
+  };
+
+  const handleBookSourceChanged = async (nextBook: Book) => {
+    const oldKey = cacheBookInfoKey();
+    const nextSearch = bookToSearchBook(nextBook);
+    setBookData(nextSearch);
+    setCoverBlobUrl(null);
+
+    if (isInShelf()) {
+      await refreshShelfBook();
+      await bookshelfStore.refreshBooks();
+      const chapters = await getDbChapterList(nextBook.bookUrl);
+      if (chapters.length > 0) {
+        commitPreloadedChapters(nextSearch, chapters);
+      }
+    }
+
+    const newKey = nextBook.tocUrl || nextBook.bookUrl;
+    if (oldKey && oldKey !== newKey) {
+      pageCacheStore.clearBookInfoCache(oldKey);
+    }
+    if (newKey) {
+      pageCacheStore.setBookInfoCache(newKey, nextSearch, preloadedChapters() ?? undefined);
+    }
+
+    const src = await getSource(nextBook.origin);
+    if (src) setBookSource(src);
+    props.onBookSourceChanged?.(nextBook);
+  };
+
+  const applyBookSourceChange = async (book: Book, item: SearchBook) => {
+    if (isInShelf()) {
+      return applyChangeSource(book, item);
+    }
+    const { book: next, chapters } = await resolveChangeSource(book, item);
+    commitPreloadedChapters(bookToSearchBook(next), chapters);
+    return next;
   };
 
   const handleSetGroup = async () => {
@@ -1385,6 +1444,16 @@ export function BookInfoPage(props: BookInfoPageProps) {
         sampleText={txtTocSample()}
         splitLongChapter={shelfBook()?.readConfig?.splitLongChapter !== false}
         onConfirm={handleLocalTxtTocRuleConfirm}
+      />
+
+      <ReaderChangeSourceDialog
+        open={changeSourceOpen()}
+        onOpenChange={setChangeSourceOpen}
+        presentation="app"
+        showModePicker={false}
+        book={resolveChangeSourceBook()}
+        applyBook={applyBookSourceChange}
+        onBookChanged={(book) => void handleBookSourceChanged(book)}
       />
     </div>
   );

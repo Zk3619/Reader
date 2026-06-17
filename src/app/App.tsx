@@ -1391,6 +1391,18 @@ function AppContent() {
     });
   }
 
+  function syncViewerAfterBookInfoChangeSource(book: Book) {
+    if (!bookInfoCanContinueReading()) return;
+    if (textViewerStore.state.book) {
+      void textViewerStore.openBook(book);
+      return;
+    }
+    const kind = viewerStore.state.kind;
+    if (viewerStore.state.book && kind) {
+      void viewerStore.openBook(book, kind);
+    }
+  }
+
   function openBookFromBookInfo(
     book: Book,
     catalog?: import("@/types").BookChapter[],
@@ -3612,6 +3624,33 @@ function AppContent() {
                 entryVisible={() => overlayEntryVisible(entry)}
                 onClose={requestCloseReader}
                 onOpenBookInfo={() => void openBookInfoFromViewerBook(textViewerStore.state.book)}
+                onSourceEdit={(source) => openSourceEditor(source)}
+                onSourceVariables={openSourceVariables}
+                onSourceLogin={async (source) => {
+                  const url = source.loginUrl?.trim();
+                  const hasUi = !!source.loginUi?.trim();
+                  const isHttp =
+                    !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                  if (isHttp && !hasUi) {
+                    try {
+                      const cookies = getStoredSourceCookiesForInnerWeb(source, url);
+                      await openSourceSettingsInApp(url, cookies, {
+                        bookSourceUrl: source.bookSourceUrl,
+                      });
+                    } catch (e) {
+                      console.error('打开登录页失败:', e);
+                      showAppToast({
+                        title: '打开失败',
+                        description: e instanceof Error ? e.message : '请稍后重试',
+                        variant: 'destructive',
+                      });
+                    }
+                    return;
+                  }
+                  if (url || hasUi) {
+                    setSourceLoginDialogSource(source);
+                  }
+                }}
                     />
                   </Match>
                   <Match when={entry.kind === "image-viewer"}>
@@ -3670,6 +3709,7 @@ function AppContent() {
                       onOpenBook={(book, catalog, sourceFromPage) =>
                         openBookFromBookInfo(book, catalog, sourceFromPage ?? e.source)
                       }
+                      onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
                     />
                       );
                     })()}
@@ -3727,6 +3767,7 @@ function AppContent() {
                 onOpenBook={(book, catalog, sourceFromPage) =>
                   openBookFromBookInfo(book, catalog, sourceFromPage ?? source)
                 }
+                onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
               />
             );
           }}
