@@ -4,6 +4,8 @@
 
 import { splitRawIntoParagraphSegments } from '@/lib/media/text/reader-content-blocks';
 import type { ReaderChapterLayout } from '@/lib/media/text/reader-chapter-layout-types';
+import { readerChapterTitleFontSizePx, readerParagraphIndentPrefix } from '@/lib/media/text/reader-chapter-title-style';
+import { resolveReaderFontFamily } from '@/lib/media/text/reader-font';
 import { textViewerLayoutContentWidth, textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import { readerChapterTitleSpacingPx } from '@/lib/media/text/reader-chapter-title-style';
@@ -48,9 +50,8 @@ function stripHtmlToPlain(raw: string): string {
     .replace(/&amp;/g, '&');
 }
 
-function resolveReaderFontFamily(config: TextViewerUiConfig): string {
-  if (config.font !== 0 && config.customFontName) return config.customFontName;
-  return 'ui-sans-serif, system-ui, sans-serif';
+function resolveReaderFontFamilyFromConfig(config: TextViewerUiConfig): string {
+  return resolveReaderFontFamily(config);
 }
 
 function wrapParagraphToLines(
@@ -112,8 +113,9 @@ function buildCanvasSegments(params: CanvasTextLayoutParams): {
     };
   }
 
-  const fontFamily = resolveReaderFontFamily(config);
-  ctx.font = `${fontSize}px ${fontFamily}`;
+  const fontFamily = resolveReaderFontFamilyFromConfig(config);
+  const fontWeight = config.fontWeight ?? 400;
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
 
   const segments: ReaderLayoutSegment[] = [];
   let y = 0;
@@ -122,21 +124,27 @@ function buildCanvasSegments(params: CanvasTextLayoutParams): {
   const titleSpacing = readerChapterTitleSpacingPx(titleStyle, config, 'paged');
   if (titleSpacing && chapterTitle?.trim()) {
     y += titleSpacing.marginTopPx;
+    const titleSize = readerChapterTitleFontSizePx(config);
+    ctx.font = `${config.chapterTitleFontWeight ?? 600} ${titleSize}px ${fontFamily}`;
     const titleLines = wrapParagraphToLines(ctx, chapterTitle.trim(), contentWidth);
-    const titleLineH = fontSize * (config.spacing.line + 0.2);
+    const titleLineH = titleSize * (config.spacing.line + 0.2);
     for (const _line of titleLines) {
       segments.push({ top: y, bottom: y + titleLineH });
       y += titleLineH;
     }
     y += titleSpacing.marginBottomPx;
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   }
+
+  const indentPrefix = readerParagraphIndentPrefix(config.paragraphIndentChars ?? 2);
 
   const plain = stripHtmlToPlain(raw);
   const paragraphs = splitRawIntoParagraphSegments(plain);
   for (let p = 0; p < paragraphs.length; p++) {
     const para = paragraphs[p]!;
     if (!para.trim()) continue;
-    const lines = wrapParagraphToLines(ctx, para, contentWidth);
+    const text = indentPrefix + para.replace(/^([ \u3000]+)/, '');
+    const lines = wrapParagraphToLines(ctx, text, contentWidth);
     for (const _line of lines) {
       segments.push({ top: y, bottom: y + lineHeight });
       y += lineHeight;

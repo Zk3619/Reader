@@ -445,25 +445,18 @@ export function mountSimulationNextAreaPanel(
   options?: {
     contentSpanPx?: number;
     contentInsetPx?: TextViewerPagedContentInsets;
+    pageBg?: string;
   },
 ): void {
   clearSimulationNextAreaPanel(slideMount);
 
   const contentSpan = Math.max(1, Math.round(options?.contentSpanPx ?? 0));
-  const inset = options?.contentInsetPx;
-  const pageBg = resolveOpaquePageBackground(liveInner);
+  const pageBg = options?.pageBg ?? resolveOpaquePageBackground(liveInner);
   const surface = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
 
   const panel = document.createElement('div');
   panel.className = `${NEXT_AREA_CLASS} pointer-events-none absolute inset-0 overflow-hidden box-border`;
   panel.style.backgroundColor = pageBg;
-
-  if (inset) {
-    panel.style.paddingTop = `${inset.top}px`;
-    panel.style.paddingRight = `${inset.right}px`;
-    panel.style.paddingBottom = `${inset.bottom}px`;
-    panel.style.paddingLeft = `${inset.left}px`;
-  }
 
   const contentClip = document.createElement('div');
   contentClip.className = `${READER_PAGED_TURN_CONTENT_CLIP_CLASS} relative w-full overflow-hidden`;

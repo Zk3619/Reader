@@ -11,6 +11,7 @@ import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickRegion } from '@/lib/media/text/reader-click-region';
 import type { TextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
+import type { ReaderPageTipType } from '@/lib/media/text/reader-page-tip';
 
 /** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 滑动 / 仿真 / 无动画 */
 export type TextViewerPageAnim =
@@ -158,6 +159,55 @@ export function normalizeSimulationDragZonePercent(
 }
 
 /** 仿真拖拽分区边界 x：起点 ≤ boundary 为 prev 区，> boundary 为 next 区 */
+export type TextViewerPageTipHeaderMode = 'follow' | 'always' | 'never';
+export type TextViewerPageTipFooterMode = 'follow' | 'always' | 'never';
+
+export interface TextViewerPageTipInsets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** 页眉/页脚信息条（对齐 Legado ReadTipConfig / ReadBookConfig） */
+export interface TextViewerPageTipsConfig {
+  headerMode: TextViewerPageTipHeaderMode;
+  footerMode: TextViewerPageTipFooterMode;
+  headerLeft: ReaderPageTipType;
+  headerMiddle: ReaderPageTipType;
+  headerRight: ReaderPageTipType;
+  footerLeft: ReaderPageTipType;
+  footerMiddle: ReaderPageTipType;
+  footerRight: ReaderPageTipType;
+  headerFontSize: number;
+  footerFontSize: number;
+  headerInset: TextViewerPageTipInsets;
+  footerInset: TextViewerPageTipInsets;
+  showHeaderLine: boolean;
+  showFooterLine: boolean;
+  tipFollowContentColor: boolean;
+  customTipColor: string;
+}
+
+export const defaultTextViewerPageTipsConfig: TextViewerPageTipsConfig = {
+  headerMode: 'follow',
+  footerMode: 'never',
+  headerLeft: 'time',
+  headerMiddle: 'none',
+  headerRight: 'battery',
+  footerLeft: 'chapterTitle',
+  footerMiddle: 'none',
+  footerRight: 'pageAndTotal',
+  headerFontSize: 12,
+  footerFontSize: 12,
+  headerInset: { top: 0, bottom: 0, left: 0, right: 0 },
+  footerInset: { top: 0, bottom: 0, left: 0, right: 0 },
+  showHeaderLine: false,
+  showFooterLine: true,
+  tipFollowContentColor: true,
+  customTipColor: '',
+};
+
 export function simulationDragZoneBoundaryPx(
   viewportWidth: number,
   zonePercent: number,
@@ -185,9 +235,13 @@ export interface TextViewerUiConfig {
   theme: number;
   font: number;
   fontSize: number;
+  /** 正文字重 100–900 */
+  fontWeight: number;
   readWidth: number;
   infiniteLoading: boolean;
   customFontName: string;
+  /** 本地字体文件路径（font=3） */
+  customFontPath: string;
   jumpDuration: number;
   spacing: {
     paragraph: number;
@@ -210,8 +264,20 @@ export interface TextViewerUiConfig {
   /** 仿真翻页：左右拖拽分区宽度（视口宽度 25% / 50% / 75%） */
   simulationDragZonePercent: TextViewerSimulationDragZonePercent;
   dualPage: TextViewerDualPageMode;
-  /** 章节标题渲染：不渲染 / 居中 / 左上角 */
+  /** 章节标题渲染：不渲染 / 左侧 / 中心 / 右侧 */
   chapterTitleStyle: TextViewerChapterTitleStyle;
+  /** 章节标题字号增量（rem，0 表示与正文相同） */
+  chapterTitleSize: number;
+  /** 章节标题上间距（rem） */
+  chapterTitleTopSpacing: number;
+  /** 章节标题下间距（rem） */
+  chapterTitleBottomSpacing: number;
+  /** 章节标题字重 100–900 */
+  chapterTitleFontWeight: number;
+  /** 段首缩进全角字符数（0 表示不缩进） */
+  paragraphIndentChars: number;
+  /** 页眉与页脚信息条 */
+  pageTips: TextViewerPageTipsConfig;
   /** 两端对齐（Legado textFullJustify） */
   textFullJustify: boolean;
   /** 末行底对齐（Legado textBottomJustify，按页微调行距） */
@@ -293,9 +359,11 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   theme: 0,
   font: 0,
   fontSize: 18,
+  fontWeight: 400,
   readWidth: 800,
   infiniteLoading: false,
   customFontName: '',
+  customFontPath: '',
   jumpDuration: 1000,
   spacing: { paragraph: 1, line: 0.8, letter: 0 },
   contentInset: { left: 16, right: 16, center: 32, top: 32, bottom: 32 },
@@ -305,6 +373,12 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   simulationDragZonePercent: TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT,
   dualPage: 'auto',
   chapterTitleStyle: 'center',
+  chapterTitleSize: 0,
+  chapterTitleTopSpacing: 0,
+  chapterTitleBottomSpacing: 0,
+  chapterTitleFontWeight: 600,
+  paragraphIndentChars: 2,
+  pageTips: { ...defaultTextViewerPageTipsConfig },
   textFullJustify: true,
   textBottomJustify: true,
   useZhLayout: false,

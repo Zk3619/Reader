@@ -19,13 +19,20 @@ export function getPersistedTurnSlide(): HTMLElement | null {
 }
 
 /** 向上查找不透明页面背景色（幕帘 / 仿真背面折痕底色） */
-export function resolveOpaquePageBackground(startEl: HTMLElement): string {
+export function resolveOpaquePageBackground(
+  startEl: HTMLElement,
+  fallbackBg?: string,
+): string {
   let node: HTMLElement | null = startEl;
   while (node) {
-    if (node.classList.contains('reader-text-content-slot')) {
-      const slotBg = getComputedStyle(node).backgroundColor;
-      if (slotBg && slotBg !== 'rgba(0, 0, 0, 0)' && slotBg !== 'transparent') {
-        return slotBg;
+    if (
+      node.classList.contains('reader-paged-live-inner') ||
+      node.classList.contains('reader-paged-page-window') ||
+      node.classList.contains('reader-text-content-slot')
+    ) {
+      const bg = getComputedStyle(node).backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+        return bg;
       }
     }
     const bg = getComputedStyle(node).backgroundColor;
@@ -34,7 +41,46 @@ export function resolveOpaquePageBackground(startEl: HTMLElement): string {
     }
     node = node.parentElement;
   }
-  return READER_THEME_DEFAULT_BG;
+  return fallbackBg ?? READER_THEME_DEFAULT_BG;
+}
+
+/** 克隆含页眉页脚的整页 content-frame（滑动幕帘在 always 模式使用） */
+export function buildPageFrameClone(
+  frameEl: HTMLElement,
+  _liveInner: HTMLElement,
+  pageStartPx: number,
+  pageBg: string,
+): HTMLElement {
+  const clone = frameEl.cloneNode(true) as HTMLElement;
+  clone.setAttribute('aria-hidden', 'true');
+  clone.classList.add('reader-paged-turn-frame-clone');
+  clone.style.pointerEvents = 'none';
+  clone.style.position = 'absolute';
+  clone.style.inset = '0';
+  clone.style.width = '100%';
+  clone.style.height = '100%';
+  clone.style.margin = '0';
+  clone.style.boxSizing = 'border-box';
+  clone.style.overflow = 'hidden';
+  clone.style.backgroundColor = pageBg;
+
+  const srcStyle = getComputedStyle(frameEl);
+  clone.style.paddingTop = srcStyle.paddingTop;
+  clone.style.paddingRight = srcStyle.paddingRight;
+  clone.style.paddingBottom = srcStyle.paddingBottom;
+  clone.style.paddingLeft = srcStyle.paddingLeft;
+
+  const innerEl =
+    clone.querySelector<HTMLElement>('.reader-paged-live-inner') ??
+    clone.querySelector<HTMLElement>('[data-reader-render-page]');
+  if (innerEl) {
+    innerEl.style.backgroundColor = pageBg;
+    const y = Math.round(pageStartPx);
+    innerEl.style.transform =
+      mergePagedContentTransforms(y) ?? (y > 0 ? `translate3d(0, ${-y}px, 0)` : '');
+    innerEl.style.willChange = 'transform';
+  }
+  return clone;
 }
 
 /** 克隆 live 页面表面（幕帘 / 仿真下层区共用） */
@@ -83,43 +129,43 @@ export function mountTurnPageCurtain(
     slideViewportPanel?: boolean;
     /** @deprecated 使用 slideViewportPanel */
     slideFillMount?: boolean;
+    /** 主题背景色（避免幕帘回落到默认主题 0） */
+    pageBg?: string;
+    /** 页眉页脚随翻页：克隆整页 content-frame */
+    carryPageTips?: boolean;
+    frameEl?: HTMLElement;
   },
 ): void {
   clearTurnPageCurtain(turnLayer, slideMount);
 
   const contentSpan = Math.max(1, Math.round(options?.contentSpanPx ?? 0));
-  const inset = options?.contentInsetPx;
-  const viewportSlide = Boolean(options?.slideViewportPanel && inset);
-  const pageBg = resolveOpaquePageBackground(liveInner);
-  const curtain = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
+  const pageBg = options?.pageBg ?? resolveOpaquePageBackground(liveInner);
+  const carryTips = Boolean(options?.carryPageTips && options?.frameEl);
 
   const slide = document.createElement('div');
   slide.style.backgroundColor = pageBg;
 
-  if (viewportSlide && inset) {
+  if (carryTips && options?.frameEl) {
+    const frameClone = buildPageFrameClone(
+      options.frameEl,
+      liveInner,
+      pageStartPx,
+      pageBg,
+    );
     slide.className = `${SLIDE_CLASS} absolute inset-0 overflow-hidden box-border`;
-    slide.style.paddingTop = `${inset.top}px`;
-    slide.style.paddingRight = `${inset.right}px`;
-    slide.style.paddingBottom = `${inset.bottom}px`;
-    slide.style.paddingLeft = `${inset.left}px`;
-
-    const contentClip = document.createElement('div');
-    contentClip.className = `${CONTENT_CLIP_CLASS} relative w-full overflow-hidden`;
-    contentClip.style.height = `${contentSpan}px`;
-    contentClip.appendChild(curtain);
-    slide.appendChild(contentClip);
-  } else if (inset || options?.slideFillMount) {
+    slide.style.width = '100%';
+    slide.style.height = '100%';
+    slide.appendChild(frameClone);
+  } else {
+    const curtain = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
     slide.className = `${SLIDE_CLASS} absolute inset-0 overflow-hidden box-border`;
 
     const contentClip = document.createElement('div');
     contentClip.className = `${CONTENT_CLIP_CLASS} absolute inset-x-0 top-0 overflow-hidden`;
     contentClip.style.height = `${contentSpan}px`;
+    contentClip.style.backgroundColor = pageBg;
     contentClip.appendChild(curtain);
     slide.appendChild(contentClip);
-  } else {
-    slide.className = `${SLIDE_CLASS} absolute inset-x-0 top-0 overflow-hidden box-border`;
-    slide.style.height = `${contentSpan}px`;
-    slide.appendChild(curtain);
   }
 
   persistedTurnSlide = slide;
@@ -135,21 +181,23 @@ export function mountCrossChapterIncomingPanel(
   liveInner: HTMLElement,
   pageStartPx: number,
   contentSpanPx: number,
+  pageBg?: string,
 ): void {
   clearCrossChapterIncomingPanel(mount);
 
-  const pageBg = resolveOpaquePageBackground(liveInner);
+  const bg = pageBg ?? resolveOpaquePageBackground(liveInner);
   const span = Math.max(1, Math.round(contentSpanPx));
-  const curtain = buildPageSurfaceClone(liveInner, pageStartPx, pageBg);
+  const curtain = buildPageSurfaceClone(liveInner, pageStartPx, bg);
 
   const panel = document.createElement('div');
   panel.className = `${INCOMING_MOUNT_CLASS} absolute inset-0 overflow-hidden box-border pointer-events-none`;
-  panel.style.backgroundColor = pageBg;
+  panel.style.backgroundColor = bg;
   panel.style.height = `${span}px`;
 
   const contentClip = document.createElement('div');
   contentClip.className = `${CONTENT_CLIP_CLASS} relative w-full overflow-hidden`;
   contentClip.style.height = `${span}px`;
+  contentClip.style.backgroundColor = bg;
   contentClip.appendChild(curtain);
   panel.appendChild(contentClip);
 

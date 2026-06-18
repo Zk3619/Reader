@@ -16,6 +16,23 @@ export interface PagedPageWindowMetrics {
   viewportHeight: number;
 }
 
+export interface ReadPagedPageWindowMetricsParams {
+  viewportEl?: HTMLElement | null;
+  clipEl?: HTMLElement | null;
+  /** 正文槽（页眉页脚之间的 flex 子节点） */
+  contentSlotEl?: HTMLElement | null;
+  /** 页眉页脚之间的 flex 正文区（reader-page-tip-body） */
+  pageTipBodyEl?: HTMLElement | null;
+  /** 外层 content-frame（承担四边 inset；缺省回退 contentSlotEl） */
+  contentFrameEl?: HTMLElement | null;
+  fallbackInsets?: PagedContentInsets;
+  /** content-frame 贴视口上下时，由页眉/页脚占据的垂直空间 */
+  tipChromePadTop?: number;
+  tipChromePadBottom?: number;
+  /** 页眉底至页脚底实测正文高（优先于算术推算） */
+  authoritativeBodyHeightPx?: number;
+}
+
 /** 从 content-slot 读取四边间距：支持 absolute inset 与滑动翻页的 padding inset */
 export function measureContentSlotInsets(
   contentSlotEl: HTMLElement | null | undefined,
@@ -26,10 +43,17 @@ export function measureContentSlotInsets(
 
   const style = getComputedStyle(contentSlotEl);
   const readEdge = (position: string, padding: string, defaultVal: number) => {
-    const pos = parseFloat(position);
-    if (Number.isFinite(pos) && pos > 0) return pos;
     const pad = parseFloat(padding);
     if (Number.isFinite(pad) && pad > 0) return pad;
+    if (position !== '' && position !== 'auto') {
+      const pos = parseFloat(position);
+      if (Number.isFinite(pos) && pos > 0) return pos;
+    }
+    if (Number.isFinite(pad)) return pad;
+    if (position !== '' && position !== 'auto') {
+      const pos = parseFloat(position);
+      if (Number.isFinite(pos)) return pos;
+    }
     return defaultVal;
   };
 
@@ -64,26 +88,73 @@ export function readPagedSpreadContentWidthPx(params: {
   return Math.max(1, 320);
 }
 
-/** 分页与展示共用的 page-window 度量（clipHeight 对齐 content-slot 实测高度） */
-export function readPagedPageWindowMetrics(params: {
-  viewportEl?: HTMLElement | null;
-  clipEl?: HTMLElement | null;
-  contentSlotEl?: HTMLElement | null;
-  fallbackInsets?: PagedContentInsets;
-}): PagedPageWindowMetrics {
-  const insets = measureContentSlotInsets(params.contentSlotEl, params.fallbackInsets);
+/** 页眉/页脚之间的正文窗高（与 grid tip-body 对齐；不含额外 reserve） */
+function resolveTipChromeBodyHeightPx(
+  frameOuter: number,
+  tipTop: number,
+  tipBottom: number,
+  params: ReadPagedPageWindowMetricsParams,
+): number {
+  const estimated = Math.max(1, frameOuter - tipTop - tipBottom);
+  let bodyHeight = estimated;
+
+  if (params.authoritativeBodyHeightPx != null && params.authoritativeBodyHeightPx > 0) {
+    bodyHeight = Math.min(bodyHeight, Math.round(params.authoritativeBodyHeightPx));
+  }
+
+  const domBody = params.pageTipBodyEl?.clientHeight ?? 0;
+  if (domBody > 0) {
+    const rounded = Math.round(domBody);
+    if (rounded > 0 && rounded <= estimated + 2) {
+      bodyHeight = Math.min(bodyHeight, rounded);
+    }
+  }
+
+  return Math.max(1, bodyHeight);
+}
+
+/** 分页与展示共用的 page-window 度量（clipHeight 对齐正文槽实测高度；不含页眉页脚） */
+export function readPagedPageWindowMetrics(
+  params: ReadPagedPageWindowMetricsParams,
+): PagedPageWindowMetrics {
+  const insetEl = params.contentFrameEl ?? params.contentSlotEl;
+  const insets = measureContentSlotInsets(insetEl, params.fallbackInsets);
   const outer =
     (params.viewportEl && params.viewportEl.clientHeight > 0
       ? params.viewportEl.clientHeight
       : 0) ||
     (params.clipEl && params.clipEl.clientHeight > 0 ? params.clipEl.clientHeight : 0);
 
-  const clipHeight = measurePagedClipContentHeight(
+  const tipTop = params.tipChromePadTop ?? 0;
+  const tipBottom = params.tipChromePadBottom ?? 0;
+  const frameFullBleed = insets.top === 0 && insets.bottom === 0;
+
+  const frameOuter =
+    params.contentFrameEl && params.contentFrameEl.clientHeight > 0
+      ? params.contentFrameEl.clientHeight
+      : outer;
+
+  /** 满视口 frame + 页眉/页脚：正文区恒为 frame−tip，与 grid tip-body 一致 */
+  if (frameFullBleed && frameOuter > 0) {
+    const clipHeight = resolveTipChromeBodyHeightPx(frameOuter, tipTop, tipBottom, params);
+    return {
+      clipHeight,
+      padTop: tipTop,
+      padBottom: tipBottom,
+      viewportHeight: frameOuter,
+    };
+  }
+
+  const measuredClip = measurePagedClipContentHeight(
     params.clipEl ?? null,
     outer,
     insets,
     params.contentSlotEl,
+    { top: tipTop, bottom: tipBottom },
+    params.pageTipBodyEl,
   );
+
+  const clipHeight = Math.max(1, measuredClip);
 
   return {
     clipHeight,
@@ -93,24 +164,42 @@ export function readPagedPageWindowMetrics(params: {
   };
 }
 
-/** 正文排版区高度（优先测 content-slot；否则从 clip 减去逻辑 inset） */
+/** 正文排版区高度（优先测 tip-body / content-slot；否则从 clip 减去逻辑 inset） */
 export function measurePagedClipContentHeight(
   clipEl: HTMLElement | null | undefined,
   fallbackOuterHeight = 0,
   insets?: { top: number; bottom: number },
   contentSlotEl?: HTMLElement | null,
+  tipChromePads?: { top: number; bottom: number },
+  pageTipBodyEl?: HTMLElement | null,
 ): number {
   const defaults = textViewerPagedContentInsets();
   const top = insets?.top ?? defaults.top;
   const bottom = insets?.bottom ?? defaults.bottom;
-  const fallback = Math.max(1, fallbackOuterHeight - top - bottom);
+  const tipTop = tipChromePads?.top ?? 0;
+  const tipBottom = tipChromePads?.bottom ?? 0;
+
+  let fallback = Math.max(1, fallbackOuterHeight - top - bottom);
+  if (top === 0 && bottom === 0 && fallbackOuterHeight > 0 && (tipTop > 0 || tipBottom > 0)) {
+    fallback = Math.max(1, fallbackOuterHeight - tipTop - tipBottom);
+  }
+
+  const capToTipChrome = (height: number) => {
+    if (fallbackOuterHeight > 0 && (tipTop > 0 || tipBottom > 0)) {
+      return Math.min(height, Math.max(1, fallbackOuterHeight - tipTop - tipBottom));
+    }
+    return height;
+  };
+
+  if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
+    return capToTipChrome(Math.max(1, Math.round(pageTipBodyEl.clientHeight)));
+  }
 
   if (contentSlotEl && contentSlotEl.clientHeight > 0) {
-    // 滑动翻页时 slot 为满视口面板，inset 由 padding 承担；clientHeight 含 padding 需扣除，
-    // 否则排版区高度被高估、切章前后页界不一致而抖动。按页挂载时 padding 为 0，结果不变。
     const padTop = parseFloat(contentSlotEl.style.paddingTop) || 0;
     const padBottom = parseFloat(contentSlotEl.style.paddingBottom) || 0;
-    return Math.max(1, Math.round(contentSlotEl.clientHeight - padTop - padBottom));
+    const height = Math.max(1, Math.round(contentSlotEl.clientHeight - padTop - padBottom));
+    return capToTipChrome(height);
   }
 
   if (!clipEl || clipEl.clientHeight <= 0) {
