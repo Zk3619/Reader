@@ -30,6 +30,8 @@ import {
 } from '@/lib/viewer/media-viewer-catalog-drawer';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import { ReaderTextContentSlot } from '@/components/viewer/text-viewer/reader-text-content-slot';
+import { ReaderScrollPageChrome } from '@/components/viewer/text-viewer/ReaderScrollPageChrome';
+import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
 import {
   ReaderScrollViewport,
@@ -41,6 +43,7 @@ import {
   normalizeTextViewerPageAnim,
 } from '@/lib/media/text/text-viewer-page-anim';
 import { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';
+import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
 import { ReaderOfflineCacheDialog } from '@/components/viewer/text-viewer/ReaderOfflineCacheDialog';
@@ -97,7 +100,7 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainScrollClass, useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
 import { TextViewerChapterSourceBar } from '@/components/viewer/text-viewer/TextViewerChapterSourceBar';
 import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
@@ -883,15 +886,26 @@ export function BookReader(props: BookReaderProps) {
     return style === 'scanLine' || style === 'progressBar';
   };
 
-  const scrollContentClass = useMediaViewerMainScrollClass('reader-text-scroll');
   const stageContentClass = useMediaViewerMainStageClass('reader-text-stage');
   const readerThemeShell = () => readerThemeClasses(textViewerStore.state.config.theme);
 
   const mainContentClass = () =>
-    cn(
-      isPagedMode() ? stageContentClass() : scrollContentClass(),
-      readerThemeShell().bg,
-    );
+    cn(stageContentClass(), readerThemeShell().bg);
+
+  const scrollPageTipContext = (): ReaderPageTipContext => {
+    const cat = catalog();
+    const ch = chapterIndex();
+    const total = cat.length;
+    const progress = total > 0 ? Math.min(1, Math.max(0, (ch + chapterPos()) / total)) : 0;
+    return {
+      bookName: book()?.name,
+      chapterTitle: displayChapterTitle(),
+      pageIndex: 0,
+      pageCount: 1,
+      bookProgressPercent: progress,
+      bookProgressLabel: total > 0 ? `${ch + 1}/${total}` : undefined,
+    };
+  };
 
   const readerContentShared = {
     onOpenComments: openComments,
@@ -905,19 +919,27 @@ export function BookReader(props: BookReaderProps) {
       fallback={
         <Index each={[contentEnterKey()]}>
           {() => (
-            <ReaderTextContentSlot mode="scroll">
-              <ReaderScrollViewport
-                class={cn('min-h-full', contentTransitionClass())}
-                insetManagedBySlot
-                getScrollContainer={getScrollContainer}
-                onRegisterNav={(api) => {
-                  scrollNav = api;
-                }}
-                resolveChapterTitle={displayChapterTitle}
-                {...readerContentShared}
-                dualPage={dualPageActive()}
-              />
-            </ReaderTextContentSlot>
+            <ReaderScrollPageChrome
+              tips={textViewerStore.state.config.pageTips}
+              context={scrollPageTipContext()}
+              chromeBarsVisible={chromeBarsVisible()}
+              themeId={textViewerStore.state.config.theme}
+              scrollRef={bindScrollContainerRef}
+            >
+              <ReaderTextContentSlot mode="scroll" tipChromeOuter>
+                <ReaderScrollViewport
+                  class={cn('min-h-full', contentTransitionClass())}
+                  insetManagedBySlot
+                  getScrollContainer={getScrollContainer}
+                  onRegisterNav={(api) => {
+                    scrollNav = api;
+                  }}
+                  resolveChapterTitle={displayChapterTitle}
+                  {...readerContentShared}
+                  dualPage={dualPageActive()}
+                />
+              </ReaderTextContentSlot>
+            </ReaderScrollPageChrome>
           )}
         </Index>
       }
@@ -926,6 +948,7 @@ export function BookReader(props: BookReaderProps) {
         pageAnim={normalizedPageAnim}
         class="h-full min-h-full"
         suppressPointerTurn={() => autoPager.active()}
+        chromeBarsVisible={chromeBarsVisible}
         {...readerContentShared}
         resolveChapterTitle={displayChapterTitle}
         onRequestPrevChapter={() => handlePrev()}
@@ -942,145 +965,145 @@ export function BookReader(props: BookReaderProps) {
       <MediaViewerChromeLayoutProvider
         layout={() => textViewerStore.state.config.viewerChromeLayout}
       >
-      <MediaViewerShell
-        entryVisible={props.entryVisible}
-        tapToToggleBars={false}
-        chromePointerInput
-        contentPrimaryAction={contentPrimaryAction}
-      >
-        <BookReaderChromeBridge
-          onReady={(toggle) => {
-            toggleChromeBars = toggle;
-          }}
-          onChromeBarsVisible={setChromeBarsVisible}
-        />
-        <MediaViewerShellMain>
-          <MediaViewerChromeSlots
-            header={
-              <MediaViewerHeader
-                subHeader={
-                  <TextViewerChapterSourceBar
-                    book={book()}
-                    chapter={currentChapter()}
-                    chapterTitle={displayChapterTitle()}
-                    onSourceEdit={props.onSourceEdit}
-                    onSourceLogin={props.onSourceLogin}
-                    onSourceVariables={props.onSourceVariables}
+        <MediaViewerShell
+          entryVisible={props.entryVisible}
+          tapToToggleBars={false}
+          chromePointerInput
+          contentPrimaryAction={contentPrimaryAction}
+        >
+          <BookReaderChromeBridge
+            onReady={(toggle) => {
+              toggleChromeBars = toggle;
+            }}
+            onChromeBarsVisible={setChromeBarsVisible}
+          />
+          <MediaViewerShellMain>
+            <MediaViewerChromeSlots
+              header={
+                <MediaViewerHeader
+                  subHeader={
+                    <TextViewerChapterSourceBar
+                      book={book()}
+                      chapter={currentChapter()}
+                      chapterTitle={displayChapterTitle()}
+                      onSourceEdit={props.onSourceEdit}
+                      onSourceLogin={props.onSourceLogin}
+                      onSourceVariables={props.onSourceVariables}
+                    />
+                  }
+                >
+                  <TextViewerToolbarHeader
+                    bookName={book()?.name ?? ''}
+                    onClose={props.onClose}
+                    onOpenBookInfo={props.onOpenBookInfo}
+                    isWideScreen={isWideScreen()}
+                    readAloudActive={readAloudActive()}
+                    onOpenCatalog={openCatalog}
+                    onReadAloud={handleReadAloud}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenReaderMenu={openReaderMenuDrawer}
+                    settingsTooltipSuspended={settingsTooltipSuspended()}
+                    catalogTooltipSuspended={catalogTooltipSuspended()}
+                    onChangeSource={openChangeSource}
+                    canChangeSource={canChangeSource()}
+                    onRefreshChapter={() => {
+                      void textViewerStore.refreshChapter().catch(() => undefined);
+                    }}
+                    onOpenOfflineCache={openOfflineCacheDialog}
+                    moreMenu={{
+                      canBookmark: canUseBookmarks(),
+                      onOpenSearch: () => setSearchOpen(true),
+                      onOpenBookmarks: () => setBookmarksOpen(true),
+                      onAddBookmark: () => void handleAddBookmark(),
+                      onOpenDict: handleOpenDict,
+                      autoPageActive: () => autoPager.active(),
+                      autoPageBlocked: () => isDualPageLayoutActive(),
+                      onAutoPageToggle: handleAutoPageToggle,
+                    }}
                   />
+                </MediaViewerHeader>
+              }
+              footer={
+                <MediaViewerFooter>
+                  <TextViewerBottomChrome
+                    isWideScreen={isWideScreen()}
+                    bottomBarThemeClasses={bottomBarThemeClasses()}
+                    chapterTitle={displayChapterTitle()}
+                    chapterWordCountText={chapterWordCountText()}
+                    chapterProgressPercent={chapterProgressPercent()}
+                    bookProgressPercent={bookProgressPercent()}
+                    chapterPos={chapterPos()}
+                    onChapterProgressChange={handleChapterProgressChange}
+                    onPrevChapter={handlePrev}
+                    onNextChapter={handleNext}
+                    onOpenCatalog={openCatalog}
+                    onReadAloud={handleReadAloud}
+                    readAloudActive={readAloudActive()}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenReaderMenu={openReaderMenuDrawer}
+                    autoPageActive={() => autoPager.active() && !isDualPageLayoutActive()}
+                    autoReadSpeed={() => autoPager.speed()}
+                    onAutoReadSpeedChange={handleAutoReadSpeedChange}
+                  />
+                </MediaViewerFooter>
+              }
+            >
+              <Show
+                when={isWideScreen() && (commentsOpen() || panelClosing())}
+                fallback={
+                  <div
+                    ref={bindScrollContainerRef}
+                    class={mainContentClass()}
+                    onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
+                    onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
+                  >
+                    <ReaderAutoPageOverlay
+                      visible={autoPageOverlayVisible()}
+                      style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
+                      progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
+                      progress={autoPager.screenProgress()}
+                    />
+                    {renderTextBody()}
+                  </div>
                 }
               >
-                <TextViewerToolbarHeader
-                  bookName={book()?.name ?? ''}
-                  onClose={props.onClose}
-                  onOpenBookInfo={props.onOpenBookInfo}
-                  isWideScreen={isWideScreen()}
-                  readAloudActive={readAloudActive()}
-                  onOpenCatalog={openCatalog}
-                  onReadAloud={handleReadAloud}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                  onOpenReaderMenu={openReaderMenuDrawer}
-                  settingsTooltipSuspended={settingsTooltipSuspended()}
-                  catalogTooltipSuspended={catalogTooltipSuspended()}
-                  onChangeSource={openChangeSource}
-                  canChangeSource={canChangeSource()}
-                  onRefreshChapter={() => {
-                    void textViewerStore.refreshChapter().catch(() => undefined);
-                  }}
-                  onOpenOfflineCache={openOfflineCacheDialog}
-                  moreMenu={{
-                    canBookmark: canUseBookmarks(),
-                    onOpenSearch: () => setSearchOpen(true),
-                    onOpenBookmarks: () => setBookmarksOpen(true),
-                    onAddBookmark: () => void handleAddBookmark(),
-                    onOpenDict: handleOpenDict,
-                    autoPageActive: () => autoPager.active(),
-                    autoPageBlocked: () => isDualPageLayoutActive(),
-                    onAutoPageToggle: handleAutoPageToggle,
-                  }}
-                />
-              </MediaViewerHeader>
-            }
-            footer={
-              <MediaViewerFooter>
-                <TextViewerBottomChrome
-                  isWideScreen={isWideScreen()}
-                  bottomBarThemeClasses={bottomBarThemeClasses()}
-                  chapterTitle={displayChapterTitle()}
-                  chapterWordCountText={chapterWordCountText()}
-                  chapterProgressPercent={chapterProgressPercent()}
-                  bookProgressPercent={bookProgressPercent()}
-                  chapterPos={chapterPos()}
-                  onChapterProgressChange={handleChapterProgressChange}
-                  onPrevChapter={handlePrev}
-                  onNextChapter={handleNext}
-                  onOpenCatalog={openCatalog}
-                  onReadAloud={handleReadAloud}
-                  readAloudActive={readAloudActive()}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                  onOpenReaderMenu={openReaderMenuDrawer}
-                  autoPageActive={() => autoPager.active() && !isDualPageLayoutActive()}
-                  autoReadSpeed={() => autoPager.speed()}
-                  onAutoReadSpeedChange={handleAutoReadSpeedChange}
-                />
-              </MediaViewerFooter>
-            }
-          >
-          <Show
-            when={isWideScreen() && (commentsOpen() || panelClosing())}
-            fallback={
-              <div
-                ref={bindScrollContainerRef}
-                class={mainContentClass()}
-                onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
-                onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
-              >
-                <ReaderAutoPageOverlay
-                  visible={autoPageOverlayVisible()}
-                  style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
-                  progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
-                  progress={autoPager.screenProgress()}
-                />
-                {renderTextBody()}
-              </div>
-            }
-          >
-            <div class="flex min-h-0 flex-1">
-              <div class="relative min-w-0 flex-1 overflow-hidden">
-                <div
-                  ref={bindScrollContainerRef}
-                  class={mainContentClass()}
-                  onPointerDown={onContentPointerDown}
-                  onPointerMove={onContentPointerMove}
-                >
-                  <ReaderAutoPageOverlay
-                    visible={autoPageOverlayVisible()}
-                    style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
-                    progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
-                    progress={autoPager.screenProgress()}
-                  />
-                  {renderTextBody()}
+                <div class="flex min-h-0 flex-1">
+                  <div class="relative min-w-0 flex-1 overflow-hidden">
+                    <div
+                      ref={bindScrollContainerRef}
+                      class={mainContentClass()}
+                      onPointerDown={onContentPointerDown}
+                      onPointerMove={onContentPointerMove}
+                    >
+                      <ReaderAutoPageOverlay
+                        visible={autoPageOverlayVisible()}
+                        style={textViewerStore.state.config.autoPageStyle ?? 'scanLine'}
+                        progressEdge={textViewerStore.state.config.autoPageProgressEdge ?? 'bottom'}
+                        progress={autoPager.screenProgress()}
+                      />
+                      {renderTextBody()}
+                    </div>
+                  </div>
+                  <div
+                    class={cn(
+                      'reader-comments-panel flex shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background transition-[width] duration-300 ease-out',
+                      (panelEntering() || panelClosing()) ? 'w-0 border-l-0' : 'w-80'
+                    )}
+                    onTransitionEnd={handleCommentsPanelTransitionEnd}
+                  >
+                    <div class="flex h-full min-w-80 flex-col">
+                      <ReaderCommentsDrawer
+                        segment={commentsSegment()}
+                        onClose={handleCloseComments}
+                        embedded
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div
-                class={cn(
-                  'reader-comments-panel flex shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background transition-[width] duration-300 ease-out',
-                  (panelEntering() || panelClosing()) ? 'w-0 border-l-0' : 'w-80'
-                )}
-                onTransitionEnd={handleCommentsPanelTransitionEnd}
-              >
-                <div class="flex h-full min-w-80 flex-col">
-                  <ReaderCommentsDrawer
-                    segment={commentsSegment()}
-                    onClose={handleCloseComments}
-                    embedded
-                  />
-                </div>
-              </div>
-            </div>
-          </Show>
-          </MediaViewerChromeSlots>
-        </MediaViewerShellMain>
-      </MediaViewerShell>
+              </Show>
+            </MediaViewerChromeSlots>
+          </MediaViewerShellMain>
+        </MediaViewerShell>
       </MediaViewerChromeLayoutProvider>
 
       {/* 窄屏段评 Drawer */}
@@ -1139,13 +1162,13 @@ export function BookReader(props: BookReaderProps) {
         </ViewerAppDrawer>
       </Show>
 
-      {/* 阅读设置 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
+      {/* 阅读界面 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
       <ViewerAppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
         <ViewerAppDrawerContent
           class={cn('flex flex-col', hDrawerPanel, `max-h-[75dvh]`)}
           showNativeDragHandle={false}
         >
-          <ViewerAppDrawerHeader title="阅读设置" />
+          <ViewerAppDrawerHeader title="界面" />
           <ViewerAppDrawerBody class="mb-4 min-w-0 flex-1 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-4 pb-2 pt-1">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
@@ -1172,6 +1195,12 @@ export function BookReader(props: BookReaderProps) {
           <ViewerAppDrawerHeader title="设置" />
           {/* 阻止内部拖拽使用 data-corvu-no-drag 或 disableDragClose */}
           <ViewerAppDrawerBody class="gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-2 mb-4">
+            <div class="space-y-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-3 mx-1 mb-2">
+              <ChapterBodyPrefetchControls viewer="text" />
+              <p class="text-xs text-muted-foreground">
+                与全局设置「阅读体验 → 章节正文预下载」同步；容量与清理见「存储与缓存 → 阅读缓存」。
+              </p>
+            </div>
             <Button
               variant="ghost"
               class="w-full justify-start"

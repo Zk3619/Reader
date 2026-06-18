@@ -15,7 +15,7 @@ import {
 import { textViewerStore } from '@/stores/viewer';
 import { state as viewerState } from '@/stores/viewer/media/state';
 import { ReaderContent, type ReaderContentProps } from '@/components/viewer/text-viewer/ReaderContent';
-import { applyReaderTextContentSlotLayoutStyle, readerTextContentSlotPagedMountStyle, readerTextContentSlotSlidePanelStyle } from '@/components/viewer/text-viewer/reader-text-content-slot';
+import { applyReaderTextContentSlotLayoutStyle, readerTextContentSlotHorizontalPaddingStyle, readerTextContentSlotPagedBodyMountStyle, readerTextContentSlotPagedFrameStyle, readerTextContentSlotPagedMountStyle, readerTextContentSlotSlidePanelStyle } from '@/components/viewer/text-viewer/reader-text-content-slot';
 import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import {
   layoutReaderChapter,
@@ -70,7 +70,10 @@ import {
   simulationDragIntentFromOffset,
   updateSimulationCurl,
 } from '@/lib/media/text/reader-paged-simulation-curl';
-import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
+import { ReaderPageTipChrome } from '@/components/viewer/text-viewer/ReaderPageTipChrome';
+import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
+import { readerPageTipsCarryWithTurn, readerPageTipContentBudget } from '@/lib/media/text/reader-page-tip';
 import { isReaderInlineMeasureImage } from '@/lib/media/image/inline-text-image-size';
 import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
 import {
@@ -114,7 +117,6 @@ import {
   type PagedTurnDirection,
 } from '@/lib/media/text/reader-paged-turn-style';
 import {
-  measureContentSlotInsets,
   readPagedPageWindowMetrics,
   readPagedSpreadContentWidthPx,
 } from '@/lib/media/text/reader-paged-clip-measure';
@@ -170,6 +172,8 @@ export interface ReaderPagedViewportProps extends ReaderContentProps {
   suppressPointerTurn?: Accessor<boolean>;
   /** 章节展示标题（含替换净化）；缺省用目录原始 title */
   resolveChapterTitle?: (index: number) => string | undefined;
+  /** 顶底操作栏是否可见（页眉 follow 模式） */
+  chromeBarsVisible?: Accessor<boolean>;
 }
 
 export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
@@ -180,6 +184,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     'onRegisterNav',
     'suppressPointerTurn',
     'resolveChapterTitle',
+    'chromeBarsVisible',
   ]);
 
   const [pageIndex, setPageIndex] = createSignal(0);
@@ -200,7 +205,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   let viewportEl: HTMLDivElement | undefined;
   let clipEl: HTMLDivElement | undefined;
+  let contentFrameEl: HTMLDivElement | undefined;
+  let pageTipBodyEl: HTMLDivElement | undefined;
   let contentSlotEl: HTMLDivElement | undefined;
+  let tipChromeResizeObserver: ResizeObserver | undefined;
+  let tipChromeResizeDebounce: ReturnType<typeof setTimeout> | undefined;
   let liveInnerEl: HTMLDivElement | undefined;
   let curtainCloneHostInnerEl: HTMLDivElement | undefined;
   let dualLeftShiftEl: HTMLDivElement | undefined;
@@ -276,6 +285,24 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const pagedSlotInsetFromConfig = (): TextViewerPagedContentInsets =>
     textViewerPagedContentInsets(viewerState.config);
+
+  const pagedFrameFallbackInsets = (): TextViewerPagedContentInsets => {
+    const pads = pagedSlotInsetFromConfig();
+    return { ...pads, top: 0, bottom: 0 };
+  };
+
+  const pageTipContentBudget = () =>
+    readerPageTipContentBudget(
+      contentFrameEl,
+      viewerState.config.pageTips,
+      chromeBarsVisible(),
+      pageTipBodyEl,
+    );
+
+  const pageTipVerticalPads = () => {
+    const budget = pageTipContentBudget();
+    return { top: budget.headerPad, bottom: budget.footerPad };
+  };
 
   /** 视口正文内宽（不读可能被宽 shift 撑大的 slot，也不触发双栏判定） */
   const viewportSpreadContentWidthPx = (): number =>
@@ -360,20 +387,67 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const contentInset = (): TextViewerPagedContentInsets => {
-    const fallback = pagedSlotInsetFromConfig();
-    if (slideTurnActive()) return fallback;
-    if (contentSlotEl) {
-      return measureContentSlotInsets(contentSlotEl, fallback);
-    }
-    const l = layout();
-    if (l) {
-      return {
-        ...fallback,
-        top: l.padTop,
-        bottom: l.padBottom,
-      };
-    }
-    return fallback;
+    const horizontal = pagedSlotInsetFromConfig();
+    const tips = pageTipVerticalPads();
+    return {
+      left: horizontal.left,
+      right: horizontal.right,
+      top: tips.top,
+      bottom: tips.bottom,
+    };
+  };
+
+  const chromeBarsVisible = () => local.chromeBarsVisible?.() ?? false;
+
+  const pageThemeBg = () => readerThemePalette(viewerState.config.theme).bg;
+
+  const turnSlidePanelLayoutActive = () =>
+    turnVisualActive() && (anim() === 'slide' || anim() === 'simulation');
+
+  const carryPageTipsWithTurn = () =>
+    readerPageTipsCarryWithTurn(viewerState.config.pageTips, chromeBarsVisible());
+
+  const slideTurnPanelEl = () =>
+    carryPageTipsWithTurn() ? contentFrameEl : contentSlotEl;
+
+  const turnSlidePanelStyle = () => ({
+    'background-color': pageThemeBg(),
+  });
+
+  const applyTurnFrameSlideLayout = () => {
+    if (!contentFrameEl) return;
+    const a = anim();
+    if (a !== 'slide' && a !== 'simulation') return;
+    applyReaderTextContentSlotLayoutStyle(
+      contentFrameEl,
+      readerTextContentSlotSlidePanelStyle(),
+    );
+  };
+
+  const turnCurtainSpanPx = (fromPage: number) => {
+    const span = pageWindowSpanPx(fromPage);
+    if (span != null && span > 0) return span;
+    return clipViewportHeightPx();
+  };
+
+  const turnCurtainMountOptions = (fromPage: number) => {
+    const carry = carryPageTipsWithTurn();
+    const useFrameChrome = carry && Boolean(contentFrameEl);
+    return {
+      contentSpanPx: turnCurtainSpanPx(fromPage),
+      viewportHeightPx: curtainViewportHeightPx(fromPage),
+      /** 正文区几何由 JSX curtain-slide-mount（pagedBodyMountStyle）承担，幕帘内不再叠 padding */
+      contentInsetPx: undefined,
+      slideViewportPanel: false,
+      pageBg: pageThemeBg(),
+      carryPageTips: useFrameChrome,
+      frameEl: useFrameChrome ? contentFrameEl : undefined,
+    };
+  };
+
+  const pageTipBodyHeightPx = () => {
+    const h = pageTipContentBudget().bodyHeightPx;
+    return h > 0 ? h : undefined;
   };
 
   const pageWindowMetrics = () =>
@@ -381,19 +455,63 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       viewportEl,
       clipEl,
       contentSlotEl,
-      fallbackInsets: pagedSlotInsetFromConfig(),
+      pageTipBodyEl,
+      contentFrameEl,
+      fallbackInsets: pagedFrameFallbackInsets(),
+      tipChromePadTop: pageTipVerticalPads().top,
+      tipChromePadBottom: pageTipVerticalPads().bottom,
+      authoritativeBodyHeightPx: pageTipBodyHeightPx(),
     });
 
-  /** 满视口裁切层（无 padding，翻页/书脊对齐此层） */
+  const pagedViewportSignature = (layoutWidth: number, viewportHeight: number) =>
+    buildViewportSignature(layoutWidth, viewportHeight, pageWindowMetrics());
+
+  const pageTipContext = (): ReaderPageTipContext => {
+    const catalog = viewerState.catalog;
+    const ch = viewerState.chapterIndex;
+    const totalCh = catalog.length;
+    const bookProgress =
+      totalCh > 0 ? Math.min(1, Math.max(0, (ch + pageIndex() / Math.max(1, pageCount())) / totalCh)) : 0;
+    return {
+      bookName: viewerState.book?.name,
+      chapterTitle:
+        local.resolveChapterTitle?.(ch) ?? catalog[ch]?.title ?? '',
+      pageIndex: incomingDisplayPage(),
+      pageCount: pageCount(),
+      bookProgressPercent: bookProgress,
+      bookProgressLabel:
+        totalCh > 0 ? `${ch + 1}/${totalCh}` : undefined,
+    };
+  };
+
   const pagedClipStyle = () =>
     ({
       height: '100%',
       'box-sizing': 'border-box',
     }) as const;
 
-  /** @deprecated 使用 readerTextContentSlotPagedMountStyle */
+  /** @deprecated 使用 readerTextContentSlotPagedFrameStyle */
   const pagedContentSlotStyle = (inset: TextViewerPagedContentInsets) =>
     readerTextContentSlotPagedMountStyle(inset);
+
+  const pagedFrameStyle = () => readerTextContentSlotPagedFrameStyle();
+
+  const pagedBodyMountStyle = (inset: TextViewerPagedContentInsets) =>
+    readerTextContentSlotPagedBodyMountStyle(inset, pageTipVerticalPads());
+
+  /** turn-layer 边衬：与正文区（页眉页脚之间）对齐，勿用配置里的垂直 contentInset */
+  const turnGutterInsets = (): TextViewerPagedContentInsets =>
+    carryPageTipsWithTurn()
+      ? { top: 0, bottom: 0, left: 0, right: 0 }
+      : contentInset();
+
+  /** 幕帘挂载：携带页眉页脚时须满视口，否则仅正文区 */
+  const turnCurtainSlideMountActiveStyle = (
+    horizontalInset: TextViewerPagedContentInsets,
+  ): Record<string, string> =>
+    carryPageTipsWithTurn()
+      ? readerTextContentSlotPagedFrameStyle()
+      : pagedBodyMountStyle(horizontalInset);
 
   const contentExtentPx = () => {
     const l = pagingLayout();
@@ -499,7 +617,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         viewportWidth: layoutWidth,
         viewportHeight: height,
       }),
-      viewportSignature: buildViewportSignature(layoutWidth, height),
+      viewportSignature: pagedViewportSignature(layoutWidth, height),
       chapterTitle,
     });
     const cached = getCachedChapterLayout(cacheKey);
@@ -713,15 +831,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const resolveContentRootForLayout = (): HTMLElement | null => {
-    // 仅双栏展示时限定屏外测量根；单栏下仍可用 live/idle 兜底（避免 intent 为真但尚未双栏时测不到 DOM）
+    // 双栏：屏外测量根；单栏：tip-body 内 live/idle 根（与展示同区域）
     if (dualPageMeasureIntent() && pagedLayoutDualPage()) {
       if (!measureHostColumnWidthReady()) return null;
       return resolveMeasureHostContentRoot();
     }
 
     const candidates: HTMLElement[] = [];
-    const measureHost = resolveMeasureHostContentRoot();
-    if (measureHost) candidates.push(measureHost);
     if (idleContentRoot) candidates.push(idleContentRoot);
     const live =
       liveInnerEl?.querySelector<HTMLElement>('[data-reader-content]') ??
@@ -781,11 +897,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       if (!measureHostColumnWidthReady()) return false;
       return Boolean(resolveMeasureHostContentRoot());
     }
-    if (resolveMeasureHostContentRoot()) return true;
     if (idleContentRoot && measureRootHasUsableBlocks(idleContentRoot)) {
       return true;
     }
-    return false;
+    const live =
+      liveInnerEl?.querySelector<HTMLElement>('[data-reader-content]') ??
+      viewportEl?.querySelector<HTMLElement>(
+        '.reader-paged-live-inner [data-reader-content]',
+      );
+    return live != null && measureRootHasUsableBlocks(live);
   };
 
   const bindDualMeasureContentRoot = (root: HTMLElement | null) => {
@@ -836,13 +956,23 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const measureHostWidthStyle = createMemo(() => {
     viewportSize();
     void contentRootReady();
+    pageTipContentBudget();
+    const clipH = pageWindowMetrics().clipHeight;
     if (dualPageMeasureIntent()) {
-      return dualSpreadMeasureHostStyle(dualSpreadMeasureColumnWidthPx());
+      return {
+        ...dualSpreadMeasureHostStyle(dualSpreadMeasureColumnWidthPx()),
+        height: clipH > 0 ? `${clipH}px` : undefined,
+        overflow: 'hidden',
+      };
     }
     const w = slotContentInnerWidth();
     const fallback = Math.max(viewportSpreadContentWidthPx(), 320);
     const safeW = w > 1 ? w : fallback;
-    return { width: `${Math.round(safeW)}px` };
+    return {
+      width: `${Math.round(safeW)}px`,
+      height: clipH > 0 ? `${clipH}px` : undefined,
+      overflow: 'hidden',
+    };
   });
 
   /** 测量块随正文异步挂载；须持续重试直至排版完整（非单次 remeasure） */
@@ -974,7 +1104,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             viewportWidth: layoutWidth,
             viewportHeight: height,
           }),
-          viewportSignature: buildViewportSignature(layoutWidth, height),
+          viewportSignature: pagedViewportSignature(layoutWidth, height),
           chapterTitle: currentChapterTitle(),
         });
         const fromCache =
@@ -1082,6 +1212,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       buildViewportSignature(
         viewportEl?.clientWidth ?? 0,
         viewportEl?.clientHeight ?? 0,
+        pageWindowMetrics(),
       ),
       options?.bypassCache ? '1' : '0',
     ].join('|');
@@ -1197,7 +1328,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         viewportWidth: layoutWidth,
         viewportHeight: height,
       }),
-      viewportSignature: buildViewportSignature(layoutWidth, height),
+      viewportSignature: pagedViewportSignature(layoutWidth, height),
       chapterTitle: currentChapterTitle(),
     });
   };
@@ -1301,12 +1432,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const ch = viewerState.chapterIndex;
     const outerW = viewportEl?.clientWidth ?? 0;
     if (!book || outerW <= 0) return;
-    const inset = pagedSlotInsetFromConfig();
     const pageWindow = readPagedPageWindowMetrics({
       viewportEl,
       clipEl,
       contentSlotEl,
-      fallbackInsets: inset,
+      pageTipBodyEl,
+      contentFrameEl,
+      fallbackInsets: pagedFrameFallbackInsets(),
+      tipChromePadTop: pageTipVerticalPads().top,
+      tipChromePadBottom: pageTipVerticalPads().bottom,
     });
     const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
@@ -1425,9 +1559,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const pageContentClipPx = () =>
     pageWindowSpanPx(incomingDisplayPage()) ?? clipViewportHeightPx();
 
-  /** 页窗与 content-clip 同高，避免 page-window 满高 + clip 缩窗在底部形成错误占位 */
-  const pageWindowHeightForDisplay = () => pageContentClipPx();
-
   const dualSpreadColumnClipPx = (
     page: number,
     column: 'left' | 'right',
@@ -1467,9 +1598,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const viewportWidth = () => viewportEl?.clientWidth ?? 0;
 
-  /** 滑动翻页位移基准：满视口 clip 宽（每页为视口宽面板，inset 在面板内 padding） */
-  const slideTurnSpanWidthPx = () =>
-    clipEl?.clientWidth || viewportEl?.clientWidth || 0;
+  /** 滑动翻页位移基准：与翻页面板同宽（满 clip 或 content-frame） */
+  const slideTurnSpanWidthPx = () => {
+    const panel = slideTurnPanelEl();
+    if (panel && panel.clientWidth > 0) return panel.clientWidth;
+    if (contentFrameEl && contentFrameEl.clientWidth > 0) return contentFrameEl.clientWidth;
+    return clipEl?.clientWidth || viewportEl?.clientWidth || 0;
+  };
 
   /** 跨章 staging/落点须满足与 idle 相同的双栏完整性，避免占位 layout 冒充就绪 */
   const isCrossChapterLayoutReady = (
@@ -1865,7 +2000,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       setTurnTo(page);
       queueMicrotask(() => {
         skipChapterPosSync = false;
-        if (anim() === 'slide') restoreContentSlotPagedLayout();
+        if (anim() === 'slide' || anim() === 'simulation') restoreContentSlotPagedLayout();
         const ch = viewerState.chapterIndex;
         if (!isChapterLayoutComplete(layout(), ch)) {
           scheduleRemeasureWhenMeasureBlocksReady({ bypassCache: true });
@@ -2007,8 +2142,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       cloneRoot,
       pagedLayoutDualPage() ? 0 : pageStartPxForTurn(livePage),
       {
-        contentSpanPx: pageWindowSpanPx(livePage) ?? pageClipHeight(),
-        contentInsetPx: contentInset(),
+        contentSpanPx: turnCurtainSpanPx(livePage),
+        contentInsetPx: undefined,
+        pageBg: pageThemeBg(),
       },
     );
   };
@@ -2097,6 +2233,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (
       turnCurtainKey === key &&
       (curtainSlideMountEl.querySelector('.reader-paged-turn-curtain') ||
+        curtainSlideMountEl.querySelector('.reader-paged-turn-frame-clone') ||
         ensureTurnCurtainAttached(turnLayerEl, curtainSlideMountEl))
     ) {
       return;
@@ -2107,35 +2244,32 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       curtainSlideMountEl,
       source,
       startY,
-      {
-        contentSpanPx: pageWindowSpanPx(fromPage) ?? pageClipHeight(),
-        viewportHeightPx: curtainViewportHeightPx(fromPage),
-        contentInsetPx:
-          local.pageAnim() === 'cover' ||
-            local.pageAnim() === 'slide' ||
-            local.pageAnim() === 'simulation'
-            ? contentInset()
-            : undefined,
-        slideViewportPanel:
-          local.pageAnim() === 'slide' || local.pageAnim() === 'simulation',
-      },
+      turnCurtainMountOptions(fromPage),
     );
   };
 
   const restoreContentSlotPagedLayout = () => {
-    if (!contentSlotEl || slideTurnActive()) return;
+    if (!contentFrameEl || turnSlidePanelLayoutActive()) return;
     applyReaderTextContentSlotLayoutStyle(
-      contentSlotEl,
-      readerTextContentSlotPagedMountStyle(pagedSlotInsetFromConfig()),
+      contentFrameEl,
+      readerTextContentSlotPagedFrameStyle(),
     );
-    contentSlotEl.style.removeProperty('transform');
-    contentSlotEl.style.removeProperty('will-change');
+    if (contentSlotEl) {
+      contentSlotEl.style.removeProperty('transform');
+      contentSlotEl.style.removeProperty('will-change');
+    }
+    if (contentFrameEl) {
+      contentFrameEl.style.removeProperty('transform');
+      contentFrameEl.style.removeProperty('will-change');
+    }
   };
 
   const clearSlidePanelStyles = () => {
-    if (!contentSlotEl) return;
-    contentSlotEl.style.transform = '';
-    contentSlotEl.style.willChange = '';
+    for (const el of [contentSlotEl, contentFrameEl]) {
+      if (!el) continue;
+      el.style.transform = '';
+      el.style.willChange = '';
+    }
   };
 
   const syncSlideIncomingPanelTransform = (stage: TurnStage, value: number) => {
@@ -2145,15 +2279,16 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       queueMicrotask(restoreContentSlotPagedLayout);
       return;
     }
-    if (!contentSlotEl) return;
+    const panel = slideTurnPanelEl();
+    if (!panel) return;
     const offset = slideTurnOffsetPx(stage, value);
     const xForm = readerPagedSlideIncomingTransform(
       turnDir(),
       slideTurnSpanWidthPx(),
       offset,
     );
-    contentSlotEl.style.transform = xForm ?? '';
-    contentSlotEl.style.willChange = 'transform';
+    panel.style.transform = xForm ?? '';
+    panel.style.willChange = 'transform';
     const turn = crossChapterTurn;
     if (
       liveInnerEl &&
@@ -2292,6 +2427,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     updateSimulationCurl({
       slideMount: mount,
       geometry,
+      pageBg: pageThemeBg(),
     });
   };
 
@@ -2671,7 +2807,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     viewerState.showContent;
     const sig = layoutSignature();
     const { w, h } = viewportSize();
-    const vp = w > 0 && h > 0 ? buildViewportSignature(w, h) : '0x0';
+    const vp =
+      w > 0 && h > 0 ? pagedViewportSignature(slotContentInnerWidth() || w, h) : '0x0';
     const layoutKey = `${ch}:${contentRev}:${sig}`;
     const bypassCache = layoutKey !== lastLayoutRemeasureKey;
     if (bypassCache) lastLayoutRemeasureKey = layoutKey;
@@ -2763,7 +2900,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       viewportEl,
       clipEl,
       contentSlotEl,
-      fallbackInsets: pagedSlotInsetFromConfig(),
+      pageTipBodyEl,
+      contentFrameEl,
+      fallbackInsets: pagedFrameFallbackInsets(),
+      tipChromePadTop: pageTipVerticalPads().top,
+      tipChromePadBottom: pageTipVerticalPads().bottom,
+      authoritativeBodyHeightPx: pageTipBodyHeightPx(),
     }).clipHeight;
     if (liveClip <= 0 || l.clipHeight <= 0) return;
     if (Math.abs(l.clipHeight - liveClip) <= 2) return;
@@ -2777,12 +2919,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const cfg = viewerState.config;
     const outerW = viewportEl?.clientWidth ?? 0;
     if (!book || outerW <= 0) return;
-    const inset = textViewerPagedContentInsets(cfg);
     const pageWindow = readPagedPageWindowMetrics({
       viewportEl,
       clipEl,
       contentSlotEl,
-      fallbackInsets: inset,
+      pageTipBodyEl,
+      contentFrameEl,
+      fallbackInsets: pagedFrameFallbackInsets(),
+      tipChromePadTop: pageTipVerticalPads().top,
+      tipChromePadBottom: pageTipVerticalPads().bottom,
     });
     const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
@@ -2808,7 +2953,38 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     );
   });
 
+  createEffect(
+    on(
+      () =>
+        [
+          viewerState.config.pageTips.headerMode,
+          viewerState.config.pageTips.footerMode,
+          viewerState.config.pageTips.headerLeft,
+          viewerState.config.pageTips.headerMiddle,
+          viewerState.config.pageTips.headerRight,
+          viewerState.config.pageTips.footerLeft,
+          viewerState.config.pageTips.footerMiddle,
+          viewerState.config.pageTips.footerRight,
+          chromeBarsVisible(),
+        ] as const,
+      () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            bindPageTipChromeFrame(contentFrameEl);
+            scheduleRemeasureWhenMeasureBlocksReady({ bypassCache: true });
+          });
+        });
+      },
+    ),
+  );
+
   onCleanup(() => {
+    tipChromeResizeObserver?.disconnect();
+    tipChromeResizeObserver = undefined;
+    if (tipChromeResizeDebounce !== undefined) {
+      clearTimeout(tipChromeResizeDebounce);
+      tipChromeResizeDebounce = undefined;
+    }
     cancelDualMeasureRetry();
   });
 
@@ -3091,7 +3267,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     themeCls: ReturnType<typeof theme>,
     inset: TextViewerPagedContentInsets,
   ) => (
-    <Show when={turnVisualActive() && anim() === 'cover'}>
+    <Show when={turnVisualActive() && (anim() === 'cover' || anim() === 'slide' || anim() === 'simulation')}>
       {inset.left > 0 ? (
         <div
           class={cn(
@@ -3205,7 +3381,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     setTurnTo(dragStartPageIndex);
     queueMicrotask(() => {
       skipChapterPosSync = false;
-      if (anim() === 'slide') restoreContentSlotPagedLayout();
+      if (anim() === 'slide' || anim() === 'simulation') restoreContentSlotPagedLayout();
     });
     dragTurnInitialized = false;
     turnCurtainPrepInFlight = false;
@@ -3315,6 +3491,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         ? Math.min(fromPage + 1, pageCount() - 1)
         : Math.max(fromPage - 1, 0);
     const outgoingRoot = liveInnerEl;
+    if (anim() === 'slide' || anim() === 'simulation') {
+      applyTurnFrameSlideLayout();
+    }
     setTurnFrom(fromPage);
     setTurnTo(to);
     setTurnDir(dir);
@@ -4037,7 +4216,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             curtainCloneHostInnerEl = el;
           }}
           data-reader-render-page={page}
-          class={cn('reader-paged-live-inner h-full w-full', theme().bg)}
+          class={cn('reader-paged-live-inner h-full w-full min-w-0 max-w-full', theme().bg)}
           style={{
             transform: transform || undefined,
             'min-height': extent > 0 ? `${extent}px` : undefined,
@@ -4210,7 +4389,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           ref={(el) => {
             liveInnerEl = el;
           }}
-          class={cn('reader-paged-live-inner h-full w-full', theme().bg)}
+          class={cn('reader-paged-live-inner h-full w-full min-w-0 max-w-full', theme().bg)}
           aria-hidden="true"
           style={{
             visibility: hideLive || hideUntilRevealed ? 'hidden' : undefined,
@@ -4231,7 +4410,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           liveInnerEl = el;
         }}
         data-reader-render-page={page}
-        class={cn('reader-paged-live-inner h-full w-full', theme().bg)}
+        class={cn('reader-paged-live-inner h-full w-full min-w-0 max-w-full', theme().bg)}
         style={{
           transform: slideActive
             ? mergePagedContentTransforms(contentOffsetY(page))
@@ -4246,11 +4425,44 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     );
   };
 
+  const bindPageTipChromeFrame = (el: HTMLDivElement | undefined) => {
+    contentFrameEl = el;
+    tipChromeResizeObserver?.disconnect();
+    tipChromeResizeObserver = undefined;
+    if (tipChromeResizeDebounce !== undefined) {
+      clearTimeout(tipChromeResizeDebounce);
+      tipChromeResizeDebounce = undefined;
+    }
+    if (!el) return;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+      });
+    });
+
+    if (typeof ResizeObserver === 'undefined') return;
+    tipChromeResizeObserver = new ResizeObserver(() => {
+      if (tipChromeResizeDebounce !== undefined) {
+        clearTimeout(tipChromeResizeDebounce);
+      }
+      tipChromeResizeDebounce = setTimeout(() => {
+        tipChromeResizeDebounce = undefined;
+        scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+      }, 120);
+    });
+    tipChromeResizeObserver.observe(el);
+    const header = el.querySelector('.reader-page-tip-header');
+    const footer = el.querySelector('.reader-page-tip-footer');
+    if (header) tipChromeResizeObserver.observe(header);
+    if (footer) tipChromeResizeObserver.observe(footer);
+  };
+
   const renderPagedWindow = () => {
     const themeCls = theme();
-    const pageWindowH = pageWindowHeightForDisplay();
     const slotInset = pagedSlotInsetFromConfig();
     const slideActive = slideTurnActive();
+    const turnPanelLayout = turnSlidePanelLayoutActive();
 
     return (
       <div
@@ -4270,62 +4482,88 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
             });
           }}
-          class="reader-paged-clip relative box-border h-full overflow-hidden"
-          style={pagedClipStyle()}
+          class={cn(
+            'reader-paged-clip relative box-border h-full overflow-hidden',
+            themeCls.bg,
+          )}
+          style={{
+            ...pagedClipStyle(),
+            'background-color': pageThemeBg(),
+          }}
         >
           <div
             ref={(el) => {
               turnLayerEl = el;
             }}
-            class="reader-paged-turn-layer pointer-events-none absolute inset-0 overflow-hidden"
+            class={cn(
+              'reader-paged-turn-layer pointer-events-none absolute inset-0 overflow-hidden',
+              themeCls.bg,
+            )}
+            style={{ 'background-color': pageThemeBg() }}
           >
-            {renderTurnGutterBackdrop(themeCls, slotInset)}
+            {renderTurnGutterBackdrop(themeCls, turnGutterInsets())}
             <div
               ref={(el) => {
                 curtainSlideMountEl = el;
               }}
               class={cn(
                 'reader-paged-curtain-slide-mount absolute overflow-hidden box-border',
-                (anim() === 'slide' || anim() === 'simulation') && 'inset-0',
+                themeCls.bg,
               )}
-              style={
-                anim() === 'slide' || anim() === 'simulation'
-                  ? { contain: 'layout style paint' }
-                  : pagedContentSlotStyle(slotInset)
-              }
+              style={{
+                ...(turnVisualActive() &&
+                (anim() === 'slide' || anim() === 'simulation' || anim() === 'cover')
+                  ? {
+                      ...turnCurtainSlideMountActiveStyle(slotInset),
+                      'background-color': pageThemeBg(),
+                      ...((anim() === 'slide' || anim() === 'simulation') && {
+                        contain: 'layout style paint',
+                      }),
+                    }
+                  : { 'background-color': pageThemeBg() }),
+              }}
             />
             {renderCoverTurnEdge()}
           </div>
-          <div
-            ref={(el) => {
-              contentSlotEl = el;
+          <ReaderPageTipChrome
+            tips={viewerState.config.pageTips}
+            context={pageTipContext()}
+            chromeBarsVisible={chromeBarsVisible()}
+            themeId={viewerState.config.theme}
+            frameRef={bindPageTipChromeFrame}
+            bodyRef={(el) => {
+              pageTipBodyEl = el;
             }}
-            class="reader-text-content-slot absolute z-2 overflow-hidden box-border"
-            style={
-              slideActive
-                ? readerTextContentSlotSlidePanelStyle(slotInset)
-                : pagedContentSlotStyle(slotInset)
-            }
+            layoutStyle={{
+              ...(slideActive || turnPanelLayout
+                ? readerTextContentSlotSlidePanelStyle()
+                : pagedFrameStyle()),
+              ...turnSlidePanelStyle(),
+            }}
           >
             <div
-              class={cn(
-                'reader-paged-page-window relative w-full overflow-hidden',
-                themeCls.bg,
-                themeCls.text,
-                pageWindowH == null && 'h-full',
-              )}
-              style={pageWindowH != null ? { height: `${pageWindowH}px` } : undefined}
+              ref={(el) => {
+                contentSlotEl = el;
+              }}
+              class="reader-text-content-slot relative h-full min-h-0 w-full overflow-hidden box-border"
+              style={readerTextContentSlotHorizontalPaddingStyle(slotInset)}
             >
               <div
-                class="reader-paged-page-content-clip relative h-full w-full overflow-hidden"
+                class={cn(
+                  'reader-paged-page-window relative h-full min-h-0 w-full overflow-hidden',
+                  themeCls.bg,
+                  themeCls.text,
+                )}
               >
-                {renderCurtainCloneHost()}
-                {renderLiveChapter()}
-                {renderIncomingStagingChapter()}
-                {renderAutoPagerScanReveal()}
+                <div class="reader-paged-page-content-clip relative h-full min-h-0 w-full overflow-hidden">
+                  {renderCurtainCloneHost()}
+                  {renderLiveChapter()}
+                  {renderIncomingStagingChapter()}
+                  {renderAutoPagerScanReveal()}
+                </div>
               </div>
             </div>
-          </div>
+          </ReaderPageTipChrome>
         </div>
       </div>
     );

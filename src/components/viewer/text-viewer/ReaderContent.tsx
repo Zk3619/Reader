@@ -25,8 +25,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   readerChapterTitleSpacingPx,
+  readerChapterTitleFontSizePx,
+  readerParagraphIndentPrefix,
   shouldRenderChapterTitle,
 } from '@/lib/media/text/reader-chapter-title-style';
+import { resolveReaderFontFamily } from '@/lib/media/text/reader-font';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 
 type ReaderDisplayBlockLocal = ReaderDisplayBlock;
@@ -202,16 +205,20 @@ export function ReaderContent(props: ReaderContentProps) {
 
   const themeStyle = createMemo(() => {
     const c = config();
-    const fontFamily = c.font === 0 || !c.customFontName
-      ? 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)'
-      : c.customFontName;
+    const fontFamily = resolveReaderFontFamily(c);
     const useReadWidth = (props.applyReadWidth?.() !== false) && c.readWidth;
     return {
       'font-size': `${c.fontSize}px`,
+      'font-weight': c.fontWeight ?? 400,
       'line-height': c.spacing.line + 1,
       'letter-spacing': c.spacing.letter ? `${c.spacing.letter}em` : undefined,
       'font-family': fontFamily,
-      'max-width': useReadWidth ? `${c.readWidth}px` : undefined,
+      'max-width':
+        useReadWidth && !props.pagedLayout
+          ? `${c.readWidth}px`
+          : useReadWidth
+            ? '100%'
+            : undefined,
     } as Record<string, string | number | undefined>;
   });
 
@@ -324,7 +331,7 @@ export function ReaderContent(props: ReaderContentProps) {
     <div
       ref={(el) => props.onMeasureRoot?.(el ?? null)}
       class={cn(
-        'reader-content w-full px-0 selection:bg-primary/20',
+        'reader-content box-border w-full min-w-0 max-w-full px-0 selection:bg-primary/20',
         readerThemeClasses(config().theme).bg,
         readerThemeClasses(config().theme).text,
         props.class,
@@ -366,7 +373,7 @@ export function ReaderContent(props: ReaderContentProps) {
         >
           <div
             class={cn(
-              'wrap-break-word reader-body',
+              'wrap-break-word reader-body relative',
               props.measureAtColumnWidth && 'reader-dual-measure',
               props.dualSpreadRender && 'reader-dual-spread-pane',
               props.dualPage &&
@@ -384,38 +391,51 @@ export function ReaderContent(props: ReaderContentProps) {
             {/* 章节标题 + 段评气泡（segmentIndex=0）；沉浸模式下不显示气泡 */}
             <Show when={showChapterTitleBlock()}>
               <div
-                class={cn(
-                  'flex items-center gap-2',
-                  chapterTitleSpacing()?.align === 'center' && 'justify-center',
-                )}
+                class="box-border w-full max-w-full min-w-0 overflow-hidden"
                 style={{
                   'padding-top': `${chapterTitleSpacing()?.marginTopPx ?? 0}px`,
                   'padding-bottom': `${chapterTitleSpacing()?.marginBottomPx ?? 0}px`,
                 }}
                 data-reader-measure-block={props.measureBlocks ? '' : undefined}
               >
-                <h2
+                <h4
                   class={cn(
-                    'text-lg font-semibold',
+                    'box-border block w-full max-w-full min-w-0 overflow-hidden font-semibold break-all',
                     chapterTitleSpacing()?.align === 'center'
                       ? 'text-center'
-                      : 'w-full text-left',
+                      : chapterTitleSpacing()?.align === 'right'
+                        ? 'text-right'
+                        : 'text-left',
                   )}
+                  style={{
+                    'font-size': `${readerChapterTitleFontSizePx(config())}px`,
+                    'font-weight': config().chapterTitleFontWeight ?? 600,
+                    'overflow-wrap': 'anywhere',
+                    'word-break': 'break-word',
+                  }}
                 >
                   {currentChapter()!.title}
-                </h2>
+                </h4>
                 <Show when={!props.hideCommentBubbles && (getCount(0) ?? 0) > 0}>
-                  <button
-                    type="button"
-                    class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      props.onOpenComments?.(chapterIndex(), 0);
-                    }}
-                    aria-label={`本章节 ${getCount(0)} 条段评`}
+                  <div
+                    class={cn(
+                      'mt-1 flex w-full max-w-full min-w-0',
+                      chapterTitleSpacing()?.align === 'center' && 'justify-center',
+                      chapterTitleSpacing()?.align === 'right' && 'justify-end',
+                    )}
                   >
-                    {getCount(0)}
-                  </button>
+                    <button
+                      type="button"
+                      class="reader-comment-bubble inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded border border-border bg-muted/60 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground no-drag"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        props.onOpenComments?.(chapterIndex(), 0);
+                      }}
+                      aria-label={`本章节 ${getCount(0)} 条段评`}
+                    >
+                      {getCount(0)}
+                    </button>
+                  </div>
                 </Show>
               </div>
             </Show>
@@ -943,21 +963,9 @@ function getParagraphs(text: string, chapterTitle?: string): string[] {
 
 /** 单段纯文本转 HTML：转义、中文引号空格、换行，保留段首缩进 */
 function paragraphToHtml(p: string): string {
-  // 先检查段首是否有空格（用于调试）
-  // const hasLeadingSpace = /^[ \u3000]+/.test(p);
-  // if (hasLeadingSpace) {
-  //   const leadingMatch = p.match(/^([ \u3000]+)/);
-  //   console.log('[段落HTML] 原始段首空格:', {
-  //     count: leadingMatch?.[1].length ?? 0,
-  //     chars: leadingMatch?.[1],
-  //     firstChar: p.charCodeAt(0),
-  //     preview: p.substring(0, 30),
-  //   });
-  // }
-  
-  // 先处理段首缩进，再处理转义和引号，避免引号处理影响段首空格
-  // 匹配段首（整个段落开头）的半角空格或全角空格
-  // 支持半角空格（U+0020）和全角空格（U+3000）
+  const indentChars = viewerState.config.paragraphIndentChars ?? 2;
+  const configuredIndent = readerParagraphIndentPrefix(indentChars);
+
   let withIndent = p;
   const paragraphStartMatch = withIndent.match(/^([ \u3000]+)/);
   if (paragraphStartMatch) {
@@ -965,40 +973,25 @@ function paragraphToHtml(p: string): string {
     const halfWidthCount = (leadingSpaces.match(/ /g) || []).length;
     const fullWidthCount = (leadingSpaces.match(/\u3000/g) || []).length;
     const totalHalfWidthEquivalent = halfWidthCount + fullWidthCount * 2;
-    
-    // 中文排版标准：段首缩进为两个全角空格（两个汉字宽度）
-    // 如果原文件有4个半角空格，转换为2个全角空格
-    // 如果原文件有2个半角空格，转换为1个全角空格
-    // 如果原文件已经有全角空格，保持原样
+
     let fullWidthIndent: string;
-    if (fullWidthCount > 0) {
-      // 如果已经有全角空格，保持原样（但确保至少2个）
-      fullWidthIndent = '\u3000'.repeat(Math.max(2, fullWidthCount));
+    if (indentChars <= 0) {
+      fullWidthIndent = '';
+    } else if (fullWidthCount > 0) {
+      fullWidthIndent = '\u3000'.repeat(Math.max(indentChars, fullWidthCount));
     } else {
-      // 将半角空格转换为全角空格
-      // 标准：4个半角空格 = 2个全角空格
-      const fullWidthSpaceCount = Math.max(2, Math.ceil(totalHalfWidthEquivalent / 2));
+      const fullWidthSpaceCount = Math.max(
+        indentChars,
+        Math.ceil(totalHalfWidthEquivalent / 2),
+      );
       fullWidthIndent = '\u3000'.repeat(fullWidthSpaceCount);
     }
-    
-    // console.log('[段落HTML] 转换缩进:', {
-    //   original: { halfWidthCount, fullWidthCount, totalHalfWidthEquivalent },
-    //   converted: fullWidthIndent.length,
-    // });
-    
-    withIndent = withIndent.replace(/^([ \u3000]+)/, fullWidthIndent);
-    
-    // 验证替换后的结果
-    // const finalMatch = withIndent.match(/^([ \u3000]+)/);
-    // console.log('[段落HTML] 最终段首空格:', {
-    //   count: finalMatch?.[1].length ?? 0,
-    //   chars: finalMatch?.[1],
-    //   preview: withIndent.substring(0, 30),
-    // });
-  } else {
-    // 参考 legado：对所有段落统一添加段首缩进（两个全角空格 = 两个汉字宽度）
-    // 即使原文件没有段首空格，也添加标准中文排版缩进
-    withIndent = '\u3000\u3000' + withIndent;
+
+    withIndent = fullWidthIndent
+      ? withIndent.replace(/^([ \u3000]+)/, fullWidthIndent)
+      : withIndent.replace(/^([ \u3000]+)/, '');
+  } else if (configuredIndent) {
+    withIndent = configuredIndent + withIndent;
   }
   
   // 匹配每行开头的空格（换行后的行首，不包括段首）

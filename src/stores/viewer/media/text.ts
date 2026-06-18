@@ -73,8 +73,11 @@ import {
 } from '@/lib/media/text/reader-theme-classes';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { migrateReaderImageStyle } from '@/lib/js-engine/legado/legado-image-options';
-import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { mergePageTipsConfig } from '@/components/viewer/text-viewer/ReaderPageTipControls';
+import { normalizeFontWeight, normalizeReaderFontPreset } from '@/lib/media/text/reader-font';
+import { normalizeTextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
 import { settingsState } from '@/stores/settings';
+import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 
 const defaultConfig = defaultTextViewerUiConfig;
 
@@ -145,6 +148,20 @@ async function hydrateReaderConfig(): Promise<void> {
       autoPageProgressEdge: normalizeAutoPageProgressEdge(
         saved.autoPageProgressEdge as string | undefined,
       ),
+      font: normalizeReaderFontPreset(saved.font),
+      fontWeight: normalizeFontWeight(saved.fontWeight, defaultConfig.fontWeight),
+      customFontPath: saved.customFontPath ?? prev.customFontPath,
+      chapterTitleStyle: normalizeTextViewerChapterTitleStyle(saved.chapterTitleStyle),
+      chapterTitleSize: saved.chapterTitleSize ?? prev.chapterTitleSize,
+      chapterTitleTopSpacing: saved.chapterTitleTopSpacing ?? prev.chapterTitleTopSpacing,
+      chapterTitleBottomSpacing: saved.chapterTitleBottomSpacing ?? prev.chapterTitleBottomSpacing,
+      chapterTitleFontWeight: normalizeFontWeight(
+        saved.chapterTitleFontWeight,
+        prev.chapterTitleFontWeight,
+      ),
+      paragraphIndentChars:
+        saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
+      pageTips: mergePageTipsConfig(saved.pageTips),
     }));
   }
 }

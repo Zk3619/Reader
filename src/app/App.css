@@ -905,14 +905,14 @@
   max-width: 100%;
 }
 
-/** 双栏 Prepare：屏外测量根（保持 layout 与 getBoundingClientRect，避免 visibility:hidden 零高度） */
+/** 双栏 Prepare：屏外测量根（高度对齐 tip-body，与按页展示一致） */
 .reader-dual-measure-host {
   position: fixed;
   left: -10000px;
   top: 0;
   opacity: 0;
   pointer-events: none;
-  overflow: visible;
+  overflow: hidden;
   z-index: -1;
   height: auto;
   max-height: none;

@@ -1,11 +1,18 @@
 /**
- * 阅读设置面板
- * 参考 legado：主题、字体、行距/字距/段距、阅读宽度、边距、双页等
+ * 阅读界面设置面板（字号、间距、配色、页眉页脚等）
  */
 
 import { For, Show, onMount, createSignal } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
-import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
+import {
+  AppSelect,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
+import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 import type {
   TextViewerUiConfig as ReadConfig,
   TextViewerDualPageMode as ReaderDualPageMode,
@@ -55,6 +62,15 @@ import {
   TEXT_VIEWER_CHAPTER_TITLE_STYLE_OPTIONS,
   type TextViewerChapterTitleStyle,
 } from '@/lib/media/text/reader-chapter-title-style';
+import { ReaderPageTipControls } from '@/components/viewer/text-viewer/ReaderPageTipControls';
+import {
+  READER_FONT_PRESET_IDS,
+  READER_FONT_PRESET_LABELS,
+  ensureReaderFontFace,
+  readerCustomFontFamilyName,
+} from '@/lib/media/text/reader-font';
+import { formatRem, formatRemFromPx, pxToRem, remToPx } from '@/lib/media/text/reader-rem';
+import { isTauri } from '@/lib/platform/detect';
 
 export interface ReaderSettingsProps {
   onClose?: () => void;
@@ -67,6 +83,8 @@ export interface ReaderSettingsProps {
 export function ReaderSettings(props: ReaderSettingsProps) {
   const config = () => textViewerStore.state.config;
   const [httpTtsList, setHttpTtsList] = createSignal<HttpTTS[]>([]);
+  const [fontSelectOpen, setFontSelectOpen] = createSignal(false);
+  const fontOptions = () => READER_FONT_PRESET_IDS.map(String);
 
   onMount(() => {
     void getAllHttpTTS().then(setHttpTtsList);
@@ -88,6 +106,32 @@ export function ReaderSettings(props: ReaderSettingsProps) {
     });
   };
 
+  const setPageTips = (patch: Partial<ReadConfig['pageTips']>) => {
+    textViewerStore.setConfig({
+      pageTips: { ...config().pageTips, ...patch },
+    });
+  };
+
+  const pickLocalFontFile = async () => {
+    if (!isTauri()) return;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: '字体', extensions: ['ttf', 'otf', 'woff', 'woff2'] }],
+      });
+      if (!selected || Array.isArray(selected)) return;
+      const family = readerCustomFontFamilyName({
+        customFontName: config().customFontName,
+        customFontPath: selected,
+      });
+      ensureReaderFontFace(selected, family);
+      setConfig({ font: 3, customFontPath: selected, customFontName: family });
+    } catch (e) {
+      console.warn('[ReaderSettings] pick font failed', e);
+    }
+  };
+
   const dualPageMiddleVisible = () =>
     isTextViewerPagedAnim(config().pageAnim) && config().dualPage !== 'off';
 
@@ -103,13 +147,6 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           value={() => config().viewerChromeLayout}
           onChange={(layout) => setConfig({ viewerChromeLayout: layout })}
         />
-      </div>
-
-      <div class="space-y-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-3">
-        <ChapterBodyPrefetchControls viewer="text" />
-        <p class="text-xs text-muted-foreground">
-          与全局设置「阅读体验 → 章节正文预下载」同步；容量与清理见「存储与缓存 → 阅读缓存」。
-        </p>
       </div>
 
       {/* 主题 */}
@@ -163,20 +200,191 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             </For>
           </TabsList>
         </Tabs>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">标题字号增量</Label>
+            <span class="text-sm text-muted-foreground">
+              {formatRem(config().chapterTitleSize ?? 0)}
+            </span>
+          </div>
+          <Slider
+            value={[config().chapterTitleSize ?? 0]}
+            minValue={0}
+            maxValue={1.5}
+            step={0.0625}
+            onChange={(values: number[]) =>
+              setConfig({ chapterTitleSize: values[0] ?? config().chapterTitleSize ?? 0 })
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">标题上间距</Label>
+            <span class="text-sm text-muted-foreground">
+              {formatRem(config().chapterTitleTopSpacing ?? 0)}
+            </span>
+          </div>
+          <Slider
+            value={[config().chapterTitleTopSpacing ?? 0]}
+            minValue={0}
+            maxValue={3}
+            step={0.125}
+            onChange={(values: number[]) =>
+              setConfig({ chapterTitleTopSpacing: values[0] ?? config().chapterTitleTopSpacing ?? 0 })
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">标题下间距</Label>
+            <span class="text-sm text-muted-foreground">
+              {formatRem(config().chapterTitleBottomSpacing ?? 0)}
+            </span>
+          </div>
+          <Slider
+            value={[config().chapterTitleBottomSpacing ?? 0]}
+            minValue={0}
+            maxValue={3}
+            step={0.125}
+            onChange={(values: number[]) =>
+              setConfig({
+                chapterTitleBottomSpacing: values[0] ?? config().chapterTitleBottomSpacing ?? 0,
+              })
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <Label class="text-sm font-normal">标题字重</Label>
+            <span class="text-sm text-muted-foreground">{config().chapterTitleFontWeight ?? 600}</span>
+          </div>
+          <Slider
+            value={[config().chapterTitleFontWeight ?? 600]}
+            minValue={100}
+            maxValue={900}
+            step={100}
+            onChange={(values: number[]) =>
+              setConfig({ chapterTitleFontWeight: values[0] ?? config().chapterTitleFontWeight ?? 600 })
+            }
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+      </div>
+
+      {/* 字体 */}
+      <div class="space-y-3">
+        <Label for="reader-font-preset">字体</Label>
+        <AppSelect
+          value={String(config().font)}
+          onChange={(v) => setConfig({ font: Number(v ?? 0) })}
+          options={fontOptions()}
+          placeholder="选择字体"
+          open={fontSelectOpen()}
+          onOpenChange={setFontSelectOpen}
+          itemComponent={(itemProps) => (
+            <AppSelectItem item={itemProps.item}>
+              {READER_FONT_PRESET_LABELS[Number(itemProps.item.rawValue)] ??
+                itemProps.item.rawValue}
+            </AppSelectItem>
+          )}
+        >
+          <AppSelectTrigger id="reader-font-preset" aria-label="字体">
+            <AppSelectValue<string>>
+              {(state) => {
+                const v = state.selectedOption();
+                const id = Number(v);
+                return READER_FONT_PRESET_LABELS[id] ?? v ?? '选择字体';
+              }}
+            </AppSelectValue>
+            <AppSelectIcon />
+          </AppSelectTrigger>
+          <ViewerAppSelectContent>
+            <AppSelectListbox />
+          </ViewerAppSelectContent>
+        </AppSelect>
+        <Show when={config().font === 3}>
+          <div class="space-y-2">
+            <Button variant="outline" class="w-full" onClick={() => void pickLocalFontFile()}>
+              选择本地字体文件
+            </Button>
+            <Show when={config().customFontPath}>
+              <p class="truncate text-xs text-muted-foreground" title={config().customFontPath}>
+                {config().customFontPath}
+              </p>
+            </Show>
+          </div>
+        </Show>
+        <Show when={config().font === 4}>
+          <div class="space-y-2">
+            <Label class="text-sm font-normal">字体名称</Label>
+            <input
+              class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={config().customFontName}
+              placeholder="例如：PingFang SC, Noto Serif SC"
+              onInput={(e) => setConfig({ customFontName: e.currentTarget.value })}
+            />
+            <p class="text-xs text-muted-foreground">
+              填写系统已安装或 WebView 支持的字体族名称。
+            </p>
+          </div>
+        </Show>
       </div>
 
       {/* 字体大小 */}
       <div class="space-y-2">
         <div class="flex items-center justify-between">
           <Label>字体大小</Label>
-          <span class="text-sm text-muted-foreground">{config().fontSize}px</span>
+          <span class="text-sm text-muted-foreground">{formatRemFromPx(config().fontSize)}</span>
         </div>
         <Slider
-          value={[config().fontSize]}
-          minValue={12}
-          maxValue={32}
-          step={1}
-          onChange={(values: number[]) => setConfig({ fontSize: values[0] ?? config().fontSize })}
+          value={[pxToRem(config().fontSize)]}
+          minValue={0.75}
+          maxValue={2}
+          step={0.0625}
+          onChange={(values: number[]) =>
+            setConfig({ fontSize: remToPx(values[0] ?? pxToRem(config().fontSize)) })
+          }
+        >
+          <SliderTrack>
+            <SliderFill />
+            <SliderThumb />
+          </SliderTrack>
+        </Slider>
+      </div>
+
+      {/* 字重 */}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <Label>字重</Label>
+          <span class="text-sm text-muted-foreground">{config().fontWeight ?? 400}</span>
+        </div>
+        <Slider
+          value={[config().fontWeight ?? 400]}
+          minValue={100}
+          maxValue={900}
+          step={100}
+          onChange={(values: number[]) =>
+            setConfig({ fontWeight: values[0] ?? config().fontWeight ?? 400 })
+          }
         >
           <SliderTrack>
             <SliderFill />
@@ -245,19 +453,45 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Slider>
       </div>
 
+      {/* 段首缩进 */}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <Label>段首缩进</Label>
+          <span class="text-sm text-muted-foreground">
+            {config().paragraphIndentChars ?? 2} 字
+          </span>
+        </div>
+        <Slider
+          value={[config().paragraphIndentChars ?? 2]}
+          minValue={0}
+          maxValue={8}
+          step={1}
+          onChange={(values: number[]) =>
+            setConfig({ paragraphIndentChars: values[0] ?? config().paragraphIndentChars ?? 2 })
+          }
+        >
+          <SliderTrack>
+            <SliderFill />
+            <SliderThumb />
+          </SliderTrack>
+        </Slider>
+      </div>
+
       {/* 阅读宽度：窄屏+移动端不显示 */}
       <Show when={props.showReadWidth?.() ?? true}>
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label>阅读宽度</Label>
-            <span class="text-sm text-muted-foreground">{config().readWidth}px</span>
+            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().readWidth)}</span>
           </div>
           <Slider
-            value={[config().readWidth]}
-            minValue={400}
-            maxValue={1200}
-            step={50}
-            onChange={(values: number[]) => setConfig({ readWidth: values[0] ?? config().readWidth })}
+            value={[pxToRem(config().readWidth)]}
+            minValue={25}
+            maxValue={75}
+            step={0.5}
+            onChange={(values: number[]) =>
+              setConfig({ readWidth: remToPx(values[0] ?? pxToRem(config().readWidth)) })
+            }
           >
             <SliderTrack>
               <SliderFill />
@@ -278,15 +512,15 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label class="text-sm font-normal">左侧</Label>
-            <span class="text-sm text-muted-foreground">{config().contentInset.left}px</span>
+            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.left)}</span>
           </div>
           <Slider
-            value={[config().contentInset.left]}
+            value={[pxToRem(config().contentInset.left)]}
             minValue={0}
-            maxValue={200}
-            step={2}
+            maxValue={12.5}
+            step={0.125}
             onChange={(values: number[]) =>
-              setContentInset('left', values[0] ?? config().contentInset.left)
+              setContentInset('left', remToPx(values[0] ?? pxToRem(config().contentInset.left)))
             }
           >
             <SliderTrack>
@@ -298,15 +532,15 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label class="text-sm font-normal">右侧</Label>
-            <span class="text-sm text-muted-foreground">{config().contentInset.right}px</span>
+            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.right)}</span>
           </div>
           <Slider
-            value={[config().contentInset.right]}
+            value={[pxToRem(config().contentInset.right)]}
             minValue={0}
-            maxValue={200}
-            step={2}
+            maxValue={12.5}
+            step={0.125}
             onChange={(values: number[]) =>
-              setContentInset('right', values[0] ?? config().contentInset.right)
+              setContentInset('right', remToPx(values[0] ?? pxToRem(config().contentInset.right)))
             }
           >
             <SliderTrack>
@@ -318,15 +552,15 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label class="text-sm font-normal">顶部</Label>
-            <span class="text-sm text-muted-foreground">{config().contentInset.top}px</span>
+            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.top)}</span>
           </div>
           <Slider
-            value={[config().contentInset.top]}
+            value={[pxToRem(config().contentInset.top)]}
             minValue={0}
-            maxValue={120}
-            step={2}
+            maxValue={7.5}
+            step={0.125}
             onChange={(values: number[]) =>
-              setContentInset('top', values[0] ?? config().contentInset.top)
+              setContentInset('top', remToPx(values[0] ?? pxToRem(config().contentInset.top)))
             }
           >
             <SliderTrack>
@@ -338,15 +572,15 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label class="text-sm font-normal">底部</Label>
-            <span class="text-sm text-muted-foreground">{config().contentInset.bottom}px</span>
+            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.bottom)}</span>
           </div>
           <Slider
-            value={[config().contentInset.bottom]}
+            value={[pxToRem(config().contentInset.bottom)]}
             minValue={0}
-            maxValue={120}
-            step={2}
+            maxValue={7.5}
+            step={0.125}
             onChange={(values: number[]) =>
-              setContentInset('bottom', values[0] ?? config().contentInset.bottom)
+              setContentInset('bottom', remToPx(values[0] ?? pxToRem(config().contentInset.bottom)))
             }
           >
             <SliderTrack>
@@ -359,15 +593,15 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           <div class="space-y-2">
             <div class="flex items-center justify-between">
               <Label class="text-sm font-normal">中心间距</Label>
-              <span class="text-sm text-muted-foreground">{config().contentInset.center}px</span>
+              <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.center)}</span>
             </div>
             <Slider
-              value={[config().contentInset.center]}
+              value={[pxToRem(config().contentInset.center)]}
               minValue={0}
-              maxValue={400}
-              step={2}
+              maxValue={25}
+              step={0.125}
               onChange={(values: number[]) =>
-                setContentInset('center', values[0] ?? config().contentInset.center)
+                setContentInset('center', remToPx(values[0] ?? pxToRem(config().contentInset.center)))
               }
             >
               <SliderTrack>
@@ -378,6 +612,8 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           </div>
         </Show>
       </div>
+
+      <ReaderPageTipControls tips={() => config().pageTips} onChange={setPageTips} />
 
       {/* 双页 */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
