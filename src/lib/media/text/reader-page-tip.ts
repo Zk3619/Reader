@@ -1,0 +1,519 @@
+import type { TextViewerPageTipsConfig, TextViewerPageTipInsets } from '@/lib/media/text/reader-ui-config';
+import { isMobile } from '@/lib/platform/detect';
+
+const READER_PAGE_TIP_SAFE_TOP = 'var(--safe-area-top-effective, env(safe-area-inset-top, 0px))';
+const READER_PAGE_TIP_SAFE_BOTTOM =
+  'var(--safe-area-bottom-effective, env(safe-area-inset-bottom, 0px))';
+
+/** 移动端页眉/页脚额外安全区（桌面为 0） */
+export function readerPageTipSafeInsetPx(position: 'header' | 'footer'): number {
+  if (!isMobile() || typeof document === 'undefined') return 0;
+  const prop =
+    position === 'header' ? '--safe-area-top-effective' : '--safe-area-bottom-effective';
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
+  if (!raw) return 0;
+  const px = parseFloat(raw);
+  return Number.isFinite(px) ? px : 0;
+}
+
+/** 页眉/页脚四边 padding：桌面贴边；移动端顶/底叠加系统安全区 */
+export function readerPageTipBarEdgePaddingStyle(
+  position: 'header' | 'footer',
+  inset: TextViewerPageTipInsets,
+): Record<string, string> {
+  const mobile = isMobile();
+  return {
+    'padding-left': `${inset.left}px`,
+    'padding-right': `${inset.right}px`,
+    'padding-top':
+      position === 'header' && mobile
+        ? inset.top > 0
+          ? `calc(${inset.top}px + ${READER_PAGE_TIP_SAFE_TOP})`
+          : READER_PAGE_TIP_SAFE_TOP
+        : `${inset.top}px`,
+    'padding-bottom':
+      position === 'footer' && mobile
+        ? inset.bottom > 0
+          ? `calc(${inset.bottom}px + ${READER_PAGE_TIP_SAFE_BOTTOM})`
+          : READER_PAGE_TIP_SAFE_BOTTOM
+        : `${inset.bottom}px`,
+  };
+}
+
+/** 页眉/页脚信息条类型（对齐 Legado ReadTipConfig） */
+export type ReaderPageTipType =
+  | 'none'
+  | 'bookName'
+  | 'chapterTitle'
+  | 'time'
+  | 'battery'
+  | 'batteryPercentage'
+  | 'page'
+  | 'totalProgress'
+  | 'totalProgress1'
+  | 'pageAndTotal'
+  | 'timeBattery'
+  | 'timeBatteryIconOnly'
+  | 'timeBatteryPercentage';
+
+export const READER_PAGE_TIP_TYPE_LABELS: Record<ReaderPageTipType, string> = {
+  none: '无',
+  bookName: '书名',
+  chapterTitle: '标题',
+  time: '时间',
+  battery: '电量',
+  batteryPercentage: '电量%',
+  page: '页数',
+  totalProgress: '进度(%)',
+  totalProgress1: '进度(xx/yyy)',
+  pageAndTotal: '页数及进度',
+  timeBattery: '时间及电量',
+  timeBatteryIconOnly: '时间和电量',
+  timeBatteryPercentage: '时间及电量%',
+};
+
+export const READER_PAGE_TIP_TYPE_OPTIONS: ReaderPageTipType[] = [
+  'none',
+  'bookName',
+  'chapterTitle',
+  'time',
+  'battery',
+  'batteryPercentage',
+  'page',
+  'totalProgress',
+  'totalProgress1',
+  'pageAndTotal',
+  'timeBattery',
+  'timeBatteryIconOnly',
+  'timeBatteryPercentage',
+];
+
+export const READER_PAGE_TIP_HEADER_MODE_LABELS = {
+  follow: '跟随顶栏',
+  always: '始终显示',
+  never: '始终隐藏',
+} as const;
+
+export const READER_PAGE_TIP_FOOTER_MODE_LABELS = {
+  follow: '跟随底栏',
+  always: '始终显示',
+  never: '始终隐藏',
+} as const;
+
+export function normalizeTextViewerPageTipFooterMode(
+  raw: unknown,
+): TextViewerPageTipsConfig['footerMode'] {
+  if (raw === 'show') return 'always';
+  if (raw === 'hide') return 'never';
+  if (raw === 'follow' || raw === 'always' || raw === 'never') return raw;
+  return 'never';
+}
+
+export interface ReaderPageTipContext {
+  bookName?: string;
+  chapterTitle?: string;
+  pageIndex: number;
+  pageCount: number;
+  bookProgressPercent: number;
+  bookProgressLabel?: string;
+}
+
+let batteryLevelCache: number | null = null;
+
+export function refreshReaderBatteryLevel(): void {
+  if (typeof navigator === 'undefined' || !('getBattery' in navigator)) {
+    batteryLevelCache = null;
+    return;
+  }
+  void (navigator as Navigator & { getBattery?: () => Promise<{ level: number }> })
+    .getBattery?.()
+    .then((b) => {
+      batteryLevelCache = Math.round(b.level * 100);
+    })
+    .catch(() => {
+      batteryLevelCache = null;
+    });
+}
+
+if (typeof window !== 'undefined') {
+  refreshReaderBatteryLevel();
+}
+
+function formatTime(now = new Date()): string {
+  const h = now.getHours();
+  const m = now.getMinutes();
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function batteryText(mode: 'icon' | 'percent' | 'both'): string {
+  const level = batteryLevelCache;
+  if (level == null) return '--';
+  if (mode === 'icon' || mode === 'both') return `${level}%`;
+  return `${level}%`;
+}
+
+export function resolveReaderPageTipText(
+  type: ReaderPageTipType,
+  ctx: ReaderPageTipContext,
+): string {
+  switch (type) {
+    case 'none':
+      return '';
+    case 'bookName':
+      return ctx.bookName ?? '';
+    case 'chapterTitle':
+      return ctx.chapterTitle ?? '';
+    case 'time':
+      return formatTime();
+    case 'battery':
+      return batteryText('both');
+    case 'batteryPercentage':
+      return batteryText('percent');
+    case 'page':
+      return ctx.pageCount > 0 ? `${ctx.pageIndex + 1}/${ctx.pageCount}` : '';
+    case 'totalProgress':
+      return `${Math.round(ctx.bookProgressPercent * 100)}%`;
+    case 'totalProgress1':
+      return ctx.bookProgressLabel ?? `${Math.round(ctx.bookProgressPercent * 100)}%`;
+    case 'pageAndTotal': {
+      const page =
+        ctx.pageCount > 0 ? `${ctx.pageIndex + 1}/${ctx.pageCount}` : '';
+      const pct = `${Math.round(ctx.bookProgressPercent * 100)}%`;
+      return page ? `${page}  ${pct}` : pct;
+    }
+    case 'timeBattery':
+      return `${formatTime()}  ${batteryText('percent')}`;
+    case 'timeBatteryIconOnly':
+      return `${formatTime()}  ${batteryText('icon')}`;
+    case 'timeBatteryPercentage':
+      return `${formatTime()}  ${batteryText('percent')}`;
+    default:
+      return '';
+  }
+}
+
+type TipSlotKey = 'headerLeft' | 'headerMiddle' | 'headerRight' | 'footerLeft' | 'footerMiddle' | 'footerRight';
+
+export function readerPageTipSlotValue(
+  tips: TextViewerPageTipsConfig,
+  slot: TipSlotKey,
+): ReaderPageTipType {
+  return tips[slot] ?? 'none';
+}
+
+export function readerPageTipBarVisible(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): boolean {
+  if (position === 'header') {
+    if (tips.headerMode === 'never') return false;
+    // 跟随顶栏：顶栏显示时页眉显示在其下方；沉浸（顶栏隐藏）时隐藏页眉
+    if (tips.headerMode === 'follow' && !chromeBarsVisible) return false;
+  } else {
+    if (tips.footerMode === 'never') return false;
+    // 跟随底栏：底栏显示时页脚显示在其上方；沉浸时隐藏页脚
+    if (tips.footerMode === 'follow' && !chromeBarsVisible) return false;
+  }
+
+  const slots: TipSlotKey[] =
+    position === 'header'
+      ? ['headerLeft', 'headerMiddle', 'headerRight']
+      : ['footerLeft', 'footerMiddle', 'footerRight'];
+
+  return slots.some((s) => readerPageTipSlotValue(tips, s) !== 'none');
+}
+
+export function readerPageTipBarHeightPx(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): number {
+  if (!readerPageTipBarVisible(position, tips, chromeBarsVisible)) return 0;
+
+  const fontSize = position === 'header' ? tips.headerFontSize : tips.footerFontSize;
+  const inset = position === 'header' ? tips.headerInset : tips.footerInset;
+  const showLine = position === 'header' ? tips.showHeaderLine : tips.showFooterLine;
+  const lineHeight = Math.max(12, fontSize) * 1.35;
+  /** h-px + mt-1/mb-1（4px） */
+  const dividerBlock = showLine ? 5 : 0;
+  let height = inset.top + inset.bottom + lineHeight + dividerBlock;
+  if (isMobile()) {
+    height += readerPageTipSafeInsetPx(position);
+  }
+  return height;
+}
+
+export interface ReaderPageTipChromePads {
+  top: number;
+  bottom: number;
+}
+
+/** 页眉/页脚之间的正文区预算（隐藏 tip 时 pad=0，正文自动撑满 frame） */
+export interface ReaderPageTipContentBudget {
+  headerPad: number;
+  footerPad: number;
+  bodyHeightPx: number;
+}
+
+/**
+ * 正文显示与 DOM 分页共用的垂直预算。
+ * 始终返回可用高度（估算优先，DOM 收敛后取 min），避免首帧阻塞。
+ */
+export function readerPageTipContentBudget(
+  frameEl: HTMLElement | null | undefined,
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+  pageTipBodyEl?: HTMLElement | null,
+): ReaderPageTipContentBudget {
+  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
+  const headerPad = headerVisible ? pads.top : 0;
+  const footerPad = footerVisible ? pads.bottom : 0;
+
+  const frameH = frameEl?.clientHeight ?? 0;
+  if (frameH <= 0) {
+    return { headerPad, footerPad, bodyHeightPx: 0 };
+  }
+
+  const arithmetic = Math.max(1, frameH - headerPad - footerPad);
+  let bodyHeightPx = arithmetic;
+
+  if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
+    const dom = Math.round(pageTipBodyEl.clientHeight);
+    if (dom > 0 && dom <= arithmetic + 2) {
+      bodyHeightPx = dom;
+    }
+  } else if (frameEl) {
+    const gap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
+    if (gap > 0 && gap <= arithmetic + 2) {
+      bodyHeightPx = gap;
+    }
+  }
+
+  return { headerPad, footerPad, bodyHeightPx };
+}
+
+/** 页眉/页脚是否已贴 frame 顶/底（未贴边时勿用 frame−tip.top 推算 band，否则会吞掉正文区） */
+function tipBarAnchoredToFrameEdge(
+  barRect: DOMRect,
+  frameRect: DOMRect,
+  position: 'header' | 'footer',
+): boolean {
+  const slack = 3;
+  if (position === 'header') {
+    return Math.abs(barRect.top - frameRect.top) <= slack;
+  }
+  return Math.abs(barRect.bottom - frameRect.bottom) <= slack;
+}
+
+function finiteOffsetHeight(el: HTMLElement): number {
+  const h = el.offsetHeight;
+  return Number.isFinite(h) && h > 0 ? h : 0;
+}
+
+/** 页眉/页脚 DOM 是否已稳定到可参与分页（避免首帧 band 误测导致 clipHeight 过小或过大） */
+export function readerPageTipChromeMeasureReady(
+  frameEl: HTMLElement | null | undefined,
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): boolean {
+  if (!frameEl || frameEl.clientHeight <= 0) return false;
+  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  if (!headerVisible && !footerVisible) return true;
+
+  const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
+  const estTop = readerPageTipBarHeightPx('header', tips, chromeBarsVisible);
+  const estBottom = readerPageTipBarHeightPx('footer', tips, chromeBarsVisible);
+  const frameH = frameEl.clientHeight;
+
+  if (headerVisible) {
+    const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
+    if (!header || finiteOffsetHeight(header) < estTop * 0.45) return false;
+    if (pads.top < estTop * 0.55 || pads.top > frameH * 0.4) return false;
+  }
+  if (footerVisible) {
+    const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
+    if (!footer || finiteOffsetHeight(footer) < estBottom * 0.45) return false;
+    if (pads.bottom < estBottom * 0.55 || pads.bottom > frameH * 0.4) return false;
+  }
+  const bodyBudget = frameH - pads.top - pads.bottom;
+  if (bodyBudget < Math.max(48, frameH * 0.35)) return false;
+
+  if (headerVisible && footerVisible) {
+    const bodyGap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
+    if (bodyGap < bodyBudget * 0.88) return false;
+  }
+  return true;
+}
+
+/** 优先读 DOM 实测页眉/页脚高度，与分页及翻页幕帘几何对齐 */
+export function measureReaderPageTipChromePads(
+  frameEl: HTMLElement | null | undefined,
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): ReaderPageTipChromePads {
+  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const estTop = readerPageTipBarHeightPx('header', tips, chromeBarsVisible);
+  const estBottom = readerPageTipBarHeightPx('footer', tips, chromeBarsVisible);
+  if (!frameEl) {
+    return {
+      top: headerVisible ? estTop : 0,
+      bottom: footerVisible ? estBottom : 0,
+    };
+  }
+  const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
+  const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
+  const frameRect = frameEl.getBoundingClientRect();
+  let domTop =
+    header && headerVisible ? Math.ceil(header.getBoundingClientRect().height) : 0;
+  let domBottom =
+    footer && footerVisible ? Math.ceil(footer.getBoundingClientRect().height) : 0;
+  if (header && headerVisible) {
+    const headerRect = header.getBoundingClientRect();
+    const headerHeight = Math.max(
+      Math.ceil(headerRect.height),
+      finiteOffsetHeight(header),
+    );
+    const headerBand = tipBarAnchoredToFrameEdge(headerRect, frameRect, 'header')
+      ? Math.ceil(headerRect.bottom - frameRect.top)
+      : headerHeight;
+    domTop = Math.max(domTop, headerHeight, headerBand);
+  }
+  if (footer && footerVisible) {
+    const footerRect = footer.getBoundingClientRect();
+    const footerHeight = Math.max(
+      Math.ceil(footerRect.height),
+      finiteOffsetHeight(footer),
+    );
+    const footerBand = tipBarAnchoredToFrameEdge(footerRect, frameRect, 'footer')
+      ? Math.ceil(frameRect.bottom - footerRect.top)
+      : footerHeight;
+    domBottom = Math.max(domBottom, footerHeight, footerBand);
+  }
+  return {
+    top: headerVisible ? Math.max(domTop, estTop) : 0,
+    bottom: footerVisible ? Math.max(domBottom, estBottom) : 0,
+  };
+}
+
+/**
+ * 页眉底至页脚底之间的正文区高度。
+ * 首帧布局未稳定时回退为 frame−页眉−页脚（估算），避免 rect 间隙过小导致首屏空白。
+ */
+export function measureReaderPageTipBodyHeightPx(
+  frameEl: HTMLElement | null | undefined,
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): number {
+  const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
+  if (!frameEl || frameEl.clientHeight <= 0) {
+    return 0;
+  }
+  const expected = Math.max(1, frameEl.clientHeight - pads.top - pads.bottom);
+
+  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
+  const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
+
+  if (header && footer && headerVisible && footerVisible) {
+    const gap = Math.floor(
+      footer.getBoundingClientRect().top - header.getBoundingClientRect().bottom,
+    );
+    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
+      return gap;
+    }
+    return expected;
+  }
+  if (header && headerVisible && !footerVisible) {
+    const gap = Math.floor(
+      frameEl.getBoundingClientRect().bottom - header.getBoundingClientRect().bottom,
+    );
+    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
+      return gap;
+    }
+    return expected;
+  }
+  if (footer && footerVisible && !headerVisible) {
+    const gap = Math.floor(footer.getBoundingClientRect().top - frameEl.getBoundingClientRect().top);
+    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
+      return gap;
+    }
+    return expected;
+  }
+  if (!headerVisible && !footerVisible) {
+    return Math.max(1, Math.round(frameEl.getBoundingClientRect().height));
+  }
+
+  return expected;
+}
+
+export function readerPageTipChromeHeightPx(
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): number {
+  return (
+    readerPageTipBarHeightPx('header', tips, chromeBarsVisible) +
+    readerPageTipBarHeightPx('footer', tips, chromeBarsVisible)
+  );
+}
+
+const BATTERY_TIP_TYPES: ReaderPageTipType[] = [
+  'battery',
+  'batteryPercentage',
+  'timeBattery',
+  'timeBatteryIconOnly',
+  'timeBatteryPercentage',
+];
+
+const TIP_SLOT_KEYS: TipSlotKey[] = [
+  'headerLeft',
+  'headerMiddle',
+  'headerRight',
+  'footerLeft',
+  'footerMiddle',
+  'footerRight',
+];
+
+function tipBarHasContent(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+): boolean {
+  const slots: TipSlotKey[] =
+    position === 'header'
+      ? ['headerLeft', 'headerMiddle', 'headerRight']
+      : ['footerLeft', 'footerMiddle', 'footerRight'];
+  return slots.some((s) => readerPageTipSlotValue(tips, s) !== 'none');
+}
+
+/** 仅「始终显示」的页眉/页脚随翻页幕帘与 incoming 面板一起移动 */
+export function readerPageTipsCarryWithTurn(
+  tips: TextViewerPageTipsConfig,
+  _chromeBarsVisible: boolean,
+): boolean {
+  if (tips.headerMode === 'always' && tipBarHasContent('header', tips)) return true;
+  if (tips.footerMode === 'always' && tipBarHasContent('footer', tips)) return true;
+  return false;
+}
+
+export function readerPageTipsUseBattery(tips: TextViewerPageTipsConfig): boolean {
+  return TIP_SLOT_KEYS.some((slot) =>
+    BATTERY_TIP_TYPES.includes(readerPageTipSlotValue(tips, slot)),
+  );
+}
+
+export function readerPageTipsUseTime(tips: TextViewerPageTipsConfig): boolean {
+  const timeTypes: ReaderPageTipType[] = [
+    'time',
+    'timeBattery',
+    'timeBatteryIconOnly',
+    'timeBatteryPercentage',
+  ];
+  return TIP_SLOT_KEYS.some((slot) =>
+    timeTypes.includes(readerPageTipSlotValue(tips, slot)),
+  );
+}
