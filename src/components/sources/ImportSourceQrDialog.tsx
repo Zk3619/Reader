@@ -23,14 +23,14 @@ export interface ImportSourceQrDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onIdentify: (raw: string) => void;
-  /** ????????? .reader-inner-web-layer?? z-[160]? */
+  /** 内嵌页会话时须高于 .reader-inner-web-layer（如 z-[160]） */
   portalZClass?: string;
   /**
-   * ?????????? / ????????????????????????
-   * @deprecated ?? autoImport
+   * 扫码导入：摄像头扫码 / 图片识别（全平台），识别后自动导入，无粘贴输入。
+   * @deprecated 使用 autoImport
    */
   cameraOnly?: boolean;
-  /** ??/?????????????? */
+  /** 扫码/识图后自动导入（无粘贴输入） */
   autoImport?: boolean;
   title?: string;
   description?: string;
@@ -63,8 +63,8 @@ function QrImagePicker(props: {
     }
 
     showAppToast({
-      title: '???????',
-      description: '??????????',
+      title: '未识别到二维码',
+      description: '请换一张更清晰的图片',
       variant: 'destructive',
     });
   };
@@ -79,17 +79,17 @@ function QrImagePicker(props: {
         disabled={props.disabled}
         onClick={pickImage}
       >
-        ??????
+        选择图片识别
       </Button>
       <label for={props.inputId} class="sr-only">
-        ????????????
+        选择包含二维码的图片文件
       </label>
       <input
         id={props.inputId}
         type="file"
         accept="image/*"
         class="hidden"
-        aria-label="????????????"
+        aria-label="选择包含二维码的图片文件"
         onChange={handleFileChange}
       />
     </>
@@ -123,7 +123,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
     setRaw('');
     setMode('paste');
     setCameraActive(false);
-    showAppToast({ title: '??????', variant: 'default' });
+    showAppToast({ title: '已识别二维码', variant: 'default' });
   };
 
   const handleOpenChange = (open: boolean) => {
@@ -147,12 +147,12 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
     <AppDialog open={props.open} onOpenChange={handleOpenChange} modal>
       <AppDialogContent portalToBody portalZClass={props.portalZClass}>
         <AppDialogHeader>
-          <AppDialogTitle>{props.title ?? '???????'}</AppDialogTitle>
+          <AppDialogTitle>{props.title ?? '二维码导入书源'}</AppDialogTitle>
           <AppDialogDescription>
             {props.description ??
               (useAutoImport()
-                ? '????????????????????'
-                : '???????????????`yuedu://`?`legado://`??? JSON ? http/https ????')}
+                ? '使用摄像头扫码或选择图片识别书源二维码。'
+                : '粘贴、摄像头扫描或从图片识别（`yuedu://`、`legado://`、书源 JSON 或 http/https 地址）。')}
           </AppDialogDescription>
         </AppDialogHeader>
         <AppDialogScrollBody>
@@ -167,7 +167,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                     variant={mode() === 'paste' ? 'default' : 'outline'}
                     onClick={() => setMode('paste')}
                   >
-                    ????
+                    粘贴内容
                   </Button>
                   <Show when={isCameraInputAvailable()}>
                     <Button
@@ -176,7 +176,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                       variant={mode() === 'camera' ? 'default' : 'outline'}
                       onClick={() => setMode('camera')}
                     >
-                      ?????
+                      摄像头扫码
                     </Button>
                   </Show>
                 </div>
@@ -186,15 +186,15 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                     autoStart
                     onScanning={() => {
                       showAppToast({
-                        title: '??????',
-                        description: '???????????????????',
+                        title: '摄像头已就绪',
+                        description: '将二维码对准画面，识别成功后会自动导入',
                         variant: 'default',
                       });
                     }}
                     onDecoded={(text) => {
                       setRaw(text);
                       setMode('paste');
-                      showAppToast({ title: '??????', variant: 'default' });
+                      showAppToast({ title: '已识别二维码', variant: 'default' });
                     }}
                     onError={(msg) => {
                       showAppToast({ title: msg, variant: 'destructive' });
@@ -207,7 +207,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                     inputId={imageInputId}
                     onDecoded={(text) => {
                       setRaw(text);
-                      showAppToast({ title: '??????', variant: 'default' });
+                      showAppToast({ title: '已识别二维码', variant: 'default' });
                     }}
                   />
                   <TextField>
@@ -233,7 +233,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                     disabled={cameraActive()}
                     onClick={openCamera}
                   >
-                    ?????
+                    打开摄像头
                   </Button>
                 </Show>
                 <QrImagePicker
@@ -248,8 +248,8 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                   autoStart
                   onScanning={() => {
                     showAppToast({
-                      title: '??????',
-                      description: '???????????????????',
+                      title: '摄像头已就绪',
+                      description: '将二维码对准画面，识别成功后会自动导入',
                       variant: 'default',
                     });
                   }}
@@ -262,11 +262,11 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
         </AppDialogScrollBody>
         <AppDialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            ??
+            取消
           </Button>
           <Show when={!useAutoImport()}>
             <Button onClick={handleIdentify} disabled={!raw().trim()}>
-              ??
+              确定
             </Button>
           </Show>
         </AppDialogFooter>

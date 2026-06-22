@@ -36,7 +36,7 @@ describe('collectPrefetchIndices', () => {
       forwardPrefetchNum: 2,
       backwardPrefetchNum: 2,
     });
-    // ?? n=2?? current-2?Legado ? current-2 ???? min(5,n)=2 ??
+    // backward n=2 时从 current-2 起扫（Legado 语义），窗口长度 min(5,n)=2
     expect(indices).toEqual([3, 6, 7]);
     expect(new Set(indices).size).toBe(indices.length);
   });

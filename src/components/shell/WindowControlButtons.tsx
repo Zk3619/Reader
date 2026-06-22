@@ -1,7 +1,7 @@
 /**
- * ??????????????/??????
- * ?????? + Tauri ??????????????
- * ????????????/??????????????????
+ * 窗口控制按钮（最小化、最大化/还原、关闭）
+ * 仅在桌面平台 + Tauri 环境显示，与导航栏逻辑一致。
+ * 关闭时支持「隐藏到托盘」/「退出应用」选择及「记住我的选择」。
  */
 
 import { createSignal, Show, onMount, onCleanup } from "solid-js"
@@ -74,7 +74,7 @@ export function WindowControlButtons() {
       try {
         await appWindow.minimize()
       } catch (error) {
-        console.error("???????:", error)
+        console.error("最小化窗口失败:", error)
       }
     }
   }
@@ -90,7 +90,7 @@ export function WindowControlButtons() {
           setIsMaximized(true)
         }
       } catch (error) {
-        console.error("???????:", error)
+        console.error("最大化窗口失败:", error)
       }
     }
   }
@@ -117,7 +117,7 @@ export function WindowControlButtons() {
         try {
           await hideWindowAndSaveState()
         } catch (error) {
-          console.error("???????:", error)
+          console.error("隐藏到托盘失败:", error)
           if (appWindow) await appWindow.hide()
         }
       }
@@ -126,12 +126,12 @@ export function WindowControlButtons() {
         try {
           await saveWindowStateBeforeExit()
         } catch (error) {
-          console.error("????????:", error)
+          console.error("保存窗口状态失败:", error)
         }
         try {
           await appWindow.close()
         } catch (error) {
-          console.error("??????:", error)
+          console.error("关闭窗口失败:", error)
         }
       }
     }
@@ -162,9 +162,9 @@ export function WindowControlButtons() {
           <AppTooltip>
             <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={minimizeWindow}>
               <MinimizeWindowIcon class="h-4 w-4" size={16} />
-              <span class="sr-only">???</span>
+              <span class="sr-only">最小化</span>
             </AppTooltipTrigger>
-            <AppTooltipContent>???</AppTooltipContent>
+            <AppTooltipContent>最小化</AppTooltipContent>
           </AppTooltip>
           <AppTooltip>
             <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={maximizeWindow}>
@@ -174,9 +174,9 @@ export function WindowControlButtons() {
               >
                 <RestoreWindowIcon class="h-4 w-4" size={16} />
               </Show>
-              <span class="sr-only">{isMaximized() ? "??" : "???"}</span>
+              <span class="sr-only">{isMaximized() ? "还原" : "最大化"}</span>
             </AppTooltipTrigger>
-            <AppTooltipContent>{isMaximized() ? "??" : "???"}</AppTooltipContent>
+            <AppTooltipContent>{isMaximized() ? "还原" : "最大化"}</AppTooltipContent>
           </AppTooltip>
           <AppTooltip>
             <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-destructive hover:text-destructive-foreground transition-colors" onClick={(e: MouseEvent) => {
@@ -184,9 +184,9 @@ export function WindowControlButtons() {
               closeWindow(e)
             }}>
               <XIcon class="h-4 w-4" size={16} />
-              <span class="sr-only">??</span>
+              <span class="sr-only">关闭</span>
             </AppTooltipTrigger>
-            <AppTooltipContent>??</AppTooltipContent>
+            <AppTooltipContent>关闭</AppTooltipContent>
           </AppTooltip>
         </div>
       </Show>
@@ -205,7 +205,7 @@ export function WindowControlButtons() {
           }
         >
           <AppDialogHeader>
-            <AppDialogTitle>??</AppDialogTitle>
+            <AppDialogTitle>关闭</AppDialogTitle>
           </AppDialogHeader>
           <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
             <RadioGroup
@@ -213,10 +213,10 @@ export function WindowControlButtons() {
               onChange={(value: string) => setCloseAction(value as "hide" | "quit")}
             >
               <RadioGroupItem value="hide">
-                <RadioGroupItemLabel>?????</RadioGroupItemLabel>
+                <RadioGroupItemLabel>隐藏到托盘</RadioGroupItemLabel>
               </RadioGroupItem>
               <RadioGroupItem value="quit">
-                <RadioGroupItemLabel>????</RadioGroupItemLabel>
+                <RadioGroupItemLabel>退出应用</RadioGroupItemLabel>
               </RadioGroupItem>
             </RadioGroup>
             <div class="flex items-center gap-2">
@@ -225,15 +225,15 @@ export function WindowControlButtons() {
                 checked={rememberChoice()}
                 onChange={setRememberChoice}
               />
-              <Label for="window-close-remember">??????</Label>
+              <Label for="window-close-remember">记住我的选择</Label>
             </div>
           </AppDialogScrollBody>
           <AppDialogFooter>
             <Button variant="outline" onClick={handleCloseCancel}>
-              ??
+              取消
             </Button>
             <Button variant="default" onClick={handleCloseConfirm}>
-              ??
+              确定
             </Button>
           </AppDialogFooter>
         </AppDialogContent>
