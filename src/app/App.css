@@ -963,13 +963,17 @@
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
-/** 单页正文裁切（高度 = nextStart − pageStart，与 page-window 同高）；inset 由 content-slot 承担 */
+/** 单页正文裁切（高度 = nextStart − pageStart，与 tip-body 同高）；inset 由 content-slot 承担 */
 .reader-paged-page-content-clip {
   position: relative;
   width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -980,6 +984,22 @@
 .reader-paged-live-inner {
   position: relative;
   z-index: 0;
+}
+
+/** 单栏按页界裁切：正文高度随内容，禁用页底 justify（避免 margin-auto 在可变高容器内下移末行） */
+.reader-paged-page-span-clip .reader-paged-live-inner {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.reader-paged-page-span-clip .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.reader-paged-page-span-clip.reader-paged-bottom-justify .reader-p:last-child,
+.reader-paged-page-span-clip .reader-paged-bottom-justify .reader-p:last-child {
+  margin-bottom: unset;
 }
 
 .reader-paged-turn-slide {

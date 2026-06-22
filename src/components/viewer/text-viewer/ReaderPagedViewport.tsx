@@ -73,7 +73,7 @@ import {
 import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
 import { ReaderPageTipChrome } from '@/components/viewer/text-viewer/ReaderPageTipChrome';
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
-import { readerPageTipsCarryWithTurn, readerPageTipContentBudget } from '@/lib/media/text/reader-page-tip';
+import { readerPageTipsCarryWithTurn, readerPageTipContentBudget, readReaderPageTipBodyClientHeightPx } from '@/lib/media/text/reader-page-tip';
 import { isReaderInlineMeasureImage } from '@/lib/media/image/inline-text-image-size';
 import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
 import {
@@ -1432,16 +1432,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const ch = viewerState.chapterIndex;
     const outerW = viewportEl?.clientWidth ?? 0;
     if (!book || outerW <= 0) return;
-    const pageWindow = readPagedPageWindowMetrics({
-      viewportEl,
-      clipEl,
-      contentSlotEl,
-      pageTipBodyEl,
-      contentFrameEl,
-      fallbackInsets: pagedFrameFallbackInsets(),
-      tipChromePadTop: pageTipVerticalPads().top,
-      tipChromePadBottom: pageTipVerticalPads().bottom,
-    });
+    const pageWindow = pageWindowMetrics();
     const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
     prefetchAdjacentChapterLayoutsFromPool({
@@ -1559,6 +1550,19 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const pageContentClipPx = () =>
     pageWindowSpanPx(incomingDisplayPage()) ?? clipViewportHeightPx();
 
+  /** 单栏：按页界裁切；翻页动画期间亦保持同高，避免下一页段首露出与落页位移 */
+  const pageSpanClipHeightPx = (page: number) => {
+    const band = tipBodyBandHeightPx();
+    if (pagedLayoutDualPage()) return band;
+    const span = pageWindowSpanPx(page);
+    if (span == null || span <= 0) return band;
+    return Math.min(span, band);
+  };
+
+  const pageSpanClipStyle = (): { height: string } => ({
+    height: `${pageSpanClipHeightPx(liveRenderPage())}px`,
+  });
+
   const dualSpreadColumnClipPx = (
     page: number,
     column: 'left' | 'right',
@@ -1575,19 +1579,26 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     return dualSpreadColumnContentSpanPx(page, column, spanLayout, liveClip);
   };
 
-  /** 裁切视口内容区高度（与 DOM page-window / 分页 clipHeight 一致） */
-  const clipViewportHeightPx = () => {
-    const live = pageWindowMetrics().clipHeight;
-    if (live > 0) return live;
+  /** 页眉/页脚之间正文带高度：以 tip-body DOM 为唯一基准，与分页 clipHeight 一致 */
+  const tipBodyBandHeightPx = (): number => {
+    const dom = readReaderPageTipBodyClientHeightPx(pageTipBodyEl);
+    if (dom > 0) return dom;
+    const budget = pageTipContentBudget().bodyHeightPx;
+    if (budget > 0) return budget;
+    const metrics = pageWindowMetrics().clipHeight;
+    if (metrics > 0) return metrics;
     const clip = pageClipHeight();
     if (clip > 0) return clip;
     return Math.max(
       1,
       (viewportEl?.clientHeight ?? 0) -
-      contentInset().top -
-      contentInset().bottom,
+        contentInset().top -
+        contentInset().bottom,
     );
   };
+
+  /** 裁切视口内容区高度（与 DOM tip-body / 分页 clipHeight 一致） */
+  const clipViewportHeightPx = () => tipBodyBandHeightPx();
 
   /** 满视口页面包（含上下 contentInset，用于翻页幕帘/书脊） */
   const pagedFaceHeightPx = () => {
@@ -2891,22 +2902,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     });
   });
 
-  /** layout.clipHeight 与 content-slot 实测偏差时重测，避免页界按错误窗高计算导致裁字 */
+  /** layout.clipHeight 与 tip-body 实测偏差时重测，避免页界按错误窗高计算导致裁字 */
   createEffect(() => {
     if (turnStage() !== 'idle' || crossChapterCommitInFlight) return;
     const l = layout();
     if (!l || !isChapterLayoutComplete(l, viewerState.chapterIndex)) return;
-    const liveClip = readPagedPageWindowMetrics({
-      viewportEl,
-      clipEl,
-      contentSlotEl,
-      pageTipBodyEl,
-      contentFrameEl,
-      fallbackInsets: pagedFrameFallbackInsets(),
-      tipChromePadTop: pageTipVerticalPads().top,
-      tipChromePadBottom: pageTipVerticalPads().bottom,
-      authoritativeBodyHeightPx: pageTipBodyHeightPx(),
-    }).clipHeight;
+    const liveClip = tipBodyBandHeightPx();
     if (liveClip <= 0 || l.clipHeight <= 0) return;
     if (Math.abs(l.clipHeight - liveClip) <= 2) return;
     scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
@@ -2919,16 +2920,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const cfg = viewerState.config;
     const outerW = viewportEl?.clientWidth ?? 0;
     if (!book || outerW <= 0) return;
-    const pageWindow = readPagedPageWindowMetrics({
-      viewportEl,
-      clipEl,
-      contentSlotEl,
-      pageTipBodyEl,
-      contentFrameEl,
-      fallbackInsets: pagedFrameFallbackInsets(),
-      tipChromePadTop: pageTipVerticalPads().top,
-      tipChromePadBottom: pageTipVerticalPads().bottom,
-    });
+    const pageWindow = pageWindowMetrics();
     const layoutWidth = slotContentInnerWidth();
     if (layoutWidth <= 0 || pageWindow.viewportHeight <= 0) return;
     scheduleAdjacentChapterLayoutPrefetch({
@@ -4463,6 +4455,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const slotInset = pagedSlotInsetFromConfig();
     const slideActive = slideTurnActive();
     const turnPanelLayout = turnSlidePanelLayoutActive();
+    const spanClipStyle = pageSpanClipStyle();
 
     return (
       <div
@@ -4557,8 +4550,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               >
                 <div class="reader-paged-page-content-clip relative h-full min-h-0 w-full overflow-hidden">
                   {renderCurtainCloneHost()}
-                  {renderLiveChapter()}
-                  {renderIncomingStagingChapter()}
+                  <div
+                    class="reader-paged-page-span-clip absolute inset-x-0 top-0 overflow-hidden"
+                    style={spanClipStyle}
+                  >
+                    {renderLiveChapter()}
+                    {renderIncomingStagingChapter()}
+                  </div>
                   {renderAutoPagerScanReveal()}
                 </div>
               </div>

@@ -88,29 +88,35 @@ export function readPagedSpreadContentWidthPx(params: {
   return Math.max(1, 320);
 }
 
-/** 页眉/页脚之间的正文窗高（与 grid tip-body 对齐；不含额外 reserve） */
+/** 页眉/页脚之间的正文窗高（与 grid tip-body 对齐） */
 function resolveTipChromeBodyHeightPx(
   frameOuter: number,
   tipTop: number,
   tipBottom: number,
   params: ReadPagedPageWindowMetricsParams,
 ): number {
-  const estimated = Math.max(1, frameOuter - tipTop - tipBottom);
-  let bodyHeight = estimated;
-
   if (params.authoritativeBodyHeightPx != null && params.authoritativeBodyHeightPx > 0) {
-    bodyHeight = Math.min(bodyHeight, Math.round(params.authoritativeBodyHeightPx));
+    return Math.max(1, Math.round(params.authoritativeBodyHeightPx));
   }
 
+  const estimated = Math.max(1, frameOuter - tipTop - tipBottom);
   const domBody = params.pageTipBodyEl?.clientHeight ?? 0;
   if (domBody > 0) {
     const rounded = Math.round(domBody);
-    if (rounded > 0 && rounded <= estimated + 2) {
-      bodyHeight = Math.min(bodyHeight, rounded);
+    if (rounded > 0) {
+      return Math.max(1, Math.min(estimated, rounded));
     }
   }
 
-  return Math.max(1, bodyHeight);
+  const frame = params.contentFrameEl;
+  if (frame && typeof frame.querySelector === 'function') {
+    const tipBody = frame.querySelector<HTMLElement>('.reader-page-tip-body');
+    if (tipBody && tipBody.clientHeight > 0) {
+      return Math.max(1, Math.min(estimated, Math.round(tipBody.clientHeight)));
+    }
+  }
+
+  return estimated;
 }
 
 /** 分页与展示共用的 page-window 度量（clipHeight 对齐正文槽实测高度；不含页眉页脚） */
@@ -192,7 +198,7 @@ export function measurePagedClipContentHeight(
   };
 
   if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
-    return capToTipChrome(Math.max(1, Math.round(pageTipBodyEl.clientHeight)));
+    return Math.max(1, Math.round(pageTipBodyEl.clientHeight));
   }
 
   if (contentSlotEl && contentSlotEl.clientHeight > 0) {

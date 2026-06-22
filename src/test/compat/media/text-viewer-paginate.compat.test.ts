@@ -162,6 +162,16 @@ describe('pageContentSpanPx', () => {
     expect(pageContentSpanPx(0, layout, 700)).toBe(700);
   });
 
+  it('uses page break span when smaller than live clip (prevents next-page lead-in)', () => {
+    const layout = {
+      pageStarts: [0, 650],
+      clipHeight: 700,
+      contentExtent: 2000,
+      segments: [{ top: 640, bottom: 750 }],
+    };
+    expect(pageContentSpanPx(0, layout, 670)).toBe(650);
+  });
+
   it('uses full live clip for dual-page spread block slicing', () => {
     const layout = {
       pageStarts: [0, 400],

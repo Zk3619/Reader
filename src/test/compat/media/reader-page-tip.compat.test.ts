@@ -4,6 +4,7 @@ import {
   measureReaderPageTipBodyHeightPx,
   readerPageTipBarHeightPx,
   readerPageTipBarVisible,
+  readReaderPageTipBodyClientHeightPx,
   readerPageTipChromeMeasureReady,
   readerPageTipContentBudget,
   readerPageTipsCarryWithTurn,
@@ -81,6 +82,37 @@ describe('measureReaderPageTipBodyHeightPx', () => {
     expect(measureReaderPageTipBodyHeightPx(frame, tips, false)).toBe(530);
   });
 
+  it('prefers tip-body clientHeight over header-footer rect gap', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 30,
+      getBoundingClientRect: () => ({ top: 0, bottom: 30, height: 30 }),
+    } as HTMLElement;
+    const footer = {
+      offsetHeight: 40,
+      getBoundingClientRect: () => ({ top: 560, bottom: 600, height: 40 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 526 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return footer;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'always' as const,
+      footerMode: 'always' as const,
+      footerRight: 'page' as const,
+    };
+    expect(measureReaderPageTipBodyHeightPx(frame, tips, false)).toBe(526);
+    expect(readReaderPageTipBodyClientHeightPx(tipBody)).toBe(526);
+  });
+
   it('falls back to frame minus pads when rect gap is implausible', () => {
     const frame = {
       clientHeight: 600,
@@ -110,6 +142,34 @@ describe('measureReaderPageTipBodyHeightPx', () => {
     const h = measureReaderPageTipBodyHeightPx(frame, tips, false);
     expect(h).toBeGreaterThan(500);
     expect(h).toBeLessThanOrEqual(600);
+  });
+
+  it('prefers DOM gap when footer pad is underestimated', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 30,
+      getBoundingClientRect: () => ({ top: 0, bottom: 30, height: 30 }),
+    } as HTMLElement;
+    const footer = {
+      offsetHeight: 50,
+      getBoundingClientRect: () => ({ top: 520, bottom: 600, height: 80 }),
+    } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return footer;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'always' as const,
+      footerMode: 'always' as const,
+      footerRight: 'page' as const,
+    };
+    expect(measureReaderPageTipBodyHeightPx(frame, tips, false)).toBe(490);
   });
 });
 
@@ -162,6 +222,37 @@ describe('readerPageTipContentBudget', () => {
     expect(budget.footerPad).toBeGreaterThan(0);
     expect(budget.bodyHeightPx).toBe(530);
     expect(budget.bodyHeightPx).toBeLessThan(600);
+  });
+
+  it('does not shrink body below tip-body DOM when footer is visible', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 30,
+      getBoundingClientRect: () => ({ top: 0, bottom: 30, height: 30 }),
+    } as HTMLElement;
+    const footer = {
+      offsetHeight: 40,
+      getBoundingClientRect: () => ({ top: 560, bottom: 600, height: 40 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 530 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return footer;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'always' as const,
+      footerMode: 'always' as const,
+      footerRight: 'page' as const,
+      showFooterLine: true,
+    };
+    const budget = readerPageTipContentBudget(frame, tips, false, tipBody);
+    expect(budget.bodyHeightPx).toBe(530);
   });
 });
 

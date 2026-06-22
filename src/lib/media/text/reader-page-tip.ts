@@ -280,19 +280,44 @@ export function readerPageTipContentBudget(
   const arithmetic = Math.max(1, frameH - headerPad - footerPad);
   let bodyHeightPx = arithmetic;
 
-  if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
-    const dom = Math.round(pageTipBodyEl.clientHeight);
-    if (dom > 0 && dom <= arithmetic + 2) {
-      bodyHeightPx = dom;
-    }
+  const tipBodyEl =
+    pageTipBodyEl ??
+    frameEl?.querySelector<HTMLElement>('.reader-page-tip-body') ??
+    null;
+  const tipBodyDom = readReaderPageTipBodyClientHeightPx(tipBodyEl);
+  if (tipBodyDom > 0) {
+    bodyHeightPx = Math.min(arithmetic, tipBodyDom);
   } else if (frameEl) {
-    const gap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
-    if (gap > 0 && gap <= arithmetic + 2) {
-      bodyHeightPx = gap;
+    const measured = measureReaderPageTipBodyHeightPx(
+      frameEl,
+      tips,
+      chromeBarsVisible,
+      pageTipBodyEl,
+    );
+    if (measured > 0) {
+      bodyHeightPx = Math.min(arithmetic, measured);
     }
   }
 
   return { headerPad, footerPad, bodyHeightPx };
+}
+
+/** tip-body 元素实测正文带高度（0 表示未挂载或尚未布局） */
+export function readReaderPageTipBodyClientHeightPx(
+  tipBodyEl?: HTMLElement | null,
+): number {
+  if (!tipBodyEl) return 0;
+  const h = tipBodyEl.clientHeight;
+  if (!Number.isFinite(h) || h <= 0) return 0;
+  return Math.max(1, Math.round(h));
+}
+
+function resolveReaderPageTipBodyEl(
+  frameEl: HTMLElement | null | undefined,
+  pageTipBodyEl?: HTMLElement | null,
+): HTMLElement | null {
+  if (pageTipBodyEl) return pageTipBodyEl;
+  return frameEl?.querySelector<HTMLElement>('.reader-page-tip-body') ?? null;
 }
 
 /** 页眉/页脚是否已贴 frame 顶/底（未贴边时勿用 frame−tip.top 推算 band，否则会吞掉正文区） */
@@ -311,6 +336,14 @@ function tipBarAnchoredToFrameEdge(
 function finiteOffsetHeight(el: HTMLElement): number {
   const h = el.offsetHeight;
   return Number.isFinite(h) && h > 0 ? h : 0;
+}
+
+/** 页眉底与页脚顶之间的实测间隙；过小视为布局未稳定，回退算术预算 */
+function acceptTipBodyGapPx(gap: number, expected: number): number {
+  if (gap <= 0 || gap > expected) return expected;
+  const minPlausible = Math.max(48, expected * 0.25);
+  if (gap < minPlausible) return expected;
+  return gap;
 }
 
 /** 页眉/页脚 DOM 是否已稳定到可参与分页（避免首帧 band 误测导致 clipHeight 过小或过大） */
@@ -343,8 +376,14 @@ export function readerPageTipChromeMeasureReady(
   if (bodyBudget < Math.max(48, frameH * 0.35)) return false;
 
   if (headerVisible && footerVisible) {
-    const bodyGap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
-    if (bodyGap < bodyBudget * 0.88) return false;
+    const tipBody = frameEl.querySelector<HTMLElement>('.reader-page-tip-body');
+    const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
+    if (bodyDom > 0) {
+      if (bodyDom < bodyBudget * 0.88) return false;
+    } else {
+      const bodyGap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
+      if (bodyGap < bodyBudget * 0.88) return false;
+    }
   }
   return true;
 }
@@ -401,19 +440,26 @@ export function measureReaderPageTipChromePads(
 }
 
 /**
- * 页眉底至页脚底之间的正文区高度。
- * 首帧布局未稳定时回退为 frame−页眉−页脚（估算），避免 rect 间隙过小导致首屏空白。
+ * 页眉/页脚之间正文区高度。
+ * 优先 tip-body clientHeight（与展示裁切一致）；仅 tip-body 未挂载时回退 header/footer 间隙推算。
  */
 export function measureReaderPageTipBodyHeightPx(
   frameEl: HTMLElement | null | undefined,
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
+  pageTipBodyEl?: HTMLElement | null,
 ): number {
   const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
   if (!frameEl || frameEl.clientHeight <= 0) {
     return 0;
   }
   const expected = Math.max(1, frameEl.clientHeight - pads.top - pads.bottom);
+
+  const tipBody = resolveReaderPageTipBodyEl(frameEl, pageTipBodyEl);
+  const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
+  if (bodyDom > 0) {
+    return Math.min(expected, bodyDom);
+  }
 
   const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
   const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
@@ -424,26 +470,17 @@ export function measureReaderPageTipBodyHeightPx(
     const gap = Math.floor(
       footer.getBoundingClientRect().top - header.getBoundingClientRect().bottom,
     );
-    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
-      return gap;
-    }
-    return expected;
+    return acceptTipBodyGapPx(gap, expected);
   }
   if (header && headerVisible && !footerVisible) {
     const gap = Math.floor(
       frameEl.getBoundingClientRect().bottom - header.getBoundingClientRect().bottom,
     );
-    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
-      return gap;
-    }
-    return expected;
+    return acceptTipBodyGapPx(gap, expected);
   }
   if (footer && footerVisible && !headerVisible) {
     const gap = Math.floor(footer.getBoundingClientRect().top - frameEl.getBoundingClientRect().top);
-    if (gap > 0 && gap <= expected && gap >= expected * 0.92) {
-      return gap;
-    }
-    return expected;
+    return acceptTipBodyGapPx(gap, expected);
   }
   if (!headerVisible && !footerVisible) {
     return Math.max(1, Math.round(frameEl.getBoundingClientRect().height));
