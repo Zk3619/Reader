@@ -875,7 +875,7 @@
   animation: none;
 }
 
-/** 按页：骨架退场前正文保持透明，退场后与骨架交叉淡入淡出 */
+/** 按页：骨架遮罩与正文交叉淡入淡出（时长须与 PAGED_SKELETON_EXIT_MS 一致） */
 .reader-paged-loading {
   animation: skeleton-fade-in 0.15s ease-out;
 }
@@ -884,6 +884,21 @@
   opacity: 0;
   transition: opacity 0.2s ease-out;
   pointer-events: none;
+}
+
+.reader-paged-viewport:not(.is-live-content-revealed):not(.is-live-content-revealing)
+  .reader-paged-page-span-clip
+  .reader-body {
+  opacity: 0;
+}
+
+.reader-paged-viewport.is-live-content-revealing .reader-paged-page-span-clip .reader-body {
+  opacity: 1;
+  transition: opacity 0.2s ease-out;
+}
+
+.reader-paged-viewport.is-live-content-revealed .reader-paged-page-span-clip .reader-body {
+  opacity: 1;
 }
 
 .reader-dual-page {

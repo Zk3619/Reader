@@ -3413,6 +3413,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const PAGED_SKELETON_EXIT_MS = 200;
 
+  /** 骨架 visible 时正文透明；exiting 时与骨架交叉淡入淡出 */
+  const pagedLiveContentRevealClass = () => {
+    if (isPagedSkeletonDismissed() || pagedSkeletonPhase() === 'hidden') {
+      return 'is-live-content-revealed';
+    }
+    if (pagedSkeletonPhase() === 'exiting') return 'is-live-content-revealing';
+    return '';
+  };
+
   createEffect(() => {
     void tipBodyClipPx();
     layout();
@@ -5145,6 +5154,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         'reader-paged-viewport relative h-full min-h-0 w-full overflow-hidden',
         theme().bg,
         theme().text,
+        pagedLiveContentRevealClass(),
       )}
       data-dual-page={pagedLayoutDualPage() ? '' : undefined}
       style={pagedViewportThemeStyle()}
@@ -5170,6 +5180,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               theme().text,
               pagedSkeletonPhase() === 'exiting' && 'is-exiting',
             )}
+            style={{
+              'background-color': pageThemeBg(),
+            }}
           >
             <div class="reader-paged-clip relative h-full overflow-hidden" style={pagedClipStyle()}>
               <div
