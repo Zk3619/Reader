@@ -4,7 +4,24 @@
 
 import { createStore } from 'solid-js/store';
 import type { ViewerState } from '@/stores/viewer/base-state';
-import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import {
+  defaultTextViewerUiConfig,
+  type TextViewerUiConfig,
+} from '@/lib/media/text/reader-ui-config';
+import { peekReaderUiConfigSync } from '@/lib/media/text/read-config-storage';
+import { normalizeReaderThemeId } from '@/lib/media/text/reader-theme-classes';
+import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
+
+/** 首帧即从 localStorage 恢复主题等，避免进入阅读器时闪默认配色 */
+function buildInitialReaderConfig(): TextViewerUiConfig {
+  const saved = peekReaderUiConfigSync();
+  if (!saved) return { ...defaultTextViewerUiConfig };
+  return {
+    ...defaultTextViewerUiConfig,
+    theme: normalizeReaderThemeId(saved.theme),
+    pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
+  };
+}
 
 export const initialViewerState: ViewerState = {
   kind: null,
@@ -18,7 +35,7 @@ export const initialViewerState: ViewerState = {
   contentFetching: false,
   contentBootstrapping: false,
   showContent: false,
-  config: defaultTextViewerUiConfig,
+  config: buildInitialReaderConfig(),
   popCataVisible: false,
   readSettingsVisible: false,
   miniInterface: false,
@@ -33,5 +50,5 @@ export const initialViewerState: ViewerState = {
 export const [state, setState] = createStore<ViewerState>({ ...initialViewerState });
 
 export function resetViewerState(): void {
-  setState({ ...initialViewerState, config: { ...defaultTextViewerUiConfig } });
+  setState({ ...initialViewerState, config: buildInitialReaderConfig() });
 }

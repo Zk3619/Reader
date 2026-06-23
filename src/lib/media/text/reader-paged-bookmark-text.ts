@@ -12,7 +12,18 @@ export function normalizeBookmarkPlainText(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim();
 }
 
-function pagedBookmarkChapterPos(pageIndex: number, pageCount: number): number {
+function pagedBookmarkChapterPos(
+  pageIndex: number,
+  pageCount: number,
+  layout?: ReaderChapterLayout | null,
+): number {
+  const page = layout?.pages[pageIndex];
+  if (layout?.engine === 'pretext' && page?.chapterPosition != null && page.chapterPosition > 0) {
+    const plainLen = layout.pages.reduce((sum, p) => sum + (p.text?.length ?? 0), 0);
+    if (plainLen > 0) {
+      return Math.min(1, Math.max(0, page.chapterPosition / plainLen));
+    }
+  }
   if (pageCount <= 1) return 0;
   return pageIndex / (pageCount - 1);
 }
@@ -124,7 +135,7 @@ export function buildPagedBookmarkSnapshot(input: BuildPagedBookmarkSnapshotInpu
   const layout = input.layout;
   const pageCount = layout ? pageCountFromChapterLayout(layout) : 1;
   const safeIndex = Math.max(0, Math.min(input.pageIndex, pageCount - 1));
-  const chapterPos = pagedBookmarkChapterPos(safeIndex, pageCount);
+  const chapterPos = pagedBookmarkChapterPos(safeIndex, pageCount, layout);
 
   const clipText = extractVisiblePagedClipText(input.viewportRoot);
   const domLineText =
@@ -136,7 +147,10 @@ export function buildPagedBookmarkSnapshot(input: BuildPagedBookmarkSnapshotInpu
     ? fallbackExcerptAtRatio(input.chapterHtml, chapterPos)
     : '';
 
-  const pageText = clipText || domLineText || layoutText || ratioText;
+  const pageText =
+    layout?.engine === 'pretext'
+      ? (layoutText || clipText || domLineText || ratioText)
+      : (clipText || domLineText || layoutText || ratioText);
 
   return {
     chapterPos,

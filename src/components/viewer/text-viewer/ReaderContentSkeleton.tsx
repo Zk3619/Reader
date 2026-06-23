@@ -1,21 +1,26 @@
-import { For, createMemo } from 'solid-js';
+import { For } from 'solid-js';
+
+/** 固定段落行宽（%），避免 Math.random 导致重挂载时骨架条错位 */
+const SKELETON_PARAGRAPHS: readonly (readonly number[])[] = [
+  [92, 88, 74],
+  [95, 82],
+  [90, 85, 78, 70],
+  [88, 93, 76],
+  [91, 84, 72],
+  [94, 80, 77],
+  [89, 86, 75, 68],
+  [93, 81],
+];
 
 /** 阅读器正文加载骨架（分页/滚动共用） */
 export function ReaderContentSkeleton() {
-  const paragraphs = createMemo(() =>
-    Array.from({ length: 8 }, () => {
-      const lineCount = Math.floor(Math.random() * 3) + 2;
-      return Array.from({ length: lineCount }, () => Math.floor(Math.random() * 30) + 70);
-    }),
-  );
-
   return (
     <>
       <div class="mb-6 flex items-center justify-center">
         <div class="skeleton-bar h-7 w-48 rounded" />
       </div>
       <div class="space-y-5">
-        <For each={paragraphs()}>
+        <For each={SKELETON_PARAGRAPHS}>
           {(lines) => (
             <div class="space-y-2.5">
               <For each={lines}>

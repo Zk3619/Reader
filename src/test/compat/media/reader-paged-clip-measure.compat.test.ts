@@ -151,18 +151,18 @@ describe('readPagedPageWindowMetrics', () => {
     vi.unstubAllGlobals();
   });
 
-  it('caps inflated tip-body/slot height with frame minus tip chrome', () => {
+  it('uses tip-body DOM height when grid body is measured', () => {
     const frame = { clientHeight: 600 } as HTMLElement;
     const slot = {
       clientHeight: 580,
       style: { paddingTop: '0px', paddingBottom: '0px' },
     } as HTMLElement;
-    const tipBody = { clientHeight: 580 } as HTMLElement;
+    const tipBody = { clientHeight: 556 } as HTMLElement;
     const getComputedStyle = vi.fn(() => ({
       top: '0px',
       bottom: '0px',
-      left: '0px',
-      right: '0px',
+      left: '16px',
+      right: '16px',
       paddingTop: '0px',
       paddingBottom: '0px',
       paddingLeft: '0px',

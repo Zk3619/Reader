@@ -4,13 +4,16 @@
 
 import { getPooledChapterContent } from '@/lib/chapter-cache/chapter-content-pool';
 import { readCachedChapterRaw } from '@/lib/chapter-cache/storage';
-import { layoutReaderChapter } from '@/lib/media/text/reader-chapter-layout';
 import {
   buildChapterLayoutCacheKey,
   buildContentRevision,
   buildReaderLayoutSignature,
   buildViewportSignature,
 } from '@/lib/media/text/reader-layout-signature';
+import {
+  buildPretextChapterImageRevision,
+  layoutReaderChapter,
+} from '@/lib/media/text/reader-chapter-layout';
 import { getCachedChapterLayout } from '@/lib/media/text/reader-chapter-layout-cache';
 import { setPagedLayoutPrefetchStatus } from '@/lib/media/text/reader-paged-layout-debug';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
@@ -60,6 +63,15 @@ function prefetchOne(
     }),
     viewportSignature: buildViewportSignature(viewportWidth, viewportHeight),
     chapterTitle: title,
+    imageRevision: buildPretextChapterImageRevision({
+      content,
+      config,
+      viewportWidth,
+      viewportHeight,
+      chapterTitle: title,
+      dualPage,
+      horizontalInsetOnSlot: true,
+    }),
   });
   if (getCachedChapterLayout(cacheKey)) return;
 

@@ -84,6 +84,19 @@ describe('computePageStartsFromSegments', () => {
     expect(computePageStartsFromSegments(segments, clipHeight, 781, 0)).toEqual([0, 717]);
   });
 
+  it('breaks before tail line when inline chrome exceeds clip though glyph fits', () => {
+    const clipHeight = 100;
+    const segments = [
+      { top: 0, bottom: 24, textBottom: 22 },
+      { top: 24, bottom: 48, textBottom: 46 },
+      { top: 48, bottom: 72, textBottom: 70 },
+      { top: 72, bottom: 96, textBottom: 94 },
+      { top: 96, bottom: 106, textBottom: 98 },
+      { top: 106, bottom: 130, textBottom: 128 },
+    ];
+    expect(computePageStartsFromSegments(segments, clipHeight, 200, 0)).toEqual([0, 96]);
+  });
+
   it('breaks at line touching clip bottom', () => {
     const clipHeight = 749;
     const segments = [

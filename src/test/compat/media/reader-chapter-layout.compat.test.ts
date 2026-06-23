@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
   canUseCanvasChapterLayout,
+  canUsePretextChapterLayout,
   needsDomChapterLayout,
 } from '@/lib/media/text/reader-content-complexity';
 import {
@@ -30,6 +31,11 @@ describe('reader-content-complexity', () => {
     expect(needsDomChapterLayout('<p>x</p><img src="a">')).toBe(true);
     expect(needsDomChapterLayout('<div class="x">y</div>')).toBe(true);
     expect(needsDomChapterLayout('<figure><img></figure>')).toBe(true);
+  });
+
+  it('pretext can layout img chapters when not structural', () => {
+    expect(canUsePretextChapterLayout('<p>x</p><img src="a">')).toBe(true);
+    expect(canUsePretextChapterLayout('<div class="x">y</div>')).toBe(false);
   });
 });
 
@@ -184,16 +190,18 @@ describe('isChapterLayoutCompleteForContent', () => {
 });
 
 describe('layoutPlainTextChapterCanvas', () => {
-  it('returns canvas chapter layout with at least one page', () => {
+  it('returns pretext chapter layout with at least one page', () => {
     const layout = layoutPlainTextChapterCanvas({
       chapterIndex: 0,
       raw: '第一章\n\n' + '正文内容。'.repeat(200),
       viewportWidth: 360,
       viewportHeight: 640,
-      config: { ...defaultTextViewerUiConfig, fontSize: 18 },
+      config: { ...defaultTextViewerUiConfig, fontSize: 18, layoutEngine: 'pretext' },
       cacheKey: 'test',
+      clipHeightPx: 500,
+      horizontalInsetOnSlot: true,
     });
-    expect(layout.engine).toBe('canvas');
+    expect(layout.engine).toBe('pretext');
     expect(layout.pageStarts[0]).toBe(0);
     expect(layout.pages.length).toBe(layout.pageStarts.length);
     expect(layout.pages[0]!.displayHeight).toBeGreaterThan(0);

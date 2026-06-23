@@ -1,4 +1,5 @@
 import type { TextViewerPageTipsConfig, TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { normalizePretextImageUrl } from '@/lib/media/image/pretext-image-intrinsic';
 import {
   textViewerDualPageActive,
   textViewerDualPageActiveInViewport,
@@ -77,6 +78,7 @@ export function buildReaderLayoutSignature(
     config.customFontPath,
     dualActive ? '1:dp9' : 0,
     pageTipsLayoutSignature(config.pageTips),
+    config.layoutEngine ?? 'dom',
   ].join('\0');
 }
 
@@ -86,6 +88,24 @@ export function buildContentRevision(content: string): string {
   const head = content.slice(0, 48);
   const tail = content.slice(-48);
   return `${len}:${head}:${tail}`;
+}
+
+/** 块级图 intrinsic 从占位变为实测时改变 revision，避免同章重复全量重算 */
+export function buildChapterImageRevision(
+  urls: string[],
+  intrinsicByUrl?: ReadonlyMap<string, { width: number; height: number }> | null,
+): string {
+  if (urls.length === 0) return '';
+  return urls
+    .map((raw) => {
+      const norm = normalizePretextImageUrl(raw);
+      const intrinsic =
+        intrinsicByUrl?.get(norm) ?? intrinsicByUrl?.get(raw);
+      return intrinsic
+        ? `${norm}@${Math.round(intrinsic.width)}x${Math.round(intrinsic.height)}`
+        : `${norm}@pending`;
+    })
+    .join('\0');
 }
 
 export function buildViewportSignature(
@@ -104,6 +124,7 @@ export function buildChapterLayoutCacheKey(params: {
   layoutSignature: string;
   viewportSignature: string;
   chapterTitle?: string;
+  imageRevision?: string;
 }): string {
   return [
     params.chapterIndex,
@@ -111,5 +132,6 @@ export function buildChapterLayoutCacheKey(params: {
     params.layoutSignature,
     params.viewportSignature,
     params.chapterTitle ?? '',
+    params.imageRevision ?? '',
   ].join('|');
 }

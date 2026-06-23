@@ -109,7 +109,38 @@ function isChapterTitleMeasureBlock(block: HTMLElement): boolean {
 
 /** 段落内含行内图（段评 SVG 等）：须按 .reader-p 整块测量，不可只量 span 文字 */
 function paragraphHasInlineMeasureContent(textEl: HTMLElement): boolean {
-  return textEl.querySelector('img, figure, svg, [data-legado-cmt]') != null;
+  return (
+    textEl.querySelector(
+      'img, figure, svg, [data-legado-cmt], [data-reader-inline-img], .reader-legado-cmt-img',
+    ) != null
+  );
+}
+
+/** 段评气泡在末行旁会撑高行盒，须按整块 .reader-p 测量 */
+function paragraphHasCommentBubble(textEl: HTMLElement): boolean {
+  return textEl.querySelector('.reader-comment-bubble') != null;
+}
+
+/** 段评/行内图控件底（相对 measureRoot），用于补全行级 segment 未量的末行高度 */
+function paragraphInlineChromeBottom(rootRect: DOMRect, textEl: HTMLElement): number {
+  let bottom = 0;
+  const nodes = textEl.querySelectorAll(
+    '[data-reader-inline-img], [data-legado-cmt], .reader-legado-cmt-img, .reader-comment-bubble',
+  );
+  for (const node of nodes) {
+    const b = relativeBottom(rootRect, node);
+    if (b > bottom) bottom = b;
+  }
+  return bottom;
+}
+
+function blockNeedsLegadoInlineMeasure(block: HTMLElement): boolean {
+  return (
+    block.hasAttribute('data-reader-legado-inline') ||
+    block.querySelector(
+      '[data-reader-inline-img], [data-legado-cmt], .reader-legado-cmt-img',
+    ) != null
+  );
 }
 
 /** 块在排版流中的底（含段距 margin；wrapper 矩形常不含子段落 margin） */
@@ -265,6 +296,17 @@ function collectLineSegmentsInBlock(
     const lineBoxBottom = Math.max(top + lineHeightPx, rectBottom);
     mergeLineSegment(lines, top, lineBoxBottom, rectBottom);
   }
+  const chromeBottom = paragraphInlineChromeBottom(rootRect, textEl);
+  if (chromeBottom > 0 && lines.length > 0) {
+    const last = lines[lines.length - 1]!;
+    if (chromeBottom > last.bottom + 0.5) {
+      lines[lines.length - 1] = {
+        ...last,
+        bottom: chromeBottom,
+        textBottom: Math.max(last.textBottom ?? last.bottom, chromeBottom),
+      };
+    }
+  }
   return lines.sort((a, b) => a.top - b.top || a.bottom - b.bottom);
 }
 
@@ -310,6 +352,24 @@ export function measureLayoutSegments(
       block.querySelector<HTMLElement>('h2');
     if (!textEl) return;
 
+    if (blockNeedsLegadoInlineMeasure(block)) {
+      const blockTop = relativeTop(rootRect, block);
+      let blockBottom = Math.max(
+        relativeBottom(rootRect, block),
+        relativeBottom(rootRect, textEl),
+      );
+      const chromeBottom = paragraphInlineChromeBottom(rootRect, textEl);
+      if (chromeBottom > 0) blockBottom = Math.max(blockBottom, chromeBottom);
+      if (blockBottom <= blockTop + 0.5) return;
+      segments.push({
+        top: blockTop,
+        bottom: blockBottom,
+        textBottom: blockBottom,
+        blockIndex,
+      });
+      return;
+    }
+
     if (isChapterTitleMeasureBlock(block)) {
       const blockTop = relativeTop(rootRect, block);
       const blockBottom = relativeBottom(rootRect, block);
@@ -325,7 +385,7 @@ export function measureLayoutSegments(
       return;
     }
 
-    if (paragraphHasInlineMeasureContent(textEl)) {
+    if (paragraphHasInlineMeasureContent(textEl) || paragraphHasCommentBubble(textEl)) {
       const blockTop = relativeTop(rootRect, textEl);
       const blockBottom = relativeBottom(rootRect, textEl);
       if (blockBottom <= blockTop + 0.5) return;
@@ -589,6 +649,36 @@ function shrinkPageEndBeforeStraddle(
   return shrink > pageStart + 1 ? shrink : pageEnd;
 }
 
+/** DOM 复核：裁切线下仍有跨行元素时前移页界，与 tip-body 可视区严格对齐 */
+export function trimPageStartsBeforeClipStraddle(
+  measureRoot: HTMLElement,
+  pageStarts: number[],
+  clipHeight: number,
+): number[] {
+  if (pageStarts.length <= 1 || clipHeight <= 0) return pageStarts;
+
+  const trimmed: number[] = [pageStarts[0] ?? 0];
+  for (let i = 0; i < pageStarts.length - 1; i += 1) {
+    const pageStart = trimmed[trimmed.length - 1] ?? 0;
+    const nominalNext = pageStarts[i + 1] ?? pageStart + clipHeight;
+    const windowBottom = pageStart + clipHeight;
+    let nextStart = nominalNext;
+
+    if (pageWindowHasStraddle(measureRoot, pageStart, windowBottom)) {
+      const shrunk = shrinkPageEndBeforeStraddle(measureRoot, pageStart, windowBottom);
+      if (shrunk > pageStart + 1 && shrunk < nominalNext + 0.5) {
+        nextStart = Math.round(shrunk);
+      }
+    }
+
+    if (nextStart <= pageStart + 0.5) break;
+    if (Math.abs(nextStart - (trimmed[trimmed.length - 1] ?? 0)) < 0.5) break;
+    trimmed.push(nextStart);
+  }
+
+  return trimmed.length > 0 ? trimmed : pageStarts;
+}
+
 /** 片段是否可放入当前页；尾行允许忽略行距/段距下延（字形底仍在页窗内） */
 export function segmentFitsInPageLimit(
   seg: ReaderLayoutSegment,
@@ -647,6 +737,16 @@ export function computePageStartsFromSegments(
         continue;
       }
       if (usedText + blockText <= clipHeight + 0.5) {
+        const visualUsed = usedFull + blockFull;
+        const inlineChromeOverflow =
+          visualUsed > clipHeight + 0.5 &&
+          seg.bottom > textBottom + 1 &&
+          textBottom > seg.top + 0.5;
+        if (inlineChromeOverflow) {
+          nextStart =
+            seg.top >= pageStart - 0.5 ? Math.round(seg.top) : Math.round(limit);
+          break;
+        }
         prevBottom = seg.bottom;
         for (let j = segIndex + 1; j < segments.length; j += 1) {
           const next = segments[j]!;
@@ -730,10 +830,10 @@ export function paginateReaderContent(
     paragraphSpacing,
   );
   const extent = contentExtentFromSegments(segments, measureRoot);
-  /** 正文可排版高度（优先 page-window 实测，否则视口减 inset） */
+  /** 正文可排版高度：按页模式须直传 tip-body 实测 clipHeightPx */
   const clipHeight =
     options?.clipHeightPx != null && options.clipHeightPx > 0
-      ? Math.max(1, Math.round(options.clipHeightPx))
+      ? Math.max(1, Math.floor(options.clipHeightPx))
       : Math.max(1, viewportHeight - padTop - padBottom);
   const layoutResult = computePageStartsForLayout(
     segments,
@@ -748,6 +848,11 @@ export function paginateReaderContent(
     },
   );
 
+  let pageStarts = layoutResult.pageStarts;
+  if (measureRoot && pageStarts.length > 1) {
+    pageStarts = trimPageStartsBeforeClipStraddle(measureRoot, pageStarts, clipHeight);
+  }
+
   const layoutSegments = layoutResult.segments ?? segments;
   const contentExtent =
     options?.dualPage && layoutResult.leftColumnExtent != null
@@ -759,7 +864,7 @@ export function paginateReaderContent(
       : extent;
 
   return {
-    pageStarts: layoutResult.pageStarts,
+    pageStarts,
     clipHeight,
     viewportHeight: Math.max(1, viewportHeight),
     contentExtent,

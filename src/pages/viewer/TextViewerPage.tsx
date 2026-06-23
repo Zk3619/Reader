@@ -7,7 +7,7 @@ import { createSignal, Show, Index, onMount, onCleanup, createEffect, on, type A
 import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
-import { readerThemeBarClasses, readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { readerThemeBarClasses, readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
@@ -133,7 +133,10 @@ function BookReaderChromeBridge(props: {
   onChromeBarsVisible?: (visible: boolean) => void;
 }) {
   const shell = useMediaViewerShell();
-  onMount(() => props.onReady(() => shell.toggleBars()));
+  onMount(() => {
+    props.onChromeBarsVisible?.(shell.headerVisible());
+    props.onReady(() => shell.toggleBars());
+  });
   createEffect(() => {
     props.onChromeBarsVisible?.(shell.headerVisible());
   });
@@ -888,9 +891,13 @@ export function BookReader(props: BookReaderProps) {
 
   const stageContentClass = useMediaViewerMainStageClass('reader-text-stage');
   const readerThemeShell = () => readerThemeClasses(textViewerStore.state.config.theme);
+  const readerShellStyle = () => ({
+    'background-color': readerThemePalette(textViewerStore.state.config.theme).bg,
+    color: readerThemePalette(textViewerStore.state.config.theme).text,
+  });
 
   const mainContentClass = () =>
-    cn(stageContentClass(), readerThemeShell().bg);
+    cn(stageContentClass(), readerThemeShell().bg, readerThemeShell().text);
 
   const scrollPageTipContext = (): ReaderPageTipContext => {
     const cat = catalog();
@@ -970,6 +977,8 @@ export function BookReader(props: BookReaderProps) {
           tapToToggleBars={false}
           chromePointerInput
           contentPrimaryAction={contentPrimaryAction}
+          class={cn(readerThemeShell().bg, readerThemeShell().text)}
+          style={readerShellStyle()}
         >
           <BookReaderChromeBridge
             onReady={(toggle) => {

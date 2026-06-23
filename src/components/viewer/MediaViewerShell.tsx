@@ -25,6 +25,7 @@ export type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
 export interface MediaViewerShellProps {
   children: JSX.Element;
   class?: string;
+  style?: JSX.CSSProperties;
   /** 顶栏显隐；不传则 Shell 内部管理（点击主区可切换）*/
   headerVisible?: boolean;
   onHeaderVisibleChange?: (visible: boolean) => void;
@@ -54,6 +55,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
   const [local] = splitProps(props, [
     'children',
     'class',
+    'style',
     'headerVisible',
     'onHeaderVisibleChange',
     'tapToToggleBars',
@@ -298,6 +300,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
           'fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground',
           local.class,
         )}
+        style={local.style}
         onPointerLeave={(e) => activeChromeInput()?.onShellPointerLeave(e)}
         onPointerEnter={(e) => activeChromeInput()?.onShellPointerEnter(e)}
       >

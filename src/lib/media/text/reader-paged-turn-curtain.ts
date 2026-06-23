@@ -265,4 +265,5 @@ export function setTurnCurtainTransform(
 export function setCurtainHostActive(turnLayer: HTMLElement | undefined, active: boolean): void {
   if (!turnLayer) return;
   turnLayer.style.zIndex = active ? '10' : '';
+  turnLayer.toggleAttribute('data-turn-active', active);
 }

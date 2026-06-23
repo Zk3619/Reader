@@ -875,6 +875,17 @@
   animation: none;
 }
 
+/** 按页：骨架退场前正文保持透明，退场后与骨架交叉淡入淡出 */
+.reader-paged-loading {
+  animation: skeleton-fade-in 0.15s ease-out;
+}
+
+.reader-paged-loading.is-exiting {
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+  pointer-events: none;
+}
+
 .reader-dual-page {
   columns: 2;
   column-fill: balance;
@@ -905,20 +916,13 @@
   max-width: 100%;
 }
 
-/** 双栏 Prepare：屏外测量根（高度对齐 tip-body，与按页展示一致） */
-.reader-dual-measure-host {
-  position: fixed;
-  left: -10000px;
-  top: 0;
-  opacity: 0;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: -1;
-  height: auto;
-  max-height: none;
+/** 按页测量根：叠在 content-slot 内，几何与正文展示区（页眉页脚之间）一致 */
+.reader-paged-measure-host {
+  box-sizing: border-box;
+  contain: layout style;
 }
 
-.reader-dual-measure-host .reader-content {
+.reader-paged-measure-host .reader-content {
   height: auto !important;
   min-height: 0 !important;
 }
@@ -1009,6 +1013,15 @@
 
 .reader-paged-curtain-slide-mount {
   z-index: 1;
+}
+
+/** idle：翻页层透明，正文由 tip-chrome(z-2) 承担；翻页时再 imperative 设不透明幕帘 */
+.reader-paged-turn-layer {
+  z-index: 0;
+}
+
+.reader-paged-turn-layer[data-turn-active] {
+  z-index: 10;
 }
 
 .reader-paged-turn-curtain {

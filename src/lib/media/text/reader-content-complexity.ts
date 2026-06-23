@@ -23,3 +23,11 @@ export function needsDomChapterLayout(raw: string): boolean {
 export function canUseCanvasChapterLayout(raw: string): boolean {
   return !needsDomChapterLayout(raw);
 }
+
+/** 可降为 LayoutDocument 并由 Pretext 排版（含图但无不可解析结构 HTML） */
+export function canUsePretextChapterLayout(raw: string): boolean {
+  const text = raw?.trim() ?? '';
+  if (!text) return true;
+  if (DOM_LAYOUT_STRUCTURAL_RE.test(text)) return false;
+  return true;
+}

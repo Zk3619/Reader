@@ -23,6 +23,14 @@ export function mergePagedContentTransforms(
   return parts.length > 0 ? parts.join(' ') : undefined;
 }
 
+/** idle 首屏：y=0 时也保留 translate3d，促发 overflow 裁切区合成层绘制 */
+export function readerPagedIdleContentTransform(
+  pageStartPx: number,
+  ...extras: (string | undefined)[]
+): string {
+  return mergePagedContentTransforms(pageStartPx, ...extras) ?? 'translate3d(0, 0, 0)';
+}
+
 /** 滑动翻页：outgoing 横向位移（px；next 为负） */
 export function readerPagedSlideTurnOffsetPx(
   dir: PagedTurnDirection,

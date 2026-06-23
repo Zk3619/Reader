@@ -5,6 +5,7 @@ import {
   readerPageTipBarHeightPx,
   readerPageTipBarVisible,
   readReaderPageTipBodyClientHeightPx,
+  readerPageTipChromeDomMatchesChromeBars,
   readerPageTipChromeMeasureReady,
   readerPageTipContentBudget,
   readerPageTipsCarryWithTurn,
@@ -254,6 +255,42 @@ describe('readerPageTipContentBudget', () => {
     const budget = readerPageTipContentBudget(frame, tips, false, tipBody);
     expect(budget.bodyHeightPx).toBe(530);
   });
+
+  it('tip-body DOM wins over inflated chrome pad estimates', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 28,
+      getBoundingClientRect: () => ({ top: 0, bottom: 28, height: 28 }),
+    } as HTMLElement;
+    const footer = {
+      offsetHeight: 36,
+      getBoundingClientRect: () => ({ top: 564, bottom: 600, height: 36 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 536 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return footer;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'always' as const,
+      footerMode: 'always' as const,
+      footerRight: 'page' as const,
+      headerInset: { top: 12, bottom: 12, left: 8, right: 8 },
+      footerInset: { top: 12, bottom: 12, left: 8, right: 8 },
+      showHeaderLine: true,
+      showFooterLine: true,
+    };
+    const budget = readerPageTipContentBudget(frame, tips, false, tipBody);
+    expect(budget.bodyHeightPx).toBe(536);
+    expect(budget.headerPad + budget.footerPad + budget.bodyHeightPx).toBe(600);
+  });
 });
 
 describe('readerPageTipChromeMeasureReady', () => {
@@ -298,6 +335,150 @@ describe('readerPageTipChromeMeasureReady', () => {
       footerRight: 'page' as const,
     };
     expect(readerPageTipChromeMeasureReady(frame, tips, false)).toBe(true);
+  });
+
+  it('returns true when tip-body is laid out even if bars are shorter than estimate', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 22,
+      getBoundingClientRect: () => ({ top: 0, bottom: 22, height: 22 }),
+    } as HTMLElement;
+    const footer = {
+      offsetHeight: 20,
+      getBoundingClientRect: () => ({ top: 580, bottom: 600, height: 20 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 558 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return footer;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'always' as const,
+      footerMode: 'always' as const,
+      footerRight: 'page' as const,
+      headerInset: { top: 16, bottom: 16, left: 8, right: 8 },
+      footerInset: { top: 16, bottom: 16, left: 8, right: 8 },
+      showHeaderLine: true,
+      showFooterLine: true,
+    };
+    expect(readerPageTipChromeMeasureReady(frame, tips, false)).toBe(true);
+  });
+
+  it('rejects when header mounted but tip-body still full frame height', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = {
+      offsetHeight: 28,
+      getBoundingClientRect: () => ({ top: 0, bottom: 28, height: 28 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 600 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return null;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'follow' as const,
+      footerMode: 'never' as const,
+    };
+    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(false);
+  });
+});
+
+describe('readerPageTipChromeDomMatchesChromeBars', () => {
+  it('passes when follow header visible regardless of tip-body shrink', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = { offsetHeight: 28 } as HTMLElement;
+    const tipBody = { clientHeight: 600 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return null;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'follow' as const,
+      footerMode: 'never' as const,
+    };
+    expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(true);
+    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(false);
+  });
+
+  it('passes when follow header visible and tip-body shrunk', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const header = { offsetHeight: 28 } as HTMLElement;
+    const tipBody = { clientHeight: 572 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-footer') return null;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'follow' as const,
+      footerMode: 'never' as const,
+    };
+    expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(true);
+  });
+
+  it('passes when follow chrome hidden and header absent', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 600 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return null;
+      if (sel === '.reader-page-tip-footer') return null;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'follow' as const,
+      footerMode: 'never' as const,
+    };
+    expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, false)).toBe(true);
+  });
+
+  it('fails when chrome visible but header not in DOM', () => {
+    const frame = {
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
+    } as HTMLElement;
+    const tipBody = { clientHeight: 600 } as HTMLElement;
+    frame.querySelector = (sel: string) => {
+      if (sel === '.reader-page-tip-header') return null;
+      if (sel === '.reader-page-tip-footer') return null;
+      if (sel === '.reader-page-tip-body') return tipBody;
+      return null;
+    };
+    const tips = {
+      ...tipsWithHeaderSlots,
+      headerMode: 'follow' as const,
+      footerMode: 'never' as const,
+    };
+    expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(false);
   });
 });
 

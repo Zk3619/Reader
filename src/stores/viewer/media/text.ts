@@ -39,6 +39,7 @@ import {
 } from '@/lib/book-source/chapters';
 import {
   loadReaderUiConfig,
+  peekReaderUiConfigSync,
   saveReaderUiConfig,
 } from '@/lib/media/text/read-config-storage';
 import {
@@ -65,6 +66,7 @@ import {
   normalizeAutoPageStyle,
   normalizeAutoReadSpeed,
   normalizeSimulationDragZonePercent,
+  normalizeTextViewerLayoutEngine,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
 import {
@@ -105,64 +107,89 @@ function mergeContentInset(
   };
 }
 
+function applySavedReaderUiConfig(
+  prev: TextViewerUiConfig,
+  saved: Partial<TextViewerUiConfig> & {
+    middleLeft?: number;
+    middleRight?: number;
+    layoutEngine?: string;
+  },
+): TextViewerUiConfig {
+  return {
+    ...prev,
+    ...saved,
+    spacing: { ...prev.spacing, ...saved.spacing },
+    contentInset: mergeContentInset(
+      prev.contentInset,
+      saved.contentInset ?? saved,
+    ),
+    clickActions: {
+      ...DEFAULT_CLICK_ACTIONS,
+      ...saved.clickActions,
+    },
+    clickRegion: saved.clickRegion
+      ? {
+        xSplits: [
+          saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
+          saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
+        ] as [number, number],
+        ySplits: [
+          saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
+          saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
+        ] as [number, number],
+      }
+      : prev.clickRegion,
+    imageStyle: migrateReaderImageStyle(saved.imageStyle ?? prev.imageStyle),
+    pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
+    simulationDragZonePercent: normalizeSimulationDragZonePercent(
+      saved.simulationDragZonePercent,
+    ),
+    viewerChromeLayout: normalizeViewerChromeLayout(
+      saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
+    ),
+    theme: normalizeReaderThemeId(saved.theme),
+    autoReadSpeed: normalizeAutoReadSpeed(saved.autoReadSpeed),
+    autoPageStyle: normalizeAutoPageStyle(saved.autoPageStyle as string | undefined),
+    autoPageProgressEdge: normalizeAutoPageProgressEdge(
+      saved.autoPageProgressEdge as string | undefined,
+    ),
+    font: normalizeReaderFontPreset(saved.font),
+    fontWeight: normalizeFontWeight(saved.fontWeight, defaultConfig.fontWeight),
+    customFontPath: saved.customFontPath ?? prev.customFontPath,
+    chapterTitleStyle: normalizeTextViewerChapterTitleStyle(saved.chapterTitleStyle),
+    chapterTitleSize: saved.chapterTitleSize ?? prev.chapterTitleSize,
+    chapterTitleTopSpacing: saved.chapterTitleTopSpacing ?? prev.chapterTitleTopSpacing,
+    chapterTitleBottomSpacing:
+      saved.chapterTitleBottomSpacing ?? prev.chapterTitleBottomSpacing,
+    chapterTitleFontWeight: normalizeFontWeight(
+      saved.chapterTitleFontWeight,
+      prev.chapterTitleFontWeight,
+    ),
+    paragraphIndentChars:
+      saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
+    pageTips: mergePageTipsConfig(saved.pageTips),
+    layoutEngine: normalizeTextViewerLayoutEngine(saved.layoutEngine),
+  };
+}
+
+/** 将已缓存/同步读到的阅读器配置灌入 store（可在 warm 之后多次调用） */
+export function applyPersistedReaderUiConfig(): void {
+  const saved = peekReaderUiConfigSync();
+  if (!saved) return;
+  setState('config', (prev) => applySavedReaderUiConfig(prev, saved));
+}
+
+/** 打开阅读器前同步灌入持久化配置 */
+function bootstrapReaderConfigSync(): void {
+  applyPersistedReaderUiConfig();
+}
+
 async function hydrateReaderConfig(): Promise<void> {
   if (configHydrated) return;
   configHydrated = true;
   const saved = await loadReaderUiConfig();
   if (saved) {
-    setState('config', prev => ({
-      ...prev,
-      ...saved,
-      spacing: { ...prev.spacing, ...saved.spacing },
-      contentInset: mergeContentInset(
-        prev.contentInset,
-        saved.contentInset ?? (saved as { middleLeft?: number; middleRight?: number }),
-      ),
-      clickActions: {
-        ...DEFAULT_CLICK_ACTIONS,
-        ...saved.clickActions,
-      },
-      clickRegion: saved.clickRegion
-        ? {
-          xSplits: [
-            saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
-            saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
-          ] as [number, number],
-          ySplits: [
-            saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
-            saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
-          ] as [number, number],
-        }
-        : prev.clickRegion,
-      imageStyle: migrateReaderImageStyle(saved.imageStyle),
-      pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
-      simulationDragZonePercent: normalizeSimulationDragZonePercent(
-        saved.simulationDragZonePercent,
-      ),
-      viewerChromeLayout: normalizeViewerChromeLayout(
-        saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
-      ),
-      theme: normalizeReaderThemeId(saved.theme),
-      autoReadSpeed: normalizeAutoReadSpeed(saved.autoReadSpeed),
-      autoPageStyle: normalizeAutoPageStyle(saved.autoPageStyle as string | undefined),
-      autoPageProgressEdge: normalizeAutoPageProgressEdge(
-        saved.autoPageProgressEdge as string | undefined,
-      ),
-      font: normalizeReaderFontPreset(saved.font),
-      fontWeight: normalizeFontWeight(saved.fontWeight, defaultConfig.fontWeight),
-      customFontPath: saved.customFontPath ?? prev.customFontPath,
-      chapterTitleStyle: normalizeTextViewerChapterTitleStyle(saved.chapterTitleStyle),
-      chapterTitleSize: saved.chapterTitleSize ?? prev.chapterTitleSize,
-      chapterTitleTopSpacing: saved.chapterTitleTopSpacing ?? prev.chapterTitleTopSpacing,
-      chapterTitleBottomSpacing: saved.chapterTitleBottomSpacing ?? prev.chapterTitleBottomSpacing,
-      chapterTitleFontWeight: normalizeFontWeight(
-        saved.chapterTitleFontWeight,
-        prev.chapterTitleFontWeight,
-      ),
-      paragraphIndentChars:
-        saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
-      pageTips: mergePageTipsConfig(saved.pageTips),
-    }));
+    setState('config', (prev) => applySavedReaderUiConfig(prev, saved));
   }
 }
 
@@ -458,6 +485,7 @@ function attachTocProgressWhileReadingImpl(
 }
 
 export function setTextBookInitialState(book: Book): void {
+  bootstrapReaderConfigSync();
   resetChapterContentPool(book.bookUrl);
   setState({
     kind: MediaKind.text,
@@ -1169,4 +1197,6 @@ export const textViewerTextApi = {
     setState({ miniInterface: mini });
   },
 };
+
+bootstrapReaderConfigSync();
 

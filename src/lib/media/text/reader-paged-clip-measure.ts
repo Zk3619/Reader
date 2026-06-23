@@ -1,4 +1,5 @@
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
+import { readStrictTipBodyClipHeightPx } from '@/lib/media/text/reader-paged-tip-body-measure';
 
 export interface PagedContentInsets {
   top: number;
@@ -102,30 +103,29 @@ function resolveTipChromeBodyHeightPx(
   const estimated = Math.max(1, frameOuter - tipTop - tipBottom);
   const domBody = params.pageTipBodyEl?.clientHeight ?? 0;
   if (domBody > 0) {
-    const rounded = Math.round(domBody);
-    if (rounded > 0) {
-      return Math.max(1, Math.min(estimated, rounded));
-    }
+    return Math.max(1, Math.round(domBody));
   }
 
   const frame = params.contentFrameEl;
   if (frame && typeof frame.querySelector === 'function') {
     const tipBody = frame.querySelector<HTMLElement>('.reader-page-tip-body');
     if (tipBody && tipBody.clientHeight > 0) {
-      return Math.max(1, Math.min(estimated, Math.round(tipBody.clientHeight)));
+      return Math.max(1, Math.round(tipBody.clientHeight));
     }
   }
 
   return estimated;
 }
 
-/** 分页与展示共用的 page-window 度量（clipHeight 对齐正文槽实测高度；不含页眉页脚） */
+/** 分页与展示共用的 page-window 度量（clipHeight 严格等于 tip-body，不含页眉页脚） */
 export function readPagedPageWindowMetrics(
   params: ReadPagedPageWindowMetricsParams,
 ): PagedPageWindowMetrics {
-  const insetEl = params.contentFrameEl ?? params.contentSlotEl;
-  const insets = measureContentSlotInsets(insetEl, params.fallbackInsets);
-  const outer =
+  const tipBodyClip = readStrictTipBodyClipHeightPx(params.pageTipBodyEl);
+  const frameOuter =
+    (params.contentFrameEl && params.contentFrameEl.clientHeight > 0
+      ? params.contentFrameEl.clientHeight
+      : 0) ||
     (params.viewportEl && params.viewportEl.clientHeight > 0
       ? params.viewportEl.clientHeight
       : 0) ||
@@ -133,21 +133,38 @@ export function readPagedPageWindowMetrics(
 
   const tipTop = params.tipChromePadTop ?? 0;
   const tipBottom = params.tipChromePadBottom ?? 0;
+
+  if (tipBodyClip > 0) {
+    const padsTop = tipTop;
+    const padsBottom = tipBottom;
+    return {
+      clipHeight: tipBodyClip,
+      padTop: padsTop,
+      padBottom: padsBottom,
+      viewportHeight: Math.max(1, tipBodyClip + padsTop + padsBottom),
+    };
+  }
+
+  const insetEl = params.contentFrameEl ?? params.contentSlotEl;
+  const insets = measureContentSlotInsets(insetEl, params.fallbackInsets);
+  const outer =
+    frameOuter;
+
   const frameFullBleed = insets.top === 0 && insets.bottom === 0;
 
-  const frameOuter =
+  const frameOuterForTip =
     params.contentFrameEl && params.contentFrameEl.clientHeight > 0
       ? params.contentFrameEl.clientHeight
       : outer;
 
   /** 满视口 frame + 页眉/页脚：正文区恒为 frame−tip，与 grid tip-body 一致 */
-  if (frameFullBleed && frameOuter > 0) {
-    const clipHeight = resolveTipChromeBodyHeightPx(frameOuter, tipTop, tipBottom, params);
+  if (frameFullBleed && frameOuterForTip > 0 && (tipTop > 0 || tipBottom > 0)) {
+    const clipHeight = resolveTipChromeBodyHeightPx(frameOuterForTip, tipTop, tipBottom, params);
     return {
       clipHeight,
       padTop: tipTop,
       padBottom: tipBottom,
-      viewportHeight: frameOuter,
+      viewportHeight: frameOuterForTip,
     };
   }
 

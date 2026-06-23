@@ -3,11 +3,12 @@
 import type { ReaderLayoutSegment } from '@/lib/media/text/text-viewer-paginate';
 import type { ReaderTextPageMeta } from '@/lib/media/text/reader-text-layout-entities';
 
-/** canvas+dom：Canvas 初算后经 DOM 精修页界 */
+/** canvas+dom：旧路径，保留类型兼容 */
 export type ReaderChapterLayoutEngine =
   | 'canvas'
   | 'dom'
   | 'canvas+dom'
+  | 'pretext'
   | 'stream'
   | 'epub-native';
 

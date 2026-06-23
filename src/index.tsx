@@ -5,6 +5,8 @@ import App from "@/app/App";
 import MigrationSplash from "@/migration/MigrationSplash";
 import { isTauri } from "@/lib/platform/detect";
 import { settingsStore } from "@/stores/settings";
+import { warmReaderUiConfigCache } from "@/lib/media/text/read-config-storage";
+import { applyPersistedReaderUiConfig } from "@/stores/viewer/media/text";
 
 async function bootstrap() {
   const root = document.getElementById("root") as HTMLElement;
@@ -22,6 +24,10 @@ async function bootstrap() {
   await settingsStore.loadSettings().catch((e) => {
     console.warn("加载应用设置失败:", e);
   });
+  await warmReaderUiConfigCache().catch((e) => {
+    console.warn("预加载阅读器配置失败:", e);
+  });
+  applyPersistedReaderUiConfig();
   render(() => <App />, root);
 }
 

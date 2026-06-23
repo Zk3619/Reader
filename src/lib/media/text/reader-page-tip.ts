@@ -258,7 +258,7 @@ export interface ReaderPageTipContentBudget {
 
 /**
  * 正文显示与 DOM 分页共用的垂直预算。
- * 始终返回可用高度（估算优先，DOM 收敛后取 min），避免首帧阻塞。
+ * tip-body 已布局时以其 clientHeight 为唯一正文高；页眉/页脚 pad 与 frame−body 对齐。
  */
 export function readerPageTipContentBudget(
   frameEl: HTMLElement | null | undefined,
@@ -273,21 +273,22 @@ export function readerPageTipContentBudget(
   const footerPad = footerVisible ? pads.bottom : 0;
 
   const frameH = frameEl?.clientHeight ?? 0;
-  if (frameH <= 0) {
-    return { headerPad, footerPad, bodyHeightPx: 0 };
-  }
-
-  const arithmetic = Math.max(1, frameH - headerPad - footerPad);
-  let bodyHeightPx = arithmetic;
-
   const tipBodyEl =
     pageTipBodyEl ??
     frameEl?.querySelector<HTMLElement>('.reader-page-tip-body') ??
     null;
   const tipBodyDom = readReaderPageTipBodyClientHeightPx(tipBodyEl);
-  if (tipBodyDom > 0) {
-    bodyHeightPx = Math.min(arithmetic, tipBodyDom);
-  } else if (frameEl) {
+
+  if (tipBodyDom > 0 && frameH > 0) {
+    return { headerPad, footerPad, bodyHeightPx: tipBodyDom };
+  }
+
+  if (frameH <= 0) {
+    return { headerPad, footerPad, bodyHeightPx: 0 };
+  }
+
+  let bodyHeightPx = Math.max(1, frameH - headerPad - footerPad);
+  if (frameEl) {
     const measured = measureReaderPageTipBodyHeightPx(
       frameEl,
       tips,
@@ -295,7 +296,7 @@ export function readerPageTipContentBudget(
       pageTipBodyEl,
     );
     if (measured > 0) {
-      bodyHeightPx = Math.min(arithmetic, measured);
+      bodyHeightPx = measured;
     }
   }
 
@@ -309,7 +310,7 @@ export function readReaderPageTipBodyClientHeightPx(
   if (!tipBodyEl) return 0;
   const h = tipBodyEl.clientHeight;
   if (!Number.isFinite(h) || h <= 0) return 0;
-  return Math.max(1, Math.round(h));
+  return Math.max(1, Math.floor(h));
 }
 
 function resolveReaderPageTipBodyEl(
@@ -320,22 +321,21 @@ function resolveReaderPageTipBodyEl(
   return frameEl?.querySelector<HTMLElement>('.reader-page-tip-body') ?? null;
 }
 
-/** 页眉/页脚是否已贴 frame 顶/底（未贴边时勿用 frame−tip.top 推算 band，否则会吞掉正文区） */
-function tipBarAnchoredToFrameEdge(
-  barRect: DOMRect,
-  frameRect: DOMRect,
-  position: 'header' | 'footer',
-): boolean {
-  const slack = 3;
-  if (position === 'header') {
-    return Math.abs(barRect.top - frameRect.top) <= slack;
-  }
-  return Math.abs(barRect.bottom - frameRect.bottom) <= slack;
-}
-
 function finiteOffsetHeight(el: HTMLElement): number {
   const h = el.offsetHeight;
   return Number.isFinite(h) && h > 0 ? h : 0;
+}
+
+/** 页眉/页脚条实测高；DOM 未就绪时回退估算 */
+function measureTipBarHeightPx(
+  bar: HTMLElement | null | undefined,
+  estimate: number,
+): number {
+  if (!bar) return estimate > 0 ? estimate : 0;
+  const rectH = Math.ceil(bar.getBoundingClientRect().height);
+  const offsetH = finiteOffsetHeight(bar);
+  const dom = Math.max(rectH, offsetH);
+  return dom > 0 ? dom : estimate > 0 ? estimate : 0;
 }
 
 /** 页眉底与页脚顶之间的实测间隙；过小视为布局未稳定，回退算术预算 */
@@ -357,10 +357,35 @@ export function readerPageTipChromeMeasureReady(
   const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
   if (!headerVisible && !footerVisible) return true;
 
+  const frameH = frameEl.clientHeight;
+  const tipBody = frameEl.querySelector<HTMLElement>('.reader-page-tip-body');
+  const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
+  if (bodyDom > 0) {
+    const chromeTotal = frameH - bodyDom;
+    if (chromeTotal < 0 || chromeTotal > frameH * 0.65) return false;
+    const minChromePx =
+      (headerVisible
+        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('header', tips, chromeBarsVisible) * 0.35))
+        : 0) +
+      (footerVisible
+        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('footer', tips, chromeBarsVisible) * 0.35))
+        : 0);
+    // 页眉/页脚应占高但 tip-body 仍近满 frame：grid 尚未收缩，禁止用满高 clip 分页
+    if (minChromePx > 0 && chromeTotal < minChromePx) return false;
+    if (headerVisible) {
+      const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
+      if (!header || finiteOffsetHeight(header) <= 0) return false;
+    }
+    if (footerVisible) {
+      const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
+      if (!footer || finiteOffsetHeight(footer) <= 0) return false;
+    }
+    return true;
+  }
+
   const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
   const estTop = readerPageTipBarHeightPx('header', tips, chromeBarsVisible);
   const estBottom = readerPageTipBarHeightPx('footer', tips, chromeBarsVisible);
-  const frameH = frameEl.clientHeight;
 
   if (headerVisible) {
     const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
@@ -372,19 +397,35 @@ export function readerPageTipChromeMeasureReady(
     if (!footer || finiteOffsetHeight(footer) < estBottom * 0.45) return false;
     if (pads.bottom < estBottom * 0.55 || pads.bottom > frameH * 0.4) return false;
   }
+
   const bodyBudget = frameH - pads.top - pads.bottom;
   if (bodyBudget < Math.max(48, frameH * 0.35)) return false;
 
   if (headerVisible && footerVisible) {
-    const tipBody = frameEl.querySelector<HTMLElement>('.reader-page-tip-body');
-    const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
-    if (bodyDom > 0) {
-      if (bodyDom < bodyBudget * 0.88) return false;
-    } else {
-      const bodyGap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
-      if (bodyGap < bodyBudget * 0.88) return false;
-    }
+    const bodyGap = measureReaderPageTipBodyHeightPx(frameEl, tips, chromeBarsVisible);
+    if (bodyGap < bodyBudget * 0.88) return false;
   }
+  return true;
+}
+
+/** 页眉/页脚 DOM 显隐须与 chromeBarsVisible + follow/always 逻辑一致，避免首帧未挂载就分页 */
+export function readerPageTipChromeDomMatchesChromeBars(
+  frameEl: HTMLElement | null | undefined,
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): boolean {
+  const expectHeader = readerPageTipBarVisible('header', tips, chromeBarsVisible);
+  const expectFooter = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  if (!expectHeader && !expectFooter) return true;
+  if (!frameEl) return false;
+
+  const headerEl = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
+  const footerEl = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
+  const headerShown = headerEl != null && finiteOffsetHeight(headerEl) > 0;
+  const footerShown = footerEl != null && finiteOffsetHeight(footerEl) > 0;
+
+  if (expectHeader !== headerShown) return false;
+  if (expectFooter !== footerShown) return false;
   return true;
 }
 
@@ -406,36 +447,38 @@ export function measureReaderPageTipChromePads(
   }
   const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
   const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
-  const frameRect = frameEl.getBoundingClientRect();
-  let domTop =
-    header && headerVisible ? Math.ceil(header.getBoundingClientRect().height) : 0;
-  let domBottom =
-    footer && footerVisible ? Math.ceil(footer.getBoundingClientRect().height) : 0;
-  if (header && headerVisible) {
-    const headerRect = header.getBoundingClientRect();
-    const headerHeight = Math.max(
-      Math.ceil(headerRect.height),
-      finiteOffsetHeight(header),
-    );
-    const headerBand = tipBarAnchoredToFrameEdge(headerRect, frameRect, 'header')
-      ? Math.ceil(headerRect.bottom - frameRect.top)
-      : headerHeight;
-    domTop = Math.max(domTop, headerHeight, headerBand);
+  let top = headerVisible ? measureTipBarHeightPx(header, estTop) : 0;
+  let bottom = footerVisible ? measureTipBarHeightPx(footer, estBottom) : 0;
+
+  const tipBody = frameEl.querySelector<HTMLElement>('.reader-page-tip-body');
+  const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
+  const frameH = frameEl.clientHeight;
+  if (bodyDom > 0 && frameH > 0) {
+    const chromeTotal = Math.max(0, frameH - bodyDom);
+    if (!headerVisible && !footerVisible) {
+      top = 0;
+      bottom = 0;
+    } else if (headerVisible && footerVisible) {
+      const sum = top + bottom;
+      if (sum > 0 && Math.abs(sum - chromeTotal) > 1) {
+        top = Math.round(chromeTotal * (top / sum));
+        bottom = chromeTotal - top;
+      } else if (sum <= 0) {
+        top = Math.floor(chromeTotal / 2);
+        bottom = chromeTotal - top;
+      }
+    } else if (headerVisible) {
+      top = chromeTotal;
+      bottom = 0;
+    } else {
+      top = 0;
+      bottom = chromeTotal;
+    }
   }
-  if (footer && footerVisible) {
-    const footerRect = footer.getBoundingClientRect();
-    const footerHeight = Math.max(
-      Math.ceil(footerRect.height),
-      finiteOffsetHeight(footer),
-    );
-    const footerBand = tipBarAnchoredToFrameEdge(footerRect, frameRect, 'footer')
-      ? Math.ceil(frameRect.bottom - footerRect.top)
-      : footerHeight;
-    domBottom = Math.max(domBottom, footerHeight, footerBand);
-  }
+
   return {
-    top: headerVisible ? Math.max(domTop, estTop) : 0,
-    bottom: footerVisible ? Math.max(domBottom, estBottom) : 0,
+    top: headerVisible ? top : 0,
+    bottom: footerVisible ? bottom : 0,
   };
 }
 
@@ -458,7 +501,7 @@ export function measureReaderPageTipBodyHeightPx(
   const tipBody = resolveReaderPageTipBodyEl(frameEl, pageTipBodyEl);
   const bodyDom = readReaderPageTipBodyClientHeightPx(tipBody);
   if (bodyDom > 0) {
-    return Math.min(expected, bodyDom);
+    return bodyDom;
   }
 
   const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);

@@ -22,6 +22,13 @@ export type TextViewerPageAnim =
   | 'none';
 export type TextViewerDualPageMode = 'off' | 'auto' | 'always';
 export type TextViewerImageStyle = 'DEFAULT' | 'FULL' | 'TEXT' | 'SINGLE';
+/** 按页排版引擎：Pretext 计算 / DOM 测量 */
+export type TextViewerLayoutEngine = 'pretext' | 'dom';
+
+export const TEXT_VIEWER_LAYOUT_ENGINE_LABELS: Record<TextViewerLayoutEngine, string> = {
+  pretext: 'Pretext（实验）',
+  dom: 'DOM 测量（推荐）',
+};
 
 /** Tailwind `xl` 断点（1280px）：双页「自动」模式的最小视口宽度 */
 export const TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX = 1280;
@@ -264,6 +271,8 @@ export interface TextViewerUiConfig {
   /** 仿真翻页：左右拖拽分区宽度（视口宽度 25% / 50% / 75%） */
   simulationDragZonePercent: TextViewerSimulationDragZonePercent;
   dualPage: TextViewerDualPageMode;
+  /** 按页排版：Pretext 无 DOM 行测量；DOM 为经典 measure-host 方案 */
+  layoutEngine: TextViewerLayoutEngine;
   /** 章节标题渲染：不渲染 / 左侧 / 中心 / 右侧 */
   chapterTitleStyle: TextViewerChapterTitleStyle;
   /** 章节标题字号增量（rem，0 表示与正文相同） */
@@ -345,6 +354,18 @@ export const TEXT_VIEWER_AUTO_READ_SPEED_MIN = 1;
 export const TEXT_VIEWER_AUTO_READ_SPEED_MAX = 120;
 export const TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT = 10;
 
+export function normalizeTextViewerLayoutEngine(
+  value: string | undefined | null,
+): TextViewerLayoutEngine {
+  return value === 'pretext' ? 'pretext' : 'dom';
+}
+
+export function textViewerUsesPretextLayout(
+  config: Pick<TextViewerUiConfig, 'layoutEngine'>,
+): boolean {
+  return config.layoutEngine === 'pretext';
+}
+
 export function normalizeAutoReadSpeed(value: number | undefined | null): number {
   if (value == null || !Number.isFinite(value)) {
     return TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT;
@@ -372,6 +393,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   pagedDragCommitPercent: TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT,
   simulationDragZonePercent: TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT,
   dualPage: 'auto',
+  layoutEngine: 'dom',
   chapterTitleStyle: 'center',
   chapterTitleSize: 0,
   chapterTitleTopSpacing: 0,

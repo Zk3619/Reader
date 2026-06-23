@@ -147,6 +147,8 @@ export function ReaderContent(props: ReaderContentProps) {
   const contentBootstrapping = () => textViewerStore.state.contentBootstrapping;
   const showReaderSkeleton = () => {
     if (isStaged()) return false;
+    // 按页模式由 ReaderPagedViewport 的 loading 遮罩统一展示骨架，避免双层叠影
+    if (props.pagedLayout) return false;
     return (
       contentFetching() ||
       contentBootstrapping() ||
@@ -265,8 +267,11 @@ export function ReaderContent(props: ReaderContentProps) {
 
   const showMeasureOrLiveBody = () => {
     if (props.measureHost) return Boolean(content()?.trim());
-    // 按页模式 reveal 前：hidden live 层仍需测量块以完成 DOM 分页（不依赖 showContent）
     if (props.pagedLayout && props.measureBlocks) {
+      return Boolean(content()?.trim()) && !contentLoading() && !showReaderSkeleton();
+    }
+    // 按页 live：骨架遮罩负责隐藏，正文加载完即挂载（避免 showContent 与 Solid 重绘不同步致白屏）
+    if (props.pagedLayout) {
       return Boolean(content()?.trim()) && !contentLoading() && !showReaderSkeleton();
     }
     return !showReaderSkeleton() && !contentLoading() && showContent();
@@ -443,7 +448,16 @@ export function ReaderContent(props: ReaderContentProps) {
           <div class="prose max-w-none">
             <For each={blockEntries()}>
               {(entry, index) => (
-                <div data-reader-measure-block={props.measureBlocks ? '' : undefined}>
+                <div
+                  data-reader-measure-block={props.measureBlocks ? '' : undefined}
+                  data-reader-legado-inline={
+                    props.measureBlocks &&
+                    entry.block.type === 'paragraph' &&
+                    paragraphHasLegadoCommentImg(entry.block.parts)
+                      ? ''
+                      : undefined
+                  }
+                >
                 <ReaderBlockItem
                   block={entry.block}
                   blockIndex={entry.blockIndex}

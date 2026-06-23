@@ -16,6 +16,7 @@ import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 import type {
   TextViewerUiConfig as ReadConfig,
   TextViewerDualPageMode as ReaderDualPageMode,
+  TextViewerLayoutEngine,
 } from '@/lib/media/text/reader-ui-config';
 import { READER_IMAGE_STYLE_LABELS } from '@/lib/js-engine/legado/legado-image-options';
 import { getAllHttpTTS } from '@/lib/database/http-tts';
@@ -34,6 +35,7 @@ import {
 import {
   TEXT_VIEWER_DUAL_PAGE_MODE_LABELS,
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
+  TEXT_VIEWER_LAYOUT_ENGINE_LABELS,
   TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MAX,
   TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_MIN,
   TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS,
@@ -52,6 +54,7 @@ import {
   pagedLayoutEngine,
   pagedLayoutPrefetchStatus,
 } from '@/lib/media/text/reader-paged-layout-debug';
+import { clearChapterLayoutCache } from '@/lib/media/text/reader-chapter-layout-cache';
 import {
   READER_THEME_IDS,
   READER_THEME_LABELS,
@@ -91,7 +94,16 @@ export function ReaderSettings(props: ReaderSettingsProps) {
   });
 
   const setConfig = (patch: Partial<ReadConfig>) => {
+    if (patch.layoutEngine != null && patch.layoutEngine !== config().layoutEngine) {
+      clearChapterLayoutCache();
+    }
     textViewerStore.setConfig(patch);
+  };
+
+  const onLayoutEngineChange = (value: TextViewerLayoutEngine) => {
+    if (value === config().layoutEngine) return;
+    clearChapterLayoutCache();
+    setConfig({ layoutEngine: value });
   };
 
   const setSpacing = (key: keyof ReadConfig['spacing'], value: number) => {
@@ -632,6 +644,31 @@ export function ReaderSettings(props: ReaderSettingsProps) {
                 {(mode) => (
                   <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
                     {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
+                  </TabsTrigger>
+                )}
+              </For>
+            </TabsList>
+          </Tabs>
+        </div>
+      </Show>
+
+      {/* 排版引擎 */}
+      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+        <div class="space-y-3">
+          <Label>排版引擎</Label>
+          <p class="text-xs text-muted-foreground">
+            Pretext 为实验性无 DOM 行测量方案，翻页更流畅；DOM 为推荐的经典 measure-host 方案。两端对齐章节字级坐标仍依赖 DOM。
+          </p>
+          <Tabs
+            value={config().layoutEngine}
+            onChange={(value) => onLayoutEngineChange(value as TextViewerLayoutEngine)}
+            class="w-full"
+          >
+            <TabsList class={readerDrawerOptionTabsListClass} aria-label="排版引擎">
+              <For each={(['pretext', 'dom'] as TextViewerLayoutEngine[])}>
+                {(engine) => (
+                  <TabsTrigger value={engine} class={readerDrawerOptionTabsTriggerClass}>
+                    {TEXT_VIEWER_LAYOUT_ENGINE_LABELS[engine]}
                   </TabsTrigger>
                 )}
               </For>
