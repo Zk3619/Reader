@@ -9,6 +9,7 @@ import {
   snapContiguousMeasureBlocks,
   splitBlockIndicesByPageHeight,
   lastNonBlankPageIndex,
+  trimPageStartsToSegmentVisualBounds,
 } from '@/lib/media/text/text-viewer-paginate';
 
 describe('computePageStartsFromSegments', () => {
@@ -155,6 +156,33 @@ describe('computePageStartsFromSegments', () => {
     expect(computePageStartsFromSegments(segments, clipHeight, 1500, 0)).toEqual([
       0, 749, 1498,
     ]);
+  });
+
+  it('trimPageStartsToSegmentVisualBounds pulls break before overflowing inline chrome', () => {
+    const clipHeight = 749;
+    const segments = [
+      { top: 640, bottom: 672 },
+      { top: 672, bottom: 704 },
+      { top: 704, bottom: 736 },
+      { top: 736, bottom: 768, textBottom: 736 },
+    ];
+    const starts = [0, 736];
+    expect(
+      trimPageStartsToSegmentVisualBounds(starts, segments, clipHeight, 768),
+    ).toEqual([0, 736]);
+  });
+
+  it('trimPageStartsToSegmentVisualBounds advances break when segment bleeds past clip', () => {
+    const clipHeight = 749;
+    const segments = [
+      { top: 640, bottom: 672 },
+      { top: 672, bottom: 704 },
+      { top: 704, bottom: 736 },
+      { top: 717, bottom: 781, textBottom: 760 },
+    ];
+    expect(
+      trimPageStartsToSegmentVisualBounds([0, 749], segments, clipHeight, 781),
+    ).toEqual([0, 717]);
   });
 });
 

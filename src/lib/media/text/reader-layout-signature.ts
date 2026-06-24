@@ -108,14 +108,40 @@ export function buildChapterImageRevision(
     .join('\0');
 }
 
+export interface LayoutPageWindowMetrics {
+  clipHeight: number;
+  padTop: number;
+  padBottom: number;
+}
+
+/** 分页缓存键用的正文窗度量（与 layoutReaderChapter / 按页实测对齐） */
+export function resolveLayoutPageWindowMetrics(
+  viewportHeight: number,
+  options?: {
+    padTop?: number;
+    padBottom?: number;
+    clipHeightPx?: number;
+    defaultPads?: { top: number; bottom: number };
+  },
+): LayoutPageWindowMetrics {
+  const defaultPads = options?.defaultPads ?? { top: 0, bottom: 0 };
+  const padTop = options?.padTop ?? defaultPads.top;
+  const padBottom = options?.padBottom ?? defaultPads.bottom;
+  const clipHeight =
+    options?.clipHeightPx != null && options.clipHeightPx > 0
+      ? Math.max(1, Math.floor(options.clipHeightPx))
+      : Math.max(1, Math.floor(viewportHeight - padTop - padBottom));
+  return { clipHeight, padTop, padBottom };
+}
+
 export function buildViewportSignature(
   width: number,
   height: number,
-  pageWindow?: { clipHeight: number; padTop: number; padBottom: number },
+  pageWindow?: LayoutPageWindowMetrics,
 ): string {
   const base = `${Math.round(width)}x${Math.round(height)}`;
   if (!pageWindow) return base;
-  return `${base}|c${Math.round(pageWindow.clipHeight)}|t${Math.round(pageWindow.padTop)}|b${Math.round(pageWindow.padBottom)}`;
+  return `${base}|c${Math.floor(pageWindow.clipHeight)}|t${Math.floor(pageWindow.padTop)}|b${Math.floor(pageWindow.padBottom)}`;
 }
 
 export function buildChapterLayoutCacheKey(params: {

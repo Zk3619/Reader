@@ -10,15 +10,16 @@ import {
   setCachedChapterLayout,
   chapterLayoutCacheSize,
 } from '@/lib/media/text/reader-chapter-layout-cache';
-import { layoutReaderChapter, isChapterLayoutCompleteForContent } from '@/lib/media/text/reader-chapter-layout';
+import { layoutReaderChapter, isChapterLayoutCompleteForContent, layoutPrefersDomForTipChrome } from '@/lib/media/text/reader-chapter-layout';
 import { layoutPlainTextChapterCanvas } from '@/lib/media/text/canvas-text-chapter-layout';
 import {
   buildChapterLayoutCacheKey,
   buildContentRevision,
   buildReaderLayoutSignature,
   buildViewportSignature,
+  resolveLayoutPageWindowMetrics,
 } from '@/lib/media/text/reader-layout-signature';
-import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { defaultTextViewerUiConfig, textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import type { ReaderChapterLayout } from '@/lib/media/text/reader-chapter-layout-types';
 
 describe('reader-content-complexity', () => {
@@ -99,6 +100,10 @@ describe('layoutReaderChapter incomplete cache', () => {
   it('cache hit preserves dualPage flag from input', () => {
     const config = defaultTextViewerUiConfig;
     const content = '有正文的章节';
+    const pageWindow = resolveLayoutPageWindowMetrics(600, {
+      clipHeightPx: 500,
+      defaultPads: textViewerPagedContentInsets(config),
+    });
     const cacheKey = buildChapterLayoutCacheKey({
       chapterIndex: 0,
       contentRevision: buildContentRevision(content),
@@ -107,7 +112,7 @@ describe('layoutReaderChapter incomplete cache', () => {
         viewportWidth: 400,
         viewportHeight: 600,
       }),
-      viewportSignature: buildViewportSignature(400, 600),
+      viewportSignature: buildViewportSignature(400, 600, pageWindow),
     });
     const cached: ReaderChapterLayout = {
       chapterIndex: 0,
@@ -139,6 +144,73 @@ describe('layoutReaderChapter incomplete cache', () => {
 
     expect(hit.dualPage).toBe(true);
     expect(hit.segments.length).toBeGreaterThan(0);
+  });
+
+  it('does not reuse cache when tip chrome shrinks clip height', () => {
+    const config = { ...defaultTextViewerUiConfig, layoutEngine: 'pretext' as const };
+    const content = '章节\n\n' + '正文行。\n'.repeat(80);
+
+    const full = layoutReaderChapter({
+      chapterIndex: 0,
+      content,
+      viewportWidth: 400,
+      viewportHeight: 800,
+      config,
+      contentRoot: null,
+      clipHeightPx: 740,
+      padTop: 0,
+      padBottom: 0,
+    });
+    const cramped = layoutReaderChapter({
+      chapterIndex: 0,
+      content,
+      viewportWidth: 400,
+      viewportHeight: 800,
+      config,
+      contentRoot: null,
+      clipHeightPx: 600,
+      padTop: 30,
+      padBottom: 40,
+    });
+
+    expect(full.clipHeight).toBe(740);
+    expect(cramped.clipHeight).toBe(600);
+    expect(cramped.pageStarts.length).toBeGreaterThanOrEqual(full.pageStarts.length);
+    expect(cramped.cacheKey).not.toBe(full.cacheKey);
+  });
+});
+
+describe('layoutPrefersDomForTipChrome', () => {
+  it('returns true when measure root exists and tip pads are non-zero', () => {
+    expect(
+      layoutPrefersDomForTipChrome({
+        chapterIndex: 0,
+        content: 'test',
+        viewportWidth: 400,
+        viewportHeight: 800,
+        config: defaultTextViewerUiConfig,
+        contentRoot: {} as HTMLElement,
+        padTop: 28,
+        padBottom: 36,
+        clipHeightPx: 520,
+      }),
+    ).toBe(true);
+  });
+
+  it('returns false without measure root even when tip pads are set', () => {
+    expect(
+      layoutPrefersDomForTipChrome({
+        chapterIndex: 0,
+        content: 'test',
+        viewportWidth: 400,
+        viewportHeight: 800,
+        config: defaultTextViewerUiConfig,
+        contentRoot: null,
+        padTop: 28,
+        padBottom: 36,
+        clipHeightPx: 520,
+      }),
+    ).toBe(false);
   });
 });
 

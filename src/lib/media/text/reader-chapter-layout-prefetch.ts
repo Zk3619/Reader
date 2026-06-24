@@ -9,6 +9,7 @@ import {
   buildContentRevision,
   buildReaderLayoutSignature,
   buildViewportSignature,
+  resolveLayoutPageWindowMetrics,
 } from '@/lib/media/text/reader-layout-signature';
 import {
   buildPretextChapterImageRevision,
@@ -49,10 +50,11 @@ function prefetchOne(
 ): void {
   const { config, viewportWidth, viewportHeight, dualPage = false } = params;
   const inset = textViewerPagedContentInsets(config);
-  const clipHeightPx = Math.max(
-    1,
-    Math.round(viewportHeight - inset.top - inset.bottom),
-  );
+  const pageWindow = resolveLayoutPageWindowMetrics(viewportHeight, {
+    padTop: inset.top,
+    padBottom: inset.bottom,
+    defaultPads: inset,
+  });
   const cacheKey = buildChapterLayoutCacheKey({
     chapterIndex: index,
     contentRevision: buildContentRevision(content),
@@ -61,7 +63,7 @@ function prefetchOne(
       viewportWidth,
       viewportHeight,
     }),
-    viewportSignature: buildViewportSignature(viewportWidth, viewportHeight),
+    viewportSignature: buildViewportSignature(viewportWidth, viewportHeight, pageWindow),
     chapterTitle: title,
     imageRevision: buildPretextChapterImageRevision({
       content,
@@ -85,9 +87,9 @@ function prefetchOne(
     contentRoot: null,
     refineWithDom: false,
     dualPage,
-    padTop: inset.top,
-    padBottom: inset.bottom,
-    clipHeightPx,
+    padTop: pageWindow.padTop,
+    padBottom: pageWindow.padBottom,
+    clipHeightPx: pageWindow.clipHeight,
     horizontalInsetOnSlot: true,
   });
 }

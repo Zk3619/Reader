@@ -21,6 +21,7 @@ import {
   buildContentRevision,
   buildReaderLayoutSignature,
   buildViewportSignature,
+  resolveLayoutPageWindowMetrics,
 } from '@/lib/media/text/reader-layout-signature';
 import {
   textViewerPagedContentInsets,
@@ -103,6 +104,15 @@ export function chapterLayoutsEqual(
   return a.pageStarts.every((v, i) => Math.abs(v - (b.pageStarts[i] ?? -1)) < 0.5);
 }
 
+/** 页眉/页脚占据垂直空间时须用 DOM 实测分页，避免 Pretext 窗高与 tip-body 偏差导致裁切/重复 */
+export function layoutPrefersDomForTipChrome(input: LayoutReaderChapterInput): boolean {
+  if (!input.contentRoot) return false;
+  const pads = textViewerPagedContentInsets(input.config);
+  const padTop = input.padTop ?? pads.top;
+  const padBottom = input.padBottom ?? pads.bottom;
+  return padTop > 0 || padBottom > 0;
+}
+
 function isIncompleteChapterLayout(
   layout: ReaderChapterLayout,
   content: string,
@@ -123,8 +133,8 @@ function emptyChapterLayout(
   const padBottom = pads?.bottom ?? defaults.bottom;
   const clipHeight =
     clipHeightPx != null && clipHeightPx > 0
-      ? Math.max(1, Math.round(clipHeightPx))
-      : Math.max(1, viewportHeight - padTop - padBottom);
+      ? Math.max(1, Math.floor(clipHeightPx))
+      : Math.max(1, Math.floor(viewportHeight - padTop - padBottom));
   return {
     chapterIndex,
     engine: 'dom',
@@ -257,9 +267,17 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
     viewportHeight: input.viewportHeight,
   });
   const contentRevision = buildContentRevision(input.content);
+  const defaultPads = textViewerPagedContentInsets(input.config);
+  const pageWindow = resolveLayoutPageWindowMetrics(input.viewportHeight, {
+    padTop: input.padTop,
+    padBottom: input.padBottom,
+    clipHeightPx: input.clipHeightPx,
+    defaultPads,
+  });
   const viewportSignature = buildViewportSignature(
     input.viewportWidth,
     input.viewportHeight,
+    pageWindow,
   );
   const imageRevision = pretextImageRevisionForInput(input);
   const cacheKey = buildChapterLayoutCacheKey({
@@ -279,9 +297,12 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
   }
 
   const usePretext = textViewerUsesPretextLayout(input.config);
+  const preferDomForTipChrome = layoutPrefersDomForTipChrome(input);
   let layout: ReaderChapterLayout;
 
-  if (usePretext && canUsePretextChapterLayout(input.content)) {
+  if (preferDomForTipChrome) {
+    layout = layoutFromDomPath(input, cacheKey);
+  } else if (usePretext && canUsePretextChapterLayout(input.content)) {
     const pretextLayout = layoutFromPretextPath(input, cacheKey);
     if (pretextLayout) {
       layout = pretextLayout;
@@ -318,6 +339,39 @@ export function layoutReaderChapter(input: LayoutReaderChapterInput): ReaderChap
     setCachedChapterLayout(cacheKey, resolved);
   }
   return resolved;
+}
+
+/** 用校正后的 pageStarts 重建 pages（live DOM 复核后就地更新版式） */
+export function chapterLayoutWithPageStarts(
+  layout: ReaderChapterLayout,
+  pageStarts: number[],
+): ReaderChapterLayout {
+  const same =
+    pageStarts.length === layout.pageStarts.length &&
+    pageStarts.every((v, i) => Math.abs(v - (layout.pageStarts[i] ?? -1)) < 0.5);
+  if (same) return layout;
+
+  const pages = pageStarts.map((startY, index) => {
+    const prev = layout.pages[index];
+    const endY = pageStarts[index + 1] ?? layout.contentExtent;
+    return {
+      index,
+      startY,
+      endY,
+      displayHeight: pageDisplayHeight(
+        index,
+        pageStarts,
+        layout.clipHeight,
+        layout.contentExtent,
+        layout.segments,
+      ),
+      chapterPosition: prev?.chapterPosition ?? 0,
+      text: prev?.text,
+      leftLineSize: prev?.leftLineSize,
+    };
+  });
+
+  return { ...layout, pageStarts, pages };
 }
 
 /** 由已缓存/计算好的章节版式取当前页显示高度 */

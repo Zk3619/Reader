@@ -455,6 +455,25 @@ export function measureLayoutSegments(
   );
 }
 
+const PAGE_STRADDLE_BLOCK_SELECTORS =
+  '.reader-p, h2, figure, [data-reader-measure-block]';
+const PAGE_STRADDLE_INLINE_SELECTORS =
+  '[data-reader-inline-img], [data-legado-cmt], .reader-legado-cmt-img, .reader-comment-bubble';
+
+function elementStraddlesWindowBottom(
+  el: Element,
+  rootRect: DOMRect,
+  pageStart: number,
+  windowBottom: number,
+): boolean {
+  const rect = el.getBoundingClientRect();
+  const top = rect.top - rootRect.top;
+  const bottom = rect.bottom - rootRect.top;
+  if (bottom <= pageStart + 0.5) return false;
+  if (top >= windowBottom - 0.5) return false;
+  return top < windowBottom - 1 && bottom > windowBottom + 1;
+}
+
 /** DOM 探测：是否有元素跨越裁切下边界 */
 export function pageWindowHasStraddle(
   measureRoot: HTMLElement,
@@ -462,16 +481,28 @@ export function pageWindowHasStraddle(
   windowBottom: number,
 ): boolean {
   const rootRect = measureRoot.getBoundingClientRect();
-  const selectors = '.reader-p, h2, figure, [data-reader-measure-block]';
-  const nodes = measureRoot.querySelectorAll<HTMLElement>(selectors);
+  const nodes = measureRoot.querySelectorAll<HTMLElement>(
+    `${PAGE_STRADDLE_BLOCK_SELECTORS}, ${PAGE_STRADDLE_INLINE_SELECTORS}`,
+  );
 
   for (const el of nodes) {
-    const top = el.getBoundingClientRect().top - rootRect.top;
-    const bottom = el.getBoundingClientRect().bottom - rootRect.top;
-    if (bottom <= pageStart + 0.5) continue;
-    if (top >= windowBottom - 0.5) continue;
-    if (top < windowBottom - 1 && bottom > windowBottom + 1) {
+    if (elementStraddlesWindowBottom(el, rootRect, pageStart, windowBottom)) {
       return true;
+    }
+  }
+
+  for (const textEl of measureRoot.querySelectorAll<HTMLElement>('.reader-p, h2')) {
+    const range = document.createRange();
+    range.selectNodeContents(textEl);
+    for (const rect of range.getClientRects()) {
+      if (rect.width < 0.5 || rect.height < 0.5) continue;
+      const top = rect.top - rootRect.top;
+      const bottom = rect.bottom - rootRect.top;
+      if (bottom <= pageStart + 0.5) continue;
+      if (top >= windowBottom - 0.5) continue;
+      if (top < windowBottom - 1 && bottom > windowBottom + 1) {
+        return true;
+      }
     }
   }
   return false;
@@ -638,7 +669,9 @@ function shrinkPageEndBeforeStraddle(
   const rootRect = measureRoot.getBoundingClientRect();
   let shrink = pageEnd;
   measureRoot
-    .querySelectorAll<HTMLElement>('.reader-p, h2, figure, [data-reader-measure-block]')
+    .querySelectorAll<HTMLElement>(
+      `${PAGE_STRADDLE_BLOCK_SELECTORS}, ${PAGE_STRADDLE_INLINE_SELECTORS}`,
+    )
     .forEach((el) => {
       const top = el.getBoundingClientRect().top - rootRect.top;
       const bottom = el.getBoundingClientRect().bottom - rootRect.top;
@@ -673,6 +706,51 @@ export function trimPageStartsBeforeClipStraddle(
 
     if (nextStart <= pageStart + 0.5) break;
     if (Math.abs(nextStart - (trimmed[trimmed.length - 1] ?? 0)) < 0.5) break;
+    trimmed.push(nextStart);
+  }
+
+  return trimmed.length > 0 ? trimmed : pageStarts;
+}
+
+/**
+ * segment 复核：非末页时禁止片段 visual bottom 超出 pageStart+clipHeight（行内图/段评底常漏进半行）。
+ */
+export function trimPageStartsToSegmentVisualBounds(
+  pageStarts: number[],
+  segments: ReaderLayoutSegment[],
+  clipHeight: number,
+  contentExtent?: number,
+): number[] {
+  if (pageStarts.length <= 1 || clipHeight <= 0 || segments.length === 0) {
+    return pageStarts;
+  }
+
+  const contentBottom =
+    contentExtent ?? segments.reduce((max, s) => Math.max(max, s.bottom), 0);
+  const trimmed: number[] = [pageStarts[0] ?? 0];
+
+  for (let i = 0; i < pageStarts.length - 1; i += 1) {
+    const pageStart = trimmed[trimmed.length - 1] ?? 0;
+    const limit = pageStart + clipHeight;
+    let nextStart = pageStarts[i + 1] ?? limit;
+
+    if (limit >= contentBottom - 0.5) break;
+
+    for (const seg of segments) {
+      if (seg.bottom <= pageStart + 0.5) continue;
+      if (seg.top >= nextStart - 0.5) break;
+      if (seg.top < pageStart - 0.5 || seg.bottom <= limit + 0.5) continue;
+
+      const textBottom = seg.textBottom ?? seg.bottom;
+      const tailSpacingOnly =
+        textBottom <= limit + 0.5 && seg.bottom > textBottom + 0.5;
+      if (tailSpacingOnly) continue;
+
+      nextStart = Math.min(nextStart, Math.round(seg.top));
+    }
+
+    if (nextStart <= pageStart + 0.5) break;
+    if (Math.abs(nextStart - pageStart) < 0.5) break;
     trimmed.push(nextStart);
   }
 
@@ -746,6 +824,17 @@ export function computePageStartsFromSegments(
           nextStart =
             seg.top >= pageStart - 0.5 ? Math.round(seg.top) : Math.round(limit);
           break;
+        }
+        if (visualUsed > clipHeight + 0.5) {
+          const tailSpacingOnly =
+            segIndex === segments.length - 1 &&
+            textBottom <= limit + 0.5 &&
+            seg.bottom > textBottom + 0.5;
+          if (!tailSpacingOnly) {
+            nextStart =
+              seg.top >= pageStart - 0.5 ? Math.round(seg.top) : Math.round(limit);
+            break;
+          }
         }
         prevBottom = seg.bottom;
         for (let j = segIndex + 1; j < segments.length; j += 1) {
@@ -849,6 +938,14 @@ export function paginateReaderContent(
   );
 
   let pageStarts = layoutResult.pageStarts;
+  if (pageStarts.length > 1) {
+    pageStarts = trimPageStartsToSegmentVisualBounds(
+      pageStarts,
+      segments,
+      clipHeight,
+      extent,
+    );
+  }
   if (measureRoot && pageStarts.length > 1) {
     pageStarts = trimPageStartsBeforeClipStraddle(measureRoot, pageStarts, clipHeight);
   }

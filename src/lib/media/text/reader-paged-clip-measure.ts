@@ -1,5 +1,7 @@
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
-import { readStrictTipBodyClipHeightPx } from '@/lib/media/text/reader-paged-tip-body-measure';
+import {
+  readStrictTipBodyClipHeightPx,
+} from '@/lib/media/text/reader-paged-tip-body-measure';
 
 export interface PagedContentInsets {
   top: number;
@@ -97,20 +99,21 @@ function resolveTipChromeBodyHeightPx(
   params: ReadPagedPageWindowMetricsParams,
 ): number {
   if (params.authoritativeBodyHeightPx != null && params.authoritativeBodyHeightPx > 0) {
-    return Math.max(1, Math.round(params.authoritativeBodyHeightPx));
+    return Math.max(1, Math.floor(params.authoritativeBodyHeightPx));
   }
 
   const estimated = Math.max(1, frameOuter - tipTop - tipBottom);
-  const domBody = params.pageTipBodyEl?.clientHeight ?? 0;
-  if (domBody > 0) {
-    return Math.max(1, Math.round(domBody));
+  const strictBody = readStrictTipBodyClipHeightPx(params.pageTipBodyEl);
+  if (strictBody > 0) {
+    return strictBody;
   }
 
   const frame = params.contentFrameEl;
   if (frame && typeof frame.querySelector === 'function') {
     const tipBody = frame.querySelector<HTMLElement>('.reader-page-tip-body');
-    if (tipBody && tipBody.clientHeight > 0) {
-      return Math.max(1, Math.round(tipBody.clientHeight));
+    const dom = readStrictTipBodyClipHeightPx(tipBody);
+    if (dom > 0) {
+      return dom;
     }
   }
 
@@ -215,7 +218,7 @@ export function measurePagedClipContentHeight(
   };
 
   if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
-    return Math.max(1, Math.round(pageTipBodyEl.clientHeight));
+    return readStrictTipBodyClipHeightPx(pageTipBodyEl);
   }
 
   if (contentSlotEl && contentSlotEl.clientHeight > 0) {

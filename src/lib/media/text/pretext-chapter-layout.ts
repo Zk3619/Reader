@@ -18,6 +18,7 @@ import {
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { pageDisplayHeight } from '@/lib/media/text/text-viewer-paginate';
 import { computePageStartsForLayout } from '@/lib/media/text/text-viewer-paginate-dual';
+import { trimPageStartsToSegmentVisualBounds } from '@/lib/media/text/text-viewer-paginate';
 
 export interface PretextChapterLayoutParams extends LayoutDocumentParams {
   chapterIndex: number;
@@ -42,8 +43,8 @@ export function layoutChapterFromPretext(
   const padBottom = params.padBottom ?? defaultPads.bottom;
   const clipHeight =
     params.clipHeightPx != null && params.clipHeightPx > 0
-      ? Math.max(1, Math.round(params.clipHeightPx))
-      : Math.max(1, params.viewportHeight - padTop - padBottom);
+      ? Math.max(1, Math.floor(params.clipHeightPx))
+      : Math.max(1, Math.floor(params.viewportHeight - padTop - padBottom));
 
   const { segments: rawSegments, contentExtent, lineMetas } = computeSegmentsFromLayoutDocument(
     doc,
@@ -68,7 +69,15 @@ export function layoutChapterFromPretext(
   );
 
   const segments = layoutResult.segments ?? rawSegments;
-  const pageStarts = layoutResult.pageStarts;
+  let pageStarts = layoutResult.pageStarts;
+  if (pageStarts.length > 1) {
+    pageStarts = trimPageStartsToSegmentVisualBounds(
+      pageStarts,
+      segments,
+      clipHeight,
+      extent,
+    );
+  }
   const resolvedExtent =
     params.dualPage && layoutResult.leftColumnExtent != null
       ? Math.max(

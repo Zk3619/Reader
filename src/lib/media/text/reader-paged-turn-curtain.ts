@@ -44,6 +44,24 @@ export function resolveOpaquePageBackground(
   return fallbackBg ?? READER_THEME_DEFAULT_BG;
 }
 
+/** 克隆后清理：去掉 live 隐藏样式、剥离 staging/测量宿主，避免幕帘白屏 */
+export function sanitizeClonedTurnPageSurface(root: HTMLElement): void {
+  root.style.visibility = 'visible';
+  root.style.opacity = '';
+  root.querySelectorAll(
+    '.reader-paged-measure-host, .reader-paged-incoming-inner',
+  ).forEach((node) => {
+    node.remove();
+  });
+  root.querySelectorAll(
+    '.reader-paged-live-inner, .reader-body, .reader-content',
+  ).forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.style.visibility = 'visible';
+    node.style.opacity = '';
+  });
+}
+
 /** 克隆含页眉页脚的整页 content-frame（滑动幕帘在 always 模式使用） */
 export function buildPageFrameClone(
   frameEl: HTMLElement,
@@ -52,6 +70,7 @@ export function buildPageFrameClone(
   pageBg: string,
 ): HTMLElement {
   const clone = frameEl.cloneNode(true) as HTMLElement;
+  sanitizeClonedTurnPageSurface(clone);
   clone.setAttribute('aria-hidden', 'true');
   clone.classList.add('reader-paged-turn-frame-clone');
   clone.style.pointerEvents = 'none';
@@ -74,6 +93,7 @@ export function buildPageFrameClone(
     clone.querySelector<HTMLElement>('.reader-paged-live-inner') ??
     clone.querySelector<HTMLElement>('[data-reader-render-page]');
   if (innerEl) {
+    innerEl.classList.add('reader-paged-turn-surface');
     innerEl.style.backgroundColor = pageBg;
     const y = Math.round(pageStartPx);
     innerEl.style.transform =
@@ -90,8 +110,9 @@ export function buildPageSurfaceClone(
   pageBg: string,
 ): HTMLElement {
   const curtain = liveInner.cloneNode(true) as HTMLElement;
+  sanitizeClonedTurnPageSurface(curtain);
   curtain.setAttribute('aria-hidden', 'true');
-  curtain.classList.add('reader-paged-turn-curtain');
+  curtain.classList.add('reader-paged-turn-curtain', 'reader-paged-turn-surface');
   curtain.style.pointerEvents = 'none';
   curtain.style.marginTop = '';
   curtain.style.minHeight = '';
