@@ -901,6 +901,44 @@
   opacity: 1;
 }
 
+/**
+ * 跨章 staging：仅隐藏主 chrome 的 live 层（勿波及 turn-layer 幕帘克隆）。
+ * 命令式 class 亦生效（staging 挂载早于 data-cross-chapter-staging 属性时）。
+ */
+.reader-paged-page-span-clip > .reader-paged-live-inner.reader-paged-live-suppressed,
+.reader-paged-viewport[data-cross-chapter-staging]
+  .reader-paged-clip
+  > .reader-page-tip-chrome
+  .reader-paged-live-suppressed {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 拖拽/翻页幕帘（含常显页眉页脚 frame 克隆）须始终可见 */
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-live-inner,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-curtain,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-frame-clone,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-surface {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.reader-paged-viewport:not(.is-live-content-revealed):not(.is-live-content-revealing)
+  .reader-paged-turn-layer
+  .reader-body {
+  opacity: 1;
+}
+
+.reader-paged-viewport[data-cross-chapter-staging] .reader-paged-incoming-inner .reader-body {
+  opacity: 1 !important;
+}
+
+/** 跨章拖拽未过门槛：staging 已预挂但保持隐藏，避免 Solid 反复挂载 */
+.reader-paged-incoming-inner.reader-paged-incoming-drag-held {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .reader-dual-page {
   columns: 2;
   column-fill: balance;
