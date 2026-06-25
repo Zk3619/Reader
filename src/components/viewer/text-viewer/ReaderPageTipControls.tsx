@@ -10,7 +10,7 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
-import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
+import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
@@ -101,27 +101,27 @@ function TipInsetSliders(props: {
   inset: TextViewerPageTipsConfig['headerInset'];
   onChange: (patch: Partial<TextViewerPageTipsConfig['headerInset']>) => void;
 }) {
+  const pxDialogValue = (px: number, unit: 'px' | 'rem') =>
+    unit === 'px' ? px : pxToRem(px);
+
+  const applyPxDialog =
+    (key: keyof TextViewerPageTipsConfig['headerInset']) =>
+    (value: number, unit: 'px' | 'rem') => {
+      props.onChange({ [key]: unit === 'px' ? value : remToPx(value) });
+    };
+
   const edge = (key: keyof TextViewerPageTipsConfig['headerInset'], label: string) => (
-    <div class="space-y-2">
-      <div class="flex items-center justify-between">
-        <Label class="text-sm font-normal">{label}</Label>
-        <span class="text-sm text-muted-foreground">{formatRemFromPx(props.inset[key])}</span>
-      </div>
-      <Slider
-        value={[pxToRem(props.inset[key])]}
-        minValue={0}
-        maxValue={6}
-        step={0.125}
-        onChange={(values: number[]) =>
-          props.onChange({ [key]: remToPx(values[0] ?? pxToRem(props.inset[key])) })
-        }
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
-    </div>
+    <ReaderRemSliderRow
+      label={label}
+      valueLabel={formatRemFromPx(props.inset[key])}
+      sliderValue={pxToRem(props.inset[key])}
+      minValue={0}
+      maxValue={6}
+      step={0.125}
+      onSliderChange={(v) => props.onChange({ [key]: remToPx(v) })}
+      getDialogValue={(unit) => pxDialogValue(props.inset[key], unit)}
+      onDialogApply={applyPxDialog(key)}
+    />
   );
 
   return (
@@ -225,51 +225,37 @@ export function ReaderPageTipControls(props: ReaderPageTipControlsProps) {
         </For>
       </div>
 
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>页眉字号</Label>
-          <span class="text-sm text-muted-foreground">
-            {formatRemFromPx(props.tips().headerFontSize)}
-          </span>
-        </div>
-        <Slider
-          value={[pxToRem(props.tips().headerFontSize)]}
-          minValue={0.5}
-          maxValue={1.5}
-          step={0.0625}
-          onChange={(values: number[]) =>
-            setTips({ headerFontSize: remToPx(values[0] ?? pxToRem(props.tips().headerFontSize)) })
-          }
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="页眉字号"
+        valueLabel={formatRemFromPx(props.tips().headerFontSize)}
+        sliderValue={pxToRem(props.tips().headerFontSize)}
+        minValue={0.5}
+        maxValue={1.5}
+        step={0.0625}
+        onSliderChange={(v) => setTips({ headerFontSize: remToPx(v) })}
+        getDialogValue={(unit) =>
+          unit === 'px' ? props.tips().headerFontSize : pxToRem(props.tips().headerFontSize)
+        }
+        onDialogApply={(value, unit) =>
+          setTips({ headerFontSize: unit === 'px' ? value : remToPx(value) })
+        }
+      />
 
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>页脚字号</Label>
-          <span class="text-sm text-muted-foreground">
-            {formatRemFromPx(props.tips().footerFontSize)}
-          </span>
-        </div>
-        <Slider
-          value={[pxToRem(props.tips().footerFontSize)]}
-          minValue={0.5}
-          maxValue={1.5}
-          step={0.0625}
-          onChange={(values: number[]) =>
-            setTips({ footerFontSize: remToPx(values[0] ?? pxToRem(props.tips().footerFontSize)) })
-          }
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="页脚字号"
+        valueLabel={formatRemFromPx(props.tips().footerFontSize)}
+        sliderValue={pxToRem(props.tips().footerFontSize)}
+        minValue={0.5}
+        maxValue={1.5}
+        step={0.0625}
+        onSliderChange={(v) => setTips({ footerFontSize: remToPx(v) })}
+        getDialogValue={(unit) =>
+          unit === 'px' ? props.tips().footerFontSize : pxToRem(props.tips().footerFontSize)
+        }
+        onDialogApply={(value, unit) =>
+          setTips({ footerFontSize: unit === 'px' ? value : remToPx(value) })
+        }
+      />
 
       <TipInsetSliders
         title="页眉"

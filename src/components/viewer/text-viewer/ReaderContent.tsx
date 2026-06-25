@@ -29,6 +29,11 @@ import {
   readerParagraphIndentPrefix,
   shouldRenderChapterTitle,
 } from '@/lib/media/text/reader-chapter-title-style';
+import {
+  readerLetterSpacingCss,
+  readerLineHeightCss,
+  readerParagraphMarginCss,
+} from '@/lib/media/text/reader-spacing';
 import { resolveReaderFontFamily } from '@/lib/media/text/reader-font';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 
@@ -212,8 +217,8 @@ export function ReaderContent(props: ReaderContentProps) {
     return {
       'font-size': `${c.fontSize}px`,
       'font-weight': c.fontWeight ?? 400,
-      'line-height': c.spacing.line + 1,
-      'letter-spacing': c.spacing.letter ? `${c.spacing.letter}em` : undefined,
+      'line-height': readerLineHeightCss(c.spacing.line),
+      'letter-spacing': readerLetterSpacingCss(c.spacing.letter),
       'font-family': fontFamily,
       'max-width':
         useReadWidth && !props.pagedLayout
@@ -241,7 +246,7 @@ export function ReaderContent(props: ReaderContentProps) {
 
   const paragraphStyle = createMemo(() => {
     const p = config().spacing.paragraph;
-    return { 'margin-bottom': p ? `${p}em` : undefined };
+    return { 'margin-bottom': readerParagraphMarginCss(p) };
   });
 
   const imageStyleKey = () => config().imageStyle;
@@ -615,7 +620,7 @@ function ParagraphWithParts(props: {
   const hideMockBubble = () => paragraphHasLegadoCommentImg(props.parts);
   const paragraphStyle = createMemo(() => {
     const p = viewerState.config.spacing.paragraph;
-    return { 'margin-bottom': p ? `${p}em` : undefined };
+    return { 'margin-bottom': readerParagraphMarginCss(p) };
   });
   return (
     <p
@@ -683,7 +688,7 @@ function ParagraphBlock(props: {
   const html = () => paragraphToHtml(props.raw);
   const paragraphStyle = createMemo(() => {
     const p = viewerState.config.spacing.paragraph;
-    return { 'margin-bottom': p ? `${p}em` : undefined };
+    return { 'margin-bottom': readerParagraphMarginCss(p) };
   });
   return (
     <p

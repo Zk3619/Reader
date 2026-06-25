@@ -184,6 +184,39 @@ describe('readPagedPageWindowMetrics', () => {
     vi.unstubAllGlobals();
   });
 
+  it('subtracts content-slot vertical padding from tip-body clip height', () => {
+    const frame = { clientHeight: 600 } as HTMLElement;
+    const slot = {
+      clientHeight: 556,
+      style: { paddingTop: '32px', paddingBottom: '32px' },
+    } as HTMLElement;
+    const tipBody = { clientHeight: 556 } as HTMLElement;
+    const getComputedStyle = vi.fn(() => ({
+      top: '0px',
+      bottom: '0px',
+      left: '16px',
+      right: '16px',
+      paddingTop: '32px',
+      paddingBottom: '32px',
+      paddingLeft: '0px',
+      paddingRight: '0px',
+    }));
+    vi.stubGlobal('getComputedStyle', getComputedStyle);
+
+    const metrics = readPagedPageWindowMetrics({
+      viewportEl: { clientHeight: 600 } as HTMLElement,
+      contentFrameEl: frame,
+      contentSlotEl: slot,
+      pageTipBodyEl: tipBody,
+      fallbackInsets: { top: 0, bottom: 0, left: 16, right: 16 },
+      tipChromePadTop: 24,
+      tipChromePadBottom: 20,
+    });
+    expect(metrics.clipHeight).toBe(492);
+
+    vi.unstubAllGlobals();
+  });
+
   it('prefers authoritative body height over inflated slot measurement', () => {
     const frame = { clientHeight: 600 } as HTMLElement;
     const slot = {
@@ -286,6 +319,17 @@ describe('measurePagedClipContentHeight', () => {
         bottom: 20,
       }, tipBody),
     ).toBe(540);
+  });
+
+  it('subtracts content-slot vertical padding from tip-body clip height', () => {
+    const slot = {
+      clientHeight: 540,
+      style: { paddingTop: '32px', paddingBottom: '32px' },
+    } as HTMLElement;
+    const tipBody = { clientHeight: 540 } as HTMLElement;
+    expect(
+      measurePagedClipContentHeight(null, 600, { top: 0, bottom: 0 }, slot, undefined, tipBody),
+    ).toBe(476);
   });
 });
 

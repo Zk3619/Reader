@@ -34,20 +34,10 @@ export const TEXT_VIEWER_LAYOUT_ENGINE_LABELS: Record<TextViewerLayoutEngine, st
 export const TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX = 1280;
 
 /**
- * 按页阅读：content-slot 四边 inset 默认值（与 {@link defaultTextViewerUiConfig} 一致）
- * @deprecated 请使用 config.contentInset
+ * 按页阅读：content-slot 默认上下 inset（与 {@link defaultTextViewerUiConfig} 一致）
  */
 export const TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX = 32;
-/** @deprecated 请使用 config.contentInset */
 export const TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX = 32;
-
-/** @deprecated 请使用 {@link TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX} */
-export const TEXT_VIEWER_PAGED_PAD_TOP_PX = TEXT_VIEWER_PAGED_CONTENT_INSET_TOP_PX;
-/** @deprecated 请使用 {@link TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX} */
-export const TEXT_VIEWER_PAGED_PAD_BOTTOM_PX = TEXT_VIEWER_PAGED_CONTENT_INSET_BOTTOM_PX;
-
-/** @deprecated 请使用 {@link textViewerPagedContentInsets} */
-export const TEXT_VIEWER_PAGED_VERTICAL_PAD_PX = 16;
 
 export type TextViewerPagedContentInsets = {
   top: number;
@@ -83,14 +73,6 @@ export function textViewerLayoutContentWidth(
     return Math.max(1, Math.min(inner, config.readWidth));
   }
   return Math.max(1, inner);
-}
-
-/** @deprecated 请使用 {@link textViewerPagedContentInsets} */
-export function textViewerPagedVerticalPads(
-  config?: Pick<TextViewerUiConfig, 'contentInset'>,
-): { top: number; bottom: number } {
-  const pads = textViewerPagedContentInsets(config);
-  return { top: pads.top, bottom: pads.bottom };
 }
 
 export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, string> = {

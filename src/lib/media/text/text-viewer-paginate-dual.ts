@@ -300,6 +300,21 @@ type SpreadColumnBlock = {
   maxTextBottom: number;
 };
 
+/** live 首屏左栏单独渲染章节标题时，用于 clip 叠高的标题占位（勿用整块 segment 跨度） */
+function spreadTitleStackBlock(
+  titleBounds: ColumnBlockBounds | undefined,
+  clipHeight: number,
+): ColumnStackBlock | undefined {
+  if (!titleBounds) return undefined;
+  const rawSpan = Math.max(0, titleBounds.maxBottom - titleBounds.minTop);
+  const sane = Math.min(rawSpan, Math.max(40, Math.round(clipHeight * 0.22)));
+  return {
+    minTop: 0,
+    maxBottom: sane,
+    maxTextBottom: sane,
+  };
+}
+
 /** live pane 叠高：非尾块含段距；尾块 CSS 清零 margin-bottom，保留行盒下延 */
 function spreadPageVisualStackPx(
   titleBlock: ColumnStackBlock | undefined,
@@ -405,18 +420,17 @@ export function contentBlockIndicesForSpreadPage(
     pageIndex === 0 && columnShowsChapterTitleOnSpreadPage(layout, column, pageIndex);
 
   const columnBounds = blockBoundsInColumn(layout.segments, column);
-  const titleBounds = stackFromColumnTop ? columnBounds.get(0) : undefined;
+  const resolvedClipForTitle =
+    clipHeight ??
+    (layout.clipHeight != null && layout.clipHeight > 0
+      ? Math.round(layout.clipHeight)
+      : 1);
+  const titleStackBlock = stackFromColumnTop
+    ? spreadTitleStackBlock(columnBounds.get(0), resolvedClipForTitle)
+    : undefined;
 
   const indices: number[] = [];
-  const placed: ColumnStackBlock[] = titleBounds
-    ? [
-      {
-        minTop: titleBounds.minTop,
-        maxBottom: titleBounds.maxBottom,
-        maxTextBottom: titleBounds.maxTextBottom,
-      },
-    ]
-    : [];
+  const placed: ColumnStackBlock[] = titleStackBlock ? [titleStackBlock] : [];
 
   for (const c of candidates) {
     if (clipHeight != null) {
@@ -439,13 +453,7 @@ export function contentBlockIndicesForSpreadPage(
       const contentBlocks = indices
         .map((idx) => candidates.find((b) => b.blockIndex - 1 === idx))
         .filter((b): b is SpreadColumnBlock => b != null);
-      const titleBlock = titleBounds
-        ? {
-          minTop: titleBounds.minTop,
-          maxBottom: titleBounds.maxBottom,
-          maxTextBottom: titleBounds.maxTextBottom,
-        }
-        : undefined;
+      const titleBlock = titleStackBlock;
       const liveH = spreadPageVisualStackPx(titleBlock, contentBlocks);
       if (liveH <= clipHeight + 0.5) break;
       indices.pop();

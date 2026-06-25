@@ -3,6 +3,41 @@ import {
   readStrictTipBodyClipHeightPx,
 } from '@/lib/media/text/reader-paged-tip-body-measure';
 
+/** 读取 content-slot 四边 padding（inline 优先，回退 computed） */
+export function readContentSlotPaddingPx(
+  el: HTMLElement | null | undefined,
+): { top: number; bottom: number; left: number; right: number } {
+  if (!el) return { top: 0, bottom: 0, left: 0, right: 0 };
+  const readPad = (inline: string, computed?: string) => {
+    const inlineVal = parseFloat(inline);
+    if (Number.isFinite(inlineVal)) return inlineVal;
+    if (computed != null) {
+      const computedVal = parseFloat(computed);
+      if (Number.isFinite(computedVal)) return computedVal;
+    }
+    return 0;
+  };
+  const style = el.style;
+  const computed =
+    typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+  return {
+    top: readPad(style.paddingTop, computed?.paddingTop),
+    bottom: readPad(style.paddingBottom, computed?.paddingBottom),
+    left: readPad(style.paddingLeft, computed?.paddingLeft),
+    right: readPad(style.paddingRight, computed?.paddingRight),
+  };
+}
+
+/** 扣除 content-slot 上下 padding 后的正文排版区高度 */
+export function readContentSlotInnerHeightPx(
+  el: HTMLElement | null | undefined,
+  outerHeight: number,
+): number {
+  if (!Number.isFinite(outerHeight) || outerHeight <= 0) return 0;
+  const pads = readContentSlotPaddingPx(el);
+  return Math.max(1, Math.round(outerHeight - pads.top - pads.bottom));
+}
+
 export interface PagedContentInsets {
   top: number;
   bottom: number;
@@ -140,8 +175,12 @@ export function readPagedPageWindowMetrics(
   if (tipBodyClip > 0) {
     const padsTop = tipTop;
     const padsBottom = tipBottom;
+    const clipHeight = readContentSlotInnerHeightPx(
+      params.contentSlotEl,
+      tipBodyClip,
+    );
     return {
-      clipHeight: tipBodyClip,
+      clipHeight,
       padTop: padsTop,
       padBottom: padsBottom,
       viewportHeight: Math.max(1, tipBodyClip + padsTop + padsBottom),
@@ -218,13 +257,14 @@ export function measurePagedClipContentHeight(
   };
 
   if (pageTipBodyEl && pageTipBodyEl.clientHeight > 0) {
-    return readStrictTipBodyClipHeightPx(pageTipBodyEl);
+    return readContentSlotInnerHeightPx(
+      contentSlotEl,
+      readStrictTipBodyClipHeightPx(pageTipBodyEl),
+    );
   }
 
   if (contentSlotEl && contentSlotEl.clientHeight > 0) {
-    const padTop = parseFloat(contentSlotEl.style.paddingTop) || 0;
-    const padBottom = parseFloat(contentSlotEl.style.paddingBottom) || 0;
-    const height = Math.max(1, Math.round(contentSlotEl.clientHeight - padTop - padBottom));
+    const height = readContentSlotInnerHeightPx(contentSlotEl, contentSlotEl.clientHeight);
     return capToTipChrome(height);
   }
 

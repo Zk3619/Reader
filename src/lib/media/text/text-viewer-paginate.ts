@@ -1,12 +1,8 @@
 /** 按 content-slot 内 page-window 全高分页（上下间距仅由 content-slot inset 承担） */
 
+import { readerLineHeightPx, readerParagraphMarginPx } from '@/lib/media/text/reader-spacing';
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { computePageStartsForLayout } from '@/lib/media/text/text-viewer-paginate-dual';
-
-export const PAGE_CLIP_SAFETY_BASE_PX = 0;
-
-/** @deprecated 外层 content-slot 已预留上下间距，裁切区内不再留白 */
-export const PAGE_BOTTOM_PAD_PX = 0;
 
 export interface ReaderBlockMetric {
   blockIndex: number;
@@ -76,7 +72,7 @@ export function readLineHeightPx(el: HTMLElement, fontSize?: number, lineSpacing
   const lh = parseFloat(style.lineHeight);
   if (Number.isFinite(lh) && lh > 0) return lh;
   const size = readFontSizePx(el, fontSize);
-  return size * ((lineSpacing ?? 0.8) + 1);
+  return readerLineHeightPx(size, lineSpacing ?? 0.8);
 }
 
 export function readParagraphMarginBottomPx(
@@ -86,8 +82,8 @@ export function readParagraphMarginBottomPx(
 ): number {
   const mb = parseFloat(getComputedStyle(el).marginBottom);
   if (Number.isFinite(mb) && mb >= 0) return mb;
-  const size = readFontSizePx(el, fontSize);
-  return size * (paragraphSpacing ?? 0);
+  void fontSize;
+  return readerParagraphMarginPx(paragraphSpacing ?? 0);
 }
 
 function relativeTop(rootRect: DOMRect, el: Element): number {
@@ -326,10 +322,10 @@ export function measureLayoutSegments(
     measureRoot.querySelector<HTMLElement>('h2');
   const defaultLineH = sampleLineEl
     ? readLineHeightPx(sampleLineEl, fontSize, lineSpacing)
-    : (fontSize ?? 18) * ((lineSpacing ?? 0.8) + 1);
+    : readerLineHeightPx(fontSize ?? 18, lineSpacing ?? 0.8);
   const defaultParagraphGap = sampleLineEl
     ? readParagraphMarginBottomPx(sampleLineEl, fontSize, paragraphSpacing)
-    : (fontSize ?? 18) * (paragraphSpacing ?? 0);
+    : readerParagraphMarginPx(paragraphSpacing ?? 0);
   const singleBlockThreshold = defaultLineH + defaultParagraphGap + 1;
 
   const blocks = measureRoot.querySelectorAll<HTMLElement>('[data-reader-measure-block]');
@@ -528,11 +524,6 @@ export function measureLineMetrics(
     height: s.bottom - s.top,
     bottom: s.bottom,
   }));
-}
-
-/** @deprecated 行级 segment 断页已保证整行；裁切区不再扣减 */
-export function clipSafetyPx(_fontSize = 18, _lineSpacing = 0.8): number {
-  return 0;
 }
 
 /** 每页 pack 上限 = pageStart + clipHeight（裁切区即 page-window 全高） */
@@ -973,20 +964,6 @@ export function paginateReaderContent(
     leftColumnExtent: layoutResult.leftColumnExtent,
     rightColumnExtent: layoutResult.rightColumnExtent,
   };
-}
-
-/** @deprecated */
-export function computePageStartsFromLines(
-  lines: ReaderLineMetric[],
-  clipHeight: number,
-  contentExtent?: number,
-  safetyPx?: number,
-): number[] {
-  const segments = lines.map((l) => ({
-    top: l.top,
-    bottom: l.bottom ?? l.top + l.height,
-  }));
-  return computePageStartsFromSegments(segments, clipHeight, contentExtent, safetyPx);
 }
 
 export function splitBlockIndicesByPageHeight(

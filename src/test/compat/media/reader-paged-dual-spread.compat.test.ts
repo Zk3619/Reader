@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  dualSpreadShiftLayoutStyle,
+  dualSpreadColumnPaneStyle,
   dualSpreadShiftTransform,
   dualSpreadYOffset,
   inferDualSpreadRightStart,
@@ -84,13 +84,13 @@ describe('dualSpreadShiftTransform', () => {
   });
 });
 
-describe('dualSpreadShiftLayoutStyle', () => {
+describe('dualSpreadColumnPaneStyle', () => {
   it('sets column pane width to 100% with optional min-height', () => {
-    expect(dualSpreadShiftLayoutStyle(800, 'left', 1200)).toEqual({
+    expect(dualSpreadColumnPaneStyle(1200)).toEqual({
       width: '100%',
       'min-height': '1200px',
     });
-    expect(dualSpreadShiftLayoutStyle(800, 'right')).toEqual({
+    expect(dualSpreadColumnPaneStyle()).toEqual({
       width: '100%',
       'min-height': undefined,
     });

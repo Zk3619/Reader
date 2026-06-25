@@ -2,13 +2,14 @@ import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { cn } from '@/lib/utils';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import {
-  readerPageTipBarVisible,
   readerPageTipBarEdgePaddingStyle,
+  readerPageTipBarVisibleOnSurface,
   readerPageTipsUseBattery,
   readerPageTipsUseTime,
   readerPageTipSlotValue,
   resolveReaderPageTipText,
   refreshReaderBatteryLevel,
+  type ReaderPageTipBarSurface,
   type ReaderPageTipContext,
 } from '@/lib/media/text/reader-page-tip';
 
@@ -17,6 +18,8 @@ export interface ReaderPageTipBarProps {
   tips: TextViewerPageTipsConfig;
   context: ReaderPageTipContext;
   chromeBarsVisible: boolean;
+  /** reader=阅读器内；chrome=顶/底操作栏（跟随模式） */
+  surface?: ReaderPageTipBarSurface;
   contentColor?: string;
   class?: string;
 }
@@ -40,8 +43,15 @@ export function ReaderPageTipBar(props: ReaderPageTipBarProps) {
     onCleanup(() => window.clearInterval(timer));
   });
 
+  const surface = () => props.surface ?? 'reader';
+
   const visible = () =>
-    readerPageTipBarVisible(props.position, props.tips, props.chromeBarsVisible);
+    readerPageTipBarVisibleOnSurface(
+      props.position,
+      props.tips,
+      props.chromeBarsVisible,
+      surface(),
+    );
 
   const inset = () =>
     props.position === 'header' ? props.tips.headerInset : props.tips.footerInset;
@@ -73,7 +83,9 @@ export function ReaderPageTipBar(props: ReaderPageTipBarProps) {
           props.class,
         )}
         style={{
-          ...readerPageTipBarEdgePaddingStyle(props.position, inset()),
+          ...readerPageTipBarEdgePaddingStyle(props.position, inset(), {
+            omitSafeArea: surface() === 'chrome',
+          }),
           color: textColor(),
           'font-size': `${fontSize()}px`,
           'line-height': '1.35',

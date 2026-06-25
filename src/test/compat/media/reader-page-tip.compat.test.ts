@@ -4,6 +4,9 @@ import {
   measureReaderPageTipBodyHeightPx,
   readerPageTipBarHeightPx,
   readerPageTipBarVisible,
+  readerPageTipBarVisibleInChrome,
+  readerPageTipBarMountedInChrome,
+  readerPageTipBarVisibleInReader,
   readReaderPageTipBodyClientHeightPx,
   readerPageTipChromeDomMatchesChromeBars,
   readerPageTipChromeMeasureReady,
@@ -19,20 +22,31 @@ const tipsWithHeaderSlots = {
 };
 
 describe('readerPageTipBarVisible follow chrome', () => {
-  it('shows header/footer when chrome visible in follow mode', () => {
+  it('shows header/footer in chrome when chrome visible in follow mode', () => {
     const tips = { ...tipsWithHeaderSlots, headerMode: 'follow' as const, footerMode: 'follow' as const };
+    expect(readerPageTipBarVisibleInChrome('header', tips, true)).toBe(true);
+    expect(readerPageTipBarVisibleInChrome('footer', tips, true)).toBe(true);
+    expect(readerPageTipBarVisibleInReader('header', tips, true)).toBe(false);
+    expect(readerPageTipBarVisibleInReader('footer', tips, true)).toBe(false);
     expect(readerPageTipBarVisible('header', tips, true)).toBe(true);
     expect(readerPageTipBarVisible('footer', tips, true)).toBe(true);
   });
 
-  it('hides header/footer when chrome hidden in follow mode', () => {
+  it('hides header/footer from user when chrome hidden in follow mode', () => {
     const tips = { ...tipsWithHeaderSlots, headerMode: 'follow' as const, footerMode: 'follow' as const };
+    expect(readerPageTipBarMountedInChrome('header', tips)).toBe(true);
+    expect(readerPageTipBarMountedInChrome('footer', tips)).toBe(true);
+    expect(readerPageTipBarVisibleInChrome('header', tips, false)).toBe(false);
+    expect(readerPageTipBarVisibleInChrome('footer', tips, false)).toBe(false);
     expect(readerPageTipBarVisible('header', tips, false)).toBe(false);
     expect(readerPageTipBarVisible('footer', tips, false)).toBe(false);
   });
 
-  it('always mode ignores chrome visibility', () => {
+  it('always mode shows in reader only, not chrome', () => {
     const tips = { ...tipsWithHeaderSlots, headerMode: 'always' as const };
+    expect(readerPageTipBarVisibleInReader('header', tips, false)).toBe(true);
+    expect(readerPageTipBarVisibleInReader('header', tips, true)).toBe(true);
+    expect(readerPageTipBarVisibleInChrome('header', tips, true)).toBe(false);
     expect(readerPageTipBarVisible('header', tips, false)).toBe(true);
     expect(readerPageTipBarVisible('header', tips, true)).toBe(true);
   });
@@ -393,20 +407,19 @@ describe('readerPageTipChromeMeasureReady', () => {
       headerMode: 'follow' as const,
       footerMode: 'never' as const,
     };
-    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(false);
+    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(true);
   });
 });
 
 describe('readerPageTipChromeDomMatchesChromeBars', () => {
-  it('passes when follow header visible regardless of tip-body shrink', () => {
+  it('passes when follow mode and reader has no tip bars', () => {
     const frame = {
       clientHeight: 600,
       getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
     } as HTMLElement;
-    const header = { offsetHeight: 28 } as HTMLElement;
     const tipBody = { clientHeight: 600 } as HTMLElement;
     frame.querySelector = (sel: string) => {
-      if (sel === '.reader-page-tip-header') return header;
+      if (sel === '.reader-page-tip-header') return null;
       if (sel === '.reader-page-tip-footer') return null;
       if (sel === '.reader-page-tip-body') return tipBody;
       return null;
@@ -417,28 +430,7 @@ describe('readerPageTipChromeDomMatchesChromeBars', () => {
       footerMode: 'never' as const,
     };
     expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(true);
-    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(false);
-  });
-
-  it('passes when follow header visible and tip-body shrunk', () => {
-    const frame = {
-      clientHeight: 600,
-      getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
-    } as HTMLElement;
-    const header = { offsetHeight: 28 } as HTMLElement;
-    const tipBody = { clientHeight: 572 } as HTMLElement;
-    frame.querySelector = (sel: string) => {
-      if (sel === '.reader-page-tip-header') return header;
-      if (sel === '.reader-page-tip-footer') return null;
-      if (sel === '.reader-page-tip-body') return tipBody;
-      return null;
-    };
-    const tips = {
-      ...tipsWithHeaderSlots,
-      headerMode: 'follow' as const,
-      footerMode: 'never' as const,
-    };
-    expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(true);
+    expect(readerPageTipChromeMeasureReady(frame, tips, true)).toBe(true);
   });
 
   it('passes when follow chrome hidden and header absent', () => {
@@ -461,7 +453,7 @@ describe('readerPageTipChromeDomMatchesChromeBars', () => {
     expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, false)).toBe(true);
   });
 
-  it('fails when chrome visible but header not in DOM', () => {
+  it('fails when always mode chrome visible but header not in DOM', () => {
     const frame = {
       clientHeight: 600,
       getBoundingClientRect: () => ({ top: 0, bottom: 600, height: 600 }),
@@ -475,7 +467,7 @@ describe('readerPageTipChromeDomMatchesChromeBars', () => {
     };
     const tips = {
       ...tipsWithHeaderSlots,
-      headerMode: 'follow' as const,
+      headerMode: 'always' as const,
       footerMode: 'never' as const,
     };
     expect(readerPageTipChromeDomMatchesChromeBars(frame, tips, true)).toBe(false);

@@ -20,7 +20,7 @@ import {
 } from '@/components/viewer/media-viewer-shell-context';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 
-export type { ViewerChromePlacement } from '@/components/viewer/viewer-chrome';
+export type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 
 export interface MediaViewerShellProps {
   children: JSX.Element;

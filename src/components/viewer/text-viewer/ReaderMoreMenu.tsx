@@ -18,12 +18,8 @@ import {
   AppManualRadioGroup,
   AppManualRadioOption,
 } from '@/components/shared/AppManualRadio';
-import {
-  ViewerAppDropdownMenuContent,
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from '@/components/viewer/viewer-app-overlay';
+import { ViewerAppDropdownMenuContent } from '@/components/viewer/viewer-app-overlay';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { MoreIcon } from '@/components/shared/icons';
 import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
@@ -130,8 +126,8 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   return (
     <>
     <AppDropdownMenu open={open()} onOpenChange={setOpen}>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger as="div">
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
           <AppDropdownMenuTrigger
             as={(triggerProps: Record<string, unknown>) => (
               <AppDropdownMenuIconTrigger
@@ -143,9 +139,9 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
               </AppDropdownMenuIconTrigger>
             )}
           />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>更多</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">更多</AppTooltipContent>
+      </AppTooltip>
       <ViewerAppDropdownMenuContent layout="min" align="end">
         <AppDropdownMenuItem onSelect={props.onOpenSearch}>全书搜索</AppDropdownMenuItem>
         <Show when={props.onOpenDict}>

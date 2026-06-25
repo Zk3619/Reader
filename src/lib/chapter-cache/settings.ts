@@ -32,7 +32,7 @@ const DEFAULTS: ChapterCacheSettings = {
   imageRetainNum: 2,
 };
 
-/** @deprecated v3 字段，仅用于迁移 */
+/** v3 设置迁移专用 */
 type LegacyChapterCacheSettings = Partial<ChapterCacheSettings> & {
   prefetchEnabled?: boolean;
   prefetchCount?: number;

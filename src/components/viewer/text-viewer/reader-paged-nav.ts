@@ -1,3 +1,5 @@
+import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
+
 export type ReaderPagedBookmarkSnapshot = {
   chapterPos: number;
   pageText: string;
@@ -12,6 +14,8 @@ export type ReaderPagedNavApi = {
   setPageProgress: (ratio: number) => void;
   /** 分页模式：当前页正文与章内进度（添加书签时应用，避免 store 滞后） */
   getBookmarkSnapshot: () => ReaderPagedBookmarkSnapshot;
+  /** 页眉/页脚 tip 上下文（跟随顶底栏展示用） */
+  getPageTipContext?: () => ReaderPageTipContext;
   /** 是否还能向下一页/下一章（自动翻页边界） */
   canGoNextPage: () => boolean;
   /** 揭示下一页：progress 0–1；progress=0 重置；progress=1 提交翻页，返回是否成功 */

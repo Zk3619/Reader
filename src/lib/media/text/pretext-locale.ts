@@ -5,6 +5,7 @@
 import { setLocale } from '@chenglou/pretext';
 import type { PrepareOptions } from '@chenglou/pretext';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { readerLetterSpacingPx } from '@/lib/media/text/reader-spacing';
 
 let activeLocale: string | undefined;
 
@@ -23,9 +24,9 @@ export function pretextPrepareOptions(
   if (config.useZhLayout) {
     options.wordBreak = 'keep-all';
   }
-  const letterSpacing = config.spacing.letter;
-  if (Number.isFinite(letterSpacing) && letterSpacing > 0) {
-    options.letterSpacing = letterSpacing;
+  const letterSpacingPx = readerLetterSpacingPx(config.spacing.letter);
+  if (letterSpacingPx != null && letterSpacingPx > 0) {
+    options.letterSpacing = letterSpacingPx;
   }
   return options;
 }

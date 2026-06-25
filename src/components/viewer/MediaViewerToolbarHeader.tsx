@@ -3,11 +3,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import { Separator } from '@/components/ui/separator';
-import {
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from '@/components/viewer/viewer-app-overlay';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   ChevronLeftIcon,
   DownloadIcon,
@@ -57,8 +53,8 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
   const clusterClass = () => floating.clusterClass();
 
   const closeButton = () => (
-    <ViewerAppTooltip>
-      <ViewerAppTooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -67,17 +63,17 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
         aria-label="关闭"
       >
         <ChevronLeftIcon class="h-5 w-5" />
-      </ViewerAppTooltipTrigger>
-      <ViewerAppTooltipContent>关闭</ViewerAppTooltipContent>
-    </ViewerAppTooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent layer="viewer">关闭</AppTooltipContent>
+    </AppTooltip>
   );
 
   const titleHeadingClass = () => cn('truncate text-sm font-medium');
 
   const catalogButton = () => (
     <Show when={props.onOpenCatalog}>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -86,9 +82,9 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
           aria-label="目录"
         >
           <ListIcon class="h-5 w-5" />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>目录</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">目录</AppTooltipContent>
+      </AppTooltip>
     </Show>
   );
 
@@ -101,8 +97,8 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
         when={props.onOpenBookInfo}
         fallback={<h1 class={titleHeadingClass()}>{props.title || '—'}</h1>}
       >
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as="button"
             type="button"
             class={cn(
@@ -113,9 +109,9 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="进入书籍信息页"
           >
             {props.title || '—'}
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">书籍信息</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.subtitle}>
         <p class="truncate text-xs text-muted-foreground">{props.subtitle}</p>
@@ -126,8 +122,8 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
   const actionButtons = () => (
     <>
       <Show when={props.onOpenImageSettings}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -136,13 +132,13 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="界面设置"
           >
             <Settings2Icon class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>界面设置</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">界面设置</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onRetryFailedImages}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -152,13 +148,13 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="重试失败图片"
           >
             <ImageUp class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>重试失败图片</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">重试失败图片</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onRefresh}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -168,13 +164,13 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="刷新章节"
           >
             <RefreshIcon class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>刷新章节</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">刷新章节</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onOpenSpeed}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -183,15 +179,15 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="播放速度"
           >
             <Gauge class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">
             {props.playbackSpeedLabel ?? '播放速度'}
-          </ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onToggleFullscreen}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -202,15 +198,15 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             <Show when={props.isFullscreen} fallback={<Maximize class="h-5 w-5" />}>
               <Minimize class="h-5 w-5" />
             </Show>
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">
             {props.isFullscreen ? '退出全屏' : '全屏'}
-          </ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onOpenVideoSettings}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -219,13 +215,13 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="视频设置"
           >
             <Settings class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>视频设置</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">视频设置</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.onOpenOfflineCache}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -234,9 +230,9 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
             aria-label="离线缓存"
           >
             <DownloadIcon class="h-5 w-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">离线缓存</AppTooltipContent>
+        </AppTooltip>
       </Show>
     </>
   );

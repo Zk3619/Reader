@@ -4,7 +4,7 @@ import {
   getAudioPlayConfig,
   normalizePlayMode,
 } from '@/lib/media/audio/book-audio-config';
-import { parseAudioUrls, parseParsedAudioUrls } from '@/lib/media/audio/parse-audio-urls';
+import { parseAudioUrlStrings, parseParsedAudioUrls } from '@/lib/media/audio/parse-audio-urls';
 import {
   findPlayableChapterIndex,
   resolveNextChapterIndex,
@@ -14,7 +14,7 @@ import { AudioPlayMode } from '@/lib/media/audio/types';
 describe('audio play (Legado compat)', () => {
   it('parses JSON array audio urls', () => {
     const raw = '["https://a.com/1.mp3","https://a.com/2.mp3"]';
-    expect(parseAudioUrls(raw)).toEqual(['https://a.com/1.mp3', 'https://a.com/2.mp3']);
+    expect(parseAudioUrlStrings(raw)).toEqual(['https://a.com/1.mp3', 'https://a.com/2.mp3']);
   });
 
   it('parses JSON object with url field (聚合听书)', () => {

@@ -45,11 +45,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import {
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from '@/components/viewer/viewer-app-overlay';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   getAudioPlayConfig,
@@ -391,19 +387,19 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
                 </div>
 
                 <div class="flex items-center gap-3">
-                  <ViewerAppTooltip>
-                    <ViewerAppTooltipTrigger as="div">
+                  <AppTooltip>
+                    <AppTooltipTrigger as="div">
                       <MultiSwitch<AudioPlayMode>
                         options={PLAY_MODE_OPTIONS}
                         value={() => audioConfig().playMode}
                         onChange={(mode) => void patchBookConfig({ playMode: mode })}
                         sizeClass="h-9 w-9"
                       />
-                    </ViewerAppTooltipTrigger>
-                    <ViewerAppTooltipContent>
+                    </AppTooltipTrigger>
+                    <AppTooltipContent layer="viewer">
                       {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
-                    </ViewerAppTooltipContent>
-                  </ViewerAppTooltip>
+                    </AppTooltipContent>
+                  </AppTooltip>
 
                   <Button
                     variant="ghost"

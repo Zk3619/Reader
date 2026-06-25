@@ -933,6 +933,27 @@
   opacity: 1 !important;
 }
 
+/** 双栏 spread：排版完成前 interim 正文须可见（避免 opacity:0 白屏；页眉页脚常显时尤甚） */
+.reader-paged-viewport[data-dual-page]
+  .reader-paged-page-span-clip
+  > .reader-paged-live-inner.reader-paged-dual-spread:not(.reader-paged-live-suppressed)
+  .reader-body,
+.reader-paged-viewport[data-dual-page]
+  .reader-paged-page-span-clip
+  > .reader-paged-live-inner.reader-paged-dual-spread:not(.reader-paged-live-suppressed)
+  .reader-content {
+  opacity: 1 !important;
+}
+
+.reader-paged-viewport[data-dual-page].is-live-content-revealing
+  .reader-paged-dual-spread
+  .reader-body,
+.reader-paged-viewport[data-dual-page].is-live-content-revealed
+  .reader-paged-dual-spread
+  .reader-body {
+  opacity: 1;
+}
+
 /** 跨章拖拽未过门槛：staging 已预挂但保持隐藏，避免 Solid 反复挂载 */
 .reader-paged-incoming-inner.reader-paged-incoming-drag-held {
   visibility: hidden !important;
@@ -1047,6 +1068,15 @@
 .reader-paged-page-span-clip .reader-paged-live-inner {
   height: auto !important;
   min-height: 0 !important;
+}
+
+/**
+ * 双栏 spread 的左右 pane 为 absolute inset-y-0；若 live-inner 保持 height:auto 会塌缩为 0，
+ * 页眉页脚常显时 tip-body 有高度但正文带仍被 overflow:hidden 裁成白屏。
+ */
+.reader-paged-page-span-clip .reader-paged-live-inner.reader-paged-dual-spread {
+  height: 100% !important;
+  min-height: 100% !important;
 }
 
 .reader-paged-page-span-clip .reader-content {
@@ -2053,12 +2083,6 @@ body.reader-inner-web-session--drawer {
 
 /** 滚动视口内上下留白：桌面 py-2；触摸端底边 max(py-2, 安全区) */
 .app-scroll-edge-inset {
-  padding-top: 0.5rem;
-  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective, 0px));
-}
-
-/** @deprecated 使用 .app-scroll-edge-inset */
-.app-scroll-bottom-inset {
   padding-top: 0.5rem;
   padding-bottom: max(0.5rem, var(--safe-area-bottom-effective, 0px));
 }

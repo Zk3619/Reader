@@ -41,6 +41,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
       style={{ 'background-color': pageBg() }}
     >
       <ReaderPageTipBar
+        surface="reader"
         position="header"
         tips={props.tips}
         context={props.context}
@@ -55,6 +56,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
         {props.children}
       </div>
       <ReaderPageTipBar
+        surface="reader"
         position="footer"
         tips={props.tips}
         context={props.context}

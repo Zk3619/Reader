@@ -23,6 +23,7 @@ import { getAllHttpTTS } from '@/lib/database/http-tts';
 import type { HttpTTS } from '@/types';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
+import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -49,11 +50,6 @@ import {
   TEXT_VIEWER_PAGE_ANIM_OPTIONS,
   isTextViewerPagedAnim,
 } from '@/lib/media/text/text-viewer-page-anim';
-import {
-  pagedLayoutCacheHit,
-  pagedLayoutEngine,
-  pagedLayoutPrefetchStatus,
-} from '@/lib/media/text/reader-paged-layout-debug';
 import { clearChapterLayoutCache } from '@/lib/media/text/reader-chapter-layout-cache';
 import {
   READER_THEME_IDS,
@@ -147,6 +143,20 @@ export function ReaderSettings(props: ReaderSettingsProps) {
   const dualPageMiddleVisible = () =>
     isTextViewerPagedAnim(config().pageAnim) && config().dualPage !== 'off';
 
+  const remDialogValue = (rem: number, unit: 'px' | 'rem') =>
+    unit === 'rem' ? rem : remToPx(rem);
+
+  const applyRemDialog = (setter: (rem: number) => void) => (value: number, unit: 'px' | 'rem') => {
+    setter(unit === 'rem' ? value : pxToRem(value));
+  };
+
+  const pxDialogValue = (px: number, unit: 'px' | 'rem') =>
+    unit === 'px' ? px : pxToRem(px);
+
+  const applyPxDialog = (setter: (px: number) => void) => (value: number, unit: 'px' | 'rem') => {
+    setter(unit === 'px' ? value : remToPx(value));
+  };
+
   return (
     <div class="flex w-full min-w-0 flex-col gap-6 pt-4 pb-2">
       <div class="space-y-3">
@@ -212,74 +222,39 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             </For>
           </TabsList>
         </Tabs>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">标题字号增量</Label>
-            <span class="text-sm text-muted-foreground">
-              {formatRem(config().chapterTitleSize ?? 0)}
-            </span>
-          </div>
-          <Slider
-            value={[config().chapterTitleSize ?? 0]}
-            minValue={0}
-            maxValue={1.5}
-            step={0.0625}
-            onChange={(values: number[]) =>
-              setConfig({ chapterTitleSize: values[0] ?? config().chapterTitleSize ?? 0 })
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">标题上间距</Label>
-            <span class="text-sm text-muted-foreground">
-              {formatRem(config().chapterTitleTopSpacing ?? 0)}
-            </span>
-          </div>
-          <Slider
-            value={[config().chapterTitleTopSpacing ?? 0]}
-            minValue={0}
-            maxValue={3}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setConfig({ chapterTitleTopSpacing: values[0] ?? config().chapterTitleTopSpacing ?? 0 })
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">标题下间距</Label>
-            <span class="text-sm text-muted-foreground">
-              {formatRem(config().chapterTitleBottomSpacing ?? 0)}
-            </span>
-          </div>
-          <Slider
-            value={[config().chapterTitleBottomSpacing ?? 0]}
-            minValue={0}
-            maxValue={3}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setConfig({
-                chapterTitleBottomSpacing: values[0] ?? config().chapterTitleBottomSpacing ?? 0,
-              })
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
+        <ReaderRemSliderRow
+          label="标题字号增量"
+          valueLabel={formatRem(config().chapterTitleSize ?? 0)}
+          sliderValue={config().chapterTitleSize ?? 0}
+          minValue={0}
+          maxValue={1.5}
+          step={0.0625}
+          onSliderChange={(v) => setConfig({ chapterTitleSize: v })}
+          getDialogValue={(unit) => remDialogValue(config().chapterTitleSize ?? 0, unit)}
+          onDialogApply={applyRemDialog((v) => setConfig({ chapterTitleSize: v }))}
+        />
+        <ReaderRemSliderRow
+          label="标题上间距"
+          valueLabel={formatRem(config().chapterTitleTopSpacing ?? 0)}
+          sliderValue={config().chapterTitleTopSpacing ?? 0}
+          minValue={0}
+          maxValue={3}
+          step={0.125}
+          onSliderChange={(v) => setConfig({ chapterTitleTopSpacing: v })}
+          getDialogValue={(unit) => remDialogValue(config().chapterTitleTopSpacing ?? 0, unit)}
+          onDialogApply={applyRemDialog((v) => setConfig({ chapterTitleTopSpacing: v }))}
+        />
+        <ReaderRemSliderRow
+          label="标题下间距"
+          valueLabel={formatRem(config().chapterTitleBottomSpacing ?? 0)}
+          sliderValue={config().chapterTitleBottomSpacing ?? 0}
+          minValue={0}
+          maxValue={3}
+          step={0.125}
+          onSliderChange={(v) => setConfig({ chapterTitleBottomSpacing: v })}
+          getDialogValue={(unit) => remDialogValue(config().chapterTitleBottomSpacing ?? 0, unit)}
+          onDialogApply={applyRemDialog((v) => setConfig({ chapterTitleBottomSpacing: v }))}
+        />
         <div class="space-y-2">
           <div class="flex items-center justify-between">
             <Label class="text-sm font-normal">标题字重</Label>
@@ -362,26 +337,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       </div>
 
       {/* 字体大小 */}
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>字体大小</Label>
-          <span class="text-sm text-muted-foreground">{formatRemFromPx(config().fontSize)}</span>
-        </div>
-        <Slider
-          value={[pxToRem(config().fontSize)]}
-          minValue={0.75}
-          maxValue={2}
-          step={0.0625}
-          onChange={(values: number[]) =>
-            setConfig({ fontSize: remToPx(values[0] ?? pxToRem(config().fontSize)) })
-          }
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="字体大小"
+        valueLabel={formatRemFromPx(config().fontSize)}
+        sliderValue={pxToRem(config().fontSize)}
+        minValue={0.75}
+        maxValue={2}
+        step={0.0625}
+        onSliderChange={(v) => setConfig({ fontSize: remToPx(v) })}
+        getDialogValue={(unit) => pxDialogValue(config().fontSize, unit)}
+        onDialogApply={applyPxDialog((v) => setConfig({ fontSize: v }))}
+      />
 
       {/* 字重 */}
       <div class="space-y-2">
@@ -405,65 +371,41 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Slider>
       </div>
 
-      {/* 行距 */}
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>行距</Label>
-          <span class="text-sm text-muted-foreground">{config().spacing.line.toFixed(1)}</span>
-        </div>
-        <Slider
-          value={[config().spacing.line]}
-          minValue={0.5}
-          maxValue={2.5}
-          step={0.1}
-          onChange={(values: number[]) => setSpacing('line', values[0] ?? config().spacing.line)}
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="行距"
+        valueLabel={formatRem(config().spacing.line)}
+        sliderValue={config().spacing.line}
+        minValue={0.5}
+        maxValue={2.5}
+        step={0.1}
+        onSliderChange={(v) => setSpacing('line', v)}
+        getDialogValue={(unit) => remDialogValue(config().spacing.line, unit)}
+        onDialogApply={applyRemDialog((v) => setSpacing('line', v))}
+      />
 
-      {/* 字间距 */}
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>字间距</Label>
-          <span class="text-sm text-muted-foreground">{config().spacing.letter.toFixed(2)}em</span>
-        </div>
-        <Slider
-          value={[config().spacing.letter]}
-          minValue={0}
-          maxValue={0.2}
-          step={0.01}
-          onChange={(values: number[]) => setSpacing('letter', values[0] ?? config().spacing.letter)}
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="字间距"
+        valueLabel={formatRem(config().spacing.letter)}
+        sliderValue={config().spacing.letter}
+        minValue={0}
+        maxValue={0.2}
+        step={0.01}
+        onSliderChange={(v) => setSpacing('letter', v)}
+        getDialogValue={(unit) => remDialogValue(config().spacing.letter, unit)}
+        onDialogApply={applyRemDialog((v) => setSpacing('letter', v))}
+      />
 
-      {/* 段距 */}
-      <div class="space-y-2">
-        <div class="flex items-center justify-between">
-          <Label>段距</Label>
-          <span class="text-sm text-muted-foreground">{config().spacing.paragraph.toFixed(1)}em</span>
-        </div>
-        <Slider
-          value={[config().spacing.paragraph]}
-          minValue={0}
-          maxValue={2}
-          step={0.1}
-          onChange={(values: number[]) => setSpacing('paragraph', values[0] ?? config().spacing.paragraph)}
-        >
-          <SliderTrack>
-            <SliderFill />
-            <SliderThumb />
-          </SliderTrack>
-        </Slider>
-      </div>
+      <ReaderRemSliderRow
+        label="段距"
+        valueLabel={formatRem(config().spacing.paragraph)}
+        sliderValue={config().spacing.paragraph}
+        minValue={0}
+        maxValue={2}
+        step={0.1}
+        onSliderChange={(v) => setSpacing('paragraph', v)}
+        getDialogValue={(unit) => remDialogValue(config().spacing.paragraph, unit)}
+        onDialogApply={applyRemDialog((v) => setSpacing('paragraph', v))}
+      />
 
       {/* 段首缩进 */}
       <div class="space-y-2">
@@ -491,26 +433,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
 
       {/* 阅读宽度：窄屏+移动端不显示 */}
       <Show when={props.showReadWidth?.() ?? true}>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label>阅读宽度</Label>
-            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().readWidth)}</span>
-          </div>
-          <Slider
-            value={[pxToRem(config().readWidth)]}
-            minValue={25}
-            maxValue={75}
-            step={0.5}
-            onChange={(values: number[]) =>
-              setConfig({ readWidth: remToPx(values[0] ?? pxToRem(config().readWidth)) })
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
+        <ReaderRemSliderRow
+          label="阅读宽度"
+          valueLabel={formatRemFromPx(config().readWidth)}
+          sliderValue={pxToRem(config().readWidth)}
+          minValue={25}
+          maxValue={75}
+          step={0.5}
+          onSliderChange={(v) => setConfig({ readWidth: remToPx(v) })}
+          getDialogValue={(unit) => pxDialogValue(config().readWidth, unit)}
+          onDialogApply={applyPxDialog((v) => setConfig({ readWidth: v }))}
+        />
       </Show>
 
       {/* 边距：正文与视口/列边界留白 */}
@@ -521,107 +454,62 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             四边间距由 content-slot 统一控制；按页双页阅读时可设置列间中心间距。
           </p>
         </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">左侧</Label>
-            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.left)}</span>
-          </div>
-          <Slider
-            value={[pxToRem(config().contentInset.left)]}
-            minValue={0}
-            maxValue={12.5}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setContentInset('left', remToPx(values[0] ?? pxToRem(config().contentInset.left)))
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">右侧</Label>
-            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.right)}</span>
-          </div>
-          <Slider
-            value={[pxToRem(config().contentInset.right)]}
-            minValue={0}
-            maxValue={12.5}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setContentInset('right', remToPx(values[0] ?? pxToRem(config().contentInset.right)))
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">顶部</Label>
-            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.top)}</span>
-          </div>
-          <Slider
-            value={[pxToRem(config().contentInset.top)]}
-            minValue={0}
-            maxValue={7.5}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setContentInset('top', remToPx(values[0] ?? pxToRem(config().contentInset.top)))
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <Label class="text-sm font-normal">底部</Label>
-            <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.bottom)}</span>
-          </div>
-          <Slider
-            value={[pxToRem(config().contentInset.bottom)]}
-            minValue={0}
-            maxValue={7.5}
-            step={0.125}
-            onChange={(values: number[]) =>
-              setContentInset('bottom', remToPx(values[0] ?? pxToRem(config().contentInset.bottom)))
-            }
-          >
-            <SliderTrack>
-              <SliderFill />
-              <SliderThumb />
-            </SliderTrack>
-          </Slider>
-        </div>
+        <ReaderRemSliderRow
+          label="左侧"
+          valueLabel={formatRemFromPx(config().contentInset.left)}
+          sliderValue={pxToRem(config().contentInset.left)}
+          minValue={0}
+          maxValue={12.5}
+          step={0.125}
+          onSliderChange={(v) => setContentInset('left', remToPx(v))}
+          getDialogValue={(unit) => pxDialogValue(config().contentInset.left, unit)}
+          onDialogApply={applyPxDialog((v) => setContentInset('left', v))}
+        />
+        <ReaderRemSliderRow
+          label="右侧"
+          valueLabel={formatRemFromPx(config().contentInset.right)}
+          sliderValue={pxToRem(config().contentInset.right)}
+          minValue={0}
+          maxValue={12.5}
+          step={0.125}
+          onSliderChange={(v) => setContentInset('right', remToPx(v))}
+          getDialogValue={(unit) => pxDialogValue(config().contentInset.right, unit)}
+          onDialogApply={applyPxDialog((v) => setContentInset('right', v))}
+        />
+        <ReaderRemSliderRow
+          label="顶部"
+          valueLabel={formatRemFromPx(config().contentInset.top)}
+          sliderValue={pxToRem(config().contentInset.top)}
+          minValue={0}
+          maxValue={7.5}
+          step={0.125}
+          onSliderChange={(v) => setContentInset('top', remToPx(v))}
+          getDialogValue={(unit) => pxDialogValue(config().contentInset.top, unit)}
+          onDialogApply={applyPxDialog((v) => setContentInset('top', v))}
+        />
+        <ReaderRemSliderRow
+          label="底部"
+          valueLabel={formatRemFromPx(config().contentInset.bottom)}
+          sliderValue={pxToRem(config().contentInset.bottom)}
+          minValue={0}
+          maxValue={7.5}
+          step={0.125}
+          onSliderChange={(v) => setContentInset('bottom', remToPx(v))}
+          getDialogValue={(unit) => pxDialogValue(config().contentInset.bottom, unit)}
+          onDialogApply={applyPxDialog((v) => setContentInset('bottom', v))}
+        />
         <Show when={dualPageMiddleVisible()}>
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
-              <Label class="text-sm font-normal">中心间距</Label>
-              <span class="text-sm text-muted-foreground">{formatRemFromPx(config().contentInset.center)}</span>
-            </div>
-            <Slider
-              value={[pxToRem(config().contentInset.center)]}
+            <ReaderRemSliderRow
+              label="中心间距"
+              valueLabel={formatRemFromPx(config().contentInset.center)}
+              sliderValue={pxToRem(config().contentInset.center)}
               minValue={0}
               maxValue={25}
               step={0.125}
-              onChange={(values: number[]) =>
-                setContentInset('center', remToPx(values[0] ?? pxToRem(config().contentInset.center)))
-              }
-            >
-              <SliderTrack>
-                <SliderFill />
-                <SliderThumb />
-              </SliderTrack>
-            </Slider>
-          </div>
+              onSliderChange={(v) => setContentInset('center', remToPx(v))}
+              getDialogValue={(unit) => pxDialogValue(config().contentInset.center, unit)}
+              onDialogApply={applyPxDialog((v) => setContentInset('center', v))}
+            />
         </Show>
       </div>
 
@@ -893,26 +781,6 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </div>
       </Show>
 
-
-      {/* 分页引擎（调试） */}
-      <Show when={isTextViewerPagedAnim(config().pageAnim)}>
-        <div class="space-y-2 rounded-lg border border-dashed border-muted-foreground/40 px-3 py-2">
-          <Label class="text-muted-foreground">分页引擎（调试）</Label>
-          <p class="text-sm font-medium tabular-nums">
-            {pagedLayoutEngine() === 'idle' ? '—' : pagedLayoutEngine()}
-            <Show when={pagedLayoutCacheHit()}>
-              <span class="ml-2 text-xs font-normal text-muted-foreground">缓存命中</span>
-            </Show>
-          </p>
-          <Show when={pagedLayoutPrefetchStatus()}>
-            <p class="text-xs text-muted-foreground">{pagedLayoutPrefetchStatus()}</p>
-          </Show>
-          <p class="text-xs text-muted-foreground">
-            canvas：纯文本 Canvas 预排；dom：HTML/插图 DOM 测量；canvas+dom：Canvas 初算后经 DOM 精修。
-            正文预下载见设置页「阅读体验」；全局容量与清理见设置页「章节正文缓存」。
-          </p>
-        </div>
-      </Show>
 
       {/* 恢复默认 */}
       <Button

@@ -39,26 +39,32 @@ export function ReaderPageTipChrome(props: ReaderPageTipChromeProps) {
         'background-color': readerThemePalette(props.themeId).bg,
       }}
     >
-      <ReaderPageTipBar
-        position="header"
-        tips={props.tips}
-        context={props.context}
-        chromeBarsVisible={props.chromeBarsVisible}
-        contentColor={contentColor()}
-      />
+      <div class="reader-page-tip-header-slot min-h-0 shrink-0 [grid-row:1]">
+        <ReaderPageTipBar
+          surface="reader"
+          position="header"
+          tips={props.tips}
+          context={props.context}
+          chromeBarsVisible={props.chromeBarsVisible}
+          contentColor={contentColor()}
+        />
+      </div>
       <div
         ref={props.bodyRef}
-        class="reader-page-tip-body relative flex min-h-0 flex-col overflow-hidden overflow-x-clip"
+        class="reader-page-tip-body relative flex min-h-0 min-w-0 flex-col overflow-hidden overflow-x-clip [grid-row:2]"
       >
         {props.children}
       </div>
-      <ReaderPageTipBar
-        position="footer"
-        tips={props.tips}
-        context={props.context}
-        chromeBarsVisible={props.chromeBarsVisible}
-        contentColor={contentColor()}
-      />
+      <div class="reader-page-tip-footer-slot min-h-0 shrink-0 [grid-row:3]">
+        <ReaderPageTipBar
+          surface="reader"
+          position="footer"
+          tips={props.tips}
+          context={props.context}
+          chromeBarsVisible={props.chromeBarsVisible}
+          contentColor={contentColor()}
+        />
+      </div>
     </div>
   );
 }

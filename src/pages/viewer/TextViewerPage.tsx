@@ -104,6 +104,7 @@ import { useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewe
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
 import { TextViewerChapterSourceBar } from '@/components/viewer/text-viewer/TextViewerChapterSourceBar';
 import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
+import { TextViewerChromePageTip } from '@/components/viewer/text-viewer/TextViewerChromePageTip';
 import { ReaderAutoPageOverlay } from '@/components/viewer/text-viewer/ReaderAutoPageOverlay';
 import { useTextViewerAutoPager } from '@/lib/media/text/use-text-viewer-auto-pager';
 import { normalizeAutoReadSpeed } from '@/lib/media/text/text-viewer-auto-pager';
@@ -914,6 +915,14 @@ export function BookReader(props: BookReaderProps) {
     };
   };
 
+  const pageTipContext = (): ReaderPageTipContext => {
+    if (isPagedMode()) {
+      const ctx = pagedNav?.getPageTipContext?.();
+      if (ctx) return ctx;
+    }
+    return scrollPageTipContext();
+  };
+
   const readerContentShared = {
     onOpenComments: openComments,
     getSegmentCommentCount,
@@ -1000,6 +1009,15 @@ export function BookReader(props: BookReaderProps) {
                       onSourceVariables={props.onSourceVariables}
                     />
                   }
+                  bottomSlot={
+                    <TextViewerChromePageTip
+                      position="header"
+                      tips={textViewerStore.state.config.pageTips}
+                      context={pageTipContext()}
+                      chromeBarsVisible={chromeBarsVisible()}
+                      themeId={textViewerStore.state.config.theme}
+                    />
+                  }
                 >
                   <TextViewerToolbarHeader
                     bookName={book()?.name ?? ''}
@@ -1034,6 +1052,13 @@ export function BookReader(props: BookReaderProps) {
               }
               footer={
                 <MediaViewerFooter>
+                  <TextViewerChromePageTip
+                    position="footer"
+                    tips={textViewerStore.state.config.pageTips}
+                    context={pageTipContext()}
+                    chromeBarsVisible={chromeBarsVisible()}
+                    themeId={textViewerStore.state.config.theme}
+                  />
                   <TextViewerBottomChrome
                     isWideScreen={isWideScreen()}
                     bottomBarThemeClasses={bottomBarThemeClasses()}

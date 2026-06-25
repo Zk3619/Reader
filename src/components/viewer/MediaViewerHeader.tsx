@@ -13,6 +13,8 @@ export interface MediaViewerHeaderProps {
   children: JSX.Element;
   /** 主工具栏下方的附加行（如文本阅读器章节/书源栏） */
   subHeader?: JSX.Element;
+  /** 顶栏最下方附加行（如跟随顶栏的页眉） */
+  bottomSlot?: JSX.Element;
   /** 覆盖应用设置中的布局（一般无需指定） */
   layout?: ViewerChromeLayout;
   visible?: boolean;
@@ -20,7 +22,7 @@ export interface MediaViewerHeaderProps {
 }
 
 export function MediaViewerHeader(props: MediaViewerHeaderProps) {
-  const [local] = splitProps(props, ['children', 'subHeader', 'layout', 'visible', 'class']);
+  const [local] = splitProps(props, ['children', 'subHeader', 'bottomSlot', 'layout', 'visible', 'class']);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
   const layout = () => local.layout ?? chromeLayout();
@@ -49,6 +51,7 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
     <>
       {toolbarRow()}
       <Show when={local.subHeader}>{local.subHeader}</Show>
+      <Show when={local.bottomSlot}>{local.bottomSlot}</Show>
     </>
   );
 

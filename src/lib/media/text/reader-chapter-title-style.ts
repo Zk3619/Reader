@@ -1,5 +1,9 @@
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import { remToPx } from '@/lib/media/text/reader-rem';
+import {
+  readerLineHeightPx,
+  readerParagraphMarginPx,
+} from '@/lib/media/text/reader-spacing';
 
 /** 章节标题在阅读视图中的渲染方式 */
 export type TextViewerChapterTitleStyle = 'none' | 'left' | 'center' | 'right';
@@ -67,9 +71,9 @@ export function readerChapterTitleSpacingPx(
 
   const extra = titleExtraPx(config);
   const { fontSize, spacing } = config;
-  const lineFactor = spacing.line + 1;
-  const paragraphFactor = Math.max(0.35, spacing.paragraph + 0.35);
-  const letterFactor = 1 + spacing.letter * 0.35;
+  const lineFactor = readerLineHeightPx(fontSize, spacing.line) / fontSize;
+  const paragraphFactor = Math.max(0.35, readerParagraphMarginPx(spacing.paragraph) / fontSize + 0.35);
+  const letterFactor = 1 + remToPx(spacing.letter) / fontSize * 0.35;
   const rhythm = fontSize * lineFactor * paragraphFactor * letterFactor;
 
   const bottomGap = Math.max(fontSize * 0.45, rhythm * 0.55);

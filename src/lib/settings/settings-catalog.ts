@@ -65,6 +65,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['减少动效', '动画', '过渡', '动效', '性能'],
   },
   {
+    id: 'show-tooltips',
+    categoryId: 'appearance',
+    title: '显示工具提示',
+    description: '按钮与控件悬停时显示说明文字',
+    keywords: ['工具提示', 'tooltip', '悬停', '提示', '说明'],
+  },
+  {
     id: 'shell-layout',
     categoryId: 'appearance',
     title: '导航布局',

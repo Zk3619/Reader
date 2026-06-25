@@ -11,7 +11,7 @@ import {
   chapterLayoutCacheSize,
 } from '@/lib/media/text/reader-chapter-layout-cache';
 import { layoutReaderChapter, isChapterLayoutCompleteForContent, layoutPrefersDomForTipChrome } from '@/lib/media/text/reader-chapter-layout';
-import { layoutPlainTextChapterCanvas } from '@/lib/media/text/canvas-text-chapter-layout';
+import { layoutChapterFromPretext } from '@/lib/media/text/pretext-chapter-layout';
 import {
   buildChapterLayoutCacheKey,
   buildContentRevision,
@@ -261,9 +261,9 @@ describe('isChapterLayoutCompleteForContent', () => {
   });
 });
 
-describe('layoutPlainTextChapterCanvas', () => {
+describe('layoutChapterFromPretext', () => {
   it('returns pretext chapter layout with at least one page', () => {
-    const layout = layoutPlainTextChapterCanvas({
+    const layout = layoutChapterFromPretext({
       chapterIndex: 0,
       raw: '第一章\n\n' + '正文内容。'.repeat(200),
       viewportWidth: 360,
@@ -273,9 +273,10 @@ describe('layoutPlainTextChapterCanvas', () => {
       clipHeightPx: 500,
       horizontalInsetOnSlot: true,
     });
-    expect(layout.engine).toBe('pretext');
-    expect(layout.pageStarts[0]).toBe(0);
-    expect(layout.pages.length).toBe(layout.pageStarts.length);
-    expect(layout.pages[0]!.displayHeight).toBeGreaterThan(0);
+    expect(layout).not.toBeNull();
+    expect(layout!.engine).toBe('pretext');
+    expect(layout!.pageStarts[0]).toBe(0);
+    expect(layout!.pages.length).toBe(layout!.pageStarts.length);
+    expect(layout!.pages[0]!.displayHeight).toBeGreaterThan(0);
   });
 });

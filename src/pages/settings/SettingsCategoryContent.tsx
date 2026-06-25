@@ -69,6 +69,28 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
           </div>
         </SettingItemAnchor>
 
+        <SettingItemAnchor id="show-tooltips" highlighted={highlight('show-tooltips')}>
+          <div class="rounded-2xl border border-border/50 bg-card p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div class="space-y-0.5">
+                <h3 class="font-semibold text-foreground">显示工具提示</h3>
+                <p class="text-sm text-muted-foreground">
+                  关闭后，全应用按钮与控件的悬停说明将不再显示
+                </p>
+              </div>
+              <UiSwitch
+                checked={settingsStore.state.app.showTooltips !== false}
+                onChange={(v: boolean) => void settingsStore.setShowTooltips(!!v)}
+              >
+                <SwitchControl class="data-disabled:cursor-not-allowed">
+                  <SwitchThumb />
+                </SwitchControl>
+                <SwitchLabel class="sr-only">显示工具提示</SwitchLabel>
+              </UiSwitch>
+            </div>
+          </div>
+        </SettingItemAnchor>
+
         <SettingItemAnchor id="shell-layout" highlighted={highlight('shell-layout')}>
           <ShellLayoutSetting />
         </SettingItemAnchor>

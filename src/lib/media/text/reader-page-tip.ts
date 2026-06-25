@@ -20,8 +20,9 @@ export function readerPageTipSafeInsetPx(position: 'header' | 'footer'): number 
 export function readerPageTipBarEdgePaddingStyle(
   position: 'header' | 'footer',
   inset: TextViewerPageTipInsets,
+  options?: { omitSafeArea?: boolean },
 ): Record<string, string> {
-  const mobile = isMobile();
+  const mobile = isMobile() && !options?.omitSafeArea;
   return {
     'padding-left': `${inset.left}px`,
     'padding-right': `${inset.right}px`,
@@ -201,35 +202,78 @@ export function readerPageTipSlotValue(
   return tips[slot] ?? 'none';
 }
 
+export type ReaderPageTipBarSurface = 'reader' | 'chrome';
+
+function tipBarHasSlotContent(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+): boolean {
+  const slots: TipSlotKey[] =
+    position === 'header'
+      ? ['headerLeft', 'headerMiddle', 'headerRight']
+      : ['footerLeft', 'footerMiddle', 'footerRight'];
+  return slots.some((s) => readerPageTipSlotValue(tips, s) !== 'none');
+}
+
+/** 阅读器内页眉/页脚：仅「始终显示」模式 */
+export function readerPageTipBarVisibleInReader(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+  _chromeBarsVisible: boolean,
+): boolean {
+  const mode = position === 'header' ? tips.headerMode : tips.footerMode;
+  if (mode !== 'always') return false;
+  return tipBarHasSlotContent(position, tips);
+}
+
+/** 跟随模式且有条目：应挂载在顶/底栏内（显隐由 chrome 壳层动画负责，勿随 chromeBarsVisible 卸载） */
+export function readerPageTipBarMountedInChrome(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+): boolean {
+  const mode = position === 'header' ? tips.headerMode : tips.footerMode;
+  if (mode !== 'follow') return false;
+  return tipBarHasSlotContent(position, tips);
+}
+
+/** 顶/底操作栏内页眉/页脚：跟随模式且操作栏当前可见 */
+export function readerPageTipBarVisibleInChrome(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+): boolean {
+  return readerPageTipBarMountedInChrome(position, tips) && chromeBarsVisible;
+}
+
 export function readerPageTipBarVisible(
   position: 'header' | 'footer',
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
 ): boolean {
-  if (position === 'header') {
-    if (tips.headerMode === 'never') return false;
-    // 跟随顶栏：顶栏显示时页眉显示在其下方；沉浸（顶栏隐藏）时隐藏页眉
-    if (tips.headerMode === 'follow' && !chromeBarsVisible) return false;
-  } else {
-    if (tips.footerMode === 'never') return false;
-    // 跟随底栏：底栏显示时页脚显示在其上方；沉浸时隐藏页脚
-    if (tips.footerMode === 'follow' && !chromeBarsVisible) return false;
-  }
+  return (
+    readerPageTipBarVisibleInReader(position, tips, chromeBarsVisible) ||
+    readerPageTipBarVisibleInChrome(position, tips, chromeBarsVisible)
+  );
+}
 
-  const slots: TipSlotKey[] =
-    position === 'header'
-      ? ['headerLeft', 'headerMiddle', 'headerRight']
-      : ['footerLeft', 'footerMiddle', 'footerRight'];
-
-  return slots.some((s) => readerPageTipSlotValue(tips, s) !== 'none');
+export function readerPageTipBarVisibleOnSurface(
+  position: 'header' | 'footer',
+  tips: TextViewerPageTipsConfig,
+  chromeBarsVisible: boolean,
+  surface: ReaderPageTipBarSurface,
+): boolean {
+  return surface === 'reader'
+    ? readerPageTipBarVisibleInReader(position, tips, chromeBarsVisible)
+    : readerPageTipBarMountedInChrome(position, tips);
 }
 
 export function readerPageTipBarHeightPx(
   position: 'header' | 'footer',
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
+  surface: ReaderPageTipBarSurface = 'reader',
 ): number {
-  if (!readerPageTipBarVisible(position, tips, chromeBarsVisible)) return 0;
+  if (!readerPageTipBarVisibleOnSurface(position, tips, chromeBarsVisible, surface)) return 0;
 
   const fontSize = position === 'header' ? tips.headerFontSize : tips.footerFontSize;
   const inset = position === 'header' ? tips.headerInset : tips.footerInset;
@@ -238,7 +282,7 @@ export function readerPageTipBarHeightPx(
   /** h-px + mt-1/mb-1（4px） */
   const dividerBlock = showLine ? 5 : 0;
   let height = inset.top + inset.bottom + lineHeight + dividerBlock;
-  if (isMobile()) {
+  if (isMobile() && surface === 'reader') {
     height += readerPageTipSafeInsetPx(position);
   }
   return height;
@@ -266,8 +310,8 @@ export function readerPageTipContentBudget(
   chromeBarsVisible: boolean,
   pageTipBodyEl?: HTMLElement | null,
 ): ReaderPageTipContentBudget {
-  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const headerVisible = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
   const pads = measureReaderPageTipChromePads(frameEl, tips, chromeBarsVisible);
   const headerPad = headerVisible ? pads.top : 0;
   const footerPad = footerVisible ? pads.bottom : 0;
@@ -353,8 +397,8 @@ export function readerPageTipChromeMeasureReady(
   chromeBarsVisible: boolean,
 ): boolean {
   if (!frameEl || frameEl.clientHeight <= 0) return false;
-  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const headerVisible = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
   if (!headerVisible && !footerVisible) return true;
 
   const frameH = frameEl.clientHeight;
@@ -365,10 +409,10 @@ export function readerPageTipChromeMeasureReady(
     if (chromeTotal < 0 || chromeTotal > frameH * 0.65) return false;
     const minChromePx =
       (headerVisible
-        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('header', tips, chromeBarsVisible) * 0.35))
+        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('header', tips, chromeBarsVisible, 'reader') * 0.35))
         : 0) +
       (footerVisible
-        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('footer', tips, chromeBarsVisible) * 0.35))
+        ? Math.max(8, Math.floor(readerPageTipBarHeightPx('footer', tips, chromeBarsVisible, 'reader') * 0.35))
         : 0);
     // 页眉/页脚应占高但 tip-body 仍近满 frame：grid 尚未收缩，禁止用满高 clip 分页
     if (minChromePx > 0 && chromeTotal < minChromePx) return false;
@@ -414,8 +458,8 @@ export function readerPageTipChromeDomMatchesChromeBars(
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
 ): boolean {
-  const expectHeader = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const expectFooter = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const expectHeader = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const expectFooter = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
   if (!expectHeader && !expectFooter) return true;
   if (!frameEl) return false;
 
@@ -435,10 +479,10 @@ export function measureReaderPageTipChromePads(
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
 ): ReaderPageTipChromePads {
-  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
-  const estTop = readerPageTipBarHeightPx('header', tips, chromeBarsVisible);
-  const estBottom = readerPageTipBarHeightPx('footer', tips, chromeBarsVisible);
+  const headerVisible = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
+  const estTop = readerPageTipBarHeightPx('header', tips, chromeBarsVisible, 'reader');
+  const estBottom = readerPageTipBarHeightPx('footer', tips, chromeBarsVisible, 'reader');
   if (!frameEl) {
     return {
       top: headerVisible ? estTop : 0,
@@ -504,8 +548,8 @@ export function measureReaderPageTipBodyHeightPx(
     return bodyDom;
   }
 
-  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const headerVisible = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
   const header = frameEl.querySelector<HTMLElement>('.reader-page-tip-header');
   const footer = frameEl.querySelector<HTMLElement>('.reader-page-tip-footer');
 
@@ -537,8 +581,8 @@ export function readerPageTipChromeHeightPx(
   chromeBarsVisible: boolean,
 ): number {
   return (
-    readerPageTipBarHeightPx('header', tips, chromeBarsVisible) +
-    readerPageTipBarHeightPx('footer', tips, chromeBarsVisible)
+    readerPageTipBarHeightPx('header', tips, chromeBarsVisible, 'reader') +
+    readerPageTipBarHeightPx('footer', tips, chromeBarsVisible, 'reader')
   );
 }
 

@@ -1,6 +1,6 @@
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import {
-  readerPageTipBarVisible,
+  readerPageTipBarVisibleInReader,
   readerPageTipChromeDomMatchesChromeBars,
   readerPageTipChromeMeasureReady,
 } from '@/lib/media/text/reader-page-tip';
@@ -87,8 +87,8 @@ export function tipBodyReadyForPagedMeasure(
   tips: TextViewerPageTipsConfig,
   chromeBarsVisible: boolean,
 ): boolean {
-  const headerVisible = readerPageTipBarVisible('header', tips, chromeBarsVisible);
-  const footerVisible = readerPageTipBarVisible('footer', tips, chromeBarsVisible);
+  const headerVisible = readerPageTipBarVisibleInReader('header', tips, chromeBarsVisible);
+  const footerVisible = readerPageTipBarVisibleInReader('footer', tips, chromeBarsVisible);
   if (!headerVisible && !footerVisible) {
     return (
       readStrictTipBodyClipHeightPx(tipBodyEl) > 0 || (frameEl?.clientHeight ?? 0) > 0

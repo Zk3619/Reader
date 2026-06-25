@@ -7,7 +7,7 @@
 import type { QuickJSContext } from 'quickjs-emscripten';
 import { invoke } from '@tauri-apps/api/core';
 import { get as httpGet, post, request as httpRequest } from '@/lib/http';
-import { deleteCookie, getCookie } from '@/lib/http/cookie-manager';
+import { deleteCookie, getJarCookie } from '@/lib/http/cookie-manager';
 import {
   getOrCreateAndroidId,
   legadoJavaAndroidId,
@@ -1101,7 +1101,7 @@ async function syncLegadoCookieStoreFromHttpJar(
   }
   for (const u of urls) {
     try {
-      const jar = (await getCookie(u))?.trim();
+      const jar = (await getJarCookie(u))?.trim();
       if (!jar) continue;
       const cleaned = sanitizeLegadoCookieValue(jar, deviceId);
       if (cleaned) propagateLegadoCookieToStore(cookieStore, u, cleaned, baseUrl);

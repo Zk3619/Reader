@@ -26,6 +26,11 @@ import {
   readerParagraphIndentPrefix,
   shouldRenderChapterTitle,
 } from '@/lib/media/text/reader-chapter-title-style';
+import {
+  readerLetterSpacingPx,
+  readerLineHeightPx,
+  readerParagraphMarginPx,
+} from '@/lib/media/text/reader-spacing';
 import { pretextCanvasFont, pretextChapterTitleFont } from '@/lib/media/text/pretext-font-sync';
 import {
   textViewerLayoutContentWidth,
@@ -154,7 +159,7 @@ function partsToInlineItems(
 ): PretextInlineItem[] {
   const items: PretextInlineItem[] = [];
   const font = bodyFont(config);
-  const letterSpacing = config.spacing.letter > 0 ? config.spacing.letter : undefined;
+  const letterSpacing = readerLetterSpacingPx(config.spacing.letter);
 
   for (const part of parts) {
     if (part.kind === 'text') {
@@ -272,8 +277,8 @@ export function layoutDocumentFromChapter(params: LayoutDocumentParams): LayoutD
   const contentWidth = textViewerLayoutContentWidth(viewportWidth, config, {
     horizontalInsetOnSlot: params.horizontalInsetOnSlot,
   });
-  const lineHeight = config.fontSize * (config.spacing.line + 1);
-  const paragraphGap = config.fontSize * config.spacing.paragraph;
+  const lineHeight = readerLineHeightPx(config.fontSize, config.spacing.line);
+  const paragraphGap = readerParagraphMarginPx(config.spacing.paragraph);
 
   if (hasUnparseableStructuralHtml(raw)) {
     return {
@@ -311,7 +316,7 @@ export function layoutDocumentFromChapter(params: LayoutDocumentParams): LayoutD
       }],
       marginTop: titleSpacing.marginTopPx,
       marginBottom: titleSpacing.marginBottomPx,
-      lineHeight: titleSize * (config.spacing.line + 0.2),
+      lineHeight: readerLineHeightPx(titleSize, config.spacing.line + 0.2),
     });
   }
 

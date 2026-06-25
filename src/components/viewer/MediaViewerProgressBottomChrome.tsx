@@ -1,11 +1,7 @@
 import { Show, splitProps, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import {
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from '@/components/viewer/viewer-app-overlay';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
 import { cn } from '@/lib/utils';
 import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
@@ -78,12 +74,12 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
               cn(floating.pillClass(), 'mx-auto w-fit max-w-[calc(100%-1.5rem)] border-0'),
           )}
         >
-          <ViewerAppTooltip>
-            <ViewerAppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
+          <AppTooltip>
+            <AppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
               {local.chapterTitle || '—'}
-            </ViewerAppTooltipTrigger>
-            <ViewerAppTooltipContent>{local.chapterTitle || '—'}</ViewerAppTooltipContent>
-          </ViewerAppTooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent layer="viewer">{local.chapterTitle || '—'}</AppTooltipContent>
+          </AppTooltip>
           <div class="flex shrink-0 items-center gap-3 tabular-nums text-muted-foreground">
             {local.statusMeta}
             <Show when={local.chapterProgressPercent != null}>

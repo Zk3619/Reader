@@ -40,6 +40,8 @@ export interface AppSettings {
   restoreWindowState: boolean;
   /** 减少动效（无障碍 / 偏好） */
   reduceMotion: boolean;
+  /** 是否显示界面工具提示（按钮悬停说明等） */
+  showTooltips?: boolean;
   /**
    * 宽屏（≥480px）下的壳层布局：桌面、移动，或自动（按运行环境）。
    * 仅移动端且宽度不足 480px 时强制使用底栏。
@@ -105,6 +107,7 @@ const defaultAppSettings: AppSettings = {
   closeToTray: true,
   restoreWindowState: true,
   reduceMotion: false,
+  showTooltips: true,
   shellLayout: 'auto',
   booksDirectorySet: false,
   rememberImportAction: false,
@@ -313,6 +316,10 @@ export const settingsStore = {
    */
   async setReduceMotion(reduceMotion: boolean): Promise<void> {
     await this.updateAppSettings({ reduceMotion });
+  },
+
+  async setShowTooltips(showTooltips: boolean): Promise<void> {
+    await this.updateAppSettings({ showTooltips });
   },
 
   async setShellLayout(shellLayout: ShellLayoutPreference): Promise<void> {

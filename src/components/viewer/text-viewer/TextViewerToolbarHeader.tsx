@@ -5,11 +5,7 @@ import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout'
 import { Separator } from '@/components/ui/separator';
 import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
-import {
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from '@/components/viewer/viewer-app-overlay';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   ChevronLeftIcon,
   ListIcon,
@@ -60,8 +56,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
   const clusterClass = () => floating.clusterClass();
 
   const closeButton = () => (
-    <ViewerAppTooltip>
-      <ViewerAppTooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -70,9 +66,9 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         aria-label="关闭阅读器"
       >
         <ChevronLeftIcon class="size-5" />
-      </ViewerAppTooltipTrigger>
-      <ViewerAppTooltipContent>关闭阅读器</ViewerAppTooltipContent>
-    </ViewerAppTooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent layer="viewer">关闭阅读器</AppTooltipContent>
+    </AppTooltip>
   );
 
   const titleNode = (inCluster: boolean) => (
@@ -84,8 +80,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         </h1>
       }
     >
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as="button"
           type="button"
           class={cn(
@@ -96,17 +92,17 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           aria-label="进入书籍信息页"
         >
           {props.bookName || '—'}
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>书籍信息</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">书籍信息</AppTooltipContent>
+      </AppTooltip>
     </Show>
   );
 
   const actionButtons = () => (
     <>
       <Show when={props.isWideScreen}>
-        <ViewerAppTooltip disabled={props.catalogTooltipSuspended}>
-          <ViewerAppTooltipTrigger
+        <AppTooltip disabled={props.catalogTooltipSuspended}>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -119,11 +115,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             data-reader-catalog-trigger=""
           >
             <ListIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>目录</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">目录</AppTooltipContent>
+        </AppTooltip>
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -136,11 +132,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             ) : (
               <VolumeOnIcon class="size-5" size={20} />
             )}
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>朗读</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">朗读</AppTooltipContent>
+        </AppTooltip>
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -151,11 +147,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             <span class="text-base font-normal leading-none" aria-hidden="true">
               Aa
             </span>
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>界面</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
-        <ViewerAppTooltip disabled={props.settingsTooltipSuspended}>
-          <ViewerAppTooltipTrigger
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">界面</AppTooltipContent>
+        </AppTooltip>
+        <AppTooltip disabled={props.settingsTooltipSuspended}>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -165,13 +161,13 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             data-reader-menu-trigger=""
           >
             <SettingsIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>设置</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">设置</AppTooltipContent>
+        </AppTooltip>
       </Show>
       <Show when={props.canChangeSource !== false}>
-        <ViewerAppTooltip>
-          <ViewerAppTooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -180,12 +176,12 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
             aria-label="换源"
           >
             <ReplaceIcon class="size-5" />
-          </ViewerAppTooltipTrigger>
-          <ViewerAppTooltipContent>换源</ViewerAppTooltipContent>
-        </ViewerAppTooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">换源</AppTooltipContent>
+        </AppTooltip>
       </Show>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -194,11 +190,11 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           aria-label="刷新当前章节"
         >
           <RefreshIcon class="size-5" />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>刷新</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">刷新</AppTooltipContent>
+      </AppTooltip>
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -207,9 +203,9 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           aria-label="离线缓存"
         >
           <DownloadIcon class="size-5" />
-        </ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>离线缓存</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">离线缓存</AppTooltipContent>
+      </AppTooltip>
       <ReaderMoreMenu {...props.moreMenu} triggerClass={iconBtn()} />
     </>
   );
