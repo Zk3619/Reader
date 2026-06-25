@@ -5,7 +5,7 @@
 
 import { createSignal, createEffect, onCleanup, type Accessor } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/shared/icons';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { settingsStore } from '@/stores/settings';
@@ -47,8 +47,8 @@ function QuickScrollButton(props: {
           : 'pointer-events-none max-h-0 opacity-0 scale-95 translate-y-2 overflow-hidden',
       )}
     >
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           onClick={props.onClick}
           size="icon"
@@ -62,9 +62,9 @@ function QuickScrollButton(props: {
         >
           {props.children}
           <span class="sr-only">{props.label}</span>
-        </TooltipTrigger>
-        <TooltipContent>{props.label}</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{props.label}</AppTooltipContent>
+      </AppTooltip>
     </div>
   );
 }

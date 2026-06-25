@@ -5,7 +5,7 @@
 import { AppDropdownMenu, AppDropdownMenuContent, AppDropdownMenuItem, AppDropdownMenuTrigger } from '@/components/shared/AppDropdownMenu';
 import { MoreIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 
 export interface BookmarkRowMenuProps {
   onEdit: () => void;
@@ -16,8 +16,8 @@ export function BookmarkRowMenu(props: BookmarkRowMenuProps) {
   return (
     <div class="flex shrink-0 items-center">
       <AppDropdownMenu>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={Button}
               variant="ghost"
@@ -28,9 +28,9 @@ export function BookmarkRowMenu(props: BookmarkRowMenuProps) {
             >
               <MoreIcon class="h-4 w-4" size={16} />
             </AppDropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>更多操作</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多操作</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent align="end">
           <AppDropdownMenuItem onSelect={props.onEdit}>编辑</AppDropdownMenuItem>
           <AppDropdownMenuItem

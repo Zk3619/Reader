@@ -5,7 +5,7 @@
 
 import { createSignal, onMount, onCleanup } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { cn } from '@/lib/utils';
 import { ChevronUpIcon } from '@/components/shared/icons';
 
@@ -114,8 +114,8 @@ export function ScrollToTop(props: ScrollToTopProps) {
           : 'opacity-0 translate-y-4 pointer-events-none'
       )}
     >
-      <Tooltip>
-        <TooltipTrigger as={Button} onClick={scrollToTop} size="icon" class={cn(
+      <AppTooltip>
+        <AppTooltipTrigger as={Button} onClick={scrollToTop} size="icon" class={cn(
           'rounded-full shadow-lg transition-all duration-200',
           'hover:scale-110 active:scale-95',
           'bg-primary text-primary-foreground',
@@ -124,9 +124,9 @@ export function ScrollToTop(props: ScrollToTopProps) {
         )}>
           <ChevronUpIcon class="h-5 w-5" size={20} />
           <span class="sr-only">回到顶部</span>
-        </TooltipTrigger>
-        <TooltipContent>回到顶部</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>回到顶部</AppTooltipContent>
+      </AppTooltip>
     </div>
   );
 }

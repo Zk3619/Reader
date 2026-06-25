@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 字典规则编辑（对齐 Legado DictRuleEditDialog）
  */
@@ -91,7 +91,7 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
         <AppDialogHeader>
           <AppDialogTitle>{isEditing() ? '编辑字典规则' : '新建字典规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称（主键）</Label>
             <TextField class="mt-1">

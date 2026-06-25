@@ -46,7 +46,7 @@ import {
   isListViewMode,
 } from '@/lib/bookshelf/bookshelf-layout-settings';
 import { cn } from '@/lib/utils';
-import { appDialogSettingsScrollFrame, appDialogSettingsScrollTrack, appDialogSettingsShell } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, appDialogSettingsScrollTrack, appDialogSettingsShell } from '@/lib/ui/viewport-classes';
 
 const sectionPanelClass =
   'rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3';
@@ -173,7 +173,7 @@ export function BookshelfLayoutDialog(props: BookshelfLayoutDialogProps) {
           <AppDialogDescription>自定义书架和分组的显示方式</AppDialogDescription>
         </AppDialogHeader>
 
-        <AppDialogScrollBody frameClass={appDialogSettingsScrollFrame} class={appDialogSettingsScrollTrack}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogSettingsScrollTrack}>
           <section class={sectionPanelClass}>
             <Label class={sectionTitleClass}>分组样式</Label>
             <AppSelect

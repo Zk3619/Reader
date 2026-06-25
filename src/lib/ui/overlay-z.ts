@@ -5,7 +5,7 @@
  * 阅读器导航叠层（APP_OVERLAY_VIEWER_Z）之上的 Dialog / Drawer / Popper 等
  * 使用 MEDIA_VIEWER_OVERLAY_LAYER_Z，并通过 ViewerApp* 封装 portalToBody 挂 document.body
  *（与 BookInfoDrawer 相同，见 components/viewer/viewer-app-overlay.tsx）。
- * Tooltip 须高于阅读器壳层：阅读器内用 ViewerAppTooltipContent，全局用 AppTooltipContent。
+ * Tooltip 须高于阅读器壳层：阅读器内为 AppTooltipContent 设置 layer="viewer"。
  */
 
 /** 主壳侧栏 */

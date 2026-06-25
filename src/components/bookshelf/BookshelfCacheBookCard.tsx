@@ -5,7 +5,7 @@
 import { Show, type Component } from 'solid-js';
 import type { Store } from 'solid-js/store';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverIcon, ExportIcon, PlayIcon, SquareIcon } from '@/components/shared/icons';
 import { Trash2 } from 'lucide-solid';
@@ -180,8 +180,8 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
           </Show>
         </div>
         <div class="flex shrink-0 flex-row items-center gap-0.5 self-center pl-0.5">
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant={active() ? 'default' : 'outline'}
               size="icon"
@@ -195,11 +195,11 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
                 <SquareIcon class="h-3.5 w-3.5" size={14} />
               </Show>
               <span class="sr-only">{active() ? '停止缓存' : '缓存全书'}</span>
-            </TooltipTrigger>
-            <TooltipContent>{active() ? '停止缓存' : '缓存全书'}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
+            </AppTooltipTrigger>
+            <AppTooltipContent>{active() ? '停止缓存' : '缓存全书'}</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="outline"
               size="icon"
@@ -212,11 +212,11 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
             >
               <ExportIcon class="h-3.5 w-3.5" size={14} />
               <span class="sr-only">导出已缓存内容</span>
-            </TooltipTrigger>
-            <TooltipContent>导出缓存</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
+            </AppTooltipTrigger>
+            <AppTooltipContent>导出缓存</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="destructive"
               size="icon"
@@ -228,9 +228,9 @@ export const BookshelfCacheBookCard: Component<BookshelfCacheBookCardProps> = (p
             >
               <Trash2 class="h-3.5 w-3.5" />
               <span class="sr-only">清除本书缓存</span>
-            </TooltipTrigger>
-            <TooltipContent>清除本书缓存</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>清除本书缓存</AppTooltipContent>
+          </AppTooltip>
         </div>
       </div>
     </li>

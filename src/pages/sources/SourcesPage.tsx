@@ -45,7 +45,7 @@ import {
   AppDrawerHeader,
 } from '@/components/shared/AppDrawer';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { RefreshIcon } from '@/components/shared/icons';
 import { SourceExploreDrawerContent } from '@/components/sources/SourceExploreDrawerContent';
 import { DeleteSourceDialog } from '@/components/sources/DeleteSourceDialog';
@@ -664,8 +664,8 @@ export function SourcesPage(props: SourcesPageProps) {
           <AppDrawerHeader
             title={expandedSource()?.sourceName ?? '发现'}
             actions={
-              <Tooltip>
-                <TooltipTrigger as="div" class="shrink-0">
+              <AppTooltip>
+                <AppTooltipTrigger as="div" class="shrink-0">
                   <Button
                     type="button"
                     variant="ghost"
@@ -680,9 +680,9 @@ export function SourcesPage(props: SourcesPageProps) {
                     />
                     <span class="sr-only">刷新发现分类</span>
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>刷新发现分类</TooltipContent>
-              </Tooltip>
+                </AppTooltipTrigger>
+                <AppTooltipContent>刷新发现分类</AppTooltipContent>
+              </AppTooltip>
             }
           />
           <AppDrawerBody class={appDrawerScrollBody}>

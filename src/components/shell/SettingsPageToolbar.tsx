@@ -4,7 +4,7 @@
 
 import { createSignal, createEffect, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { SearchIcon, ChevronLeftIcon, XIcon, BookInfoIcon } from '@/components/shared/icons';
 
 export interface SettingsPageToolbarProps {
@@ -14,8 +14,8 @@ export interface SettingsPageToolbarProps {
 
 export function SettingsToolbarLeading(props: { onBack: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -25,9 +25,9 @@ export function SettingsToolbarLeading(props: { onBack: () => void }) {
         type="button"
       >
         <ChevronLeftIcon class="h-4 w-4" />
-      </TooltipTrigger>
-      <TooltipContent>返回设置</TooltipContent>
-    </Tooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent>返回设置</AppTooltipContent>
+    </AppTooltip>
   );
 }
 
@@ -47,8 +47,8 @@ export function SettingsPageToolbar(props: SettingsPageToolbarProps) {
       <Show
         when={searchExpanded()}
         fallback={
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -58,9 +58,9 @@ export function SettingsPageToolbar(props: SettingsPageToolbarProps) {
               type="button"
             >
               <SearchIcon class="h-4 w-4" />
-            </TooltipTrigger>
-            <TooltipContent>搜索设置</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>搜索设置</AppTooltipContent>
+          </AppTooltip>
         }
       >
         <div class="relative flex h-9 w-40 items-center rounded-md border border-input bg-transparent text-sm sm:w-52">
@@ -102,13 +102,13 @@ export function SettingsPageToolbar(props: SettingsPageToolbarProps) {
         </div>
       </Show>
 
-      <Tooltip>
-        <TooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
+      <AppTooltip>
+        <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
           <BookInfoIcon class="h-4 w-4" />
           <span class="sr-only">帮助</span>
-        </TooltipTrigger>
-        <TooltipContent>帮助</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>帮助</AppTooltipContent>
+      </AppTooltip>
     </div>
   );
 }

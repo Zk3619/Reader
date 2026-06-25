@@ -4,7 +4,7 @@
 
 import { createMemo, createSignal, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ReadRecordGoalEditDialog } from '@/components/record/ReadRecordGoalEditDialog';
 import { AuthorIcon, PencilIcon } from '@/components/shared/icons';
 import { formatReadDuration } from '@/lib/record/read-record-format';
@@ -43,8 +43,8 @@ export function ReadRecordGoalCard(props: ReadRecordGoalCardProps) {
       <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'space-y-4', props.class)}>
         <div class="flex items-center justify-between gap-2">
           <h3 class="font-semibold text-foreground">阅读目标</h3>
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -53,9 +53,9 @@ export function ReadRecordGoalCard(props: ReadRecordGoalCardProps) {
               onClick={() => setEditOpen(true)}
             >
               <PencilIcon class="h-4 w-4" size={16} />
-            </TooltipTrigger>
-            <TooltipContent>编辑阅读目标</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>编辑阅读目标</AppTooltipContent>
+          </AppTooltip>
         </div>
 
         <div class="flex items-start gap-3.5">

@@ -4,7 +4,7 @@
 
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   AppDropdownMenu,
@@ -85,8 +85,8 @@ export function SourcesSortDropdown(props: SourcesSortDropdownProps) {
 
   return (
     <AppDropdownMenu open={menuOpen()} onOpenChange={setMenuOpen}>
-      <Tooltip>
-        <TooltipTrigger as="div">
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
           <AppDropdownMenuTrigger
             as={(triggerProps: Record<string, unknown>) => (
               <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -95,9 +95,9 @@ export function SourcesSortDropdown(props: SourcesSortDropdownProps) {
               </AppDropdownMenuIconTrigger>
             )}
           />
-        </TooltipTrigger>
-        <TooltipContent>排序</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>排序</AppTooltipContent>
+      </AppTooltip>
       <AppDropdownMenuContent layout="compact">
         <Show when={showPageDisplay()}>
           <AppDropdownMenuItem

@@ -5,7 +5,7 @@
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -76,8 +76,8 @@ function MenuRadioIndicator(props: { selected: boolean }) {
 
 export function SourcesManageToolbarLeading(props: { onBack: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -87,9 +87,9 @@ export function SourcesManageToolbarLeading(props: { onBack: () => void }) {
         type="button"
       >
         <ChevronLeftIcon class="h-4 w-4" />
-      </TooltipTrigger>
-      <TooltipContent>返回书源</TooltipContent>
-    </Tooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent>返回书源</AppTooltipContent>
+    </AppTooltip>
   );
 }
 
@@ -117,8 +117,8 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
       <Show
         when={searchExpanded()}
         fallback={
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -127,9 +127,9 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
             >
               <SearchIcon class="h-4 w-4" />
               <span class="sr-only">搜索</span>
-            </TooltipTrigger>
-            <TooltipContent>搜索</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>搜索</AppTooltipContent>
+          </AppTooltip>
         }
       >
         <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
@@ -178,8 +178,8 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
         onEnableDragSortChange={props.onEnableDragSortChange}
       />
 
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -189,13 +189,13 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
         >
           <FilterIcon class="h-4 w-4" />
           <span class="sr-only">筛选</span>
-        </TooltipTrigger>
-        <TooltipContent>{props.filterTooltip || '筛选'}</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{props.filterTooltip || '筛选'}</AppTooltipContent>
+      </AppTooltip>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
                 <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -204,9 +204,9 @@ export function SourcesManagePageToolbar(props: SourcesManagePageToolbarProps) {
                 </AppDropdownMenuIconTrigger>
               )}
             />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem onSelect={() => props.onSourcesNew?.()}>
             <FileTextIcon class="h-4 w-4" />

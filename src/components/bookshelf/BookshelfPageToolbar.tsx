@@ -5,7 +5,7 @@
 import { Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -80,8 +80,8 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           scope={props.pendingUpdateScope}
           scopeBookUrls={props.pendingUpdateBookUrls}
         />
-        <Tooltip>
-          <TooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -90,13 +90,13 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
           >
             <SearchIcon class="h-4 w-4" />
             <span class="sr-only">搜索</span>
-          </TooltipTrigger>
-          <TooltipContent>进入搜索页</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>进入搜索页</AppTooltipContent>
+        </AppTooltip>
 
         <Show when={props.showReloadLocal}>
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -109,16 +109,16 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
                 class={cn('h-4 w-4', props.isReloadingLocal && 'animate-spin')}
               />
               <span class="sr-only">重新加载书籍列表</span>
-            </TooltipTrigger>
-            <TooltipContent>
+            </AppTooltipTrigger>
+            <AppTooltipContent>
               {props.isReloadingLocal ? '重新加载中…' : '重新加载书籍列表'}
-            </TooltipContent>
-          </Tooltip>
+            </AppTooltipContent>
+          </AppTooltip>
         </Show>
 
         <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-          <Tooltip>
-            <TooltipTrigger as="div">
+          <AppTooltip>
+            <AppTooltipTrigger as="div">
               <AppDropdownMenuTrigger
                 as={(triggerProps: Record<string, unknown>) => (
                   <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -127,9 +127,9 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
                   </AppDropdownMenuIconTrigger>
                 )}
               />
-            </TooltipTrigger>
-            <TooltipContent>更多</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>更多</AppTooltipContent>
+          </AppTooltip>
           <AppDropdownMenuContent layout="compact">
             <AppDropdownMenuItem onSelect={() => props.onUpdateToc?.()}>
               <RefreshIcon class="h-4 w-4" />

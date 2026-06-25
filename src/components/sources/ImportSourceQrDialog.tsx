@@ -25,11 +25,6 @@ export interface ImportSourceQrDialogProps {
   onIdentify: (raw: string) => void;
   /** 内嵌页会话时须高于 .reader-inner-web-layer（如 z-[160]） */
   portalZClass?: string;
-  /**
-   * 扫码导入：摄像头扫码 / 图片识别（全平台），识别后自动导入，无粘贴输入。
-   * @deprecated 使用 autoImport
-   */
-  cameraOnly?: boolean;
   /** 扫码/识图后自动导入（无粘贴输入） */
   autoImport?: boolean;
   title?: string;
@@ -101,7 +96,7 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
   const [raw, setRaw] = createSignal('');
   const [mode, setMode] = createSignal<QrInputMode>('paste');
   const [cameraActive, setCameraActive] = createSignal(false);
-  const useAutoImport = () => props.autoImport ?? props.cameraOnly ?? false;
+  const useAutoImport = () => props.autoImport ?? false;
 
   const notifyCameraError = (msg: string) => {
     showAppToast({ title: msg, variant: 'destructive' });

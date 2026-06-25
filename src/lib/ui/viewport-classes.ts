@@ -124,9 +124,6 @@ export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
  */
 export const scrollEdgeInset = 'py-2 app-scroll-edge-inset';
 
-/** @deprecated 使用 scrollEdgeInset */
-export const scrollEdgeBottomInset = scrollEdgeInset;
-
 /**
  * 贴底 chrome 内边距（底栏、抽屉、阅读器底栏）。
  * 触摸端由 App.css + `installMobileViewportInsets` 按手势条/三键导航分配底部安全距离。
@@ -170,10 +167,7 @@ export const popperMenuScrollTrack = cn(
   scrollGutterStableBoth,
 );
 
-/** @deprecated 使用 popperMenuScrollFrame + popperMenuScrollTrack */
-export const popperMenuScrollBody = popperMenuScrollTrack;
-
-/** 不超过锚点方向可用高度（`--kb-popper-content-available-height`），面板内纵向滚动 */
+/**（`--kb-popper-content-available-height`），面板内纵向滚动 */
 export const popperContentViewportScroll = cn(
   'max-h-[var(--kb-popper-content-available-height)]',
   'overflow-y-auto overflow-x-hidden overscroll-contain',
@@ -254,38 +248,19 @@ export const appDialogScrollBodySpaceY4 = 'space-y-4';
 export const appDialogScrollBodyMaxH60 = 'max-h-[60dvh]';
 export const appDialogScrollBodyMaxH70 = 'max-h-[min(70vh,36rem)]';
 
-/** @deprecated 使用 DialogScrollViewport + dialogScrollFrameFlex */
-export const appDialogScrollBodyNoFooter = dialogScrollFrameFlex;
-
-/** @deprecated 使用 DialogScrollViewport */
-export const appDialogScrollBody = '';
-
-/** @deprecated 使用 DialogScrollViewport frameClass={dialogScrollFrameFlex} */
-export const appDialogScrollBodyFlex = dialogScrollFrameFlex;
-
-export const appDialogScrollBodyFlexSpaceY3 = appDialogScrollBodySpaceY3;
-export const appDialogScrollBodyFlexSpaceY4 = appDialogScrollBodySpaceY4;
-
 export const appDialogScrollBodyMaxH70SpaceY4 = cn(
   appDialogScrollBodySpaceY4,
   appDialogScrollBodyMaxH70,
 );
 
-/** @deprecated 使用 DialogScrollViewport nested */
-export const appDialogNestedPanelScroll = dialogNestedScrollFrame;
-
 /** 弹窗内虚拟长列表 track（与 dialogVirtualListPanelHeight 配合，外层用 DialogScrollViewport） */
 export const dialogVirtualListScroll = 'min-h-0 flex-1 space-y-2';
 
 /** 多区块设置类弹窗：外框 flex-1，track 限高 */
-export const appDialogSettingsScrollFrame = dialogScrollFrameFlex;
 export const appDialogSettingsScrollTrack = cn(
   dialogScrollTrack,
   'space-y-4',
 );
-
-/** @deprecated 使用 DialogScrollViewport frameClass/trackClass */
-export const appDialogSettingsScrollBody = appDialogSettingsScrollTrack;
 
 /** Popper 内嵌套可滚动列表（下拉选项分组等） */
 export const popperNestedListScroll = cn(

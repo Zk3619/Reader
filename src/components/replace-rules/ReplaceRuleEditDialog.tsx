@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 替换净化规则编辑（对齐 Legado ReplaceEditActivity）
  */
@@ -153,7 +153,7 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
         <AppDialogHeader>
           <AppDialogTitle>{isEditing() ? '编辑替换规则' : '新建替换规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称</Label>
             <TextField class="mt-1">

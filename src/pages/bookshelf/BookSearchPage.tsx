@@ -72,8 +72,8 @@ import {
 import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
 import {
-  EXPLORE_BOOK_GRID_CLASS,
-  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
+  EXPLORE_RESPONSIVE_GRID_CLASS,
+  EXPLORE_RESPONSIVE_ROW_HEIGHT_PX,
 } from '@/components/explore/ExploreBookCardSkeleton';
 import { VirtualExploreBookGrid } from '@/components/explore/VirtualExploreBookGrid';
 
@@ -608,7 +608,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
               }
             >
               <h3 class="mb-2 text-xs font-medium text-muted-foreground">书架</h3>
-              <ul class={cn('mb-4 p-1', EXPLORE_BOOK_GRID_CLASS)}>
+              <ul class={cn('mb-4 p-1', EXPLORE_RESPONSIVE_GRID_CLASS)}>
                 <For each={filteredLocal()}>
                   {(book) => (
                     <li class="w-full">
@@ -727,7 +727,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
                 <VirtualExploreBookGrid
                   class={cn(standalonePageScroll, 'min-h-0 flex-1')}
                   items={onlineBooks}
-                  rowHeight={EXPLORE_BOOK_GRID_ROW_HEIGHT_PX}
+                  rowHeight={EXPLORE_RESPONSIVE_ROW_HEIGHT_PX}
                   onScroll={handleScroll}
                   getItemKey={(book) => book.bookUrl}
                   renderEntityByKey={renderSearchBookGridCell}

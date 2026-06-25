@@ -5,7 +5,7 @@
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   AppDropdownMenu,
@@ -48,8 +48,8 @@ export interface BookGroupManagePageToolbarProps {
 
 export function BookGroupManageToolbarLeading(props: { onBack: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -59,9 +59,9 @@ export function BookGroupManageToolbarLeading(props: { onBack: () => void }) {
         type="button"
       >
         <ChevronLeftIcon class="h-4 w-4" />
-      </TooltipTrigger>
-      <TooltipContent>返回书架</TooltipContent>
-    </Tooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent>返回书架</AppTooltipContent>
+    </AppTooltip>
   );
 }
 
@@ -89,8 +89,8 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
       <Show
         when={searchExpanded()}
         fallback={
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -99,9 +99,9 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
             >
               <SearchIcon class="h-4 w-4" />
               <span class="sr-only">搜索</span>
-            </TooltipTrigger>
-            <TooltipContent>搜索</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>搜索</AppTooltipContent>
+          </AppTooltip>
         }
       >
         <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
@@ -138,8 +138,8 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
         </div>
       </Show>
 
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -149,13 +149,13 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
         >
           <FolderPlusIcon class="h-4 w-4" />
           <span class="sr-only">添加分组</span>
-        </TooltipTrigger>
-        <TooltipContent>添加分组</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>添加分组</AppTooltipContent>
+      </AppTooltip>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
                 <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -164,9 +164,9 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
                 </AppDropdownMenuIconTrigger>
               )}
             />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem
             onSelect={() => props.onSearchModeChange?.('name')}

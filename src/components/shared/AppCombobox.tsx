@@ -15,7 +15,7 @@ import {
   ComboboxTrigger,
 } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { popperMenuPanelShell } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
@@ -32,7 +32,6 @@ export type AppComboboxProps = {
 };
 
 export const AppCombobox: Component<AppComboboxProps> = (props) => {
-  const layer = useOverlayLayerZ();
   const mount = useOverlayPortalMount();
   const [local] = splitProps(props, [
     'options',
@@ -72,7 +71,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       </ComboboxControl>
       <ComboboxPrimitive.Portal mount={mount}>
         <ComboboxPrimitive.Content
-          class={cn(popperMenuPanelShell, layer.popper, local.contentClass)}
+          class={cn(popperMenuPanelShell, overlayLayerZ().popper, local.contentClass)}
         >
           <PopperScrollViewport class="px-1">
             <ComboboxPrimitive.Listbox class="m-0 p-0" />

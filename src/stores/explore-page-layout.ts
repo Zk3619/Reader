@@ -41,9 +41,9 @@ type LegacySourceNavStyle = 'normal' | 'dropdown' | 'tabs';
 
 type StoredExplorePageLayout = Partial<ExplorePageLayoutSettings> & {
   sourceNavStyle?: ExploreSourceNavStyle | LegacySourceNavStyle;
-  /** @deprecated 迁移至 sourceNavStyle */
+  /** 旧版存储：迁移至 sourceNavStyle */
   sourceDropdownEnabled?: boolean;
-  /** @deprecated 迁移至 sourceNavStyle */
+  /** 旧版存储：迁移至 sourceNavStyle */
   sourceTabsEnabled?: boolean;
 };
 

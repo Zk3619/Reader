@@ -6,9 +6,9 @@ import type { JSX } from 'solid-js';
 import type { Store } from 'solid-js/store';
 import { VirtualGridRowsList } from '@/components/shared/virtual-list/VirtualGridRowsList';
 import {
-  EXPLORE_BOOK_GRID_CLASS,
-  EXPLORE_BOOK_GRID_GAP_PX,
-  useExploreGridColumnCount,
+  EXPLORE_RESPONSIVE_GRID_CLASS,
+  EXPLORE_RESPONSIVE_GRID_GAP_PX,
+  useExploreResponsiveColumnCount,
 } from '@/components/explore/ExploreBookCardSkeleton';
 import { CACHE_BOOK_CARD_HEIGHT_PX } from '@/components/bookshelf/BookshelfCacheBookCard';
 import { cn } from '@/lib/utils';
@@ -23,7 +23,7 @@ export interface VirtualBookshelfCacheGridProps<T extends { book: Pick<Book, 'bo
 export function VirtualBookshelfCacheGrid<T extends { book: Pick<Book, 'bookUrl'> }>(
   props: VirtualBookshelfCacheGridProps<T>,
 ) {
-  const colCount = useExploreGridColumnCount();
+  const colCount = useExploreResponsiveColumnCount();
   const items: () => readonly T[] = () => props.items as readonly T[];
 
   return (
@@ -31,9 +31,9 @@ export function VirtualBookshelfCacheGrid<T extends { book: Pick<Book, 'bookUrl'
       items={items}
       colCount={colCount}
       rowHeightMode="fixed"
-      estimateRowSize={() => CACHE_BOOK_CARD_HEIGHT_PX + EXPLORE_BOOK_GRID_GAP_PX}
+      estimateRowSize={() => CACHE_BOOK_CARD_HEIGHT_PX + EXPLORE_RESPONSIVE_GRID_GAP_PX}
       class={cn('px-2', props.class)}
-      gridClass={EXPLORE_BOOK_GRID_CLASS}
+      gridClass={EXPLORE_RESPONSIVE_GRID_CLASS}
       rowUlClass="pb-2"
       overscan={2}
       getItemKey={(entry) => entry.book.bookUrl}

@@ -43,7 +43,7 @@ import {
   appDrawerSideSafeArea,
   appDrawerTopSafeArea,
 } from '@/lib/ui/viewport-classes';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
@@ -169,7 +169,6 @@ function AppDrawerBottomDragHandle() {
 /** 主题色遮罩 + 分层 z-index（高于 Corvu 默认纯黑 rgb 遮罩） */
 function AppDrawerOverlay(props: { class?: string }) {
   const ctx = DrawerPrimitive.useContext();
-  const layer = useOverlayLayerZ();
   const [local] = splitProps(props, ['class']);
   return (
     <DrawerPrimitive.Overlay
@@ -178,7 +177,7 @@ function AppDrawerOverlay(props: { class?: string }) {
         'fixed inset-0',
         APP_OVERLAY_BACKDROP_CLASS,
         'data-transitioning:transition-opacity data-transitioning:duration-300',
-        layer.drawerOverlay,
+        overlayLayerZ().drawerOverlay,
         appBlockDrag,
         local.class,
       )}
@@ -206,7 +205,6 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
   props: DynamicProps<T, AppDrawerContentProps<T>>,
 ) => {
   const ctx = DrawerPrimitive.useContext();
-  const layer = useOverlayLayerZ();
   const [local, rest] = splitProps(props as AppDrawerContentProps, [
     'class',
     'children',
@@ -225,7 +223,7 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
           data-app-overlay-surface=""
           class={cn(
             'fixed flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
-            layer.drawer,
+            overlayLayerZ().drawer,
             appBlockDrag,
             (side() === 'bottom' || side() === 'top') && APP_DRAWER_MAX_HEIGHT_CLASS,
             side() === 'left' &&

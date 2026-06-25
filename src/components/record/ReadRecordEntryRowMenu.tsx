@@ -1,11 +1,11 @@
 /**
- * 阅读记录列表项「更多」菜单
+ * 阅读记录列表项「更多」菜�?
  */
 
 import { Show } from 'solid-js';
 import { MoreIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -42,8 +42,8 @@ export function ReadRecordEntryRowMenu(props: ReadRecordEntryRowMenuProps) {
   return (
     <div class="flex shrink-0 items-center">
       <AppDropdownMenu>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={Button}
               variant="ghost"
@@ -54,9 +54,9 @@ export function ReadRecordEntryRowMenu(props: ReadRecordEntryRowMenuProps) {
             >
               <MoreIcon class="h-4 w-4" size={16} />
             </AppDropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>更多操作</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多操作</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent align="end">
           <AppDropdownMenuItem onSelect={handlePrimary}>
             {props.primaryActionLabel ??

@@ -5,7 +5,7 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '@/components/shared/icons';
 import {
   settingsOptionTabsEqualWidthListClass,
@@ -147,8 +147,8 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
 
       <div class="rounded-lg bg-muted/40 p-3">
         <div class="flex items-center justify-between gap-2">
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -157,9 +157,9 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
               onClick={() => shiftMonth(-1)}
             >
               <ChevronLeftIcon class="h-4 w-4" size={16} />
-            </TooltipTrigger>
-            <TooltipContent>上个月</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>上个月</AppTooltipContent>
+          </AppTooltip>
           <div class="min-w-0 text-center">
             <div class="text-sm font-semibold text-foreground">
               {year()}年{month()}月
@@ -168,8 +168,8 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
               {mode() === 'count' ? '按阅读次数显示' : '按阅读时长显示'}
             </div>
           </div>
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -178,9 +178,9 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
               onClick={() => shiftMonth(1)}
             >
               <ChevronRightIcon class="h-4 w-4" size={16} />
-            </TooltipTrigger>
-            <TooltipContent>下个月</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>下个月</AppTooltipContent>
+          </AppTooltip>
         </div>
 
         <div class="mt-3 flex gap-2">

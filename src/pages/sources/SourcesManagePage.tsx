@@ -44,7 +44,7 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import { ChevronDownIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
 import {
@@ -1071,10 +1071,10 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
             <For each={validateResults()}>
               {(r) => (
                 <div class="rounded-lg border border-border/60 p-3 space-y-2">
-                  <Tooltip>
-                    <TooltipTrigger as="div" class="font-medium text-sm truncate">{r.sourceName}</TooltipTrigger>
-                    <TooltipContent>{r.sourceName}</TooltipContent>
-                  </Tooltip>
+                  <AppTooltip>
+                    <AppTooltipTrigger as="div" class="font-medium text-sm truncate">{r.sourceName}</AppTooltipTrigger>
+                    <AppTooltipContent>{r.sourceName}</AppTooltipContent>
+                  </AppTooltip>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div class="flex flex-col gap-0.5">
                       <span class="text-muted-foreground">搜索</span>

@@ -41,7 +41,7 @@ import {
   shouldPreventMenuCloseAutoFocus,
   withBlurBefore,
 } from '@/utils/accessibility';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
@@ -243,9 +243,8 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
     'children',
   ]);
   const layout = () => local.layout ?? 'compact';
-  const layer = useOverlayLayerZ();
   const userOnCloseAutoFocus = local.onCloseAutoFocus;
-  const popperZ = () => local.portalZClass ?? layer.popper;
+  const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   const useInnerScroll = () => SCROLL_INNER_LAYOUTS.has(layout());
   const useTitleScroll = () => TITLE_SCROLL_LAYOUTS.has(layout());
   return (
@@ -281,8 +280,7 @@ type AppDropdownMenuSubContentProps = ComponentProps<typeof DropdownMenuSubConte
 
 export const AppDropdownMenuSubContent: Component<AppDropdownMenuSubContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
-  const layer = useOverlayLayerZ();
-  const popperZ = () => local.portalZClass ?? layer.popper;
+  const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   return (
     <DropdownMenuSubContent
       {...rest}

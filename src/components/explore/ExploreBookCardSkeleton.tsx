@@ -14,26 +14,25 @@ import {
   bookGroupGridCoverClass,
 } from '@/lib/bookshelf/book-group-card-styles';
 import {
-  EXPLORE_BOOK_CARD_HEIGHT_PX,
-  EXPLORE_BOOK_GRID_CLASS,
-  EXPLORE_BOOK_GRID_GAP_PX,
-  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
+  EXPLORE_RESPONSIVE_CARD_HEIGHT_PX,
+  EXPLORE_RESPONSIVE_GRID_CLASS,
+  EXPLORE_RESPONSIVE_GRID_GAP_PX,
+  EXPLORE_RESPONSIVE_ROW_HEIGHT_PX,
   getExploreListColumnCount,
   getExploreListGridClass,
-  resolveExploreGridColumnCount,
-  useExploreGridColumnCount,
+  resolveExploreResponsiveColumnCount,
   useExploreResponsiveColumnCount,
 } from '@/lib/explore/explore-list-layout';
 import { explorePageLayoutStore } from '@/stores/explore-page-layout';
 import { cn } from '@/lib/utils';
 
 export {
-  EXPLORE_BOOK_GRID_CLASS,
-  EXPLORE_BOOK_CARD_HEIGHT_PX,
-  EXPLORE_BOOK_GRID_GAP_PX,
-  EXPLORE_BOOK_GRID_ROW_HEIGHT_PX,
-  resolveExploreGridColumnCount,
-  useExploreGridColumnCount,
+  EXPLORE_RESPONSIVE_GRID_CLASS,
+  EXPLORE_RESPONSIVE_CARD_HEIGHT_PX,
+  EXPLORE_RESPONSIVE_GRID_GAP_PX,
+  EXPLORE_RESPONSIVE_ROW_HEIGHT_PX,
+  resolveExploreResponsiveColumnCount,
+  useExploreResponsiveColumnCount,
 };
 
 function useExploreSkeletonCount() {

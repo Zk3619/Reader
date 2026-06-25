@@ -29,7 +29,7 @@ import {
   popperOverflowPadding,
 } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { blurActiveElement } from '@/utils/accessibility';
 
@@ -93,9 +93,8 @@ type AppContextMenuContentProps = ComponentProps<typeof ContextMenuContent> & {
 export const AppContextMenuContent: Component<AppContextMenuContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'children']);
   const layout = () => local.layout ?? 'compact';
-  const layer = useOverlayLayerZ();
   const mount = useOverlayPortalMount();
-  const popperZ = () => local.portalZClass ?? layer.popper;
+  const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   return (
     <ContextMenuContent
       mount={mount}
@@ -113,8 +112,7 @@ type AppContextMenuSubContentProps = ComponentProps<typeof ContextMenuSubContent
 
 export const AppContextMenuSubContent: Component<AppContextMenuSubContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
-  const layer = useOverlayLayerZ();
-  const popperZ = () => local.portalZClass ?? layer.popper;
+  const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   return (
     <ContextMenuSubContent
       {...rest}

@@ -5,7 +5,7 @@
 import { createEffect, createSignal, onMount, Show } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -39,8 +39,8 @@ export interface ReplaceRulesPageToolbarProps {
 
 export function ReplaceRulesToolbarLeading(props: { onBack: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <AppTooltip>
+      <AppTooltipTrigger
         as={Button}
         variant="ghost"
         size="icon"
@@ -50,9 +50,9 @@ export function ReplaceRulesToolbarLeading(props: { onBack: () => void }) {
         type="button"
       >
         <ChevronLeftIcon class="h-4 w-4" />
-      </TooltipTrigger>
-      <TooltipContent>返回</TooltipContent>
-    </Tooltip>
+      </AppTooltipTrigger>
+      <AppTooltipContent>返回</AppTooltipContent>
+    </AppTooltip>
   );
 }
 
@@ -81,8 +81,8 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
       <Show
         when={searchExpanded()}
         fallback={
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -91,9 +91,9 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
             >
               <SearchIcon class="h-4 w-4" />
               <span class="sr-only">搜索</span>
-            </TooltipTrigger>
-            <TooltipContent>搜索</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>搜索</AppTooltipContent>
+          </AppTooltip>
         }
       >
         <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
@@ -130,8 +130,8 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
         </div>
       </Show>
 
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -141,15 +141,15 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
           type="button"
         >
           <SettingsIcon class="h-4 w-4" />
-        </TooltipTrigger>
-        <TooltipContent>设置</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>设置</AppTooltipContent>
+      </AppTooltip>
 
       <ReplacePurifySettingsDialog open={settingsOpen()} onOpenChange={setSettingsOpen} />
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
                 <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -158,9 +158,9 @@ export function ReplaceRulesPageToolbar(props: ReplaceRulesPageToolbarProps) {
                 </AppDropdownMenuIconTrigger>
               )}
             />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem onSelect={() => props.onNewRule?.()}>
             <FileTextIcon class="h-4 w-4" />

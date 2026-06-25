@@ -1,7 +1,7 @@
 import { For, Show } from 'solid-js';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
@@ -94,8 +94,8 @@ export function SearchBookResultRow(props: SearchBookResultRowProps) {
             </Show>
           </p>
           <Show when={metaBadgeEntries().length > 0}>
-            <Tooltip>
-              <TooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
+            <AppTooltip>
+              <AppTooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
                 <For each={metaBadgeEntries()}>
                   {(entry, i) => (
                     <Badge
@@ -112,11 +112,11 @@ export function SearchBookResultRow(props: SearchBookResultRowProps) {
                     </Badge>
                   )}
                 </For>
-              </TooltipTrigger>
-              <TooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
+              </AppTooltipTrigger>
+              <AppTooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
                 {metaBadgeTooltipText()}
-              </TooltipContent>
-            </Tooltip>
+              </AppTooltipContent>
+            </AppTooltip>
           </Show>
           <ExploreBookListIntro>
             简介：{props.book.intro?.trim() || '暂无简介'}

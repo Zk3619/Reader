@@ -11,7 +11,7 @@
 import { Show, For, createSignal, onMount, onCleanup, type Component, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -152,8 +152,8 @@ function DropdownActionButton(props: {
   
   return (
     <AppDropdownMenu open={dropdownOpen()} onOpenChange={setDropdownOpen}>
-      <Tooltip>
-        <TooltipTrigger as="div">
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
           <AppDropdownMenuTrigger
             as={(triggerProps: Record<string, unknown>) => (
               <AppDropdownMenuIconTrigger
@@ -166,9 +166,9 @@ function DropdownActionButton(props: {
               </AppDropdownMenuIconTrigger>
             )}
           />
-        </TooltipTrigger>
-        <TooltipContent>{props.action.label}</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{props.action.label}</AppTooltipContent>
+      </AppTooltip>
       <AppDropdownMenuContent
         layout="compact"
         portalZClass={props.action.dropdownPortalZClass}
@@ -319,12 +319,12 @@ export function PageHeader(props: PageHeaderProps) {
                     </Button>
                   }
                 >
-                  <Tooltip>
-                    <TooltipTrigger as={Button} variant="ghost" size="icon" onClick={action.onClick} disabled={action.disabled} aria-label={action.label}>
+                  <AppTooltip>
+                    <AppTooltipTrigger as={Button} variant="ghost" size="icon" onClick={action.onClick} disabled={action.disabled} aria-label={action.label}>
                       {iconElement}
-                    </TooltipTrigger>
-                    <TooltipContent>{action.label}</TooltipContent>
-                  </Tooltip>
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>{action.label}</AppTooltipContent>
+                  </AppTooltip>
                 </Show>
               );
             }}
@@ -353,8 +353,8 @@ export function PageHeader(props: PageHeaderProps) {
       <Show when={showThemeToggle || showWindowControls}>
         <div class={cn('flex items-center gap-2', props.draggable && 'no-drag')}>
           <Show when={showThemeToggle}>
-            <Tooltip>
-              <TooltipTrigger as="div">
+            <AppTooltip>
+              <AppTooltipTrigger as="div">
                 <Toggle
                   pressed={isDark()}
                   onChange={toggleTheme}
@@ -370,9 +370,9 @@ export function PageHeader(props: PageHeaderProps) {
                   </Show>
                   <span class="sr-only">{isDark() ? "切换到浅色模式" : "切换到深色模式"}</span>
                 </Toggle>
-              </TooltipTrigger>
-              <TooltipContent>{isDark() ? "切换到浅色模式" : "切换到深色模式"}</TooltipContent>
-            </Tooltip>
+              </AppTooltipTrigger>
+              <AppTooltipContent>{isDark() ? "切换到浅色模式" : "切换到深色模式"}</AppTooltipContent>
+            </AppTooltip>
           </Show>
           <Show when={showWindowControls}>
             <WindowControlButtons />

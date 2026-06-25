@@ -3,7 +3,7 @@
  */
 
 import { For, Show, type Accessor } from 'solid-js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { BookCoverImg } from '@/components/books/BookCoverImg';
 import { BookCoverIcon } from '@/components/shared/icons';
 import type { BookSource, SearchBook } from '@/types';
@@ -49,8 +49,8 @@ function ExploreBookBadgeRow(props: { book: Accessor<SearchBook> }) {
 
   return (
     <Show when={entries().length > 0}>
-      <Tooltip>
-        <TooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
+      <AppTooltip>
+        <AppTooltipTrigger as="div" class={exploreBookListBadgeRowClass()}>
           <For each={entries()}>
             {(entry, i) => {
               const isLast = i() === entries().length - 1;
@@ -66,11 +66,11 @@ function ExploreBookBadgeRow(props: { book: Accessor<SearchBook> }) {
               );
             }}
           </For>
-        </TooltipTrigger>
-        <TooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
+        </AppTooltipTrigger>
+        <AppTooltipContent class={BOOK_BADGE_TOOLTIP_CONTENT_CLASS}>
           {tooltipText()}
-        </TooltipContent>
-      </Tooltip>
+        </AppTooltipContent>
+      </AppTooltip>
     </Show>
   );
 }

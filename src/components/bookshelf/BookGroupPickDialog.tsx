@@ -5,7 +5,7 @@
 import { For, Show, createSignal, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDialog,
   AppDialogContent,
@@ -114,8 +114,8 @@ export function BookGroupPickDialog(props: BookGroupPickDialogProps) {
         <AppDialogHeader
           actions={
             <Show when={props.onAddGroup}>
-              <Tooltip>
-                <TooltipTrigger
+              <AppTooltip>
+                <AppTooltipTrigger
                   onFocus={(e) => e.preventDefault()}
                   as={(triggerProps: Record<string, unknown>) => (
                     <Button
@@ -131,8 +131,8 @@ export function BookGroupPickDialog(props: BookGroupPickDialogProps) {
                     </Button>
                   )}
                 />
-                <TooltipContent class="z-100">添加分组</TooltipContent>
-              </Tooltip>
+                <AppTooltipContent class="z-100">添加分组</AppTooltipContent>
+              </AppTooltip>
             </Show>
           }
         >

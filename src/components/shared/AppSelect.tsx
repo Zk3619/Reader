@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useOverlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import {
   popperMenuPanelShell,
   popperOverflowPadding,
@@ -138,11 +138,11 @@ type AppSelectContentProps = ComponentProps<typeof SelectContent> & {
 export const AppSelectContent: Component<AppSelectContentProps> = (props) => {
   const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'portalToBody']);
   const layout = () => local.layout ?? 'plain';
-  const layer = useOverlayLayerZ();
   const drawerPortalMount = useAppDrawerPortalMount();
   const inDrawer = () => !local.portalToBody && drawerPortalMount() != null;
   const popperZ = () =>
-    local.portalZClass ?? (inDrawer() ? layer.drawerPopper : layer.dialogPopper);
+    local.portalZClass ??
+    (inDrawer() ? overlayLayerZ().drawerPopper : overlayLayerZ().dialogPopper);
   return (
     <SelectContent
       {...rest}

@@ -43,7 +43,7 @@ import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialo
 import { DeleteBookDialog } from '@/components/books/DeleteBookDialog';
 import { BookContextMenu, type BookContextMenuActions } from '@/components/bookshelf/BookContextMenu';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ChevronLeftIcon, BookshelfIcon } from '@/components/shared/icons';
 import {
   dismissAppToast,
@@ -746,8 +746,8 @@ export function BookShelf(props: BookShelfProps) {
         }
         leading={
           showBackToGroupList() ? (
-            <Tooltip>
-              <TooltipTrigger
+            <AppTooltip>
+              <AppTooltipTrigger
                 as={Button}
                 variant="ghost"
                 size="icon"
@@ -756,9 +756,9 @@ export function BookShelf(props: BookShelfProps) {
                 aria-label="返回分组页"
               >
                 <ChevronLeftIcon class="h-4 w-4" />
-              </TooltipTrigger>
-              <TooltipContent>返回分组</TooltipContent>
-            </Tooltip>
+              </AppTooltipTrigger>
+              <AppTooltipContent>返回分组</AppTooltipContent>
+            </AppTooltip>
           ) : undefined
         }
         below={

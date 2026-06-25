@@ -10,8 +10,8 @@ export interface TruncatedTooltipProps {
   text: string;
   class?: string;
   as?: 'span' | 'div';
-  /** 阅读器叠层内请用 ViewerAppTooltipContent 包裹并传入 portalZClass */
-  portalZClass?: string;
+  /** 阅读器叠层内请为 AppTooltipContent 设置 layer="viewer" */
+  layer?: 'app' | 'viewer';
 }
 
 function isTextTruncated(el: HTMLElement) {
@@ -19,7 +19,7 @@ function isTextTruncated(el: HTMLElement) {
 }
 
 export function TruncatedTooltip(props: TruncatedTooltipProps) {
-  const [local, others] = splitProps(props, ['text', 'class', 'as', 'portalZClass']);
+  const [local, others] = splitProps(props, ['text', 'class', 'as', 'layer']);
   const [triggerEl, setTriggerEl] = createSignal<HTMLElement | undefined>();
   const [truncated, setTruncated] = createSignal(false);
 
@@ -47,7 +47,7 @@ export function TruncatedTooltip(props: TruncatedTooltipProps) {
       >
         {local.text}
       </AppTooltipTrigger>
-      <AppTooltipContent portalToBody portalZClass={local.portalZClass}>
+      <AppTooltipContent layer={local.layer ?? 'app'}>
         {local.text}
       </AppTooltipContent>
     </AppTooltip>

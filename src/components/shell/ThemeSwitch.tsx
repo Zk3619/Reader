@@ -1,14 +1,10 @@
 import { MultiSwitch, type MultiSwitchOption } from "@/components/ui/multi-switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Show } from "solid-js";
 import { ThemeLightIcon, ThemeDarkIcon, ThemeAutoIcon } from "@/components/shared/icons";
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from "@/components/shared/AppTooltip";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument, type ThemeMode } from "@/lib/theme";
-import {
-  ViewerAppDropdownMenuContent,
-  ViewerAppTooltip,
-  ViewerAppTooltipContent,
-  ViewerAppTooltipTrigger,
-} from "@/components/viewer/viewer-app-overlay";
+import { ViewerAppDropdownMenuContent } from "@/components/viewer/viewer-app-overlay";
 
 const THEME_OPTIONS: MultiSwitchOption<ThemeMode>[] = [
   { value: "light", label: "浅色", icon: ThemeLightIcon },
@@ -59,19 +55,12 @@ export function ThemeSwitch(props: ThemeSwitchProps) {
     return switchControl;
   }
 
-  if (inViewer()) {
-    return (
-      <ViewerAppTooltip>
-        <ViewerAppTooltipTrigger as="div">{switchControl}</ViewerAppTooltipTrigger>
-        <ViewerAppTooltipContent>{tooltipHint()}</ViewerAppTooltipContent>
-      </ViewerAppTooltip>
-    );
-  }
-
   return (
-    <Tooltip>
-      <TooltipTrigger as="div">{switchControl}</TooltipTrigger>
-      <TooltipContent>{tooltipHint()}</TooltipContent>
-    </Tooltip>
+    <AppTooltip>
+      <AppTooltipTrigger as="div">{switchControl}</AppTooltipTrigger>
+      <Show when={inViewer()} fallback={<AppTooltipContent>{tooltipHint()}</AppTooltipContent>}>
+        <AppTooltipContent layer="viewer">{tooltipHint()}</AppTooltipContent>
+      </Show>
+    </AppTooltip>
   );
 }

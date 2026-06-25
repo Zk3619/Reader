@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * TXT 目录规则编辑（对齐 Legado TxtTocRuleEditDialog）
  */
@@ -96,7 +96,7 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
         <AppDialogHeader>
           <AppDialogTitle>{props.rule?.id ? '编辑目录规则' : '新建目录规则'}</AppDialogTitle>
         </AppDialogHeader>
-        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称</Label>
             <TextField class="mt-1">

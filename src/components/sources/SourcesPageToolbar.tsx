@@ -5,7 +5,7 @@
 import { createSignal, createEffect, onMount, Show } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -84,8 +84,8 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
       <Show
         when={sourceSearchExpanded()}
         fallback={
-          <Tooltip>
-            <TooltipTrigger
+          <AppTooltip>
+            <AppTooltipTrigger
               as={Button}
               variant="ghost"
               size="icon"
@@ -94,9 +94,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
             >
               <SearchIcon class="h-4 w-4" />
               <span class="sr-only">搜索</span>
-            </TooltipTrigger>
-            <TooltipContent>搜索</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>搜索</AppTooltipContent>
+          </AppTooltip>
         }
       >
         <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
@@ -146,8 +146,8 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
         onEnableDragSortChange={props.onEnableDragSortChange}
       />
 
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -157,13 +157,13 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
         >
           <FilterIcon class="h-4 w-4" />
           <span class="sr-only">筛选</span>
-        </TooltipTrigger>
-        <TooltipContent>{props.filterTooltip || '筛选'}</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{props.filterTooltip || '筛选'}</AppTooltipContent>
+      </AppTooltip>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
                 <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -172,9 +172,9 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
                 </AppDropdownMenuIconTrigger>
               )}
             />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem onSelect={() => props.onOpenSourcesManage?.()}>
             <Settings2Icon class="h-4 w-4" />

@@ -4,7 +4,7 @@
 
 import { createMemo, createResource, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ReadRecordCalendarDrawer } from '@/components/record/ReadRecordCalendarDrawer';
 import { ReadRecordGoalCard } from '@/components/record/ReadRecordGoalCard';
 import { ReadRecordHeatmap } from '@/components/record/ReadRecordHeatmap';
@@ -150,8 +150,8 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
         }
         leading={props.onBack ? <SettingsToolbarLeading onBack={props.onBack} /> : undefined}
       >
-        <Tooltip>
-          <TooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -160,12 +160,12 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
             onClick={() => setCalendarOpen(true)}
           >
             <CalendarDaysIcon class="h-5 w-5" size={20} />
-          </TooltipTrigger>
-          <TooltipContent>打开阅读日历</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>打开阅读日历</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenu>
-          <Tooltip>
-            <TooltipTrigger as="div">
+          <AppTooltip>
+            <AppTooltipTrigger as="div">
               <AppDropdownMenuTrigger
                 as={(triggerProps: Record<string, unknown>) => (
                   <AppDropdownMenuIconTrigger triggerProps={triggerProps} class="size-9">
@@ -174,9 +174,9 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
                   </AppDropdownMenuIconTrigger>
                 )}
               />
-            </TooltipTrigger>
-            <TooltipContent>更多操作</TooltipContent>
-          </Tooltip>
+            </AppTooltipTrigger>
+            <AppTooltipContent>更多操作</AppTooltipContent>
+          </AppTooltip>
           <AppDropdownMenuContent align="end">
             <AppDropdownMenuCheckboxItem
               checked={enableReadRecord()}

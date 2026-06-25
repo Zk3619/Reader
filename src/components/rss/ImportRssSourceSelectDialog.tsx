@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodyFlexSpaceY3 } from '@/lib/ui/viewport-classes';
+import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 import { For, Show } from 'solid-js';
 import {
   AppDialogScrollBody,
@@ -97,7 +97,7 @@ export function ImportRssSourceSelectDialog(props: ImportRssSourceSelectDialogPr
             默认勾选新增或远程更新时间更晚的订阅源。可保留本地名称、分组与启用状态。
           </AppDialogDescription>
         </AppDialogHeader>
-        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodyFlexSpaceY3}>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <Show when={!props.loading}>
             <section class="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
               <p class="text-xs font-medium text-muted-foreground">导入选项</p>

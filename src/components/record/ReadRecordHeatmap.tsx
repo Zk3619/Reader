@@ -4,7 +4,7 @@
 
 import { createMemo, createSignal, For, Show } from 'solid-js';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   settingsOptionTabsEqualWidthListClass,
   settingsOptionTabsEqualWidthTriggerClass,
@@ -55,15 +55,15 @@ function HeatmapGrid(props: { cells: HeatmapCell[] }) {
           <div class="flex min-w-0 flex-1 flex-col gap-1">
             <For each={week}>
               {(cell) => (
-                <Tooltip>
-                  <TooltipTrigger
+                <AppTooltip>
+                  <AppTooltipTrigger
                     class={cn(
                       'block min-h-0 w-full flex-1 rounded-sm border-0 p-0',
                       resolveHeatmapCellClass(cell.readTimeSeconds, maxReadTime()),
                     )}
                     aria-label={`${formatFriendlyDate(cell.dateKey)} ${formatReadDuration(cell.readTimeSeconds)}`}
                   />
-                  <TooltipContent>
+                  <AppTooltipContent>
                     <div class="text-xs">
                       <div>{formatFriendlyDate(cell.dateKey)}</div>
                       <div class="text-muted-foreground">
@@ -72,8 +72,8 @@ function HeatmapGrid(props: { cells: HeatmapCell[] }) {
                           : '无阅读记录'}
                       </div>
                     </div>
-                  </TooltipContent>
-                </Tooltip>
+                  </AppTooltipContent>
+                </AppTooltip>
               )}
             </For>
           </div>

@@ -6,7 +6,7 @@ import { Show, createSignal, onMount } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { ExploreLayoutDialog } from '@/components/explore/ExploreLayoutDialog';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
   AppDropdownMenuContent,
@@ -50,8 +50,8 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger
+      <AppTooltip>
+        <AppTooltipTrigger
           as={Button}
           variant="ghost"
           size="icon"
@@ -61,13 +61,13 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
         >
           <SearchIcon class="h-4 w-4" />
           <span class="sr-only">搜索</span>
-        </TooltipTrigger>
-        <TooltipContent>搜索</TooltipContent>
-      </Tooltip>
+        </AppTooltipTrigger>
+        <AppTooltipContent>搜索</AppTooltipContent>
+      </AppTooltip>
 
       <Show when={props.showRefresh}>
-        <Tooltip>
-          <TooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -77,12 +77,12 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           >
             <ListRefreshIcon class="h-4 w-4" />
             <span class="sr-only">刷新列表</span>
-          </TooltipTrigger>
-          <TooltipContent>刷新列表</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>刷新列表</AppTooltipContent>
+        </AppTooltip>
 
-        <Tooltip>
-          <TooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -92,12 +92,12 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           >
             <FolderRefreshIcon class="h-4 w-4" />
             <span class="sr-only">刷新分类</span>
-          </TooltipTrigger>
-          <TooltipContent>刷新分类</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>刷新分类</AppTooltipContent>
+        </AppTooltip>
 
-        <Tooltip>
-          <TooltipTrigger
+        <AppTooltip>
+          <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
@@ -107,14 +107,14 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
           >
             <RefreshIcon class="h-4 w-4" />
             <span class="sr-only">刷新整页</span>
-          </TooltipTrigger>
-          <TooltipContent>刷新整页</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>刷新整页</AppTooltipContent>
+        </AppTooltip>
       </Show>
 
       <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-        <Tooltip>
-          <TooltipTrigger as="div">
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
             <AppDropdownMenuTrigger
               as={(triggerProps: Record<string, unknown>) => (
                 <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
@@ -123,9 +123,9 @@ export function ExplorePageToolbar(props: ExplorePageToolbarProps) {
                 </AppDropdownMenuIconTrigger>
               )}
             />
-          </TooltipTrigger>
-          <TooltipContent>更多</TooltipContent>
-        </Tooltip>
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
         <AppDropdownMenuContent layout="compact">
           <AppDropdownMenuItem onSelect={() => setLayoutDialogOpen(true)}>
             <Settings2Icon class="h-4 w-4" />
