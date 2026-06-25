@@ -10,11 +10,6 @@ export function formatBookmarkBookTitle(bookName: string, bookAuthor: string): s
   return author ? `${bookName} · ${author}` : bookName;
 }
 
-/** @deprecated 使用 formatBookmarkBookTitle */
-export function formatBookmarkBookHeader(bookName: string, bookAuthor: string): string {
-  return formatBookmarkBookTitle(bookName, bookAuthor);
-}
-
 export function bookmarkBookKey(bookName: string, bookAuthor: string): string {
   return `${bookName}\0${bookAuthor ?? ''}`;
 }

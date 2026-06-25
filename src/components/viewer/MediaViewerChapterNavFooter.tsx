@@ -20,8 +20,6 @@ export interface MediaViewerChapterNavFooterProps {
   loading?: boolean;
   /** 中间附加信息（如漫画页码）*/
   center?: import('solid-js').JSX.Element;
-  /** @deprecated 显隐由 MediaViewerOverlayBottomChrome 控制 */
-  visible?: boolean;
   onPrev: () => void;
   onNext: () => void;
 }
@@ -33,7 +31,6 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
     'catalogLength',
     'loading',
     'center',
-    'visible',
     'onPrev',
     'onNext',
   ]);

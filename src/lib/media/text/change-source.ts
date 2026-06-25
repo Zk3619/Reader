@@ -225,27 +225,6 @@ export class ChangeSourceSearchSession {
   }
 }
 
-/** @deprecated 使用 ChangeSourceSearchSession */
-export async function searchChangeSourceCandidates(
-  book: Book,
-  options?: { maxSources?: number },
-): Promise<ChangeSourceCandidate[]> {
-  const session = new ChangeSourceSearchSession();
-  const prefs = loadChangeSourcePrefs();
-  await session.startSearch(book, prefs);
-  const sources = await sourcesDb.getAllSources();
-  const byUrl = new Map(sources.map((s) => [s.sourceUrl, s]));
-  return session
-    .getResults()
-    .slice(0, options?.maxSources ?? 48)
-    .map((searchBook) => {
-      const source = byUrl.get(searchBook.origin);
-      if (!source) return null;
-      return { source, searchBook };
-    })
-    .filter((x): x is ChangeSourceCandidate => x != null);
-}
-
 export async function resolveChangeSource(
   oldBook: Book,
   searchBook: SearchBook,

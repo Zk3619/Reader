@@ -258,22 +258,3 @@ async function postBookSourcePageDirect(
     { cfTitle: opts?.cfTitle },
   );
 }
-
-/** @deprecated 已内置于 get/postBookSourcePage，保留别名避免外部引用断裂 */
-export async function fetchBookSourcePageWithServerFailover(
-  source: BookSource,
-  url: string,
-  options: {
-    method?: 'GET' | 'POST';
-    body?: string;
-    logTag?: string;
-  } & BookSourceHttpOpts = {},
-): Promise<string> {
-  const method = options.method ?? 'GET';
-  const body = options.body ?? '';
-  const { logTag: _logTag, method: _m, body: _b, ...httpOpts } = options;
-  if (method === 'POST') {
-    return postBookSourcePage(source, url, body, httpOpts);
-  }
-  return getBookSourcePage(source, url, httpOpts);
-}

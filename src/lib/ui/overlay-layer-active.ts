@@ -35,8 +35,3 @@ export function publishActiveOverlayLayer(
 export function overlayLayerZ(): OverlayLayerZ {
   return activeOverlayLayer();
 }
-
-/** @deprecated 优先在模板内使用 overlayLayerZ()，避免初始化时快照导致阅读器内 Dialog 被遮挡 */
-export function useOverlayLayerZ(): OverlayLayerZ {
-  return overlayLayerZ();
-}

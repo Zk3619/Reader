@@ -19,9 +19,6 @@ export function stripInnerWebMetaRefresh(html: string): string {
   });
 }
 
-/** @deprecated 使用 stripInnerWebMetaRefresh */
-export const stripImportDeepLinkMetaRefresh = stripInnerWebMetaRefresh;
-
 /** CF 挑战页 CSP 仅允许 img-src 'self'（localhost），须移除 meta 才能让书源域资源加载 */
 export function stripInnerWebCspMetaTags(html: string): string {
   return html.replace(
@@ -606,9 +603,6 @@ window.addEventListener('pagehide',function(){syncParent();});
 syncParent();
 })();`;
 }
-
-/** @deprecated 使用 patchProxiedDocumentLocationQuery */
-export const patchParagraphReviewEmbeddedQuery = patchProxiedDocumentLocationQuery;
 
 export function injectHtmlForInnerWeb(
   html: string,

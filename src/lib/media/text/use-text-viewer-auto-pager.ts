@@ -194,8 +194,6 @@ export function useTextViewerAutoPager(options: UseTextViewerAutoPagerOptions) {
 
   return {
     active,
-    /** @deprecated 使用 screenProgress */
-    pagedProgress: screenProgress,
     screenProgress,
     speed,
     /** 按页模式下的翻页样式；滚动模式始终为连续滚动 */

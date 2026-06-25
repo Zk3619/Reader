@@ -3,9 +3,6 @@ import { cn } from '@/lib/utils';
 /** 顶栏 / 底栏相对主内容区的布局方式 */
 export type ViewerChromeLayout = 'fixed' | 'stacked' | 'floating';
 
-/** @deprecated 使用 ViewerChromeLayout；overlay 已更名为 stacked（层叠） */
-export type ViewerChromePlacement = ViewerChromeLayout;
-
 export const defaultViewerChromeLayout: ViewerChromeLayout = 'stacked';
 
 export const VIEWER_CHROME_LAYOUT_LABELS: Record<ViewerChromeLayout, string> = {

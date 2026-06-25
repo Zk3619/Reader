@@ -35,8 +35,6 @@ export interface ChapterCacheStats {
   breakdown: ChapterCacheStorageBreakdown;
   /** 各分项之和 */
   totalBytes: number;
-  /** @deprecated 与 totalBytes 相同，兼容旧调用 */
-  estimatedBytes: number;
 }
 
 export function sumChapterCacheBreakdownBytes(
@@ -134,7 +132,6 @@ export async function getChapterCacheStats(): Promise<ChapterCacheStats> {
     manualChapterCount,
     breakdown,
     totalBytes,
-    estimatedBytes: totalBytes,
   };
 }
 

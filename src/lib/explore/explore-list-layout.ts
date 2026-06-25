@@ -144,21 +144,3 @@ export function getExploreListRowEstimatePx(
 export function shouldUseResponsiveRowHeight(settings: ExplorePageLayoutSettings): boolean {
   return settings.dataLayoutMode === 'card-grid';
 }
-
-/** @deprecated 使用 EXPLORE_RESPONSIVE_GRID_CLASS */
-export const EXPLORE_BOOK_GRID_CLASS = EXPLORE_RESPONSIVE_GRID_CLASS;
-
-/** @deprecated 使用 EXPLORE_RESPONSIVE_CARD_HEIGHT_PX */
-export const EXPLORE_BOOK_CARD_HEIGHT_PX = EXPLORE_RESPONSIVE_CARD_HEIGHT_PX;
-
-/** @deprecated 使用 EXPLORE_RESPONSIVE_GRID_GAP_PX */
-export const EXPLORE_BOOK_GRID_GAP_PX = EXPLORE_RESPONSIVE_GRID_GAP_PX;
-
-/** @deprecated 使用 EXPLORE_RESPONSIVE_ROW_HEIGHT_PX */
-export const EXPLORE_BOOK_GRID_ROW_HEIGHT_PX = EXPLORE_RESPONSIVE_ROW_HEIGHT_PX;
-
-/** @deprecated 使用 resolveExploreResponsiveColumnCount */
-export const resolveExploreGridColumnCount = resolveExploreResponsiveColumnCount;
-
-/** @deprecated 使用 useExploreResponsiveColumnCount */
-export const useExploreGridColumnCount = useExploreResponsiveColumnCount;

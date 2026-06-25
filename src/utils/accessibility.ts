@@ -283,15 +283,6 @@ function scheduleFlushAfterMenuCloseAutoFocus(): void {
  * 用于开弹窗、切页、开全屏子页等，避免锚点随 DOM 隐藏后 Popper 闪到左上角（Android 常见）。
  */
 export function deferUntilMenuDismissed(action: () => void): void {
-  openAppDialogAfterMenuDismissImpl(action);
-}
-
-/** @deprecated 使用 deferUntilMenuDismissed；保留别名兼容旧调用 */
-export function openAppDialogAfterMenuDismiss(action: () => void): void {
-  deferUntilMenuDismissed(action);
-}
-
-function openAppDialogAfterMenuDismissImpl(action: () => void): void {
   preventMenuCloseAutoFocus = true;
   pendingDialogAfterMenu = action;
   pendingDialogRunScheduled = false;

@@ -36,11 +36,6 @@ import {
 } from '@/components/shared/AppDialog';
 import { AppDropdownMenuContent } from '@/components/shared/AppDropdownMenu';
 import { AppSelectContent } from '@/components/shared/AppSelect';
-import {
-  AppTooltip,
-  AppTooltipContent,
-  AppTooltipTrigger,
-} from '@/components/shared/AppTooltip';
 
 /** 阅读器内 Dialog / Drawer / Popper 的 z-index 档位（与 overlay-z 同步） */
 export const VIEWER_OVERLAY_Z = MEDIA_VIEWER_OVERLAY_LAYER_Z;
@@ -139,24 +134,6 @@ export const ViewerAppSelectContent: Component<ViewerAppSelectContentProps> = (p
   );
 };
 
-export type ViewerAppTooltipContentProps = Omit<
-  ComponentProps<typeof AppTooltipContent>,
-  'portalToBody'
->;
-
-export const ViewerAppTooltipContent: Component<ViewerAppTooltipContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
-  const popperZ = () => local.portalZClass ?? VIEWER_OVERLAY_Z.popper;
-  return (
-    <AppTooltipContent
-      portalToBody
-      portalZClass={popperZ()}
-      class={cn(popperZ(), local.class)}
-      {...rest}
-    />
-  );
-};
-
 export {
   AppDrawer as ViewerAppDrawer,
   type AppDrawerProps as ViewerAppDrawerProps,
@@ -175,6 +152,4 @@ export {
   AppDialogFooter as ViewerAppDialogFooter,
   AppDialogHeader as ViewerAppDialogHeader,
   AppDialogTitle as ViewerAppDialogTitle,
-  AppTooltip as ViewerAppTooltip,
-  AppTooltipTrigger as ViewerAppTooltipTrigger,
 };

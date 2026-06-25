@@ -69,14 +69,6 @@ export function invalidateMangaImageMetaIndex(): void {
   statsMapInflight = null;
 }
 
-/** @deprecated 使用 getMangaImageUrlKey */
-export async function getMangaImageCacheKey(
-  imageUrl: string,
-  sourceId?: string,
-): Promise<string> {
-  return getMangaImageUrlKey(imageUrl, sourceId);
-}
-
 function resolveSourceId(sourceId?: string): string {
   return sourceId ?? '';
 }

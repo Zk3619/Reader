@@ -51,15 +51,6 @@ export function dualSpreadColumnPaneStyle(
   };
 }
 
-/** @deprecated 兼容旧引用 */
-export function dualSpreadShiftLayoutStyle(
-  _spreadWidthPx: number,
-  _role: 'left' | 'right',
-  extentPx?: number,
-): Record<string, string | undefined> {
-  return dualSpreadColumnPaneStyle(extentPx);
-}
-
 export function dualSpreadShiftTransform(
   y: number,
   ...extras: (string | undefined)[]

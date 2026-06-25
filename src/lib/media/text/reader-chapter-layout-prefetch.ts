@@ -85,7 +85,6 @@ function prefetchOne(
     viewportHeight,
     config,
     contentRoot: null,
-    refineWithDom: false,
     dualPage,
     padTop: pageWindow.padTop,
     padBottom: pageWindow.padBottom,

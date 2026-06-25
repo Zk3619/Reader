@@ -142,14 +142,10 @@ export function mountTurnPageCurtain(
   pageStartPx: number,
   options?: {
     contentSpanPx?: number;
-    /** @deprecated slideMount 已与 content-slot 同几何时不再使用 */
-    viewportHeightPx?: number;
     /** 覆盖：slideMount 由 JSX 对齐 content-slot 四边 inset，此处仅用于语义标记 */
     contentInsetPx?: TextViewerPagedContentInsets;
     /** 滑动/仿真：满视口页面板（padding 承载 inset，与 incoming 一致） */
     slideViewportPanel?: boolean;
-    /** @deprecated 使用 slideViewportPanel */
-    slideFillMount?: boolean;
     /** 主题背景色（避免幕帘回落到默认主题 0） */
     pageBg?: string;
     /** 页眉页脚随翻页：克隆整页 content-frame */

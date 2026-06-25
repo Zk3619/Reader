@@ -78,8 +78,6 @@ export interface LayoutReaderChapterInput {
   config: TextViewerUiConfig;
   contentRoot?: HTMLElement | null;
   bypassCache?: boolean;
-  /** @deprecated 由 layoutEngine 控制；保留字段避免调用方报错 */
-  refineWithDom?: boolean;
   dualPage?: boolean;
   streamLayout?: boolean;
   onLayoutProgress?: (layout: ReaderChapterLayout) => void;

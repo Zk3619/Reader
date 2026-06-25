@@ -77,28 +77,6 @@ export async function convertImageWithCanvas(
   return { bytes: await blob.arrayBuffer(), mime: targetMime };
 }
 
-/** @deprecated 请使用 convertImageForExport */
-export async function convertImageBytes(
-  bytes: ArrayBuffer,
-  sourceMime: string,
-  target: ImageTargetFormat,
-  quality = 0.92,
-): Promise<{ bytes: ArrayBuffer; mime: string }> {
-  if (target === 'original') {
-    return { bytes, mime: sourceMime || 'image/jpeg' };
-  }
-  try {
-    const { convertImageForExport } = await import('@/lib/media/media-convert');
-    return await convertImageForExport(bytes, sourceMime, target);
-  } catch {
-    try {
-      return await convertImageWithCanvas(bytes, sourceMime, target, quality);
-    } catch {
-      return { bytes, mime: sourceMime || 'image/jpeg' };
-    }
-  }
-}
-
 export function imageExtensionForMime(mime: string): string {
   const m = mime.toLowerCase();
   if (m.includes('png')) return 'png';

@@ -10,8 +10,3 @@ import {
 
 export type { ParsedAudioUrl };
 export { parseParsedAudioUrls, parseAudioUrlStrings };
-
-/** @deprecated 使用 parseParsedAudioUrls */
-export function parseAudioUrls(raw: string): string[] {
-  return parseAudioUrlStrings(raw);
-}

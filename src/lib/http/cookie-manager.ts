@@ -3,20 +3,11 @@
  */
 
 import {
-  getJarCookie,
   removeJarCookies,
   saveSetCookieLines,
 } from '@/lib/http/cookie-jar';
 
 export { getSubDomain, getJarCookie, replacePersistentCookie, saveSetCookieLines } from '@/lib/http/cookie-jar';
-
-/**
- * @deprecated 使用 getJarCookie；保留别名
- */
-export async function getCookie(url: string): Promise<string | null> {
-  const c = await getJarCookie(url);
-  return c || null;
-}
 
 /**
  * 单条 Set-Cookie 写入（兼容旧调用）

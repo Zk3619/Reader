@@ -37,15 +37,6 @@ export function setViewerOverlayPortalHostEnabled(enabled: boolean): void {
   setOverlayPortalHost(undefined);
 }
 
-/** @deprecated 使用 setViewerOverlayPortalHostEnabled */
-export function registerOverlayPortalHost(el: HTMLElement | undefined): void {
-  if (el) {
-    setViewerOverlayPortalHostEnabled(true);
-    return;
-  }
-  setViewerOverlayPortalHostEnabled(false);
-}
-
 /** 当前是否已启用阅读器 Portal 宿主（供 Select 等判断是否走 viewer 档位） */
 export function useOverlayPortalMount(): HTMLElement | undefined {
   return overlayPortalHost();

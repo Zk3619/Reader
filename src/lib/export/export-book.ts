@@ -286,11 +286,3 @@ export async function exportBook(
 
   return { exported: chapters.length };
 }
-
-/** @deprecated 使用 exportBook */
-export async function exportBookAsTxt(
-  book: Book,
-  options?: Omit<ExportBookOptions, 'format' | 'layout'>,
-): Promise<void> {
-  await exportBook(book, { ...options, format: 'txt', layout: 'single' });
-}
