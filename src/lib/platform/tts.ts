@@ -38,6 +38,8 @@ export interface TtsConfig {
   voiceURI?: string;
   /** 语言代码 */
   lang?: string;
+  /** 字/句边界（Web Speech API onboundary） */
+  onBoundary?: (charIndex: number, charLength: number) => void;
 }
 
 /**
@@ -103,6 +105,7 @@ class WebTtsProvider implements TtsProvider {
     volume: 1,
   };
   private isPausedFlag = false;
+  private cancelling = false;
 
   constructor() {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -160,9 +163,16 @@ class WebTtsProvider implements TtsProvider {
     };
 
     utterance.onerror = (event) => {
-      const error = new Error(`TTS 错误: ${event.error}`);
+      const speechEvent = event as SpeechSynthesisErrorEvent;
+      const benign =
+        this.cancelling ||
+        speechEvent.error === 'interrupted' ||
+        speechEvent.error === 'canceled';
+      this.cancelling = false;
       this.currentUtterance = null;
       this.isPausedFlag = false;
+      if (benign) return;
+      const error = new Error(`TTS 错误: ${speechEvent.error}`);
       this.stateListener?.onError?.(error);
       console.error('TTS 错误:', event);
     };
@@ -177,11 +187,16 @@ class WebTtsProvider implements TtsProvider {
       this.stateListener?.onResume?.();
     };
 
+    utterance.onboundary = (event) => {
+      finalConfig.onBoundary?.(event.charIndex, event.charLength);
+    };
+
     // 开始朗读
     this.synth.speak(utterance);
   }
 
   stop(): void {
+    this.cancelling = true;
     this.synth.cancel();
     this.currentUtterance = null;
     this.isPausedFlag = false;
