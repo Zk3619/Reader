@@ -89,7 +89,7 @@
 | 漫画 ReadManga | ✅ | ⬜ | P3 |
 | 段评 | — | 🟡 UI 无数据 | P3 |
 | 缓存章节 | ✅ | 🟡 | P1 |
-| 朗读 TTS / HttpTTS | ✅ | ⬜ | P2 |
+| 朗读 TTS / HttpTTS | ✅ | 🟡 全屏页/流式HttpTTS/按页字级高亮/焦点恢复 | P2 |
 | 音量键翻页 | ✅ 安卓 | ⬜ 桌面快捷键 | P2 |
 | 宽屏段评闪烁 | — | 🐛 bugs.txt | P1 修 |
 
@@ -156,7 +156,7 @@
 | replace_rules | ✅ | 无管理 UI |
 | rssSources / rssArticles… | ✅ | 无 UI |
 | readRecord* | ✅ | 无 UI |
-| httpTTS | ✅ | 无 UI |
+| httpTTS | ✅ | 🟡 阅读内引擎管理 UI |
 | cookies | ✅ | 使用中 |
 | caches | ✅ | 部分 |
 | dictRules / keyboardAssists | ✅ | 未用 |
