@@ -13,6 +13,11 @@ import { createStore } from 'solid-js/store';
 import type { ShellLayoutPreference } from '@/lib/shell/layout';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import {
+  defaultMediaPlayerChromeLayout,
+  defaultMediaPlayerChromePosition,
+  type MediaPlayerChromePosition,
+} from '@/lib/viewer/media-player-chrome-layout';
 import { readHmrData, writeHmrData } from '@/lib/dev/hmr-state';
 import {
   onInnerWebSessionEnded,
@@ -92,6 +97,10 @@ export interface AppSettings {
    * 旧值 overlay 在加载时迁移为 stacked
    */
   viewerChromeLayout?: ViewerChromeLayout;
+  /** 全局媒体播放器布局：fixed | stacked | floating */
+  mediaPlayerChromeLayout?: ViewerChromeLayout;
+  /** 全局媒体播放器位置：top | bottom */
+  mediaPlayerChromePosition?: MediaPlayerChromePosition;
   /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
   enableReadRecord?: boolean;
 }
@@ -117,6 +126,8 @@ const defaultAppSettings: AppSettings = {
   innerWebRenderMode: 'auto',
   sourceExploreDrawerLayout: 'default',
   viewerChromeLayout: defaultViewerChromeLayout,
+  mediaPlayerChromeLayout: defaultMediaPlayerChromeLayout,
+  mediaPlayerChromePosition: defaultMediaPlayerChromePosition,
   enableReadRecord: true,
 };
 
@@ -328,6 +339,16 @@ export const settingsStore = {
 
   async setViewerChromeLayout(viewerChromeLayout: ViewerChromeLayout): Promise<void> {
     await this.updateAppSettings({ viewerChromeLayout });
+  },
+
+  async setMediaPlayerChromeLayout(mediaPlayerChromeLayout: ViewerChromeLayout): Promise<void> {
+    await this.updateAppSettings({ mediaPlayerChromeLayout });
+  },
+
+  async setMediaPlayerChromePosition(
+    mediaPlayerChromePosition: MediaPlayerChromePosition,
+  ): Promise<void> {
+    await this.updateAppSettings({ mediaPlayerChromePosition });
   },
 
   /**

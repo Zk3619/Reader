@@ -65,6 +65,7 @@ import {
   normalizeAutoPageProgressEdge,
   normalizeAutoPageStyle,
   normalizeAutoReadSpeed,
+  normalizeTtsSpeechRate,
   normalizeSimulationDragZonePercent,
   normalizeTextViewerLayoutEngine,
   type TextViewerUiConfig,
@@ -169,6 +170,25 @@ function applySavedReaderUiConfig(
       saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
     pageTips: mergePageTipsConfig(saved.pageTips),
     layoutEngine: normalizeTextViewerLayoutEngine(saved.layoutEngine),
+    ttsSpeechRate: normalizeTtsSpeechRate(
+      saved.ttsSpeechRate ?? saved.speakSpeed ?? prev.ttsSpeechRate,
+    ),
+    speakSpeed: normalizeTtsSpeechRate(
+      saved.speakSpeed ?? saved.ttsSpeechRate ?? prev.speakSpeed,
+    ),
+    ttsFollowSys: saved.ttsFollowSys ?? prev.ttsFollowSys ?? true,
+    ttsTimer: saved.ttsTimer ?? prev.ttsTimer ?? 0,
+    readAloudByPage: saved.readAloudByPage ?? prev.readAloudByPage ?? false,
+    mediaButtonPerNext: saved.mediaButtonPerNext ?? prev.mediaButtonPerNext ?? false,
+    systemTtsVoiceURI: saved.systemTtsVoiceURI ?? prev.systemTtsVoiceURI ?? '',
+    systemTtsLang: saved.systemTtsLang ?? prev.systemTtsLang ?? 'zh-CN',
+    readAloudFloatingUi: saved.readAloudFloatingUi ?? prev.readAloudFloatingUi ?? false,
+    contentSelectSpeakMod:
+      saved.contentSelectSpeakMod === 1 ? 1 : (prev.contentSelectSpeakMod ?? 0),
+    volumeKeyControlAloud: saved.volumeKeyControlAloud ?? prev.volumeKeyControlAloud ?? true,
+    streamReadAloudAudio: saved.streamReadAloudAudio ?? prev.streamReadAloudAudio ?? false,
+    readAloudResumeOnFocus:
+      saved.readAloudResumeOnFocus ?? prev.readAloudResumeOnFocus ?? false,
   };
 }
 

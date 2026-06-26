@@ -2,7 +2,7 @@
  * 阅读界面设置面板（字号、间距、配色、页眉页脚等）
  */
 
-import { For, Show, onMount, createSignal } from 'solid-js';
+import { For, Show, createSignal } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import {
   AppSelect,
@@ -19,15 +19,12 @@ import type {
   TextViewerLayoutEngine,
 } from '@/lib/media/text/reader-ui-config';
 import { READER_IMAGE_STYLE_LABELS } from '@/lib/js-engine/legado/legado-image-options';
-import { getAllHttpTTS } from '@/lib/database/http-tts';
-import type { HttpTTS } from '@/types';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
 import { Button } from '@/components/ui/button';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
 import {
   readerDrawerOptionTabsListClass,
@@ -44,7 +41,6 @@ import {
   type TextViewerImageStyle,
   type TextViewerSimulationDragZonePercent,
 } from '@/lib/media/text/reader-ui-config';
-import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';
 import {
   TEXT_VIEWER_PAGE_ANIM_LABELS,
   TEXT_VIEWER_PAGE_ANIM_OPTIONS,
@@ -81,13 +77,8 @@ export interface ReaderSettingsProps {
 
 export function ReaderSettings(props: ReaderSettingsProps) {
   const config = () => textViewerStore.state.config;
-  const [httpTtsList, setHttpTtsList] = createSignal<HttpTTS[]>([]);
   const [fontSelectOpen, setFontSelectOpen] = createSignal(false);
   const fontOptions = () => READER_FONT_PRESET_IDS.map(String);
-
-  onMount(() => {
-    void getAllHttpTTS().then(setHttpTtsList);
-  });
 
   const setConfig = (patch: Partial<ReadConfig>) => {
     if (patch.layoutEngine != null && patch.layoutEngine !== config().layoutEngine) {
@@ -600,80 +591,6 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           </SwitchControl>
           <SwitchLabel class="sr-only">音量键翻页</SwitchLabel>
         </Switch>
-      </div>
-
-      {/* 朗读 */}
-      <div class="space-y-3">
-        <Label>朗读引擎</Label>
-        <Tabs
-          value={config().aloudEngine}
-          onChange={(value) => setConfig({ aloudEngine: value as ReadAloudEngine })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="朗读引擎">
-            <TabsTrigger value="system" class={readerDrawerOptionTabsTriggerClass}>
-              系统 TTS
-            </TabsTrigger>
-            <TabsTrigger value="httpTts" class={readerDrawerOptionTabsTriggerClass}>
-              HttpTTS
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <Show when={config().aloudEngine === 'httpTts'}>
-          <div class="space-y-2">
-            <Label class="text-xs text-muted-foreground">HttpTTS 引擎</Label>
-            <Show
-              when={httpTtsList().length > 0}
-              fallback={
-                <p class="text-xs text-muted-foreground">请先在设置中配置 HttpTTS</p>
-              }
-            >
-              <Tabs
-                value={
-                  config().httpTtsId != null
-                    ? String(config().httpTtsId)
-                    : undefined
-                }
-                onChange={(value) => setConfig({ httpTtsId: Number(value) })}
-                class="w-full"
-              >
-                <TabsList class={readerDrawerOptionTabsListClass} aria-label="HttpTTS 引擎">
-                  <For each={httpTtsList()}>
-                    {(item) => (
-                      <TabsTrigger
-                        value={String(item.id)}
-                        class={cn(readerDrawerOptionTabsTriggerClass, 'truncate')}
-                        title={item.name}
-                      >
-                        {item.name}
-                      </TabsTrigger>
-                    )}
-                  </For>
-                </TabsList>
-              </Tabs>
-            </Show>
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <Label>语速</Label>
-                <span class="text-sm text-muted-foreground">{config().speakSpeed}</span>
-              </div>
-              <Slider
-                value={[config().speakSpeed]}
-                minValue={0}
-                maxValue={10}
-                step={1}
-                onChange={(values: number[]) =>
-                  setConfig({ speakSpeed: values[0] ?? config().speakSpeed })
-                }
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
-            </div>
-          </div>
-        </Show>
       </div>
 
       {/* 点击区域（仅按页翻页） */}

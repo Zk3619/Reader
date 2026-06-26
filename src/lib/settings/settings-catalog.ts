@@ -86,6 +86,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['阅读器', '顶栏', '底栏', '工具栏', '悬浮', '层叠'],
   },
   {
+    id: 'media-player-chrome',
+    categoryId: 'appearance',
+    title: '全局媒体播放器',
+    description: '后台朗读与音视频播放时的壳层播放条布局',
+    keywords: ['播放器', '朗读', '后台', '音频', '视频', '悬浮', '层叠', '固定'],
+  },
+  {
     id: 'book-info-presentation',
     categoryId: 'appearance',
     title: '书籍详情展示',

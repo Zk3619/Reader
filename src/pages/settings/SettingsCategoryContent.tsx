@@ -3,6 +3,7 @@ import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
 import { ViewerChromeLayoutSetting } from '@/components/settings/ViewerChromeLayoutSetting';
+import { MediaPlayerChromeSetting } from '@/components/settings/MediaPlayerChromeSetting';
 import { InnerWebRenderModeSetting } from '@/components/settings/InnerWebRenderModeSetting';
 import { BookInfoPresentationSetting } from '@/components/settings/BookInfoPresentationSetting';
 import { TocPaginationSafetySetting } from '@/components/settings/TocPaginationSafetySetting';
@@ -97,6 +98,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
 
         <SettingItemAnchor id="viewer-chrome" highlighted={highlight('viewer-chrome')}>
           <ViewerChromeLayoutSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="media-player-chrome" highlighted={highlight('media-player-chrome')}>
+          <MediaPlayerChromeSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="book-info-presentation" highlighted={highlight('book-info-presentation')}>

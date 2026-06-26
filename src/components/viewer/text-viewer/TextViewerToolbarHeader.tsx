@@ -14,7 +14,6 @@ import {
   ReplaceIcon,
   DownloadIcon,
   VolumeOnIcon,
-  VolumeOffIcon,
 } from '@/components/shared/icons';
 import { ReaderMoreMenu, type ReaderMoreMenuProps } from '@/components/viewer/text-viewer/ReaderMoreMenu';
 import { isMobile, isTauri } from '@/lib/platform/detect';
@@ -33,6 +32,8 @@ export interface TextViewerToolbarHeaderProps {
   settingsTooltipSuspended?: boolean;
   /** 目录抽屉开/关期间暂停「目录」Tooltip */
   catalogTooltipSuspended?: boolean;
+  /** 朗读抽屉/全屏开/关期间暂停「朗读」Tooltip */
+  readAloudTooltipSuspended?: boolean;
   onChangeSource: () => void;
   /** 在线书架书才显示换源（对齐 Legado menu_group_on_line） */
   canChangeSource?: boolean;
@@ -118,20 +119,17 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           </AppTooltipTrigger>
           <AppTooltipContent layer="viewer">目录</AppTooltipContent>
         </AppTooltip>
-        <AppTooltip>
+        <AppTooltip disabled={props.readAloudTooltipSuspended}>
           <AppTooltipTrigger
             as={Button}
             variant="ghost"
             size="icon"
             class={iconBtn()}
-            onClick={props.onReadAloud}
             aria-label="朗读"
+            data-reader-aloud-trigger=""
+            onClick={props.onReadAloud}
           >
-            {props.readAloudActive ? (
-              <VolumeOffIcon class="size-5" size={20} />
-            ) : (
-              <VolumeOnIcon class="size-5" size={20} />
-            )}
+            <VolumeOnIcon class="size-5" size={20} />
           </AppTooltipTrigger>
           <AppTooltipContent layer="viewer">朗读</AppTooltipContent>
         </AppTooltip>

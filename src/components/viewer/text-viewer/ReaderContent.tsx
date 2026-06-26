@@ -3,7 +3,7 @@
  * 参考 legado 阅读界面：应用阅读配置（主题、字体、间距），支持正文选中、段评气泡
  */
 
-import { Show, For, createMemo, createSignal, createEffect } from 'solid-js';
+import { Show, For, createMemo, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { state as viewerState } from '@/stores/viewer/media/state';
 import {
@@ -36,6 +36,16 @@ import {
 } from '@/lib/media/text/reader-spacing';
 import { resolveReaderFontFamily } from '@/lib/media/text/reader-font';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import {
+  subscribeReadAloudProgress,
+  type ReadAloudProgress,
+} from '@/lib/media/text/read-aloud-progress';
+import { buildAloudParagraphIndexMap } from '@/lib/media/text/read-aloud-paragraphs';
+import { plainTextForAloud } from '@/lib/media/text/read-aloud';
+import {
+  ReaderScrollAloudHighlights,
+  resolveScrollAloudReadCharIndex,
+} from '@/components/viewer/text-viewer/ReaderScrollAloudHighlights';
 
 type ReaderDisplayBlockLocal = ReaderDisplayBlock;
 
@@ -293,6 +303,41 @@ export function ReaderContent(props: ReaderContentProps) {
       .map((blockIndex) => ({ block: all[blockIndex]!, blockIndex }));
   });
 
+  const [aloudProgress, setAloudProgress] = createSignal<ReadAloudProgress | null>(null);
+  onMount(() => {
+    const unsub = subscribeReadAloudProgress(setAloudProgress);
+    onCleanup(unsub);
+  });
+
+  const aloudParagraphIndexByBlock = createMemo(() => {
+    const html = content() ?? '';
+    const blocks = contentBlocks();
+    const refs: { blockIndex: number; text: string }[] = [];
+    for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+      const block = blocks[blockIndex]!;
+      if (block.type !== 'paragraph') continue;
+      const text = block.parts
+        .filter((p): p is Extract<ReaderParagraphPart, { kind: 'text' }> => p.kind === 'text')
+        .map((p) => p.text)
+        .join('');
+      refs.push({ blockIndex, text: plainTextForAloud(text) });
+    }
+    return buildAloudParagraphIndexMap(html, refs);
+  });
+
+  createEffect(() => {
+    const p = aloudProgress();
+    if (!p || p.chapterIndex !== chapterIndex()) return;
+    if (props.pagedLayout) return;
+    if (typeof document === 'undefined') return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-reader-aloud-paragraph="${p.paragraphIndex}"]`,
+      );
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  });
+
   const isMangaChapter = createMemo(() => {
     const raw = content()?.trim() ?? '';
     if (!raw) return false;
@@ -452,9 +497,27 @@ export function ReaderContent(props: ReaderContentProps) {
           {/* 段落 / 插图块 + 段评气泡 */}
           <div class="prose max-w-none">
             <For each={blockEntries()}>
-              {(entry, index) => (
+              {(entry, index) => {
+                const aloudIdx =
+                  entry.block.type === 'paragraph'
+                    ? aloudParagraphIndexByBlock().get(entry.blockIndex)
+                    : undefined;
+                const isAloudHighlight = () => {
+                  const p = aloudProgress();
+                  return (
+                    p != null &&
+                    p.chapterIndex === chapterIndex() &&
+                    aloudIdx != null &&
+                    p.paragraphIndex === aloudIdx
+                  );
+                };
+                return (
                 <div
                   data-reader-measure-block={props.measureBlocks ? '' : undefined}
+                  data-reader-aloud-paragraph={aloudIdx}
+                  class={cn(
+                    isAloudHighlight() && 'reader-aloud-highlight relative',
+                  )}
                   data-reader-legado-inline={
                     props.measureBlocks &&
                     entry.block.type === 'paragraph' &&
@@ -484,8 +547,18 @@ export function ReaderContent(props: ReaderContentProps) {
                   mangaChapterIndex={isMangaChapter() ? chapterIndex() : undefined}
                   mangaPageBaseIndex={mangaPageBaseByBlockIndex().get(entry.blockIndex)}
                 />
+                <Show when={isAloudHighlight() && !props.pagedLayout && aloudIdx != null}>
+                  <ReaderScrollAloudHighlights
+                    paragraphIndex={aloudIdx!}
+                    readCharIndex={resolveScrollAloudReadCharIndex(
+                      aloudProgress()?.paragraphText ?? '',
+                      aloudProgress()?.paragraphCharIndex,
+                    )}
+                  />
+                </Show>
                 </div>
-              )}
+                );
+              }}
             </For>
           </div>
           </div>

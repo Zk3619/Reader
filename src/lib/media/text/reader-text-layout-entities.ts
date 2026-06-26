@@ -21,6 +21,8 @@ export interface ReaderTextLine {
   chapterPosition: number;
   column: 0 | 1;
   isParagraphEnd?: boolean;
+  /** 朗读高亮（Legado isReadAloud） */
+  isReadAloud?: boolean;
   columns?: ReaderTextColumn[];
 }
 

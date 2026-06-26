@@ -13,6 +13,10 @@ import {
   createMediaViewerChromeInputHandlers,
   type MediaViewerChromeInputHandlers,
 } from '@/lib/media/media-viewer-chrome-input';
+import {
+  isReadAloudBackgroundExitInProgress,
+  clearReadAloudBackgroundExitFlag,
+} from '@/lib/media/text/read-aloud-background';
 import { registerMediaViewerChromeBackSession } from '@/lib/media/media-viewer-chrome-back';
 import {
   MediaViewerShellContextProvider,
@@ -84,6 +88,8 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
 
   const setHeaderVisibleRaw = (visible: boolean) => {
     if (!chromeBarsCollapsible()) return;
+    if (isReadAloudBackgroundExitInProgress()) return;
+    if (local.entryVisible !== undefined && !local.entryVisible()) return;
     if (local.onHeaderVisibleChange) {
       local.onHeaderVisibleChange(visible);
       return;
@@ -163,7 +169,8 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
         headerVisible,
         setHeaderVisible,
         toggleBars: () => setHeaderVisible(!headerVisible()),
-        enabled: () => true,
+        enabled: () =>
+          (local.entryVisible?.() ?? true) && !isReadAloudBackgroundExitInProgress(),
         barsCollapsible: chromeBarsCollapsible,
       })
       : null;
@@ -265,6 +272,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
   });
 
   onCleanup(() => {
+    clearReadAloudBackgroundExitFlag();
     registerMediaViewerChromeAutoHideSession(null, registryToken);
     registerMediaViewerChromeBackSession(null, chromeBackToken);
     appFocus?.dispose();

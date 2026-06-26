@@ -16,6 +16,7 @@ import { textViewerStore } from '@/stores/viewer';
 import { state as viewerState } from '@/stores/viewer/media/state';
 import { getPooledChapterContent } from '@/lib/chapter-cache/chapter-content-pool';
 import { ReaderContent, type ReaderContentProps } from '@/components/viewer/text-viewer/ReaderContent';
+import { ReaderPagedAloudOverlay } from '@/components/viewer/text-viewer/ReaderPagedAloudOverlay';
 import { applyReaderTextContentSlotLayoutStyle, readerTextContentSlotPagedBodyMountStyle, readerTextContentSlotPagedFrameStyle, readerTextContentSlotPagedMountStyle, readerTextContentSlotPaddingStyle, readerTextContentSlotSlidePanelStyle } from '@/components/viewer/text-viewer/reader-text-content-slot';
 import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import {
@@ -5988,20 +5989,26 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
                   themeCls.text,
                 )}
               >
-                <div class="reader-paged-page-content-clip relative h-full min-h-0 w-full overflow-hidden">
-                  {renderCurtainCloneHost()}
-                  <div
-                    class={cn(
-                      'reader-paged-page-span-clip absolute inset-x-0 top-0 overflow-hidden',
-                      pagedLayoutDualPage() && 'bottom-0',
-                    )}
-                    style={pageSpanClipStyle()}
-                  >
-                    {renderLiveChapter()}
-                    {renderIncomingStagingChapter()}
+                  <div class="reader-paged-page-content-clip relative h-full min-h-0 w-full overflow-hidden">
+                    {renderCurtainCloneHost()}
+                    <div
+                      class={cn(
+                        'reader-paged-page-span-clip absolute inset-x-0 top-0 overflow-hidden',
+                        pagedLayoutDualPage() && 'bottom-0',
+                      )}
+                      style={pageSpanClipStyle()}
+                    >
+                      {renderLiveChapter()}
+                      {renderIncomingStagingChapter()}
+                      <ReaderPagedAloudOverlay
+                        layout={() => layout()}
+                        pageIndex={() => incomingDisplayPage()}
+                        chapterIndex={() => viewerState.chapterIndex}
+                        contentOffsetY={() => contentOffsetY(incomingDisplayPage())}
+                      />
+                    </div>
+                    {renderAutoPagerScanReveal()}
                   </div>
-                  {renderAutoPagerScanReveal()}
-                </div>
               </div>
             </div>
           </ReaderPageTipChrome>

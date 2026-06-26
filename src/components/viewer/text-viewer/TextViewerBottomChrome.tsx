@@ -6,7 +6,6 @@ import {
   ListIcon,
   SettingsIcon,
   VolumeOnIcon,
-  VolumeOffIcon,
 } from '@/components/shared/icons';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
 import { cn } from '@/lib/utils';
@@ -34,6 +33,7 @@ export interface TextViewerBottomChromeProps {
   onOpenCatalog: () => void;
   onReadAloud: () => void;
   readAloudActive: boolean;
+  readAloudTooltipSuspended?: boolean;
   onOpenSettings: () => void;
   onOpenReaderMenu: () => void;
   autoPageActive?: boolean | (() => boolean);
@@ -194,7 +194,7 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
             <ListIcon class="h-4 w-4" />
             <span>目录</span>
           </Button>
-          <AppTooltip>
+          <AppTooltip disabled={props.readAloudTooltipSuspended}>
             <AppTooltipTrigger
               as={Button}
               variant="ghost"
@@ -203,14 +203,11 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
               'flex flex-col items-center gap-0.5 px-3 py-1.5 text-xs no-drag',
               floating.isFloating() ? floating.pillClass() : 'rounded-md',
             )}
-              onClick={props.onReadAloud}
               aria-label="朗读"
+              data-reader-aloud-trigger=""
+              onClick={props.onReadAloud}
             >
-              {props.readAloudActive ? (
-                <VolumeOffIcon class="h-4 w-4" size={16} />
-              ) : (
-                <VolumeOnIcon class="h-4 w-4" size={16} />
-              )}
+              <VolumeOnIcon class="h-4 w-4" size={16} />
               <span>朗读</span>
             </AppTooltipTrigger>
             <AppTooltipContent layer="viewer">朗读</AppTooltipContent>

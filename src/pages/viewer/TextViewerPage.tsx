@@ -61,13 +61,20 @@ import {
 } from '@/lib/media/viewer-regional-click';
 import { shouldSuppressPagedRegionalTap } from '@/lib/media/text/reader-paged-pointer-gesture';
 import { getHttpTTS } from '@/lib/database/http-tts';
+import { stopReadAloud } from '@/lib/media/text/read-aloud';
 import {
-  startReadAloud,
-  stopReadAloud,
-  toggleReadAloudPause,
-  getReadAloudState,
-  isReadAloudSupported,
-} from '@/lib/media/text/read-aloud';
+  bindReadAloudSessionContext,
+  unbindReadAloudSessionContext,
+  prevReadAloudParagraph,
+  nextReadAloudParagraph,
+  isReadAloudSessionActive,
+  type ReadAloudSessionContext,
+} from '@/lib/media/text/read-aloud-session';
+import { ReaderReadAloudDrawer } from '@/components/viewer/text-viewer/ReaderReadAloudDrawer';
+import { ReaderReadAloudFullscreen } from '@/components/viewer/text-viewer/ReaderReadAloudFullscreen';
+import { enterReadAloudBackground } from '@/lib/media/text/read-aloud-background';
+import { ReaderReadAloudMiniBar } from '@/components/viewer/text-viewer/ReaderReadAloudMiniBar';
+import { ReaderTextSelectionMenu } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
 import { type ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
 import {
   addReaderBookmark,
@@ -89,6 +96,7 @@ import { VIEWER_SHELL_OVERLAY_EVENTS } from '@/lib/ui/overlay-cleanup';
 import {
   blurAfterDrawerTriggerRefocus,
   dismissOpenKobalteTooltips,
+  resetReaderAloudTooltipTrigger,
   resetReaderCatalogTooltipTrigger,
   resetReaderMenuTooltipTrigger,
   SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
@@ -159,6 +167,8 @@ export function BookReader(props: BookReaderProps) {
   const [settingsTooltipSuspended, setSettingsTooltipSuspended] = createSignal(false);
   /** 目录抽屉开/关期间暂停顶栏「目录」Tooltip */
   const [catalogTooltipSuspended, setCatalogTooltipSuspended] = createSignal(false);
+  /** 朗读抽屉/全屏开/关期间暂停「朗读」Tooltip */
+  const [readAloudTooltipSuspended, setReadAloudTooltipSuspended] = createSignal(false);
   const [statusBarStyleDialogOpen, setStatusBarStyleDialogOpen] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
@@ -173,6 +183,8 @@ export function BookReader(props: BookReaderProps) {
   const [clickRegionalOpen, setClickRegionalOpen] = createSignal(false);
   const [clickRegionalMarkHint, setClickRegionalMarkHint] = createSignal(false);
   const [readAloudActive, setReadAloudActive] = createSignal(false);
+  const [readAloudDrawerOpen, setReadAloudDrawerOpen] = createSignal(false);
+  const [readAloudFullscreenOpen, setReadAloudFullscreenOpen] = createSignal(false);
   const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
   const [effectiveReplacesOpen, setEffectiveReplacesOpen] = createSignal(false);
   /** 设置抽屉内 Dialog 关闭后的短暂保护，避免同一次点击/失焦误关抽屉 */
@@ -232,6 +244,32 @@ export function BookReader(props: BookReaderProps) {
     onCleanup(() => window.clearTimeout(timer));
   });
 
+  let readAloudOverlayWasOpen = false;
+  const openReadAloudFullscreen = () => {
+    setReadAloudTooltipSuspended(true);
+    resetReaderAloudTooltipTrigger();
+    dismissOpenKobalteTooltips();
+    setReadAloudDrawerOpen(false);
+    setReadAloudFullscreenOpen(true);
+  };
+  createEffect(() => {
+    const open = readAloudDrawerOpen() || readAloudFullscreenOpen();
+    if (open) {
+      readAloudOverlayWasOpen = true;
+      setReadAloudTooltipSuspended(true);
+      dismissOpenKobalteTooltips();
+      return;
+    }
+    if (!readAloudOverlayWasOpen) return;
+    readAloudOverlayWasOpen = false;
+    blurAfterDrawerTriggerRefocus();
+    const timer = window.setTimeout(
+      () => setReadAloudTooltipSuspended(false),
+      SETTINGS_DRAWER_TOOLTIP_RESUME_MS,
+    );
+    onCleanup(() => window.clearTimeout(timer));
+  });
+
   createEffect(() => {
     const nestedDialogOpen = statusBarStyleDialogOpen() || effectiveReplacesOpen();
     if (nestedDialogOpen) {
@@ -277,6 +315,8 @@ export function BookReader(props: BookReaderProps) {
     setCatalogOpen(false);
     setSettingsOpen(false);
     setReaderMenuDrawerOpen(false);
+    setReadAloudDrawerOpen(false);
+    setReadAloudFullscreenOpen(false);
     setStatusBarStyleDialogOpen(false);
     setOfflineCacheDialogOpen(false);
     setDictOpen(false);
@@ -506,63 +546,124 @@ export function BookReader(props: BookReaderProps) {
     });
   };
 
-  const syncReadAloudActive = () => {
-    const st = getReadAloudState();
-    setReadAloudActive(st === 'playing' || st === 'paused');
+  const syncReadAloudActive = (active: boolean) => {
+    setReadAloudActive(active);
   };
 
-  const handleReadAloud = async () => {
-    const st = getReadAloudState();
-    if (st === 'playing' || st === 'paused') {
-      toggleReadAloudPause();
-      syncReadAloudActive();
-      showAppToast({
-        title: st === 'playing' ? '已暂停朗读' : '继续朗读',
-      });
-      return;
-    }
-    const cfg = textViewerStore.state.config;
-    const httpTts =
-      cfg.aloudEngine === 'httpTts' && cfg.httpTtsId != null
-        ? await getHttpTTS(cfg.httpTtsId)
-        : null;
-    if (cfg.aloudEngine === 'httpTts' && !httpTts) {
-      showAppToast({
-        title: '未配置 HttpTTS',
-        description: '请在设置 → 朗读引擎中选择在线朗读源',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (cfg.aloudEngine !== 'httpTts' && !isReadAloudSupported()) {
-      showAppToast({
-        title: '不支持朗读',
-        description: '当前环境无法使用语音合成',
-      });
-      return;
-    }
-    const ok = await startReadAloud(content(), {
-      engine: cfg.aloudEngine,
-      httpTts,
-      speakSpeed: cfg.speakSpeed,
-      onEnd: () => {
-        setReadAloudActive(false);
-        showAppToast({ title: '朗读结束' });
-      },
-      onError: (msg) => {
-        setReadAloudActive(false);
-        showAppToast({ title: '朗读失败', description: msg, variant: 'destructive' });
-      },
-    });
-    if (ok) {
-      autoPager.stop();
-      setReadAloudActive(true);
-      showAppToast({ title: '开始朗读' });
-    }
+  const handleReadAloud = () => {
+    openReadAloudDrawer();
   };
+
+  const openReadAloudDrawer = () => {
+    setReadAloudTooltipSuspended(true);
+    resetReaderAloudTooltipTrigger();
+    dismissOpenKobalteTooltips();
+    setReadAloudDrawerOpen(true);
+  };
+
+  let lastAloudFollowParagraph = -1;
 
   let pagedNav: ReaderPagedNavApi | undefined;
   let scrollNav: ReaderScrollNavApi | undefined;
+
+  const waitForChapterContent = async (maxMs = 15_000): Promise<void> => {
+    const start = Date.now();
+    while (
+      (textViewerStore.state.contentLoading || !textViewerStore.state.content?.trim()) &&
+      Date.now() - start < maxMs
+    ) {
+      await new Promise((r) => setTimeout(r, 80));
+    }
+  };
+
+  const readAloudSessionContext: ReadAloudSessionContext = {
+    getChapterContent: () => textViewerStore.state.content,
+    getChapterIndex: () => textViewerStore.state.chapterIndex,
+    getReadingAnchor: () => {
+      if (isPagedMode() && pagedNav) {
+        const snap = pagedNav.getBookmarkSnapshot();
+        return {
+          chapterIndex: textViewerStore.state.chapterIndex,
+          chapterPos: snap.chapterPos,
+          pageIndex: snap.pageIndex,
+          pageText: snap.pageText,
+        };
+      }
+      return {
+        chapterIndex: textViewerStore.state.chapterIndex,
+        chapterPos: textViewerStore.state.chapterPos,
+      };
+    },
+    onRequestPrevChapter: async () => {
+      await textViewerStore.prevChapter();
+      await waitForChapterContent();
+    },
+    onRequestNextChapter: async () => {
+      await textViewerStore.nextChapter();
+      await waitForChapterContent();
+    },
+    onChapterFinished: async () => {
+      if (
+        textViewerStore.state.chapterIndex >=
+        textViewerStore.state.catalog.length - 1
+      ) {
+        showAppToast({ title: '朗读结束' });
+        return false;
+      }
+      await textViewerStore.nextChapter();
+      await waitForChapterContent();
+      if (!textViewerStore.state.content?.trim()) {
+        showAppToast({
+          title: '下一章加载失败',
+          variant: 'destructive',
+        });
+        return false;
+      }
+      return true;
+    },
+    getConfig: () => textViewerStore.state.config,
+    resolveHttpTts: (id) =>
+      id != null ? getHttpTTS(id) : Promise.resolve(null),
+    onAutoPagerStop: () => autoPager.stop(),
+    onError: (msg) => {
+      setReadAloudActive(false);
+      showAppToast({
+        title: '朗读失败',
+        description: msg,
+        variant: 'destructive',
+      });
+    },
+    onStateChange: (snapshot) => {
+      setReadAloudActive(
+        snapshot.state === 'playing' || snapshot.state === 'paused',
+      );
+    },
+    onProgress: (progress) => {
+      if (progress.chapterIndex !== textViewerStore.state.chapterIndex) return;
+      textViewerStore.setChapterPos(progress.chapterPos);
+      const paragraphChanged = progress.paragraphIndex !== lastAloudFollowParagraph;
+      if (!paragraphChanged) return;
+      lastAloudFollowParagraph = progress.paragraphIndex;
+      if (isPagedMode() && pagedNav) {
+        pagedNav.setPageProgress(progress.chapterPos);
+      } else {
+        scrollNav?.scrollToProgressInCurrentChapter(progress.chapterPos);
+      }
+    },
+    getChapterCount: () => textViewerStore.state.catalog.length,
+    onNotify: (message) => {
+      showAppToast({ title: message, variant: 'info' });
+    },
+    getMediaMetadata: () => {
+      const book = textViewerStore.state.book;
+      const catalog = textViewerStore.state.catalog;
+      const idx = textViewerStore.state.chapterIndex;
+      return {
+        bookName: book?.name ?? '',
+        chapterTitle: catalog[idx]?.title ?? '',
+      };
+    },
+  };
 
   const normalizedPageAnim = () =>
     normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
@@ -571,6 +672,8 @@ export function BookReader(props: BookReaderProps) {
   const autoPagePaused = () =>
     catalogOpen() ||
     settingsOpen() ||
+    readAloudDrawerOpen() ||
+    readAloudFullscreenOpen() ||
     readerMenuDrawerOpen() ||
     searchOpen() ||
     bookmarksOpen() ||
@@ -778,6 +881,13 @@ export function BookReader(props: BookReaderProps) {
   };
 
   onMount(() => {
+    bindReadAloudSessionContext(readAloudSessionContext);
+    onCleanup(() => {
+      unbindReadAloudSessionContext();
+    });
+  });
+
+  onMount(() => {
     void shouldShowClickActionHint().then((show) => {
       if (show && isPagedMode()) openClickRegionalConfig(true);
     });
@@ -796,9 +906,27 @@ export function BookReader(props: BookReaderProps) {
         if (commentsOpen()) setPanelClosing(true);
         else if (!catalogOpen() && !settingsOpen()) toggleChromeBars();
       }
+
+      const aloudActive =
+        isReadAloudSessionActive() &&
+        (textViewerStore.state.config.volumeKeyControlAloud ?? true);
+
+      if (aloudActive) {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.code === 'AudioVolumeUp') {
+          e.preventDefault();
+          void prevReadAloudParagraph();
+          return;
+        }
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.code === 'AudioVolumeDown') {
+          e.preventDefault();
+          void nextReadAloudParagraph();
+          return;
+        }
+      }
+
       if (e.key === 'ArrowLeft') goPrevPage();
       if (e.key === 'ArrowRight') goNextPage();
-      if (textViewerStore.state.config.volumeKeyTurnPage) {
+      if (textViewerStore.state.config.volumeKeyTurnPage && !aloudActive) {
         if (e.key === 'ArrowUp' || e.code === 'AudioVolumeUp') {
           e.preventDefault();
           handlePrev();
@@ -1027,6 +1155,7 @@ export function BookReader(props: BookReaderProps) {
                     readAloudActive={readAloudActive()}
                     onOpenCatalog={openCatalog}
                     onReadAloud={handleReadAloud}
+                    readAloudTooltipSuspended={readAloudTooltipSuspended()}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenReaderMenu={openReaderMenuDrawer}
                     settingsTooltipSuspended={settingsTooltipSuspended()}
@@ -1073,6 +1202,7 @@ export function BookReader(props: BookReaderProps) {
                     onOpenCatalog={openCatalog}
                     onReadAloud={handleReadAloud}
                     readAloudActive={readAloudActive()}
+                    readAloudTooltipSuspended={readAloudTooltipSuspended()}
                     onOpenSettings={() => setSettingsOpen(true)}
                     onOpenReaderMenu={openReaderMenuDrawer}
                     autoPageActive={() => autoPager.active() && !isDualPageLayoutActive()}
@@ -1195,6 +1325,76 @@ export function BookReader(props: BookReaderProps) {
           </ViewerAppDrawerContent>
         </ViewerAppDrawer>
       </Show>
+
+      <ReaderReadAloudDrawer
+        open={readAloudDrawerOpen()}
+        onOpenChange={setReadAloudDrawerOpen}
+        sessionContext={readAloudSessionContext}
+        onSessionStateChange={syncReadAloudActive}
+        onOpenCatalog={() => {
+          setReadAloudDrawerOpen(false);
+          openCatalog();
+        }}
+        onOpenSettings={() => {
+          setReadAloudDrawerOpen(false);
+          setSettingsOpen(true);
+        }}
+        onOpenFullscreen={openReadAloudFullscreen}
+        onEnterBackground={() => {
+          const book = textViewerStore.state.book;
+          const catalog = textViewerStore.state.catalog;
+          const chapterIdx = textViewerStore.state.chapterIndex;
+          const chapterTitle = catalog[chapterIdx]?.title ?? '';
+          const subtitle = [book?.author, chapterTitle].filter(Boolean).join(' · ');
+          enterReadAloudBackground(
+            readAloudSessionContext,
+            props.onClose,
+            {
+              title: book?.name ?? '朗读中',
+              subtitle: subtitle || undefined,
+              coverBookUrl: book?.bookUrl,
+            },
+            book?.bookUrl ?? '',
+          );
+        }}
+      />
+
+      <ReaderReadAloudFullscreen
+        open={readAloudFullscreenOpen()}
+        onClose={() => setReadAloudFullscreenOpen(false)}
+        onOpenCatalog={() => {
+          setReadAloudFullscreenOpen(false);
+          openCatalog();
+        }}
+        onEnterBackground={() => {
+          const book = textViewerStore.state.book;
+          const catalog = textViewerStore.state.catalog;
+          const chapterIdx = textViewerStore.state.chapterIndex;
+          const chapterTitle = catalog[chapterIdx]?.title ?? '';
+          const subtitle = [book?.author, chapterTitle].filter(Boolean).join(' · ');
+          enterReadAloudBackground(
+            readAloudSessionContext,
+            props.onClose,
+            {
+              title: book?.name ?? '朗读中',
+              subtitle: subtitle || undefined,
+              coverBookUrl: book?.bookUrl,
+            },
+            book?.bookUrl ?? '',
+          );
+        }}
+        sessionContext={readAloudSessionContext}
+      />
+
+      <ReaderReadAloudMiniBar
+        drawerOpen={readAloudDrawerOpen() || readAloudFullscreenOpen()}
+        onOpenDrawer={openReadAloudDrawer}
+      />
+
+      <ReaderTextSelectionMenu
+        sessionContext={readAloudSessionContext}
+        contentRootRef={() => getScrollContainer()}
+      />
 
       {/* 阅读界面 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
       <ViewerAppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>

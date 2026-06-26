@@ -13,6 +13,10 @@ import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
 import {
+  GlobalMediaPlayer,
+  useGlobalMediaPlayerFixedInset,
+} from "@/components/shell/GlobalMediaPlayer";
+import {
   AppBackNavigationBridge,
   type BackLayerDefinition,
 } from "@/components/shell/AppBackNavigationBridge";
@@ -103,6 +107,7 @@ import {
   dismissViewerBodyOverlays,
   requestCloseViewerShellOverlays,
 } from "@/lib/ui/overlay-cleanup";
+import { clearReadAloudBackgroundExitFlag } from "@/lib/media/text/read-aloud-background";
 import { scheduleOverlayPositionSync } from "@/lib/ui/overlay-position-sync";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { ensureShelfBookReadyForReading } from "@/lib/bookshelf/save-book-to-shelf";
@@ -1639,15 +1644,16 @@ function AppContent() {
     const top = nav.top();
     if (!top || !isViewerOverlayKind(top.kind)) return;
     requestCloseViewerShellOverlays();
+    nav.pop();
     await afterViewerShellOverlaysClosed();
     dismissViewerBodyOverlays();
-    nav.pop();
     if (top.kind === "text-viewer") {
       await textViewerStore.closeBook();
     } else {
       await viewerStore.closeBook();
       writeHmrData("mediaViewerSession", null);
     }
+    clearReadAloudBackgroundExitFlag();
   }
 
   let closeReaderPromptInFlight = false;
@@ -3053,6 +3059,17 @@ function AppContent() {
     const shell = useShellLayout();
     const showTopNav = () => !isStandalonePage() && shell().showTopNavigation;
     const showBottomBar = () => !isStandalonePage() && shell().showBottomBar;
+    const mediaPlayerFixedInset = useGlobalMediaPlayerFixedInset({
+      shellOverlayOpen: isStandalonePage,
+      showTopNav,
+      showBottomBar,
+    });
+    const shellMainLeftClass = () =>
+      shell().showSidebar
+        ? state() === "expanded"
+          ? "left-(--sidebar-width)"
+          : "left-(--sidebar-width-icon)"
+        : "left-0";
 
     return (
       <div
@@ -3133,6 +3150,18 @@ function AppContent() {
           />
         </Show>
 
+        <GlobalMediaPlayer
+          shellOverlayOpen={isStandalonePage()}
+          showTopNav={showTopNav()}
+          showBottomBar={showBottomBar()}
+          shellMainLeftClass={shellMainLeftClass()}
+          onOpenTextReader={(bookUrl) => {
+            void getBook(bookUrl).then((book) => {
+              if (book) openReaderPage(book);
+            });
+          }}
+        />
+
         {/* 主容器 - 独立页时仅 hidden，保持挂载以保留书架/探索/书源状态 */}
         <div
           id="main-content-container"
@@ -3146,6 +3175,8 @@ function AppContent() {
                 : "left-(--sidebar-width-icon)"
               : "left-0",
             showBottomBar() && "inset-bottom-app-bar",
+            mediaPlayerFixedInset().bottom && "pb-19",
+            mediaPlayerFixedInset().top && "pt-19",
             isStandalonePage() && "hidden pointer-events-none",
           )}
         >

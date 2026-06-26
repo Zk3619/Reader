@@ -82,8 +82,9 @@ export function createMediaViewerChromeInputHandlers(options: {
   const shouldSuppressAutoHide = () =>
     shownBarsByPointerLeave || awaitingDismissClick;
 
-  /** 移出视口：终止自动隐藏，并按「移出视口唤出」处理（回视口后单击内容区隐藏） */
   const showBarsFromPointerLeave = () => {
+    if (!options.enabled()) return;
+    if (shellElement && !shellElement.isConnected) return;
     shownBarsByPointerLeave = true;
     awaitingDismissClick = false;
     options.setHeaderVisible(true);
@@ -125,6 +126,7 @@ export function createMediaViewerChromeInputHandlers(options: {
 
   const onContentPrimaryClick = (event: MouseEvent, action: () => void) => {
     if (!options.enabled()) return;
+    if (shellElement && !shellElement.isConnected) return;
     if (isMediaViewerInteractiveClick(event.target)) return;
 
     if (barsCollapsible() && isDesktop() && awaitingDismissClick) {
@@ -132,7 +134,9 @@ export function createMediaViewerChromeInputHandlers(options: {
       event.stopPropagation();
       awaitingDismissClick = false;
       resetClickPair();
-      options.setHeaderVisible(false);
+      if (options.enabled()) {
+        options.setHeaderVisible(false);
+      }
       return;
     }
 

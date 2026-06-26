@@ -282,7 +282,28 @@ export interface TextViewerUiConfig {
   clickRegion: ReaderClickRegion;
   aloudEngine: ReadAloudEngine;
   httpTtsId: number | null;
+  /** @deprecated 迁移至 ttsSpeechRate；保留读取兼容 */
   speakSpeed: number;
+  /** Legado ttsSpeechRate：0–45，显示 (value+5)/10 */
+  ttsSpeechRate: number;
+  ttsFollowSys: boolean;
+  /** 默认定时关闭分钟数（0=不定时） */
+  ttsTimer: number;
+  readAloudByPage: boolean;
+  /** true：段键切章；false：段键切段 */
+  mediaButtonPerNext: boolean;
+  systemTtsVoiceURI: string;
+  systemTtsLang: string;
+  /** 浮动朗读控制条（Legado readAloudFloatingUi） */
+  readAloudFloatingUi: boolean;
+  /** 选区朗读：0 仅选中 / 1 从选中连续读 */
+  contentSelectSpeakMod: 0 | 1;
+  /** 朗读活跃时音量键控制段/章而非翻页 */
+  volumeKeyControlAloud: boolean;
+  /** HttpTTS 边下边播（Legado streamReadAloudAudio） */
+  streamReadAloudAudio: boolean;
+  /** 页面重新可见时自动恢复朗读（Legado 音频焦点简化版） */
+  readAloudResumeOnFocus: boolean;
   imageStyle: TextViewerImageStyle;
   /** 顶栏与底栏布局（仅文本阅读器；未配置时沿用应用设置） */
   viewerChromeLayout: ViewerChromeLayout;
@@ -348,6 +369,49 @@ export function textViewerUsesPretextLayout(
   return config.layoutEngine === 'pretext';
 }
 
+export const TTS_SPEECH_RATE_MIN = 0;
+export const TTS_SPEECH_RATE_MAX = 45;
+export const TTS_TIMER_MAX_MINUTES = 180;
+
+export function normalizeTtsSpeechRate(value: number | undefined | null): number {
+  if (value == null || !Number.isFinite(value)) {
+    return defaultTextViewerUiConfig.ttsSpeechRate;
+  }
+  return Math.min(
+    TTS_SPEECH_RATE_MAX,
+    Math.max(TTS_SPEECH_RATE_MIN, Math.round(value)),
+  );
+}
+
+/** Legado 显示值：(rate + 5) / 10 */
+export function ttsSpeechRateDisplay(rate: number): string {
+  return String(ttsSpeechRateToDisplayValue(rate));
+}
+
+export const TTS_SPEECH_RATE_DISPLAY_MIN = (TTS_SPEECH_RATE_MIN + 5) / 10;
+export const TTS_SPEECH_RATE_DISPLAY_MAX = (TTS_SPEECH_RATE_MAX + 5) / 10;
+
+export function ttsSpeechRateToDisplayValue(rate: number): number {
+  return (normalizeTtsSpeechRate(rate) + 5) / 10;
+}
+
+export function ttsSpeechRateFromDisplayValue(display: number): number {
+  if (!Number.isFinite(display)) {
+    return defaultTextViewerUiConfig.ttsSpeechRate;
+  }
+  return normalizeTtsSpeechRate(Math.round(display * 10 - 5));
+}
+
+export function normalizeTtsTimerMinutes(value: number | undefined | null): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return Math.min(TTS_TIMER_MAX_MINUTES, Math.max(0, Math.round(value)));
+}
+
+/** 系统 Web Speech rate */
+export function ttsSpeechRateToSystemRate(rate: number): number {
+  return (normalizeTtsSpeechRate(rate) + 5) / 10;
+}
+
 export function normalizeAutoReadSpeed(value: number | undefined | null): number {
   if (value == null || !Number.isFinite(value)) {
     return TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT;
@@ -396,6 +460,18 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   aloudEngine: 'system',
   httpTtsId: null,
   speakSpeed: 5,
+  ttsSpeechRate: 5,
+  ttsFollowSys: true,
+  ttsTimer: 0,
+  readAloudByPage: false,
+  mediaButtonPerNext: false,
+  systemTtsVoiceURI: '',
+  systemTtsLang: 'zh-CN',
+  readAloudFloatingUi: false,
+  contentSelectSpeakMod: 0,
+  volumeKeyControlAloud: true,
+  streamReadAloudAudio: false,
+  readAloudResumeOnFocus: false,
   imageStyle: 'DEFAULT',
   viewerChromeLayout: defaultViewerChromeLayout,
   adaptSpecialStyle: true,
