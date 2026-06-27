@@ -26,13 +26,26 @@ import {
 import { isTauri } from '@/lib/platform/detect';
 import { migrateAppStorageSettings } from '@/lib/platform/fs/migration';
 import { getStorage, setStorage } from '@/lib/platform/storage';
+import {
+  DEFAULT_APP_TOAST_POSITION,
+  DEFAULT_APP_TOAST_STYLE,
+  normalizeAppToastPosition,
+  normalizeAppToastStyle,
+  type AppToastPosition,
+  type AppToastStyle,
+} from '@/lib/ui/app-toast-config';
+import { clampThemeHour, normalizeThemeMode, normalizeThemeScheduleHours } from '@/lib/theme';
 
 /**
  * 应用设置接口
  */
 export interface AppSettings {
-  /** 主题：light | dark | auto */
-  theme: 'light' | 'dark' | 'auto';
+  /** 主题：light | dark | auto（跟随系统）| schedule（按时） */
+  theme: 'light' | 'dark' | 'auto' | 'schedule';
+  /** 按时模式：浅色开始时刻（0–23） */
+  themeScheduleDayHour?: number;
+  /** 按时模式：深色开始时刻（0–23） */
+  themeScheduleNightHour?: number;
   /** 语言 */
   language: string;
   /** 自动启动 */
@@ -103,6 +116,10 @@ export interface AppSettings {
   mediaPlayerChromePosition?: MediaPlayerChromePosition;
   /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
   enableReadRecord?: boolean;
+  /** 通知 Toast 风格：default | sonner | toast */
+  toastStyle?: AppToastStyle;
+  /** 通知 Toast 位置 */
+  toastPosition?: AppToastPosition;
 }
 
 /**
@@ -110,6 +127,8 @@ export interface AppSettings {
  */
 const defaultAppSettings: AppSettings = {
   theme: 'auto',
+  themeScheduleDayHour: 6,
+  themeScheduleNightHour: 18,
   language: 'zh-CN',
   autoStart: false,
   minimizeToTray: true,
@@ -129,6 +148,8 @@ const defaultAppSettings: AppSettings = {
   mediaPlayerChromeLayout: defaultMediaPlayerChromeLayout,
   mediaPlayerChromePosition: defaultMediaPlayerChromePosition,
   enableReadRecord: true,
+  toastStyle: DEFAULT_APP_TOAST_STYLE,
+  toastPosition: DEFAULT_APP_TOAST_POSITION,
 };
 
 /**
@@ -169,10 +190,24 @@ let settingsHydrated = false;
 let loadSettingsPromise: Promise<void> | null = null;
 
 function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
-  return migrateAppStorageSettings({
+  const merged = migrateAppStorageSettings({
     ...defaultAppSettings,
     ...stored,
   });
+  return {
+    ...merged,
+    theme: normalizeThemeMode(merged.theme),
+    themeScheduleDayHour: clampThemeHour(
+      merged.themeScheduleDayHour,
+      defaultAppSettings.themeScheduleDayHour!,
+    ),
+    themeScheduleNightHour: clampThemeHour(
+      merged.themeScheduleNightHour,
+      defaultAppSettings.themeScheduleNightHour!,
+    ),
+    toastStyle: normalizeAppToastStyle(merged.toastStyle),
+    toastPosition: normalizeAppToastPosition(merged.toastPosition),
+  };
 }
 
 /** Web：在首屏渲染前从 localStorage 同步恢复，避免闪回默认布局 */
@@ -290,8 +325,19 @@ export const settingsStore = {
   /**
    * 设置主题
    */
-  async setTheme(theme: 'light' | 'dark' | 'auto'): Promise<void> {
+  async setTheme(theme: 'light' | 'dark' | 'auto' | 'schedule'): Promise<void> {
     await this.updateAppSettings({ theme });
+  },
+
+  async setThemeScheduleHours(hours: {
+    dayStartHour: number;
+    nightStartHour: number;
+  }): Promise<void> {
+    const normalized = normalizeThemeScheduleHours(hours);
+    await this.updateAppSettings({
+      themeScheduleDayHour: normalized.dayStartHour,
+      themeScheduleNightHour: normalized.nightStartHour,
+    });
   },
 
   /**
@@ -331,6 +377,16 @@ export const settingsStore = {
 
   async setShowTooltips(showTooltips: boolean): Promise<void> {
     await this.updateAppSettings({ showTooltips });
+  },
+
+  async setToastStyle(toastStyle: AppToastStyle): Promise<void> {
+    await this.updateAppSettings({ toastStyle: normalizeAppToastStyle(toastStyle) });
+  },
+
+  async setToastPosition(toastPosition: AppToastPosition): Promise<void> {
+    await this.updateAppSettings({
+      toastPosition: normalizeAppToastPosition(toastPosition),
+    });
   },
 
   async setShellLayout(shellLayout: ShellLayoutPreference): Promise<void> {

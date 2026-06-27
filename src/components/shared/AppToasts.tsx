@@ -4,15 +4,34 @@
  */
 
 import type { JSX } from "solid-js"
-import { createRoot, createSignal, onCleanup, onMount } from "solid-js"
+import { createMemo, createRoot, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { toast, type ExternalToast, type ToasterProps } from "solid-sonner"
+import * as ToastPrimitive from "@kobalte/core/toast"
+import type { ToastSwipeDirection } from "@kobalte/core/toast"
 import { Toaster } from "@/components/ui/sonner"
+import {
+  Toast as KobalteToast,
+  ToastClose,
+  ToastDescription,
+  ToastTitle,
+  type ToastVariant as KobalteToastVariant,
+} from "@/components/ui/toast"
 import { APP_TOAST_Z } from "@/lib/ui/overlay-z"
+import {
+  appToastSwipeDirections,
+  KOBALTE_TOAST_REGION_ID,
+  kobalteToastSwipeDirection,
+  normalizeAppToastPosition,
+  normalizeAppToastStyle,
+  toastListPositionClass,
+  type AppToastPosition,
+} from "@/lib/ui/app-toast-config"
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { isMobile } from "@/lib/platform/detect"
 import { cn } from "@/lib/utils"
+import { settingsState } from "@/stores/settings"
 
 const KEY_PERMANENT = "reader.immersiveToastDismissed"
 const KEY_UNTIL = "reader.immersiveToastDismissedUntil"
@@ -79,6 +98,17 @@ export function shouldShowImmersiveEnterToast(): boolean {
 
 const APP_TOAST_CLASS = "reader-app-toast group"
 
+/** Sonner 标准风格：不含 reader-app-toast 增强 class */
+const SONNER_MINIMAL_TOAST_OPTIONS: ToasterProps["toastOptions"] = {
+  classes: {
+    toast:
+      "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
+    description: "group-[.toast]:text-muted-foreground",
+    actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
+    cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+  },
+}
+
 /** 非 persistent 通知的默认自动关闭时长（毫秒）；悬停暂停后按剩余时间继续（Sonner 原生行为） */
 export const DEFAULT_TOAST_DURATION = 3000
 
@@ -113,6 +143,43 @@ let mobileActiveToastId: string | number | undefined
 const desktopToastIds: (string | number)[] = []
 let mobileActiveScriptToastId: string | number | undefined
 const desktopScriptToastIds: (string | number)[] = []
+
+const kobalteExternalIdMap = new Map<string | number, number>()
+const kobalteReverseIdMap = new Map<number, string | number>()
+
+function getActiveToastStyle() {
+  return normalizeAppToastStyle(settingsState.app.toastStyle)
+}
+
+function getActiveToastPosition(): AppToastPosition {
+  return normalizeAppToastPosition(settingsState.app.toastPosition)
+}
+
+function releaseKobalteMapping(externalId: string | number): void {
+  const kobalteId = kobalteExternalIdMap.get(externalId)
+  if (kobalteId != null) {
+    kobalteExternalIdMap.delete(externalId)
+    kobalteReverseIdMap.delete(kobalteId)
+  }
+}
+
+function registerKobalteMapping(externalId: string | number, kobalteId: number): void {
+  kobalteExternalIdMap.set(externalId, kobalteId)
+  kobalteReverseIdMap.set(kobalteId, externalId)
+}
+
+function dismissToastByExternalId(id: string | number): void {
+  if (getActiveToastStyle() === "toast") {
+    const kobalteId = kobalteExternalIdMap.get(id)
+    if (kobalteId != null) {
+      ToastPrimitive.toaster.dismiss(kobalteId)
+      releaseKobalteMapping(id)
+    }
+  } else {
+    toast.dismiss(id)
+  }
+  releaseToastSlot(id)
+}
 
 function isScriptNoticeToastId(id: string | number): boolean {
   return String(id).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)
@@ -159,8 +226,7 @@ function claimStreamToastSlot(
   if (isMobile()) {
     if (mobileActive.current != null && mobileActive.current !== id) {
       const prev = mobileActive.current
-      toast.dismiss(prev)
-      releaseToastSlot(prev)
+      dismissToastByExternalId(prev)
     }
     mobileActive.current = id
     return
@@ -173,8 +239,7 @@ function claimStreamToastSlot(
   while (desktopQueue.length > limit) {
     const oldest = desktopQueue.shift()
     if (oldest != null && oldest !== id) {
-      toast.dismiss(oldest)
-      releaseToastSlot(oldest)
+      dismissToastByExternalId(oldest)
     }
   }
 }
@@ -201,16 +266,39 @@ function claimToastSlot(requestedId?: string | number): string | number {
 }
 
 export function dismissAppToast(id?: string | number) {
-  toast.dismiss(id)
-  if (id != null) releaseToastSlot(id)
+  if (id == null) {
+    if (getActiveToastStyle() === "toast") {
+      ToastPrimitive.toaster.clear()
+      kobalteExternalIdMap.clear()
+      kobalteReverseIdMap.clear()
+    } else {
+      toast.dismiss()
+    }
+    mobileActiveToastId = undefined
+    desktopToastIds.length = 0
+    mobileActiveScriptToastId = undefined
+    desktopScriptToastIds.length = 0
+    return
+  }
+  dismissToastByExternalId(id)
 }
 
 /** 收起所有脚本通知总线弹出的 toast（如关闭登录弹窗） */
 export function dismissScriptNoticeToasts(): void {
+  if (getActiveToastStyle() === "toast") {
+    for (const [kobalteId, externalId] of kobalteReverseIdMap.entries()) {
+      if (String(externalId).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)) {
+        ToastPrimitive.toaster.dismiss(kobalteId)
+        releaseKobalteMapping(externalId)
+        releaseToastSlot(externalId)
+      }
+    }
+    return
+  }
   for (const t of toast.getToasts()) {
-    const id = t.id
-    if (id != null && String(id).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)) {
-      dismissAppToast(id)
+    const toastId = t.id
+    if (toastId != null && String(toastId).startsWith(SCRIPT_NOTICE_TOAST_ID_PREFIX)) {
+      dismissAppToast(toastId)
     }
   }
 }
@@ -360,27 +448,68 @@ export type AppToastHostProps = {
   icons: NonNullable<ToasterProps["icons"]>
 }
 
+function SonnerAppToastHost(props: AppToastHostProps) {
+  const theme = useToastTheme()
+  const useMinimalSonner = createMemo(
+    () => normalizeAppToastStyle(settingsState.app.toastStyle) === "sonner",
+  )
+  const position = createMemo(() => getActiveToastPosition())
+  const visibleLimit = createMemo(() => getAppToastVisibleLimit())
+
+  return (
+    <div class="reader-toast-host" data-kb-top-layer style={appToastHostStyle()}>
+      <SonnerInteractionFix />
+      <Toaster
+        duration={DEFAULT_TOAST_DURATION}
+        theme={theme()}
+        position={position()}
+        expand={visibleLimit() > 1}
+        visibleToasts={visibleLimit()}
+        closeButton
+        richColors={false}
+        toastOptions={useMinimalSonner() ? SONNER_MINIMAL_TOAST_OPTIONS : undefined}
+        icons={props.icons}
+        swipeDirections={appToastSwipeDirections(position())}
+        class={APP_TOAST_Z}
+      />
+    </div>
+  )
+}
+
+function KobalteAppToastHost() {
+  const position = createMemo(() => getActiveToastPosition())
+  const visibleLimit = createMemo(() => getAppToastVisibleLimit())
+  const swipeDirection = createMemo((): ToastSwipeDirection =>
+    kobalteToastSwipeDirection(position()),
+  )
+
+  return (
+    <div class="reader-toast-host reader-kobalte-toast-host" data-kb-top-layer>
+      <Portal>
+        <ToastPrimitive.Region
+          regionId={KOBALTE_TOAST_REGION_ID}
+          limit={visibleLimit()}
+          duration={DEFAULT_TOAST_DURATION}
+          swipeDirection={swipeDirection()}
+        >
+          <ToastPrimitive.List
+            class={cn(toastListPositionClass(position()), APP_TOAST_Z)}
+          />
+        </ToastPrimitive.Region>
+      </Portal>
+    </div>
+  )
+}
+
 /** Portal 到 body 的全局 Toaster 宿主（须与应用主题一致） */
 export function AppToastHost(props: AppToastHostProps) {
-  const theme = useToastTheme()
+  const useKobalte = createMemo(() => getActiveToastStyle() === "toast")
 
   return (
     <Portal mount={document.body}>
-      <div class="reader-toast-host" data-kb-top-layer style={appToastHostStyle()}>
-        <SonnerInteractionFix />
-        <Toaster
-          duration={DEFAULT_TOAST_DURATION}
-          theme={theme()}
-          position="bottom-right"
-          expand={getAppToastVisibleLimit() > 1}
-          visibleToasts={getAppToastVisibleLimit()}
-          closeButton
-          richColors={false}
-          icons={props.icons}
-          swipeDirections={["bottom", "right"]}
-          class={APP_TOAST_Z}
-        />
-      </div>
+      <Show when={useKobalte()} fallback={<SonnerAppToastHost icons={props.icons} />}>
+        <KobalteAppToastHost />
+      </Show>
     </Portal>
   )
 }
@@ -546,8 +675,114 @@ export function normalizeScriptToastText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\t/g, "    ").trimEnd()
 }
 
+function mapKobalteVariant(variant: ResolvedToastVariant): KobalteToastVariant {
+  switch (variant) {
+    case "success":
+      return "success"
+    case "warning":
+      return "warning"
+    case "error":
+      return "destructive"
+    default:
+      return "default"
+  }
+}
+
+function dismissExistingKobalteExternalId(externalId: string | number): void {
+  const existing = kobalteExternalIdMap.get(externalId)
+  if (existing == null) return
+  ToastPrimitive.toaster.dismiss(existing)
+  releaseKobalteMapping(externalId)
+}
+
+function showKobalteAppToastImpl(props: {
+  title?: JSX.Element
+  description?: JSX.Element
+  children?: JSX.Element
+  variant?: ToastVariant
+  duration?: number
+  persistent?: boolean
+  progress?: ToastProgressInput
+  id?: string | number
+  script?: boolean
+}) {
+  const externalId = claimToastSlot(props.id)
+  dismissExistingKobalteExternalId(externalId)
+
+  const durationMs = props.persistent
+    ? undefined
+    : (props.duration ?? DEFAULT_TOAST_DURATION)
+  const persistent = props.persistent ?? false
+  const progress = resolveProgress(
+    props.progress,
+    props.persistent ? Number.POSITIVE_INFINITY : (props.duration ?? DEFAULT_TOAST_DURATION),
+  )
+
+  if (props.children) {
+    const kobalteId = ToastPrimitive.toaster.show(
+      (data) => (
+        <KobalteToast toastId={data.toastId} persistent={persistent} duration={durationMs}>
+          <div class="w-full min-w-[280px]">{props.children}</div>
+          <ToastClose />
+        </KobalteToast>
+      ),
+      { region: KOBALTE_TOAST_REGION_ID },
+    )
+    registerKobalteMapping(externalId, kobalteId)
+    return
+  }
+
+  const variant = normalizeVariant(props.variant)
+  const hasTitle = props.title != null && props.title !== ""
+  const hasDescField = props.description != null && props.description !== ""
+
+  if (!hasTitle && !hasDescField && !progress) return
+
+  const icon = variant === "plain" ? null : resolvePerToastIcon(variant)
+  const bodyProps = (): DescriptionBodyProps => ({
+    description: hasDescField ? props.description : undefined,
+    script: props.script,
+    progress,
+    toastId: externalId,
+  })
+
+  const kobalteId = ToastPrimitive.toaster.show(
+    (data) => (
+      <KobalteToast
+        toastId={data.toastId}
+        variant={mapKobalteVariant(variant)}
+        duration={durationMs}
+        persistent={persistent || progress != null}
+      >
+        <div class="flex min-w-0 items-start gap-3 pr-6">
+          {icon ? <div class="mt-0.5 shrink-0">{icon}</div> : null}
+          <div class="grid min-w-0 flex-1 gap-1">
+            {hasTitle ? <ToastTitle>{props.title}</ToastTitle> : null}
+            {!hasTitle && hasDescField ? (
+              <ToastDescription class={cn(props.script && "whitespace-pre-wrap font-mono text-xs")}>
+                {props.description}
+              </ToastDescription>
+            ) : null}
+            {hasTitle && (hasDescField || progress) ? (
+              <div class={cn("text-sm opacity-90", props.script && "whitespace-pre-wrap font-mono text-xs")}>
+                {buildDescriptionBody(bodyProps())}
+              </div>
+            ) : null}
+            {!hasTitle && !hasDescField && progress ? (
+              <div ref={(el) => el && mountToastProgressBar(el, progress, externalId)} />
+            ) : null}
+          </div>
+        </div>
+        <ToastClose />
+      </KobalteToast>
+    ),
+    { region: KOBALTE_TOAST_REGION_ID },
+  )
+  registerKobalteMapping(externalId, kobalteId)
+}
+
 /** 在独立 Solid root 中展示，避免 createResource/untrack 或 QuickJS 宿主间隙下 owner 链断裂 */
-function showAppToastImpl(props: {
+function showSonnerAppToastImpl(props: {
   title?: JSX.Element
   description?: JSX.Element
   children?: JSX.Element
@@ -663,16 +898,39 @@ export function showAppToast(props: {
 }) {
   queueMicrotask(() => {
     createRoot(() => {
-      showAppToastImpl(props)
+      if (getActiveToastStyle() === "toast") {
+        showKobalteAppToastImpl(props)
+      } else {
+        showSonnerAppToastImpl(props)
+      }
     })
   })
 }
 
 export function showImmersiveEnterToast() {
-  toast.custom(() => <ImmersiveToastContent />, {
-    duration: Number.POSITIVE_INFINITY,
-    closeButton: true,
-    class: APP_TOAST_CLASS,
+  queueMicrotask(() => {
+    createRoot(() => {
+      if (getActiveToastStyle() === "toast") {
+        const externalId = claimToastSlot()
+        dismissExistingKobalteExternalId(externalId)
+        const kobalteId = ToastPrimitive.toaster.show(
+          (data) => (
+            <KobalteToast toastId={data.toastId} persistent>
+              <ImmersiveToastContent />
+              <ToastClose />
+            </KobalteToast>
+          ),
+          { region: KOBALTE_TOAST_REGION_ID },
+        )
+        registerKobalteMapping(externalId, kobalteId)
+        return
+      }
+      toast.custom(() => <ImmersiveToastContent />, {
+        duration: Number.POSITIVE_INFINITY,
+        closeButton: true,
+        class: APP_TOAST_CLASS,
+      })
+    })
   })
 }
 

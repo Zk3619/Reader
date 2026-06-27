@@ -1,6 +1,11 @@
 import { MultiSwitch, type MultiSwitchOption } from "@/components/ui/multi-switch";
 import { Show } from "solid-js";
-import { ThemeLightIcon, ThemeDarkIcon, ThemeAutoIcon } from "@/components/shared/icons";
+import {
+  ThemeLightIcon,
+  ThemeDarkIcon,
+  ThemeSystemIcon,
+  ThemeScheduleIcon,
+} from "@/components/shared/icons";
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from "@/components/shared/AppTooltip";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument, type ThemeMode } from "@/lib/theme";
@@ -9,7 +14,8 @@ import { ViewerAppDropdownMenuContent } from "@/components/viewer/viewer-app-ove
 const THEME_OPTIONS: MultiSwitchOption<ThemeMode>[] = [
   { value: "light", label: "浅色", icon: ThemeLightIcon },
   { value: "dark", label: "深色", icon: ThemeDarkIcon },
-  { value: "auto", label: "系统", icon: ThemeAutoIcon },
+  { value: "auto", label: "系统", icon: ThemeSystemIcon },
+  { value: "schedule", label: "按时", icon: ThemeScheduleIcon },
 ];
 
 export interface ThemeSwitchProps {
@@ -34,7 +40,8 @@ export function ThemeSwitch(props: ThemeSwitchProps) {
     const t = theme();
     if (t === "light") return "浅色模式";
     if (t === "dark") return "深色模式";
-    return "跟随系统";
+    if (t === "auto") return "跟随系统";
+    return "按时切换";
   };
 
   const tooltipHint = () =>

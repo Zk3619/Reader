@@ -54,8 +54,15 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     id: 'theme',
     categoryId: 'appearance',
     title: '主题',
-    description: '浅色、跟随系统或深色模式',
-    keywords: ['主题', '暗黑模式', '深色', '浅色', '夜间', 'dark', 'light', 'theme'],
+    description: '浅色、深色、跟随系统或按时切换',
+    keywords: ['主题', '暗黑模式', '深色', '浅色', '夜间', 'dark', 'light', 'theme', '系统', '按时'],
+  },
+  {
+    id: 'theme-schedule',
+    categoryId: 'appearance',
+    title: '主题按时切换',
+    description: '按时模式下浅色与深色的切换时刻',
+    keywords: ['主题', '按时', '日', '夜', '切换', '时段', '6点', '18点'],
   },
   {
     id: 'reduce-motion',
@@ -70,6 +77,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     title: '显示工具提示',
     description: '按钮与控件悬停时显示说明文字',
     keywords: ['工具提示', 'tooltip', '悬停', '提示', '说明'],
+  },
+  {
+    id: 'toast',
+    categoryId: 'appearance',
+    title: '通知 Toast',
+    description: '应用内通知的风格与屏幕位置',
+    keywords: ['通知', 'toast', 'sonner', '提示', '位置', '风格'],
   },
   {
     id: 'shell-layout',

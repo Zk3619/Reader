@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
+import { ThemeScheduleSetting } from '@/components/settings/ThemeScheduleSetting';
 import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
 import { ViewerChromeLayoutSetting } from '@/components/settings/ViewerChromeLayoutSetting';
@@ -8,6 +9,7 @@ import { InnerWebRenderModeSetting } from '@/components/settings/InnerWebRenderM
 import { BookInfoPresentationSetting } from '@/components/settings/BookInfoPresentationSetting';
 import { TocPaginationSafetySetting } from '@/components/settings/TocPaginationSafetySetting';
 import { SourceExploreDrawerLayoutSetting } from '@/components/settings/SourceExploreDrawerLayoutSetting';
+import { ToastSetting } from '@/components/settings/ToastSetting';
 import { SourceBlocklistSetting } from '@/components/settings/SourceBlocklistSetting';
 import { StorageAndWebViewSetting } from '@/components/settings/StorageAndWebViewSetting';
 import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
@@ -40,12 +42,16 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
               <div>
                 <h3 class="font-semibold text-foreground">主题</h3>
                 <p class="text-sm text-muted-foreground">
-                  浅色、跟随系统或深色；左键循环切换，右键或长按选择
+                  浅色、深色、跟随系统或按时切换；左键循环切换，右键或长按选择
                 </p>
               </div>
               <ThemeSwitch withTooltip={false} />
             </div>
           </div>
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="theme-schedule" highlighted={highlight('theme-schedule')}>
+          <ThemeScheduleSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="reduce-motion" highlighted={highlight('reduce-motion')}>
@@ -90,6 +96,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
               </UiSwitch>
             </div>
           </div>
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="toast" highlighted={highlight('toast')}>
+          <ToastSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="shell-layout" highlighted={highlight('shell-layout')}>
