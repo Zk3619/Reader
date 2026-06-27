@@ -5,6 +5,7 @@
 
 import { getDatabase } from '@/lib/database/database-core';
 import type { SearchBook } from '@/types';
+import { UNGROUPED_SOURCE_LABEL } from '@/lib/sources/source-list-filter';
 
 /**
  * 插入搜索结果（如果存在则替换）
@@ -94,11 +95,15 @@ export async function clearSearchBooks(): Promise<void> {
   await db.execute('DELETE FROM searchBooks');
 }
 
-function sourceMatchesGroup(sourceGroup: string | undefined, filterGroup: string): boolean {
-  if (!filterGroup) return true;
-  if (!sourceGroup?.trim()) return false;
-  const parts = sourceGroup.split(/[,，;；]\s*/).map((s) => s.trim());
-  return parts.includes(filterGroup);
+function sourceMatchesAnyGroup(sourceGroup: string | undefined, groupNames: string[]): boolean {
+  if (groupNames.length === 0) return true;
+  const parts = sourceGroup?.split(/[,，;；]\s*/).map((s) => s.trim()).filter(Boolean) ?? [];
+  if (parts.length === 0) {
+    return groupNames.includes(UNGROUPED_SOURCE_LABEL);
+  }
+  return groupNames.some(
+    (g) => g !== UNGROUPED_SOURCE_LABEL && parts.includes(g),
+  );
 }
 
 /**
@@ -108,7 +113,7 @@ export async function queryChangeSourceBooks(params: {
   name: string;
   author: string;
   checkAuthor: boolean;
-  searchGroup: string;
+  groupNames: string[];
   screenKey?: string;
 }): Promise<SearchBook[]> {
   const db = await getDatabase();
@@ -119,8 +124,8 @@ export async function queryChangeSourceBooks(params: {
   let sql = 'SELECT * FROM searchBooks WHERE name = ?';
   const args: unknown[] = [name];
   if (author) {
-    sql += ' AND author = ?';
-    args.push(author);
+    sql += ' AND author LIKE ?';
+    args.push(`%${author}%`);
   }
   if (screen) {
     sql += ' AND (name LIKE ? OR originName LIKE ? OR latestChapterTitle LIKE ?)';
@@ -131,11 +136,13 @@ export async function queryChangeSourceBooks(params: {
 
   const rows = await db.select<Record<string, unknown>>(sql, args);
   let books = rows.map((row) => mapRowToSearchBook(row));
-  if (params.searchGroup) {
+  if (params.groupNames.length > 0) {
     const { getAllSources } = await import('@/lib/database/sources');
     const allowed = new Set(
       (await getAllSources())
-        .filter((s) => s.enabled && sourceMatchesGroup(s.sourceGroup, params.searchGroup))
+        .filter(
+          (s) => s.enabled && sourceMatchesAnyGroup(s.sourceGroup, params.groupNames),
+        )
         .map((s) => s.sourceUrl),
     );
     books = books.filter((b) => allowed.has(b.origin));

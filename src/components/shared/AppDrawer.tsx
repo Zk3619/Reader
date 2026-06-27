@@ -41,7 +41,11 @@ import {
   appBlockDrag,
   appDrawerBottomSafeArea,
   appDrawerSideSafeArea,
+  appDrawerSideViewportBounds,
   appDrawerTopSafeArea,
+  appDrawerVerticalViewportBounds,
+  drawerHorizontalAdaptive,
+  drawerVerticalAdaptive,
 } from '@/lib/ui/viewport-classes';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
@@ -116,9 +120,6 @@ export const APP_DRAWER_CLOSE_BUTTON_CLASS =
 
 const AppDrawerNativeDragHandleContext = createContext<() => boolean>(() => false);
 
-/** 顶/底抽屉内容区默认最大高度（侧栏抽屉占满高度，不限制） */
-const APP_DRAWER_MAX_HEIGHT_CLASS = 'max-h-[80dvh]';
-
 type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> & {
   class?: string;
   children?: JSX.Element;
@@ -128,6 +129,12 @@ type AppDrawerContentProps<T extends ValidComponent = 'div'> = ContentProps<T> &
   showNativeDragHandle?: boolean;
   /** App 根级抽屉（如书籍详情）须挂 body 并使用自带 z-index，勿挂阅读器 Portal 宿主 */
   portalToBody?: boolean;
+  /**
+   * 尺寸布局：app 为默认（顶/底 h-fit + min/max 高度，侧栏 w-fit + min/max 宽度）；
+   * plain 不附加默认尺寸类，由 class 完全接管。
+   * 业务侧可通过 class 覆盖 min/max 及固定 h/w（如 hDrawerPanel、sourcesExploreDrawerWidth）。
+   */
+  layout?: 'app' | 'plain';
 };
 
 export type AppDrawerBodyProps = ComponentProps<'div'> & {
@@ -211,8 +218,10 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
     'overlayClass',
     'showNativeDragHandle',
     'portalToBody',
+    'layout',
   ]);
   const side = () => ctx.side();
+  const layout = () => local.layout ?? 'app';
   const showNativeDragHandle = createMemo(() => local.showNativeDragHandle ?? false);
 
   return (
@@ -225,27 +234,27 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
             'fixed flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
             overlayLayerZ().drawer,
             appBlockDrag,
-            (side() === 'bottom' || side() === 'top') && APP_DRAWER_MAX_HEIGHT_CLASS,
             side() === 'left' &&
-              cn(
-                'left-0 top-0 bottom-0 h-full w-full max-w-sm rounded-r-[10px] border-l',
-                appDrawerSideSafeArea,
-              ),
+              cn('left-0 top-0 bottom-0 rounded-r-[10px] border-l', appDrawerSideSafeArea),
             side() === 'right' &&
-              cn(
-                'right-0 top-0 bottom-0 h-full w-full max-w-sm rounded-l-[10px] border-r',
-                appDrawerSideSafeArea,
-              ),
+              cn('right-0 top-0 bottom-0 rounded-l-[10px] border-r', appDrawerSideSafeArea),
             side() === 'bottom' &&
               cn(
-                'inset-x-0 bottom-0 mt-24 flex h-auto flex-col rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
+                'inset-x-0 bottom-0 mt-24 rounded-t-[10px] after:absolute after:inset-x-0 after:top-full after:h-1/2 after:bg-inherit',
                 appDrawerBottomSafeArea,
               ),
             side() === 'top' &&
+              cn('inset-x-0 top-0 rounded-b-[10px]', appDrawerTopSafeArea),
+            layout() === 'app' &&
+              (side() === 'bottom' || side() === 'top') &&
               cn(
-                'inset-x-0 top-0 flex h-auto flex-col rounded-b-[10px]',
-                appDrawerTopSafeArea,
+                'flex min-h-0 flex-col overflow-hidden',
+                drawerVerticalAdaptive,
+                appDrawerVerticalViewportBounds,
               ),
+            layout() === 'app' &&
+              isSideDrawer(side()) &&
+              cn(drawerHorizontalAdaptive, appDrawerSideViewportBounds),
             local.class,
           )}
           {...rest}

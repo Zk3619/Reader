@@ -9,24 +9,19 @@ import {
 } from '@/components/shared/icons';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
 import { cn } from '@/lib/utils';
-import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
-import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import { textViewerStore } from '@/stores/viewer';
 import {
   TEXT_VIEWER_AUTO_READ_SPEED_MAX,
   TEXT_VIEWER_AUTO_READ_SPEED_MIN,
   normalizeAutoReadSpeed,
 } from '@/lib/media/text/text-viewer-auto-pager';
+import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 
 export interface TextViewerBottomChromeProps {
   isWideScreen: boolean;
-  /** 窄屏移动端 + 状态栏始终显示时，与阅读主题一致的底栏配色 */
-  bottomBarThemeClasses: string | null;
-  chapterTitle: string;
-  chapterWordCountText: string;
-  chapterProgressPercent: number;
-  bookProgressPercent: number;
   chapterPos: number;
+  chapterIndex: number;
+  catalogLength: number;
   onChapterProgressChange: (values: number[]) => void;
   onPrevChapter: () => void;
   onNextChapter: () => void;
@@ -44,13 +39,9 @@ export interface TextViewerBottomChromeProps {
 /**
  * 文本阅读器底栏：与 MediaViewerChapterNavFooter 相同封装链
  * MediaViewerFooter → MediaViewerOverlayBottomChrome → MediaViewerBottomChromeContent → 本组件
- *
- * 顶栏显隐动画只由 overlay 壳层负责；此处仅用 CSS hidden 控制配置/宽屏，不用 Show 卸载节点。
  */
 export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
   const floating = useMediaViewerChromeFloating();
-  const statusBarStyle = () => textViewerStore.state.config.statusBarDisplayStyle;
-  const hideStatusBar = () => statusBarStyle() === 'never';
   const hideOperationBar = () => props.isWideScreen;
   const pillBtn = () => cn(floating.isFloating() && floating.pillClass());
 
@@ -61,6 +52,12 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
 
   const autoPageActive = () => resolveProp(props.autoPageActive, false);
   const autoReadSpeed = () => resolveProp(props.autoReadSpeed, normalizeAutoReadSpeed(undefined));
+  const progressBarBehavior = () => textViewerStore.state.config.progressBarBehavior ?? 'page';
+  const sliderValue = () =>
+    progressBarBehavior() === 'chapter' ? props.chapterIndex : props.chapterPos;
+  const sliderMax = () =>
+    progressBarBehavior() === 'chapter' ? Math.max(0, props.catalogLength - 1) : 1;
+  const sliderStep = () => (progressBarBehavior() === 'chapter' ? 1 : 0.01);
 
   return (
     <MediaViewerBottomChromeContent>
@@ -68,10 +65,7 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
         <div
           class={cn(
             'flex w-full min-w-0 items-center gap-3 px-4 py-2 text-xs',
-            props.bottomBarThemeClasses,
-            !props.bottomBarThemeClasses &&
-              !floating.isFloating() &&
-              'border-b border-border/40',
+            !floating.isFloating() && 'border-b border-border/40',
             floating.isFloating() &&
               cn(
                 floating.pillClass(),
@@ -80,7 +74,7 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
               ),
           )}
         >
-          <span class="w-14 shrink-0 text-muted-foreground">自动翻页</span>
+          <span class="w-14 shrink-0 opacity-80">自动翻页</span>
           <div class="min-w-0 flex-1 basis-0">
             <Slider
               value={[autoReadSpeed()]}
@@ -105,37 +99,6 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
 
       <div
         class={cn(
-          mediaViewerChromeBottomRowClass,
-          'min-h-9 text-xs',
-          hideStatusBar() && 'hidden',
-          props.bottomBarThemeClasses,
-          !props.bottomBarThemeClasses &&
-            !hideOperationBar() &&
-            !floating.isFloating() &&
-            'border-b border-border/40',
-          floating.isFloating() &&
-            cn(floating.pillClass(), 'mx-auto w-fit max-w-[calc(100%-1.5rem)]'),
-        )}
-      >
-        <AppTooltip>
-          <AppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
-            {props.chapterTitle || '—'}
-          </AppTooltipTrigger>
-          <AppTooltipContent layer="viewer">{props.chapterTitle || '—'}</AppTooltipContent>
-        </AppTooltip>
-        <div class="flex shrink-0 items-center gap-3 tabular-nums">
-          <span>
-            {props.chapterWordCountText === '—'
-              ? '—'
-              : `${props.chapterWordCountText}字`}
-          </span>
-          <span>本章 {props.chapterProgressPercent}%</span>
-          <span>全书 {props.bookProgressPercent}%</span>
-        </div>
-      </div>
-
-      <div
-        class={cn(
           'flex flex-col px-4 py-2',
           hideOperationBar() && 'hidden',
         )}
@@ -152,10 +115,10 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
           </Button>
           <div class="min-w-0 flex-1 px-1">
             <Slider
-              value={[props.chapterPos]}
+              value={[sliderValue()]}
               minValue={0}
-              maxValue={1}
-              step={0.01}
+              maxValue={sliderMax()}
+              step={sliderStep()}
               onChange={props.onChapterProgressChange}
               class="py-2"
             >

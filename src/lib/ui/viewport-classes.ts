@@ -66,6 +66,9 @@ export const dialogFormCoverAsideWide = 'block w-64 shrink-0';
 /** 对话框最大高度（85% 视口，且不低于上下各 1rem 边距） */
 export const maxHDialog = 'max-h-[min(85dvh,calc(100dvh-2rem))]';
 
+/** 对话框固定高度（与 maxHDialog 上限一致，避免内容增减导致弹窗高度抖动） */
+export const hDialogMax = 'h-[min(85dvh,calc(100dvh-2rem))]';
+
 /** 对话框最小高度（保证顶栏/底栏不局促，高内容仍由 h-fit 撑开） */
 export const minHDialog = 'min-h-[min(10rem,35dvh)]';
 
@@ -90,8 +93,35 @@ export const dialogViewportMinBounds = cn(minWDialog, minHDialog, maxHDialog);
 /** 导航 mega menu、封面预览等（80% 视口） */
 export const maxHViewport80 = 'max-h-[80dvh]';
 
-/** 底部抽屉面板（75% 视口） */
+/** 底部抽屉面板（75% 视口）；显式固定高度，覆盖 AppDrawer 默认 h-fit 自适应 */
 export const hDrawerPanel = 'h-[75dvh]';
+
+/** 顶/底 AppDrawer：高度随内容收缩，宽占满 */
+export const drawerVerticalAdaptive = 'h-fit w-full';
+
+/** 顶/底 AppDrawer 默认最大高度 */
+export const maxHAppDrawerVertical = 'max-h-[80dvh]';
+
+/** 顶/底 AppDrawer 默认最小高度 */
+export const minHAppDrawerVertical = 'min-h-[min(10rem,35dvh)]';
+
+/** 顶/底 AppDrawer 默认尺寸约束（min + max 高度） */
+export const appDrawerVerticalViewportBounds = cn(
+  minHAppDrawerVertical,
+  maxHAppDrawerVertical,
+);
+
+/** 侧栏 AppDrawer：宽度随内容收缩，高占满 */
+export const drawerHorizontalAdaptive = 'w-fit h-full';
+
+/** 侧栏 AppDrawer 默认最大宽度（与原 ui/drawer max-w-sm 一致） */
+export const maxWAppDrawerSide = 'max-w-sm';
+
+/** 侧栏 AppDrawer 默认最小宽度 */
+export const minWAppDrawerSide = 'min-w-[min(18rem,85dvw)]';
+
+/** 侧栏 AppDrawer 默认尺寸约束（min + max 宽度） */
+export const appDrawerSideViewportBounds = cn(minWAppDrawerSide, maxWAppDrawerSide);
 
 /** Inner-Web 底/顶抽屉默认高度（段评 preset 等为 72dvh） */
 export const hInnerWebDrawerPanel = 'h-[72dvh]';

@@ -24,6 +24,20 @@ export function clearReadAloudBackgroundExitFlag(): void {
   backgroundExitInProgress = false;
 }
 
+/** 后台朗读结束：释放阅读器 store（nav 已 pop 时） */
+export async function cleanupReadAloudBackgroundBook(): Promise<void> {
+  clearReadAloudBackgroundExitFlag();
+  const { textViewerStore } = await import('@/stores/viewer');
+  const { MediaKind } = await import('@/lib/book-source/book-type');
+  if (textViewerStore.state.book && textViewerStore.state.kind === MediaKind.text) {
+    await textViewerStore.closeBook();
+  }
+}
+
+export function isReadAloudShellBackground(): boolean {
+  return globalMediaPlayerStore.isReadAloudShellActive();
+}
+
 export function enterReadAloudBackground(
   sessionContext: ReadAloudSessionContext,
   exitReader: () => void,

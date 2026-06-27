@@ -75,9 +75,16 @@ function sourceHasExplore(source: BookSource): boolean {
   return !!(source.exploreUrl?.trim() || source.ruleExplore);
 }
 
+function exploreSourceListUnchanged(prev: BookSource[], next: BookSource[]): boolean {
+  if (prev.length !== next.length) return false;
+  return prev.every((s, i) => s.sourceUrl === next[i].sourceUrl);
+}
+
 export const ExplorePage: Component<ExplorePageProps> = (props) => {
   const isActive = createMemo(() => readShellPageActive(props.active));
   const [sources, setSources] = createSignal<BookSource[]>([]);
+  /** 首次激活后只拉取一次；空列表时避免 setSources([]) 触发 effect 无限重载 */
+  const [sourcesInitialLoadDone, setSourcesInitialLoadDone] = createSignal(false);
   const [selectedSourceUrl, setSelectedSourceUrl] = createSignal<string | null>(null);
   const [selectedSection, setSelectedSection] = createSignal<ExploreSection | null>(null);
   const exploreArgsVersion = () => {
@@ -175,7 +182,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
     try {
       const all = await sourcesDb.getAllSources();
       const list = all.filter(sourceHasExplore).sort((a, b) => a.customOrder - b.customOrder);
-      setSources(list);
+      setSources((prev) => (exploreSourceListUnchanged(prev, list) ? prev : list));
       if (list.length === 0) {
         setSelectedSourceUrl(null);
         setSelectedSection(null);
@@ -187,6 +194,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
       }
     } catch (e) {
       console.error('加载书源失败:', e);
+      setSources((prev) => (prev.length === 0 ? prev : []));
     }
   }
 
@@ -198,9 +206,8 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   });
 
   createEffect(() => {
-    if (!isActive()) return;
-    if (sources().length > 0) return;
-    void loadSources();
+    if (!isActive() || sourcesInitialLoadDone()) return;
+    void loadSources().finally(() => setSourcesInitialLoadDone(true));
   });
 
   /** 切页中止后重新进入：若 resource 仍停在 AbortError，主动重拉 */

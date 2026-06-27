@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createResource, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, createMemo, createResource, For, Match, Show, Switch, onMount, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Navigation, type PageType } from "@/components/shell/Navigation";
 import { PageToolbar } from "@/components/shell/PageToolbar";
@@ -108,6 +108,7 @@ import {
   requestCloseViewerShellOverlays,
 } from "@/lib/ui/overlay-cleanup";
 import { clearReadAloudBackgroundExitFlag } from "@/lib/media/text/read-aloud-background";
+import { globalMediaPlayerStore } from "@/stores/global-media-player";
 import { scheduleOverlayPositionSync } from "@/lib/ui/overlay-position-sync";
 import { addSearchBookToShelf } from "@/lib/bookshelf/save-book-to-shelf";
 import { ensureShelfBookReadyForReading } from "@/lib/bookshelf/save-book-to-shelf";
@@ -361,6 +362,11 @@ function AppContent() {
   function openSourceEditor(source?: BookSource) {
     setSourceEditTarget(source ? source.sourceUrl : "new");
   }
+
+  const openSourcesManagePage = () => {
+    nav.navigateShell("sources");
+    setShowSourcesManage(true);
+  };
   const [showBookshelfCache, setShowBookshelfCache] = createSignal(false);
   const [bookshelfCacheGroupId, setBookshelfCacheGroupId] = createSignal(-1);
   const [showBookDirectoryDialog, setShowBookDirectoryDialog] = createSignal(false);
@@ -1587,6 +1593,23 @@ function AppContent() {
     })();
   }
 
+  /** 从壳层播放器回到阅读器：书籍仍在 store 时不重载，避免朗读进度/高亮错位 */
+  function reopenTextReaderFromShell(book: Book) {
+    globalMediaPlayerStore.clearShell();
+    const kind = MediaKind.text;
+    const viewerKind = mediaViewerPageForKind(kind);
+    const storeReady =
+      viewerStore.state.kind === MediaKind.text &&
+      viewerStore.state.book?.bookUrl === book.bookUrl &&
+      !viewerStore.state.contentBootstrapping;
+
+    if (storeReady) {
+      mountReaderOnNav(book, viewerKind);
+      return;
+    }
+    openReaderPage(book);
+  }
+
   function openTextViewerFromMediaFallback(detail: ReaderMediaTextFallbackDetail) {
     const book = viewerStore.state.book;
     const catalog = viewerStore.state.catalog;
@@ -1643,15 +1666,20 @@ function AppContent() {
     setGuestAddToShelfBusy(false);
     const top = nav.top();
     if (!top || !isViewerOverlayKind(top.kind)) return;
+    const keepBookForBackgroundAloud =
+      globalMediaPlayerStore.isReadAloudShellActive() &&
+      top.kind === 'text-viewer';
     requestCloseViewerShellOverlays();
     nav.pop();
     await afterViewerShellOverlaysClosed();
     dismissViewerBodyOverlays();
-    if (top.kind === "text-viewer") {
-      await textViewerStore.closeBook();
-    } else {
-      await viewerStore.closeBook();
-      writeHmrData("mediaViewerSession", null);
+    if (!keepBookForBackgroundAloud) {
+      if (top.kind === "text-viewer") {
+        await textViewerStore.closeBook();
+      } else {
+        await viewerStore.closeBook();
+        writeHmrData("mediaViewerSession", null);
+      }
     }
     clearReadAloudBackgroundExitFlag();
   }
@@ -3064,6 +3092,15 @@ function AppContent() {
       showTopNav,
       showBottomBar,
     });
+    const mainContentPlayerInsetStyle = createMemo(() => {
+      const inset = mediaPlayerFixedInset();
+      if (!inset.top && !inset.bottom) return undefined;
+      const h = `${inset.heightPx}px`;
+      return {
+        ...(inset.top ? { 'padding-top': h } : {}),
+        ...(inset.bottom ? { 'padding-bottom': h } : {}),
+      } as Record<string, string>;
+    });
     const shellMainLeftClass = () =>
       shell().showSidebar
         ? state() === "expanded"
@@ -3151,13 +3188,13 @@ function AppContent() {
         </Show>
 
         <GlobalMediaPlayer
-          shellOverlayOpen={isStandalonePage()}
-          showTopNav={showTopNav()}
-          showBottomBar={showBottomBar()}
+          shellOverlayOpen={isStandalonePage}
+          showTopNav={showTopNav}
+          showBottomBar={showBottomBar}
           shellMainLeftClass={shellMainLeftClass()}
           onOpenTextReader={(bookUrl) => {
             void getBook(bookUrl).then((book) => {
-              if (book) openReaderPage(book);
+              if (book) reopenTextReaderFromShell(book);
             });
           }}
         />
@@ -3166,6 +3203,7 @@ function AppContent() {
         <div
           id="main-content-container"
           data-shell-bottom-bar={showBottomBar() ? 'visible' : 'hidden'}
+          style={mainContentPlayerInsetStyle()}
           class={cn(
             "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
             showTopNav() ? "inset-top-app-bar" : "top-0",
@@ -3175,8 +3213,6 @@ function AppContent() {
                 : "left-(--sidebar-width-icon)"
               : "left-0",
             showBottomBar() && "inset-bottom-app-bar",
-            mediaPlayerFixedInset().bottom && "pb-19",
-            mediaPlayerFixedInset().top && "pt-19",
             isStandalonePage() && "hidden pointer-events-none",
           )}
         >
@@ -3321,7 +3357,7 @@ function AppContent() {
                       onSortReverseChange={setSourceSortReverse}
                       filterTooltip={sourceFilterTooltip()}
                       onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
-                      onOpenSourcesManage={() => setShowSourcesManage(true)}
+                      onOpenSourcesManage={openSourcesManagePage}
                       showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
                         getEffectiveSourceListFilter(
                           sourceListFilter(),
@@ -3682,6 +3718,7 @@ function AppContent() {
                     setSourceLoginDialogSource(source);
                   }
                 }}
+                onOpenSourcesManage={openSourcesManagePage}
                     />
                   </Match>
                   <Match when={entry.kind === "image-viewer"}>
@@ -3741,6 +3778,7 @@ function AppContent() {
                         openBookFromBookInfo(book, catalog, sourceFromPage ?? e.source)
                       }
                       onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
+                      onOpenSourcesManage={openSourcesManagePage}
                     />
                       );
                     })()}
@@ -3799,6 +3837,7 @@ function AppContent() {
                   openBookFromBookInfo(book, catalog, sourceFromPage ?? source)
                 }
                 onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
+                onOpenSourcesManage={openSourcesManagePage}
               />
             );
           }}

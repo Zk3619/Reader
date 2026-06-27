@@ -81,6 +81,21 @@ export const TEXT_VIEWER_DUAL_PAGE_MODE_LABELS: Record<TextViewerDualPageMode, s
   always: '始终',
 };
 
+export type TextViewerChineseConverterType = 0 | 1 | 2;
+
+export const TEXT_VIEWER_CHINESE_CONVERTER_TYPE_OPTIONS: TextViewerChineseConverterType[] = [
+  0, 1, 2,
+];
+
+export const TEXT_VIEWER_CHINESE_CONVERTER_TYPE_LABELS: Record<
+  TextViewerChineseConverterType,
+  string
+> = {
+  0: '不转换',
+  1: '繁转简',
+  2: '简转繁',
+};
+
 /** 滚动模式：以窗口宽度判断双页（ReaderContent columns-2） */
 export function textViewerDualPageActive(
   mode: TextViewerDualPageMode,
@@ -98,19 +113,12 @@ export function textViewerDualPageActiveInViewport(
   viewportWidth: number,
   viewportHeight: number,
 ): boolean {
-  if (mode === 'off') return false;
-  const isWideScreen = viewportWidth >= 480;
-  if (!isWideScreen || viewportHeight <= 0) return false;
-  if (mode === 'always') return true;
-  const landscape = viewportWidth > viewportHeight;
-  return (
-    viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX || landscape
-  );
+  return textViewerDualPageMeasureIntent(mode, viewportWidth, viewportHeight);
 }
 
 /**
- * 双栏 DOM 测量意图：宽屏即按单栏宽测量（不要求视口高度就绪）。
- * 与 {@link textViewerDualPageActiveInViewport} 解耦，避免首帧高度=0 时测量根塌缩为 1px。
+ * 双栏排版/展示意图：宽屏即按单栏宽测量；视口高度未就绪时仍可按宽度判定，
+ * 避免首帧高度=0 时测量根塌缩为 1px 或单页→双页布局闪烁。
  */
 export function textViewerDualPageMeasureIntent(
   mode: TextViewerDualPageMode,
@@ -118,8 +126,13 @@ export function textViewerDualPageMeasureIntent(
   viewportHeight: number,
 ): boolean {
   if (mode === 'off') return false;
+  if (mode === 'always') {
+    if (viewportWidth >= 480) return true;
+    // 视口宽度未就绪（如 spread 回退 320px）时沿用窗口宽度，避免首帧误判单栏
+    if (typeof window !== 'undefined' && window.innerWidth >= 480) return true;
+    return false;
+  }
   if (viewportWidth < 480) return false;
-  if (mode === 'always') return true;
   if (viewportHeight <= 0) {
     return viewportWidth >= TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX;
   }
@@ -180,13 +193,13 @@ export interface TextViewerPageTipsConfig {
 
 export const defaultTextViewerPageTipsConfig: TextViewerPageTipsConfig = {
   headerMode: 'follow',
-  footerMode: 'never',
+  footerMode: 'follow',
   headerLeft: 'time',
   headerMiddle: 'none',
   headerRight: 'battery',
   footerLeft: 'chapterTitle',
-  footerMiddle: 'none',
-  footerRight: 'pageAndTotal',
+  footerMiddle: 'chapterWordCount',
+  footerRight: 'chapterProgressAndBook',
   headerFontSize: 12,
   footerFontSize: 12,
   headerInset: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -319,6 +332,57 @@ export interface TextViewerUiConfig {
   autoPageStyle?: TextViewerAutoPageStyle;
   /** 进度条模式：进度条贴在内容区顶部或底部 */
   autoPageProgressEdge?: TextViewerAutoPageProgressEdge;
+
+  /** 填充刘海：内容延伸，移除顶栏 safe-area 顶部间距 */
+  paddingDisplayCutouts?: boolean;
+  /** 顶栏章节/书源附加区域 */
+  showReadTitleAddition?: boolean;
+  /** @deprecated 已拆分为 readTopBarStyleFollowPage / readBottomBarStyleFollowPage */
+  readBarStyleFollowPage?: boolean;
+  /** 顶栏配色跟随阅读主题 */
+  readTopBarStyleFollowPage?: boolean;
+  /** 底栏配色跟随阅读主题 */
+  readBottomBarStyleFollowPage?: boolean;
+  /** 顶栏/底栏显示亮度滑条 */
+  showBrightnessView?: boolean;
+  /** 亮度胶囊位置：左 / 右 / 顶栏下 / 底栏上 */
+  brightnessViewPosition?: TextViewerBrightnessViewPosition;
+  /** 亮度胶囊配色跟随阅读主题 */
+  brightnessViewStyleFollowPage?: boolean;
+  /** 浮动朗读播放器配色跟随阅读主题 */
+  readAloudBarStyleFollowPage?: boolean;
+  /** 底栏进度条：按页 / 按章 */
+  progressBarBehavior?: 'page' | 'chapter';
+  /** 鼠标滚轮翻页（滚动模式滚内容，按页模式翻页） */
+  mouseWheelPage?: boolean;
+  /** 朗读时音量键仍翻页（与 volumeKeyControlAloud 互斥） */
+  volumeKeyTurnPageOnAloud?: boolean;
+  /** 自定义翻页按键 KeyboardEvent.code */
+  customPageKeys?: { prev: string[]; next: string[] };
+  /** 按键长按连续翻页 */
+  keyPageOnLongPress?: boolean;
+  /** 禁用滚动模式九宫格点击（仅切换顶底栏） */
+  disableScrollClickAnimation?: boolean;
+  /** 允许长按选择文本 */
+  selectText?: boolean;
+  /** 文本选择菜单默认展开 */
+  expandTextMenu?: boolean;
+  /** 文本选择菜单可见项 id */
+  textMenuVisibleItems?: string[];
+  /** 点击图片方式：0 默认 / 1 预览 / 2 兼容 / 3 关闭 / 4 双击 */
+  clickImgWay?: 0 | 1 | 2 | 3 | 4;
+  /** 屏幕方向 0–5 */
+  screenOrientation?: 0 | 1 | 2 | 3 | 4 | 5;
+  /** 屏幕超时秒数；-1 常亮；0 系统默认 */
+  keepScreenOn?: 0 | 60 | 300 | 600 | -1;
+  /** 阅读亮度 0–100 */
+  readBrightness?: number;
+  /** 退出阅读器时恢复亮度 */
+  brightnessAuto?: boolean;
+  /** 章节加载失败时自动换源 */
+  autoChangeSource?: boolean;
+  /** 菜单隐藏时拦截返回键 */
+  disableReturnKey?: boolean;
 }
 
 /** 按页自动翻页：扫描线 / 横向进度条 / 扫描揭示下一页（对齐 Legado 非滚动 AutoPager） */
@@ -332,6 +396,12 @@ export const TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS: Record<TextViewerAutoPageStyle,
   reveal: '揭示下一页',
 };
 
+export const TEXT_VIEWER_AUTO_PAGE_STYLES = [
+  'scanLine',
+  'progressBar',
+  'reveal',
+] as const satisfies readonly TextViewerAutoPageStyle[];
+
 export const TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS: Record<
   TextViewerAutoPageProgressEdge,
   string
@@ -339,6 +409,11 @@ export const TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS: Record<
   top: '顶部',
   bottom: '底部',
 };
+
+export const TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGES = [
+  'top',
+  'bottom',
+] as const satisfies readonly TextViewerAutoPageProgressEdge[];
 
 export function normalizeAutoPageStyle(
   value: string | undefined | null,
@@ -422,6 +497,150 @@ export function normalizeAutoReadSpeed(value: number | undefined | null): number
   );
 }
 
+export type TextViewerProgressBarBehavior = 'page' | 'chapter';
+
+export type TextViewerScreenOrientation = 0 | 1 | 2 | 3 | 4 | 5;
+
+export type TextViewerKeepScreenOn = 0 | 60 | 300 | 600 | -1;
+
+export type TextViewerClickImgWay = 0 | 1 | 2 | 3 | 4;
+
+export const TEXT_VIEWER_SCREEN_ORIENTATION_LABELS: Record<TextViewerScreenOrientation, string> = {
+  0: '跟随系统',
+  1: '竖屏',
+  2: '横屏',
+  3: '传感器',
+  4: '反向竖屏',
+  5: '反向横屏',
+};
+
+export const TEXT_VIEWER_KEEP_SCREEN_ON_LABELS: Record<string, string> = {
+  '0': '系统默认',
+  '60': '1 分钟',
+  '300': '5 分钟',
+  '600': '10 分钟',
+  '-1': '常亮',
+};
+
+export const TEXT_VIEWER_PROGRESS_BAR_BEHAVIOR_LABELS: Record<TextViewerProgressBarBehavior, string> = {
+  page: '按页',
+  chapter: '按章',
+};
+
+export const TEXT_VIEWER_PROGRESS_BAR_BEHAVIORS = [
+  'page',
+  'chapter',
+] as const satisfies readonly TextViewerProgressBarBehavior[];
+
+export type TextViewerBrightnessViewPosition = 'left' | 'right' | 'top' | 'bottom';
+
+export const TEXT_VIEWER_BRIGHTNESS_VIEW_POSITION_LABELS: Record<
+  TextViewerBrightnessViewPosition,
+  string
+> = {
+  left: '左侧',
+  right: '右侧',
+  top: '顶部',
+  bottom: '底部',
+};
+
+export function normalizeBrightnessViewPosition(
+  value: unknown,
+): TextViewerBrightnessViewPosition {
+  if (value === 'left' || value === 'right' || value === 'top' || value === 'bottom') {
+    return value;
+  }
+  return 'left';
+}
+
+export const TEXT_VIEWER_BRIGHTNESS_VIEW_POSITIONS = [
+  'left',
+  'right',
+  'top',
+  'bottom',
+] as const satisfies readonly TextViewerBrightnessViewPosition[];
+
+export const TEXT_VIEWER_CLICK_IMG_WAY_LABELS: Record<TextViewerClickImgWay, string> = {
+  0: '默认（链接）',
+  1: '预览',
+  2: '兼容旧版',
+  3: '关闭',
+  4: '双击',
+};
+
+export const TEXT_VIEWER_TEXT_MENU_ITEM_IDS = [
+  'speakSelection',
+  'speakFromHere',
+  'copy',
+  'dict',
+] as const;
+
+export type TextViewerTextMenuItemId = (typeof TEXT_VIEWER_TEXT_MENU_ITEM_IDS)[number];
+
+export const TEXT_VIEWER_TEXT_MENU_ITEM_LABELS: Record<TextViewerTextMenuItemId, string> = {
+  speakSelection: '朗读选中',
+  speakFromHere: '从此处朗读',
+  copy: '复制',
+  dict: '字典',
+};
+
+export const DEFAULT_TEXT_VIEWER_CUSTOM_PAGE_KEYS = {
+  prev: [] as string[],
+  next: [] as string[],
+};
+
+export const DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS: TextViewerTextMenuItemId[] = [
+  'speakSelection',
+  'speakFromHere',
+];
+
+export function normalizeProgressBarBehavior(
+  value: string | undefined | null,
+): TextViewerProgressBarBehavior {
+  return value === 'chapter' ? 'chapter' : 'page';
+}
+
+export function normalizeClickImgWay(value: number | undefined | null): TextViewerClickImgWay {
+  if (value === 1 || value === 2 || value === 3 || value === 4) return value;
+  return 0;
+}
+
+export function normalizeScreenOrientation(
+  value: number | undefined | null,
+): TextViewerScreenOrientation {
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5) return value;
+  return 0;
+}
+
+export function normalizeKeepScreenOn(value: number | undefined | null): TextViewerKeepScreenOn {
+  if (value === 60 || value === 300 || value === 600 || value === -1) return value;
+  return 0;
+}
+
+export function normalizeReadBrightness(value: number | undefined | null): number {
+  if (value == null || !Number.isFinite(value)) return 100;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+export function normalizeCustomPageKeys(
+  raw: Partial<{ prev: string[]; next: string[] }> | undefined | null,
+): { prev: string[]; next: string[] } {
+  return {
+    prev: Array.isArray(raw?.prev) ? raw.prev.filter((k) => typeof k === 'string') : [],
+    next: Array.isArray(raw?.next) ? raw.next.filter((k) => typeof k === 'string') : [],
+  };
+}
+
+export function normalizeTextMenuVisibleItems(
+  raw: string[] | undefined | null,
+): TextViewerTextMenuItemId[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS];
+  }
+  const allowed = new Set<string>(TEXT_VIEWER_TEXT_MENU_ITEM_IDS);
+  return raw.filter((id): id is TextViewerTextMenuItemId => allowed.has(id));
+}
+
 export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   theme: 0,
   font: 0,
@@ -480,4 +699,28 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   autoReadSpeed: TEXT_VIEWER_AUTO_READ_SPEED_DEFAULT,
   autoPageStyle: 'scanLine',
   autoPageProgressEdge: 'bottom',
+  paddingDisplayCutouts: false,
+  showReadTitleAddition: true,
+  readTopBarStyleFollowPage: false,
+  readBottomBarStyleFollowPage: false,
+  showBrightnessView: true,
+  brightnessViewPosition: 'left',
+  brightnessViewStyleFollowPage: true,
+  readAloudBarStyleFollowPage: false,
+  progressBarBehavior: 'page',
+  mouseWheelPage: true,
+  volumeKeyTurnPageOnAloud: false,
+  customPageKeys: { ...DEFAULT_TEXT_VIEWER_CUSTOM_PAGE_KEYS },
+  keyPageOnLongPress: false,
+  disableScrollClickAnimation: false,
+  selectText: true,
+  expandTextMenu: false,
+  textMenuVisibleItems: [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS],
+  clickImgWay: 0,
+  screenOrientation: 0,
+  keepScreenOn: 0,
+  readBrightness: 100,
+  brightnessAuto: true,
+  autoChangeSource: true,
+  disableReturnKey: false,
 };

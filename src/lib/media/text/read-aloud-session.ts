@@ -39,6 +39,7 @@ import {
 } from '@/lib/media/text/read-aloud-media-session';
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import type { HttpTTS } from '@/types';
+import { globalMediaPlayerStore } from '@/stores/global-media-player';
 
 export type ReadAloudReadingAnchor = ReadAloudParagraphAnchor & {
   chapterIndex: number;
@@ -449,6 +450,7 @@ export function isReadAloudUserPaused(): boolean {
 }
 
 export function stopReadAloudSession(): void {
+  const wasShellBackground = globalMediaPlayerStore.isReadAloudShellActive();
   playing = false;
   userPausedManual = false;
   stopReadAloud();
@@ -458,6 +460,12 @@ export function stopReadAloudSession(): void {
   clearReadAloudMediaSession();
   unbindReadAloudFocusResume();
   notify();
+  if (wasShellBackground) {
+    globalMediaPlayerStore.deactivate();
+    void import('@/lib/media/text/read-aloud-background').then((m) => {
+      void m.cleanupReadAloudBackgroundBook();
+    });
+  }
 }
 
 export function toggleReadAloudSessionPlay(): void {
@@ -582,6 +590,9 @@ export function bindReadAloudSessionContext(context: ReadAloudSessionContext): v
 }
 
 export function unbindReadAloudSessionContext(): void {
+  if (globalMediaPlayerStore.isReadAloudShellActive()) {
+    return;
+  }
   stopReadAloudSession();
   ctx = null;
   paragraphs = [];

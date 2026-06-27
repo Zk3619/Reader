@@ -18,75 +18,143 @@ export interface ReaderThemePalette {
   accent: string;
   /** 底栏顶边框（与背景对比明显） */
   border: string;
+  /** 亮度胶囊与滑条配色 */
+  brightnessChrome: ReaderBrightnessChrome;
+}
+
+/** 阅读器亮度胶囊 / 竖向滑条配色（随阅读主题） */
+export interface ReaderBrightnessChrome {
+  capsuleBg: string;
+  foreground: string;
+  buttonHoverBg: string;
+  sliderTrack: string;
+  sliderFill: string;
+  sliderThumb: string;
+  /** 胶囊边缘荧光阴影（box-shadow） */
+  capsuleGlow: string;
+}
+
+type ReaderThemePaletteCore = Omit<ReaderThemePalette, 'brightnessChrome'>;
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function rgbaHex(hex: string, alpha: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function relativeLuminance(hex: string): number {
+  const { r, g, b } = hexToRgb(hex);
+  const linear = [r, g, b].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+}
+
+/** 由阅读主题 bg / text / border 派生亮度胶囊配色，与正文背景/前景一致 */
+export function deriveReaderBrightnessChrome(
+  bg: string,
+  text: string,
+  border: string,
+): ReaderBrightnessChrome {
+  const darkBg = relativeLuminance(bg) < 0.45;
+  const trackAlpha = darkBg ? 0.32 : 0.26;
+  const fillAlpha = darkBg ? 0.9 : 0.8;
+  const glowStrength = darkBg ? 0.58 : 0.48;
+
+  return {
+    capsuleBg: rgbaHex(bg, 0.94),
+    foreground: text,
+    buttonHoverBg: rgbaHex(text, darkBg ? 0.14 : 0.1),
+    sliderTrack: rgbaHex(text, trackAlpha),
+    sliderFill: rgbaHex(text, fillAlpha),
+    sliderThumb: text,
+    capsuleGlow: `0 0 0 1px ${rgbaHex(border, 0.42)}, 0 0 16px ${rgbaHex(border, glowStrength)}, 0 0 6px ${rgbaHex(text, 0.18)}`,
+  };
+}
+
+function defineReaderThemePalette(core: ReaderThemePaletteCore): ReaderThemePalette {
+  return {
+    ...core,
+    brightnessChrome: deriveReaderBrightnessChrome(core.bg, core.text, core.border),
+  };
 }
 
 /**
  * 0–5：融合配色；6 夜间 / 7 日间 / 8 微信读书与 Legado readConfig 日间或夜间值对齐。
  */
 export const READER_THEME_PALETTES: Record<ReaderThemeId, ReaderThemePalette> = {
-  0: {
+  0: defineReaderThemePalette({
     name: '默认',
     bg: '#f5f0e6',
     text: '#5b4636',
     accent: '#E53935',
     border: '#9c8b7a',
-  },
-  1: {
+  }),
+  1: defineReaderThemePalette({
     name: '护眼绿',
     bg: '#d5e9d1',
     text: '#596C44',
     accent: '#E53935',
     border: '#43a047',
-  },
-  2: {
+  }),
+  2: defineReaderThemePalette({
     name: '羊皮纸',
     bg: '#DDC090',
     text: '#3E3422',
     accent: '#834E00',
     border: '#a08060',
-  },
-  3: {
+  }),
+  3: defineReaderThemePalette({
     name: '淡蓝',
     bg: '#c4dff1',
     text: '#3D4C54',
     accent: '#E53935',
     border: '#6d9eb8',
-  },
-  4: {
+  }),
+  4: defineReaderThemePalette({
     name: '淡紫',
     bg: '#e7cef0',
     text: '#68516C',
     accent: '#801314',
     border: '#a888b0',
-  },
-  5: {
+  }),
+  5: defineReaderThemePalette({
     name: '深色',
     bg: '#263238',
     text: '#b0bec5',
     accent: '#FE4D55',
     border: '#546e7a',
-  },
-  6: {
+  }),
+  6: defineReaderThemePalette({
     name: '夜间',
     bg: '#000000',
     text: '#ADADAD',
     accent: '#FE4D55',
     border: '#444444',
-  },
-  7: {
+  }),
+  7: defineReaderThemePalette({
     name: '日间',
     bg: '#FFFFFF',
     text: '#000000',
     accent: '#E53935',
     border: '#d0d0d0',
-  },
-  8: {
+  }),
+  8: defineReaderThemePalette({
     name: '微信读书',
     bg: '#c0edc6',
     text: '#0b0b0b',
     accent: '#E53935',
     border: '#7ab889',
-  },
+  }),
 };
 
 export const READER_THEME_LABELS: Record<ReaderThemeId, string> = {
@@ -154,4 +222,29 @@ export function readerThemeBarClasses(themeId: number) {
     text: twText(palette.text),
     border: twBorderTop(palette.border),
   };
+}
+
+export function readerThemeBrightnessChrome(themeId: number): ReaderBrightnessChrome {
+  return readerThemePalette(themeId).brightnessChrome;
+}
+
+/** 亮度胶囊使用应用主题（顶底栏未跟随页面时的配色语义） */
+export function appThemeBrightnessChrome(): ReaderBrightnessChrome {
+  return {
+    capsuleBg: 'hsl(var(--background) / 0.95)',
+    foreground: 'hsl(var(--foreground))',
+    buttonHoverBg: 'hsl(var(--foreground) / 0.08)',
+    sliderTrack: 'hsl(var(--foreground) / 0.22)',
+    sliderFill: 'hsl(var(--primary))',
+    sliderThumb: 'hsl(var(--foreground))',
+    capsuleGlow:
+      '0 0 0 1px hsl(var(--border) / 0.42), 0 0 16px hsl(var(--primary) / 0.38), 0 0 6px hsl(var(--foreground) / 0.12)',
+  };
+}
+
+export function resolveBrightnessChrome(
+  themeId: number,
+  followPage: boolean,
+): ReaderBrightnessChrome {
+  return followPage ? readerThemeBrightnessChrome(themeId) : appThemeBrightnessChrome();
 }

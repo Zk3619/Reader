@@ -224,6 +224,7 @@
   --reader-bar-easing-exit: cubic-bezier(0.64, 0, 0.78, 0);
   --reader-bar-easing: var(--reader-bar-easing-enter);
   --reader-bar-transition: var(--reader-bar-duration) var(--reader-bar-easing-enter);
+  --reader-brightness-chrome-gap: 10px;
   --reader-top-bar-height: 3.5rem;
   --reader-bottom-bar-height: 4rem;
   --reader-footer-max-height: 20rem;
@@ -685,6 +686,68 @@
     opacity var(--reader-bar-duration) ease-in;
 }
 
+/* 亮度胶囊：与顶底栏同节奏的淡入淡出 + 按方位轻微位移 */
+.reader-brightness-capsule-shell {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.reader-brightness-capsule-shell--hidden {
+  visibility: hidden;
+  transition: visibility 0s linear var(--reader-bar-duration);
+}
+
+.reader-brightness-capsule-track {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out;
+}
+
+.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in;
+}
+
+.reader-brightness-capsule-shell--left.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0, 0);
+}
+
+.reader-brightness-capsule-shell--right.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(var(--reader-chrome-floating-shift, 0.75rem), 0, 0);
+}
+
+.reader-brightness-capsule-shell--top.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(0, calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0);
+}
+
+.reader-brightness-capsule-shell--bottom.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(0, var(--reader-chrome-floating-shift, 0.75rem), 0);
+}
+
+/* 嵌入顶/底栏：随 surface/track 位移，透明透出正文 */
+.reader-brightness-capsule-shell--embedded-top,
+.reader-brightness-capsule-shell--embedded-bottom {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.reader-brightness-capsule-shell--embedded-top {
+  margin-top: var(--reader-brightness-chrome-gap, 10px);
+  padding-bottom: 2px;
+}
+
+.reader-brightness-capsule-shell--embedded-bottom {
+  margin-bottom: var(--reader-brightness-chrome-gap, 10px);
+  padding-top: 2px;
+}
+
 /* fixed 占位栏：max-height 折叠（流式布局） */
 .reader-top-bar {
   min-height: 0;
@@ -739,6 +802,33 @@
     border-width var(--reader-bar-duration) var(--reader-bar-easing-exit);
 }
 
+/* 阅读器：填充刘海 — 移除顶栏顶部安全间距 */
+.reader-padding-cutouts-host .reader-top-bar.safe-area-inset-top,
+.reader-padding-cutouts-host .safe-area-inset-top {
+  --safe-area-top-effective: 0px;
+  padding-top: 0;
+}
+
+/* 阅读器亮度 overlay（Web / native 失败降级） */
+[data-reader-brightness-host] {
+  position: relative;
+}
+
+[data-reader-brightness-host]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 5;
+}
+
+[data-reader-brightness-host][data-brightness-overlay]::after {
+  opacity: calc(var(--reader-brightness-overlay, 0));
+}
+
 .reader-bottom-bar,
 .reader-control-bar {
   min-height: 0;
@@ -778,6 +868,7 @@
   .reader-chrome-overlay-panel,
   .reader-chrome-floating-top,
   .reader-chrome-floating-bottom,
+  .reader-brightness-capsule-shell,
   .reader-top-bar,
   .reader-footer,
   .reader-bottom-bar,
@@ -787,7 +878,8 @@
 
   .reader-chrome-overlay-panel__surface,
   .reader-chrome-floating-top__track,
-  .reader-chrome-floating-bottom__track {
+  .reader-chrome-floating-bottom__track,
+  .reader-brightness-capsule-track {
     transform: none !important;
     opacity: 1 !important;
   }
@@ -1784,6 +1876,14 @@ body.reader-inner-web-session--drawer {
   height: 0;
   overflow: visible;
   pointer-events: none;
+}
+
+.reader-kobalte-toast-host [data-kb-top-layer] {
+  pointer-events: none;
+}
+
+.reader-kobalte-toast-host [data-kb-top-layer] ol {
+  pointer-events: auto;
 }
 
 .reader-toast-host [data-sonner-toaster] {

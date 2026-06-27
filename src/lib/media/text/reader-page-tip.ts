@@ -53,6 +53,9 @@ export type ReaderPageTipType =
   | 'totalProgress'
   | 'totalProgress1'
   | 'pageAndTotal'
+  | 'chapterWordCount'
+  | 'chapterProgress'
+  | 'chapterProgressAndBook'
   | 'timeBattery'
   | 'timeBatteryIconOnly'
   | 'timeBatteryPercentage';
@@ -68,6 +71,9 @@ export const READER_PAGE_TIP_TYPE_LABELS: Record<ReaderPageTipType, string> = {
   totalProgress: '进度(%)',
   totalProgress1: '进度(xx/yyy)',
   pageAndTotal: '页数及进度',
+  chapterWordCount: '本章字数',
+  chapterProgress: '本章进度(%)',
+  chapterProgressAndBook: '本章及全书进度',
   timeBattery: '时间及电量',
   timeBatteryIconOnly: '时间和电量',
   timeBatteryPercentage: '时间及电量%',
@@ -84,6 +90,9 @@ export const READER_PAGE_TIP_TYPE_OPTIONS: ReaderPageTipType[] = [
   'totalProgress',
   'totalProgress1',
   'pageAndTotal',
+  'chapterWordCount',
+  'chapterProgress',
+  'chapterProgressAndBook',
   'timeBattery',
   'timeBatteryIconOnly',
   'timeBatteryPercentage',
@@ -117,6 +126,8 @@ export interface ReaderPageTipContext {
   pageCount: number;
   bookProgressPercent: number;
   bookProgressLabel?: string;
+  chapterWordCountText?: string;
+  chapterProgressPercent?: number;
 }
 
 let batteryLevelCache: number | null = null;
@@ -182,6 +193,15 @@ export function resolveReaderPageTipText(
       const pct = `${Math.round(ctx.bookProgressPercent * 100)}%`;
       return page ? `${page}  ${pct}` : pct;
     }
+    case 'chapterWordCount': {
+      const text = ctx.chapterWordCountText;
+      if (!text || text === '—') return '';
+      return `${text}字`;
+    }
+    case 'chapterProgress':
+      return `本章 ${ctx.chapterProgressPercent ?? 0}%`;
+    case 'chapterProgressAndBook':
+      return `本章 ${ctx.chapterProgressPercent ?? 0}%  全书 ${Math.round(ctx.bookProgressPercent * 100)}%`;
     case 'timeBattery':
       return `${formatTime()}  ${batteryText('percent')}`;
     case 'timeBatteryIconOnly':

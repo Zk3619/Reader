@@ -20,6 +20,7 @@ import {
 import { subscribeReadAloudProgress } from '@/lib/media/text/read-aloud-progress';
 import { globalMediaPlayerState } from '@/stores/global-media-player';
 import { textViewerStore } from '@/stores/viewer';
+import { readerThemePalette } from '@/lib/media/text/reader-theme-classes';
 
 export interface ReaderReadAloudMiniBarProps {
   drawerOpen: boolean;
@@ -70,20 +71,51 @@ export function ReaderReadAloudMiniBar(props: ReaderReadAloudMiniBarProps) {
 
   const isPlaying = () => snapshot().state === 'playing';
 
+  const followPageTheme = () =>
+    textViewerStore.state.config.readAloudBarStyleFollowPage === true;
+  const themePalette = () =>
+    readerThemePalette(textViewerStore.state.config.theme ?? 0);
+
+  const barSurfaceStyle = createMemo(() => {
+    if (!followPageTheme()) return undefined;
+    const palette = themePalette();
+    return {
+      'background-color': palette.bg,
+      color: palette.text,
+      'border-color': palette.border,
+    } as const;
+  });
+
+  const metaTextStyle = createMemo(() => {
+    if (!followPageTheme()) return undefined;
+    return { color: themePalette().text, opacity: 0.72 } as const;
+  });
+
+  const bodyTextStyle = createMemo(() => {
+    if (!followPageTheme()) return undefined;
+    return { color: themePalette().text, opacity: 0.92 } as const;
+  });
+
   return (
     <Show when={visible()}>
       <div
         class={cn(
           'pointer-events-auto fixed bottom-20 left-1/2 z-(--viewer-chrome-z,50)',
           'w-[min(92vw,32rem)] -translate-x-1/2',
-          'rounded-2xl border border-border/70 bg-background/95 px-4 py-3 shadow-lg backdrop-blur-sm',
+          'rounded-2xl border px-4 py-3 shadow-lg backdrop-blur-sm',
+          !followPageTheme() && 'border-border/70 bg-background/95',
         )}
+        style={barSurfaceStyle()}
         role="toolbar"
         aria-label="朗读控制"
       >
         <button
           type="button"
-          class="mb-2 w-full truncate text-left text-xs text-muted-foreground"
+          class={cn(
+            'mb-2 w-full truncate text-left text-xs',
+            !followPageTheme() && 'text-muted-foreground',
+          )}
+          style={metaTextStyle()}
           onClick={props.onOpenDrawer}
         >
           {metaLine()}
@@ -91,7 +123,11 @@ export function ReaderReadAloudMiniBar(props: ReaderReadAloudMiniBarProps) {
 
         <button
           type="button"
-          class="mb-3 max-h-20 w-full overflow-y-auto text-left text-sm leading-relaxed text-foreground/90"
+          class={cn(
+            'mb-3 max-h-20 w-full overflow-y-auto text-left text-sm leading-relaxed',
+            !followPageTheme() && 'text-foreground/90',
+          )}
+          style={bodyTextStyle()}
           onClick={props.onOpenDrawer}
         >
           {readingText() || '…'}

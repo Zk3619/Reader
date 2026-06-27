@@ -1,18 +1,14 @@
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import {
+  defaultMediaPlayerChromeLayout,
   MEDIA_PLAYER_POSITION_HINTS,
   MEDIA_PLAYER_POSITION_LABELS,
   normalizeMediaPlayerChromePosition,
   type MediaPlayerChromePosition,
 } from '@/lib/viewer/media-player-chrome-layout';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
-import {
-  settingsOptionTabsEqualWidthListClass,
-  settingsOptionTabsEqualWidthTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import { settingsState, settingsStore } from '@/stores/settings';
-import { For } from 'solid-js';
 
 const POSITION_OPTIONS: MediaPlayerChromePosition[] = ['bottom', 'top'];
 
@@ -36,36 +32,26 @@ export function MediaPlayerChromeSetting() {
           <ViewerChromeLayoutControls
             value={() =>
               normalizeViewerChromeLayout(
-                settingsState.app.mediaPlayerChromeLayout ?? settingsState.app.viewerChromeLayout,
+                settingsState.app.mediaPlayerChromeLayout ?? defaultMediaPlayerChromeLayout,
               )
             }
             onChange={(layout) => void settingsStore.setMediaPlayerChromeLayout(layout)}
           />
         </div>
 
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-foreground">位置</p>
-          <Tabs
-            value={position()}
-            onChange={(value) => {
-              void settingsStore.setMediaPlayerChromePosition(
-                value as MediaPlayerChromePosition,
-              );
-            }}
-            class="w-full"
-          >
-            <TabsList class={settingsOptionTabsEqualWidthListClass} aria-label="播放器位置">
-              <For each={POSITION_OPTIONS}>
-                {(value) => (
-                  <TabsTrigger value={value} class={settingsOptionTabsEqualWidthTriggerClass}>
-                    {MEDIA_PLAYER_POSITION_LABELS[value]}
-                  </TabsTrigger>
-                )}
-              </For>
-            </TabsList>
-          </Tabs>
-          <p class="text-xs text-muted-foreground">{MEDIA_PLAYER_POSITION_HINTS[position()]}</p>
-        </div>
+        <AppTabs
+          layout="stacked"
+          variant="settings-equal"
+          label="位置"
+          value={position()}
+          options={POSITION_OPTIONS}
+          labels={MEDIA_PLAYER_POSITION_LABELS}
+          ariaLabel="播放器位置"
+          hint={MEDIA_PLAYER_POSITION_HINTS[position()]}
+          onChange={(value) => {
+            void settingsStore.setMediaPlayerChromePosition(value as MediaPlayerChromePosition);
+          }}
+        />
       </div>
     </div>
   );

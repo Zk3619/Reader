@@ -12,7 +12,7 @@ import {
 import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import {
   READER_PAGE_TIP_FOOTER_MODE_LABELS,
@@ -22,10 +22,6 @@ import {
   READER_PAGE_TIP_TYPE_OPTIONS,
   type ReaderPageTipType,
 } from '@/lib/media/text/reader-page-tip';
-import {
-  readerDrawerOptionTabsListClass,
-  readerDrawerOptionTabsTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import { formatRemFromPx, pxToRem, remToPx } from '@/lib/media/text/reader-rem';
 
 type TipSlotKey =
@@ -161,43 +157,27 @@ export function ReaderPageTipControls(props: ReaderPageTipControlsProps) {
         </p>
       </div>
 
-      <div class="space-y-3">
-        <Label>页眉显示</Label>
-        <Tabs
-          value={props.tips().headerMode}
-          onChange={(v) => setTips({ headerMode: v as TextViewerPageTipsConfig['headerMode'] })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="页眉显示">
-            <For each={(['follow', 'always', 'never'] as const)}>
-              {(mode) => (
-                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
-                  {READER_PAGE_TIP_HEADER_MODE_LABELS[mode]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
-      </div>
+      <AppTabs
+        layout="stacked"
+        variant="drawer"
+        label="页眉显示"
+        value={props.tips().headerMode}
+        options={['follow', 'always', 'never'] as const}
+        labels={READER_PAGE_TIP_HEADER_MODE_LABELS}
+        ariaLabel="页眉显示"
+        onChange={(v) => setTips({ headerMode: v as TextViewerPageTipsConfig['headerMode'] })}
+      />
 
-      <div class="space-y-3">
-        <Label>页脚显示</Label>
-        <Tabs
-          value={props.tips().footerMode}
-          onChange={(v) => setTips({ footerMode: v as TextViewerPageTipsConfig['footerMode'] })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="页脚显示">
-            <For each={(['follow', 'always', 'never'] as const)}>
-              {(mode) => (
-                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
-                  {READER_PAGE_TIP_FOOTER_MODE_LABELS[mode]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
-      </div>
+      <AppTabs
+        layout="stacked"
+        variant="drawer"
+        label="页脚显示"
+        value={props.tips().footerMode}
+        options={['follow', 'always', 'never'] as const}
+        labels={READER_PAGE_TIP_FOOTER_MODE_LABELS}
+        ariaLabel="页脚显示"
+        onChange={(v) => setTips({ footerMode: v as TextViewerPageTipsConfig['footerMode'] })}
+      />
 
       <div class="space-y-2">
         <Label>页眉内容</Label>
@@ -344,13 +324,13 @@ export function mergePageTipsConfig(
 function defaultTextViewerPageTipsConfigFromUi(): TextViewerPageTipsConfig {
   return {
     headerMode: 'follow',
-    footerMode: 'never',
+    footerMode: 'follow',
     headerLeft: 'time',
     headerMiddle: 'none',
     headerRight: 'battery',
     footerLeft: 'chapterTitle',
-    footerMiddle: 'none',
-    footerRight: 'pageAndTotal',
+    footerMiddle: 'chapterWordCount',
+    footerRight: 'chapterProgressAndBook',
     headerFontSize: 12,
     footerFontSize: 12,
     headerInset: { top: 0, bottom: 0, left: 16, right: 16 },

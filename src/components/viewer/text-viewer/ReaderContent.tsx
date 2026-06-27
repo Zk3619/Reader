@@ -440,6 +440,7 @@ export function ReaderContent(props: ReaderContentProps) {
                 config().textBottomJustify &&
                 !props.dualSpreadRender &&
                 'reader-paged-bottom-justify',
+              config().selectText === false && 'select-none',
             )}
             style={bodyStyle()}
           >
@@ -613,6 +614,7 @@ function ReaderBlockItem(props: {
               source={props.source}
               imageStyle={props.imageStyle}
               fontSizePx={props.fontSizePx}
+              clickImgWay={viewerState.config.clickImgWay ?? 0}
               onLegadoCommentClick={props.onLegadoCommentClick}
               bookUrl={props.mangaBookUrl}
               chapterIndex={props.mangaChapterIndex}
@@ -720,6 +722,7 @@ function ParagraphWithParts(props: {
               source={props.source}
               imageStyle={props.imageStyle}
               fontSizePx={props.fontSizePx}
+              clickImgWay={viewerState.config.clickImgWay ?? 0}
               onLegadoCommentClick={props.onLegadoCommentClick}
               bookUrl={props.mangaBookUrl}
               chapterIndex={props.mangaChapterIndex}

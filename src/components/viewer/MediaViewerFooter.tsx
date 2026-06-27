@@ -9,13 +9,25 @@ import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chro
 
 export interface MediaViewerFooterProps {
   children: JSX.Element;
+  /** 底栏附属内容最上方（如嵌入的亮度胶囊） */
+  leadingSlot?: JSX.Element;
   layout?: ViewerChromeLayout;
   visible?: boolean;
   class?: string;
+  surfaceClass?: string;
+  surfaceStyle?: JSX.CSSProperties;
 }
 
 export function MediaViewerFooter(props: MediaViewerFooterProps) {
-  const [local] = splitProps(props, ['children', 'layout', 'visible', 'class']);
+  const [local] = splitProps(props, [
+    'children',
+    'leadingSlot',
+    'layout',
+    'visible',
+    'class',
+    'surfaceClass',
+    'surfaceStyle',
+  ]);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
   const layout = () => local.layout ?? chromeLayout();
@@ -37,14 +49,19 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         layout() === 'floating' &&
           'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0',
         layout() === 'fixed' &&
-          'reader-footer shrink-0 border-t border-border bg-background/95 backdrop-blur app-bottom-chrome-inset',
+          'reader-footer shrink-0 flex flex-col app-bottom-chrome-inset',
         local.class,
       )}
       data-media-viewer-interactive-zone
       onClick={(e) => e.stopPropagation()}
     >
       <Show when={layout() === 'stacked'}>
-        <MediaViewerOverlayBottomChrome visible={panelVisible()}>
+        <MediaViewerOverlayBottomChrome
+          visible={panelVisible()}
+          surfaceClass={local.surfaceClass}
+          surfaceStyle={local.surfaceStyle}
+          headSlot={local.leadingSlot}
+        >
           {local.children}
         </MediaViewerOverlayBottomChrome>
       </Show>
@@ -54,10 +71,16 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
+          <Show when={local.leadingSlot}>{local.leadingSlot}</Show>
           {local.children}
         </MediaViewerFloatingBottomChrome>
       </Show>
-      <Show when={layout() === 'fixed'}>{local.children}</Show>
+      <Show when={layout() === 'fixed'}>
+        <Show when={local.leadingSlot}>{local.leadingSlot}</Show>
+        <div class="flex flex-col border-t border-border bg-background/95 backdrop-blur">
+          {local.children}
+        </div>
+      </Show>
     </div>
   );
 }

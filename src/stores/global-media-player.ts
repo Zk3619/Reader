@@ -21,6 +21,8 @@ export type GlobalMediaPlayerState = {
   collapsed: boolean;
   meta: GlobalMediaPlayerMeta | null;
   bookUrl: string | null;
+  /** 固定布局时实测 chrome 高度（px） */
+  chromeHeightPx: number;
 };
 
 const [state, setState] = createStore<GlobalMediaPlayerState>({
@@ -29,6 +31,7 @@ const [state, setState] = createStore<GlobalMediaPlayerState>({
   collapsed: false,
   meta: null,
   bookUrl: null,
+  chromeHeightPx: 0,
 });
 
 export const globalMediaPlayerState = state;
@@ -36,6 +39,10 @@ export const globalMediaPlayerState = state;
 export const globalMediaPlayerStore = {
   get state() {
     return state;
+  },
+
+  isReadAloudShellActive(): boolean {
+    return state.shellActive && state.kind === 'read-aloud';
   },
 
   activateReadAloud(meta: GlobalMediaPlayerMeta, bookUrl: string): void {
@@ -78,7 +85,14 @@ export const globalMediaPlayerStore = {
       collapsed: false,
       meta: null,
       bookUrl: null,
+      chromeHeightPx: 0,
     });
+  },
+
+  setChromeHeight(px: number): void {
+    const next = Math.max(0, Math.round(px));
+    if (state.chromeHeightPx === next) return;
+    setState('chromeHeightPx', next);
   },
 
   clearShell(): void {

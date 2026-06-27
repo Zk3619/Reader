@@ -71,6 +71,7 @@ import {
   Square,
   Star,
   Sun,
+  SunMoon,
   Upload,
   Users,
   X,
@@ -119,7 +120,10 @@ export const SettingsIcon = icon(Settings);
 export const StarIcon = icon(Star);
 export const ThemeLightIcon = icon(Sun);
 export const ThemeDarkIcon = icon(Moon);
-export const ThemeAutoIcon = icon(Monitor);
+/** 跟随系统明暗 */
+export const ThemeSystemIcon = icon(Monitor);
+/** 按设定时段自动明暗（sun-moon） */
+export const ThemeScheduleIcon = icon(SunMoon);
 export const AddToShelfIcon = icon(BookPlus);
 export const RemoveFromShelfIcon = icon(BookMinus);
 export const BookInfoIcon = icon(Info);

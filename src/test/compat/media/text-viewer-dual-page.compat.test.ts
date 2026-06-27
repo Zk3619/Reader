@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
   textViewerDualPageActive,
@@ -34,15 +34,31 @@ describe('textViewerDualPageActiveInViewport', () => {
     expect(textViewerDualPageActiveInViewport('always', 400, 800)).toBe(false);
   });
 
+  it('always enables before spread width is measured when window is wide', () => {
+    vi.stubGlobal('window', { innerWidth: 1280 });
+    try {
+      expect(textViewerDualPageMeasureIntent('always', 320, 600)).toBe(true);
+      expect(textViewerDualPageActiveInViewport('always', 320, 600)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('off is always false', () => {
     expect(textViewerDualPageActiveInViewport('off', 1920, 1080)).toBe(false);
+  });
+
+  it('matches measure intent before viewport height is ready', () => {
+    expect(textViewerDualPageActiveInViewport('always', 1920, 0)).toBe(true);
+    expect(textViewerDualPageActiveInViewport('auto', 1280, 0)).toBe(true);
+    expect(textViewerDualPageActiveInViewport('auto', 1024, 0)).toBe(false);
   });
 });
 
 describe('textViewerDualPageMeasureIntent', () => {
   it('enables dual measure before viewport height is ready', () => {
     expect(textViewerDualPageMeasureIntent('always', 1920, 0)).toBe(true);
-    expect(textViewerDualPageActiveInViewport('always', 1920, 0)).toBe(false);
+    expect(textViewerDualPageActiveInViewport('always', 1920, 0)).toBe(true);
   });
 
   it('auto enables at xl width before viewport height is ready', () => {

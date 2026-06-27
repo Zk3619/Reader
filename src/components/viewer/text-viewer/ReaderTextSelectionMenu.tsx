@@ -2,7 +2,7 @@
  * 正文选区朗读菜单（对标 Legado TextActionMenu + contentSelectSpeakMod）
  */
 
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
   findParagraphIndexForSelection,
@@ -16,6 +16,11 @@ import {
 } from '@/lib/media/text/read-aloud-session';
 import { textViewerStore } from '@/stores/viewer';
 import { getHttpTTS } from '@/lib/database/http-tts';
+import {
+  TEXT_VIEWER_TEXT_MENU_ITEM_LABELS,
+  normalizeTextMenuVisibleItems,
+  type TextViewerTextMenuItemId,
+} from '@/lib/media/text/reader-ui-config';
 
 export interface ReaderTextSelectionMenuProps {
   sessionContext: ReadAloudSessionContext;
@@ -26,6 +31,10 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
   const [rect, setRect] = createSignal<ReturnType<typeof getSelectionClientRect>>(null);
 
   const updateSelection = () => {
+    if (textViewerStore.state.config.selectText === false) {
+      setRect(null);
+      return;
+    }
     const text = getSelectionPlainText();
     if (!text) {
       setRect(null);
@@ -48,6 +57,13 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
       document.removeEventListener('mouseup', updateSelection);
     });
   });
+
+  const visibleItems = (): TextViewerTextMenuItemId[] => {
+    const cfg = textViewerStore.state.config;
+    const items = normalizeTextMenuVisibleItems(cfg.textMenuVisibleItems);
+    if (cfg.expandTextMenu) return items;
+    return items.slice(0, 1);
+  };
 
   const buildSpeakOptions = async () => {
     const cfg = textViewerStore.state.config;
@@ -85,6 +101,32 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
     void startReadAloudSessionFromSelection(props.sessionContext, idx);
   };
 
+  const handleCopy = () => {
+    const text = getSelectionPlainText();
+    if (!text) return;
+    void navigator.clipboard.writeText(text).catch(() => undefined);
+    window.getSelection()?.removeAllRanges();
+    setRect(null);
+  };
+
+  const runItem = (id: TextViewerTextMenuItemId) => {
+    switch (id) {
+      case 'speakSelection':
+        void handleSpeakSelection();
+        break;
+      case 'speakFromHere':
+        void handleSpeakFromHere();
+        break;
+      case 'copy':
+        handleCopy();
+        break;
+      case 'dict':
+        break;
+      default:
+        break;
+    }
+  };
+
   const pos = () => {
     const r = rect();
     if (!r) return null;
@@ -104,16 +146,20 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
             left: `${p().left}px`,
           }}
           role="toolbar"
-          aria-label="选区朗读"
+          aria-label="选区菜单"
         >
-          <Button size="sm" variant="secondary" class="h-8 text-xs" onClick={() => void handleSpeakSelection()}>
-            朗读选中
-          </Button>
-          <Show when={(textViewerStore.state.config.contentSelectSpeakMod ?? 0) === 1}>
-            <Button size="sm" variant="secondary" class="h-8 text-xs" onClick={() => void handleSpeakFromHere()}>
-              从此处朗读
-            </Button>
-          </Show>
+          <For each={visibleItems()}>
+            {(id) => (
+              <Button
+                size="sm"
+                variant="secondary"
+                class="h-8 text-xs"
+                onClick={() => runItem(id)}
+              >
+                {TEXT_VIEWER_TEXT_MENU_ITEM_LABELS[id]}
+              </Button>
+            )}
+          </For>
         </div>
       )}
     </Show>

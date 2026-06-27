@@ -2,18 +2,14 @@
  * 设置页：宽屏下在桌面/移动壳层布局间切换
  */
 
-import { createMemo, For, Show } from 'solid-js';
+import { createMemo, Show } from 'solid-js';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import {
   resolveShellLayoutPreference,
   type ShellLayoutPreference,
 } from '@/lib/shell/layout';
 import { isMobile } from '@/lib/platform/detect';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  settingsOptionTabsListClass,
-  settingsOptionTabsTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { settingsState, settingsStore } from '@/stores/settings';
 
 const SHELL_LAYOUT_OPTIONS: { value: ShellLayoutPreference; label: string }[] = [
@@ -67,21 +63,20 @@ export function ShellLayoutSetting() {
               <p class="text-sm text-primary">{autoEffectiveHint()}</p>
             </Show>
           </div>
-          <Tabs
+          <AppTabs
+            layout="inline"
+            variant="settings"
+            tabsClass="w-full shrink-0 sm:w-auto"
             value={layout()}
+            options={SHELL_LAYOUT_OPTIONS.map((opt) => opt.value)}
+            labels={
+              Object.fromEntries(
+                SHELL_LAYOUT_OPTIONS.map((opt) => [opt.value, opt.label]),
+              ) as Record<ShellLayoutPreference, string>
+            }
+            ariaLabel="导航布局"
             onChange={handleLayoutChange}
-            class="w-full shrink-0 sm:w-auto"
-          >
-            <TabsList class={settingsOptionTabsListClass} aria-label="导航布局">
-              <For each={SHELL_LAYOUT_OPTIONS}>
-                {(opt) => (
-                  <TabsTrigger value={opt.value} class={settingsOptionTabsTriggerClass}>
-                    {opt.label}
-                  </TabsTrigger>
-                )}
-              </For>
-            </TabsList>
-          </Tabs>
+          />
         </div>
       </div>
     </Show>

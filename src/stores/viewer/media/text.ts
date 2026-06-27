@@ -65,6 +65,7 @@ import {
   normalizeAutoPageProgressEdge,
   normalizeAutoPageStyle,
   normalizeAutoReadSpeed,
+  normalizeBrightnessViewPosition,
   normalizeTtsSpeechRate,
   normalizeSimulationDragZonePercent,
   normalizeTextViewerLayoutEngine,
@@ -168,7 +169,6 @@ function applySavedReaderUiConfig(
     ),
     paragraphIndentChars:
       saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
-    pageTips: mergePageTipsConfig(saved.pageTips),
     layoutEngine: normalizeTextViewerLayoutEngine(saved.layoutEngine),
     ttsSpeechRate: normalizeTtsSpeechRate(
       saved.ttsSpeechRate ?? saved.speakSpeed ?? prev.ttsSpeechRate,
@@ -189,7 +189,62 @@ function applySavedReaderUiConfig(
     streamReadAloudAudio: saved.streamReadAloudAudio ?? prev.streamReadAloudAudio ?? false,
     readAloudResumeOnFocus:
       saved.readAloudResumeOnFocus ?? prev.readAloudResumeOnFocus ?? false,
+    readTopBarStyleFollowPage:
+      saved.readTopBarStyleFollowPage ??
+      saved.readBarStyleFollowPage ??
+      prev.readTopBarStyleFollowPage ??
+      false,
+    readBottomBarStyleFollowPage:
+      saved.readBottomBarStyleFollowPage ??
+      saved.readBarStyleFollowPage ??
+      prev.readBottomBarStyleFollowPage ??
+      false,
+    brightnessViewPosition: normalizeBrightnessViewPosition(
+      saved.brightnessViewPosition ?? prev.brightnessViewPosition,
+    ),
+    brightnessViewStyleFollowPage:
+      saved.brightnessViewStyleFollowPage ?? prev.brightnessViewStyleFollowPage ?? true,
+    readAloudBarStyleFollowPage:
+      saved.readAloudBarStyleFollowPage ?? prev.readAloudBarStyleFollowPage ?? false,
+    pageTips: migratePageTipsFromStatusBar(
+      mergePageTipsConfig(saved.pageTips),
+      saved.statusBarDisplayStyle,
+    ),
   };
+}
+
+/** 将旧版「阅读进度状态栏」显示策略迁移到页脚信息条 */
+function migratePageTipsFromStatusBar(
+  tips: TextViewerUiConfig['pageTips'],
+  statusBarStyle: TextViewerUiConfig['statusBarDisplayStyle'] | undefined,
+): TextViewerUiConfig['pageTips'] {
+  if (!statusBarStyle || statusBarStyle === 'follow') {
+    if (tips.footerMode !== 'never') return tips;
+    return {
+      ...tips,
+      footerMode: 'follow',
+      footerLeft: tips.footerLeft === 'none' ? 'chapterTitle' : tips.footerLeft,
+      footerMiddle: tips.footerMiddle === 'none' ? 'chapterWordCount' : tips.footerMiddle,
+      footerRight:
+        tips.footerRight === 'none' || tips.footerRight === 'pageAndTotal'
+          ? 'chapterProgressAndBook'
+          : tips.footerRight,
+    };
+  }
+  if (statusBarStyle === 'always') {
+    if (tips.footerMode === 'always') return tips;
+    return {
+      ...tips,
+      footerMode: 'always',
+      footerLeft: tips.footerLeft === 'none' ? 'chapterTitle' : tips.footerLeft,
+      footerMiddle: tips.footerMiddle === 'none' ? 'chapterWordCount' : tips.footerMiddle,
+      footerRight:
+        tips.footerRight === 'none' || tips.footerRight === 'pageAndTotal'
+          ? 'chapterProgressAndBook'
+          : tips.footerRight,
+    };
+  }
+  return tips;
 }
 
 /** 将已缓存/同步读到的阅读器配置灌入 store（可在 warm 之后多次调用） */
@@ -845,6 +900,11 @@ export async function loadTextChapter(
     await saveTextProgress();
   } catch (e) {
     console.error('加载章节内容失败:', e);
+    const { tryAutoChangeSourceOnLoadError } = await import(
+      '@/lib/media/text/try-auto-change-source'
+    );
+    const changed = await tryAutoChangeSourceOnLoadError(index, e);
+    if (changed) return;
     markSessionContentReady(book.bookUrl);
     setState({
       content: `加载失败: ${e instanceof Error ? e.message : '未知错误'}`,

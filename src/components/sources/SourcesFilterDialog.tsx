@@ -4,6 +4,7 @@
  */
 
 import { Show, createSignal, createEffect } from 'solid-js';
+import { Dynamic } from 'solid-js/web';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -16,6 +17,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { ViewerAppStackedDialogContent } from '@/components/viewer/viewer-app-overlay';
 import { VirtualChapterList } from '@/components/books/VirtualChapterList';
 import {
   SOURCE_ENABLED_FILTER_OPTIONS,
@@ -38,6 +40,10 @@ export interface SourcesFilterDialogProps {
   sourceGroups: string[];
   appliedFilter: SourceListFilterCriteria;
   onApply: (criteria: SourceListFilterCriteria) => void;
+  /** 阅读器叠层内打开时使用更高 z-index */
+  stackedOverlay?: boolean;
+  /** 仅展示书源分组区块（换源弹窗分组筛选） */
+  groupsOnly?: boolean;
 }
 
 const GROUP_ROW_HEIGHT = 40;
@@ -188,13 +194,18 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
     props.onOpenChange(false);
   }
 
+  const dialogContentComponent = () =>
+    props.stackedOverlay ? ViewerAppStackedDialogContent : AppDialogContent;
+
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <AppDialogContent layout="app" class="max-w-lg">
+      <Dynamic component={dialogContentComponent()} layout="app" class="max-w-lg">
         <AppDialogHeader class="shrink-0 px-6 pt-6">
-          <AppDialogTitle>筛选</AppDialogTitle>
+          <AppDialogTitle>{props.groupsOnly ? '分组筛选' : '筛选'}</AppDialogTitle>
           <AppDialogDescription>
-            勾选要保留的分组或条件；不勾选表示该维度不限制。
+            {props.groupsOnly
+              ? '勾选要参与搜索的书源分组；不勾选表示不限制分组。'
+              : '勾选要保留的分组或条件；不勾选表示该维度不限制。'}
           </AppDialogDescription>
         </AppDialogHeader>
 
@@ -250,42 +261,44 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
               </Show>
             </div>
 
-            <div class="flex min-w-0 flex-col gap-2">
-              <FilterSectionActions
-                label="其他条件"
-                selectedCount={stateFilterSelectedCount}
-                totalCount={stateFilterTotalCount}
-                onSelectAll={selectAllStateFilters}
-                onClear={clearStateFilters}
-                onInvert={invertStateFilters}
-              />
-              <AppDialogScrollBody nested>
-                <ul class="space-y-0.5">
-                  {SOURCE_ENABLED_FILTER_OPTIONS.map((opt) => (
-                    <li>
-                      <label class={listItemClass}>
-                        <Checkbox
-                          checked={draft().enabledStates.includes(opt.value)}
-                          onChange={() => toggleEnabled(opt.value)}
-                        />
-                        <span class="min-w-0 truncate">{opt.label}</span>
-                      </label>
-                    </li>
-                  ))}
-                  {SOURCE_SPECIAL_FILTER_OPTIONS.map((opt) => (
-                    <li>
-                      <label class={listItemClass}>
-                        <Checkbox
-                          checked={draft().specialFilters.includes(opt.value)}
-                          onChange={() => toggleSpecial(opt.value)}
-                        />
-                        <span class="min-w-0 truncate">{opt.label}</span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </AppDialogScrollBody>
-            </div>
+            <Show when={!props.groupsOnly}>
+              <div class="flex min-w-0 flex-col gap-2">
+                <FilterSectionActions
+                  label="其他条件"
+                  selectedCount={stateFilterSelectedCount}
+                  totalCount={stateFilterTotalCount}
+                  onSelectAll={selectAllStateFilters}
+                  onClear={clearStateFilters}
+                  onInvert={invertStateFilters}
+                />
+                <AppDialogScrollBody nested>
+                  <ul class="space-y-0.5">
+                    {SOURCE_ENABLED_FILTER_OPTIONS.map((opt) => (
+                      <li>
+                        <label class={listItemClass}>
+                          <Checkbox
+                            checked={draft().enabledStates.includes(opt.value)}
+                            onChange={() => toggleEnabled(opt.value)}
+                          />
+                          <span class="min-w-0 truncate">{opt.label}</span>
+                        </label>
+                      </li>
+                    ))}
+                    {SOURCE_SPECIAL_FILTER_OPTIONS.map((opt) => (
+                      <li>
+                        <label class={listItemClass}>
+                          <Checkbox
+                            checked={draft().specialFilters.includes(opt.value)}
+                            onChange={() => toggleSpecial(opt.value)}
+                          />
+                          <span class="min-w-0 truncate">{opt.label}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </AppDialogScrollBody>
+              </div>
+            </Show>
           </div>
         </AppDialogScrollBody>
 
@@ -297,7 +310,7 @@ export function SourcesFilterDialog(props: SourcesFilterDialogProps) {
             确定
           </Button>
         </AppDialogFooter>
-      </AppDialogContent>
+      </Dynamic>
     </AppDialog>
   );
 }

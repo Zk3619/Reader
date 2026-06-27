@@ -2,18 +2,14 @@
  * 阅读记录归档区：按时间 / 日期 / 时长切换展示完整记录
  */
 
-import { createSignal, For, Match, Show, Switch, type Accessor } from 'solid-js';
+import { createSignal, Match, Show, Switch, type Accessor } from 'solid-js';
 import { useChunkedDerived } from '@/lib/hooks/useChunkedDerived';
 import { Button } from '@/components/ui/button';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { ReadRecordEntryRowMenu } from '@/components/record/ReadRecordEntryRowMenu';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { VirtualList } from '@/components/shared/virtual-list';
-import {
-  settingsOptionTabsEqualWidthListClass,
-  settingsOptionTabsEqualWidthTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import {
   buildReadRecordArchiveRows,
   loadReadRecordArchiveMode,
@@ -191,19 +187,15 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
         <p class="text-sm text-muted-foreground">{READ_RECORD_ARCHIVE_MODE_HINTS[mode()]}</p>
       </div>
 
-      <Tabs value={mode()} onChange={handleModeChange} class="w-full">
-        <TabsList
-          class={settingsOptionTabsEqualWidthListClass}
-          aria-label="阅读记录展示方式"
-        >
-        <For each={ARCHIVE_MODES}>
-          {(value) => (
-            <TabsTrigger value={value} class={settingsOptionTabsEqualWidthTriggerClass}>
-              {READ_RECORD_ARCHIVE_MODE_LABELS[value]}
-            </TabsTrigger>
-          )}
-        </For>
-      </TabsList>
+      <AppTabs
+        layout="stacked"
+        variant="settings-equal"
+        value={mode()}
+        options={ARCHIVE_MODES}
+        labels={READ_RECORD_ARCHIVE_MODE_LABELS}
+        ariaLabel="阅读记录展示方式"
+        onChange={handleModeChange}
+      />
 
       <div class="mt-4 space-y-3">
         <Show when={computing() && progressText()}>
@@ -269,7 +261,6 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
           </div>
         </Show>
       </div>
-    </Tabs>
     </section>
   );
 }

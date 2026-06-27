@@ -33,6 +33,7 @@ export type LoadedScrollChapter = {
 export interface ReaderScrollNavApi {
   scrollToChapterProgress: (chapterIndex: number, pos: number) => void;
   scrollToProgressInCurrentChapter: (pos: number) => void;
+  scrollByViewportPage: (direction: 1 | -1) => void;
 }
 
 export interface ReaderScrollViewportProps extends ReaderContentProps {
@@ -129,6 +130,11 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     });
   };
 
+  const scrollBehavior = (): ScrollBehavior => {
+    const ms = textViewerStore.state.config.jumpDuration ?? 1000;
+    return ms > 0 ? 'smooth' : 'auto';
+  };
+
   const applyScrollToChapter = (
     chapterIndex: number,
     pos: number,
@@ -140,12 +146,13 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     if (!section || section.height <= 0) return false;
     suppressProgressSync = true;
     isRestoringScroll = true;
-    root.scrollTop = scrollTopForChapterPos(
+    const top = scrollTopForChapterPos(
       section.top,
       section.height,
       root.clientHeight,
       pos,
     );
+    root.scrollTo({ top, behavior: scrollBehavior() });
     if (syncStore) {
       textViewerStore.setScrollReadingPosition(chapterIndex, pos);
     }
@@ -172,6 +179,13 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
 
   const scrollToProgressInCurrentChapter = (pos: number) => {
     scrollToChapterProgress(storeChapterIndex(), pos);
+  };
+
+  const scrollByViewportPage = (direction: 1 | -1) => {
+    const root = scrollEl();
+    if (!root) return;
+    const delta = root.clientHeight * 0.92 * direction;
+    root.scrollBy({ top: delta, behavior: scrollBehavior() });
   };
 
   const syncProgressFromScroll = () => {
@@ -424,6 +438,7 @@ export function ReaderScrollViewport(props: ReaderScrollViewportProps) {
     local.onRegisterNav?.({
       scrollToChapterProgress,
       scrollToProgressInCurrentChapter,
+      scrollByViewportPage,
     });
     bindObservers();
 

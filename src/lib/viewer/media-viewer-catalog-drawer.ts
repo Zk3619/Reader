@@ -13,7 +13,7 @@ export function mediaViewerCatalogDrawerContentClass(
   side: MediaViewerCatalogDrawerSide = mediaViewerCatalogDrawerSide(),
 ): string {
   if (side === 'left') {
-    return 'flex h-full w-full max-w-sm flex-col';
+    return 'flex flex-col w-full';
   }
   return cn('flex flex-col', hDrawerPanel, 'max-h-[75dvh]');
 }

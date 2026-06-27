@@ -2,7 +2,7 @@
  * 朗读控制抽屉（对标 Legado ReadAloudDialog）
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { List, Fullscreen, EyeOff, Pause, Play, Settings, SkipBack, SkipForward, Square } from 'lucide-solid';
 import { textViewerStore } from '@/stores/viewer';
 import { getAllHttpTTS } from '@/lib/database/http-tts';
@@ -41,17 +41,12 @@ import {
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
 } from '@/components/viewer/viewer-app-overlay';
-import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  readerDrawerOptionTabsListClass,
-  readerDrawerOptionTabsTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
+import { AppTabs } from '@/components/shared/AppTabs';
 import {
   AppSelect,
   AppSelectIcon,
@@ -204,10 +199,7 @@ export function ReaderReadAloudDrawer(props: ReaderReadAloudDrawerProps) {
         snapPoints={[0, 1]}
         defaultSnapPoint={1}
       >
-        <ViewerAppDrawerContent
-          class={cn('flex flex-col', hDrawerPanel, 'max-h-[85dvh]')}
-          showNativeDragHandle={false}
-        >
+        <ViewerAppDrawerContent class="flex flex-col" showNativeDragHandle={false}>
           <ViewerAppDrawerHeader title="朗读" />
           <ViewerAppDrawerBody class="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-gutter-stable-both px-4 pb-4">
             <Show when={currentReadingText()}>
@@ -352,23 +344,16 @@ export function ReaderReadAloudDrawer(props: ReaderReadAloudDrawerProps) {
 
             {/* 引擎 */}
             <div class="space-y-3">
-              <Label>朗读引擎</Label>
-              <Tabs
+              <AppTabs
+                layout="stacked"
+                variant="drawer"
+                label="朗读引擎"
                 value={config().aloudEngine}
-                onChange={(value) =>
-                  setConfig({ aloudEngine: value as ReadAloudEngine })
-                }
-                class="w-full"
-              >
-                <TabsList class={readerDrawerOptionTabsListClass} aria-label="朗读引擎">
-                  <TabsTrigger value="system" class={readerDrawerOptionTabsTriggerClass}>
-                    系统 TTS
-                  </TabsTrigger>
-                  <TabsTrigger value="httpTts" class={readerDrawerOptionTabsTriggerClass}>
-                    HttpTTS
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+                options={['system', 'httpTts'] as const}
+                labels={{ system: '系统 TTS', httpTts: 'HttpTTS' }}
+                ariaLabel="朗读引擎"
+                onChange={(value) => setConfig({ aloudEngine: value as ReadAloudEngine })}
+              />
 
               <Show when={config().aloudEngine === 'system'}>
                 <Show
@@ -421,32 +406,20 @@ export function ReaderReadAloudDrawer(props: ReaderReadAloudDrawerProps) {
                       <p class="text-xs text-muted-foreground">暂无引擎，请添加或导入</p>
                     }
                   >
-                    <Tabs
-                      value={
-                        config().httpTtsId != null
-                          ? String(config().httpTtsId)
-                          : undefined
-                      }
+                    <AppTabs
+                      layout="stacked"
+                      variant="drawer"
+                      value={String(config().httpTtsId ?? httpTtsList()[0]?.id ?? '')}
+                      items={httpTtsList().map((item) => ({
+                        value: String(item.id),
+                        label: item.name,
+                        title: item.name,
+                      }))}
+                      listClass="flex-wrap"
+                      triggerClass="truncate"
+                      ariaLabel="HttpTTS"
                       onChange={(value) => setConfig({ httpTtsId: Number(value) })}
-                      class="w-full"
-                    >
-                      <TabsList
-                        class={cn(readerDrawerOptionTabsListClass, 'flex-wrap')}
-                        aria-label="HttpTTS"
-                      >
-                        <For each={httpTtsList()}>
-                          {(item) => (
-                            <TabsTrigger
-                              value={String(item.id)}
-                              class={cn(readerDrawerOptionTabsTriggerClass, 'truncate')}
-                              title={item.name}
-                            >
-                              {item.name}
-                            </TabsTrigger>
-                          )}
-                        </For>
-                      </TabsList>
-                    </Tabs>
+                    />
                   </Show>
                   <Button
                     variant="outline"

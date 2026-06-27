@@ -18,3 +18,10 @@ export const readerDrawerOptionTabsListClass =
 
 export const readerDrawerOptionTabsTriggerClass =
   'h-8 min-w-0 flex-1 px-1 text-xs hover:bg-background/60 hover:text-foreground data-[selected]:bg-background data-[selected]:text-foreground data-[selected]:shadow-sm sm:text-sm';
+
+/** 阅读设置抽屉：标签与 Tabs 同行时，右侧紧凑 Tab 条 */
+export const readerDrawerInlineOptionTabsListClass =
+  'flex h-auto w-auto shrink-0 gap-1 rounded-lg border border-input bg-muted p-1.5';
+
+export const readerDrawerInlineOptionTabsTriggerClass =
+  'h-8 shrink-0 px-2.5 text-xs hover:bg-background/60 hover:text-foreground data-[selected]:bg-background data-[selected]:text-foreground data-[selected]:shadow-sm sm:px-3 sm:text-sm';

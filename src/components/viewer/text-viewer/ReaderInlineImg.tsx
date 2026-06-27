@@ -22,6 +22,7 @@ export interface ReaderInlineImgProps {
   legadoImageHeaders?: Record<string, string>;
   legadoClick?: string;
   layout?: LegadoImageLayout;
+  clickImgWay?: 0 | 1 | 2 | 3 | 4;
   onLegadoCommentClick?: (click: string) => void;
   fontSizePx?: number;
   class?: string;
@@ -98,6 +99,30 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
     props.onLegadoCommentClick?.(click);
   };
 
+  const clickWay = () => props.clickImgWay ?? 0;
+
+  const handleImageClick = (e: MouseEvent) => {
+    const way = clickWay();
+    if (way === 3) {
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+    if (way === 2 && props.legadoClick) {
+      handleLegadoClick(e);
+      return;
+    }
+    if (way === 1) {
+      e.stopPropagation();
+      const src = load.displaySrc();
+      if (src) window.open(src, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (props.legadoClick) {
+      handleLegadoClick(e);
+    }
+  };
+
   const placeholderClass = () =>
     cn(
       'flex flex-col items-center justify-center gap-2 rounded-md bg-muted/30 px-4 text-center text-xs text-muted-foreground',
@@ -164,13 +189,25 @@ export function ReaderInlineImg(props: ReaderInlineImgProps) {
       </Show>
 
       <Show when={load.phase() === 'ready' && load.displaySrc()}>
-        <Show when={props.legadoClick && isInline()} fallback={imgEl()}>
+        <Show
+          when={clickWay() !== 3}
+          fallback={imgEl()}
+        >
           <button
             type="button"
-            class="reader-legado-cmt-img inline-flex shrink-0 cursor-pointer border-0 bg-transparent p-0 align-baseline no-drag"
-            data-legado-cmt="true"
-            aria-label="查看段评"
-            onClick={handleLegadoClick}
+            class={cn(
+              'inline-flex shrink-0 border-0 bg-transparent p-0 align-baseline no-drag',
+              props.legadoClick && isInline() ? 'reader-legado-cmt-img cursor-pointer' : 'cursor-default',
+            )}
+            data-legado-cmt={props.legadoClick && isInline() ? 'true' : undefined}
+            aria-label={props.legadoClick ? '查看段评' : undefined}
+            onClick={handleImageClick}
+            onDblClick={(e) => {
+              if (clickWay() !== 4) return;
+              e.stopPropagation();
+              const src = load.displaySrc();
+              if (src) window.open(src, '_blank', 'noopener,noreferrer');
+            }}
           >
             {imgEl()}
           </button>

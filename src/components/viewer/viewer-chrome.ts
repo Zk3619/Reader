@@ -21,9 +21,15 @@ export const VIEWER_CHROME_LAYOUT_HINTS: Record<ViewerChromeLayout, string> = {
 export const mediaViewerChromeTopSurfaceClass =
   'border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top';
 
+/** 层叠顶栏内容区背景（与 surface 分离，供透明槽位露出正文） */
+export const mediaViewerChromeTopFillClass = mediaViewerChromeTopSurfaceClass;
+
 /** 层叠底栏 surface 视觉 */
 export const mediaViewerChromeBottomSurfaceClass =
   'border-t border-border/50 bg-background/95 text-muted-foreground backdrop-blur';
+
+/** 层叠底栏内容区背景 */
+export const mediaViewerChromeBottomFillClass = mediaViewerChromeBottomSurfaceClass;
 
 /** 层叠底栏内容根 */
 export const mediaViewerChromeBottomContentClass = 'flex w-full flex-col';

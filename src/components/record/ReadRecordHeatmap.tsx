@@ -3,12 +3,8 @@
  */
 
 import { createMemo, createSignal, For, Show } from 'solid-js';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
-import {
-  settingsOptionTabsEqualWidthListClass,
-  settingsOptionTabsEqualWidthTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import {
   buildHeatmapCells,
   fillHeatmapCells,
@@ -110,20 +106,15 @@ export function ReadRecordHeatmap(props: ReadRecordHeatmapProps) {
         <p class="text-sm text-muted-foreground">{periodHint()}</p>
       </div>
 
-      <Tabs
+      <AppTabs
+        layout="stacked"
+        variant="settings-equal"
         value={period()}
+        options={HEATMAP_PERIODS}
+        labels={HEATMAP_PERIOD_LABELS}
+        ariaLabel="热力图时间段"
         onChange={(value) => setPeriod(value as HeatmapPeriod)}
-      >
-        <TabsList class={settingsOptionTabsEqualWidthListClass}>
-          <For each={HEATMAP_PERIODS}>
-            {(item) => (
-              <TabsTrigger value={item} class={settingsOptionTabsEqualWidthTriggerClass}>
-                {HEATMAP_PERIOD_LABELS[item]}
-              </TabsTrigger>
-            )}
-          </For>
-        </TabsList>
-      </Tabs>
+      />
 
       <Show
         when={monthLabels().length > 0}
@@ -146,11 +137,11 @@ export function ReadRecordHeatmap(props: ReadRecordHeatmapProps) {
 
       <div class="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
         <span>少</span>
-        <div class="size-3 rounded-sm bg-primary/[0.08]" />
-        <div class="size-3 rounded-sm bg-primary/[0.36]" />
-        <div class="size-3 rounded-sm bg-primary/[0.6]" />
-        <div class="size-3 rounded-sm bg-primary/[0.78]" />
-        <div class="size-3 rounded-sm bg-primary/[0.92]" />
+        <div class="size-3 rounded-sm bg-primary/8" />
+        <div class="size-3 rounded-sm bg-primary/36" />
+        <div class="size-3 rounded-sm bg-primary/60" />
+        <div class="size-3 rounded-sm bg-primary/78" />
+        <div class="size-3 rounded-sm bg-primary/92" />
         <span>多</span>
       </div>
     </section>

@@ -279,6 +279,8 @@ export interface BookInfoPageProps {
   onOpenBook: (book: Book, initialCatalog?: BookChapter[], source?: BookSource) => void;
   /** 阅读器内打开详情时换源成功后同步刷新阅读会话 */
   onBookSourceChanged?: (book: Book) => void;
+  /** 换源弹窗「书源管理」：以独立页打开书源管理 */
+  onOpenSourcesManage?: () => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
@@ -1453,6 +1455,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         showModePicker={false}
         book={resolveChangeSourceBook()}
         applyBook={applyBookSourceChange}
+        onOpenSourcesManage={props.onOpenSourcesManage}
         onBookChanged={(book) => void handleBookSourceChanged(book)}
       />
     </div>

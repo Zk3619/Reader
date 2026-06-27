@@ -4,13 +4,9 @@
 
 import { createMemo, createSignal, For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from '@/components/shared/icons';
-import {
-  settingsOptionTabsEqualWidthListClass,
-  settingsOptionTabsEqualWidthTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import {
   buildMonthCalendarDays,
   formatSelectedDateLabel,
@@ -129,20 +125,16 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
             <p class="text-sm text-muted-foreground">按月查看阅读活跃与时长分布</p>
           </div>
         </Show>
-        <Tabs
+        <AppTabs
+          layout="inline"
+          variant="settings-equal"
+          tabsClass={cn('w-full', (props.variant ?? 'card') === 'card' ? 'sm:w-auto' : '')}
           value={mode()}
+          options={['count', 'time'] as const}
+          labels={{ count: '次数', time: '时长' }}
+          ariaLabel="日历显示模式"
           onChange={(value) => setMode(value as HeatmapCalendarMode)}
-          class={cn('w-full', (props.variant ?? 'card') === 'card' ? 'sm:w-auto' : '')}
-        >
-          <TabsList class={settingsOptionTabsEqualWidthListClass}>
-            <TabsTrigger value="count" class={settingsOptionTabsEqualWidthTriggerClass}>
-              次数
-            </TabsTrigger>
-            <TabsTrigger value="time" class={settingsOptionTabsEqualWidthTriggerClass}>
-              时长
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        />
       </div>
 
       <div class="rounded-lg bg-muted/40 p-3">

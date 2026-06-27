@@ -4,7 +4,7 @@ import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-sh
 import { MediaViewerFloatingTopChrome } from '@/components/viewer/MediaViewerFloatingTopChrome';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import {
-  mediaViewerChromeTopSurfaceClass,
+  mediaViewerChromeTopFillClass,
   type ViewerChromeLayout,
 } from '@/components/viewer/viewer-chrome';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
@@ -15,14 +15,30 @@ export interface MediaViewerHeaderProps {
   subHeader?: JSX.Element;
   /** 顶栏最下方附加行（如跟随顶栏的页眉） */
   bottomSlot?: JSX.Element;
+  /** 顶栏附属内容最下方（如嵌入的亮度胶囊，透明透出正文） */
+  trailingSlot?: JSX.Element;
   /** 覆盖应用设置中的布局（一般无需指定） */
   layout?: ViewerChromeLayout;
   visible?: boolean;
   class?: string;
+  /** 顶栏 surface 附加 class（如主题跟随） */
+  surfaceClass?: string;
+  /** 顶栏 surface 内联样式（主题跟随时使用，覆盖默认背景） */
+  surfaceStyle?: JSX.CSSProperties;
 }
 
 export function MediaViewerHeader(props: MediaViewerHeaderProps) {
-  const [local] = splitProps(props, ['children', 'subHeader', 'bottomSlot', 'layout', 'visible', 'class']);
+  const [local] = splitProps(props, [
+    'children',
+    'subHeader',
+    'bottomSlot',
+    'trailingSlot',
+    'layout',
+    'visible',
+    'class',
+    'surfaceClass',
+    'surfaceStyle',
+  ]);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
   const layout = () => local.layout ?? chromeLayout();
@@ -34,6 +50,32 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
   };
 
   const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, layout());
+
+  const themedSurface = () => local.surfaceStyle != null;
+
+  const stackedSurfaceClass = () =>
+    cn('reader-chrome-overlay-panel__surface flex flex-col', local.surfaceClass);
+
+  const stackedChromeFillClass = () =>
+    cn(
+      'flex flex-col',
+      !themedSurface() && mediaViewerChromeTopFillClass,
+      themedSurface() && 'border-b',
+    );
+
+  const fixedHeaderClass = () =>
+    cn(
+      'reader-top-bar flex shrink-0 flex-col safe-area-inset-top',
+      !visible() && 'reader-bar-hidden',
+      local.class,
+    );
+
+  const fixedChromeFillClass = () =>
+    cn(
+      'flex flex-col',
+      !themedSurface() && 'border-b border-border/50 bg-background/95 backdrop-blur',
+      themedSurface() && 'border-b',
+    );
 
   const toolbarRow = () => (
     <div
@@ -55,6 +97,8 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
     </>
   );
 
+  const trailingSlot = () => <Show when={local.trailingSlot}>{local.trailingSlot}</Show>;
+
   return (
     <>
       <Show when={layout() === 'floating'}>
@@ -67,6 +111,7 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           <div class="pointer-events-none flex w-full min-w-0 flex-col gap-0.5">
             {chromeBody()}
           </div>
+          {trailingSlot()}
         </MediaViewerFloatingTopChrome>
       </Show>
       <Show when={layout() === 'stacked'}>
@@ -83,27 +128,24 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
-          <div
-            class={cn(
-              'reader-chrome-overlay-panel__surface flex flex-col',
-              mediaViewerChromeTopSurfaceClass,
-            )}
-          >
-            {chromeBody()}
+          <div class={stackedSurfaceClass()}>
+            <div class={stackedChromeFillClass()} style={local.surfaceStyle}>
+              {chromeBody()}
+            </div>
+            {trailingSlot()}
           </div>
         </header>
       </Show>
       <Show when={layout() === 'fixed'}>
         <header
-          class={cn(
-            'reader-top-bar flex shrink-0 flex-col border-b border-border/50 bg-background/95 backdrop-blur safe-area-inset-top',
-            !visible() && 'reader-bar-hidden',
-            local.class,
-          )}
+          class={fixedHeaderClass()}
           data-tauri-drag-region
           onClick={(e) => e.stopPropagation()}
         >
-          {chromeBody()}
+          <div class={fixedChromeFillClass()} style={local.surfaceStyle}>
+            {chromeBody()}
+          </div>
+          {trailingSlot()}
         </header>
       </Show>
     </>

@@ -13,15 +13,17 @@ import {
 import { Dynamic } from 'solid-js/web';
 import type { Book, BookChapter, SearchBook } from '@/types';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
-import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
 import {
   AppDropdownMenu,
   AppDropdownMenuCheckboxItem,
   AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { SourcesFilterDialog } from '@/components/sources/SourcesFilterDialog';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDialog,
   AppDialogContent,
@@ -35,18 +37,31 @@ import {
   ViewerAppDialogDescription,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
-  ViewerAppDropdownMenuContent,
 } from '@/components/viewer/viewer-app-overlay';
-import { MoreIcon, RefreshIcon } from '@/components/shared/icons';
+import {
+  FilterIcon,
+  MoreIcon,
+  RefreshIcon,
+  SearchIcon,
+  Settings2Icon,
+  XIcon,
+} from '@/components/shared/icons';
+import {
+  isAppFloatingOverlayTarget,
+  preventDialogDismissForPopperLayer,
+} from '@/components/shared/app-drawer-overlay-lock';
 import { DialogScrollViewport } from '@/components/shared/DialogScrollViewport';
 import {
-  dialogVirtualListPanelHeight,
   dialogVirtualListPanelWidth,
   dialogVirtualListScroll,
-  maxHDialog,
-  popperNestedListScroll,
+  hDialogMax,
   scrollEdgeInset,
 } from '@/lib/ui/viewport-classes';
+import {
+  changeSourceGroupFilterCriteria,
+  type ChangeSourcePrefs,
+} from '@/lib/media/text/change-source-prefs';
+import type { SourceListFilterCriteria } from '@/lib/sources/source-list-filter';
 import { cn } from '@/lib/utils';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
@@ -57,7 +72,6 @@ import {
   loadChangeSourceToc,
   matchChapterIndexForChangeSource,
   saveChangeSourcePrefs,
-  type ChangeSourcePrefs,
 } from '@/lib/media/text/change-source';
 import * as sourcesDb from '@/lib/database/sources';
 import { getAllSourceGroups } from '@/lib/database/sources';
@@ -81,6 +95,8 @@ export interface ReaderChangeSourceDialogProps {
   applyBook?: (book: Book, item: SearchBook) => Promise<Book>;
   onBookChanged: (book: Book) => void;
   onChapterReplaced?: () => void;
+  /** 打开书源管理独立页 */
+  onOpenSourcesManage?: () => void;
 }
 
 function formatRespondTime(ms: number): string {
@@ -106,12 +122,14 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   const [progress, setProgress] = createSignal({ done: 0, total: 0, name: '' });
   const [screenKey, setScreenKey] = createSignal('');
   const [applying, setApplying] = createSignal(false);
-  const [groups, setGroups] = createSignal<string[]>([]);
+  const [sourceGroups, setSourceGroups] = createSignal<string[]>([]);
+  const [groupFilterOpen, setGroupFilterOpen] = createSignal(false);
   const [tocOpen, setTocOpen] = createSignal(false);
   const [tocLoading, setTocLoading] = createSignal(false);
   const [tocChapters, setTocChapters] = createSignal<BookChapter[]>([]);
   const [pickedSearchBook, setPickedSearchBook] = createSignal<SearchBook | null>(null);
-  const [optionsOpen, setOptionsOpen] = createSignal(false);
+  const [screenSearchExpanded, setScreenSearchExpanded] = createSignal(false);
+  const screenKeyRef: { current: string } = { current: '' };
 
   let session: ChangeSourceSearchSession | null = null;
   let listEl: HTMLDivElement | undefined;
@@ -133,6 +151,22 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   const currentOriginName = () => props.book?.originName ?? '—';
 
   const isCurrentSource = (item: SearchBook) => item.bookUrl === props.book?.bookUrl;
+  const fromReader = () => (props.presentation ?? 'viewer') === 'viewer';
+  const showWordCountMeta = () => prefs().loadWordCount;
+
+  const syncSessionSearchOptions = () => {
+    session?.setSearchOptions({
+      chapterIndex: props.chapterIndex ?? textViewerStore.state.chapterIndex,
+      fromReader: fromReader(),
+    });
+  };
+
+  const groupFilterSummary = () => {
+    const names = prefs().groupNames;
+    if (names.length === 0) return '分组筛选';
+    if (names.length === 1) return `分组 · ${names[0]}`;
+    return `分组 · ${names.length} 项`;
+  };
 
   const startSearch = async (fresh = false) => {
     const book = props.book;
@@ -140,6 +174,7 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
 
     session?.close();
     session = new ChangeSourceSearchSession();
+    syncSessionSearchOptions();
     session.setCallbacks({
       onResults: (books) => setResults(books),
       onProgress: (done, total, name) => setProgress({ done, total, name }),
@@ -165,9 +200,21 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
         setSearching(false);
         return;
       }
+    } else {
+      setResults([]);
+      setProgress({ done: 0, total: 0, name: '' });
     }
-    await session.startSearch(book, prefs(), screenKey());
+    await session.startSearch(book, prefs(), screenKey(), fresh);
     setSearching(false);
+  };
+
+  const applyScreenKeyFilter = (key: string) => {
+    setScreenKey(key);
+    screenKeyRef.current = key;
+    const book = props.book;
+    if (book && props.open) {
+      void session?.loadCached(book, prefs(), key);
+    }
   };
 
   const handleOpenChange = (open: boolean) => {
@@ -178,6 +225,7 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
       setTocOpen(false);
       setPickedSearchBook(null);
       setTocChapters([]);
+      setScreenSearchExpanded(false);
     }
   };
 
@@ -200,18 +248,49 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     if (!props.open || !props.book) return;
     resetModePickerState();
     setPrefs(loadChangeSourcePrefs());
-    void getAllSourceGroups().then(setGroups);
+    void getAllSourceGroups().then(setSourceGroups);
     void startSearch();
+  });
+
+  createEffect(() => {
+    screenKeyRef.current = screenKey();
+    if (screenKey().trim()) setScreenSearchExpanded(true);
   });
 
   onCleanup(() => session?.close());
 
   const updatePrefs = (patch: Partial<ChangeSourcePrefs>) => {
+    const prev = prefs();
     const next = saveChangeSourcePrefs(patch);
     setPrefs(next);
-    if (props.open && props.book) {
+    const book = props.book;
+    if (!props.open || !book) return;
+
+    if ('checkAuthor' in patch) {
+      syncSessionSearchOptions();
+      void session?.loadCached(book, next, screenKey());
+      return;
+    }
+    if ('loadWordCount' in patch && patch.loadWordCount && !prev.loadWordCount) {
+      syncSessionSearchOptions();
+      setSearching(true);
+      void session
+        ?.refreshMissingWordCounts(book, next, screenKey())
+        .finally(() => setSearching(false));
+      return;
+    }
+    if ('groupNames' in patch) {
       void startSearch(true);
     }
+  };
+
+  const handleOpenSourcesManage = () => {
+    props.onOpenChange(false);
+    props.onOpenSourcesManage?.();
+  };
+
+  const handleApplyGroupFilter = (criteria: SourceListFilterCriteria) => {
+    updatePrefs({ groupNames: [...criteria.groupNames] });
   };
 
   const applyBook = async (item: SearchBook) => {
@@ -345,6 +424,25 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     return `搜索中 ${p.done}/${p.total}${p.name ? ` · ${p.name}` : ''}`;
   };
 
+  const preventDismissForFloatingOverlay = (event: {
+    target?: EventTarget | null;
+    detail?: { originalEvent?: Event };
+    preventDefault: () => void;
+  }) => {
+    const target = event.detail?.originalEvent?.target ?? event.target;
+    if (isAppFloatingOverlayTarget(target)) {
+      event.preventDefault();
+    }
+  };
+
+  const resolveOptionsMenuMount = (): HTMLElement | undefined => {
+    if (typeof document === 'undefined' || !props.open) return undefined;
+    return (
+      document.querySelector<HTMLElement>('[data-app-overlay-surface][data-expanded]') ??
+      undefined
+    );
+  };
+
   const dialogShell = createMemo(() =>
     (props.presentation ?? 'viewer') === 'app'
       ? {
@@ -353,7 +451,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           Header: AppDialogHeader,
           Title: AppDialogTitle,
           Description: AppDialogDescription,
-          MenuContent: AppDropdownMenuContent,
         }
       : {
           Root: ViewerAppDialog,
@@ -361,7 +458,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           Header: ViewerAppDialogHeader,
           Title: ViewerAppDialogTitle,
           Description: ViewerAppDialogDescription,
-          MenuContent: ViewerAppDropdownMenuContent,
         },
   );
 
@@ -373,9 +469,145 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     >
       <Dynamic
         component={dialogShell().Content}
-        class={cn(dialogVirtualListPanelWidth, maxHDialog)}
+        class={cn(
+          dialogVirtualListPanelWidth,
+          hDialogMax,
+          'flex flex-col overflow-hidden',
+        )}
+        onInteractOutside={preventDismissForFloatingOverlay}
+        onPointerDownOutside={preventDismissForFloatingOverlay}
+        onFocusOutside={preventDialogDismissForPopperLayer}
       >
-        <Dynamic component={dialogShell().Header} class="px-6 pt-6 pb-2">
+        <Dynamic
+          component={dialogShell().Header}
+          class="px-6 pt-6 pb-2"
+          actions={
+            <>
+              <Show
+                when={screenSearchExpanded()}
+                fallback={
+                  <AppTooltip>
+                    <AppTooltipTrigger
+                      as={Button}
+                      variant="ghost"
+                      size="icon"
+                      class="h-9 w-9 shrink-0"
+                      onClick={() => setScreenSearchExpanded(true)}
+                    >
+                      <SearchIcon class="h-4 w-4" />
+                      <span class="sr-only">筛选</span>
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>筛选</AppTooltipContent>
+                  </AppTooltip>
+                }
+              >
+                <div class="relative flex h-9 w-36 sm:w-44 items-center rounded-md border border-input bg-transparent text-sm">
+                  <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="筛选书源或章节"
+                    value={screenKey()}
+                    onInput={(e) => applyScreenKeyFilter(e.currentTarget.value)}
+                    onBlur={() => {
+                      if (!screenKeyRef.current.trim()) setScreenSearchExpanded(false);
+                    }}
+                    class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
+                    aria-label="筛选书源或章节"
+                  />
+                  <Show when={screenKey().length > 0}>
+                    <button
+                      type="button"
+                      class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      aria-label="清除筛选"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applyScreenKeyFilter('')}
+                    >
+                      <XIcon class="h-3.5 w-3.5" />
+                    </button>
+                  </Show>
+                </div>
+              </Show>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  variant="ghost"
+                  size="icon"
+                  class="h-9 w-9 shrink-0"
+                  aria-label={searching() ? '停止搜索' : '重新搜索'}
+                  onClick={() => {
+                    if (searching()) {
+                      session?.stop();
+                      setSearching(false);
+                      return;
+                    }
+                    void startSearch(true);
+                  }}
+                >
+                  <RefreshIcon class={cn('h-4 w-4', searching() && 'animate-spin')} />
+                  <span class="sr-only">{searching() ? '停止搜索' : '重新搜索'}</span>
+                </AppTooltipTrigger>
+                <AppTooltipContent>{searching() ? '停止搜索' : '重新搜索'}</AppTooltipContent>
+              </AppTooltip>
+              <AppDropdownMenu disableAccessibilityAnnounce>
+                <AppDropdownMenuTrigger
+                  as={(triggerProps: Record<string, unknown>) => (
+                    <AppDropdownMenuIconTrigger
+                      triggerProps={triggerProps}
+                      aria-label="换源选项"
+                    >
+                      <MoreIcon class="h-4 w-4" />
+                      <span class="sr-only">换源选项</span>
+                    </AppDropdownMenuIconTrigger>
+                  )}
+                />
+                <AppDropdownMenuContent
+                  layout="min"
+                  align="end"
+                  mount={resolveOptionsMenuMount()}
+                >
+                  <Show when={props.onOpenSourcesManage}>
+                    <AppDropdownMenuItem onSelect={handleOpenSourcesManage}>
+                      <Settings2Icon class="h-4 w-4" />
+                      <span>书源管理</span>
+                    </AppDropdownMenuItem>
+                  </Show>
+                  <AppDropdownMenuCheckboxItem
+                    closeOnSelect={false}
+                    checked={prefs().checkAuthor}
+                    onChange={(checked) => updatePrefs({ checkAuthor: checked })}
+                  >
+                    校验作者
+                  </AppDropdownMenuCheckboxItem>
+                  <AppDropdownMenuCheckboxItem
+                    closeOnSelect={false}
+                    checked={prefs().loadWordCount}
+                    onChange={(checked) => updatePrefs({ loadWordCount: checked })}
+                  >
+                    加载字数
+                  </AppDropdownMenuCheckboxItem>
+                  <AppDropdownMenuCheckboxItem
+                    closeOnSelect={false}
+                    checked={prefs().loadInfo}
+                    onChange={(checked) => updatePrefs({ loadInfo: checked })}
+                  >
+                    加载详情页
+                  </AppDropdownMenuCheckboxItem>
+                  <AppDropdownMenuCheckboxItem
+                    closeOnSelect={false}
+                    checked={prefs().loadToc}
+                    onChange={(checked) => updatePrefs({ loadToc: checked })}
+                  >
+                    加载目录
+                  </AppDropdownMenuCheckboxItem>
+                  <AppDropdownMenuItem onSelect={() => setGroupFilterOpen(true)}>
+                    <FilterIcon class="h-4 w-4" />
+                    <span class="min-w-0 truncate">{groupFilterSummary()}</span>
+                  </AppDropdownMenuItem>
+                </AppDropdownMenuContent>
+              </AppDropdownMenu>
+            </>
+          }
+        >
           <Dynamic component={dialogShell().Title} class="truncate text-left">
             {title()}
           </Dynamic>
@@ -431,99 +663,10 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
         </Show>
 
         <div class="relative flex min-h-0 flex-1 flex-col gap-2 px-6 pb-4">
-          <div class="flex shrink-0 items-center gap-2">
-            <form
-              class="flex min-w-0 flex-1 gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void session?.loadCached(props.book!, prefs(), screenKey());
-              }}
-            >
-              <TextField class="min-w-0 flex-1">
-                <TextFieldInput
-                  value={screenKey()}
-                  onInput={(e) => setScreenKey(e.currentTarget.value)}
-                  placeholder="筛选书源或章节"
-                />
-              </TextField>
-            </form>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={searching()}
-              aria-label={searching() ? '停止搜索' : '重新搜索'}
-              onClick={() => {
-                if (searching()) {
-                  session?.stop();
-                  setSearching(false);
-                  return;
-                }
-                void startSearch(true);
-              }}
-            >
-              <RefreshIcon class={cn('size-5', searching() && 'animate-spin')} />
-            </Button>
-            <AppDropdownMenu open={optionsOpen()} onOpenChange={setOptionsOpen}>
-              <AppDropdownMenuTrigger
-                as={Button}
-                variant="outline"
-                size="icon"
-                aria-label="换源选项"
-              >
-                <MoreIcon class="size-5" />
-              </AppDropdownMenuTrigger>
-              <Dynamic component={dialogShell().MenuContent} layout="min" align="end">
-                <AppDropdownMenuCheckboxItem
-                  checked={prefs().checkAuthor}
-                  onChange={(checked) => updatePrefs({ checkAuthor: checked })}
-                >
-                  校验作者
-                </AppDropdownMenuCheckboxItem>
-                <AppDropdownMenuCheckboxItem
-                  checked={prefs().loadWordCount}
-                  onChange={(checked) => updatePrefs({ loadWordCount: checked })}
-                >
-                  加载字数
-                </AppDropdownMenuCheckboxItem>
-                <div class="px-2 py-1.5">
-                  <div class="mb-1 px-2 text-xs text-muted-foreground">书源分组</div>
-                  <div class={cn(popperNestedListScroll, 'max-h-40 space-y-1')}>
-                    <button
-                      type="button"
-                      class={cn(
-                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent',
-                        !prefs().searchGroup && 'bg-accent/60',
-                      )}
-                      onClick={() => updatePrefs({ searchGroup: '' })}
-                    >
-                      <Checkbox checked={!prefs().searchGroup} />
-                      全部分组
-                    </button>
-                    <For each={groups()}>
-                      {(group) => (
-                        <button
-                          type="button"
-                          class={cn(
-                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent',
-                            prefs().searchGroup === group && 'bg-accent/60',
-                          )}
-                          onClick={() => updatePrefs({ searchGroup: group })}
-                        >
-                          <Checkbox checked={prefs().searchGroup === group} />
-                          <span class="truncate">{group}</span>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </Dynamic>
-            </AppDropdownMenu>
-          </div>
-
           <p class="shrink-0 text-xs text-muted-foreground">{progressText()}</p>
 
           <DialogScrollViewport
-            class={cn(dialogVirtualListPanelHeight, dialogVirtualListScroll)}
+            class={cn('min-h-0 flex-1', dialogVirtualListScroll)}
             trackRef={(el) => {
               listEl = el;
             }}
@@ -548,14 +691,16 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
                           <div class="mt-0.5 truncate text-xs text-muted-foreground">
                             {item.latestChapterTitle || item.bookUrl}
                           </div>
-                          <Show when={item.chapterWordCountText}>
+                          <Show when={showWordCountMeta() && item.chapterWordCountText}>
                             <div class="mt-1 text-xs text-muted-foreground">
                               {item.chapterWordCountText}
                             </div>
                           </Show>
                         </div>
                         <div class="shrink-0 text-right text-xs text-muted-foreground">
-                          <div>{formatRespondTime(item.respondTime)}</div>
+                          <Show when={showWordCountMeta()}>
+                            <div>{formatRespondTime(item.respondTime)}</div>
+                          </Show>
                           <Show when={isCurrentSource(item)}>
                             <div class="mt-1 text-primary">当前</div>
                           </Show>
@@ -627,6 +772,16 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           </Show>
         </div>
       </Dynamic>
+
+      <SourcesFilterDialog
+        open={groupFilterOpen()}
+        onOpenChange={setGroupFilterOpen}
+        sourceGroups={sourceGroups()}
+        appliedFilter={changeSourceGroupFilterCriteria(prefs())}
+        onApply={handleApplyGroupFilter}
+        groupsOnly
+        stackedOverlay={(props.presentation ?? 'viewer') === 'viewer'}
+      />
     </Dynamic>
   );
 }

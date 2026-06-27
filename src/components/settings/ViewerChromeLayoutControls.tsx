@@ -1,12 +1,6 @@
-import { For, type Accessor } from 'solid-js';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { type Accessor } from 'solid-js';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { cn } from '@/lib/utils';
-import {
-  readerDrawerOptionTabsListClass,
-  readerDrawerOptionTabsTriggerClass,
-  settingsOptionTabsEqualWidthListClass,
-  settingsOptionTabsEqualWidthTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
 import {
   VIEWER_CHROME_LAYOUT_HINTS,
   VIEWER_CHROME_LAYOUT_LABELS,
@@ -35,44 +29,26 @@ export function ViewerChromeLayoutControls(props: ViewerChromeLayoutControlsProp
     }
     return normalizeViewerChromeLayout(settingsState.app.viewerChromeLayout);
   };
-  const tabsListClass = () =>
-    props.variant === 'drawer'
-      ? readerDrawerOptionTabsListClass
-      : settingsOptionTabsEqualWidthListClass;
-  const tabsTriggerClass = () =>
-    props.variant === 'drawer'
-      ? readerDrawerOptionTabsTriggerClass
-      : settingsOptionTabsEqualWidthTriggerClass;
+  const tabsVariant = () => (props.variant === 'drawer' ? 'drawer' : 'settings-equal');
 
   return (
-    <div class={cn('space-y-2', props.class)}>
-      <Tabs
-        value={layout()}
-        onChange={(value) => {
-          const next = value as ViewerChromeLayout;
-          if (props.onChange) {
-            props.onChange(next);
-            return;
-          }
-          void settingsStore.setViewerChromeLayout(next);
-        }}
-        class="w-full"
-      >
-        <TabsList class={tabsListClass()} aria-label="顶栏与底栏布局">
-          <For each={LAYOUT_OPTIONS}>
-            {(value) => (
-              <TabsTrigger value={value} class={tabsTriggerClass()}>
-                {VIEWER_CHROME_LAYOUT_LABELS[value]}
-              </TabsTrigger>
-            )}
-          </For>
-        </TabsList>
-      </Tabs>
-      {props.showHint !== false ? (
-        <p class="text-xs text-muted-foreground">
-          {VIEWER_CHROME_LAYOUT_HINTS[layout()]}
-        </p>
-      ) : null}
-    </div>
+    <AppTabs
+      class={cn(props.class)}
+      layout="stacked"
+      variant={tabsVariant()}
+      value={layout()}
+      options={LAYOUT_OPTIONS}
+      labels={VIEWER_CHROME_LAYOUT_LABELS}
+      ariaLabel="顶栏与底栏布局"
+      hint={props.showHint !== false ? VIEWER_CHROME_LAYOUT_HINTS[layout()] : undefined}
+      onChange={(value) => {
+        const next = value as ViewerChromeLayout;
+        if (props.onChange) {
+          props.onChange(next);
+          return;
+        }
+        void settingsStore.setViewerChromeLayout(next);
+      }}
+    />
   );
 }

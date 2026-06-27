@@ -46,7 +46,10 @@ export interface TextViewerToolbarHeaderProps {
 export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
   const floating = useMediaViewerChromeFloating();
   const iconBtn = () =>
-    cn('no-drag', floating.isFloating() ? floating.inlineIconClass() : floating.iconButtonClass());
+    cn(
+      'no-drag text-inherit [&_svg]:text-current',
+      floating.isFloating() ? floating.inlineIconClass() : floating.iconButtonClass(),
+    );
   const titleClass = (inCluster: boolean) =>
     cn(
       'min-w-0 truncate text-sm font-medium text-foreground',

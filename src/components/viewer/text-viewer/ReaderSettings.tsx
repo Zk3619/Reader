@@ -23,14 +23,12 @@ import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
+import type { ChineseConverterType } from '@/lib/replace-rules/chinese-converter';
 import {
-  readerDrawerOptionTabsListClass,
-  readerDrawerOptionTabsTriggerClass,
-} from '@/lib/settings/settings-tab-styles';
-import {
+  TEXT_VIEWER_CHINESE_CONVERTER_TYPE_LABELS,
+  TEXT_VIEWER_CHINESE_CONVERTER_TYPE_OPTIONS,
   TEXT_VIEWER_DUAL_PAGE_MODE_LABELS,
   TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX,
   TEXT_VIEWER_LAYOUT_ENGINE_LABELS,
@@ -192,27 +190,19 @@ export function ReaderSettings(props: ReaderSettingsProps) {
 
       {/* 章节标题 */}
       <div class="space-y-3">
-        <Label>章节标题</Label>
-        <p class="text-xs text-muted-foreground">
-          控制章节名在阅读视图中的位置与间距；间距会随字号、行距、字距、段距变化。
-        </p>
-        <Tabs
+        <AppTabs
+          layout="stacked"
+          variant="drawer"
+          label="章节标题"
+          description="控制章节名在阅读视图中的位置与间距；间距会随字号、行距、字距、段距变化。"
           value={config().chapterTitleStyle ?? 'center'}
+          options={TEXT_VIEWER_CHAPTER_TITLE_STYLE_OPTIONS}
+          labels={TEXT_VIEWER_CHAPTER_TITLE_STYLE_LABELS}
+          ariaLabel="章节标题渲染"
           onChange={(value) =>
             setConfig({ chapterTitleStyle: value as TextViewerChapterTitleStyle })
           }
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="章节标题渲染">
-            <For each={TEXT_VIEWER_CHAPTER_TITLE_STYLE_OPTIONS}>
-              {(style) => (
-                <TabsTrigger value={style} class={readerDrawerOptionTabsTriggerClass}>
-                  {TEXT_VIEWER_CHAPTER_TITLE_STYLE_LABELS[style]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
+        />
         <ReaderRemSliderRow
           label="标题字号增量"
           valueLabel={formatRem(config().chapterTitleSize ?? 0)}
@@ -422,6 +412,29 @@ export function ReaderSettings(props: ReaderSettingsProps) {
         </Slider>
       </div>
 
+      {/* 简繁转换 */}
+      <div class="space-y-3">
+        <AppTabs
+          layout="stacked"
+          variant="drawer"
+          label="简繁转换"
+          value={String(config().chineseConverterType ?? 0)}
+          options={TEXT_VIEWER_CHINESE_CONVERTER_TYPE_OPTIONS.map(String)}
+          labels={Object.fromEntries(
+            TEXT_VIEWER_CHINESE_CONVERTER_TYPE_OPTIONS.map((type) => [
+              String(type),
+              TEXT_VIEWER_CHINESE_CONVERTER_TYPE_LABELS[type],
+            ]),
+          ) as Record<string, string>}
+          ariaLabel="简繁转换"
+          onChange={(value) => {
+            void textViewerStore
+              .setChineseConverterType(Number(value) as ChineseConverterType)
+              .catch(() => undefined);
+          }}
+        />
+      </div>
+
       {/* 阅读宽度：窄屏+移动端不显示 */}
       <Show when={props.showReadWidth?.() ?? true}>
         <ReaderRemSliderRow
@@ -509,90 +522,52 @@ export function ReaderSettings(props: ReaderSettingsProps) {
       {/* 双页 */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
         <div class="space-y-3">
-          <Label>双页阅读</Label>
-          <p class="text-xs text-muted-foreground">
-            宽屏下分栏显示；「自动」在视口 ≥{TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px 或横屏时启用（按页模式）。
-          </p>
-          <Tabs
+          <AppTabs
+            layout="stacked"
+            variant="drawer"
+            label="双页阅读"
+            description={`宽屏下分栏显示；「自动」在视口 ≥${TEXT_VIEWER_DUAL_PAGE_XL_MIN_WIDTH_PX}px 或横屏时启用（按页模式）。`}
             value={config().dualPage}
+            options={['off', 'auto', 'always'] as const}
+            labels={TEXT_VIEWER_DUAL_PAGE_MODE_LABELS}
+            ariaLabel="双页阅读"
             onChange={(value) => setConfig({ dualPage: value as ReaderDualPageMode })}
-            class="w-full"
-          >
-            <TabsList class={readerDrawerOptionTabsListClass} aria-label="双页阅读">
-              <For each={(['off', 'auto', 'always'] as ReaderDualPageMode[])}>
-                {(mode) => (
-                  <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
-                    {TEXT_VIEWER_DUAL_PAGE_MODE_LABELS[mode]}
-                  </TabsTrigger>
-                )}
-              </For>
-            </TabsList>
-          </Tabs>
+          />
         </div>
       </Show>
 
       {/* 排版引擎 */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
         <div class="space-y-3">
-          <Label>排版引擎</Label>
-          <p class="text-xs text-muted-foreground">
-            Pretext 为实验性无 DOM 行测量方案，翻页更流畅；DOM 为推荐的经典 measure-host 方案。两端对齐章节字级坐标仍依赖 DOM。
-          </p>
-          <Tabs
+          <AppTabs
+            layout="stacked"
+            variant="drawer"
+            label="排版引擎"
+            description="Pretext 为实验性无 DOM 行测量方案，翻页更流畅；DOM 为推荐的经典 measure-host 方案。两端对齐章节字级坐标仍依赖 DOM。"
             value={config().layoutEngine}
+            options={['pretext', 'dom'] as const}
+            labels={TEXT_VIEWER_LAYOUT_ENGINE_LABELS}
+            ariaLabel="排版引擎"
             onChange={(value) => onLayoutEngineChange(value as TextViewerLayoutEngine)}
-            class="w-full"
-          >
-            <TabsList class={readerDrawerOptionTabsListClass} aria-label="排版引擎">
-              <For each={(['pretext', 'dom'] as TextViewerLayoutEngine[])}>
-                {(engine) => (
-                  <TabsTrigger value={engine} class={readerDrawerOptionTabsTriggerClass}>
-                    {TEXT_VIEWER_LAYOUT_ENGINE_LABELS[engine]}
-                  </TabsTrigger>
-                )}
-              </For>
-            </TabsList>
-          </Tabs>
+          />
         </div>
       </Show>
 
       {/* 插图样式 */}
       <div class="space-y-3">
-        <Label>插图样式</Label>
-        <Tabs
+        <AppTabs
+          layout="stacked"
+          variant="drawer"
+          label="插图样式"
           value={config().imageStyle}
+          options={['DEFAULT', 'FULL', 'TEXT', 'SINGLE'] as const}
+          labels={READER_IMAGE_STYLE_LABELS}
+          ariaLabel="插图样式"
           onChange={(value) => setConfig({ imageStyle: value as TextViewerImageStyle })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="插图样式">
-            <For each={(['DEFAULT', 'FULL', 'TEXT', 'SINGLE'] as TextViewerImageStyle[])}>
-              {(style) => (
-                <TabsTrigger value={style} class={readerDrawerOptionTabsTriggerClass}>
-                  {READER_IMAGE_STYLE_LABELS[style]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
+        />
       </div>
 
-      {/* 音量键翻页 */}
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <Label>音量键翻页</Label>
-          <p class="text-xs text-muted-foreground">音量上/下或方向键上/下切换章节</p>
-        </div>
-        <Switch
-          checked={config().volumeKeyTurnPage}
-          onChange={(checked) => setConfig({ volumeKeyTurnPage: checked })}
-        >
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">音量键翻页</SwitchLabel>
-        </Switch>
-      </div>
-
+      {/* 音量键翻页 — 已移至「设置」抽屉 */}
       {/* 点击区域（仅按页翻页） */}
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
         <div class="space-y-3">
@@ -615,25 +590,17 @@ export function ReaderSettings(props: ReaderSettingsProps) {
 
       {/* 翻页模式 */}
       <div class="space-y-3">
-        <Label>翻页模式</Label>
-        <p class="text-xs text-muted-foreground">
-          滚动为连续阅读；其余模式按页翻页，可拖拽或点击换页。覆盖：当前页盖住新页；滑动：两页并排平移；仿真：折页。
-        </p>
-        <Tabs
+        <AppTabs
+          layout="stacked"
+          variant="drawer"
+          label="翻页模式"
+          description="滚动为连续阅读；其余模式按页翻页，可拖拽或点击换页。覆盖：当前页盖住新页；滑动：两页并排平移；仿真：折页。"
           value={config().pageAnim}
+          options={TEXT_VIEWER_PAGE_ANIM_OPTIONS}
+          labels={TEXT_VIEWER_PAGE_ANIM_LABELS}
+          ariaLabel="翻页模式"
           onChange={(value) => setConfig({ pageAnim: value as TextViewerPageAnim })}
-          class="w-full"
-        >
-          <TabsList class={readerDrawerOptionTabsListClass} aria-label="翻页模式">
-            <For each={TEXT_VIEWER_PAGE_ANIM_OPTIONS}>
-              {(mode) => (
-                <TabsTrigger value={mode} class={readerDrawerOptionTabsTriggerClass}>
-                  {TEXT_VIEWER_PAGE_ANIM_LABELS[mode]}
-                </TabsTrigger>
-              )}
-            </For>
-          </TabsList>
-        </Tabs>
+        />
       </div>
 
       <Show when={isTextViewerPagedAnim(config().pageAnim)}>
@@ -669,32 +636,26 @@ export function ReaderSettings(props: ReaderSettingsProps) {
 
       <Show when={config().pageAnim === 'simulation'}>
         <div class="space-y-3">
-          <Label>仿真拖拽分区</Label>
-          <p class="text-xs text-muted-foreground">
-            左侧区域仅翻上一页，右侧区域仅翻下一页。调节左右分区宽度（占视口比例）。
-          </p>
-          <Tabs
+          <AppTabs
+            layout="stacked"
+            variant="drawer"
+            label="仿真拖拽分区"
+            description="左侧区域仅翻上一页，右侧区域仅翻下一页。调节左右分区宽度（占视口比例）。"
             value={String(config().simulationDragZonePercent)}
+            options={TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS.map(String)}
+            labels={Object.fromEntries(
+              TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS.map((percent) => [
+                String(percent),
+                `${percent}%`,
+              ]),
+            )}
+            ariaLabel="仿真拖拽分区"
             onChange={(value) =>
               setConfig({
                 simulationDragZonePercent: Number(value) as TextViewerSimulationDragZonePercent,
               })
             }
-            class="w-full"
-          >
-            <TabsList class={readerDrawerOptionTabsListClass} aria-label="仿真拖拽分区">
-              <For each={TEXT_VIEWER_SIMULATION_DRAG_ZONE_OPTIONS}>
-                {(percent) => (
-                  <TabsTrigger
-                    value={String(percent)}
-                    class={readerDrawerOptionTabsTriggerClass}
-                  >
-                    {percent}%
-                  </TabsTrigger>
-                )}
-              </For>
-            </TabsList>
-          </Tabs>
+          />
         </div>
       </Show>
 

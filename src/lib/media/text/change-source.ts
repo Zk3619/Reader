@@ -15,11 +15,7 @@ import { getContent } from '@/lib/book-source/content';
 import { fetchChapterListDeduped, toNewBookChapter } from '@/lib/book-source/chapters';
 import { searchBook } from '@/lib/book-source/search';
 import { isAbortError } from '@/lib/http';
-import {
-  getDurChapterIndex,
-  isSameNameAndAuthor,
-  migrateBookProgress,
-} from '@/lib/bookshelf/book-migrate';
+import { getDurChapterIndex, migrateBookProgress } from '@/lib/bookshelf/book-migrate';
 import { isLocalBook } from '@/lib/local-book';
 import { writeCachedChapterRaw } from '@/lib/chapter-cache/storage';
 import {
@@ -27,6 +23,7 @@ import {
   saveChangeSourcePrefs,
   type ChangeSourcePrefs,
 } from '@/lib/media/text/change-source-prefs';
+import { UNGROUPED_SOURCE_LABEL } from '@/lib/sources/source-list-filter';
 import type { Book, BookChapter, BookSource, SearchBook } from '@/types';
 
 export type { ChangeSourcePrefs };
@@ -44,13 +41,34 @@ export interface ChangeSourceSearchCallbacks {
   onError?: (message: string) => void;
 }
 
+export interface ChangeSourceSearchOptions {
+  chapterIndex?: number;
+  /** 阅读器内换源：字数取当前章；否则取目录末章 */
+  fromReader?: boolean;
+}
+
 const SOURCE_TIMEOUT_MS = 45_000;
 const DEFAULT_CONCURRENCY = 5;
 
-function sourceInGroup(source: BookSource, group: string): boolean {
-  if (!group) return true;
-  if (!source.sourceGroup?.trim()) return false;
-  return source.sourceGroup.split(/[,，;；]\s*/).some((g) => g.trim() === group);
+function sourceMatchesGroupFilter(source: BookSource, groupNames: string[]): boolean {
+  if (groupNames.length === 0) return true;
+  const parts =
+    source.sourceGroup?.split(/[,，;；]\s*/).map((s) => s.trim()).filter(Boolean) ?? [];
+  if (parts.length === 0) {
+    return groupNames.includes(UNGROUPED_SOURCE_LABEL);
+  }
+  return groupNames.some((g) => g !== UNGROUPED_SOURCE_LABEL && parts.includes(g));
+}
+
+function authorMatchesForChangeSource(
+  hitAuthor: string | undefined,
+  bookAuthor: string,
+  checkAuthor: boolean,
+): boolean {
+  if (!checkAuthor) return true;
+  const expected = bookAuthor.trim();
+  if (!expected) return true;
+  return (hitAuthor ?? '').includes(expected);
 }
 
 function sortChangeSourceBooks(books: SearchBook[], loadWordCount: boolean): SearchBook[] {
@@ -66,10 +84,103 @@ function sortChangeSourceBooks(books: SearchBook[], loadWordCount: boolean): Sea
   });
 }
 
+async function enrichChangeSourceHit(
+  source: BookSource,
+  book: Book,
+  hit: SearchBook,
+  prefs: ChangeSourcePrefs,
+  options: ChangeSourceSearchOptions,
+  signal: AbortSignal,
+): Promise<SearchBook> {
+  if (!prefs.loadInfo && !prefs.loadToc && !prefs.loadWordCount) {
+    return hit;
+  }
+  if (signal.aborted) return hit;
+
+  let working: SearchBook = { ...hit };
+  let info: Awaited<ReturnType<typeof getBookInfo>> | null = null;
+
+  const needsInfo =
+    !working.tocUrl?.trim() || prefs.loadInfo || prefs.loadToc || prefs.loadWordCount;
+  if (needsInfo) {
+    info = await getBookInfo(source, working.bookUrl, {
+      book: working as unknown as Record<string, unknown>,
+      bookVariable: book.variable,
+    });
+    if (info) {
+      working = {
+        ...working,
+        name: info.name || working.name,
+        author: info.author ?? working.author,
+        kind: info.kind ?? working.kind,
+        intro: info.intro ?? working.intro,
+        coverUrl: info.coverUrl ?? working.coverUrl,
+        tocUrl: info.tocUrl?.trim() || working.tocUrl,
+        latestChapterTitle: info.latestChapterTitle ?? working.latestChapterTitle,
+      };
+    }
+  }
+
+  if (prefs.loadToc || prefs.loadWordCount) {
+    const tocUrl = working.tocUrl?.trim() || working.bookUrl;
+    const chapters = await fetchChapterListDeduped(source, tocUrl, {
+      bookVariable: book.variable,
+      reverseToc: book.readConfig?.reverseToc === true,
+    });
+    if (chapters.length > 0) {
+      working.latestChapterTitle =
+        chapters[chapters.length - 1]?.title ?? working.latestChapterTitle;
+    }
+
+    if (prefs.loadWordCount && chapters.length > 0) {
+      const idx = options.fromReader
+        ? matchChapterIndexForChangeSource(
+            options.chapterIndex ?? 0,
+            book.durChapterTitle ?? '',
+            chapters,
+          )
+        : chapters.length - 1;
+      const safeIdx = Math.min(Math.max(idx, 0), chapters.length - 1);
+      const ch = chapters[safeIdx]!;
+      const nextUrl = chapters[safeIdx + 1]?.url;
+      const rawTitle = ch.title.trim();
+      const title = rawTitle.length > 20 ? `${rawTitle.slice(0, 20)}…` : rawTitle;
+      const start = Date.now();
+      try {
+        const tempBook = searchBookToTempBook(book, working, source, info ?? undefined);
+        const raw = await getContent(source, ch, nextUrl, tempBook);
+        const respondTime = Date.now() - start;
+        const len = raw?.length ?? 0;
+        working = {
+          ...working,
+          chapterWordCount: len > 0 ? len : -1,
+          chapterWordCountText: `[${safeIdx + 1}] ${title}\n字数：${len}`,
+          respondTime,
+        };
+      } catch (e) {
+        if (!isAbortError(e) && !signal.aborted) {
+          working = {
+            ...working,
+            chapterWordCount: -1,
+            chapterWordCountText: `[${safeIdx + 1}] ${title}\n获取字数失败：${e instanceof Error ? e.message : '未知错误'}`,
+            respondTime: Date.now() - start,
+          };
+        }
+      }
+    }
+  } else if (prefs.loadInfo && info?.latestChapterTitle) {
+    working.latestChapterTitle = info.latestChapterTitle;
+  }
+
+  await insertSearchBook(working);
+  return working;
+}
+
 async function searchOneSourceForChange(
   source: BookSource,
   book: Book,
   prefs: ChangeSourcePrefs,
+  options: ChangeSourceSearchOptions,
   signal: AbortSignal,
 ): Promise<SearchBook[]> {
   if (signal.aborted || !source.searchUrl?.trim()) return [];
@@ -78,11 +189,7 @@ async function searchOneSourceForChange(
       searchBook(source, book.name, {
         filter: (name, author) => {
           if (name !== book.name) return false;
-          if (!prefs.checkAuthor) return true;
-          return isSameNameAndAuthor(
-            { name, author },
-            { name: book.name, author: book.author ?? '' },
-          );
+          return authorMatchesForChangeSource(author, book.author ?? '', prefs.checkAuthor);
         },
       }),
       new Promise<SearchBook[]>((_, reject) => {
@@ -97,10 +204,17 @@ async function searchOneSourceForChange(
         );
       }),
     ]);
+    const enriched: SearchBook[] = [];
     for (const hit of hits) {
-      await insertSearchBook(hit);
+      if (signal.aborted) break;
+      const next =
+        prefs.loadInfo || prefs.loadToc || prefs.loadWordCount
+          ? await enrichChangeSourceHit(source, book, hit, prefs, options, signal)
+          : hit;
+      await insertSearchBook(next);
+      enriched.push(next);
     }
-    return hits;
+    return enriched;
   } catch (e) {
     if (isAbortError(e) || signal.aborted) return [];
     console.warn('[change-source] search failed', source.sourceName, e);
@@ -132,9 +246,14 @@ export class ChangeSourceSearchSession {
   private searching = false;
   private callbacks: ChangeSourceSearchCallbacks = {};
   private results: SearchBook[] = [];
+  private searchOptions: ChangeSourceSearchOptions = {};
 
   setCallbacks(cb: ChangeSourceSearchCallbacks): void {
     this.callbacks = cb;
+  }
+
+  setSearchOptions(options: ChangeSourceSearchOptions): void {
+    this.searchOptions = options;
   }
 
   getResults(): SearchBook[] {
@@ -161,7 +280,7 @@ export class ChangeSourceSearchSession {
       name: book.name,
       author: book.author ?? '',
       checkAuthor: prefs.checkAuthor,
-      searchGroup: prefs.searchGroup,
+      groupNames: prefs.groupNames,
       screenKey,
     });
     this.results = sortChangeSourceBooks(this.results, prefs.loadWordCount);
@@ -169,21 +288,31 @@ export class ChangeSourceSearchSession {
     return this.results;
   }
 
-  async startSearch(book: Book, prefs: ChangeSourcePrefs, screenKey = ''): Promise<void> {
+  async startSearch(
+    book: Book,
+    prefs: ChangeSourcePrefs,
+    screenKey = '',
+    forceRefresh = false,
+  ): Promise<void> {
     this.stop();
     this.abort = new AbortController();
     const signal = this.abort.signal;
     this.searching = true;
 
     try {
-      const cached = await this.loadCached(book, prefs, screenKey);
-      if (cached.length > 0) {
-        this.callbacks.onFinish?.(false);
-        return;
+      if (!forceRefresh) {
+        const cached = await this.loadCached(book, prefs, screenKey);
+        if (cached.length > 0) {
+          this.callbacks.onFinish?.(false);
+          return;
+        }
+      } else {
+        this.results = [];
+        this.callbacks.onResults?.([]);
       }
 
       const sources = (await sourcesDb.getEnabledSources()).filter(
-        (s) => s.sourceUrl !== book.origin && sourceInGroup(s, prefs.searchGroup),
+        (s) => s.sourceUrl !== book.origin && sourceMatchesGroupFilter(s, prefs.groupNames),
       );
       const total = sources.length;
       let done = 0;
@@ -195,7 +324,13 @@ export class ChangeSourceSearchSession {
         async (source) => {
           if (signal.aborted) return;
           this.callbacks.onProgress?.(done, total, source.sourceName);
-          const hits = await searchOneSourceForChange(source, book, prefs, signal);
+          const hits = await searchOneSourceForChange(
+            source,
+            book,
+            prefs,
+            this.searchOptions,
+            signal,
+          );
           for (const hit of hits) {
             collected.set(hit.bookUrl, hit);
           }
@@ -217,6 +352,66 @@ export class ChangeSourceSearchSession {
     } catch (e) {
       if (!signal.aborted) {
         this.callbacks.onError?.(e instanceof Error ? e.message : '搜索失败');
+      }
+    } finally {
+      this.searching = false;
+      this.abort = null;
+    }
+  }
+
+  async refreshMissingWordCounts(
+    book: Book,
+    prefs: ChangeSourcePrefs,
+    screenKey = '',
+  ): Promise<void> {
+    if (!prefs.loadWordCount) return;
+    this.stop();
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+    this.searching = true;
+
+    const missing = this.results.filter((item) => !item.chapterWordCountText?.trim());
+    if (missing.length === 0) {
+      this.searching = false;
+      this.abort = null;
+      return;
+    }
+
+    const total = missing.length;
+    let done = 0;
+    try {
+      await runPool(
+        missing,
+        DEFAULT_CONCURRENCY,
+        async (item) => {
+          if (signal.aborted) return;
+          const source = await sourcesDb.getSource(item.origin);
+          if (!source) {
+            done += 1;
+            return;
+          }
+          this.callbacks.onProgress?.(done, total, source.sourceName);
+          const enriched = await enrichChangeSourceHit(
+            source,
+            book,
+            item,
+            prefs,
+            this.searchOptions,
+            signal,
+          );
+          const idx = this.results.findIndex((r) => r.bookUrl === enriched.bookUrl);
+          if (idx >= 0) {
+            this.results[idx] = enriched;
+          }
+          this.results = sortChangeSourceBooks(this.results, prefs.loadWordCount);
+          this.callbacks.onResults?.(this.results);
+          done += 1;
+          this.callbacks.onProgress?.(done, total, source.sourceName);
+        },
+        signal,
+      );
+      if (!signal.aborted) {
+        await this.loadCached(book, prefs, screenKey);
       }
     } finally {
       this.searching = false;

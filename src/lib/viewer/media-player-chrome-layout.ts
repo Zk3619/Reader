@@ -1,5 +1,4 @@
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
-import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { settingsState } from '@/stores/settings';
 
@@ -23,7 +22,7 @@ export function normalizeMediaPlayerChromePosition(
 
 export function resolveMediaPlayerChromeLayout(): ViewerChromeLayout {
   return normalizeViewerChromeLayout(
-    settingsState.app.mediaPlayerChromeLayout ?? settingsState.app.viewerChromeLayout,
+    settingsState.app.mediaPlayerChromeLayout ?? defaultMediaPlayerChromeLayout,
   );
 }
 
@@ -33,6 +32,9 @@ export function resolveMediaPlayerChromePosition(): MediaPlayerChromePosition {
   );
 }
 
-export const defaultMediaPlayerChromeLayout: ViewerChromeLayout = defaultViewerChromeLayout;
+export const defaultMediaPlayerChromeLayout: ViewerChromeLayout = 'fixed';
 
 export const defaultMediaPlayerChromePosition: MediaPlayerChromePosition = 'bottom';
+
+/** 悬浮模式：与顶/底壳层的间距（对称） */
+export const globalMediaPlayerFloatingEdgeClass = 'm-3';

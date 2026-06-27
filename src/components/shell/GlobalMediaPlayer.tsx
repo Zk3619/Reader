@@ -5,9 +5,8 @@
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from 'solid-js';
 import {
-  ChevronDown,
   ChevronLeft,
-  ChevronUp,
+  ChevronRight,
   Pause,
   Play,
   SkipBack,
@@ -16,6 +15,10 @@ import {
 } from 'lucide-solid';
 import { BookCoverFallback } from '@/components/books/BookCoverFallback';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
+import {
+  bookGroupGridCoverClass,
+  bookGroupGridCoverZoomClass,
+} from '@/lib/bookshelf/book-group-card-styles';
 import { Button } from '@/components/ui/button';
 import {
   mediaViewerChromeBottomSurfaceClass,
@@ -28,6 +31,7 @@ import { insetBottomAppBar, insetTopAppBar } from '@/lib/ui/viewport-classes';
 import {
   resolveMediaPlayerChromeLayout,
   resolveMediaPlayerChromePosition,
+  globalMediaPlayerFloatingEdgeClass,
 } from '@/lib/viewer/media-player-chrome-layout';
 import {
   getReadAloudSessionSnapshot,
@@ -49,9 +53,9 @@ import {
 
 export interface GlobalMediaPlayerProps {
   /** 独立页（阅读器等）打开时隐藏壳层播放器 */
-  shellOverlayOpen: boolean;
-  showTopNav: boolean;
-  showBottomBar: boolean;
+  shellOverlayOpen: Accessor<boolean>;
+  showTopNav: Accessor<boolean>;
+  showBottomBar: Accessor<boolean>;
   /** 与主内容区一致的左侧偏移（桌面侧栏） */
   shellMainLeftClass?: string;
   onOpenTextReader?: (bookUrl: string) => void;
@@ -61,20 +65,21 @@ export function useGlobalMediaPlayerFixedInset(props: {
   shellOverlayOpen: Accessor<boolean>;
   showTopNav: Accessor<boolean>;
   showBottomBar: Accessor<boolean>;
-}): Accessor<{ top: boolean; bottom: boolean }> {
+}): Accessor<{ top: boolean; bottom: boolean; heightPx: number }> {
   return createMemo(() => {
-    if (props.shellOverlayOpen()) return { top: false, bottom: false };
+    if (props.shellOverlayOpen()) return { top: false, bottom: false, heightPx: 0 };
     if (!globalMediaPlayerState.shellActive || !globalMediaPlayerState.kind) {
-      return { top: false, bottom: false };
+      return { top: false, bottom: false, heightPx: 0 };
     }
     const layout = resolveMediaPlayerChromeLayout();
-    if (layout !== 'fixed') return { top: false, bottom: false };
-    if (globalMediaPlayerState.collapsed) return { top: false, bottom: false };
+    if (layout !== 'fixed') return { top: false, bottom: false, heightPx: 0 };
+    if (globalMediaPlayerState.collapsed) return { top: false, bottom: false, heightPx: 0 };
     const pos = resolveMediaPlayerChromePosition();
     const readAloudActive =
       globalMediaPlayerState.kind !== 'read-aloud' || isReadAloudSessionActive();
-    if (!readAloudActive) return { top: false, bottom: false };
-    return { top: pos === 'top', bottom: pos === 'bottom' };
+    if (!readAloudActive) return { top: false, bottom: false, heightPx: 0 };
+    const heightPx = globalMediaPlayerState.chromeHeightPx || 76;
+    return { top: pos === 'top', bottom: pos === 'bottom', heightPx };
   });
 }
 
@@ -153,7 +158,6 @@ function GlobalMediaPlayerReadAloudControls(props: {
         aria-label="停止"
         onClick={() => {
           stopReadAloudSession();
-          globalMediaPlayerStore.deactivate();
         }}
       >
         <Square class="size-4" />
@@ -180,6 +184,13 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     getReadAloudSessionSnapshot(),
   );
   const [livePreview, setLivePreview] = createSignal('');
+  let chromeMeasureEl: HTMLDivElement | undefined;
+  let chromeResizeObserver: ResizeObserver | undefined;
+
+  const measureChromeHeight = () => {
+    if (!chromeMeasureEl) return;
+    globalMediaPlayerStore.setChromeHeight(chromeMeasureEl.offsetHeight);
+  };
 
   onMount(() => {
     const unsubSession = subscribeReadAloudSession((s) => {
@@ -196,6 +207,8 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     onCleanup(() => {
       unsubSession();
       unsubProgress();
+      chromeResizeObserver?.disconnect();
+      globalMediaPlayerStore.setChromeHeight(0);
     });
   });
 
@@ -205,6 +218,9 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     const snap = snapshot();
     if (snap.state !== 'playing' && snap.state !== 'paused') {
       globalMediaPlayerStore.deactivate();
+      void import('@/lib/media/text/read-aloud-background').then((m) => {
+        void m.cleanupReadAloudBackgroundBook();
+      });
     }
   });
 
@@ -222,7 +238,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
   const visible = () =>
     globalMediaPlayerState.shellActive &&
     !!globalMediaPlayerState.kind &&
-    !props.shellOverlayOpen &&
+    !props.shellOverlayOpen() &&
     sessionActive();
 
   const meta = () => globalMediaPlayerState.meta;
@@ -236,6 +252,26 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
   const canCollapse = () => layout() === 'stacked' || layout() === 'floating';
   const collapsed = () => globalMediaPlayerState.collapsed && canCollapse();
 
+  createEffect(() => {
+    if (!visible() || collapsed() || layout() !== 'fixed') {
+      globalMediaPlayerStore.setChromeHeight(0);
+      return;
+    }
+    queueMicrotask(() => measureChromeHeight());
+  });
+
+  const bindChromeMeasureRef = (el: HTMLDivElement) => {
+    chromeMeasureEl = el;
+    chromeResizeObserver?.disconnect();
+    if (!el || typeof ResizeObserver === 'undefined') {
+      measureChromeHeight();
+      return;
+    }
+    chromeResizeObserver = new ResizeObserver(() => measureChromeHeight());
+    chromeResizeObserver.observe(el);
+    measureChromeHeight();
+  };
+
   const openReader = () => {
     const url = globalMediaPlayerState.bookUrl;
     if (url) props.onOpenTextReader?.(url);
@@ -244,17 +280,15 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
   const positionClass = (l: ViewerChromeLayout) => {
     const pos = position();
     const edge = shellHorizontalInsetClass(
-      props.showTopNav,
-      props.showBottomBar,
+      props.showTopNav(),
+      props.showBottomBar(),
       pos,
       props.shellMainLeftClass,
     );
     if (l === 'floating') {
       return cn(
-        'fixed z-[48]',
+        'fixed z-[48] flex justify-center px-3 pointer-events-none',
         edge,
-        pos === 'bottom' ? 'pb-3' : 'pt-3',
-        'flex justify-center px-3 pointer-events-none',
       );
     }
     return cn('fixed z-[48]', edge);
@@ -265,6 +299,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
       return cn(
         mediaViewerChromeFloatingControlClass,
         mediaViewerChromeHitTargetClass,
+        globalMediaPlayerFloatingEdgeClass,
         'w-[min(92vw,28rem)] rounded-2xl px-3 py-2.5 shadow-lg',
       );
     }
@@ -277,7 +312,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     }
     return cn(
       'border-border/60 bg-card/95 text-foreground backdrop-blur-md',
-      position() === 'top' ? 'border-b safe-area-inset-top' : 'border-t',
+      position() === 'top' ? 'border-b' : 'border-t',
     );
   };
 
@@ -286,21 +321,10 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
       variant="ghost"
       size="icon"
       class="h-8 w-8 shrink-0 text-muted-foreground"
-      aria-label={collapsed() ? '展开播放器' : '收起播放器'}
+      aria-label="收起播放器"
       onClick={() => globalMediaPlayerStore.toggleCollapsed()}
     >
-      <Show
-        when={position() === 'bottom'}
-        fallback={
-          <Show when={collapsed()} fallback={<ChevronUp class="size-4" />}>
-            <ChevronDown class="size-4" />
-          </Show>
-        }
-      >
-        <Show when={collapsed()} fallback={<ChevronDown class="size-4" />}>
-          <ChevronUp class="size-4" />
-        </Show>
-      </Show>
+      <ChevronRight class="size-4" />
     </Button>
   );
 
@@ -313,12 +337,12 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
             class={cn(
               mediaViewerChromeFloatingControlClass,
               mediaViewerChromeHitTargetClass,
-              'fixed z-[48] right-0 flex flex-col items-center gap-2 rounded-l-2xl border-r-0 px-2 py-3 shadow-lg',
+              'fixed z-48 right-0 flex flex-col items-center gap-2 rounded-l-2xl border-r-0 px-2 py-3 shadow-lg',
               position() === 'bottom'
-                ? props.showBottomBar
+                ? props.showBottomBar()
                   ? insetBottomAppBar
                   : 'bottom-20 safe-area-inset-bottom'
-                : props.showTopNav
+                : props.showTopNav()
                   ? insetTopAppBar
                   : 'top-20 safe-area-inset-top',
             )}
@@ -350,6 +374,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
       >
         <div class={positionClass(layout())} role="region" aria-label="媒体播放控制">
           <div
+            ref={layout() === 'fixed' ? bindChromeMeasureRef : undefined}
             class={cn(
               surfaceClass(layout()),
               layout() === 'fixed' && 'px-4 py-2.5',
@@ -359,27 +384,26 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
             <div class="flex min-w-0 items-center gap-3">
               <button
                 type="button"
-                class="group relative shrink-0 overflow-hidden rounded-lg shadow-sm ring-1 ring-border/50 transition hover:ring-primary/40"
+                class="group shrink-0 transition hover:opacity-90"
                 onClick={openReader}
                 aria-label="返回阅读器"
               >
-                <div class="size-11 sm:size-12">
-                  <Show
-                    when={meta()?.coverBookUrl}
-                    fallback={
-                      <div class="flex size-full items-center justify-center bg-muted">
-                        <BookCoverFallback class="size-6 text-muted-foreground" />
-                      </div>
-                    }
-                  >
-                    <BookCoverFromBook
-                      bookUrl={meta()!.coverBookUrl}
-                      class="size-full object-cover"
-                      fallback={<BookCoverFallback class="size-6 text-muted-foreground" />}
-                    />
-                  </Show>
+                <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
+                  <div class={bookGroupGridCoverZoomClass()}>
+                    <Show
+                      when={meta()?.coverBookUrl}
+                      fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                    >
+                      <BookCoverFromBook
+                        bookUrl={meta()!.coverBookUrl}
+                        alt=""
+                        class="h-full w-full object-cover"
+                        draggable={false}
+                        fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                      />
+                    </Show>
+                  </div>
                 </div>
-                <div class="absolute inset-0 bg-linear-to-t from-black/25 to-transparent opacity-0 transition group-hover:opacity-100" />
               </button>
 
               <button

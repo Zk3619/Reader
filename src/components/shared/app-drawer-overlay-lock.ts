@@ -16,6 +16,42 @@ export function useAppDrawerPortalMount(): Accessor<HTMLElement | undefined> {
   return useContext(AppDrawerPortalMountContext) ?? noopPortalMount;
 }
 
+/** 是否已有展开中的 Kobalte 下拉菜单 */
+export function hasOpenAppDropdownMenu(): boolean {
+  if (typeof document === 'undefined') return false;
+  return !!document.querySelector(
+    '[id*="dropdownmenu"][data-expanded], [role="menu"][data-expanded]',
+  );
+}
+
+function resolveOutsideEventTarget(event: {
+  target?: EventTarget | null;
+  detail?: { originalEvent?: Event };
+}): EventTarget | null | undefined {
+  const original = event.detail?.originalEvent;
+  if (original && 'relatedTarget' in original) {
+    const related = (original as FocusEvent).relatedTarget;
+    if (related) return related;
+  }
+  return event.target;
+}
+
+/** Dialog 与 Portal 下拉/选择器共存：阻止 outside / focus outside 误关浮层或抢焦点 */
+export function preventDialogDismissForPopperLayer(event: {
+  target?: EventTarget | null;
+  detail?: { originalEvent?: Event };
+  preventDefault: () => void;
+}): void {
+  const target = resolveOutsideEventTarget(event);
+  if (isAppFloatingOverlayTarget(target)) {
+    event.preventDefault();
+    return;
+  }
+  if (hasOpenAppDropdownMenu()) {
+    event.preventDefault();
+  }
+}
+
 /** 是否在 Kobalte / Popper 浮层内（Portal 到 body 时的兜底） */
 export function isAppFloatingOverlayTarget(target: EventTarget | null | undefined): boolean {
   if (!(target instanceof Element)) return false;

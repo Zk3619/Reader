@@ -95,7 +95,6 @@ import {
 } from '@/lib/media/text/reader-paged-pointer-gesture';
 import type { TextViewerPageAnim, TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import {
-  textViewerDualPageActiveInViewport,
   textViewerDualPageMeasureIntent,
   textViewerPagedContentInsets,
   textViewerPagedDragCommitThresholdPx,
@@ -361,22 +360,32 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   /** 视口正文内宽（不读可能被宽 shift 撑大的 slot，也不触发双栏判定） */
-  const viewportSpreadContentWidthPx = (): number =>
-    readPagedSpreadContentWidthPx({
+  const viewportSpreadContentWidthPx = (): number => {
+    const spreadW = readPagedSpreadContentWidthPx({
       viewportEl,
       contentSlotEl,
       fallbackInsets: pagedSlotInsetFromConfig(),
     });
+    const cachedW = viewportSize().w;
+    if (cachedW > 0) {
+      const insets = pagedSlotInsetFromConfig();
+      const cachedSpread = Math.max(
+        1,
+        Math.round(cachedW - insets.left - insets.right),
+      );
+      return Math.max(spreadW, cachedSpread);
+    }
+    return spreadW;
+  };
 
-  /** 按页双栏：宽屏 + 横屏/≥1280px（对齐设置页 dualPage 说明） */
-  const pagedLayoutDualPage = () =>
-    textViewerDualPageActiveInViewport(
-      viewerState.config.dualPage ?? 'auto',
-      viewportSpreadContentWidthPx(),
-      pageWindowMetrics().viewportHeight,
-    );
+  const isAlwaysDualPageMode = () =>
+    (viewerState.config.dualPage ?? 'auto') === 'always';
 
-  /** 双栏测量/排版意图（视口高度未就绪时仍为 true，避免 1px 测量根） */
+  /** 始终双栏：须等完整 spread 排版后再展示，避免左栏 interim 像单栏 */
+  const pagedDualSpreadAwaitingFullLayout = () =>
+    pagedLayoutDualPage() && isAlwaysDualPageMode() && !dualSpreadLayoutReady();
+
+  /** 双栏布局/测量意图（视口高度未就绪时沿用缓存高度，避免单页→双页闪烁） */
   const dualPageMeasureIntent = () => {
     viewportSize();
     const spreadW = viewportSpreadContentWidthPx();
@@ -390,6 +399,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       vh,
     );
   };
+
+  /** 按页双栏：与测量意图一致，避免首帧/窗口缩放时先单页后双页 */
+  const pagedLayoutDualPage = () => dualPageMeasureIntent();
 
   const layout = () => chapterLayout();
 
@@ -720,7 +732,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const w = slotContentInnerWidth() || viewportSize().w;
     const h = pageWindow.viewportHeight || viewportSize().h;
     return buildReaderLayoutSignature(viewerState.config, {
-      dualPage: pagedLayoutDualPage() || dualPageMeasureIntent(),
+      dualPage: pagedLayoutDualPage(),
       viewportWidth: w,
       viewportHeight: h,
     });
@@ -1079,6 +1091,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const pagedLiveContentRootReady = () => {
     void contentRootReady();
     if (pagedLayoutDualPage()) {
+      if (isAlwaysDualPageMode()) {
+        return dualSpreadLayoutReady();
+      }
       return dualSpreadLayoutReady() || dualSpreadInterimLiveMounted();
     }
     if (idleContentRoot == null) return false;
@@ -1129,8 +1144,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   /** 骨架可撤下：完整展示管线就绪，或双栏 surface 已可展示 */
-  const shouldDismissPagedSkeleton = () =>
-    pagedDisplayPipelineReady() || pagedDualSpreadSurfaceReady();
+  const shouldDismissPagedSkeleton = () => {
+    if (pagedDisplayPipelineReady()) return true;
+    if (pagedDualSpreadAwaitingFullLayout()) return false;
+    return pagedDualSpreadSurfaceReady();
+  };
 
   /** 排版完成即可撤骨架（不等待 tip-body DOM 与 layout 逐像素对齐） */
   const pagedLayoutReadyForReveal = () => {
@@ -1210,7 +1228,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (!tipBodyReadyForPagedMeasure(contentFrameEl, pageTipBodyEl, tips, chromeVisible)) {
       return { root: null, provisional: false };
     }
-    if (dualPageMeasureIntent() && pagedLayoutDualPage()) {
+    if (pagedLayoutDualPage()) {
       if (!measureHostColumnWidthReady()) return { root: null, provisional: false };
     }
     const hostRoot = resolveMeasureHostContentRoot();
@@ -3907,6 +3925,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (!resolveLayoutContentForChapter().trim()) return true;
     // 跨章翻页全程不显示骨架（staging/幕帘承担过渡；已切 store 后亦勿闪骨架）
     if (isCrossChapterTurnActive()) return false;
+    // 始终双栏：排版完成前保持骨架，避免白屏/左栏 interim
+    if (pagedDualSpreadAwaitingFullLayout()) return true;
     // 已有预热排版 / 排版已就绪：不挡骨架（避免 白屏→骨架→白屏）
     if (hasWarmChapterLayoutCache()) return false;
     if (pagedLayoutReadyForReveal()) return false;
@@ -3932,13 +3952,14 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     ) {
       return 'is-live-content-revealing';
     }
-    // 双栏排版进行中：surface 已就绪，勿保持 reader-body opacity:0 白屏
-    if (pagedDualSpreadSurfaceReady()) {
+    // 双栏排版进行中：surface 已就绪，勿保持 reader-body opacity:0 白屏（始终双栏等完整排版）
+    if (pagedDualSpreadSurfaceReady() && !pagedDualSpreadAwaitingFullLayout()) {
       return 'is-live-content-revealing';
     }
     if (
       pagedLayoutDualPage() &&
       dualSpreadInterimLiveMounted() &&
+      !pagedDualSpreadAwaitingFullLayout() &&
       !viewerState.contentFetching &&
       (!viewerState.contentLoading || hasWarmChapterLayoutCache())
     ) {
@@ -5666,7 +5687,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         });
       }
 
-      if (viewerState.content?.trim()) {
+      if (!isAlwaysDualPageMode() && viewerState.content?.trim()) {
         const interimLeft = (
           <Index each={liveChapterContentMountKey()}>
             {() => (

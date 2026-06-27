@@ -1,15 +1,19 @@
-import { splitProps, type JSX } from 'solid-js';
+import { Show, splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
-import { mediaViewerChromeBottomSurfaceClass } from '@/components/viewer/viewer-chrome';
+import { mediaViewerChromeBottomFillClass } from '@/components/viewer/viewer-chrome';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerOverlayBottomChromeProps {
   children: JSX.Element;
+  /** 底栏内容区上方透明槽（如嵌入亮度胶囊） */
+  headSlot?: JSX.Element;
   /** 覆盖 Shell 顶栏联动（如全屏视频强制隐藏） */
   visible?: boolean;
   class?: string;
+  surfaceClass?: string;
+  surfaceStyle?: JSX.CSSProperties;
 }
 
 /**
@@ -17,7 +21,14 @@ export interface MediaViewerOverlayBottomChromeProps {
  * 显隐动画只作用在本壳层；子内容应常驻 DOM，勿用 Show 随顶栏卸载。
  */
 export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomChromeProps) {
-  const [local] = splitProps(props, ['children', 'visible', 'class']);
+  const [local] = splitProps(props, [
+    'children',
+    'headSlot',
+    'visible',
+    'class',
+    'surfaceClass',
+    'surfaceStyle',
+  ]);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
   const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, chromeLayout());
@@ -26,6 +37,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     if (shell) return shell.headerVisible();
     return true;
   };
+  const themedSurface = () => local.surfaceStyle != null;
 
   return (
     <div
@@ -41,10 +53,20 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
       <div
         class={cn(
           'reader-chrome-overlay-panel__surface flex w-full flex-col app-bottom-chrome-inset',
-          mediaViewerChromeBottomSurfaceClass,
+          local.surfaceClass,
         )}
       >
-        {local.children}
+        <Show when={local.headSlot}>{local.headSlot}</Show>
+        <div
+          class={cn(
+            'flex w-full flex-col',
+            !themedSurface() && mediaViewerChromeBottomFillClass,
+            themedSurface() && 'border-t',
+          )}
+          style={local.surfaceStyle}
+        >
+          {local.children}
+        </div>
       </div>
     </div>
   );

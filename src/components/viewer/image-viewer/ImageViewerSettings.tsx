@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AppTabs } from '@/components/shared/AppTabs';
 import {
   defaultImageViewerUiConfig,
   IMAGE_VIEWER_ESTIMATED_PAGE_HEIGHT_MAX,
@@ -53,37 +53,17 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
 
   return (
     <div class="space-y-5">
-      <div class="space-y-3">
-        <Label>阅读模式</Label>
-        <Tabs
-          value={props.config().readingMode}
-          onChange={(value) =>
-            setConfig({ readingMode: value as ImageViewerReadingMode })
-          }
-          class="w-full"
-        >
-          <TabsList
-            class="grid h-auto w-full grid-cols-2 gap-1 rounded-lg bg-muted p-1"
-            aria-label="阅读模式"
-          >
-            <TabsTrigger
-              value="scroll"
-              class="h-8 rounded-md px-2 text-xs data-selected:bg-background data-selected:shadow-sm"
-            >
-              {READING_MODE_LABELS.scroll}
-            </TabsTrigger>
-            <TabsTrigger
-              value="paged"
-              class="h-8 rounded-md px-2 text-xs data-selected:bg-background data-selected:shadow-sm"
-            >
-              {READING_MODE_LABELS.paged}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <p class="text-xs text-muted-foreground">
-          滚动为纵向连续阅读，单击切换顶底栏；翻页为单张全屏切换，支持九宫格点击区域。
-        </p>
-      </div>
+      <AppTabs
+        layout="stacked"
+        variant="drawer"
+        label="阅读模式"
+        hint="滚动为纵向连续阅读，单击切换顶底栏；翻页为单张全屏切换，支持九宫格点击区域。"
+        value={props.config().readingMode}
+        options={['scroll', 'paged'] as const}
+        labels={READING_MODE_LABELS}
+        ariaLabel="阅读模式"
+        onChange={(value) => setConfig({ readingMode: value as ImageViewerReadingMode })}
+      />
 
       <div class="space-y-3">
         <Label>顶栏与底栏布局</Label>
