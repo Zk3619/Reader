@@ -15,6 +15,8 @@ mod inner_web_panel_capture;
 mod backstage_webview;
 mod webjs_java_rpc;
 mod android_fs_commands;
+mod display_reader_commands;
+mod desktop_brightness;
 mod media_convert;
 use tauri::Emitter;
 use tauri::Manager;
@@ -2028,6 +2030,11 @@ pub fn run() {
             android_fs_commands::android_persist_dir_permission,
             android_fs_commands::android_read_dir,
             android_fs_commands::android_write_book_to_tree,
+            display_reader_commands::probe_display_brightness,
+            display_reader_commands::get_display_brightness,
+            display_reader_commands::set_display_brightness,
+            display_reader_commands::set_screen_orientation,
+            display_reader_commands::set_keep_screen_on,
             download_binary,
             fetch_url_text,
             extract_zip_json_entries,
