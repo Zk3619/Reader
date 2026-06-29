@@ -551,7 +551,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
           showNativeDragHandle={false}
         >
           <ViewerAppDrawerHeader title="界面设置" />
-          <ViewerAppDrawerBody class="mb-4 overflow-y-auto scroll-gutter-stable-both px-4 pb-2 pt-1">
+          <ViewerAppDrawerBody class="mb-4 gap-1 overflow-y-auto scroll-gutter-stable-both px-2 pb-2">
             <ImageViewerSettings
               config={uiConfig}
               onChange={patchUiConfig}

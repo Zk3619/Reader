@@ -2,7 +2,7 @@
  * 文本阅读器「设置」抽屉（对齐 Legado MoreConfigDialog）
  */
 
-import { createSignal, For, Show, type ParentProps } from 'solid-js';
+import { createSignal, For, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { Label } from '@/components/ui/label';
@@ -50,6 +50,7 @@ import {
 } from '@/lib/media/text/reader-ui-config';
 import { ReaderCustomPageKeyDialog } from './ReaderCustomPageKeyDialog';
 import { ReaderTextMenuConfigDialog } from './ReaderTextMenuConfigDialog';
+import { SettingsDrawerSection } from '@/components/viewer/SettingsDrawerSection';
 
 function SettingsSwitchRow(props: {
   label: string;
@@ -76,15 +77,6 @@ function SettingsSwitchRow(props: {
         </SwitchControl>
         <SwitchLabel class="sr-only">{props.label}</SwitchLabel>
       </Switch>
-    </div>
-  );
-}
-
-function SettingsSection(props: ParentProps<{ title: string }>) {
-  return (
-    <div class="mx-1 mb-2 space-y-0.5 rounded-lg border border-border/50 bg-muted/20 px-1 py-1">
-      <p class="px-3 pt-2 pb-1 text-xs font-medium text-muted-foreground">{props.title}</p>
-      {props.children}
     </div>
   );
 }
@@ -167,7 +159,7 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
               </p>
             </div>
 
-            <SettingsSection title="显示与布局">
+            <SettingsDrawerSection title="显示与布局">
               <Show when={isMobile()}>
                 <SettingsSwitchRow
                   label="填充刘海区域"
@@ -225,9 +217,9 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                   }
                 />
               </Show>
-            </SettingsSection>
+            </SettingsDrawerSection>
 
-            <SettingsSection title="阅读排版">
+            <SettingsDrawerSection title="阅读排版">
               <SettingsSwitchRow
                 label="使用自定义中文分行"
                 checked={config().useZhLayout === true}
@@ -252,9 +244,9 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                   void textViewerStore.reprocessDisplayedChapter().catch(() => undefined);
                 }}
               />
-            </SettingsSection>
+            </SettingsDrawerSection>
 
-            <SettingsSection title="进度与导航">
+            <SettingsDrawerSection title="进度与导航">
               <AppTabs
                 layout="inline"
                 variant="drawer-inline"
@@ -273,9 +265,9 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                 checked={config().disableReturnKey === true}
                 onChange={(v) => setConfig({ disableReturnKey: v })}
               />
-            </SettingsSection>
+            </SettingsDrawerSection>
 
-            <SettingsSection title="翻页与输入">
+            <SettingsDrawerSection title="翻页与输入">
               <SettingsSwitchRow
                 label="自动翻页"
                 checked={props.autoPageActive}
@@ -348,9 +340,9 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                 checked={config().disableScrollClickAnimation === true}
                 onChange={(v) => setConfig({ disableScrollClickAnimation: v })}
               />
-            </SettingsSection>
+            </SettingsDrawerSection>
 
-            <SettingsSection title="文本与图片">
+            <SettingsDrawerSection title="文本与图片">
               <SettingsSwitchRow
                 label="长按选择文本"
                 checked={config().selectText !== false}
@@ -375,19 +367,19 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                 }
                 onClick={() => setClickImgWayPickerOpen(true)}
               />
-            </SettingsSection>
+            </SettingsDrawerSection>
 
-            <SettingsSection title="其他">
+            <SettingsDrawerSection title="其他">
               <SettingsSwitchRow
                 label="自动换源"
                 description="章节加载失败时尝试自动换源"
                 checked={config().autoChangeSource !== false}
                 onChange={(v) => setConfig({ autoChangeSource: v })}
               />
-            </SettingsSection>
+            </SettingsDrawerSection>
 
             <Show when={isMobile()}>
-              <SettingsSection title="移动端">
+              <SettingsDrawerSection title="移动端">
                 <SettingsPickerRow
                   label="屏幕方向"
                   valueLabel={
@@ -406,7 +398,7 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                   }
                   onClick={() => setKeepScreenPickerOpen(true)}
                 />
-              </SettingsSection>
+              </SettingsDrawerSection>
             </Show>
           </ViewerAppDrawerBody>
         </ViewerAppDrawerContent>

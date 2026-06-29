@@ -15,6 +15,8 @@ import {
 } from '@/lib/replace-rules/chinese-converter';
 import { isLocalBook, getLocalContent, readLocalBookContent, ensureLocalTxtCatalogFresh } from '@/lib/local-book';
 import { normalizeCatalogChapterIndices } from '@/lib/chapter-cache/catalog-cache-index';
+import { reverseChapterContentText } from '@/lib/book/reverse-chapter-content';
+import { readChapterRawForEdit } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
 import {
   readCachedChapterRaw,
   writeCachedChapterRaw,
@@ -22,7 +24,9 @@ import {
 } from '@/lib/chapter-cache/storage';
 import { applyChapterDisplayProcessingWithMeta } from '@/lib/chapter-cache/display-processing';
 import type { Book, BookChapter, BookProgress, BookSource, ReplaceRule } from '@/types';
+import type { ReadConfig } from '@/types/book';
 import { scheduleChapterBodyCachePrefetch } from '@/lib/chapter-cache/prefetch';
+import { maxSimulatedChapterIndex } from '@/lib/book/simulated-reading';
 import {
   getPooledChapterContent,
   hasPooledNextChapter,
@@ -1028,7 +1032,9 @@ export const textViewerTextApi = {
 
   /** 下一章 */
   async nextChapter(): Promise<void> {
-    if (!state.book || state.chapterIndex >= state.catalog.length - 1) return;
+    if (!state.book || state.catalog.length === 0) return;
+    const maxIdx = maxSimulatedChapterIndex(state.book, state.catalog.length);
+    if (state.chapterIndex >= maxIdx) return;
 
     markPagedChapterEntry('first');
 
@@ -1111,14 +1117,17 @@ export const textViewerTextApi = {
     index: number,
     options?: { entry?: PagedChapterEntry; chapterPos?: number },
   ): Promise<void> {
-    if (index >= 0 && index < state.catalog.length) {
+    if (!state.book || state.catalog.length === 0) return;
+    const maxIdx = maxSimulatedChapterIndex(state.book, state.catalog.length);
+    const target = Math.min(Math.max(0, index), maxIdx);
+    if (target >= 0 && target < state.catalog.length) {
       if (options?.chapterPos != null) {
         setState({
           chapterPos: Math.min(1, Math.max(0, options.chapterPos)),
         });
       }
       markPagedChapterEntry(options?.entry ?? 'first');
-      await loadTextChapter(index);
+      await loadTextChapter(target);
     }
   },
 
@@ -1204,6 +1213,46 @@ export const textViewerTextApi = {
     this.setConfig({ removeDuplicateTitle: enabled });
     await reprocessDisplayedChapterImpl();
     notifyScrollChaptersRefresh();
+  },
+
+  maxReadableChapterIndex(): number {
+    if (!state.book || state.catalog.length === 0) return 0;
+    return maxSimulatedChapterIndex(state.book, state.catalog.length);
+  },
+
+  patchBookReadConfig(readConfig: ReadConfig): void {
+    if (!state.book) return;
+    setState('book', {
+      ...state.book,
+      readConfig: { ...state.book.readConfig, ...readConfig },
+    });
+  },
+
+  async reloadDisplayedChapter(): Promise<void> {
+    await reprocessDisplayedChapterImpl();
+  },
+
+  /** 翻转当前章正文（对齐 Legado reverseContent，按码点反转） */
+  async reverseChapterContent(): Promise<void> {
+    if (!state.book || isLocalBook(state.book)) return;
+    const idx = state.chapterIndex;
+    const chapter = state.catalog[idx];
+    if (!chapter) return;
+
+    let raw = await readCachedChapterRaw(state.book.bookUrl, idx);
+    if (!raw?.trim()) {
+      raw = await readChapterRawForEdit(
+        state.book,
+        idx,
+        chapter,
+        state.content ?? '',
+      );
+    }
+    if (!raw?.trim()) {
+      throw new Error('当前章节尚无缓存正文');
+    }
+
+    await this.replaceChapterContent(reverseChapterContentText(raw), idx);
   },
 
   /** 禁用一条生效的替换规则并刷新当前章 */

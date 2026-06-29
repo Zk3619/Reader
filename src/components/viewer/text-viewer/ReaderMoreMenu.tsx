@@ -1,12 +1,15 @@
 /**
- * 阅读器「更多」菜单（对齐 Legado book_read 溢出项子集）
+ * 阅读器「更多」菜单（对齐 Legado book_read.xml 溢出项）
  */
 
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
 import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
 import { ContentEditDialog } from '@/components/viewer/text-viewer/ContentEditDialog';
+import { BookPageAnimDialog } from '@/components/viewer/text-viewer/BookPageAnimDialog';
+import { SimulatedReadingDialog } from '@/components/viewer/text-viewer/SimulatedReadingDialog';
+import { isLocalBook } from '@/lib/local-book';
 import {
   AppDropdownMenu,
   AppDropdownMenuCheckboxItem,
@@ -14,34 +17,21 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import {
-  AppManualRadioGroup,
-  AppManualRadioOption,
-} from '@/components/shared/AppManualRadio';
 import { ViewerAppDropdownMenuContent } from '@/components/viewer/viewer-app-overlay';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { MoreIcon } from '@/components/shared/icons';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
-import type { ChineseConverterType } from '@/lib/replace-rules/chinese-converter';
-import {
-  TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS,
-  TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS,
-  type TextViewerAutoPageStyle,
-  type TextViewerAutoPageProgressEdge,
-} from '@/lib/media/text/text-viewer-auto-pager';
 
 export interface ReaderMoreMenuProps {
-  onOpenSearch: () => void;
   onOpenBookmarks: () => void;
   onAddBookmark: () => void;
-  onOpenDict?: () => void;
   canBookmark: boolean;
-  autoPageActive?: boolean | (() => boolean);
-  onAutoPageToggle?: (enabled: boolean) => void;
-  /** 双页排版下不可开启自动翻页 */
-  autoPageBlocked?: boolean | (() => boolean);
-  /** 工具栏图标按钮 class（与 MediaViewer chrome 一致） */
+  onUpdateToc?: () => void;
+  canUpdateToc?: boolean | (() => boolean);
+  /** 阅读器叠层是否栈顶可见；传给起效的替换对话框 */
+  shellActive?: boolean;
   triggerClass?: string;
 }
 
@@ -49,13 +39,23 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   const [open, setOpen] = createSignal(false);
   const [effectiveOpen, setEffectiveOpen] = createSignal(false);
   const [contentEditOpen, setContentEditOpen] = createSignal(false);
+  const [pageAnimOpen, setPageAnimOpen] = createSignal(false);
+  const [simulatedOpen, setSimulatedOpen] = createSignal(false);
+
   const replaceEnabled = () => textViewerStore.isUseReplaceRule();
   const reSegmentEnabled = () => textViewerStore.isReSegment();
   const removeDuplicateTitleEnabled = () => textViewerStore.isRemoveDuplicateTitle();
-  const chineseConverterType = () => textViewerStore.getChineseConverterType();
   const canEditCachedContent = () => {
     const book = textViewerStore.state.book;
     return !!book && isLocalBookContentEditable(book);
+  };
+  const canReverseContent = () => {
+    const book = textViewerStore.state.book;
+    return !!book && !isLocalBook(book);
+  };
+  const canUpdateToc = () => {
+    const v = props.canUpdateToc;
+    return typeof v === 'function' ? v() : (v ?? false);
   };
 
   onMount(() => {
@@ -93,172 +93,119 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
     }
   };
 
-  const handleChineseConverter = async (type: ChineseConverterType) => {
+  const openContentEdit = () => {
+    setOpen(false);
+    setContentEditOpen(true);
+  };
+
+  const handleReverseContent = async () => {
+    setOpen(false);
     try {
-      await textViewerStore.setChineseConverterType(type);
+      await textViewerStore.reverseChapterContent();
     } catch (e) {
-      console.error(e);
+      showAppToast({
+        title: '翻转失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
     }
-  };
-
-  const isAutoPageActive = () => {
-    const v = props.autoPageActive;
-    return typeof v === 'function' ? v() : (v ?? false);
-  };
-
-  const isAutoPageBlocked = () => {
-    const v = props.autoPageBlocked;
-    return typeof v === 'function' ? v() : (v ?? false);
-  };
-
-  const autoPageStyle = () => textViewerStore.state.config.autoPageStyle ?? 'scanLine';
-  const autoPageProgressEdge = () =>
-    textViewerStore.state.config.autoPageProgressEdge ?? 'bottom';
-
-  const setAutoPageStyle = (style: TextViewerAutoPageStyle) => {
-    textViewerStore.setConfig({ autoPageStyle: style });
-  };
-
-  const setAutoPageProgressEdge = (edge: TextViewerAutoPageProgressEdge) => {
-    textViewerStore.setConfig({ autoPageProgressEdge: edge });
   };
 
   return (
     <>
-    <AppDropdownMenu open={open()} onOpenChange={setOpen}>
-      <AppTooltip>
-        <AppTooltipTrigger as="div">
-          <AppDropdownMenuTrigger
-            as={(triggerProps: Record<string, unknown>) => (
-              <AppDropdownMenuIconTrigger
-                triggerProps={triggerProps}
-                class={cn('no-drag', props.triggerClass)}
-                aria-label="更多"
-              >
-                <MoreIcon class="size-5" />
-              </AppDropdownMenuIconTrigger>
-            )}
-          />
-        </AppTooltipTrigger>
-        <AppTooltipContent layer="viewer">更多</AppTooltipContent>
-      </AppTooltip>
-      <ViewerAppDropdownMenuContent layout="min" align="end">
-        <AppDropdownMenuItem onSelect={props.onOpenSearch}>全书搜索</AppDropdownMenuItem>
-        <Show when={props.onOpenDict}>
-          <AppDropdownMenuItem onSelect={() => props.onOpenDict?.()}>字典</AppDropdownMenuItem>
-        </Show>
-        <Show when={props.canBookmark}>
-          <AppDropdownMenuItem onSelect={props.onAddBookmark}>添加书签</AppDropdownMenuItem>
-          <AppDropdownMenuItem onSelect={props.onOpenBookmarks}>本书书签</AppDropdownMenuItem>
-        </Show>
-        <Show when={props.onAutoPageToggle}>
-          <AppDropdownMenuCheckboxItem
-            checked={isAutoPageActive() && !isAutoPageBlocked()}
-            onChange={(checked) => {
-              if (isAutoPageBlocked()) return;
-              props.onAutoPageToggle?.(checked);
-            }}
-            class={isAutoPageBlocked() ? 'opacity-50' : undefined}
-          >
-            自动翻页
-            <Show when={isAutoPageBlocked()}>
-              <span class="ml-1 text-xs text-muted-foreground">（双页不可用）</span>
-            </Show>
-          </AppDropdownMenuCheckboxItem>
-        </Show>
-        <div class="px-2 py-1.5">
-          <div class="mb-1 px-2 text-xs text-muted-foreground">自动翻页方式（按页模式）</div>
-          <AppManualRadioGroup>
-            <For each={['scanLine', 'progressBar', 'reveal'] as TextViewerAutoPageStyle[]}>
-              {(style) => (
-                <AppManualRadioOption
-                  selected={autoPageStyle() === style}
-                  onSelect={() => setAutoPageStyle(style)}
+      <AppDropdownMenu open={open()} onOpenChange={setOpen}>
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
+            <AppDropdownMenuTrigger
+              as={(triggerProps: Record<string, unknown>) => (
+                <AppDropdownMenuIconTrigger
+                  triggerProps={triggerProps}
+                  class={cn('no-drag', props.triggerClass)}
+                  aria-label="更多"
                 >
-                  {TEXT_VIEWER_AUTO_PAGE_STYLE_LABELS[style]}
-                </AppManualRadioOption>
+                  <MoreIcon class="size-5" />
+                </AppDropdownMenuIconTrigger>
               )}
-            </For>
-          </AppManualRadioGroup>
-          <Show when={autoPageStyle() === 'progressBar'}>
-            <div class="mt-2 mb-1 px-2 text-xs text-muted-foreground">进度条位置</div>
-            <AppManualRadioGroup>
-              <For each={['top', 'bottom'] as TextViewerAutoPageProgressEdge[]}>
-                {(edge) => (
-                  <AppManualRadioOption
-                    selected={autoPageProgressEdge() === edge}
-                    onSelect={() => setAutoPageProgressEdge(edge)}
-                  >
-                    {TEXT_VIEWER_AUTO_PAGE_PROGRESS_EDGE_LABELS[edge]}
-                  </AppManualRadioOption>
-                )}
-              </For>
-            </AppManualRadioGroup>
+            />
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">更多</AppTooltipContent>
+        </AppTooltip>
+        <ViewerAppDropdownMenuContent layout="min" align="end">
+          <Show when={props.canBookmark}>
+            <AppDropdownMenuItem onSelect={props.onAddBookmark}>添加书签</AppDropdownMenuItem>
+            <AppDropdownMenuItem onSelect={props.onOpenBookmarks}>本书书签</AppDropdownMenuItem>
           </Show>
-        </div>
-        <AppDropdownMenuCheckboxItem
-          checked={replaceEnabled()}
-          onChange={(checked) => void handleToggleReplace(checked)}
-        >
-          启用替换净化
-        </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuCheckboxItem
-          checked={reSegmentEnabled()}
-          onChange={(checked) => void handleToggleReSegment(checked)}
-        >
-          重新分段
-        </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuCheckboxItem
-          checked={removeDuplicateTitleEnabled()}
-          onChange={(checked) => void handleToggleRemoveDuplicateTitle(checked)}
-        >
-          去除重复标题
-        </AppDropdownMenuCheckboxItem>
-        <div class="px-2 py-1.5">
-          <div class="mb-1 px-2 text-xs text-muted-foreground">简繁转换</div>
-          <AppManualRadioGroup>
-            <AppManualRadioOption
-              selected={chineseConverterType() === 0}
-              onSelect={() => void handleChineseConverter(0)}
-            >
-              不转换
-            </AppManualRadioOption>
-            <AppManualRadioOption
-              selected={chineseConverterType() === 1}
-              onSelect={() => void handleChineseConverter(1)}
-            >
-              繁转简
-            </AppManualRadioOption>
-            <AppManualRadioOption
-              selected={chineseConverterType() === 2}
-              onSelect={() => void handleChineseConverter(2)}
-            >
-              简转繁
-            </AppManualRadioOption>
-          </AppManualRadioGroup>
-        </div>
-        <AppDropdownMenuItem
-          onSelect={() => {
-            setOpen(false);
-            setEffectiveOpen(true);
-          }}
-        >
-          生效的替换规则
-        </AppDropdownMenuItem>
-        <Show when={canEditCachedContent()}>
+          <AppDropdownMenuItem disabled={!canEditCachedContent()} onSelect={openContentEdit}>
+            编辑正文
+          </AppDropdownMenuItem>
           <AppDropdownMenuItem
             onSelect={() => {
               setOpen(false);
-              setContentEditOpen(true);
+              setPageAnimOpen(true);
             }}
           >
-            编辑正文
+            本书翻页动画
           </AppDropdownMenuItem>
-        </Show>
-      </ViewerAppDropdownMenuContent>
-    </AppDropdownMenu>
-    <EffectiveReplacesDialog open={effectiveOpen()} onOpenChange={setEffectiveOpen} />
-    <ContentEditDialog open={contentEditOpen()} onOpenChange={setContentEditOpen} />
+          <Show when={canReverseContent()}>
+            <AppDropdownMenuItem onSelect={() => void handleReverseContent()}>
+              翻转内容
+            </AppDropdownMenuItem>
+          </Show>
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setOpen(false);
+              setSimulatedOpen(true);
+            }}
+          >
+            模拟追更
+          </AppDropdownMenuItem>
+          <AppDropdownMenuCheckboxItem
+            checked={replaceEnabled()}
+            onChange={(checked) => void handleToggleReplace(checked)}
+          >
+            替换净化
+          </AppDropdownMenuCheckboxItem>
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setOpen(false);
+              setEffectiveOpen(true);
+            }}
+          >
+            起效的替换
+          </AppDropdownMenuItem>
+          <AppDropdownMenuCheckboxItem
+            checked={removeDuplicateTitleEnabled()}
+            onChange={(checked) => void handleToggleRemoveDuplicateTitle(checked)}
+          >
+            移除重复标题
+          </AppDropdownMenuCheckboxItem>
+          <AppDropdownMenuCheckboxItem
+            checked={reSegmentEnabled()}
+            onChange={(checked) => void handleToggleReSegment(checked)}
+          >
+            重新分段
+          </AppDropdownMenuCheckboxItem>
+          <Show when={canUpdateToc()}>
+            <AppDropdownMenuItem
+              onSelect={() => {
+                setOpen(false);
+                props.onUpdateToc?.();
+              }}
+            >
+              更新目录
+            </AppDropdownMenuItem>
+          </Show>
+        </ViewerAppDropdownMenuContent>
+      </AppDropdownMenu>
+
+      <EffectiveReplacesDialog
+        open={effectiveOpen()}
+        onOpenChange={setEffectiveOpen}
+        shellActive={props.shellActive}
+      />
+      <ContentEditDialog open={contentEditOpen()} onOpenChange={setContentEditOpen} />
+      <BookPageAnimDialog open={pageAnimOpen()} onOpenChange={setPageAnimOpen} />
+      <SimulatedReadingDialog open={simulatedOpen()} onOpenChange={setSimulatedOpen} />
     </>
   );
 }

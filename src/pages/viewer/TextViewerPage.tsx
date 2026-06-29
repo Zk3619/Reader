@@ -33,6 +33,7 @@ import {
   isTextViewerPagedAnim,
   normalizeTextViewerPageAnim,
 } from '@/lib/media/text/text-viewer-page-anim';
+import { resolveBookTextViewerPageAnim } from '@/lib/book/legado-page-anim';
 import { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';
 import { ReaderBehaviorSettingsDrawer } from '@/components/viewer/text-viewer/ReaderBehaviorSettingsDrawer';
 import { ReaderBrightnessControl } from '@/components/viewer/text-viewer/ReaderBrightnessControl';
@@ -52,7 +53,7 @@ import { DictDialog } from '@/components/dict/DictDialog';
 import { ReaderSearchDrawer } from '@/components/viewer/text-viewer/ReaderSearchDrawer';
 import { ReaderBookmarksDrawer } from '@/components/viewer/text-viewer/ReaderBookmarksDrawer';
 import { ReaderChangeSourceDialog } from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
-import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
+import { updateBookToc } from '@/lib/book-source/update-toc';
 import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
 import { ReaderClickRegionalOverlay } from '@/components/viewer/text-viewer/ReaderClickRegionalOverlay';
 import { shouldShowClickActionHint } from '@/lib/media/text/reader-click-hint-storage';
@@ -111,7 +112,9 @@ import {
   MediaViewerFooter,
 } from '@/components/viewer/MediaViewerShell';
 import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
-import { useMediaViewerMainStageClass, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { useMediaViewerMainStageClass, useViewerChromeLayout, normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { mergeViewerChromeThemedSurfaceStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+import { settingsState } from '@/stores/settings';
 import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
 import { TextViewerChapterSourceBar } from '@/components/viewer/text-viewer/TextViewerChapterSourceBar';
 import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
@@ -180,7 +183,7 @@ export function BookReader(props: BookReaderProps) {
   const [readAloudTooltipSuspended, setReadAloudTooltipSuspended] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
-  const [dictWord, setDictWord] = createSignal('');
+  const [dictWord] = createSignal('');
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [bookmarksOpen, setBookmarksOpen] = createSignal(false);
   const [contentEnterKey, setContentEnterKey] = createSignal(0);
@@ -194,12 +197,8 @@ export function BookReader(props: BookReaderProps) {
   const [readAloudDrawerOpen, setReadAloudDrawerOpen] = createSignal(false);
   const [readAloudFullscreenOpen, setReadAloudFullscreenOpen] = createSignal(false);
   const [clickActionPickerOpen, setClickActionPickerOpen] = createSignal(false);
-  const [effectiveReplacesOpen, setEffectiveReplacesOpen] = createSignal(false);
-  /** 设置抽屉内 Dialog 关闭后的短暂保护，避免同一次点击/失焦误关抽屉 */
-  const [readerMenuDrawerDismissGuard, setReaderMenuDrawerDismissGuard] = createSignal(false);
-  const readerMenuDrawerBlockOutsideDismiss = () =>
-    effectiveReplacesOpen() ||
-    readerMenuDrawerDismissGuard();
+  /** 设置抽屉：blockOutsideDismiss 保留给嵌套 Dialog（当前无） */
+  const readerMenuDrawerBlockOutsideDismiss = () => false;
 
   let readerMenuDrawerWasOpen = false;
   const openReaderMenuDrawer = () => {
@@ -277,15 +276,7 @@ export function BookReader(props: BookReaderProps) {
     onCleanup(() => window.clearTimeout(timer));
   });
 
-  createEffect(() => {
-    const nestedDialogOpen = effectiveReplacesOpen();
-    if (nestedDialogOpen) {
-      setReaderMenuDrawerDismissGuard(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setReaderMenuDrawerDismissGuard(false), 200);
-    onCleanup(() => window.clearTimeout(timer));
-  });
+
   const [commentsOpen, setCommentsOpen] = createSignal(false);
   const [commentsSegment, setCommentsSegment] = createSignal<{ chapterIndex: number; segmentIndex: number } | null>(null);
   /** 宽屏下段评面板正在播放关闭动画，动画结束后再置为 false 并关闭 */
@@ -327,7 +318,6 @@ export function BookReader(props: BookReaderProps) {
     setTxtTocRuleOpen(false);
     setClickRegionalOpen(false);
     setClickActionPickerOpen(false);
-    setEffectiveReplacesOpen(false);
     setCommentsOpen(false);
     setPanelClosing(false);
     setPanelEntering(false);
@@ -464,19 +454,17 @@ export function BookReader(props: BookReaderProps) {
       position === 'top'
         ? cfg.readTopBarStyleFollowPage === true
         : cfg.readBottomBarStyleFollowPage === true;
-    if (follow) {
-      const palette = readerThemePalette(readerTheme());
-      return {
-        'background-color': palette.bg,
-        color: palette.text,
-        'border-color': palette.border,
-      } as const;
-    }
-    return {
-      'background-color': 'hsl(var(--background) / 0.95)',
-      color: 'hsl(var(--foreground))',
-      'border-color': 'hsl(var(--border) / 0.5)',
-    } as const;
+    const layout = normalizeViewerChromeLayout(
+      cfg.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
+    );
+    const base = follow
+      ? ({
+          'background-color': readerThemePalette(readerTheme()).bg,
+          color: readerThemePalette(readerTheme()).text,
+          'border-color': readerThemePalette(readerTheme()).border,
+        } as const)
+      : undefined;
+    return mergeViewerChromeThemedSurfaceStyle(base, layout);
   };
 
   let scrollContainer: HTMLDivElement | null = null;
@@ -502,17 +490,33 @@ export function BookReader(props: BookReaderProps) {
     return !!b && !textViewerStore.isGuestReading();
   };
 
-  const handleOpenDict = () => {
-    const selected = selectionTextFromDocument().trim();
-    if (!selected) {
+  const canUpdateToc = () => {
+    const b = book();
+    return !!b && !textViewerStore.isGuestReading() && !isLocalBook(b) && b.canUpdate !== false;
+  };
+
+  const handleUpdateToc = async () => {
+    const b = book();
+    if (!b || !canUpdateToc()) {
       showAppToast({
-        title: '请先选中要查询的文字',
+        title: '无法更新目录',
+        description: '仅在线书架书籍可更新目录',
         variant: 'destructive',
       });
       return;
     }
-    setDictWord(selected.slice(0, 120));
-    setDictOpen(true);
+    showAppToast({ title: '正在更新目录', description: b.name, persistent: true });
+    try {
+      const nextUrl = await updateBookToc(b.bookUrl);
+      await textViewerStore.loadCatalog(nextUrl);
+      showAppToast({ title: '目录已更新', variant: 'success' });
+    } catch (e) {
+      showAppToast({
+        title: '更新目录失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleAddBookmark = async () => {
@@ -681,7 +685,10 @@ export function BookReader(props: BookReaderProps) {
   };
 
   const normalizedPageAnim = () =>
-    normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim);
+    resolveBookTextViewerPageAnim(
+      textViewerStore.state.book,
+      normalizeTextViewerPageAnim(textViewerStore.state.config.pageAnim),
+    );
   const isPagedMode = () => isTextViewerPagedAnim(normalizedPageAnim());
 
   const autoPagePaused = () =>
@@ -1285,7 +1292,6 @@ export function BookReader(props: BookReaderProps) {
                     bookName={book()?.name ?? ''}
                     onClose={props.onClose}
                     onOpenBookInfo={props.onOpenBookInfo}
-                    isWideScreen={isWideScreen()}
                     readAloudActive={readAloudActive()}
                     onOpenCatalog={openCatalog}
                     onReadAloud={handleReadAloud}
@@ -1302,12 +1308,11 @@ export function BookReader(props: BookReaderProps) {
                     onOpenOfflineCache={openOfflineCacheDialog}
                     moreMenu={{
                       canBookmark: canUseBookmarks(),
-                      onOpenSearch: () => setSearchOpen(true),
                       onOpenBookmarks: () => setBookmarksOpen(true),
                       onAddBookmark: () => void handleAddBookmark(),
-                      onOpenDict: handleOpenDict,
-                      autoPageActive: () => autoPager.active(),
-                      onAutoPageToggle: handleAutoPageToggle,
+                      canUpdateToc: canUpdateToc,
+                      onUpdateToc: () => void handleUpdateToc(),
+                      shellActive: props.entryVisible?.() ?? true,
                     }}
                   />
                 </MediaViewerHeader>
@@ -1332,7 +1337,6 @@ export function BookReader(props: BookReaderProps) {
                     themeId={textViewerStore.state.config.theme}
                   />
                   <TextViewerBottomChrome
-                    isWideScreen={isWideScreen()}
                     chapterPos={chapterPos()}
                     chapterIndex={chapterIndex()}
                     catalogLength={catalog().length}
@@ -1550,7 +1554,7 @@ export function BookReader(props: BookReaderProps) {
           showNativeDragHandle={false}
         >
           <ViewerAppDrawerHeader title="界面" />
-          <ViewerAppDrawerBody class="mb-4 min-w-0 flex-1 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-4 pb-2 pt-1">
+          <ViewerAppDrawerBody class="mb-4 min-w-0 flex-1 gap-1 overflow-y-auto overscroll-contain contain-layout scroll-gutter-stable-both px-2 pb-2">
             <ReaderSettings
               onClose={() => setSettingsOpen(false)}
               showReadWidth={() => isWideScreen() || !isMobile()}
@@ -1566,12 +1570,6 @@ export function BookReader(props: BookReaderProps) {
         blockOutsideDismiss={readerMenuDrawerBlockOutsideDismiss()}
         autoPageActive={autoPager.active()}
         onAutoPageToggle={handleAutoPageToggle}
-      />
-
-      <EffectiveReplacesDialog
-        open={effectiveReplacesOpen()}
-        onOpenChange={setEffectiveReplacesOpen}
-        shellActive={props.entryVisible?.() ?? true}
       />
 
       <ReaderOfflineCacheDialog

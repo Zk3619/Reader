@@ -3,6 +3,11 @@ import { readerPageTipBarMountedInChrome, type ReaderPageTipContext } from '@/li
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
 import { cn } from '@/lib/utils';
+import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
+import {
+  mergeViewerChromeSurfaceStyles,
+  resolveViewerChromeOverlayAppearanceStyle,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { ReaderPageTipBar } from './ReaderPageTipBar';
 
 export interface TextViewerChromePageTipProps {
@@ -16,6 +21,7 @@ export interface TextViewerChromePageTipProps {
 
 /** 顶/底操作栏内的页眉/页脚（仅跟随模式；与阅读器内 always 条视觉一致） */
 export function TextViewerChromePageTip(props: TextViewerChromePageTipProps) {
+  const floating = useMediaViewerChromeFloating();
   const themeCls = () => readerThemeClasses(props.themeId);
   const contentColor = () => readerThemePalette(props.themeId).text;
   const pageBg = () => readerThemePalette(props.themeId).bg;
@@ -28,11 +34,18 @@ export function TextViewerChromePageTip(props: TextViewerChromePageTipProps) {
           props.position === 'header'
             ? 'reader-chrome-page-tip reader-chrome-page-tip-header shrink-0 border-t border-border/40'
             : 'reader-chrome-page-tip reader-chrome-page-tip-footer shrink-0 border-b border-border/40',
-          themeCls().bg,
-          themeCls().text,
+          !floating.isFloating() && themeCls().bg,
+          !floating.isFloating() && themeCls().text,
+          floating.isFloating() && cn(floating.wideBlockClass(), 'overflow-hidden border-0'),
           props.class,
         )}
-        style={{ 'background-color': pageBg() }}
+        style={
+          floating.isFloating()
+            ? mergeViewerChromeSurfaceStyles(
+                resolveViewerChromeOverlayAppearanceStyle(pageBg()),
+              )
+            : { 'background-color': pageBg() }
+        }
       >
         <ReaderPageTipBar
           surface="chrome"

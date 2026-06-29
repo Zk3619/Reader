@@ -2,7 +2,7 @@
  * HttpTTS 引擎管理（对标 Legado SpeakEngineDialog）
  */
 
-import { createResource, createSignal, For, Show } from 'solid-js';
+import { createResource, createSignal, Show } from 'solid-js';
 import {
   AppDialog,
   AppDialogContent,
@@ -11,6 +11,7 @@ import {
   AppDialogScrollBody,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { VirtualList } from '@/components/shared/virtual-list';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { deleteHttpTTS, getAllHttpTTS } from '@/lib/database/http-tts';
@@ -27,6 +28,7 @@ import type { HttpTTS } from '@/types';
 import { HttpTtsEditDialog } from '@/components/viewer/text-viewer/HttpTtsEditDialog';
 import { HttpTtsLoginDialog } from '@/components/viewer/text-viewer/HttpTtsLoginDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { dialogScrollFrameFlex, dialogVirtualListScroll } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
 export interface HttpTtsEngineManagerProps {
@@ -35,7 +37,10 @@ export interface HttpTtsEngineManagerProps {
   onListChange?: () => void;
 }
 
+const HTTP_TTS_ENGINE_ROW_ESTIMATE_PX = 88;
+
 export function HttpTtsEngineManager(props: HttpTtsEngineManagerProps) {
+  let scrollTrack: HTMLDivElement | undefined;
   const [editOpen, setEditOpen] = createSignal(false);
   const [editTarget, setEditTarget] = createSignal<HttpTTS | null>(null);
   const [loginOpen, setLoginOpen] = createSignal(false);
@@ -168,7 +173,7 @@ export function HttpTtsEngineManager(props: HttpTtsEngineManagerProps) {
           <AppDialogHeader>
             <AppDialogTitle>朗读引擎管理</AppDialogTitle>
           </AppDialogHeader>
-          <AppDialogScrollBody class="space-y-3">
+          <div class="shrink-0 space-y-3 px-6">
             <div class="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -202,11 +207,28 @@ export function HttpTtsEngineManager(props: HttpTtsEngineManagerProps) {
                 导入
               </Button>
             </div>
+          </div>
+          <AppDialogScrollBody
+            frameClass={dialogScrollFrameFlex}
+            class={dialogVirtualListScroll}
+            trackRef={(el) => {
+              scrollTrack = el;
+            }}
+          >
             <Show when={list.loading}>
               <p class="text-sm text-muted-foreground">加载中…</p>
             </Show>
-            <ul class="space-y-2">
-              <For each={list() ?? []}>
+            <Show when={!list.loading && (list()?.length ?? 0) === 0}>
+              <p class="py-4 text-center text-sm text-muted-foreground">暂无引擎，请新增或导入</p>
+            </Show>
+            <Show when={(list()?.length ?? 0) > 0}>
+              <VirtualList
+                items={() => list() ?? []}
+                estimateSize={() => HTTP_TTS_ENGINE_ROW_ESTIMATE_PX}
+                overscan={4}
+                externalScrollElement={() => scrollTrack ?? null}
+                getItemKey={(item) => item.id}
+              >
                 {(item) => {
                   const support = () => httpTtsWebPlaybackSupport(item.url);
                   const hasLogin = () =>
@@ -215,70 +237,72 @@ export function HttpTtsEngineManager(props: HttpTtsEngineManagerProps) {
                     textViewerStore.state.config.httpTtsId === item.id &&
                     textViewerStore.state.config.aloudEngine === 'httpTts';
                   return (
-                    <li
-                      class={cn(
-                        'rounded-lg border p-3',
-                        selected() ? 'border-primary' : 'border-border/60',
-                      )}
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <button
-                          type="button"
-                          class="min-w-0 flex-1 text-left"
-                          onClick={() => selectEngine(item)}
-                        >
-                          <div class="font-medium">{item.name}</div>
-                          <div class="mt-1 text-xs text-muted-foreground">
-                            {support() === 'full'
-                              ? 'Web 完全支持'
-                              : support() === 'limited'
-                                ? 'Web 部分支持'
-                                : 'Web 不支持 @js'}
-                            {item.loginUi?.trim()
-                              ? hasLogin()
-                                ? ' · 已登录'
-                                : ' · 需登录'
-                              : ''}
-                          </div>
-                        </button>
-                        <div class="flex shrink-0 gap-1">
-                          <Show when={item.loginUi?.trim()}>
+                    <div class="pb-2">
+                      <div
+                        class={cn(
+                          'rounded-lg border p-3',
+                          selected() ? 'border-primary' : 'border-border/60',
+                        )}
+                      >
+                        <div class="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            class="min-w-0 flex-1 text-left"
+                            onClick={() => selectEngine(item)}
+                          >
+                            <div class="font-medium">{item.name}</div>
+                            <div class="mt-1 text-xs text-muted-foreground">
+                              {support() === 'full'
+                                ? 'Web 完全支持'
+                                : support() === 'limited'
+                                  ? 'Web 部分支持'
+                                  : 'Web 不支持 @js'}
+                              {item.loginUi?.trim()
+                                ? hasLogin()
+                                  ? ' · 已登录'
+                                  : ' · 需登录'
+                                : ''}
+                            </div>
+                          </button>
+                          <div class="flex shrink-0 gap-1">
+                            <Show when={item.loginUi?.trim()}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setLoginTarget(item);
+                                  setLoginOpen(true);
+                                }}
+                              >
+                                登录
+                              </Button>
+                            </Show>
                             <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => {
-                                setLoginTarget(item);
-                                setLoginOpen(true);
+                                setEditTarget(item);
+                                setEditOpen(true);
                               }}
                             >
-                              登录
+                              编辑
                             </Button>
-                          </Show>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditTarget(item);
-                              setEditOpen(true);
-                            }}
-                          >
-                            编辑
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            class="text-destructive"
-                            onClick={() => void handleDelete(item)}
-                          >
-                            删除
-                          </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              class="text-destructive"
+                              onClick={() => void handleDelete(item)}
+                            >
+                              删除
+                            </Button>
+                          </div>
                         </div>
                       </div>
-                    </li>
+                    </div>
                   );
                 }}
-              </For>
-            </ul>
+              </VirtualList>
+            </Show>
           </AppDialogScrollBody>
           <AppDialogFooter>
             <Button variant="outline" onClick={() => props.onOpenChange(false)}>

@@ -24,6 +24,12 @@ import { cn } from '@/lib/utils';
 import { READER_BRIGHTNESS_CHROME_GAP_PX } from '@/lib/viewer/reader-brightness-insets';
 import { useReaderBrightnessChromeInsets } from '@/lib/viewer/use-reader-brightness-chrome-insets';
 import { mediaViewerChromeHitTargetClass } from '@/components/viewer/viewer-chrome';
+import { useMediaViewerChromeFloating, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import {
+  mergeViewerChromeSurfaceStyles,
+  resolveViewerChromeOverlayAppearanceStyle,
+  viewerChromeOverlayAppearanceApplies,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 
 export interface ReaderBrightnessControlProps {
   /** 顶底栏可见时显示（与 Legado 菜单联动） */
@@ -51,8 +57,10 @@ function BrightnessSlider(props: {
     <SliderPrimitive.Root
       orientation={props.orientation}
       class={cn(
-        'relative flex touch-none select-none',
-        vertical() ? 'h-full w-full flex-col items-center' : 'h-full w-full items-center',
+        'relative flex min-w-0 touch-none select-none',
+        vertical()
+          ? 'h-full w-full min-h-0 flex-col items-center overflow-hidden'
+          : 'h-5 w-full max-w-full items-center overflow-visible',
       )}
       value={[props.value]}
       minValue={0}
@@ -63,13 +71,13 @@ function BrightnessSlider(props: {
     >
       <SliderPrimitive.Track
         class={cn(
-          'relative rounded-full',
-          vertical() ? 'h-full w-2' : 'h-2 w-full',
+          'relative shrink-0 rounded-full',
+          vertical() ? 'h-full w-2' : 'h-2 w-full max-w-full',
         )}
         style={{ 'background-color': props.chrome.sliderTrack }}
       >
         <SliderPrimitive.Fill
-          class={cn('absolute rounded-full', vertical() ? 'inset-x-0' : 'inset-y-0')}
+          class={cn('absolute rounded-full', vertical() ? 'inset-x-0' : 'inset-y-0 left-0')}
           style={{ 'background-color': props.chrome.sliderFill }}
         />
         <SliderPrimitive.Thumb
@@ -103,14 +111,14 @@ function brightnessShellClass(
     return cn(
       posClass,
       'reader-brightness-capsule-shell--embedded-top',
-      'w-full items-center justify-center px-3',
+      'w-full min-w-0 max-w-full items-center justify-center overflow-visible px-2',
     );
   }
   if (embeddedChrome === 'bottom') {
     return cn(
       posClass,
       'reader-brightness-capsule-shell--embedded-bottom',
-      'w-full items-center justify-center px-3',
+      'w-full min-w-0 max-w-full items-center justify-center overflow-visible px-2',
     );
   }
 
@@ -150,21 +158,23 @@ function brightnessShellInsetStyle(
 function brightnessCapsuleClass(
   position: TextViewerBrightnessViewPosition,
   embedded?: boolean,
+  floating?: boolean,
 ): string {
   const edge = position === 'top' || position === 'bottom';
   return cn(
-    'flex items-center rounded-full backdrop-blur-sm',
+    'reader-brightness-capsule-track flex shrink-0 items-center rounded-full',
     edge
-      ? cn(
-          'h-10 flex-row gap-0 px-3 py-1.5',
-          embedded ? 'w-auto max-w-[min(72vw,20rem)]' : 'w-full max-w-[min(72vw,20rem)]',
-        )
-      : 'h-full w-full max-h-[min(56dvh,20rem)] flex-col px-1.5 py-3',
+      ? 'h-10 w-[min(72dvw,20rem)] max-w-full min-w-[10rem] flex-row gap-1 px-2'
+      : 'h-full min-w-0 w-full max-h-[min(56dvh,20rem)] flex-col px-1.5 py-3',
+    floating && embedded && 'border border-border/50 shadow-sm',
   );
 }
 
 export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
   const [hostRef, setHostRef] = createSignal<HTMLElement | undefined>();
+  const floating = useMediaViewerChromeFloating();
+  const chromeLayout = useViewerChromeLayout();
+  const overlayChromeApplies = () => viewerChromeOverlayAppearanceApplies(chromeLayout());
   const brightnessAuto = () => textViewerStore.state.config.brightnessAuto !== false;
   const position = () =>
     normalizeBrightnessViewPosition(textViewerStore.state.config.brightnessViewPosition);
@@ -193,7 +203,7 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
         textViewerStore.state.config.pageTips,
         textViewerStore.state.config.viewerChromeLayout,
       ] as const,
-    () => !isEmbedded() && (position() === 'left' || position() === 'right'),
+    () => !isEmbedded(),
   );
 
   const shellInsetStyle = () =>
@@ -220,12 +230,24 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
   const capsuleStyle = () => {
     const c = chrome();
     const edge = isEdgePosition();
-    return {
-      'background-color': c.capsuleBg,
+    const sizeConstraint = edge
+      ? { width: EDGE_CAPSULE_MAX_WIDTH, maxWidth: '100%' }
+      : { maxHeight: SIDE_CAPSULE_MAX_HEIGHT };
+
+    const baseStyle = {
       color: c.foreground,
       'box-shadow': c.capsuleGlow,
-      ...(edge ? { 'max-width': EDGE_CAPSULE_MAX_WIDTH } : { 'max-height': SIDE_CAPSULE_MAX_HEIGHT }),
-    } as const;
+      ...sizeConstraint,
+    };
+
+    if (overlayChromeApplies()) {
+      return mergeViewerChromeSurfaceStyles(
+        resolveViewerChromeOverlayAppearanceStyle(c.capsuleBg),
+        baseStyle,
+      );
+    }
+
+    return mergeViewerChromeSurfaceStyles({ 'background-color': c.capsuleBg }, baseStyle);
   };
 
   return (
@@ -249,9 +271,8 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
       >
         <div
           class={cn(
-            'reader-brightness-capsule-track',
             mediaViewerChromeHitTargetClass,
-            brightnessCapsuleClass(position(), isEmbedded()),
+            brightnessCapsuleClass(position(), isEmbedded(), floating.isFloating()),
           )}
           style={capsuleStyle()}
         >
@@ -281,10 +302,8 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
           </Button>
           <div
             class={cn(
-              'flex min-w-0',
-              isEdgePosition()
-                ? 'min-w-34 flex-1 items-center px-1 py-0.5'
-                : 'min-h-0 w-full flex-1 flex-col px-1 py-0.5',
+              'reader-brightness-capsule-slider-lane',
+              isEdgePosition() ? 'flex-row' : 'flex-col px-0.5',
             )}
           >
             <BrightnessSlider

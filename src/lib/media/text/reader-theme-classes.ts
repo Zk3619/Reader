@@ -71,7 +71,7 @@ export function deriveReaderBrightnessChrome(
   const glowStrength = darkBg ? 0.58 : 0.48;
 
   return {
-    capsuleBg: rgbaHex(bg, 0.94),
+    capsuleBg: bg,
     foreground: text,
     buttonHoverBg: rgbaHex(text, darkBg ? 0.14 : 0.1),
     sliderTrack: rgbaHex(text, trackAlpha),
@@ -231,7 +231,7 @@ export function readerThemeBrightnessChrome(themeId: number): ReaderBrightnessCh
 /** 亮度胶囊使用应用主题（顶底栏未跟随页面时的配色语义） */
 export function appThemeBrightnessChrome(): ReaderBrightnessChrome {
   return {
-    capsuleBg: 'hsl(var(--background) / 0.95)',
+    capsuleBg: 'hsl(var(--background))',
     foreground: 'hsl(var(--foreground))',
     buttonHoverBg: 'hsl(var(--foreground) / 0.08)',
     sliderTrack: 'hsl(var(--foreground) / 0.22)',

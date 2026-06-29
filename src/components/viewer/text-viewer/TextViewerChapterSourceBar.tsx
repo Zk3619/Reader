@@ -140,23 +140,29 @@ export function TextViewerChapterSourceBar(props: TextViewerChapterSourceBarProp
     <Show when={visible()}>
       <div
         class={cn(
-          'flex w-full min-w-0 items-stretch gap-2 border-t border-border/40 px-4 py-1.5',
-          floating.isFloating() && 'pointer-events-none px-3',
+          floating.isFloating()
+            ? cn(floating.wideBlockClass(), 'flex min-w-0 items-center gap-2')
+            : 'flex w-full min-w-0 items-stretch gap-2 border-t border-border/40 px-4 py-1.5',
         )}
+        style={floating.isFloating() ? floating.overlaySurfaceStyle() : undefined}
         data-media-viewer-interactive-zone
       >
         <button
           type="button"
           class={cn(
-            hitTarget(),
+            floating.isFloating() ? undefined : hitTarget(),
             'min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent/40',
           )}
           onClick={handleOpenChapterUrl}
           aria-label="在应用内打开章节网页"
         >
-          <div class="truncate text-sm font-medium text-foreground">{props.chapterTitle || '—'}</div>
+          <div class="truncate text-sm font-medium leading-snug text-foreground">
+            {props.chapterTitle || '—'}
+          </div>
           <Show when={chapterUrl()}>
-            <div class="truncate text-xs text-muted-foreground">{chapterUrl()}</div>
+            <div class="truncate text-xs leading-normal text-muted-foreground underline-offset-2 hover:underline">
+              {chapterUrl()}
+            </div>
           </Show>
         </button>
 

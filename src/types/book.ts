@@ -15,6 +15,19 @@ export interface ReadConfig {
   useReplaceRule?: boolean;
   /** 重新分段（Legado reSegment，默认关闭） */
   reSegment?: boolean;
+  /**
+   * 本书翻页动画（Legado readConfig.pageAnim）
+   * -1 或未设置：跟随阅读器界面设置；0 覆盖 … 4 无动画
+   */
+  pageAnim?: number;
+  /** 模拟追更（Legado readSimulating） */
+  readSimulating?: boolean;
+  /** 模拟追更起始日期 YYYY-MM-DD */
+  startDate?: string;
+  /** 模拟追更起始章节索引 */
+  startChapter?: number;
+  /** 模拟追更每日解锁章数 */
+  dailyChapters?: number;
   /** 本地书自定义目录正则（legado 风格），如 "^\s*第[一二三四五六七八九十百千\\d]+章\\s*.*$" */
   tocRule?: string;
   /** 超长章节自动拆分（Legado splitLongChapter，默认开启） */
