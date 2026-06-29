@@ -3,6 +3,10 @@ import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import { mediaViewerChromeBottomFillClass } from '@/components/viewer/viewer-chrome';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import {
+  mergeViewerChromeSurfaceStyles,
+  resolveViewerChromeOverlayAppearanceStyle,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerOverlayBottomChromeProps {
@@ -38,12 +42,19 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     return true;
   };
   const themedSurface = () => local.surfaceStyle != null;
+  const fillStyle = (): JSX.CSSProperties | undefined => {
+    if (themedSurface()) return local.surfaceStyle;
+    return mergeViewerChromeSurfaceStyles(
+      resolveViewerChromeOverlayAppearanceStyle(),
+      local.surfaceStyle,
+    );
+  };
 
   return (
     <div
       class={cn(
         'reader-chrome-overlay-panel reader-chrome-overlay-panel--bottom',
-        'pointer-events-auto w-full',
+        'pointer-events-auto w-full max-w-full min-w-0',
         !panelVisible() && 'reader-chrome-overlay-panel--hidden',
         local.class,
       )}
@@ -52,18 +63,18 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     >
       <div
         class={cn(
-          'reader-chrome-overlay-panel__surface flex w-full flex-col app-bottom-chrome-inset',
+          'reader-chrome-overlay-panel__surface flex w-full min-w-0 max-w-full flex-col app-bottom-chrome-inset',
           local.surfaceClass,
         )}
       >
         <Show when={local.headSlot}>{local.headSlot}</Show>
         <div
           class={cn(
-            'flex w-full flex-col',
+            'flex min-w-0 max-w-full flex-col',
             !themedSurface() && mediaViewerChromeBottomFillClass,
             themedSurface() && 'border-t',
           )}
-          style={local.surfaceStyle}
+          style={fillStyle()}
         >
           {local.children}
         </div>

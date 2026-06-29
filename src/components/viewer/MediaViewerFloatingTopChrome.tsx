@@ -1,5 +1,6 @@
 import { splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
+import { mediaViewerChromeFloatingTrackClass } from '@/components/viewer/viewer-chrome';
 
 export interface MediaViewerFloatingTopChromeProps {
   children: JSX.Element;
@@ -30,7 +31,10 @@ export function MediaViewerFloatingTopChrome(props: MediaViewerFloatingTopChrome
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        class="reader-chrome-floating-top__track pointer-events-none flex w-full items-start justify-between gap-2 px-3 pb-2"
+        class={cn(
+          'reader-chrome-floating-top__track pb-3',
+          mediaViewerChromeFloatingTrackClass,
+        )}
         onPointerEnter={local.onPointerEnter}
         onPointerLeave={local.onPointerLeave}
       >

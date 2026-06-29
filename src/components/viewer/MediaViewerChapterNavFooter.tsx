@@ -5,6 +5,8 @@ import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerB
 import {
   mediaViewerChromeBottomPassThroughClass,
   mediaViewerChromeBottomRowClass,
+  mediaViewerChromeFloatingBottomPillClass,
+  mediaViewerChromeFloatingBottomRowClass,
   mediaViewerChromeHitTargetClass,
 } from '@/components/viewer/viewer-chrome';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
@@ -45,31 +47,35 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
       : {};
   const navBtn = () =>
     cn(
-      floating.isFloating() && floating.pillClass(),
-      floating.isFloating() && 'shadow-sm',
+      floating.isFloating() && mediaViewerChromeFloatingBottomPillClass,
       isFloatingLayout() && mediaViewerChromeHitTargetClass,
     );
   const centerWrap = () =>
     cn(
       'flex min-w-0 flex-col items-center gap-0.5 text-center',
-      floating.isFloating() && floating.pillClass(),
-      floating.isFloating() && 'px-3 py-1.5',
+      floating.isFloating() && mediaViewerChromeFloatingBottomPillClass,
       isFloatingLayout() && mediaViewerChromeHitTargetClass,
     );
+  const floatingPillStyle = () =>
+    floating.isFloating() ? floating.overlaySurfaceStyle() : undefined;
 
   return (
     <MediaViewerBottomChromeContent>
       <div
         class={cn(
-          mediaViewerChromeBottomRowClass,
-          isFloatingLayout() && mediaViewerChromeBottomPassThroughClass,
-          floating.isFloating() && 'border-0 bg-transparent',
+          isFloatingLayout()
+            ? cn(
+                mediaViewerChromeFloatingBottomRowClass,
+                mediaViewerChromeBottomPassThroughClass,
+              )
+            : mediaViewerChromeBottomRowClass,
         )}
       >
         <Button
           variant={floating.isFloating() ? 'ghost' : 'outline'}
           size="sm"
           class={navBtn()}
+          style={floatingPillStyle()}
           disabled={local.chapterIndex <= 0 || local.loading}
           onClick={local.onPrev}
           onPointerEnter={barHover().onPointerEnter}
@@ -79,6 +85,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
         </Button>
         <div
           class={centerWrap()}
+          style={floatingPillStyle()}
           onPointerEnter={barHover().onPointerEnter}
           onPointerLeave={barHover().onPointerLeave}
         >
@@ -93,6 +100,7 @@ export function MediaViewerChapterNavFooter(props: MediaViewerChapterNavFooterPr
           variant={floating.isFloating() ? 'ghost' : 'outline'}
           size="sm"
           class={navBtn()}
+          style={floatingPillStyle()}
           disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
           onClick={local.onNext}
           onPointerEnter={barHover().onPointerEnter}

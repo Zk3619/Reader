@@ -1,4 +1,5 @@
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
+import { ViewerChromeOverlayAppearanceSetting } from '@/components/settings/ViewerChromeOverlayAppearanceSetting';
 
 /** 设置页：阅读器顶栏与底栏布局（固定 / 层叠 / 悬浮） */
 export function ViewerChromeLayoutSetting() {
@@ -12,6 +13,7 @@ export function ViewerChromeLayoutSetting() {
           </p>
         </div>
         <ViewerChromeLayoutControls />
+        <ViewerChromeOverlayAppearanceSetting />
       </div>
     </div>
   );

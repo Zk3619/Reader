@@ -18,7 +18,10 @@ import {
 } from '@/lib/book-source/legado-zip';
 import * as readRecordsDb from '@/lib/database/read-records';
 import { legadoErr, legadoOk, type LegadoReturnData } from '@/lib/web-api/return-data';
-import type { NewBook } from '@/types';
+import {
+  parseLegadoBookImportRow,
+  mergeLegadoImportedBookFields,
+} from '@/lib/book/legado-book-import';
 import type { ReadRecord } from '@/types/read-record';
 
 const SQLITE_SIG = 'SQLite format 3\0';
@@ -79,26 +82,14 @@ async function importBooksFromLegadoJson(text: string): Promise<number> {
   if (!Array.isArray(arr)) return 0;
   let count = 0;
   for (const item of arr) {
-    const row = item as Record<string, unknown>;
-    const bookUrl = String(row.bookUrl ?? '').trim();
-    const name = String(row.name ?? '').trim();
-    if (!bookUrl || !name) continue;
-    if (await booksDb.hasBook(bookUrl)) continue;
-    const book: NewBook = {
-      bookUrl,
-      tocUrl: String(row.tocUrl ?? bookUrl),
-      origin: String(row.origin ?? bookUrl),
-      originName: String(row.originName ?? ''),
-      name,
-      author: String(row.author ?? ''),
-      kind: row.kind != null ? String(row.kind) : undefined,
-      intro: row.intro != null ? String(row.intro) : undefined,
-      coverUrl: row.coverUrl != null ? String(row.coverUrl) : undefined,
-      charset: row.charset != null ? String(row.charset) : undefined,
-      type: typeof row.type === 'number' ? row.type : Number(row.type) || 0,
-      variable: row.variable != null ? String(row.variable) : undefined,
-    };
-    await booksDb.insertBook(book);
+    const imported = parseLegadoBookImportRow(item as Record<string, unknown>);
+    if (!imported) continue;
+    if (await booksDb.hasBook(imported.bookUrl)) continue;
+    await booksDb.insertBook(imported);
+    const created = await booksDb.getBook(imported.bookUrl);
+    if (created && (imported.readConfig || imported.durChapterIndex != null)) {
+      await booksDb.updateBook(mergeLegadoImportedBookFields(created, imported));
+    }
     count += 1;
   }
   return count;

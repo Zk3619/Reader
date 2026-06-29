@@ -602,7 +602,9 @@
 
 /* overlay 悬浮栏：外层裁剪+显隐；内层 surface 位移+透明度（顶栏外层保留 drag，不用 transform） */
 .reader-chrome-overlay-panel {
-  overflow: hidden;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: visible;
   visibility: visible;
   transition: visibility 0s linear 0s;
 }
@@ -615,36 +617,34 @@
 }
 
 .reader-chrome-overlay-panel__surface {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
   opacity: 1;
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
-  /* 出现：自下/自上滑入 + 淡入 */
-  transition:
-    transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
-    opacity var(--reader-bar-duration) ease-out;
+  /* 出现/消失：仅位移，避免与不透明度叠加造成「先透后糊」 */
+  transition: transform var(--reader-bar-duration) var(--reader-bar-easing-enter);
 }
 
 .reader-chrome-overlay-panel--top.reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
   transform: translate3d(0, -100%, 0);
-  opacity: 0;
 }
 
 .reader-chrome-overlay-panel--bottom.reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
   transform: translate3d(0, 100%, 0);
-  opacity: 0;
 }
 
 .reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
-  /* 消失：与出现同时长，位移/透明度 easing 取反 */
-  transition:
-    transform var(--reader-bar-duration) var(--reader-bar-easing-exit),
-    opacity var(--reader-bar-duration) ease-in;
+  transition: transform var(--reader-bar-duration) var(--reader-bar-easing-exit);
 }
 
 /* 悬浮栏：整条轨道淡入淡出 + 轻微位移（控件本身为圆角胶囊） */
 .reader-chrome-floating-top,
 .reader-chrome-floating-bottom {
   visibility: visible;
+  overflow: visible;
   transition: visibility 0s linear 0s;
 }
 
@@ -659,6 +659,7 @@
   opacity: 1;
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
+  overflow: visible;
   transition:
     transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
     opacity var(--reader-bar-duration) ease-out;
@@ -701,9 +702,30 @@
   opacity: 1;
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
   transition:
     transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
     opacity var(--reader-bar-duration) ease-out;
+}
+
+.reader-brightness-capsule-slider-lane {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  padding-inline: 0.625rem;
+}
+
+.reader-brightness-capsule-slider-lane.flex-col {
+  width: 100%;
+  padding-inline: 0;
+  padding-block: 0.625rem;
 }
 
 .reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
@@ -736,16 +758,21 @@
   position: relative;
   z-index: 1;
   background: transparent;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
 }
 
 .reader-brightness-capsule-shell--embedded-top {
   margin-top: var(--reader-brightness-chrome-gap, 10px);
-  padding-bottom: 2px;
+  padding-top: 4px;
+  padding-bottom: 6px;
 }
 
 .reader-brightness-capsule-shell--embedded-bottom {
   margin-bottom: var(--reader-brightness-chrome-gap, 10px);
-  padding-top: 2px;
+  padding-top: 6px;
+  padding-bottom: 4px;
 }
 
 /* fixed 占位栏：max-height 折叠（流式布局） */

@@ -23,6 +23,8 @@ import {
   type MediaViewerShellContextValue,
 } from '@/components/viewer/media-viewer-shell-context';
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { isMobile } from '@/lib/platform/detect';
+import { mediaViewerChromeDesktopMinWidthClass } from '@/components/viewer/viewer-chrome';
 
 export type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 
@@ -306,6 +308,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
         ref={(el) => activeChromeInput()?.bindShellElement(el)}
         class={cn(
           'fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground',
+          !isMobile() && mediaViewerChromeDesktopMinWidthClass,
           local.class,
         )}
         style={local.style}

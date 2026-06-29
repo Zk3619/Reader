@@ -2,11 +2,15 @@ import { Show, splitProps, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-shell-context';
 import { MediaViewerFloatingTopChrome } from '@/components/viewer/MediaViewerFloatingTopChrome';
-import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
+import { useViewerChromeLayout, useMediaViewerToolbarChromeClasses } from '@/lib/viewer/viewer-chrome-layout';
 import {
   mediaViewerChromeTopFillClass,
   type ViewerChromeLayout,
 } from '@/components/viewer/viewer-chrome';
+import {
+  mergeViewerChromeSurfaceStyles,
+  resolveViewerChromeOverlayAppearanceStyle,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
 
 export interface MediaViewerHeaderProps {
@@ -41,6 +45,7 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
   ]);
   const shell = useMediaViewerShellOptional();
   const chromeLayout = useViewerChromeLayout();
+  const toolbarChrome = useMediaViewerToolbarChromeClasses();
   const layout = () => local.layout ?? chromeLayout();
   const visible = () => {
     if (layout() === 'fixed') return true;
@@ -54,11 +59,11 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
   const themedSurface = () => local.surfaceStyle != null;
 
   const stackedSurfaceClass = () =>
-    cn('reader-chrome-overlay-panel__surface flex flex-col', local.surfaceClass);
+    cn('reader-chrome-overlay-panel__surface flex min-w-0 max-w-full flex-col', local.surfaceClass);
 
   const stackedChromeFillClass = () =>
     cn(
-      'flex flex-col',
+      'flex min-w-0 max-w-full flex-col',
       !themedSurface() && mediaViewerChromeTopFillClass,
       themedSurface() && 'border-b',
     );
@@ -72,19 +77,20 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
 
   const fixedChromeFillClass = () =>
     cn(
-      'flex flex-col',
-      !themedSurface() && 'border-b border-border/50 bg-background/95 backdrop-blur',
+      'flex flex-col border-b bg-background',
       themedSurface() && 'border-b',
     );
 
+  const stackedFillStyle = (): JSX.CSSProperties | undefined => {
+    if (themedSurface()) return local.surfaceStyle;
+    if (layout() === 'stacked') {
+      return mergeViewerChromeSurfaceStyles(resolveViewerChromeOverlayAppearanceStyle(), local.surfaceStyle);
+    }
+    return local.surfaceStyle;
+  };
+
   const toolbarRow = () => (
-    <div
-      class={cn(
-        'flex w-full items-center gap-2',
-        layout() === 'floating' && 'items-start justify-between',
-        layout() !== 'floating' && 'h-14 px-4',
-      )}
-    >
+    <div class={toolbarChrome().toolbarRowClass}>
       {local.children}
     </div>
   );
@@ -108,17 +114,17 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
-          <div class="pointer-events-none flex w-full min-w-0 flex-col gap-0.5">
+          <div class="pointer-events-none flex w-full min-w-0 max-w-full flex-col items-center gap-2 overflow-visible">
             {chromeBody()}
+            {trailingSlot()}
           </div>
-          {trailingSlot()}
         </MediaViewerFloatingTopChrome>
       </Show>
       <Show when={layout() === 'stacked'}>
         <header
           class={cn(
             'reader-chrome-overlay-panel reader-chrome-overlay-panel--top',
-            'absolute left-0 right-0 top-0 z-10',
+            'absolute inset-x-0 top-0 z-10 max-w-full min-w-0',
             !visible() && 'reader-chrome-overlay-panel--hidden',
             local.class,
           )}
@@ -129,7 +135,7 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
           <div class={stackedSurfaceClass()}>
-            <div class={stackedChromeFillClass()} style={local.surfaceStyle}>
+            <div class={stackedChromeFillClass()} style={stackedFillStyle()}>
               {chromeBody()}
             </div>
             {trailingSlot()}

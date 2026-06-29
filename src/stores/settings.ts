@@ -34,6 +34,12 @@ import {
   type AppToastPosition,
   type AppToastStyle,
 } from '@/lib/ui/app-toast-config';
+import {
+  DEFAULT_VIEWER_CHROME_OVERLAY_BLUR_PX,
+  DEFAULT_VIEWER_CHROME_OVERLAY_OPACITY,
+  normalizeViewerChromeOverlayBlurPx,
+  normalizeViewerChromeOverlayOpacity,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { clampThemeHour, normalizeThemeMode, normalizeThemeScheduleHours } from '@/lib/theme';
 
 /**
@@ -110,6 +116,12 @@ export interface AppSettings {
    * 旧值 overlay 在加载时迁移为 stacked
    */
   viewerChromeLayout?: ViewerChromeLayout;
+  /**
+   * media-viewer 层叠/悬浮顶底栏及附加区域背景不透明度（0–100，默认 100 不透明）
+   */
+  viewerChromeOverlayOpacity?: number;
+  /** media-viewer 层叠/悬浮顶底栏及附加区域背景模糊（px，默认 0 不模糊） */
+  viewerChromeOverlayBlurPx?: number;
   /** 全局媒体播放器布局：fixed | stacked | floating */
   mediaPlayerChromeLayout?: ViewerChromeLayout;
   /** 全局媒体播放器位置：top | bottom */
@@ -145,6 +157,8 @@ const defaultAppSettings: AppSettings = {
   innerWebRenderMode: 'auto',
   sourceExploreDrawerLayout: 'default',
   viewerChromeLayout: defaultViewerChromeLayout,
+  viewerChromeOverlayOpacity: DEFAULT_VIEWER_CHROME_OVERLAY_OPACITY,
+  viewerChromeOverlayBlurPx: DEFAULT_VIEWER_CHROME_OVERLAY_BLUR_PX,
   mediaPlayerChromeLayout: defaultMediaPlayerChromeLayout,
   mediaPlayerChromePosition: defaultMediaPlayerChromePosition,
   enableReadRecord: true,
@@ -207,6 +221,12 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     ),
     toastStyle: normalizeAppToastStyle(merged.toastStyle),
     toastPosition: normalizeAppToastPosition(merged.toastPosition),
+    viewerChromeOverlayOpacity: normalizeViewerChromeOverlayOpacity(
+      merged.viewerChromeOverlayOpacity,
+    ),
+    viewerChromeOverlayBlurPx: normalizeViewerChromeOverlayBlurPx(
+      merged.viewerChromeOverlayBlurPx,
+    ),
   };
 }
 
@@ -395,6 +415,18 @@ export const settingsStore = {
 
   async setViewerChromeLayout(viewerChromeLayout: ViewerChromeLayout): Promise<void> {
     await this.updateAppSettings({ viewerChromeLayout });
+  },
+
+  async setViewerChromeOverlayOpacity(viewerChromeOverlayOpacity: number): Promise<void> {
+    await this.updateAppSettings({
+      viewerChromeOverlayOpacity: normalizeViewerChromeOverlayOpacity(viewerChromeOverlayOpacity),
+    });
+  },
+
+  async setViewerChromeOverlayBlurPx(viewerChromeOverlayBlurPx: number): Promise<void> {
+    await this.updateAppSettings({
+      viewerChromeOverlayBlurPx: normalizeViewerChromeOverlayBlurPx(viewerChromeOverlayBlurPx),
+    });
   },
 
   async setMediaPlayerChromeLayout(mediaPlayerChromeLayout: ViewerChromeLayout): Promise<void> {

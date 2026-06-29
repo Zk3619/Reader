@@ -4,7 +4,14 @@ import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/sl
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
 import { cn } from '@/lib/utils';
-import { mediaViewerChromeBottomRowClass } from '@/components/viewer/viewer-chrome';
+import {
+  mediaViewerChromeBottomPassThroughClass,
+  mediaViewerChromeBottomRowClass,
+  mediaViewerChromeFloatingBottomPillClass,
+  mediaViewerChromeFloatingBottomRowClass,
+  mediaViewerChromeFloatingSliderPillClass,
+  mediaViewerChromeFloatingStatusPillClass,
+} from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 
 export interface MediaViewerProgressBottomChromeProps {
@@ -52,7 +59,10 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
   ]);
 
   const floating = useMediaViewerChromeFloating();
-  const pillBtn = () => cn(floating.isFloating() && floating.pillClass());
+  const floatingPill = () =>
+    cn(floating.isFloating() && mediaViewerChromeFloatingBottomPillClass);
+  const floatingPillStyle = () =>
+    floating.isFloating() ? floating.overlaySurfaceStyle() : undefined;
   const showStatus = () => local.showStatusBar !== false;
   const showSlider = () => local.showProgressSlider !== false;
   const bookPercent = () => {
@@ -63,39 +73,112 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
   };
   const chapterPercent = () => local.chapterProgressPercent ?? 0;
 
+  const statusMetaNode = () => (
+    <div class="flex min-w-0 shrink items-center gap-3 tabular-nums text-muted-foreground">
+      {local.statusMeta}
+      <Show when={local.chapterProgressPercent != null}>
+        <span>本章 {chapterPercent()}%</span>
+      </Show>
+      <span>全书 {bookPercent()}%</span>
+    </div>
+  );
+
   return (
-    <MediaViewerBottomChromeContent>
+    <MediaViewerBottomChromeContent
+      class={cn(floating.isFloating() && mediaViewerChromeBottomPassThroughClass)}
+    >
       <Show when={showStatus()}>
-        <div
-          class={cn(
-            mediaViewerChromeBottomRowClass,
-            'min-h-9 border-b border-border/40 text-xs',
-            floating.isFloating() &&
-              cn(floating.pillClass(), 'mx-auto w-fit max-w-[calc(100%-1.5rem)] border-0'),
-          )}
+        <Show
+          when={floating.isFloating()}
+          fallback={
+            <div
+              class={cn(
+                mediaViewerChromeBottomRowClass,
+                'min-h-9 border-b border-border/40 text-xs',
+              )}
+            >
+              <AppTooltip>
+                <AppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
+                  {local.chapterTitle || '—'}
+                </AppTooltipTrigger>
+                <AppTooltipContent layer="viewer">{local.chapterTitle || '—'}</AppTooltipContent>
+              </AppTooltip>
+              {statusMetaNode()}
+            </div>
+          }
         >
-          <AppTooltip>
-            <AppTooltipTrigger as="span" class="min-w-0 flex-1 truncate text-left">
-              {local.chapterTitle || '—'}
-            </AppTooltipTrigger>
-            <AppTooltipContent layer="viewer">{local.chapterTitle || '—'}</AppTooltipContent>
-          </AppTooltip>
-          <div class="flex shrink-0 items-center gap-3 tabular-nums text-muted-foreground">
-            {local.statusMeta}
-            <Show when={local.chapterProgressPercent != null}>
-              <span>本章 {chapterPercent()}%</span>
-            </Show>
-            <span>全书 {bookPercent()}%</span>
+          <div class={mediaViewerChromeFloatingBottomRowClass}>
+            <div class={mediaViewerChromeFloatingStatusPillClass} style={floatingPillStyle()}>
+              <AppTooltip>
+                <AppTooltipTrigger as="span" class="min-w-0 truncate text-left">
+                  {local.chapterTitle || '—'}
+                </AppTooltipTrigger>
+                <AppTooltipContent layer="viewer">{local.chapterTitle || '—'}</AppTooltipContent>
+              </AppTooltip>
+            </div>
+            <div class={mediaViewerChromeFloatingStatusPillClass} style={floatingPillStyle()}>
+              {statusMetaNode()}
+            </div>
           </div>
-        </div>
+        </Show>
       </Show>
 
-      <div class="flex flex-col px-4 py-2">
-        <div class="flex items-center gap-2">
+      <Show
+        when={floating.isFloating()}
+        fallback={
+          <div class="flex min-w-0 max-w-full flex-col px-4 py-2">
+            <div class="flex min-w-0 max-w-full items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="shrink-0 text-xs no-drag"
+                disabled={local.chapterIndex <= 0 || local.loading}
+                onClick={local.onPrev}
+                aria-label="上一章"
+              >
+                上一章
+              </Button>
+              <Show
+                when={showSlider()}
+                fallback={<div class="min-h-9 min-w-0 flex-1" />}
+              >
+                <div class="min-w-0 flex-1 px-1">
+                  <Slider
+                    value={[local.progressValue]}
+                    minValue={0}
+                    maxValue={1}
+                    step={0.001}
+                    onChange={local.onProgressChange}
+                    class="py-2"
+                    disabled={local.loading}
+                  >
+                    <SliderTrack>
+                      <SliderFill />
+                      <SliderThumb />
+                    </SliderTrack>
+                  </Slider>
+                </div>
+              </Show>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="shrink-0 text-xs no-drag"
+                disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
+                onClick={local.onNext}
+                aria-label="下一章"
+              >
+                下一章
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div class={mediaViewerChromeFloatingBottomRowClass}>
           <Button
             variant="ghost"
             size="sm"
-            class={cn('shrink-0 text-xs no-drag', pillBtn())}
+            class={cn('shrink-0 text-xs no-drag', floatingPill())}
+            style={floatingPillStyle()}
             disabled={local.chapterIndex <= 0 || local.loading}
             onClick={local.onPrev}
             aria-label="上一章"
@@ -104,29 +187,32 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
           </Button>
           <Show
             when={showSlider()}
-            fallback={<div class="min-h-9 min-w-0 flex-1" />}
+            fallback={<div class="min-h-9 min-w-0" />}
           >
-            <div class="min-w-0 flex-1 px-1">
-              <Slider
-                value={[local.progressValue]}
-                minValue={0}
-                maxValue={1}
-                step={0.001}
-                onChange={local.onProgressChange}
-                class="py-2"
-                disabled={local.loading}
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+            <div class={mediaViewerChromeFloatingSliderPillClass} style={floatingPillStyle()}>
+              <div class="min-w-0 w-full overflow-hidden">
+                <Slider
+                  value={[local.progressValue]}
+                  minValue={0}
+                  maxValue={1}
+                  step={0.001}
+                  onChange={local.onProgressChange}
+                  class="w-full min-w-0 py-1"
+                  disabled={local.loading}
+                >
+                  <SliderTrack>
+                    <SliderFill />
+                    <SliderThumb />
+                  </SliderTrack>
+                </Slider>
+              </div>
             </div>
           </Show>
           <Button
             variant="ghost"
             size="sm"
-            class={cn('shrink-0 text-xs no-drag', pillBtn())}
+            class={cn('shrink-0 text-xs no-drag', floatingPill())}
+            style={floatingPillStyle()}
             disabled={local.chapterIndex >= local.catalogLength - 1 || local.loading}
             onClick={local.onNext}
             aria-label="下一章"
@@ -134,7 +220,7 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
             下一章
           </Button>
         </div>
-      </div>
+      </Show>
     </MediaViewerBottomChromeContent>
   );
 }

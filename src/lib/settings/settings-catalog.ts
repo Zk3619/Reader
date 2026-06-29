@@ -100,6 +100,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['阅读器', '顶栏', '底栏', '工具栏', '悬浮', '层叠'],
   },
   {
+    id: 'viewer-chrome-overlay',
+    categoryId: 'appearance',
+    title: '阅读器栏外观',
+    description: '层叠与悬浮模式下顶底栏透明度与模糊',
+    keywords: ['阅读器', '顶栏', '底栏', '透明度', '模糊', '层叠', '悬浮', 'chrome'],
+  },
+  {
     id: 'media-player-chrome',
     categoryId: 'appearance',
     title: '全局媒体播放器',

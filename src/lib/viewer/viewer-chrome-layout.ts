@@ -5,11 +5,34 @@ import { cn } from '@/lib/utils';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import {
   defaultViewerChromeLayout,
+  mediaViewerChromeFloatingActionsClusterClass,
+  mediaViewerChromeFloatingClusterIconButtonClass,
   mediaViewerChromeFloatingIconButtonClass,
+  mediaViewerChromeFloatingOverlayFirstRowClass,
   mediaViewerChromeFloatingPillClass,
+  mediaViewerChromeFloatingTitleCapsuleClass,
+  mediaViewerChromeFloatingWindowChromeCapsuleClass,
+  mediaViewerChromeFloatingWindowChromeLeadClass,
+  mediaViewerChromeFloatingWindowChromeTrailClass,
+  mediaViewerChromeFloatingWideBlockClass,
   mediaViewerChromeHitTargetClass,
+  mediaViewerChromeToolbarActionsGroupClass,
+  mediaViewerChromeToolbarActionsMobileClass,
+  mediaViewerChromeToolbarOverlayFirstRowClass,
+  mediaViewerChromeToolbarRowClass,
+  mediaViewerChromeToolbarRowMobileClass,
+  mediaViewerChromeToolbarRowStackedClass,
+  mediaViewerChromeFloatingToolbarRowClass,
+  mediaViewerChromeToolbarSpacerClass,
+  mediaViewerChromeToolbarWindowChromeLeadClass,
+  mediaViewerChromeToolbarWindowChromeTrailClass,
+  mediaViewerChromeToolbarSpacerOverlayClass,
   mediaViewerContentScrollClass,
 } from '@/components/viewer/viewer-chrome';
+import {
+  resolveViewerChromeOverlayAppearanceStyle,
+  viewerChromeOverlayAppearanceApplies,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { settingsState } from '@/stores/settings';
 
 export function normalizeViewerChromeLayout(
@@ -89,16 +112,86 @@ export function useMediaViewerChromeFloating() {
   const pillClass = createMemo(() =>
     isFloating() ? mediaViewerChromeFloatingPillClass : '',
   );
-  /** 悬浮顶栏：左右各一组胶囊，避免逐按钮铺满整行形成背景条 */
-  const clusterClass = createMemo(() =>
-    isFloating()
-      ? cn(mediaViewerChromeFloatingPillClass, mediaViewerChromeHitTargetClass)
-      : '',
+  const titleCapsuleClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeFloatingTitleCapsuleClass : '',
+  );
+  const windowChromeCapsuleClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeFloatingWindowChromeCapsuleClass : '',
+  );
+  const actionsClusterClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeFloatingActionsClusterClass : '',
+  );
+  const wideBlockClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeFloatingWideBlockClass : '',
+  );
+  const clusterIconButtonClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeFloatingClusterIconButtonClass : '',
   );
   const inlineIconClass = createMemo(() =>
     isFloating() ? 'size-10 shrink-0' : '',
   );
-  return { layout, isFloating, iconButtonClass, pillClass, clusterClass, inlineIconClass };
+  const floatingHitTargetClass = createMemo(() =>
+    isFloating() ? mediaViewerChromeHitTargetClass : '',
+  );
+  const overlaySurfaceStyle = createMemo(() => {
+    if (!viewerChromeOverlayAppearanceApplies(layout())) {
+      return {};
+    }
+    return resolveViewerChromeOverlayAppearanceStyle();
+  });
+  return {
+    layout,
+    isFloating,
+    iconButtonClass,
+    pillClass,
+    titleCapsuleClass,
+    windowChromeCapsuleClass,
+    actionsClusterClass,
+    clusterIconButtonClass,
+    wideBlockClass,
+    floatingHitTargetClass,
+    inlineIconClass,
+    overlaySurfaceStyle,
+  };
+}
+
+/** 顶栏工具栏在 fixed / stacked / floating 下的 class 分流（断点由 CSS 控制） */
+export function useMediaViewerToolbarChromeClasses() {
+  const layout = useViewerChromeLayout();
+  const mobile = isMobile();
+  return createMemo(() => {
+    const mode = layout();
+    const floating = mode === 'floating';
+    return {
+      mobile,
+      showSpacer: mode === 'fixed' || mode === 'stacked',
+      toolbarRowClass: mobile
+        ? mediaViewerChromeToolbarRowMobileClass
+        : floating
+          ? mediaViewerChromeFloatingToolbarRowClass
+          : mode === 'stacked'
+            ? mediaViewerChromeToolbarRowStackedClass
+            : mediaViewerChromeToolbarRowClass,
+      overlayFirstRowClass: floating
+        ? mediaViewerChromeFloatingOverlayFirstRowClass
+        : mediaViewerChromeToolbarOverlayFirstRowClass,
+      actionsGroupClass: mobile
+        ? mediaViewerChromeToolbarActionsMobileClass
+        : floating
+          ? mediaViewerChromeFloatingActionsClusterClass
+          : mediaViewerChromeToolbarActionsGroupClass,
+      windowChromeLeadClass: floating
+        ? mediaViewerChromeFloatingWindowChromeLeadClass
+        : mediaViewerChromeToolbarWindowChromeLeadClass,
+      windowChromeTrailClass: floating
+        ? mediaViewerChromeFloatingWindowChromeTrailClass
+        : mediaViewerChromeToolbarWindowChromeTrailClass,
+      spacerClass:
+        mode === 'fixed' || mode === 'stacked'
+          ? mediaViewerChromeToolbarSpacerClass
+          : mediaViewerChromeToolbarSpacerOverlayClass,
+    };
+  });
 }
 
 /** 移动端 media 正文区：隐藏滚动条且不预留 scrollbar-gutter */
