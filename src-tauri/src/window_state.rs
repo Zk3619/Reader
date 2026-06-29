@@ -1,4 +1,7 @@
 //! 主窗口状态持久化：读写 exe 旁 `.window-state.json`（不依赖 window-state 插件）
+//!
+//! 窗口显隐不写入存档：启动时保持 `tauri.conf` 的 hidden，由前端在开屏/UI 就绪后 `show()`，
+//! 避免恢复阶段过早显示透明 WebView 与不透明边框。
 
 use std::sync::atomic::AtomicU64;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -45,7 +48,6 @@ struct WindowStateInner {
     #[serde(default)]
     prev_y: i32,
     maximized: bool,
-    visible: bool,
     /// 新格式为逻辑像素（与 tauri.conf width/height 一致）；旧存档无此字段时按物理像素恢复
     #[serde(default)]
     use_logical_size: bool,
@@ -61,7 +63,6 @@ impl Default for WindowStateInner {
             prev_x: 0,
             prev_y: 0,
             maximized: false,
-            visible: true,
             use_logical_size: false,
         }
     }
@@ -155,7 +156,6 @@ fn update_cache_from_window(cache: &mut WindowStateInner, window: &WebviewWindow
     let is_minimized = window.is_minimized().unwrap_or(false);
 
     cache.maximized = is_maximized;
-    cache.visible = window.is_visible().map_err(|e| e.to_string())?;
     cache.use_logical_size = true;
 
     if !is_maximized && !is_minimized {
@@ -312,12 +312,6 @@ fn apply_window_state(window: &WebviewWindow, state: &WindowStateInner) -> Resul
 
     if state.maximized {
         window.maximize().map_err(|e| e.to_string())?;
-    }
-
-    if state.visible {
-        window.show().map_err(|e| e.to_string())?;
-    } else {
-        window.hide().map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -536,10 +530,18 @@ mod tests {
 
     #[test]
     fn parse_legacy_plugin_format() {
-        let json = r#"{"main":{"width":960,"height":640,"x":100,"y":80,"prevX":100,"prevY":80,"maximized":false,"visible":true}}"#;
+        let json = r#"{"main":{"width":960,"height":640,"x":100,"y":80,"prevX":100,"prevY":80,"maximized":false}}"#;
         let root: serde_json::Value = serde_json::from_str(json).unwrap();
         let state: WindowStateInner = serde_json::from_value(root.get("main").unwrap().clone()).unwrap();
         assert_eq!(state.width, 960);
         assert_eq!(state.height, 640);
+    }
+
+    #[test]
+    fn parse_legacy_visible_field_is_ignored() {
+        let json = r#"{"main":{"width":960,"height":640,"x":100,"y":80,"prevX":100,"prevY":80,"maximized":false,"visible":true}}"#;
+        let root: serde_json::Value = serde_json::from_str(json).unwrap();
+        let state: WindowStateInner = serde_json::from_value(root.get("main").unwrap().clone()).unwrap();
+        assert_eq!(state.width, 960);
     }
 }
