@@ -41,11 +41,11 @@ export function ViewerToolbarWindowControls(props: ViewerToolbarWindowControlsPr
           <Show when={showSeparator()}>
             <Separator orientation="vertical" class="mx-1 h-6 max-sm:hidden sm:mx-2" />
           </Show>
-          <div class="flex h-10 items-center gap-0.5 sm:gap-1">
+          <div class="flex h-9 items-center gap-0.5 sm:gap-1">
             <ThemeSwitch
               withTooltip
               inViewerOverlay
-              sizeClass={useCapsule() ? 'size-10' : undefined}
+              sizeClass={useCapsule() ? 'size-9' : undefined}
             />
             <Show when={isTauri() && !isMobile()}>
               <WindowControlButtons />

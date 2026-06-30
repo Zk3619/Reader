@@ -85,6 +85,12 @@ export const mediaViewerChromeToolbarLeadRowClass = cn(
   'sm:flex-none sm:max-w-[min(40%,24rem)]',
 );
 
+/** 悬浮顶栏左侧：胶囊带阴影/边框，勿裁切底部 */
+export const mediaViewerChromeFloatingToolbarLeadRowClass = cn(
+  mediaViewerChromeToolbarLeadRowClass,
+  'overflow-visible',
+);
+
 export const mediaViewerChromeToolbarTitleInlineClass = cn(
   'block min-w-0 truncate text-sm font-medium text-foreground',
   'max-sm:flex-1 max-sm:basis-0',
@@ -173,11 +179,11 @@ export const mediaViewerChromeFloatingCapsuleWidthClass =
   'w-auto max-w-[min(calc(100%-1.5rem),24rem)]';
 
 /** 悬浮顶栏统一胶囊高度（与 FloatingIconButtonClass 一致） */
-export const mediaViewerChromeFloatingToolbarCapsuleHeightClass = 'h-10 min-h-10';
+export const mediaViewerChromeFloatingToolbarCapsuleHeightClass = 'h-9 min-h-9';
 
 /** 悬浮顶栏主工具栏行：&lt;480px 双行（与层叠 360–479 单行不同）；480–639 双行；≥640 单行 */
 export const mediaViewerChromeFloatingToolbarRowClass = cn(
-  'flex w-full min-w-0 max-w-full items-center justify-center overflow-visible py-2',
+  'flex w-full min-w-0 max-w-full items-center justify-center overflow-visible py-1',
   mediaViewerChromeBarInsetClass,
   'sm:px-2! md:px-4!',
   'max-[479px]:flex-wrap max-[479px]:justify-center max-[479px]:gap-y-2!',
@@ -216,7 +222,8 @@ export const mediaViewerChromeFloatingControlClass =
 export const mediaViewerChromeFloatingIconButtonClass = cn(
   mediaViewerChromeFloatingControlClass,
   mediaViewerChromeFloatingToolbarCapsuleHeightClass,
-  'size-10 shrink-0 rounded-full',
+  mediaViewerChromeHitTargetClass,
+  'size-9 shrink-0 rounded-full',
 );
 
 export const mediaViewerChromeFloatingPillClass = cn(
@@ -227,7 +234,7 @@ export const mediaViewerChromeFloatingPillClass = cn(
 
 /** 悬浮顶栏第二行内按钮：无独立胶囊，仅尺寸对齐 */
 export const mediaViewerChromeFloatingClusterIconButtonClass =
-  'size-10 shrink-0 rounded-full no-drag';
+  'size-9 shrink-0 rounded-full no-drag';
 
 /** 悬浮模式独立内容块：胶囊背景 + 可点击 */
 export const mediaViewerChromeFloatingBlockClass = cn(

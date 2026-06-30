@@ -4,6 +4,10 @@ vi.mock('@/lib/media/is-media-viewer-interactive-click', () => ({
   isMediaViewerInteractiveClick: () => false,
 }));
 
+vi.mock('@/lib/media/text/reader-text-selection-shared', () => ({
+  shouldBlockReaderContentPrimaryClick: () => false,
+}));
+
 import {
   MEDIA_VIEWER_CLICK_PAIR_MS,
   createMediaViewerChromeInputHandlers,
@@ -219,6 +223,57 @@ describe('media viewer chrome input', () => {
     handlers.onContentDblClick(clickEvent());
     expect(visible).toBe(true);
     expect(handlers.shouldSuppressAutoHide()).toBe(false);
+    handlers.dispose();
+  });
+
+  it('pointer leave to selection handle does not show bars', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    const handle = {
+      closest: (sel: string) => (sel.includes('data-reader-selection-handle') ? handle : null),
+    };
+    let visible = false;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(handle as unknown as EventTarget));
+    expect(visible).toBe(false);
+    handlers.dispose();
+  });
+
+  it('pointer leave does not show bars while text selection is active', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: false,
+        toString: () => '字',
+      }),
+    });
+    let visible = false;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        visible = !visible;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    expect(visible).toBe(false);
     handlers.dispose();
   });
 

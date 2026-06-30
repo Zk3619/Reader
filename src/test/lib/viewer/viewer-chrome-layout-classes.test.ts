@@ -14,6 +14,8 @@ import {
   mediaViewerChromeFloatingToolbarRowClass,
   mediaViewerChromeFloatingWideBlockClass,
   mediaViewerChromeFloatingTitleCapsuleClass,
+  mediaViewerChromeFloatingIconButtonClass,
+  mediaViewerChromeFloatingToolbarLeadRowClass,
   mediaViewerChromeFloatingWindowChromeCapsuleClass,
   mediaViewerChromeFloatingWindowChromeLeadClass,
   mediaViewerChromeFloatingWindowChromeTrailClass,
@@ -121,9 +123,11 @@ describe('viewer-chrome layout classes', () => {
   it('floating capsules split title and window chrome; actions use one cluster pill', () => {
     expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('rounded-full');
     expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('pointer-events-auto');
-    expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('h-10');
+    expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('h-9');
     expect(mediaViewerChromeFloatingWindowChromeCapsuleClass).toContain('rounded-full');
-    expect(mediaViewerChromeFloatingWindowChromeCapsuleClass).toContain('h-10');
+    expect(mediaViewerChromeFloatingWindowChromeCapsuleClass).toContain('h-9');
+    expect(mediaViewerChromeFloatingIconButtonClass).toContain('pointer-events-auto');
+    expect(mediaViewerChromeFloatingToolbarLeadRowClass).toContain('overflow-visible');
     expect(mediaViewerChromeFloatingActionsClusterClass).toContain('max-[479px]:basis-full');
     expect(mediaViewerChromeFloatingActionsClusterClass).toContain('min-[480px]:max-sm:basis-full');
     expect(mediaViewerChromeFloatingActionsClusterClass).toContain('overflow-visible');

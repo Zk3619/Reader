@@ -23,6 +23,8 @@ const MEDIA_VIEWER_INTERACTIVE_SELECTOR = [
   '[data-legado-cmt]',
   '.reader-comment-bubble',
   '[data-media-viewer-interactive-zone]',
+  '[data-reader-selection-handle]',
+  '[data-reader-text-selection-menu]',
 ].join(',');
 
 /** 点击是否落在可交互内容上（含其内部子节点） */

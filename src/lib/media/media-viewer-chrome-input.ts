@@ -1,4 +1,14 @@
 import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
+import {
+  clearDocumentTextSelection,
+  hasNonCollapsedTextSelection,
+  isReaderTextSelectionUiNode,
+  isSelectionHandleDragActive,
+  markReaderSelectionDismissClickConsumed,
+  shouldSuppressReaderRegionalTap,
+} from '@/lib/media/text/reader-text-selection-gesture';
+import { shouldSuppressPagedRegionalTap } from '@/lib/media/text/reader-paged-pointer-gesture';
+import { shouldBlockReaderContentPrimaryClick } from '@/lib/media/text/reader-text-selection-shared';
 import { isMobile } from '@/lib/platform/detect';
 
 /** 桌面 / Web（非移动 UA）：启用鼠标移出视口显示顶底栏等逻辑 */
@@ -28,9 +38,23 @@ function isPointerLeavingShell(
   shell: HTMLElement,
   relatedTarget: EventTarget | null,
 ): boolean {
+  if (isReaderTextSelectionUiNode(relatedTarget)) return false;
   if (!relatedTarget) return true;
   if (!(relatedTarget instanceof Node)) return true;
   return !shell.contains(relatedTarget);
+}
+
+function shouldShowBarsOnPointerLeave(relatedTarget: EventTarget | null): boolean {
+  if (isSelectionHandleDragActive()) return false;
+  if (hasNonCollapsedTextSelection()) return false;
+  if (
+    typeof document !== 'undefined' &&
+    document.documentElement.hasAttribute('data-reader-text-selection-active')
+  ) {
+    return false;
+  }
+  if (isReaderTextSelectionUiNode(relatedTarget)) return false;
+  return true;
 }
 
 /**
@@ -92,6 +116,7 @@ export function createMediaViewerChromeInputHandlers(options: {
 
   const onDocumentPointerOut = (event: PointerEvent) => {
     if (!options.enabled() || !barsCollapsible() || !isDesktop() || !shellElement) return;
+    if (!shouldShowBarsOnPointerLeave(event.relatedTarget)) return;
     if (!isPointerLeavingShell(shellElement, event.relatedTarget)) return;
     if (!(event.target instanceof Node) || !shellElement.contains(event.target)) return;
     showBarsFromPointerLeave();
@@ -111,13 +136,19 @@ export function createMediaViewerChromeInputHandlers(options: {
     ) {
       return;
     }
+    if (!shouldShowBarsOnPointerLeave(event.relatedTarget)) return;
     if (!isPointerLeavingShell(shell as HTMLElement, event.relatedTarget)) return;
     showBarsFromPointerLeave();
   };
 
   const onShellPointerEnter = (_event: PointerEvent) => {
-    if (!options.enabled() || !barsCollapsible() || !isDesktop() || !shownBarsByPointerLeave)
+    if (!options.enabled() || !barsCollapsible() || !isDesktop()) return;
+    if (hasNonCollapsedTextSelection()) {
+      shownBarsByPointerLeave = false;
+      awaitingDismissClick = false;
       return;
+    }
+    if (!shownBarsByPointerLeave) return;
     if (options.headerVisible()) {
       awaitingDismissClick = true;
     }
@@ -128,6 +159,26 @@ export function createMediaViewerChromeInputHandlers(options: {
     if (!options.enabled()) return;
     if (shellElement && !shellElement.isConnected) return;
     if (isMediaViewerInteractiveClick(event.target)) return;
+
+    if (
+      shouldSuppressPagedRegionalTap() ||
+      shouldSuppressReaderRegionalTap() ||
+      shouldBlockReaderContentPrimaryClick()
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      resetClickPair();
+      return;
+    }
+
+    if (hasNonCollapsedTextSelection()) {
+      clearDocumentTextSelection();
+      markReaderSelectionDismissClickConsumed();
+      event.preventDefault();
+      event.stopPropagation();
+      resetClickPair();
+      return;
+    }
 
     if (barsCollapsible() && isDesktop() && awaitingDismissClick) {
       event.preventDefault();
@@ -154,6 +205,13 @@ export function createMediaViewerChromeInputHandlers(options: {
       const run = pendingSingleAction;
       pendingSingleAction = null;
       lastPrimaryClickAt = 0;
+      if (
+        shouldSuppressPagedRegionalTap() ||
+        shouldSuppressReaderRegionalTap() ||
+        shouldBlockReaderContentPrimaryClick()
+      ) {
+        return;
+      }
       run?.();
     }, MEDIA_VIEWER_CLICK_PAIR_MS);
   };

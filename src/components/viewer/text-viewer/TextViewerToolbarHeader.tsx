@@ -7,7 +7,6 @@ import {
   ViewerToolbarWindowControlsTrail,
 } from '@/components/viewer/ViewerToolbarChromeParts';
 import {
-  mediaViewerChromeToolbarLeadRowClass,
   mediaViewerChromeToolbarPrimaryActionsClass,
   mediaViewerChromeToolbarTitleInlineClass,
   mediaViewerChromeFloatingActionsClusterScrollClass,
@@ -240,7 +239,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
   const leadRow = () => (
     <div
       class={cn(
-        mediaViewerChromeToolbarLeadRowClass,
+        toolbarChrome().leadRowClass,
         isFloating() && 'gap-1 sm:min-w-0 sm:shrink',
       )}
     >

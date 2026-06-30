@@ -23,6 +23,8 @@ import {
   mediaViewerChromeToolbarRowMobileClass,
   mediaViewerChromeToolbarRowStackedClass,
   mediaViewerChromeFloatingToolbarRowClass,
+  mediaViewerChromeFloatingToolbarLeadRowClass,
+  mediaViewerChromeToolbarLeadRowClass,
   mediaViewerChromeToolbarSpacerClass,
   mediaViewerChromeToolbarWindowChromeLeadClass,
   mediaViewerChromeToolbarWindowChromeTrailClass,
@@ -128,7 +130,7 @@ export function useMediaViewerChromeFloating() {
     isFloating() ? mediaViewerChromeFloatingClusterIconButtonClass : '',
   );
   const inlineIconClass = createMemo(() =>
-    isFloating() ? 'size-10 shrink-0' : '',
+    isFloating() ? 'size-9 shrink-0' : '',
   );
   const floatingHitTargetClass = createMemo(() =>
     isFloating() ? mediaViewerChromeHitTargetClass : '',
@@ -186,6 +188,9 @@ export function useMediaViewerToolbarChromeClasses() {
       windowChromeTrailClass: floating
         ? mediaViewerChromeFloatingWindowChromeTrailClass
         : mediaViewerChromeToolbarWindowChromeTrailClass,
+      leadRowClass: floating
+        ? mediaViewerChromeFloatingToolbarLeadRowClass
+        : mediaViewerChromeToolbarLeadRowClass,
       spacerClass:
         mode === 'fixed' || mode === 'stacked'
           ? mediaViewerChromeToolbarSpacerClass

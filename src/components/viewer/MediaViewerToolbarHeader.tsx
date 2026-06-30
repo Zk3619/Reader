@@ -16,7 +16,6 @@ import {
 } from '@/components/shared/icons';
 import { Gauge, ImageUp, Maximize, Minimize, Settings } from 'lucide-solid';
 import {
-  mediaViewerChromeToolbarLeadRowClass,
   mediaViewerChromeToolbarTitleInlineClass,
   mediaViewerChromeFloatingActionsClusterScrollClass,
 } from '@/components/viewer/viewer-chrome';
@@ -257,12 +256,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
   const actionsGroupClass = () => toolbarChrome().actionsGroupClass;
 
   const leadRow = () => (
-    <div
-      class={cn(
-        mediaViewerChromeToolbarLeadRowClass,
-        isFloating() && 'gap-1 sm:min-w-0 sm:shrink',
-      )}
-    >
+    <div class={cn(toolbarChrome().leadRowClass, isFloating() && 'gap-1 sm:min-w-0 sm:shrink')}>
       {closeButton()}
       {titleBlock()}
     </div>
