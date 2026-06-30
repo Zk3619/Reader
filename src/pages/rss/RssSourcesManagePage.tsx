@@ -26,7 +26,7 @@ import {
 } from '@/components/rss/RssSourcesManagePageToolbar';
 import { RssSourcesManageFilterDialog } from '@/components/rss/RssSourcesManageFilterDialog';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -816,15 +816,15 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
             onClick={(e) => e.stopPropagation()}
             role="presentation"
           >
-            <Switch
+            <AppSwitch
               checked={source.enabled}
               onChange={(checked) => void handleEnable(source, checked)}
               aria-label={source.enabled ? '禁用订阅源' : '启用订阅源'}
             >
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-            </Switch>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
           </div>
           <div
             class="shrink-0"

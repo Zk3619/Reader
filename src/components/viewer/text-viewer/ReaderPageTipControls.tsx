@@ -11,7 +11,7 @@ import {
 } from '@/components/shared/AppSelect';
 import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 import { ReaderRemSliderRow } from '@/components/viewer/text-viewer/ReaderRemSliderRow';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { AppTabs } from '@/components/shared/AppTabs';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import {
@@ -250,43 +250,43 @@ export function ReaderPageTipControls(props: ReaderPageTipControlsProps) {
 
       <div class="flex items-center justify-between gap-4">
         <Label>页眉分隔线</Label>
-        <Switch
+        <AppSwitch
           checked={props.tips().showHeaderLine}
           onChange={(checked) => setTips({ showHeaderLine: checked })}
         >
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">页眉分隔线</SwitchLabel>
-        </Switch>
+          <AppSwitchControl>
+            <AppSwitchThumb />
+          </AppSwitchControl>
+          <AppSwitchLabel class="sr-only">页眉分隔线</AppSwitchLabel>
+        </AppSwitch>
       </div>
 
       <div class="flex items-center justify-between gap-4">
         <Label>页脚分隔线</Label>
-        <Switch
+        <AppSwitch
           checked={props.tips().showFooterLine}
           onChange={(checked) => setTips({ showFooterLine: checked })}
         >
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">页脚分隔线</SwitchLabel>
-        </Switch>
+          <AppSwitchControl>
+            <AppSwitchThumb />
+          </AppSwitchControl>
+          <AppSwitchLabel class="sr-only">页脚分隔线</AppSwitchLabel>
+        </AppSwitch>
       </div>
 
       <div class="flex items-center justify-between gap-4">
         <div>
           <Label>信息条颜色跟随正文</Label>
         </div>
-        <Switch
+        <AppSwitch
           checked={props.tips().tipFollowContentColor}
           onChange={(checked) => setTips({ tipFollowContentColor: checked })}
         >
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">信息条颜色跟随正文</SwitchLabel>
-        </Switch>
+          <AppSwitchControl>
+            <AppSwitchThumb />
+          </AppSwitchControl>
+          <AppSwitchLabel class="sr-only">信息条颜色跟随正文</AppSwitchLabel>
+        </AppSwitch>
       </div>
 
       <Show when={!props.tips().tipFollowContentColor}>

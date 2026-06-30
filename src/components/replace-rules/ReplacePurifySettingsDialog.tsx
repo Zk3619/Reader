@@ -4,7 +4,7 @@
 
 import { createSignal, onMount } from 'solid-js';
 import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
   AppDialog,
   AppDialogContent,
@@ -93,42 +93,42 @@ export function ReplacePurifySettingsDialog(props: ReplacePurifySettingsDialogPr
               <Label class="text-sm">启用替换净化</Label>
               <p class="text-xs text-muted-foreground">未单独开关的书籍是否应用替换规则</p>
             </div>
-            <Switch checked={replaceEnabled()} onChange={toggleReplaceEnabled}>
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">启用替换净化</SwitchLabel>
-            </Switch>
+            <AppSwitch checked={replaceEnabled()} onChange={toggleReplaceEnabled}>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">启用替换净化</AppSwitchLabel>
+            </AppSwitch>
           </div>
           <div class="flex items-center justify-between gap-3 rounded-lg px-1 py-1">
             <Label class="text-sm">导出时应用替换净化</Label>
-            <Switch checked={exportUseReplace()} onChange={toggleExportUseReplace}>
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">导出时应用替换净化</SwitchLabel>
-            </Switch>
+            <AppSwitch checked={exportUseReplace()} onChange={toggleExportUseReplace}>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">导出时应用替换净化</AppSwitchLabel>
+            </AppSwitch>
           </div>
           <div class="flex items-center justify-between gap-3 rounded-lg px-1 py-1">
             <Label class="text-sm">导出 TXT 不含章节名</Label>
-            <Switch checked={exportNoChapterName()} onChange={toggleExportNoChapterName}>
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">导出 TXT 不含章节名</SwitchLabel>
-            </Switch>
+            <AppSwitch checked={exportNoChapterName()} onChange={toggleExportNoChapterName}>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">导出 TXT 不含章节名</AppSwitchLabel>
+            </AppSwitch>
           </div>
           <div class="flex items-center justify-between gap-3 rounded-lg px-1 py-1">
             <div class="space-y-0.5">
               <Label class="text-sm">保护特殊 HTML（usehtml）</Label>
               <p class="text-xs text-muted-foreground">替换前保留特殊 HTML 块</p>
             </div>
-            <Switch checked={adaptSpecialStyle()} onChange={(v) => void toggleAdaptSpecialStyle(v)}>
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">保护特殊 HTML</SwitchLabel>
-            </Switch>
+            <AppSwitch checked={adaptSpecialStyle()} onChange={(v) => void toggleAdaptSpecialStyle(v)}>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">保护特殊 HTML</AppSwitchLabel>
+            </AppSwitch>
           </div>
         </div>
       </AppDialogContent>

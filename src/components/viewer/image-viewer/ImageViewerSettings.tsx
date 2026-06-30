@@ -2,7 +2,7 @@ import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { AppTabs } from '@/components/shared/AppTabs';
 import {
   defaultImageViewerUiConfig,
@@ -165,15 +165,15 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
               开启后阅读也会缓存图片到本地（便于离线）；关闭则仅内存+网络，更贴近 Legado 正常阅读。
             </p>
           </div>
-          <Switch
+          <AppSwitch
             checked={props.config().mangaDiskCacheWhileReading}
             onChange={(v) => setConfig({ mangaDiskCacheWhileReading: v })}
           >
-            <SwitchControl>
-              <SwitchThumb />
-            </SwitchControl>
-            <SwitchLabel class="sr-only">阅读时写入磁盘缓存</SwitchLabel>
-          </Switch>
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+            <AppSwitchLabel class="sr-only">阅读时写入磁盘缓存</AppSwitchLabel>
+          </AppSwitch>
         </div>
       </SettingsDrawerSection>
 

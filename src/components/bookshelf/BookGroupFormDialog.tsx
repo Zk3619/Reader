@@ -5,7 +5,7 @@
 
 import { createSignal, createEffect } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Label } from '@/components/ui/label';
 import {
   AppSelect,
@@ -288,27 +288,27 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
               {/* 允许下拉刷新 */}
               <div class="flex items-center justify-between">
                 <Label for="enable-refresh">允许下拉刷新</Label>
-                <Switch
+                <AppSwitch
                   checked={form().enableRefresh ?? true}
                   onChange={(checked) => setForm({ ...form(), enableRefresh: checked })}
                 >
-                  <SwitchControl id="enable-refresh">
-                    <SwitchThumb />
-                  </SwitchControl>
-                </Switch>
+                  <AppSwitchControl id="enable-refresh">
+                    <AppSwitchThumb />
+                  </AppSwitchControl>
+                </AppSwitch>
               </div>
 
               {/* 是否显示 */}
               <div class="flex items-center justify-between">
                 <Label for="show-group">显示分组</Label>
-                <Switch
+                <AppSwitch
                   checked={form().show ?? true}
                   onChange={(checked) => setForm({ ...form(), show: checked })}
                 >
-                  <SwitchControl id="show-group">
-                    <SwitchThumb />
-                  </SwitchControl>
-                </Switch>
+                  <AppSwitchControl id="show-group">
+                    <AppSwitchThumb />
+                  </AppSwitchControl>
+                </AppSwitch>
               </div>
             </div>
           </div>

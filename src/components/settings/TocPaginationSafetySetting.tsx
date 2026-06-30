@@ -3,7 +3,7 @@
  */
 
 import { createEffect, createSignal } from 'solid-js';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { settingsStore } from '@/stores/settings';
 
@@ -42,18 +42,18 @@ export function TocPaginationSafetySetting() {
             <span class="text-sm">启用分页安全阈值</span>
             <p class="text-xs text-muted-foreground">建议保持开启，防止目录抓取死循环。</p>
           </div>
-          <Switch
+          <AppSwitch
             checked={enabled()}
             onChange={(v) => {
               setEnabled(v);
               void persist(v, maxPages());
             }}
           >
-            <SwitchControl>
-              <SwitchThumb />
-            </SwitchControl>
-            <SwitchLabel class="sr-only">启用分页安全阈值</SwitchLabel>
-          </Switch>
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+            <AppSwitchLabel class="sr-only">启用分页安全阈值</AppSwitchLabel>
+          </AppSwitch>
         </div>
 
         <label class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">

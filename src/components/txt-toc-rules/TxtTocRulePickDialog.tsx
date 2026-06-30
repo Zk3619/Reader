@@ -19,7 +19,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { cn } from '@/lib/utils';
 import type { TxtTocRule } from '@/types';
@@ -113,12 +113,12 @@ export function TxtTocRulePickDialog(props: TxtTocRulePickDialogProps) {
 
         <div class="flex items-center justify-between rounded-md border border-border/60 px-3 py-2">
           <span class="text-sm">拆分超长章节</span>
-          <Switch checked={splitLongChapter()} onChange={(v) => setSplitLongChapter(!!v)}>
-            <SwitchControl>
-              <SwitchLabel class="sr-only">拆分超长章节</SwitchLabel>
-              <SwitchThumb />
-            </SwitchControl>
-          </Switch>
+          <AppSwitch checked={splitLongChapter()} onChange={(v) => setSplitLongChapter(!!v)}>
+            <AppSwitchControl>
+              <AppSwitchLabel class="sr-only">拆分超长章节</AppSwitchLabel>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+          </AppSwitch>
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto rounded-md border border-border/60">

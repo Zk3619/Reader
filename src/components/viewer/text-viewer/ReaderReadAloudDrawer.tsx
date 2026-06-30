@@ -45,7 +45,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { AppTabs } from '@/components/shared/AppTabs';
 import {
   AppSelect,
@@ -295,16 +295,16 @@ export function ReaderReadAloudDrawer(props: ReaderReadAloudDrawerProps) {
                   onRateChange={applySpeechRate}
                   disabled={config().ttsFollowSys}
                 />
-                <Switch
+                <AppSwitch
                   class="flex items-center gap-2"
                   checked={config().ttsFollowSys ?? true}
                   onChange={(checked) => setConfig({ ttsFollowSys: checked })}
                 >
-                  <SwitchControl>
-                    <SwitchThumb />
-                  </SwitchControl>
-                  <SwitchLabel class="text-xs text-muted-foreground">跟随系统</SwitchLabel>
-                </Switch>
+                  <AppSwitchControl>
+                    <AppSwitchThumb />
+                  </AppSwitchControl>
+                  <AppSwitchLabel class="text-xs text-muted-foreground">跟随系统</AppSwitchLabel>
+                </AppSwitch>
               </div>
               <div class="flex items-center gap-2">
                 <Button

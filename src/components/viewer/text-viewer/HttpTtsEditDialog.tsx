@@ -13,7 +13,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
 import { upsertHttpTTS } from '@/lib/database/http-tts';
 import type { HttpTTS } from '@/types';
@@ -158,15 +158,15 @@ export function HttpTtsEditDialog(props: HttpTtsEditDialogProps) {
           </div>
           <div class="flex items-center justify-between">
             <Label>启用 CookieJar</Label>
-            <Switch
+            <AppSwitch
               checked={form().enabledCookieJar === true}
               onChange={(checked) => patch({ enabledCookieJar: checked })}
             >
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">CookieJar</SwitchLabel>
-            </Switch>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">CookieJar</AppSwitchLabel>
+            </AppSwitch>
           </div>
         </AppDialogScrollBody>
         <AppDialogFooter>

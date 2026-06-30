@@ -21,7 +21,7 @@ import {
 } from '@/components/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
@@ -100,12 +100,12 @@ export function SimulatedReadingDialog(props: SimulatedReadingDialogProps) {
         <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class="space-y-4 px-6">
           <div class="flex items-center justify-between gap-4">
             <Label>启用</Label>
-            <Switch checked={enabled()} onChange={setEnabled}>
-              <SwitchControl>
-                <SwitchThumb />
-              </SwitchControl>
-              <SwitchLabel class="sr-only">启用模拟追更</SwitchLabel>
-            </Switch>
+            <AppSwitch checked={enabled()} onChange={setEnabled}>
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">启用模拟追更</AppSwitchLabel>
+            </AppSwitch>
           </div>
           <div class="space-y-2">
             <Label>起始日期</Label>

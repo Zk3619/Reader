@@ -1,7 +1,7 @@
 import { For, Show } from 'solid-js';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { ThemeScheduleSetting } from '@/components/settings/ThemeScheduleSetting';
-import { Switch as UiSwitch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
 import { ViewerChromeLayoutSetting } from '@/components/settings/ViewerChromeLayoutSetting';
 import { MediaPlayerChromeSetting } from '@/components/settings/MediaPlayerChromeSetting';
@@ -63,15 +63,15 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
                   关闭或缩短动画与过渡，适合对动效敏感或追求性能的用户
                 </p>
               </div>
-              <UiSwitch
+              <AppSwitch
                 checked={settingsStore.state.app.reduceMotion}
                 onChange={(v: boolean) => settingsStore.setReduceMotion(!!v)}
               >
-                <SwitchControl class="data-disabled:cursor-not-allowed">
-                  <SwitchThumb />
-                </SwitchControl>
-                <SwitchLabel class="sr-only">减少动效</SwitchLabel>
-              </UiSwitch>
+                <AppSwitchControl class="data-disabled:cursor-not-allowed">
+                  <AppSwitchThumb />
+                </AppSwitchControl>
+                <AppSwitchLabel class="sr-only">减少动效</AppSwitchLabel>
+              </AppSwitch>
             </div>
           </div>
         </SettingItemAnchor>
@@ -85,15 +85,15 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
                   关闭后，全应用按钮与控件的悬停说明将不再显示
                 </p>
               </div>
-              <UiSwitch
+              <AppSwitch
                 checked={settingsStore.state.app.showTooltips !== false}
                 onChange={(v: boolean) => void settingsStore.setShowTooltips(!!v)}
               >
-                <SwitchControl class="data-disabled:cursor-not-allowed">
-                  <SwitchThumb />
-                </SwitchControl>
-                <SwitchLabel class="sr-only">显示工具提示</SwitchLabel>
-              </UiSwitch>
+                <AppSwitchControl class="data-disabled:cursor-not-allowed">
+                  <AppSwitchThumb />
+                </AppSwitchControl>
+                <AppSwitchLabel class="sr-only">显示工具提示</AppSwitchLabel>
+              </AppSwitch>
             </div>
           </div>
         </SettingItemAnchor>

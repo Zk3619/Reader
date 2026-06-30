@@ -80,10 +80,9 @@ import { getEffectiveTitleDisplay } from '@/lib/bookshelf/bookshelf-title-displa
 import { BookshelfCoverTitleOverlay } from '@/components/bookshelf/BookshelfCoverTitleOverlay';
 import { BookshelfGridHideTooltip } from '@/components/bookshelf/BookshelfGridHideTooltip';
 import {
-  BookShelfGridLastUpdateBadge,
-  BookShelfGridUnreadBadge,
+  BookShelfGridCoverBadges,
+  shouldShowBookshelfGridCoverBadges,
 } from '@/components/bookshelf/BookShelfReadingMeta';
-import { shouldShowBookshelfLastUpdateTime } from '@/lib/bookshelf/book-reading-progress';
 import { BookShelfListBookRow } from '@/components/bookshelf/BookShelfListBookRow';
 import {
   bookGroupGridCardClass,
@@ -1135,22 +1134,20 @@ function BookCardWithMenu(props: {
                   bookGroupGridCoverClass(),
                   (effectiveTitleDisplay() === 'overlay' ||
                     (props.layout === 'grid' &&
-                      (props.showUnreadFlag ||
-                        shouldShowBookshelfLastUpdateTime(
-                          props.book,
-                          props.showLastUpdateTime,
-                        )))) &&
-                  'relative',
+                      shouldShowBookshelfGridCoverBadges(
+                        props.book,
+                        props.showUnreadFlag,
+                        props.showLastUpdateTime,
+                      ))) &&
+                    '@container relative',
                 )}
               >
-                <Show when={props.showLastUpdateTime && props.layout === 'grid'}>
-                  <BookShelfGridLastUpdateBadge
+                <Show when={props.layout === 'grid'}>
+                  <BookShelfGridCoverBadges
                     book={props.book}
+                    showUnreadFlag={props.showUnreadFlag}
                     showLastUpdateTime={props.showLastUpdateTime}
                   />
-                </Show>
-                <Show when={props.showUnreadFlag && props.layout === 'grid'}>
-                  <BookShelfGridUnreadBadge book={props.book} />
                 </Show>
                 <div class={bookGroupGridCoverZoomClass()}>
                   <BookCoverImg

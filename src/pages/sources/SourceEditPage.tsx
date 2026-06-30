@@ -12,7 +12,7 @@ import {
   type PageHeaderDropdownItem,
 } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
 import {
@@ -330,7 +330,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
           <div class="min-w-0">
             <div class="text-sm font-medium text-foreground">{field.title}</div>
           </div>
-          <Switch
+          <AppSwitch
             checked={checked()}
             onChange={(v) =>
               updateDraft((prev) => {
@@ -339,10 +339,10 @@ export function SourceEditPage(props: SourceEditPageProps) {
               })
             }
           >
-            <SwitchControl>
-              <SwitchThumb />
-            </SwitchControl>
-          </Switch>
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+          </AppSwitch>
         </div>
       );
     }

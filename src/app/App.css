@@ -33,6 +33,12 @@
   --color-error: hsl(var(--error));
   --color-error-foreground: hsl(var(--error-foreground));
   --color-ring: hsl(var(--ring));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -275,6 +281,13 @@
 
     --ring: 240 5.9% 10%;
 
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 240 5.9% 90%;
+    --sidebar-ring: 240 5.9% 10%;
+
     --radius: 0.5rem;
 
     /* 移动端安全区（顶栏固定；底栏由 mobile-viewport-insets + 下方变量） */
@@ -325,6 +338,13 @@
     --error-foreground: 0 84% 60%;
 
     --ring: 240 4.9% 83.9%;
+
+    --sidebar: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 240 4.9% 83.9%;
 
     --radius: 0.5rem;
   }
@@ -1089,8 +1109,8 @@
 .reader-aloud-highlight {
   background-color: hsl(var(--primary) / 0.18);
   border-radius: 0.25rem;
-  box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /** 段内已朗读字级高亮 */
@@ -1377,6 +1397,42 @@ pre *,
   -ms-user-select: text !important;
   user-select: text !important;
   -webkit-touch-callout: default;
+}
+
+/*
+ * Legado 式选区：禁止原生拖选由 selectstart 拦截（见 reader-paged-text-selection-bridge）。
+ * 正文必须保持 user-select:text（见上方 [data-reader-content] 规则），
+ * 否则 WebView2 下 Selection.addRange 可能无效或高亮不可见。
+ */
+.reader-text-handle-select [data-reader-content="true"]::selection,
+.reader-text-handle-select [data-reader-content="true"] *::selection {
+  background-color: hsl(var(--primary) / 0.35);
+}
+
+html[data-reader-text-selection-active] [data-reader-content="true"]::selection,
+html[data-reader-text-selection-active] [data-reader-content="true"] *::selection {
+  background-color: hsl(var(--primary) / 0.35);
+}
+
+/** Legado 式选文：正文可程序化选中，但鼠标保持默认箭头（非 I 形文本光标） */
+.reader-text-handle-select [data-reader-content="true"],
+.reader-text-handle-select [data-reader-content="true"] * {
+  cursor: default !important;
+}
+
+/** 选区游标：手形表示可拖拽 */
+[data-reader-selection-handle] {
+  cursor: grab !important;
+}
+
+[data-reader-selection-handle]:active {
+  cursor: grabbing !important;
+}
+
+/** 按页长按达成（桌面无振动时的视觉反馈） */
+.reader-paged-viewport[data-reader-long-press-armed] {
+  outline: 2px solid hsl(var(--primary) / 0.35);
+  outline-offset: -2px;
 }
 
 input[type="text"],

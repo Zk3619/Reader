@@ -3,25 +3,19 @@
  * 底层仍使用 @/components/ui/select（Kobalte Select 原语）。
  */
 
-import type { Component, ComponentProps, ParentProps } from 'solid-js';
+import type { Component, JSX, ParentProps, ValidComponent } from 'solid-js';
 import { onCleanup, splitProps } from 'solid-js';
 import {
   useAppDrawerOverlayLock,
   useAppDrawerPortalMount,
   syncAppDrawerOverlayLock,
 } from '@/components/shared/app-drawer-overlay-lock';
+import type { PolymorphicProps } from '@kobalte/core/polymorphic';
 import type { SelectRootProps } from '@kobalte/core/select';
+import * as SelectPrimitive from '@kobalte/core/select';
 
-import {
-  Select,
-  SelectContent,
-  SelectIcon,
-  SelectItem,
-  SelectItemIndicator,
-  SelectListbox,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectValue } from '@/components/ui/select';
+import { CheckIcon, ChevronsUpDownIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import {
@@ -60,6 +54,15 @@ export type AppSelectContentLayout = 'plain';
 const CONTENT_LAYOUT_CLASS: Record<AppSelectContentLayout, string> = {
   plain: popperMenuPanelShell,
 };
+
+const APP_SELECT_TRIGGER_BASE_CLASS =
+  'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
+
+const APP_SELECT_CONTENT_MOTION_CLASS =
+  'relative min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2';
+
+const APP_SELECT_ITEM_BASE_CLASS =
+  'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50';
 
 function mergeOpenChange(
   userOnOpenChange: ((open: boolean) => void) | undefined,
@@ -112,66 +115,131 @@ export function AppSelect<Option = string, OptGroup = never>(
   );
 }
 
-type AppSelectTriggerProps = ComponentProps<typeof SelectTrigger> & {
-  layout?: AppSelectTriggerLayout;
-};
+type AppSelectTriggerProps<T extends ValidComponent = 'button'> =
+  SelectPrimitive.SelectTriggerProps<T> & {
+    class?: string | undefined;
+    children?: JSX.Element;
+    layout?: AppSelectTriggerLayout;
+  };
 
-export const AppSelectTrigger: Component<AppSelectTriggerProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout']);
+export const AppSelectTrigger = <T extends ValidComponent = 'button'>(
+  props: PolymorphicProps<T, AppSelectTriggerProps<T>>,
+) => {
+  const [local, others] = splitProps(props as AppSelectTriggerProps, ['class', 'children', 'layout']);
   const layout = () => local.layout ?? 'form';
   return (
-    <SelectTrigger
-      {...rest}
-      class={cn(TRIGGER_LAYOUT_CLASS[layout()], local.class)}
-    />
+    <SelectPrimitive.Trigger
+      class={cn(APP_SELECT_TRIGGER_BASE_CLASS, TRIGGER_LAYOUT_CLASS[layout()], local.class)}
+      {...others}
+    >
+      {local.children}
+    </SelectPrimitive.Trigger>
   );
 };
 
-type AppSelectContentProps = ComponentProps<typeof SelectContent> & {
-  layout?: AppSelectContentLayout;
-  /** 附加在 Content 上的 z-index 等（如内嵌页 z-[160]） */
-  portalZClass?: string;
-  /** 挂 body 并用显式 portalZClass（阅读器内用 ViewerAppSelectContent） */
-  portalToBody?: boolean;
+export const AppSelectIcon: Component<SelectPrimitive.SelectIconProps> = (props) => {
+  return (
+    <SelectPrimitive.Icon {...props}>
+      <ChevronsUpDownIcon class="h-4 w-4 shrink-0 opacity-50" />
+    </SelectPrimitive.Icon>
+  );
 };
 
-export const AppSelectContent: Component<AppSelectContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'portalToBody']);
+type AppSelectContentProps<T extends ValidComponent = 'div'> =
+  SelectPrimitive.SelectContentProps<T> & {
+    class?: string | undefined;
+    layout?: AppSelectContentLayout;
+    /** 附加在 Content 上的 z-index 等（如内嵌页 z-[160]） */
+    portalZClass?: string;
+    /** 挂 body 并用显式 portalZClass（阅读器内用 ViewerAppSelectContent） */
+    portalToBody?: boolean;
+    /** 挂到指定节点（如 AppDrawer 内 Portal 锚点），避免 body 层被抽屉挡住 */
+    mount?: HTMLElement | undefined;
+  };
+
+export const AppSelectContent = <T extends ValidComponent = 'div'>(
+  props: PolymorphicProps<T, AppSelectContentProps<T>>,
+) => {
+  const [local, others] = splitProps(props as AppSelectContentProps, [
+    'class',
+    'layout',
+    'portalZClass',
+    'portalToBody',
+    'mount',
+  ]);
   const layout = () => local.layout ?? 'plain';
   const drawerPortalMount = useAppDrawerPortalMount();
   const inDrawer = () => !local.portalToBody && drawerPortalMount() != null;
   const popperZ = () =>
     local.portalZClass ??
     (inDrawer() ? overlayLayerZ().drawerPopper : overlayLayerZ().dialogPopper);
+  const resolveMount = () => {
+    if (local.portalToBody) return undefined;
+    return local.mount ?? drawerPortalMount() ?? undefined;
+  };
   return (
-    <SelectContent
-      {...rest}
-      mount={local.portalToBody ? undefined : drawerPortalMount() ?? undefined}
-      class={cn(
-        CONTENT_LAYOUT_CLASS[layout()],
-        popperZ(),
-        local.class,
-      )}
-    />
+    <SelectPrimitive.Portal mount={resolveMount()}>
+      <SelectPrimitive.Content
+        class={cn(
+          APP_SELECT_CONTENT_MOTION_CLASS,
+          CONTENT_LAYOUT_CLASS[layout()],
+          popperZ(),
+          local.class,
+        )}
+        {...others}
+      />
+    </SelectPrimitive.Portal>
   );
 };
 
-export const AppSelectItem: Component<ComponentProps<typeof SelectItem>> = (props) => {
-  const [local, rest] = splitProps(props, ['class']);
-  return <SelectItem class={cn(APP_SELECT_ITEM_CLASS, local.class)} {...rest} />;
+type AppSelectItemProps<T extends ValidComponent = 'li'> =
+  SelectPrimitive.SelectItemProps<T> & {
+    class?: string | undefined;
+    children?: JSX.Element;
+  };
+
+export const AppSelectItem = <T extends ValidComponent = 'li'>(
+  props: PolymorphicProps<T, AppSelectItemProps<T>>,
+) => {
+  const [local, others] = splitProps(props as AppSelectItemProps, ['class', 'children']);
+  return (
+    <SelectPrimitive.Item
+      class={cn(APP_SELECT_ITEM_BASE_CLASS, APP_SELECT_ITEM_CLASS, local.class)}
+      {...others}
+    >
+      <SelectPrimitive.ItemIndicator class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+        <CheckIcon class="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+      <SelectPrimitive.ItemLabel>{local.children}</SelectPrimitive.ItemLabel>
+    </SelectPrimitive.Item>
+  );
 };
 
-export const AppSelectListbox: Component<ComponentProps<typeof SelectListbox>> = (props) => {
-  const [local, rest] = splitProps(props, ['class']);
+type AppSelectListboxProps<T extends ValidComponent = 'ul'> =
+  SelectPrimitive.SelectListboxProps<T> & { class?: string | undefined };
+
+export const AppSelectListbox = <T extends ValidComponent = 'ul'>(
+  props: PolymorphicProps<T, AppSelectListboxProps<T>>,
+) => {
+  const [local, others] = splitProps(props as AppSelectListboxProps, ['class']);
   return (
     <PopperScrollViewport class="px-1">
-      <SelectListbox class={cn('p-0', local.class)} {...rest} />
+      <SelectPrimitive.Listbox class={cn('p-0', local.class)} {...others} />
     </PopperScrollViewport>
   );
 };
 
-export {
-  SelectValue as AppSelectValue,
-  SelectIcon as AppSelectIcon,
-  SelectItemIndicator as AppSelectItemIndicator,
+export const AppSelectItemIndicator: Component<SelectPrimitive.SelectItemIndicatorProps> = (
+  props,
+) => {
+  return (
+    <SelectPrimitive.ItemIndicator
+      class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center"
+      {...props}
+    >
+      <CheckIcon class="h-4 w-4" />
+    </SelectPrimitive.ItemIndicator>
+  );
 };
+
+export { SelectValue as AppSelectValue };

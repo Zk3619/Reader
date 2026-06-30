@@ -1,6 +1,6 @@
 import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
 import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { TextField, TextFieldInput } from '@/components/ui/text-field';
 import { Button } from '@/components/ui/button';
 import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
@@ -130,21 +130,21 @@ export function WebServiceSettingBlock() {
       <div class="space-y-3">
       <div class="flex items-center justify-between gap-3">
         <Label class="text-sm">启用 Web 服务</Label>
-        <Switch checked={enabled()} disabled={busy()} onChange={(v) => void toggleEnabled(v)}>
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">启用 Web 服务</SwitchLabel>
-        </Switch>
+        <AppSwitch checked={enabled()} disabled={busy()} onChange={(v) => void toggleEnabled(v)}>
+          <AppSwitchControl>
+            <AppSwitchThumb />
+          </AppSwitchControl>
+          <AppSwitchLabel class="sr-only">启用 Web 服务</AppSwitchLabel>
+        </AppSwitch>
       </div>
       <div class="flex items-center justify-between gap-3">
         <Label class="text-sm">启用认证（Token）</Label>
-        <Switch checked={authEnabled()} disabled={busy()} onChange={(v) => void toggleAuth(v)}>
-          <SwitchControl>
-            <SwitchThumb />
-          </SwitchControl>
-          <SwitchLabel class="sr-only">启用 Web 认证</SwitchLabel>
-        </Switch>
+        <AppSwitch checked={authEnabled()} disabled={busy()} onChange={(v) => void toggleAuth(v)}>
+          <AppSwitchControl>
+            <AppSwitchThumb />
+          </AppSwitchControl>
+          <AppSwitchLabel class="sr-only">启用 Web 认证</AppSwitchLabel>
+        </AppSwitch>
       </div>
       <Show when={authEnabled()}>
         <div class="space-y-1.5">

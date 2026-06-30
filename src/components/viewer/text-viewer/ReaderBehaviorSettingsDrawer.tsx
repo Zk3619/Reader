@@ -6,7 +6,7 @@ import { createSignal, For, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
 import { Label } from '@/components/ui/label';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Button } from '@/components/ui/button';
 import { AppTabs } from '@/components/shared/AppTabs';
 import {
@@ -67,16 +67,16 @@ function SettingsSwitchRow(props: {
           <p class="text-xs text-muted-foreground">{props.description}</p>
         </Show>
       </div>
-      <Switch
+      <AppSwitch
         checked={props.checked}
         disabled={props.disabled}
         onChange={props.onChange}
       >
-        <SwitchControl>
-          <SwitchThumb />
-        </SwitchControl>
-        <SwitchLabel class="sr-only">{props.label}</SwitchLabel>
-      </Switch>
+        <AppSwitchControl>
+          <AppSwitchThumb />
+        </AppSwitchControl>
+        <AppSwitchLabel class="sr-only">{props.label}</AppSwitchLabel>
+      </AppSwitch>
     </div>
   );
 }

@@ -143,17 +143,61 @@ export function BookShelfCompactReadingMeta(props: { book: Book }) {
   );
 }
 
-/** 网格封面右上角徽标（受 showUnreadFlag 控制） */
+const gridCoverBadgeItemClass =
+  'block w-max max-w-full min-w-0 shrink-0 basis-auto overflow-hidden truncate text-left';
+
+/** 网格封面顶栏徽标：同行时左右两端；换行后同侧对齐；仍不足再省略 */
+export function BookShelfGridCoverBadges(props: {
+  book: Book;
+  showUnreadFlag: boolean;
+  showLastUpdateTime: boolean;
+}) {
+  const showLast = () => shouldShowBookshelfLastUpdateTime(props.book, props.showLastUpdateTime);
+  const showUnread = () => props.showUnreadFlag && shouldShowBookshelfUnreadBadge(props.book);
+  const showBoth = () => showLast() && showUnread();
+
+  return (
+    <Show when={showLast() || showUnread()}>
+      <div
+        class={cn(
+          'pointer-events-none absolute inset-x-1 top-1 z-10',
+          'flex w-[calc(100%-0.5rem)] min-w-0 flex-wrap items-start gap-x-1 gap-y-0.5',
+          showBoth() ? 'justify-between' : showLast() ? 'justify-start' : 'justify-end',
+        )}
+      >
+        <Show when={showLast()}>
+          <BookShelfLastUpdateBadge book={props.book} class={gridCoverBadgeItemClass} />
+        </Show>
+        <Show when={showUnread()}>
+          <BookShelfUnreadCountBadge book={props.book} class={gridCoverBadgeItemClass} />
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
+export function shouldShowBookshelfGridCoverBadges(
+  book: Book,
+  showUnreadFlag: boolean,
+  showLastUpdateTime: boolean,
+): boolean {
+  return (
+    (showUnreadFlag && shouldShowBookshelfUnreadBadge(book)) ||
+    shouldShowBookshelfLastUpdateTime(book, showLastUpdateTime)
+  );
+}
+
+/** @deprecated 请使用 BookShelfGridCoverBadges */
 export function BookShelfGridUnreadBadge(props: { book: Book }) {
   return (
     <BookShelfUnreadCountBadge
       book={props.book}
-      class="pointer-events-none absolute top-1 right-1 z-10"
+      class={cn(gridCoverBadgeItemClass, 'pointer-events-none absolute top-1 right-1 z-10')}
     />
   );
 }
 
-/** 网格封面左上角：上次更新时间 */
+/** @deprecated 请使用 BookShelfGridCoverBadges */
 export function BookShelfGridLastUpdateBadge(props: {
   book: Book;
   showLastUpdateTime: boolean;
@@ -162,7 +206,7 @@ export function BookShelfGridLastUpdateBadge(props: {
     <Show when={shouldShowBookshelfLastUpdateTime(props.book, props.showLastUpdateTime)}>
       <BookShelfLastUpdateBadge
         book={props.book}
-        class="pointer-events-none absolute top-1 left-1 z-10"
+        class={cn(gridCoverBadgeItemClass, 'pointer-events-none absolute top-1 left-1 z-10')}
       />
     </Show>
   );

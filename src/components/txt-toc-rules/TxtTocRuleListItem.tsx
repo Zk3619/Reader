@@ -1,7 +1,7 @@
 import type { TxtTocRule } from '@/types';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Button } from '@/components/ui/button';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { PencilIcon, MoreIcon } from '@/components/shared/icons';
@@ -78,15 +78,15 @@ export function TxtTocRuleListItem(props: TxtTocRuleListItemProps) {
           onClick={(e) => e.stopPropagation()}
           role="presentation"
         >
-          <Switch
+          <AppSwitch
             checked={props.rule.enable}
             onChange={(checked) => props.onEnableChange(!!checked)}
             aria-label={props.rule.enable ? '禁用规则' : '启用规则'}
           >
-            <SwitchControl class="data-disabled:cursor-not-allowed">
-              <SwitchThumb />
-            </SwitchControl>
-          </Switch>
+            <AppSwitchControl class="data-disabled:cursor-not-allowed">
+              <AppSwitchThumb />
+            </AppSwitchControl>
+          </AppSwitch>
 
           <Button
             variant="ghost"

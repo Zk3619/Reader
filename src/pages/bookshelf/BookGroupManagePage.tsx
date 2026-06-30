@@ -12,7 +12,7 @@
 import { createSignal, For, Show, onMount, batch, createMemo } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Label } from '@/components/ui/label';
 import { GroupContextMenu, type GroupContextMenuActions } from '@/components/bookshelf/BookGroupContextMenu';
 import {
@@ -541,14 +541,14 @@ export function BookGroupManage(props: BookGroupManageProps) {
                           <Label for={`show-${group.groupId}`} class="text-sm">
                             显示
                           </Label>
-                          <Switch
+                          <AppSwitch
                             checked={group.show}
                             onChange={(checked) => handleToggleShow(group, checked)}
                           >
-                            <SwitchControl id={`show-${group.groupId}`}>
-                              <SwitchThumb />
-                            </SwitchControl>
-                          </Switch>
+                            <AppSwitchControl id={`show-${group.groupId}`}>
+                              <AppSwitchThumb />
+                            </AppSwitchControl>
+                          </AppSwitch>
                         </div>
 
                         <Button

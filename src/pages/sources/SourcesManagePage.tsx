@@ -46,7 +46,7 @@ import { Button } from '@/components/ui/button';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Switch, SwitchControl, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
   AppContextMenu,
   AppContextMenuContent,
@@ -243,15 +243,15 @@ function SourceManageListItem(props: SourceManageListItemProps) {
               onClick={(e: MouseEvent) => e.stopPropagation()}
               role="presentation"
             >
-              <Switch
+              <AppSwitch
                 checked={props.source.enabled}
                 onChange={(checked: boolean) => void props.onEnableChange(props.source, checked)}
                 aria-label={props.source.enabled ? '禁用书源' : '启用书源'}
               >
-                <SwitchControl class="data-disabled:cursor-not-allowed">
-                  <SwitchThumb />
-                </SwitchControl>
-              </Switch>
+                <AppSwitchControl class="data-disabled:cursor-not-allowed">
+                  <AppSwitchThumb />
+                </AppSwitchControl>
+              </AppSwitch>
             </div>
           </AppContextMenuTrigger>
           <AppContextMenuContent>

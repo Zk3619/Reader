@@ -11,10 +11,8 @@ import * as DialogPrimitive from '@kobalte/core/dialog';
 import {
   Dialog,
   DialogFooter,
-  DialogOverlay,
   DialogTitle,
   DialogDescription,
-  dialogContentMotionClass,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
@@ -31,6 +29,29 @@ import {
   releasePageFocus,
 } from '@/utils/accessibility';
 import { restoreAppModalSideEffects } from '@/lib/ui/overlay-cleanup';
+
+/** 遮罩：淡入淡出（应用层复用，与 Kobalte data-expanded 属性一致） */
+const dialogOverlayClass =
+  'fixed inset-0 z-50 bg-background/80 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0';
+
+/** 内容区进出场动画 */
+const dialogContentMotionClass =
+  'duration-200 data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-closed:slide-out-to-left-1/2 data-closed:slide-out-to-top-[48%] data-expanded:slide-in-from-left-1/2 data-expanded:slide-in-from-top-[48%]';
+
+type AppDialogOverlayProps<T extends ValidComponent = 'div'> =
+  DialogPrimitive.DialogOverlayProps<T> & { class?: string | undefined };
+
+const AppDialogOverlay = <T extends ValidComponent = 'div'>(
+  props: PolymorphicProps<T, AppDialogOverlayProps<T>>,
+) => {
+  const [, rest] = splitProps(props as AppDialogOverlayProps, ['class']);
+  return (
+    <DialogPrimitive.Overlay
+      class={cn(dialogOverlayClass, props.class)}
+      {...rest}
+    />
+  );
+};
 
 /** 与 WindowControlButtons 关闭钮一致（ghost + destructive hover） */
 export const APP_DIALOG_CLOSE_BUTTON_CLASS =
@@ -163,7 +184,7 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
   const contentZ = () => zOverride() ?? overlayLayerZ().dialog;
   return (
     <AppDialogPortal wrapperClass={portalZ()} portalToBody={portalToBody()}>
-      <DialogOverlay
+      <AppDialogOverlay
         data-app-overlay-backdrop=""
         class={cn('pointer-events-auto', overlayZ(), appBlockDrag, overlayCls())}
       />

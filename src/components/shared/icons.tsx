@@ -87,6 +87,8 @@ import {
   SquareArrowRightEnter,
   SquareArrowRightExit,
   Trash2,
+  ThumbsDown,
+  ThumbsUp,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -218,6 +220,8 @@ export const BookshelfReadProgressIcon = icon(History);
 export const VolumeOnIcon = icon(Volume2);
 export const VolumeOffIcon = icon(VolumeOff);
 export const ChevronUpIcon = icon(ChevronUp);
+export const ThumbsUpIcon = icon(ThumbsUp);
+export const ThumbsDownIcon = icon(ThumbsDown);
 export const TrashIcon = icon(Trash2);
 /** 目录：章节尚未写入正文缓存 */
 export const ChapterUncachedIcon = icon(Cloud);

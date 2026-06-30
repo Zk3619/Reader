@@ -12,7 +12,7 @@ import {
 } from '@/components/viewer/viewer-app-overlay';
 import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { Switch, SwitchControl, SwitchLabel, SwitchThumb } from '@/components/ui/switch';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Label } from '@/components/ui/label';
 import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 import {
@@ -53,15 +53,15 @@ export function ReaderTextMenuConfigDialog(props: ReaderTextMenuConfigDialogProp
               {(id) => (
                 <div class="flex items-center justify-between gap-3">
                   <Label class="text-sm">{TEXT_VIEWER_TEXT_MENU_ITEM_LABELS[id]}</Label>
-                  <Switch
+                  <AppSwitch
                     checked={isVisible(id)}
                     onChange={(v) => toggle(id, v)}
                   >
-                    <SwitchControl>
-                      <SwitchThumb />
-                    </SwitchControl>
-                    <SwitchLabel class="sr-only">{TEXT_VIEWER_TEXT_MENU_ITEM_LABELS[id]}</SwitchLabel>
-                  </Switch>
+                    <AppSwitchControl>
+                      <AppSwitchThumb />
+                    </AppSwitchControl>
+                    <AppSwitchLabel class="sr-only">{TEXT_VIEWER_TEXT_MENU_ITEM_LABELS[id]}</AppSwitchLabel>
+                  </AppSwitch>
                 </div>
               )}
             </For>

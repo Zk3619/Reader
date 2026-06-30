@@ -281,6 +281,8 @@ export interface BookInfoPageProps {
   onBookSourceChanged?: (book: Book) => void;
   /** 换源弹窗「书源管理」：以独立页打开书源管理 */
   onOpenSourcesManage?: () => void;
+  /** 换源弹窗「编辑源」 */
+  onSourceEdit?: (source: BookSource) => void;
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
@@ -1456,6 +1458,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         book={resolveChangeSourceBook()}
         applyBook={applyBookSourceChange}
         onOpenSourcesManage={props.onOpenSourcesManage}
+        onSourceEdit={props.onSourceEdit}
         onBookChanged={(book) => void handleBookSourceChanged(book)}
       />
     </div>
