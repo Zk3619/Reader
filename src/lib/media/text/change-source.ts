@@ -24,6 +24,7 @@ import {
   type ChangeSourcePrefs,
 } from '@/lib/media/text/change-source-prefs';
 import { UNGROUPED_SOURCE_LABEL } from '@/lib/sources/source-list-filter';
+import { getBookScore, getSourceScore } from '@/lib/sources/source-config';
 import type { Book, BookChapter, BookSource, SearchBook } from '@/types';
 
 export type { ChangeSourcePrefs };
@@ -71,17 +72,42 @@ function authorMatchesForChangeSource(
   return (hitAuthor ?? '').includes(expected);
 }
 
-function sortChangeSourceBooks(books: SearchBook[], loadWordCount: boolean): SearchBook[] {
-  return [...books].sort((a, b) => {
-    if (loadWordCount) {
-      const aw = a.chapterWordCount > 0 ? a.chapterWordCount : -1;
-      const bw = b.chapterWordCount > 0 ? b.chapterWordCount : -1;
-      if (aw !== bw) return bw - aw;
-    }
-    const rt = (a.respondTime ?? 0) - (b.respondTime ?? 0);
-    if (rt !== 0) return rt;
-    return (a.originOrder ?? 0) - (b.originOrder ?? 0);
-  });
+const CHANGE_SOURCE_CHAPTER_NUM_RE = /^\[(\d+)]/;
+
+function chapterNumFromWordCountText(text?: string | null): number {
+  if (!text) return -1;
+  const match = CHANGE_SOURCE_CHAPTER_NUM_RE.exec(text);
+  return match ? Number.parseInt(match[1], 10) : -1;
+}
+
+function compareChangeSourceBooks(a: SearchBook, b: SearchBook, loadWordCount: boolean): number {
+  const bookScoreA = getBookScore(a.origin, a.name, a.author);
+  const bookScoreB = getBookScore(b.origin, b.name, b.author);
+  if (bookScoreA !== bookScoreB) return bookScoreB - bookScoreA;
+
+  const sourceScoreA = getSourceScore(a.origin);
+  const sourceScoreB = getSourceScore(b.origin);
+  if (sourceScoreA !== sourceScoreB) return sourceScoreB - sourceScoreA;
+
+  if (loadWordCount) {
+    const overA = a.chapterWordCount > 1000 ? 1 : 0;
+    const overB = b.chapterWordCount > 1000 ? 1 : 0;
+    if (overA !== overB) return overB - overA;
+
+    const numA = chapterNumFromWordCountText(a.chapterWordCountText);
+    const numB = chapterNumFromWordCountText(b.chapterWordCountText);
+    if (numA !== numB) return numB - numA;
+
+    const wordA = a.chapterWordCount > 0 ? a.chapterWordCount : -1;
+    const wordB = b.chapterWordCount > 0 ? b.chapterWordCount : -1;
+    if (wordA !== wordB) return wordB - wordA;
+  }
+
+  return (a.originOrder ?? 0) - (b.originOrder ?? 0);
+}
+
+export function sortChangeSourceBooks(books: SearchBook[], loadWordCount: boolean): SearchBook[] {
+  return [...books].sort((a, b) => compareChangeSourceBooks(a, b, loadWordCount));
 }
 
 async function enrichChangeSourceHit(

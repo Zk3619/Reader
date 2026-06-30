@@ -28,6 +28,7 @@ import {
   AppDialog,
   AppDialogContent,
   AppDialogDescription,
+  AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
@@ -67,16 +68,23 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import {
   applyChangeSource,
   ChangeSourceSearchSession,
+  disableChangeSourceOrigin,
   fetchChapterContentForChangeSource,
   loadChangeSourcePrefs,
   loadChangeSourceToc,
   matchChapterIndexForChangeSource,
   saveChangeSourcePrefs,
+  sortChangeSourceBooks,
 } from '@/lib/media/text/change-source';
 import * as sourcesDb from '@/lib/database/sources';
 import { getAllSourceGroups } from '@/lib/database/sources';
+import { deleteBookSourceWithSessionPurge } from '@/lib/book-source/purge-source-session';
+import { setBookScore, removeSource, getBookScore } from '@/lib/sources/source-config';
+import { insertSearchBook } from '@/lib/database/search-books';
 import { isLocalBook } from '@/lib/local-book';
 import { textViewerStore } from '@/stores/viewer';
+import { ChangeSourceResultItem } from '@/components/viewer/text-viewer/ChangeSourceResultItem';
+import type { BookSource } from '@/types';
 
 export type ChangeSourceMode = 'book' | 'chapter';
 
@@ -97,6 +105,8 @@ export interface ReaderChangeSourceDialogProps {
   onChapterReplaced?: () => void;
   /** 打开书源管理独立页 */
   onOpenSourcesManage?: () => void;
+  /** 编辑书源（换源项右键菜单） */
+  onSourceEdit?: (source: BookSource) => void;
 }
 
 function formatRespondTime(ms: number): string {
@@ -129,7 +139,21 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   const [tocChapters, setTocChapters] = createSignal<BookChapter[]>([]);
   const [pickedSearchBook, setPickedSearchBook] = createSignal<SearchBook | null>(null);
   const [screenSearchExpanded, setScreenSearchExpanded] = createSignal(false);
+  const [scoreRevision, setScoreRevision] = createSignal(0);
+  const [scoreOverrides, setScoreOverrides] = createSignal<Record<string, number>>({});
+  const [deleteTarget, setDeleteTarget] = createSignal<SearchBook | null>(null);
   const screenKeyRef: { current: string } = { current: '' };
+
+  const itemScores = createMemo(() => {
+    scoreRevision();
+    const overrides = scoreOverrides();
+    return Object.fromEntries(
+      results().map((book) => [
+        book.bookUrl,
+        overrides[book.bookUrl] ?? getBookScore(book.origin, book.name, book.author ?? ''),
+      ]),
+    ) as Record<string, number>;
+  });
 
   let session: ChangeSourceSearchSession | null = null;
   let listEl: HTMLDivElement | undefined;
@@ -226,6 +250,9 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
       setPickedSearchBook(null);
       setTocChapters([]);
       setScreenSearchExpanded(false);
+      setDeleteTarget(null);
+      setScoreOverrides({});
+      setScoreRevision(0);
     }
   };
 
@@ -248,6 +275,8 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     if (!props.open || !props.book) return;
     resetModePickerState();
     setPrefs(loadChangeSourcePrefs());
+    setScoreOverrides({});
+    setScoreRevision(0);
     void getAllSourceGroups().then(setSourceGroups);
     void startSearch();
   });
@@ -381,6 +410,118 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
       return;
     }
     void openTocForChapter(item);
+  };
+
+  const resortResults = (books: SearchBook[]) =>
+    sortChangeSourceBooks(books, prefs().loadWordCount);
+
+  const updateResults = (updater: (books: SearchBook[]) => SearchBook[]) => {
+    setResults((prev) => resortResults(updater(prev)));
+  };
+
+  const handleSetBookScore = (item: SearchBook, score: number) => {
+    setBookScore(item.origin, item.name, item.author ?? '', score);
+    setScoreOverrides((prev) => ({ ...prev, [item.bookUrl]: score }));
+    setScoreRevision((v) => v + 1);
+    updateResults((books) => [...books]);
+  };
+
+  const handlePinSourceTop = async (item: SearchBook) => {
+    try {
+      const all = await sourcesDb.getAllSources();
+      const minOrder = all.length > 0 ? Math.min(...all.map((s) => s.customOrder)) : 0;
+      const newOrder = minOrder - 1;
+      await sourcesDb.updateSourceOrder(item.origin, newOrder);
+      const nextItem = { ...item, originOrder: newOrder };
+      await insertSearchBook(nextItem);
+      updateResults((books) =>
+        books.map((row) => (row.origin === item.origin ? { ...row, originOrder: newOrder } : row)),
+      );
+      window.dispatchEvent(new CustomEvent('sources-refresh'));
+      showAppToast({ title: '已置顶', description: item.originName });
+    } catch (e) {
+      showAppToast({
+        title: '置顶失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handlePinSourceBottom = async (item: SearchBook) => {
+    try {
+      const all = await sourcesDb.getAllSources();
+      const maxOrder = all.length > 0 ? Math.max(...all.map((s) => s.customOrder)) : 0;
+      const newOrder = maxOrder + 1;
+      await sourcesDb.updateSourceOrder(item.origin, newOrder);
+      const nextItem = { ...item, originOrder: newOrder };
+      await insertSearchBook(nextItem);
+      updateResults((books) =>
+        books.map((row) => (row.origin === item.origin ? { ...row, originOrder: newOrder } : row)),
+      );
+      window.dispatchEvent(new CustomEvent('sources-refresh'));
+      showAppToast({ title: '已置底', description: item.originName });
+    } catch (e) {
+      showAppToast({
+        title: '置底失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleEditSource = async (item: SearchBook) => {
+    const source = await sourcesDb.getSource(item.origin);
+    if (!source) {
+      showAppToast({ title: '书源不存在', variant: 'destructive' });
+      return;
+    }
+    handleOpenChange(false);
+    props.onSourceEdit?.(source);
+  };
+
+  const handleDisableSource = async (item: SearchBook) => {
+    try {
+      await disableChangeSourceOrigin(item.origin);
+      updateResults((books) => books.filter((row) => row.origin !== item.origin));
+      window.dispatchEvent(new CustomEvent('sources-refresh'));
+      showAppToast({ title: '已禁用书源', description: item.originName });
+    } catch (e) {
+      showAppToast({
+        title: '禁用失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteSource = (item: SearchBook) => {
+    setDeleteTarget(item);
+  };
+
+  const confirmDeleteSource = async () => {
+    const item = deleteTarget();
+    if (!item) return;
+    try {
+      const source = await sourcesDb.getSource(item.origin);
+      if (!source) {
+        showAppToast({ title: '书源不存在', variant: 'destructive' });
+        setDeleteTarget(null);
+        return;
+      }
+      await deleteBookSourceWithSessionPurge(source);
+      removeSource(item.origin);
+      updateResults((books) => books.filter((row) => row.origin !== item.origin));
+      window.dispatchEvent(new CustomEvent('sources-refresh'));
+      showAppToast({ title: '已删除书源', description: item.originName });
+      setDeleteTarget(null);
+    } catch (e) {
+      showAppToast({
+        title: '删除书源失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
   };
 
   const scrollList = (toEnd: boolean) => {
@@ -662,58 +803,48 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           </div>
         </Show>
 
-        <div class="relative flex min-h-0 flex-1 flex-col gap-2 px-6 pb-4">
-          <p class="shrink-0 text-xs text-muted-foreground">{progressText()}</p>
+        <div class="relative flex min-h-0 flex-1 flex-col gap-1.5 pb-3">
+          <p class="shrink-0 px-6 text-xs text-muted-foreground">{progressText()}</p>
 
-          <DialogScrollViewport
-            class={cn('min-h-0 flex-1', dialogVirtualListScroll)}
-            trackRef={(el) => {
-              listEl = el;
-            }}
-          >
-            <ul class="space-y-2">
-              <For each={results()}>
-                {(item) => (
-                  <li>
-                    <button
-                      type="button"
-                      data-book-url={item.bookUrl}
-                      class={cn(
-                        'w-full rounded-lg border border-border/60 p-3 text-left transition-colors hover:bg-accent/40',
-                        isCurrentSource(item) && 'border-primary/50 bg-primary/5',
-                      )}
-                      disabled={applying()}
-                      onClick={() => handleItemClick(item)}
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0 flex-1">
-                          <div class="font-medium">{item.originName}</div>
-                          <div class="mt-0.5 truncate text-xs text-muted-foreground">
-                            {item.latestChapterTitle || item.bookUrl}
-                          </div>
-                          <Show when={showWordCountMeta() && item.chapterWordCountText}>
-                            <div class="mt-1 text-xs text-muted-foreground">
-                              {item.chapterWordCountText}
-                            </div>
-                          </Show>
-                        </div>
-                        <div class="shrink-0 text-right text-xs text-muted-foreground">
-                          <Show when={showWordCountMeta()}>
-                            <div>{formatRespondTime(item.respondTime)}</div>
-                          </Show>
-                          <Show when={isCurrentSource(item)}>
-                            <div class="mt-1 text-primary">当前</div>
-                          </Show>
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                )}
-              </For>
-            </ul>
-          </DialogScrollViewport>
+          <div class="min-h-0 flex-1 px-2">
+            <DialogScrollViewport
+              frameClass="flex min-h-0 w-full flex-1 flex-col overflow-hidden py-1 app-scroll-edge-inset"
+              class={cn('min-h-0 flex-1', dialogVirtualListScroll)}
+              trackRef={(el) => {
+                listEl = el;
+              }}
+            >
+              <ul class="space-y-1">
+                <For each={results()}>
+                  {(item) => (
+                    <li>
+                      <Show when={item} keyed>
+                        {(book) => (
+                          <ChangeSourceResultItem
+                            item={book}
+                            score={itemScores()[book.bookUrl] ?? 0}
+                            current={isCurrentSource(book)}
+                            applying={applying()}
+                            showWordCountMeta={showWordCountMeta()}
+                            formatRespondTime={formatRespondTime}
+                            onSelect={handleItemClick}
+                            onSetScore={handleSetBookScore}
+                            onPinTop={(row) => void handlePinSourceTop(row)}
+                            onPinBottom={(row) => void handlePinSourceBottom(row)}
+                            onEditSource={(row) => void handleEditSource(row)}
+                            onDisableSource={(row) => void handleDisableSource(row)}
+                            onDeleteSource={handleDeleteSource}
+                          />
+                        )}
+                      </Show>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </DialogScrollViewport>
+          </div>
 
-          <div class="flex shrink-0 items-center gap-2 border-t border-border/50 pt-2 text-xs">
+          <div class="flex shrink-0 items-center gap-2 border-t border-border/50 px-6 pt-2 text-xs">
             <button
               type="button"
               class="min-w-0 flex-1 truncate text-left text-muted-foreground hover:text-foreground"
@@ -782,6 +913,25 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
         groupsOnly
         stackedOverlay={(props.presentation ?? 'viewer') === 'viewer'}
       />
+
+      <AppDialog open={deleteTarget() !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AppDialogContent layout="app" class="max-w-sm">
+          <AppDialogHeader>
+            <AppDialogTitle>删除书源</AppDialogTitle>
+            <AppDialogDescription>
+              确定删除「{deleteTarget()?.originName ?? ''}」吗？此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmDeleteSource()}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </Dynamic>
   );
 }
