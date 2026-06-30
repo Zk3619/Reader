@@ -159,7 +159,7 @@ import {
 } from "@/lib/platform/fs/managed-storage";
 import { formatStorageRef, parseStorageRef } from "@/lib/platform/fs/storage-ref";
 import { fileRefExists, readBytes } from "@/lib/platform/fs/read-write";
-import { isMobile, isTauri } from "@/lib/platform/detect";
+import { isTauri } from "@/lib/platform/detect";
 import { getFileSystem, toNativeFilesystemPath } from "@/lib/platform/filesystem";
 import { basename, extname, join, normalize } from "@tauri-apps/api/path";
 import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
@@ -334,7 +334,7 @@ function AppContent() {
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
-  const { state, toggleSidebar } = useSidebar();
+  const { state, toggleSidebar, isMobile, setOpenMobile } = useSidebar();
   const [windowWidth, setWindowWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
@@ -3158,20 +3158,25 @@ function AppContent() {
           </div>
         </Show>
 
-        {/* 左侧边栏：桌面壳层且宽度 ≥768px；独立页仅隐藏不卸载，避免返回时 useSidebar 上下文丢失 */}
-        <Show when={shell().showSidebar}>
+        {/* 左侧边栏：桌面固定侧栏（≥768px）或窄屏 Sheet；独立页隐藏 */}
+        <Show when={!isStandalonePage() && (shell().showSidebar || shell().showTopNavigation)}>
           <div
             class={cn(
-              "fixed bottom-0 left-0 z-40",
-              showTopNav() ? "inset-top-app-bar" : "top-0",
-              isStandalonePage() && "hidden pointer-events-none",
+              shell().showSidebar && "fixed bottom-0 left-0 z-40",
+              shell().showSidebar && (showTopNav() ? "inset-top-app-bar" : "top-0"),
             )}
           >
             <SideBar
               currentPage={currentPage()}
-              onPageChange={navigateToPage}
+              onPageChange={(page) => {
+                navigateToPage(page);
+                if (isMobile()) setOpenMobile(false);
+              }}
               recentBooks={recentBooks()}
-              onOpenRecentBook={(book) => void openRecentBook(book)}
+              onOpenRecentBook={(book) => {
+                void openRecentBook(book);
+                if (isMobile()) setOpenMobile(false);
+              }}
               sidebarState={state}
               onToggleSidebar={toggleSidebar}
               offsetTopAppBar={showTopNav()}
@@ -3779,6 +3784,7 @@ function AppContent() {
                       }
                       onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
                       onOpenSourcesManage={openSourcesManagePage}
+                      onSourceEdit={(source) => openSourceEditor(source)}
                     />
                       );
                     })()}

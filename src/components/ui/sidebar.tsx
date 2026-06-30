@@ -196,13 +196,19 @@ const Sidebar: Component<SidebarProps> = (rawProps) => {
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            class="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+            class={cn(
+              "gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground shadow-lg",
+              "w-(--sidebar-width) max-w-(--sidebar-width)! sm:max-w-(--sidebar-width)!",
+              "[&>button]:hidden"
+            )}
             style={{
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE
             }}
             position={local.side}
           >
-            <div class="flex size-full flex-col">{local.children}</div>
+            <div class="flex size-full min-h-0 flex-col bg-sidebar text-sidebar-foreground">
+              {local.children}
+            </div>
           </SheetContent>
         </Sheet>
       </Match>

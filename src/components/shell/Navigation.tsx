@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/navigation-menu";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { WindowControlButtons } from "@/components/shell/WindowControlButtons";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { getEffectiveDark } from "@/lib/theme";
 import { settingsStore } from "@/stores/settings";
 import { cn } from "@/lib/utils";
@@ -106,8 +107,10 @@ export function Navigation(props: NavigationProps) {
   const shell = useShellLayout();
   const isDark = () => getEffectiveDark(settingsStore.state.app.theme);
   const currentPage = () => props.currentPage || "bookshelf";
-  /** 侧栏未挂载时（移动壳层或宽度不足）在顶栏显示等待更新徽标 */
+  /** 侧栏未挂载为固定栏时（窄屏）在顶栏显示等待更新徽标 */
   const showNavPendingBadge = () => !shell().showSidebar;
+  /** 窄屏顶栏：用 Sheet 打开侧栏（与 ui/sidebar 的 SidebarTrigger 配套） */
+  const showSidebarTrigger = () => shell().showTopNavigation && !shell().showSidebar;
 
   function handlePageChange(page: PageType) {
     props.onPageChange?.(page);
@@ -123,6 +126,9 @@ export function Navigation(props: NavigationProps) {
     >
       <div class="flex h-14 items-center justify-between gap-2 px-3 sm:px-4">
         <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <Show when={showSidebarTrigger()}>
+            <SidebarTrigger class="shrink-0" />
+          </Show>
           <div class="flex shrink-0 items-center gap-2">
             <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shadow-sm transition-colors dark:bg-primary/20">
               <img
