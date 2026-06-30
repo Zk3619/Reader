@@ -93,6 +93,9 @@ import {
   shouldPreventTouchDefaultForPagedDrag,
   shouldSuppressPagedTapAfterPointer,
 } from '@/lib/media/text/reader-paged-pointer-gesture';
+import { isReaderHandleSelectMode, isSelectionHandleDragActive } from '@/lib/media/text/reader-text-selection-gesture';
+import { getSharedReaderTextSelectionGesture } from '@/lib/media/text/reader-text-selection-shared';
+import { attachReaderPagedTextSelectionBridge } from '@/lib/media/text/reader-paged-text-selection-bridge';
 import type { TextViewerPageAnim, TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import {
   textViewerDualPageMeasureIntent,
@@ -270,6 +273,25 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let lastViewportW = 0;
   let lastViewportH = 0;
   let lastClipLayoutOuterH = 0;
+
+  const textSelectGesture = getSharedReaderTextSelectionGesture();
+  let detachTextSelectionBridge: (() => void) | undefined;
+
+  const bindTextSelectionBridge = (el: HTMLElement | undefined) => {
+    detachTextSelectionBridge?.();
+    detachTextSelectionBridge = undefined;
+    if (!el) return;
+    detachTextSelectionBridge = attachReaderPagedTextSelectionBridge(el, {
+      gesture: textSelectGesture,
+      isEnabled: () => isReaderHandleSelectMode(textViewerStore.state.config),
+      isHandleDragActive: isSelectionHandleDragActive,
+      isInteractiveTarget: isMediaViewerInteractiveClick,
+    });
+  };
+
+  onCleanup(() => {
+    detachTextSelectionBridge?.();
+  });
 
   let dragPointerId: number | null = null;
   let dragPointerCaptured = false;
@@ -4902,23 +4924,31 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const dy = e.clientY - dragStartY;
     dismissIdleCoverCurtain();
     if (
+      textSelectGesture.shouldSuppressRegionalTap() ||
       shouldSuppressPagedTapAfterPointer(dx, dy, {
         dragTurnInitialized,
         turnStage: turnStage(),
       })
     ) {
       markPagedTurnPointerConsumed();
-      if (isTouchLikePointer(e)) {
-        e.preventDefault();
-      }
+      e.preventDefault();
     }
     releaseDragPointerCapture(e);
     dragPointerId = null;
     dragAxis = 'none';
   };
 
+  const handleSelectMode = () => isReaderHandleSelectMode(textViewerStore.state.config);
+
+  const preventNativeTextSelection = (e: PointerEvent) => {
+    if (!handleSelectMode() || isSelectionHandleDragActive()) return;
+    if (e.pointerType === 'mouse') return;
+    e.preventDefault();
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     if (local.suppressPointerTurn?.()) return;
+    if (isSelectionHandleDragActive()) return;
     if (isTurnAnimating() || e.button !== 0) return;
     if (!e.isPrimary) return;
     if (isMediaViewerInteractiveClick(e.target)) return;
@@ -4945,21 +4975,32 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     ) {
       warmAdjacentLayoutsFromPool();
     }
-    scheduleCoverCurtainPrep(idx);
+    if (!textSelectGesture.blocksPagedDrag()) {
+      scheduleCoverCurtainPrep(idx);
+    }
   };
 
   const onPointerMove = (e: PointerEvent) => {
     if (dragPointerId !== e.pointerId || isTurnAnimating()) {
       return;
     }
+    if (isSelectionHandleDragActive()) return;
+    preventNativeTextSelection(e);
     simPointerClientX = e.clientX;
     simPointerClientY = e.clientY;
     const dx = e.clientX - dragStartX;
     const dy = e.clientY - dragStartY;
+    if (dragAxis === 'none' && textSelectGesture.blocksPagedDrag()) {
+      return;
+    }
     if (dragAxis === 'none') {
       const axis = resolvePagedDragAxis(dx, dy, dragAxisDeadzonePx());
       if (axis === 'none') return;
       dragAxis = axis;
+      if (dragAxis === 'x') {
+        textSelectGesture.cancelLongPressIntent();
+        scheduleCoverCurtainPrep(dragStartPageIndex);
+      }
       if (dragAxis === 'y') return;
       maybeArmCoverDragCurtain(dragStartPageIndex);
       if (!dragPointerCaptured) {
@@ -5024,6 +5065,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   };
 
   const onPointerUp = (e: PointerEvent) => {
+    const suppressClick = textSelectGesture.shouldSuppressRegionalTap();
+    if (suppressClick) {
+      markPagedTurnPointerConsumed();
+      e.preventDefault();
+    }
+
     if (dragPointerId !== e.pointerId) return;
 
     if (turnStage() !== 'drag') {
@@ -6042,6 +6089,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     <div
       ref={(el) => {
         viewportEl = el;
+        bindTextSelectionBridge(el ?? undefined);
         syncViewportSize(el.clientWidth, el.clientHeight);
         resizeObserver?.disconnect();
         resizeObserver = new ResizeObserver(() => {
@@ -6074,13 +6122,16 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onLostPointerCapture={(e) => {
+      onPointerCancel={(e) => {
         if (dragPointerId === e.pointerId) {
           dragPointerCaptured = false;
           dragPointerId = null;
           dragAxis = 'none';
         }
+      }}
+      onLostPointerCapture={(e) => {
+        if (dragPointerId !== e.pointerId || !dragPointerCaptured) return;
+        dragPointerCaptured = false;
       }}
     >
       <div class={cn('relative z-10 h-full min-h-0 w-full', theme().bg)}>

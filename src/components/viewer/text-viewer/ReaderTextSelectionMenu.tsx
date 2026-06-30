@@ -21,6 +21,11 @@ import {
   normalizeTextMenuVisibleItems,
   type TextViewerTextMenuItemId,
 } from '@/lib/media/text/reader-ui-config';
+import { isSelectionAnchorInReaderContent } from '@/lib/media/text/reader-text-selection-shared';
+import {
+  clearDocumentTextSelection,
+  READER_TEXT_SELECTION_CLEARED_EVENT,
+} from '@/lib/media/text/reader-text-selection-gesture';
 
 export interface ReaderTextSelectionMenuProps {
   sessionContext: ReadAloudSessionContext;
@@ -35,14 +40,19 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
       setRect(null);
       return;
     }
+    if (typeof window !== 'undefined') {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || sel.toString().length === 0) {
+        setRect(null);
+        return;
+      }
+    }
     const text = getSelectionPlainText();
     if (!text) {
       setRect(null);
       return;
     }
-    const root = props.contentRootRef?.();
-    const sel = window.getSelection();
-    if (root && sel?.anchorNode && !root.contains(sel.anchorNode)) {
+    if (!isSelectionAnchorInReaderContent()) {
       setRect(null);
       return;
     }
@@ -50,10 +60,13 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
   };
 
   onMount(() => {
+    const onSelectionCleared = () => setRect(null);
     document.addEventListener('selectionchange', updateSelection);
+    document.addEventListener(READER_TEXT_SELECTION_CLEARED_EVENT, onSelectionCleared);
     document.addEventListener('mouseup', updateSelection);
     onCleanup(() => {
       document.removeEventListener('selectionchange', updateSelection);
+      document.removeEventListener(READER_TEXT_SELECTION_CLEARED_EVENT, onSelectionCleared);
       document.removeEventListener('mouseup', updateSelection);
     });
   });
@@ -87,8 +100,7 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
     if (!text) return;
     const opts = await buildSpeakOptions();
     void speakSelectionOnce(text, opts);
-    window.getSelection()?.removeAllRanges();
-    setRect(null);
+    clearDocumentTextSelection();
   };
 
   const handleSpeakFromHere = async () => {
@@ -96,8 +108,7 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
     if (!text) return;
     const content = textViewerStore.state.content;
     const idx = findParagraphIndexForSelection(content, text);
-    window.getSelection()?.removeAllRanges();
-    setRect(null);
+    clearDocumentTextSelection();
     void startReadAloudSessionFromSelection(props.sessionContext, idx);
   };
 
@@ -105,8 +116,7 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
     const text = getSelectionPlainText();
     if (!text) return;
     void navigator.clipboard.writeText(text).catch(() => undefined);
-    window.getSelection()?.removeAllRanges();
-    setRect(null);
+    clearDocumentTextSelection();
   };
 
   const runItem = (id: TextViewerTextMenuItemId) => {
@@ -141,6 +151,7 @@ export function ReaderTextSelectionMenu(props: ReaderTextSelectionMenuProps) {
       {(p) => (
         <div
           class="pointer-events-auto fixed z-[calc(var(--viewer-chrome-z,50)+2)] flex -translate-x-1/2 gap-1 rounded-lg border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur-sm"
+          data-reader-text-selection-menu=""
           style={{
             top: `${p().top}px`,
             left: `${p().left}px`,

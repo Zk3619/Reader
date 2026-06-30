@@ -62,6 +62,17 @@ import {
   resolveRegionalClickAction,
 } from '@/lib/media/viewer-regional-click';
 import { shouldSuppressPagedRegionalTap } from '@/lib/media/text/reader-paged-pointer-gesture';
+import {
+  clearDocumentTextSelection,
+  hasNonCollapsedTextSelection,
+  isReaderHandleSelectMode,
+  isReaderTextSelectionUiNode,
+  isSelectionHandleDragActive,
+  markReaderSelectionDismissClickConsumed,
+  shouldSuppressReaderRegionalTap,
+} from '@/lib/media/text/reader-text-selection-gesture';
+import { getSharedReaderTextSelectionGesture, resetSharedReaderTextSelectionGesture, setReaderTextSelectChromeGate } from '@/lib/media/text/reader-text-selection-shared';
+import { isMediaViewerInteractiveClick } from '@/lib/media/is-media-viewer-interactive-click';
 import { getHttpTTS } from '@/lib/database/http-tts';
 import { stopReadAloud } from '@/lib/media/text/read-aloud';
 import {
@@ -79,6 +90,8 @@ import { getReadAloudProgress } from '@/lib/media/text/read-aloud-progress';
 import { syncReadAloudProgressToViewport } from '@/lib/media/text/read-aloud-viewport-sync';
 import { ReaderReadAloudMiniBar } from '@/components/viewer/text-viewer/ReaderReadAloudMiniBar';
 import { ReaderTextSelectionMenu } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
+import { ReaderTextSelectionHandles } from '@/components/viewer/text-viewer/ReaderTextSelectionHandles';
+import { resolveReaderContentRootFromSelection } from '@/lib/media/text/reader-text-selection-shared';
 import { type ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
 import {
   addReaderBookmark,
@@ -340,6 +353,58 @@ export function BookReader(props: BookReaderProps) {
   let tapStartX = 0;
   let tapStartY = 0;
   let tapMoved = false;
+
+  const textSelectGesture = getSharedReaderTextSelectionGesture();
+  setReaderTextSelectChromeGate(() => !chromeBarsVisible());
+  createEffect(() => {
+    setReaderTextSelectChromeGate(() => !chromeBarsVisible());
+  });
+
+  /** 按页：视口外（overlay 等）点击取消选区；长按选文仍由 ReaderPagedViewport bridge 处理 */
+  let detachPagedSelectionDismiss: (() => void) | undefined;
+  createEffect(() => {
+    detachPagedSelectionDismiss?.();
+    detachPagedSelectionDismiss = undefined;
+    if (!isPagedMode()) return;
+    const el = scrollContainerEl();
+    if (!el) return;
+
+    const capture = true;
+    const pagedViewport = () => el.querySelector('.reader-paged-viewport');
+
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.button !== 0 || !e.isPrimary) return;
+      if (!isReaderHandleSelectMode(textViewerStore.state.config)) return;
+      if (isSelectionHandleDragActive()) return;
+      if (isReaderTextSelectionUiNode(e.target)) return;
+      if (isMediaViewerInteractiveClick(e.target)) return;
+      const vp = pagedViewport();
+      if (vp?.contains(e.target as Node)) return;
+      if (!hasNonCollapsedTextSelection()) return;
+      textSelectGesture.onPointerDown(e, el, e.target);
+    };
+
+    const onPointerUpCapture = (e: PointerEvent) => {
+      const vp = pagedViewport();
+      if (vp?.contains(e.target as Node)) return;
+      const suppress = textSelectGesture.onPointerUp(e);
+      if (suppress) {
+        e.preventDefault();
+      }
+    };
+
+    el.addEventListener('pointerdown', onPointerDownCapture, capture);
+    el.addEventListener('pointerup', onPointerUpCapture, capture);
+    detachPagedSelectionDismiss = () => {
+      el.removeEventListener('pointerdown', onPointerDownCapture, capture);
+      el.removeEventListener('pointerup', onPointerUpCapture, capture);
+    };
+  });
+
+  onCleanup(() => {
+    detachPagedSelectionDismiss?.();
+    resetSharedReaderTextSelectionGesture();
+  });
 
   const book = () => textViewerStore.state.book;
   const catalogSize = () => textViewerStore.state.catalog.length;
@@ -1073,21 +1138,42 @@ export function BookReader(props: BookReaderProps) {
     closeReaderShellOverlays();
   });
 
-  const onContentPointerDown = (e: MouseEvent | TouchEvent) => {
-    const x = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const y = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    if ('button' in e && e.button !== 0) return;
+  const handleSelectMode = () => isReaderHandleSelectMode(textViewerStore.state.config);
+
+  const onContentPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0 || !e.isPrimary) return;
+    if (isMediaViewerInteractiveClick(e.target)) return;
+    if (isReaderTextSelectionUiNode(e.target)) return;
+    if (handleSelectMode() && !isSelectionHandleDragActive()) {
+      e.preventDefault();
+    }
+    const container = getScrollContainer();
+    if (container) textSelectGesture.onPointerDown(e, container, e.target);
     tapStartTime = Date.now();
-    tapStartX = x;
-    tapStartY = y;
+    tapStartX = e.clientX;
+    tapStartY = e.clientY;
     tapMoved = false;
   };
 
-  const onContentPointerMove = (e: MouseEvent | TouchEvent) => {
-    const x = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-    const y = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-    if (tapStartTime && (Math.abs(x - tapStartX) > TAP_MOVE_THRESHOLD || Math.abs(y - tapStartY) > TAP_MOVE_THRESHOLD)) {
+  const onContentPointerMove = (e: PointerEvent) => {
+    if (handleSelectMode() && !isSelectionHandleDragActive()) {
+      e.preventDefault();
+    }
+    const container = getScrollContainer();
+    if (container) textSelectGesture.onPointerMove(e, container);
+    if (
+      tapStartTime &&
+      (Math.abs(e.clientX - tapStartX) > TAP_MOVE_THRESHOLD ||
+        Math.abs(e.clientY - tapStartY) > TAP_MOVE_THRESHOLD)
+    ) {
       tapMoved = true;
+    }
+  };
+
+  const onContentPointerUp = (e: PointerEvent) => {
+    const suppress = textSelectGesture.onPointerUp(e);
+    if (suppress) {
+      e.preventDefault();
     }
   };
 
@@ -1105,6 +1191,16 @@ export function BookReader(props: BookReaderProps) {
 
   const contentPrimaryAction = (e: MouseEvent) => {
     if (shouldSuppressPagedRegionalTap()) {
+      tapStartTime = 0;
+      return;
+    }
+    if (shouldSuppressReaderRegionalTap() || textSelectGesture.shouldSuppressRegionalTap()) {
+      tapStartTime = 0;
+      return;
+    }
+    if (hasNonCollapsedTextSelection()) {
+      clearDocumentTextSelection();
+      markReaderSelectionDismissClickConsumed();
       tapStartTime = 0;
       return;
     }
@@ -1240,7 +1336,11 @@ export function BookReader(props: BookReaderProps) {
           tapToToggleBars={false}
           chromePointerInput
           contentPrimaryAction={contentPrimaryAction}
-          class={cn(readerThemeShell().bg, readerThemeShell().text)}
+          class={cn(
+            readerThemeShell().bg,
+            readerThemeShell().text,
+            handleSelectMode() && 'reader-text-handle-select',
+          )}
           style={readerShellStyle()}
         >
           <BookReaderChromeBridge
@@ -1371,6 +1471,8 @@ export function BookReader(props: BookReaderProps) {
                     class={mainContentClass()}
                     onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
                     onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
+                    onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
+                    onPointerCancel={isPagedMode() ? undefined : onContentPointerUp}
                   >
                     <ReaderAutoPageOverlay
                       visible={autoPageOverlayVisible()}
@@ -1387,8 +1489,10 @@ export function BookReader(props: BookReaderProps) {
                     <div
                       ref={bindScrollContainerRef}
                       class={mainContentClass()}
-                      onPointerDown={onContentPointerDown}
-                      onPointerMove={onContentPointerMove}
+                    onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
+                    onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
+                    onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
+                    onPointerCancel={isPagedMode() ? undefined : onContentPointerUp}
                     >
                       <ReaderAutoPageOverlay
                         visible={autoPageOverlayVisible()}
@@ -1546,6 +1650,9 @@ export function BookReader(props: BookReaderProps) {
         sessionContext={readAloudSessionContext}
         contentRootRef={() => getScrollContainer()}
       />
+      <ReaderTextSelectionHandles
+        contentRootRef={() => resolveReaderContentRootFromSelection(getScrollContainer())}
+      />
 
       {/* 阅读界面 Drawer（仅关闭/全开两档，保证可滚动区高度固定、滚动正常） */}
       <ViewerAppDrawer open={settingsOpen()} onOpenChange={setSettingsOpen} snapPoints={[0, 1]} defaultSnapPoint={1}>
@@ -1602,6 +1709,7 @@ export function BookReader(props: BookReaderProps) {
         chapterIndex={chapterIndex()}
         chapterTitle={displayChapterTitle()}
         onOpenSourcesManage={props.onOpenSourcesManage}
+        onSourceEdit={props.onSourceEdit}
         onBookChanged={async (nextBook) => {
           await textViewerStore.openBook(nextBook);
         }}
