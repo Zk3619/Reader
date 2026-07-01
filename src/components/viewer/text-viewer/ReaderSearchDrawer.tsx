@@ -2,7 +2,7 @@
  * 阅读内全书搜索（对齐 Legado SearchMenu / SearchContentActivity）
  */
 
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, createEffect, For, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { searchBookContent, type BookSearchHit } from '@/lib/media/text/book-content-search';
 import { plainTextForAloud } from '@/lib/media/text/read-aloud';
@@ -21,6 +21,8 @@ export interface ReaderSearchDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onJumpToChapter: (index: number) => void;
+  /** 从选区菜单打开时预填关键词 */
+  initialKeyword?: string;
 }
 
 export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
@@ -29,18 +31,26 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
   const [hits, setHits] = createSignal<BookSearchHit[]>([]);
   const [activeIndex, setActiveIndex] = createSignal(0);
 
-  const runSearch = async () => {
+  createEffect(() => {
+    if (!props.open) return;
+    const seed = props.initialKeyword?.trim();
+    if (seed) {
+      setKeyword(seed);
+      void runSearchWithKeyword(seed);
+    }
+  });
+  const runSearchWithKeyword = async (kw: string) => {
     const book = textViewerStore.state.book;
     const catalog = textViewerStore.state.catalog;
-    const kw = keyword().trim();
-    if (!book || !kw) {
+    const query = kw.trim();
+    if (!book || !query) {
       setHits([]);
       return;
     }
     setSearching(true);
     try {
       const currentPlain = plainTextForAloud(textViewerStore.state.content);
-      const results = await searchBookContent(book, catalog, kw, {
+      const results = await searchBookContent(book, catalog, query, {
         startIndex: textViewerStore.state.chapterIndex,
         currentChapterPlain: currentPlain,
       });
@@ -49,6 +59,10 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
     } finally {
       setSearching(false);
     }
+  };
+
+  const runSearch = async () => {
+    await runSearchWithKeyword(keyword());
   };
 
   const goHit = (hit: BookSearchHit) => {

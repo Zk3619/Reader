@@ -369,6 +369,8 @@ export interface TextViewerUiConfig {
   expandTextMenu?: boolean;
   /** 文本选择菜单可见项 id */
   textMenuVisibleItems?: string[];
+  /** 隐藏的第三方 PROCESS_TEXT 类菜单项 key（Legado hiddenProcessTextItems） */
+  textMenuHiddenProcessTextItems?: string[];
   /** 点击图片方式：0 默认 / 1 预览 / 2 兼容 / 3 关闭 / 4 双击 */
   clickImgWay?: 0 | 1 | 2 | 3 | 4;
   /** 屏幕方向 0–5 */
@@ -568,30 +570,44 @@ export const TEXT_VIEWER_CLICK_IMG_WAY_LABELS: Record<TextViewerClickImgWay, str
   4: '双击',
 };
 
-export const TEXT_VIEWER_TEXT_MENU_ITEM_IDS = [
-  'speakSelection',
-  'speakFromHere',
+/** Legado TextMenuConfig.ALL_MENU_ITEMS 顺序；折叠时前 5 项主栏，其余进「更多」 */
+export const TEXT_VIEWER_TEXT_MENU_ITEM_ORDER = [
+  'replace',
   'copy',
+  'bookmark',
+  'speakSelection',
   'dict',
+  'searchContent',
+  'browser',
+  'share',
+] as const;
+
+/** speakFromHere 由 contentSelectSpeakMod=1 时在 speakSelection 后插入 */
+export const TEXT_VIEWER_TEXT_MENU_EXTRA_ITEM_IDS = ['speakFromHere'] as const;
+
+export const TEXT_VIEWER_TEXT_MENU_ITEM_IDS = [
+  ...TEXT_VIEWER_TEXT_MENU_ITEM_ORDER,
+  ...TEXT_VIEWER_TEXT_MENU_EXTRA_ITEM_IDS,
 ] as const;
 
 export type TextViewerTextMenuItemId = (typeof TEXT_VIEWER_TEXT_MENU_ITEM_IDS)[number];
 
 export const TEXT_VIEWER_TEXT_MENU_ITEM_LABELS: Record<TextViewerTextMenuItemId, string> = {
-  speakSelection: '朗读选中',
-  speakFromHere: '从此处朗读',
+  replace: '替换',
   copy: '复制',
+  bookmark: '书签',
+  speakSelection: '朗读',
+  speakFromHere: '从此处朗读',
   dict: '字典',
+  searchContent: '全文搜索',
+  browser: '浏览器',
+  share: '分享',
 };
 
-export const DEFAULT_TEXT_VIEWER_CUSTOM_PAGE_KEYS = {
-  prev: [] as string[],
-  next: [] as string[],
-};
+export const TEXT_VIEWER_TEXT_MENU_COLLAPSED_PRIMARY_COUNT = 5;
 
 export const DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS: TextViewerTextMenuItemId[] = [
-  'speakSelection',
-  'speakFromHere',
+  ...TEXT_VIEWER_TEXT_MENU_ITEM_ORDER,
 ];
 
 export function normalizeProgressBarBehavior(
@@ -631,14 +647,20 @@ export function normalizeCustomPageKeys(
   };
 }
 
+export const DEFAULT_TEXT_VIEWER_CUSTOM_PAGE_KEYS = {
+  prev: [] as string[],
+  next: [] as string[],
+};
+
 export function normalizeTextMenuVisibleItems(
   raw: string[] | undefined | null,
 ): TextViewerTextMenuItemId[] {
+  const allowed = new Set<string>(TEXT_VIEWER_TEXT_MENU_ITEM_IDS);
   if (!Array.isArray(raw) || raw.length === 0) {
     return [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS];
   }
-  const allowed = new Set<string>(TEXT_VIEWER_TEXT_MENU_ITEM_IDS);
-  return raw.filter((id): id is TextViewerTextMenuItemId => allowed.has(id));
+  const filtered = raw.filter((id): id is TextViewerTextMenuItemId => allowed.has(id));
+  return filtered.length > 0 ? filtered : [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS];
 }
 
 export const defaultTextViewerUiConfig: TextViewerUiConfig = {
@@ -716,6 +738,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   selectText: true,
   expandTextMenu: false,
   textMenuVisibleItems: [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS],
+  textMenuHiddenProcessTextItems: [],
   clickImgWay: 0,
   screenOrientation: 0,
   keepScreenOn: 0,

@@ -350,6 +350,7 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
               />
               <SettingsSwitchRow
                 label="展开文本选择菜单"
+                description="开启后在选区菜单中一次性显示全部可见项（宽度足够时为单行）"
                 checked={config().expandTextMenu === true}
                 onChange={(v) => setConfig({ expandTextMenu: v })}
               />
