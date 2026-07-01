@@ -44,6 +44,13 @@ function removeBodyPortalWrapper(backdrop: HTMLElement): void {
 function removeOrphanBodyDialogPortals(): void {
   document.body.querySelectorAll<HTMLElement>(':scope > div').forEach((wrapper) => {
     if (!isBodyPortalWrapper(wrapper)) return;
+    // 仅保留仍展开的换源弹窗；已关闭的 portal 须清理，避免遮罩挡住正文长按/点击
+    if (
+      wrapper.querySelector('[data-change-source-dialog]') &&
+      wrapper.querySelector('[data-app-overlay-surface][data-expanded]')
+    ) {
+      return;
+    }
     if (wrapper.children.length === 0) {
       wrapper.remove();
       return;

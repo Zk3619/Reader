@@ -81,8 +81,8 @@ function chapterNumFromWordCountText(text?: string | null): number {
 }
 
 function compareChangeSourceBooks(a: SearchBook, b: SearchBook, loadWordCount: boolean): number {
-  const bookScoreA = getBookScore(a.origin, a.name, a.author);
-  const bookScoreB = getBookScore(b.origin, b.name, b.author);
+  const bookScoreA = getBookScore(a.origin, a.name, a.author ?? '', a.bookUrl);
+  const bookScoreB = getBookScore(b.origin, b.name, b.author ?? '', b.bookUrl);
   if (bookScoreA !== bookScoreB) return bookScoreB - bookScoreA;
 
   const sourceScoreA = getSourceScore(a.origin);

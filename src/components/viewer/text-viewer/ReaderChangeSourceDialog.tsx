@@ -107,6 +107,8 @@ export interface ReaderChangeSourceDialogProps {
   onOpenSourcesManage?: () => void;
   /** 编辑书源（换源项右键菜单） */
   onSourceEdit?: (source: BookSource) => void;
+  /** 书源编辑全屏页是否打开（打开时暂挂弹窗，避免被模态栈误关） */
+  sourceEditActive?: () => boolean;
 }
 
 function formatRespondTime(ms: number): string {
@@ -118,6 +120,7 @@ function formatRespondTime(ms: number): string {
 export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   const showModePicker = () =>
     props.showModePicker ?? (props.presentation ?? 'viewer') !== 'app';
+  const sourceEditSuspended = () => props.sourceEditActive?.() === true;
   const [mode, setMode] = createSignal<ChangeSourceMode>(props.defaultMode ?? 'book');
   const modeOptionRowClass =
     'flex cursor-pointer items-center rounded-md px-2 py-1.5 hover:bg-muted/50 has-[[data-checked]]:bg-accent has-[[data-checked]]:text-accent-foreground';
@@ -150,7 +153,8 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     return Object.fromEntries(
       results().map((book) => [
         book.bookUrl,
-        overrides[book.bookUrl] ?? getBookScore(book.origin, book.name, book.author ?? ''),
+        overrides[book.bookUrl] ??
+          getBookScore(book.origin, book.name, book.author ?? '', book.bookUrl),
       ]),
     ) as Record<string, number>;
   });
@@ -242,6 +246,7 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   };
 
   const handleOpenChange = (open: boolean) => {
+    if (!open && sourceEditSuspended()) return;
     props.onOpenChange(open);
     if (!open) {
       session?.close();
@@ -420,7 +425,7 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   };
 
   const handleSetBookScore = (item: SearchBook, score: number) => {
-    setBookScore(item.origin, item.name, item.author ?? '', score);
+    setBookScore(item.origin, item.name, item.author ?? '', score, item.bookUrl);
     setScoreOverrides((prev) => ({ ...prev, [item.bookUrl]: score }));
     setScoreRevision((v) => v + 1);
     updateResults((books) => [...books]);
@@ -476,7 +481,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
       showAppToast({ title: '书源不存在', variant: 'destructive' });
       return;
     }
-    handleOpenChange(false);
     props.onSourceEdit?.(source);
   };
 
@@ -602,10 +606,16 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
         },
   );
 
+  const suspendedOverlayClass = () =>
+    sourceEditSuspended() ? 'pointer-events-none opacity-0' : undefined;
+  const suspendedContentClass = () =>
+    sourceEditSuspended() ? 'pointer-events-none invisible opacity-0' : undefined;
+
   return (
     <Dynamic
       component={dialogShell().Root}
       open={props.open}
+      modal={!sourceEditSuspended()}
       onOpenChange={handleOpenChange}
     >
       <Dynamic
@@ -614,10 +624,13 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           dialogVirtualListPanelWidth,
           hDialogMax,
           'flex flex-col overflow-hidden',
+          suspendedContentClass(),
         )}
+        overlayClass={suspendedOverlayClass()}
         onInteractOutside={preventDismissForFloatingOverlay}
         onPointerDownOutside={preventDismissForFloatingOverlay}
         onFocusOutside={preventDialogDismissForPopperLayer}
+        data-change-source-dialog=""
       >
         <Dynamic
           component={dialogShell().Header}
@@ -816,27 +829,23 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
             >
               <ul class="space-y-1">
                 <For each={results()}>
-                  {(item) => (
+                  {(book) => (
                     <li>
-                      <Show when={item} keyed>
-                        {(book) => (
-                          <ChangeSourceResultItem
-                            item={book}
-                            score={itemScores()[book.bookUrl] ?? 0}
-                            current={isCurrentSource(book)}
-                            applying={applying()}
-                            showWordCountMeta={showWordCountMeta()}
-                            formatRespondTime={formatRespondTime}
-                            onSelect={handleItemClick}
-                            onSetScore={handleSetBookScore}
-                            onPinTop={(row) => void handlePinSourceTop(row)}
-                            onPinBottom={(row) => void handlePinSourceBottom(row)}
-                            onEditSource={(row) => void handleEditSource(row)}
-                            onDisableSource={(row) => void handleDisableSource(row)}
-                            onDeleteSource={handleDeleteSource}
-                          />
-                        )}
-                      </Show>
+                      <ChangeSourceResultItem
+                        item={book}
+                        score={itemScores()[book.bookUrl] ?? 0}
+                        current={isCurrentSource(book)}
+                        applying={applying()}
+                        showWordCountMeta={showWordCountMeta()}
+                        formatRespondTime={formatRespondTime}
+                        onSelect={handleItemClick}
+                        onSetScore={handleSetBookScore}
+                        onPinTop={(row) => void handlePinSourceTop(row)}
+                        onPinBottom={(row) => void handlePinSourceBottom(row)}
+                        onEditSource={(row) => void handleEditSource(row)}
+                        onDisableSource={(row) => void handleDisableSource(row)}
+                        onDeleteSource={handleDeleteSource}
+                      />
                     </li>
                   )}
                 </For>
