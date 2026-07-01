@@ -4,7 +4,10 @@
 
 import { createSignal, Show, For, onMount, onCleanup, createEffect, createMemo, type JSX } from 'solid-js';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
-import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import {
+  APP_SOURCE_EDIT_DIALOG_Z,
+  APP_SOURCE_EDIT_LAYER_Z,
+} from '@/lib/ui/overlay-z';
 import { cn } from '@/lib/utils';
 import {
   PageHeader,
@@ -116,6 +119,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
   const [codeEditOpen, setCodeEditOpen] = createSignal(false);
   const [shareQrOpen, setShareQrOpen] = createSignal(false);
   const [qrImportOpen, setQrImportOpen] = createSignal(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = createSignal(false);
   const debugStore = createSourceDebugPanelStore();
 
   const isDirty = () => baseline() !== legadoEditSnapshot(draft());
@@ -185,22 +189,36 @@ export function SourceEditPage(props: SourceEditPageProps) {
     setDraft((prev) => updater(cloneDraft(prev)));
   }
 
-  function handleBack() {
+  function requestLeave() {
     if (isDirty()) {
-      if (!confirm('有未保存的修改，确定离开吗？')) return;
+      setLeaveDialogOpen(true);
+      return;
     }
     props.onClose();
   }
 
+  function handleBack() {
+    if (leaveDialogOpen()) {
+      setLeaveDialogOpen(false);
+      return;
+    }
+    requestLeave();
+  }
+
   useBackHandler(() => () => {
+    if (leaveDialogOpen()) {
+      setLeaveDialogOpen(false);
+      return true;
+    }
     if (isDirty()) {
-      if (!confirm('有未保存的修改，确定离开吗？')) return true;
+      setLeaveDialogOpen(true);
+      return true;
     }
     props.onClose();
     return true;
   });
 
-  async function handleSave() {
+  async function persistDraft(): Promise<boolean> {
     setSaving(true);
     try {
       const saved = await saveLegadoEditSource(draft(), props.sourceUrl, {
@@ -209,16 +227,35 @@ export function SourceEditPage(props: SourceEditPageProps) {
       setBaseline(legadoEditSnapshot(draft()));
       showAppToast({ title: isNew() ? '书源已创建' : '书源已保存', variant: 'default' });
       props.onSaved?.(saved);
-      props.onClose();
+      return true;
     } catch (e) {
       showAppToast({
         title: '保存失败',
         description: e instanceof Error ? e.message : String(e),
         variant: 'destructive',
       });
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSave() {
+    if (await persistDraft()) {
+      props.onClose();
+    }
+  }
+
+  async function handleLeaveSaveAndExit() {
+    if (await persistDraft()) {
+      setLeaveDialogOpen(false);
+      props.onClose();
+    }
+  }
+
+  function handleLeaveDiscard() {
+    setLeaveDialogOpen(false);
+    props.onClose();
   }
 
   function openJsonDialog() {
@@ -412,7 +449,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
               </AppSelectValue>
               <AppSelectIcon />
             </AppSelectTrigger>
-            <AppSelectContent portalZClass="z-[60]">
+            <AppSelectContent portalZClass={APP_SOURCE_EDIT_DIALOG_Z}>
               <AppSelectListbox />
             </AppSelectContent>
           </AppSelect>
@@ -585,8 +622,8 @@ export function SourceEditPage(props: SourceEditPageProps) {
   return (
     <section
       class={cn(
-        'fixed inset-0 flex flex-col overflow-hidden bg-background',
-        overlayLayerZ().dialog,
+        'pointer-events-auto fixed inset-0 flex flex-col overflow-hidden bg-background',
+        APP_SOURCE_EDIT_LAYER_Z,
       )}
       role="dialog"
       aria-modal="true"
@@ -672,7 +709,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
       <AppDialog open={jsonDialogOpen()} onOpenChange={setJsonDialogOpen}>
         <AppDialogContent
           class="flex max-h-[min(90vh,720px)] max-w-2xl flex-col"
-          portalZClass="z-[70]"
+          portalZClass={APP_SOURCE_EDIT_DIALOG_Z}
         >
           <AppDialogHeader>
             <AppDialogTitle>编辑 JSON</AppDialogTitle>
@@ -736,7 +773,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
         target={codeEditTarget()}
         onOpenChange={setCodeEditOpen}
         onApply={applyCodeEdit}
-        portalZClass="z-[70]"
+        portalZClass={APP_SOURCE_EDIT_DIALOG_Z}
       />
 
       <SourceShareQrDialog
@@ -748,13 +785,49 @@ export function SourceEditPage(props: SourceEditPageProps) {
       <ImportSourceQrDialog
         open={qrImportOpen()}
         onOpenChange={setQrImportOpen}
-        portalZClass="z-[70]"
+        portalZClass={APP_SOURCE_EDIT_DIALOG_Z}
         autoImport
         onIdentify={(raw) => {
           props.onImportFromQr?.(raw);
           setQrImportOpen(false);
         }}
       />
+
+      <AppDialog open={leaveDialogOpen()} onOpenChange={setLeaveDialogOpen}>
+        <AppDialogContent class="max-w-sm" portalZClass={APP_SOURCE_EDIT_DIALOG_Z}>
+          <AppDialogHeader>
+            <AppDialogTitle>未保存的修改</AppDialogTitle>
+            <AppDialogDescription>
+              当前书源有未保存的修改，离开前请选择如何处理。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter class="flex-col gap-2 sm:flex-col sm:space-x-0">
+            <Button
+              class="w-full"
+              onClick={() => void handleLeaveSaveAndExit()}
+              disabled={saving()}
+            >
+              {saving() ? '保存中…' : '保存并退出'}
+            </Button>
+            <Button
+              variant="outline"
+              class="w-full"
+              onClick={handleLeaveDiscard}
+              disabled={saving()}
+            >
+              不保存退出
+            </Button>
+            <Button
+              variant="ghost"
+              class="w-full"
+              onClick={() => setLeaveDialogOpen(false)}
+              disabled={saving()}
+            >
+              取消
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </section>
   );
 }

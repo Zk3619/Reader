@@ -23,8 +23,20 @@ function saveStore(store: ScoreStore): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
 }
 
-function bookScoreKey(origin: string, name: string, author: string): string {
-  return `${origin}_${name}_${author}`;
+function normalizeAuthor(author: string | undefined): string {
+  return author ?? '';
+}
+
+/** 换源列表按 bookUrl 独立评分；无 bookUrl 时回退 Legado 的 origin+书名+作者 */
+function resolveBookScoreKey(
+  origin: string,
+  name: string,
+  author: string | undefined,
+  bookUrl?: string,
+): string {
+  const url = bookUrl?.trim();
+  if (url) return `bu:${url}`;
+  return `${origin}_${name}_${normalizeAuthor(author)}`;
 }
 
 export function setBookScore(
@@ -32,9 +44,10 @@ export function setBookScore(
   name: string,
   author: string,
   score: number,
+  bookUrl?: string,
 ): void {
   const store = loadStore();
-  const key = bookScoreKey(origin, name, author);
+  const key = resolveBookScoreKey(origin, name, author, bookUrl);
   const prevScore = store[key] ?? 0;
   let delta = score;
   if (prevScore !== 0) {
@@ -45,8 +58,15 @@ export function setBookScore(
   saveStore(store);
 }
 
-export function getBookScore(origin: string, name: string, author: string): number {
-  return loadStore()[bookScoreKey(origin, name, author)] ?? 0;
+export function getBookScore(
+  origin: string,
+  name: string,
+  author: string,
+  bookUrl?: string,
+): number {
+  const store = loadStore();
+  const key = resolveBookScoreKey(origin, name, author, bookUrl);
+  return store[key] ?? 0;
 }
 
 export function getSourceScore(origin: string): number {

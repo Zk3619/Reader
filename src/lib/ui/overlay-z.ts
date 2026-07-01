@@ -43,6 +43,13 @@ export const APP_READER_CLICK_REGIONAL_OVERLAY_Z = 'z-50';
 /** 内嵌 WebView 浮层 */
 export const APP_INNER_WEB_LAYER_Z = 'z-[150]';
 
+/** 书源 / 订阅源编辑全屏页（高于阅读器内 Dialog，须 pointer-events-auto） */
+export const APP_SOURCE_EDIT_LAYER_Z = 'z-[140]';
+
+/** 书源编辑页内 Dialog / Select Portal */
+export const APP_SOURCE_EDIT_DIALOG_OVERLAY_Z = 'z-[145]';
+export const APP_SOURCE_EDIT_DIALOG_Z = 'z-[146]';
+
 /** 内嵌 Web 打开时的主 WebView 模态（须高于 inner-web layer） */
 export const APP_INNER_WEB_DIALOG_Z = 'z-[160]';
 

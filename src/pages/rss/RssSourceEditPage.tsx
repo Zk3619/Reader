@@ -81,6 +81,8 @@ import {
 } from '@/lib/rss-source/legado-rss-source-editor';
 import * as rssSourcesDb from '@/lib/database/rss-sources';
 import type { RssSource } from '@/types';
+import { APP_SOURCE_EDIT_LAYER_Z } from '@/lib/ui/overlay-z';
+import { cn } from '@/lib/utils';
 
 const RSS_EDIT_TEXTAREA_CLASS =
   'min-h-[4.5rem] max-h-60 resize-none overflow-y-auto [field-sizing:content]';
@@ -540,7 +542,10 @@ export function RssSourceEditPage(props: RssSourceEditPageProps) {
 
   return (
     <section
-      class="fixed inset-0 z-[120] flex flex-col overflow-hidden bg-background"
+      class={cn(
+        'pointer-events-auto fixed inset-0 flex flex-col overflow-hidden bg-background',
+        APP_SOURCE_EDIT_LAYER_Z,
+      )}
       role="dialog"
       aria-modal="true"
       aria-label={pageTitle()}

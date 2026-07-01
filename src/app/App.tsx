@@ -3694,6 +3694,7 @@ function AppContent() {
                   <Match when={entry.kind === "text-viewer"}>
                     <BookReader
                 entryVisible={() => overlayEntryVisible(entry)}
+                sourceEditActive={() => sourceEditTarget() !== null}
                 onClose={requestCloseReader}
                 onOpenBookInfo={() => void openBookInfoFromViewerBook(textViewerStore.state.book)}
                 onSourceEdit={(source) => openSourceEditor(source)}
