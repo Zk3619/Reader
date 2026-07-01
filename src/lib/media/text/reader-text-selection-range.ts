@@ -169,17 +169,6 @@ export function getSelectionHandleLayouts(): SelectionHandleLayout[] | null {
   ];
 }
 
-function caretRectFromRange(range: Range): DOMRect {
-  const rects = range.getClientRects();
-  if (rects.length > 0) {
-    const rect = rects[0]!;
-    if (rect.width > 0 || rect.height > 0) return rect;
-  }
-  const rect = range.getBoundingClientRect();
-  if (rect.width > 0 || rect.height > 0) return rect;
-  return caretPointRect(rect.left, rect.top, rect.height);
-}
-
 function layoutFromCaretRect(side: SelectionHandleSide, rect: DOMRect): SelectionHandleLayout {
   const size = READER_SELECTION_CURSOR_SIZE_PX;
   const endAnchorX = rect.width > 0 ? rect.right : rect.left;
@@ -207,7 +196,7 @@ export function getSelectionHandleLayoutAtPoint(
     (root instanceof HTMLElement ? queryReaderTextContentRoot(root) : null);
   const caret = resolveCaretForDrag(x, y, contentRoot);
   if (!caret || !isNodeWithinRoot(caret.startContainer, contentRoot)) return null;
-  return layoutFromCaretRect(side, caretRectFromRange(caret));
+  return layoutFromCaretRect(side, boundaryCaretRect(caret, side === 'start'));
 }
 
 function resolveCaretForDrag(
@@ -387,13 +376,16 @@ function buildRangeFromFrozenCaret(
   return expandCollapsedAtMeeting(frozen, grabbedSide);
 }
 
-/** 拖拽帧游标布局：passive 钉在 frozen，active 跟手（交叉后 side 自动切换） */
+/** 拖拽帧游标布局：优先从已更新的整段选区取边界（图片等非文本结尾与松手后一致） */
 export function getDragHandleLayouts(
   session: SelectionDragSession,
   movingSide: SelectionHandleSide,
   x: number,
   y: number,
 ): SelectionHandleLayout[] | null {
+  const fromSelection = getSelectionHandleLayouts();
+  if (fromSelection) return fromSelection;
+
   const passiveSide: SelectionHandleSide = movingSide === 'start' ? 'end' : 'start';
   const active = getSelectionHandleLayoutAtPoint(movingSide, x, y, session.contentRoot);
   const passive = getSelectionHandleLayoutAtBoundary(
@@ -419,6 +411,13 @@ export function buildSelectionDragPreview(
   frozen: SelectionFrozenAnchor,
   root?: Element | null,
 ): SelectionDragPreview | null {
+  const fromSelection = getSelectionHandleLayouts();
+  if (fromSelection?.length === 2) {
+    const active = fromSelection.find((layout) => layout.side === movingSide);
+    const passive = fromSelection.find((layout) => layout.side !== movingSide);
+    if (active && passive) return { active, passive };
+  }
+
   const active = getSelectionHandleLayoutAtPoint(movingSide, x, y, root);
   const passiveSide: SelectionHandleSide = movingSide === 'start' ? 'end' : 'start';
   const passive = getSelectionHandleLayoutAtBoundary(

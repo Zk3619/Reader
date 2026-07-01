@@ -12,6 +12,10 @@ import {
   MEDIA_VIEWER_CLICK_PAIR_MS,
   createMediaViewerChromeInputHandlers,
 } from '@/lib/media/media-viewer-chrome-input';
+import {
+  clearReaderRegionalTapSuppress,
+  markReaderRegionalTapSuppressed,
+} from '@/lib/media/text/reader-text-selection-gesture';
 
 function clickEvent(): MouseEvent {
   return {
@@ -38,6 +42,7 @@ describe('media viewer chrome input', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    clearReaderRegionalTapSuppress();
   });
 
   it('desktop pointer leave shell shows bars', () => {
@@ -295,6 +300,96 @@ describe('media viewer chrome input', () => {
     const ev = clickEvent();
     handlers.onContentDblClick(ev);
     expect(barToggles).toBe(0);
+    handlers.dispose();
+  });
+
+  it('first click after blur sync still dismisses selection without chrome toggle', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 Windows NT 10.0' } as Navigator,
+    );
+    const removeAttribute = vi.fn();
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+        removeAllRanges: vi.fn(),
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute,
+      },
+      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    let barToggles = 0;
+    let visible = true;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => visible,
+      setHeaderVisible: (v) => {
+        visible = v;
+      },
+      toggleBars: () => {
+        barToggles += 1;
+      },
+      enabled: () => true,
+    });
+    handlers.onShellPointerLeave(pointerLeaveEvent(null));
+    expect(visible).toBe(true);
+    handlers.onShellPointerEnter({} as PointerEvent);
+    handlers.onContentPrimaryClick(clickEvent(), () => barToggles++);
+    expect(barToggles).toBe(0);
+    expect(visible).toBe(true);
+    expect(removeAttribute).toHaveBeenCalledWith('data-reader-text-selection-active');
+    handlers.dispose();
+  });
+
+  it('second click toggles chrome after orphan selection dismiss', () => {
+    vi.stubGlobal(
+      'navigator',
+      { userAgent: 'Mozilla/5.0 iPhone' } as Navigator,
+    );
+    let hasMark = true;
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+        removeAllRanges: vi.fn(),
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) =>
+          name === 'data-reader-text-selection-active' && hasMark,
+        removeAttribute: vi.fn(() => {
+          hasMark = false;
+        }),
+      },
+      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    let barToggles = 0;
+    const handlers = createMediaViewerChromeInputHandlers({
+      headerVisible: () => false,
+      setHeaderVisible: () => {},
+      toggleBars: () => {
+        barToggles += 1;
+      },
+      enabled: () => true,
+    });
+    markReaderRegionalTapSuppressed();
+    handlers.onContentPrimaryClick(clickEvent(), () => barToggles++);
+    expect(barToggles).toBe(0);
+    expect(hasMark).toBe(false);
+    clearReaderRegionalTapSuppress();
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS + 1);
+    handlers.onContentPrimaryClick(clickEvent(), () => barToggles++);
+    vi.advanceTimersByTime(MEDIA_VIEWER_CLICK_PAIR_MS);
+    expect(barToggles).toBe(1);
     handlers.dispose();
   });
 });

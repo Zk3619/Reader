@@ -49,6 +49,8 @@ import type { ReaderClickActionId } from '@/lib/media/text/reader-click-actions'
 import {
   findPagedClickContainer,
   resolveRegionalClickAction,
+  shouldDismissChromeOverRegionalClick,
+  viewerChromeBarsCollapsible,
 } from '@/lib/media/viewer-regional-click';
 import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
 import {
@@ -75,9 +77,18 @@ export interface ImageViewerPageProps {
   entryVisible?: Accessor<boolean>;
 }
 
-function ImageViewerChromeBridge(props: { onReady: (toggleBars: () => void) => void }) {
+function ImageViewerChromeBridge(props: {
+  onReady: (toggleBars: () => void) => void;
+  onChromeBarsVisible?: (visible: boolean) => void;
+}) {
   const shell = useMediaViewerShell();
-  onMount(() => props.onReady(() => shell.toggleBars()));
+  onMount(() => {
+    props.onChromeBarsVisible?.(shell.headerVisible());
+    props.onReady(() => shell.toggleBars());
+  });
+  createEffect(() => {
+    props.onChromeBarsVisible?.(shell.headerVisible());
+  });
   return null;
 }
 
@@ -92,6 +103,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
   const [batchRetryToken, setBatchRetryToken] = createSignal(0);
   const [viewPage, setViewPage] = createSignal(1);
+  const [chromeBarsVisible, setChromeBarsVisible] = createSignal(true);
 
   let toggleChromeBars: () => void = () => undefined;
   let pagedNav: ReaderPagedNavApi | undefined;
@@ -345,6 +357,16 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       tapStartTime = 0;
       return;
     }
+    if (
+      shouldDismissChromeOverRegionalClick(
+        chromeBarsVisible(),
+        viewerChromeBarsCollapsible(uiConfig().viewerChromeLayout),
+      )
+    ) {
+      toggleChromeBars();
+      tapStartTime = 0;
+      return;
+    }
     const container = findPagedClickContainer(e);
     const action = resolveRegionalClickAction(
       e,
@@ -399,6 +421,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
           onReady={(toggle) => {
             toggleChromeBars = toggle;
           }}
+          onChromeBarsVisible={setChromeBarsVisible}
         />
         <MediaViewerShellMain>
           <MediaViewerChromeSlots

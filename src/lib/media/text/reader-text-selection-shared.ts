@@ -7,12 +7,14 @@ import {
   isReaderHandleSelectMode,
   isSelectionHandleDragActive,
   shouldSuppressReaderRegionalTap,
+  syncReaderTextSelectionSurface,
   type ReaderTextSelectionGestureHandle,
 } from '@/lib/media/text/reader-text-selection-gesture';
 import { textViewerStore } from '@/stores/viewer';
 
 let sharedGesture: ReaderTextSelectionGestureHandle | null = null;
 let selectStartGuardAttached = false;
+let selectionSurfaceSyncAttached = false;
 /** 顶底栏隐藏时才允许长按选文（由 TextViewerPage 注入） */
 let readerTextSelectChromeGate: () => boolean = () => false;
 
@@ -47,8 +49,18 @@ function ensureReaderTextSelectStartGuard(): void {
   );
 }
 
+function ensureReaderTextSelectionSurfaceSync(): void {
+  if (selectionSurfaceSyncAttached || typeof window === 'undefined') return;
+  selectionSurfaceSyncAttached = true;
+  const sync = () => syncReaderTextSelectionSurface();
+  window.addEventListener('blur', sync);
+  window.addEventListener('focus', sync);
+  document.addEventListener('visibilitychange', sync);
+}
+
 export function getSharedReaderTextSelectionGesture(): ReaderTextSelectionGestureHandle {
   ensureReaderTextSelectStartGuard();
+  ensureReaderTextSelectionSurfaceSync();
   if (!sharedGesture) {
     sharedGesture = createReaderTextSelectionGesture({
       enabled: () => textViewerStore.state.config.selectText !== false,
@@ -63,6 +75,7 @@ export function resetSharedReaderTextSelectionGesture(): void {
   sharedGesture?.dispose();
   sharedGesture = null;
   readerTextSelectChromeGate = () => false;
+  selectionSurfaceSyncAttached = false;
 }
 
 export function isSelectionAnchorInReaderContent(): boolean {
@@ -115,4 +128,9 @@ export function resolveReaderContentRootFromSelection(
   return container?.querySelector<HTMLElement>('[data-reader-content]') ?? null;
 }
 
+export {
+  dismissReaderTextSelectionOnClick,
+  isReaderTextSelectionSurfaceActive,
+  syncReaderTextSelectionSurface,
+} from '@/lib/media/text/reader-text-selection-gesture';
 export { isReaderTextSelectionUiNode, READER_TEXT_SELECTION_UI_SELECTOR } from '@/lib/media/text/reader-text-selection-gesture';

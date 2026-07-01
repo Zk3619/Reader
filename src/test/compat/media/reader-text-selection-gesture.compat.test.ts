@@ -6,8 +6,11 @@ import {
   clearDocumentTextSelection,
   clearReaderRegionalTapSuppress,
   createReaderTextSelectionGesture,
+  dismissReaderTextSelectionOnClick,
   hasNonCollapsedTextSelection,
+  isReaderTextSelectionSurfaceActive,
   selectCharacterAtClientPoint,
+  syncReaderTextSelectionSurface,
 } from '@/lib/media/text/reader-text-selection-gesture';
 
 function pointer(id: number, x: number, y: number, pointerType: string = 'mouse') {
@@ -357,5 +360,130 @@ describe('selectCharacterAtClientPoint fallback', () => {
     expect(removeAttribute).toHaveBeenCalledWith('data-reader-text-selection-active');
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: READER_TEXT_SELECTION_CLEARED_EVENT }));
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'selectionchange' }));
+  });
+
+  it('isReaderTextSelectionSurfaceActive stays true when mark survives blur without selection', () => {
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute: vi.fn(),
+      },
+      dispatchEvent: vi.fn(),
+    });
+
+    expect(hasNonCollapsedTextSelection()).toBe(false);
+    expect(isReaderTextSelectionSurfaceActive()).toBe(true);
+  });
+
+  it('syncReaderTextSelectionSurface hides selection UI but keeps dismiss mark', () => {
+    const removeAttribute = vi.fn();
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+        removeAllRanges: vi.fn(),
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute,
+      },
+      dispatchEvent,
+    });
+
+    syncReaderTextSelectionSurface();
+
+    expect(removeAttribute).not.toHaveBeenCalled();
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: READER_TEXT_SELECTION_CLEARED_EVENT }),
+    );
+    expect(isReaderTextSelectionSurfaceActive()).toBe(true);
+    expect(dismissReaderTextSelectionOnClick()).toBe(true);
+  });
+
+  it('pointerdown dismiss keeps mark until click handler consumes it', () => {
+    const removeAllRanges = vi.fn();
+    const removeAttribute = vi.fn();
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+        removeAllRanges,
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute,
+      },
+      dispatchEvent: vi.fn(),
+    });
+
+    const gesture = createReaderTextSelectionGesture({ enabled: () => true });
+    const container = mockContainer();
+
+    gesture.onPointerDown(pointer(1, 5, 5), container);
+    expect(removeAllRanges).toHaveBeenCalled();
+    expect(removeAttribute).not.toHaveBeenCalled();
+    expect(isReaderTextSelectionSurfaceActive()).toBe(true);
+
+    gesture.onPointerUp(pointer(1, 5, 5));
+    expect(dismissReaderTextSelectionOnClick()).toBe(true);
+    expect(removeAttribute).toHaveBeenCalledWith('data-reader-text-selection-active');
+  });
+
+  it('dismissReaderTextSelectionOnClick consumes click when only active mark remains', () => {
+    const removeAllRanges = vi.fn();
+    const removeAttribute = vi.fn();
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: true,
+        toString: () => '',
+        removeAllRanges,
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute,
+      },
+      dispatchEvent,
+    });
+
+    clearReaderRegionalTapSuppress();
+    expect(dismissReaderTextSelectionOnClick()).toBe(true);
+    expect(removeAllRanges).toHaveBeenCalled();
+  });
+
+  it('dismissReaderTextSelectionOnClick does not clear live selection after long press', () => {
+    const removeAllRanges = vi.fn();
+    const removeAttribute = vi.fn();
+    vi.stubGlobal('window', {
+      getSelection: () => ({
+        isCollapsed: false,
+        toString: () => '字',
+        removeAllRanges,
+      }),
+    });
+    vi.stubGlobal('document', {
+      documentElement: {
+        hasAttribute: (name: string) => name === 'data-reader-text-selection-active',
+        removeAttribute,
+      },
+      dispatchEvent: vi.fn(),
+    });
+
+    expect(dismissReaderTextSelectionOnClick()).toBe(false);
+    expect(removeAllRanges).not.toHaveBeenCalled();
+    expect(removeAttribute).not.toHaveBeenCalled();
   });
 });

@@ -104,6 +104,31 @@ export function hasNonCollapsedTextSelection(): boolean {
   return !!sel && !sel.isCollapsed && sel.toString().length > 0;
 }
 
+/** 选区或选区 UI 仍视为活跃（失焦后浏览器可能已清选区但游标/标记未同步） */
+export function isReaderTextSelectionSurfaceActive(): boolean {
+  if (hasNonCollapsedTextSelection()) return true;
+  if (typeof document === 'undefined') return false;
+  return document.documentElement?.hasAttribute('data-reader-text-selection-active') ?? false;
+}
+
+/** 失焦/可见性变化后：浏览器可能已清 DOM 选区，仅同步隐藏游标/菜单 UI，保留 active 标记供首次单击 dismiss */
+export function syncReaderTextSelectionSurface(): void {
+  if (hasNonCollapsedTextSelection()) return;
+  if (typeof document === 'undefined') return;
+  if (!document.documentElement?.hasAttribute('data-reader-text-selection-active')) return;
+  document.dispatchEvent(new Event(READER_TEXT_SELECTION_CLEARED_EVENT));
+}
+
+/** 主区单击优先取消选区；返回 true 表示本次 click 应被吞掉（仅 orphan mark，不含刚建立/live 选区） */
+export function dismissReaderTextSelectionOnClick(): boolean {
+  if (hasNonCollapsedTextSelection()) return false;
+  if (typeof document === 'undefined') return false;
+  if (!document.documentElement?.hasAttribute('data-reader-text-selection-active')) return false;
+  clearDocumentTextSelection({ keepDismissMark: false });
+  clearReaderRegionalTapSuppress();
+  return true;
+}
+
 export function markReaderTextSelectionActive(): void {
   if (typeof document === 'undefined') return;
   document.documentElement?.setAttribute('data-reader-text-selection-active', '');
@@ -117,11 +142,13 @@ export function clearReaderTextSelectionActiveMark(): void {
 /** 选区被清除时派发，供游标/菜单等 UI 立即同步（不依赖 selectionchange 时序） */
 export const READER_TEXT_SELECTION_CLEARED_EVENT = 'reader-text-selection-cleared';
 
-export function clearDocumentTextSelection(): void {
+export function clearDocumentTextSelection(options?: { keepDismissMark?: boolean }): void {
   if (typeof window === 'undefined') return;
   const sel = window.getSelection();
   sel?.removeAllRanges();
-  clearReaderTextSelectionActiveMark();
+  if (options?.keepDismissMark !== true) {
+    clearReaderTextSelectionActiveMark();
+  }
   if (typeof document !== 'undefined') {
     document.dispatchEvent(new Event(READER_TEXT_SELECTION_CLEARED_EVENT));
     document.dispatchEvent(new Event('selectionchange'));
@@ -415,9 +442,14 @@ export function createReaderTextSelectionGesture(options: {
         consumeClickOnSelectionBody = true;
         return;
       }
-      clearDocumentTextSelection();
+      clearDocumentTextSelection({ keepDismissMark: true });
       pressOnTextSelected = true;
-      markSuppressTap();
+      return;
+    }
+
+    if (isReaderTextSelectionSurfaceActive()) {
+      clearDocumentTextSelection({ keepDismissMark: true });
+      pressOnTextSelected = true;
       return;
     }
 

@@ -87,7 +87,7 @@ export function attachReaderPagedTextSelectionBridge(
   const onPointerUpCapture = (e: PointerEvent) => {
     if (options.isHandleDragActive()) return;
     if (finishGesturePointer(e.pointerId, e.clientX, e.clientY)) {
-      e.preventDefault();
+      e.preventDefault?.();
     }
     if (e.pointerType === 'mouse') {
       mouseSessionActive = false;
@@ -151,7 +151,7 @@ export function attachReaderPagedTextSelectionBridge(
       suppress = finishGesturePointer(gesturePointerId, e.clientX, e.clientY);
     }
     if (suppress) {
-      e.preventDefault();
+      e.preventDefault?.();
     }
   };
 

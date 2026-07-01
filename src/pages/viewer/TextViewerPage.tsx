@@ -60,15 +60,17 @@ import { shouldShowClickActionHint } from '@/lib/media/text/reader-click-hint-st
 import {
   findPagedClickContainer,
   resolveRegionalClickAction,
+  canStartReaderTextLongPressForChrome,
+  shouldDismissChromeOverRegionalClick,
+  viewerChromeBarsCollapsible,
 } from '@/lib/media/viewer-regional-click';
 import { shouldSuppressPagedRegionalTap } from '@/lib/media/text/reader-paged-pointer-gesture';
 import {
-  clearDocumentTextSelection,
-  hasNonCollapsedTextSelection,
+  dismissReaderTextSelectionOnClick,
   isReaderHandleSelectMode,
+  isReaderTextSelectionSurfaceActive,
   isReaderTextSelectionUiNode,
   isSelectionHandleDragActive,
-  markReaderSelectionDismissClickConsumed,
   shouldSuppressReaderRegionalTap,
 } from '@/lib/media/text/reader-text-selection-gesture';
 import { getSharedReaderTextSelectionGesture, resetSharedReaderTextSelectionGesture, setReaderTextSelectChromeGate } from '@/lib/media/text/reader-text-selection-shared';
@@ -90,6 +92,7 @@ import { getReadAloudProgress } from '@/lib/media/text/read-aloud-progress';
 import { syncReadAloudProgressToViewport } from '@/lib/media/text/read-aloud-viewport-sync';
 import { ReaderReadAloudMiniBar } from '@/components/viewer/text-viewer/ReaderReadAloudMiniBar';
 import { ReaderTextSelectionMenu } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
+import type { ReaderTextSelectionMenuActions } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
 import { ReaderTextSelectionHandles } from '@/components/viewer/text-viewer/ReaderTextSelectionHandles';
 import { resolveReaderContentRootFromSelection } from '@/lib/media/text/reader-text-selection-shared';
 import { type ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
@@ -97,7 +100,7 @@ import {
   addReaderBookmark,
   selectionTextFromDocument,
 } from '@/lib/media/text/reader-bookmark';
-import type { Bookmark, BookSource } from '@/types';
+import type { Bookmark, BookSource, ReplaceRule } from '@/types';
 import { cn } from '@/lib/utils';
 import { isMobile } from '@/lib/platform/detect';
 import {
@@ -107,6 +110,11 @@ import {
   reparseLocalTxtBook,
 } from '@/lib/local-book';
 import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/txt-toc-rules/TxtTocRulePickDialog';
+import {
+  ReplaceRuleEditDialog,
+  type ReplaceRuleDraft,
+} from '@/components/replace-rules/ReplaceRuleEditDialog';
+import * as replaceDb from '@/lib/database/replace-rules';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { VIEWER_SHELL_OVERLAY_EVENTS } from '@/lib/ui/overlay-cleanup';
@@ -156,6 +164,8 @@ export interface BookReaderProps {
   onOpenSourcesManage?: () => void;
   /** 导航栈条目是否栈顶可见 */
   entryVisible?: Accessor<boolean>;
+  /** 书源编辑全屏页是否打开（换源弹窗暂挂时不应被关闭） */
+  sourceEditActive?: Accessor<boolean>;
 }
 
 /** 在 Shell 内挂载，供分区「菜单」动作与 Shell 顶栏显隐同步 */
@@ -196,11 +206,29 @@ export function BookReader(props: BookReaderProps) {
   const [readAloudTooltipSuspended, setReadAloudTooltipSuspended] = createSignal(false);
   const [offlineCacheDialogOpen, setOfflineCacheDialogOpen] = createSignal(false);
   const [dictOpen, setDictOpen] = createSignal(false);
-  const [dictWord] = createSignal('');
+  const [dictWord, setDictWord] = createSignal('');
   const [searchOpen, setSearchOpen] = createSignal(false);
+  const [searchInitialKeyword, setSearchInitialKeyword] = createSignal('');
+  const [selectionReplaceOpen, setSelectionReplaceOpen] = createSignal(false);
+  const [selectionReplaceDraft, setSelectionReplaceDraft] = createSignal<ReplaceRuleDraft | null>(
+    null,
+  );
   const [bookmarksOpen, setBookmarksOpen] = createSignal(false);
   const [contentEnterKey, setContentEnterKey] = createSignal(0);
   const [changeSourceOpen, setChangeSourceOpen] = createSignal(false);
+  let restoreChangeSourceAfterEdit = false;
+
+  createEffect(
+    on(
+      () => props.sourceEditActive?.(),
+      (active, wasActive) => {
+        if (!active && wasActive && restoreChangeSourceAfterEdit) {
+          restoreChangeSourceAfterEdit = false;
+          setChangeSourceOpen(true);
+        }
+      },
+    ),
+  );
   const [txtTocRuleOpen, setTxtTocRuleOpen] = createSignal(false);
   const [txtTocSample, setTxtTocSample] = createSignal('');
   const [txtTocReparsing, setTxtTocReparsing] = createSignal(false);
@@ -327,7 +355,9 @@ export function BookReader(props: BookReaderProps) {
     setDictOpen(false);
     setSearchOpen(false);
     setBookmarksOpen(false);
-    setChangeSourceOpen(false);
+    if (!props.sourceEditActive?.()) {
+      setChangeSourceOpen(false);
+    }
     setTxtTocRuleOpen(false);
     setClickRegionalOpen(false);
     setClickActionPickerOpen(false);
@@ -355,10 +385,13 @@ export function BookReader(props: BookReaderProps) {
   let tapMoved = false;
 
   const textSelectGesture = getSharedReaderTextSelectionGesture();
-  setReaderTextSelectChromeGate(() => !chromeBarsVisible());
-  createEffect(() => {
-    setReaderTextSelectChromeGate(() => !chromeBarsVisible());
-  });
+  const syncTextSelectChromeGate = () => {
+    setReaderTextSelectChromeGate(() =>
+      canStartReaderTextLongPressForChrome(chromeBarsVisible(), chromeLayout()),
+    );
+  };
+  syncTextSelectChromeGate();
+  createEffect(syncTextSelectChromeGate);
 
   /** 按页：视口外（overlay 等）点击取消选区；长按选文仍由 ReaderPagedViewport bridge 处理 */
   let detachPagedSelectionDismiss: (() => void) | undefined;
@@ -380,7 +413,7 @@ export function BookReader(props: BookReaderProps) {
       if (isMediaViewerInteractiveClick(e.target)) return;
       const vp = pagedViewport();
       if (vp?.contains(e.target as Node)) return;
-      if (!hasNonCollapsedTextSelection()) return;
+      if (!isReaderTextSelectionSurfaceActive()) return;
       textSelectGesture.onPointerDown(e, el, e.target);
     };
 
@@ -584,12 +617,12 @@ export function BookReader(props: BookReaderProps) {
     }
   };
 
-  const handleAddBookmark = async () => {
+  const handleAddBookmark = async (selectedOverride?: string) => {
     const b = book();
     const ch = currentChapter();
     if (!b || !ch) return;
     try {
-      const selected = selectionTextFromDocument();
+      const selected = selectedOverride ?? selectionTextFromDocument();
       let pos = chapterPos();
       let pageText: string | undefined;
       if (isPagedMode() && pagedNav) {
@@ -615,6 +648,61 @@ export function BookReader(props: BookReaderProps) {
       });
     }
   };
+
+  const buildSelectionReplaceScope = () => {
+    const scopes: string[] = [];
+    const b = book();
+    if (b?.name) scopes.push(b.name);
+    if (b?.origin) scopes.push(b.origin);
+    return scopes.join(';');
+  };
+
+  const openSelectionReplaceRule = (text: string) => {
+    const pattern = text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n');
+    if (!pattern) return;
+    setSelectionReplaceDraft({
+      name: '选区替换',
+      pattern,
+      replacement: '',
+      scope: buildSelectionReplaceScope(),
+      scopeContent: true,
+      scopeTitle: false,
+      isEnabled: true,
+      isRegex: false,
+      timeoutMillisecond: 3000,
+      order: 0,
+    });
+    setSelectionReplaceOpen(true);
+  };
+
+  const saveSelectionReplaceRule = async (rule: ReplaceRuleDraft) => {
+    if ('id' in rule && rule.id) {
+      await replaceDb.updateReplaceRule(rule as ReplaceRule);
+    } else {
+      await replaceDb.insertReplaceRule({ ...(rule as Omit<ReplaceRule, 'id'>), id: 0 });
+    }
+    window.dispatchEvent(new CustomEvent('replace-rules-refresh'));
+    showAppToast({ title: '替换规则已保存' });
+    setSelectionReplaceOpen(false);
+    setSelectionReplaceDraft(null);
+  };
+
+  const textSelectionMenuActions = (): ReaderTextSelectionMenuActions => ({
+    onReplace: openSelectionReplaceRule,
+    onBookmark: (text) => handleAddBookmark(text),
+    onDict: (text) => {
+      setDictWord(text.trim());
+      setDictOpen(true);
+    },
+    onSearchContent: (text) => {
+      setSearchInitialKeyword(text.trim());
+      setSearchOpen(true);
+    },
+  });
 
   const handleJumpBookmark = async (bm: Bookmark) => {
     await textViewerStore.jumpToChapter(bm.chapterIndex, {
@@ -1194,13 +1282,11 @@ export function BookReader(props: BookReaderProps) {
       tapStartTime = 0;
       return;
     }
-    if (shouldSuppressReaderRegionalTap() || textSelectGesture.shouldSuppressRegionalTap()) {
+    if (dismissReaderTextSelectionOnClick()) {
       tapStartTime = 0;
       return;
     }
-    if (hasNonCollapsedTextSelection()) {
-      clearDocumentTextSelection();
-      markReaderSelectionDismissClickConsumed();
+    if (shouldSuppressReaderRegionalTap() || textSelectGesture.shouldSuppressRegionalTap()) {
       tapStartTime = 0;
       return;
     }
@@ -1209,6 +1295,16 @@ export function BookReader(props: BookReaderProps) {
       return;
     }
     if (autoPager.active()) {
+      toggleChromeBars();
+      tapStartTime = 0;
+      return;
+    }
+    if (
+      shouldDismissChromeOverRegionalClick(
+        chromeBarsVisible(),
+        viewerChromeBarsCollapsible(chromeLayout()),
+      )
+    ) {
       toggleChromeBars();
       tapStartTime = 0;
       return;
@@ -1649,6 +1745,7 @@ export function BookReader(props: BookReaderProps) {
       <ReaderTextSelectionMenu
         sessionContext={readAloudSessionContext}
         contentRootRef={() => getScrollContainer()}
+        actions={textSelectionMenuActions()}
       />
       <ReaderTextSelectionHandles
         contentRootRef={() => resolveReaderContentRootFromSelection(getScrollContainer())}
@@ -1692,7 +1789,16 @@ export function BookReader(props: BookReaderProps) {
       <ReaderSearchDrawer
         open={searchOpen()}
         onOpenChange={setSearchOpen}
+        initialKeyword={searchInitialKeyword()}
         onJumpToChapter={(index) => void textViewerStore.jumpToChapter(index)}
+      />
+
+      <ReplaceRuleEditDialog
+        open={selectionReplaceOpen()}
+        onOpenChange={setSelectionReplaceOpen}
+        rule={selectionReplaceDraft()}
+        onSave={saveSelectionReplaceRule}
+        overlayLayer="viewer-stacked"
       />
 
       <ReaderBookmarksDrawer
@@ -1705,11 +1811,17 @@ export function BookReader(props: BookReaderProps) {
       <ReaderChangeSourceDialog
         open={changeSourceOpen()}
         onOpenChange={setChangeSourceOpen}
+        sourceEditActive={props.sourceEditActive}
         book={book() ?? null}
         chapterIndex={chapterIndex()}
         chapterTitle={displayChapterTitle()}
         onOpenSourcesManage={props.onOpenSourcesManage}
-        onSourceEdit={props.onSourceEdit}
+        onSourceEdit={(source) => {
+          if (changeSourceOpen()) {
+            restoreChangeSourceAfterEdit = true;
+          }
+          props.onSourceEdit?.(source);
+        }}
         onBookChanged={async (nextBook) => {
           await textViewerStore.openBook(nextBook);
         }}

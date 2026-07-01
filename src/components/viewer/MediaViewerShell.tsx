@@ -13,6 +13,7 @@ import {
   createMediaViewerChromeInputHandlers,
   type MediaViewerChromeInputHandlers,
 } from '@/lib/media/media-viewer-chrome-input';
+import { isReaderTextSelectionSurfaceActive } from '@/lib/media/text/reader-text-selection-gesture';
 import {
   isReadAloudBackgroundExitInProgress,
   clearReadAloudBackgroundExitFlag,
@@ -122,6 +123,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     if (isHeaderControlled() && !useSessionAutoHide()) return;
     const entryVisible = local.entryVisible;
     if (entryVisible !== undefined && !entryVisible()) return;
+    if (isReaderTextSelectionSurfaceActive()) return;
     setHeaderVisible(true);
     activeChromeInput()?.resetDismissGestureState();
   };
