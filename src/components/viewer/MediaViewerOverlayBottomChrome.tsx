@@ -8,6 +8,7 @@ import {
   resolveViewerChromeOverlayAppearanceStyle,
 } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
+import { appBottomChromePadding } from '@/lib/ui/viewport-classes';
 
 export interface MediaViewerOverlayBottomChromeProps {
   children: JSX.Element;
@@ -63,7 +64,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     >
       <div
         class={cn(
-          'reader-chrome-overlay-panel__surface flex w-full min-w-0 max-w-full flex-col app-bottom-chrome-inset',
+          'reader-chrome-overlay-panel__surface flex w-full min-w-0 max-w-full flex-col',
           local.surfaceClass,
         )}
       >
@@ -73,6 +74,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
             'flex min-w-0 max-w-full flex-col',
             !themedSurface() && mediaViewerChromeBottomFillClass,
             themedSurface() && 'border-t',
+            appBottomChromePadding,
           )}
           style={fillStyle()}
         >

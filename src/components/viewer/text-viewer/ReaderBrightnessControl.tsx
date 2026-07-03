@@ -21,7 +21,6 @@ import {
 } from '@/lib/platform/display-reader';
 import { ThemeLightIcon, ThemeScheduleIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
-import { READER_BRIGHTNESS_CHROME_GAP_PX } from '@/lib/viewer/reader-brightness-insets';
 import { useReaderBrightnessChromeInsets } from '@/lib/viewer/use-reader-brightness-chrome-insets';
 import { mediaViewerChromeHitTargetClass } from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
@@ -57,10 +56,10 @@ function BrightnessSlider(props: {
     <SliderPrimitive.Root
       orientation={props.orientation}
       class={cn(
-        'relative flex min-w-0 touch-none select-none',
+        'relative flex min-w-0 touch-none select-none overflow-visible',
         vertical()
-          ? 'h-full w-full min-h-0 flex-col items-center overflow-hidden'
-          : 'h-5 w-full max-w-full items-center overflow-visible',
+          ? 'h-full w-full min-h-0 flex-col items-center'
+          : 'h-5 w-full max-w-full items-center',
       )}
       value={[props.value]}
       minValue={0}
@@ -71,7 +70,7 @@ function BrightnessSlider(props: {
     >
       <SliderPrimitive.Track
         class={cn(
-          'relative shrink-0 rounded-full',
+          'relative shrink-0 overflow-visible rounded-full',
           vertical() ? 'h-full w-2' : 'h-2 w-full max-w-full',
         )}
         style={{ 'background-color': props.chrome.sliderTrack }}
@@ -134,24 +133,19 @@ function brightnessShellClass(
   }
 }
 
-function brightnessShellInsetStyle(
+function brightnessShellInsetClass(
   position: TextViewerBrightnessViewPosition,
-  insets: { top: number; bottom: number },
-): { top?: string; bottom?: string } {
-  const gap = READER_BRIGHTNESS_CHROME_GAP_PX;
+): string | undefined {
   switch (position) {
     case 'top':
-      return { top: `${insets.top + gap}px` };
+      return 'reader-brightness-capsule-shell--inset-top';
     case 'bottom':
-      return { bottom: `${insets.bottom + gap}px` };
+      return 'reader-brightness-capsule-shell--inset-bottom';
     case 'right':
     case 'left':
-      return {
-        top: `${insets.top + gap}px`,
-        bottom: `${insets.bottom + gap}px`,
-      };
+      return 'reader-brightness-capsule-shell--inset-vertical';
     default:
-      return {};
+      return undefined;
   }
 }
 
@@ -193,7 +187,7 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
   const sliderOrientation = (): 'horizontal' | 'vertical' =>
     isEdgePosition() ? 'horizontal' : 'vertical';
 
-  const chromeInsets = useReaderBrightnessChromeInsets(
+  useReaderBrightnessChromeInsets(
     hostRef,
     () => props.chromeVisible,
     () =>
@@ -205,9 +199,6 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
       ] as const,
     () => !isEmbedded(),
   );
-
-  const shellInsetStyle = () =>
-    isEmbedded() ? undefined : brightnessShellInsetStyle(position(), chromeInsets());
 
   createEffect(() => {
     if (!visible() || brightnessAuto()) return;
@@ -262,10 +253,10 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
           'reader-brightness-capsule-shell pointer-events-none flex',
           !isEmbedded() && 'absolute z-20',
           brightnessShellClass(position(), embeddedChrome()),
+          !isEmbedded() && brightnessShellInsetClass(position()),
           !isEmbedded() && !visible() && 'reader-brightness-capsule-shell--hidden',
           props.class,
         )}
-        style={shellInsetStyle()}
         data-media-viewer-interactive-zone
         onClick={(e) => e.stopPropagation()}
       >

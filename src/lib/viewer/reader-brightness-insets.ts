@@ -4,6 +4,13 @@ export const READER_BRIGHTNESS_CHROME_GAP_PX = 10;
 /** 与 App.css `--reader-bar-duration` 一致 */
 export const READER_BAR_TRANSITION_MS = 400;
 
+/** 小于此差值的 inset 抖动忽略，避免移动端 sub-pixel 测量导致胶囊跳动 */
+export const READER_BRIGHTNESS_INSET_STABILIZE_EPS_PX = 4;
+
+/** chrome-slots 上由 JS 写入的顶/底栏占位（供亮度胶囊 CSS 定位） */
+export const READER_BRIGHTNESS_INSET_TOP_VAR = '--reader-brightness-inset-top';
+export const READER_BRIGHTNESS_INSET_BOTTOM_VAR = '--reader-brightness-inset-bottom';
+
 export interface ReaderBrightnessChromeInsets {
   top: number;
   bottom: number;
@@ -102,5 +109,17 @@ export function measureReaderBrightnessChromeInsets(
     bottom = Math.max(bottom, Math.max(0, hostRect.bottom - rect.top));
   }
 
+  return { top, bottom };
+}
+
+export function stabilizeReaderBrightnessChromeInsets(
+  prev: ReaderBrightnessChromeInsets,
+  next: ReaderBrightnessChromeInsets,
+  epsilon = READER_BRIGHTNESS_INSET_STABILIZE_EPS_PX,
+): ReaderBrightnessChromeInsets {
+  const top =
+    Math.abs(prev.top - next.top) < epsilon ? prev.top : next.top;
+  const bottom =
+    Math.abs(prev.bottom - next.bottom) < epsilon ? prev.bottom : next.bottom;
   return { top, bottom };
 }

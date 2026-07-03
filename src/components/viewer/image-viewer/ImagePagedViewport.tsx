@@ -15,6 +15,7 @@ import {
 } from '@/lib/media/image/image-paged-layout';
 import { cn } from '@/lib/utils';
 import { isMobile } from '@/lib/platform/detect';
+import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
 import { mediaViewerContentScrollClass } from '@/components/viewer/viewer-chrome';
 import type { MangaPageItem } from '@/components/viewer/image-viewer/ImageScrollViewport';
 import type { BookSource } from '@/types';
@@ -74,13 +75,12 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
     ro.observe(el);
     sync();
     const raf = requestAnimationFrame(sync);
-    const onWinResize = () => sync();
-    window.addEventListener('resize', onWinResize);
+    const unsubscribeGeometry = subscribeViewportGeometryChange(sync);
 
     onCleanup(() => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      window.removeEventListener('resize', onWinResize);
+      unsubscribeGeometry();
     });
   });
 

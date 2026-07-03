@@ -49,7 +49,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
         layout() === 'floating' &&
           'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0 max-w-full min-w-0',
         layout() === 'fixed' &&
-          'reader-footer shrink-0 flex flex-col app-bottom-chrome-inset',
+          'reader-footer shrink-0 flex flex-col',
         local.class,
       )}
       data-media-viewer-interactive-zone
@@ -77,7 +77,7 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
       </Show>
       <Show when={layout() === 'fixed'}>
         <Show when={local.leadingSlot}>{local.leadingSlot}</Show>
-        <div class="flex flex-col border-t border-border bg-background">
+        <div class="flex flex-col border-t border-border bg-background app-bottom-chrome-inset">
           {local.children}
         </div>
       </Show>

@@ -33,7 +33,7 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
     >
       <div
         class={cn(
-          'reader-chrome-floating-bottom__track pb-3 pt-2',
+          'reader-chrome-floating-bottom__track pt-2',
           mediaViewerChromeFloatingTrackClass,
           scrollGutterStableBoth,
         )}
@@ -41,11 +41,11 @@ export function MediaViewerFloatingBottomChrome(props: MediaViewerFloatingBottom
         onPointerLeave={local.onPointerLeave}
       >
         {local.children}
+        <div
+          class="pointer-events-none shrink-0 bg-background/95 backdrop-blur app-bottom-chrome-inset"
+          aria-hidden="true"
+        />
       </div>
-      <div
-        class="pointer-events-none shrink-0 bg-background/95 backdrop-blur safe-area-min-height-bottom"
-        aria-hidden="true"
-      />
     </div>
   );
 }

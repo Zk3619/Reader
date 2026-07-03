@@ -96,6 +96,7 @@ import {
 import { isReaderHandleSelectMode, isSelectionHandleDragActive } from '@/lib/media/text/reader-text-selection-gesture';
 import { getSharedReaderTextSelectionGesture } from '@/lib/media/text/reader-text-selection-shared';
 import { attachReaderPagedTextSelectionBridge } from '@/lib/media/text/reader-paged-text-selection-bridge';
+import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
 import type { TextViewerPageAnim, TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import {
   textViewerDualPageMeasureIntent,
@@ -4316,6 +4317,27 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   let resizeObserver: ResizeObserver | undefined;
 
+  const applyViewportElementResize = (w: number, h: number) => {
+    if (
+      Math.abs(w - lastViewportW) < VIEWPORT_RESIZE_EPS_PX &&
+      Math.abs(h - lastViewportH) < VIEWPORT_RESIZE_EPS_PX
+    ) {
+      return;
+    }
+    lastViewportW = w;
+    lastViewportH = h;
+    syncViewportSize(w, h);
+    scheduleRemeasure({ immediate: true, bypassCache: true });
+  };
+
+  onMount(() =>
+    subscribeViewportGeometryChange(() => {
+      const el = viewportEl;
+      if (!el) return;
+      applyViewportElementResize(el.clientWidth, el.clientHeight);
+    }),
+  );
+
   onCleanup(() => {
     resizeObserver?.disconnect();
     cancelAnimFrame();
@@ -6093,18 +6115,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         syncViewportSize(el.clientWidth, el.clientHeight);
         resizeObserver?.disconnect();
         resizeObserver = new ResizeObserver(() => {
-          const w = el.clientWidth;
-          const h = el.clientHeight;
-          if (
-            Math.abs(w - lastViewportW) < VIEWPORT_RESIZE_EPS_PX &&
-            Math.abs(h - lastViewportH) < VIEWPORT_RESIZE_EPS_PX
-          ) {
-            return;
-          }
-          lastViewportW = w;
-          lastViewportH = h;
-          syncViewportSize(w, h);
-          scheduleRemeasure({ immediate: true, bypassCache: true });
+          applyViewportElementResize(el.clientWidth, el.clientHeight);
         });
         resizeObserver.observe(el);
         lastViewportW = el.clientWidth;

@@ -46,6 +46,7 @@ import {
   clearKeepScreenOn,
   restoreBrightnessOnExit,
 } from '@/lib/platform/display-reader';
+import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
 import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
 import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
 import { ReaderOfflineCacheDialog } from '@/components/viewer/text-viewer/ReaderOfflineCacheDialog';
@@ -1043,13 +1044,13 @@ export function BookReader(props: BookReaderProps) {
   });
 
   onMount(() => {
-    const handleResize = () => {
+    const syncLayout = () => {
       const w = window.innerWidth;
       setIsWideScreen(w >= 480);
       setDualPageLayoutProbe((p) => p + 1);
     };
-    window.addEventListener('resize', handleResize);
-    onCleanup(() => window.removeEventListener('resize', handleResize));
+    syncLayout();
+    return subscribeViewportGeometryChange(syncLayout);
   });
 
   const dismissClickRegional = () => {

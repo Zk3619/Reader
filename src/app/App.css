@@ -718,6 +718,24 @@
   transition: visibility 0s linear var(--reader-bar-duration);
 }
 
+.reader-brightness-capsule-shell--left,
+.reader-brightness-capsule-shell--right {
+  overflow: visible;
+}
+
+.reader-brightness-capsule-shell--inset-top {
+  top: calc(var(--reader-brightness-inset-top, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
+.reader-brightness-capsule-shell--inset-bottom {
+  bottom: calc(var(--reader-brightness-inset-bottom, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
+.reader-brightness-capsule-shell--inset-vertical {
+  top: calc(var(--reader-brightness-inset-top, 0px) + var(--reader-brightness-chrome-gap, 10px));
+  bottom: calc(var(--reader-brightness-inset-bottom, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
 .reader-brightness-capsule-track {
   opacity: 1;
   transform: translate3d(0, 0, 0);
@@ -739,13 +757,14 @@
   align-items: center;
   justify-content: center;
   overflow: visible;
-  padding-inline: 0.625rem;
+  /* size-5 滑块在槽端需留出半径，避免被圆角胶囊裁切 */
+  padding-inline: 0.75rem;
 }
 
 .reader-brightness-capsule-slider-lane.flex-col {
   width: 100%;
   padding-inline: 0;
-  padding-block: 0.625rem;
+  padding-block: 0.75rem;
 }
 
 .reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
