@@ -45,4 +45,7 @@ ehthumbs.db
 .cursor
 .shared
 
+# Local analysis / codegen (not for version control)
+.codegraph/
+
 *.tsbuildinfo

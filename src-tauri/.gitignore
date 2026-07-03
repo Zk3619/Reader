@@ -30,3 +30,7 @@
 /gen/android/.gradle/
 /gen/android/.idea/
 /gen/android/local.properties
+
+# display-reader Tauri plugin：Gradle 构建产物
+/android/display-reader/build/
+/android/display-reader/.tauri/
