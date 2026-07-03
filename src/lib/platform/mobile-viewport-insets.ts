@@ -4,6 +4,10 @@
  */
 
 import { isAndroid, isMobile } from '@/lib/platform/detect';
+import {
+  measureScreenInnerHeightGapPx,
+  subscribeViewportGeometryChange,
+} from '@/lib/platform/viewport-geometry';
 
 /** 手势导航 / 主页指示条区域（env 常为 0 时的兜底） */
 export const MOBILE_SAFE_BOTTOM_GESTURE_PX = 12;
@@ -118,11 +122,6 @@ function measureVisualViewportBottomGapPx(): number {
   return Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
 }
 
-function measureScreenInnerHeightGapPx(): number {
-  if (typeof window === 'undefined') return 0;
-  return Math.max(0, Math.round(window.screen.height - window.innerHeight));
-}
-
 function applyTouchUiInsets(): void {
   const root = document.documentElement;
   const envTop = probeEnvSafeAreaTopPx();
@@ -179,18 +178,10 @@ export function installMobileViewportInsets(): () => void {
 
   applyMobileViewportInsets();
 
-  const onChange = () => applyMobileViewportInsets();
-  const vv = window.visualViewport;
-  vv?.addEventListener('resize', onChange);
-  vv?.addEventListener('scroll', onChange);
-  window.addEventListener('resize', onChange);
-  window.addEventListener('orientationchange', onChange);
+  const unsubscribe = subscribeViewportGeometryChange(() => applyMobileViewportInsets());
 
   return () => {
-    vv?.removeEventListener('resize', onChange);
-    vv?.removeEventListener('scroll', onChange);
-    window.removeEventListener('resize', onChange);
-    window.removeEventListener('orientationchange', onChange);
+    unsubscribe();
     clearTouchUiInsets();
     installed = false;
   };

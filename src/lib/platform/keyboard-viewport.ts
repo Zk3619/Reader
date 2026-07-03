@@ -3,6 +3,8 @@
  * 通过 visualViewport 计算键盘占用高度，写入 CSS 变量供 fixed 底栏等使用。
  */
 
+import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
+
 const KEYBOARD_THRESHOLD_PX = 80;
 
 let installed = false;
@@ -28,11 +30,7 @@ export function installKeyboardViewport(): () => void {
 
   applyKeyboardInset();
 
-  const vv = window.visualViewport;
-  const onViewportChange = () => applyKeyboardInset();
-  vv?.addEventListener('resize', onViewportChange);
-  vv?.addEventListener('scroll', onViewportChange);
-  window.addEventListener('resize', onViewportChange);
+  const unsubscribeGeometry = subscribeViewportGeometryChange(() => applyKeyboardInset());
 
   const onFocusIn = (ev: FocusEvent) => {
     const target = ev.target;
@@ -51,9 +49,7 @@ export function installKeyboardViewport(): () => void {
   document.addEventListener('focusout', onFocusOut, true);
 
   return () => {
-    vv?.removeEventListener('resize', onViewportChange);
-    vv?.removeEventListener('scroll', onViewportChange);
-    window.removeEventListener('resize', onViewportChange);
+    unsubscribeGeometry();
     document.removeEventListener('focusin', onFocusIn, true);
     document.removeEventListener('focusout', onFocusOut, true);
     document.documentElement.style.removeProperty('--keyboard-inset-bottom');

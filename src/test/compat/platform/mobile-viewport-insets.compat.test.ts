@@ -67,4 +67,15 @@ describe('mobile-viewport-insets', () => {
       }),
     ).toEqual({ mode: 'gesture', insetPx: MOBILE_SAFE_BOTTOM_GESTURE_PX });
   });
+
+  it('横屏时 screenInnerHeightGap 应较小，避免误判三键导航', () => {
+    expect(
+      resolveMobileBottomInset({
+        envSafeBottomPx: 0,
+        visualViewportBottomGapPx: 0,
+        screenInnerHeightGapPx: 32,
+        android: true,
+      }),
+    ).toEqual({ mode: 'gesture', insetPx: MOBILE_SAFE_BOTTOM_GESTURE_PX });
+  });
 });
