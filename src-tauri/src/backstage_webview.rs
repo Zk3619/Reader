@@ -281,6 +281,7 @@ pub async fn run_backstage_webjs(
 }
 
 /// 从后台 WebView 读取指定 URL 的 Cookie（登录 / WebJs 后回写书源表）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub async fn get_backstage_webview_cookies_for_url(
     app: AppHandle,
@@ -312,6 +313,7 @@ pub async fn get_backstage_webview_cookies_for_url(
 }
 
 /// 向后台 WebView 注入 Cookie（用于登录池回灌）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub async fn set_cookies_for_backstage_webview(
     app: AppHandle,

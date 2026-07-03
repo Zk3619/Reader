@@ -1,22 +1,28 @@
-mod data_migration;
 mod web_service;
 mod web_static;
 mod web_multipart;
 mod web_socket;
 mod local_addresses;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod data_migration;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod http_cookies;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod window_state;
 mod portable_paths;
 mod webview_storage;
 mod tray;
 mod login_script_engine;
 mod inner_web_scripts;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod inner_web_panel_capture;
 mod backstage_webview;
 mod webjs_java_rpc;
 mod android_fs_commands;
 mod display_reader_commands;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_brightness;
+mod platform;
 mod media_convert;
 use tauri::Emitter;
 use tauri::Manager;
@@ -44,6 +50,7 @@ fn inner_web_panel_user_agent_store() -> &'static Mutex<String> {
 const CONFIG_FILE: &str = "config.json";
 
 /// 可选：exe 同目录 reader.json 中的 dataDir 覆盖默认 AppData
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) const PORTABLE_MARKER_FILE: &str = "reader.json";
 
 /** 日志预览：按字节上限截断，但不切断 UTF-8 多字节字符 */
@@ -903,6 +910,7 @@ async fn get_inner_web_panel_cookies_for_url(
 }
 
 /// Tauri panel √ 前抓取 document HTML（光遇 getServerSettings 解析 serverValue）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn inner_web_panel_html_snapshot_store() -> &'static Mutex<String> {
     static STORE: OnceLock<Mutex<String>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(String::new()))
@@ -1961,7 +1969,9 @@ pub fn run() {
         });
 
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(tauri_plugin_android_fs::init());
+    let builder = builder
+        .plugin(tauri_plugin_android_fs::init())
+        .plugin(crate::platform::android::display_brightness::init_plugin());
 
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
@@ -2033,6 +2043,8 @@ pub fn run() {
             display_reader_commands::probe_display_brightness,
             display_reader_commands::get_display_brightness,
             display_reader_commands::set_display_brightness,
+            display_reader_commands::capture_display_brightness,
+            display_reader_commands::restore_display_brightness,
             display_reader_commands::set_screen_orientation,
             display_reader_commands::set_keep_screen_on,
             download_binary,
@@ -2151,6 +2163,9 @@ pub fn run() {
                 window_state::save_on_exit(app_handle);
                 http_cookies::finalize_http_cookies_to_portable();
             }
+
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let _ = app_handle;
 
             // 兜底：仅拦截系统/用户触发的退出（code=None）；前端 request_app_exit / app.exit(0) 为 code=Some，须放行。
             #[cfg(any(target_os = "android", target_os = "ios"))]

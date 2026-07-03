@@ -8,12 +8,17 @@ use std::path::{Path, PathBuf};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::AppHandle;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const DATA_DIR_NAME: &str = "AppData";
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const LOG_DIR_NAME: &str = "logs";
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const WINDOW_STATE_FILE: &str = ".window-state.json";
 /// WebView2 在 data_directory 下自动创建的子目录名
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const WEBVIEW_PROFILE_DIR: &str = "EBWebView";
 /// 旧版布局（迁移用）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const LEGACY_WEBVIEW_CACHE_DIR: &str = "WebViewCache";
 
 /// exe 所在目录（绿色版根目录）
@@ -33,6 +38,7 @@ pub fn ensure_dir(path: &Path) -> Result<(), String> {
 }
 
 /// 默认业务数据根：exe/AppData
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn default_data_root() -> Result<PathBuf, String> {
     let dir = exe_dir()?.join(DATA_DIR_NAME);
     ensure_dir(&dir)?;
@@ -40,16 +46,19 @@ pub fn default_data_root() -> Result<PathBuf, String> {
 }
 
 /// 桌面端：config.json 位于 exe/AppData/config.json
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn config_file_path() -> Result<PathBuf, String> {
     Ok(default_data_root()?.join(super::CONFIG_FILE))
 }
 
 /// 窗口状态：exe/AppData/.window-state.json
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn window_state_file_path() -> Result<PathBuf, String> {
     Ok(default_data_root()?.join(WINDOW_STATE_FILE))
 }
 
 /// 日志目录：exe/logs
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn log_directory() -> Result<PathBuf, String> {
     let dir = exe_dir()?.join(LOG_DIR_NAME);
     ensure_dir(&dir)?;
@@ -91,6 +100,7 @@ pub fn webview_profile_directory(root: &Path) -> PathBuf {
 }
 
 /// reader.json 仍在 exe 同目录，可选覆盖 dataDir
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn data_dir_from_reader_json(exe_dir: &Path) -> Option<String> {
     #[derive(serde::Deserialize)]
     struct ReaderJson {
@@ -138,6 +148,7 @@ pub fn run_legacy_layout_migrations() {
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
+#[allow(dead_code)]
 pub fn run_legacy_layout_migrations() {}
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

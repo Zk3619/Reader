@@ -8,6 +8,7 @@ use tauri::AppHandle;
 pub struct WebJsJavaRpcParams {
     pub fun_name: String,
     pub args: Vec<Option<String>>,
+    #[allow(dead_code)]
     pub base_url: Option<String>,
     pub cookies: Option<String>,
     pub headers_json: Option<String>,

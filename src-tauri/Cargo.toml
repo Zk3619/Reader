@@ -83,6 +83,7 @@ media-ffmpeg = ["dep:ffmpeg-next"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-android-fs = "28"
+reader-display-native = { path = "android/display-reader" }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

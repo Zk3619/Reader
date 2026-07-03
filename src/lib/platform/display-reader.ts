@@ -44,6 +44,10 @@ export function isUsingBrightnessOverlay(): boolean {
 export async function captureNativeBrightnessBeforeRead(): Promise<void> {
   if (!isTauri()) return;
   try {
+    if (isAndroid()) {
+      await invoke('capture_display_brightness');
+      return;
+    }
     const level = await invoke<number>('get_display_brightness');
     if (Number.isFinite(level)) savedNativeBrightness = level;
   } catch {
@@ -73,6 +77,16 @@ export async function applyReadBrightness(
 export async function restoreBrightnessOnExit(brightnessAuto: boolean): Promise<void> {
   clearBrightnessOverlay();
   if (!brightnessAuto || !isTauri()) return;
+  if (isAndroid()) {
+    try {
+      await invoke('restore_display_brightness');
+    } catch {
+      /* ignore */
+    }
+    savedNativeBrightness = null;
+    usingOverlay = false;
+    return;
+  }
   if (savedNativeBrightness == null) return;
   try {
     await invoke('set_display_brightness', { level: savedNativeBrightness });
