@@ -522,6 +522,31 @@ export function downloadBackup(): Promise<Blob> {
   });
 }
 
+export interface RemoteBackupEntry {
+  name: string;
+  size: number;
+  lastModify: number;
+}
+
+export function getWebDavBackupList() {
+  return apiGet<{ backups: RemoteBackupEntry[] }>('/webDavBackupList');
+}
+
+export function uploadWebDavBackup() {
+  return apiPost<{ fileName: string; size: number }>('/webDavBackupUpload', {});
+}
+
+export function restoreWebDavBackup(fileName: string) {
+  return apiPost<RestoreBackupResult>('/webDavBackupRestore', { fileName });
+}
+
+export function syncWebDavAssets() {
+  return apiPost<{ progressUpdated: number; bgUploaded: number; bgDownloaded: number }>(
+    '/webDavSyncAssets',
+    {},
+  );
+}
+
 export function coverUrl(book: WebBook, forceProxy = false): string {
   const raw = book.customCoverUrl || book.coverUrl;
   if (!raw) {

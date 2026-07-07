@@ -20,6 +20,10 @@ import { applyChapterDisplayProcessing } from '@/lib/chapter-cache/display-proce
 
 import { loadReaderUiConfig, saveReaderUiConfig } from '@/lib/media/text/read-config-storage';
 import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import {
+  buildReaderLegadoConfigBundle,
+  parseReaderLegadoConfigPayload,
+} from '@/lib/media/text/legado-read-config-sync';
 
 import { legadoErr, legadoOk, type LegadoReturnData } from '@/lib/web-api/return-data';
 
@@ -339,6 +343,13 @@ export async function saveBookProgressApi(postData: string | null): Promise<Lega
 
   }
 
+  const updated = await booksDb.getBook(book.bookUrl);
+  if (updated) {
+    void import('@/lib/backup/webdav-book-progress').then((m) =>
+      m.uploadBookProgressToWebDav(updated),
+    );
+  }
+
 
 
   return legadoOk('');
@@ -359,7 +370,7 @@ export async function getReadConfigApi(): Promise<LegadoReturnData<string>> {
 
   if (!cfg) return legadoErr('没有配置');
 
-  return legadoOk(JSON.stringify(cfg));
+  return legadoOk(JSON.stringify(buildReaderLegadoConfigBundle(cfg)));
 
 }
 
@@ -377,9 +388,11 @@ export async function saveReadConfigApi(postData: string | null): Promise<Legado
 
   try {
 
-    const parsed = JSON.parse(postData) as Record<string, unknown>;
+    const parsed = JSON.parse(postData) as unknown;
 
-    await saveReaderUiConfig({ ...defaultTextViewerUiConfig, ...parsed });
+    const merged = parseReaderLegadoConfigPayload(parsed, defaultTextViewerUiConfig);
+
+    await saveReaderUiConfig(merged);
 
     return legadoOk('');
 

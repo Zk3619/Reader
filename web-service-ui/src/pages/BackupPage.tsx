@@ -1,6 +1,15 @@
 import { createResource, createSignal, For, Show } from 'solid-js';
 import { Layout, Card, Button, ErrorBox, Loading } from '@/components/Layout';
-import { getBackupPreview, downloadBackup, restoreBackup } from '@/lib/api';
+import {
+  getBackupPreview,
+  downloadBackup,
+  restoreBackup,
+  getWebDavBackupList,
+  uploadWebDavBackup,
+  restoreWebDavBackup,
+  syncWebDavAssets,
+  type RemoteBackupEntry,
+} from '@/lib/api';
 import { formatResourceError, resourceError } from '@/lib/resource';
 import {
   backupFileIcon,
@@ -18,6 +27,12 @@ export function BackupPage() {
   const [restoreError, setRestoreError] = createSignal('');
   const [restoreSummary, setRestoreSummary] = createSignal<string[]>([]);
   const [expanded, setExpanded] = createSignal<Record<string, boolean>>({});
+  const [webDavUploading, setWebDavUploading] = createSignal(false);
+  const [webDavRestoring, setWebDavRestoring] = createSignal(false);
+  const [webDavSyncing, setWebDavSyncing] = createSignal(false);
+  const [webDavError, setWebDavError] = createSignal('');
+  const [webDavBackups, setWebDavBackups] = createSignal<RemoteBackupEntry[]>([]);
+  const [webDavListOpen, setWebDavListOpen] = createSignal(false);
 
   const [preview, { refetch }] = createResource(getBackupPreview);
 
@@ -97,13 +112,83 @@ export function BackupPage() {
   function pickRestoreFile() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.zip,.db,.sqlite,.sqlite3,application/zip,application/x-sqlite3';
+    input.accept = '.zip,.db,.sqlite,.sqlite3,application/zip,application/x-sqlite3,.json';
     input.onchange = () => {
       const file = input.files?.[0];
       if (file) void handleRestoreFile(file);
       input.value = '';
     };
     input.click();
+  }
+
+  async function handleWebDavUpload() {
+    setWebDavUploading(true);
+    setWebDavError('');
+    try {
+      const result = await uploadWebDavBackup();
+      showToast(`已上传 ${result.fileName}`, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWebDavError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setWebDavUploading(false);
+    }
+  }
+
+  async function openWebDavRestoreList() {
+    setWebDavError('');
+    try {
+      const data = await getWebDavBackupList();
+      setWebDavBackups(data.backups ?? []);
+      setWebDavListOpen(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWebDavError(msg);
+      showToast(msg, 'error');
+    }
+  }
+
+  async function handleWebDavRestore(entry: RemoteBackupEntry) {
+    if (!confirm(`从 WebDAV 恢复：${entry.name}？\n\n数据库全量恢复不可撤销。`)) return;
+    setWebDavRestoring(true);
+    setWebDavError('');
+    try {
+      const result = await restoreWebDavBackup(entry.name);
+      setRestoreSummary(result.summary);
+      showToast(`还原完成：${result.summary.join('、')}`, 'success');
+      setWebDavListOpen(false);
+      await refetch();
+      if (result.reloadRecommended) {
+        setTimeout(() => {
+          if (confirm('数据库已全量恢复，是否刷新页面？')) window.location.reload();
+        }, 500);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWebDavError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setWebDavRestoring(false);
+    }
+  }
+
+  async function handleWebDavSync() {
+    setWebDavSyncing(true);
+    setWebDavError('');
+    try {
+      const result = await syncWebDavAssets();
+      showToast(
+        `同步完成：进度 ${result.progressUpdated} · 上传背景 ${result.bgUploaded} · 下载背景 ${result.bgDownloaded}`,
+        'success',
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWebDavError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setWebDavSyncing(false);
+    }
   }
 
   return (
@@ -144,9 +229,67 @@ export function BackupPage() {
         </Show>
 
         <p class="text-center text-xs text-muted-foreground">
-          支持 Reader SQLite（.db / backup.zip）、Legado 备份 ZIP（含 bookshelf.json、bookSource.json 等）。
+          支持 Reader SQLite（.db / backup.zip）、Legado 备份 ZIP、旧版 myBook*.json。
           整库恢复后建议刷新页面。
         </p>
+      </Card>
+
+      <Card class="mx-auto mb-6 max-w-2xl space-y-4">
+        <div class="text-center">
+          <h2 class="text-lg font-semibold">WebDAV 云备份</h2>
+          <p class="mt-1 text-sm text-muted-foreground">
+            需先在 Reader 主应用设置中配置 WebDAV；此处调用同一套 API
+          </p>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <Button
+            class="w-full"
+            onClick={() => void handleWebDavUpload()}
+            disabled={webDavUploading() || webDavRestoring() || webDavSyncing() || downloading() || restoring()}
+          >
+            {webDavUploading() ? '上传中…' : '上传到 WebDAV'}
+          </Button>
+          <Button
+            variant="secondary"
+            class="w-full"
+            onClick={() => void openWebDavRestoreList()}
+            disabled={webDavRestoring() || webDavUploading() || webDavSyncing()}
+          >
+            {webDavRestoring() ? '恢复中…' : '从 WebDAV 恢复'}
+          </Button>
+          <Button
+            variant="outline"
+            class="w-full"
+            onClick={() => void handleWebDavSync()}
+            disabled={webDavSyncing() || webDavUploading() || webDavRestoring()}
+          >
+            {webDavSyncing() ? '同步中…' : '同步进度/背景'}
+          </Button>
+        </div>
+        <Show when={webDavError()}>
+          <ErrorBox message={webDavError()} />
+        </Show>
+        <Show when={webDavListOpen()}>
+          <div class="max-h-64 space-y-2 overflow-y-auto rounded-lg border border-border p-3">
+            <Show when={webDavBackups().length === 0}>
+              <p class="text-sm text-muted-foreground">云端暂无 backup*.zip</p>
+            </Show>
+            <For each={webDavBackups()}>
+              {(entry) => (
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-2 rounded-md border border-border/60 px-3 py-2 text-left text-sm hover:bg-muted"
+                  onClick={() => void handleWebDavRestore(entry)}
+                >
+                  <span class="truncate font-medium">{entry.name}</span>
+                  <span class="shrink-0 text-xs text-muted-foreground">
+                    {formatBackupSize(entry.size)}
+                  </span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
       </Card>
 
       <Card class="mx-auto max-w-2xl">

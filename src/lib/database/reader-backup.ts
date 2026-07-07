@@ -1,5 +1,5 @@
 /**
- * Reader 本地数据备份与恢复（对齐 Legado Backup.kt / Restore.kt，不含 WebDav）
+ * Reader 本地数据备份与恢复（对齐 Legado Backup.kt / Restore.kt，含 WebDAV 上传入口）
  */
 
 import { save } from '@tauri-apps/plugin-dialog';
@@ -10,12 +10,16 @@ import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { readBytes } from '@/lib/platform/fs/read-write';
 import { exportDatabase, exportDatabaseAndDownload } from '@/lib/database/export-import';
 import { restoreBackupFromBytes } from '@/lib/web-api/restore-backup';
-import * as booksDb from '@/lib/database/books';
-import * as sourcesDb from '@/lib/database/sources';
-import * as rssDb from '@/lib/database/rss-sources';
-import * as replaceDb from '@/lib/database/replace-rules';
-import * as readRecordsDb from '@/lib/database/read-records';
+import { collectBackupJsonBundle } from '@/lib/backup/backup-json-export';
+import { getBackupPassword } from '@/lib/backup/backup-config-storage';
+import { getSelectedBackupFileNames } from '@/lib/backup/backup-selector-config';
+import { collectBookCacheZipEntries } from '@/lib/backup/book-cache-backup';
+import { collectBackgroundZipEntries } from '@/lib/backup/background-backup';
 import { isTauri } from '@/lib/platform/detect';
+import { loadReaderUiConfig } from '@/lib/media/text/read-config-storage';
+import { exportLegadoReadConfigBundle } from '@/lib/media/text/legado-read-config-sync';
+import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { formatLegadoStyleBackupFileName } from '@/lib/backup/backup-filename';
 
 export interface BackupItemInfo {
   fileName: string;
@@ -32,108 +36,108 @@ export interface BackupOverview {
   items: BackupItemInfo[];
 }
 
-function formatBackupFileName(includeTimestamp = true): string {
-  if (!includeTimestamp) return 'reader-backup.zip';
+export interface CreateReaderBackupOptions {
+  /** Legado 风格 backup{date}-{device}.zip */
+  legadoStyleName?: boolean;
+  deviceName?: string;
+  /** 覆盖选择性备份项；不传则读取用户保存的选择 */
+  selectedFileNames?: Set<string>;
+  backupPassword?: string;
+}
+
+function formatBackupFileName(options: CreateReaderBackupOptions = {}): string {
+  if (options.legadoStyleName) {
+    return formatLegadoStyleBackupFileName(options.deviceName);
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
   return `reader-backup-${stamp}.zip`;
 }
 
-export async function getBackupOverview(): Promise<BackupOverview> {
-  const [books, sources, rssSources, rules, records, dbBuffer] = await Promise.all([
-    booksDb.getAllBooks(),
-    sourcesDb.getAllSources(),
-    rssDb.getAllRssSources(),
-    replaceDb.getAllReplaceRules(),
-    readRecordsDb.getAllReadRecords(),
-    exportDatabase(),
+async function resolveSelectedFileNames(options: CreateReaderBackupOptions): Promise<Set<string>> {
+  return options.selectedFileNames ?? (await getSelectedBackupFileNames());
+}
+
+const EMPTY_BUNDLE = { entries: {} as Record<string, Uint8Array>, item: undefined as BackupItemInfo | undefined };
+
+async function buildBackupEntries(options: CreateReaderBackupOptions = {}): Promise<{
+  entries: Record<string, Uint8Array>;
+  items: BackupItemInfo[];
+}> {
+  const selected = await resolveSelectedFileNames(options);
+  const backupPassword = options.backupPassword ?? (await getBackupPassword());
+
+  const [dbBuffer, readerUi, jsonBundle, bookCacheBundle, bgBundle] = await Promise.all([
+    selected.has('reader.db') ? exportDatabase() : Promise.resolve(null),
+    loadReaderUiConfig(),
+    collectBackupJsonBundle({ selected, backupPassword }),
+    selected.has('book_cache') ? collectBookCacheZipEntries() : Promise.resolve(EMPTY_BUNDLE),
+    selected.has('bg') ? collectBackgroundZipEntries() : Promise.resolve(EMPTY_BUNDLE),
   ]);
 
-  const items: BackupItemInfo[] = [
-    {
+  const legadoExport = exportLegadoReadConfigBundle(readerUi ?? defaultTextViewerUiConfig);
+  const entries: Record<string, Uint8Array> = {};
+  const items: BackupItemInfo[] = [];
+
+  if (dbBuffer) {
+    entries['reader.db'] = new Uint8Array(dbBuffer);
+    items.push({
       fileName: 'reader.db',
       displayName: '数据库',
       description: '完整 SQLite 数据库',
       count: 1,
       size: dbBuffer.byteLength,
-    },
-    {
-      fileName: 'bookshelf.json',
-      displayName: '书架',
-      description: '书架书籍列表',
-      count: books.length,
-      size: JSON.stringify(books).length,
-    },
-    {
-      fileName: 'bookSource.json',
-      displayName: '书源',
-      description: '书源规则',
-      count: sources.length,
-      size: JSON.stringify(sources).length,
-    },
-    {
-      fileName: 'rssSources.json',
-      displayName: 'RSS',
-      description: 'RSS 订阅源',
-      count: rssSources.length,
-      size: JSON.stringify(rssSources).length,
-    },
-    {
-      fileName: 'replaceRule.json',
-      displayName: '替换规则',
-      description: '替换净化规则',
-      count: rules.length,
-      size: JSON.stringify(rules).length,
-    },
-    {
-      fileName: 'readRecord.json',
-      displayName: '阅读记录',
-      description: '阅读记录',
-      count: records.length,
-      size: JSON.stringify(records).length,
-    },
-  ].filter((item) => item.count > 0 || item.fileName === 'reader.db');
+    });
+  }
 
+  for (const [name, text] of Object.entries(jsonBundle.entries)) {
+    entries[name] = strToU8(text);
+  }
+  items.push(...jsonBundle.items);
+
+  const configItems: Array<{ key: string; file: string; display: string; desc: string; text: string }> = [
+    { key: 'readerUiConfig.json', file: 'readerUiConfig.json', display: '阅读器 UI', desc: '文本阅读器完整配置', text: legadoExport.readerUiConfigJson },
+    { key: 'readConfig.json', file: 'readConfig.json', display: 'Legado 阅读样式', desc: 'Legado readConfig.json', text: legadoExport.readConfigJson },
+    { key: 'shareReadConfig.json', file: 'shareReadConfig.json', display: 'Legado 共享样式', desc: 'Legado shareReadConfig.json', text: legadoExport.shareReadConfigJson },
+    { key: 'readerPrefs.json', file: 'readerPrefs.json', display: 'Legado 阅读偏好', desc: 'Legado SharedPreferences 子集', text: legadoExport.readerPrefsJson },
+  ];
+  for (const cfg of configItems) {
+    if (!selected.has(cfg.key)) continue;
+    entries[cfg.file] = strToU8(cfg.text);
+    items.push({
+      fileName: cfg.file,
+      displayName: cfg.display,
+      description: cfg.desc,
+      count: 1,
+      size: cfg.text.length,
+    });
+  }
+
+  Object.assign(entries, bookCacheBundle.entries);
+  if (bookCacheBundle.item) items.push(bookCacheBundle.item);
+
+  Object.assign(entries, bgBundle.entries);
+  if (bgBundle.item) items.push(bgBundle.item);
+
+  return { entries, items };
+}
+
+export async function getBackupOverview(options: CreateReaderBackupOptions = {}): Promise<BackupOverview> {
+  const { items } = await buildBackupEntries(options);
   const totalSize = items.reduce((sum, item) => sum + item.size, 0);
   return {
-    fileName: formatBackupFileName(),
+    fileName: formatBackupFileName(options),
     totalSize,
     createTime: Date.now(),
     items,
   };
 }
 
-export async function createReaderBackupZip(): Promise<{ blob: Blob; filename: string }> {
-  const [books, sources, rssSources, rules, records, dbBuffer] = await Promise.all([
-    booksDb.getAllBooks(),
-    sourcesDb.getAllSources(),
-    rssDb.getAllRssSources(),
-    replaceDb.getAllReplaceRules(),
-    readRecordsDb.getAllReadRecords(),
-    exportDatabase(),
-  ]);
-
-  const entries: Record<string, Uint8Array> = {
-    'reader.db': new Uint8Array(dbBuffer),
-  };
-
-  if (books.length > 0) {
-    entries['bookshelf.json'] = strToU8(JSON.stringify(books, null, 2));
-  }
-  if (sources.length > 0) {
-    entries['bookSource.json'] = strToU8(JSON.stringify(sources, null, 2));
-  }
-  if (rssSources.length > 0) {
-    entries['rssSources.json'] = strToU8(JSON.stringify(rssSources, null, 2));
-  }
-  if (rules.length > 0) {
-    entries['replaceRule.json'] = strToU8(JSON.stringify(rules, null, 2));
-  }
-  if (records.length > 0) {
-    entries['readRecord.json'] = strToU8(JSON.stringify(records, null, 2));
-  }
-
+export async function createReaderBackupZip(
+  options: CreateReaderBackupOptions = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const { entries } = await buildBackupEntries(options);
+  const filename = formatBackupFileName(options);
   const zipped = zipSync(entries, { level: 6 });
-  const filename = formatBackupFileName();
   return {
     blob: new Blob([zipped], { type: 'application/zip' }),
     filename,
@@ -215,7 +219,6 @@ export async function restoreReaderBackupFromUserFile(file: File): Promise<{
   return { summary, reloadRecommended };
 }
 
-/** Web 环境：仅 .db 快捷导出（兼容旧流程） */
 export async function exportDatabaseFileDownload(filename = 'reader.db'): Promise<void> {
   await exportDatabaseAndDownload(filename);
 }

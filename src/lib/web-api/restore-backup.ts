@@ -15,8 +15,26 @@ import {
   LEGADO_ZIP_BOOK_SOURCE_NAMES,
   LEGADO_ZIP_RSS_NAMES,
   LEGADO_ZIP_REPLACE_RULE_NAMES,
+  LEGADO_ZIP_READ_CONFIG_NAMES,
+  LEGADO_ZIP_SHARE_READ_CONFIG_NAMES,
+  LEGADO_ZIP_READER_UI_CONFIG_NAMES,
+  LEGADO_ZIP_READER_PREFS_NAMES,
+  LEGADO_ZIP_CONFIG_XML_NAMES,
 } from '@/lib/book-source/legado-zip';
 import * as readRecordsDb from '@/lib/database/read-records';
+import { saveReaderUiConfig } from '@/lib/media/text/read-config-storage';
+import { importReaderUiConfigFromBackupEntries } from '@/lib/media/text/legado-read-config-sync';
+import { importExtraBackupJsonEntries } from '@/lib/backup/backup-json-import';
+import { getBackupPassword } from '@/lib/backup/backup-config-storage';
+import { getSelectedBackupFileNames } from '@/lib/backup/backup-selector-config';
+import { decryptBackupJsonIfNeeded } from '@/lib/backup/backup-aes';
+import { restoreBookCacheFromZip } from '@/lib/backup/book-cache-backup';
+import { restoreBackgroundFromZip } from '@/lib/backup/background-backup';
+import {
+  detectLegacyImportKind,
+  importLegacyBackupFile,
+  importOldBookSourcesToDb,
+} from '@/lib/backup/import-old-data';
 import { legadoErr, legadoOk, type LegadoReturnData } from '@/lib/web-api/return-data';
 import {
   parseLegadoBookImportRow,
@@ -55,6 +73,23 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buf instanceof ArrayBuffer ? buf : new Uint8Array(bytes).buffer;
 }
 
+function normalizeZipPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+export interface RestoreBackupOptions {
+  replace?: boolean;
+  selectedFileNames?: Set<string>;
+  backupPassword?: string;
+}
+
+function shouldRestoreItem(fileName: string, selected?: Set<string>): boolean {
+  if (!selected) return true;
+  if (selected.has(fileName)) return true;
+  if (fileName === 'book_cache' && selected.has('book_cache')) return true;
+  return false;
+}
+
 async function unzipBackup(bytes: Uint8Array): Promise<{
   text: Record<string, string>;
   binary: Record<string, Uint8Array>;
@@ -65,13 +100,19 @@ async function unzipBackup(bytes: Uint8Array): Promise<{
   const text: Record<string, string> = {};
   const binary: Record<string, Uint8Array> = {};
   for (const [path, data] of Object.entries(raw)) {
-    const name = basename(path);
-    if (!name) continue;
+    const norm = normalizeZipPath(path);
+    if (!norm) continue;
+    const name = basename(norm);
     if (/\.(db|sqlite3?)$/.test(name)) {
       binary[name] = data;
-    } else if (name.endsWith('.json') || name.endsWith('.txt')) {
+    } else if (norm.startsWith('book_cache/') || norm.startsWith('bg/')) {
+      binary[norm] = data;
+    } else if (name.endsWith('.json') || name.endsWith('.txt') || name.endsWith('.xml')) {
       const decoded = new TextDecoder().decode(data);
-      if (decoded.trim()) text[name] = decoded;
+      if (decoded.trim()) {
+        text[name] = decoded;
+        if (norm !== name) text[norm] = decoded;
+      }
     }
   }
   return { text, binary };
@@ -122,13 +163,30 @@ async function importReadRecordsFromJson(text: string): Promise<number> {
 export async function restoreBackupFromBytes(
   fileName: string,
   bytes: Uint8Array,
-  _replace = true,
+  replaceOrOptions: boolean | RestoreBackupOptions = true,
 ): Promise<string[]> {
+  const options: RestoreBackupOptions =
+    typeof replaceOrOptions === 'boolean' ? { replace: replaceOrOptions } : replaceOrOptions;
+  const selected = options.selectedFileNames ?? (await getSelectedBackupFileNames());
+  const backupPassword = options.backupPassword ?? (await getBackupPassword());
+
   const summary: string[] = [];
   const lower = fileName.toLowerCase();
 
+  const legacyKind = detectLegacyImportKind(fileName);
+  if (legacyKind && !isZipBuffer(bytes) && !isSqliteBuffer(bytes)) {
+    const text = new TextDecoder().decode(bytes);
+    const n = await importLegacyBackupFile(legacyKind, text);
+    if (n > 0) summary.push(`旧版 ${legacyKind} ${n} 条`);
+    if (summary.length === 0) throw new Error('旧版数据导入失败或为空');
+    return summary;
+  }
+
   if (isSqliteBuffer(bytes) || /\.(db|sqlite3?)$/.test(lower)) {
-    await importDatabase(toArrayBuffer(bytes), true);
+    if (!shouldRestoreItem('reader.db', selected)) {
+      throw new Error('选择性恢复未包含数据库项');
+    }
+    await importDatabase(toArrayBuffer(bytes), options.replace !== false);
     summary.push('已全量恢复 SQLite 数据库');
     return summary;
   }
@@ -136,33 +194,51 @@ export async function restoreBackupFromBytes(
   if (isZipBuffer(bytes) || lower.endsWith('.zip')) {
     const { text, binary } = await unzipBackup(bytes);
 
+    if (text['servers.json']) {
+      text['servers.json'] = decryptBackupJsonIfNeeded(text['servers.json'], backupPassword);
+    }
+
     const dbEntry = Object.entries(binary).find(([name]) =>
-      /^(reader|legado|backup)\.(db|sqlite3?)$/.test(name) || name.endsWith('.db'),
+      shouldRestoreItem('reader.db', selected)
+      && (/^(reader|legado|backup)\.(db|sqlite3?)$/.test(basename(name)) || name.endsWith('.db')),
     );
-    if (dbEntry) {
-      await importDatabase(toArrayBuffer(dbEntry[1]), true);
-      summary.push(`已全量恢复数据库：${dbEntry[0]}`);
+    if (dbEntry && shouldRestoreItem('reader.db', selected)) {
+      await importDatabase(toArrayBuffer(dbEntry[1]), options.replace !== false);
+      summary.push(`已全量恢复数据库：${basename(dbEntry[0])}`);
       return summary;
     }
 
-    const bookJson = pickZipEntry(text, [
-      ...LEGADO_ZIP_BOOK_SOURCE_NAMES,
-      'booksource.json',
-    ]);
-    const rssJson = pickZipEntry(text, LEGADO_ZIP_RSS_NAMES);
-    const replaceJson = pickZipEntry(text, LEGADO_ZIP_REPLACE_RULE_NAMES);
-    const shelfJson = pickZipEntry(text, ['bookshelf.json', 'books.json']);
-    const recordJson = pickZipEntry(text, ['readrecord.json', 'read_record.json']);
+    const bookJson =
+      shouldRestoreItem('bookSource.json', selected)
+        ? pickZipEntry(text, [...LEGADO_ZIP_BOOK_SOURCE_NAMES, 'booksource.json'])
+        : null;
+    const rssJson = shouldRestoreItem('rssSources.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_RSS_NAMES)
+      : null;
+    const replaceJson = shouldRestoreItem('replaceRule.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_REPLACE_RULE_NAMES)
+      : null;
+    const shelfJson = shouldRestoreItem('bookshelf.json', selected)
+      ? pickZipEntry(text, ['bookshelf.json', 'books.json'])
+      : null;
+    const recordJson = shouldRestoreItem('readRecord.json', selected)
+      ? pickZipEntry(text, ['readrecord.json', 'read_record.json'])
+      : null;
 
     if (bookJson) {
-      const sources = parseBookSourceJson(bookJson);
-      let n = 0;
-      for (const source of sources) {
-        if (!source.sourceUrl?.trim() || !source.sourceName?.trim()) continue;
-        await sourcesDb.insertSource(source);
-        n += 1;
+      let sources = parseBookSourceJson(bookJson);
+      if (sources.length === 0) {
+        const n = await importOldBookSourcesToDb(bookJson);
+        if (n > 0) summary.push(`书源（旧版） ${n} 条`);
+      } else {
+        let n = 0;
+        for (const source of sources) {
+          if (!source.sourceUrl?.trim() || !source.sourceName?.trim()) continue;
+          await sourcesDb.insertSource(source);
+          n += 1;
+        }
+        if (n > 0) summary.push(`书源 ${n} 条`);
       }
-      if (n > 0) summary.push(`书源 ${n} 条`);
     }
     if (rssJson) {
       const rss = parseRssSourceJson(rssJson);
@@ -180,6 +256,55 @@ export async function restoreBackupFromBytes(
     if (recordJson) {
       const n = await importReadRecordsFromJson(recordJson);
       if (n > 0) summary.push(`阅读记录 ${n} 条`);
+    }
+
+    summary.push(...(await importExtraBackupJsonEntries(text, selected)));
+
+    const readConfigJson = shouldRestoreItem('readConfig.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_READ_CONFIG_NAMES)
+      : null;
+    const shareReadConfigJson = shouldRestoreItem('shareReadConfig.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_SHARE_READ_CONFIG_NAMES)
+      : null;
+    const readerUiJson = shouldRestoreItem('readerUiConfig.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_READER_UI_CONFIG_NAMES)
+      : null;
+    const readerPrefsJson = shouldRestoreItem('readerPrefs.json', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_READER_PREFS_NAMES)
+      : null;
+    const configXml = shouldRestoreItem('config.xml', selected)
+      ? pickZipEntry(text, LEGADO_ZIP_CONFIG_XML_NAMES)
+      : null;
+    if (readConfigJson || shareReadConfigJson || readerUiJson || readerPrefsJson || configXml) {
+      const importedUi = importReaderUiConfigFromBackupEntries({
+        ...text,
+        ...(readConfigJson ? { 'readConfig.json': readConfigJson } : {}),
+        ...(shareReadConfigJson ? { 'shareReadConfig.json': shareReadConfigJson } : {}),
+        ...(readerUiJson ? { 'readerUiConfig.json': readerUiJson } : {}),
+        ...(readerPrefsJson ? { 'readerPrefs.json': readerPrefsJson } : {}),
+        ...(configXml ? { 'config.xml': configXml } : {}),
+      });
+      if (importedUi) {
+        await saveReaderUiConfig(importedUi);
+        summary.push('阅读器 UI 配置');
+      }
+    }
+
+    if (shouldRestoreItem('book_cache', selected)) {
+      const cacheCount = await restoreBookCacheFromZip(binary, text);
+      if (cacheCount > 0) summary.push(`章节缓存 ${cacheCount} 个文件`);
+    }
+
+    if (shouldRestoreItem('bg', selected)) {
+      const bgCount = await restoreBackgroundFromZip(binary);
+      if (bgCount > 0) summary.push(`背景图片 ${bgCount} 张`);
+    }
+
+    for (const [name, content] of Object.entries(text)) {
+      const legacyKind = detectLegacyImportKind(name);
+      if (!legacyKind) continue;
+      const n = await importLegacyBackupFile(legacyKind, content);
+      if (n > 0) summary.push(`旧版 ${legacyKind} ${n} 条`);
     }
 
     if (summary.length === 0) {

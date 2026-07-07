@@ -25,7 +25,7 @@ import { debugBookSourceApi } from '@/lib/web-api/book-source-debug-controller';
 import { debugRssSourceApi } from '@/lib/web-api/rss-source-debug-controller';
 import { assertWebApiAuthorized } from '@/lib/web-api/auth';
 import { addLocalBookApi } from '@/lib/web-api/wifi-upload';
-import { backupApi, getBackupPreviewApi, restoreBackupApi } from '@/lib/web-api/backup-controller';
+import { backupApi, getBackupPreviewApi, restoreBackupApi, webDavBackupListApi, webDavBackupRestoreApi, webDavBackupUploadApi, webDavSyncAssetsApi } from '@/lib/web-api/backup-controller';
 import {
   deleteReplaceRuleApi,
   getAllReplaceRulesApi,
@@ -157,6 +157,8 @@ export async function dispatchLegadoWebApi(
         return jsonApiResult(await getBackupPreviewApi());
       case '/backup':
         return backupApi();
+      case '/webDavBackupList':
+        return jsonApiResult(await webDavBackupListApi());
       case '/cover':
         return getCoverApi(query);
       case '/image':
@@ -197,6 +199,12 @@ export async function dispatchLegadoWebApi(
         return jsonApiResult(await addLocalBookApi(body));
       case '/restoreBackup':
         return jsonApiResult(await restoreBackupApi(body));
+      case '/webDavBackupUpload':
+        return jsonApiResult(await webDavBackupUploadApi());
+      case '/webDavBackupRestore':
+        return jsonApiResult(await webDavBackupRestoreApi(body));
+      case '/webDavSyncAssets':
+        return jsonApiResult(await webDavSyncAssetsApi());
       case '/saveReadConfig':
         return jsonApiResult(await saveReadConfigApi(body));
       case '/debugBookSource':
