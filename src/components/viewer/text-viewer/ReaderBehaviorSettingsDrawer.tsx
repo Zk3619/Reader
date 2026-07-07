@@ -39,13 +39,17 @@ import {
   TEXT_VIEWER_PROGRESS_BAR_BEHAVIOR_LABELS,
   TEXT_VIEWER_PROGRESS_BAR_BEHAVIORS,
   TEXT_VIEWER_SCREEN_ORIENTATION_LABELS,
+  TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPE_LABELS,
+  TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPES,
   type TextViewerClickImgWay,
   type TextViewerKeepScreenOn,
   type TextViewerScreenOrientation,
+  type TextViewerTextSelectDismissScope,
   type TextViewerUiConfig,
   normalizeBrightnessViewPosition,
   normalizeAutoPageStyle,
   normalizeAutoPageProgressEdge,
+  normalizeTextViewerTextSelectDismissScope,
   type TextViewerBrightnessViewPosition,
 } from '@/lib/media/text/reader-ui-config';
 import { ReaderCustomPageKeyDialog } from './ReaderCustomPageKeyDialog';
@@ -119,6 +123,7 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
   const [customPageKeyOpen, setCustomPageKeyOpen] = createSignal(false);
   const [textMenuConfigOpen, setTextMenuConfigOpen] = createSignal(false);
   const [clickImgWayPickerOpen, setClickImgWayPickerOpen] = createSignal(false);
+  const [textSelectDismissPickerOpen, setTextSelectDismissPickerOpen] = createSignal(false);
   const [orientationPickerOpen, setOrientationPickerOpen] = createSignal(false);
   const [keepScreenPickerOpen, setKeepScreenPickerOpen] = createSignal(false);
 
@@ -133,6 +138,7 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
     customPageKeyOpen() ||
     textMenuConfigOpen() ||
     clickImgWayPickerOpen() ||
+    textSelectDismissPickerOpen() ||
     orientationPickerOpen() ||
     keepScreenPickerOpen();
 
@@ -348,6 +354,19 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                 checked={config().selectText !== false}
                 onChange={(v) => setConfig({ selectText: v })}
               />
+              <Show when={config().selectText !== false}>
+                <SettingsPickerRow
+                  label="点击取消选区"
+                  valueLabel={
+                    TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPE_LABELS[
+                      normalizeTextViewerTextSelectDismissScope(
+                        config().textSelectDismissScope,
+                      )
+                    ]
+                  }
+                  onClick={() => setTextSelectDismissPickerOpen(true)}
+                />
+              </Show>
               <SettingsSwitchRow
                 label="展开文本选择菜单"
                 description="开启后在选区菜单中一次性显示全部可见项（宽度足够时为单行）"
@@ -449,6 +468,56 @@ export function ReaderBehaviorSettingsDrawer(props: ReaderBehaviorSettingsDrawer
                 )}
               </For>
             </RadioGroup>
+          </AppDialogScrollBody>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
+
+      <ViewerAppDialog
+        open={textSelectDismissPickerOpen()}
+        onOpenChange={setTextSelectDismissPickerOpen}
+        modal={false}
+      >
+        <ViewerAppDialogContent class={cn('w-[calc(100dvw-2rem)] max-w-[20rem]')}>
+          <ViewerAppDialogHeader>
+            <ViewerAppDialogTitle>点击取消选区</ViewerAppDialogTitle>
+          </ViewerAppDialogHeader>
+          <AppDialogScrollBody frameClass={dialogScrollFrameFlex}>
+            <RadioGroup
+              value={normalizeTextViewerTextSelectDismissScope(config().textSelectDismissScope)}
+              onChange={(value) => {
+                setConfig({
+                  textSelectDismissScope: value as TextViewerTextSelectDismissScope,
+                });
+                setTextSelectDismissPickerOpen(false);
+              }}
+              class="flex flex-col gap-2"
+            >
+              <For each={[...TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPES]}>
+                {(scope) => (
+                  <div
+                    class={optionRowClass}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => triggerOptionRadio(e.currentTarget)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        triggerOptionRadio(e.currentTarget);
+                      }
+                    }}
+                  >
+                    <RadioGroupItem value={scope} class="w-full">
+                      <RadioGroupItemLabel>
+                        {TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPE_LABELS[scope]}
+                      </RadioGroupItemLabel>
+                    </RadioGroupItem>
+                  </div>
+                )}
+              </For>
+            </RadioGroup>
+            <p class="mt-2 px-2 text-xs text-muted-foreground">
+              「非游标区域」：点击选区文字也会取消选中；「非游标及选区区域」：仅点击选区与游标外才取消。
+            </p>
           </AppDialogScrollBody>
         </ViewerAppDialogContent>
       </ViewerAppDialog>

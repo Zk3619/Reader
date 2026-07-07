@@ -12,6 +12,7 @@ import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickRegion } from '@/lib/media/text/reader-click-region';
 import type { TextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
 import type { ReaderPageTipType } from '@/lib/media/text/reader-page-tip';
+import type { ReaderBgType } from '@/lib/media/text/reader-background';
 
 /** 与 Legado PageAnim 对齐：滚动 / 覆盖 / 滑动 / 仿真 / 无动画 */
 export type TextViewerPageAnim =
@@ -365,6 +366,8 @@ export interface TextViewerUiConfig {
   disableScrollClickAnimation?: boolean;
   /** 允许长按选择文本 */
   selectText?: boolean;
+  /** 点击取消选区范围：仅游标外 / 游标与选区外 */
+  textSelectDismissScope?: TextViewerTextSelectDismissScope;
   /** 文本选择菜单默认展开 */
   expandTextMenu?: boolean;
   /** 文本选择菜单可见项 id */
@@ -385,6 +388,15 @@ export interface TextViewerUiConfig {
   autoChangeSource?: boolean;
   /** 菜单隐藏时拦截返回键 */
   disableReturnKey?: boolean;
+
+  /** Legado 阅读背景：白天类型 0 颜色 / 1 内置 / 2 自定义 */
+  bgType?: ReaderBgType;
+  bgTypeNight?: ReaderBgType;
+  /** 颜色 hex 或图片文件名 */
+  bgStr?: string;
+  bgStrNight?: string;
+  /** 背景图透明度 0–100 */
+  bgAlpha?: number;
 }
 
 /** 按页自动翻页：扫描线 / 横向进度条 / 扫描揭示下一页（对齐 Legado 非滚动 AutoPager） */
@@ -570,6 +582,31 @@ export const TEXT_VIEWER_CLICK_IMG_WAY_LABELS: Record<TextViewerClickImgWay, str
   4: '双击',
 };
 
+/** 点击取消选区：仅在游标外 / 游标与选区外 */
+export type TextViewerTextSelectDismissScope =
+  | 'outsideHandle'
+  | 'outsideHandleAndSelection';
+
+export const TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPE_LABELS: Record<
+  TextViewerTextSelectDismissScope,
+  string
+> = {
+  outsideHandle: '非游标区域',
+  outsideHandleAndSelection: '非游标及选区区域',
+};
+
+export const TEXT_VIEWER_TEXT_SELECT_DISMISS_SCOPES = [
+  'outsideHandle',
+  'outsideHandleAndSelection',
+] as const satisfies readonly TextViewerTextSelectDismissScope[];
+
+export function normalizeTextViewerTextSelectDismissScope(
+  value: string | undefined | null,
+): TextViewerTextSelectDismissScope {
+  if (value === 'outsideHandle') return 'outsideHandle';
+  return 'outsideHandleAndSelection';
+}
+
 /** Legado TextMenuConfig.ALL_MENU_ITEMS 顺序；折叠时前 5 项主栏，其余进「更多」 */
 export const TEXT_VIEWER_TEXT_MENU_ITEM_ORDER = [
   'replace',
@@ -736,6 +773,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   keyPageOnLongPress: false,
   disableScrollClickAnimation: false,
   selectText: true,
+  textSelectDismissScope: 'outsideHandleAndSelection',
   expandTextMenu: false,
   textMenuVisibleItems: [...DEFAULT_TEXT_VIEWER_TEXT_MENU_VISIBLE_ITEMS],
   textMenuHiddenProcessTextItems: [],
@@ -746,4 +784,9 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   brightnessAuto: true,
   autoChangeSource: true,
   disableReturnKey: false,
+  bgType: 0,
+  bgTypeNight: 0,
+  bgStr: '#ffc0edc6',
+  bgStrNight: '#000000',
+  bgAlpha: 100,
 };

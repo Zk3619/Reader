@@ -50,8 +50,7 @@ import {
   startReadingSession,
   tickReadingSession,
 } from '@/lib/media/text/reading-session';
-import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
-import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
+import { mergeTextViewerUiConfig } from '@/lib/media/text/merge-text-viewer-ui-config';
 import {
   chapterPosForChapterSwitch,
   consumePagedChapterEntry,
@@ -66,189 +65,24 @@ import {
 } from '@/stores/viewer/media/chapter';
 import {
   defaultTextViewerUiConfig,
-  normalizeAutoPageProgressEdge,
-  normalizeAutoPageStyle,
-  normalizeAutoReadSpeed,
-  normalizeBrightnessViewPosition,
-  normalizeTtsSpeechRate,
-  normalizeSimulationDragZonePercent,
-  normalizeTextViewerLayoutEngine,
   type TextViewerUiConfig,
 } from '@/lib/media/text/reader-ui-config';
-import {
-  isReaderNightTheme,
-  normalizeReaderThemeId,
-} from '@/lib/media/text/reader-theme-classes';
+import { isReaderNightTheme } from '@/lib/media/text/reader-theme-classes';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
-import { migrateReaderImageStyle } from '@/lib/js-engine/legado/legado-image-options';
-import { mergePageTipsConfig } from '@/components/viewer/text-viewer/ReaderPageTipControls';
-import { normalizeFontWeight, normalizeReaderFontPreset } from '@/lib/media/text/reader-font';
-import { normalizeTextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
 import { settingsState } from '@/stores/settings';
-import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 
 const defaultConfig = defaultTextViewerUiConfig;
 
 let configHydrated = false;
 let configSaveTimer: number | null = null;
 
-/** 合并持久化边距；兼容旧版 middleLeft + middleRight */
-function mergeContentInset(
-  prev: TextViewerUiConfig['contentInset'],
-  saved: Partial<TextViewerUiConfig['contentInset']> & {
-    middleLeft?: number;
-    middleRight?: number;
-  },
-): TextViewerUiConfig['contentInset'] {
-  let center = saved.center;
-  if (center == null && (saved.middleLeft != null || saved.middleRight != null)) {
-    center = (saved.middleLeft ?? 0) + (saved.middleRight ?? 0);
-  }
-  return {
-    left: saved.left ?? prev.left,
-    right: saved.right ?? prev.right,
-    center: center ?? prev.center,
-    top: saved.top ?? prev.top,
-    bottom: saved.bottom ?? prev.bottom,
-  };
-}
-
 function applySavedReaderUiConfig(
   prev: TextViewerUiConfig,
-  saved: Partial<TextViewerUiConfig> & {
-    middleLeft?: number;
-    middleRight?: number;
-    layoutEngine?: string;
-  },
+  saved: Partial<TextViewerUiConfig>,
 ): TextViewerUiConfig {
-  return {
-    ...prev,
-    ...saved,
-    spacing: { ...prev.spacing, ...saved.spacing },
-    contentInset: mergeContentInset(
-      prev.contentInset,
-      saved.contentInset ?? saved,
-    ),
-    clickActions: {
-      ...DEFAULT_CLICK_ACTIONS,
-      ...saved.clickActions,
-    },
-    clickRegion: saved.clickRegion
-      ? {
-        xSplits: [
-          saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
-          saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
-        ] as [number, number],
-        ySplits: [
-          saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
-          saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
-        ] as [number, number],
-      }
-      : prev.clickRegion,
-    imageStyle: migrateReaderImageStyle(saved.imageStyle ?? prev.imageStyle),
-    pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined),
-    simulationDragZonePercent: normalizeSimulationDragZonePercent(
-      saved.simulationDragZonePercent,
-    ),
-    viewerChromeLayout: normalizeViewerChromeLayout(
-      saved.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
-    ),
-    theme: normalizeReaderThemeId(saved.theme),
-    autoReadSpeed: normalizeAutoReadSpeed(saved.autoReadSpeed),
-    autoPageStyle: normalizeAutoPageStyle(saved.autoPageStyle as string | undefined),
-    autoPageProgressEdge: normalizeAutoPageProgressEdge(
-      saved.autoPageProgressEdge as string | undefined,
-    ),
-    font: normalizeReaderFontPreset(saved.font),
-    fontWeight: normalizeFontWeight(saved.fontWeight, defaultConfig.fontWeight),
-    customFontPath: saved.customFontPath ?? prev.customFontPath,
-    chapterTitleStyle: normalizeTextViewerChapterTitleStyle(saved.chapterTitleStyle),
-    chapterTitleSize: saved.chapterTitleSize ?? prev.chapterTitleSize,
-    chapterTitleTopSpacing: saved.chapterTitleTopSpacing ?? prev.chapterTitleTopSpacing,
-    chapterTitleBottomSpacing:
-      saved.chapterTitleBottomSpacing ?? prev.chapterTitleBottomSpacing,
-    chapterTitleFontWeight: normalizeFontWeight(
-      saved.chapterTitleFontWeight,
-      prev.chapterTitleFontWeight,
-    ),
-    paragraphIndentChars:
-      saved.paragraphIndentChars ?? prev.paragraphIndentChars ?? defaultConfig.paragraphIndentChars,
-    layoutEngine: normalizeTextViewerLayoutEngine(saved.layoutEngine),
-    ttsSpeechRate: normalizeTtsSpeechRate(
-      saved.ttsSpeechRate ?? saved.speakSpeed ?? prev.ttsSpeechRate,
-    ),
-    speakSpeed: normalizeTtsSpeechRate(
-      saved.speakSpeed ?? saved.ttsSpeechRate ?? prev.speakSpeed,
-    ),
-    ttsFollowSys: saved.ttsFollowSys ?? prev.ttsFollowSys ?? true,
-    ttsTimer: saved.ttsTimer ?? prev.ttsTimer ?? 0,
-    readAloudByPage: saved.readAloudByPage ?? prev.readAloudByPage ?? false,
-    mediaButtonPerNext: saved.mediaButtonPerNext ?? prev.mediaButtonPerNext ?? false,
-    systemTtsVoiceURI: saved.systemTtsVoiceURI ?? prev.systemTtsVoiceURI ?? '',
-    systemTtsLang: saved.systemTtsLang ?? prev.systemTtsLang ?? 'zh-CN',
-    readAloudFloatingUi: saved.readAloudFloatingUi ?? prev.readAloudFloatingUi ?? false,
-    contentSelectSpeakMod:
-      saved.contentSelectSpeakMod === 1 ? 1 : (prev.contentSelectSpeakMod ?? 0),
-    volumeKeyControlAloud: saved.volumeKeyControlAloud ?? prev.volumeKeyControlAloud ?? true,
-    streamReadAloudAudio: saved.streamReadAloudAudio ?? prev.streamReadAloudAudio ?? false,
-    readAloudResumeOnFocus:
-      saved.readAloudResumeOnFocus ?? prev.readAloudResumeOnFocus ?? false,
-    readTopBarStyleFollowPage:
-      saved.readTopBarStyleFollowPage ??
-      saved.readBarStyleFollowPage ??
-      prev.readTopBarStyleFollowPage ??
-      false,
-    readBottomBarStyleFollowPage:
-      saved.readBottomBarStyleFollowPage ??
-      saved.readBarStyleFollowPage ??
-      prev.readBottomBarStyleFollowPage ??
-      false,
-    brightnessViewPosition: normalizeBrightnessViewPosition(
-      saved.brightnessViewPosition ?? prev.brightnessViewPosition,
-    ),
-    brightnessViewStyleFollowPage:
-      saved.brightnessViewStyleFollowPage ?? prev.brightnessViewStyleFollowPage ?? true,
-    readAloudBarStyleFollowPage:
-      saved.readAloudBarStyleFollowPage ?? prev.readAloudBarStyleFollowPage ?? false,
-    pageTips: migratePageTipsFromStatusBar(
-      mergePageTipsConfig(saved.pageTips),
-      saved.statusBarDisplayStyle,
-    ),
-  };
-}
-
-/** 将旧版「阅读进度状态栏」显示策略迁移到页脚信息条 */
-function migratePageTipsFromStatusBar(
-  tips: TextViewerUiConfig['pageTips'],
-  statusBarStyle: TextViewerUiConfig['statusBarDisplayStyle'] | undefined,
-): TextViewerUiConfig['pageTips'] {
-  if (!statusBarStyle || statusBarStyle === 'follow') {
-    if (tips.footerMode !== 'never') return tips;
-    return {
-      ...tips,
-      footerMode: 'follow',
-      footerLeft: tips.footerLeft === 'none' ? 'chapterTitle' : tips.footerLeft,
-      footerMiddle: tips.footerMiddle === 'none' ? 'chapterWordCount' : tips.footerMiddle,
-      footerRight:
-        tips.footerRight === 'none' || tips.footerRight === 'pageAndTotal'
-          ? 'chapterProgressAndBook'
-          : tips.footerRight,
-    };
-  }
-  if (statusBarStyle === 'always') {
-    if (tips.footerMode === 'always') return tips;
-    return {
-      ...tips,
-      footerMode: 'always',
-      footerLeft: tips.footerLeft === 'none' ? 'chapterTitle' : tips.footerLeft,
-      footerMiddle: tips.footerMiddle === 'none' ? 'chapterWordCount' : tips.footerMiddle,
-      footerRight:
-        tips.footerRight === 'none' || tips.footerRight === 'pageAndTotal'
-          ? 'chapterProgressAndBook'
-          : tips.footerRight,
-    };
-  }
-  return tips;
+  return mergeTextViewerUiConfig(prev, saved, {
+    fallbackViewerChromeLayout: settingsState.app.viewerChromeLayout,
+  });
 }
 
 /** 将已缓存/同步读到的阅读器配置灌入 store（可在 warm 之后多次调用） */
@@ -972,6 +806,12 @@ export async function saveTextProgress(): Promise<void> {
       chapterPos,
       chapterTitle,
     });
+    const updated = await booksDb.getBook(bookUrl);
+    if (updated) {
+      void import('@/lib/backup/webdav-book-progress').then((m) =>
+        m.uploadBookProgressToWebDav(updated),
+      );
+    }
     window.dispatchEvent(
       new CustomEvent('bookshelf-book-updated', {
         detail: { bookUrl },

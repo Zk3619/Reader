@@ -3,7 +3,12 @@
  */
 
 import { getStorage, setStorage } from '@/lib/platform/storage';
-import type { TextViewerUiConfig as ReadConfig } from '@/lib/media/text/reader-ui-config';
+import {
+  defaultTextViewerUiConfig,
+  type TextViewerUiConfig as ReadConfig,
+} from '@/lib/media/text/reader-ui-config';
+import { mergeTextViewerUiConfig } from '@/lib/media/text/merge-text-viewer-ui-config';
+import { parseReaderLegadoConfigPayload } from '@/lib/media/text/legado-read-config-sync';
 
 const STORAGE_KEY = 'reader_ui_config_v1';
 
@@ -14,6 +19,11 @@ const WEB_STORAGE_PREFIX = 'store_settings.json_';
 const SESSION_MIRROR_KEY = 'reader_ui_config_v1_mirror';
 
 let cached: ReadConfig | null = null;
+
+function normalizeStoredReaderUiConfig(raw: ReadConfig | null | undefined): ReadConfig | null {
+  if (!raw || typeof raw !== 'object') return null;
+  return parseReaderLegadoConfigPayload(raw, defaultTextViewerUiConfig);
+}
 
 function mirrorReaderUiConfigToSession(config: ReadConfig): void {
   if (typeof sessionStorage === 'undefined') return;
@@ -48,8 +58,8 @@ export function peekReaderUiConfigSync(): ReadConfig | null {
   try {
     const raw = localStorage.getItem(`${WEB_STORAGE_PREFIX}${STORAGE_KEY}`);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as ReadConfig;
-    if (parsed && typeof parsed === 'object') {
+    const parsed = normalizeStoredReaderUiConfig(JSON.parse(raw) as ReadConfig);
+    if (parsed) {
       cached = parsed;
       mirrorReaderUiConfigToSession(parsed);
       return parsed;
@@ -68,8 +78,8 @@ export async function warmReaderUiConfigCache(): Promise<ReadConfig | null> {
 export async function loadReaderUiConfig(): Promise<ReadConfig | null> {
   if (cached) return cached;
   try {
-    const parsed = await getStorage<ReadConfig>(STORAGE_KEY);
-    if (parsed && typeof parsed === 'object') {
+    const parsed = normalizeStoredReaderUiConfig(await getStorage<ReadConfig>(STORAGE_KEY));
+    if (parsed) {
       cached = parsed;
       mirrorReaderUiConfigToSession(parsed);
       return parsed;
@@ -81,10 +91,11 @@ export async function loadReaderUiConfig(): Promise<ReadConfig | null> {
 }
 
 export async function saveReaderUiConfig(config: ReadConfig): Promise<void> {
-  cached = config;
-  mirrorReaderUiConfigToSession(config);
+  const normalized = mergeTextViewerUiConfig(defaultTextViewerUiConfig, config);
+  cached = normalized;
+  mirrorReaderUiConfigToSession(normalized);
   try {
-    await setStorage(STORAGE_KEY, config);
+    await setStorage(STORAGE_KEY, normalized);
   } catch (e) {
     console.warn('[read-config-storage] save failed', e);
   }
