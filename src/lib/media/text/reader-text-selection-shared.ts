@@ -65,6 +65,7 @@ export function getSharedReaderTextSelectionGesture(): ReaderTextSelectionGestur
     sharedGesture = createReaderTextSelectionGesture({
       enabled: () => textViewerStore.state.config.selectText !== false,
       canStartLongPress: () => canStartReaderTextLongPress(),
+      getDismissScope: () => textViewerStore.state.config.textSelectDismissScope,
     });
   }
   return sharedGesture;

@@ -7,6 +7,23 @@ import { legadoWebApiServer } from "./vite-plugins/legado-web-api-server";
 
 const host = process.env.TAURI_DEV_HOST;
 
+/** 开发时排除监听，避免编辑文档/示例/构建产物等触发 HMR */
+const DEV_WATCH_IGNORED_DIRS = [
+  "src-tauri",
+  "docs",
+  "examples",
+  "dist",
+  "web-service-dist",
+  "scripts",
+  ".cursor",
+  ".vscode",
+  ".codegraph",
+  ".shared",
+] as const;
+const devWatchIgnored = DEV_WATCH_IGNORED_DIRS.map(
+  (dir) => `${path.resolve(__dirname, dir).replace(/\\/g, "/")}/**`,
+);
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   test: {
@@ -49,8 +66,8 @@ export default defineConfig(async () => ({
       }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. 排除非前端源码路径，避免无关文件变更触发 HMR
+      ignored: devWatchIgnored,
     },
   },
 }));

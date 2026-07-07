@@ -7,10 +7,11 @@ export type MediaViewerChromeAutoHideSession = {
 
 let activeSession: MediaViewerChromeAutoHideSession | null = null;
 let activeToken: symbol | null = null;
-let autoHideSuspended = false;
+let autoHideFrozen = false;
+let autoHideHoldCount = 0;
 
 export function isMediaViewerChromeAutoHideSuspended(): boolean {
-  return autoHideSuspended;
+  return autoHideFrozen || autoHideHoldCount > 0;
 }
 
 export function registerMediaViewerChromeAutoHideSession(
@@ -21,7 +22,8 @@ export function registerMediaViewerChromeAutoHideSession(
     if (token === undefined || token === activeToken) {
       activeSession = null;
       activeToken = null;
-      autoHideSuspended = false;
+      autoHideFrozen = false;
+      autoHideHoldCount = 0;
     }
     return;
   }
@@ -31,14 +33,33 @@ export function registerMediaViewerChromeAutoHideSession(
 
 /** 试读退出等：终止自动隐藏计时并保持顶底栏可见 */
 export function freezeMediaViewerChromeAutoHide(): void {
-  autoHideSuspended = true;
+  autoHideFrozen = true;
   activeSession?.autoHide.clearHideTimer();
   activeSession?.showChrome();
 }
 
 /** 关闭试读提示且仍留在阅读器时，恢复自动隐藏 */
 export function resumeMediaViewerChromeAutoHide(): void {
-  if (!autoHideSuspended) return;
-  autoHideSuspended = false;
-  activeSession?.autoHide.revealSession();
+  if (!autoHideFrozen) return;
+  autoHideFrozen = false;
+  if (autoHideHoldCount === 0) {
+    activeSession?.autoHide.revealSession();
+  }
+}
+
+/** 拖动亮度/进度等滑条时暂停自动隐藏倒计时 */
+export function holdMediaViewerChromeAutoHide(): void {
+  autoHideHoldCount++;
+  if (autoHideHoldCount === 1) {
+    activeSession?.autoHide.clearHideTimer();
+  }
+}
+
+/** 松手后重启自动隐藏倒计时（若未被 freeze） */
+export function releaseMediaViewerChromeAutoHide(): void {
+  if (autoHideHoldCount <= 0) return;
+  autoHideHoldCount--;
+  if (autoHideHoldCount === 0 && !autoHideFrozen) {
+    activeSession?.autoHide.scheduleHide();
+  }
 }

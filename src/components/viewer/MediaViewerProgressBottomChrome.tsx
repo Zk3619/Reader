@@ -1,6 +1,6 @@
 import { Show, splitProps, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
+import { MediaViewerChromeHoldSlider } from '@/components/viewer/MediaViewerChromeHoldSlider';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerBottomChromeContent';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,7 @@ import {
   mediaViewerChromeFloatingBottomRowClass,
   mediaViewerChromeFloatingSliderPillClass,
   mediaViewerChromeFloatingStatusPillClass,
+  mediaViewerChromeSliderLaneClass,
 } from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 
@@ -142,8 +143,8 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
                 when={showSlider()}
                 fallback={<div class="min-h-9 min-w-0 flex-1" />}
               >
-                <div class="min-w-0 flex-1 px-1">
-                  <Slider
+                <div class={mediaViewerChromeSliderLaneClass}>
+                  <MediaViewerChromeHoldSlider
                     value={[local.progressValue]}
                     minValue={0}
                     maxValue={1}
@@ -151,12 +152,7 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
                     onChange={local.onProgressChange}
                     class="py-2"
                     disabled={local.loading}
-                  >
-                    <SliderTrack>
-                      <SliderFill />
-                      <SliderThumb />
-                    </SliderTrack>
-                  </Slider>
+                  />
                 </div>
               </Show>
               <Button
@@ -190,8 +186,8 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
             fallback={<div class="min-h-9 min-w-0" />}
           >
             <div class={mediaViewerChromeFloatingSliderPillClass} style={floatingPillStyle()}>
-              <div class="min-w-0 w-full overflow-hidden">
-                <Slider
+              <div class="min-w-0 w-full overflow-visible">
+                <MediaViewerChromeHoldSlider
                   value={[local.progressValue]}
                   minValue={0}
                   maxValue={1}
@@ -199,12 +195,7 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
                   onChange={local.onProgressChange}
                   class="w-full min-w-0 py-1"
                   disabled={local.loading}
-                >
-                  <SliderTrack>
-                    <SliderFill />
-                    <SliderThumb />
-                  </SliderTrack>
-                </Slider>
+                />
               </div>
             </div>
           </Show>

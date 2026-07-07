@@ -1,7 +1,7 @@
 import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
-import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
+import { MediaViewerChromeHoldSlider } from '@/components/viewer/MediaViewerChromeHoldSlider';
 import {
   ListIcon,
   SettingsIcon,
@@ -23,6 +23,7 @@ import {
   mediaViewerChromeFloatingBottomPillClass,
   mediaViewerChromeFloatingBottomRowClass,
   mediaViewerChromeFloatingSliderPillClass,
+  mediaViewerChromeSliderLaneClass,
 } from '@/components/viewer/viewer-chrome';
 
 export interface TextViewerBottomChromeProps {
@@ -91,8 +92,8 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
             style={floatingPillStyle()}
           >
             <span class="w-14 shrink-0 opacity-80">自动翻页</span>
-            <div class="min-w-0 flex-1 overflow-hidden">
-              <Slider
+            <div class="min-w-0 flex-1 overflow-visible">
+              <MediaViewerChromeHoldSlider
                 value={[autoReadSpeed()]}
                 minValue={TEXT_VIEWER_AUTO_READ_SPEED_MIN}
                 maxValue={TEXT_VIEWER_AUTO_READ_SPEED_MAX}
@@ -102,12 +103,7 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
                   props.onAutoReadSpeedChange?.(next);
                 }}
                 class="py-1"
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+              />
             </div>
             <span class="shrink-0 tabular-nums">{autoReadSpeed()}s</span>
           </div>
@@ -129,20 +125,15 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
                 >
                   上一章
                 </Button>
-                <div class="min-w-0 flex-1 px-1">
-                  <Slider
+                <div class={mediaViewerChromeSliderLaneClass}>
+                  <MediaViewerChromeHoldSlider
                     value={[sliderValue()]}
                     minValue={0}
                     maxValue={sliderMax()}
                     step={sliderStep()}
                     onChange={props.onChapterProgressChange}
                     class="py-2"
-                  >
-                    <SliderTrack>
-                      <SliderFill />
-                      <SliderThumb />
-                    </SliderTrack>
-                  </Slider>
+                  />
                 </div>
                 <Button
                   variant="ghost"
@@ -218,20 +209,15 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
               上一章
             </Button>
             <div class={mediaViewerChromeFloatingSliderPillClass} style={floatingPillStyle()}>
-              <div class="min-w-0 w-full overflow-hidden">
-                <Slider
+              <div class="min-w-0 w-full overflow-visible">
+                <MediaViewerChromeHoldSlider
                   value={[sliderValue()]}
                   minValue={0}
                   maxValue={sliderMax()}
                   step={sliderStep()}
                   onChange={props.onChapterProgressChange}
                   class="w-full min-w-0 py-1"
-                >
-                  <SliderTrack>
-                    <SliderFill />
-                    <SliderThumb />
-                  </SliderTrack>
-                </Slider>
+                />
               </div>
             </div>
             <Button

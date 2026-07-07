@@ -4,6 +4,8 @@ import { ReaderPageTipBar } from '@/components/viewer/text-viewer/ReaderPageTipB
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
+import { createReaderPageBgStyle } from '@/lib/media/text/reader-background';
+import { textViewerStore } from '@/stores/viewer';
 import { cn } from '@/lib/utils';
 
 export interface ReaderScrollPageChromeProps {
@@ -20,7 +22,7 @@ export interface ReaderScrollPageChromeProps {
 export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
   const themeCls = () => readerThemeClasses(props.themeId);
   const contentColor = () => readerThemePalette(props.themeId).text;
-  const pageBg = () => readerThemePalette(props.themeId).bg;
+  const pageBgStyle = createReaderPageBgStyle(() => textViewerStore.state.config);
 
   const scrollClass = createMemo(() =>
     cn(
@@ -38,7 +40,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
         themeCls().bg,
         themeCls().text,
       )}
-      style={{ 'background-color': pageBg() }}
+      style={pageBgStyle()}
     >
       <ReaderPageTipBar
         surface="reader"
@@ -51,7 +53,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
       <div
         ref={props.scrollRef}
         class={scrollClass()}
-        style={{ 'background-color': pageBg() }}
+        style={pageBgStyle()}
       >
         {props.children}
       </div>

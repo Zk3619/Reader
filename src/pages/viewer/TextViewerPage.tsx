@@ -40,11 +40,11 @@ import { ReaderBrightnessControl } from '@/components/viewer/text-viewer/ReaderB
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import {
   applyKeepScreenOn,
-  applyReadBrightness,
   applyScreenOrientation,
   captureNativeBrightnessBeforeRead,
   clearKeepScreenOn,
   restoreBrightnessOnExit,
+  syncReadBrightness,
 } from '@/lib/platform/display-reader';
 import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
 import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
@@ -1096,15 +1096,18 @@ export function BookReader(props: BookReaderProps) {
 
   onMount(() => {
     void captureNativeBrightnessBeforeRead();
-    void applyReadBrightness(textViewerStore.state.config.readBrightness ?? 100);
     const cfg = textViewerStore.state.config;
+    void syncReadBrightness(
+      cfg.readBrightness ?? 100,
+      cfg.brightnessAuto !== false,
+    );
     void applyScreenOrientation(cfg.screenOrientation ?? 0);
     void applyKeepScreenOn(cfg.keepScreenOn ?? 0);
   });
 
   createEffect(() => {
     const cfg = textViewerStore.state.config;
-    void applyReadBrightness(cfg.readBrightness ?? 100);
+    void syncReadBrightness(cfg.readBrightness ?? 100, cfg.brightnessAuto !== false);
     void applyScreenOrientation(cfg.screenOrientation ?? 0);
     void applyKeepScreenOn(cfg.keepScreenOn ?? 0);
   });
@@ -1452,6 +1455,15 @@ export function BookReader(props: BookReaderProps) {
             )}
           >
             <MediaViewerChromeSlots
+              sideOverlay={
+                <Show
+                  when={
+                    brightnessViewPosition() === 'left' || brightnessViewPosition() === 'right'
+                  }
+                >
+                  <ReaderBrightnessControl chromeVisible={brightnessChromeVisible()} />
+                </Show>
+              }
               header={
                 <MediaViewerHeader
                   surfaceStyle={readerChromeSurfaceStyle('top')}
@@ -1553,13 +1565,6 @@ export function BookReader(props: BookReaderProps) {
                 </MediaViewerFooter>
               }
             >
-              <Show
-                when={
-                  brightnessViewPosition() === 'left' || brightnessViewPosition() === 'right'
-                }
-              >
-                <ReaderBrightnessControl chromeVisible={brightnessChromeVisible()} />
-              </Show>
               <Show
                 when={isWideScreen() && (commentsOpen() || panelClosing())}
                 fallback={

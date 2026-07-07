@@ -723,6 +723,14 @@
   overflow: visible;
 }
 
+.reader-brightness-overlay-host {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .reader-brightness-capsule-shell--inset-top {
   top: calc(var(--reader-brightness-inset-top, 0px) + var(--reader-brightness-chrome-gap, 10px));
 }
@@ -875,24 +883,16 @@
   padding-top: 0;
 }
 
-/* 阅读器亮度 overlay（Web / native 失败降级） */
-[data-reader-brightness-host] {
-  position: relative;
+/* 阅读器亮度 overlay 降级：brightness 滤镜模拟背光；拖动时即时更新，不做 transition 避免闪回最亮 */
+[data-reader-brightness-host][data-brightness-overlay] {
+  filter: brightness(var(--reader-brightness-filter, 1));
+  -webkit-filter: brightness(var(--reader-brightness-filter, 1));
 }
 
-[data-reader-brightness-host]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: #000;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  z-index: 5;
-}
-
-[data-reader-brightness-host][data-brightness-overlay]::after {
-  opacity: calc(var(--reader-brightness-overlay, 0));
+/* 底栏/进度滑条：为圆环滑块留出溢出空间 */
+.viewer-chrome-slider-lane,
+.viewer-chrome-slider-root {
+  overflow: visible;
 }
 
 .reader-bottom-bar,

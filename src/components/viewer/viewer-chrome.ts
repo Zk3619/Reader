@@ -311,9 +311,13 @@ export const mediaViewerChromeFloatingBottomPillClass = cn(
 /** 悬浮底栏进度/自动翻页滑条胶囊 */
 export const mediaViewerChromeFloatingSliderPillClass = cn(
   mediaViewerChromeFloatingBottomPillClass,
-  'flex min-w-0 flex-1 shrink basis-0 items-center gap-2 overflow-hidden px-3 py-2',
+  'flex min-w-0 flex-1 shrink basis-0 items-center gap-2 overflow-visible px-3 py-2',
   'max-w-[min(calc(100%-8rem),20rem)]',
 );
+
+/** 底栏滑条容器：为 size-5 滑块留出上下溢出空间，避免裁切圆环 */
+export const mediaViewerChromeSliderLaneClass =
+  'viewer-chrome-slider-lane min-w-0 flex-1 overflow-visible px-1';
 
 /** 悬浮底栏状态信息胶囊 */
 export const mediaViewerChromeFloatingStatusPillClass = cn(

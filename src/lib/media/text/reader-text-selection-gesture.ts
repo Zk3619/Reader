@@ -10,6 +10,10 @@ import {
   queryReaderTextContentRootAtPoint,
 } from '@/lib/media/text/reader-text-selection-hit-test';
 import { markPagedTurnPointerConsumed } from '@/lib/media/text/reader-paged-pointer-gesture';
+import {
+  normalizeTextViewerTextSelectDismissScope,
+  type TextViewerTextSelectDismissScope,
+} from '@/lib/media/text/reader-ui-config';
 
 /** 与 Legado ReadView.longPressTimeout 一致 */
 export const READER_TEXT_SELECT_LONG_PRESS_MS = 600;
@@ -96,6 +100,16 @@ export function isPointInActiveTextSelection(x: number, y: number): boolean {
     );
   }
   return false;
+}
+
+/** 当前配置下 pointerdown 是否应保留已有选区（不触发取消选） */
+export function shouldPreserveTextSelectionOnPointerDown(
+  scope: TextViewerTextSelectDismissScope,
+  x: number,
+  y: number,
+): boolean {
+  if (scope !== 'outsideHandleAndSelection') return false;
+  return isPointInActiveTextSelection(x, y);
 }
 
 export function hasNonCollapsedTextSelection(): boolean {
@@ -296,6 +310,8 @@ export function createReaderTextSelectionGesture(options: {
   enabled: () => boolean;
   /** 顶底栏隐藏时才允许发起长按选文 */
   canStartLongPress?: () => boolean;
+  /** 点击取消选区范围（默认游标与选区外） */
+  getDismissScope?: () => TextViewerTextSelectDismissScope | undefined | null;
 }): ReaderTextSelectionGestureHandle {
   let activePointerId: number | null = null;
   let startX = 0;
@@ -438,7 +454,10 @@ export function createReaderTextSelectionGesture(options: {
     gestureHost = container;
 
     if (hasNonCollapsedTextSelection()) {
-      if (isPointInActiveTextSelection(e.clientX, e.clientY)) {
+      const dismissScope = normalizeTextViewerTextSelectDismissScope(
+        options.getDismissScope?.(),
+      );
+      if (shouldPreserveTextSelectionOnPointerDown(dismissScope, e.clientX, e.clientY)) {
         consumeClickOnSelectionBody = true;
         return;
       }

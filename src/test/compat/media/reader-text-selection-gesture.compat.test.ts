@@ -10,6 +10,7 @@ import {
   hasNonCollapsedTextSelection,
   isReaderTextSelectionSurfaceActive,
   selectCharacterAtClientPoint,
+  shouldPreserveTextSelectionOnPointerDown,
   syncReaderTextSelectionSurface,
 } from '@/lib/media/text/reader-text-selection-gesture';
 
@@ -25,6 +26,27 @@ function mockContainer(): HTMLElement {
     setAttribute: vi.fn(),
     removeAttribute: vi.fn(),
   } as unknown as HTMLElement;
+}
+
+function mockSelectionWindow(removeAllRanges: ReturnType<typeof vi.fn>, pointInSelection: boolean) {
+  vi.stubGlobal('window', {
+    getSelection: () => ({
+      isCollapsed: false,
+      toString: () => 'selected',
+      removeAllRanges,
+      rangeCount: 1,
+      getRangeAt: () => ({
+        getClientRects: () =>
+          pointInSelection
+            ? [{ left: 10, top: 10, right: 30, bottom: 28 }]
+            : [{ left: 100, top: 100, right: 120, bottom: 118 }],
+        getBoundingClientRect: () =>
+          pointInSelection
+            ? { left: 10, top: 10, right: 30, bottom: 28, width: 20, height: 18 }
+            : { left: 100, top: 100, right: 120, bottom: 118, width: 20, height: 18 },
+      }),
+    }),
+  });
 }
 
 describe('reader text selection gesture', () => {
@@ -197,18 +219,7 @@ describe('reader text selection gesture', () => {
 
   it('clears selection and suppresses click when tapping outside selection', () => {
     const removeAllRanges = vi.fn();
-    vi.stubGlobal('window', {
-      getSelection: () => ({
-        isCollapsed: false,
-        toString: () => 'selected',
-        removeAllRanges,
-        rangeCount: 1,
-        getRangeAt: () => ({
-          getClientRects: () => [{ left: 100, top: 100, right: 120, bottom: 118 }],
-          getBoundingClientRect: () => ({ left: 100, top: 100, right: 120, bottom: 118, width: 20, height: 18 }),
-        }),
-      }),
-    });
+    mockSelectionWindow(removeAllRanges, false);
 
     const gesture = createReaderTextSelectionGesture({ enabled: () => true });
     const container = mockContainer();
@@ -219,20 +230,57 @@ describe('reader text selection gesture', () => {
     expect(gesture.shouldSuppressRegionalTap()).toBe(true);
   });
 
-  it('keeps selection when tapping inside selection body', () => {
+  it('keeps selection when tapping inside selection body with outsideHandleAndSelection scope', () => {
     const removeAllRanges = vi.fn();
+    mockSelectionWindow(removeAllRanges, true);
+
+    const gesture = createReaderTextSelectionGesture({
+      enabled: () => true,
+      getDismissScope: () => 'outsideHandleAndSelection',
+    });
+    const container = mockContainer();
+
+    gesture.onPointerDown(pointer(1, 15, 15), container);
+    expect(removeAllRanges).not.toHaveBeenCalled();
+    gesture.onPointerUp(pointer(1, 15, 15));
+    expect(gesture.shouldSuppressRegionalTap()).toBe(true);
+  });
+
+  it('clears selection when tapping inside selection body with outsideHandle scope', () => {
+    const removeAllRanges = vi.fn();
+    mockSelectionWindow(removeAllRanges, true);
+
+    const gesture = createReaderTextSelectionGesture({
+      enabled: () => true,
+      getDismissScope: () => 'outsideHandle',
+    });
+    const container = mockContainer();
+
+    gesture.onPointerDown(pointer(1, 15, 15), container);
+    expect(removeAllRanges).toHaveBeenCalled();
+    gesture.onPointerUp(pointer(1, 15, 15));
+    expect(gesture.shouldSuppressRegionalTap()).toBe(true);
+  });
+
+  it('shouldPreserveTextSelectionOnPointerDown only preserves for outsideHandleAndSelection', () => {
     vi.stubGlobal('window', {
       getSelection: () => ({
         isCollapsed: false,
-        toString: () => 'selected',
-        removeAllRanges,
+        toString: () => 'x',
         rangeCount: 1,
         getRangeAt: () => ({
-          getClientRects: () => [{ left: 10, top: 10, right: 30, bottom: 28 }],
-          getBoundingClientRect: () => ({ left: 10, top: 10, right: 30, bottom: 28, width: 20, height: 18 }),
+          getClientRects: () => [{ left: 0, top: 0, right: 10, bottom: 10 }],
+          getBoundingClientRect: () => ({ left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 }),
         }),
       }),
     });
+    expect(shouldPreserveTextSelectionOnPointerDown('outsideHandleAndSelection', 5, 5)).toBe(true);
+    expect(shouldPreserveTextSelectionOnPointerDown('outsideHandle', 5, 5)).toBe(false);
+  });
+
+  it('keeps selection when tapping inside selection body', () => {
+    const removeAllRanges = vi.fn();
+    mockSelectionWindow(removeAllRanges, true);
 
     const gesture = createReaderTextSelectionGesture({ enabled: () => true });
     const container = mockContainer();

@@ -79,6 +79,7 @@ import {
   updateSimulationCurl,
 } from '@/lib/media/text/reader-paged-simulation-curl';
 import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
+import { createReaderPageBgStyle, readerPageBaseColor } from '@/lib/media/text/reader-background';
 import { ReaderPageTipChrome } from '@/components/viewer/text-viewer/ReaderPageTipChrome';
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import { readerPageTipsCarryWithTurn, readerPageTipContentBudget } from '@/lib/media/text/reader-page-tip';
@@ -516,7 +517,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const chromeBarsVisible = () => local.chromeBarsVisible?.() ?? false;
 
-  const pageThemeBg = () => readerThemePalette(viewerState.config.theme).bg;
+  const pageThemeBg = () => readerPageBaseColor(viewerState.config);
+  const pageBgStyle = createReaderPageBgStyle(() => viewerState.config);
 
   /** 与章内翻页一致：仅在 drag/anim 阶段激活翻页视觉；跨章点击已就绪时亦激活以挂载幕帘 */
   const turnVisualActive = () => {
@@ -542,7 +544,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     carryPageTipsWithTurn() ? contentFrameEl : contentSlotEl;
 
   const turnSlidePanelStyle = () => ({
-    'background-color': pageThemeBg(),
+    ...pageBgStyle(),
   });
 
   const applyTurnFrameSlideLayout = () => {
@@ -737,7 +739,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const theme = () => readerThemeClasses(textViewerStore.state.config.theme);
 
   const pagedViewportThemeStyle = (): Record<string, string> => ({
-    'background-color': pageThemeBg(),
+    ...pageBgStyle(),
     color: readerThemePalette(viewerState.config.theme).text,
     'touch-action': readerPagedViewportTouchAction(),
   });
@@ -5978,7 +5980,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           )}
           style={{
             ...pagedClipStyle(),
-            'background-color': pageThemeBg(),
+            ...pageBgStyle(),
           }}
         >
           <div

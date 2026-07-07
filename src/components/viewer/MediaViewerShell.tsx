@@ -136,6 +136,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
 
   const shouldScheduleAutoHide = () => {
     if (!useAutoHide() || !headerVisible()) return false;
+    if (isMediaViewerChromeAutoHideSuspended()) return false;
     if (activeChromeInput()?.shouldSuppressAutoHide()) return false;
     return true;
   };
@@ -150,7 +151,10 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
       return;
     }
     if (!useAutoHide()) return;
-    if (activeChromeInput()?.shouldSuppressAutoHide()) {
+    if (
+      activeChromeInput()?.shouldSuppressAutoHide() ||
+      isMediaViewerChromeAutoHideSuspended()
+    ) {
       chromeAutoHide.clearHideTimer();
       return;
     }
@@ -308,6 +312,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     <MediaViewerShellContextProvider value={shellValue()}>
       <div
         ref={(el) => activeChromeInput()?.bindShellElement(el)}
+        data-reader-brightness-host
         class={cn(
           'fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground',
           !isMobile() && mediaViewerChromeDesktopMinWidthClass,
