@@ -2,7 +2,7 @@
  * 阅读器亮度控件（对齐 Legado ReadMenu llBrightness：视口左侧竖向悬浮）
  */
 
-import { createEffect, createSignal, Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import * as SliderPrimitive from '@kobalte/core/slider';
 import { Button } from '@/components/ui/button';
 import { textViewerStore } from '@/stores/viewer';
@@ -16,9 +16,12 @@ import {
   type ReaderBrightnessChrome,
 } from '@/lib/media/text/reader-theme-classes';
 import {
-  applyReadBrightness,
   restoreBrightnessOnExit,
 } from '@/lib/platform/display-reader';
+import {
+  mergeMediaViewerChromeSliderChangeEndHold,
+  mergeMediaViewerChromeSliderPointerDownHold,
+} from '@/lib/media/media-viewer-chrome-auto-hide-hold';
 import { ThemeLightIcon, ThemeScheduleIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { useReaderBrightnessChromeInsets } from '@/lib/viewer/use-reader-brightness-chrome-insets';
@@ -59,7 +62,7 @@ function BrightnessSlider(props: {
         'relative flex min-w-0 touch-none select-none overflow-visible',
         vertical()
           ? 'h-full w-full min-h-0 flex-col items-center'
-          : 'h-5 w-full max-w-full items-center',
+          : 'h-auto w-full max-w-full items-center py-1.5',
       )}
       value={[props.value]}
       minValue={0}
@@ -67,8 +70,10 @@ function BrightnessSlider(props: {
       step={1}
       disabled={props.disabled}
       onChange={(values) => props.onChange(normalizeReadBrightness(values[0]))}
+      onChangeEnd={mergeMediaViewerChromeSliderChangeEndHold()}
     >
       <SliderPrimitive.Track
+        onPointerDown={mergeMediaViewerChromeSliderPointerDownHold()}
         class={cn(
           'relative shrink-0 overflow-visible rounded-full',
           vertical() ? 'h-full w-2' : 'h-2 w-full max-w-full',
@@ -80,16 +85,17 @@ function BrightnessSlider(props: {
           style={{ 'background-color': props.chrome.sliderFill }}
         />
         <SliderPrimitive.Thumb
+          onPointerDown={mergeMediaViewerChromeSliderPointerDownHold()}
           class={cn(
             'absolute block size-5 rounded-full border-2',
             'ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
             'disabled:pointer-events-none disabled:opacity-50',
             vertical()
               ? 'left-1/2 -translate-x-1/2'
-              : 'top-1/2 -translate-y-1/2',
+              : 'top-[-6px]',
           )}
           style={{
-            'background-color': props.chrome.sliderThumb,
+            'background-color': props.chrome.capsuleBg,
             'border-color': props.chrome.sliderThumb,
           }}
         >
@@ -200,12 +206,6 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
     () => !isEmbedded(),
   );
 
-  createEffect(() => {
-    if (!visible() || brightnessAuto()) return;
-    const level = normalizeReadBrightness(textViewerStore.state.config.readBrightness);
-    void applyReadBrightness(level);
-  });
-
   const value = () => normalizeReadBrightness(textViewerStore.state.config.readBrightness);
 
   const toggleBrightnessAuto = () => {
@@ -213,9 +213,7 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
     textViewerStore.setConfig({ brightnessAuto: next });
     if (next) {
       void restoreBrightnessOnExit(true);
-      return;
     }
-    void applyReadBrightness(textViewerStore.state.config.readBrightness ?? 100);
   };
 
   const capsuleStyle = () => {
@@ -246,8 +244,8 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
       <div
         ref={(el) => {
           if (isEmbedded()) return;
-          const parent = el.parentElement;
-          setHostRef(parent instanceof HTMLElement ? parent : el);
+          const slots = el.closest('[data-media-viewer-chrome-slots]');
+          setHostRef(slots instanceof HTMLElement ? slots : undefined);
         }}
         class={cn(
           'reader-brightness-capsule-shell pointer-events-none flex',

@@ -1,6 +1,14 @@
 use serde::Serialize;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDisplayBrightnessResult {
+    pub window_applied: bool,
+    pub system_applied: bool,
+    pub needs_write_settings: bool,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DisplayBrightnessProbe {
     pub native: bool,
@@ -8,16 +16,23 @@ pub struct DisplayBrightnessProbe {
 }
 
 #[tauri::command]
-pub fn probe_display_brightness() -> DisplayBrightnessProbe {
+pub fn probe_display_brightness(app: tauri::AppHandle) -> DisplayBrightnessProbe {
     #[cfg(target_os = "android")]
     {
+        let native = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.get_brightness(),
+        )
+        .map(|r| r.is_ok())
+        .unwrap_or(false);
         return DisplayBrightnessProbe {
-            native: true,
+            native,
             overlay: true,
         };
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = &app;
         let native = crate::desktop_brightness::probe_native_brightness();
         DisplayBrightnessProbe {
             native,
@@ -46,21 +61,40 @@ pub fn get_display_brightness(app: tauri::AppHandle) -> Result<u8, String> {
 }
 
 #[tauri::command]
-pub fn set_display_brightness(app: tauri::AppHandle, level: u8) -> Result<(), String> {
+pub fn set_display_brightness(
+    app: tauri::AppHandle,
+    level: u8,
+    sync_system: Option<bool>,
+) -> Result<SetDisplayBrightnessResult, String> {
+    let sync_system = sync_system.unwrap_or(false);
     #[cfg(target_os = "android")]
     {
         if let Some(result) = crate::platform::android::display_brightness::with_android(
             &app,
-            |android| android.set_brightness(level),
+            |android| {
+                android
+                    .set_brightness(level, sync_system)
+                    .map(|resp| SetDisplayBrightnessResult {
+                        window_applied: true,
+                        system_applied: resp.system_applied,
+                        needs_write_settings: resp.needs_write_settings,
+                    })
+            },
         ) {
             return result;
         }
-        return Err("display brightness plugin not initialized".into());
+        return Err("display reader plugin not initialized".into());
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = sync_system;
         let _ = &app;
-        crate::desktop_brightness::set_brightness(level)
+        crate::desktop_brightness::set_brightness(level)?;
+        Ok(SetDisplayBrightnessResult {
+            window_applied: true,
+            system_applied: false,
+            needs_write_settings: false,
+        })
     }
 }
 
@@ -97,21 +131,86 @@ pub fn restore_display_brightness(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn set_screen_orientation(_mode: u8) -> Result<(), String> {
+pub fn follow_system_display_brightness(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        return Err("set_screen_orientation: Android JNI not wired in this build".into());
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.follow_system_brightness(),
+        ) {
+            return result;
+        }
+        return Err("display reader plugin not initialized".into());
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = &app;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn can_write_display_settings(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.can_write_display_settings(),
+        ) {
+            return result;
+        }
+        return Ok(false);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub fn open_display_write_settings(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.open_write_settings_permission(),
+        ) {
+            return result;
+        }
+        return Err("display reader plugin not initialized".into());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn set_screen_orientation(app: tauri::AppHandle, mode: u8) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.set_screen_orientation(mode),
+        ) {
+            return result;
+        }
+        return Err("display reader plugin not initialized".into());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, mode);
         Err("set_screen_orientation is only available on Android".into())
     }
 }
 
 #[tauri::command]
-pub fn set_keep_screen_on(seconds: i32) -> Result<(), String> {
+pub fn set_keep_screen_on(app: tauri::AppHandle, seconds: i32) -> Result<(), String> {
     #[cfg(windows)]
     {
+        let _ = &app;
         use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_DISPLAY_REQUIRED};
         unsafe {
             if seconds == 0 {
@@ -124,12 +223,17 @@ pub fn set_keep_screen_on(seconds: i32) -> Result<(), String> {
     }
     #[cfg(target_os = "android")]
     {
-        let _ = seconds;
-        return Err("set_keep_screen_on: Android JNI not wired in this build".into());
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.set_keep_screen_on(seconds),
+        ) {
+            return result;
+        }
+        return Err("display reader plugin not initialized".into());
     }
     #[cfg(not(any(windows, target_os = "android")))]
     {
-        let _ = seconds;
+        let _ = (app, seconds);
         Ok(())
     }
 }

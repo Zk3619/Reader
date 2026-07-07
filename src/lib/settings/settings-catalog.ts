@@ -142,6 +142,13 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['预下载', '章节', '正文', '向前', '向后', '缓存', '阅读'],
   },
   {
+    id: 'brightness-sync-system',
+    categoryId: 'reading',
+    title: '亮度同步系统',
+    description: '手动阅读亮度是否写入 Android 系统亮度',
+    keywords: ['亮度', '系统亮度', '背光', '阅读', '同步', 'android'],
+  },
+  {
     id: 'txt-toc-rules',
     categoryId: 'reading',
     title: 'TXT 目录规则',
@@ -229,8 +236,8 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     id: 'database-backup',
     categoryId: 'storage',
     title: '数据备份与恢复',
-    description: '导出 ZIP 本地备份或从备份恢复',
-    keywords: ['备份', '恢复', '数据库', '导出', '导入'],
+    description: '本地 ZIP 备份、WebDAV 云备份与恢复',
+    keywords: ['备份', '恢复', '数据库', '导出', '导入', 'WebDAV', '云备份', '坚果云'],
   },
   {
     id: 'tech-stack',

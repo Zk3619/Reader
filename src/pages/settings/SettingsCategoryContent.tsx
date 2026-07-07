@@ -17,6 +17,7 @@ import { CoverCacheSetting } from '@/components/settings/CoverCacheSetting';
 import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
 import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
 import { ChapterBodyPrefetchSetting } from '@/components/settings/ChapterBodyPrefetchSetting';
+import { BrightnessSyncSystemSetting } from '@/components/settings/BrightnessSyncSystemSetting';
 import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { DataBackupSetting } from '@/components/settings/DataBackupSetting';
 import { settingsStore } from '@/stores/settings';
@@ -130,6 +131,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
 
         <SettingItemAnchor id="chapter-body-prefetch" highlighted={highlight('chapter-body-prefetch')}>
           <ChapterBodyPrefetchSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="brightness-sync-system" highlighted={highlight('brightness-sync-system')}>
+          <BrightnessSyncSystemSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
