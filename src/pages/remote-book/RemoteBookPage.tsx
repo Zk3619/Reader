@@ -28,10 +28,8 @@ import {
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/platform/detect';
-import { getStorage } from '@/lib/platform/storage';
-import type { RemoteBook, WebDavConfig, RemoteBookSort } from '@/types/remote-book';
-
-const WEBDAV_CONFIG_KEY = 'webdav_config';
+import { loadWebDavConfig } from '@/lib/remote-book/webdav-config-storage';
+import type { RemoteBook, RemoteBookSort, WebDavConfig } from '@/types/remote-book';
 
 export interface RemoteBookPageProps {
   onClose?: () => void;
@@ -69,7 +67,7 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
 
   const checkAndLoadConfig = async () => {
     try {
-      const config = await getStorage<WebDavConfig>(WEBDAV_CONFIG_KEY);
+      const config = await loadWebDavConfig();
       if (config && config.url && config.username && config.password) {
         const managerInstance = new WebDavRemoteBookManager(config);
         setManager(managerInstance);

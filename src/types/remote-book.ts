@@ -60,7 +60,7 @@ export interface RemoteBookManager {
 }
 
 /**
- * WebDav 配置信息
+ * WebDav 配置信息（对齐 Legado PreferKey + AppWebDav）
  */
 export interface WebDavConfig {
   /** WebDav 服务器地址 */
@@ -71,8 +71,20 @@ export interface WebDavConfig {
   password: string;
   /** 服务器 ID（用于标识不同的 WebDav 服务器） */
   serverID?: number;
-  /** 根书籍目录路径（默认为 "books"） */
+  /** 远程书籍根目录（默认为 books） */
   rootBookPath?: string;
+  /** 云同步根子目录（Legado 默认 legado） */
+  webDavDir?: string;
+  /** 备份文件名中的设备标识（Legado webDavDeviceName） */
+  deviceName?: string;
+  /** 启用自动备份（24 小时间隔，在设置页触发） */
+  autoBackupEnabled?: boolean;
+  /** 启动/打开设置时检测云端是否有更新备份 */
+  autoCheckNewBackup?: boolean;
+  /** 上次成功上传备份的时间戳 */
+  lastBackupTime?: number;
+  /** 上次上传的远程备份文件名 */
+  lastRemoteBackupName?: string;
 }
 
 /**

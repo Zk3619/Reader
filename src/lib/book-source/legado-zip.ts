@@ -24,7 +24,7 @@ async function extractZipWeb(bytes: Uint8Array): Promise<LegadoZipEntries> {
   const out: LegadoZipEntries = {};
   for (const [path, data] of Object.entries(raw)) {
     const name = basename(path).toLowerCase();
-    if (!name.endsWith('.json') && !name.endsWith('.txt')) continue;
+    if (!name.endsWith('.json') && !name.endsWith('.txt') && !name.endsWith('.xml')) continue;
     const text = new TextDecoder().decode(data);
     if (text.trim()) out[name] = text;
   }
@@ -49,6 +49,11 @@ export const LEGADO_ZIP_BOOK_SOURCE_NAMES = [
 ];
 export const LEGADO_ZIP_RSS_NAMES = ['rsssources.json', 'rsssource.json'];
 export const LEGADO_ZIP_REPLACE_RULE_NAMES = ['replacerule.json', 'replace_rule.json'];
+export const LEGADO_ZIP_READ_CONFIG_NAMES = ['readconfig.json'];
+export const LEGADO_ZIP_SHARE_READ_CONFIG_NAMES = ['sharereadconfig.json'];
+export const LEGADO_ZIP_READER_UI_CONFIG_NAMES = ['readeruiconfig.json'];
+export const LEGADO_ZIP_READER_PREFS_NAMES = ['readerprefs.json'];
+export const LEGADO_ZIP_CONFIG_XML_NAMES = ['config.xml'];
 
 export function pickZipEntry(
   entries: LegadoZipEntries,
