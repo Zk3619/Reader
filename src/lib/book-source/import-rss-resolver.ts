@@ -4,6 +4,7 @@
 
 import * as rssSourcesDb from '@/lib/database/rss-sources';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
+import { assertRssSourceNetworkJson } from '@/lib/book-source/import-network-sidecar';
 import { parseRssSourceJson } from '@/lib/book-source/import-rss-source';
 import { mergeRssSourceForImport, type ImportRssSourceOptions } from '@/lib/book-source/import-rss-merge';
 import { dispatchRssSourcesRefresh } from '@/lib/rss/rss-sources-refresh-event';
@@ -19,6 +20,7 @@ export async function resolveRssSourcesFromNetworkUrl(
   url: string,
 ): Promise<NewRssSource[]> {
   const text = await fetchBookSourceJsonText(url.trim());
+  await assertRssSourceNetworkJson(text);
   return parseRssSourceJson(text);
 }
 

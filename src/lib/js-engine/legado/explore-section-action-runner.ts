@@ -3,7 +3,7 @@
  */
 
 import type { BookSource } from '@/types';
-import { resolveUrl } from '@/lib/book-source/utils';
+import { hexToUtf8, resolveUrl, utf8FromBase64, utf8ToBase64 } from '@/lib/book-source/utils';
 import { installScriptDateShim } from '@/lib/js-engine/legado/script-date-shim';
 import { createLegadoExploreJavaDeviceHandlers } from '@/lib/js-engine/legado/legado-explore-java-device';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/js-engine/legado/login-script-runner';
 import {
   buildLegadoExploreScriptBundle,
+  createLegadoScriptCache,
   createSourceVariableHandlers,
   getLegadoSourceKey,
   getScriptBaseUrl,
@@ -173,6 +174,7 @@ async function runExploreSectionActionLegacy(
     baseUrl: ctx.baseUrl,
     host: ctx.hostList,
     infoMap: ctx.infoMap,
+    cache: createLegadoScriptCache(),
     cookie: cookieApi,
     source: {
       getVariable: (key?: string) => sourceVars.getVariable(key),
@@ -213,6 +215,15 @@ async function runExploreSectionActionLegacy(
       },
       getCookie: (url: string) => cookieApi.getCookie(url),
       ajax: () => '',
+      base64Encode(str: unknown) {
+        return utf8ToBase64(String(str ?? ''));
+      },
+      base64Decode(str: unknown) {
+        return utf8FromBase64(String(str ?? ''));
+      },
+      hexDecodeToString(hex: unknown) {
+        return hexToUtf8(String(hex ?? ''));
+      },
     },
   };
 

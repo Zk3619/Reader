@@ -1,5 +1,11 @@
+import { matchesLegadoImportKind } from '@/lib/book-source/legado-import-kind';
 import type { NewRssSource } from '@/types';
 import { stripLegadoSourceUrlMarker } from '@/lib/book-source/utils';
+
+export interface ParseRssSourceJsonOptions {
+  /** 限定只接受订阅源项；会过滤书源、规则等其它类型 */
+  rssSourcesOnly?: boolean;
+}
 
 interface LegadoRssItem {
   [key: string]: unknown;
@@ -66,7 +72,14 @@ function pickScalarFields(raw: LegadoRssItem): Record<string, unknown> {
   return out;
 }
 
-function normalizeRssItem(raw: LegadoRssItem): NewRssSource | null {
+function normalizeRssItem(
+  raw: LegadoRssItem,
+  options?: ParseRssSourceJsonOptions,
+): NewRssSource | null {
+  if (options?.rssSourcesOnly !== false) {
+    if (!matchesLegadoImportKind(raw, 'rssSource')) return null;
+  }
+
   const sourceUrl = raw.sourceUrl ?? raw.rssSourceUrl;
   const sourceName = raw.sourceName ?? raw.rssSourceName;
   if (!sourceUrl || !sourceName) return null;
@@ -91,7 +104,10 @@ function normalizeRssItem(raw: LegadoRssItem): NewRssSource | null {
   };
 }
 
-export function parseRssSourceJson(jsonText: string): NewRssSource[] {
+export function parseRssSourceJson(
+  jsonText: string,
+  options?: ParseRssSourceJsonOptions,
+): NewRssSource[] {
   const trimmed = jsonText.replace(/^\uFEFF/, '').trim();
   if (!trimmed) return [];
   let data: unknown;
@@ -104,7 +120,7 @@ export function parseRssSourceJson(jsonText: string): NewRssSource[] {
   const out: NewRssSource[] = [];
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
-    const n = normalizeRssItem(item as LegadoRssItem);
+    const n = normalizeRssItem(item as LegadoRssItem, options);
     if (n) out.push(n);
   }
   return out;

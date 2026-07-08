@@ -1,5 +1,6 @@
 import type { ReplaceRule } from '@/types';
 import * as replaceDb from '@/lib/database/replace-rules';
+import { matchesLegadoImportKind } from '@/lib/book-source/legado-import-kind';
 import { isReplaceRuleValid } from '@/lib/replace-rules/replace-text';
 import {
   mergeReplaceRuleForImport,
@@ -39,10 +40,20 @@ function readBool(value: unknown): boolean | undefined {
 }
 
 /** 对齐 Legado ReplaceAnalyzer.jsonToReplaceRule 旧版字段 */
+export interface ParseReplaceRuleJsonOptions {
+  /** 限定只接受替换规则项 */
+  replaceRulesOnly?: boolean;
+}
+
 export function normalizeReplaceItem(
   raw: LegadoReplaceItem,
   fallbackOrder: number,
+  options?: ParseReplaceRuleJsonOptions,
 ): Omit<ReplaceRule, 'id'> | null {
+  if (options?.replaceRulesOnly !== false) {
+    if (!matchesLegadoImportKind(raw, 'replaceRule')) return null;
+  }
+
   const pattern = String(raw.pattern ?? raw.regex ?? '').trim();
   if (!pattern) return null;
 
@@ -73,7 +84,10 @@ export interface ReplaceRuleImportItem {
   idHint?: number;
 }
 
-export function parseReplaceRuleImportItems(jsonText: string): ReplaceRuleImportItem[] {
+export function parseReplaceRuleImportItems(
+  jsonText: string,
+  options?: ParseReplaceRuleJsonOptions,
+): ReplaceRuleImportItem[] {
   const trimmed = jsonText.replace(/^\uFEFF/, '').trim();
   if (!trimmed) return [];
   let data: unknown;
@@ -87,7 +101,7 @@ export function parseReplaceRuleImportItems(jsonText: string): ReplaceRuleImport
   items.forEach((item, index) => {
     if (!item || typeof item !== 'object') return;
     const legado = item as LegadoReplaceItem;
-    const rule = normalizeReplaceItem(legado, index);
+    const rule = normalizeReplaceItem(legado, index, options);
     if (!rule) return;
     const idHint = Number(legado.id ?? 0);
     out.push({
@@ -98,8 +112,11 @@ export function parseReplaceRuleImportItems(jsonText: string): ReplaceRuleImport
   return out;
 }
 
-export function parseReplaceRuleJson(jsonText: string): Omit<ReplaceRule, 'id'>[] {
-  return parseReplaceRuleImportItems(jsonText).map((item) => item.rule);
+export function parseReplaceRuleJson(
+  jsonText: string,
+  options?: ParseReplaceRuleJsonOptions,
+): Omit<ReplaceRule, 'id'>[] {
+  return parseReplaceRuleImportItems(jsonText, options).map((item) => item.rule);
 }
 
 /** Web API / 单条保存：兼容 Legado 旧字段与 id */

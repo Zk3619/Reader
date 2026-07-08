@@ -9,6 +9,7 @@ import {
   type ImportReplaceRuleOptions,
 } from '@/lib/book-source/import-replace-rule';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
+import { assertReplaceRuleNetworkJson } from '@/lib/book-source/import-network-sidecar';
 export type { ImportReplaceRuleComparison } from '@/lib/book-source/import-replace-rule-compare';
 export type { ImportReplaceRuleOptions } from '@/lib/book-source/import-replace-rule';
 export {
@@ -20,6 +21,7 @@ export async function resolveReplaceRulesFromNetworkUrl(
   url: string,
 ): Promise<ReplaceRuleImportItem[]> {
   const text = await fetchBookSourceJsonText(url.trim());
+  await assertReplaceRuleNetworkJson(text);
   return parseReplaceRuleImportItems(text);
 }
 

@@ -1,5 +1,10 @@
 import type { DictRule } from '@/types';
 import * as dictDb from '@/lib/database/dict-rules';
+import { matchesLegadoImportKind } from '@/lib/book-source/legado-import-kind';
+
+export interface ParseDictRuleJsonOptions {
+  dictRulesOnly?: boolean;
+}
 
 interface LegadoDictItem {
   [key: string]: unknown;
@@ -10,7 +15,14 @@ interface LegadoDictItem {
   sortNumber?: number;
 }
 
-function normalizeDictItem(raw: LegadoDictItem, fallbackOrder: number): DictRule {
+function normalizeDictItem(
+  raw: LegadoDictItem,
+  fallbackOrder: number,
+  options?: ParseDictRuleJsonOptions,
+): DictRule | null {
+  if (options?.dictRulesOnly !== false) {
+    if (!matchesLegadoImportKind(raw, 'dictRule')) return null;
+  }
   return {
     name: String(raw.name ?? '导入规则'),
     urlRule: String(raw.urlRule ?? ''),
@@ -20,7 +32,10 @@ function normalizeDictItem(raw: LegadoDictItem, fallbackOrder: number): DictRule
   };
 }
 
-export function parseDictRuleJson(jsonText: string): DictRule[] {
+export function parseDictRuleJson(
+  jsonText: string,
+  options?: ParseDictRuleJsonOptions,
+): DictRule[] {
   const trimmed = jsonText.replace(/^\uFEFF/, '').trim();
   if (!trimmed) return [];
   let data: unknown;
@@ -32,7 +47,8 @@ export function parseDictRuleJson(jsonText: string): DictRule[] {
   const items = Array.isArray(data) ? data : [data];
   return items
     .filter((item) => item && typeof item === 'object')
-    .map((item, index) => normalizeDictItem(item as LegadoDictItem, index));
+    .map((item, index) => normalizeDictItem(item as LegadoDictItem, index, options))
+    .filter((rule): rule is DictRule => rule != null);
 }
 
 export async function importDictRulesFromJson(jsonText: string): Promise<number> {

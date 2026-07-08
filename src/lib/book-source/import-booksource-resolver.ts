@@ -6,6 +6,7 @@ import {
 } from '@/lib/book-source/source-import';
 import { filterBlocklistedBookSources } from '@/lib/book-source/source-blocklist';
 import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
+import { assertBookSourceNetworkJson } from '@/lib/book-source/import-network-sidecar';
 import {
   mergeBookSourceForImport,
   type ImportBookSourceOptions,
@@ -51,6 +52,7 @@ export async function resolveBookSourcesFromNetworkUrl(
   const text = await fetchBookSourceJsonText(url);
 
   onProgress?.({ stage: 'parse', message: '正在解析书源…' });
+  await assertBookSourceNetworkJson(text);
   const direct = parseBookSourceJson(text);
   if (direct.length > 0) {
     return { sources: direct };

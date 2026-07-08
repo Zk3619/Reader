@@ -3,7 +3,13 @@
  * 兼容 legado 书源 JSON 格式（bookSourceUrl、bookSourceName 等）与当前项目的 sourceUrl、sourceName
  */
 
+import { matchesLegadoImportKind } from '@/lib/book-source/legado-import-kind';
 import type { NewBookSource } from '@/types';
+
+export interface ParseBookSourceJsonOptions {
+  /** 限定只接受书源项；会过滤订阅源、规则等其它类型 */
+  bookSourcesOnly?: boolean;
+}
 
 /** legado 风格的单条书源（可能带 bookSource 前缀的字段）；允许 GSON 额外字段透传 */
 interface LegadoSourceItem {
@@ -74,7 +80,14 @@ function normalizeSourceBaseUrl(rawUrl: string): string {
 /**
  * 将单条书源项（legado 或本项目格式）规范为 NewBookSource
  */
-function normalizeSourceItem(raw: LegadoSourceItem): NewBookSource | null {
+function normalizeSourceItem(
+  raw: LegadoSourceItem,
+  options?: ParseBookSourceJsonOptions,
+): NewBookSource | null {
+  if (options?.bookSourcesOnly !== false) {
+    if (!matchesLegadoImportKind(raw, 'bookSource')) return null;
+  }
+
   const sourceUrl = raw.sourceUrl ?? raw.bookSourceUrl;
   const sourceName = raw.sourceName ?? raw.bookSourceName;
   if (!sourceUrl || typeof sourceUrl !== 'string' || !sourceName || typeof sourceName !== 'string') {
@@ -162,7 +175,10 @@ export function extractSourceUrlsEnvelope(jsonText: string): string[] {
  * 解析书源 JSON 字符串（支持单条对象或数组，兼容 legado 字段名）
  * @returns 规范后的书源列表，无效项已过滤
  */
-export function parseBookSourceJson(jsonText: string): NewBookSource[] {
+export function parseBookSourceJson(
+  jsonText: string,
+  options?: ParseBookSourceJsonOptions,
+): NewBookSource[] {
   const trimmed = stripBom(jsonText);
   if (!trimmed) return [];
   if (looksLikeHtml(trimmed)) {
@@ -181,7 +197,7 @@ export function parseBookSourceJson(jsonText: string): NewBookSource[] {
   const items = collectLegadoItems(data);
   const result: NewBookSource[] = [];
   for (const item of items) {
-    const normalized = normalizeSourceItem(item);
+    const normalized = normalizeSourceItem(item, options);
     if (normalized) result.push(normalized);
   }
   return result;
