@@ -1,0 +1,4 @@
+/* Image viewer stage */
+.image-viewer-stage {
+  background-color: var(--image-viewer-stage-bg);
+}

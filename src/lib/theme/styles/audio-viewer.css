@@ -1,0 +1,9 @@
+/* Audio viewer stage */
+.audio-viewer-stage {
+  background: linear-gradient(
+    to bottom,
+    var(--audio-viewer-stage-from),
+    var(--audio-viewer-stage-via),
+    var(--audio-viewer-stage-to)
+  );
+}

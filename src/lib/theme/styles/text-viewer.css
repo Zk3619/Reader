@@ -1,0 +1,693 @@
+/* Text viewer */
+
+/**
+ * Tailwind v4：显式 safelist 阅读主题字面量类（与 TextViewerTheme.TEXT_VIEWER_TW_THEME_CLASSES 一致）
+ */
+@source inline(
+  "bg-[#f5f0e6]", "text-[#5b4636]", "border-t-[#9c8b7a]",
+  "bg-[#d5e9d1]", "text-[#596C44]", "border-t-[#43a047]",
+  "bg-[#DDC090]", "text-[#3E3422]", "border-t-[#a08060]",
+  "bg-[#c4dff1]", "text-[#3D4C54]", "border-t-[#6d9eb8]",
+  "bg-[#e7cef0]", "text-[#68516C]", "border-t-[#a888b0]",
+  "bg-[#263238]", "text-[#b0bec5]", "border-t-[#546e7a]",
+  "bg-[#000000]", "text-[#ADADAD]", "border-t-[#444444]",
+  "bg-[#FFFFFF]", "text-[#000000]", "border-t-[#d0d0d0]",
+  "bg-[#c0edc6]", "text-[#0b0b0b]", "border-t-[#7ab889]"
+);
+
+/**
+ * 阅读主题 scope：无 JS inline 时仍可从 data 属性解析 CSS 变量（商业级双通道 fallback）
+ */
+[data-text-viewer-theme="0"] {
+  --text-viewer-content-bg: #f5f0e6;
+  --text-viewer-content-text: #5b4636;
+  --text-viewer-content-border: #9c8b7a;
+  --text-viewer-content-accent: #8b6914;
+  --text-viewer-content-link: #6b5344;
+  --text-viewer-content-quote-border: #9c8b7a;
+  --text-viewer-content-quote-bg: rgba(155, 139, 122, 0.12);
+  --text-viewer-content-code-bg: rgba(91, 70, 54, 0.08);
+  --text-viewer-content-selection-bg: rgba(139, 105, 20, 0.25);
+}
+
+[data-text-viewer-theme="1"] {
+  --text-viewer-content-bg: #d5e9d1;
+  --text-viewer-content-text: #596C44;
+  --text-viewer-content-border: #43a047;
+  --text-viewer-content-accent: #2e7d32;
+  --text-viewer-content-link: #388e3c;
+  --text-viewer-content-quote-border: #43a047;
+  --text-viewer-content-quote-bg: rgba(67, 160, 71, 0.12);
+  --text-viewer-content-code-bg: rgba(89, 108, 68, 0.08);
+  --text-viewer-content-selection-bg: rgba(46, 125, 50, 0.25);
+}
+
+[data-text-viewer-theme="2"] {
+  --text-viewer-content-bg: #DDC090;
+  --text-viewer-content-text: #3E3422;
+  --text-viewer-content-border: #a08060;
+  --text-viewer-content-accent: #8b6914;
+  --text-viewer-content-link: #6b5344;
+  --text-viewer-content-quote-border: #a08060;
+  --text-viewer-content-quote-bg: rgba(160, 128, 96, 0.15);
+  --text-viewer-content-code-bg: rgba(62, 52, 34, 0.08);
+  --text-viewer-content-selection-bg: rgba(139, 105, 20, 0.25);
+}
+
+[data-text-viewer-theme="3"] {
+  --text-viewer-content-bg: #c4dff1;
+  --text-viewer-content-text: #3D4C54;
+  --text-viewer-content-border: #6d9eb8;
+  --text-viewer-content-accent: #1976d2;
+  --text-viewer-content-link: #1565c0;
+  --text-viewer-content-quote-border: #6d9eb8;
+  --text-viewer-content-quote-bg: rgba(109, 158, 184, 0.15);
+  --text-viewer-content-code-bg: rgba(61, 76, 84, 0.08);
+  --text-viewer-content-selection-bg: rgba(25, 118, 210, 0.25);
+}
+
+[data-text-viewer-theme="4"] {
+  --text-viewer-content-bg: #e7cef0;
+  --text-viewer-content-text: #68516C;
+  --text-viewer-content-border: #a888b0;
+  --text-viewer-content-accent: #7b1fa2;
+  --text-viewer-content-link: #6a1b9a;
+  --text-viewer-content-quote-border: #a888b0;
+  --text-viewer-content-quote-bg: rgba(168, 136, 176, 0.15);
+  --text-viewer-content-code-bg: rgba(104, 81, 108, 0.08);
+  --text-viewer-content-selection-bg: rgba(123, 31, 162, 0.25);
+}
+
+[data-text-viewer-theme="5"] {
+  --text-viewer-content-bg: #263238;
+  --text-viewer-content-text: #b0bec5;
+  --text-viewer-content-border: #546e7a;
+  --text-viewer-content-accent: #4fc3f7;
+  --text-viewer-content-link: #29b6f6;
+  --text-viewer-content-quote-border: #546e7a;
+  --text-viewer-content-quote-bg: rgba(84, 110, 122, 0.35);
+  --text-viewer-content-code-bg: rgba(176, 190, 197, 0.08);
+  --text-viewer-content-selection-bg: rgba(79, 195, 247, 0.35);
+}
+
+[data-text-viewer-theme="6"] {
+  --text-viewer-content-bg: #000000;
+  --text-viewer-content-text: #ADADAD;
+  --text-viewer-content-border: #444444;
+  --text-viewer-content-accent: #90caf9;
+  --text-viewer-content-link: #64b5f6;
+  --text-viewer-content-quote-border: #444444;
+  --text-viewer-content-quote-bg: rgba(68, 68, 68, 0.5);
+  --text-viewer-content-code-bg: rgba(173, 173, 173, 0.08);
+  --text-viewer-content-selection-bg: rgba(144, 202, 249, 0.35);
+}
+
+[data-text-viewer-theme="7"] {
+  --text-viewer-content-bg: #FFFFFF;
+  --text-viewer-content-text: #000000;
+  --text-viewer-content-border: #d0d0d0;
+  --text-viewer-content-accent: #1976d2;
+  --text-viewer-content-link: #1565c0;
+  --text-viewer-content-quote-border: #d0d0d0;
+  --text-viewer-content-quote-bg: rgba(0, 0, 0, 0.04);
+  --text-viewer-content-code-bg: rgba(0, 0, 0, 0.06);
+  --text-viewer-content-selection-bg: rgba(25, 118, 210, 0.25);
+}
+
+[data-text-viewer-theme="8"] {
+  --text-viewer-content-bg: #c0edc6;
+  --text-viewer-content-text: #0b0b0b;
+  --text-viewer-content-border: #7ab889;
+  --text-viewer-content-accent: #2e7d32;
+  --text-viewer-content-link: #388e3c;
+  --text-viewer-content-quote-border: #7ab889;
+  --text-viewer-content-quote-bg: rgba(122, 184, 137, 0.2);
+  --text-viewer-content-code-bg: rgba(11, 11, 11, 0.06);
+  --text-viewer-content-selection-bg: rgba(46, 125, 50, 0.25);
+}
+
+/**
+ * 阅读主题配色：依赖祖先 scope 上的 --text-viewer-content-*（见 textViewerCssVars / data-text-viewer-theme）
+ */
+.text-viewer-theme-bg {
+  background-color: var(--text-viewer-content-bg);
+}
+
+.text-viewer-theme-text {
+  color: var(--text-viewer-content-text);
+}
+
+.text-viewer-theme-border-t {
+  border-top-color: var(--text-viewer-content-border);
+}
+
+/** 顶/底栏跟随阅读页：覆盖子树内应用语义色 class，改用继承的阅读配色 */
+.reader-chrome-follow-page :where(.text-foreground) {
+  color: inherit;
+}
+
+.reader-chrome-follow-page :where(.text-muted-foreground) {
+  color: inherit;
+  opacity: 0.72;
+}
+
+.reader-chrome-follow-page :where(.text-primary) {
+  color: inherit;
+}
+
+.reader-chrome-follow-page :where(.bg-primary\/10) {
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.reader-chrome-follow-page :where(.hover\:bg-primary\/15:hover) {
+  background-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.reader-chrome-follow-page :where(.hover\:bg-accent\/40:hover) {
+  background-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.reader-chrome-follow-page :where(.border-border\/40) {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.reader-chrome-follow-page :where(.bg-background) {
+  background-color: inherit;
+}
+
+.reader-chrome-follow-page :where(.border-border\/50) {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.reader-chrome-follow-page :where(.bg-border) {
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+/** 页眉/页脚：分割线仅容器上/下边框 */
+.reader-page-tip.border-b,
+.reader-page-tip.border-t {
+  border-width: 1px;
+}
+
+.reader-control-bar {
+  max-height: 16rem;
+}
+
+/* 文本阅读器正文滚动：不预留 scrollbar-gutter，滚动条隐藏；主题 bg 由 TextViewerPage 注入 */
+.reader-text-scroll {
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.reader-text-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 阅读器目录滚动条样式 */
+.reader-catalog-scroll {
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+.reader-catalog-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.reader-catalog-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.reader-catalog-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.reader-catalog-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* 导入过程中的对话框 */
+.dialog-importing [data-kb-dialog-close-button] {
+  pointer-events: none;
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 阅读器 skeleton 加载条 */
+.skeleton-bar {
+  background-color: currentColor;
+  opacity: 0.12;
+  animation: skeleton-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes skeleton-pulse {
+
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+
+  50% {
+    opacity: 0.06;
+  }
+}
+
+.reader-skeleton-wrapper {
+  animation: skeleton-fade-in 0.15s ease-out;
+  transition: opacity 0.2s ease-out;
+}
+
+.reader-body {
+  animation: content-fade-in 0.2s ease-out;
+}
+
+.reader-paged-viewport .reader-body {
+  animation: none;
+}
+
+/** 按页：骨架遮罩与正文交叉淡入淡出（时长须与 PAGED_SKELETON_EXIT_MS 一致） */
+.reader-paged-loading {
+  animation: skeleton-fade-in 0.15s ease-out;
+}
+
+.reader-paged-loading.is-exiting {
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+  pointer-events: none;
+}
+
+.reader-paged-viewport:not(.is-live-content-revealed):not(.is-live-content-revealing)
+  .reader-paged-page-span-clip
+  .reader-body {
+  opacity: 0;
+}
+
+.reader-paged-viewport.is-live-content-revealing .reader-paged-page-span-clip .reader-body {
+  opacity: 1;
+  transition: opacity 0.2s ease-out;
+}
+
+.reader-paged-viewport.is-live-content-revealed .reader-paged-page-span-clip .reader-body {
+  opacity: 1;
+}
+
+/**
+ * 跨章 staging：仅隐藏主 chrome 的 live 层（勿波及 turn-layer 幕帘克隆）。
+ * 命令式 class 亦生效（staging 挂载早于 data-cross-chapter-staging 属性时）。
+ */
+.reader-paged-page-span-clip > .reader-paged-live-inner.reader-paged-live-suppressed,
+.reader-paged-viewport[data-cross-chapter-staging]
+  .reader-paged-clip
+  > .reader-page-tip-chrome
+  .reader-paged-live-suppressed {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 拖拽/翻页幕帘（含常显页眉页脚 frame 克隆）须始终可见 */
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-live-inner,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-curtain,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-frame-clone,
+.reader-paged-viewport .reader-paged-turn-layer .reader-paged-turn-surface {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.reader-paged-viewport:not(.is-live-content-revealed):not(.is-live-content-revealing)
+  .reader-paged-turn-layer
+  .reader-body {
+  opacity: 1;
+}
+
+.reader-paged-viewport[data-cross-chapter-staging] .reader-paged-incoming-inner .reader-body {
+  opacity: 1 !important;
+}
+
+/** 双栏 spread：排版完成前 interim 正文须可见（避免 opacity:0 白屏；页眉页脚常显时尤甚） */
+.reader-paged-viewport[data-dual-page]
+  .reader-paged-page-span-clip
+  > .reader-paged-live-inner.reader-paged-dual-spread:not(.reader-paged-live-suppressed)
+  .reader-body,
+.reader-paged-viewport[data-dual-page]
+  .reader-paged-page-span-clip
+  > .reader-paged-live-inner.reader-paged-dual-spread:not(.reader-paged-live-suppressed)
+  .reader-content {
+  opacity: 1 !important;
+}
+
+.reader-paged-viewport[data-dual-page].is-live-content-revealing
+  .reader-paged-dual-spread
+  .reader-body,
+.reader-paged-viewport[data-dual-page].is-live-content-revealed
+  .reader-paged-dual-spread
+  .reader-body {
+  opacity: 1;
+}
+
+/** 跨章拖拽未过门槛：staging 已预挂但保持隐藏，避免 Solid 反复挂载 */
+.reader-paged-incoming-inner.reader-paged-incoming-drag-held {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.reader-dual-page {
+  columns: 2;
+  column-fill: balance;
+  width: 100%;
+}
+
+/** 朗读当前段高亮（对标 Legado isReadAloud） */
+.reader-aloud-highlight {
+  background-color: hsl(var(--primary) / 0.18);
+  border-radius: 0.25rem;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/** 段内已朗读字级高亮 */
+.reader-aloud-read-highlight {
+  background-color: hsl(var(--primary) / 0.32);
+  border-radius: 0.125rem;
+}
+
+/** 方案 B live spread：单栏 pane，禁止继承 viewport 级 multicol */
+.reader-dual-spread-pane {
+  column-count: 1 !important;
+  columns: 1 !important;
+}
+
+.reader-paged-dual-spread .reader-body {
+  column-count: 1 !important;
+  columns: 1 !important;
+}
+
+.reader-dual-measure .reader-body {
+  column-count: 1 !important;
+  columns: 1 !important;
+  column-fill: auto;
+  box-sizing: border-box;
+}
+
+.reader-paged-dual-spread {
+  isolation: isolate;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/** 按页测量根：叠在 content-slot 内，几何与正文展示区（页眉页脚之间）一致 */
+.reader-paged-measure-host {
+  box-sizing: border-box;
+  contain: layout style;
+}
+
+.reader-paged-measure-host .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/** 左右单栏 pane：宽 (spread − 中缝) / 2，与屏外测量根栏宽一致 */
+.reader-paged-dual-pane-left {
+  left: 0;
+  width: calc((100% - var(--reader-dual-column-gap, 32px)) / 2);
+}
+
+.reader-paged-dual-pane-right {
+  right: 0;
+  width: calc((100% - var(--reader-dual-column-gap, 32px)) / 2);
+}
+
+.reader-paged-dual-spread .reader-paged-dual-shift {
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-shift .reader-content,
+.reader-paged-dual-spread .reader-paged-dual-shift .reader-body {
+  width: 100%;
+  max-width: none;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-column-clip .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/** live 双栏 pane 裁切：页尾块段距不计入叠高，避免页尾裁字 */
+.reader-paged-dual-spread .reader-paged-dual-column-clip .reader-p[data-reader-dual-tail-block] {
+  margin-bottom: 0 !important;
+}
+
+.reader-paged-dual-spread .reader-paged-dual-column-clip.reader-paged-bottom-justify .reader-p[data-reader-dual-tail-block] {
+  margin-bottom: 0 !important;
+}
+
+.reader-paged-page-window {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/** 单页正文裁切（高度 = nextStart − pageStart，与 tip-body 同高）；inset 由 content-slot 承担 */
+.reader-paged-page-content-clip {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.reader-paged-clip {
+  isolation: isolate;
+}
+
+.reader-paged-live-inner {
+  position: relative;
+  z-index: 0;
+}
+
+/** 单栏按页界裁切：正文高度随内容，禁用页底 justify（避免 margin-auto 在可变高容器内下移末行） */
+.reader-paged-page-span-clip .reader-paged-live-inner {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/**
+ * 双栏 spread 的左右 pane 为 absolute inset-y-0；若 live-inner 保持 height:auto 会塌缩为 0，
+ * 页眉页脚常显时 tip-body 有高度但正文带仍被 overflow:hidden 裁成白屏。
+ */
+.reader-paged-page-span-clip .reader-paged-live-inner.reader-paged-dual-spread {
+  height: 100% !important;
+  min-height: 100% !important;
+}
+
+.reader-paged-page-span-clip .reader-content {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.reader-paged-page-span-clip.reader-paged-bottom-justify .reader-p:last-child,
+.reader-paged-page-span-clip .reader-paged-bottom-justify .reader-p:last-child {
+  margin-bottom: unset;
+}
+
+.reader-paged-turn-slide {
+  z-index: 1;
+  /* 高度由 imperative mount 设为 clipViewport；底色铺满视口 */
+}
+
+.reader-paged-curtain-slide-mount {
+  z-index: 1;
+}
+
+/** idle：翻页层透明，正文由 tip-chrome(z-2) 承担；翻页时再 imperative 设不透明幕帘 */
+.reader-paged-turn-layer {
+  z-index: 0;
+}
+
+.reader-paged-turn-layer[data-turn-active] {
+  z-index: 10;
+}
+
+.reader-paged-turn-curtain {
+  position: relative;
+  z-index: 1;
+}
+
+/* 覆盖翻页：书脊线对齐满视口页面包（reader-paged-clip），在留白外侧 */
+.reader-paged-cover-edge {
+  z-index: 20;
+  width: 1px;
+  background-color: hsl(var(--border) / 0.55);
+}
+
+/* 阴影投向揭起页内侧，参数对称，仅水平方向镜像 */
+.reader-paged-cover-edge-right {
+  right: 0;
+  left: auto;
+  box-shadow: -4px 0 12px -2px rgba(0, 0, 0, 0.2);
+}
+
+.reader-paged-cover-edge-left {
+  left: 0;
+  right: auto;
+  box-shadow: 4px 0 12px -2px rgba(0, 0, 0, 0.2);
+}
+
+.reader-paged-justify .reader-p {
+  text-align: justify;
+  text-justify: inter-character;
+}
+
+.reader-paged-bottom-justify .reader-p:last-child {
+  margin-bottom: auto;
+}
+
+/** 双栏 clip 分页：禁用页底 justify（h-full + margin-auto 会把正文撑出 clip 导致末行裁切） */
+.reader-paged-dual-spread .reader-dual-spread-pane.reader-paged-bottom-justify .reader-p:last-child {
+  margin-bottom: unset;
+}
+
+@keyframes skeleton-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes content-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 书籍信息页 Skeleton Shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg,
+      hsl(var(--muted) / 0.5) 0%,
+      hsl(var(--muted) / 0.8) 20%,
+      hsl(var(--muted) / 0.3) 40%,
+      hsl(var(--muted) / 0.8) 60%,
+      hsl(var(--muted) / 0.5) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.dark .skeleton-shimmer,
+[data-kb-theme="dark"] .skeleton-shimmer {
+  background: linear-gradient(90deg,
+      hsl(var(--muted) / 0.3) 0%,
+      hsl(var(--muted) / 0.6) 20%,
+      hsl(var(--muted) / 0.2) 40%,
+      hsl(var(--muted) / 0.6) 60%,
+      hsl(var(--muted) / 0.3) 100%);
+  background-size: 200% 100%;
+}
+
+.bookinfo-fade-in {
+  animation: bookinfo-appear 0.35s ease-out;
+}
+
+@keyframes bookinfo-appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 允许输入组件选中文本（* 的 user-select: none 已在 @layer base 中定义） */
+input,
+textarea,
+input *,
+textarea *,
+[contenteditable="true"],
+[contenteditable="true"] *,
+[data-selectable="true"],
+[data-selectable="true"] *,
+[data-kb-text-field-input],
+[data-kb-text-field-textarea],
+[data-kb-text-field-input] *,
+[data-kb-text-field-textarea] *,
+.reader-content,
+.reader-content *,
+[data-reader-content="true"],
+[data-reader-content="true"] *,
+code,
+pre,
+code *,
+pre *,
+[data-code="true"],
+[data-code="true"] * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}
+
+/*
+ * Legado 式选区：禁止原生拖选由 selectstart 拦截（见 reader-paged-text-selection-bridge）。
+ * 正文必须保持 user-select:text（见上方 [data-reader-content] 规则），
+ * 否则 WebView2 下 Selection.addRange 可能无效或高亮不可见。
+ */
+.reader-text-handle-select [data-reader-content="true"]::selection,
+.reader-text-handle-select [data-reader-content="true"] *::selection {
+  background-color: var(--text-viewer-selection, hsl(var(--primary) / 0.35));
+}
+
+html[data-reader-text-selection-active] [data-reader-content="true"]::selection,
+html[data-reader-text-selection-active] [data-reader-content="true"] *::selection {
+  background-color: var(--text-viewer-selection, hsl(var(--primary) / 0.35));
+}
+
+/** Legado 式选文：正文可程序化选中，但鼠标保持默认箭头（非 I 形文本光标） */
+.reader-text-handle-select [data-reader-content="true"],
+.reader-text-handle-select [data-reader-content="true"] * {
+  cursor: default !important;
+}
+
+/** 选区游标：手形表示可拖拽 */
+[data-reader-selection-handle] {
+  cursor: grab !important;
+}
+
+[data-reader-selection-handle]:active {
+  cursor: grabbing !important;
+}
+
+/** 按页长按达成（桌面无振动时的视觉反馈） */
+.reader-paged-viewport[data-reader-long-press-armed] {
+  outline: 2px solid hsl(var(--primary) / 0.35);
+  outline-offset: -2px;
+}

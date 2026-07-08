@@ -1,0 +1,156 @@
+/**
+ * CSS 变量名常量 — 单一来源，避免 TS / CSS 漂移
+ */
+
+export const APP_CSS_VARS = {
+  background: '--background',
+  foreground: '--foreground',
+  muted: '--muted',
+  mutedForeground: '--muted-foreground',
+  popover: '--popover',
+  popoverForeground: '--popover-foreground',
+  border: '--border',
+  input: '--input',
+  card: '--card',
+  cardForeground: '--card-foreground',
+  primary: '--primary',
+  primaryForeground: '--primary-foreground',
+  secondary: '--secondary',
+  secondaryForeground: '--secondary-foreground',
+  accent: '--accent',
+  accentForeground: '--accent-foreground',
+  destructive: '--destructive',
+  destructiveForeground: '--destructive-foreground',
+  info: '--info',
+  infoForeground: '--info-foreground',
+  success: '--success',
+  successForeground: '--success-foreground',
+  warning: '--warning',
+  warningForeground: '--warning-foreground',
+  error: '--error',
+  errorForeground: '--error-foreground',
+  ring: '--ring',
+  sidebar: '--sidebar',
+  sidebarForeground: '--sidebar-foreground',
+  sidebarAccent: '--sidebar-accent',
+  sidebarAccentForeground: '--sidebar-accent-foreground',
+  sidebarBorder: '--sidebar-border',
+  sidebarRing: '--sidebar-ring',
+  radius: '--radius',
+  appBarHeight: '--app-bar-height',
+  readerTopBarHeight: '--reader-top-bar-height',
+  readerBottomBarHeight: '--reader-bottom-bar-height',
+  readerFooterMaxHeight: '--reader-footer-max-height',
+  readerScrollbarSize: '--reader-scrollbar-size',
+  readerBarDuration: '--reader-bar-duration',
+  readerBarEasingEnter: '--reader-bar-easing-enter',
+  readerBarEasingExit: '--reader-bar-easing-exit',
+  readerBarEasing: '--reader-bar-easing',
+  readerBarTransition: '--reader-bar-transition',
+  readerBrightnessChromeGap: '--reader-brightness-chrome-gap',
+  readerBrightnessFilter: '--reader-brightness-filter',
+  readerBrightnessInsetTop: '--reader-brightness-inset-top',
+  readerBrightnessInsetBottom: '--reader-brightness-inset-bottom',
+  readerChromeFloatingShift: '--reader-chrome-floating-shift',
+  readerDualSpreadWidth: '--reader-dual-spread-width',
+  readerDualColumnGap: '--reader-dual-column-gap',
+  readerAppToastMaxWidth: '--reader-app-toast-max-width',
+  readerAppToastMaxHeight: '--reader-app-toast-max-height',
+  readerAppToastContentMaxHeight: '--reader-app-toast-content-max-height',
+  readerInnerWebAnimMs: '--reader-inner-web-anim-ms',
+  mobileSafeTop: '--mobile-safe-top',
+  mobileSafeBottomGesture: '--mobile-safe-bottom-gesture',
+  mobileSafeBottomButtons: '--mobile-safe-bottom-buttons',
+  safeAreaTopEffective: '--safe-area-top-effective',
+  safeAreaBottomEffective: '--safe-area-bottom-effective',
+  keyboardInsetBottom: '--keyboard-inset-bottom',
+  systemStatusInsetTop: '--system-status-inset-top',
+  systemNavInsetBottom: '--system-nav-inset-bottom',
+  searchLoopDuration: '--search-loop-duration',
+  searchLoopMinWidth: '--search-loop-min-width',
+  bookshelfLayoutGap: '--bookshelf-layout-gap',
+  exploreIntroLineClamp: '--explore-intro-line-clamp',
+} as const;
+
+export const MEDIA_VIEWER_CSS_VARS = {
+  stageBackground: '--media-viewer-stage-bg',
+  chromeOverlayOpacity: '--media-viewer-chrome-overlay-opacity',
+  chromeOverlayBlur: '--media-viewer-chrome-overlay-blur',
+} as const;
+
+export const TEXT_VIEWER_CSS_VARS = {
+  contentBg: '--text-viewer-content-bg',
+  contentText: '--text-viewer-content-text',
+  contentAccent: '--text-viewer-content-accent',
+  contentBorder: '--text-viewer-content-border',
+  contentLink: '--text-viewer-content-link',
+  contentQuoteBorder: '--text-viewer-content-quote-border',
+  contentQuoteBg: '--text-viewer-content-quote-bg',
+  contentCodeBg: '--text-viewer-content-code-bg',
+  contentSelectionBg: '--text-viewer-content-selection-bg',
+  selection: '--text-viewer-selection',
+} as const;
+
+export const IMAGE_VIEWER_CSS_VARS = {
+  stageBg: '--image-viewer-stage-bg',
+  letterbox: '--image-viewer-letterbox',
+} as const;
+
+export const AUDIO_VIEWER_CSS_VARS = {
+  stageGradientFrom: '--audio-viewer-stage-from',
+  stageGradientVia: '--audio-viewer-stage-via',
+  stageGradientTo: '--audio-viewer-stage-to',
+  lyricHighlight: '--audio-viewer-lyric-highlight',
+} as const;
+
+export const VIDEO_VIEWER_CSS_VARS = {
+  artTheme: '--art-theme',
+  artHoverColor: '--art-hover-color',
+  artProgressColor: '--art-progress-color',
+  stageLetterbox: '--video-viewer-letterbox',
+} as const;
+
+export const FILE_VIEWER_CSS_VARS = {
+  stageBg: '--file-viewer-stage-bg',
+  embedBorder: '--file-viewer-embed-border',
+} as const;
+
+/** 语义色 → CSS 变量映射（值为 HSL 分量） */
+export const SEMANTIC_TO_CSS_VAR: Record<
+  keyof import('@/lib/theme/types').SemanticColorTokens,
+  string
+> = {
+  background: APP_CSS_VARS.background,
+  foreground: APP_CSS_VARS.foreground,
+  muted: APP_CSS_VARS.muted,
+  mutedForeground: APP_CSS_VARS.mutedForeground,
+  popover: APP_CSS_VARS.popover,
+  popoverForeground: APP_CSS_VARS.popoverForeground,
+  border: APP_CSS_VARS.border,
+  input: APP_CSS_VARS.input,
+  card: APP_CSS_VARS.card,
+  cardForeground: APP_CSS_VARS.cardForeground,
+  primary: APP_CSS_VARS.primary,
+  primaryForeground: APP_CSS_VARS.primaryForeground,
+  secondary: APP_CSS_VARS.secondary,
+  secondaryForeground: APP_CSS_VARS.secondaryForeground,
+  accent: APP_CSS_VARS.accent,
+  accentForeground: APP_CSS_VARS.accentForeground,
+  destructive: APP_CSS_VARS.destructive,
+  destructiveForeground: APP_CSS_VARS.destructiveForeground,
+  info: APP_CSS_VARS.info,
+  infoForeground: APP_CSS_VARS.infoForeground,
+  success: APP_CSS_VARS.success,
+  successForeground: APP_CSS_VARS.successForeground,
+  warning: APP_CSS_VARS.warning,
+  warningForeground: APP_CSS_VARS.warningForeground,
+  error: APP_CSS_VARS.error,
+  errorForeground: APP_CSS_VARS.errorForeground,
+  ring: APP_CSS_VARS.ring,
+  sidebar: APP_CSS_VARS.sidebar,
+  sidebarForeground: APP_CSS_VARS.sidebarForeground,
+  sidebarAccent: APP_CSS_VARS.sidebarAccent,
+  sidebarAccentForeground: APP_CSS_VARS.sidebarAccentForeground,
+  sidebarBorder: APP_CSS_VARS.sidebarBorder,
+  sidebarRing: APP_CSS_VARS.sidebarRing,
+};

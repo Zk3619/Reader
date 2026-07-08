@@ -1,0 +1,1051 @@
+/* Shared overlays */
+
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="tel"],
+input[type="url"],
+input[type="number"],
+textarea {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+}
+
+/* Tauri 窗口拖拽区域 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+}
+
+/*
+ * inner-web 打开时禁用 #root 内拖拽区（阅读器顶栏等）。
+ * 抽屉 Portal 在 body 层，不在 #root 内；避免点击抽屉顶栏时命中下层 drag region。
+ */
+body.reader-inner-web-session #root [data-tauri-drag-region] {
+  -webkit-app-region: no-drag !important;
+}
+
+/* 模态层拦截 Tauri 顶栏 drag（AppDrawer / AppDialog） */
+.app-block-drag {
+  -webkit-app-region: no-drag !important;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] .no-drag,
+[data-tauri-drag-region] .no-drag * {
+  -webkit-app-region: no-drag !important;
+}
+
+/* 未单独指定 duration-* 时的默认节奏（animation-name 由 tailwindcss-animate 提供） */
+.animate-in {
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+
+.animate-out {
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+
+/* Toast 动画关键帧 */
+@keyframes toast-slide-in-right {
+  from {
+    transform: translateX(calc(100% + 1rem)) scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out-right {
+  from {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateX(calc(100% + 1rem)) scale(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes toast-slide-in-top {
+  from {
+    transform: translateY(-100%) scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out-top {
+  from {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateY(-100%) scale(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes toast-slide-in-bottom {
+  from {
+    transform: translateY(100%) scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out-bottom {
+  from {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateY(100%) scale(0.95);
+    opacity: 0;
+  }
+}
+
+@keyframes toast-progress {
+  from {
+    width: 100%;
+  }
+
+  to {
+    width: 0%;
+  }
+}
+
+.toast-wrapper {
+  display: contents;
+}
+
+li.toast-animated[data-opened],
+li[role="status"].toast-animated[data-opened],
+.toast-wrapper li.toast-animated[data-opened] {
+  transition-property: none !important;
+  transition-duration: 0s !important;
+  transition-timing-function: none !important;
+  transition-delay: 0s !important;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  animation: toast-slide-in-top 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+@media (min-width: 640px) {
+
+  li.toast-animated[data-opened],
+  li[role="status"].toast-animated[data-opened],
+  .toast-wrapper li.toast-animated[data-opened] {
+    animation: toast-slide-in-right 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  }
+}
+
+li.toast-animated[data-closed],
+li[role="status"].toast-animated[data-closed],
+.toast-wrapper li.toast-animated[data-closed] {
+  transition-property: none !important;
+  transition-duration: 0s !important;
+  transition-timing-function: none !important;
+  transition-delay: 0s !important;
+  animation: toast-slide-out-bottom 0.25s cubic-bezier(0.4, 0, 1, 1) forwards !important;
+}
+
+@media (min-width: 640px) {
+
+  li.toast-animated[data-closed],
+  li[role="status"].toast-animated[data-closed],
+  .toast-wrapper li.toast-animated[data-closed] {
+    animation: toast-slide-out-right 0.25s cubic-bezier(0.4, 0, 1, 1) forwards !important;
+  }
+}
+
+/* 由 AppToasts ToastProgressBar 以 JS 驱动宽度，与 Sonner 悬停暂停计时同步 */
+
+[data-kb-toast-close-button] {
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+
+[data-kb-toast-close-button]:hover {
+  transform: scale(1.1);
+  background-color: hsl(var(--background) / 0.1);
+}
+
+[data-kb-toast-close-button]:active {
+  transform: scale(0.95);
+}
+
+.toast-enhanced {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+[data-kb-toast-list]>*+* {
+  margin-top: 0.5rem;
+}
+
+/* 内嵌网页浮层：高于 Dialog/登录弹窗（z-50），低于 Toast（z-200） */
+.reader-inner-web-layer {
+  z-index: 150;
+}
+
+/* 非全屏：主界面锁定；center 额外半透明，drawer 仅 corvu 遮罩 */
+body.reader-inner-web-session--drawer:not(.reader-inner-web-session--allow-root) #root,
+body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+  opacity: 0.42;
+  transition: opacity var(--reader-inner-web-anim-ms, 320ms) ease;
+}
+
+body.reader-inner-web-session--allow-root #root {
+  pointer-events: auto;
+  -webkit-user-select: auto;
+  user-select: auto;
+  opacity: 1;
+}
+
+/* Tauri 桌面子 WebView：锁定主界面，仅浮层可交互 */
+body.reader-inner-web-session #root {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.reader-inner-web-session .reader-inner-web-layer-root,
+body.reader-inner-web-session .reader-inner-web-layer {
+  pointer-events: auto;
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+/* 主壳内容区：限定 stacking，确保 body 级 Dialog（z-100+）始终在上 */
+#main-content-container {
+  z-index: 0;
+}
+
+/*
+ * 阅读器浮层 Portal 宿主（body 级，#reader-overlay-portal-host）
+ * Solid Portal 会插入无尺寸 wrapper div，须强制铺满；遮罩/内容须显式分层。
+ */
+#reader-overlay-portal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  display: none;
+}
+
+#reader-overlay-portal-host[data-active='true'] {
+  display: block;
+}
+
+#reader-overlay-portal-host>div {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+  z-index: 0 !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-corvu-drawer-overlay] {
+  z-index: 120 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-corvu-drawer-content],
+#reader-overlay-portal-host[data-active='true'] [data-app-overlay-surface] {
+  z-index: 121 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-app-overlay-backdrop]:not([data-corvu-drawer-overlay]) {
+  z-index: 130 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [role='dialog'] {
+  z-index: 131 !important;
+  pointer-events: auto !important;
+}
+
+#reader-overlay-portal-host[data-active='true'] [data-kb-popper-content-wrapper],
+#reader-overlay-portal-host[data-active='true'] [data-kb-popper-content] {
+  z-index: 135 !important;
+  pointer-events: auto !important;
+}
+
+/*
+ * RSS 文章列表 / 阅读页 Portal 宿主
+ * Solid Portal wrapper 无尺寸时，子树 fixed 无法可靠铺满视口。
+ */
+#reader-rss-overlay-portal-host {
+  position: fixed;
+  inset: 0;
+  z-index: 108;
+  pointer-events: none;
+}
+
+#reader-rss-overlay-portal-host>div {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+}
+
+#reader-rss-overlay-portal-host [data-rss-overlay-shell] {
+  pointer-events: auto;
+}
+
+/* 内嵌页 Portal 下拉/对话框：须高于 .reader-inner-web-layer (z-150) */
+body.reader-inner-web-session [data-kb-popper-content-wrapper] {
+  z-index: 160 !important;
+  pointer-events: auto;
+}
+
+/* 内嵌页：关闭确认等 Portal 对话框须高于浮层 */
+body.reader-inner-web-session .reader-inner-web-overlay-portal {
+  z-index: 160 !important;
+}
+
+.reader-inner-web-layer--panel .reader-inner-web-toolbar-host {
+  position: relative;
+  z-index: 1;
+}
+
+/* Inner-Web 抽屉（@corvu）须高于阅读器 z-100 层；内容须高于遮罩 */
+body.reader-inner-web-session--drawer [data-corvu-drawer-overlay] {
+  z-index: 150 !important;
+}
+
+body.reader-inner-web-session--drawer [data-corvu-drawer-content] {
+  z-index: 151 !important;
+}
+
+/* 抽屉打开时锁定 body 滚动，避免滚动条占位导致右侧留白 */
+body.reader-inner-web-session--drawer {
+  overflow: hidden;
+}
+
+/* 段评等紧凑顶栏 */
+.reader-inner-web-header--compact[data-page-header] {
+  min-height: 2.75rem;
+}
+
+/* 抽屉/居中：内嵌顶栏（非全屏 flex 顶栏语义），去掉 safe-area */
+.reader-inner-web-header--embedded[data-page-header] {
+  position: relative;
+  z-index: auto;
+}
+
+.reader-inner-web-header--embedded[data-page-header].safe-area-inset-top {
+  padding-top: 0;
+}
+
+/* --- Inner-Web 入场动画 --- */
+@keyframes reader-inner-web-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-up-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-left-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-right-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-slide-down-in {
+  from {
+    transform: translateY(-100%);
+    opacity: 0.85;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-zoom-in {
+  from {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes reader-inner-web-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.reader-inner-web-animate-fade .reader-inner-web-panel {
+  animation: reader-inner-web-fade-in var(--reader-inner-web-anim-ms, 200ms) ease;
+}
+
+.reader-inner-web-animate-fade .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 200ms) ease;
+}
+
+.reader-inner-web-animate-slide-up .reader-inner-web-panel {
+  animation: reader-inner-web-slide-up-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-up .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-slide-down .reader-inner-web-panel {
+  animation: reader-inner-web-slide-down-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-down .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-slide-left .reader-inner-web-panel {
+  animation: reader-inner-web-slide-left-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-right .reader-inner-web-panel {
+  animation: reader-inner-web-slide-right-in var(--reader-inner-web-anim-ms, 320ms) cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reader-inner-web-animate-slide-left .reader-inner-web-backdrop,
+.reader-inner-web-animate-slide-right .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 280ms) ease;
+}
+
+.reader-inner-web-animate-zoom .reader-inner-web-panel {
+  animation: reader-inner-web-zoom-in var(--reader-inner-web-anim-ms, 280ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reader-inner-web-animate-zoom .reader-inner-web-backdrop {
+  animation: reader-inner-web-backdrop-in var(--reader-inner-web-anim-ms, 240ms) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .reader-inner-web-animate-fade .reader-inner-web-panel,
+  .reader-inner-web-animate-fade .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-up .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-up .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-down .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-down .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-left .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-left .reader-inner-web-backdrop,
+  .reader-inner-web-animate-slide-right .reader-inner-web-panel,
+  .reader-inner-web-animate-slide-right .reader-inner-web-backdrop,
+  .reader-inner-web-animate-zoom .reader-inner-web-panel,
+  .reader-inner-web-animate-zoom .reader-inner-web-backdrop {
+    animation: none;
+  }
+
+  body.reader-inner-web-session--center:not(.reader-inner-web-session--allow-root) #root {
+    transition: none;
+  }
+}
+
+/* Sonner：挂到 body，高于 Dialog（z-110），模态打开时仍可点击 */
+/* 勿用 inset:0 全屏锚点，首次 toast 会触发整页合成层重绘导致闪烁 */
+.reader-toast-host {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 200;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.reader-kobalte-toast-host [data-kb-top-layer] {
+  pointer-events: none;
+}
+
+.reader-kobalte-toast-host [data-kb-top-layer] ol {
+  pointer-events: auto;
+}
+
+.reader-toast-host [data-sonner-toaster] {
+  pointer-events: auto;
+}
+
+/* 左图标 + 右标题/描述；宽高上限由 AppToasts 注入的 CSS 变量决定 */
+.reader-toast-host [data-sonner-toast].reader-app-toast {
+  align-items: flex-start;
+  max-width: var(--reader-app-toast-max-width, min(26.25rem, calc(100dvw - 2rem)));
+  max-height: var(--reader-app-toast-max-height, min(80dvh, 28rem));
+  overflow: hidden;
+  --reader-toast-capsule-ring: hsl(var(--border) / 0.42);
+  --reader-toast-capsule-glow: hsl(var(--primary) / 0.38);
+  --reader-toast-capsule-halo: hsl(var(--foreground) / 0.12);
+  border-color: hsl(var(--border) / 0.55);
+  box-shadow:
+    0 4px 12px hsl(0 0% 0% / 0.1),
+    0 0 0 1px var(--reader-toast-capsule-ring),
+    0 0 16px var(--reader-toast-capsule-glow),
+    0 0 6px var(--reader-toast-capsule-halo);
+}
+
+/* 变体光晕：与阅读器悬浮胶囊 capsuleGlow 同构（ring + glow + halo） */
+.reader-toast-host [data-sonner-toast].reader-app-toast--success,
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-type='success'] {
+  --reader-toast-capsule-ring: hsl(var(--success-foreground) / 0.42);
+  --reader-toast-capsule-glow: hsl(var(--success-foreground) / 0.38);
+  border-color: hsl(var(--success-foreground) / 0.28);
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--info,
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-type='info'] {
+  --reader-toast-capsule-ring: hsl(var(--info-foreground) / 0.42);
+  --reader-toast-capsule-glow: hsl(var(--info-foreground) / 0.38);
+  border-color: hsl(var(--info-foreground) / 0.28);
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--warning,
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-type='warning'] {
+  --reader-toast-capsule-ring: hsl(var(--warning-foreground) / 0.42);
+  --reader-toast-capsule-glow: hsl(var(--warning-foreground) / 0.38);
+  border-color: hsl(var(--warning-foreground) / 0.28);
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--error,
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-type='error'] {
+  --reader-toast-capsule-ring: hsl(var(--destructive) / 0.42);
+  --reader-toast-capsule-glow: hsl(var(--destructive) / 0.38);
+  border-color: hsl(var(--destructive) / 0.28);
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--plain {
+  --reader-toast-capsule-ring: hsl(var(--border) / 0.36);
+  --reader-toast-capsule-glow: hsl(var(--muted-foreground) / 0.22);
+  --reader-toast-capsule-halo: hsl(var(--foreground) / 0.08);
+  border-color: hsl(var(--border) / 0.45);
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-icon] {
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast--plain [data-icon] {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  overflow: hidden;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast [data-content] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 悬停展开：长内容可滚动（Sonner 锁高时避免裁切） */
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-expanded='true'] {
+  height: auto !important;
+  touch-action: auto;
+}
+
+.reader-toast-host [data-sonner-toast].reader-app-toast[data-expanded='true'] [data-content] {
+  max-height: var(--reader-app-toast-content-max-height, min(calc(80dvh - 2rem), calc(28rem - 2rem)));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+/* 进度条 */
+.reader-toast-host [data-sonner-toast].reader-app-toast--progress [data-content] {
+  padding-bottom: 2px;
+}
+
+.reader-toast-host .toast-progress-track {
+  margin-top: 0.25rem;
+}
+
+.reader-toast-host .toast-progress-fill {
+  transition: width 75ms linear;
+}
+
+/* 关闭按钮：限定在 .reader-toast-host，优先级高于 solid-sonner 运行时 styleInject */
+.reader-toast-host [data-sonner-toaster][dir='ltr'] {
+  --toast-close-button-start: unset;
+  --toast-close-button-end: 0.75rem;
+  --toast-close-button-transform: none;
+}
+
+.reader-toast-host [data-sonner-toaster][dir='rtl'] {
+  --toast-close-button-start: 0.75rem;
+  --toast-close-button-end: unset;
+  --toast-close-button-transform: none;
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button] {
+  top: 0.75rem;
+  left: unset;
+  right: var(--toast-close-button-end, 0.75rem);
+  transform: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button] svg {
+  width: 12px;
+  height: 12px;
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button],
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button]:hover,
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover {
+  background: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--border));
+  color: hsl(var(--destructive));
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button]:hover svg,
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible:hover svg {
+  color: hsl(var(--destructive));
+}
+
+.reader-toast-host [data-sonner-toaster][dir='rtl'] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  right: unset;
+  left: var(--toast-close-button-start, 0.75rem);
+}
+
+.reader-toast-host [data-sonner-toast][data-styled='true']:has([data-close-button]) {
+  padding-right: 2.5rem;
+}
+
+.reader-toast-host [data-sonner-toaster][dir='rtl'] [data-sonner-toast][data-styled='true']:has([data-close-button]) {
+  padding-right: 16px;
+  padding-left: 2.5rem;
+}
+
+/* 动画工具类 */
+.fade-in {
+  animation-name: fade-in;
+}
+
+.fade-out {
+  animation-name: fade-in;
+  animation-direction: reverse;
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: fade-in, slide-in-from-bottom;
+}
+
+.slide-in-from-left-52 {
+  animation-name: fade-in, slide-in-from-left;
+}
+
+.slide-in-from-right-52 {
+  animation-name: fade-in, slide-in-from-right;
+}
+
+.slide-in-from-top-52 {
+  animation-name: fade-in, slide-in-from-top;
+}
+
+.slide-out-to-left-52 {
+  animation-name: fade-out, slide-out-to-left;
+}
+
+.slide-out-to-right-52 {
+  animation-name: fade-out, slide-out-to-right;
+}
+
+.slide-out-to-top-52 {
+  animation-name: fade-out, slide-out-to-top;
+}
+
+.slide-out-to-bottom-52 {
+  animation-name: fade-out, slide-out-to-bottom;
+}
+
+/* SortableJS 拖拽样式 */
+.sortable-chosen {
+  @apply border-primary bg-primary/5;
+}
+
+.sortable-drag {
+  @apply cursor-move;
+  opacity: 0.8;
+  transform: rotate(2deg);
+  transition: none !important;
+}
+
+.sortablejs-dragging {
+  opacity: 0.8 !important;
+  cursor: move !important;
+  pointer-events: none !important;
+}
+
+.sortablejs-ghost {
+  opacity: 0.5 !important;
+}
+
+/* ring-offset 颜色支持 */
+.ring-offset-background {
+  --tw-ring-offset-color: hsl(var(--background));
+}
+
+/* 开屏动画关键帧 */
+@keyframes fadeInZoom {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 独立页叠层（非阅读器）：纯 opacity 淡入淡出，无 scale/slide */
+.app-overlay-fade-shell {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.app-overlay-fade-shell[data-overlay-visible='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 减少动效 */
+[data-reduce-motion="true"] .animate-in,
+[data-reduce-motion="true"] .animate-out,
+[data-reduce-motion="true"] [data-opened],
+[data-reduce-motion="true"] [data-closed],
+[data-reduce-motion="true"] .toast-progress-bar,
+[data-reduce-motion="true"] .toast-progress-fill,
+[data-reduce-motion="true"] .fade-in,
+[data-reduce-motion="true"] .fade-out,
+[data-reduce-motion="true"] .slide-in-from-bottom-4,
+[data-reduce-motion="true"] .slide-in-from-left-52,
+[data-reduce-motion="true"] .slide-in-from-right-52,
+[data-reduce-motion="true"] .slide-in-from-top-52,
+[data-reduce-motion="true"] .slide-out-to-left-52,
+[data-reduce-motion="true"] .slide-out-to-right-52,
+[data-reduce-motion="true"] .slide-out-to-top-52,
+[data-reduce-motion="true"] .slide-out-to-bottom-52,
+[data-reduce-motion="true"] .animate-app-menu-show,
+[data-reduce-motion="true"] .animate-app-menu-hide,
+[data-reduce-motion="true"] .setting-item-highlight-enter,
+[data-reduce-motion="true"] .setting-item-highlight-exit,
+[data-reduce-motion="true"] .app-overlay-fade-shell {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+}
+
+[data-reduce-motion="true"] * {
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+}
+
+/* 全局视觉特效开关（设置 → 视觉特效） */
+[data-visual-shadow="false"] :where(.shadow-sm, .shadow-md, .shadow-lg) {
+  box-shadow: none !important;
+}
+
+[data-visual-blur="false"] :where(
+  .backdrop-blur,
+  .backdrop-blur-sm,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  [class*="backdrop-blur:"]
+) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+[data-visual-transparency="false"] :where(
+  .bg-background\/95,
+  .bg-background\/90,
+  .bg-background\/80,
+  .bg-muted\/60,
+  .bg-muted\/30
+) {
+  background-color: hsl(var(--background)) !important;
+}
+
+
+.safe-area-inset-top {
+  padding-top: var(--safe-area-top-effective);
+}
+
+/** 主壳 PageToolbar：安全区 + 1rem，避免与 Tailwind pt-4 争抢 padding-top */
+.page-toolbar-shell-top {
+  padding-top: calc(var(--safe-area-top-effective) + 1rem);
+}
+
+/** 主壳 fixed 区域：顶/底栏高度 + 安全区（与 Navigation / BottomBar 外层 padding 一致） */
+.inset-top-app-bar {
+  top: calc(var(--app-bar-height) + var(--safe-area-top-effective));
+}
+
+.inset-bottom-app-bar {
+  bottom: calc(var(--app-bar-height) + var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+/* 遗留 class：桌面用 env；触摸端在下方 @media 中叠加 app-bottom-edge-inset */
+.safe-area-inset-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+.safe-area-page-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+/** 贴底 chrome（底栏、抽屉、阅读器底栏）：仅触摸端 pb-2 */
+.app-bottom-chrome-inset {
+  padding-bottom: 0;
+}
+
+/** 块级底部外边距：仅触摸端 mb-2 */
+.app-bottom-edge-inset {
+  margin-bottom: 0;
+}
+
+/** 滚动视口内上下留白：桌面 py-2；触摸端底边 max(py-2, 安全区) */
+.app-scroll-edge-inset {
+  padding-top: 0.5rem;
+  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective, 0px));
+}
+
+html.keyboard-open .reader-footer.safe-area-inset-bottom,
+html.keyboard-open .fixed.bottom-0.safe-area-inset-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+/* 触摸端：pointer:coarse 与 data-touch-ui 双轨（WebView 媒体查询可能失效） */
+@media (pointer: coarse) and (hover: none) {
+  :root {
+    --safe-area-top-effective: max(env(safe-area-inset-top, 0px), var(--system-status-inset-top, var(--mobile-safe-top)));
+    --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
+  }
+
+  .safe-area-inset-bottom,
+  .safe-area-page-bottom {
+    padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+  }
+
+  .app-bottom-chrome-inset {
+    padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+  }
+
+  .app-bottom-edge-inset {
+    margin-bottom: var(--safe-area-bottom-effective);
+  }
+
+  .app-scroll-edge-inset,
+  .app-scroll-bottom-inset {
+    padding-bottom: max(0.5rem, var(--safe-area-bottom-effective));
+  }
+
+  .safe-area-min-height-bottom {
+    min-height: var(--safe-area-bottom-effective);
+  }
+
+  .safe-area-min-height-top {
+    min-height: var(--safe-area-top-effective);
+  }
+
+  #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
+    margin-bottom: var(--safe-area-bottom-effective);
+  }
+}
+
+html[data-touch-ui] {
+  --safe-area-top-effective: max(env(safe-area-inset-top, 0px), var(--system-status-inset-top, var(--mobile-safe-top)));
+  --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-gesture)));
+}
+
+html[data-touch-ui] .safe-area-inset-bottom,
+html[data-touch-ui] .safe-area-page-bottom {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+html[data-touch-ui] .app-bottom-chrome-inset {
+  padding-bottom: calc(var(--safe-area-bottom-effective) + var(--keyboard-inset-bottom));
+}
+
+html[data-touch-ui] .app-bottom-edge-inset {
+  margin-bottom: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] .app-scroll-edge-inset,
+html[data-touch-ui] .app-scroll-bottom-inset {
+  padding-bottom: max(0.5rem, var(--safe-area-bottom-effective));
+}
+
+html[data-touch-ui] .safe-area-min-height-bottom {
+  min-height: var(--safe-area-bottom-effective);
+}
+
+html[data-touch-ui] .safe-area-min-height-top {
+  min-height: var(--safe-area-top-effective);
+}
+
+html[data-touch-ui] #main-content-container[data-shell-bottom-bar='hidden'] .main-shell-page-scroll {
+  margin-bottom: var(--safe-area-bottom-effective);
+}
+
+/* 三键导航：略增贴底 chrome 内边距（data-android-nav 由 JS 写入） */
+html[data-touch-ui][data-android-nav='buttons'] {
+  --safe-area-bottom-effective: max(env(safe-area-inset-bottom, 0px), var(--system-nav-inset-bottom, var(--mobile-safe-bottom-buttons)));
+}
+
+
+@keyframes search-loop-pulse {
+  0% {
+    width: 100%;
+    left: 0%;
+  }
+
+  50% {
+    width: var(--search-loop-min-width);
+    left: calc((100% - var(--search-loop-min-width)) / 2);
+  }
+
+  100% {
+    width: 100%;
+    left: 0%;
+  }
+}
+
+.search-loop-track {
+  position: relative;
+  height: 0.25rem;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+.search-loop-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+.search-loop-bar--active {
+  background: hsl(var(--primary));
+  animation: search-loop-pulse var(--search-loop-duration) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

@@ -1,0 +1,357 @@
+/* Media viewer chrome */
+
+/* ── 以下为从 Reader-old 迁移的样式 ── */
+
+/* 四 viewer 主内容区铺满壳层 */
+.media-viewer-main-stage {
+  overflow: hidden;
+}
+
+.media-viewer-main-scroll {
+  overscroll-behavior: contain;
+}
+
+/* 四 media-viewer 移动端正文：不预留 scrollbar-gutter，滚动条隐藏 */
+.media-viewer-content-scroll {
+  scrollbar-gutter: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.media-viewer-content-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* overlay 悬浮栏：外层裁剪+显隐；内层 surface 位移+透明度（顶栏外层保留 drag，不用 transform） */
+.reader-chrome-overlay-panel {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: visible;
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.reader-chrome-overlay-panel--top.reader-chrome-overlay-panel--hidden,
+.reader-chrome-overlay-panel--bottom.reader-chrome-overlay-panel--hidden {
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0s linear var(--reader-bar-duration);
+}
+
+.reader-chrome-overlay-panel__surface {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  /* 出现/消失：仅位移，避免与不透明度叠加造成「先透后糊」 */
+  transition: transform var(--reader-bar-duration) var(--reader-bar-easing-enter);
+}
+
+.reader-chrome-overlay-panel--top.reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
+  transform: translate3d(0, -100%, 0);
+}
+
+.reader-chrome-overlay-panel--bottom.reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
+  transform: translate3d(0, 100%, 0);
+}
+
+.reader-chrome-overlay-panel--hidden .reader-chrome-overlay-panel__surface {
+  transition: transform var(--reader-bar-duration) var(--reader-bar-easing-exit);
+}
+
+/* 悬浮栏：整条轨道淡入淡出 + 轻微位移（控件本身为圆角胶囊） */
+.reader-chrome-floating-top,
+.reader-chrome-floating-bottom {
+  visibility: visible;
+  overflow: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.reader-chrome-floating-top--hidden,
+.reader-chrome-floating-bottom--hidden {
+  visibility: hidden;
+  transition: visibility 0s linear var(--reader-bar-duration);
+}
+
+.reader-chrome-floating-top__track,
+.reader-chrome-floating-bottom__track {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  overflow: visible;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out;
+}
+
+.reader-chrome-floating-top__track {
+  padding-top: calc(var(--safe-area-top-effective) + 0.75rem);
+}
+
+.reader-chrome-floating-top--hidden .reader-chrome-floating-top__track {
+  opacity: 0;
+  transform: translate3d(0, calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0);
+  pointer-events: none;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in;
+}
+
+.reader-chrome-floating-bottom--hidden .reader-chrome-floating-bottom__track {
+  opacity: 0;
+  transform: translate3d(0, var(--reader-chrome-floating-shift, 0.75rem), 0);
+  pointer-events: none;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in;
+}
+
+/* 亮度胶囊：与顶底栏同节奏的淡入淡出 + 按方位轻微位移 */
+.reader-brightness-capsule-shell {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+
+.reader-brightness-capsule-shell--hidden {
+  visibility: hidden;
+  transition: visibility 0s linear var(--reader-bar-duration);
+}
+
+.reader-brightness-capsule-shell--left,
+.reader-brightness-capsule-shell--right {
+  overflow: visible;
+}
+
+.reader-brightness-overlay-host {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.reader-brightness-capsule-shell--inset-top {
+  top: calc(var(--reader-brightness-inset-top, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
+.reader-brightness-capsule-shell--inset-bottom {
+  bottom: calc(var(--reader-brightness-inset-bottom, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
+.reader-brightness-capsule-shell--inset-vertical {
+  top: calc(var(--reader-brightness-inset-top, 0px) + var(--reader-brightness-chrome-gap, 10px));
+  bottom: calc(var(--reader-brightness-inset-bottom, 0px) + var(--reader-brightness-chrome-gap, 10px));
+}
+
+.reader-brightness-capsule-track {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out;
+}
+
+.reader-brightness-capsule-slider-lane {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  /* size-5 滑块在槽端需留出半径，避免被圆角胶囊裁切 */
+  padding-inline: 0.75rem;
+}
+
+.reader-brightness-capsule-slider-lane.flex-col {
+  width: 100%;
+  padding-inline: 0;
+  padding-block: 0.75rem;
+}
+
+.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in;
+}
+
+.reader-brightness-capsule-shell--left.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0, 0);
+}
+
+.reader-brightness-capsule-shell--right.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(var(--reader-chrome-floating-shift, 0.75rem), 0, 0);
+}
+
+.reader-brightness-capsule-shell--top.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(0, calc(-1 * var(--reader-chrome-floating-shift, 0.75rem)), 0);
+}
+
+.reader-brightness-capsule-shell--bottom.reader-brightness-capsule-shell--hidden .reader-brightness-capsule-track {
+  transform: translate3d(0, var(--reader-chrome-floating-shift, 0.75rem), 0);
+}
+
+/* 嵌入顶/底栏：随 surface/track 位移，透明透出正文 */
+.reader-brightness-capsule-shell--embedded-top,
+.reader-brightness-capsule-shell--embedded-bottom {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.reader-brightness-capsule-shell--embedded-top {
+  margin-top: var(--reader-brightness-chrome-gap, 10px);
+  padding-top: 4px;
+  padding-bottom: 6px;
+}
+
+.reader-brightness-capsule-shell--embedded-bottom {
+  margin-bottom: var(--reader-brightness-chrome-gap, 10px);
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+
+/* fixed 占位栏：max-height 折叠（流式布局） */
+.reader-top-bar {
+  min-height: 0;
+  max-height: calc(var(--reader-top-bar-height) + var(--safe-area-top-effective));
+  overflow: hidden;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-enter);
+}
+
+.reader-top-bar.reader-bar-hidden {
+  max-height: 0 !important;
+  height: 0 !important;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-exit);
+}
+
+.reader-footer {
+  min-height: 0;
+  max-height: var(--reader-footer-max-height);
+  overflow: hidden;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-enter);
+}
+
+.reader-footer.reader-bar-hidden {
+  max-height: 0 !important;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-exit);
+}
+
+/* 阅读器：填充刘海 — 移除顶栏顶部安全间距 */
+.reader-padding-cutouts-host .reader-top-bar.safe-area-inset-top,
+.reader-padding-cutouts-host .safe-area-inset-top {
+  --safe-area-top-effective: 0px;
+  padding-top: 0;
+}
+
+/* 阅读器亮度 overlay 降级：brightness 滤镜模拟背光；拖动时即时更新，不做 transition 避免闪回最亮 */
+[data-reader-brightness-host][data-brightness-overlay] {
+  filter: brightness(var(--reader-brightness-filter, 1));
+  -webkit-filter: brightness(var(--reader-brightness-filter, 1));
+}
+
+/* 底栏/进度滑条：为圆环滑块留出溢出空间 */
+.viewer-chrome-slider-lane,
+.viewer-chrome-slider-root {
+  overflow: visible;
+}
+
+.reader-bottom-bar,
+.reader-control-bar {
+  min-height: 0;
+  overflow: hidden;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    opacity var(--reader-bar-duration) ease-out,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-enter),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-enter);
+}
+
+.reader-bottom-bar.reader-bar-hidden,
+.reader-control-bar.reader-bar-hidden {
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-height var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    opacity var(--reader-bar-duration) ease-in,
+    padding var(--reader-bar-duration) var(--reader-bar-easing-exit),
+    border-width var(--reader-bar-duration) var(--reader-bar-easing-exit);
+}
+
+.reader-bottom-bar {
+  max-height: var(--reader-bottom-bar-height);
+}
+
+.reader-bottom-bar.safe-area-inset-bottom {
+  max-height: calc(var(--reader-bottom-bar-height) + var(--safe-area-bottom-effective));
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .reader-chrome-overlay-panel,
+  .reader-chrome-floating-top,
+  .reader-chrome-floating-bottom,
+  .reader-brightness-capsule-shell,
+  .reader-top-bar,
+  .reader-footer,
+  .reader-bottom-bar,
+  .reader-control-bar {
+    transition-duration: 0.01ms !important;
+  }
+
+  .reader-chrome-overlay-panel__surface,
+  .reader-chrome-floating-top__track,
+  .reader-chrome-floating-bottom__track,
+  .reader-brightness-capsule-track {
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}

@@ -20,6 +20,10 @@ import {
   CHAPTER_CACHE_TIER_SCHEMA_VERSION,
   migrateChapterCacheV99,
 } from '@/lib/database/migration-chapter-cache-v99';
+import {
+  THEME_PRESETS_SCHEMA_VERSION,
+  migrateThemePresetsV100,
+} from '@/lib/database/migration-v100';
 
 export { LEGADO_SCHEMA_VERSION };
 export { CHAPTER_CACHE_SCHEMA_VERSION };
@@ -450,5 +454,9 @@ export const migrations: Migration[] = [
   {
     version: CHAPTER_CACHE_TIER_SCHEMA_VERSION,
     up: migrateChapterCacheV99,
+  },
+  {
+    version: THEME_PRESETS_SCHEMA_VERSION,
+    up: migrateThemePresetsV100,
   },
 ];

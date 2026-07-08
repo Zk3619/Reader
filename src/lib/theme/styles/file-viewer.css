@@ -1,0 +1,7 @@
+/* File viewer stage */
+.file-viewer-stage {
+  background-color: var(--file-viewer-stage-bg);
+}
+.file-viewer-embed {
+  border: 1px solid var(--file-viewer-embed-border);
+}
