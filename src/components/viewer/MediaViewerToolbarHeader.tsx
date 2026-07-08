@@ -2,6 +2,8 @@ import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating, useMediaViewerToolbarChromeClasses } from '@/lib/viewer/viewer-chrome-layout';
+import { mergeViewerChromeFloatingCapsuleStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+import { appThemeBrightnessChrome } from '@/lib/theme/TextViewerTheme';
 import {
   ViewerToolbarWindowControlsLead,
   ViewerToolbarWindowControlsTrail,
@@ -57,7 +59,12 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
     );
   const titleHeadingClass = () => cn('truncate text-sm font-medium');
   const titleClass = () => mediaViewerChromeToolbarTitleInlineClass;
-  const capsuleStyle = () => (isFloating() ? floating.overlaySurfaceStyle() : undefined);
+  const capsuleStyle = () =>
+    isFloating()
+      ? mergeViewerChromeFloatingCapsuleStyle(floating.overlaySurfaceStyle(), {
+          boxShadow: appThemeBrightnessChrome().capsuleGlow,
+        })
+      : undefined;
 
   const closeButton = () => (
     <AppTooltip>
@@ -256,7 +263,7 @@ export function MediaViewerToolbarHeader(props: MediaViewerToolbarHeaderProps) {
   const actionsGroupClass = () => toolbarChrome().actionsGroupClass;
 
   const leadRow = () => (
-    <div class={cn(toolbarChrome().leadRowClass, isFloating() && 'gap-1 sm:min-w-0 sm:shrink')}>
+    <div class={cn(toolbarChrome().leadRowClass, isFloating() && 'gap-1 sm:min-w-0')}>
       {closeButton()}
       {titleBlock()}
     </div>

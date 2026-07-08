@@ -4,10 +4,20 @@
 
 import { type JSX } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
-import type { TextViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
+import type { TextViewerPagedContentInsets, TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { textViewerSurfacePaintStyle } from '@/lib/theme/TextViewerTheme';
 import { cn } from '@/lib/utils';
+
+/** 正文槽背景/前景：仅使用阅读主题 palette（自定义背景待商业级主题系统统一接入） */
+export function readerTextContentSlotPaintStyle(
+  config: TextViewerUiConfig,
+): Record<string, string> {
+  return textViewerSurfacePaintStyle(config.theme ?? 0, {
+    themeSurfaceAppearance: config.themeSurfaceAppearance,
+  });
+}
 
 /** 滚动模式：slot 在滚动容器内，用 padding 留白 */
 export function readerTextContentSlotPaddingStyle(
@@ -136,7 +146,8 @@ export function ReaderTextContentSlot(props: ReaderTextContentSlotProps) {
           ? readerTextContentSlotHorizontalPaddingStyle(pads)
           : readerTextContentSlotPaddingStyle(pads)
         : readerTextContentSlotPagedMountStyle(pads);
-    return props.style ? { ...base, ...props.style } : base;
+    const themed = readerTextContentSlotPaintStyle(textViewerStore.state.config);
+    return props.style ? { ...base, ...themed, ...props.style } : { ...base, ...themed };
   };
 
   return (
@@ -148,6 +159,8 @@ export function ReaderTextContentSlot(props: ReaderTextContentSlotProps) {
         props.mode === 'scroll' && 'min-h-full w-full max-w-full box-border overflow-x-clip',
         props.mode === 'scroll' && theme().bg,
         props.mode === 'scroll' && theme().text,
+        props.mode === 'paged' && theme().bg,
+        props.mode === 'paged' && theme().text,
         props.class,
       )}
       style={slotStyle()}

@@ -2,13 +2,20 @@ import { Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating, useMediaViewerToolbarChromeClasses } from '@/lib/viewer/viewer-chrome-layout';
+import { textViewerStore } from '@/stores/viewer';
+import {
+  textViewerChromeFollowPagePaletteStyle,
+  textViewerFloatingCapsuleBoxShadow,
+} from '@/lib/theme/TextViewerTheme';
+import {
+  mergeViewerChromeFloatingCapsuleStyle,
+} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import {
   ViewerToolbarWindowControlsLead,
   ViewerToolbarWindowControlsTrail,
 } from '@/components/viewer/ViewerToolbarChromeParts';
 import {
   mediaViewerChromeToolbarPrimaryActionsClass,
-  mediaViewerChromeToolbarTitleInlineClass,
   mediaViewerChromeFloatingActionsClusterScrollClass,
 } from '@/components/viewer/viewer-chrome';
 import { isMobile } from '@/lib/platform/detect';
@@ -61,8 +68,37 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           : cn(floating.inlineIconClass(), floating.iconButtonClass())
         : floating.iconButtonClass(),
     );
-  const titleClass = () => mediaViewerChromeToolbarTitleInlineClass;
-  const capsuleStyle = () => (isFloating() ? floating.overlaySurfaceStyle() : undefined);
+  const titleClass = () =>
+    cn(
+      'block min-w-0 truncate text-sm font-medium max-sm:flex-1 max-sm:basis-0',
+      topBarFollowsPage() ? 'text-inherit' : 'text-foreground',
+    );
+  const topBarFollowsPage = () => textViewerStore.state.config.readTopBarStyleFollowPage === true;
+  const themeAppearanceConfig = () => ({
+    themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+  });
+  const capsuleStyle = () => {
+    if (!isFloating()) return undefined;
+    const themeId = textViewerStore.state.config.theme ?? 0;
+    const follow = topBarFollowsPage();
+    const base = follow
+      ? textViewerChromeFollowPagePaletteStyle(themeId)
+      : floating.overlaySurfaceStyle();
+    return mergeViewerChromeFloatingCapsuleStyle(base, {
+      themeId,
+      followPage: follow,
+      surfaceKind: 'chrome',
+      config: themeAppearanceConfig(),
+      boxShadow: textViewerFloatingCapsuleBoxShadow(themeId, follow),
+    });
+  };
+  /** 悬浮模式：返回键与标题/操作簇共用 surface，避免独立 bg-background 胶囊 */
+  const floatingBackButtonStyle = () => (isFloating() ? capsuleStyle() : undefined);
+  const windowControlsChrome = () => ({
+    inheritChromeColors: topBarFollowsPage(),
+    themeId: textViewerStore.state.config.theme ?? 0,
+    themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+  });
 
   const closeButton = () => (
     <AppTooltip>
@@ -71,6 +107,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
         variant="ghost"
         size="icon"
         class={iconBtn()}
+        style={floatingBackButtonStyle()}
         onClick={props.onClose}
         aria-label="关闭阅读器"
       >
@@ -95,7 +132,8 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
           type="button"
           class={cn(
             titleClass(),
-            'min-w-0 max-w-full overflow-hidden text-left transition-colors cursor-pointer hover:text-primary',
+            'min-w-0 max-w-full overflow-hidden text-left transition-colors cursor-pointer',
+            topBarFollowsPage() ? 'hover:opacity-80' : 'hover:text-primary',
           )}
           onClick={() => props.onOpenBookInfo!()}
           aria-label="进入书籍信息页"
@@ -240,7 +278,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
     <div
       class={cn(
         toolbarChrome().leadRowClass,
-        isFloating() && 'gap-1 sm:min-w-0 sm:shrink',
+        isFloating() && 'gap-1 sm:min-w-0',
       )}
     >
       {closeButton()}
@@ -266,7 +304,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
     <>
       <div class={toolbarChrome().overlayFirstRowClass}>
         {leadRow()}
-        <ViewerToolbarWindowControlsLead />
+        <ViewerToolbarWindowControlsLead {...windowControlsChrome()} />
       </div>
       <Show when={toolbarChrome().showSpacer}>
         <div class={toolbarChrome().spacerClass} data-tauri-drag-region />
@@ -274,7 +312,7 @@ export function TextViewerToolbarHeader(props: TextViewerToolbarHeaderProps) {
       <div class={actionsGroupClass()} style={capsuleStyle()}>
         {actionsGroupContent()}
       </div>
-      <ViewerToolbarWindowControlsTrail />
+      <ViewerToolbarWindowControlsTrail {...windowControlsChrome()} />
     </>
   );
 

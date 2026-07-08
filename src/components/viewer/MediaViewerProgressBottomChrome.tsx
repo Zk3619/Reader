@@ -14,6 +14,8 @@ import {
   mediaViewerChromeSliderLaneClass,
 } from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
+import { mergeViewerChromeFloatingCapsuleStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+import { appThemeBrightnessChrome } from '@/lib/theme/TextViewerTheme';
 
 export interface MediaViewerProgressBottomChromeProps {
   chapterIndex: number;
@@ -63,7 +65,11 @@ export function MediaViewerProgressBottomChrome(props: MediaViewerProgressBottom
   const floatingPill = () =>
     cn(floating.isFloating() && mediaViewerChromeFloatingBottomPillClass);
   const floatingPillStyle = () =>
-    floating.isFloating() ? floating.overlaySurfaceStyle() : undefined;
+    floating.isFloating()
+      ? mergeViewerChromeFloatingCapsuleStyle(floating.overlaySurfaceStyle(), {
+          boxShadow: appThemeBrightnessChrome().capsuleGlow,
+        })
+      : undefined;
   const showStatus = () => local.showStatusBar !== false;
   const showSlider = () => local.showProgressSlider !== false;
   const bookPercent = () => {

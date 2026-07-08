@@ -85,10 +85,11 @@ export const mediaViewerChromeToolbarLeadRowClass = cn(
   'sm:flex-none sm:max-w-[min(40%,24rem)]',
 );
 
-/** 悬浮顶栏左侧：胶囊带阴影/边框，勿裁切底部 */
+/** 悬浮顶栏左侧：占首行剩余宽度，仅空间不足时截断书名 */
 export const mediaViewerChromeFloatingToolbarLeadRowClass = cn(
-  mediaViewerChromeToolbarLeadRowClass,
-  'overflow-visible',
+  'flex min-w-0 items-center gap-1 overflow-visible sm:gap-2',
+  'max-sm:flex-1 max-sm:basis-0',
+  'sm:min-w-0 sm:flex-1',
 );
 
 export const mediaViewerChromeToolbarTitleInlineClass = cn(
@@ -262,7 +263,7 @@ export const mediaViewerChromeFloatingTitleCapsuleClass = cn(
   mediaViewerChromeHitTargetClass,
   'flex min-w-0 items-center overflow-hidden px-3',
   'max-sm:flex-1 max-sm:basis-0',
-  'sm:max-w-[min(calc(100vw-16rem),14rem)] md:max-w-[min(40%,24rem)]',
+  'sm:min-w-0 sm:flex-1',
 );
 
 /** 悬浮顶栏：主题 + 窗口控件独立胶囊（首行） */

@@ -23,11 +23,13 @@ import { MoreIcon } from '@/components/shared/icons';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { blurActiveElement } from '@/utils/accessibility';
 import { cn } from '@/lib/utils';
+import { themeStudioStore } from '@/stores/theme-studio';
 
 export interface ReaderMoreMenuProps {
   onOpenBookmarks: () => void;
   onAddBookmark: () => void;
   canBookmark: boolean;
+  onOpenThemeStudio?: () => void;
   onUpdateToc?: () => void;
   canUpdateToc?: boolean | (() => boolean);
   /** 阅读器叠层是否栈顶可见；传给起效的替换对话框 */
@@ -135,6 +137,15 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
             <AppDropdownMenuItem onSelect={props.onAddBookmark}>添加书签</AppDropdownMenuItem>
             <AppDropdownMenuItem onSelect={props.onOpenBookmarks}>本书书签</AppDropdownMenuItem>
           </Show>
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setOpen(false);
+              props.onOpenThemeStudio?.();
+              themeStudioStore.openStudio({ entry: 'reader', scope: 'viewer' });
+            }}
+          >
+            阅读器主题
+          </AppDropdownMenuItem>
           <AppDropdownMenuItem disabled={!canEditCachedContent()} onSelect={openContentEdit}>
             编辑正文
           </AppDropdownMenuItem>

@@ -11,6 +11,11 @@ import { MediaViewerBottomChromeContent } from '@/components/viewer/MediaViewerB
 import { cn } from '@/lib/utils';
 import { textViewerStore } from '@/stores/viewer';
 import {
+  textViewerChromeFollowPagePaletteStyle,
+  textViewerFloatingCapsuleBoxShadow,
+} from '@/lib/theme/TextViewerTheme';
+import { mergeViewerChromeFloatingCapsuleStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+import {
   TEXT_VIEWER_AUTO_READ_SPEED_MAX,
   TEXT_VIEWER_AUTO_READ_SPEED_MIN,
   normalizeAutoReadSpeed,
@@ -50,12 +55,30 @@ export interface TextViewerBottomChromeProps {
  */
 export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
   const floating = useMediaViewerChromeFloating();
+  const bottomBarFollowsPage = () =>
+    textViewerStore.state.config.readBottomBarStyleFollowPage === true;
+  const themeAppearanceConfig = () => ({
+    themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+  });
   const operationBarClass = () =>
     cn(!isMobile() && mediaViewerChromeBottomPrimarySectionClass);
   const floatingPill = () =>
     cn(floating.isFloating() && mediaViewerChromeFloatingBottomPillClass);
-  const floatingPillStyle = () =>
-    floating.isFloating() ? floating.overlaySurfaceStyle() : undefined;
+  const floatingPillStyle = () => {
+    if (!floating.isFloating()) return undefined;
+    const themeId = textViewerStore.state.config.theme ?? 0;
+    const follow = bottomBarFollowsPage();
+    const base = follow
+      ? textViewerChromeFollowPagePaletteStyle(themeId)
+      : floating.overlaySurfaceStyle();
+    return mergeViewerChromeFloatingCapsuleStyle(base, {
+      themeId,
+      followPage: follow,
+      surfaceKind: 'chrome',
+      config: themeAppearanceConfig(),
+      boxShadow: textViewerFloatingCapsuleBoxShadow(themeId, follow),
+    });
+  };
 
   const resolveProp = <T,>(value: T | (() => T) | undefined, fallback: T): T => {
     if (value === undefined) return fallback;
@@ -73,7 +96,10 @@ export function TextViewerBottomChrome(props: TextViewerBottomChromeProps) {
 
   return (
     <MediaViewerBottomChromeContent
-      class={cn(floating.isFloating() && mediaViewerChromeBottomPassThroughClass)}
+      class={cn(
+        floating.isFloating() && mediaViewerChromeBottomPassThroughClass,
+        bottomBarFollowsPage() && 'reader-chrome-follow-page',
+      )}
     >
       <Show when={autoPageActive()}>
         <div

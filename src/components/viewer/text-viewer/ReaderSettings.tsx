@@ -66,7 +66,6 @@ import { formatRem, formatRemFromPx, pxToRem, remToPx } from '@/lib/media/text/r
 import { cn } from '@/lib/utils';
 import { SettingsDrawerSection } from '@/components/viewer/SettingsDrawerSection';
 import { isTauri } from '@/lib/platform/detect';
-import { ReaderBackgroundSetting } from '@/components/viewer/text-viewer/ReaderBackgroundSetting';
 
 const sectionPad = 'px-3 py-2';
 
@@ -192,9 +191,6 @@ export function ReaderSettings(props: ReaderSettingsProps) {
               )}
             </For>
           </div>
-        </div>
-        <div class={cn(sectionPad, 'space-y-2')}>
-          <ReaderBackgroundSetting />
         </div>
       </SettingsDrawerSection>
 

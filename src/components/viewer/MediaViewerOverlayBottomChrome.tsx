@@ -43,6 +43,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
     return true;
   };
   const themedSurface = () => local.surfaceStyle != null;
+  const followPageClass = () => (themedSurface() ? 'reader-chrome-follow-page' : undefined);
   const fillStyle = (): JSX.CSSProperties | undefined => {
     if (themedSurface()) return local.surfaceStyle;
     return mergeViewerChromeSurfaceStyles(
@@ -66,6 +67,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
         class={cn(
           'reader-chrome-overlay-panel__surface flex w-full min-w-0 max-w-full flex-col',
           local.surfaceClass,
+          followPageClass(),
         )}
       >
         <Show when={local.headSlot}>{local.headSlot}</Show>
@@ -74,6 +76,7 @@ export function MediaViewerOverlayBottomChrome(props: MediaViewerOverlayBottomCh
             'flex min-w-0 max-w-full flex-col',
             !themedSurface() && mediaViewerChromeBottomFillClass,
             themedSurface() && 'border-t',
+            followPageClass(),
             appBottomChromePadding,
           )}
           style={fillStyle()}

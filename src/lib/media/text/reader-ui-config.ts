@@ -188,8 +188,20 @@ export interface TextViewerPageTipsConfig {
   footerInset: TextViewerPageTipInsets;
   showHeaderLine: boolean;
   showFooterLine: boolean;
+  /** @deprecated 使用 pageTipTextFollowPage */
   tipFollowContentColor: boolean;
+  /** 页眉/页脚文本是否跟随阅读主题 */
+  pageTipTextFollowPage?: boolean;
+  /** 页眉/页脚分割线是否跟随阅读主题 */
+  pageTipDividerFollowPage?: boolean;
+  /** 页眉/页脚背景是否跟随阅读主题 */
+  pageTipBackgroundFollowPage?: boolean;
+  /** 自定义文本色（pageTipTextFollowPage=false） */
   customTipColor: string;
+  /** 自定义分割线色（pageTipDividerFollowPage=false） */
+  customTipDividerColor?: string;
+  /** 自定义背景色（pageTipBackgroundFollowPage=false） */
+  customTipBackgroundColor?: string;
 }
 
 export const defaultTextViewerPageTipsConfig: TextViewerPageTipsConfig = {
@@ -208,7 +220,12 @@ export const defaultTextViewerPageTipsConfig: TextViewerPageTipsConfig = {
   showHeaderLine: false,
   showFooterLine: true,
   tipFollowContentColor: true,
+  pageTipTextFollowPage: true,
+  pageTipDividerFollowPage: true,
+  pageTipBackgroundFollowPage: true,
   customTipColor: '',
+  customTipDividerColor: '',
+  customTipBackgroundColor: '',
 };
 
 export function simulationDragZoneBoundaryPx(
@@ -397,6 +414,32 @@ export interface TextViewerUiConfig {
   bgStrNight?: string;
   /** 背景图透明度 0–100 */
   bgAlpha?: number;
+
+  /**
+   * 商业级主题：各 surface 透明度/模糊覆盖（0–100 / 0–24px）
+   * 未设则沿用主题预设；chrome 类未设时沿用应用全局 viewerChromeOverlay*
+   */
+  themeSurfaceAppearance?: TextViewerThemeAppearanceConfig;
+}
+
+/** 阅读主题 surface 外观配置（商业级主题包 / 用户覆盖） */
+export interface TextViewerThemeAppearanceConfig {
+  /** 正文区背景 */
+  content?: Partial<TextViewerSurfaceAppearanceTokens>;
+  /** 顶/底栏、悬浮胶囊等 chrome */
+  chrome?: Partial<TextViewerSurfaceAppearanceTokens>;
+  /** 页眉/页脚条 */
+  pageTip?: Partial<TextViewerSurfaceAppearanceTokens>;
+  /** 亮度胶囊 */
+  brightness?: Partial<TextViewerSurfaceAppearanceTokens>;
+}
+
+/** surface 透明度与模糊 */
+export interface TextViewerSurfaceAppearanceTokens {
+  /** 不透明度 0–100 */
+  opacity: number;
+  /** 背景模糊 px 0–24 */
+  blurPx: number;
 }
 
 /** 按页自动翻页：扫描线 / 横向进度条 / 扫描揭示下一页（对齐 Legado 非滚动 AutoPager） */
@@ -786,7 +829,8 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   disableReturnKey: false,
   bgType: 0,
   bgTypeNight: 0,
-  bgStr: '#ffc0edc6',
+  /** 空字符串表示跟随当前阅读主题 palette，勿用 Legado 默认粉色 */
+  bgStr: '',
   bgStrNight: '#000000',
   bgAlpha: 100,
 };

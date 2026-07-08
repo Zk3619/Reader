@@ -12,15 +12,17 @@ import {
   type ReaderPageTipBarSurface,
   type ReaderPageTipContext,
 } from '@/lib/media/text/reader-page-tip';
+import { resolveTextViewerPageTipPresentation } from '@/lib/theme/TextViewerTheme';
+import { textViewerStore } from '@/stores/viewer';
 
 export interface ReaderPageTipBarProps {
   position: 'header' | 'footer';
   tips: TextViewerPageTipsConfig;
   context: ReaderPageTipContext;
   chromeBarsVisible: boolean;
+  themeId: number;
   /** reader=阅读器内；chrome=顶/底操作栏（跟随模式） */
   surface?: ReaderPageTipBarSurface;
-  contentColor?: string;
   class?: string;
 }
 
@@ -59,13 +61,13 @@ export function ReaderPageTipBar(props: ReaderPageTipBarProps) {
   const fontSize = () =>
     props.position === 'header' ? props.tips.headerFontSize : props.tips.footerFontSize;
 
-  const showLine = () =>
-    props.position === 'header' ? props.tips.showHeaderLine : props.tips.showFooterLine;
-
-  const textColor = () =>
-    props.tips.tipFollowContentColor
-      ? props.contentColor
-      : props.tips.customTipColor || props.contentColor;
+  const presentation = () =>
+    resolveTextViewerPageTipPresentation(
+      props.tips,
+      props.themeId,
+      props.position,
+      { themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance },
+    );
 
   const cellText = (col: 'Left' | 'Middle' | 'Right') => {
     void timeTick();
@@ -78,38 +80,35 @@ export function ReaderPageTipBar(props: ReaderPageTipBarProps) {
     <Show when={visible()}>
       <div
         class={cn(
-          'reader-page-tip pointer-events-none w-full shrink-0 select-none',
+          'reader-page-tip pointer-events-none w-full shrink-0 select-none border-solid',
           props.position === 'header' ? 'reader-page-tip-header' : 'reader-page-tip-footer',
+          presentation().dividerClass,
           props.class,
         )}
         style={{
           ...readerPageTipBarEdgePaddingStyle(props.position, inset(), {
             omitSafeArea: surface() === 'chrome',
           }),
-          color: textColor(),
+          color: presentation().textColor,
           'font-size': `${fontSize()}px`,
           'line-height': '1.35',
-          'background-color': 'inherit',
+          ...(presentation().surfaceBackgroundStyle ?? {}),
+          ...(presentation().surfaceBackgroundStyle
+            ? {}
+            : presentation().backgroundColor
+              ? { 'background-color': presentation().backgroundColor }
+              : {}),
+          ...(presentation().dividerColor
+            ? { 'border-color': presentation().dividerColor }
+            : {}),
         }}
         aria-hidden="true"
       >
-        <Show when={showLine() && props.position === 'footer'}>
-          <div
-            class="mb-1 h-px w-full opacity-30"
-            style={{ 'background-color': textColor() ?? 'currentColor' }}
-          />
-        </Show>
         <div class="grid min-w-0 grid-cols-3 items-center gap-1 tabular-nums">
           <span class="min-w-0 truncate text-left">{cellText('Left')}</span>
           <span class="min-w-0 truncate text-center">{cellText('Middle')}</span>
           <span class="min-w-0 truncate text-right">{cellText('Right')}</span>
         </div>
-        <Show when={showLine() && props.position === 'header'}>
-          <div
-            class="mt-1 h-px w-full opacity-30"
-            style={{ 'background-color': textColor() ?? 'currentColor' }}
-          />
-        </Show>
       </div>
     </Show>
   );

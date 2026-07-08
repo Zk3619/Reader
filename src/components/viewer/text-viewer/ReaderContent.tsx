@@ -36,6 +36,7 @@ import {
 } from '@/lib/media/text/reader-spacing';
 import { resolveReaderFontFamily } from '@/lib/media/text/reader-font';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { textViewerContentTypographyStyle, textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
 import {
   subscribeReadAloudProgress,
   type ReadAloudProgress,
@@ -224,7 +225,13 @@ export function ReaderContent(props: ReaderContentProps) {
     const c = config();
     const fontFamily = resolveReaderFontFamily(c);
     const useReadWidth = (props.applyReadWidth?.() !== false) && c.readWidth;
+    const paint = insetOnSlot()
+      ? textViewerContentTypographyStyle(c.theme)
+      : textViewerThemeStyle(c.theme, {
+          themeSurfaceAppearance: c.themeSurfaceAppearance,
+        });
     return {
+      ...paint,
       'font-size': `${c.fontSize}px`,
       'font-weight': c.fontWeight ?? 400,
       'line-height': readerLineHeightCss(c.spacing.line),
@@ -387,7 +394,7 @@ export function ReaderContent(props: ReaderContentProps) {
       ref={(el) => props.onMeasureRoot?.(el ?? null)}
       class={cn(
         'reader-content box-border w-full min-w-0 max-w-full px-0 selection:bg-primary/20',
-        readerThemeClasses(config().theme).bg,
+        !insetOnSlot() && readerThemeClasses(config().theme).bg,
         readerThemeClasses(config().theme).text,
         props.class,
         props.dualSpreadRender

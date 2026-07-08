@@ -10,8 +10,11 @@ import {
 import {
   mergeViewerChromeSurfaceStyles,
   resolveViewerChromeOverlayAppearanceStyle,
+  viewerChromeFloatingScopeStyle,
 } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
+import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 
 export interface MediaViewerHeaderProps {
   children: JSX.Element;
@@ -58,14 +61,18 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
 
   const themedSurface = () => local.surfaceStyle != null;
 
+  const followPageClass = () => (themedSurface() ? 'reader-chrome-follow-page' : undefined);
+
   const stackedSurfaceClass = () =>
-    cn('reader-chrome-overlay-panel__surface flex min-w-0 max-w-full flex-col', local.surfaceClass);
+    cn('reader-chrome-overlay-panel__surface flex min-w-0 max-w-full flex-col', local.surfaceClass, followPageClass());
 
   const stackedChromeFillClass = () =>
     cn(
       'flex min-w-0 max-w-full flex-col',
       !themedSurface() && mediaViewerChromeTopFillClass,
+      !themedSurface() && 'text-foreground',
       themedSurface() && 'border-b',
+      followPageClass(),
     );
 
   const fixedHeaderClass = () =>
@@ -77,8 +84,9 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
 
   const fixedChromeFillClass = () =>
     cn(
-      'flex flex-col border-b bg-background',
-      themedSurface() && 'border-b',
+      'flex flex-col border-b',
+      !themedSurface() && 'bg-background text-foreground',
+      themedSurface() && 'reader-chrome-follow-page border-b',
     );
 
   const stackedFillStyle = (): JSX.CSSProperties | undefined => {
@@ -114,7 +122,15 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
-          <div class="pointer-events-none flex w-full min-w-0 max-w-full flex-col items-center gap-2 overflow-visible">
+          <div
+            class={cn(
+              'pointer-events-none flex w-full min-w-0 max-w-full flex-col items-center gap-2 overflow-visible',
+              followPageClass(),
+            )}
+            style={
+              themedSurface() ? viewerChromeFloatingScopeStyle(local.surfaceStyle) : undefined
+            }
+          >
             {chromeBody()}
             {trailingSlot()}
           </div>
@@ -134,8 +150,9 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           onPointerEnter={chromeBarHover().onPointerEnter}
           onPointerLeave={chromeBarHover().onPointerLeave}
         >
-          <div class={stackedSurfaceClass()}>
-            <div class={stackedChromeFillClass()} style={stackedFillStyle()}>
+          <div class={cn(stackedSurfaceClass(), 'relative overflow-hidden')} {...componentDataAttr('toolbarHeader')}>
+            <ThemedComponentBackground componentId="toolbarHeader" />
+            <div class={cn(stackedChromeFillClass(), 'relative z-1')} style={stackedFillStyle()}>
               {chromeBody()}
             </div>
             {trailingSlot()}
@@ -148,8 +165,11 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
           data-tauri-drag-region
           onClick={(e) => e.stopPropagation()}
         >
-          <div class={fixedChromeFillClass()} style={local.surfaceStyle}>
+          <div class={cn(fixedChromeFillClass(), 'relative overflow-hidden')} {...componentDataAttr('toolbarHeader')}>
+            <ThemedComponentBackground componentId="toolbarHeader" />
+            <div class="relative z-1" style={local.surfaceStyle}>
             {chromeBody()}
+            </div>
           </div>
           {trailingSlot()}
         </header>

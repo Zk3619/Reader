@@ -15,6 +15,8 @@ import {
   resolveBrightnessChrome,
   type ReaderBrightnessChrome,
 } from '@/lib/media/text/reader-theme-classes';
+import { textViewerChromeFollowPageSurfaceStyle } from '@/lib/theme/TextViewerTheme';
+import { resolveVisualBoxShadow } from '@/lib/ui/visual-effects-settings';
 import {
   restoreBrightnessOnExit,
 } from '@/lib/platform/display-reader';
@@ -25,7 +27,10 @@ import {
 import { ThemeLightIcon, ThemeScheduleIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { useReaderBrightnessChromeInsets } from '@/lib/viewer/use-reader-brightness-chrome-insets';
-import { mediaViewerChromeHitTargetClass } from '@/components/viewer/viewer-chrome';
+import {
+  mediaViewerChromeFloatingControlClass,
+  mediaViewerChromeHitTargetClass,
+} from '@/components/viewer/viewer-chrome';
 import { useMediaViewerChromeFloating, useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import {
   mergeViewerChromeSurfaceStyles,
@@ -159,6 +164,7 @@ function brightnessCapsuleClass(
   position: TextViewerBrightnessViewPosition,
   embedded?: boolean,
   floating?: boolean,
+  followPage?: boolean,
 ): string {
   const edge = position === 'top' || position === 'bottom';
   return cn(
@@ -166,7 +172,11 @@ function brightnessCapsuleClass(
     edge
       ? 'h-10 w-[min(72dvw,20rem)] max-w-full min-w-[10rem] flex-row gap-1 px-2'
       : 'h-full min-w-0 w-full max-h-[min(56dvh,20rem)] flex-col px-1.5 py-3',
-    floating && embedded && 'border border-border/50 shadow-sm',
+    floating &&
+      (followPage
+        ? 'border border-border/50 text-foreground shadow-sm'
+        : mediaViewerChromeFloatingControlClass),
+    floating && embedded && 'mx-auto',
   );
 }
 
@@ -185,11 +195,9 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
   const visible = () => props.chromeVisible && configEnabled();
   const followPageTheme = () =>
     textViewerStore.state.config.brightnessViewStyleFollowPage !== false;
+  const themeId = () => textViewerStore.state.config.theme ?? 0;
   const chrome = () =>
-    resolveBrightnessChrome(
-      textViewerStore.state.config.theme ?? 0,
-      followPageTheme(),
-    );
+    resolveBrightnessChrome(themeId(), followPageTheme());
   const sliderOrientation = (): 'horizontal' | 'vertical' =>
     isEdgePosition() ? 'horizontal' : 'vertical';
 
@@ -225,9 +233,18 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
 
     const baseStyle = {
       color: c.foreground,
-      'box-shadow': c.capsuleGlow,
+      'box-shadow': resolveVisualBoxShadow(c.capsuleGlow) ?? 'none',
       ...sizeConstraint,
     };
+
+    if (followPageTheme()) {
+      return mergeViewerChromeSurfaceStyles(
+        textViewerChromeFollowPageSurfaceStyle(themeId(), {
+          themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+        }, 'brightness'),
+        baseStyle,
+      );
+    }
 
     if (overlayChromeApplies()) {
       return mergeViewerChromeSurfaceStyles(
@@ -261,7 +278,12 @@ export function ReaderBrightnessControl(props: ReaderBrightnessControlProps) {
         <div
           class={cn(
             mediaViewerChromeHitTargetClass,
-            brightnessCapsuleClass(position(), isEmbedded(), floating.isFloating()),
+            brightnessCapsuleClass(
+              position(),
+              isEmbedded(),
+              floating.isFloating(),
+              followPageTheme(),
+            ),
           )}
           style={capsuleStyle()}
         >

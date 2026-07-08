@@ -26,6 +26,7 @@ import {
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { isMobile } from '@/lib/platform/detect';
 import { mediaViewerChromeDesktopMinWidthClass } from '@/components/viewer/viewer-chrome';
+import { ViewerGlobalThemeEffectsLayer } from '@/components/theme/GlobalThemeEffectsLayer';
 
 export type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 
@@ -322,6 +323,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
         onPointerLeave={(e) => activeChromeInput()?.onShellPointerLeave(e)}
         onPointerEnter={(e) => activeChromeInput()?.onShellPointerEnter(e)}
       >
+        <ViewerGlobalThemeEffectsLayer />
         {local.children}
       </div>
     </MediaViewerShellContextProvider>

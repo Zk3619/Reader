@@ -128,6 +128,11 @@ function mergePageTipsConfig(
 ): TextViewerUiConfig['pageTips'] {
   const base = { ...defaultTextViewerPageTipsConfig };
   if (!saved) return base;
+  const textFollow =
+    saved.pageTipTextFollowPage ??
+    saved.tipFollowContentColor ??
+    base.pageTipTextFollowPage ??
+    base.tipFollowContentColor;
   return {
     ...base,
     ...saved,
@@ -135,6 +140,11 @@ function mergePageTipsConfig(
     footerMode: normalizeTextViewerPageTipFooterMode(saved.footerMode ?? base.footerMode),
     headerInset: { ...base.headerInset, ...saved.headerInset },
     footerInset: { ...base.footerInset, ...saved.footerInset },
+    pageTipTextFollowPage: textFollow,
+    pageTipDividerFollowPage: saved.pageTipDividerFollowPage ?? base.pageTipDividerFollowPage,
+    pageTipBackgroundFollowPage:
+      saved.pageTipBackgroundFollowPage ?? base.pageTipBackgroundFollowPage,
+    tipFollowContentColor: textFollow,
   };
 }
 

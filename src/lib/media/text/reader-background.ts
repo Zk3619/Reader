@@ -1,8 +1,8 @@
 /**
- * 阅读器背景（对齐 Legado ReadBookConfig bgType / bgStr / bgAlpha）
+ * 阅读器背景配置（Legado 兼容：导入/备份保留字段；UI 与渲染待商业级主题统一接入）
  */
 
-import { createResource, type Accessor } from 'solid-js';
+import { type Accessor } from 'solid-js';
 import {
   readLocalBackgroundAsDataUrl,
   writeLocalBackgroundFile,
@@ -58,9 +58,13 @@ export function activeReaderBgSlot(config: TextViewerUiConfig): ReaderBgSlot {
     };
   }
   const fallback = readerThemePalette(config.theme).bg;
+  const raw = config.bgStr?.trim() ?? '';
+  /** Legado 默认粉色占位：视为未自定义，跟随主题 palette */
+  const bgStr =
+    !raw || /^#ffc0ed(c6)?$/i.test(raw) ? '' : raw;
   return {
     bgType: normalizeReaderBgType(config.bgType),
-    bgStr: config.bgStr?.trim() || fallback,
+    bgStr: bgStr || fallback,
   };
 }
 
@@ -87,9 +91,12 @@ export function builtinReaderBgUrl(fileName: string): string {
 }
 
 export function readerPageBaseColor(config: TextViewerUiConfig): string {
-  const slot = activeReaderBgSlot(config);
-  if (slot.bgType === 0 && slot.bgStr.startsWith('#')) return slot.bgStr;
   return readerThemePalette(config.theme).bg;
+}
+
+/** @deprecated 自定义阅读背景已移除，始终返回 false */
+export function usesReaderPageBackgroundOverlay(_config: TextViewerUiConfig): boolean {
+  return false;
 }
 
 export async function resolveReaderBackgroundImageUrl(
@@ -184,17 +191,7 @@ export function collectReaderBgFileNamesFromConfig(config: TextViewerUiConfig): 
   return [...names];
 }
 
-/** Solid 资源：解析背景图并生成视口 style */
-export function createReaderPageBgStyle(config: Accessor<TextViewerUiConfig>) {
-  const [imageUrl] = createResource(
-    () => {
-      const c = config();
-      const slot = activeReaderBgSlot(c);
-      if (slot.bgType === 0) return null;
-      return `${c.theme}|${slot.bgType}|${slot.bgStr}|${c.bgAlpha ?? 100}`;
-    },
-    () => resolveReaderBackgroundImageUrl(config()),
-  );
-
-  return () => readerPageBackgroundStyle(config(), imageUrl());
+/** @deprecated 自定义阅读背景已移除 */
+export function createReaderPageBgStyle(_config: Accessor<TextViewerUiConfig>) {
+  return () => ({}) as Record<string, string>;
 }

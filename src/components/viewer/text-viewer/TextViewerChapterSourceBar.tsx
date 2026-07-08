@@ -5,6 +5,9 @@
 import { createEffect, createSignal, Show } from 'solid-js';
 import type { Book, BookChapter, BookSource } from '@/types';
 import { cn } from '@/lib/utils';
+import { textViewerStore } from '@/stores/viewer';
+import { textViewerChromeFollowPagePaletteStyle, textViewerChromeFollowPageSurfaceStyle, textViewerFloatingCapsuleBoxShadow } from '@/lib/theme/TextViewerTheme';
+import { mergeViewerChromeFloatingCapsuleStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { isLocalBook } from '@/lib/local-book';
 import { getSource, enableSource } from '@/lib/database/sources';
 import { resolveUrl } from '@/lib/book-source/utils';
@@ -75,6 +78,33 @@ function openChapterUrlInInnerWeb(
 
 export function TextViewerChapterSourceBar(props: TextViewerChapterSourceBarProps) {
   const floating = useMediaViewerChromeFloating();
+  const topBarFollowsPage = () => textViewerStore.state.config.readTopBarStyleFollowPage === true;
+  const themeAppearanceConfig = () => ({
+    themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+  });
+  const followPageSurfaceStyle = () => {
+    if (!topBarFollowsPage()) return undefined;
+    return textViewerChromeFollowPageSurfaceStyle(
+      textViewerStore.state.config.theme ?? 0,
+      themeAppearanceConfig(),
+      'chrome',
+    );
+  };
+  const floatingSurfaceStyle = () => {
+    if (!floating.isFloating()) return followPageSurfaceStyle();
+    const themeId = textViewerStore.state.config.theme ?? 0;
+    const follow = topBarFollowsPage();
+    const base = follow
+      ? textViewerChromeFollowPagePaletteStyle(themeId)
+      : floating.overlaySurfaceStyle();
+    return mergeViewerChromeFloatingCapsuleStyle(base, {
+      themeId,
+      followPage: follow,
+      surfaceKind: 'chrome',
+      config: themeAppearanceConfig(),
+      boxShadow: textViewerFloatingCapsuleBoxShadow(themeId, follow),
+    });
+  };
   const [source, setSource] = createSignal<BookSource | null>(null);
   const [menuOpen, setMenuOpen] = createSignal(false);
 
@@ -142,25 +172,44 @@ export function TextViewerChapterSourceBar(props: TextViewerChapterSourceBarProp
         class={cn(
           floating.isFloating()
             ? cn(floating.wideBlockClass(), 'flex min-w-0 items-center gap-2')
-            : 'flex w-full min-w-0 items-stretch gap-2 border-t border-border/40 px-4 py-1.5',
+            : cn(
+                'flex w-full min-w-0 items-stretch gap-2 border-t px-4 py-1.5',
+                topBarFollowsPage() ? 'border-current/30' : 'border-border/40',
+              ),
+          topBarFollowsPage() && 'reader-chrome-follow-page',
         )}
-        style={floating.isFloating() ? floating.overlaySurfaceStyle() : undefined}
+        style={
+          floating.isFloating()
+            ? floatingSurfaceStyle()
+            : followPageSurfaceStyle()
+        }
         data-media-viewer-interactive-zone
       >
         <button
           type="button"
           class={cn(
             floating.isFloating() ? undefined : hitTarget(),
-            'min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent/40',
+            'min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors',
+            topBarFollowsPage() ? 'hover:bg-current/10' : 'hover:bg-accent/40',
           )}
           onClick={handleOpenChapterUrl}
           aria-label="在应用内打开章节网页"
         >
-          <div class="truncate text-sm font-medium leading-snug text-foreground">
+          <div
+            class={cn(
+              'truncate text-sm font-medium leading-snug',
+              topBarFollowsPage() ? 'text-inherit' : 'text-foreground',
+            )}
+          >
             {props.chapterTitle || '—'}
           </div>
           <Show when={chapterUrl()}>
-            <div class="truncate text-xs leading-normal text-muted-foreground underline-offset-2 hover:underline">
+            <div
+              class={cn(
+                'truncate text-xs leading-normal underline-offset-2 hover:underline',
+                topBarFollowsPage() ? 'text-inherit opacity-70' : 'text-muted-foreground',
+              )}
+            >
               {chapterUrl()}
             </div>
           </Show>
@@ -174,7 +223,10 @@ export function TextViewerChapterSourceBar(props: TextViewerChapterSourceBarProp
                 type="button"
                 class={cn(
                   hitTarget(),
-                  'inline-flex max-w-30 shrink-0 items-center gap-0.5 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15',
+                  'inline-flex max-w-30 shrink-0 items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                  topBarFollowsPage()
+                    ? 'bg-current/12 text-inherit hover:bg-current/18'
+                    : 'bg-primary/10 text-primary hover:bg-primary/15',
                 )}
                 aria-label="书源操作"
               >

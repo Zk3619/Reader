@@ -7,7 +7,8 @@ import { createSignal, Show, Index, onMount, onCleanup, createEffect, on, type A
 import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
-import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
+import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { textViewerThemeScopeAttrs, textViewerChromeFollowPageSurfaceStyle, textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
 import { Button } from '@/components/ui/button';
 import {
   ViewerAppDrawer,
@@ -556,13 +557,16 @@ export function BookReader(props: BookReaderProps) {
     const layout = normalizeViewerChromeLayout(
       cfg.viewerChromeLayout ?? settingsState.app.viewerChromeLayout,
     );
-    const base = follow
-      ? ({
-          'background-color': readerThemePalette(readerTheme()).bg,
-          color: readerThemePalette(readerTheme()).text,
-          'border-color': readerThemePalette(readerTheme()).border,
-        } as const)
-      : undefined;
+    if (follow) {
+      return textViewerChromeFollowPageSurfaceStyle(
+        readerTheme(),
+        { themeSurfaceAppearance: cfg.themeSurfaceAppearance },
+        'chrome',
+      );
+    }
+    const base = {
+      color: 'hsl(var(--foreground))',
+    } as const;
     return mergeViewerChromeThemedSurfaceStyle(base, layout);
   };
 
@@ -1333,10 +1337,10 @@ export function BookReader(props: BookReaderProps) {
 
   const stageContentClass = useMediaViewerMainStageClass('reader-text-stage');
   const readerThemeShell = () => readerThemeClasses(textViewerStore.state.config.theme);
-  const readerShellStyle = () => ({
-    'background-color': readerThemePalette(textViewerStore.state.config.theme).bg,
-    color: readerThemePalette(textViewerStore.state.config.theme).text,
-  });
+  const mainContentStyle = () =>
+    textViewerThemeStyle(textViewerStore.state.config.theme ?? 0, {
+      themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+    });
 
   const mainContentClass = () =>
     cn(stageContentClass(), readerThemeShell().bg, readerThemeShell().text);
@@ -1436,12 +1440,7 @@ export function BookReader(props: BookReaderProps) {
           tapToToggleBars={false}
           chromePointerInput
           contentPrimaryAction={contentPrimaryAction}
-          class={cn(
-            readerThemeShell().bg,
-            readerThemeShell().text,
-            handleSelectMode() && 'reader-text-handle-select',
-          )}
-          style={readerShellStyle()}
+          class={cn(handleSelectMode() && 'reader-text-handle-select')}
         >
           <BookReaderChromeBridge
             onReady={(toggle) => {
@@ -1571,6 +1570,8 @@ export function BookReader(props: BookReaderProps) {
                   <div
                     ref={bindScrollContainerRef}
                     class={mainContentClass()}
+                    style={mainContentStyle()}
+                    {...textViewerThemeScopeAttrs(textViewerStore.state.config.theme ?? 0)}
                     onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
                     onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
                     onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
@@ -1591,7 +1592,9 @@ export function BookReader(props: BookReaderProps) {
                     <div
                       ref={bindScrollContainerRef}
                       class={mainContentClass()}
-                    onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
+                      style={mainContentStyle()}
+                      {...textViewerThemeScopeAttrs(textViewerStore.state.config.theme ?? 0)}
+                      onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
                     onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
                     onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
                     onPointerCancel={isPagedMode() ? undefined : onContentPointerUp}

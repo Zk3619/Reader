@@ -6,6 +6,8 @@ import { useMediaViewerShellOptional } from '@/components/viewer/media-viewer-sh
 import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { mediaViewerChromeBarHoverHandlers } from '@/lib/media/media-viewer-chrome-bar-hover';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
+import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 
 export interface MediaViewerFooterProps {
   children: JSX.Element;
@@ -39,22 +41,26 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
   };
 
   const chromeBarHover = () => mediaViewerChromeBarHoverHandlers(shell, layout());
+  const themedSurface = () => local.surfaceStyle != null;
 
   return (
     <div
       class={cn(
-        'flex flex-col',
+        'relative flex flex-col',
         layout() === 'stacked' &&
-          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0 max-w-full min-w-0',
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0 max-w-full min-w-0 overflow-hidden',
         layout() === 'floating' &&
-          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0 max-w-full min-w-0',
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 min-h-0 max-w-full min-w-0 overflow-hidden',
         layout() === 'fixed' &&
           'reader-footer shrink-0 flex flex-col',
         local.class,
       )}
+      {...componentDataAttr('footerChrome')}
       data-media-viewer-interactive-zone
       onClick={(e) => e.stopPropagation()}
     >
+      <ThemedComponentBackground componentId="footerChrome" />
+      <div class="relative z-1 flex flex-col">
       <Show when={layout() === 'stacked'}>
         <MediaViewerOverlayBottomChrome
           visible={panelVisible()}
@@ -77,10 +83,18 @@ export function MediaViewerFooter(props: MediaViewerFooterProps) {
       </Show>
       <Show when={layout() === 'fixed'}>
         <Show when={local.leadingSlot}>{local.leadingSlot}</Show>
-        <div class="flex flex-col border-t border-border bg-background app-bottom-chrome-inset">
+        <div
+          class={cn(
+            'flex flex-col border-t app-bottom-chrome-inset',
+            !themedSurface() && 'border-border bg-background text-foreground',
+            themedSurface() && 'reader-chrome-follow-page border-t',
+          )}
+          style={local.surfaceStyle}
+        >
           {local.children}
         </div>
       </Show>
+      </div>
     </div>
   );
 }

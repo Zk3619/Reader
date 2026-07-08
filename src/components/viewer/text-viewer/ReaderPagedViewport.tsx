@@ -17,7 +17,7 @@ import { state as viewerState } from '@/stores/viewer/media/state';
 import { getPooledChapterContent } from '@/lib/chapter-cache/chapter-content-pool';
 import { ReaderContent, type ReaderContentProps } from '@/components/viewer/text-viewer/ReaderContent';
 import { ReaderPagedAloudOverlay } from '@/components/viewer/text-viewer/ReaderPagedAloudOverlay';
-import { applyReaderTextContentSlotLayoutStyle, readerTextContentSlotPagedBodyMountStyle, readerTextContentSlotPagedFrameStyle, readerTextContentSlotPagedMountStyle, readerTextContentSlotPaddingStyle, readerTextContentSlotSlidePanelStyle } from '@/components/viewer/text-viewer/reader-text-content-slot';
+import { applyReaderTextContentSlotLayoutStyle, readerTextContentSlotPagedBodyMountStyle, readerTextContentSlotPagedFrameStyle, readerTextContentSlotPagedMountStyle, readerTextContentSlotPaddingStyle, readerTextContentSlotPaintStyle, readerTextContentSlotSlidePanelStyle } from '@/components/viewer/text-viewer/reader-text-content-slot';
 import { ReaderContentSkeleton } from '@/components/viewer/text-viewer/ReaderContentSkeleton';
 import {
   canUsePretextChapterLayout,
@@ -79,7 +79,7 @@ import {
   updateSimulationCurl,
 } from '@/lib/media/text/reader-paged-simulation-curl';
 import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
-import { createReaderPageBgStyle, readerPageBaseColor } from '@/lib/media/text/reader-background';
+import { textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
 import { ReaderPageTipChrome } from '@/components/viewer/text-viewer/ReaderPageTipChrome';
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import { readerPageTipsCarryWithTurn, readerPageTipContentBudget } from '@/lib/media/text/reader-page-tip';
@@ -517,8 +517,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   const chromeBarsVisible = () => local.chromeBarsVisible?.() ?? false;
 
-  const pageThemeBg = () => readerPageBaseColor(viewerState.config);
-  const pageBgStyle = createReaderPageBgStyle(() => viewerState.config);
+  const pageThemeBg = () => readerThemePalette(viewerState.config.theme).bg;
 
   /** 与章内翻页一致：仅在 drag/anim 阶段激活翻页视觉；跨章点击已就绪时亦激活以挂载幕帘 */
   const turnVisualActive = () => {
@@ -543,9 +542,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const slideTurnPanelEl = () =>
     carryPageTipsWithTurn() ? contentFrameEl : contentSlotEl;
 
-  const turnSlidePanelStyle = () => ({
-    ...pageBgStyle(),
-  });
+  const turnSlidePanelStyle = () => ({});
 
   const applyTurnFrameSlideLayout = () => {
     if (!contentFrameEl) return;
@@ -739,8 +736,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const theme = () => readerThemeClasses(textViewerStore.state.config.theme);
 
   const pagedViewportThemeStyle = (): Record<string, string> => ({
-    ...pageBgStyle(),
-    color: readerThemePalette(viewerState.config.theme).text,
+    ...textViewerThemeStyle(viewerState.config.theme, {
+      themeSurfaceAppearance: viewerState.config.themeSurfaceAppearance,
+    }),
     'touch-action': readerPagedViewportTouchAction(),
   });
 
@@ -4397,7 +4395,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             'reader-paged-turn-gutter pointer-events-none absolute inset-y-0 left-0 z-0',
             themeCls.bg,
           )}
-          style={{ width: `${inset.left}px` }}
+          style={{ width: `${inset.left}px`, 'background-color': pageThemeBg() }}
         />
       ) : null}
       {inset.right > 0 ? (
@@ -4406,7 +4404,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             'reader-paged-turn-gutter pointer-events-none absolute inset-y-0 right-0 z-0',
             themeCls.bg,
           )}
-          style={{ width: `${inset.right}px` }}
+          style={{ width: `${inset.right}px`, 'background-color': pageThemeBg() }}
         />
       ) : null}
       {inset.top > 0 ? (
@@ -4415,7 +4413,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             'reader-paged-turn-gutter pointer-events-none absolute inset-x-0 top-0 z-0',
             themeCls.bg,
           )}
-          style={{ height: `${inset.top}px` }}
+          style={{ height: `${inset.top}px`, 'background-color': pageThemeBg() }}
         />
       ) : null}
       {inset.bottom > 0 ? (
@@ -4424,7 +4422,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             'reader-paged-turn-gutter pointer-events-none absolute inset-x-0 bottom-0 z-0',
             themeCls.bg,
           )}
-          style={{ height: `${inset.bottom}px` }}
+          style={{ height: `${inset.bottom}px`, 'background-color': pageThemeBg() }}
         />
       ) : null}
     </Show>
@@ -5846,7 +5844,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         data-reader-render-page={page}
         class={cn(
           'reader-paged-live-inner h-full w-full min-w-0 max-w-full',
-          theme().bg,
           hideLive && 'reader-paged-live-suppressed',
         )}
         style={{
@@ -5858,7 +5855,6 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
                 : undefined),
           'min-height': extent > 0 ? `${extent}px` : undefined,
           'will-change': turning && !slideActive && !simTurning ? 'transform' : undefined,
-          'background-color': pageThemeBg(),
         }}
       >
         {chapterBody}
@@ -5963,6 +5959,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           themeCls.bg,
           themeCls.text,
         )}
+        style={{
+          'background-color': pageThemeBg(),
+          color: readerThemePalette(viewerState.config.theme).text,
+        }}
       >
         <div
           ref={(el) => {
@@ -5976,12 +5976,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           }}
           class={cn(
             'reader-paged-clip relative box-border h-full overflow-hidden',
-            themeCls.bg,
           )}
-          style={{
-            ...pagedClipStyle(),
-            ...pageBgStyle(),
-          }}
+          style={pagedClipStyle()}
         >
           <div
             ref={(el) => {
@@ -6047,8 +6043,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
               ref={(el) => {
                 contentSlotEl = el;
               }}
-              class="reader-text-content-slot relative z-1 h-full min-h-0 w-full overflow-hidden box-border"
-              style={readerTextContentSlotPaddingStyle(slotInset)}
+              class={cn(
+                'reader-text-content-slot relative z-1 h-full min-h-0 w-full overflow-hidden box-border',
+                themeCls.bg,
+                themeCls.text,
+              )}
+              style={{
+                ...readerTextContentSlotPaddingStyle(slotInset),
+                ...readerTextContentSlotPaintStyle(viewerState.config),
+              }}
             >
               <div
                 class={cn(
@@ -6074,13 +6077,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
                   )}
                 </Index>
               </div>
-              <div
-                class={cn(
-                  'reader-paged-page-window relative z-1 h-full min-h-0 w-full overflow-hidden',
-                  themeCls.bg,
-                  themeCls.text,
-                )}
-              >
+              <div class="reader-paged-page-window relative z-1 h-full min-h-0 w-full overflow-hidden">
                   <div class="reader-paged-page-content-clip relative h-full min-h-0 w-full overflow-hidden">
                     {renderCurtainCloneHost()}
                     <div
@@ -6164,7 +6161,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
             <div class="reader-paged-clip relative h-full overflow-hidden" style={pagedClipStyle()}>
               <div
                 class="reader-text-content-slot absolute z-2 overflow-hidden box-border"
-                style={readerTextContentSlotPagedMountStyle(pagedSlotInsetFromConfig())}
+                style={{
+                  ...readerTextContentSlotPagedMountStyle(pagedSlotInsetFromConfig()),
+                  ...readerTextContentSlotPaintStyle(viewerState.config),
+                }}
               >
                 <ReaderContentSkeleton />
               </div>

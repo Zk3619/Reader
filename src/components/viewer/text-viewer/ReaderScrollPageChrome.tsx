@@ -3,8 +3,8 @@ import { createMemo } from 'solid-js';
 import { ReaderPageTipBar } from '@/components/viewer/text-viewer/ReaderPageTipBar';
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
-import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
-import { createReaderPageBgStyle } from '@/lib/media/text/reader-background';
+import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import { textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
 import { textViewerStore } from '@/stores/viewer';
 import { cn } from '@/lib/utils';
 
@@ -21,8 +21,6 @@ export interface ReaderScrollPageChromeProps {
 /** 滚动模式：页眉 + 可滚动正文 + 页脚 */
 export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
   const themeCls = () => readerThemeClasses(props.themeId);
-  const contentColor = () => readerThemePalette(props.themeId).text;
-  const pageBgStyle = createReaderPageBgStyle(() => textViewerStore.state.config);
 
   const scrollClass = createMemo(() =>
     cn(
@@ -33,6 +31,11 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
     ),
   );
 
+  const themeSurfaceStyle = () =>
+    textViewerThemeStyle(props.themeId, {
+      themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+    });
+
   return (
     <div
       class={cn(
@@ -40,7 +43,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
         themeCls().bg,
         themeCls().text,
       )}
-      style={pageBgStyle()}
+      style={themeSurfaceStyle()}
     >
       <ReaderPageTipBar
         surface="reader"
@@ -48,12 +51,12 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
         tips={props.tips}
         context={props.context}
         chromeBarsVisible={props.chromeBarsVisible}
-        contentColor={contentColor()}
+        themeId={props.themeId}
       />
       <div
         ref={props.scrollRef}
         class={scrollClass()}
-        style={pageBgStyle()}
+        style={themeSurfaceStyle()}
       >
         {props.children}
       </div>
@@ -63,7 +66,7 @@ export function ReaderScrollPageChrome(props: ReaderScrollPageChromeProps) {
         tips={props.tips}
         context={props.context}
         chromeBarsVisible={props.chromeBarsVisible}
-        contentColor={contentColor()}
+        themeId={props.themeId}
       />
     </div>
   );

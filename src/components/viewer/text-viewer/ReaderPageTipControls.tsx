@@ -1,5 +1,4 @@
-import { For, Show, createSignal } from 'solid-js';
-import { ChromePicker } from 'solid-color';
+import { For, createSignal } from 'solid-js';
 import { Label } from '@/components/ui/label';
 import {
   AppSelect,
@@ -274,34 +273,53 @@ export function ReaderPageTipControls(props: ReaderPageTipControlsProps) {
         </AppSwitch>
       </div>
 
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <Label>信息条颜色跟随正文</Label>
-        </div>
-        <AppSwitch
-          checked={props.tips().tipFollowContentColor}
-          onChange={(checked) => setTips({ tipFollowContentColor: checked })}
-        >
-          <AppSwitchControl>
-            <AppSwitchThumb />
-          </AppSwitchControl>
-          <AppSwitchLabel class="sr-only">信息条颜色跟随正文</AppSwitchLabel>
-        </AppSwitch>
-      </div>
+      <div class="space-y-3 rounded-lg border border-border/40 px-3 py-3">
+        <Label>页眉页脚样式</Label>
+        <p class="text-xs text-muted-foreground">
+          关闭跟随后将使用应用默认样式；自定义配色将在商业级主题设置中统一配置。
+        </p>
 
-      <Show when={!props.tips().tipFollowContentColor}>
-        <div class="space-y-2">
-          <Label class="text-sm font-normal">自定义颜色</Label>
-          <div class="overflow-hidden rounded-lg border border-border/50">
-            <ChromePicker
-              color={props.tips().customTipColor || '#666666'}
-              disableAlpha
-              width="100%"
-              onChange={(color) => setTips({ customTipColor: color.hex })}
-            />
-          </div>
+        <div class="flex items-center justify-between gap-4">
+          <Label class="font-normal">文本跟随阅读主题</Label>
+          <AppSwitch
+            checked={props.tips().pageTipTextFollowPage ?? props.tips().tipFollowContentColor}
+            onChange={(checked) =>
+              setTips({ pageTipTextFollowPage: checked, tipFollowContentColor: checked })
+            }
+          >
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+            <AppSwitchLabel class="sr-only">文本跟随阅读主题</AppSwitchLabel>
+          </AppSwitch>
         </div>
-      </Show>
+
+        <div class="flex items-center justify-between gap-4">
+          <Label class="font-normal">分割线跟随阅读主题</Label>
+          <AppSwitch
+            checked={props.tips().pageTipDividerFollowPage ?? true}
+            onChange={(checked) => setTips({ pageTipDividerFollowPage: checked })}
+          >
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+            <AppSwitchLabel class="sr-only">分割线跟随阅读主题</AppSwitchLabel>
+          </AppSwitch>
+        </div>
+
+        <div class="flex items-center justify-between gap-4">
+          <Label class="font-normal">背景跟随阅读主题</Label>
+          <AppSwitch
+            checked={props.tips().pageTipBackgroundFollowPage ?? true}
+            onChange={(checked) => setTips({ pageTipBackgroundFollowPage: checked })}
+          >
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+            <AppSwitchLabel class="sr-only">背景跟随阅读主题</AppSwitchLabel>
+          </AppSwitch>
+        </div>
+      </div>
     </div>
   );
 }
@@ -311,6 +329,11 @@ export function mergePageTipsConfig(
 ): TextViewerPageTipsConfig {
   const base = { ...defaultTextViewerPageTipsConfigFromUi() };
   if (!saved) return base;
+  const textFollow =
+    saved.pageTipTextFollowPage ??
+    saved.tipFollowContentColor ??
+    base.pageTipTextFollowPage ??
+    base.tipFollowContentColor;
   return {
     ...base,
     ...saved,
@@ -318,6 +341,11 @@ export function mergePageTipsConfig(
     footerMode: normalizeTextViewerPageTipFooterMode(saved.footerMode ?? base.footerMode),
     headerInset: { ...base.headerInset, ...saved.headerInset },
     footerInset: { ...base.footerInset, ...saved.footerInset },
+    pageTipTextFollowPage: textFollow,
+    pageTipDividerFollowPage: saved.pageTipDividerFollowPage ?? base.pageTipDividerFollowPage,
+    pageTipBackgroundFollowPage:
+      saved.pageTipBackgroundFollowPage ?? base.pageTipBackgroundFollowPage,
+    tipFollowContentColor: textFollow,
   };
 }
 
@@ -338,6 +366,11 @@ function defaultTextViewerPageTipsConfigFromUi(): TextViewerPageTipsConfig {
     showHeaderLine: false,
     showFooterLine: true,
     tipFollowContentColor: true,
+    pageTipTextFollowPage: true,
+    pageTipDividerFollowPage: true,
+    pageTipBackgroundFollowPage: true,
     customTipColor: '',
+    customTipDividerColor: '',
+    customTipBackgroundColor: '',
   };
 }

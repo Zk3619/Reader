@@ -1,13 +1,17 @@
 import { Show } from 'solid-js';
 import { readerPageTipBarMountedInChrome, type ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
 import type { TextViewerPageTipsConfig } from '@/lib/media/text/reader-ui-config';
-import { readerThemeClasses, readerThemePalette } from '@/lib/media/text/reader-theme-classes';
+import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { cn } from '@/lib/utils';
 import { useMediaViewerChromeFloating } from '@/lib/viewer/viewer-chrome-layout';
 import {
-  mergeViewerChromeSurfaceStyles,
-  resolveViewerChromeOverlayAppearanceStyle,
-} from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+  pageTipBackgroundFollowsPage,
+  textViewerChromeFollowPagePaletteStyle,
+  textViewerChromeFollowPageSurfaceStyle,
+  textViewerFloatingCapsuleBoxShadow,
+} from '@/lib/theme/TextViewerTheme';
+import { mergeViewerChromeFloatingCapsuleStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
+import { textViewerStore } from '@/stores/viewer';
 import { ReaderPageTipBar } from './ReaderPageTipBar';
 
 export interface TextViewerChromePageTipProps {
@@ -23,29 +27,44 @@ export interface TextViewerChromePageTipProps {
 export function TextViewerChromePageTip(props: TextViewerChromePageTipProps) {
   const floating = useMediaViewerChromeFloating();
   const themeCls = () => readerThemeClasses(props.themeId);
-  const contentColor = () => readerThemePalette(props.themeId).text;
-  const pageBg = () => readerThemePalette(props.themeId).bg;
   const mounted = () => readerPageTipBarMountedInChrome(props.position, props.tips);
+
+  const themeAppearanceConfig = () => ({
+    themeSurfaceAppearance: textViewerStore.state.config.themeSurfaceAppearance,
+  });
+
+  const shellStyle = () => {
+    const config = themeAppearanceConfig();
+    if (!floating.isFloating()) {
+      if (!pageTipBackgroundFollowsPage(props.tips)) return undefined;
+      return textViewerChromeFollowPageSurfaceStyle(props.themeId, config, 'pageTip');
+    }
+    const followBg = pageTipBackgroundFollowsPage(props.tips);
+    const base = followBg
+      ? textViewerChromeFollowPagePaletteStyle(props.themeId)
+      : floating.overlaySurfaceStyle();
+    return mergeViewerChromeFloatingCapsuleStyle(base, {
+      themeId: props.themeId,
+      followPage: followBg,
+      surfaceKind: 'pageTip',
+      config,
+      boxShadow: textViewerFloatingCapsuleBoxShadow(props.themeId, followBg),
+    });
+  };
 
   return (
     <Show when={mounted()}>
       <div
         class={cn(
-          props.position === 'header'
-            ? 'reader-chrome-page-tip reader-chrome-page-tip-header shrink-0 border-t border-border/40'
-            : 'reader-chrome-page-tip reader-chrome-page-tip-footer shrink-0 border-b border-border/40',
+          'reader-chrome-page-tip shrink-0 overflow-hidden',
+          props.position === 'header' ? 'reader-chrome-page-tip-header' : 'reader-chrome-page-tip-footer',
           !floating.isFloating() && themeCls().bg,
           !floating.isFloating() && themeCls().text,
-          floating.isFloating() && cn(floating.wideBlockClass(), 'overflow-hidden border-0'),
+          floating.isFloating() && cn(floating.wideBlockClass(), 'border-0'),
+          pageTipBackgroundFollowsPage(props.tips) && 'reader-chrome-follow-page',
           props.class,
         )}
-        style={
-          floating.isFloating()
-            ? mergeViewerChromeSurfaceStyles(
-                resolveViewerChromeOverlayAppearanceStyle(pageBg()),
-              )
-            : { 'background-color': pageBg() }
-        }
+        style={shellStyle()}
       >
         <ReaderPageTipBar
           surface="chrome"
@@ -53,7 +72,7 @@ export function TextViewerChromePageTip(props: TextViewerChromePageTipProps) {
           tips={props.tips}
           context={props.context}
           chromeBarsVisible={props.chromeBarsVisible}
-          contentColor={contentColor()}
+          themeId={props.themeId}
         />
       </div>
     </Show>
