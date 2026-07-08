@@ -839,11 +839,16 @@ export async function confirmInnerWebClose(
   void requestInnerWebDismiss();
 }
 
-/** 返回或取消：不确认 */
-export function cancelInnerWebClose(): void {
+/** 关闭内嵌页会话（await 完成后再打开主程序浮层，避免 #root 仍被 pointer-events 锁定） */
+export async function dismissInnerWebSession(): Promise<void> {
   pendingAwait?.resolve({ confirmed: false, cookies: '', url: '' });
   pendingAwait = null;
-  void requestInnerWebDismiss();
+  await requestInnerWebDismiss();
+}
+
+/** 返回或取消：不确认 */
+export function cancelInnerWebClose(): void {
+  void dismissInnerWebSession();
 }
 
 export function isInnerWebAwaiting(): boolean {

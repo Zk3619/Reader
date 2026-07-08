@@ -42,6 +42,19 @@ describe('buildInnerWebNavigationBridgeScript', () => {
   });
 });
 
+describe('inner_web_panel_bootstrap import links', () => {
+  it('yuedu/legado 深链走 location.href 由 on_navigation 拦截（data: 页 invoke 不可用）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { dirname, join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const script = readFileSync(join(root, 'src-tauri/scripts/inner_web_panel_bootstrap.js'), 'utf8');
+    const importNav = script.slice(script.indexOf('if (!isImportScheme(h)) return;'));
+    expect(importNav).toContain('location.href = h');
+    expect(importNav).not.toContain('inner_web_panel_open_link');
+  });
+});
+
 describe('navigateInnerWebLink', () => {
   it('http 链接在当前 InnerWeb 会话内导航', async () => {
     const { navigateInnerWebLink } = await import('@/lib/platform/inner-web-navigation');

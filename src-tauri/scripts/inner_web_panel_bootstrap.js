@@ -133,23 +133,13 @@
       return;
     }
     if (!isImportScheme(h)) return;
-    try {
-      var inv2 = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
-      if (inv2) {
-        inv2('inner_web_panel_open_link', {
-          url: h,
-          target: target || null,
-        }).catch(function () {});
-        return;
-      }
-    } catch (e4) {
-      /* ignore */
-    }
+    // data: / null origin 页 invoke 无 IPC capabilities；走顶层导航由 Rust on_navigation 拦截
     try {
       location.href = h;
     } catch (e5) {
       /* ignore */
     }
+    return;
   }
 
   function installShellOpenShim() {

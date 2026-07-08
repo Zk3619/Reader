@@ -68,6 +68,11 @@ async function applyPanelVisible(visible: boolean): Promise<void> {
 
 async function flushPanelShow(): Promise<void> {
   if (overlayRetainCount > 0 || !panelSuppressed) return;
+  if (!isInnerWebSessionActive()) {
+    panelSuppressed = false;
+    syncPanelMaskVisible();
+    return;
+  }
   cancelPendingShow();
   await applyPanelVisible(true);
 }
@@ -120,7 +125,12 @@ export function releaseInnerWebPanelForOverlay(options?: ReleaseInnerWebPanelOpt
 export function releaseInnerWebPanelAfterImportDialog(): void {
   if (!isTauri()) return;
   releaseInnerWebPanelForOverlay({ immediate: true });
-  if (overlayRetainCount === 0 && panelSuppressed && isInnerWebSessionActive()) {
+  if (!isInnerWebSessionActive()) {
+    panelSuppressed = false;
+    syncPanelMaskVisible();
+    return;
+  }
+  if (overlayRetainCount === 0 && panelSuppressed) {
     cancelPendingShow();
     void flushPanelShow();
   }
