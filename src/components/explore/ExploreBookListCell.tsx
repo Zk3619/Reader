@@ -23,8 +23,10 @@ import {
 } from '@/lib/bookshelf/book-group-card-styles';
 import { getExploreCardLayout } from '@/lib/explore/explore-list-layout';
 import { ExploreBookListIntro } from '@/components/explore/ExploreBookListIntro';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import { tryFormatDisplayUpdateTime } from '@/lib/format/display-time';
+import { cn } from '@/lib/utils';
 import {
   buildBadgeTooltipText,
   buildExploreBadgeEntries,
@@ -112,10 +114,11 @@ function ExploreBookListCellContent(props: {
     <li class="w-full list-none">
       <button
         type="button"
-        class={cardClass()}
+        class={cn(cardClass(), '[&>:not([data-theme-background])]:relative [&>:not([data-theme-background])]:z-1')}
         onClick={() => props.onOpen(sb())}
         {...bookGroupCardPressHandlers}
       >
+        <ThemedComponentBackground componentId="surfaceCard" />
         <Show when={showCover()}>
           <div class={coverClass()}>
             <BookCoverImg

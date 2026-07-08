@@ -15,6 +15,7 @@ import {
   ComboboxTrigger,
 } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { popperMenuPanelShell } from '@/lib/ui/viewport-classes';
@@ -71,9 +72,10 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       </ComboboxControl>
       <ComboboxPrimitive.Portal mount={mount}>
         <ComboboxPrimitive.Content
-          class={cn(popperMenuPanelShell, overlayLayerZ().popper, local.contentClass)}
+          class={cn(popperMenuPanelShell, overlayLayerZ().popper, 'overflow-hidden isolate', local.contentClass)}
         >
-          <PopperScrollViewport class="px-1">
+          <ThemedComponentBackground componentId="combobox" />
+          <PopperScrollViewport class="relative z-1 px-1">
             <ComboboxPrimitive.Listbox class="m-0 p-0" />
           </PopperScrollViewport>
         </ComboboxPrimitive.Content>

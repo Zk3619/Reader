@@ -16,7 +16,7 @@ import {
   type HeatmapPeriod,
 } from '@/lib/record/read-record-daily';
 import { formatReadDuration, formatFriendlyDate } from '@/lib/record/read-record-format';
-import { READ_RECORD_SECTION_CARD_CLASS } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import { cn } from '@/lib/utils';
 
 const HEATMAP_PERIODS: HeatmapPeriod[] = ['year', 'half-year', 'quarter', 'month', 'week'];
@@ -100,7 +100,7 @@ export function ReadRecordHeatmap(props: ReadRecordHeatmapProps) {
   });
 
   return (
-    <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'flex min-w-0 flex-1 flex-col gap-4')}>
+    <ThemedRecordSectionCard class="flex min-w-0 flex-1 flex-col gap-4">
       <div class="space-y-1">
         <h3 class="font-semibold text-foreground">阅读热力图</h3>
         <p class="text-sm text-muted-foreground">{periodHint()}</p>
@@ -144,6 +144,6 @@ export function ReadRecordHeatmap(props: ReadRecordHeatmapProps) {
         <div class="size-3 rounded-sm bg-primary/92" />
         <span>多</span>
       </div>
-    </section>
+    </ThemedRecordSectionCard>
   );
 }

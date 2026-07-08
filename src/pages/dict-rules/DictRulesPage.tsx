@@ -6,7 +6,7 @@ import { createSignal, Show } from 'solid-js';
 import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as dictDb from '@/lib/database/dict-rules';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
-import { fetchBookSourceJsonText } from '@/lib/book-source/import-booksource-fetch';
+import { importDictRulesFromNetworkUrl } from '@/lib/book-source/import-network-sidecar';
 import { dictRuleMatchesSearch } from '@/lib/dict-rules/filter-dict-rules';
 import { DictRuleListItem } from '@/components/dict-rules/DictRuleListItem';
 import { DictRuleEditDialog } from '@/components/dict-rules/DictRuleEditDialog';
@@ -161,8 +161,7 @@ export function DictRulesPage(props: DictRulesPageProps) {
       return false;
     }
     try {
-      const text = await fetchBookSourceJsonText(trimmed);
-      const count = await importDictRulesFromJson(text);
+      const count = await importDictRulesFromNetworkUrl(trimmed);
       return finishImport(count);
     } catch (e) {
       showAppToast({

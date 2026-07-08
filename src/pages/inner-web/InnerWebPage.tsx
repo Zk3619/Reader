@@ -148,8 +148,8 @@ function injectYueduBooksourceBridge(frame: HTMLIFrameElement): void {
     const ch = INNER_WEB_YUEDU_CHANNEL;
     s.textContent =
       "(function(){if(document.documentElement.dataset.readerYuedu)return;document.documentElement.dataset.readerYuedu='1';" +
-      "function decode(h){if(!h||h.indexOf('yuedu:')!==0)return null;var q=h.indexOf('?');if(q<0)return null;try{return new URLSearchParams(h.slice(q+1)).get('src')}catch(_){return null}}" +
-      `document.addEventListener('click',function(e){var g=e.target,a=g&&g.closest&&g.closest('a[href^="yuedu:"]');if(!a)return;var raw=a.getAttribute('href')||a.href;var src=decode(raw);if(!src||src.indexOf('http')!==0)return;e.preventDefault();e.stopPropagation();if(window.parent&&window.parent!==window)window.parent.postMessage({channel:'${ch}',src:src},'*')},true);` +
+      "function decode(h){var s=String(h||'').trim();if(!/^yuedu:/i.test(s))return null;var q=s.indexOf('?');if(q<0)return null;try{return new URLSearchParams(s.slice(q+1)).get('src')}catch(_){return null}}" +
+      `document.addEventListener('click',function(e){var g=e.target,a=g&&g.closest&&g.closest('a[href]');if(!a)return;var raw=(a.getAttribute('href')||a.href||'').trim();if(!/^yuedu:/i.test(raw))return;var src=decode(raw);if(!src||src.indexOf('http')!==0)return;e.preventDefault();e.stopPropagation();if(window.parent&&window.parent!==window)window.parent.postMessage({channel:'${ch}',src:src},'*')},true);` +
       '})();';
     root.appendChild(s);
   } catch {
@@ -731,6 +731,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
       }
       if (useHtmlContent()) {
         yueduBridgeIframe = el;
+        injectInnerWebNavigationBridge(el);
         injectYueduBooksourceBridge(el);
       } else if (pageUrl().startsWith('http')) {
         const p = payload();

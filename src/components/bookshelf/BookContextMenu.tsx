@@ -10,8 +10,9 @@ import {
   AppContextMenuSeparator,
   AppContextMenuTrigger,
 } from '@/components/shared/AppContextMenu';
-import { useSuppressClickAfterDrag } from '@/components/shared/virtual-list/use-suppress-click-after-drag';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
+import { useSuppressClickAfterDrag } from '@/components/shared/virtual-list/use-suppress-click-after-drag';
 import { findBookOrderIndex } from '@/lib/bookshelf/book-order';
 import type { Book } from '@/types';
 
@@ -220,6 +221,7 @@ export function BookContextMenu(props: BookContextMenuProps) {
         }}
         {...longPress.pointerProps}
       >
+        <ThemedComponentBackground componentId="bookshelfCard" />
         {props.children}
       </AppContextMenuTrigger>
       <BookContextMenuContent

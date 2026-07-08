@@ -24,6 +24,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import {
   popperMenuPanelShell,
   popperOverflowPadding,
@@ -99,9 +100,10 @@ export const AppContextMenuContent: Component<AppContextMenuContentProps> = (pro
     <ContextMenuContent
       mount={mount}
       {...rest}
-      class={cn(CONTENT_LAYOUT_CLASS[layout()], popperZ(), local.class)}
+      class={cn(CONTENT_LAYOUT_CLASS[layout()], popperZ(), 'overflow-hidden isolate', local.class)}
     >
-      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+      <ThemedComponentBackground componentId="contextMenu" />
+      <PopperScrollViewport class="relative z-1 px-1">{local.children}</PopperScrollViewport>
     </ContextMenuContent>
   );
 };

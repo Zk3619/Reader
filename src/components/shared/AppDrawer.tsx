@@ -50,6 +50,7 @@ import {
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { APP_OVERLAY_BACKDROP_CLASS } from '@/lib/ui/overlay-z';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 
 export type { AppDrawerOverlayLock } from '@/components/shared/app-drawer-overlay-lock';
 export {
@@ -231,7 +232,7 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
         <DrawerPrimitive.Content
           data-app-overlay-surface=""
           class={cn(
-            'fixed flex flex-col border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
+            'fixed flex flex-col overflow-hidden isolate border bg-background data-transitioning:transition-transform data-transitioning:duration-300 md:select-none',
             overlayLayerZ().drawer,
             appBlockDrag,
             side() === 'left' &&
@@ -257,12 +258,16 @@ const AppDrawerContentImpl = <T extends ValidComponent = 'div'>(
               cn(drawerHorizontalAdaptive, appDrawerSideViewportBounds),
             local.class,
           )}
+          data-theme-component="drawer"
           {...rest}
         >
+          <ThemedComponentBackground componentId="drawer" />
+          <div class="z-1 flex min-h-0 min-w-0 flex-1 flex-col">
           <Show when={showNativeDragHandle() && (side() === 'bottom' || side() === 'top')}>
             <AppDrawerBottomDragHandle />
           </Show>
           <AppDrawerPortalMountHost>{local.children}</AppDrawerPortalMountHost>
+          </div>
         </DrawerPrimitive.Content>
       </DrawerPortal>
     </AppDrawerNativeDragHandleContext.Provider>

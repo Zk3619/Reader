@@ -10,12 +10,15 @@ import {
   AppContextMenuSeparator,
   AppContextMenuTrigger,
 } from '@/components/shared/AppContextMenu';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import {
   findGroupOrderIndex,
   isDefaultBookGroup,
   sortGroupsByOrder,
 } from '@/lib/bookshelf/book-group-order';
+import { cn } from '@/lib/utils';
+
 import type { BookGroup } from '@/types';
 
 const DELETE_ITEM_CLASS =
@@ -187,7 +190,7 @@ export function GroupContextMenu(props: GroupContextMenuProps) {
 
   const triggerProps = () => {
     const base: Record<string, unknown> = {
-      class: props.class,
+      class: cn('relative overflow-hidden', props.class),
       onClick: props.onClick,
       'data-group-id': props['data-group-id'] ?? props.group.groupId,
       ref: (el: HTMLElement | null) => longPress.setTriggerRef(el),
@@ -214,6 +217,7 @@ export function GroupContextMenu(props: GroupContextMenuProps) {
   return (
     <AppContextMenu>
       <AppContextMenuTrigger as={triggerAs()} {...triggerProps()}>
+        <ThemedComponentBackground componentId="bookshelfGroupCard" />
         {props.children}
       </AppContextMenuTrigger>
       <GroupContextMenuContent

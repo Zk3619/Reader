@@ -14,6 +14,7 @@ import {
 } from '@/components/shared/AppContextMenu';
 import { ChevronRightIcon } from '@/components/shared/icons';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 
 const LONG_PRESS_MS = 500;
 const MOVE_THRESHOLD = 10;
@@ -124,7 +125,8 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
             onTouchMove={onPointerMove}
             onTouchEnd={onPointerUp}
             class={cn(
-              'flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm transition-all',
+              'relative overflow-hidden flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm transition-all',
+              '[&>:not([data-theme-background])]:relative [&>:not([data-theme-background])]:z-1',
               'hover:bg-accent/30',
               props.expanded && 'bg-accent/20',
             )}
@@ -139,6 +141,7 @@ export function SourcePageListItem(props: SourcePageListItemProps) {
             role="button"
             tabIndex={0}
           >
+            <ThemedComponentBackground componentId="surfaceCard" />
             <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
               <TruncatedTooltip
                 as="span"

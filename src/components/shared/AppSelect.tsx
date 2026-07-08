@@ -25,6 +25,7 @@ import {
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { blurActiveElement } from '@/utils/accessibility';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 
 /** 选项行：与表单/对话框内其它 Select 一致，缩小左侧勾选留白 */
 export const APP_SELECT_ITEM_CLASS = 'pl-2';
@@ -148,6 +149,7 @@ export const AppSelectIcon: Component<SelectPrimitive.SelectIconProps> = (props)
 type AppSelectContentProps<T extends ValidComponent = 'div'> =
   SelectPrimitive.SelectContentProps<T> & {
     class?: string | undefined;
+    children?: JSX.Element;
     layout?: AppSelectContentLayout;
     /** 附加在 Content 上的 z-index 等（如内嵌页 z-[160]） */
     portalZClass?: string;
@@ -166,6 +168,7 @@ export const AppSelectContent = <T extends ValidComponent = 'div'>(
     'portalZClass',
     'portalToBody',
     'mount',
+    'children',
   ]);
   const layout = () => local.layout ?? 'plain';
   const drawerPortalMount = useAppDrawerPortalMount();
@@ -184,10 +187,14 @@ export const AppSelectContent = <T extends ValidComponent = 'div'>(
           APP_SELECT_CONTENT_MOTION_CLASS,
           CONTENT_LAYOUT_CLASS[layout()],
           popperZ(),
+          'overflow-hidden isolate',
           local.class,
         )}
         {...others}
-      />
+      >
+        <ThemedComponentBackground componentId="select" />
+        <div class="relative z-1">{local.children}</div>
+      </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
 };

@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMountAccessor } from '@/lib/ui/overlay-portal-mount';
 import { appBlockDrag, dialogContentInPortal, dialogPortalShell, dialogViewportMaxBounds, dialogViewportMinBounds } from '@/lib/ui/viewport-classes';
-import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { preventOverlayDismissForAppToast } from '@/components/shared/app-drawer-overlay-lock';
 import {
   clearFocusBeforeModal,
@@ -29,6 +29,7 @@ import {
   releasePageFocus,
 } from '@/utils/accessibility';
 import { restoreAppModalSideEffects } from '@/lib/ui/overlay-cleanup';
+import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 
 /** 遮罩：淡入淡出（应用层复用，与 Kobalte data-expanded 属性一致） */
 const dialogOverlayClass =
@@ -212,16 +213,17 @@ const AppDialogContentImpl = <T extends ValidComponent = 'div'>(
           APP_DIALOG_CONTENT_SURFACE_CLASS,
           dialogContentMotionClass,
           appBlockDrag,
-          'pointer-events-auto',
+          'pointer-events-auto overflow-hidden isolate',
           contentZ(),
           layout() === 'app' && 'flex min-h-0 max-h-full flex-col overflow-hidden p-0',
           layout() === 'plain' &&
-            'grid min-h-0 max-h-full w-full max-w-lg gap-4 overflow-y-auto p-6',
+            'grid min-h-0 max-h-full gap-4 overflow-y-auto p-6',
           dialogViewportMaxBounds,
           userClass(),
           dialogViewportMinBounds,
         )}
       >
+        <ThemedComponentBackground componentId="dialog" />
         {(props as AppDialogContentProps<T>).children}
       </DialogPrimitive.Content>
     </AppDialogPortal>

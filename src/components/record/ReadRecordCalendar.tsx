@@ -18,7 +18,7 @@ import {
   type HeatmapCalendarMode,
 } from '@/lib/record/read-record-daily';
 import { formatDateKey, formatReadDuration } from '@/lib/record/read-record-format';
-import { READ_RECORD_SECTION_CARD_CLASS } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import { cn } from '@/lib/utils';
 
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'] as const;
@@ -273,14 +273,8 @@ export function ReadRecordCalendar(props: ReadRecordCalendarProps) {
   }
 
   return (
-    <section
-      class={cn(
-        READ_RECORD_SECTION_CARD_CLASS,
-        'flex min-w-0 flex-1 flex-col gap-4',
-        props.class,
-      )}
-    >
+    <ThemedRecordSectionCard class={cn('flex min-w-0 flex-1 flex-col gap-4', props.class)}>
       {content}
-    </section>
+    </ThemedRecordSectionCard>
   );
 }

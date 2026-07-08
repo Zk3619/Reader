@@ -6,6 +6,7 @@ import { createSignal, Show } from 'solid-js';
 import { useChunkedFilter } from '@/lib/hooks/useChunkedFilter';
 import * as txtTocDb from '@/lib/database/txt-toc-rules';
 import { importTxtTocRulesFromJson } from '@/lib/book-source/import-txt-toc-rule';
+import { importTxtTocRulesFromNetworkUrl } from '@/lib/book-source/import-network-sidecar';
 import { batchReparseLocalTxtBooks, listLocalTxtBooks } from '@/lib/local-book/batch-reparse-local-txt';
 import { txtTocRuleMatchesSearch } from '@/lib/txt-toc-rules/filter-txt-toc-rules';
 import { TxtTocRuleListItem } from '@/components/txt-toc-rules/TxtTocRuleListItem';
@@ -158,9 +159,7 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
       return;
     }
     try {
-      const res = await fetch(trimmed);
-      const text = await res.text();
-      const count = await importTxtTocRulesFromJson(text);
+      const count = await importTxtTocRulesFromNetworkUrl(trimmed);
       await reload();
       showAppToast({
         title: count > 0 ? `已导入 ${count} 条规则` : '未识别到有效规则',

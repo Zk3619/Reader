@@ -29,9 +29,9 @@ import {
   READ_RECORD_ARCHIVE_LIST_HEIGHT_CLASS,
   READ_RECORD_DATE_HEADER_HEIGHT_PX,
   READ_RECORD_ROW_HEIGHT_PX,
-  READ_RECORD_SECTION_CARD_CLASS,
   READ_RECORD_VIRTUAL_LIST_CLASS,
 } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import type { ReadRecordEntry } from '@/lib/record/read-record-presenter';
 import {
   bookshelfListCoverClass,
@@ -166,6 +166,8 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
     progressLabel: '正在整理阅读记录',
   });
 
+  const safeRows = (): readonly ReadRecordArchiveVirtualRow[] => rows() ?? [];
+
   function handleModeChange(next: string) {
     const value = next as ReadRecordArchiveMode;
     setMode(value);
@@ -173,7 +175,7 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
   }
 
   const estimateRowSize = (index: number) => {
-    const row = rows()[index];
+    const row = safeRows()[index];
     if (!row) return READ_RECORD_ROW_HEIGHT_PX;
     return row.kind === 'date-header'
       ? READ_RECORD_DATE_HEADER_HEIGHT_PX
@@ -181,7 +183,7 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
   };
 
   return (
-    <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'space-y-4')}>
+    <ThemedRecordSectionCard class="space-y-4">
       <div class="space-y-1">
         <h3 class="font-semibold text-foreground">全部阅读记录</h3>
         <p class="text-sm text-muted-foreground">{READ_RECORD_ARCHIVE_MODE_HINTS[mode()]}</p>
@@ -202,7 +204,7 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
           <p class="text-center text-xs text-muted-foreground">{progressText()}</p>
         </Show>
         <Show
-          when={rows().length > 0 || computing()}
+          when={safeRows().length > 0 || computing()}
           fallback={
             <div
               class={cn(
@@ -217,7 +219,7 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
           <div class={cn('flex-none min-h-0', READ_RECORD_ARCHIVE_LIST_HEIGHT_CLASS)}>
             <VirtualList
               class={READ_RECORD_VIRTUAL_LIST_CLASS}
-              items={rows}
+              items={safeRows}
               estimateSize={estimateRowSize}
               overscan={6}
               getItemKey={(row: ReadRecordArchiveVirtualRow) => row.key}
@@ -261,6 +263,6 @@ export function ReadRecordArchiveSection(props: ReadRecordArchiveSectionProps) {
           </div>
         </Show>
       </div>
-    </section>
+    </ThemedRecordSectionCard>
   );
 }

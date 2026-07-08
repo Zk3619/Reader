@@ -29,7 +29,6 @@ import {
 import { CalendarDaysIcon, MoreIcon, XIcon } from '@/components/shared/icons';
 import * as readRecordDetailsDb from '@/lib/database/read-record-details';
 import * as readRecordsDb from '@/lib/database/read-records';
-import { isMobile } from '@/lib/platform/detect';
 import {
   readRecordEntryMatchesDate,
   formatSelectedDateLabel,
@@ -67,7 +66,7 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
   const [selectedDate, setSelectedDate] = createSignal<string | null>(null);
 
   const tabEnterClass = () =>
-    mainShellTabEnterClass(settingsStore.state.app.reduceMotion, isMobile());
+    mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
 
   const [entries, { refetch }] = createResource(() => loadReadRecordEntries());
   const [dailyStats, { refetch: refetchDaily }] = createResource(

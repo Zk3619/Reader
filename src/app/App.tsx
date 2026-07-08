@@ -10,6 +10,8 @@ import type { ReadingRulePageId } from "@/lib/settings/reading-rules-nav";
 import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
 import { TxtTocRulesPage } from "@/pages/txt-toc-rules/TxtTocRulesPage";
 import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
+import { ThemeStudioPage } from "@/pages/settings/ThemeStudioPage";
+import { GlobalThemeEffectsLayer } from "@/components/theme/GlobalThemeEffectsLayer";
 import { SideBar } from "@/components/shell/SideBar";
 import { BottomBar } from "@/components/shell/BottomBar";
 import {
@@ -121,6 +123,7 @@ import {
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { cn } from "@/lib/utils";
 import {
+  hViewport,
   mainShellInset,
   mainShellPageRoot,
   mainShellTabEnterClass,
@@ -132,6 +135,12 @@ import { isDesktopTauri } from "@/lib/platform/webview-storage";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument } from "@/lib/theme";
+import { applyActiveThemePackToDocument } from "@/lib/theme/theme-runtime";
+import { getThemePreset } from "@/lib/database/theme-presets";
+import { ThemedComponentBackground } from "@/components/theme/ThemedComponentBackground";
+import { ThemePackRuntimeProvider } from "@/components/theme/ThemePackRuntimeProvider";
+import { componentDataAttr } from "@/lib/theme/preview/component-registry";
+import { themeStudioStore } from "@/stores/theme-studio";
 import { getBook, getBookByNameAndAuthor, hasBook } from "@/lib/database/books";
 import { getRecentReadBooks, type RecentReadBook } from "@/lib/bookshelf/recent-reading";
 import {
@@ -198,6 +207,7 @@ import {
   READER_BOOKSOURCE_IMPORT_NETWORK_EVENT,
   isInnerWebSessionActive,
   cancelInnerWebClose,
+  dismissInnerWebSession,
   type InnerWebPayload,
 } from "@/lib/platform/inner-web";
 import {
@@ -826,6 +836,14 @@ function AppContent() {
     releaseInnerWebPanelAfterImportDialog();
   }
 
+  /** 内嵌页（如光遇更新页）触发书源导入前先关闭，避免 session 锁定 #root */
+  async function dismissInnerWebBeforeImport(): Promise<void> {
+    if (!isInnerWebSessionActive()) return;
+    importSelectDialogPanelRetained = false;
+    releaseImportSelectDialogPanelIfNeeded();
+    await dismissInnerWebSession();
+  }
+
   async function retainImportSelectDialogPanelIfNeeded(): Promise<void> {
     if (importSelectDialogPanelRetained) return;
     const p = innerWebPayload();
@@ -906,6 +924,7 @@ function AppContent() {
       showAppToast({ title: '网络导入书源', description: '链接无效', variant: 'destructive' });
       return;
     }
+    await dismissInnerWebBeforeImport();
     await openImportSourceSelectLoading();
     try {
       const { sources } = await resolveBookSourcesFromNetworkUrl(
@@ -1109,6 +1128,7 @@ function AppContent() {
   };
 
   const handleLegadoNetworkImport = async (url: string, title = '网络导入') => {
+    await dismissInnerWebBeforeImport();
     const parsed = parseReaderImportDeepLink(url);
     if (parsed?.kind === 'unsupported') {
       showAppToast({ title, description: parsed.reason, variant: 'default' });
@@ -1142,14 +1162,24 @@ function AppContent() {
           void identifyRssFromNetworkUrl(parsed.src);
           return;
         }
+        const kindLabel =
+          result.kind === 'replace'
+            ? '替换规则'
+            : result.kind === 'dict'
+              ? '字典规则'
+              : 'TXT 目录规则';
         showAppToast({
-          title: '导入替换规则',
+          title: `导入${kindLabel}`,
           description: `已导入 ${result.count} 条`,
           variant: 'default',
         });
         return;
-      } catch {
-        void identifySourcesFromNetwork(parsed.src);
+      } catch (err) {
+        showAppToast({
+          title: '导入失败',
+          description: String(err),
+          variant: 'destructive',
+        });
         return;
       }
     }
@@ -2423,6 +2453,16 @@ function AppContent() {
     applyThemeToDocument(settingsStore.state.app.theme);
   });
 
+  createEffect(() => {
+    const presetId = settingsStore.state.app.activeThemePresetId;
+    if (!presetId || !dbInitialized()) return;
+    void getThemePreset(presetId).then((record) => {
+      if (record?.manifest.scopes.app) {
+        applyActiveThemePackToDocument(record.manifest);
+      }
+    });
+  });
+
   // HMR 已跳过开屏时仍须 show 主窗口（tauri.conf visible:false）
   onMount(() => {
     if (!showSplash()) {
@@ -2508,9 +2548,6 @@ function AppContent() {
       const detail = (ev as CustomEvent<{ url?: string }>).detail;
       const u = detail?.url?.trim();
       if (!u?.startsWith("http")) return;
-      if (isInnerWebSessionActive()) {
-        cancelInnerWebClose();
-      }
       void identifySourcesFromNetwork(u);
     };
     window.addEventListener(READER_BOOKSOURCE_IMPORT_NETWORK_EVENT, onBookImport);
@@ -2562,7 +2599,10 @@ function AppContent() {
             await listen<{ uri?: string }>("reader-import-deeplink", (e) => {
               const uri = e.payload?.uri?.trim();
               if (!uri) return;
-              void handleReaderImportDeepLink(uri);
+              void (async () => {
+                await dismissInnerWebBeforeImport();
+                await handleReaderImportDeepLink(uri);
+              })();
             })
           );
           unlistenFns.push(
@@ -2929,7 +2969,10 @@ function AppContent() {
   };
 
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
-  const shellTabEnter = () => mainShellTabEnterClass(reduceMotion(), isMobile());
+  const visualShadow = () => settingsStore.state.app.enableVisualShadow !== false;
+  const visualTransparency = () => settingsStore.state.app.enableVisualTransparency !== false;
+  const visualBlur = () => settingsStore.state.app.enableVisualBlur !== false;
+  const shellTabEnter = () => mainShellTabEnterClass(reduceMotion());
 
   const getOpenBackLayers = (): BackLayerDefinition[] => {
     const layers: BackLayerDefinition[] = [];
@@ -3044,6 +3087,7 @@ function AppContent() {
       returnFromSettingsQuickPage,
     );
     push("reading-rule-page", readingRulePage() != null, () => setReadingRulePage(null));
+    push("theme-studio", themeStudioStore.state.open, () => themeStudioStore.closeStudio());
     push(
       "sources-explore-drawer",
       currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
@@ -3110,8 +3154,11 @@ function AppContent() {
 
     return (
       <div
-        class="min-h-dvh w-full transition-colors duration-300"
+        class={cn(hViewport, "w-full overflow-hidden transition-colors duration-300")}
         data-reduce-motion={reduceMotion() ? "true" : undefined}
+        data-visual-shadow={visualShadow() ? undefined : "false"}
+        data-visual-transparency={visualTransparency() ? undefined : "false"}
+        data-visual-blur={visualBlur() ? undefined : "false"}
       >
         {/* 数据库初始化错误提示 */}
         <Show when={dbError()}>
@@ -3220,9 +3267,11 @@ function AppContent() {
             showBottomBar() && "inset-bottom-app-bar",
             isStandalonePage() && "hidden pointer-events-none",
           )}
+          {...componentDataAttr('pageContent')}
         >
+          <ThemedComponentBackground componentId="pageContent" />
           {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
-          <main class={cn("flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
+          <main class={cn("relative z-1 flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
             {/* 书架：保持挂载，切走再回保留分组/列表状态 */}
             <section
               class={cn(
@@ -3656,6 +3705,7 @@ function AppContent() {
                 class={cn(
                   "flex min-h-0 flex-1 flex-col w-full",
                   readingRulePage() && "hidden pointer-events-none",
+                  themeStudioStore.state.open && "hidden pointer-events-none",
                 )}
               >
                 <SettingsPage
@@ -3666,6 +3716,10 @@ function AppContent() {
                   onNavigateToPage={navigateFromSettingsQuickPage}
                   onOpenReadingRulePage={(page) => {
                     setReadingRulePage(page);
+                    navigateToPage("settings");
+                  }}
+                  onOpenThemeStudio={() => {
+                    themeStudioStore.openStudio({ entry: "settings", scope: "all" });
                     navigateToPage("settings");
                   }}
                 />
@@ -4210,6 +4264,9 @@ function AppContent() {
     <ShellLayoutProvider windowWidth={windowWidth}>
       <AppBackNavigationBridge getOpenLayers={getOpenBackLayers} />
       <AppChrome />
+      <Show when={themeStudioStore.state.open}>
+        <ThemeStudioPage onBack={() => themeStudioStore.closeStudio()} />
+      </Show>
     </ShellLayoutProvider>
   );
 }
@@ -4225,10 +4282,18 @@ const appToastIcons = createAppToastIcons();
 
 function App() {
   return (
-    <SidebarProvider style={appSidebarStyle}>
-      <AppContent />
-      <AppToastHost icons={appToastIcons} />
-    </SidebarProvider>
+    <ThemePackRuntimeProvider>
+      <SidebarProvider
+        style={appSidebarStyle}
+        class={cn(hViewport, "relative min-h-0 overflow-hidden")}
+        {...componentDataAttr('appShell')}
+      >
+        <ThemedComponentBackground componentId="appShell" />
+        <AppContent />
+        <AppToastHost icons={appToastIcons} />
+        <GlobalThemeEffectsLayer domain="app" />
+      </SidebarProvider>
+    </ThemePackRuntimeProvider>
   );
 }
 

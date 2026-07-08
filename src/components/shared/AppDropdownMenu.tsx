@@ -42,8 +42,9 @@ import {
   withBlurBefore,
 } from '@/utils/accessibility';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
-import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
+import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 
 type AppDropdownMenuItemProps = ComponentProps<typeof DropdownMenuItem> & {
   /** 为 false 时立即执行 onSelect（默认 true：等菜单关闭后再执行） */
@@ -258,17 +259,19 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
         appDropdownMenuContentMotionClass,
         CONTENT_LAYOUT_CLASS[layout()],
         popperZ(),
+        'overflow-hidden isolate',
         local.class
       )}
     >
+      <ThemedComponentBackground componentId="dropdown" />
       {useInnerScroll() ? (
-        <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
+        <PopperScrollViewport class="relative z-1 px-1">{local.children}</PopperScrollViewport>
       ) : useTitleScroll() ? (
-        <PopperScrollViewport class="flex min-h-0 flex-1 flex-col">
+        <PopperScrollViewport class="relative z-1 flex min-h-0 flex-1 flex-col">
           {local.children}
         </PopperScrollViewport>
       ) : (
-        local.children
+        <div class="relative z-1">{local.children}</div>
       )}
     </DropdownMenuContent>
   );

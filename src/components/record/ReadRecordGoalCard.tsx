@@ -14,7 +14,7 @@ import {
   saveReadRecordGoalConfig,
   type ReadRecordGoalConfig,
 } from '@/lib/record/read-record-goal';
-import { READ_RECORD_SECTION_CARD_CLASS } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import { cn } from '@/lib/utils';
 
 export interface ReadRecordGoalCardProps {
@@ -40,7 +40,7 @@ export function ReadRecordGoalCard(props: ReadRecordGoalCardProps) {
 
   return (
     <>
-      <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'space-y-4', props.class)}>
+      <ThemedRecordSectionCard class={cn('space-y-4', props.class)}>
         <div class="flex items-center justify-between gap-2">
           <h3 class="font-semibold text-foreground">阅读目标</h3>
           <AppTooltip>
@@ -98,7 +98,7 @@ export function ReadRecordGoalCard(props: ReadRecordGoalCardProps) {
           <span class="min-w-0 flex-1">累计 {formatReadDuration(props.totalSeconds)}</span>
           <span class="shrink-0 text-right">已读书籍 {props.bookCount} 本</span>
         </div>
-      </section>
+      </ThemedRecordSectionCard>
 
       <ReadRecordGoalEditDialog
         open={editOpen()}

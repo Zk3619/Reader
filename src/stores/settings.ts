@@ -27,12 +27,13 @@ import { isTauri } from '@/lib/platform/detect';
 import { migrateAppStorageSettings } from '@/lib/platform/fs/migration';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 import {
+  DEFAULT_APP_TOAST_EXPAND,
   DEFAULT_APP_TOAST_POSITION,
-  DEFAULT_APP_TOAST_STYLE,
+  DEFAULT_APP_TOAST_VISIBLE_LIMIT,
+  normalizeAppToastExpand,
   normalizeAppToastPosition,
-  normalizeAppToastStyle,
+  normalizeAppToastVisibleLimit,
   type AppToastPosition,
-  type AppToastStyle,
 } from '@/lib/ui/app-toast-config';
 import {
   DEFAULT_VIEWER_CHROME_OVERLAY_BLUR_PX,
@@ -40,7 +41,12 @@ import {
   normalizeViewerChromeOverlayBlurPx,
   normalizeViewerChromeOverlayOpacity,
 } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
-import { clampThemeHour, normalizeThemeMode, normalizeThemeScheduleHours } from '@/lib/theme';
+import {
+  clampThemeHour,
+  normalizeThemeMode,
+  normalizeThemeScheduleHours,
+  syncThemeBootstrapSnapshotFromAppSettings,
+} from '@/lib/theme';
 
 /**
  * 应用设置接口
@@ -122,16 +128,28 @@ export interface AppSettings {
   viewerChromeOverlayOpacity?: number;
   /** media-viewer 层叠/悬浮顶底栏及附加区域背景模糊（px，默认 0 不模糊） */
   viewerChromeOverlayBlurPx?: number;
+  /** 全局阴影特效（悬浮胶囊光晕、Toast 等）；关闭可提升低端设备性能 */
+  enableVisualShadow?: boolean;
+  /** 全局半透明背景；关闭时 chrome / 主题 surface 强制不透明 */
+  enableVisualTransparency?: boolean;
+  /** 全局背景模糊（backdrop-filter）；关闭可显著降低 GPU 开销 */
+  enableVisualBlur?: boolean;
+  /** 当前激活的应用壳层主题预设 ID */
+  activeThemePresetId?: string;
+  /** 当前激活的阅读器主题预设 ID */
+  activeViewerThemePresetId?: string;
   /** 全局媒体播放器布局：fixed | stacked | floating */
   mediaPlayerChromeLayout?: ViewerChromeLayout;
   /** 全局媒体播放器位置：top | bottom */
   mediaPlayerChromePosition?: MediaPlayerChromePosition;
   /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
   enableReadRecord?: boolean;
-  /** 通知 Toast 风格：default | sonner | toast */
-  toastStyle?: AppToastStyle;
   /** 通知 Toast 位置 */
   toastPosition?: AppToastPosition;
+  /** 通知 Toast 同屏最大条数 */
+  toastVisibleLimit?: number;
+  /** 通知 Toast 堆叠缩放（solid-sonner `expand`） */
+  toastExpand?: boolean;
 }
 
 /**
@@ -159,11 +177,15 @@ const defaultAppSettings: AppSettings = {
   viewerChromeLayout: defaultViewerChromeLayout,
   viewerChromeOverlayOpacity: DEFAULT_VIEWER_CHROME_OVERLAY_OPACITY,
   viewerChromeOverlayBlurPx: DEFAULT_VIEWER_CHROME_OVERLAY_BLUR_PX,
+  enableVisualShadow: true,
+  enableVisualTransparency: true,
+  enableVisualBlur: true,
   mediaPlayerChromeLayout: defaultMediaPlayerChromeLayout,
   mediaPlayerChromePosition: defaultMediaPlayerChromePosition,
   enableReadRecord: true,
-  toastStyle: DEFAULT_APP_TOAST_STYLE,
   toastPosition: DEFAULT_APP_TOAST_POSITION,
+  toastVisibleLimit: DEFAULT_APP_TOAST_VISIBLE_LIMIT,
+  toastExpand: DEFAULT_APP_TOAST_EXPAND,
 };
 
 /**
@@ -208,7 +230,7 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     ...defaultAppSettings,
     ...stored,
   });
-  return {
+  const result = {
     ...merged,
     theme: normalizeThemeMode(merged.theme),
     themeScheduleDayHour: clampThemeHour(
@@ -219,8 +241,9 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
       merged.themeScheduleNightHour,
       defaultAppSettings.themeScheduleNightHour!,
     ),
-    toastStyle: normalizeAppToastStyle(merged.toastStyle),
     toastPosition: normalizeAppToastPosition(merged.toastPosition),
+    toastVisibleLimit: normalizeAppToastVisibleLimit(merged.toastVisibleLimit),
+    toastExpand: normalizeAppToastExpand(merged.toastExpand),
     viewerChromeOverlayOpacity: normalizeViewerChromeOverlayOpacity(
       merged.viewerChromeOverlayOpacity,
     ),
@@ -228,6 +251,8 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
       merged.viewerChromeOverlayBlurPx,
     ),
   };
+  syncThemeBootstrapSnapshotFromAppSettings(result);
+  return result;
 }
 
 /** Web：在首屏渲染前从 localStorage 同步恢复，避免闪回默认布局 */
@@ -395,17 +420,46 @@ export const settingsStore = {
     await this.updateAppSettings({ reduceMotion });
   },
 
-  async setShowTooltips(showTooltips: boolean): Promise<void> {
-    await this.updateAppSettings({ showTooltips });
+  async setEnableVisualShadow(enableVisualShadow: boolean): Promise<void> {
+    await this.updateAppSettings({ enableVisualShadow: !!enableVisualShadow });
   },
 
-  async setToastStyle(toastStyle: AppToastStyle): Promise<void> {
-    await this.updateAppSettings({ toastStyle: normalizeAppToastStyle(toastStyle) });
+  async setEnableVisualTransparency(enableVisualTransparency: boolean): Promise<void> {
+    await this.updateAppSettings({ enableVisualTransparency: !!enableVisualTransparency });
+  },
+
+  async setEnableVisualBlur(enableVisualBlur: boolean): Promise<void> {
+    await this.updateAppSettings({ enableVisualBlur: !!enableVisualBlur });
+  },
+
+  setActiveThemePresetId(activeThemePresetId: string | undefined): void {
+    setState('app', 'activeThemePresetId', activeThemePresetId);
+    void this.saveSettings();
+  },
+
+  async setActiveViewerThemePresetId(activeViewerThemePresetId: string | undefined): Promise<void> {
+    await this.updateAppSettings({ activeViewerThemePresetId });
+  },
+
+  async setShowTooltips(showTooltips: boolean): Promise<void> {
+    await this.updateAppSettings({ showTooltips });
   },
 
   async setToastPosition(toastPosition: AppToastPosition): Promise<void> {
     await this.updateAppSettings({
       toastPosition: normalizeAppToastPosition(toastPosition),
+    });
+  },
+
+  async setToastVisibleLimit(toastVisibleLimit: number): Promise<void> {
+    await this.updateAppSettings({
+      toastVisibleLimit: normalizeAppToastVisibleLimit(toastVisibleLimit),
+    });
+  },
+
+  async setToastExpand(toastExpand: boolean): Promise<void> {
+    await this.updateAppSettings({
+      toastExpand: normalizeAppToastExpand(toastExpand),
     });
   },
 

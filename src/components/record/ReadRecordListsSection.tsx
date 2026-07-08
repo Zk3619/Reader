@@ -13,11 +13,11 @@ import { VirtualList } from '@/components/shared/virtual-list';
 import {
   READ_RECORD_PREVIEW_LIST_HEIGHT_CLASS,
   READ_RECORD_ROW_HEIGHT_PX,
-  READ_RECORD_SECTION_CARD_CLASS,
   READ_RECORD_VIRTUAL_LIST_CLASS,
   READ_RECORD_VIRTUAL_LIST_ITEM_CLASS,
   readRecordEntryKey,
 } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import {
   formatReadDuration,
   formatRelativeLastRead,
@@ -218,12 +218,7 @@ function ReadRecordVirtualPanel(props: {
   children: (entry: ReadRecordEntry, index: number) => JSX.Element;
 }) {
   return (
-    <section
-      class={cn(
-        READ_RECORD_SECTION_CARD_CLASS,
-        'flex min-w-0 flex-1 flex-col gap-4',
-      )}
-    >
+    <ThemedRecordSectionCard class="flex min-w-0 flex-1 flex-col gap-4">
       <div class="shrink-0 space-y-1">
         <h3 class="font-semibold text-foreground">{props.title}</h3>
         <Show when={props.description}>
@@ -259,7 +254,7 @@ function ReadRecordVirtualPanel(props: {
           </VirtualList>
         </div>
       </Show>
-    </section>
+    </ThemedRecordSectionCard>
   );
 }
 

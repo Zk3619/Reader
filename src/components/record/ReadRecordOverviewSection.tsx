@@ -10,7 +10,7 @@ import {
 } from '@/lib/record/read-record-format';
 import type { ReadRecordStats } from '@/lib/record/read-record-presenter';
 import type { ReadRecordEntry } from '@/lib/record/read-record-presenter';
-import { READ_RECORD_SECTION_CARD_CLASS } from '@/lib/record/read-record-layout';
+import { ThemedRecordSectionCard } from '@/components/theme/ThemedRecordSectionCard';
 import { cn } from '@/lib/utils';
 
 function RecordStatCard(props: { label: string; value: string; highlight?: boolean }) {
@@ -44,7 +44,7 @@ export interface ReadRecordOverviewSectionProps {
 
 export function ReadRecordOverviewSection(props: ReadRecordOverviewSectionProps) {
   return (
-    <section class={cn(READ_RECORD_SECTION_CARD_CLASS, 'min-w-0 flex-1 space-y-4', props.class)}>
+    <ThemedRecordSectionCard class={cn('min-w-0 flex-1 space-y-4', props.class)}>
       <div class="space-y-1">
         <h3 class="font-semibold text-foreground">阅读概览</h3>
         <p class="text-sm text-muted-foreground">累计阅读时长与在读书籍统计</p>
@@ -72,6 +72,6 @@ export function ReadRecordOverviewSection(props: ReadRecordOverviewSectionProps)
           })()}
         />
       </div>
-    </section>
+    </ThemedRecordSectionCard>
   );
 }

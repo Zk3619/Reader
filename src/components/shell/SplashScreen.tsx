@@ -2,6 +2,7 @@ import { createSignal, Show, onMount } from "solid-js";
 import logoLight from "@/assets/logo-l-512x512.png";
 import logoDark from "@/assets/logo-d-512x512.png";
 import { cn } from "@/lib/utils";
+import { getEffectiveDark } from "@/lib/theme";
 import {
   ensureMainWindowVisible,
   isDevSplashDone,
@@ -15,7 +16,10 @@ interface SplashScreenProps {
 export function SplashScreen(props: SplashScreenProps) {
   const skipForHmr = isDevSplashDone();
   const [isVisible, setIsVisible] = createSignal(!skipForHmr);
-  const [isDark, setIsDark] = createSignal(false);
+  const [isDark, setIsDark] = createSignal(
+    typeof document !== "undefined" &&
+      (document.documentElement.classList.contains("dark") || getEffectiveDark()),
+  );
 
   onMount(async () => {
     // 开发环境 HMR：立即结束，避免白底遮罩盖住主界面

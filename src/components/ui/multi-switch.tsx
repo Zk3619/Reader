@@ -35,6 +35,8 @@ export interface MultiSwitchProps<T> {
   dropdownTrigger?: boolean;
   /** 自定义下拉内容容器（阅读器内须用 ViewerAppDropdownMenuContent） */
   DropdownMenuContent?: Component<{ class?: string; children: JSX.Element }>;
+  /** 继承父级 chrom 文字/悬停色（阅读器顶栏跟随页面时） */
+  inheritChromeColors?: boolean;
 }
 
 function getValue<T>(value: T | (() => T)): T {
@@ -134,7 +136,9 @@ export function MultiSwitch<T>(props: MultiSwitchProps<T>) {
 
   const triggerButtonClass = () =>
     cn(
-      "inline-flex items-center justify-center gap-1.5 rounded-md text-sm font-medium text-foreground ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&_svg]:text-current",
+      props.inheritChromeColors
+        ? "inline-flex items-center justify-center gap-1.5 rounded-md text-sm font-medium text-inherit ring-offset-background transition-colors hover:bg-current/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/30 focus-visible:ring-offset-2 [&_svg]:text-current"
+        : "inline-flex items-center justify-center gap-1.5 rounded-md text-sm font-medium text-foreground ring-offset-background transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&_svg]:text-current",
       isDropdownTrigger() ? "px-3 py-2 h-9 min-w-0" : props.sizeClass ?? "h-9 w-9"
     );
 

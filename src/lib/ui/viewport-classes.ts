@@ -302,13 +302,27 @@ export const popperNestedListScroll = cn(
 /** 书架/探索等宽设置弹窗外壳：稳定宽度，高度由视口与滚动区约束 */
 export const appDialogSettingsShell = 'w-[min(42rem,85dvw)]';
 
+/** 主壳 Tab 入场动画时长（与 overlay 淡入一致） */
+export const SHELL_TAB_ENTER_DURATION_MS = 200;
+
+/** 独立页（非阅读器叠层）淡入淡出时长 */
+export const OVERLAY_STACK_FADE_DURATION_MS = 200;
+
 /**
- * 主壳 Tab 页入场动画。移动端省略位移，减少 Popper 首次测量错误。
+ * 主壳 Tab 页入场：纯 fade，桌面与移动端统一时长。
  */
-export function mainShellTabEnterClass(reduceMotion: boolean, mobileDevice: boolean): string {
+export function mainShellTabEnterClass(reduceMotion: boolean): string {
   if (reduceMotion) return '';
-  if (mobileDevice) return 'animate-in fade-in duration-200';
-  return 'animate-in fade-in slide-in-from-bottom-4 duration-500';
+  return 'animate-in fade-in duration-200';
+}
+
+/**
+ * 独立页叠层壳层（explore / book-search / book-info / remote-book）：
+ * 纯 opacity 过渡，无 scale/slide。阅读器全屏叠层勿用。
+ */
+export function overlayStackFadeShellClass(reduceMotion: boolean, viewerOverlay: boolean): string {
+  if (reduceMotion || viewerOverlay) return '';
+  return 'app-overlay-fade-shell';
 }
 
 /** 主壳顶/底栏 fixed 偏移（含移动端安全区） */

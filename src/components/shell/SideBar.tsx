@@ -28,6 +28,8 @@ import {
   ChevronRightIcon,
 } from "@/components/shared/icons";
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
+import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
 // 页面配置（与 Navigation 组件保持一致）
@@ -107,13 +109,27 @@ export function SideBar(props: SideBarProps) {
     <Sidebar
       collapsible="icon"
       class={cn(
-        "bottom-0! h-auto! border-r border-sidebar-border",
+        // 勿加 relative：会覆盖 ui/sidebar 内 fixed 定位，导致侧栏脱离视口布局
+        "bottom-0! h-auto! overflow-hidden border-r border-sidebar-border",
         props.offsetTopAppBar
           ? "top-[calc(var(--app-bar-height)+var(--safe-area-top-effective))]!"
           : "top-0!",
       )}
+      {...componentDataAttr('sidebar')}
     >
-      <SidebarContent>
+      <div class="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <ThemedComponentBackground componentId="sidebar" />
+      <div
+        class="pointer-events-none absolute inset-x-0 top-0 z-0 h-12"
+        {...componentDataAttr('sidebarHeader')}
+      >
+        <ThemedComponentBackground componentId="sidebarHeader" />
+      </div>
+      <div class="relative z-1 flex h-full min-h-0 flex-col">
+        <SidebarContent class="relative z-1 min-h-0 flex-1">
+        <div class="relative min-h-0 flex-1 overflow-hidden" {...componentDataAttr('sidebarNav')}>
+          <ThemedComponentBackground componentId="sidebarNav" />
+          <div class="relative z-1">
         {/* 主菜单 */}
         <SidebarGroup>
           <SidebarGroupContent>
@@ -156,10 +172,14 @@ export function SideBar(props: SideBarProps) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+          </div>
+        </div>
 
-        {/* 最近读过：展开为列表，收起为封面快捷入口 */}
+        {/* 最近读过：展开为封面+标题列表，收起为封面快捷入口 */}
         <Show when={recentBooks().length > 0 || !isCollapsed()}>
-          <>
+          <div class="relative overflow-hidden" {...componentDataAttr('sidebarRecent')}>
+            <ThemedComponentBackground componentId="sidebarRecent" />
+            <div class="relative z-1">
             <Separator />
             <SidebarGroup>
               <SidebarGroupLabel
@@ -194,38 +214,39 @@ export function SideBar(props: SideBarProps) {
                                 false,
                                 isCollapsed()
                                   ? "h-10 justify-center px-0"
-                                  : "group/recent-item flex-col items-start gap-1 h-auto w-full py-2.5 px-3 text-left",
+                                  : "group/recent-item h-auto w-full items-center gap-2.5 py-2 px-3 text-left",
                               )}
                               tooltip={`${book.title} - ${book.chapterName}`}
                               onClick={() => props.onOpenRecentBook?.(book)}
                             >
-                              <Show
-                                when={isCollapsed()}
-                                fallback={
-                                  <>
-                                    <span class="w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
-                                      {book.title}
-                                    </span>
-                                    <span class="w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
-                                      {book.chapterName}
-                                    </span>
-                                  </>
-                                }
+                              <span
+                                class={cn(
+                                  "flex shrink-0 overflow-hidden rounded-sm border border-border/40 bg-muted",
+                                  isCollapsed() ? "mx-auto h-8 w-6" : "h-12 w-9",
+                                )}
                               >
-                                <span class="mx-auto flex h-8 w-6 shrink-0 overflow-hidden rounded-sm border border-border/40 bg-muted">
-                                  <BookCoverFromBook
-                                    book={book.book}
-                                    bookUrl={book.bookUrl || undefined}
-                                    coverUrl={book.coverUrl}
-                                    alt={book.title}
-                                    class="h-full w-full object-cover"
-                                    fallback={
-                                      <span class="flex h-full w-full items-center justify-center">
-                                        <BookOpenIcon class="h-3.5 w-3.5 text-muted-foreground" size={14} />
-                                      </span>
-                                    }
-                                  />
-                                </span>
+                                <BookCoverFromBook
+                                  book={book.book}
+                                  bookUrl={book.bookUrl || undefined}
+                                  coverUrl={book.coverUrl}
+                                  alt={book.title}
+                                  class="h-full w-full object-cover"
+                                  fallback={
+                                    <span class="flex h-full w-full items-center justify-center">
+                                      <BookOpenIcon class="h-3.5 w-3.5 text-muted-foreground" size={14} />
+                                    </span>
+                                  }
+                                />
+                              </span>
+                              <Show when={!isCollapsed()}>
+                                <div class="min-w-0 flex-1 overflow-hidden">
+                                  <span class="block w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
+                                    {book.title}
+                                  </span>
+                                  <span class="block w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
+                                    {book.chapterName}
+                                  </span>
+                                </div>
                               </Show>
                             </SidebarMenuButton>
                           </SidebarMenuItem>
@@ -236,12 +257,17 @@ export function SideBar(props: SideBarProps) {
                 </Show>
               </SidebarGroupContent>
             </SidebarGroup>
-          </>
+            </div>
+          </div>
         </Show>
       </SidebarContent>
 
-      {/* 底部：收起/展开按钮 */}
-      <SidebarFooter class="mt-auto shrink-0 border-t border-sidebar-border">
+      <SidebarFooter
+        class="relative mt-auto shrink-0 overflow-hidden border-t border-sidebar-border"
+        {...componentDataAttr('sidebarFooter')}
+      >
+        <ThemedComponentBackground componentId="sidebarFooter" />
+        <div class="relative z-1">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -271,7 +297,10 @@ export function SideBar(props: SideBarProps) {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        </div>
       </SidebarFooter>
+      </div>
+      </div>
     </Sidebar>
   );
 }

@@ -20,7 +20,6 @@ import {
   mainShellPageScroll,
   mainShellTabEnterClass,
 } from '@/lib/ui/viewport-classes';
-import { isMobile } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 import type { Book, Bookmark } from '@/types';
@@ -128,7 +127,7 @@ export function BookmarkPage(props: BookmarkPageProps) {
   const [editingBookmark, setEditingBookmark] = createSignal<Bookmark | null>(null);
 
   const tabEnterClass = () =>
-    mainShellTabEnterClass(settingsStore.state.app.reduceMotion, isMobile());
+    mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
 
   const [bookmarks, { refetch }] = createResource(() => bookmarksDb.getAllBookmarks());
   const groups = createMemo(() => buildBookmarkBookGroups(bookmarks() ?? []));
