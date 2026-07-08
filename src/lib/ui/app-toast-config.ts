@@ -1,12 +1,8 @@
 import { isMobile } from '@/lib/platform/detect';
 import { SHELL_COMPACT_MAX_WIDTH } from '@/lib/shell/layout';
-import type { ToastSwipeDirection } from '@kobalte/core/toast';
 
 /** solid-sonner Toaster `swipeDirections` 项（库内未导出） */
 export type SonnerSwipeDirection = 'top' | 'right' | 'bottom' | 'left';
-
-/** Toast 风格：默认（Reader 定制 Sonner）、Sonner 原生、Kobalte Toast */
-export type AppToastStyle = 'default' | 'sonner' | 'toast';
 
 export type AppToastPosition =
   | 'top-left'
@@ -16,20 +12,24 @@ export type AppToastPosition =
   | 'top-center'
   | 'bottom-center';
 
-export const DEFAULT_APP_TOAST_STYLE: AppToastStyle = 'default';
 export const DEFAULT_APP_TOAST_POSITION: AppToastPosition = 'bottom-right';
 
-export const APP_TOAST_STYLE_LABELS: Record<AppToastStyle, string> = {
-  default: '默认',
-  sonner: 'Sonner',
-  toast: 'Toast',
-};
+/** 同屏最多显示的通知条数（solid-sonner `visibleToasts`） */
+export const DEFAULT_APP_TOAST_VISIBLE_LIMIT = 3;
+export const MIN_APP_TOAST_VISIBLE_LIMIT = 1;
+export const MAX_APP_TOAST_VISIBLE_LIMIT = 6;
 
-export const APP_TOAST_STYLE_DESCRIPTIONS: Record<AppToastStyle, string> = {
-  default: '当前 Reader 定制样式：图标、进度条与展开滚动等增强。',
-  sonner: 'solid-sonner 标准样式，更贴近 shadcn/ui 默认外观。',
-  toast: 'Kobalte Toast 组件样式，卡片式通知。',
-};
+/** solid-sonner `expand`：开启后多条通知以缩放样式叠放，悬停可展开 */
+export const DEFAULT_APP_TOAST_EXPAND = true;
+
+/**
+ * Sonner `expand` 与 UI「堆叠缩放」开关语义相反：
+ * - 堆叠缩放开 → `expand={false}`（默认叠放，悬停展开）
+ * - 堆叠缩放关 → `expand={true}`（始终展开为独立卡片）
+ */
+export function resolveSonnerToasterExpand(stackScalingEnabled?: boolean): boolean {
+  return !normalizeAppToastExpand(stackScalingEnabled);
+}
 
 export const APP_TOAST_POSITION_LABELS: Record<AppToastPosition, string> = {
   'top-left': '左上',
@@ -54,8 +54,6 @@ export const APP_TOAST_MOBILE_POSITION_OPTIONS: AppToastPosition[] = [
   'bottom-center',
 ];
 
-export const KOBALTE_TOAST_REGION_ID = 'reader-app-toast';
-
 export function isCompactMobileViewport(): boolean {
   return (
     isMobile() &&
@@ -64,9 +62,14 @@ export function isCompactMobileViewport(): boolean {
   );
 }
 
-export function normalizeAppToastStyle(style: AppToastStyle | undefined): AppToastStyle {
-  if (style === 'sonner' || style === 'toast') return style;
-  return DEFAULT_APP_TOAST_STYLE;
+export function normalizeAppToastVisibleLimit(limit: number | undefined): number {
+  const value = limit ?? DEFAULT_APP_TOAST_VISIBLE_LIMIT;
+  if (!Number.isFinite(value)) return DEFAULT_APP_TOAST_VISIBLE_LIMIT;
+  return Math.min(MAX_APP_TOAST_VISIBLE_LIMIT, Math.max(MIN_APP_TOAST_VISIBLE_LIMIT, Math.round(value)));
+}
+
+export function normalizeAppToastExpand(expand: boolean | undefined): boolean {
+  return expand ?? DEFAULT_APP_TOAST_EXPAND;
 }
 
 export function normalizeAppToastPosition(
@@ -100,43 +103,5 @@ export function appToastSwipeDirections(position: AppToastPosition): SonnerSwipe
       return ['bottom'];
     default:
       return ['bottom', 'right'];
-  }
-}
-
-export function kobalteToastSwipeDirection(position: AppToastPosition): ToastSwipeDirection {
-  switch (position) {
-    case 'top-left':
-    case 'bottom-left':
-      return 'left';
-    case 'top-right':
-    case 'bottom-right':
-      return 'right';
-    case 'top-center':
-      return 'up';
-    case 'bottom-center':
-      return 'down';
-    default:
-      return 'right';
-  }
-}
-
-export function toastListPositionClass(position: AppToastPosition): string {
-  const base =
-    'fixed z-100 flex max-h-screen w-full max-w-[420px] flex-col gap-3 p-4 pointer-events-none [&>*]:pointer-events-auto';
-  switch (position) {
-    case 'top-left':
-      return `${base} top-0 left-0 items-start`;
-    case 'top-right':
-      return `${base} top-0 right-0 items-end`;
-    case 'top-center':
-      return `${base} top-0 left-1/2 -translate-x-1/2 items-center`;
-    case 'bottom-left':
-      return `${base} bottom-0 left-0 flex-col-reverse items-start`;
-    case 'bottom-right':
-      return `${base} bottom-0 right-0 flex-col-reverse items-end`;
-    case 'bottom-center':
-      return `${base} bottom-0 left-1/2 -translate-x-1/2 flex-col-reverse items-center`;
-    default:
-      return `${base} bottom-0 right-0 flex-col-reverse items-end`;
   }
 }

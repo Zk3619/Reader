@@ -2,16 +2,32 @@ import { describe, expect, it } from 'vitest';
 import {
   appToastPositionOptions,
   appToastSwipeDirections,
+  normalizeAppToastExpand,
   normalizeAppToastPosition,
-  normalizeAppToastStyle,
+  normalizeAppToastVisibleLimit,
+  resolveSonnerToasterExpand,
 } from '@/lib/ui/app-toast-config';
 
 describe('app-toast-config', () => {
-  it('normalizes toast style', () => {
-    expect(normalizeAppToastStyle(undefined)).toBe('default');
-    expect(normalizeAppToastStyle('sonner')).toBe('sonner');
-    expect(normalizeAppToastStyle('toast')).toBe('toast');
-    expect(normalizeAppToastStyle('invalid' as 'default')).toBe('default');
+  it('normalizes visible limit', () => {
+    expect(normalizeAppToastVisibleLimit(undefined)).toBe(3);
+    expect(normalizeAppToastVisibleLimit(1)).toBe(1);
+    expect(normalizeAppToastVisibleLimit(6)).toBe(6);
+    expect(normalizeAppToastVisibleLimit(99)).toBe(6);
+    expect(normalizeAppToastVisibleLimit(0)).toBe(1);
+    expect(normalizeAppToastVisibleLimit(Number.NaN)).toBe(3);
+  });
+
+  it('normalizes expand toggle', () => {
+    expect(normalizeAppToastExpand(undefined)).toBe(true);
+    expect(normalizeAppToastExpand(false)).toBe(false);
+    expect(normalizeAppToastExpand(true)).toBe(true);
+  });
+
+  it('maps stack scaling to Sonner expand (inverted)', () => {
+    expect(resolveSonnerToasterExpand(true)).toBe(false);
+    expect(resolveSonnerToasterExpand(false)).toBe(true);
+    expect(resolveSonnerToasterExpand(undefined)).toBe(false);
   });
 
   it('clamps corner positions on compact mobile', () => {
