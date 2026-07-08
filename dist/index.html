@@ -4,10 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('reader_theme_bootstrap');
+          if (!raw) return;
+          var o = JSON.parse(raw);
+          var theme = o.theme;
+          var day = typeof o.themeScheduleDayHour === 'number' ? o.themeScheduleDayHour : 6;
+          var night = typeof o.themeScheduleNightHour === 'number' ? o.themeScheduleNightHour : 18;
+          var dark = false;
+          if (theme === 'dark') dark = true;
+          else if (theme === 'light') dark = false;
+          else if (theme === 'auto') {
+            dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          } else if (theme === 'schedule') {
+            var h = new Date().getHours();
+            var daylight = day === night ? true : day < night ? h >= day && h < night : h >= day || h < night;
+            dark = !daylight;
+          }
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="./assets/logo-BKhbptE1.svg" />
     <title>Tauri + Solid + Typescript App</title>
-    <script type="module" crossorigin src="./assets/index-DJdNCpZN.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-B_oIEVlJ.css">
+    <script type="module" crossorigin src="./assets/index-CTsdvA5R.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CLeP5gNg.css">
   </head>
 
   <body>

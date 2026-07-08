@@ -1,4 +1,4 @@
-import{ensureChapterCacheSchema as a,migrateChapterCacheV97 as i,CHAPTER_CACHE_SCHEMA_VERSION as U}from"./migration-chapter-cache-v97-ggtQT808.js";const s=96;async function L(T,E){return(await T.select("SELECT name FROM sqlite_master WHERE type='table' AND name = ?",[E])).length>0}async function r(T,E,N){return await L(T,E)?(await T.select(`PRAGMA table_info(${E})`)).some(t=>t.name===N):!1}async function e(T,E,N,o){await r(T,E,N)||await T.execute(`ALTER TABLE ${E} ADD COLUMN ${N} ${o}`)}async function c(T){if(!await L(T,"readRecord")){await T.execute(`
+import{ensureChapterCacheSchema as a,migrateChapterCacheV97 as i,CHAPTER_CACHE_SCHEMA_VERSION as s}from"./migration-chapter-cache-v97-ggtQT808.js";const U=96;async function L(T,E){return(await T.select("SELECT name FROM sqlite_master WHERE type='table' AND name = ?",[E])).length>0}async function r(T,E,N){return await L(T,E)?(await T.select(`PRAGMA table_info(${E})`)).some(t=>t.name===N):!1}async function e(T,E,N,o){await r(T,E,N)||await T.execute(`ALTER TABLE ${E} ADD COLUMN ${N} ${o}`)}async function c(T){if(!await L(T,"readRecord")){await T.execute(`
       CREATE TABLE IF NOT EXISTS readRecord (
         deviceId TEXT NOT NULL,
         bookName TEXT NOT NULL,
@@ -280,7 +280,25 @@ import{ensureChapterCacheSchema as a,migrateChapterCacheV97 as i,CHAPTER_CACHE_S
       (exploreUrl IS NOT NULL AND trim(exploreUrl) <> '') AS hasExploreUrl,
       eventListener, bookSourceType
     FROM book_sources
-  `)}async function l(T){await e(T,"books","durVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"books","chapterInVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_groups","onlyUpdateRead","INTEGER NOT NULL DEFAULT 0"),await R(T),await e(T,"chapters","imgUrl","TEXT"),await e(T,"rssSources","preloadJs","TEXT"),await e(T,"rssSources","startHtml","TEXT"),await e(T,"rssSources","startStyle","TEXT"),await e(T,"rssSources","startJs","TEXT"),await e(T,"rssSources","showWebLog","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","preload","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","cacheFirst","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","searchUrl","TEXT"),await I(T),await e(T,"rssStars","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssStars","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","origin","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","sort","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","image","TEXT"),await e(T,"rssReadRecords","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","pubDate","TEXT"),await c(T),await O(T),await u(T)}const n=98;async function X(T){await a(T)}const A=99;async function d(T){await a(T),(await T.select("PRAGMA table_info(chapter_cache)")).map(o=>String(o.name??"").toLowerCase()).includes("cache_tier")||(console.log("[数据库迁移] chapter_cache 添加 cache_tier 列"),await T.execute("ALTER TABLE chapter_cache ADD COLUMN cache_tier TEXT NOT NULL DEFAULT 'auto'"))}const F=[{version:1,up:async T=>{await T.execute(`
+  `)}async function n(T){await e(T,"books","durVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"books","chapterInVolumeIndex","INTEGER NOT NULL DEFAULT 0"),await e(T,"book_groups","onlyUpdateRead","INTEGER NOT NULL DEFAULT 0"),await R(T),await e(T,"chapters","imgUrl","TEXT"),await e(T,"rssSources","preloadJs","TEXT"),await e(T,"rssSources","startHtml","TEXT"),await e(T,"rssSources","startStyle","TEXT"),await e(T,"rssSources","startJs","TEXT"),await e(T,"rssSources","showWebLog","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","preload","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","cacheFirst","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssSources","searchUrl","TEXT"),await I(T),await e(T,"rssStars","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssStars","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","origin","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","sort","TEXT NOT NULL DEFAULT ''"),await e(T,"rssReadRecords","image","TEXT"),await e(T,"rssReadRecords","type","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","durPos","INTEGER NOT NULL DEFAULT 0"),await e(T,"rssReadRecords","pubDate","TEXT"),await c(T),await O(T),await u(T)}const l=98;async function X(T){await a(T)}const A=99;async function d(T){await a(T),(await T.select("PRAGMA table_info(chapter_cache)")).map(o=>String(o.name??"").toLowerCase()).includes("cache_tier")||(console.log("[数据库迁移] chapter_cache 添加 cache_tier 列"),await T.execute("ALTER TABLE chapter_cache ADD COLUMN cache_tier TEXT NOT NULL DEFAULT 'auto'"))}const S=100;async function p(T){await T.execute(`
+    CREATE TABLE IF NOT EXISTS theme_presets (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'user',
+      scopes_app INTEGER NOT NULL DEFAULT 1,
+      scopes_viewer INTEGER NOT NULL DEFAULT 1,
+      manifest_json TEXT NOT NULL,
+      thumbnail_path TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `),await T.execute(`
+    CREATE INDEX IF NOT EXISTS index_theme_presets_kind
+    ON theme_presets(kind)
+  `),await T.execute(`
+    CREATE INDEX IF NOT EXISTS index_theme_presets_updated
+    ON theme_presets(updated_at DESC)
+  `)}const m=[{version:1,up:async T=>{await T.execute(`
         CREATE TABLE IF NOT EXISTS books (
           bookUrl TEXT NOT NULL DEFAULT '',
           tocUrl TEXT NOT NULL DEFAULT '',
@@ -583,4 +601,4 @@ import{ensureChapterCacheSchema as a,migrateChapterCacheV97 as i,CHAPTER_CACHE_S
       `),await T.execute(`
         CREATE INDEX IF NOT EXISTS index_replace_rules_id 
         ON replace_rules(id)
-      `)}},{version:s,up:l},{version:U,up:i},{version:n,up:X},{version:A,up:d}];export{U as CHAPTER_CACHE_SCHEMA_VERSION,s as LEGADO_SCHEMA_VERSION,F as migrations};
+      `)}},{version:U,up:n},{version:s,up:i},{version:l,up:X},{version:A,up:d},{version:S,up:p}];export{s as CHAPTER_CACHE_SCHEMA_VERSION,U as LEGADO_SCHEMA_VERSION,m as migrations};

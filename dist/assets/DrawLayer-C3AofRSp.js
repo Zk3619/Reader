@@ -1,0 +1,1 @@
+var u;(function(n){n[n.BackgroundElement=0]="BackgroundElement",n[n.BackgroundDraw=1]="BackgroundDraw",n[n.BackgroundMask=2]="BackgroundMask",n[n.CanvasSetup=3]="CanvasSetup",n[n.PluginContent=4]="PluginContent",n[n.Particles=5]="Particles",n[n.CanvasCleanup=6]="CanvasCleanup",n[n.Foreground=7]="Foreground"})(u||(u={}));export{u as D};
