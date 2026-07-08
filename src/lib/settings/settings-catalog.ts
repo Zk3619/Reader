@@ -72,6 +72,27 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['减少动效', '动画', '过渡', '动效', '性能'],
   },
   {
+    id: 'visual-effects',
+    categoryId: 'appearance',
+    title: '视觉特效',
+    description: '全局阴影、半透明背景与背景模糊开关',
+    keywords: ['视觉特效', '阴影', '透明', '模糊', '性能', 'backdrop', 'GPU', '低端'],
+  },
+  {
+    id: 'theme-presets',
+    categoryId: 'appearance',
+    title: '主题预设',
+    description: '快速切换已保存的主题包',
+    keywords: ['主题预设', '主题包', '切换', 'preset', '自定义主题'],
+  },
+  {
+    id: 'custom-theme',
+    categoryId: 'appearance',
+    title: '自定义主题',
+    description: '主题工作室、组件级预览、预设与导入导出',
+    keywords: ['自定义主题', '主题工作室', '预览', '预设', '导入', '导出', '特效', '拖尾'],
+  },
+  {
     id: 'show-tooltips',
     categoryId: 'appearance',
     title: '显示工具提示',
@@ -82,8 +103,8 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     id: 'toast',
     categoryId: 'appearance',
     title: '通知 Toast',
-    description: '应用内通知的风格与屏幕位置',
-    keywords: ['通知', 'toast', 'sonner', '提示', '位置', '风格'],
+    description: '应用内通知的屏幕位置、数量与堆叠样式',
+    keywords: ['通知', 'toast', '提示', '位置', '数量', '堆叠'],
   },
   {
     id: 'shell-layout',

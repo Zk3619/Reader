@@ -11,6 +11,9 @@ import {
   Show,
 } from 'solid-js';
 import { cn } from '@/lib/utils';
+import { SettingsThemedHubCard } from '@/components/theme/SettingsThemedHubCard';
+import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
+import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import {
   bookshelfCompactListCardClass,
@@ -44,6 +47,7 @@ export interface SettingsPageProps {
   onNavigateToPage?: (page: PageType) => void;
   /** 打开阅读规则独立页（TXT 目录 / 替换净化 / 字典） */
   onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
+  onOpenThemeStudio?: () => void;
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
@@ -249,8 +253,7 @@ export function SettingsPage(props: SettingsPageProps) {
               const cat = () => getSettingsCategory(item.categoryId);
               return (
                 <li class={settingsPageListItemClass}>
-                  <button
-                    type="button"
+                  <SettingsThemedHubCard
                     class={settingsMobileListCardClass}
                     onClick={() => navigateToSettingItem(item.id, item.categoryId)}
                   >
@@ -264,7 +267,7 @@ export function SettingsPage(props: SettingsPageProps) {
                     <span class="flex shrink-0 items-center pr-1.5 text-muted-foreground">
                       <ChevronRightIcon class="h-4 w-4" />
                     </span>
-                  </button>
+                  </SettingsThemedHubCard>
                 </li>
               );
             }}
@@ -313,8 +316,7 @@ export function SettingsPage(props: SettingsPageProps) {
                     <For each={SETTINGS_MOBILE_QUICK_PAGES}>
                       {(entry) => (
                         <li class={settingsPageListItemClass}>
-                          <button
-                            type="button"
+                          <SettingsThemedHubCard
                             class={settingsMobileListCardClass}
                             onClick={() => props.onNavigateToPage?.(entry.page)}
                           >
@@ -330,15 +332,14 @@ export function SettingsPage(props: SettingsPageProps) {
                             <span class="flex shrink-0 items-center pr-1.5 text-muted-foreground">
                               <ChevronRightIcon class="h-4 w-4" />
                             </span>
-                          </button>
+                          </SettingsThemedHubCard>
                         </li>
                       )}
                     </For>
                     <For each={SETTINGS_CATEGORIES}>
                       {(cat) => (
                         <li class={settingsPageListItemClass}>
-                          <button
-                            type="button"
+                          <SettingsThemedHubCard
                             class={settingsMobileListCardClass}
                             onClick={() => handleCategoryCardClick(cat.id)}
                           >
@@ -354,7 +355,7 @@ export function SettingsPage(props: SettingsPageProps) {
                             <span class="flex shrink-0 items-center pr-1.5 text-muted-foreground">
                               <ChevronRightIcon class="h-4 w-4" />
                             </span>
-                          </button>
+                          </SettingsThemedHubCard>
                         </li>
                       )}
                     </For>
@@ -403,7 +404,13 @@ export function SettingsPage(props: SettingsPageProps) {
               />
             </PageToolbar>
 
-            <div ref={hubScrollEl} class={cn(settingsPageScrollTrackClass, mainShellPageScroll)}>
+            <div
+              ref={hubScrollEl}
+              class={cn(settingsPageScrollTrackClass, mainShellPageScroll, 'relative')}
+              {...componentDataAttr('settingsTabPanel')}
+            >
+              <ThemedComponentBackground componentId="settingsTabPanel" />
+              <div class="relative z-1 flex min-h-0 flex-1 flex-col items-stretch">
               <Show when={isSearching()}>{hubSearchResults()}</Show>
               <Show when={!isSearching()}>
                 <For each={SETTINGS_CATEGORIES}>
@@ -417,11 +424,13 @@ export function SettingsPage(props: SettingsPageProps) {
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
                         onOpenReadingRulePage={props.onOpenReadingRulePage}
+                        onOpenThemeStudio={props.onOpenThemeStudio}
                       />
                     </TabsContent>
                   )}
                 </For>
               </Show>
+              </div>
             </div>
           </Tabs>
         </Show>
@@ -459,6 +468,7 @@ export function SettingsPage(props: SettingsPageProps) {
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
                         onOpenReadingRulePage={props.onOpenReadingRulePage}
+                        onOpenThemeStudio={props.onOpenThemeStudio}
                       />
                     </div>
                   </Show>

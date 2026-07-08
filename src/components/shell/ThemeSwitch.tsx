@@ -25,6 +25,8 @@ export interface ThemeSwitchProps {
   withTooltip?: boolean;
   /** 阅读器叠层内为 true：下拉/Tooltip 使用正确 z-index */
   inViewerOverlay?: boolean;
+  /** 继承顶栏 chrom 配色（阅读器顶栏跟随页面时） */
+  inheritChromeColors?: boolean;
 }
 
 export function ThemeSwitch(props: ThemeSwitchProps) {
@@ -54,6 +56,7 @@ export function ThemeSwitch(props: ThemeSwitchProps) {
       onChange={handleChange}
       class={props.class}
       sizeClass={props.sizeClass ?? "h-9 w-9"}
+      inheritChromeColors={props.inheritChromeColors}
       DropdownMenuContent={inViewer() ? ViewerAppDropdownMenuContent : undefined}
     />
   );

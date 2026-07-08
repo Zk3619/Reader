@@ -10,6 +10,9 @@ import { BookInfoPresentationSetting } from '@/components/settings/BookInfoPrese
 import { TocPaginationSafetySetting } from '@/components/settings/TocPaginationSafetySetting';
 import { SourceExploreDrawerLayoutSetting } from '@/components/settings/SourceExploreDrawerLayoutSetting';
 import { ToastSetting } from '@/components/settings/ToastSetting';
+import { VisualEffectsSetting } from '@/components/settings/VisualEffectsSetting';
+import { ThemePresetListSetting } from '@/components/settings/ThemePresetListSetting';
+import { CustomThemeSetting } from '@/components/settings/CustomThemeSetting';
 import { SourceBlocklistSetting } from '@/components/settings/SourceBlocklistSetting';
 import { StorageAndWebViewSetting } from '@/components/settings/StorageAndWebViewSetting';
 import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
@@ -29,6 +32,7 @@ export interface SettingsCategoryContentProps {
   categoryId: SettingsCategoryId;
   highlightedItemId?: string | null;
   onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
+  onOpenThemeStudio?: () => void;
 }
 
 export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
@@ -75,6 +79,18 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
               </AppSwitch>
             </div>
           </div>
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="visual-effects" highlighted={highlight('visual-effects')}>
+          <VisualEffectsSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="theme-presets" highlighted={highlight('theme-presets')}>
+          <ThemePresetListSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="custom-theme" highlighted={highlight('custom-theme')}>
+          <CustomThemeSetting onOpenStudio={props.onOpenThemeStudio} />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="show-tooltips" highlighted={highlight('show-tooltips')}>
