@@ -19,6 +19,7 @@ import {
   type LegadoScriptSourceFace,
 } from '@/lib/js-engine/legado/source-script-shared';
 import { createExploreInjector } from '@/lib/js-engine/legado/explore-inject';
+import { runExploreSectionAction } from '@/lib/js-engine/legado/explore-section-action-runner';
 import { runLegadoScriptQuickJS } from '@/lib/js-engine/legado/quickjs-runner';
 import { initQuickJSRuntime, isQuickJSFallback } from '@/lib/js-engine/core/runtime';
 
@@ -88,6 +89,36 @@ describe('guangyu explore sections', () => {
       type: 'text',
     });
     expect(isExploreDrawerTextSection(item!)).toBe(true);
+  });
+
+  it('renderVersionPage legacy 作用域具备 java.base64Encode', async () => {
+    const ls = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => ls.get(k) ?? null,
+      setItem: (k: string, v: string) => ls.set(k, v),
+      removeItem: (k: string) => ls.delete(k),
+    });
+
+    const source = loadGuangyuSource();
+    const server = 'https://v1.gyks.cf';
+    const argsKey = getSourceArgsKey(source);
+    ls.set(
+      argsKey,
+      JSON.stringify({
+        线路: server,
+        云端配置: { hosts: [server], version: '26.5.31.4' },
+        发现页来源: '番茄',
+        发现页类型: '小说',
+      }),
+    );
+
+    await expect(
+      runExploreSectionAction(source, 'renderVersionPage()', {
+        onScriptToast: () => {},
+      }),
+    ).resolves.toBeUndefined();
+
+    vi.unstubAllGlobals();
   });
 });
 

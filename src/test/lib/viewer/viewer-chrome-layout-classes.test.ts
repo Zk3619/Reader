@@ -120,6 +120,19 @@ describe('viewer-chrome layout classes', () => {
     expect(mediaViewerChromeFloatingWindowChromeTrailClass).not.toContain('min-[360px]');
   });
 
+  it('floating lead row grows on sm+ so title can use remaining width', () => {
+    expect(mediaViewerChromeFloatingToolbarLeadRowClass).toContain('sm:flex-1');
+    expect(mediaViewerChromeFloatingToolbarLeadRowClass).not.toContain('sm:max-w-');
+    expect(mediaViewerChromeFloatingToolbarLeadRowClass).not.toContain('sm:flex-none');
+    expect(mediaViewerChromeFloatingToolbarLeadRowClass).toContain('overflow-visible');
+  });
+
+  it('floating title capsule grows with lead row instead of fixed 14rem cap', () => {
+    expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('sm:flex-1');
+    expect(mediaViewerChromeFloatingTitleCapsuleClass).not.toContain('14rem');
+    expect(mediaViewerChromeFloatingTitleCapsuleClass).not.toContain('sm:max-w-');
+  });
+
   it('floating capsules split title and window chrome; actions use one cluster pill', () => {
     expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('rounded-full');
     expect(mediaViewerChromeFloatingTitleCapsuleClass).toContain('pointer-events-auto');

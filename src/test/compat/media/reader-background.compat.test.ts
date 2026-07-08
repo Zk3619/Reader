@@ -24,12 +24,12 @@ describe('reader-background', () => {
     expect(readerBgStrForBackup('/storage/bg/foo.png', 2)).toBe('foo.png');
   });
 
-  it('builds color background style', () => {
+  it('builds color background style from theme palette', () => {
     const style = readerPageBackgroundStyle(
       { ...defaultTextViewerUiConfig, bgType: 0, bgStr: '#abcdef' },
       null,
     );
-    expect(style['background-color']).toBe('#abcdef');
+    expect(style['background-color']).toBe('#f5f0e6');
   });
 
   it('patches day vs night bg fields', () => {
