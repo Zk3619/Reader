@@ -3,6 +3,7 @@ import type { AppComponentId, ThemeComponentId } from '@/lib/theme/schema/theme-
 /** 组件模式下始终保留的壳层结构（与 App.tsx 主壳一致） */
 const APP_SHELL_CHROME: ReadonlySet<AppComponentId> = new Set([
   'appShell',
+  'topNav',
   'sidebar',
   'sidebarHeader',
   'sidebarNav',

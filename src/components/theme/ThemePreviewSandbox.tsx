@@ -19,9 +19,13 @@ import { ThemeViewerShellPreview } from '@/components/theme/ThemeViewerShellPrev
 import { GlobalThemeEffectsLayer } from '@/components/theme/GlobalThemeEffectsLayer';
 import { ShellLayoutProvider } from '@/components/shell/ShellLayoutProvider';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { scrollEdgeInset, scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
 
 import type { ThemePreviewViewport } from '@/lib/theme/preview/preview-viewport';
-import { PREVIEW_VIEWPORT_WIDTH } from '@/lib/theme/preview/preview-viewport';
+import {
+  PREVIEW_VIEWPORT_WIDTH,
+  PREVIEW_VIEWER_SHELL_MIN_HEIGHT_PX,
+} from '@/lib/theme/preview/preview-viewport';
 
 const appSidebarStyle = {
   '--sidebar-width': '12rem',
@@ -53,7 +57,6 @@ export function ThemePreviewSandbox(props: ThemePreviewSandboxProps) {
   const selectedComponentId = () => readAccessor(props.selectedComponentId);
   const showApp = () => scope() === 'app' || scope() === 'all';
   const showViewer = () => scope() === 'viewer' || scope() === 'all';
-  const showBoth = () => showApp() && showViewer();
 
   const pack = () => readAccessor(props.pack);
   const packRevision = () => readAccessor(props.packRevision ?? 0);
@@ -108,9 +111,16 @@ export function ThemePreviewSandbox(props: ThemePreviewSandboxProps) {
       )}
       data-theme-preview="true"
     >
-      <div class="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+      <div
+        class={cn(
+          'flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain',
+          scrollGutterStableBoth,
+          scrollEdgeInset,
+          'p-3',
+        )}
+      >
         <div
-          class="mx-auto flex h-full min-h-0 w-full min-w-0 flex-col self-stretch"
+          class="mx-auto flex w-full min-w-0 flex-col self-stretch"
           style={{ 'max-width': `${PREVIEW_VIEWPORT_WIDTH[viewport()]}px` }}
         >
           <ThemeDraftRuntimeProvider
@@ -119,12 +129,12 @@ export function ThemePreviewSandbox(props: ThemePreviewSandboxProps) {
             revision={packRevision}
           >
             <ShellLayoutProvider windowWidth={() => PREVIEW_VIEWPORT_WIDTH[viewport()]}>
-              <SidebarProvider style={appSidebarStyle} class="h-full min-h-0 w-full min-w-0">
+              <SidebarProvider style={appSidebarStyle} class="w-full min-w-0">
                 <div
                   ref={setRootEl}
                   data-theme-preview-mode={colorMode()}
                   class={cn(
-                    'relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-background shadow-sm',
+                    'relative flex w-full min-w-0 flex-col overflow-x-hidden rounded-lg border border-border bg-background shadow-sm',
                     colorMode() === 'dark' && 'dark',
                   )}
                 >
@@ -136,27 +146,21 @@ export function ThemePreviewSandbox(props: ThemePreviewSandboxProps) {
                       previewMode={previewMode()}
                       showSidebar={showSidebar()}
                       viewport={viewport()}
-                      class={cn(
-                        showBoth()
-                          ? 'min-h-[360px] max-h-[58%] shrink-0 flex-none'
-                          : 'min-h-0 min-w-0 flex-1',
-                      )}
+                      class="shrink-0 min-h-[520px]"
                     />
                   </Show>
 
                   <Show when={showViewer()}>
                     <div
-                      class={cn(
-                        'min-h-0 min-w-0',
-                        showApp() ? 'flex-1 border-t border-border/60' : 'min-h-0 flex-1',
-                      )}
+                      class={cn('shrink-0', showApp() && 'border-t border-border/60')}
+                      style={{ 'min-height': `${PREVIEW_VIEWER_SHELL_MIN_HEIGHT_PX}px` }}
                     >
                       <GlobalThemeEffectsLayer pack={pack()} domain="viewer" embedded />
                       <ThemeViewerShellPreview
                         themeId={viewerThemeId()}
                         selectedComponentId={selectedComponentId()}
                         previewMode={previewMode()}
-                        class={showBoth() ? 'min-h-[280px]' : 'h-full min-h-0 flex-1'}
+                        class="min-h-[inherit]"
                       />
                     </div>
                   </Show>

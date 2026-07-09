@@ -153,7 +153,9 @@ export function componentOverrideToStyle(
   options?: { componentId?: ThemeComponentId },
 ): Record<string, string> {
   if (!override) return {};
-  const style: Record<string, string> = { ...cssVarMapToStyle(override.cssVars ?? {}) };
+  const style: Record<string, string> = {
+    ...cssVarMapToStyle(override.cssVars ?? {}, { componentId: options?.componentId }),
+  };
   if (override.layout?.padding) style.padding = override.layout.padding;
   if (override.layout?.margin) style.margin = override.layout.margin;
   if (override.layout?.gap) style.gap = override.layout.gap;

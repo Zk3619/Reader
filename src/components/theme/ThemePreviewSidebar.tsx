@@ -29,6 +29,7 @@ import {
 import type { AppComponentId, ThemeComponentId } from '@/lib/theme/schema/theme-pack-v1';
 import { themePreviewHighlight } from '@/lib/theme/preview/preview-highlight';
 import { shouldShowAppPreviewComponent } from '@/lib/theme/preview/preview-visibility';
+import { themePreviewTextClasses } from '@/lib/theme/preview/theme-component-text-roles';
 import { cn } from '@/lib/utils';
 
 const NAV_PAGES = [
@@ -86,11 +87,11 @@ export function ThemePreviewSidebar(props: ThemePreviewSidebarProps) {
     <ThemedPreviewRegion
       componentId="sidebar"
       class={cn(
-        'flex h-full shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
+        'flex shrink-0 self-stretch flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
         previewSidebarWidthClass(props.viewport),
         highlight('sidebar'),
       )}
-      contentClass="flex h-full min-h-0 flex-col"
+      contentClass="flex min-h-full flex-col"
     >
       <Show when={show('sidebarHeader')}>
         <ThemedPreviewRegion
@@ -157,8 +158,20 @@ export function ThemePreviewSidebar(props: ThemePreviewSidebarProps) {
                           >
                             <span class="flex h-12 w-9 shrink-0 overflow-hidden rounded-sm border border-border/40 bg-muted/70" />
                             <div class="min-w-0 flex-1 overflow-hidden">
-                              <span class="block w-full min-w-0 truncate text-xs font-medium">{book.title}</span>
-                              <span class="block w-full min-w-0 truncate text-xs text-muted-foreground">
+                              <span
+                                class={cn(
+                                  'block w-full min-w-0 truncate text-xs font-medium',
+                                  themePreviewTextClasses('sidebarRecent').primary,
+                                )}
+                              >
+                                {book.title}
+                              </span>
+                              <span
+                                class={cn(
+                                  'block w-full min-w-0 truncate text-xs',
+                                  themePreviewTextClasses('sidebarRecent').muted,
+                                )}
+                              >
                                 {book.chapter}
                               </span>
                             </div>

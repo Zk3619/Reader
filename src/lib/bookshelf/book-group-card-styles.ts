@@ -225,7 +225,7 @@ export function formatBookshelfGridAuthor(author: string | null | undefined): st
 /** 网格标题（显示书名/分组名） */
 export function bookGroupGridTitleClass(...extra: Parameters<typeof cn>) {
   return cn(
-    'm-0 min-h-5 w-full shrink-0 truncate text-center text-sm leading-tight font-semibold text-foreground',
+    'm-0 min-h-5 w-full shrink-0 truncate text-center text-sm leading-tight font-semibold text-card-foreground',
     ...extra,
   );
 }

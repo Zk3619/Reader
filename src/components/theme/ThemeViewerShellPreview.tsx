@@ -11,6 +11,7 @@ import { useThemeDraftRuntime } from '@/components/theme/ThemeDraftRuntimeProvid
 import type { ThemeComponentId, ViewerComponentId } from '@/lib/theme/schema/theme-pack-v1';
 import { themePreviewHighlight } from '@/lib/theme/preview/preview-highlight';
 import { shouldShowViewerPreviewComponent } from '@/lib/theme/preview/preview-visibility';
+import { themePreviewTextClasses } from '@/lib/theme/preview/theme-component-text-roles';
 import {
   mergeTextViewerSurfaceAppearanceStyle,
   resolveTextViewerSurfaceAppearance,
@@ -62,11 +63,11 @@ export function ThemeViewerShellPreview(props: ThemeViewerShellPreviewProps) {
     <ThemedPreviewRegion
       componentId="readerChrome"
       class={cn(
-        'pointer-events-none flex h-full min-h-0 flex-col bg-background',
+        'pointer-events-none flex min-h-[inherit] flex-col bg-background',
         highlight('readerChrome'),
         props.class,
       )}
-      contentClass="flex min-h-0 flex-1 flex-col"
+      contentClass="flex flex-col"
     >
       <Show when={show('toolbarHeader')}>
         <MediaViewerHeader layout="fixed" visible>
@@ -77,9 +78,16 @@ export function ThemeViewerShellPreview(props: ThemeViewerShellPreviewProps) {
               highlight('toolbarHeader'),
             )}
           >
-            <span class="text-muted-foreground">←</span>
-            <span class="min-w-0 flex-1 truncate font-medium">示例书籍</span>
-            <span class="text-muted-foreground">⋮</span>
+            <span class={themePreviewTextClasses('toolbarHeader').muted}>←</span>
+            <span
+              class={cn(
+                'min-w-0 flex-1 truncate font-medium',
+                themePreviewTextClasses('toolbarHeader').primary,
+              )}
+            >
+              示例书籍
+            </span>
+            <span class={themePreviewTextClasses('toolbarHeader').muted}>⋮</span>
           </ThemedPreviewSurface>
         </MediaViewerHeader>
       </Show>
@@ -106,7 +114,8 @@ export function ThemeViewerShellPreview(props: ThemeViewerShellPreviewProps) {
         <ThemedPreviewSurface
           componentId="pageTip"
           class={cn(
-            'border-t border-border/40 px-4 py-1 text-center text-xs text-muted-foreground',
+            'border-t border-border/40 px-4 py-1 text-center text-xs',
+            themePreviewTextClasses('pageTip').primary,
             highlight('pageTip'),
           )}
         >
@@ -119,7 +128,8 @@ export function ThemeViewerShellPreview(props: ThemeViewerShellPreviewProps) {
           <ThemedPreviewSurface
             componentId="footerChrome"
             class={cn(
-              'flex items-center justify-center gap-4 px-4 py-3 text-sm text-muted-foreground',
+              'flex items-center justify-center gap-4 px-4 py-3 text-sm',
+              themePreviewTextClasses('footerChrome').primary,
               highlight('footerChrome'),
             )}
           >
@@ -135,6 +145,7 @@ export function ThemeViewerShellPreview(props: ThemeViewerShellPreviewProps) {
           componentId="brightnessCapsule"
           class={cn(
             'absolute bottom-4 right-4 rounded-full border border-border/50 bg-background/90 px-3 py-2 text-xs shadow-md backdrop-blur-sm',
+            themePreviewTextClasses('brightnessCapsule').primary,
             highlight('brightnessCapsule'),
           )}
         >

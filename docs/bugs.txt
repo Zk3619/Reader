@@ -5,8 +5,6 @@ text-viewer
 可配置的mini播放器样式/风格
 audio-viewer/video-viewer 接入后台播放
 
-是否有必要添加页面切换动画效果
-
 系统主题、通知、下拉、抽屉等应允许配置自定义样式如透明度、颜色等，AppToasts当前风格参考 groundcontrol 对透明度、颜色等进行优化调整
 
 配置 i18n

@@ -18,6 +18,7 @@ export const THEME_PACK_SCHEMA_VERSION = 1 as const;
 /** App 壳层可预览/可编辑组件 ID */
 export type AppComponentId =
   | 'appShell'
+  | 'topNav'
   | 'pageContent'
   | 'sidebar'
   | 'sidebarHeader'

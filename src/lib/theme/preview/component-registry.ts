@@ -29,6 +29,14 @@ export const APP_COMPONENT_REGISTRY: ThemeComponentDescriptor[] = [
     scopeAttr: 'appShell',
   },
   {
+    id: 'topNav',
+    label: '顶部导航栏',
+    domain: 'app',
+    parentId: 'appShell',
+    editablePaths: ['app.tokens.light', 'app.tokens.dark', 'app.components.topNav'],
+    scopeAttr: 'topNav',
+  },
+  {
     id: 'pageContent',
     label: '页面主区域',
     domain: 'app',

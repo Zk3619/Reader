@@ -14,6 +14,7 @@ export interface ThemedPreviewRegionProps {
   componentId: AppComponentId | ViewerComponentId;
   class?: string;
   contentClass?: string;
+  style?: Record<string, string>;
   children?: JSX.Element;
 }
 
@@ -40,12 +41,12 @@ export function ThemedPreviewRegion(props: ThemedPreviewRegionProps) {
 
   return (
     <div
-      class={cn('relative min-h-0 min-w-0 overflow-hidden', props.class)}
-      style={overrideStyle()}
+      class={cn('relative min-w-0', props.class)}
+      style={{ ...overrideStyle(), ...props.style }}
       {...componentDataAttr(props.componentId)}
     >
       <ThemedComponentBackground componentId={props.componentId} />
-      <div class={cn('relative z-1 min-h-0 min-w-0', props.contentClass)}>{props.children}</div>
+      <div class={cn('relative z-1 min-w-0', props.contentClass)}>{props.children}</div>
     </div>
   );
 }

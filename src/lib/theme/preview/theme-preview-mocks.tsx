@@ -10,6 +10,10 @@ import { getThemeComponentBackground } from '@/lib/theme/component-background';
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import type { AppComponentId, ViewerComponentId } from '@/lib/theme/schema/theme-pack-v1';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
+import {
+  bookGroupGridSubtitleClass,
+  bookGroupGridTitleClass,
+} from '@/lib/bookshelf/book-group-card-styles';
 import { componentOverrideToStyle } from '@/lib/theme/theme-runtime';
 import type { ReaderThemePackV1 } from '@/lib/theme/schema/theme-pack-v1';
 
@@ -114,8 +118,8 @@ export function ThemeAppPreviewMock(props: ThemePreviewMocksProps) {
             <MockComponentBackground pack={props.pack} id="bookshelfCard" resolveAssetUrl={props.resolveAssetUrl} />
             <div class="relative z-1">
             <div class="mb-3 aspect-3/4 rounded-md bg-muted" />
-            <p class="truncate font-medium">示例书籍</p>
-            <p class="text-xs text-muted-foreground">作者名</p>
+            <p class={bookGroupGridTitleClass()}>示例书籍</p>
+            <p class={bookGroupGridSubtitleClass()}>作者名</p>
             </div>
           </div>
         </Show>
@@ -129,8 +133,8 @@ export function ThemeAppPreviewMock(props: ThemePreviewMocksProps) {
             <MockComponentBackground pack={props.pack} id="bookshelfGroupCard" resolveAssetUrl={props.resolveAssetUrl} />
             <div class="relative z-1">
               <div class="mb-3 aspect-3/4 rounded-md bg-muted" />
-              <p class="truncate font-medium">默认分组</p>
-              <p class="text-xs text-muted-foreground">12 本书</p>
+              <p class={bookGroupGridTitleClass()}>默认分组</p>
+              <p class={bookGroupGridSubtitleClass()}>12 本书</p>
             </div>
           </div>
         </Show>
@@ -149,9 +153,9 @@ export function ThemeAppPreviewMock(props: ThemePreviewMocksProps) {
           </div>
         </Show>
 
-        <Show when={show('settingsTabPanel')}>
+        <Show when={show('settingsTabPanel') || show('settingsCard')}>
           <div
-            class="relative min-h-[120px] overflow-hidden rounded-xl border border-border bg-card p-4"
+            class="relative min-h-[120px] overflow-hidden rounded-xl border border-border bg-background p-4"
             {...componentDataAttr('settingsTabPanel')}
             style={overrideStyle(props.pack, 'settingsTabPanel')}
           >
@@ -159,6 +163,19 @@ export function ThemeAppPreviewMock(props: ThemePreviewMocksProps) {
             <div class="relative z-1 space-y-2">
               <p class="font-medium">设置 Tab 面板</p>
               <p class="text-sm text-muted-foreground">桌面端分类内容区背景</p>
+              <Show when={show('settingsCard')}>
+                <div
+                  class="flex h-16 items-center gap-3 rounded-lg border border-border/50 bg-card p-2 text-card-foreground"
+                  {...componentDataAttr('settingsCard')}
+                  style={overrideStyle(props.pack, 'settingsCard')}
+                >
+                  <MockComponentBackground pack={props.pack} id="settingsCard" resolveAssetUrl={props.resolveAssetUrl} />
+                  <div class="relative z-1">
+                    <p class="font-medium">设置分类卡片</p>
+                    <p class="text-xs text-card-foreground/70">卡片背景预览</p>
+                  </div>
+                </div>
+              </Show>
             </div>
           </div>
         </Show>
@@ -182,9 +199,12 @@ export function ThemeAppPreviewMock(props: ThemePreviewMocksProps) {
 
       <Show when={show('button')}>
         <div class="flex flex-wrap gap-2" {...componentDataAttr('button')} style={overrideStyle(props.pack, 'button')}>
-          <Button>主要按钮</Button>
+          <Button>主要</Button>
           <Button variant="secondary">次要</Button>
           <Button variant="outline">描边</Button>
+          <Button variant="destructive">危险</Button>
+          <Button variant="ghost">幽灵</Button>
+          <Button variant="link">链接</Button>
         </div>
       </Show>
 

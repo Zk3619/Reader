@@ -2,12 +2,14 @@
  * 带主题背景的卡片 / 区块壳层
  */
 
-import type { JSX, ValidComponent } from 'solid-js';
-import { splitProps } from 'solid-js';
+import { createMemo, splitProps, type JSX, type ValidComponent } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import type { AppComponentId } from '@/lib/theme/schema/theme-pack-v1';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
+import { useThemeDraftRuntime } from '@/components/theme/ThemeDraftRuntimeProvider';
+import { useThemePackRuntime } from '@/components/theme/ThemePackRuntimeProvider';
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
+import { componentOverrideToStyle } from '@/lib/theme/theme-runtime';
 import { cn } from '@/lib/utils';
 
 export type ThemedCardVariant =
@@ -34,10 +36,39 @@ export interface ThemedAppCardShellProps {
   [key: string]: unknown;
 }
 
+const CARD_VARIANT_SURFACE_CLASS: Record<ThemedCardVariant, string> = {
+  bookshelfCard: 'bg-card text-card-foreground',
+  bookshelfGroupCard: 'bg-card text-card-foreground',
+  settingsCard: 'bg-card text-card-foreground',
+  recordCard: 'bg-card text-card-foreground',
+  surfaceCard: 'bg-card text-card-foreground',
+};
+
 export function ThemedAppCardShell(props: ThemedAppCardShellProps) {
   const [local, rest] = splitProps(props, ['variant', 'class', 'style', 'children', 'as']);
+  const draftRuntime = useThemeDraftRuntime();
+  const runtime = useThemePackRuntime();
   const componentId = () => CARD_VARIANT_TO_ID[local.variant];
   const Tag = () => local.as ?? 'div';
+
+  const themeOverrideStyle = createMemo(() => {
+    const pack = draftRuntime?.appPack() ?? runtime.appPack();
+    if (!pack) return {};
+    const id = componentId();
+    const override = pack.app?.components?.[id];
+    if (override) {
+      void override.cssVars;
+      void override.layout;
+      void override.typography;
+      void override.surfaceAppearance;
+    }
+    return componentOverrideToStyle(override, { componentId: id });
+  });
+
+  const mergedStyle = createMemo(() => ({
+    ...local.style,
+    ...themeOverrideStyle(),
+  }));
 
   return (
     <Dynamic
@@ -45,9 +76,10 @@ export function ThemedAppCardShell(props: ThemedAppCardShellProps) {
       class={cn(
         'relative overflow-hidden',
         '[&>:not([data-theme-background])]:relative [&>:not([data-theme-background])]:z-1',
+        CARD_VARIANT_SURFACE_CLASS[local.variant],
         local.class,
       )}
-      style={local.style}
+      style={mergedStyle()}
       {...componentDataAttr(componentId())}
       {...rest}
     >

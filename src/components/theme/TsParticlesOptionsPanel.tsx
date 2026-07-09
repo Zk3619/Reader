@@ -3,7 +3,7 @@
  */
 
 import { For, createMemo } from 'solid-js';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { ThemeStudioNumberField } from '@/components/theme/ThemeStudioNumberField';
 import {
   DEFAULT_VISUAL_PARTICLE_OPTIONS,
   mergeTsParticlesVisualOptions,
@@ -42,20 +42,14 @@ export function TsParticlesOptionsPanel(props: TsParticlesOptionsPanelProps) {
       <p class="text-xs font-medium text-muted-foreground">粒子可视化参数（写入 optionsJson）</p>
       <For each={FIELDS}>
         {(field) => (
-          <TextField>
-            <TextFieldLabel>{field.label}</TextFieldLabel>
-            <TextFieldInput
-              type="number"
-              min={field.min}
-              max={field.max}
-              step={field.step}
-              value={String(visual()[field.key])}
-              onInput={(e) => {
-                const n = Number(e.currentTarget.value);
-                if (Number.isFinite(n)) patch(field.key, n);
-              }}
-            />
-          </TextField>
+          <ThemeStudioNumberField
+            label={field.label}
+            value={visual()[field.key]}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            onValueChange={(value) => patch(field.key, value)}
+          />
         )}
       </For>
     </div>

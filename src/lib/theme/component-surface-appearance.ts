@@ -16,6 +16,7 @@ import {
 /** 各组件主底色 CSS 变量（与 COMPONENT_CSS_VAR_PRESETS 背景项对齐） */
 export const COMPONENT_SURFACE_BG_VAR: Partial<Record<ThemeComponentId, string>> = {
   appShell: '--background',
+  topNav: '--background',
   pageContent: '--background',
   sidebar: '--sidebar',
   sidebarHeader: '--sidebar',
@@ -30,7 +31,7 @@ export const COMPONENT_SURFACE_BG_VAR: Partial<Record<ThemeComponentId, string>>
   settingsRow: '--background',
   recordCard: '--card',
   surfaceCard: '--card',
-  button: '--primary',
+  button: '--card',
   dialog: '--popover',
   drawer: '--background',
   dropdown: '--popover',

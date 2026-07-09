@@ -11,6 +11,10 @@ import {
   isAppOverlayComponent,
   shouldShowAppPreviewComponent,
 } from '@/lib/theme/preview/preview-visibility';
+import {
+  themePreviewSurfaceShellClass,
+  themePreviewTextClasses,
+} from '@/lib/theme/preview/theme-component-text-roles';
 import { cn } from '@/lib/utils';
 
 export interface ThemeAppOverlayPreviewProps {
@@ -36,18 +40,30 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
     <Show when={showSection()}>
       <div class="shrink-0 space-y-3 border-t border-border/60 bg-muted/10 p-3">
         <p class="text-xs font-medium text-muted-foreground">浮层组件</p>
-        <div class="grid gap-3 sm:grid-cols-2">
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <Show when={show('button')}>
             <ThemedPreviewSurface
               componentId="button"
-              class={cn('flex flex-wrap gap-2 rounded-xl border border-border/40 p-3', highlight('button'))}
+              class={cn(
+                'flex flex-wrap gap-2 rounded-xl border border-border/40 bg-card p-3',
+                highlight('button'),
+              )}
             >
               <Button size="sm">主要</Button>
               <Button size="sm" variant="secondary">
                 次要
               </Button>
-              <Button size="sm" variant="outline">
+              <Button size="sm" variant="outline" class="text-foreground">
                 描边
+              </Button>
+              <Button size="sm" variant="destructive">
+                危险
+              </Button>
+              <Button size="sm" variant="ghost" class="text-foreground">
+                幽灵
+              </Button>
+              <Button size="sm" variant="link">
+                链接
               </Button>
             </ThemedPreviewSurface>
           </Show>
@@ -56,12 +72,15 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="dialog"
               class={cn(
-                'rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg',
+                'rounded-xl border border-border p-4 shadow-lg',
+                themePreviewSurfaceShellClass('dialog'),
                 highlight('dialog'),
               )}
             >
-              <p class="font-semibold">对话框标题</p>
-              <p class="mt-1 text-sm text-muted-foreground">确认操作的对话框内容预览。</p>
+              <p class={cn('font-semibold', themePreviewTextClasses('dialog').primary)}>对话框标题</p>
+              <p class={cn('mt-1 text-sm', themePreviewTextClasses('dialog').muted)}>
+                确认操作的对话框内容预览。
+              </p>
             </ThemedPreviewSurface>
           </Show>
 
@@ -69,13 +88,28 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="dropdown"
               class={cn(
-                'w-full rounded-lg border border-border bg-popover p-2 text-sm shadow-md',
+                'w-full rounded-lg border border-border p-2 text-sm shadow-md',
+                themePreviewSurfaceShellClass('dropdown'),
                 highlight('dropdown'),
               )}
             >
               <ul class="space-y-1">
-                <li class="rounded-md px-2 py-1.5">菜单项 A</li>
-                <li class="rounded-md px-2 py-1.5 bg-accent/50">菜单项 B</li>
+                <li
+                  class={cn(
+                    'rounded-md px-2 py-1.5',
+                    themePreviewTextClasses('dropdown').primary,
+                  )}
+                >
+                  菜单项 A
+                </li>
+                <li
+                  class={cn(
+                    'rounded-md px-2 py-1.5 bg-accent/50',
+                    themePreviewTextClasses('dropdown').primary,
+                  )}
+                >
+                  菜单项 B
+                </li>
               </ul>
             </ThemedPreviewSurface>
           </Show>
@@ -84,12 +118,13 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="select"
               class={cn(
-                'rounded-lg border border-border bg-popover p-2 text-sm',
+                'rounded-lg border border-border p-2 text-sm',
+                themePreviewSurfaceShellClass('select'),
                 highlight('select'),
               )}
             >
-              <p class="font-medium">选项一</p>
-              <p class="text-muted-foreground">选项二</p>
+              <p class={cn('font-medium', themePreviewTextClasses('select').primary)}>选项一</p>
+              <p class={themePreviewTextClasses('select').muted}>选项二</p>
             </ThemedPreviewSurface>
           </Show>
 
@@ -97,11 +132,12 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="combobox"
               class={cn(
-                'rounded-lg border border-border bg-popover p-2 text-sm',
+                'rounded-lg border border-border p-2 text-sm',
+                themePreviewSurfaceShellClass('combobox'),
                 highlight('combobox'),
               )}
             >
-              <p>搜索并选择…</p>
+              <p class={themePreviewTextClasses('combobox').primary}>搜索并选择…</p>
             </ThemedPreviewSurface>
           </Show>
 
@@ -109,12 +145,13 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="contextMenu"
               class={cn(
-                'rounded-lg border border-border bg-popover p-2 text-sm shadow-md',
+                'rounded-lg border border-border p-2 text-sm shadow-md',
+                themePreviewSurfaceShellClass('contextMenu'),
                 highlight('contextMenu'),
               )}
             >
-              <p>打开</p>
-              <p>删除</p>
+              <p class={themePreviewTextClasses('contextMenu').primary}>打开</p>
+              <p class={themePreviewTextClasses('contextMenu').primary}>删除</p>
             </ThemedPreviewSurface>
           </Show>
 
@@ -122,12 +159,13 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="drawer"
               class={cn(
-                'rounded-t-xl border border-border bg-background p-4 shadow-xl',
+                'rounded-t-xl border border-border p-4 shadow-xl',
+                themePreviewSurfaceShellClass('drawer'),
                 highlight('drawer'),
               )}
             >
               <div class="mx-auto mb-3 h-1 w-12 rounded-full bg-muted" />
-              <p class="font-medium">底部抽屉</p>
+              <p class={cn('font-medium', themePreviewTextClasses('drawer').primary)}>底部抽屉</p>
             </ThemedPreviewSurface>
           </Show>
 
@@ -135,23 +173,32 @@ export function ThemeAppOverlayPreview(props: ThemeAppOverlayPreviewProps) {
             <ThemedPreviewSurface
               componentId="toast"
               class={cn(
-                'rounded-lg border border-border bg-card px-4 py-3 text-sm shadow-md',
+                'rounded-lg border border-border px-4 py-3 text-sm shadow-md',
+                themePreviewSurfaceShellClass('toast'),
                 highlight('toast'),
               )}
             >
-              操作已完成
+              <span class={themePreviewTextClasses('toast').primary}>操作已完成</span>
             </ThemedPreviewSurface>
           </Show>
 
           <Show when={show('settingsRow')}>
             <ThemedPreviewSurface
               componentId="settingsRow"
-              class={cn('rounded-xl border border-border bg-card p-4', highlight('settingsRow'))}
+              class={cn(
+                'rounded-xl border border-border p-4',
+                themePreviewSurfaceShellClass('settingsRow'),
+                highlight('settingsRow'),
+              )}
             >
               <div class="flex items-center justify-between gap-4">
                 <div>
-                  <p class="font-medium">设置项</p>
-                  <p class="text-sm text-muted-foreground">说明文字</p>
+                  <p class={cn('font-medium', themePreviewTextClasses('settingsRow').primary)}>
+                    设置项
+                  </p>
+                  <p class={cn('text-sm', themePreviewTextClasses('settingsRow').muted)}>
+                    说明文字
+                  </p>
                 </div>
                 <div class="h-6 w-11 rounded-full bg-primary/20" />
               </div>

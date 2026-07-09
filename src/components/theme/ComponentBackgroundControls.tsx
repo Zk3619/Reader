@@ -4,7 +4,8 @@
  */
 
 import { For, Show, createMemo } from 'solid-js';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { TextField, TextFieldLabel } from '@/components/ui/text-field';
+import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import type {
   ContainerBackgroundConfig,
@@ -157,31 +158,63 @@ export interface BackgroundOpacityBlurFieldsProps {
   opacityLabel?: string;
 }
 
+export interface ThemeStudioRangeFieldProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  formatValue?: (value: number) => string;
+  onChange: (value: number) => void;
+}
+
+/** 主题工作室滑条：全宽轨道，最小/最大值时滑块贴齐轨道两端 */
+export function ThemeStudioRangeField(props: ThemeStudioRangeFieldProps) {
+  const displayValue = () => props.formatValue?.(props.value) ?? String(props.value);
+
+  return (
+    <TextField>
+      <TextFieldLabel class="text-xs">
+        {props.label} ({displayValue()})
+      </TextFieldLabel>
+      <Slider
+        class="theme-studio-range w-full overflow-visible py-1.5"
+        value={[props.value]}
+        minValue={props.min}
+        maxValue={props.max}
+        step={props.step ?? 1}
+        onChange={(values) => props.onChange(values[0] ?? props.min)}
+      >
+        <SliderTrack class="h-2 w-full">
+          <SliderFill />
+          <SliderThumb />
+        </SliderTrack>
+      </Slider>
+    </TextField>
+  );
+}
+
 export function BackgroundOpacityBlurFields(props: BackgroundOpacityBlurFieldsProps) {
   return (
     <>
-      <TextField>
-        <TextFieldLabel class="text-xs">
-          {props.opacityLabel ?? '不透明度'} ({props.opacity}%)
-        </TextFieldLabel>
-        <TextFieldInput
-          type="range"
-          min={0}
-          max={100}
-          value={String(props.opacity)}
-          onInput={(e) => props.onOpacityChange(Number(e.currentTarget.value))}
-        />
-      </TextField>
-      <TextField>
-        <TextFieldLabel class="text-xs">模糊 ({props.blurPx}px)</TextFieldLabel>
-        <TextFieldInput
-          type="range"
-          min={0}
-          max={24}
-          value={String(props.blurPx)}
-          onInput={(e) => props.onBlurChange(Number(e.currentTarget.value))}
-        />
-      </TextField>
+      <ThemeStudioRangeField
+        label={props.opacityLabel ?? '不透明度'}
+        value={props.opacity}
+        min={0}
+        max={100}
+        step={1}
+        formatValue={(value) => `${value}%`}
+        onChange={props.onOpacityChange}
+      />
+      <ThemeStudioRangeField
+        label="模糊"
+        value={props.blurPx}
+        min={0}
+        max={24}
+        step={1}
+        formatValue={(value) => `${value}px`}
+        onChange={props.onBlurChange}
+      />
     </>
   );
 }
