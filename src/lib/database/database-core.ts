@@ -259,8 +259,11 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
     }
   }
 
-  const { ensureBuiltinThemePresets } = await import('@/lib/database/theme-presets');
+  const { ensureBuiltinThemePresets, ensureDefaultThemePresetActive } = await import(
+    '@/lib/database/theme-presets'
+  );
   await ensureBuiltinThemePresets();
+  await ensureDefaultThemePresetActive();
 }
 
 /**

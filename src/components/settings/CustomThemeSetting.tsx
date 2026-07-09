@@ -5,14 +5,26 @@
 import { Button } from '@/components/ui/button';
 import { SettingsIcon } from '@/components/shared/icons';
 import { themeStudioStore } from '@/stores/theme-studio';
+import { settingsStore } from '@/stores/settings';
+import {
+  BUILTIN_DEFAULT_PRESET_ID,
+  getThemePreset,
+} from '@/lib/database/theme-presets';
 
 export interface CustomThemeSettingProps {
   onOpenStudio?: () => void;
 }
 
 export function CustomThemeSetting(props: CustomThemeSettingProps) {
-  const open = () => {
-    themeStudioStore.openStudio({ entry: 'settings', scope: 'all' });
+  const open = async () => {
+    const activeId = settingsStore.state.app.activeThemePresetId ?? BUILTIN_DEFAULT_PRESET_ID;
+    const record = await getThemePreset(activeId);
+    themeStudioStore.openStudio({
+      entry: 'settings',
+      scope: 'all',
+      pack: record?.manifest,
+      presetId: record?.id ?? null,
+    });
     props.onOpenStudio?.();
   };
 
@@ -25,7 +37,7 @@ export function CustomThemeSetting(props: CustomThemeSettingProps) {
             打开主题工作室，按组件精细调整主程序与阅读器样式，支持预设保存、导入导出与高级特效
           </p>
         </div>
-        <Button class="cursor-pointer gap-2 shrink-0" onClick={open}>
+        <Button class="cursor-pointer gap-2 shrink-0" onClick={() => void open()}>
           <SettingsIcon class="h-4 w-4" />
           打开主题工作室
         </Button>

@@ -2,15 +2,21 @@
  * 设置页 — 主题预设列表与快速切换
  */
 
-import { createSignal, For, onMount, Show } from 'solid-js';
-import { listThemePresets } from '@/lib/database/theme-presets';
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { Button } from '@/components/ui/button';
+import {
+  ensureDefaultThemePresetActive,
+  listThemePresets,
+} from '@/lib/database/theme-presets';
 import type { ThemePresetRecord } from '@/lib/theme/schema/theme-pack-v1';
+import { onThemePresetsChanged } from '@/lib/theme/theme-preset-events';
 import { applyActiveThemePackToDocument } from '@/lib/theme/theme-runtime';
 import { publishActiveThemePack, publishActiveViewerThemePack } from '@/stores/theme-active-pack';
 import { settingsStore } from '@/stores/settings';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { cn } from '@/lib/utils';
-import { CheckIcon } from '@/components/shared/icons';
+import { CheckIcon, FolderTreeIcon } from '@/components/shared/icons';
+import { ThemePresetManageDialog } from '@/components/theme/ThemePresetManageDialog';
 
 const PRESET_KIND_LABEL: Record<ThemePresetRecord['kind'], string> = {
   builtin: '内置',
@@ -22,6 +28,7 @@ export function ThemePresetListSetting() {
   const [presets, setPresets] = createSignal<ThemePresetRecord[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [applyingId, setApplyingId] = createSignal<string | null>(null);
+  const [manageOpen, setManageOpen] = createSignal(false);
 
   const reload = async () => {
     setLoading(true);
@@ -32,7 +39,14 @@ export function ThemePresetListSetting() {
     }
   };
 
-  onMount(() => void reload());
+  onMount(() => {
+    void (async () => {
+      await ensureDefaultThemePresetActive();
+      await reload();
+    })();
+    const unsubscribe = onThemePresetsChanged(() => void reload());
+    onCleanup(unsubscribe);
+  });
 
   const activeAppId = () => settingsStore.state.app.activeThemePresetId;
   const activeViewerId = () => settingsStore.state.app.activeViewerThemePresetId;
@@ -71,11 +85,22 @@ export function ThemePresetListSetting() {
 
   return (
     <div class="rounded-2xl border border-border/50 bg-card p-6">
-      <div class="mb-4 space-y-1">
-        <h3 class="font-semibold text-foreground">主题预设</h3>
-        <p class="text-sm text-muted-foreground">
-          快速切换已保存的主题包（含组件背景、语义色与特效）
-        </p>
+      <div class="mb-4 flex items-start justify-between gap-3">
+        <div class="space-y-1">
+          <h3 class="font-semibold text-foreground">主题预设</h3>
+          <p class="text-sm text-muted-foreground">
+            快速切换已保存的主题包（含组件背景、语义色与特效）
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          class="shrink-0 cursor-pointer gap-1.5"
+          onClick={() => setManageOpen(true)}
+        >
+          <FolderTreeIcon class="h-4 w-4" />
+          管理
+        </Button>
       </div>
 
       <Show when={loading()}>
@@ -137,6 +162,12 @@ export function ThemePresetListSetting() {
           }}
         </For>
       </ul>
+
+      <ThemePresetManageDialog
+        open={manageOpen()}
+        onOpenChange={setManageOpen}
+        onPresetsChange={() => void reload()}
+      />
     </div>
   );
 }
