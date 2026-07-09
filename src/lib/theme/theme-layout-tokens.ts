@@ -11,7 +11,7 @@ export interface LayoutTokenGroup {
   keys: (keyof LayoutTokens)[];
 }
 
-export const LAYOUT_TOKEN_GROUPS: LayoutTokenGroup[] = [
+export const LAYOUT_SIZE_TOKEN_GROUPS: LayoutTokenGroup[] = [
   {
     id: 'shell',
     label: '壳层尺寸',
@@ -28,10 +28,28 @@ export const LAYOUT_TOKEN_GROUPS: LayoutTokenGroup[] = [
       'readerBrightnessChromeGap',
     ],
   },
+];
+
+/** @deprecated 使用 LAYOUT_SIZE_TOKEN_GROUPS + MOTION_TOKEN_GROUPS */
+export const LAYOUT_TOKEN_GROUPS: LayoutTokenGroup[] = [
+  ...LAYOUT_SIZE_TOKEN_GROUPS,
   {
     id: 'motion',
     label: '动效',
     keys: ['readerBarDuration', 'readerBarEasingEnter', 'readerBarEasingExit', 'searchLoopDuration', 'searchLoopMinWidth'],
+  },
+];
+
+export const MOTION_TOKEN_GROUPS: LayoutTokenGroup[] = [
+  {
+    id: 'reader-chrome',
+    label: '阅读器顶底栏',
+    keys: ['readerBarDuration', 'readerBarEasingEnter', 'readerBarEasingExit'],
+  },
+  {
+    id: 'search-loop',
+    label: '搜索循环动画',
+    keys: ['searchLoopDuration', 'searchLoopMinWidth'],
   },
 ];
 

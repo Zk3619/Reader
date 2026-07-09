@@ -1,9 +1,10 @@
 /**
- * Theme Studio Inspector — 语义色 / 背景 / 特效 / 高级（CodeMirror）
+ * Theme Studio Inspector — 颜色 / 布局 / 排版 / 背景 / 动效 / 高级
  */
 
 import { For, Show, createMemo } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { ColorPicker } from '@/components/ui/color-picker';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,16 +30,15 @@ import type { SemanticColorTokens } from '@/lib/theme/types';
 import { writeThemeAssetFile } from '@/lib/theme/theme-asset-storage';
 import { createThemePackId } from '@/lib/theme/schema/theme-pack-v1';
 import {
-  LAYOUT_TOKEN_LABELS,
   DEFAULT_LAYOUT_TOKEN_VALUES,
 } from '@/lib/theme/theme-layout-tokens';
 import type { LayoutTokens } from '@/lib/theme/types';
-import { cn } from '@/lib/utils';
+import type { MotionTokens, TypographyTokens } from '@/lib/theme/schema/theme-pack-v1';
 import { TsParticlesOptionsPanel } from '@/components/theme/TsParticlesOptionsPanel';
-import {
-  layoutTokenRulerWidthPx,
-  validateLayoutToken,
-} from '@/lib/theme/layout-token-validation';
+import { ThemeStudioInspectorLayoutPanel } from '@/components/theme/ThemeStudioInspectorLayoutPanel';
+import { ThemeStudioInspectorTypographyPanel } from '@/components/theme/ThemeStudioInspectorTypographyPanel';
+import { ThemeStudioInspectorMotionPanel } from '@/components/theme/ThemeStudioInspectorMotionPanel';
+import { ThemeStudioNumberField } from '@/components/theme/ThemeStudioNumberField';
 import {
   BackgroundOpacityBlurFields,
   ComponentBackgroundControls,
@@ -46,8 +46,9 @@ import {
   patchViewerTextContentBackgroundAsset,
 } from '@/components/theme/ComponentBackgroundControls';
 import {
-  COMPONENT_CSS_VAR_PRESETS,
   filterComponentCssVarPresets,
+  getComponentCssVarPresetHint,
+  getComponentCssVarPresets,
   resolveInspectorEditableSections,
 } from '@/lib/theme/preview/theme-inspector-editable';
 
@@ -56,14 +57,6 @@ export interface ThemeStudioInspectorProps {
 }
 
 const TEXT_VIEWER_PALETTE_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
-const COMPONENT_LAYOUT_LABELS: Record<keyof ComponentLayoutOverride, string> = {
-  padding: '内边距',
-  margin: '外边距',
-  gap: '间距',
-  radius: '圆角',
-  border: '边框',
-  shadow: '阴影',
-};
 
 const PARTICLE_PRESETS: TsParticlesPreset[] = [
   'particles',
@@ -74,14 +67,6 @@ const PARTICLE_PRESETS: TsParticlesPreset[] = [
   'bubbles',
   'aurora',
 ];
-
-const COMPONENT_TYPOGRAPHY_LABELS: Record<keyof ComponentTypographyOverride, string> = {
-  fontSize: '字号',
-  fontWeight: '字重',
-  lineHeight: '行高',
-  letterSpacing: '字距',
-  fontFamily: '字体',
-};
 
 function defaultMouseTrailEffect(): ThemeEffectConfig {
   return {
@@ -140,6 +125,26 @@ function defaultCustomCursorImageEffect(): ThemeEffectConfig {
     hideDefault: true,
     scope: 'app',
   };
+}
+
+function ThemeColorField(props: { value: string; label: string; onChange: (hex: string) => void }) {
+  return (
+    <div class="flex items-center gap-2">
+      <ColorPicker
+        variant="minimal"
+        triggerVariant="icon"
+        size="sm"
+        showAlpha={false}
+        defaultFormat="hex"
+        outputFormat="hex"
+        value={props.value}
+        onChange={(hex) => props.onChange(hex)}
+        aria-label={props.label}
+        class="shrink-0"
+      />
+      <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">{props.label}</span>
+    </div>
+  );
 }
 
 export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
@@ -306,6 +311,26 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
   const layoutValue = (key: keyof LayoutTokens): string => {
     const layout = themeStudioStore.state.draftPack.app?.tokens?.layout;
     return layout?.[key] ?? DEFAULT_LAYOUT_TOKEN_VALUES[key];
+  };
+
+  const patchMotion = (patch: Partial<MotionTokens>) => {
+    patchPack((draft) => ({
+      ...draft,
+      app: {
+        ...draft.app!,
+        motion: { ...draft.app?.motion, ...patch },
+      },
+    }));
+  };
+
+  const patchTypographyTokens = (patch: Partial<TypographyTokens>) => {
+    patchPack((draft) => ({
+      ...draft,
+      app: {
+        ...draft.app!,
+        typography: { ...draft.app?.typography, ...patch },
+      },
+    }));
   };
 
   const componentOverride = () => {
@@ -593,7 +618,7 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
 
   const cssVarPresets = () =>
     filterComponentCssVarPresets(
-      COMPONENT_CSS_VAR_PRESETS[props.selectedComponentId] ?? [],
+      getComponentCssVarPresets(props.selectedComponentId),
       sections().semanticGroups,
     );
 
@@ -691,11 +716,25 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
 
       <div class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both p-4">
       <Tabs defaultValue="colors" class="w-full">
-        <TabsList class="grid w-full grid-cols-4">
-          <TabsTrigger value="colors">颜色</TabsTrigger>
-          <TabsTrigger value="background">背景</TabsTrigger>
-          <TabsTrigger value="effects">特效</TabsTrigger>
-          <TabsTrigger value="advanced">高级</TabsTrigger>
+        <TabsList class="flex h-auto w-full flex-wrap gap-1 p-1">
+          <TabsTrigger value="colors" class="flex-1 text-xs sm:text-sm">
+            颜色
+          </TabsTrigger>
+          <TabsTrigger value="layout" class="flex-1 text-xs sm:text-sm">
+            布局
+          </TabsTrigger>
+          <TabsTrigger value="typography" class="flex-1 text-xs sm:text-sm">
+            排版
+          </TabsTrigger>
+          <TabsTrigger value="background" class="flex-1 text-xs sm:text-sm">
+            背景
+          </TabsTrigger>
+          <TabsTrigger value="motion" class="flex-1 text-xs sm:text-sm">
+            动效
+          </TabsTrigger>
+          <TabsTrigger value="advanced" class="flex-1 text-xs sm:text-sm">
+            高级
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="colors" class="space-y-3 pt-3">
@@ -723,19 +762,11 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
                 <p class="text-xs font-medium text-foreground">{group.label}</p>
                 <For each={group.keys}>
                   {(key) => (
-                    <div class="flex items-center gap-2">
-                      <input
-                        type="color"
-                        class="h-8 w-10 shrink-0 cursor-pointer rounded border border-input p-0.5"
-                        value={semanticValue(key)}
-                        aria-label={SEMANTIC_TOKEN_LABELS[key]}
-                        title={SEMANTIC_TOKEN_LABELS[key]}
-                        onInput={(e) => patchSemantic(key, e.currentTarget.value)}
-                      />
-                      <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                        {SEMANTIC_TOKEN_LABELS[key]}
-                      </span>
-                    </div>
+                    <ThemeColorField
+                      value={semanticValue(key)}
+                      label={SEMANTIC_TOKEN_LABELS[key]}
+                      onChange={(hex) => patchSemantic(key, hex)}
+                    />
                   )}
                 </For>
               </div>
@@ -746,185 +777,90 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             <div class="space-y-2 rounded-lg border border-border/50 p-2">
               <p class="text-xs font-medium text-foreground">组件 CSS 变量</p>
               <p class="text-[11px] text-muted-foreground">
-                仅作用于当前组件。背景色若已在上方语义色中出现，请优先用语义色；此处保留文字/强调/边框等局部覆盖。
+                仅作用于当前组件。下方标签对应预览中的主/副文字角色（如书名、作者、菜单项等）。
               </p>
+              <Show when={getComponentCssVarPresetHint(props.selectedComponentId)}>
+                {(hint) => <p class="text-[11px] text-muted-foreground">{hint()}</p>}
+              </Show>
               <For each={cssVarPresets()}>
                 {(preset) => (
-                  <div class="flex items-center gap-2">
-                    <input
-                      type="color"
-                      class="h-8 w-10 shrink-0 cursor-pointer rounded border border-input p-0.5"
-                      value={componentCssVarValue(preset.varName)}
-                      aria-label={preset.label}
-                      title={preset.label}
-                      onInput={(e) => patchComponentCssVar(preset.varName, e.currentTarget.value)}
-                    />
-                    <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                      {preset.label}
-                    </span>
-                  </div>
-                )}
-              </For>
-            </div>
-          </Show>
-
-          <Show when={sections().showComponentOverride}>
-            <div class="space-y-2 rounded-lg border border-border/50 p-2">
-              <p class="text-xs font-medium text-foreground">组件布局</p>
-              <p class="text-[11px] text-muted-foreground">边框示例：1px solid var(--border)；阴影示例：0 4px 12px rgba(0,0,0,0.12)</p>
-              <For each={(['padding', 'margin', 'gap', 'radius', 'border', 'shadow'] as const)}>
-                {(key) => (
-                  <TextField>
-                    <TextFieldLabel class="text-xs">{COMPONENT_LAYOUT_LABELS[key]}</TextFieldLabel>
-                    <TextFieldInput
-                      value={componentLayoutValue(key)}
-                      placeholder="inherit"
-                      onInput={(e) => patchComponentLayout(key, e.currentTarget.value)}
-                    />
-                  </TextField>
-                )}
-              </For>
-            </div>
-            <div class="space-y-2 rounded-lg border border-border/50 p-2">
-              <p class="text-xs font-medium text-foreground">组件排版</p>
-              <For each={(['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'fontFamily'] as const)}>
-                {(key) => (
-                  <TextField>
-                    <TextFieldLabel class="text-xs">{COMPONENT_TYPOGRAPHY_LABELS[key]}</TextFieldLabel>
-                    <TextFieldInput
-                      value={componentTypographyValue(key)}
-                      placeholder="inherit"
-                      onInput={(e) => patchComponentTypography(key, e.currentTarget.value)}
-                    />
-                  </TextField>
+                  <ThemeColorField
+                    value={componentCssVarValue(preset.varName)}
+                    label={preset.label}
+                    onChange={(hex) => patchComponentCssVar(preset.varName, hex)}
+                  />
                 )}
               </For>
             </div>
           </Show>
 
           <Show when={sections().showViewerPalette}>
-          <div class="border-t border-border pt-3">
-            <p class="mb-1 text-xs font-medium text-muted-foreground">阅读配色</p>
-            <p class="mb-2 text-[11px] text-muted-foreground">决定正文区底色与文字色；透明度/模糊请在「背景」Tab 调整。</p>
-            <div class="flex flex-wrap gap-2">
-              <For each={TEXT_VIEWER_PALETTE_IDS}>
-                {(id) => (
-                  <Button
-                    size="sm"
-                    variant={
-                      themeStudioStore.state.draftPack.viewer?.text?.paletteId === id
-                        ? 'default'
-                        : 'outline'
-                    }
-                    class="cursor-pointer"
-                    onClick={() =>
-                      patchPack((d) => ({
-                        ...d,
-                        viewer: { ...d.viewer, text: { ...d.viewer?.text, paletteId: id } },
-                      }))
-                    }
-                  >
-                    {id}
-                  </Button>
-                )}
-              </For>
-            </div>
-          </div>
-          </Show>
-
-          <Show when={sections().layoutGroups.length > 0}>
-          <div class="border-t border-border pt-3">
-            <p class="mb-2 text-xs font-medium text-muted-foreground">布局 Token</p>
-            <For each={sections().layoutGroups}>
-              {(group) => (
-                <div class="mb-3 space-y-2 rounded-lg border border-border/50 p-2">
-                  <p class="text-xs font-medium text-foreground">{group.label}</p>
-                  <For each={group.keys}>
-                    {(key) => {
-                    const value = () => layoutValue(key);
-                    const validation = () => validateLayoutToken(key, value());
-                    const rulerPx = () => layoutTokenRulerWidthPx(key, value());
-                    return (
-                      <TextField>
-                        <TextFieldLabel class="text-xs">{LAYOUT_TOKEN_LABELS[key]}</TextFieldLabel>
-                        <TextFieldInput
-                          value={value()}
-                          class={validation().valid ? '' : 'border-destructive'}
-                          onInput={(e) => patchLayout(key, e.currentTarget.value)}
-                        />
-                        <Show when={validation().hint}>
-                          <p
-                            class={cn(
-                              'text-xs',
-                              validation().valid ? 'text-muted-foreground' : 'text-destructive',
-                            )}
-                          >
-                            {validation().hint}
-                          </p>
-                        </Show>
-                        <Show when={rulerPx()}>
-                          {(px) => (
-                            <div class="mt-1 flex items-center gap-2">
-                              <div
-                                class="h-2 rounded-sm bg-primary/60"
-                                style={{ width: `${px()}px` }}
-                              />
-                              <span class="text-[10px] text-muted-foreground">{px()}px</span>
-                            </div>
-                          )}
-                        </Show>
-                      </TextField>
-                    );
-                  }}
-                  </For>
-                </div>
-              )}
-            </For>
-          </div>
-          </Show>
-
-          <Show when={sections().showTypography}>
             <div class="border-t border-border pt-3">
-              <p class="mb-2 text-xs font-medium text-muted-foreground">排版</p>
-              <TextField>
-                <TextFieldLabel class="text-xs">字体族</TextFieldLabel>
-                <TextFieldInput
-                  value={themeStudioStore.state.draftPack.app?.typography?.fontFamily ?? ''}
-                  onInput={(e) =>
-                    patchPack((d) => ({
-                      ...d,
-                      app: {
-                        ...d.app!,
-                        typography: { ...d.app?.typography, fontFamily: e.currentTarget.value },
-                      },
-                    }))
-                  }
-                />
-              </TextField>
+              <p class="mb-1 text-xs font-medium text-muted-foreground">阅读配色</p>
+              <p class="mb-2 text-[11px] text-muted-foreground">
+                决定正文区底色与文字色；透明度/模糊请在「背景」Tab 调整。
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <For each={TEXT_VIEWER_PALETTE_IDS}>
+                  {(id) => (
+                    <Button
+                      size="sm"
+                      variant={
+                        themeStudioStore.state.draftPack.viewer?.text?.paletteId === id
+                          ? 'default'
+                          : 'outline'
+                      }
+                      class="cursor-pointer"
+                      onClick={() =>
+                        patchPack((d) => ({
+                          ...d,
+                          viewer: { ...d.viewer, text: { ...d.viewer?.text, paletteId: id } },
+                        }))
+                      }
+                    >
+                      {id}
+                    </Button>
+                  )}
+                </For>
+              </div>
             </div>
           </Show>
+        </TabsContent>
 
-          <Show when={sections().showMotion}>
-            <div class="border-t border-border pt-3">
-              <p class="mb-2 text-xs font-medium text-muted-foreground">动效 Token</p>
-              <TextField>
-                <TextFieldLabel class="text-xs">默认过渡时长</TextFieldLabel>
-                <TextFieldInput
-                  value={themeStudioStore.state.draftPack.app?.motion?.durationNormal ?? ''}
-                  placeholder="200ms"
-                  onInput={(e) =>
-                    patchPack((d) => ({
-                      ...d,
-                      app: {
-                        ...d.app!,
-                        motion: { ...d.app?.motion, durationNormal: e.currentTarget.value },
-                      },
-                    }))
-                  }
-                />
-              </TextField>
-            </div>
-          </Show>
+        <TabsContent value="layout" class="pt-3">
+          <ThemeStudioInspectorLayoutPanel
+            sections={sections()}
+            layoutValue={layoutValue}
+            patchLayout={patchLayout}
+            componentLayoutValue={componentLayoutValue}
+            patchComponentLayout={patchComponentLayout}
+          />
+        </TabsContent>
+
+        <TabsContent value="typography" class="pt-3">
+          <ThemeStudioInspectorTypographyPanel
+            sections={sections()}
+            fontFamily={themeStudioStore.state.draftPack.app?.typography?.fontFamily ?? ''}
+            onFontFamilyChange={(value) => patchTypographyTokens({ fontFamily: value || undefined })}
+            fontFamilyMono={themeStudioStore.state.draftPack.app?.typography?.fontFamilyMono ?? ''}
+            onFontFamilyMonoChange={(value) =>
+              patchTypographyTokens({ fontFamilyMono: value || undefined })
+            }
+            typeScale={String(themeStudioStore.state.draftPack.app?.typography?.scale ?? '')}
+            onTypeScaleChange={(value) =>
+              patchTypographyTokens({
+                scale: value ? Number(value) : undefined,
+              })
+            }
+            typeLineHeight={String(themeStudioStore.state.draftPack.app?.typography?.lineHeight ?? '')}
+            onTypeLineHeightChange={(value) =>
+              patchTypographyTokens({
+                lineHeight: value ? Number(value) : undefined,
+              })
+            }
+            componentTypographyValue={componentTypographyValue}
+            patchComponentTypography={patchComponentTypography}
+          />
         </TabsContent>
 
         <TabsContent value="background" class="space-y-3 pt-3">
@@ -1018,19 +954,14 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
           </Show>
 
           <Show when={sections().showViewerChrome && !sections().showViewerChromeSurface}>
-          <TextField>
-            <TextFieldLabel>Chrome 透明度 (0–100)</TextFieldLabel>
-            <TextFieldInput
-              type="number"
-              min={0}
-              max={100}
-              value={String(chromeSurfaceAppearance().opacity)}
-              onInput={(e) => {
-                const opacity = Math.min(100, Math.max(0, Number(e.currentTarget.value) || 0));
-                patchChromeSurfaceAppearance({ opacity });
-              }}
-            />
-          </TextField>
+          <ThemeStudioNumberField
+            label="Chrome 透明度 (0–100)"
+            value={chromeSurfaceAppearance().opacity}
+            min={0}
+            max={100}
+            step={1}
+            onValueChange={(opacity) => patchChromeSurfaceAppearance({ opacity })}
+          />
           </Show>
 
           <Show when={sections().showTsParticles}>
@@ -1059,10 +990,20 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
           </Show>
         </TabsContent>
 
-        <TabsContent value="effects" class="space-y-3 pt-3">
-          <p class="text-sm text-muted-foreground">
-            容器级：拖尾/光晕/视差。应用主题后全局：点击粒子/涟漪/自定义指针（mouse-animations）。
-          </p>
+        <TabsContent value="motion" class="space-y-3 pt-3">
+          <ThemeStudioInspectorMotionPanel
+            sections={sections()}
+            layoutValue={layoutValue}
+            patchLayout={patchLayout}
+            motion={themeStudioStore.state.draftPack.app?.motion}
+            patchMotion={patchMotion}
+          />
+
+          <div class="space-y-2 rounded-lg border border-border/50 p-3">
+            <p class="text-xs font-medium text-foreground">交互特效</p>
+            <p class="text-[11px] text-muted-foreground">
+              容器级：拖尾/光晕/视差。应用主题后全局：点击粒子/涟漪/自定义指针。
+            </p>
           <div class="flex flex-col gap-2">
             <Button
               variant={effects().some((e) => e.type === 'mouseTrail') ? 'default' : 'outline'}
@@ -1159,33 +1100,26 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
                 </Button>
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <TextField>
-                  <TextFieldLabel>宽度 px</TextFieldLabel>
-                  <TextFieldInput
-                    type="number"
-                    min={8}
-                    max={128}
-                    value={String(customCursorEffect()?.width ?? 32)}
-                    onInput={(e) =>
-                      patchCustomCursor({ width: Number(e.currentTarget.value) || 32 })
-                    }
-                  />
-                </TextField>
-                <TextField>
-                  <TextFieldLabel>高度 px</TextFieldLabel>
-                  <TextFieldInput
-                    type="number"
-                    min={8}
-                    max={128}
-                    value={String(customCursorEffect()?.height ?? 32)}
-                    onInput={(e) =>
-                      patchCustomCursor({ height: Number(e.currentTarget.value) || 32 })
-                    }
-                  />
-                </TextField>
+                <ThemeStudioNumberField
+                  label="宽度 px"
+                  value={customCursorEffect()?.width ?? 32}
+                  min={8}
+                  max={128}
+                  step={1}
+                  onValueChange={(width) => patchCustomCursor({ width })}
+                />
+                <ThemeStudioNumberField
+                  label="高度 px"
+                  value={customCursorEffect()?.height ?? 32}
+                  min={8}
+                  max={128}
+                  step={1}
+                  onValueChange={(height) => patchCustomCursor({ height })}
+                />
               </div>
             </div>
           </Show>
+          </div>
         </TabsContent>
 
         <TabsContent value="advanced" class="space-y-3 pt-3">

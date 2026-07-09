@@ -2,7 +2,7 @@
  * Theme Studio — 全屏主题编辑与实时预览
  */
 
-import { createSignal, For, onMount, Show } from 'solid-js';
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
   AppDialog,
@@ -12,10 +12,12 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { cn } from '@/lib/utils';
 import { ThemePreviewSandbox } from '@/components/theme/ThemePreviewSandbox';
 import { ThemeStudioInspector } from '@/components/theme/ThemeStudioInspector';
+import { ThemePresetManageDialog } from '@/components/theme/ThemePresetManageDialog';
 import {
   listRootThemeComponents,
   listChildThemeComponents,
@@ -24,11 +26,14 @@ import {
 import type { ThemeApplyScope, ThemeComponentId } from '@/lib/theme/schema/theme-pack-v1';
 import { themeStudioStore } from '@/stores/theme-studio';
 import {
+  createThemePreset,
   deleteThemePreset,
   duplicateThemePreset,
   listThemePresets,
+  renameThemePreset,
   upsertThemePreset,
 } from '@/lib/database/theme-presets';
+import { onThemePresetsChanged } from '@/lib/theme/theme-preset-events';
 import type { ThemePresetRecord } from '@/lib/theme/schema/theme-pack-v1';
 import {
   downloadThemePackJson,
@@ -43,6 +48,13 @@ import { settingsStore } from '@/stores/settings';
 import { saveReaderUiConfig } from '@/lib/media/text/read-config-storage';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { summarizeThemePackDiff } from '@/lib/theme/adapters/legado-theme-adapter';
+import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import {
+  FolderTreeIcon,
+  PencilIcon,
+  PlusIcon,
+  TrashIcon,
+} from '@/components/shared/icons';
 
 export interface ThemeStudioPageProps {
   onBack?: () => void;
@@ -90,6 +102,12 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
   const [presets, setPresets] = createSignal<ThemePresetRecord[]>([]);
   const [loadingPresets, setLoadingPresets] = createSignal(true);
   const [discardDialogOpen, setDiscardDialogOpen] = createSignal(false);
+  const [manageDialogOpen, setManageDialogOpen] = createSignal(false);
+  const [createDialogOpen, setCreateDialogOpen] = createSignal(false);
+  const [createName, setCreateName] = createSignal('未命名主题');
+  const [renameTarget, setRenameTarget] = createSignal<ThemePresetRecord | null>(null);
+  const [renameValue, setRenameValue] = createSignal('');
+  const [presetActionBusy, setPresetActionBusy] = createSignal(false);
 
   const reloadPresets = async () => {
     setLoadingPresets(true);
@@ -100,7 +118,11 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
     }
   };
 
-  onMount(() => void reloadPresets());
+  onMount(() => {
+    void reloadPresets();
+    const unsubscribe = onThemePresetsChanged(() => void reloadPresets());
+    onCleanup(unsubscribe);
+  });
 
   const domain = () => (themeStudioStore.state.scope === 'viewer' ? 'viewer' : 'app');
 
@@ -212,6 +234,48 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
     await reloadPresets();
     showAppToast({ title: '已删除预设' });
   };
+
+  const handleCreatePreset = async () => {
+    const name = createName().trim();
+    if (!name) {
+      showAppToast({ title: '预设名称不能为空', variant: 'destructive' });
+      return;
+    }
+    setPresetActionBusy(true);
+    try {
+      const pack = await createThemePreset({ name });
+      themeStudioStore.setDraftPack(pack);
+      setCreateDialogOpen(false);
+      await reloadPresets();
+      showAppToast({ title: '已创建预设', description: name });
+    } finally {
+      setPresetActionBusy(false);
+    }
+  };
+
+  const handleRenamePreset = async () => {
+    const target = renameTarget();
+    const name = renameValue().trim();
+    if (!target || !name) return;
+    setPresetActionBusy(true);
+    try {
+      const ok = await renameThemePreset(target.id, name);
+      if (!ok) {
+        showAppToast({ title: '重命名失败', variant: 'destructive' });
+        return;
+      }
+      if (themeStudioStore.state.draftPack.id === target.id) {
+        themeStudioStore.patchDraft((draft) => ({ ...draft, name }));
+      }
+      setRenameTarget(null);
+      await reloadPresets();
+      showAppToast({ title: '已重命名' });
+    } finally {
+      setPresetActionBusy(false);
+    }
+  };
+
+  const currentPresetId = () => themeStudioStore.state.presetId ?? themeStudioStore.state.draftPack.id;
 
   const setScope = (scope: ThemeApplyScope) => themeStudioStore.setScope(scope);
 
@@ -383,37 +447,94 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
             </For>
           </div>
 
-          <div class="max-h-40 overflow-y-auto border-t border-border p-2">
-            <p class="mb-1 px-1 text-xs font-medium text-muted-foreground">预设</p>
+          <div class="max-h-48 overflow-y-auto border-t border-border p-2">
+            <div class="mb-1 flex items-center justify-between gap-1 px-1">
+              <p class="text-xs font-medium text-muted-foreground">预设</p>
+              <div class="flex items-center gap-0.5">
+                <AppTooltip>
+                  <AppTooltipTrigger
+                    as="button"
+                    type="button"
+                    class="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    onClick={() => {
+                      setCreateName('未命名主题');
+                      setCreateDialogOpen(true);
+                    }}
+                  >
+                    <PlusIcon class="h-3.5 w-3.5" />
+                  </AppTooltipTrigger>
+                  <AppTooltipContent>新建预设</AppTooltipContent>
+                </AppTooltip>
+                <AppTooltip>
+                  <AppTooltipTrigger
+                    as="button"
+                    type="button"
+                    class="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    onClick={() => setManageDialogOpen(true)}
+                  >
+                    <FolderTreeIcon class="h-3.5 w-3.5" />
+                  </AppTooltipTrigger>
+                  <AppTooltipContent>管理预设</AppTooltipContent>
+                </AppTooltip>
+              </div>
+            </div>
             <Show when={loadingPresets()}>
               <p class="px-1 text-xs text-muted-foreground">加载中…</p>
             </Show>
             <For each={presets()}>
               {(p) => (
-                <div class="mb-1 flex items-center gap-1">
+                <div
+                  class={cn(
+                    'mb-1 flex items-center gap-0.5 rounded px-1',
+                    currentPresetId() === p.id && 'bg-primary/10',
+                  )}
+                >
                   <button
                     type="button"
-                    class="min-w-0 flex-1 cursor-pointer truncate rounded px-2 py-1 text-left text-xs hover:bg-accent/50"
+                    class="min-w-0 flex-1 cursor-pointer truncate rounded px-1 py-1 text-left text-xs hover:bg-accent/50"
                     onClick={() => handleLoadPreset(p)}
                   >
                     {p.name}
                   </button>
-                  <button
-                    type="button"
-                    class="cursor-pointer rounded px-1 text-xs text-muted-foreground hover:text-foreground"
-                    title="复制"
-                    onClick={() => void handleDuplicate(p.id)}
-                  >
-                    +
-                  </button>
                   <Show when={p.kind !== 'builtin'}>
-                    <button
+                    <AppTooltip>
+                      <AppTooltipTrigger
+                        as="button"
+                        type="button"
+                        class="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                        onClick={() => {
+                          setRenameTarget(p);
+                          setRenameValue(p.name);
+                        }}
+                      >
+                        <PencilIcon class="h-3 w-3" />
+                      </AppTooltipTrigger>
+                      <AppTooltipContent>重命名</AppTooltipContent>
+                    </AppTooltip>
+                  </Show>
+                  <AppTooltip>
+                    <AppTooltipTrigger
+                      as="button"
                       type="button"
-                      class="cursor-pointer rounded px-1 text-xs text-destructive hover:underline"
-                      onClick={() => void handleDelete(p.id)}
+                      class="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      onClick={() => void handleDuplicate(p.id)}
                     >
-                      ×
-                    </button>
+                      <PlusIcon class="h-3 w-3" />
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>复制预设</AppTooltipContent>
+                  </AppTooltip>
+                  <Show when={p.kind !== 'builtin'}>
+                    <AppTooltip>
+                      <AppTooltipTrigger
+                        as="button"
+                        type="button"
+                        class="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-destructive hover:bg-destructive/10"
+                        onClick={() => void handleDelete(p.id)}
+                      >
+                        <TrashIcon class="h-3 w-3" />
+                      </AppTooltipTrigger>
+                      <AppTooltipContent>删除</AppTooltipContent>
+                    </AppTooltip>
                   </Show>
                 </div>
               )}
@@ -456,6 +577,73 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
             </Button>
             <Button class="cursor-pointer" onClick={() => void handleSaveAndLeave()}>
               保存并离开
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
+
+      <ThemePresetManageDialog
+        open={manageDialogOpen()}
+        onOpenChange={setManageDialogOpen}
+        onPresetsChange={() => void reloadPresets()}
+        onLoadPreset={handleLoadPreset}
+      />
+
+      <AppDialog open={createDialogOpen()} onOpenChange={setCreateDialogOpen}>
+        <AppDialogContent layout="plain" class="max-w-sm">
+          <AppDialogHeader>
+            <AppDialogTitle>新建主题预设</AppDialogTitle>
+            <AppDialogDescription>创建空白预设并加载到当前工作室。</AppDialogDescription>
+          </AppDialogHeader>
+          <TextField>
+            <TextFieldLabel>预设名称</TextFieldLabel>
+            <TextFieldInput
+              value={createName()}
+              onInput={(event) => setCreateName(event.currentTarget.value)}
+            />
+          </TextField>
+          <AppDialogFooter>
+            <Button variant="outline" class="cursor-pointer" onClick={() => setCreateDialogOpen(false)}>
+              取消
+            </Button>
+            <Button
+              class="cursor-pointer"
+              disabled={presetActionBusy()}
+              onClick={() => void handleCreatePreset()}
+            >
+              创建
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
+
+      <AppDialog
+        open={renameTarget() != null}
+        onOpenChange={(open) => {
+          if (!open) setRenameTarget(null);
+        }}
+      >
+        <AppDialogContent layout="plain" class="max-w-sm">
+          <AppDialogHeader>
+            <AppDialogTitle>重命名预设</AppDialogTitle>
+          </AppDialogHeader>
+          <TextField>
+            <TextFieldLabel>新名称</TextFieldLabel>
+            <TextFieldInput
+              value={renameValue()}
+              onInput={(event) => setRenameValue(event.currentTarget.value)}
+            />
+          </TextField>
+          <AppDialogFooter>
+            <Button variant="outline" class="cursor-pointer" onClick={() => setRenameTarget(null)}>
+              取消
+            </Button>
+            <Button
+              class="cursor-pointer"
+              disabled={presetActionBusy()}
+              onClick={() => void handleRenamePreset()}
+            >
+              保存
             </Button>
           </AppDialogFooter>
         </AppDialogContent>

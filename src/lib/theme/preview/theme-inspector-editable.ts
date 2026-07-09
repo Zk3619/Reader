@@ -8,15 +8,18 @@ import {
   type SemanticTokenGroup,
 } from '@/lib/theme/theme-semantic-colors';
 import {
-  LAYOUT_TOKEN_GROUPS,
+  LAYOUT_SIZE_TOKEN_GROUPS,
+  MOTION_TOKEN_GROUPS,
   type LayoutTokenGroup,
 } from '@/lib/theme/theme-layout-tokens';
+import { isLayoutMotionToken, isLayoutSizeToken } from '@/lib/theme/preview/theme-layout-token-meta';
 import type { SemanticColorTokens, LayoutTokens } from '@/lib/theme/types';
 import type { ThemeApplyScope } from '@/lib/theme/schema/theme-pack-v1';
 
 export interface InspectorEditableSections {
   semanticGroups: SemanticTokenGroup[];
   layoutGroups: LayoutTokenGroup[];
+  motionGroups: LayoutTokenGroup[];
   showTypography: boolean;
   showMotion: boolean;
   showComponentOverride: boolean;
@@ -94,12 +97,26 @@ function parseLayoutKeys(paths: readonly string[]): Set<keyof LayoutTokens> | 'a
 }
 
 function filterLayoutGroups(keys: Set<keyof LayoutTokens> | 'all'): LayoutTokenGroup[] {
-  if (keys === 'all') return LAYOUT_TOKEN_GROUPS;
+  if (keys === 'all') return LAYOUT_SIZE_TOKEN_GROUPS;
   if (keys.size === 0) return [];
-  return LAYOUT_TOKEN_GROUPS.map((group) => ({
-    ...group,
-    keys: group.keys.filter((key) => keys.has(key)),
-  })).filter((group) => group.keys.length > 0);
+  return LAYOUT_SIZE_TOKEN_GROUPS
+    .map((group) => ({
+      ...group,
+      keys: group.keys.filter((key) => keys.has(key) && isLayoutSizeToken(key)),
+    }))
+    .filter((group) => group.keys.length > 0);
+}
+
+function filterMotionGroups(keys: Set<keyof LayoutTokens> | 'all'): LayoutTokenGroup[] {
+  const source = MOTION_TOKEN_GROUPS;
+  if (keys === 'all') return source;
+  if (keys.size === 0) return [];
+  return source
+    .map((group) => ({
+      ...group,
+      keys: group.keys.filter((key) => keys.has(key) && isLayoutMotionToken(key)),
+    }))
+    .filter((group) => group.keys.length > 0);
 }
 
 export function resolveInspectorEditableSections(
@@ -121,6 +138,7 @@ export function resolveInspectorEditableSections(
   return {
     semanticGroups: filterSemanticGroups(semanticKeys),
     layoutGroups: filterLayoutGroups(parseLayoutKeys(paths)),
+    motionGroups: filterMotionGroups(parseLayoutKeys(paths)),
     showTypography: paths.includes('app.typography'),
     showMotion: paths.includes('app.motion'),
     showComponentOverride: hasAppComponent || hasViewerComponent,
@@ -140,107 +158,9 @@ export function resolveInspectorEditableSections(
   };
 }
 
-/** 与语义色「背景类」Token 重叠的 CSS 变量 — 已在颜色 Tab 编辑时不再重复展示 */
-const BACKGROUND_CSS_VARS = new Set([
-  '--sidebar',
-  '--background',
-  '--card',
-  '--primary',
-  '--popover',
-]);
-
-const CSS_VAR_TO_SEMANTIC_KEY: Partial<Record<string, keyof SemanticColorTokens>> = {
-  '--sidebar': 'sidebar',
-  '--background': 'background',
-  '--card': 'card',
-  '--primary': 'primary',
-  '--popover': 'popover',
-};
-
-/** 过滤与当前可编辑语义色重复的「背景」类组件 CSS 变量 */
-export function filterComponentCssVarPresets(
-  presets: { label: string; varName: string }[],
-  semanticGroups: SemanticTokenGroup[],
-): { label: string; varName: string }[] {
-  const semanticKeys = new Set(semanticGroups.flatMap((g) => g.keys));
-  return presets.filter((preset) => {
-    if (!BACKGROUND_CSS_VARS.has(preset.varName)) return true;
-    const semanticKey = CSS_VAR_TO_SEMANTIC_KEY[preset.varName];
-    return !(semanticKey && semanticKeys.has(semanticKey));
-  });
-}
-
-/** 侧栏等组件常用的 CSS 变量快捷编辑（文字/强调/边框；背景色请用语义色或阅读配色） */
-export const COMPONENT_CSS_VAR_PRESETS: Record<
-  string,
-  { label: string; varName: string }[]
-> = {
-  sidebar: [
-    { label: '侧栏背景', varName: '--sidebar' },
-    { label: '侧栏文字', varName: '--sidebar-foreground' },
-    { label: '侧栏强调', varName: '--sidebar-accent' },
-    { label: '侧栏边框', varName: '--sidebar-border' },
-  ],
-  sidebarNav: [
-    { label: '导航背景', varName: '--sidebar' },
-    { label: '导航文字', varName: '--sidebar-foreground' },
-  ],
-  sidebarRecent: [
-    { label: '区块背景', varName: '--sidebar' },
-    { label: '区块文字', varName: '--sidebar-foreground' },
-  ],
-  pageContent: [
-    { label: '页面背景', varName: '--background' },
-    { label: '页面文字', varName: '--foreground' },
-  ],
-  pageToolbar: [
-    { label: '工具栏背景', varName: '--background' },
-    { label: '工具栏文字', varName: '--foreground' },
-  ],
-  bookshelfCard: [
-    { label: '卡片背景', varName: '--card' },
-    { label: '卡片文字', varName: '--card-foreground' },
-  ],
-  button: [
-    { label: '按钮背景', varName: '--primary' },
-    { label: '按钮文字', varName: '--primary-foreground' },
-  ],
-  dialog: [
-    { label: '对话框背景', varName: '--popover' },
-    { label: '对话框文字', varName: '--popover-foreground' },
-  ],
-  sidebarHeader: [{ label: '上部背景', varName: '--sidebar' }],
-  sidebarFooter: [{ label: '底部背景', varName: '--sidebar' }],
-  settingsCard: [
-    { label: '卡片背景', varName: '--card' },
-    { label: '卡片文字', varName: '--card-foreground' },
-  ],
-  settingsTabPanel: [
-    { label: '面板背景', varName: '--background' },
-    { label: '面板文字', varName: '--foreground' },
-  ],
-  recordCard: [
-    { label: '卡片背景', varName: '--card' },
-    { label: '卡片文字', varName: '--card-foreground' },
-  ],
-  surfaceCard: [
-    { label: '卡片背景', varName: '--card' },
-    { label: '卡片文字', varName: '--card-foreground' },
-  ],
-  dropdown: [
-    { label: '菜单背景', varName: '--popover' },
-    { label: '菜单文字', varName: '--popover-foreground' },
-  ],
-  drawer: [
-    { label: '抽屉背景', varName: '--background' },
-    { label: '抽屉文字', varName: '--foreground' },
-  ],
-  toast: [
-    { label: 'Toast 背景', varName: '--background' },
-    { label: 'Toast 文字', varName: '--foreground' },
-  ],
-  appShell: [
-    { label: '壳层背景', varName: '--background' },
-    { label: '壳层文字', varName: '--foreground' },
-  ],
-};
+export {
+  filterComponentCssVarPresets,
+  getComponentCssVarPresetHint,
+  getComponentCssVarPresets,
+  type ComponentCssVarPreset,
+} from '@/lib/theme/preview/theme-component-text-roles';
