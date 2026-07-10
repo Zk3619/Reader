@@ -7,6 +7,8 @@ import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import {
   resolveShellLayoutPreference,
   type ShellLayoutPreference,
+  type MobileShellNavStyle,
+  type DesktopSidebarMode,
 } from '@/lib/shell/layout';
 import { isMobile } from '@/lib/platform/detect';
 import { AppTabs } from '@/components/shared/AppTabs';
@@ -18,9 +20,21 @@ const SHELL_LAYOUT_OPTIONS: { value: ShellLayoutPreference; label: string }[] = 
   { value: 'mobile', label: '移动' },
 ];
 
+const MOBILE_NAV_OPTIONS: { value: MobileShellNavStyle; label: string }[] = [
+  { value: 'topBar', label: '顶栏' },
+  { value: 'moduleSidebar', label: '侧栏' },
+];
+
+const DESKTOP_SIDEBAR_OPTIONS: { value: DesktopSidebarMode; label: string }[] = [
+  { value: 'fused', label: '融合' },
+  { value: 'independent', label: '独立' },
+];
+
 export function ShellLayoutSetting() {
   const shell = useShellLayout();
   const layout = () => settingsState.app.shellLayout ?? 'auto';
+  const mobileNav = () => settingsState.app.mobileShellNavStyle ?? 'topBar';
+  const desktopSidebar = () => settingsState.app.desktopSidebarMode ?? 'fused';
 
   const autoEffectiveHint = createMemo(() => {
     if (layout() !== 'auto') return null;
@@ -30,34 +44,37 @@ export function ShellLayoutSetting() {
       : '当前环境为桌面端，将使用顶栏布局。';
   });
 
-  const handleLayoutChange = (value: string) => {
-    const next = value as ShellLayoutPreference;
-    if (next === layout()) return;
-    void settingsStore.setShellLayout(next);
-  };
-
   return (
     <Show
       when={shell().isWide}
       fallback={
-        <div class="rounded-2xl border border-border/50 bg-card p-6">
+        <div class="rounded-2xl border border-border/50 bg-card p-6 space-y-4">
           <div class="space-y-1">
             <h3 class="font-semibold text-foreground">导航布局</h3>
             <p class="text-sm text-muted-foreground">
               {shell().useMobileShell
                 ? '当前为移动导航布局，已使用底部导航栏。'
-                : '当前为桌面导航布局，窗口宽度不足 480px 时仍使用顶部导航栏。'}
+                : '当前为桌面导航布局。'}
             </p>
           </div>
+          <AppTabs
+            layout="inline"
+            variant="settings"
+            value={mobileNav()}
+            options={MOBILE_NAV_OPTIONS.map((o) => o.value)}
+            labels={Object.fromEntries(MOBILE_NAV_OPTIONS.map((o) => [o.value, o.label])) as Record<MobileShellNavStyle, string>}
+            ariaLabel="移动壳层子页导航"
+            onChange={(v) => void settingsStore.setMobileShellNavStyle(v as MobileShellNavStyle)}
+          />
         </div>
       }
     >
-      <div class="rounded-2xl border border-border/50 bg-card p-6">
+      <div class="rounded-2xl border border-border/50 bg-card p-6 space-y-6">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="space-y-1">
-            <h3 class="font-semibold text-foreground">导航布局</h3>
+            <h3 class="font-semibold text-foreground">壳层布局</h3>
             <p class="text-sm text-muted-foreground">
-              桌面布局使用顶部导航栏；窗口宽度 ≥768px 时另显示侧边栏。移动布局使用底部导航栏（任意窗口宽度，含不足 480px）。自动根据当前运行环境选择布局；移动端设备且宽度不足 480px 时也会使用底栏。
+              桌面布局使用顶部导航栏与侧栏；移动布局使用底部导航栏。自动根据运行环境选择。
             </p>
             <Show when={autoEffectiveHint()}>
               <p class="text-sm text-primary">{autoEffectiveHint()}</p>
@@ -75,7 +92,45 @@ export function ShellLayoutSetting() {
               ) as Record<ShellLayoutPreference, string>
             }
             ariaLabel="导航布局"
-            onChange={handleLayoutChange}
+            onChange={(v) => void settingsStore.setShellLayout(v as ShellLayoutPreference)}
+          />
+        </div>
+
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-border/40 pt-4">
+          <div class="space-y-1">
+            <h3 class="font-semibold text-foreground">移动壳层子页导航</h3>
+            <p class="text-sm text-muted-foreground">
+              顶栏：显示 LOGO 与模块子页下拉。侧栏：隐藏顶栏，在侧栏 Sheet 内切换模块子页。
+            </p>
+          </div>
+          <AppTabs
+            layout="inline"
+            variant="settings"
+            tabsClass="w-full shrink-0 sm:w-auto"
+            value={mobileNav()}
+            options={MOBILE_NAV_OPTIONS.map((o) => o.value)}
+            labels={Object.fromEntries(MOBILE_NAV_OPTIONS.map((o) => [o.value, o.label])) as Record<MobileShellNavStyle, string>}
+            ariaLabel="移动壳层子页导航"
+            onChange={(v) => void settingsStore.setMobileShellNavStyle(v as MobileShellNavStyle)}
+          />
+        </div>
+
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-border/40 pt-4">
+          <div class="space-y-1">
+            <h3 class="font-semibold text-foreground">桌面侧栏模式</h3>
+            <p class="text-sm text-muted-foreground">
+              融合：模块子页叠在主侧栏下方。独立：模块子页使用第二固定侧栏。
+            </p>
+          </div>
+          <AppTabs
+            layout="inline"
+            variant="settings"
+            tabsClass="w-full shrink-0 sm:w-auto"
+            value={desktopSidebar()}
+            options={DESKTOP_SIDEBAR_OPTIONS.map((o) => o.value)}
+            labels={Object.fromEntries(DESKTOP_SIDEBAR_OPTIONS.map((o) => [o.value, o.label])) as Record<DesktopSidebarMode, string>}
+            ariaLabel="桌面侧栏模式"
+            onChange={(v) => void settingsStore.setDesktopSidebarMode(v as DesktopSidebarMode)}
           />
         </div>
       </div>

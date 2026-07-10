@@ -7,6 +7,14 @@ import {
   getPageNavigationSignal,
   withIgnoredPageNavigationAbort,
 } from '@/lib/navigation/page-navigation-scope';
+import { normalizePageType } from '@/lib/media-shelf/compat-keys';
+import { createOverlayStack } from '@/lib/navigation/overlay-stack';
+import {
+  prepareShellNavigation,
+} from '@/lib/modules/shell-compat';
+import {
+  consumePendingReaderTab,
+} from '@/stores/reader-internal-tab';
 
 describe('page-navigation-scope', () => {
   beforeEach(() => {
@@ -42,5 +50,35 @@ describe('page-navigation-scope', () => {
       expect(pageSignal.aborted).toBe(true);
       expect(getPageNavigationSignal().aborted).toBe(false);
     });
+  });
+});
+
+describe('normalizePageType (shell route compat)', () => {
+  it('maps legacy routes to new shell tabs', () => {
+    expect(normalizePageType('bookshelf')).toBe('reader');
+    expect(normalizePageType('bookshelf-cache')).toBe('media-cache');
+    expect(normalizePageType('book-search')).toBe('media-search');
+    expect(normalizePageType('media')).toBe('reader');
+    expect(normalizePageType('sources')).toBe('reader');
+    expect(normalizePageType('scout')).toBe('reader');
+    expect(normalizePageType('rss')).toBe('reader');
+    expect(normalizePageType('subscription')).toBe('subscribe');
+    expect(normalizePageType('music')).toBe('music');
+  });
+});
+
+describe('prepareShellNavigation (reader internal tab compat)', () => {
+  it('queues reader internal tab for legacy pages', () => {
+    expect(prepareShellNavigation('sources')).toBe('reader');
+    expect(consumePendingReaderTab()).toBe('sources');
+  });
+});
+
+describe('createOverlayStack navigateShell (legacy route compat)', () => {
+  it('normalizes bookshelf to reader when switching shell tab', () => {
+    const nav = createOverlayStack('sources');
+    nav.navigateShell('bookshelf');
+    expect(nav.currentPage()).toBe('reader');
+    expect(nav.shellTab()).toBe('reader');
   });
 });

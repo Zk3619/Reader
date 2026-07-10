@@ -5,10 +5,6 @@
 
 import { Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
-import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
-import { WindowControlButtons } from '@/components/shell/WindowControlButtons';
-import { Separator } from '@/components/ui/separator';
-import { isMobile } from '@/lib/platform/detect';
 import {
   createTauriWindowChromeDblClickHandler,
   shouldEnableTauriWindowChrome,
@@ -60,8 +56,6 @@ export interface PageToolbarProps {
 export function PageToolbar(props: PageToolbarProps) {
   const shell = useShellLayout();
   const insetTopSafeArea = () => props.insetTopSafeArea ?? shell().insetTopSafeArea;
-  /** 移动壳层 + 桌面/Web 环境：顶栏无 Navigation，补主题、窗口控制与拖拽区 */
-  const showMobileShellDesktopChrome = () => shell().useMobileShell && !isMobile();
   const enableTauriWindowChrome = () =>
     shouldEnableTauriWindowChrome(shell().useMobileShell);
   const onTauriWindowChromeDblClick = createTauriWindowChromeDblClickHandler();
@@ -110,16 +104,9 @@ export function PageToolbar(props: PageToolbarProps) {
             <div class="min-w-0 max-w-full overflow-hidden">{props.titleSlot}</div>
           </Show>
         </div>
-        <Show when={props.children || showMobileShellDesktopChrome()}>
+        <Show when={props.children}>
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 no-drag">
             {props.children}
-            <Show when={props.children && showMobileShellDesktopChrome()}>
-              <Separator orientation="vertical" class="mx-1 h-6" />
-            </Show>
-            <Show when={showMobileShellDesktopChrome()}>
-              <ThemeSwitch withTooltip />
-              <WindowControlButtons />
-            </Show>
           </div>
         </Show>
       </div>

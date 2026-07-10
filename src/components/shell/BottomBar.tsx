@@ -1,41 +1,13 @@
-import { For, Show, createMemo, type Component } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { appBottomChromePadding } from "@/lib/ui/viewport-classes";
 import type { PageType } from "@/components/shell/Navigation";
 import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
-import {
-  BookshelfIcon,
-  BookSourceIcon,
-  RssTabIcon,
-  BookmarkIcon,
-  BookInfoIcon,
-  RecordIcon,
-  SettingsIcon,
-  GlobeIcon,
-  BookOpenIcon,
-} from "@/components/shared/icons";
+import { SHELL_PAGE_CONFIG } from "@/lib/shell/shell-page-config";
+import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 
-// 页面配置（与 Navigation 和 SideBar 组件保持一致）
-const pageConfig: Record<PageType, { label: string; icon: Component<any> }> = {
-  bookshelf: { label: "书架", icon: BookshelfIcon },
-  scout: { label: "探索", icon: BookOpenIcon },
-  sources: { label: "书源", icon: BookSourceIcon },
-  explore: { label: "发现", icon: BookSourceIcon },
-  rss: { label: "订阅", icon: RssTabIcon },
-  bookmark: { label: "书签", icon: BookmarkIcon },
-  record: { label: "记录", icon: RecordIcon },
-  settings: { label: "设置", icon: SettingsIcon },
-  "remote-book": { label: "远程书籍", icon: GlobeIcon },
-  "text-viewer": { label: "阅读器", icon: BookmarkIcon },
-  "image-viewer": { label: "漫画", icon: BookmarkIcon },
-  "audio-viewer": { label: "听书", icon: BookmarkIcon },
-  "video-viewer": { label: "视频", icon: BookmarkIcon },
-  "file-viewer": { label: "文件", icon: BookmarkIcon },
-  "book-info": { label: "书籍信息", icon: BookInfoIcon },
-  "book-search": { label: "搜索", icon: BookOpenIcon },
-  "bookshelf-cache": { label: "缓存章节", icon: BookshelfIcon },
-};
+const pageConfig = SHELL_PAGE_CONFIG;
 
 interface BottomBarProps {
   currentPage?: PageType;
@@ -49,7 +21,7 @@ export function BottomBar(props: BottomBarProps) {
   }
 
   // 底栏显示的页面（书架、书源、订阅、其他）
-  const bottomBarPages: PageType[] = ["bookshelf", "scout", "sources", "rss", "settings"];
+  const bottomBarPages: PageType[] = ["reader", "music", "tv", "subscribe", "settings"];
 
   return (
     <div class={cn(
@@ -60,11 +32,11 @@ export function BottomBar(props: BottomBarProps) {
         <For each={bottomBarPages}>
           {(page) => {
             const config = pageConfig[page];
-            const currentPage = () => props.currentPage || "bookshelf";
+            const currentPage = () => normalizePageType(props.currentPage || "reader");
             const buttonClass = createMemo(() => cn(
               "flex-1 flex-col items-center justify-center gap-1 h-10 rounded-md transition-colors",
-              currentPage() !== page && "hover:bg-accent hover:text-accent-foreground",
-              currentPage() === page && "bg-accent text-accent-foreground"
+              currentPage() !== normalizePageType(page) && "hover:bg-accent hover:text-accent-foreground",
+              currentPage() === normalizePageType(page) && "bg-accent text-accent-foreground"
             ));
             return (
               <Button
@@ -77,7 +49,7 @@ export function BottomBar(props: BottomBarProps) {
                     const Icon = config.icon;
                     return <Icon class="h-5 w-5" />;
                   })()}
-                  <Show when={page === 'bookshelf'}>
+                  <Show when={page === 'reader'}>
                     <BookshelfPendingUpdateNavBadge class="absolute -top-1.5 -right-2.5 z-10" />
                   </Show>
                 </span>

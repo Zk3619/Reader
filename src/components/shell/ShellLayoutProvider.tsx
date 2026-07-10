@@ -22,6 +22,8 @@ export function ShellLayoutProvider(props: ParentProps<{ windowWidth: Accessor<n
       windowWidth: props.windowWidth(),
       preference,
       isMobileDevice: isMobile(),
+      mobileShellNavStyle: settingsState.app.mobileShellNavStyle ?? 'topBar',
+      desktopSidebarMode: settingsState.app.desktopSidebarMode ?? 'fused',
     });
     return {
       windowWidth: props.windowWidth(),

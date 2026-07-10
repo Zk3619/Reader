@@ -50,6 +50,18 @@ import {
   globalMediaPlayerState,
   globalMediaPlayerStore,
 } from '@/stores/global-media-player';
+import { AUDIO_HUB_BOOK_URL } from '@/lib/media/content-session';
+import { isMusicHubShellActive } from '@/stores/shell-tabs';
+import {
+  audioShellOpenViewer,
+  audioShellSkipNext,
+  audioShellSkipPrev,
+  audioShellStop,
+  audioShellTogglePlay,
+  audioShellIsPlaying,
+  hasAudioShellHandlers,
+  subscribeAudioShellPlaying,
+} from '@/lib/media/audio/audio-shell-controls';
 
 export interface GlobalMediaPlayerProps {
   /** 独立页（阅读器等）打开时隐藏壳层播放器 */
@@ -59,6 +71,7 @@ export interface GlobalMediaPlayerProps {
   /** 与主内容区一致的左侧偏移（桌面侧栏） */
   shellMainLeftClass?: string;
   onOpenTextReader?: (bookUrl: string) => void;
+  onOpenAudioHub?: () => void;
 }
 
 export function useGlobalMediaPlayerFixedInset(props: {
@@ -110,6 +123,54 @@ function ReadAloudEqualizer(props: { active: boolean }) {
         )}
         style={{ 'animation-delay': '240ms' }}
       />
+    </div>
+  );
+}
+
+function GlobalMediaPlayerAudioControls() {
+  const [playing, setPlaying] = createSignal(audioShellIsPlaying());
+  onMount(() => subscribeAudioShellPlaying(() => setPlaying(audioShellIsPlaying())));
+
+  return (
+    <div class="flex shrink-0 items-center gap-0.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="hidden h-8 w-8 sm:inline-flex"
+        aria-label="上一首"
+        onClick={() => audioShellSkipPrev()}
+      >
+        <SkipBack class="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-9 w-9"
+        aria-label={playing() ? '暂停' : '播放'}
+        onClick={() => audioShellTogglePlay()}
+      >
+        <Show when={playing()} fallback={<Play class="size-5" />}>
+          <Pause class="size-5" />
+        </Show>
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="hidden h-8 w-8 sm:inline-flex"
+        aria-label="下一首"
+        onClick={() => audioShellSkipNext()}
+      >
+        <SkipForward class="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-8 w-8 text-muted-foreground"
+        aria-label="停止"
+        onClick={() => audioShellStop()}
+      >
+        <Square class="size-4" />
+      </Button>
     </div>
   );
 }
@@ -239,6 +300,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     globalMediaPlayerState.shellActive &&
     !!globalMediaPlayerState.kind &&
     !props.shellOverlayOpen() &&
+    !isMusicHubShellActive() &&
     sessionActive();
 
   const meta = () => globalMediaPlayerState.meta;
@@ -274,6 +336,16 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
 
   const openReader = () => {
     const url = globalMediaPlayerState.bookUrl;
+    if (globalMediaPlayerState.kind === 'audio') {
+      if (hasAudioShellHandlers()) {
+        audioShellOpenViewer();
+        return;
+      }
+      if (url === AUDIO_HUB_BOOK_URL || url === 'shell-music-hub') {
+        props.onOpenAudioHub?.();
+        return;
+      }
+    }
     if (url) props.onOpenTextReader?.(url);
   };
 
@@ -391,15 +463,29 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
                 <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
                   <div class={bookGroupGridCoverZoomClass()}>
                     <Show
-                      when={meta()?.coverBookUrl}
-                      fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                      when={
+                        globalMediaPlayerState.kind === 'audio' && meta()?.coverUrl
+                      }
+                      fallback={
+                        <Show
+                          when={meta()?.coverBookUrl}
+                          fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                        >
+                          <BookCoverFromBook
+                            bookUrl={meta()!.coverBookUrl}
+                            alt=""
+                            class="h-full w-full object-cover"
+                            draggable={false}
+                            fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                          />
+                        </Show>
+                      }
                     >
-                      <BookCoverFromBook
-                        bookUrl={meta()!.coverBookUrl}
+                      <img
+                        src={meta()!.coverUrl}
                         alt=""
                         class="h-full w-full object-cover"
                         draggable={false}
-                        fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
                       />
                     </Show>
                   </div>
@@ -428,6 +514,10 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
                   snapshot={snapshot()}
                   preview={previewText()}
                 />
+              </Show>
+
+              <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
+                <GlobalMediaPlayerAudioControls />
               </Show>
 
               <Show when={canCollapse()}>

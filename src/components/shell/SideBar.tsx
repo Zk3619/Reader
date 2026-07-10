@@ -1,75 +1,46 @@
-import { For, Show, type Accessor, type Component } from "solid-js";
+import { For, Show, type Accessor } from "solid-js";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { PageType } from "@/components/shell/Navigation";
 import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
 import {
-  BookshelfIcon,
-  BookOpenIcon,
-  BookSourceIcon,
-  RssTabIcon,
-  BookmarkIcon,
-  BookInfoIcon,
-  RecordIcon,
-  SettingsIcon,
-  GlobeIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
 } from "@/components/shared/icons";
-import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
+import { SHELL_PAGE_CONFIG } from '@/lib/shell/shell-page-config';
+import { normalizePageType } from '@/lib/media-shelf/compat-keys';
+import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
+import { ModuleNavSection } from '@/components/shell/ModuleNavSection';
+import { useShellSidebarControls } from '@/components/shell/shell-sidebar-controls';
+import { ShellSidebarSheet } from '@/components/shell/ShellSidebarSheet';
 
-// 页面配置（与 Navigation 组件保持一致）
-const pageConfig: Record<PageType, { label: string; icon: Component<any>; description: string }> = {
-  bookshelf: { label: "书架", icon: BookshelfIcon, description: "管理你的书籍收藏" },
-  scout: { label: "探索", icon: BookOpenIcon, description: "浏览书源发现分类与书籍" },
-  sources: { label: "书源", icon: BookSourceIcon, description: "浏览和添加书源" },
-  explore: { label: "发现", icon: BookSourceIcon, description: "书源发现分类书籍列表" },
-  rss: { label: "订阅", icon: RssTabIcon, description: "订阅更新" },
-  bookmark: { label: "书签", icon: BookmarkIcon, description: "查看书签" },
-  record: { label: "记录", icon: RecordIcon, description: "阅读记录" },
-  settings: { label: "设置", icon: SettingsIcon, description: "应用设置" },
-  "remote-book": { label: "远程书籍", icon: GlobeIcon, description: "浏览和导入远程书籍" },
-  "text-viewer": { label: "阅读器", icon: BookmarkIcon, description: "文本阅读" },
-  "image-viewer": { label: "漫画", icon: BookmarkIcon, description: "图片阅读" },
-  "audio-viewer": { label: "音频", icon: BookmarkIcon, description: "音频播放" },
-  "video-viewer": { label: "视频", icon: BookmarkIcon, description: "视频播放" },
-  "file-viewer": { label: "文件", icon: BookmarkIcon, description: "文件阅读" },
-  "book-info": { label: "书籍信息", icon: BookInfoIcon, description: "查看书籍详细信息" },
-  "book-search": { label: "搜索", icon: BookOpenIcon, description: "搜索书架与全网书籍" },
-  "bookshelf-cache": {
-    label: "离线缓存",
-    icon: BookshelfIcon,
-    description: "批量缓存与导出正文",
-  },
-};
+const pageConfig = SHELL_PAGE_CONFIG;
 
 interface SideBarProps {
   currentPage?: PageType;
   onPageChange?: (page: PageType) => void;
   recentBooks?: RecentReadBook[];
   onOpenRecentBook?: (book: RecentReadBook) => void;
-  /** 由 App 层 SidebarProvider 注入，避免独立页卸载后重挂载时丢失上下文 */
+  onOpenReaderRecord?: () => void;
   sidebarState: Accessor<"expanded" | "collapsed">;
   onToggleSidebar: () => void;
-  /** 是否为主壳顶栏留出 top 偏移（与 App 层 showTopNav 一致） */
   offsetTopAppBar?: boolean;
+  /** 由 App 壳层 host 托管宽度与定位（桌面固定侧栏） */
+  shellHosted?: boolean;
 }
 
-/** 侧栏可点击项：圆角矩形背景 + 选中时左侧主色竖条（避免与右侧徽标冲突） */
 function sidebarNavButtonClass(active: boolean, extra?: string) {
   return cn(
     "relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200",
@@ -81,56 +52,34 @@ function sidebarNavButtonClass(active: boolean, extra?: string) {
 }
 
 export function SideBar(props: SideBarProps) {
-  const currentPage = () => props.currentPage || "bookshelf";
-  const recentBooks = () => props.recentBooks || [];
+  const shell = useShellLayout();
+  const { usesShellSheet, closeShellSidebar, toggleShellSidebar } = useShellSidebarControls();
+  const currentPage = () => normalizePageType(props.currentPage || "reader");
+  const allPages: PageType[] = ['reader', 'music', 'tv', 'subscribe', 'settings'];
+  const isPageActive = (page: PageType) => currentPage() === normalizePageType(page);
+  const isCollapsed = () =>
+    shell().sidebarUseSheet ? false : props.sidebarState() === "collapsed";
+  const showModuleNav = () =>
+    shell().showFusedModuleNav ||
+    (shell().showModuleSidebarNav && shell().useMobileShell);
 
-  // 处理页面切换
   function handlePageChange(page: PageType) {
     props.onPageChange?.(page);
   }
 
-  // 所有菜单页面列表（包括设置）
-  const allPages: PageType[] = [
-    "bookshelf",
-    "scout",
-    "sources",
-    "rss",
-    "bookmark",
-    "record",
-    "settings",
-  ];
-
-  // 判断是否收起
-  const isCollapsed = () => props.sidebarState() === "collapsed";
-
-  const isPageActive = (page: PageType) => currentPage() === page;
-
-  return (
-    <Sidebar
-      collapsible="icon"
+  const sidebarBody = (
+    <div
       class={cn(
-        // 勿加 relative：会覆盖 ui/sidebar 内 fixed 定位，导致侧栏脱离视口布局
-        "bottom-0! h-auto! overflow-hidden border-r border-sidebar-border",
-        props.offsetTopAppBar
-          ? "top-[calc(var(--app-bar-height)+var(--safe-area-top-effective))]!"
-          : "top-0!",
+        "relative flex h-full min-h-0 flex-col overflow-hidden",
+        shell().sidebarUseSheet && !props.offsetTopAppBar && "safe-area-inset-top",
       )}
-      {...componentDataAttr('sidebar')}
     >
-      <div class="relative flex h-full min-h-0 flex-col overflow-hidden">
       <ThemedComponentBackground componentId="sidebar" />
-      <div
-        class="pointer-events-none absolute inset-x-0 top-0 z-0 h-12"
-        {...componentDataAttr('sidebarHeader')}
-      >
-        <ThemedComponentBackground componentId="sidebarHeader" />
-      </div>
       <div class="relative z-1 flex h-full min-h-0 flex-col">
         <SidebarContent class="relative z-1 min-h-0 flex-1">
         <div class="relative min-h-0 flex-1 overflow-hidden" {...componentDataAttr('sidebarNav')}>
           <ThemedComponentBackground componentId="sidebarNav" />
           <div class="relative z-1">
-        {/* 主菜单 */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -146,22 +95,22 @@ export function SideBar(props: SideBarProps) {
                         tooltip={config.label}
                         class={sidebarNavButtonClass(
                           active(),
-                          "group/menu-button h-10 group-data-[collapsible=icon]:justify-center"
+                          cn("group/menu-button h-10", isCollapsed() && "justify-center"),
                         )}
                       >
-                        <span class="relative shrink-0 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto">
+                        <span class={cn("relative shrink-0 transition-colors duration-200", isCollapsed() && "mx-auto")}>
                           <config.icon class="h-5 w-5" />
-                          <Show when={page === 'bookshelf' && isCollapsed()}>
+                          <Show when={page === 'reader' && isCollapsed()}>
                             <BookshelfPendingUpdateNavBadge
                               variant="sidebar-collapsed"
                               class="absolute -top-1 -right-1 z-10"
                             />
                           </Show>
                         </span>
-                        <span class="min-w-0 flex-1 truncate font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                        <span class={cn("min-w-0 flex-1 truncate font-medium transition-colors duration-200", isCollapsed() && "hidden")}>
                           {config.label}
                         </span>
-                        <Show when={page === 'bookshelf' && !isCollapsed()}>
+                        <Show when={page === 'reader' && !isCollapsed()}>
                           <BookshelfPendingUpdateNavBadge class="shrink-0" />
                         </Show>
                       </SidebarMenuButton>
@@ -172,94 +121,19 @@ export function SideBar(props: SideBarProps) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <Show when={showModuleNav()}>
+          <ModuleNavSection
+            shellPage={currentPage()}
+            collapsed={isCollapsed()}
+            recentBooks={props.recentBooks}
+            onOpenRecentBook={props.onOpenRecentBook}
+            onOpenReaderRecord={props.onOpenReaderRecord}
+            onNavigate={closeShellSidebar}
+          />
+        </Show>
           </div>
         </div>
-
-        {/* 最近读过：展开为封面+标题列表，收起为封面快捷入口 */}
-        <Show when={recentBooks().length > 0 || !isCollapsed()}>
-          <div class="relative overflow-hidden" {...componentDataAttr('sidebarRecent')}>
-            <ThemedComponentBackground componentId="sidebarRecent" />
-            <div class="relative z-1">
-            <Separator />
-            <SidebarGroup>
-              <SidebarGroupLabel
-                class={cn(
-                  "text-xs font-semibold text-sidebar-foreground/70",
-                  isCollapsed() && "sr-only",
-                  !isCollapsed() && "cursor-pointer hover:text-primary",
-                )}
-                onClick={() => !isCollapsed() && handlePageChange("record")}
-              >
-                最近读过
-              </SidebarGroupLabel>
-              <SidebarGroupContent class={cn(!isCollapsed() && "mt-3")}>
-                <Show
-                  when={recentBooks().length > 0}
-                  fallback={
-                    <Show when={!isCollapsed()}>
-                      <p class="px-3 py-2 text-xs text-muted-foreground">尚无阅读记录</p>
-                    </Show>
-                  }
-                >
-                  <SidebarMenu>
-                    <For each={recentBooks().slice(0, isCollapsed() ? 3 : 5)}>
-                      {(book, index) => (
-                        <>
-                          <Show when={!isCollapsed() && index() > 0}>
-                            <Separator class="my-1 h-0.3" />
-                          </Show>
-                          <SidebarMenuItem>
-                            <SidebarMenuButton
-                              class={sidebarNavButtonClass(
-                                false,
-                                isCollapsed()
-                                  ? "h-10 justify-center px-0"
-                                  : "group/recent-item h-auto w-full items-center gap-2.5 py-2 px-3 text-left",
-                              )}
-                              tooltip={`${book.title} - ${book.chapterName}`}
-                              onClick={() => props.onOpenRecentBook?.(book)}
-                            >
-                              <span
-                                class={cn(
-                                  "flex shrink-0 overflow-hidden rounded-sm border border-border/40 bg-muted",
-                                  isCollapsed() ? "mx-auto h-8 w-6" : "h-12 w-9",
-                                )}
-                              >
-                                <BookCoverFromBook
-                                  book={book.book}
-                                  bookUrl={book.bookUrl || undefined}
-                                  coverUrl={book.coverUrl}
-                                  alt={book.title}
-                                  class="h-full w-full object-cover"
-                                  fallback={
-                                    <span class="flex h-full w-full items-center justify-center">
-                                      <BookOpenIcon class="h-3.5 w-3.5 text-muted-foreground" size={14} />
-                                    </span>
-                                  }
-                                />
-                              </span>
-                              <Show when={!isCollapsed()}>
-                                <div class="min-w-0 flex-1 overflow-hidden">
-                                  <span class="block w-full min-w-0 truncate text-xs font-medium transition-colors duration-200">
-                                    {book.title}
-                                  </span>
-                                  <span class="block w-full min-w-0 truncate text-xs text-muted-foreground transition-colors duration-200 group-hover/recent-item:text-primary">
-                                    {book.chapterName}
-                                  </span>
-                                </div>
-                              </Show>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        </>
-                      )}
-                    </For>
-                  </SidebarMenu>
-                </Show>
-              </SidebarGroupContent>
-            </SidebarGroup>
-            </div>
-          </div>
-        </Show>
       </SidebarContent>
 
       <SidebarFooter
@@ -271,11 +145,17 @@ export function SideBar(props: SideBarProps) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={() => props.onToggleSidebar()}
+              onClick={() => {
+                if (shell().sidebarUseSheet) {
+                  toggleShellSidebar();
+                } else {
+                  props.onToggleSidebar();
+                }
+              }}
               tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
               class={sidebarNavButtonClass(
                 false,
-                "group/toggle-button h-10 [&_svg]:size-4 group-data-[collapsible=icon]:justify-center"
+                cn("group/toggle-button h-10 [&_svg]:size-4", isCollapsed() && "justify-center"),
               )}
             >
               <Show
@@ -283,14 +163,14 @@ export function SideBar(props: SideBarProps) {
                 fallback={
                   <>
                     <ChevronLeftIcon class="h-4 w-4 transition-colors duration-200" size={16} />
-                    <span class="font-medium transition-colors duration-200 group-data-[collapsible=icon]:hidden">
+                    <span class={cn("font-medium transition-colors duration-200", isCollapsed() && "hidden")}>
                       收起
                     </span>
                   </>
                 }
               >
                 <ChevronRightIcon
-                  class="h-4 w-4 transition-colors duration-200 group-data-[collapsible=icon]:mx-auto"
+                  class={cn("h-4 w-4 transition-colors duration-200", isCollapsed() && "mx-auto")}
                   size={16}
                 />
               </Show>
@@ -301,6 +181,43 @@ export function SideBar(props: SideBarProps) {
       </SidebarFooter>
       </div>
       </div>
-    </Sidebar>
+  );
+
+  const fixedSidebarClass = cn(
+    "bottom-0! h-auto! overflow-hidden border-r border-sidebar-border",
+    props.offsetTopAppBar
+      ? "top-[calc(var(--app-bar-height)+var(--safe-area-top-effective))]!"
+      : "top-0!",
+  );
+  /** Sheet 侧栏勿用 fixed 定位类，避免覆盖 ui/sheet 的 h-full */
+  const sheetSidebarClass = "overflow-hidden border-r border-sidebar-border";
+  const sidebarPresentationClass = () =>
+    shell().sidebarUseSheet ? sheetSidebarClass : fixedSidebarClass;
+
+  if (props.shellHosted) {
+    return (
+      <Sidebar collapsible="none" class="h-full w-full! min-h-0 overflow-hidden" {...componentDataAttr('sidebar')}>
+        {sidebarBody}
+      </Sidebar>
+    );
+  }
+
+  return (
+    <Show
+      when={usesShellSheet()}
+      fallback={
+        <Sidebar
+          collapsible="icon"
+          class={sidebarPresentationClass()}
+          {...componentDataAttr('sidebar')}
+        >
+          {sidebarBody}
+        </Sidebar>
+      }
+    >
+      <ShellSidebarSheet class={sheetSidebarClass} offsetTopAppBar={props.offsetTopAppBar}>
+        {sidebarBody}
+      </ShellSidebarSheet>
+    </Show>
   );
 }
