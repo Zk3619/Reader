@@ -46,6 +46,8 @@ export const LEGADO_API_PATHS = new Set([
   '/testReplaceRule',
   '/debugBookSource',
   '/debugRssSource',
+  '/audio/status',
+  '/audio/search',
 ]);
 
 export function normalizeLegadoApiPath(path: string): string {

@@ -421,6 +421,11 @@ export async function openTextBook(
   const guestReading =
     !isLocalBook(book) && !(await booksDb.hasBook(book.bookUrl));
 
+  if (guestReading) {
+    const { upsertGuestPreview } = await import('@/lib/bookshelf/preview-book');
+    void upsertGuestPreview(book, MediaKind.text);
+  }
+
   let activeBook = book;
   if (!guestReading && isLocalBook(book)) {
     activeBook = await ensureLocalTxtCatalogFresh(book);

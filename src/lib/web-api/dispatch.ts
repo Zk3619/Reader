@@ -55,6 +55,11 @@ import { normalizeLegadoApiPath, isLegadoWebApiPath } from '@/lib/web-api/paths'
 import { parseQueryString } from '@/lib/web-api/query';
 import { jsonApiResult, type WebApiDispatchResult } from '@/lib/web-api/response';
 import { legadoErr, legadoOk } from '@/lib/web-api/return-data';
+import {
+  getAudioSearchApi,
+  getAudioStatusApi,
+  postAudioPlayApi,
+} from '@/lib/web-api/audio-controller';
 
 export type WebApiMethod = 'GET' | 'POST' | 'OPTIONS';
 
@@ -163,6 +168,10 @@ export async function dispatchLegadoWebApi(
         return getCoverApi(query);
       case '/image':
         return getBookImageApi(query);
+      case '/audio/status':
+        return getAudioStatusApi();
+      case '/audio/search':
+        return getAudioSearchApi(query);
       default:
         break;
     }
@@ -217,6 +226,8 @@ export async function dispatchLegadoWebApi(
         return jsonApiResult(await saveRssStarApi(body));
       case '/deleteRssStar':
         return jsonApiResult(await deleteRssStarApi(body));
+      case '/audio/play':
+        return postAudioPlayApi(body);
       default:
         break;
     }

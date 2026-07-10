@@ -25,6 +25,7 @@ import { ensureShelfBookMetadataForReading } from '@/lib/bookshelf/ensure-shelf-
 import { mergeBookContentVariable } from '@/lib/book-source/utils';
 import { isLocalBook } from '@/lib/local-book';
 import { migrateBookProgress } from '@/lib/bookshelf/book-migrate';
+import { dispatchMediaRefresh } from '@/lib/media-shelf/compat-keys';
 import {
   mergeShelfReadingProgress,
   type ShelfReadingProgressInput,
@@ -127,7 +128,7 @@ async function persistChapters(bookUrl: string, chapters: BookChapter[]): Promis
 
 /** 书架/分组页监听：新书上架或迁移后刷新列表与计数 */
 export function notifyBookshelfRefresh(): void {
-  window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+  dispatchMediaRefresh();
 }
 
 function schedulePersistChaptersToShelf(bookUrl: string, chapters: BookChapter[]): void {

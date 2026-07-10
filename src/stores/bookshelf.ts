@@ -12,7 +12,7 @@
 import { createStore } from 'solid-js/store';
 import * as booksDb from '@/lib/database/books';
 import type { Book } from '@/types';
-import { getStorage, setStorage } from '@/lib/platform/storage';
+import { getMediaShelfStorage, setMediaShelfStorage } from '@/lib/media-shelf/compat-keys';
 import {
   loadBookshelfPageShowGroupList,
   saveBookshelfPageShowGroupList,
@@ -51,8 +51,8 @@ const STORAGE_KEY_CURRENT_GROUP_NAME = 'bookshelf_currentGroupName';
 async function restoreStateFromStorage(): Promise<Partial<BookshelfState>> {
   try {
     const [currentGroup, currentGroupName, showGroupList] = await Promise.all([
-      getStorage<number>(STORAGE_KEY_CURRENT_GROUP),
-      getStorage<string>(STORAGE_KEY_CURRENT_GROUP_NAME),
+      getMediaShelfStorage<number>(STORAGE_KEY_CURRENT_GROUP),
+      getMediaShelfStorage<string>(STORAGE_KEY_CURRENT_GROUP_NAME),
       loadBookshelfPageShowGroupList(),
     ]);
 
@@ -307,7 +307,7 @@ export const bookshelfStore = {
   setCurrentGroup(groupId: number): void {
     setState({ currentGroup: groupId });
     // 异步保存到存储（不阻塞 UI）
-    setStorage(STORAGE_KEY_CURRENT_GROUP, groupId).catch((error) => {
+    setMediaShelfStorage(STORAGE_KEY_CURRENT_GROUP, groupId).catch((error) => {
       console.warn('保存当前分组到存储失败:', error);
     });
   },
@@ -318,7 +318,7 @@ export const bookshelfStore = {
   setCurrentGroupName(name: string): void {
     setState({ currentGroupName: name });
     // 异步保存到存储（不阻塞 UI）
-    setStorage(STORAGE_KEY_CURRENT_GROUP_NAME, name).catch((error) => {
+    setMediaShelfStorage(STORAGE_KEY_CURRENT_GROUP_NAME, name).catch((error) => {
       console.warn('保存当前分组名称到存储失败:', error);
     });
   },

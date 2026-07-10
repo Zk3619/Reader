@@ -14,6 +14,8 @@ export interface SourceListFilterCriteria {
   groupNames: string[];
   enabledStates: SourceEnabledFilter[];
   specialFilters: SourceSpecialFilter[];
+  /** 书源媒体类型（bookSourceType 0–4）；undefined 表示不限 */
+  sourceType?: number;
 }
 
 export const EMPTY_SOURCE_LIST_FILTER: SourceListFilterCriteria = {
@@ -237,6 +239,9 @@ export function sourceMatchesCriteria(
   }
   if (c.specialFilters.length > 0) {
     if (!c.specialFilters.some((f) => sourceMatchesSpecialFilter(source, f))) return false;
+  }
+  if (c.sourceType != null && source.sourceType !== c.sourceType) {
+    return false;
   }
   return true;
 }

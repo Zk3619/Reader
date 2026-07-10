@@ -10,7 +10,9 @@ import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import type { GroupStyle } from '@/stores/bookshelf-layout';
 import type { BookGroup } from '@/types';
+import type { MediaKind } from '@/lib/book-source/book-type';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
+import { resolveGroupDisplayName } from '@/lib/bookshelf/media-group-display';
 import { DefaultGroupCoverIcon, BookCoverPlaceholderIcon } from '@/components/bookshelf/book-group-cover-icon';
 
 const groupMenuItemClass =
@@ -66,6 +68,7 @@ function BookshelfGroupMenuList(props: {
   groupBookCounts?: Record<number, number>;
   currentGroupId?: number;
   onGroupChange?: (groupId: number) => void;
+  mediaKind?: MediaKind;
 }) {
   return (
     <For each={props.groups}>
@@ -79,7 +82,9 @@ function BookshelfGroupMenuList(props: {
         >
           <GroupCoverThumb group={g} />
           <div class="min-w-0 flex-1 space-y-0.5 py-0.5 text-left">
-            <span class="block truncate text-sm font-medium">{g.groupName}</span>
+            <span class="block truncate text-sm font-medium">
+              {resolveGroupDisplayName(g, props.mediaKind)}
+            </span>
             <span class="block truncate text-xs leading-snug text-muted-foreground">
               {props.groupBookCounts?.[g.groupId] ?? 0} 本书
             </span>
@@ -99,6 +104,7 @@ export interface BookshelfGroupTitleDropdownProps {
   onGroupChange?: (groupId: number) => void;
   /** 为 false 时仅展示标题+描述（常规分组样式） */
   dropdownEnabled?: boolean;
+  mediaKind?: MediaKind;
 }
 
 /** 以 PageToolbar 标题+描述为触发的分组下拉 */
@@ -116,6 +122,7 @@ export function BookshelfGroupTitleDropdown(props: BookshelfGroupTitleDropdownPr
         groupBookCounts={props.groupBookCounts}
         currentGroupId={props.currentGroupId}
         onGroupChange={props.onGroupChange}
+        mediaKind={props.mediaKind}
       />
     </PageToolbarTitleDropdown>
   );
@@ -127,6 +134,7 @@ export interface BookshelfGroupNavProps {
   groupBookCounts?: Record<number, number>;
   currentGroupId?: number;
   onGroupChange?: (groupId: number) => void;
+  mediaKind?: MediaKind;
 }
 
 /** 标签内容轨；横滚视口在父级 PageToolbar `.page-toolbar-below-scroll` */
@@ -147,7 +155,7 @@ export function BookshelfGroupNav(props: BookshelfGroupNavProps) {
                 )}
                 onClick={() => props.onGroupChange?.(g.groupId)}
               >
-                {g.groupName}
+                {resolveGroupDisplayName(g, props.mediaKind)}
               </Button>
             );
           }}

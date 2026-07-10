@@ -31,10 +31,13 @@ import {
 } from '@/components/shared/icons';
 import { BookshelfLayoutDialog } from '@/components/bookshelf/BookshelfLayoutDialog';
 import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
+import { getMediaShelfLabels } from '@/lib/media-shelf/shelf-labels';
+import type { MediaKind } from '@/lib/book-source/book-type';
 import type { PageType } from '@/components/shell/Navigation';
 import { cn } from '@/lib/utils';
 
 export interface BookshelfPageToolbarProps {
+  mediaKind?: MediaKind;
   onPageChange?: (page: PageType) => void;
   onOpenGroupManage?: () => void;
   onOpenBookshelfManage?: () => void;
@@ -56,6 +59,7 @@ export interface BookshelfPageToolbarProps {
 export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const [showBookshelfLayoutDialog, setShowBookshelfLayoutDialog] = createSignal(false);
+  const labels = () => getMediaShelfLabels(props.mediaKind);
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -150,15 +154,15 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
             <AppDropdownMenuSeparator />
             <AppDropdownMenuItem onSelect={() => props.onOpenBookshelfManage?.()}>
               <Settings2Icon class="h-4 w-4" />
-              <span>书架管理</span>
+              <span>{labels().manageMenu}</span>
             </AppDropdownMenuItem>
             <AppDropdownMenuItem onSelect={() => setShowBookshelfLayoutDialog(true)}>
               <LayoutIcon class="h-4 w-4" />
-              <span>书架布局</span>
+              <span>{labels().layoutMenu}</span>
             </AppDropdownMenuItem>
             <AppDropdownMenuItem onSelect={() => props.onOpenGroupManage?.()}>
               <FolderTreeIcon class="h-4 w-4" />
-              <span>分组管理</span>
+              <span>{labels().groupManageMenu}</span>
             </AppDropdownMenuItem>
             <AppDropdownMenuSeparator />
             <AppDropdownMenuItem onSelect={() => props.onOpenChapterCache?.()}>
@@ -167,11 +171,11 @@ export function BookshelfPageToolbar(props: BookshelfPageToolbarProps) {
             </AppDropdownMenuItem>
             <AppDropdownMenuItem onSelect={() => props.onExportBookshelf?.()}>
               <ExportIcon class="h-4 w-4" />
-              <span>导出书单</span>
+              <span>{labels().exportMenu}</span>
             </AppDropdownMenuItem>
             <AppDropdownMenuItem onSelect={() => props.onImportBookshelf?.()}>
               <ImportIcon class="h-4 w-4" />
-              <span>导入书单</span>
+              <span>{labels().importMenu}</span>
             </AppDropdownMenuItem>
             <AppDropdownMenuSeparator />
             <AppDropdownMenuItem>

@@ -133,6 +133,10 @@ async function importBooksFromLegadoJson(text: string): Promise<number> {
     }
     count += 1;
   }
+  if (count > 0) {
+    const { rebuildGroupItemsFromGroupMask } = await import('@/lib/database/media-groups');
+    await rebuildGroupItemsFromGroupMask();
+  }
   return count;
 }
 

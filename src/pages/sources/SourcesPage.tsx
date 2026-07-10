@@ -1,5 +1,5 @@
 /**
- * 书源页：虚拟列表浏览书源，点击行打开 AppDrawer 发现分类
+ * 来源页：虚拟列表浏览书源，点击行打开 AppDrawer 发现分类
  */
 
 import { createSignal, createEffect, createResource, createMemo, onMount, onCleanup, Show } from 'solid-js';
@@ -63,6 +63,7 @@ import {
 import type { Id } from '@thisbeyond/solid-dnd';
 import type { VirtualListSortableConfig } from '@/components/shared/virtual-list';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { notifyPageError } from '@/lib/ui/page-notify';
 import {
   buildSourceFilterGroupOptions,
   getEffectiveSourceListFilter,
@@ -121,12 +122,13 @@ export interface SourcesPageProps {
   sortReverse?: boolean;
   /** 拖拽排序开关（持久化于 sources_page_prefs） */
   enableDragSort?: boolean;
+  /** 按 bookSourceType 过滤（0–4） */
+  sourceTypeFilter?: number;
 }
 
 export function SourcesPage(props: SourcesPageProps) {
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [loading, setLoading] = createSignal(true);
-  const [error, setError] = createSignal<string | null>(null);
   const [localExpandedSourceUrl, setLocalExpandedSourceUrl] = createSignal<string | null>(null);
   const expandedSourceUrl = () =>
     props.expandedSourceUrl !== undefined ? props.expandedSourceUrl : localExpandedSourceUrl();
@@ -146,18 +148,22 @@ export function SourcesPage(props: SourcesPageProps) {
       const groups = await sourcesDb.getAllSourceGroups();
       props.onGroupsLoaded?.(groups);
     } catch (e) {
-      console.error('加载书源分组失败:', e);
+      notifyPageError(
+        '加载书源分组失败',
+        e instanceof Error ? e.message : undefined,
+      );
     }
   }
 
   async function loadSources() {
     setLoading(true);
-    setError(null);
     try {
       setSources(await sourcesDb.getAllSources());
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载书源失败';
-      setError(msg);
+      notifyPageError(
+        '加载书源失败',
+        e instanceof Error ? e.message : undefined,
+      );
       setSources([]);
     } finally {
       setLoading(false);
@@ -207,6 +213,7 @@ export function SourcesPage(props: SourcesPageProps) {
     sortMode: props.sortMode ?? 'manual',
     sortReverse: props.sortReverse ?? false,
     groups: filterGroupOptions(),
+    sourceType: props.sourceTypeFilter,
   }));
 
   const { filtered: filteredSources, filtering, progressText: filterProgressText } = useChunkedFilter({
@@ -219,14 +226,21 @@ export function SourcesPage(props: SourcesPageProps) {
         filterDeps().groups,
         filterDeps().query,
       ),
-    match: (source) =>
-      bookSourcePageItemMatches(
+    match: (source) => {
+      if (
+        filterDeps().sourceType != null &&
+        source.sourceType !== filterDeps().sourceType
+      ) {
+        return false;
+      }
+      return bookSourcePageItemMatches(
         source,
         filterDeps().criteria,
         filterDeps().groups,
         filterDeps().query,
         filterDeps().mode,
-      ),
+      );
+    },
     postProcess: (matched) =>
       sortBookSourcesCopy(matched, filterDeps().sortMode, filterDeps().sortReverse),
     progressLabel: '正在筛选书源',
@@ -557,9 +571,6 @@ export function SourcesPage(props: SourcesPageProps) {
 
   return (
     <div class={cn('@container', mainShellPageRoot, 'flex min-h-0 flex-1 flex-col overflow-hidden pt-2')}>
-      <Show when={error()}>
-        <p class="shrink-0 px-1 pb-2 text-sm text-destructive">{error()}</p>
-      </Show>
       <Show when={filtering() && filterProgressText()}>
         <p class="shrink-0 px-1 pb-2 text-center text-xs text-muted-foreground">{filterProgressText()}</p>
       </Show>

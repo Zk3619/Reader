@@ -62,9 +62,12 @@ export function isOverlayPage(page: PageType): page is OverlayPageKind {
   return OVERLAY_KIND_SET.has(page as OverlayPageKind);
 }
 
-export function normalizeShellTab(page: string, fallback: ShellTabPage = "bookshelf"): ShellTabPage {
-  if (isOverlayPage(page as PageType)) return fallback;
-  return page as ShellTabPage;
+import { normalizePageType } from "@/lib/media-shelf/compat-keys";
+
+export function normalizeShellTab(page: string, fallback: ShellTabPage = "reader"): ShellTabPage {
+  const normalized = normalizePageType(page);
+  if (isOverlayPage(normalized as PageType)) return fallback;
+  return normalized as ShellTabPage;
 }
 
 export function isViewerOverlayKind(kind: OverlayPageKind): kind is ViewerOverlayKind {
@@ -138,7 +141,7 @@ export function createOverlayStack(initialShell: ShellTabPage) {
   function navigateShell(page: PageType) {
     if (isOverlayPage(page)) return;
     popAll();
-    setShellTab(page as ShellTabPage);
+    setShellTab(normalizeShellTab(page as string));
   }
 
   function bookInfoCanContinueReading() {

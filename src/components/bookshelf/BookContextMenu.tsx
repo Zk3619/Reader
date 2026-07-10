@@ -25,6 +25,8 @@ export type BookContextMenuActions = {
   onDelete: (book: Book) => void;
   onPinTop: (book: Book) => void;
   onPinBottom: (book: Book) => void;
+  onToggleFavorite?: (book: Book) => void;
+  isFavorite?: (book: Book) => boolean;
 };
 
 export interface BookContextMenuContentProps {
@@ -50,6 +52,11 @@ export function BookContextMenuContent(props: BookContextMenuContentProps) {
       <AppContextMenuItem onSelect={() => props.actions.onEdit(props.book)}>
         编辑
       </AppContextMenuItem>
+      <Show when={props.actions.onToggleFavorite}>
+        <AppContextMenuItem onSelect={() => props.actions.onToggleFavorite!(props.book)}>
+          {props.actions.isFavorite?.(props.book) ? '取消收藏' : '收藏'}
+        </AppContextMenuItem>
+      </Show>
       <Show when={props.manualSort}>
         <AppContextMenuItem
           disabled={!canPinTop()}

@@ -41,6 +41,7 @@ import {
 import { isFirstGroupHeaderRow } from '@/components/sources/source-list-layout';
 import type { Id } from '@thisbeyond/solid-dnd';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { notifyPageError } from '@/lib/ui/page-notify';
 import { ChevronDownIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
@@ -300,7 +301,6 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
   const [sources, setSources] = createSignal<BookSource[]>([]);
   const [sourceGroups, setSourceGroups] = createSignal<string[]>([]);
   const [loading, setLoading] = createSignal(true);
-  const [error, setError] = createSignal<string | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [sortMode, setSortMode] = createSignal<SourceSortMode>('manual');
   const [sortReverse, setSortReverse] = createSignal(false);
@@ -321,13 +321,14 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
 
   async function loadSources() {
     setLoading(true);
-    setError(null);
     try {
       const list = await sourcesDb.getAllSources();
       setSources(list);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载书源失败';
-      setError(msg);
+      notifyPageError(
+        '加载书源失败',
+        e instanceof Error ? e.message : undefined,
+      );
       setSources([]);
     } finally {
       setLoading(false);
@@ -339,7 +340,10 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       const groups = await sourcesDb.getAllSourceGroups();
       setSourceGroups(groups);
     } catch (e) {
-      console.error('加载书源分组失败:', e);
+      notifyPageError(
+        '加载书源分组失败',
+        e instanceof Error ? e.message : undefined,
+      );
     }
   }
 
@@ -840,9 +844,6 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
           <div class="shrink-0 px-3 pb-2 text-center text-xs text-muted-foreground">
             {filterProgressText()}
           </div>
-        </Show>
-        <Show when={error()}>
-          <p class="shrink-0 px-1 pb-2 text-sm text-destructive">{error()}</p>
         </Show>
         <Show when={showSkeleton()}>
           <ul class="shrink-0 space-y-2 px-1">

@@ -3,7 +3,7 @@
  * 布局方案见设置「书源发现抽屉布局」
  */
 
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createEffect, createSignal, For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -37,6 +37,7 @@ import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared'
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { settingsStore } from '@/stores/settings';
 import type { BookSource } from '@/types';
+import { notifyPageError } from '@/lib/ui/page-notify';
 
 const EXPLORE_SECTION_BUTTON_CLASS =
   'flex h-auto min-h-9 w-full justify-center rounded-lg border-border/60 bg-background/80 px-3 py-2 text-center text-sm font-medium shadow-sm';
@@ -218,6 +219,19 @@ export function SourceExploreDrawerContent(props: SourceExploreDrawerContentProp
     groupExploreSectionsIntoRows(props.sections(), scheme()),
   );
 
+  let lastExploreErrorKey: string | undefined;
+  createEffect(() => {
+    if (!props.error()) {
+      lastExploreErrorKey = undefined;
+      return;
+    }
+    const msg = props.errorMessage() ?? '网络请求失败，请检查网络连接';
+    const key = `${props.source.sourceUrl}\0${msg}`;
+    if (lastExploreErrorKey === key) return;
+    lastExploreErrorKey = key;
+    notifyPageError('加载发现分类失败', msg);
+  });
+
   return (
     /** data-corvu-no-drag 用于禁用抽屉拖拽关闭 */
     <div class="min-h-0 w-full min-w-0 flex-1">
@@ -249,16 +263,6 @@ export function SourceExploreDrawerContent(props: SourceExploreDrawerContentProp
             </For>
           </div>
         </Show>
-      </Show>
-      <Show when={props.error()}>
-        <div class="my-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3">
-          <p class="text-center text-sm text-destructive">
-            <span class="font-medium">加载失败：</span>
-            <span class="text-xs text-destructive/80">
-              {props.errorMessage() ?? '网络请求失败，请检查网络连接'}
-            </span>
-          </p>
-        </div>
       </Show>
       <Show when={!props.loading() && !props.error() && props.sections().length > 0}>
         <Show
