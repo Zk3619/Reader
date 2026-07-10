@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "reader",
+  "productName": "MediaBox",
   "version": "0.1.0",
   "identifier": "com.zkingz.reader",
   "build": {
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "reader",
+        "title": "MediaBox",
         "width": 800,
         "height": 480,
         "minWidth": 240,

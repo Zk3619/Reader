@@ -19,7 +19,16 @@ mod inner_web_panel_capture;
 mod backstage_webview;
 mod webjs_java_rpc;
 mod android_fs_commands;
+mod android_media_session;
 mod display_reader_commands;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod music_openapi;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod lx_sync_server;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod desktop_lyric;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod global_hotkey;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_brightness;
 mod platform;
@@ -1971,7 +1980,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(tauri_plugin_android_fs::init())
-        .plugin(crate::platform::android::display_brightness::init_plugin());
+        .plugin(crate::platform::android::display_brightness::init_plugin())
+        .plugin(crate::platform::android::music_media::init_plugin());
 
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
@@ -2040,6 +2050,36 @@ pub fn run() {
             android_fs_commands::android_persist_dir_permission,
             android_fs_commands::android_read_dir,
             android_fs_commands::android_write_book_to_tree,
+            android_media_session::sync_android_media_session,
+            android_media_session::report_android_media_action,
+            #[cfg(target_os = "android")]
+            android_media_session::get_android_media_session_snapshot,
+            #[cfg(target_os = "android")]
+            android_media_session::take_android_media_pending_action,
+            #[cfg(target_os = "android")]
+            android_media_session::request_android_overlay_permission,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            music_openapi::start_music_openapi,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            music_openapi::update_music_openapi_state,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            music_openapi::stop_music_openapi,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            lx_sync_server::start_lx_sync_server,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            lx_sync_server::stop_lx_sync_server,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            lx_sync_server::get_lx_sync_server_status,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::open_desktop_lyric_window,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::close_desktop_lyric_window,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_ignore_cursor,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            global_hotkey::register_music_hotkeys,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            global_hotkey::unregister_music_hotkeys,
             display_reader_commands::probe_display_brightness,
             display_reader_commands::get_display_brightness,
             display_reader_commands::set_display_brightness,

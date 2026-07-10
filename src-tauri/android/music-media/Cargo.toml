@@ -1,0 +1,13 @@
+[package]
+name = "reader-music-media-native"
+version = "0.1.0"
+edition = "2021"
+links = "reader-music-media-native"
+build = "build.rs"
+publish = false
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-plugin = "2"
