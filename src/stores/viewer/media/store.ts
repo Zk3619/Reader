@@ -187,7 +187,22 @@ export const viewerStore = {
     }
   },
 
+  async openMusicHub(options?: {
+    panel?: 'search' | 'library' | 'playlist' | 'sync';
+    section?: import('@/stores/viewer/base-state').MusicHubSection;
+  }): Promise<void> {
+    const { openMusicHub } = await import('@/stores/viewer/media/audio');
+    await openMusicHub(options);
+  },
+
+  isMusicHubOpen(): boolean {
+    return state.kind === MediaKind.audio && state.playbackMode === 'music';
+  },
+
   isOpen(): boolean {
+    if (state.playbackMode === 'music' && state.kind === MediaKind.audio) {
+      return true;
+    }
     return state.book != null && state.kind != null;
   },
 
@@ -221,9 +236,17 @@ export const viewerStore = {
   async closeBook(): Promise<void> {
     const book = state.book;
     const kind = state.kind;
+    const isMusicHub = state.playbackMode === 'music' && !book;
 
     if (book && !state.guestReading) {
       await viewerStore.saveProgress();
+    }
+
+    if (isMusicHub) {
+      const { cleanupMusicHubOnClose } = await import('@/app/viewer-lifecycle');
+      cleanupMusicHubOnClose();
+      resetViewerState();
+      return;
     }
 
     if (kind === MediaKind.text) {

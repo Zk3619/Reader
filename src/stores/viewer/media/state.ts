@@ -45,6 +45,20 @@ export const initialViewerState: ViewerState = {
   loading: false,
   error: null,
   effectiveReplaceRules: [],
+  playbackMode: 'audiobook',
+  contentSession: null,
+  trackQueue: [],
+  trackIndex: 0,
+  activePlaylistId: null,
+  activeMusicGroupId: null,
+  activeSource: null,
+  musicLibraryOpen: false,
+  musicSearchOpen: false,
+  musicAccountOpen: false,
+  musicSyncOpen: false,
+  musicPlaylistOpen: false,
+  musicSourceOpen: false,
+  musicSection: 'search',
 };
 
 export const [state, setState] = createStore<ViewerState>({ ...initialViewerState });

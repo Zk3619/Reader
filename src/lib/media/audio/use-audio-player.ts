@@ -10,6 +10,8 @@ import {
   type AudioPlayConfig,
 } from '@/lib/media/audio/types';
 import type { Book, BookChapter } from '@/types';
+import type { PlayableItem } from '@/lib/media/audio/playable-item';
+import { getPlayableUrls } from '@/lib/media/audio/playable-item';
 
 const POS_STORE_INTERVAL_MS = 2000;
 
@@ -23,10 +25,14 @@ export interface UseAudioPlayerOptions {
   audioConfig: Accessor<AudioPlayConfig>;
   /** 章节正文/播放地址加载中时不应沿用旧 URL 或自动开播 */
   loading?: Accessor<boolean>;
+  /** 统一 PlayableItem 队列（music / 听书共用） */
+  playableItem?: Accessor<PlayableItem | null>;
   onChapterPosChange: (pos: number) => void;
   onEndedChapter: () => Promise<void>;
   onSaveProgress: () => Promise<void>;
   onSkipVolumeChapter: (index: number) => Promise<void>;
+  /** 播放错误（如 URL 过期）时回调，返回 true 表示已处理 */
+  onPlaybackError?: () => void | Promise<void>;
 }
 
 export interface UseAudioPlayerResult {
@@ -63,8 +69,17 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
   let userPaused = false;
   let lastSegmentKey = '';
   let pendingLoadAfterFetch = false;
+  let playbackErrorHandled = false;
+
+  const handlePlaybackError = () => {
+    if (playbackErrorHandled) return;
+    playbackErrorHandled = true;
+    void options.onPlaybackError?.();
+  };
 
   const segmentUrls = () => {
+    const fromPlayable = getPlayableUrls(options.playableItem?.() ?? null);
+    if (fromPlayable.length > 0) return fromPlayable;
     const list = options.mediaUrls();
     if (list.length > 0) return list;
     const single = options.src();
@@ -241,6 +256,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     el.addEventListener('play', () => setPlaying(true));
     el.addEventListener('pause', () => setPlaying(false));
     el.addEventListener('ended', onSegmentEnded);
+    el.addEventListener('error', () => handlePlaybackError());
 
     const key = segmentLoadKey();
     if (segmentUrls().length === 0 || (options.loading?.() ?? false)) {
@@ -267,6 +283,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
         if (!keyChanged && !pendingLoadAfterFetch) return;
         lastSegmentKey = key;
         pendingLoadAfterFetch = false;
+        playbackErrorHandled = false;
         loadSegment(0, !userPaused);
       },
       { defer: true },

@@ -1,0 +1,61 @@
+/**
+ * 播放音质选择与降级
+ */
+
+import type { MusicQuality } from '@/lib/media/audio/lyric-types';
+import { TRY_QUALITYS_LIST } from '@/lib/media/audio/lyric-types';
+import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
+
+export type { MusicQuality };
+
+export const QUALITY_LABELS: Record<MusicQuality, string> = {
+  '128k': '标准 128k',
+  '192k': '较高 192k',
+  '320k': '高品质 320k',
+  flac: '无损 FLAC',
+  flac24bit: 'Hi-Res',
+  ape: 'APE',
+  wav: 'WAV',
+};
+
+export function getPlayQuality(): MusicQuality {
+  return getMusicSettings().playQuality;
+}
+
+export function setPlayQuality(q: MusicQuality): void {
+  setMusicSettings({ playQuality: q });
+}
+
+/** 从用户偏好向下尝试可用音质 */
+export function qualityFallbackChain(preferred: MusicQuality): MusicQuality[] {
+  const idx = TRY_QUALITYS_LIST.indexOf(preferred as (typeof TRY_QUALITYS_LIST)[number]);
+  if (idx >= 0) return TRY_QUALITYS_LIST.slice(idx) as MusicQuality[];
+  return [preferred, ...TRY_QUALITYS_LIST.filter((q) => q !== preferred)];
+}
+
+export function wyLevelForQuality(q: MusicQuality): string {
+  switch (q) {
+    case 'flac24bit':
+      return 'hires';
+    case 'flac':
+      return 'lossless';
+    case '320k':
+      return 'exhigh';
+    case '192k':
+      return 'higher';
+    default:
+      return 'standard';
+  }
+}
+
+export function kwTypeForQuality(q: MusicQuality): string {
+  switch (q) {
+    case 'flac24bit':
+    case 'flac':
+      return '2000kflac';
+    case '320k':
+      return '320kmp3';
+    default:
+      return '128kmp3';
+  }
+}

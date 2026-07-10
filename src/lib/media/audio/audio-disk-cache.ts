@@ -425,3 +425,140 @@ export function createAudioObjectUrl(bytes: ArrayBuffer, mime: string): string {
   const blob = new Blob([bytes], { type: mime || 'audio/mpeg' });
   return URL.createObjectURL(blob);
 }
+
+const MUSIC_TRACK_PREFIX = 'music:';
+
+export type MusicTrackCacheMeta = {
+  trackId: string;
+  sourceUrl: string;
+  mime: string;
+  byteSize: number;
+  savedAt: number;
+};
+
+export async function buildMusicTrackCacheId(trackId: string, sourceUrl: string): Promise<string> {
+  return `${MUSIC_TRACK_PREFIX}${await buildAudioCacheId(trackId, 0, 0, sourceUrl, 'music')}`;
+}
+
+export async function cacheMusicTrackAudio(
+  trackId: string,
+  sourceUrl: string,
+  bytes: ArrayBuffer,
+  mime = 'audio/mpeg',
+): Promise<string> {
+  const id = await buildMusicTrackCacheId(trackId, sourceUrl);
+  const meta: AudioCacheMeta = {
+    id,
+    bookUrl: MUSIC_TRACK_PREFIX + trackId,
+    chapterIndex: 0,
+    segmentIndex: 0,
+    audioUrl: sourceUrl,
+    sourceId: 'music',
+    mime,
+    byteSize: bytes.byteLength,
+    savedAt: Date.now(),
+  };
+  if (!isTauri()) {
+    await webPutRecord({ id, bytes, meta });
+    invalidateAudioCacheMetaIndex();
+    return id;
+  }
+  const root = await ensureAudioCacheDir();
+  const fs = await getFileSystem();
+  const dir = await join(root, 'music-tracks', id.slice(0, 16));
+  await fs.mkdir(dir, true);
+  await fs.writeFile(await join(dir, AUDIO_BIN_FILE), new Uint8Array(bytes));
+  await fs.writeFile(
+    await join(dir, META_FILE),
+    new TextEncoder().encode(JSON.stringify(meta)),
+  );
+  invalidateAudioCacheMetaIndex();
+  return id;
+}
+
+export async function getCachedMusicTrackAudio(
+  trackId: string,
+  sourceUrl: string,
+): Promise<{ bytes: ArrayBuffer; mime: string } | null> {
+  if (sourceUrl) {
+    const hit = await getCachedMusicTrackAudioByKey(trackId, sourceUrl);
+    if (hit) return hit;
+  }
+  return getCachedMusicTrackByTrackId(trackId);
+}
+
+async function getCachedMusicTrackAudioByKey(
+  trackId: string,
+  sourceUrl: string,
+): Promise<{ bytes: ArrayBuffer; mime: string } | null> {
+  const id = await buildMusicTrackCacheId(trackId, sourceUrl);
+  if (!isTauri()) {
+    const record = await webGetRecord(id);
+    if (!record) return null;
+    return { bytes: record.bytes, mime: record.meta.mime || 'audio/mpeg' };
+  }
+  const root = await ensureAudioCacheDir();
+  const fs = await getFileSystem();
+  const dir = await join(root, 'music-tracks', id.slice(0, 16));
+  const binPath = await join(dir, AUDIO_BIN_FILE);
+  if (!(await fs.exists(binPath))) return null;
+  const raw = await fs.readFile(binPath);
+  const metaPath = await join(dir, META_FILE);
+  let mime = 'audio/mpeg';
+  if (await fs.exists(metaPath)) {
+    try {
+      const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
+      const parsed = JSON.parse(metaText) as AudioCacheMeta;
+      mime = parsed.mime || mime;
+    } catch {
+      // ignore
+    }
+  }
+  const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+  const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  return { bytes: buf, mime };
+}
+
+export async function getCachedMusicTrackByTrackId(
+  trackId: string,
+): Promise<{ bytes: ArrayBuffer; mime: string; sourceUrl: string } | null> {
+  const bookUrl = MUSIC_TRACK_PREFIX + trackId;
+  if (!isTauri()) {
+    const db = await openWebAudioDb();
+    const records = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
+      const tx = db.transaction([WEB_STORE_NAME], 'readonly');
+      const index = tx.objectStore(WEB_STORE_NAME).index('bookUrl');
+      const request = index.getAll(bookUrl);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as AudioCacheRecord[]) ?? []);
+    });
+    const record = records[0];
+    if (!record?.bytes?.byteLength) return null;
+    return {
+      bytes: record.bytes,
+      mime: record.meta.mime || 'audio/mpeg',
+      sourceUrl: record.meta.audioUrl,
+    };
+  }
+  const root = await ensureAudioCacheDir();
+  const fs = await getFileSystem();
+  const musicDir = await join(root, 'music-tracks');
+  if (!(await fs.exists(musicDir))) return null;
+  for (const name of await fs.readDir(musicDir)) {
+    const metaPath = await join(musicDir, name, META_FILE);
+    if (!(await fs.exists(metaPath))) continue;
+    try {
+      const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
+      const meta = JSON.parse(metaText) as AudioCacheMeta;
+      if (meta.bookUrl !== bookUrl) continue;
+      const binPath = await join(musicDir, name, AUDIO_BIN_FILE);
+      const raw = await fs.readFile(binPath);
+      const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+      const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+      return { bytes: buf, mime: meta.mime || 'audio/mpeg', sourceUrl: meta.audioUrl };
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}

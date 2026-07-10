@@ -3,7 +3,7 @@
  * 对齐 Legado AudioPlayActivity / AudioPlayService
  */
 
-import { createSignal, createMemo, Show, type Accessor, type Component } from 'solid-js';
+import { createSignal, createMemo, createEffect, Show, onCleanup, onMount, type Accessor, type Component } from 'solid-js';
 import {
   Repeat,
   Repeat1,
@@ -61,6 +61,15 @@ import {
 } from '@/lib/media/audio/play-mode';
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
 import { AudioPlayMode, MAX_PLAY_SPEED, MIN_PLAY_SPEED } from '@/lib/media/audio/types';
+import { isMusicPlaybackMode } from '@/stores/viewer/media/audio';
+import { AudioMusicModeView } from '@/components/viewer/audio/music/AudioMusicModeView';
+import {
+  registerAudioShellHandlers,
+  notifyAudioShellPlayingChanged,
+} from '@/lib/media/audio/audio-shell-controls';
+import { globalMediaPlayerStore } from '@/stores/global-media-player';
+import { syncAndroidMediaSession } from '@/lib/media/audio/platform/android-media-session';
+import { playableFromChapter } from '@/lib/media/audio/playable-item';
 
 export interface AudioViewerPageProps {
   onClose: () => void;
@@ -92,6 +101,16 @@ const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
 ];
 
 export function AudioViewerPage(props: AudioViewerPageProps) {
+  const isMusicMode = () => isMusicPlaybackMode();
+
+  return (
+    <Show when={isMusicMode()} fallback={<AudioAudiobookView {...props} />}>
+      <AudioMusicModeView onClose={props.onClose} entryVisible={props.entryVisible} />
+    </Show>
+  );
+}
+
+function AudioAudiobookView(props: AudioViewerPageProps) {
   const [catalogOpen, setCatalogOpen] = createSignal(false);
   const [skipCreditsOpen, setSkipCreditsOpen] = createSignal(false);
   const [speedDialogOpen, setSpeedDialogOpen] = createSignal(false);
@@ -135,6 +154,13 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   const currentChapter = () => catalog()[chapterIndex()];
   const chapterTitle = () => currentChapter()?.title ?? '';
   const lyric = () => getChapterVariable(currentChapter()?.variable, 'lyric');
+
+  const playableItem = createMemo(() => {
+    const ch = currentChapter();
+    const urls = mediaUrls();
+    if (!ch || urls.length === 0) return null;
+    return playableFromChapter(ch, urls, lyric() ?? undefined);
+  });
 
   const canPrev = () => {
     const prev = resolvePrevChapterIndex(chapterIndex());
@@ -180,6 +206,7 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
   player = useAudioPlayer({
     src: url,
     mediaUrls,
+    playableItem,
     chapterIndex,
     catalog,
     chapterPos: () => viewerStore.state.chapterPos,
@@ -191,6 +218,42 @@ export function AudioViewerPage(props: AudioViewerPageProps) {
     onSaveProgress: () => viewerStore.saveProgress(),
     onSkipVolumeChapter: (index) => goChapterTo(index),
   });
+
+  onMount(() => {
+    const b = book();
+    registerAudioShellHandlers({
+      togglePlay: () => player.togglePlay(),
+      skipPrev: () => void goChapterDelta(-1),
+      skipNext: () => void goChapterDelta(1),
+      stop: () => props.onClose(),
+      openViewer: () => globalMediaPlayerStore.clearShell(),
+      isPlaying: () => player.playing(),
+    });
+    if (b) {
+      globalMediaPlayerStore.activate(
+        'audio',
+        {
+          title: chapterTitle() || b.name,
+          subtitle: b.name,
+          coverBookUrl: b.bookUrl,
+        },
+        b.bookUrl,
+      );
+    }
+  });
+
+  createEffect(() => {
+    notifyAudioShellPlayingChanged();
+    const b = book();
+    if (!b) return;
+    void syncAndroidMediaSession({
+      playing: player.playing(),
+      title: chapterTitle() || b.name,
+      artist: b.author || b.name,
+    });
+  });
+
+  onCleanup(() => registerAudioShellHandlers(null));
 
   const goChapterDelta = async (delta: number) => {
     const cur = chapterIndex();
