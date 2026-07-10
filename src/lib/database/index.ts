@@ -24,6 +24,7 @@ export * from '@/lib/database/sources';
 
 // 分组相关DAO
 export * from '@/lib/database/book-groups';
+export * from '@/lib/database/media-groups';
 
 // 书签相关DAO
 export * from '@/lib/database/bookmarks';

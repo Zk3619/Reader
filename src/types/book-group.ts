@@ -1,48 +1,50 @@
 /**
- * 书籍分组类型定义
- * 对应 legado 项目的 BookGroup.kt
+ * 媒体分组类型定义（原 book_groups，迁移为 media_groups）
  */
 
+export type MediaGroupDomain = 'shelf' | 'music' | 'shared';
+
 /**
- * 书籍分组实体
+ * 分组实体
  */
 export interface BookGroup {
-  /** 分组ID（主键） */
   groupId: number;
-  /** 分组名称 */
   groupName: string;
-  /** 封面 */
   cover?: string;
-  /** 排序 */
   order: number;
-  /** 启用刷新 */
   enableRefresh: boolean;
-  /** 是否显示 */
   show: boolean;
-  /** 书籍排序方式 */
   bookSort: number;
-  /** 仅更新已读书籍 */
   onlyUpdateRead: boolean;
+  /** v104+ 分组域 */
+  domain?: MediaGroupDomain;
+  /** 音乐列表 ID（domain=music） */
+  listId?: string;
+  /** 音乐列表来源 */
+  source?: string;
 }
 
-/**
- * 分组ID常量
- */
-export const BookGroupId = {
-  /** 根分组 */
+/** 媒体分组实体（新名称） */
+export type MediaGroup = BookGroup;
+
+export const MediaGroupId = {
   Root: -100,
-  /** 全部分组 */
   All: -1,
-  /** 本地分组 */
   Local: -2,
-  /** 音频分组 */
+  /** @deprecated 已移除，仅备份解析 */
   Audio: -3,
-  /** 网络无分组 */
   NetNone: -4,
-  /** 本地无分组 */
   LocalNone: -5,
-  /** 视频分组 */
+  /** @deprecated 已移除，仅备份解析 */
   Video: -6,
-  /** 错误分组 */
+  Favorite: -7,
+  Preview: -8,
   Error: -11,
+  MusicDefault: -20,
+  MusicRecent: -21,
+  MusicLocal: -22,
+  MusicUserStart: -1000,
 } as const;
+
+/** @deprecated 使用 MediaGroupId */
+export const BookGroupId = MediaGroupId;

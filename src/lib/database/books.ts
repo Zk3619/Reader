@@ -7,9 +7,19 @@ import {
   SQL_LOCAL_BOOK_CONDITION,
   SQL_NETWORK_BOOK_CONDITION,
 } from '@/lib/book-source/book-type';
+import { SQL_AUDIO_BOOK_CONDITION } from '@/lib/database/migration-v103';
+import type { MediaKind } from '@/lib/book-source/book-type';
+import { resolveMediaKind } from '@/lib/book-source/book-type';
 import { getDatabase } from '@/lib/database/database-core';
+import {
+  addGroupItem,
+  getPreviewItemsByKind,
+  rebuildGroupMaskFromItems,
+  removeGroupItem,
+} from '@/lib/database/media-groups';
+import { bookFromPreviewItem } from '@/lib/bookshelf/preview-book';
 import type { Book, NewBook } from '@/types';
-import { BookGroupId } from '@/types/book-group';
+import { MediaGroupId } from '@/types/book-group';
 
 export type ReadProgressUpdate = {
   chapterIndex: number;
@@ -30,6 +40,46 @@ export async function getAllBooks(): Promise<Book[]> {
 }
 
 /**
+ * 按媒体种类过滤书籍（运行时 resolveMediaKind，兼容历史 type 脏数据）
+ */
+export async function getBooksByMediaKind(kind: MediaKind): Promise<Book[]> {
+  const all = await getAllBooks();
+  return all.filter((book) => resolveMediaKind(book) === kind);
+}
+
+/**
+ * 按分组与媒体种类获取书籍（先 getBooksByGroup，再 resolveMediaKind 过滤）
+ */
+export async function getBooksByGroupAndKind(
+  groupId: number,
+  kind: MediaKind,
+): Promise<Book[]> {
+  if (groupId === MediaGroupId.Preview) {
+    const previews = await getPreviewItemsByKind(kind);
+    return previews
+      .map((item) => bookFromPreviewItem(item))
+      .filter((b): b is Book => b != null);
+  }
+  const books = await getBooksByGroup(groupId);
+  return books.filter((book) => resolveMediaKind(book) === kind);
+}
+
+/**
+ * 按分组与媒体种类统计书籍数量
+ */
+export async function getBookCountByGroupAndKind(
+  groupId: number,
+  kind: MediaKind,
+): Promise<number> {
+  if (groupId === MediaGroupId.Preview) {
+    const previews = await getPreviewItemsByKind(kind);
+    return previews.length;
+  }
+  const books = await getBooksByGroupAndKind(groupId, kind);
+  return books.length;
+}
+
+/**
  * 根据分组获取书籍
  */
 export async function getBooksByGroup(groupId: number): Promise<Book[]> {
@@ -40,33 +90,55 @@ export async function getBooksByGroup(groupId: number): Promise<Book[]> {
 
   // 根据分组ID构建不同的查询
   switch (groupId) {
-    case BookGroupId.All:
+    case MediaGroupId.All:
       query = 'SELECT * FROM books ORDER BY durChapterTime DESC';
       break;
-    case BookGroupId.Local:
+    case MediaGroupId.Local:
       query = `SELECT * FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION} ORDER BY "order"`;
       break;
-    case BookGroupId.Audio:
-      query = 'SELECT * FROM books WHERE type & 2 > 0 ORDER BY "order"';
+    case MediaGroupId.Favorite:
+      query = `SELECT b.* FROM books b
+        INNER JOIN media_group_items mgi
+          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?
+        ORDER BY mgi.sort_order ASC, b.durChapterTime DESC`;
+      params.push(MediaGroupId.Favorite);
       break;
-    case BookGroupId.NetNone:
-      query = `SELECT * FROM books 
-        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND type & 2 = 0 
-        AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0
-        ORDER BY "order"`;
+    case MediaGroupId.NetNone:
+      query = `SELECT b.* FROM books b
+        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND NOT (${SQL_AUDIO_BOOK_CONDITION})
+        AND NOT EXISTS (
+          SELECT 1 FROM media_group_items mgi
+          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
+          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
+            AND mg.domain = 'shelf' AND mg.groupId > 0
+        )
+        ORDER BY b."order"`;
       break;
-    case BookGroupId.LocalNone:
-      query = `SELECT * FROM books 
-        WHERE ${SQL_LOCAL_BOOK_CONDITION} 
-        AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0
-        ORDER BY "order"`;
+    case MediaGroupId.LocalNone:
+      query = `SELECT b.* FROM books b
+        WHERE ${SQL_LOCAL_BOOK_CONDITION}
+        AND NOT EXISTS (
+          SELECT 1 FROM media_group_items mgi
+          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
+          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
+            AND mg.domain = 'shelf' AND mg.groupId > 0
+        )
+        ORDER BY b."order"`;
       break;
-    case BookGroupId.Error:
+    case MediaGroupId.Error:
       query = 'SELECT * FROM books WHERE type & 16 > 0 ORDER BY durChapterTime DESC';
       break;
+    case MediaGroupId.Preview: {
+      const previews = await getPreviewItemsByKind();
+      return previews
+        .map((item) => bookFromPreviewItem(item))
+        .filter((b): b is Book => b != null);
+    }
     default:
-      // 用户自定义分组（使用位运算）
-      query = 'SELECT * FROM books WHERE ("group" & ?) > 0 ORDER BY "order"';
+      query = `SELECT b.* FROM books b
+        INNER JOIN media_group_items mgi
+          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?
+        ORDER BY mgi.sort_order ASC, b."order"`;
       params.push(groupId);
       break;
   }
@@ -83,30 +155,48 @@ export async function getBookCountByGroup(groupId: number): Promise<number> {
   let query = '';
   const params: unknown[] = [];
   switch (groupId) {
-    case BookGroupId.All:
+    case MediaGroupId.All:
       query = 'SELECT COUNT(*) as count FROM books';
       break;
-    case BookGroupId.Local:
+    case MediaGroupId.Local:
       query = `SELECT COUNT(*) as count FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION}`;
       break;
-    case BookGroupId.Audio:
-      query = 'SELECT COUNT(*) as count FROM books WHERE type & 2 > 0';
+    case MediaGroupId.Favorite:
+      query = `SELECT COUNT(*) as count FROM books b
+        INNER JOIN media_group_items mgi
+          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?`;
+      params.push(MediaGroupId.Favorite);
       break;
-    case BookGroupId.NetNone:
-      query = `SELECT COUNT(*) as count FROM books 
-        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND type & 2 = 0 
-        AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0`;
+    case MediaGroupId.NetNone:
+      query = `SELECT COUNT(*) as count FROM books b
+        WHERE ${SQL_NETWORK_BOOK_CONDITION} AND NOT (${SQL_AUDIO_BOOK_CONDITION})
+        AND NOT EXISTS (
+          SELECT 1 FROM media_group_items mgi
+          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
+          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
+            AND mg.domain = 'shelf' AND mg.groupId > 0
+        )`;
       break;
-    case BookGroupId.LocalNone:
-      query = `SELECT COUNT(*) as count FROM books 
-        WHERE ${SQL_LOCAL_BOOK_CONDITION} 
-        AND ((SELECT sum(groupId) FROM book_groups WHERE groupId > 0) & "group") = 0`;
+    case MediaGroupId.LocalNone:
+      query = `SELECT COUNT(*) as count FROM books b
+        WHERE ${SQL_LOCAL_BOOK_CONDITION}
+        AND NOT EXISTS (
+          SELECT 1 FROM media_group_items mgi
+          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
+          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
+            AND mg.domain = 'shelf' AND mg.groupId > 0
+        )`;
       break;
-    case BookGroupId.Error:
+    case MediaGroupId.Error:
       query = 'SELECT COUNT(*) as count FROM books WHERE type & 16 > 0';
       break;
+    case MediaGroupId.Preview: {
+      const previews = await getPreviewItemsByKind();
+      return previews.length;
+    }
     default:
-      query = 'SELECT COUNT(*) as count FROM books WHERE ("group" & ?) > 0';
+      query = `SELECT COUNT(*) as count FROM media_group_items
+        WHERE group_id = ? AND item_kind = 'book'`;
       params.push(groupId);
       break;
   }
@@ -383,45 +473,54 @@ export async function updateBooksCanUpdate(
   }
 }
 
-/** 批量设置分组掩码 */
+/** 批量设置分组掩码（v105：写入 media_group_items 并同步 books."group" 供导出） */
 export async function updateBooksGroupMask(
   bookUrls: string[],
   groupMask: number
 ): Promise<void> {
   if (bookUrls.length === 0) return;
   const db = await getDatabase();
+  const shelfGroups = await db.select<{ groupId: number }>(
+    `SELECT groupId FROM media_groups WHERE groupId > 0 AND domain IN ('shelf', 'shared')`,
+  );
+  const shelfIds = shelfGroups.map((g) => Number(g.groupId));
+  const managedIds = [...shelfIds, MediaGroupId.Favorite];
+
   for (const bookUrl of bookUrls) {
-    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [groupMask, bookUrl]);
+    for (const gid of managedIds) {
+      if ((groupMask & gid) > 0) {
+        await addGroupItem(gid, 'book', bookUrl);
+      } else {
+        await removeGroupItem(gid, 'book', bookUrl);
+      }
+    }
+    const mask = await rebuildGroupMaskFromItems(bookUrl);
+    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [mask, bookUrl]);
   }
 }
 
-/** 为所选书籍加入分组（位或） */
+/** 为所选书籍加入分组（media_group_items） */
 export async function addBooksToGroupMask(
   bookUrls: string[],
   groupId: number
 ): Promise<void> {
   if (bookUrls.length === 0 || groupId <= 0) return;
+  const db = await getDatabase();
   for (const bookUrl of bookUrls) {
-    const book = await getBook(bookUrl);
-    if (!book) continue;
-    const next = book.group | groupId;
-    if (next === book.group) continue;
-    await updateBook({ ...book, group: next });
+    await addGroupItem(groupId, 'book', bookUrl);
+    const mask = await rebuildGroupMaskFromItems(bookUrl);
+    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [mask, bookUrl]);
   }
 }
 
-/** 为所选书籍移除分组（位清除） */
+/** 为所选书籍移除分组 */
 export async function removeBooksFromGroupMask(
   bookUrls: string[],
   groupId: number
 ): Promise<void> {
   if (bookUrls.length === 0 || groupId <= 0) return;
   for (const bookUrl of bookUrls) {
-    const book = await getBook(bookUrl);
-    if (!book) continue;
-    const next = book.group & ~groupId;
-    if (next === book.group) continue;
-    await updateBook({ ...book, group: next });
+    await removeGroupItem(groupId, 'book', bookUrl);
   }
 }
 
@@ -457,10 +556,9 @@ export async function updateBookGroup(
  */
 export async function removeBookGroup(groupId: number): Promise<void> {
   const db = await getDatabase();
-  // 使用位运算移除分组
   await db.execute(
-    'UPDATE books SET "group" = "group" & ~? WHERE ("group" & ?) > 0',
-    [groupId, groupId]
+    'DELETE FROM media_group_items WHERE group_id = ? AND item_kind = ?',
+    [groupId, 'book'],
   );
 }
 

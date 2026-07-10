@@ -24,6 +24,26 @@ import {
   THEME_PRESETS_SCHEMA_VERSION,
   migrateThemePresetsV100,
 } from '@/lib/database/migration-v100';
+import {
+  AUDIO_LIBRARY_SCHEMA_VERSION,
+  migrateAudioLibraryV101,
+} from '@/lib/database/migration-audio-v101';
+import {
+  AUDIO_DOWNLOAD_SCHEMA_VERSION,
+  migrateAudioDownloadV102,
+} from '@/lib/database/migration-audio-v102';
+import {
+  BOOK_TYPE_NORMALIZE_SCHEMA_VERSION,
+  migrateBookTypeNormalizeV103,
+} from '@/lib/database/migration-v103';
+import {
+  MEDIA_GROUPS_SCHEMA_VERSION,
+  migrateMediaGroupsV104,
+} from '@/lib/database/migration-v104-media-groups';
+import {
+  MEDIASBOX_SCHEMA_VERSION,
+  migrateMediaboxV105,
+} from '@/lib/database/migration-v105-mediabox';
 
 export { LEGADO_SCHEMA_VERSION };
 export { CHAPTER_CACHE_SCHEMA_VERSION };
@@ -458,5 +478,25 @@ export const migrations: Migration[] = [
   {
     version: THEME_PRESETS_SCHEMA_VERSION,
     up: migrateThemePresetsV100,
+  },
+  {
+    version: AUDIO_LIBRARY_SCHEMA_VERSION,
+    up: migrateAudioLibraryV101,
+  },
+  {
+    version: AUDIO_DOWNLOAD_SCHEMA_VERSION,
+    up: migrateAudioDownloadV102,
+  },
+  {
+    version: BOOK_TYPE_NORMALIZE_SCHEMA_VERSION,
+    up: migrateBookTypeNormalizeV103,
+  },
+  {
+    version: MEDIA_GROUPS_SCHEMA_VERSION,
+    up: migrateMediaGroupsV104,
+  },
+  {
+    version: MEDIASBOX_SCHEMA_VERSION,
+    up: migrateMediaboxV105,
   },
 ];

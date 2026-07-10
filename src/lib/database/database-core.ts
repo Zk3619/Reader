@@ -145,54 +145,66 @@ export async function ensureLegadoSchemaVersionRecord(
  * 对应 legado 项目的 AppDatabase.dbCallback.onOpen
  */
 async function initDefaultData(db: DatabaseAdapter): Promise<void> {
-  // 初始化默认分组（如果不存在）
-  // 全部
+  const groupsTable = 'media_groups';
+
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -1, '全部', -10, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -1)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -1, '全部', -10, 1, 1, -1, 'shelf'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -1)
   `);
 
-  // 本地（enableRefresh=0 与 Legado 一致）
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -2, '本地', -9, 0, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -2)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -2, '本地', -9, 0, 1, -1, 'shelf'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -2)
   `);
 
-  // 音频
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -3, '音频', -8, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -3)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -4, '网络未分组', -7, 1, 1, -1, 'shelf'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -4)
   `);
 
-  // 网络未分组
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -4, '网络未分组', -7, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -4)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -5, '本地未分组', -6, 1, 1, -1, 'shelf'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -5)
   `);
 
-  // 本地未分组
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -5, '本地未分组', -6, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -5)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -11, '更新失败', -1, 1, 1, -1, 'shelf'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -11)
   `);
 
-  // 视频
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -6, '视频', -5, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -6)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -7, '收藏', -4, 0, 1, -1, 'shared'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -7)
   `);
 
-  // 更新失败
   await db.execute(`
-    INSERT INTO book_groups(groupId, groupName, "order", enableRefresh, show, bookSort) 
-    SELECT -11, '更新失败', -1, 1, 1, -1
-    WHERE NOT EXISTS (SELECT * FROM book_groups WHERE groupId = -11)
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain)
+    SELECT -8, '试读/试听/试看', -3, 0, 1, -1, 'shared'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -8)
+  `);
+
+  await db.execute(`
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
+    SELECT -20, '默认列表', 0, 0, 1, -1, 'music', 'default', 'builtin'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -20)
+  `);
+
+  await db.execute(`
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
+    SELECT -21, '最近播放', -1, 0, 1, -1, 'music', 'recent', 'builtin'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -21)
+  `);
+
+  await db.execute(`
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
+    SELECT -22, '本地音乐', -2, 0, 1, -1, 'music', 'local', 'builtin'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -22)
   `);
 
   // 数据修复：清理null字符串

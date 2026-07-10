@@ -35,7 +35,7 @@ export type { SearchKeyword } from '@/types/search-keyword';
 
 // 分组相关类型
 export type { BookGroup } from '@/types/book-group';
-export { BookGroupId } from '@/types/book-group';
+export { BookGroupId, MediaGroupId } from '@/types/book-group';
 
 // 书签相关类型
 export type { Bookmark } from '@/types/bookmark';
