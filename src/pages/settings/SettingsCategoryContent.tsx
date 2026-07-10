@@ -3,35 +3,20 @@ import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { ThemeScheduleSetting } from '@/components/settings/ThemeScheduleSetting';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { ShellLayoutSetting } from '@/components/shell/ShellLayoutSetting';
-import { ViewerChromeLayoutSetting } from '@/components/settings/ViewerChromeLayoutSetting';
 import { MediaPlayerChromeSetting } from '@/components/settings/MediaPlayerChromeSetting';
-import { InnerWebRenderModeSetting } from '@/components/settings/InnerWebRenderModeSetting';
-import { BookInfoPresentationSetting } from '@/components/settings/BookInfoPresentationSetting';
-import { TocPaginationSafetySetting } from '@/components/settings/TocPaginationSafetySetting';
-import { SourceExploreDrawerLayoutSetting } from '@/components/settings/SourceExploreDrawerLayoutSetting';
 import { ToastSetting } from '@/components/settings/ToastSetting';
 import { VisualEffectsSetting } from '@/components/settings/VisualEffectsSetting';
 import { ThemePresetListSetting } from '@/components/settings/ThemePresetListSetting';
 import { CustomThemeSetting } from '@/components/settings/CustomThemeSetting';
-import { SourceBlocklistSetting } from '@/components/settings/SourceBlocklistSetting';
 import { StorageAndWebViewSetting } from '@/components/settings/StorageAndWebViewSetting';
-import { BooksStorageSetting } from '@/components/settings/BooksStorageSetting';
-import { CoverCacheSetting } from '@/components/settings/CoverCacheSetting';
-import { ChapterCacheSetting } from '@/components/settings/ChapterCacheSetting';
-import { ReadingRulesHub } from '@/components/settings/ReadingRulesHub';
-import { ChapterBodyPrefetchSetting } from '@/components/settings/ChapterBodyPrefetchSetting';
-import { BrightnessSyncSystemSetting } from '@/components/settings/BrightnessSyncSystemSetting';
-import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { DataBackupSetting } from '@/components/settings/DataBackupSetting';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
-import { type ReadingRulePageId } from '@/lib/settings/reading-rules-nav';
 import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
 
 export interface SettingsCategoryContentProps {
   categoryId: SettingsCategoryId;
   highlightedItemId?: string | null;
-  onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
   onOpenThemeStudio?: () => void;
 }
 
@@ -123,70 +108,14 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
           <ShellLayoutSetting />
         </SettingItemAnchor>
 
-        <SettingItemAnchor id="viewer-chrome" highlighted={highlight('viewer-chrome')}>
-          <ViewerChromeLayoutSetting />
-        </SettingItemAnchor>
-
         <SettingItemAnchor id="media-player-chrome" highlighted={highlight('media-player-chrome')}>
           <MediaPlayerChromeSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="book-info-presentation" highlighted={highlight('book-info-presentation')}>
-          <BookInfoPresentationSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="source-explore-drawer" highlighted={highlight('source-explore-drawer')}>
-          <SourceExploreDrawerLayoutSetting />
-        </SettingItemAnchor>
-      </Show>
-
-      <Show when={props.categoryId === 'reading'}>
-        <SettingItemAnchor id="reading-rules-hub" highlighted={highlight('reading-rules-hub')}>
-          <ReadingRulesHub onOpen={(page) => props.onOpenReadingRulePage?.(page)} />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="chapter-body-prefetch" highlighted={highlight('chapter-body-prefetch')}>
-          <ChapterBodyPrefetchSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="brightness-sync-system" highlighted={highlight('brightness-sync-system')}>
-          <BrightnessSyncSystemSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="toc-pagination-safety" highlighted={highlight('toc-pagination-safety')}>
-          <TocPaginationSafetySetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="inner-web-render" highlighted={highlight('inner-web-render')}>
-          <InnerWebRenderModeSetting />
-        </SettingItemAnchor>
-      </Show>
-
-      <Show when={props.categoryId === 'sources'}>
-        <SettingItemAnchor id="web-service" highlighted={highlight('web-service')}>
-          <WebServiceSettingBlock />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="source-blocklist" highlighted={highlight('source-blocklist')}>
-          <SourceBlocklistSetting />
         </SettingItemAnchor>
       </Show>
 
       <Show when={props.categoryId === 'storage'}>
         <SettingItemAnchor id="storage-webview" highlighted={highlight('storage-webview')}>
           <StorageAndWebViewSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="books-storage" highlighted={highlight('books-storage')}>
-          <BooksStorageSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="cover-cache" highlighted={highlight('cover-cache')}>
-          <CoverCacheSetting />
-        </SettingItemAnchor>
-
-        <SettingItemAnchor id="chapter-cache" highlighted={highlight('chapter-cache')}>
-          <ChapterCacheSetting />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="database-backup" highlighted={highlight('database-backup')}>

@@ -13,7 +13,9 @@ import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
 import { ThemeStudioPage } from "@/pages/settings/ThemeStudioPage";
 import { GlobalThemeEffectsLayer } from "@/components/theme/GlobalThemeEffectsLayer";
 import { SideBar } from "@/components/shell/SideBar";
+import { ModuleSidebarRail } from "@/components/shell/ModuleSidebarRail";
 import { BottomBar } from "@/components/shell/BottomBar";
+import { ShellSidebarTrigger } from "@/components/shell/ShellSidebarTrigger";
 import {
   GlobalMediaPlayer,
   useGlobalMediaPlayerFixedInset,
@@ -25,7 +27,14 @@ import {
 import { Tray } from "@/components/shell/Tray";
 import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
-import { BookShelf } from "@/pages/bookshelf/BookShelfPage";
+import { ReaderPage } from "@/pages/reader/ReaderPage";
+import { ReaderShelfPanel } from "@/pages/reader/ReaderShelfPanel";
+import { ReaderSettingsPage } from "@/pages/reader/ReaderSettingsPage";
+import { MusicPage } from "@/pages/music/MusicPage";
+import { TvPage } from "@/pages/tv/TvPage";
+import { TvSettingsPage } from "@/pages/tv/TvSettingsPage";
+import { SubscribePage } from "@/pages/subscribe/SubscribePage";
+import { SubscribeSettingsPage } from "@/pages/subscribe/SubscribeSettingsPage";
 import { BookshelfCachePage } from "@/pages/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/sources/SourcesPage";
 import { SourcesManagePage } from "@/pages/sources/SourcesManagePage";
@@ -38,6 +47,13 @@ import { BookGroupManage } from "@/pages/bookshelf/BookGroupManagePage";
 import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
 import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
+import { openAudioHubShell, isAudioHubBookUrl } from "@/app/open-content";
+import {
+  effectiveSourceTypeFilter,
+  SourcesTypeTabs,
+} from "@/components/sources/SourcesTypeTabs";
+import { navigateToMusicHub } from "@/stores/shell-tabs";
+import { registerGlobalAudioOpenViewer } from "@/lib/media/audio/audio-shell-controls";
 import {
   BookReader,
   ImageViewerPage,
@@ -87,7 +103,27 @@ import {
   type RssSourceListFilterCriteria,
 } from "@/lib/rss/rss-source-list-filter";
 import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
-import { bookshelfStore } from "@/stores/bookshelf";
+import { getActiveShelfNavigation } from "@/lib/bookshelf/active-shelf-navigation";
+import { normalizePageType, dispatchMediaRefresh } from "@/lib/media-shelf/compat-keys";
+import {
+  openReaderAtTab,
+  prepareShellNavigation,
+} from "@/lib/modules/shell-compat";
+import { hasModuleSidebarRailContent } from "@/lib/modules/module-nav-registry";
+import {
+  resolveShellContentLeft,
+  shellContentLeftClass,
+} from "@/lib/shell/shell-chrome-inset";
+import {
+  persistModuleSidebarRailExpanded,
+  readModuleSidebarRailExpanded,
+} from "@/lib/shell/module-sidebar-rail-state";
+import {
+  readerInternalTabValue,
+  type ReaderInternalTab,
+} from "@/stores/reader-internal-tab";
+import { isPreviewBook, resolvePreviewBookForOpen } from "@/lib/bookshelf/preview-book";
+import { removePreviewByRef } from "@/lib/database/media-groups";
 import { sourcesStore } from "@/stores/sources";
 import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
@@ -121,6 +157,7 @@ import {
   shouldOpenExplorePageForSection,
 } from "@/lib/book-source/explore-section-action";
 import { ShellLayoutProvider, useShellLayout } from "@/components/shell/ShellLayoutProvider";
+import { ShellSidebarLifecycle } from "@/components/shell/ShellSidebarLifecycle";
 import { cn } from "@/lib/utils";
 import {
   hViewport,
@@ -223,6 +260,8 @@ import {
   READER_RSS_IMPORT_EVENT,
   READER_REPLACE_RULE_IMPORT_EVENT,
 } from "@/lib/platform/legado-import-uri";
+import { handleMusicDeepLink } from "@/lib/media/audio/music-deeplink";
+import { LyricDesktopPage } from "@/pages/lyric-desktop/LyricDesktopPage";
 import {
   buildImportComparisons,
   defaultImportSelection,
@@ -287,18 +326,18 @@ function isMediaViewerPage(page: PageType): page is MediaViewerPage {
 }
 
 function normalizeRestoredPage(page: string): PageType {
-  if (page === "import") return "bookshelf";
-  if (page === "subscription") return "rss";
+  if (page === "import") return "reader";
+  if (page === "subscription") return "subscribe";
   const viewer = normalizeMediaViewerPage(page);
   if (viewer) return viewer;
-  return page as PageType;
+  return normalizePageType(page);
 }
 
 // 内部组件，用于访问 SidebarProvider 的上下文
 function AppContent() {
-  const restoredPage = normalizeRestoredPage(readHmrData<string>("currentPage", "bookshelf"));
+  const restoredPage = normalizeRestoredPage(readHmrData<string>("currentPage", "reader"));
   const nav = createOverlayStack(
-    isOverlayPage(restoredPage) ? "bookshelf" : normalizeShellTab(restoredPage),
+    isOverlayPage(restoredPage) ? "reader" : normalizeShellTab(restoredPage),
   );
   const currentPage = nav.currentPage;
   const isStandalonePage = nav.isStandaloneVisible;
@@ -308,7 +347,7 @@ function AppContent() {
   });
 
   const [settingsQuickPageReturn, setSettingsQuickPageReturn] = createSignal<
-    'bookmark' | 'record' | null
+    ReaderInternalTab | null
   >(null);
 
   const returnFromSettingsQuickPage = () => {
@@ -317,14 +356,15 @@ function AppContent() {
   };
 
   const navigateFromSettingsQuickPage = (page: PageType) => {
-    if (page === 'bookmark' || page === 'record') {
-      setSettingsQuickPageReturn(page);
+    const readerTab = page === 'bookmark' || page === 'record' ? page : null;
+    if (readerTab) {
+      setSettingsQuickPageReturn(readerTab);
     }
     navigateToPage(page);
   };
 
   const navigateToPage = (page: PageType) => {
-    if (page === "book-search") {
+    if (page === "book-search" || page === "media-search") {
       openBookSearch();
       return;
     }
@@ -332,19 +372,30 @@ function AppContent() {
       nav.push({ kind: "remote-book", originShell: nav.shellTab() });
       return;
     }
-    if (page !== settingsQuickPageReturn()) {
+    if (settingsQuickPageReturn() && page !== 'reader' && page !== 'bookmark' && page !== 'record') {
       setSettingsQuickPageReturn(null);
     }
-    nav.navigateShell(page);
+    const shellPage = prepareShellNavigation(page);
+    nav.navigateShell(shellPage);
   };
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
+  const [showTvSettings, setShowTvSettings] = createSignal(false);
+  const [showSubscribeSettings, setShowSubscribeSettings] = createSignal(false);
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
   const [readingRulePage, setReadingRulePage] = createSignal<ReadingRulePageId | null>(null);
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [dbInitialized, setDbInitialized] = createSignal(false);
   const [dbError, setDbError] = createSignal<string | null>(null);
-  const { state, toggleSidebar, isMobile, setOpenMobile } = useSidebar();
+  const { state, toggleSidebar, setOpenMobile } = useSidebar();
+  const [moduleRailOpen, setModuleRailOpen] = createSignal(readModuleSidebarRailExpanded());
+  const toggleModuleRail = () => {
+    setModuleRailOpen((open) => {
+      const next = !open;
+      persistModuleSidebarRailExpanded(next);
+      return next;
+    });
+  };
   const [windowWidth, setWindowWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
@@ -374,7 +425,8 @@ function AppContent() {
   }
 
   const openSourcesManagePage = () => {
-    nav.navigateShell("sources");
+    openReaderAtTab('sources');
+    nav.navigateShell('reader');
     setShowSourcesManage(true);
   };
   const [showBookshelfCache, setShowBookshelfCache] = createSignal(false);
@@ -722,6 +774,14 @@ function AppContent() {
     if (!import.meta.env.DEV) return;
     const page = currentPage();
     if (!isMediaViewerPage(page)) return;
+    const top = nav.top();
+    if (
+      isMusicShellPage() ||
+      viewerStore.isMusicHubOpen() ||
+      (top && "bookUrl" in top && isAudioHubBookUrl(top.bookUrl))
+    ) {
+      return;
+    }
     if (viewerStore.state.book || viewerStore.state.loading || viewerStore.isMediaViewerBootstrapping()) {
       return;
     }
@@ -730,6 +790,15 @@ function AppContent() {
       "mediaViewerSession",
       null,
     );
+    const musicHubShell = readHmrData<boolean>("musicHubShellActive", false);
+    if (musicHubShell || (session?.bookUrl && isAudioHubBookUrl(session.bookUrl))) {
+      navigateToPage('music');
+      const { section } = navigateToMusicHub();
+      if (!viewerStore.isMusicHubOpen()) {
+        void viewerStore.openMusicHub({ section });
+      }
+      return;
+    }
     if (session?.bookUrl) {
       void getBook(session.bookUrl).then((book) => {
         if (!book || viewerStore.state.book) return;
@@ -755,7 +824,7 @@ function AppContent() {
   });
 
   createEffect(() => {
-    if (currentPage() !== "sources") return;
+    if (!isReaderShellPage() || readerInternalTabValue() !== 'sources') return;
     void loadSourcesPagePrefs().then((p) => {
       setSourceSearchMode(p.searchMode);
       setSourceEnableDragSort(p.enableDragSort);
@@ -763,7 +832,7 @@ function AppContent() {
   });
 
   createEffect(() => {
-    if (currentPage() !== "rss") return;
+    if (!isReaderShellPage() || readerInternalTabValue() !== 'rss') return;
     void loadRssPagePrefs().then((p) => {
       setRssLayoutMode(p.layoutMode);
       setRssSearchMode(p.searchMode);
@@ -799,7 +868,7 @@ function AppContent() {
     });
   };
 
-  const sourcePageToolbarTitle = () => "书源";
+  const sourcePageToolbarTitle = () => "来源";
 
   const sourceFilterGroupOptions = () => buildSourceFilterGroupOptions(sourceGroups());
 
@@ -1478,6 +1547,21 @@ function AppContent() {
     nav.push({ kind: viewerKind, bookUrl });
   }
 
+  function openAudioHub(options?: import('@/app/open-content').OpenAudioHubOptions) {
+    navigateToPage('music');
+    void openAudioHubShell(
+      (opts) => viewerStore.openMusicHub(opts),
+      options,
+    ).catch((e) => {
+      console.error("[audio-hub] 打开失败:", e);
+      showAppToast({
+        title: "无法打开音乐中心",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    });
+  }
+
   function popViewerNavIfTop(bookUrl: string) {
     const top = nav.top();
     if (
@@ -1515,6 +1599,12 @@ function AppContent() {
     initialCatalog?: import("@/types").BookChapter[],
     source?: Pick<BookSource, "sourceType">,
   ) {
+    if (isPreviewBook(book)) {
+      void resolvePreviewBookForOpen(book).then((resolved) => {
+        if (resolved) openReaderPage(resolved, initialCatalog, source);
+      });
+      return;
+    }
     const kind = resolveMediaKindWithSource(book, source?.sourceType);
     const viewerKind = mediaViewerPageForKind(kind);
     if (import.meta.env.DEV) {
@@ -1678,6 +1768,11 @@ function AppContent() {
   });
 
   onMount(() => {
+    registerGlobalAudioOpenViewer(openAudioHub);
+    onCleanup(() => registerGlobalAudioOpenViewer(null));
+  });
+
+  onMount(() => {
     registerSourceVerificationHandler((request) => {
       return new Promise<string>((resolve, reject) => {
         sourceVerificationCompleter = { resolve, reject };
@@ -1794,7 +1889,8 @@ function AppContent() {
           description: book.name,
           variant: "success",
         });
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+        await removePreviewByRef(book.bookUrl);
+        dispatchMediaRefresh();
         void finishCloseReader();
       } else {
         showAppToast({ title: "加入书架失败", variant: "destructive" });
@@ -1852,7 +1948,7 @@ function AppContent() {
           variant: "success",
           progress: true,
         });
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+        dispatchMediaRefresh();
       }
     } catch (e) {
       const error = e instanceof Error ? e : null;
@@ -1866,7 +1962,7 @@ function AppContent() {
         description: msg,
         variant: "error",
       });
-      window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+      dispatchMediaRefresh();
     }
   };
 
@@ -1881,7 +1977,7 @@ function AppContent() {
         '@/lib/platform/fs/managed-storage'
       );
       if (hasRoot()) {
-        const groupId = bookshelfStore.state.currentGroup;
+        const groupId = getActiveShelfNavigation().state.currentGroup;
         await performImport(groupId >= 0 ? groupId : undefined);
       }
     }
@@ -1945,7 +2041,7 @@ function AppContent() {
       variant: success > 0 ? 'success' : failed > 0 ? 'error' : 'default',
     });
     if (success > 0) {
-      window.dispatchEvent(new CustomEvent('bookshelf-refresh'));
+      dispatchMediaRefresh();
     }
   };
 
@@ -2263,7 +2359,7 @@ function AppContent() {
           variant: "success",
           progress: true,
         });
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+        dispatchMediaRefresh();
       }
     } catch (e) {
       const error = e instanceof Error ? e : null;
@@ -2273,7 +2369,7 @@ function AppContent() {
         description: msg,
         variant: "error",
       });
-      window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+      dispatchMediaRefresh();
     }
   };
 
@@ -2326,7 +2422,7 @@ function AppContent() {
         description: msg,
         variant: "error",
       });
-      window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+      dispatchMediaRefresh();
     }
   };
 
@@ -2345,7 +2441,7 @@ function AppContent() {
 
       let finalBookUrl = fileInfo.bookUrl;
       let finalContent: ArrayBuffer;
-      const finalGroupId = groupId !== undefined ? groupId : (bookshelfStore.state.currentGroup >= 0 ? bookshelfStore.state.currentGroup : undefined);
+      const finalGroupId = groupId !== undefined ? groupId : (getActiveShelfNavigation().state.currentGroup >= 0 ? getActiveShelfNavigation().state.currentGroup : undefined);
 
       if (action === 'none') {
         finalBookUrl = fileInfo.bookUrl;
@@ -2434,7 +2530,7 @@ function AppContent() {
           variant: "success",
           progress: true,
         });
-        window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+        dispatchMediaRefresh();
       }
     } catch (e) {
       const error = e instanceof Error ? e : null;
@@ -2444,7 +2540,7 @@ function AppContent() {
         description: msg,
         variant: "error",
       });
-      window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+      dispatchMediaRefresh();
     }
   };
 
@@ -2601,6 +2697,7 @@ function AppContent() {
               if (!uri) return;
               void (async () => {
                 await dismissInnerWebBeforeImport();
+                if (await handleMusicDeepLink(uri)) return;
                 await handleReaderImportDeepLink(uri);
               })();
             })
@@ -2661,7 +2758,7 @@ function AppContent() {
 
   async function processSingleLocalBookPick(picked: LocalBookPickResult) {
     try {
-      const groupId = bookshelfStore.state.currentGroup;
+      const groupId = getActiveShelfNavigation().state.currentGroup;
       const settings = settingsStore.state.app;
 
       if (isTauri()) {
@@ -2868,7 +2965,7 @@ function AppContent() {
             description: `已导入《${result.book.name}》，共 ${result.chapterCount} 章`,
             variant: "success",
           });
-          window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+          dispatchMediaRefresh();
         }
       }
     } catch (e) {
@@ -2879,7 +2976,7 @@ function AppContent() {
         description: msg,
         variant: "error",
       });
-      window.dispatchEvent(new CustomEvent("bookshelf-refresh"));
+      dispatchMediaRefresh();
     }
   }
 
@@ -2902,7 +2999,7 @@ function AppContent() {
       if (!(await ensureBooksStorageForImport())) return;
       const candidates = await pickLocalBookFiles();
       if (!candidates?.length) return;
-      const groupId = bookshelfStore.state.currentGroup;
+      const groupId = getActiveShelfNavigation().state.currentGroup;
       const settings = settingsStore.state.app;
       const gid = groupId >= 0 ? groupId : undefined;
       if (candidates.length === 1) {
@@ -2939,7 +3036,7 @@ function AppContent() {
         });
         return;
       }
-      const groupId = bookshelfStore.state.currentGroup;
+      const groupId = getActiveShelfNavigation().state.currentGroup;
       const settings = settingsStore.state.app;
       const gid = groupId >= 0 ? groupId : undefined;
       if (await needsImportBookActionPrompt()) {
@@ -2972,6 +3069,13 @@ function AppContent() {
   const visualShadow = () => settingsStore.state.app.enableVisualShadow !== false;
   const visualTransparency = () => settingsStore.state.app.enableVisualTransparency !== false;
   const visualBlur = () => settingsStore.state.app.enableVisualBlur !== false;
+  const isReaderShellPage = () => normalizePageType(currentPage()) === "reader";
+  const isMusicShellPage = () => normalizePageType(currentPage()) === "music";
+  const isTvShellPage = () => normalizePageType(currentPage()) === "tv";
+  const isSubscribeShellPage = () => normalizePageType(currentPage()) === "subscribe";
+  const isReaderInternalTab = (tab: ReaderInternalTab) =>
+    isReaderShellPage() && readerInternalTabValue() === tab;
+
   const shellTabEnter = () => mainShellTabEnterClass(reduceMotion());
 
   const getOpenBackLayers = (): BackLayerDefinition[] => {
@@ -3083,16 +3187,18 @@ function AppContent() {
     push("settings-sub", settingsSubPageOpen(), () => settingsSubPageCloseRef.current());
     push(
       "settings-quick-page",
-      settingsQuickPageReturn() != null && currentPage() === settingsQuickPageReturn(),
+      settingsQuickPageReturn() != null && isReaderShellPage(),
       returnFromSettingsQuickPage,
     );
     push("reading-rule-page", readingRulePage() != null, () => setReadingRulePage(null));
     push("theme-studio", themeStudioStore.state.open, () => themeStudioStore.closeStudio());
     push(
       "sources-explore-drawer",
-      currentPage() === "sources" && sourcesExpandedSourceUrl() != null,
+      isReaderInternalTab('sources') && sourcesExpandedSourceUrl() != null,
       () => setSourcesExpandedSourceUrl(null),
     );
+    push("tv-settings", showTvSettings(), () => setShowTvSettings(false));
+    push("subscribe-settings", showSubscribeSettings(), () => setShowSubscribeSettings(false));
 
     // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
     if (nav.top()) {
@@ -3145,12 +3251,33 @@ function AppContent() {
         ...(inset.bottom ? { 'padding-bottom': h } : {}),
       } as Record<string, string>;
     });
-    const shellMainLeftClass = () =>
-      shell().showSidebar
-        ? state() === "expanded"
-          ? "left-(--sidebar-width)"
-          : "left-(--sidebar-width-icon)"
-        : "left-0";
+    const showModuleRail = () =>
+      !isStandalonePage() &&
+      shell().showModuleSidebarRail &&
+      hasModuleSidebarRailContent(currentPage());
+
+    const shellChromeLeftInput = () => ({
+      showSidebar: shell().showSidebar,
+      sidebarExpanded: state() === "expanded",
+      showModuleRail: showModuleRail(),
+      moduleRailExpanded: moduleRailOpen(),
+    });
+
+    const shellChromeLeft = () => resolveShellContentLeft(shellChromeLeftInput());
+
+    const shellMainLeftClass = () => shellContentLeftClass(shellChromeLeftInput());
+
+    const mainContentShellStyle = createMemo(() => {
+      const playerInset = mainContentPlayerInsetStyle();
+      return {
+        ...(playerInset ?? {}),
+        left: shellChromeLeft(),
+      } as Record<string, string>;
+    });
+
+    const showShellSidebar = () =>
+      !isStandalonePage() &&
+      (shell().showSidebar || shell().showTopNavigation || shell().showModuleSidebarNav);
 
     return (
       <div
@@ -3198,36 +3325,78 @@ function AppContent() {
         {/* 顶部导航栏：桌面壳层；独立页隐藏 */}
         <Show when={showTopNav()}>
           <div class="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur">
-            <Navigation
-              currentPage={currentPage()}
-              onPageChange={navigateToPage}
-            />
+            <Navigation currentPage={currentPage()} />
           </div>
         </Show>
 
-        {/* 左侧边栏：桌面固定侧栏（≥768px）或窄屏 Sheet；独立页隐藏 */}
-        <Show when={!isStandalonePage() && (shell().showSidebar || shell().showTopNavigation)}>
-          <div
-            class={cn(
-              shell().showSidebar && "fixed bottom-0 left-0 z-40",
-              shell().showSidebar && (showTopNav() ? "inset-top-app-bar" : "top-0"),
-            )}
+        {/* 左侧边栏：桌面固定 host / Sheet */}
+        <Show when={showShellSidebar()}>
+          <Show
+            when={shell().showSidebar}
+            fallback={
+              <SideBar
+                currentPage={currentPage()}
+                onPageChange={(page) => {
+                  navigateToPage(page);
+                  if (shell().sidebarUseSheet) setOpenMobile(false);
+                }}
+                onOpenReaderRecord={() => {
+                  navigateToPage('record');
+                  if (shell().sidebarUseSheet) setOpenMobile(false);
+                }}
+                recentBooks={recentBooks()}
+                onOpenRecentBook={(book) => {
+                  void openRecentBook(book);
+                  if (shell().sidebarUseSheet) setOpenMobile(false);
+                }}
+                sidebarState={state}
+                onToggleSidebar={toggleSidebar}
+                offsetTopAppBar={showTopNav()}
+              />
+            }
           >
-            <SideBar
-              currentPage={currentPage()}
-              onPageChange={(page) => {
-                navigateToPage(page);
-                if (isMobile()) setOpenMobile(false);
-              }}
-              recentBooks={recentBooks()}
-              onOpenRecentBook={(book) => {
-                void openRecentBook(book);
-                if (isMobile()) setOpenMobile(false);
-              }}
-              sidebarState={state}
-              onToggleSidebar={toggleSidebar}
-              offsetTopAppBar={showTopNav()}
-            />
+            <div
+              class={cn(
+                "shell-sidebar-host group fixed bottom-0 left-0 z-40 overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-linear",
+                showTopNav() ? "inset-top-app-bar" : "top-0",
+                state() === "expanded" ? "w-(--sidebar-width)" : "w-(--sidebar-width-icon)",
+              )}
+              data-state={state()}
+              data-collapsible={state() === "collapsed" ? "icon" : undefined}
+            >
+              <SideBar
+                shellHosted
+                currentPage={currentPage()}
+                onPageChange={(page) => {
+                  navigateToPage(page);
+                }}
+                onOpenReaderRecord={() => navigateToPage('record')}
+                recentBooks={recentBooks()}
+                onOpenRecentBook={(book) => void openRecentBook(book)}
+                sidebarState={state}
+                onToggleSidebar={toggleSidebar}
+                offsetTopAppBar={showTopNav()}
+              />
+            </div>
+          </Show>
+        </Show>
+
+        <Show when={showModuleRail()}>
+          <ModuleSidebarRail
+            shellPage={currentPage()}
+            offsetTopAppBar={showTopNav()}
+            mainSidebarExpanded={state() === 'expanded'}
+            moduleRailExpanded={moduleRailOpen()}
+            onToggleModuleRail={toggleModuleRail}
+            recentBooks={recentBooks()}
+            onOpenRecentBook={(book) => void openRecentBook(book)}
+            onOpenReaderRecord={() => navigateToPage('record')}
+          />
+        </Show>
+
+        <Show when={!isStandalonePage() && shell().showModuleSidebarNav && !showTopNav()}>
+          <div class="fixed left-3 top-[calc(var(--safe-area-top-effective)+0.5rem)] z-50">
+            <ShellSidebarTrigger class="h-9 w-9 rounded-lg border border-border/50 bg-background/95 shadow-sm" />
           </div>
         </Show>
 
@@ -3244,6 +3413,7 @@ function AppContent() {
           showTopNav={showTopNav}
           showBottomBar={showBottomBar}
           shellMainLeftClass={shellMainLeftClass()}
+          onOpenAudioHub={openAudioHub}
           onOpenTextReader={(bookUrl) => {
             void getBook(bookUrl).then((book) => {
               if (book) reopenTextReaderFromShell(book);
@@ -3255,15 +3425,10 @@ function AppContent() {
         <div
           id="main-content-container"
           data-shell-bottom-bar={showBottomBar() ? 'visible' : 'hidden'}
-          style={mainContentPlayerInsetStyle()}
+          style={mainContentShellStyle()}
           class={cn(
             "fixed bottom-0 right-0 flex flex-col overflow-hidden bg-background/80 backdrop-blur-sm transition-all duration-200",
             showTopNav() ? "inset-top-app-bar" : "top-0",
-            shell().showSidebar
-              ? state() === "expanded"
-                ? "left-(--sidebar-width)"
-                : "left-(--sidebar-width-icon)"
-              : "left-0",
             showBottomBar() && "inset-bottom-app-bar",
             isStandalonePage() && "hidden pointer-events-none",
           )}
@@ -3272,13 +3437,22 @@ function AppContent() {
           <ThemedComponentBackground componentId="pageContent" />
           {/* 主内容区：flex-1 min-h-0 限制高度，由各页面内部处理滚动 */}
           <main class={cn("relative z-1 flex flex-col flex-1 min-h-0 w-full overflow-hidden", mainShellInset)}>
-            {/* 书架：保持挂载，切走再回保留分组/列表状态 */}
+            {/* 阅读模块：内部 Tab 保持挂载 */}
             <section
               class={cn(
                 mainShellPageRoot,
-                currentPage() === "bookshelf" ? shellTabEnter() : "hidden",
+                isReaderShellPage() ? shellTabEnter() : "hidden",
               )}
             >
+              <div
+                class={cn(
+                  'flex min-h-0 flex-1 flex-col',
+                  readingRulePage() != null && isReaderShellPage() && 'hidden pointer-events-none',
+                )}
+              >
+              <ReaderPage
+                active={() => isReaderShellPage()}
+                shelf={
               <div class="flex flex-col flex-1 min-h-0 w-full">
                 <div
                   class={cn(
@@ -3289,8 +3463,8 @@ function AppContent() {
                     'hidden pointer-events-none',
                   )}
                 >
-                  <BookShelf
-                    active={() => currentPage() === "bookshelf"}
+                  <ReaderShelfPanel
+                    active={() => isReaderInternalTab('shelf')}
                     onPageChange={navigateToPage}
                     onOpenGroupManage={() => setShowGroupManage(true)}
                     onOpenBookshelfManage={() => setShowBookshelfManage(true)}
@@ -3310,7 +3484,7 @@ function AppContent() {
                       openBookInfo({
                         source,
                         book: bookToSearchBook(book),
-                        originShell: "bookshelf",
+                        originShell: "reader",
                       });
                     }}
                     onOpenBookshelfCache={(groupId) => {
@@ -3342,7 +3516,7 @@ function AppContent() {
                       openBookInfo({
                         source,
                         book: bookToSearchBook(book),
-                        originShell: "bookshelf",
+                        originShell: "reader",
                       });
                     }}
                   />
@@ -3351,38 +3525,24 @@ function AppContent() {
                 <Show when={showBookshelfCache()}>
                   <BookshelfCachePage
                     groupId={bookshelfCacheGroupId()}
-                    groupName={bookshelfStore.state.currentGroupName}
+                    groupName={getActiveShelfNavigation().state.currentGroupName}
                     onBack={() => setShowBookshelfCache(false)}
                   />
                 </Show>
               </div>
-            </section>
-
-            {/* 探索页：保持挂载保留状态；active 门控避免隐藏时触发发现请求 */}
-            <section
-              class={cn(
-                mainShellPageRoot,
-                currentPage() === "scout" ? shellTabEnter() : "hidden",
-              )}
-            >
+                }
+                explore={
               <ExplorePage
-                active={() => nav.isShellActiveUnderBookInfo("scout")}
+                active={() => nav.isShellActiveUnderBookInfo("reader") && isReaderInternalTab('explore')}
                 onOpenBook={(book) => openReaderPage(book)}
                 onOpenBookInfo={(source, book) => {
-                  openBookInfo({ source, book, originShell: "scout" });
+                  openBookInfo({ source, book, originShell: "reader" });
                 }}
                 onOpenBookSearch={(scope) => openBookSearch(undefined, scope)}
               />
-            </section>
-
-            {/* 书源视图：保持挂载，切到发现页再返回时不重载展开的发现脚本 */}
-            <section
-              class={cn(
-                mainShellPageRoot,
-                currentPage() === "sources" ? shellTabEnter() : "hidden",
-              )}
-            >
-              <div class="flex flex-col flex-1 min-h-0 w-full">
+                }
+                sources={
+              <>
                 <div
                   class={cn(
                     'flex flex-col flex-1 min-h-0 w-full',
@@ -3399,6 +3559,7 @@ function AppContent() {
                         dropdownEnabled={false}
                       />
                     }
+                    below={<SourcesTypeTabs class="px-4 pb-2" />}
                   >
                     <SourcesPageToolbar
                       sourceSearchQuery={sourceSearchQuery()}
@@ -3432,6 +3593,7 @@ function AppContent() {
                     onApply={setSourceListFilter}
                   />
                   <SourcesPage
+                    sourceTypeFilter={effectiveSourceTypeFilter() ?? undefined}
                     sourceSearchQuery={sourceSearchQuery()}
                     sourceSearchMode={sourceSearchMode()}
                     sourcesGroupByGroupName={sourcesGroupByGroupName()}
@@ -3442,7 +3604,7 @@ function AppContent() {
                     enableDragSort={sourceEnableDragSort()}
                     expandedSourceUrl={sourcesExpandedSourceUrl()}
                     onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
-                    exploreDrawerPresentationOpen={currentPage() === "sources"}
+                    exploreDrawerPresentationOpen={isReaderInternalTab('sources')}
                     onGroupsLoaded={(g) => setSourceGroups(g)}
                     onSourceCountChange={(n) => setSourceCount(n)}
                     onSourceEdit={(source) => openSourceEditor(source)}
@@ -3525,12 +3687,53 @@ function AppContent() {
                     onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
                   />
                 </Show>
-              </div>
-            </section>
-
-            {/* 订阅视图 */}
-            <Show when={currentPage() === "rss"}>
-              <section class={cn(shellTabEnter(), mainShellPageRoot, 'flex min-h-0 flex-1 flex-col')}>
+              </>
+                }
+                bookmark={
+              <BookmarkPage
+                onBack={
+                  settingsQuickPageReturn() === 'bookmark'
+                    ? returnFromSettingsQuickPage
+                    : undefined
+                }
+                onOpenBookmark={(bookmark, book) => {
+                  openReaderPage({
+                    ...book,
+                    durChapterIndex: bookmark.chapterIndex,
+                    durChapterPos: bookmark.chapterPos,
+                  });
+                }}
+              />
+                }
+                record={
+              <ReadRecordPage
+                onBack={
+                  settingsQuickPageReturn() === 'record'
+                    ? returnFromSettingsQuickPage
+                    : undefined
+                }
+                onOpenBook={(book) => openReaderPage(book)}
+                onSearchBook={(name) => openBookSearch(name)}
+                onOpenBookInfo={async (book) => {
+                  const source = await getSource(book.origin);
+                  if (!source) {
+                    showAppToast({
+                      title: "无法打开详情",
+                      description: "未找到对应书源",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  openBookInfo({
+                    source,
+                    book: bookToSearchBook(book),
+                    originShell: "reader",
+                  });
+                }}
+              />
+                }
+                rss={
+              <div class="flex min-h-0 flex-1 flex-col">
                 <div
                   class={cn(
                     'flex min-h-0 flex-1 flex-col',
@@ -3643,56 +3846,65 @@ function AppContent() {
                     }}
                   />
                 </Show>
-              </section>
-            </Show>
-
-            {/* 书签视图 */}
-            <Show when={currentPage() === "bookmark"}>
-              <BookmarkPage
-                onBack={
-                  settingsQuickPageReturn() === 'bookmark'
-                    ? returnFromSettingsQuickPage
-                    : undefined
+              </div>
                 }
-                onOpenBookmark={(bookmark, book) => {
-                  openReaderPage({
-                    ...book,
-                    durChapterIndex: bookmark.chapterIndex,
-                    durChapterPos: bookmark.chapterPos,
-                  });
-                }}
-              />
-            </Show>
-
-            {/* 记录视图 */}
-            <Show when={currentPage() === "record"}>
-              <ReadRecordPage
-                onBack={
-                  settingsQuickPageReturn() === 'record'
-                    ? returnFromSettingsQuickPage
-                    : undefined
+                settings={
+                  <ReaderSettingsPage
+                    onOpenReadingRulePage={(page) => setReadingRulePage(page)}
+                  />
                 }
-                onOpenBook={(book) => openReaderPage(book)}
-                onSearchBook={(name) => openBookSearch(name)}
-                onOpenBookInfo={async (book) => {
-                  const source = await getSource(book.origin);
-                  if (!source) {
-                    showAppToast({
-                      title: "无法打开详情",
-                      description: "未找到对应书源",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-                  openBookInfo({
-                    source,
-                    book: bookToSearchBook(book),
-                    originShell: "record",
-                  });
-                }}
               />
-            </Show>
+              </div>
+              <Show when={isReaderShellPage() && readingRulePage() === "txt-toc"}>
+                <TxtTocRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
+              <Show when={isReaderShellPage() && readingRulePage() === "replace"}>
+                <ReplaceRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
+              <Show when={isReaderShellPage() && readingRulePage() === "dict"}>
+                <DictRulesPage onBack={() => setReadingRulePage(null)} />
+              </Show>
+            </section>
 
+            {/* 音乐模块 */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                isMusicShellPage() ? shellTabEnter() : "hidden",
+              )}
+            >
+              <MusicPage active={() => isMusicShellPage()} />
+            </section>
+
+            {/* 影视模块（占位） */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                isTvShellPage() ? shellTabEnter() : "hidden",
+              )}
+            >
+              <Show when={showTvSettings()}>
+                <TvSettingsPage onBack={() => setShowTvSettings(false)} />
+              </Show>
+              <div class={cn(showTvSettings() && 'hidden pointer-events-none')}>
+                <TvPage onOpenTvSettings={() => setShowTvSettings(true)} />
+              </div>
+            </section>
+
+            {/* 订阅模块（Folo 占位） */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                isSubscribeShellPage() ? shellTabEnter() : "hidden",
+              )}
+            >
+              <Show when={showSubscribeSettings()}>
+                <SubscribeSettingsPage onBack={() => setShowSubscribeSettings(false)} />
+              </Show>
+              <div class={cn(showSubscribeSettings() && 'hidden pointer-events-none')}>
+                <SubscribePage onOpenSubscribeSettings={() => setShowSubscribeSettings(true)} />
+              </div>
+            </section>
 
             {/* 设置视图：保持挂载，子页切换时保留主列表滚动位置 */}
             <section
@@ -3724,13 +3936,13 @@ function AppContent() {
                   }}
                 />
               </div>
-              <Show when={readingRulePage() === "txt-toc"}>
+              <Show when={currentPage() === "settings" && readingRulePage() === "txt-toc"}>
                 <TxtTocRulesPage onBack={() => setReadingRulePage(null)} />
               </Show>
-              <Show when={readingRulePage() === "replace"}>
+              <Show when={currentPage() === "settings" && readingRulePage() === "replace"}>
                 <ReplaceRulesPage onBack={() => setReadingRulePage(null)} />
               </Show>
-              <Show when={readingRulePage() === "dict"}>
+              <Show when={currentPage() === "settings" && readingRulePage() === "dict"}>
                 <DictRulesPage onBack={() => setReadingRulePage(null)} />
               </Show>
             </section>
@@ -3819,7 +4031,7 @@ function AppContent() {
                       onBack={() => nav.pop()}
                       onOpenBook={(book) => openReaderPage(book)}
                       onOpenBookInfo={(source, book) => {
-                        openBookInfo({ source, book, originShell: "sources" });
+                        openBookInfo({ source, book, originShell: "reader" });
                       }}
                     />
                       );
@@ -3866,8 +4078,8 @@ function AppContent() {
                     <RemoteBookPage
                       onClose={() => nav.pop()}
                       groupId={
-                        bookshelfStore.state.currentGroup >= 0
-                          ? bookshelfStore.state.currentGroup
+                        getActiveShelfNavigation().state.currentGroup >= 0
+                          ? getActiveShelfNavigation().state.currentGroup
                           : undefined
                       }
                     />
@@ -4262,6 +4474,7 @@ function AppContent() {
 
   return (
     <ShellLayoutProvider windowWidth={windowWidth}>
+      <ShellSidebarLifecycle />
       <AppBackNavigationBridge getOpenLayers={getOpenBackLayers} />
       <AppChrome />
       <Show when={themeStudioStore.state.open}>
@@ -4281,6 +4494,9 @@ const appSidebarStyle = {
 const appToastIcons = createAppToastIcons();
 
 function App() {
+  if (typeof window !== "undefined" && window.location.hash === "#lyric-desktop") {
+    return <LyricDesktopPage />;
+  }
   return (
     <ThemePackRuntimeProvider>
       <SidebarProvider

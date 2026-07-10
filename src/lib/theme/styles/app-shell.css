@@ -148,6 +148,23 @@
     @apply ml-[-50px] mt-[-4px];
     content: counter(step);
   }
+
+  /** 壳层托管固定侧栏：宽度由 App 控制，禁用 ui/sidebar 内置 peer 占位与二次 fixed */
+  .shell-sidebar-host > .group.peer {
+    display: contents;
+  }
+
+  .shell-sidebar-host > .group.peer > div:first-child {
+    display: none !important;
+  }
+
+  .shell-sidebar-host > .group.peer > div:last-child {
+    position: static !important;
+    inset: auto !important;
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
 }
 
 @media (max-width: 640px) {

@@ -25,6 +25,8 @@ export type AppComponentId =
   | 'sidebarNav'
   | 'sidebarRecent'
   | 'sidebarFooter'
+  | 'moduleSidebarRail'
+  | 'moduleSidebarFooter'
   | 'bookshelfCard'
   | 'bookshelfGroupCard'
   | 'settingsCard'

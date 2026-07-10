@@ -10,7 +10,11 @@
  */
 
 import { createStore } from 'solid-js/store';
-import type { ShellLayoutPreference } from '@/lib/shell/layout';
+import type {
+  ShellLayoutPreference,
+  MobileShellNavStyle,
+  DesktopSidebarMode,
+} from '@/lib/shell/layout';
 import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 import {
@@ -77,6 +81,10 @@ export interface AppSettings {
    * 仅移动端且宽度不足 480px 时强制使用底栏。
    */
   shellLayout?: ShellLayoutPreference;
+  /** 移动壳层子页导航：顶栏下拉 vs 侧栏 Sheet */
+  mobileShellNavStyle?: MobileShellNavStyle;
+  /** 桌面壳层：融合侧栏 vs 独立模块侧栏 */
+  desktopSidebarMode?: DesktopSidebarMode;
   /** 书籍存储目录（首次导入时设置，path: 兼容字段） */
   booksDirectory?: string;
   /** 书籍库根 StorageRef 字符串（path: / saf-tree: / opfs: / handle:dir:） */
@@ -167,6 +175,8 @@ const defaultAppSettings: AppSettings = {
   reduceMotion: false,
   showTooltips: true,
   shellLayout: 'auto',
+  mobileShellNavStyle: 'topBar',
+  desktopSidebarMode: 'fused',
   booksDirectorySet: false,
   rememberImportAction: false,
   tocPaginationSafetyEnabled: true,
@@ -465,6 +475,14 @@ export const settingsStore = {
 
   async setShellLayout(shellLayout: ShellLayoutPreference): Promise<void> {
     await this.updateAppSettings({ shellLayout });
+  },
+
+  async setMobileShellNavStyle(mobileShellNavStyle: MobileShellNavStyle): Promise<void> {
+    await this.updateAppSettings({ mobileShellNavStyle });
+  },
+
+  async setDesktopSidebarMode(desktopSidebarMode: DesktopSidebarMode): Promise<void> {
+    await this.updateAppSettings({ desktopSidebarMode });
   },
 
   async setViewerChromeLayout(viewerChromeLayout: ViewerChromeLayout): Promise<void> {

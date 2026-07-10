@@ -1,8 +1,6 @@
 import { Switch, Match } from 'solid-js';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import {
-  BookOpenIcon,
-  BookSourceIcon,
   LayoutIcon,
   SettingsIcon,
   GroupLocalIcon,
@@ -18,12 +16,6 @@ export function SettingsCategoryIcon(props: SettingsCategoryIconProps) {
     <Switch>
       <Match when={props.categoryId === 'appearance'}>
         <LayoutIcon class={props.class} size={20} />
-      </Match>
-      <Match when={props.categoryId === 'reading'}>
-        <BookOpenIcon class={props.class} size={20} />
-      </Match>
-      <Match when={props.categoryId === 'sources'}>
-        <BookSourceIcon class={props.class} size={20} />
       </Match>
       <Match when={props.categoryId === 'storage'}>
         <GroupLocalIcon class={props.class} size={20} />

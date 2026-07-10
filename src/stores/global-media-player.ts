@@ -11,6 +11,8 @@ export type GlobalMediaPlayerMeta = {
   subtitle?: string;
   /** 用于 BookCoverFromBook */
   coverBookUrl?: string;
+  /** music 模式封面 URL */
+  coverUrl?: string;
   preview?: string;
 };
 

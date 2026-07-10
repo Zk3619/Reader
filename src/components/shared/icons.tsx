@@ -18,6 +18,7 @@ import {
   BookMinus,
   BookOpen,
   BookPlus,
+  BookSearch,
   Bookmark,
   BookText,
   BookImage,
@@ -165,6 +166,7 @@ export const ChevronRightIcon = icon(ChevronRight);
 export const ChevronDownIcon = icon(ChevronDown);
 export const LoaderIcon = icon(LoaderCircle);
 export const BookOpenIcon = icon(BookOpen);
+export const BookSearchIcon = icon(BookSearch);
 export const ReplaceIcon = icon(ArrowLeftRight);
 
 /** UI  primitives（shadcn / 通用控件） */
@@ -206,7 +208,9 @@ export const TocMetaIcon = icon(BookMarked);
 export const GroupAllIcon = icon(Book);
 export const GroupLocalIcon = icon(HardDrive);
 export const GroupAudioIcon = icon(Music);
+export const MusicTabIcon = icon(Music);
 export const GroupVideoIcon = icon(Film);
+export const TvTabIcon = icon(Film);
 export const GroupNetIcon = icon(Globe);
 export const GroupFolderIcon = icon(Folder);
 export const GroupErrorIcon = icon(CircleAlert);

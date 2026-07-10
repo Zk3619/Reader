@@ -51,7 +51,7 @@ export interface SettingsPageProps {
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
-const SETTINGS_PAGE_DESCRIPTION = '自定义你的阅读体验';
+const SETTINGS_PAGE_DESCRIPTION = '主题、导航、备份与应用级选项';
 
 const settingsPageScrollTrackClass =
   'flex min-h-0 w-full min-w-0 flex-1 flex-col items-stretch';
@@ -71,12 +71,17 @@ export function SettingsPage(props: SettingsPageProps) {
   const shell = useShellLayout();
   const useMobileLayout = () => shell().useMobileShell;
 
-  const [activeTab, setActiveTab] = createSignal<SettingsCategoryId>('appearance');
+  const [activeTab, setActiveTabSignal] = createSignal<SettingsCategoryId>('appearance');
+  const setActiveTab = (id: SettingsCategoryId) => {
+    setActiveTabSignal(id);
+  };
+
   const [mobileSubPage, setMobileSubPage] = createSignal<SettingsCategoryId | null>(null);
   /** 移动端已打开过的子页：保持挂载以避免重复拉取存储类数据 */
   const [mountedMobileSubPages, setMountedMobileSubPages] = createSignal<
     Set<SettingsCategoryId>
   >(new Set());
+
   /** 桌面端首次进入「存储与缓存」后保持挂载，避免重复请求 */
   const [storageTabVisited, setStorageTabVisited] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal('');
@@ -207,12 +212,6 @@ export function SettingsPage(props: SettingsPageProps) {
     const rulePage = readingRulePageForSettingItem(itemId);
     if (rulePage) {
       props.onOpenReadingRulePage?.(rulePage);
-      if (useMobileLayout()) {
-        openSubPage('reading');
-      } else {
-        setActiveTab('reading');
-      }
-      flashHighlight(itemId);
       return;
     }
     if (useMobileLayout()) {
@@ -423,7 +422,6 @@ export function SettingsPage(props: SettingsPageProps) {
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
-                        onOpenReadingRulePage={props.onOpenReadingRulePage}
                         onOpenThemeStudio={props.onOpenThemeStudio}
                       />
                     </TabsContent>
@@ -467,7 +465,6 @@ export function SettingsPage(props: SettingsPageProps) {
                       <SettingsCategoryContent
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
-                        onOpenReadingRulePage={props.onOpenReadingRulePage}
                         onOpenThemeStudio={props.onOpenThemeStudio}
                       />
                     </div>
