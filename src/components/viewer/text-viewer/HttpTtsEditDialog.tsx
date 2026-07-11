@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HttpTTS 引擎编辑对话框
  */
 
@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import { upsertHttpTTS } from '@/lib/database/http-tts';
 import type { HttpTTS } from '@/types';
 
@@ -74,87 +74,87 @@ export function HttpTtsEditDialog(props: HttpTtsEditDialogProps) {
         <AppDialogScrollBody class="max-h-[60dvh] space-y-3">
           <div class="space-y-1">
             <Label>名称</Label>
-            <TextField>
-              <TextFieldInput value={form().name} onInput={(e) => patch({ name: e.currentTarget.value })} />
-            </TextField>
+            <AppTextField>
+              <AppTextFieldInput value={form().name} onInput={(e) => patch({ name: e.currentTarget.value })} />
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>URL</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-24 font-mono text-xs"
                 value={form().url}
                 onInput={(e) => patch({ url: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>Content-Type</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 value={form().contentType ?? ''}
                 onInput={(e) => patch({ contentType: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>并发间隔（毫秒）</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 value={form().concurrentRate ?? '0'}
                 onInput={(e) => patch({ concurrentRate: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>Header（JSON 或每行 Key: Value）</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-16 font-mono text-xs"
                 value={form().header ?? ''}
                 onInput={(e) => patch({ header: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>loginUi（JSON 数组）</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-16 font-mono text-xs"
                 value={form().loginUi ?? ''}
                 onInput={(e) => patch({ loginUi: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>loginUrl</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-16 font-mono text-xs"
                 value={form().loginUrl ?? ''}
                 onInput={(e) => patch({ loginUrl: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>loginCheckJs</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-16 font-mono text-xs"
                 value={form().loginCheckJs ?? ''}
                 onInput={(e) => patch({ loginCheckJs: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-1">
             <Label>jsLib</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 class="min-h-16 font-mono text-xs"
                 value={form().jsLib ?? ''}
                 onInput={(e) => patch({ jsLib: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="flex items-center justify-between">
             <Label>启用 CookieJar</Label>

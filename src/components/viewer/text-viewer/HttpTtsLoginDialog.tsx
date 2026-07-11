@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HttpTTS 登录对话框（loginUi 表单）
  */
 
@@ -13,7 +13,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Label } from '@/components/ui/label';
 import {
   AppSelect,
@@ -111,8 +111,8 @@ export function HttpTtsLoginDialog(props: HttpTtsLoginDialogProps) {
                   <Show
                     when={item.type === 'select' && item.chars?.length}
                     fallback={
-                      <TextField>
-                        <TextFieldInput
+                      <AppTextField>
+                        <AppTextFieldInput
                           value={values()[item.name] ?? ''}
                           onInput={(e) =>
                             setValues((prev) => ({
@@ -121,7 +121,7 @@ export function HttpTtsLoginDialog(props: HttpTtsLoginDialogProps) {
                             }))
                           }
                         />
-                      </TextField>
+                      </AppTextField>
                     }
                   >
                     <AppSelect

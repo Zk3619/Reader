@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 书源网络导入对话框
  * 对齐 legado：输入书源 JSON 的 URL，拉取后解析并导入
  */
@@ -14,7 +14,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 
 export interface ImportSourceNetworkDialogProps {
   open: boolean;
@@ -59,13 +59,13 @@ export function ImportSourceNetworkDialog(props: ImportSourceNetworkDialogProps)
         </AppDialogHeader>
         <AppDialogScrollBody>
           <section class="rounded-lg border border-border/50 bg-muted/20 p-4">
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 placeholder={props.placeholder ?? 'https://example.com/bookSources.json'}
                 value={url()}
                 onInput={(e: Event) => setUrl((e.currentTarget as HTMLInputElement).value)}
               />
-            </TextField>
+            </AppTextField>
           </section>
         </AppDialogScrollBody>
         <AppDialogFooter>

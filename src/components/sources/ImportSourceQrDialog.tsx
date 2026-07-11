@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js';
+﻿import { createSignal, Show } from 'solid-js';
 import { createUniqueId } from 'solid-js';
 import {
   AppDialogScrollBody,
@@ -10,7 +10,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { decodeTextFromImageFile } from '@/lib/qr/decode-from-image';
 import {
@@ -205,14 +205,14 @@ export function ImportSourceQrDialog(props: ImportSourceQrDialogProps) {
                       showAppToast({ title: '已识别二维码', variant: 'default' });
                     }}
                   />
-                  <TextField>
-                    <TextFieldTextArea
+                  <AppTextField>
+                    <AppTextFieldTextArea
                       value={raw()}
                       onInput={(e: Event) => setRaw((e.currentTarget as HTMLTextAreaElement).value)}
                       placeholder="yuedu://booksource/importonline?src=..."
                       rows={4}
                     />
-                  </TextField>
+                  </AppTextField>
                 </Show>
               </section>
             }

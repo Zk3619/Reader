@@ -1,11 +1,11 @@
-/**
+﻿/**
  * 编辑书签（对齐 legado BookmarkDialog）
  */
 
 import { createEffect, createSignal, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   AppDialog,
   AppDialogContent,
@@ -72,28 +72,28 @@ export function BookmarkEditDialog(props: BookmarkEditDialogProps) {
 
           <div class="space-y-2">
             <Label for="bookmark-book-text">内容</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 id="bookmark-book-text"
                 rows={3}
                 placeholder="书签摘要"
                 value={bookText()}
                 onInput={(e) => setBookText(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
 
           <div class="space-y-2">
             <Label for="bookmark-note-content">笔记</Label>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 id="bookmark-note-content"
                 rows={4}
                 placeholder="笔记内容"
                 value={content()}
                 onInput={(e) => setContent(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
         </div>
 

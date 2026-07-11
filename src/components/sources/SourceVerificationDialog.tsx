@@ -1,11 +1,11 @@
-import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
+﻿import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * 书源图片验证码 / 自定义输入（对齐 Legado VerificationCodeDialog）
  */
 
 import { createSignal, createEffect, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   AppDialogScrollBody,
   AppDialog,
@@ -65,8 +65,8 @@ export function SourceVerificationDialog(props: SourceVerificationDialogProps) {
                   class="max-h-44 w-full object-contain"
                 />
               </div>
-              <TextField>
-                <TextFieldInput
+              <AppTextField>
+                <AppTextFieldInput
                   placeholder="请输入内容"
                   value={input()}
                   onInput={(e: Event) =>
@@ -79,7 +79,7 @@ export function SourceVerificationDialog(props: SourceVerificationDialogProps) {
                     }
                   }}
                 />
-              </TextField>
+              </AppTextField>
             </AppDialogScrollBody>
           )}
         </Show>

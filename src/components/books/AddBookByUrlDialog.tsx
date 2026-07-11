@@ -1,4 +1,4 @@
-import { appDialogScrollBodySpaceY2 } from '@/lib/ui/viewport-classes';
+﻿import { appDialogScrollBodySpaceY2 } from '@/lib/ui/viewport-classes';
 /**
  * 通过 URL 添加书籍对话框
  * 对齐 legado showAddBookByUrlAlert / BookshelfViewModel.addBookByUrl；
@@ -17,7 +17,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import { addBooksByUrl } from '@/lib/bookshelf/add-books-by-url';
 import { bookshelfStore } from '@/stores/bookshelf';
 import { cn } from '@/lib/utils';
@@ -143,8 +143,8 @@ export function AddBookByUrlDialog(props: AddBookByUrlDialogProps) {
               从剪贴板粘贴
             </Button>
           </div>
-          <TextField>
-            <TextFieldTextArea
+          <AppTextField>
+            <AppTextFieldTextArea
               placeholder={'https://example.com/book/123\nhttps://cdn.example.com/book.epub'}
               value={url()}
               onInput={(e: Event) => setUrl((e.currentTarget as HTMLTextAreaElement).value)}
@@ -152,7 +152,7 @@ export function AddBookByUrlDialog(props: AddBookByUrlDialogProps) {
               disabled={isImporting()}
               class="resize-none font-mono text-sm"
             />
-          </TextField>
+          </AppTextField>
           <Show when={progressLabel()}>
             <p class="text-xs text-muted-foreground">{progressLabel()}</p>
           </Show>

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * RSS 阅读历史记录对话框（对齐 Legado ReadRecordDialog）
  */
 
@@ -14,7 +14,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import {
   getAllRssReadRecords,
@@ -80,13 +80,13 @@ export function RssReadHistoryDialog(props: RssReadHistoryDialogProps) {
         </AppDialogHeader>
 
         <div class="shrink-0 px-6">
-          <TextField>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldInput
               placeholder="搜索标题或链接"
               value={searchQuery()}
               onInput={(e) => setSearchQuery(e.currentTarget.value)}
             />
-          </TextField>
+          </AppTextField>
         </div>
 
         <AppDialogScrollBody

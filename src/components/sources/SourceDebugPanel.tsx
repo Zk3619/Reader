@@ -1,10 +1,10 @@
-/**
+﻿/**
  * 书源调试面板（本地进程内 + Legado WebSocket 远程，对齐 Legado BookSourceDebugActivity）
  */
 
 import { For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   startBookSourceDebug,
   type BookSourceDebugSnapshots,
@@ -355,8 +355,8 @@ export function SourceDebugPanel(props: SourceDebugPanelProps) {
           </Show>
 
           <Show when={store().debugMode() === 'remote'}>
-            <TextField class="min-w-0">
-              <TextFieldInput
+            <AppTextField class="min-w-0">
+              <AppTextFieldInput
                 class="min-w-0"
                 value={store().httpEntry()}
                 onInput={(e: InputEvent) =>
@@ -364,14 +364,14 @@ export function SourceDebugPanel(props: SourceDebugPanelProps) {
                 }
                 placeholder="Legado Web 服务 HTTP 地址，如 http://192.168.1.2:1234"
               />
-            </TextField>
+            </AppTextField>
             <p class={`${LOG_LINE_CLASS} text-xs text-muted-foreground`}>
               WebSocket：{store().wsEntry() || '—'}
             </p>
           </Show>
 
-          <TextField class="min-w-0">
-            <TextFieldInput
+          <AppTextField class="min-w-0">
+            <AppTextFieldInput
               class="min-w-0"
               value={store().keyword()}
               onInput={(e: InputEvent) =>
@@ -383,7 +383,7 @@ export function SourceDebugPanel(props: SourceDebugPanelProps) {
                 if (e.key === 'Enter') void runDebug();
               }}
             />
-          </TextField>
+          </AppTextField>
 
           <div class="flex flex-wrap gap-2">
             <Button size="sm" disabled={store().running()} onClick={() => void runDebug()}>

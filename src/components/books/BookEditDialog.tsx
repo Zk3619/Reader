@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 书籍编辑对话框
  * 参考 legado：编辑书名、作者、封面、所属分组
  */
@@ -24,7 +24,7 @@ import {
   AppSelectTrigger,
   AppSelectValue,
 } from '@/components/shared/AppSelect';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { FormCoverPreview } from '@/components/shared/FormCoverPreview';
 import { getCoverPreviewInfo } from '@/lib/bookshelf/book-group-cover';
 import { pickLocalImageAsDataUrl } from '@/lib/platform/image-data-url';
@@ -132,39 +132,39 @@ export function BookEditDialog(props: BookEditDialogProps) {
             <div class="min-w-0 flex-1 space-y-4">
               <div class="space-y-2">
                 <Label for="book-edit-name">书名</Label>
-                <TextField>
-                  <TextFieldInput
+                <AppTextField>
+                  <AppTextFieldInput
                     id="book-edit-name"
                     value={name()}
                     onInput={(e) => setName(e.currentTarget.value)}
                     placeholder="书名"
                   />
-                </TextField>
+                </AppTextField>
               </div>
 
               <div class="space-y-2">
                 <Label for="book-edit-author">作者</Label>
-                <TextField>
-                  <TextFieldInput
+                <AppTextField>
+                  <AppTextFieldInput
                     id="book-edit-author"
                     value={author()}
                     onInput={(e) => setAuthor(e.currentTarget.value)}
                     placeholder="作者"
                   />
-                </TextField>
+                </AppTextField>
               </div>
 
               <div class="space-y-2">
                 <Label for="book-edit-cover">封面（URL 或 Emoji）</Label>
                 <div class="flex gap-2">
-                  <TextField class="flex-1">
-                    <TextFieldInput
+                  <AppTextField class="flex-1">
+                    <AppTextFieldInput
                       id="book-edit-cover"
                       value={cover()}
                       onInput={(e) => setCover(e.currentTarget.value)}
                       placeholder="输入图片 URL 或 Emoji"
                     />
-                  </TextField>
+                  </AppTextField>
                   <Button type="button" variant="outline" onClick={() => void pickCoverFromLocal()}>
                     选择本地图片
                   </Button>

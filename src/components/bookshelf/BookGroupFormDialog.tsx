@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 添加/编辑分组对话框
  * 根据 mode 自动切换为「添加」或「编辑」模式
  */
@@ -25,7 +25,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { FormCoverPreview } from '@/components/shared/FormCoverPreview';
 import { cn } from '@/lib/utils';
 import {
@@ -214,8 +214,8 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
               {/* 分组名称：仅默认分组不可编辑 */}
               <div class="space-y-2">
                 <Label for="group-name">分组名称</Label>
-                <TextField>
-                  <TextFieldInput
+                <AppTextField>
+                  <AppTextFieldInput
                     id="group-name"
                     value={form().groupName ?? ''}
                     disabled={!!nameDisabled()}
@@ -224,21 +224,21 @@ export function BookGroupFormDialog(props: BookGroupFormDialogProps) {
                     placeholder="输入分组名称"
                     class={cn(nameDisabled() && 'bg-muted')}
                   />
-                </TextField>
+                </AppTextField>
               </div>
 
               {/* 封面 */}
               <div class="space-y-2">
                 <Label for="group-cover">封面（URL或Emoji）</Label>
                 <div class="flex gap-2">
-                  <TextField class="flex-1">
-                    <TextFieldInput
+                  <AppTextField class="flex-1">
+                    <AppTextFieldInput
                       id="group-cover"
                       value={form().cover || ''}
                       onInput={(e) => setForm({ ...form(), cover: e.currentTarget.value })}
                       placeholder={isEdit() ? '输入图片URL或Emoji' : '输入图片URL或Emoji（可选）'}
                     />
-                  </TextField>
+                  </AppTextField>
                   <Button type="button" variant="outline" onClick={pickCoverFromLocal}>
                     选择本地图片
                   </Button>

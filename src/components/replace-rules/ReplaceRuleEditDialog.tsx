@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
+﻿import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 替换净化规则编辑（对齐 Legado ReplaceEditActivity）
  */
@@ -8,7 +8,7 @@ import { Dynamic } from 'solid-js/web';
 import type { ReplaceRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   AppDialogScrollBody,
   AppDialog,
@@ -156,30 +156,30 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
         <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.name ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as ReplaceRuleDraft), name: e.currentTarget.value })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>分组（可选）</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.group ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as ReplaceRuleDraft), group: e.currentTarget.value || undefined })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>匹配（正则或文本）</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.pattern ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as ReplaceRuleDraft), pattern: e.currentTarget.value })
@@ -187,12 +187,12 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
                 rows={4}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>替换为</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.replacement ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as ReplaceRuleDraft), replacement: e.currentTarget.value })
@@ -200,23 +200,23 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
                 rows={2}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>作用范围（书名/书源，可选）</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.scope ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as ReplaceRuleDraft), scope: e.currentTarget.value || undefined })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>排除范围（可选）</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.excludeScope ?? ''}
                 onInput={(e) =>
                   setDraft({
@@ -225,7 +225,7 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
                   })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="flex flex-wrap gap-4 text-sm">
             <label class="flex items-center gap-2">
@@ -261,8 +261,8 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
           </div>
           <div>
             <Label>超时（毫秒）</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 type="number"
                 value={String(draft()?.timeoutMillisecond ?? 3000)}
                 onInput={(e) =>
@@ -272,19 +272,19 @@ export function ReplaceRuleEditDialog(props: ReplaceRuleEditDialogProps) {
                   })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>测试文本</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={testSample()}
                 onInput={(e) => setTestSample(e.currentTarget.value)}
                 rows={3}
                 class="font-mono text-xs"
                 placeholder="粘贴待测试正文片段"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="flex items-center gap-2">
             <Button

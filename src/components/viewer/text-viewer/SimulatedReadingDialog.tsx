@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 模拟追更（对齐 Legado BaseReadBookActivity.showSimulatedReading）
  */
 
@@ -22,7 +22,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 
@@ -109,36 +109,36 @@ export function SimulatedReadingDialog(props: SimulatedReadingDialogProps) {
           </div>
           <div class="space-y-2">
             <Label>起始日期</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 type="date"
                 value={startDate()}
                 onInput={(e) => setStartDate(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <Label>起始章节</Label>
-              <TextField>
-                <TextFieldInput
+              <AppTextField>
+                <AppTextFieldInput
                   type="number"
                   min={0}
                   value={startChapter()}
                   onInput={(e) => setStartChapter(e.currentTarget.value)}
                 />
-              </TextField>
+              </AppTextField>
             </div>
             <div class="space-y-2">
               <Label>每日更新章数</Label>
-              <TextField>
-                <TextFieldInput
+              <AppTextField>
+                <AppTextFieldInput
                   type="number"
                   min={1}
                   value={dailyChapters()}
                   onInput={(e) => setDailyChapters(e.currentTarget.value)}
                 />
-              </TextField>
+              </AppTextField>
             </div>
           </div>
           <Show when={enabled()}>

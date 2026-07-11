@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
+﻿import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * TXT 目录规则编辑（对齐 Legado TxtTocRuleEditDialog）
  */
@@ -7,7 +7,7 @@ import { createSignal, createEffect } from 'solid-js';
 import type { TxtTocRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   AppDialogScrollBody,
   AppDialog,
@@ -99,23 +99,23 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
         <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.name ?? ''}
                 onInput={(e) => setDraft({ ...(draft() as TxtTocRule), name: e.currentTarget.value })}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>正则（MULTILINE）</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.rule ?? ''}
                 onInput={(e) => setDraft({ ...(draft() as TxtTocRule), rule: e.currentTarget.value })}
                 rows={5}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>标题净化脚本（可选 JS）</Label>
@@ -123,8 +123,8 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
               可用变量：result、index、prevTitle、prevLength、lastVolumeTitle、book；
               java.putVolume(title) 插入卷节点；返回空字符串则跳过该匹配。
             </p>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.replacement ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as TxtTocRule), replacement: e.currentTarget.value })
@@ -132,18 +132,18 @@ export function TxtTocRuleEditDialog(props: TxtTocRuleEditDialogProps) {
                 rows={4}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>示例</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.example ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as TxtTocRule), example: e.currentTarget.value })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
         </AppDialogScrollBody>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">

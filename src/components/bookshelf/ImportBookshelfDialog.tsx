@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 导入书架书单（JSON 或 URL）
  */
 
@@ -13,7 +13,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import { importBookshelf } from '@/lib/bookshelf/import-bookshelf';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { pickFile } from '@/lib/platform/fs/pick-file';
@@ -98,15 +98,15 @@ export function ImportBookshelfDialog(props: ImportBookshelfDialogProps) {
               仅导入书名、作者、简介，不会导出章节正文。支持 Legado 的 JSON 数组或远程
               bookshelf.json / books.json 链接。将按书名作者在已启用书源中搜索并加入书架。
             </p>
-            <TextField>
-              <TextFieldTextArea
+            <AppTextField>
+              <AppTextFieldTextArea
                 id="import-bookshelf-content"
                 class="min-h-40 font-mono text-sm"
                 placeholder='[{"name":"书名","author":"作者","intro":"简介"}]'
                 value={text()}
                 onInput={(e) => setText(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
         </AppDialogScrollBody>
 

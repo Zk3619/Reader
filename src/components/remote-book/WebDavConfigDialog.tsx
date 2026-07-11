@@ -1,4 +1,4 @@
-import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
+﻿import { appDialogScrollBodySpaceY4 } from '@/lib/ui/viewport-classes';
 /**
  * WebDAV 配置对话框（远程书籍 + 云备份共用）
  */
@@ -14,7 +14,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -147,8 +147,8 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
         <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
           <div class="space-y-2">
             <Label for="webdav-url">服务器地址 *</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 id="webdav-url"
                 type="url"
                 placeholder={DEFAULT_WEBDAV_URL}
@@ -156,67 +156,67 @@ export function WebDavConfigDialog(props: WebDavConfigDialogProps) {
                 onInput={(e: Event) => setUrl((e.currentTarget as HTMLInputElement).value)}
                 disabled={isSaving() || isTesting()}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-2">
             <Label for="webdav-username">用户名 *</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 id="webdav-username"
                 value={username()}
                 onInput={(e: Event) => setUsername((e.currentTarget as HTMLInputElement).value)}
                 disabled={isSaving() || isTesting()}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="space-y-2">
             <Label for="webdav-password">密码 *</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 id="webdav-password"
                 type="password"
                 value={password()}
                 onInput={(e: Event) => setPassword((e.currentTarget as HTMLInputElement).value)}
                 disabled={isSaving() || isTesting()}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <Label for="webdav-dir">云同步子目录</Label>
-              <TextField>
-                <TextFieldInput
+              <AppTextField>
+                <AppTextFieldInput
                   id="webdav-dir"
                   placeholder={DEFAULT_WEBDAV_DIR}
                   value={webDavDir()}
                   onInput={(e: Event) => setWebDavDir((e.currentTarget as HTMLInputElement).value)}
                   disabled={isSaving() || isTesting()}
                 />
-              </TextField>
+              </AppTextField>
             </div>
             <div class="space-y-2">
               <Label for="webdav-device">设备名</Label>
-              <TextField>
-                <TextFieldInput
+              <AppTextField>
+                <AppTextFieldInput
                   id="webdav-device"
                   value={deviceName()}
                   onInput={(e: Event) => setDeviceName((e.currentTarget as HTMLInputElement).value)}
                   disabled={isSaving() || isTesting()}
                 />
-              </TextField>
+              </AppTextField>
             </div>
           </div>
           <div class="space-y-2">
             <Label for="webdav-root-path">远程书籍目录</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 id="webdav-root-path"
                 placeholder={DEFAULT_ROOT_BOOK_PATH}
                 value={rootBookPath()}
                 onInput={(e: Event) => setRootBookPath((e.currentTarget as HTMLInputElement).value)}
                 disabled={isSaving() || isTesting()}
               />
-            </TextField>
+            </AppTextField>
           </div>
           <AppSwitch checked={autoBackupEnabled()} onChange={setAutoBackupEnabled}>
             <AppSwitchControl>

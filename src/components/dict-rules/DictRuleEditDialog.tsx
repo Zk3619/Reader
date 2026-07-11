@@ -1,4 +1,4 @@
-import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
+﻿import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 /**
  * 字典规则编辑（对齐 Legado DictRuleEditDialog）
  */
@@ -7,7 +7,7 @@ import { createSignal, createEffect } from 'solid-js';
 import type { DictRule } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   AppDialogScrollBody,
   AppDialog,
@@ -94,19 +94,19 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
         <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <div>
             <Label>名称（主键）</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 value={draft()?.name ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as DictRule), name: e.currentTarget.value })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>请求 URL 规则</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.urlRule ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as DictRule), urlRule: e.currentTarget.value })
@@ -114,12 +114,12 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
                 rows={4}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>结果解析规则</Label>
-            <TextField class="mt-1">
-              <TextFieldTextArea
+            <AppTextField class="mt-1">
+              <AppTextFieldTextArea
                 value={draft()?.showRule ?? ''}
                 onInput={(e) =>
                   setDraft({ ...(draft() as DictRule), showRule: e.currentTarget.value })
@@ -127,12 +127,12 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
                 rows={4}
                 class="font-mono text-xs"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div>
             <Label>排序</Label>
-            <TextField class="mt-1">
-              <TextFieldInput
+            <AppTextField class="mt-1">
+              <AppTextFieldInput
                 type="number"
                 value={String(draft()?.sortNumber ?? 0)}
                 onInput={(e) =>
@@ -142,7 +142,7 @@ export function DictRuleEditDialog(props: DictRuleEditDialogProps) {
                   })
                 }
               />
-            </TextField>
+            </AppTextField>
           </div>
         </AppDialogScrollBody>
         <div class="flex flex-wrap gap-2 border-t border-border px-6 py-4">

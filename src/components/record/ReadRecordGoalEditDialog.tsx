@@ -1,11 +1,11 @@
-/**
+﻿/**
  * 编辑阅读目标（对齐 legado-own showReadRecordGoalDialog）
  */
 
 import { createEffect, createSignal } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
 import {
   AppDialog,
@@ -77,27 +77,27 @@ export function ReadRecordGoalEditDialog(props: ReadRecordGoalEditDialogProps) {
         <div class="space-y-4 px-6 pb-2">
           <div class="space-y-2">
             <Label for="read-record-goal-user-name">用户名</Label>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 id="read-record-goal-user-name"
                 placeholder="填写要显示的用户名"
                 value={userName()}
                 onInput={(e) => setUserName(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
 
           <div class="space-y-2">
             <Label for="read-record-goal-avatar">头像图片</Label>
             <div class="flex gap-2">
-              <TextField class="min-w-0 flex-1">
-                <TextFieldInput
+              <AppTextField class="min-w-0 flex-1">
+                <AppTextFieldInput
                   id="read-record-goal-avatar"
                   placeholder="本地 URI 或图片链接"
                   value={avatar()}
                   onInput={(e) => setAvatar(e.currentTarget.value)}
                 />
-              </TextField>
+              </AppTextField>
               <Button
                 type="button"
                 variant="secondary"

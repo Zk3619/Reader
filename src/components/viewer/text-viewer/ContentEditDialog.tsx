@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 阅读中编辑章节缓存正文（对齐 Legado ContentEditDialog）
  */
 
@@ -18,7 +18,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface ContentEditDialogProps {
@@ -108,15 +108,15 @@ export function ContentEditDialog(props: ContentEditDialogProps) {
               </div>
             }
           >
-            <TextField class="h-full">
-              <TextFieldTextArea
+            <AppTextField class="h-full">
+              <AppTextFieldTextArea
                 class="min-h-[min(50dvh,24rem)] resize-y font-mono text-sm leading-relaxed"
                 value={content()}
                 onInput={(e) => setContent(e.currentTarget.value)}
                 placeholder="章节正文…"
                 aria-label="章节正文"
               />
-            </TextField>
+            </AppTextField>
           </Show>
         </div>
         <AppDialogFooter class="gap-2 sm:gap-0">

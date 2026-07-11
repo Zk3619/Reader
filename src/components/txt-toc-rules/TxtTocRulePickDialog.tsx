@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 单书 TXT 目录规则选择（对齐 Legado TxtTocRuleDialog）
  */
 
@@ -18,7 +18,7 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 import { cn } from '@/lib/utils';
@@ -103,13 +103,13 @@ export function TxtTocRulePickDialog(props: TxtTocRulePickDialogProps) {
           选择用于本书分章的目录规则。确认后将重新解析章节列表（仅对当前书籍生效）。
         </p>
 
-        <TextField>
-          <TextFieldInput
+        <AppTextField>
+          <AppTextFieldInput
             placeholder="搜索规则名称或示例"
             value={search()}
             onInput={(e) => setSearch(e.currentTarget.value)}
           />
-        </TextField>
+        </AppTextField>
 
         <div class="flex items-center justify-between rounded-md border border-border/60 px-3 py-2">
           <span class="text-sm">拆分超长章节</span>

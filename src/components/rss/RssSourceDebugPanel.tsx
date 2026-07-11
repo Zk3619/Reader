@@ -1,10 +1,10 @@
-/**
+﻿/**
  * RSS 源调试面板（对齐 Legado RssSourceDebugActivity + SourceDebugPanel）
  */
 
 import { For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import type { RssSourceDebugSnapshots } from '@/lib/rss-source/rss-source-debug';
 import type { RssSourceDebugPanelStore } from '@/lib/rss-source/rss-source-debug-panel-store';
 import type { RssSource } from '@/types';
@@ -177,8 +177,8 @@ export function RssSourceDebugPanel(props: RssSourceDebugPanelProps) {
           </div>
 
           <div class="flex flex-wrap gap-2">
-            <TextField class="min-w-0 flex-1">
-              <TextFieldInput
+            <AppTextField class="min-w-0 flex-1">
+              <AppTextFieldInput
                 placeholder="留空解析分类；关键字搜索；分类::URL；http 链接拉正文"
                 value={store().keyword()}
                 onInput={(e) => store().setKeyword(e.currentTarget.value)}
@@ -190,7 +190,7 @@ export function RssSourceDebugPanel(props: RssSourceDebugPanelProps) {
                   }
                 }}
               />
-            </TextField>
+            </AppTextField>
             <Button
               disabled={store().running() || !props.source()}
               onClick={() =>
