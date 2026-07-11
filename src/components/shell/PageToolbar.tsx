@@ -1,14 +1,19 @@
 /**
  * 主壳内 Tab 页的页面工具栏：标题 + 描述 | 操作区（左右垂直居中对齐）
- * 与 PageHeader（独立全屏页）区分，不含返回键与窗口控制。
+ * 与 PageHeader（独立全屏页）区分；桌面强制移动壳层且无顶栏时补侧栏触发与窗口 chrome。
  */
 
 import { Show, createEffect, createSignal, onCleanup, type JSX } from 'solid-js';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import {
+  PageToolbarShellTrailing,
+  PageToolbarSidebarLeading,
+} from '@/components/shell/PageToolbarShellChrome';
+import {
   createTauriWindowChromeDblClickHandler,
   shouldEnableTauriWindowChrome,
 } from '@/lib/platform/tauri-window-chrome';
+import { shouldShowPageToolbarShellChrome } from '@/lib/shell/page-toolbar-shell-chrome';
 import { cn } from '@/lib/utils';
 import { pageToolbarBelowScroll, pageToolbarShellTop } from '@/lib/ui/viewport-classes';
 
@@ -58,6 +63,7 @@ export function PageToolbar(props: PageToolbarProps) {
   const insetTopSafeArea = () => props.insetTopSafeArea ?? shell().insetTopSafeArea;
   const enableTauriWindowChrome = () =>
     shouldEnableTauriWindowChrome(shell().useMobileShell);
+  const showShellTrailingChrome = () => shouldShowPageToolbarShellChrome(shell());
   const onTauriWindowChromeDblClick = createTauriWindowChromeDblClickHandler();
   const [belowScrollRef, setBelowScrollRef] = createSignal<HTMLDivElement | undefined>(undefined);
 
@@ -92,6 +98,7 @@ export function PageToolbar(props: PageToolbarProps) {
           class="flex min-w-0 flex-1 items-center gap-3"
           data-tauri-drag-region={enableTauriWindowChrome() ? true : undefined}
         >
+          <PageToolbarSidebarLeading />
           <Show when={props.leading}>
             <div class="flex shrink-0 items-center no-drag">{props.leading}</div>
           </Show>
@@ -104,9 +111,10 @@ export function PageToolbar(props: PageToolbarProps) {
             <div class="min-w-0 max-w-full overflow-hidden">{props.titleSlot}</div>
           </Show>
         </div>
-        <Show when={props.children}>
+        <Show when={props.children || showShellTrailingChrome()}>
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 no-drag">
-            {props.children}
+            <Show when={props.children}>{props.children}</Show>
+            <PageToolbarShellTrailing showLeadingSeparator={!!props.children} />
           </div>
         </Show>
       </div>

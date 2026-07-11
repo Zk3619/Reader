@@ -167,6 +167,9 @@ export const appBottomEdgeInset = 'app-bottom-edge-inset';
 /** 主壳 PageToolbar 顶距：安全区 + pt-4（见 App.css `.page-toolbar-shell-top`） */
 export const pageToolbarShellTop = 'page-toolbar-shell-top';
 
+/** 主壳 PageToolbar 底部分割线（阅读模块 Tab 页、规则管理子页） */
+export const pageToolbarBottomBorder = 'border-b border-border/50';
+
 /** Popper 与视口边缘最小间距（2rem），传给 Kobalte `overflowPadding` */
 export const popperOverflowPadding = 32;
 
