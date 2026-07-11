@@ -1,10 +1,10 @@
-/**
+﻿/**
  * 设置页：书源导入黑名单（内置 18+ + 用户自定义）
  */
 
 import { createSignal, For, onMount, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Checkbox } from '@/components/ui/checkbox';
 import { sourceBlocklistStore } from '@/stores/source-blocklist';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -41,20 +41,20 @@ export function SourceBlocklistSetting() {
       </div>
 
       <div class="mb-4 flex flex-wrap items-end gap-2">
-        <TextField class="min-w-40 flex-1">
-          <TextFieldInput
+        <AppTextField class="min-w-40 flex-1">
+          <AppTextFieldInput
             placeholder="域名 example.com 或 URL 片段"
             value={value()}
             onInput={(e: Event) => setValue((e.currentTarget as HTMLInputElement).value)}
           />
-        </TextField>
-        <TextField class="min-w-32 flex-1">
-          <TextFieldInput
+        </AppTextField>
+        <AppTextField class="min-w-32 flex-1">
+          <AppTextFieldInput
             placeholder="备注（可选）"
             value={label()}
             onInput={(e: Event) => setLabel((e.currentTarget as HTMLInputElement).value)}
           />
-        </TextField>
+        </AppTextField>
         <Button onClick={() => void handleAdd()} disabled={loading()}>
           添加
         </Button>

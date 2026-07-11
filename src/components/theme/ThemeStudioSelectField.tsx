@@ -1,8 +1,8 @@
-/**
+﻿/**
  * 主题工作室 — 下拉选择（AppSelect）
  */
 
-import { TextField, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import {
   AppSelect,
   AppSelectContent,
@@ -50,8 +50,8 @@ export function ThemeStudioSelectField(props: ThemeStudioSelectFieldProps) {
     allOptions().find((option) => option.value === value)?.label ?? value ?? '';
 
   return (
-    <TextField>
-      <TextFieldLabel class={props.labelClass ?? 'text-xs'}>{props.label}</TextFieldLabel>
+    <AppTextField>
+      <AppTextFieldLabel class={props.labelClass ?? 'text-xs'}>{props.label}</AppTextFieldLabel>
       <AppSelect
         value={props.value}
         onChange={(value) => {
@@ -74,6 +74,6 @@ export function ThemeStudioSelectField(props: ThemeStudioSelectFieldProps) {
           <AppSelectListbox />
         </AppSelectContent>
       </AppSelect>
-    </TextField>
+    </AppTextField>
   );
 }

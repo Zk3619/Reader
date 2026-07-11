@@ -1,7 +1,7 @@
-import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
+﻿import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Button } from '@/components/ui/button';
 import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
 import { isTauri, isAndroid, isMobile } from '@/lib/platform/detect';
@@ -150,13 +150,13 @@ export function WebServiceSettingBlock() {
         <div class="space-y-1.5">
           <Label class="text-sm">访问 Token</Label>
           <div class="flex gap-2">
-            <TextField class="flex-1">
-              <TextFieldInput
+            <AppTextField class="flex-1">
+              <AppTextFieldInput
                 value={token()}
                 placeholder="Bearer Token"
                 onInput={(e) => void commitToken(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
             <Button
               type="button"
               variant="outline"

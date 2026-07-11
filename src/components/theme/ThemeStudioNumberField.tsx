@@ -1,10 +1,10 @@
-/**
+﻿/**
  * 主题工作室 — 数字输入（Kobalte NumberField）
  */
 
 import { Show } from 'solid-js';
 import { cn } from '@/lib/utils';
-import { TextField, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import {
   NumberField,
   NumberFieldDecrementTrigger,
@@ -64,8 +64,8 @@ export function ThemeStudioNumberField(props: ThemeStudioNumberFieldProps) {
   }
 
   return (
-    <TextField>
-      <TextFieldLabel class={props.labelClass ?? 'text-xs'}>{props.label}</TextFieldLabel>
+    <AppTextField>
+      <AppTextFieldLabel class={props.labelClass ?? 'text-xs'}>{props.label}</AppTextFieldLabel>
       <div class="flex items-center gap-2">
         {input}
         <Show when={props.suffix}>
@@ -75,6 +75,6 @@ export function ThemeStudioNumberField(props: ThemeStudioNumberFieldProps) {
       <Show when={props.description}>
         <p class="text-[11px] text-muted-foreground">{props.description}</p>
       </Show>
-    </TextField>
+    </AppTextField>
   );
 }

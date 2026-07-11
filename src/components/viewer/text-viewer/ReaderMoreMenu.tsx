@@ -8,6 +8,7 @@ import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw
 import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
 import { ContentEditDialog } from '@/components/viewer/text-viewer/ContentEditDialog';
 import { BookPageAnimDialog } from '@/components/viewer/text-viewer/BookPageAnimDialog';
+import { BookThemeOverrideDialog } from '@/components/viewer/text-viewer/BookThemeOverrideDialog';
 import { SimulatedReadingDialog } from '@/components/viewer/text-viewer/SimulatedReadingDialog';
 import { isLocalBook } from '@/lib/local-book';
 import {
@@ -42,6 +43,7 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   const [effectiveOpen, setEffectiveOpen] = createSignal(false);
   const [contentEditOpen, setContentEditOpen] = createSignal(false);
   const [pageAnimOpen, setPageAnimOpen] = createSignal(false);
+  const [themeOverrideOpen, setThemeOverrideOpen] = createSignal(false);
   const [simulatedOpen, setSimulatedOpen] = createSignal(false);
 
   const replaceEnabled = () => textViewerStore.isUseReplaceRule();
@@ -157,6 +159,14 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
           >
             本书翻页动画
           </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setOpen(false);
+              setThemeOverrideOpen(true);
+            }}
+          >
+            本书阅读主题
+          </AppDropdownMenuItem>
           <Show when={canReverseContent()}>
             <AppDropdownMenuItem onSelect={() => void handleReverseContent()}>
               翻转内容
@@ -216,6 +226,7 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
       />
       <ContentEditDialog open={contentEditOpen()} onOpenChange={setContentEditOpen} />
       <BookPageAnimDialog open={pageAnimOpen()} onOpenChange={setPageAnimOpen} />
+      <BookThemeOverrideDialog open={themeOverrideOpen()} onOpenChange={setThemeOverrideOpen} />
       <SimulatedReadingDialog open={simulatedOpen()} onOpenChange={setSimulatedOpen} />
     </>
   );

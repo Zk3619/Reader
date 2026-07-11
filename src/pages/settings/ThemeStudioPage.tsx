@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Theme Studio — 全屏主题编辑与实时预览
  */
 
@@ -15,16 +15,21 @@ import {
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { cn } from '@/lib/utils';
-import { ThemePreviewSandbox } from '@/components/theme/ThemePreviewSandbox';
 import { ThemeStudioInspector } from '@/components/theme/ThemeStudioInspector';
+import { ThemeStudioQuickMode } from '@/components/theme/ThemeStudioQuickMode';
+import { ThemeStudioABCompare } from '@/components/theme/ThemeStudioABCompare';
+import { ThemeStudioQualityPanel } from '@/components/theme/ThemeStudioQualityPanel';
+import { ThemeStudioPerformanceBadge } from '@/components/theme/ThemeStudioPerformanceBadge';
 import { ThemePresetManageDialog } from '@/components/theme/ThemePresetManageDialog';
 import {
   listRootThemeComponents,
   listChildThemeComponents,
+  getThemeComponent,
   type ThemeComponentDescriptor,
+  type ThemePreviewDomain,
 } from '@/lib/theme/preview/component-registry';
 import type { ThemeApplyScope, ThemeComponentId } from '@/lib/theme/schema/theme-pack-v1';
-import { themeStudioStore } from '@/stores/theme-studio';
+import { themeStudioStore, type ThemeStudioEditMode } from '@/stores/theme-studio';
 import {
   createThemePreset,
   deleteThemePreset,
@@ -42,19 +47,96 @@ import {
   importThemePackJson,
   importThemePackZip,
 } from '@/lib/theme/theme-pack-io';
+import { runThemePackQualityGate } from '@/lib/theme/quality/theme-pack-quality-gate';
 import { applyActiveThemePackToDocument } from '@/lib/theme/theme-runtime';
 import { publishActiveThemePack, publishActiveViewerThemePack } from '@/stores/theme-active-pack';
 import { settingsStore } from '@/stores/settings';
 import { saveReaderUiConfig } from '@/lib/media/text/read-config-storage';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { summarizeThemePackDiff } from '@/lib/theme/adapters/legado-theme-adapter';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import {
   FolderTreeIcon,
   PencilIcon,
   PlusIcon,
   TrashIcon,
 } from '@/components/shared/icons';
+
+const ADVANCED_SCENE_COMPONENT_IDS: ThemeComponentId[] = [
+  'pageTip',
+  'brightnessCapsule',
+  'imageStage',
+  'videoControls',
+];
+
+const EDIT_MODE_OPTIONS: { value: ThemeStudioEditMode; label: string }[] = [
+  { value: 'quick', label: '快速' },
+  { value: 'pro', label: '专业' },
+  { value: 'advanced', label: '高级' },
+];
+
+function SceneComponentSection(props: {
+  title: string;
+  domain: ThemePreviewDomain;
+  selected: ThemeComponentId;
+  onSelect: (id: ThemeComponentId) => void;
+}) {
+  const roots = () => listRootThemeComponents(props.domain);
+  return (
+    <Show when={roots().length > 0}>
+      <div class="mb-2">
+        <p class="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {props.title}
+        </p>
+        <For each={roots()}>
+          {(node) => (
+            <ComponentTreeNode
+              node={node}
+              selected={props.selected}
+              onSelect={props.onSelect}
+            />
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+function AdvancedSceneSection(props: {
+  selected: ThemeComponentId;
+  onSelect: (id: ThemeComponentId) => void;
+}) {
+  return (
+    <div class="mb-2">
+      <p class="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        高级
+      </p>
+      <For each={ADVANCED_SCENE_COMPONENT_IDS}>
+        {(id) => {
+          const descriptor = () => getThemeComponent(id);
+          return (
+            <Show when={descriptor()}>
+              {(node) => (
+                <button
+                  type="button"
+                  class={cn(
+                    'w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                    props.selected === id
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-foreground hover:bg-accent/50',
+                  )}
+                  onClick={() => props.onSelect(id)}
+                >
+                  {node().label}
+                </button>
+              )}
+            </Show>
+          );
+        }}
+      </For>
+    </div>
+  );
+}
 
 export interface ThemeStudioPageProps {
   onBack?: () => void;
@@ -108,6 +190,9 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
   const [renameTarget, setRenameTarget] = createSignal<ThemePresetRecord | null>(null);
   const [renameValue, setRenameValue] = createSignal('');
   const [presetActionBusy, setPresetActionBusy] = createSignal(false);
+  let previewCaptureEl: HTMLDivElement | undefined;
+
+  const editMode = () => themeStudioStore.state.editMode;
 
   const reloadPresets = async () => {
     setLoadingPresets(true);
@@ -123,8 +208,6 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
     const unsubscribe = onThemePresetsChanged(() => void reloadPresets());
     onCleanup(unsubscribe);
   });
-
-  const domain = () => (themeStudioStore.state.scope === 'viewer' ? 'viewer' : 'app');
 
   const handleSave = async () => {
     const pack = themeStudioStore.state.draftPack;
@@ -168,7 +251,45 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
   };
 
   const handleExportZip = async () => {
-    await downloadThemePackZip(themeStudioStore.state.draftPack);
+    const pack = themeStudioStore.state.draftPack;
+    let previewPng: Uint8Array | undefined;
+    try {
+      const captureTarget =
+        previewCaptureEl?.querySelector('[data-theme-preview-mode]') ??
+        previewCaptureEl?.querySelector('[data-theme-preview]');
+      if (captureTarget) {
+        const { toPng } = await import('html-to-image');
+        const dataUrl = await toPng(captureTarget as HTMLElement, {
+          cacheBust: true,
+          pixelRatio: 1,
+        });
+        const base64 = dataUrl.split(',')[1];
+        if (base64) {
+          const binary = atob(base64);
+          previewPng = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) previewPng[i] = binary.charCodeAt(i);
+        }
+      }
+    } catch {
+      showAppToast({ title: '预览图生成失败', description: '将导出不含 preview.png 的 ZIP', variant: 'destructive' });
+    }
+
+    const gate = runThemePackQualityGate(pack, { hasPreviewPng: !!previewPng?.byteLength });
+    if (!gate.ok && pack.accessibility?.enforceOnExport) {
+      showAppToast({
+        title: '导出被质量门禁阻止',
+        description: gate.issues.find((i) => i.severity === 'error')?.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    await downloadThemePackZip(pack, undefined, { previewPng });
+    if (gate.issues.some((i) => i.severity === 'warning')) {
+      showAppToast({ title: '已导出 ZIP', description: '存在质量警告，可在高级模式查看详情' });
+    } else {
+      showAppToast({ title: '已导出 ZIP' });
+    }
   };
 
   const handleImportFile = () => {
@@ -314,9 +435,55 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
         showThemeToggle={false}
         trailing={
           <div class="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="outline" size="sm" class="cursor-pointer" onClick={() => themeStudioStore.resetDraft()}>
+            <div class="hidden sm:flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+              <For each={EDIT_MODE_OPTIONS}>
+                {(opt) => (
+                  <Button
+                    size="sm"
+                    variant={editMode() === opt.value ? 'default' : 'ghost'}
+                    class="cursor-pointer h-7 px-2 text-xs"
+                    onClick={() => themeStudioStore.setEditMode(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                )}
+              </For>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              class="cursor-pointer"
+              disabled={!themeStudioStore.canUndo}
+              onClick={() => themeStudioStore.undo()}
+            >
               撤销
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              class="cursor-pointer"
+              disabled={!themeStudioStore.canRedo}
+              onClick={() => themeStudioStore.redo()}
+            >
+              重做
+            </Button>
+            <Button
+              variant={themeStudioStore.state.abCompareEnabled ? 'default' : 'outline'}
+              size="sm"
+              class="cursor-pointer"
+              onClick={() => {
+                if (themeStudioStore.state.abCompareEnabled) {
+                  themeStudioStore.setAbCompareEnabled(false);
+                } else {
+                  themeStudioStore.captureAbSnapshot();
+                }
+              }}
+            >
+              A/B
+            </Button>
+            <Show when={editMode() === 'advanced'}>
+              <ThemeStudioPerformanceBadge pack={themeStudioStore.state.draftPack} />
+            </Show>
             <Button variant="outline" size="sm" class="cursor-pointer" onClick={handleImportFile}>
               导入
             </Button>
@@ -436,15 +603,28 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
 
           <div class="min-h-0 flex-1 overflow-y-auto p-2">
             <p class="mb-1 px-2 text-xs font-medium text-muted-foreground">组件树</p>
-            <For each={listRootThemeComponents(domain())}>
-              {(node) => (
-                <ComponentTreeNode
-                  node={node}
-                  selected={themeStudioStore.state.selectedComponentId}
-                  onSelect={(id) => themeStudioStore.setSelectedComponent(id)}
-                />
-              )}
-            </For>
+            <Show when={themeStudioStore.state.scope === 'all' || themeStudioStore.state.scope === 'app'}>
+              <SceneComponentSection
+                title="应用"
+                domain="app"
+                selected={themeStudioStore.state.selectedComponentId}
+                onSelect={(id) => themeStudioStore.setSelectedComponent(id)}
+              />
+            </Show>
+            <Show when={themeStudioStore.state.scope === 'all' || themeStudioStore.state.scope === 'viewer'}>
+              <SceneComponentSection
+                title="阅读器"
+                domain="viewer"
+                selected={themeStudioStore.state.selectedComponentId}
+                onSelect={(id) => themeStudioStore.setSelectedComponent(id)}
+              />
+            </Show>
+            <Show when={editMode() === 'advanced' && themeStudioStore.state.scope !== 'app'}>
+              <AdvancedSceneSection
+                selected={themeStudioStore.state.selectedComponentId}
+                onSelect={(id) => themeStudioStore.setSelectedComponent(id)}
+              />
+            </Show>
           </div>
 
           <div class="max-h-48 overflow-y-auto border-t border-border p-2">
@@ -542,8 +722,8 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
           </div>
         </aside>
 
-        <main class="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-          <ThemePreviewSandbox
+        <main class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-4" ref={previewCaptureEl}>
+          <ThemeStudioABCompare
             pack={() => themeStudioStore.state.draftPack}
             scope={() => themeStudioStore.state.scope}
             previewMode={() => themeStudioStore.state.previewMode}
@@ -553,10 +733,18 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
             packRevision={() => themeStudioStore.state.draftRevision}
             class="min-h-0 flex-1"
           />
+          <Show when={editMode() === 'advanced'}>
+            <ThemeStudioQualityPanel pack={themeStudioStore.state.draftPack} />
+          </Show>
         </main>
 
         <aside class="flex min-h-0 w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-card/30">
-          <ThemeStudioInspector selectedComponentId={themeStudioStore.state.selectedComponentId} />
+          <Show
+            when={editMode() === 'quick'}
+            fallback={<ThemeStudioInspector selectedComponentId={themeStudioStore.state.selectedComponentId} />}
+          >
+            <ThemeStudioQuickMode />
+          </Show>
         </aside>
       </div>
 
@@ -595,13 +783,13 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
             <AppDialogTitle>新建主题预设</AppDialogTitle>
             <AppDialogDescription>创建空白预设并加载到当前工作室。</AppDialogDescription>
           </AppDialogHeader>
-          <TextField>
-            <TextFieldLabel>预设名称</TextFieldLabel>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldLabel>预设名称</AppTextFieldLabel>
+            <AppTextFieldInput
               value={createName()}
               onInput={(event) => setCreateName(event.currentTarget.value)}
             />
-          </TextField>
+          </AppTextField>
           <AppDialogFooter>
             <Button variant="outline" class="cursor-pointer" onClick={() => setCreateDialogOpen(false)}>
               取消
@@ -627,13 +815,13 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
           <AppDialogHeader>
             <AppDialogTitle>重命名预设</AppDialogTitle>
           </AppDialogHeader>
-          <TextField>
-            <TextFieldLabel>新名称</TextFieldLabel>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldLabel>新名称</AppTextFieldLabel>
+            <AppTextFieldInput
               value={renameValue()}
               onInput={(event) => setRenameValue(event.currentTarget.value)}
             />
-          </TextField>
+          </AppTextField>
           <AppDialogFooter>
             <Button variant="outline" class="cursor-pointer" onClick={() => setRenameTarget(null)}>
               取消

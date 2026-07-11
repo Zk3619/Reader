@@ -1,9 +1,9 @@
-/**
+﻿/**
  * 主题工作室 — 边框/阴影预设选择
  */
 
 import { Show } from 'solid-js';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import type { ThemeStylePreset } from '@/lib/theme/preview/theme-style-presets';
 import { resolveStylePresetId } from '@/lib/theme/preview/theme-style-presets';
 import { ThemeStudioSelectField } from '@/components/theme/ThemeStudioSelectField';
@@ -41,14 +41,14 @@ export function ThemeStudioStylePresetField(props: ThemeStudioStylePresetFieldPr
         customOption={isCustom() ? { value: props.value, label: '自定义（当前值）' } : undefined}
       />
       <Show when={isCustom()}>
-        <TextField>
-          <TextFieldLabel class="text-[11px] text-muted-foreground">自定义值</TextFieldLabel>
-          <TextFieldInput
+        <AppTextField>
+          <AppTextFieldLabel class="text-[11px] text-muted-foreground">自定义值</AppTextFieldLabel>
+          <AppTextFieldInput
             value={props.value}
             placeholder={props.customPlaceholder}
             onInput={(e) => props.onChange(e.currentTarget.value)}
           />
-        </TextField>
+        </AppTextField>
       </Show>
     </div>
   );

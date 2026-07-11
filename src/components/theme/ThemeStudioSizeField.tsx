@@ -1,10 +1,10 @@
-/**
+﻿/**
  * 主题工作室 — 尺寸数字输入（rem / px 切换，展示换算）
  */
 
 import { Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import { ThemeStudioNumberField } from '@/components/theme/ThemeStudioNumberField';
 import {
   formatThemeLength,
@@ -70,13 +70,13 @@ export function ThemeStudioSizeField(props: ThemeStudioSizeFieldProps) {
   };
 
   return (
-    <TextField class={props.class}>
-      <TextFieldLabel class="text-xs">{props.label}</TextFieldLabel>
+    <AppTextField class={props.class}>
+      <AppTextFieldLabel class="text-xs">{props.label}</AppTextFieldLabel>
       <div class="flex items-center gap-2">
         <Show
           when={!props.optional || props.value}
           fallback={
-            <TextFieldInput
+            <AppTextFieldInput
               class="min-w-0 flex-1"
               placeholder="继承"
               onFocus={() => {
@@ -128,6 +128,6 @@ export function ThemeStudioSizeField(props: ThemeStudioSizeFieldProps) {
           </div>
         )}
       </Show>
-    </TextField>
+    </AppTextField>
   );
 }

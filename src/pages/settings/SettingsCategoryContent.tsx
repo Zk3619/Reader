@@ -18,6 +18,7 @@ export interface SettingsCategoryContentProps {
   categoryId: SettingsCategoryId;
   highlightedItemId?: string | null;
   onOpenThemeStudio?: () => void;
+  onOpenThemesManage?: () => void;
 }
 
 export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
@@ -75,7 +76,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
         </SettingItemAnchor>
 
         <SettingItemAnchor id="custom-theme" highlighted={highlight('custom-theme')}>
-          <CustomThemeSetting onOpenStudio={props.onOpenThemeStudio} />
+          <CustomThemeSetting
+            onOpenStudio={props.onOpenThemeStudio}
+            onOpenThemesManage={props.onOpenThemesManage}
+          />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="show-tooltips" highlighted={highlight('show-tooltips')}>

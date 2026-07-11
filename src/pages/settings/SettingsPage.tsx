@@ -48,6 +48,7 @@ export interface SettingsPageProps {
   /** 打开阅读规则独立页（TXT 目录 / 替换净化 / 字典） */
   onOpenReadingRulePage?: (page: ReadingRulePageId) => void;
   onOpenThemeStudio?: () => void;
+  onOpenThemesManage?: () => void;
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
@@ -423,6 +424,7 @@ export function SettingsPage(props: SettingsPageProps) {
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
                         onOpenThemeStudio={props.onOpenThemeStudio}
+                        onOpenThemesManage={props.onOpenThemesManage}
                       />
                     </TabsContent>
                   )}
@@ -466,6 +468,7 @@ export function SettingsPage(props: SettingsPageProps) {
                         categoryId={cat.id}
                         highlightedItemId={highlightedItemId()}
                         onOpenThemeStudio={props.onOpenThemeStudio}
+                        onOpenThemesManage={props.onOpenThemesManage}
                       />
                     </div>
                   </Show>

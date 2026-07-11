@@ -3,7 +3,7 @@
  */
 
 import { Button } from '@/components/ui/button';
-import { SettingsIcon } from '@/components/shared/icons';
+import { SettingsIcon, FolderTreeIcon } from '@/components/shared/icons';
 import { themeStudioStore } from '@/stores/theme-studio';
 import { settingsStore } from '@/stores/settings';
 import {
@@ -13,6 +13,7 @@ import {
 
 export interface CustomThemeSettingProps {
   onOpenStudio?: () => void;
+  onOpenThemesManage?: () => void;
 }
 
 export function CustomThemeSetting(props: CustomThemeSettingProps) {
@@ -34,13 +35,19 @@ export function CustomThemeSetting(props: CustomThemeSettingProps) {
         <div class="space-y-1">
           <h3 class="font-semibold text-foreground">自定义主题</h3>
           <p class="text-sm text-muted-foreground">
-            打开主题工作室，按组件精细调整主程序与阅读器样式，支持预设保存、导入导出与高级特效
+            在主题工作室中按组件精细调整主程序与阅读器样式；可在主题管理页批量导入、导出与切换预设。
           </p>
         </div>
-        <Button class="cursor-pointer gap-2 shrink-0" onClick={() => void open()}>
-          <SettingsIcon class="h-4 w-4" />
-          打开主题工作室
-        </Button>
+        <div class="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" class="cursor-pointer gap-2" onClick={() => props.onOpenThemesManage?.()}>
+            <FolderTreeIcon class="h-4 w-4" />
+            主题管理
+          </Button>
+          <Button class="cursor-pointer gap-2" onClick={() => void open()}>
+            <SettingsIcon class="h-4 w-4" />
+            打开主题工作室
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Theme Studio Inspector — 排版 Tab
  */
 
 import { For, Show, createMemo } from 'solid-js';
 import type { ComponentTypographyOverride } from '@/lib/theme/schema/theme-pack-v1';
 import type { InspectorEditableSections } from '@/lib/theme/preview/theme-inspector-editable';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import { ThemeStudioSizeField } from '@/components/theme/ThemeStudioSizeField';
 import { ThemeStudioNumberField } from '@/components/theme/ThemeStudioNumberField';
 import { ThemeStudioSelectField } from '@/components/theme/ThemeStudioSelectField';
@@ -68,22 +68,22 @@ export function ThemeStudioInspectorTypographyPanel(props: ThemeStudioInspectorT
         <Show when={props.sections.showTypography}>
           <div class="space-y-2 rounded-lg border border-border/50 p-2">
             <p class="text-xs font-medium text-foreground">全局排版</p>
-            <TextField>
-              <TextFieldLabel class="text-xs">正文字体族</TextFieldLabel>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldLabel class="text-xs">正文字体族</AppTextFieldLabel>
+              <AppTextFieldInput
                 value={props.fontFamily}
                 placeholder="system-ui, sans-serif"
                 onInput={(e) => props.onFontFamilyChange(e.currentTarget.value)}
               />
-            </TextField>
-            <TextField>
-              <TextFieldLabel class="text-xs">等宽字体族</TextFieldLabel>
-              <TextFieldInput
+            </AppTextField>
+            <AppTextField>
+              <AppTextFieldLabel class="text-xs">等宽字体族</AppTextFieldLabel>
+              <AppTextFieldInput
                 value={props.fontFamilyMono}
                 placeholder="ui-monospace, monospace"
                 onInput={(e) => props.onFontFamilyMonoChange(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
             <ThemeStudioNumberField
               label="字号缩放系数"
               value={typeScaleNumber()}
@@ -119,16 +119,16 @@ export function ThemeStudioInspectorTypographyPanel(props: ThemeStudioInspectorT
             <Show
               when={componentLineHeight() != null}
               fallback={
-                <TextField>
-                  <TextFieldLabel class="text-xs">
+                <AppTextField>
+                  <AppTextFieldLabel class="text-xs">
                     {COMPONENT_TYPOGRAPHY_LABELS.lineHeight}
-                  </TextFieldLabel>
-                  <TextFieldInput
+                  </AppTextFieldLabel>
+                  <AppTextFieldInput
                     placeholder="继承"
                     onFocus={() => props.patchComponentTypography('lineHeight', '1.5')}
                   />
                   <p class="text-[11px] text-muted-foreground">无单位倍数，如 1.5</p>
-                </TextField>
+                </AppTextField>
               }
             >
               <ThemeStudioNumberField
@@ -155,14 +155,14 @@ export function ThemeStudioInspectorTypographyPanel(props: ThemeStudioInspectorT
                 })),
               ]}
             />
-            <TextField>
-              <TextFieldLabel class="text-xs">{COMPONENT_TYPOGRAPHY_LABELS.fontFamily}</TextFieldLabel>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldLabel class="text-xs">{COMPONENT_TYPOGRAPHY_LABELS.fontFamily}</AppTextFieldLabel>
+              <AppTextFieldInput
                 value={props.componentTypographyValue('fontFamily')}
                 placeholder="继承全局字体"
                 onInput={(e) => props.patchComponentTypography('fontFamily', e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
         </Show>
       </Show>

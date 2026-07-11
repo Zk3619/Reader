@@ -1,12 +1,12 @@
-/**
+﻿/**
  * Theme Studio Inspector — 颜色 / 布局 / 排版 / 背景 / 动效 / 高级
  */
 
 import { For, Show, createMemo } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { ColorPicker } from '@/components/ui/color-picker';
+import { ThemeStudioColorField } from '@/components/theme/ThemeStudioColorField';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
   ComponentLayoutOverride,
@@ -39,8 +39,8 @@ import { ThemeStudioInspectorLayoutPanel } from '@/components/theme/ThemeStudioI
 import { ThemeStudioInspectorTypographyPanel } from '@/components/theme/ThemeStudioInspectorTypographyPanel';
 import { ThemeStudioInspectorMotionPanel } from '@/components/theme/ThemeStudioInspectorMotionPanel';
 import { ThemeStudioNumberField } from '@/components/theme/ThemeStudioNumberField';
+import { ThemeStudioOpacityBlurFields } from '@/components/theme/ThemeStudioOpacityBlurFields';
 import {
-  BackgroundOpacityBlurFields,
   ComponentBackgroundControls,
   patchComponentBackgroundAsset,
   patchViewerTextContentBackgroundAsset,
@@ -128,23 +128,7 @@ function defaultCustomCursorImageEffect(): ThemeEffectConfig {
 }
 
 function ThemeColorField(props: { value: string; label: string; onChange: (hex: string) => void }) {
-  return (
-    <div class="flex items-center gap-2">
-      <ColorPicker
-        variant="minimal"
-        triggerVariant="icon"
-        size="sm"
-        showAlpha={false}
-        defaultFormat="hex"
-        outputFormat="hex"
-        value={props.value}
-        onChange={(hex) => props.onChange(hex)}
-        aria-label={props.label}
-        class="shrink-0"
-      />
-      <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">{props.label}</span>
-    </div>
-  );
+  return <ThemeStudioColorField value={props.value} label={props.label} onChange={props.onChange} />;
 }
 
 export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
@@ -537,6 +521,58 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
     }));
   };
 
+  const pageTipSurfaceAppearance = () => ({
+    opacity: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.pageTip?.opacity ?? 100,
+    blurPx: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.pageTip?.blurPx ?? 0,
+  });
+
+  const patchPageTipSurfaceAppearance = (
+    patch: Partial<{ opacity: number; blurPx: number }>,
+  ) => {
+    patchPack((draft) => ({
+      ...draft,
+      viewer: {
+        ...draft.viewer,
+        text: {
+          ...draft.viewer?.text,
+          surfaceAppearance: {
+            ...draft.viewer?.text?.surfaceAppearance,
+            pageTip: {
+              ...draft.viewer?.text?.surfaceAppearance?.pageTip,
+              ...patch,
+            },
+          },
+        },
+      },
+    }));
+  };
+
+  const brightnessSurfaceAppearance = () => ({
+    opacity: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.brightness?.opacity ?? 100,
+    blurPx: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.brightness?.blurPx ?? 0,
+  });
+
+  const patchBrightnessSurfaceAppearance = (
+    patch: Partial<{ opacity: number; blurPx: number }>,
+  ) => {
+    patchPack((draft) => ({
+      ...draft,
+      viewer: {
+        ...draft.viewer,
+        text: {
+          ...draft.viewer?.text,
+          surfaceAppearance: {
+            ...draft.viewer?.text?.surfaceAppearance,
+            brightness: {
+              ...draft.viewer?.text?.surfaceAppearance?.brightness,
+              ...patch,
+            },
+          },
+        },
+      },
+    }));
+  };
+
   const contentSurfaceAppearance = () => ({
     opacity: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.content?.opacity ?? 100,
     blurPx: themeStudioStore.state.draftPack.viewer?.text?.surfaceAppearance?.content?.blurPx ?? 0,
@@ -552,7 +588,15 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
     sections().showComponentBackground ||
     sections().showViewerContentBackground ||
     sections().showViewerChromeSurface ||
+    sections().showViewerPageTipSurface ||
+    sections().showViewerBrightnessSurface ||
     sections().showTsParticles;
+
+  const hasSurfaceControls = () =>
+    sections().semanticGroups.length > 0 ||
+    cssVarPresets().length > 0 ||
+    sections().showViewerPalette ||
+    hasBackgroundControls();
 
   const componentCssVarValue = (varName: string): string => {
     const id = props.selectedComponentId;
@@ -715,19 +759,16 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both p-4">
-      <Tabs defaultValue="colors" class="w-full">
+      <Tabs defaultValue="surface" class="w-full">
         <TabsList class="flex h-auto w-full flex-wrap gap-1 p-1">
-          <TabsTrigger value="colors" class="flex-1 text-xs sm:text-sm">
-            颜色
+          <TabsTrigger value="surface" class="flex-1 text-xs sm:text-sm">
+            表面
           </TabsTrigger>
           <TabsTrigger value="layout" class="flex-1 text-xs sm:text-sm">
             布局
           </TabsTrigger>
           <TabsTrigger value="typography" class="flex-1 text-xs sm:text-sm">
             排版
-          </TabsTrigger>
-          <TabsTrigger value="background" class="flex-1 text-xs sm:text-sm">
-            背景
           </TabsTrigger>
           <TabsTrigger value="motion" class="flex-1 text-xs sm:text-sm">
             动效
@@ -737,22 +778,22 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="colors" class="space-y-3 pt-3">
-          <TextField>
-            <TextFieldLabel>主题名称</TextFieldLabel>
-            <TextFieldInput
+        <TabsContent value="surface" class="space-y-3 pt-3">
+          <AppTextField>
+            <AppTextFieldLabel>主题名称</AppTextFieldLabel>
+            <AppTextFieldInput
               value={themeStudioStore.state.draftPack.name}
               onInput={(e) => patchPack((d) => ({ ...d, name: e.currentTarget.value }))}
             />
-          </TextField>
+          </AppTextField>
 
           <p class="text-xs text-muted-foreground">
-            编辑 {semanticMode() === 'light' ? '浅色' : '深色'} 语义色（预览区当前模式）
+            编辑 {semanticMode() === 'light' ? '浅色' : '深色'} 语义色与表面效果（预览区当前模式）
           </p>
 
-          <Show when={sections().semanticGroups.length === 0 && cssVarPresets().length === 0}>
+          <Show when={!hasSurfaceControls()}>
             <p class="rounded-lg border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
-              当前组件无可编辑的全局语义色。组件底色请通过下方 CSS 变量（若可用）调节；装饰图/模糊请在「背景」标签页设置。
+              当前组件无可编辑的表面项。请选择侧栏、正文区、顶栏等组件，或切换到「全部」作用域。
             </p>
           </Show>
 
@@ -798,7 +839,7 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             <div class="border-t border-border pt-3">
               <p class="mb-1 text-xs font-medium text-muted-foreground">阅读配色</p>
               <p class="mb-2 text-[11px] text-muted-foreground">
-                决定正文区底色与文字色；透明度/模糊请在「背景」Tab 调整。
+                决定正文区底色与文字色；透明度/模糊可在下方调整。
               </p>
               <div class="flex flex-wrap gap-2">
                 <For each={TEXT_VIEWER_PALETTE_IDS}>
@@ -825,58 +866,14 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
               </div>
             </div>
           </Show>
-        </TabsContent>
-
-        <TabsContent value="layout" class="pt-3">
-          <ThemeStudioInspectorLayoutPanel
-            sections={sections()}
-            layoutValue={layoutValue}
-            patchLayout={patchLayout}
-            componentLayoutValue={componentLayoutValue}
-            patchComponentLayout={patchComponentLayout}
-          />
-        </TabsContent>
-
-        <TabsContent value="typography" class="pt-3">
-          <ThemeStudioInspectorTypographyPanel
-            sections={sections()}
-            fontFamily={themeStudioStore.state.draftPack.app?.typography?.fontFamily ?? ''}
-            onFontFamilyChange={(value) => patchTypographyTokens({ fontFamily: value || undefined })}
-            fontFamilyMono={themeStudioStore.state.draftPack.app?.typography?.fontFamilyMono ?? ''}
-            onFontFamilyMonoChange={(value) =>
-              patchTypographyTokens({ fontFamilyMono: value || undefined })
-            }
-            typeScale={String(themeStudioStore.state.draftPack.app?.typography?.scale ?? '')}
-            onTypeScaleChange={(value) =>
-              patchTypographyTokens({
-                scale: value ? Number(value) : undefined,
-              })
-            }
-            typeLineHeight={String(themeStudioStore.state.draftPack.app?.typography?.lineHeight ?? '')}
-            onTypeLineHeightChange={(value) =>
-              patchTypographyTokens({
-                lineHeight: value ? Number(value) : undefined,
-              })
-            }
-            componentTypographyValue={componentTypographyValue}
-            patchComponentTypography={patchComponentTypography}
-          />
-        </TabsContent>
-
-        <TabsContent value="background" class="space-y-3 pt-3">
-          <Show when={!hasBackgroundControls()}>
-            <p class="rounded-lg border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
-              当前组件无可编辑背景项。请选择侧栏、正文区、顶栏等组件，或切换到「全部」作用域。
-            </p>
-          </Show>
 
           <Show when={sections().showComponentSurfaceAppearance}>
           <div class="rounded-lg border border-primary/30 bg-primary/5 p-3">
             <p class="mb-1 text-xs font-medium text-foreground">底色效果</p>
             <p class="mb-2 text-[11px] text-muted-foreground">
-              调节「颜色」Tab 所设底色的不透明度与模糊（{descriptor()?.label ?? props.selectedComponentId}）。
+              调节「颜色」所设底色的不透明度与模糊（{descriptor()?.label ?? props.selectedComponentId}）。
             </p>
-            <BackgroundOpacityBlurFields
+            <ThemeStudioOpacityBlurFields
               opacity={componentSurfaceAppearance().opacity}
               blurPx={componentSurfaceAppearance().blurPx}
               opacityLabel="底色不透明度"
@@ -892,12 +889,40 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             <p class="mb-2 text-[11px] text-muted-foreground">
               阅读器顶栏/底栏等 Chrome 区域的透明度与背景模糊。
             </p>
-            <BackgroundOpacityBlurFields
+            <ThemeStudioOpacityBlurFields
               opacity={chromeSurfaceAppearance().opacity}
               blurPx={chromeSurfaceAppearance().blurPx}
               opacityLabel="Chrome 不透明度"
               onOpacityChange={(opacity) => patchChromeSurfaceAppearance({ opacity })}
               onBlurChange={(blurPx) => patchChromeSurfaceAppearance({ blurPx })}
+            />
+          </div>
+          </Show>
+
+          <Show when={sections().showViewerPageTipSurface}>
+          <div class="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <p class="mb-1 text-xs font-medium text-foreground">页眉页脚底色效果</p>
+            <p class="mb-2 text-[11px] text-muted-foreground">阅读器页眉/页脚条的透明度与背景模糊。</p>
+            <ThemeStudioOpacityBlurFields
+              opacity={pageTipSurfaceAppearance().opacity}
+              blurPx={pageTipSurfaceAppearance().blurPx}
+              opacityLabel="页眉页脚不透明度"
+              onOpacityChange={(opacity) => patchPageTipSurfaceAppearance({ opacity })}
+              onBlurChange={(blurPx) => patchPageTipSurfaceAppearance({ blurPx })}
+            />
+          </div>
+          </Show>
+
+          <Show when={sections().showViewerBrightnessSurface}>
+          <div class="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <p class="mb-1 text-xs font-medium text-foreground">亮度胶囊底色效果</p>
+            <p class="mb-2 text-[11px] text-muted-foreground">亮度调节胶囊的透明度与背景模糊。</p>
+            <ThemeStudioOpacityBlurFields
+              opacity={brightnessSurfaceAppearance().opacity}
+              blurPx={brightnessSurfaceAppearance().blurPx}
+              opacityLabel="亮度胶囊不透明度"
+              onOpacityChange={(opacity) => patchBrightnessSurfaceAppearance({ opacity })}
+              onBlurChange={(blurPx) => patchBrightnessSurfaceAppearance({ blurPx })}
             />
           </div>
           </Show>
@@ -908,7 +933,7 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
               装饰背景 · {descriptor()?.label ?? props.selectedComponentId}
             </p>
             <p class="mb-2 text-[11px] text-muted-foreground">
-              叠加图片/视频/动图，不改变「颜色」Tab 中的底色 Token。
+              叠加图片/视频/动图，不改变语义底色 Token。
             </p>
             <Button variant="outline" class="mb-2 w-full cursor-pointer" onClick={uploadComponentBackground}>
               上传装饰图 / 视频
@@ -926,7 +951,7 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             <div>
               <p class="mb-1 text-xs font-medium text-muted-foreground">正文区装饰背景</p>
               <p class="mb-2 text-[11px] text-muted-foreground">
-                正文底色由「颜色」Tab 的阅读配色决定；此处可叠加全屏装饰图。
+                正文底色由阅读配色决定；此处可叠加全屏装饰图。
               </p>
               <Button variant="outline" class="w-full cursor-pointer" onClick={uploadBackgroundAsset}>
                 上传正文装饰图 / 动图 / 视频
@@ -942,7 +967,7 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             <div class="border-t border-border/50 pt-3">
               <p class="mb-1 text-xs font-medium text-foreground">正文底色效果</p>
               <p class="mb-2 text-[11px] text-muted-foreground">作用于阅读配色底色（非装饰图图层）。</p>
-              <BackgroundOpacityBlurFields
+              <ThemeStudioOpacityBlurFields
                 opacity={contentSurfaceAppearance().opacity}
                 blurPx={contentSurfaceAppearance().blurPx}
                 opacityLabel="底色不透明度"
@@ -988,6 +1013,42 @@ export function ThemeStudioInspector(props: ThemeStudioInspectorProps) {
             </div>
           </div>
           </Show>
+        </TabsContent>
+
+        <TabsContent value="layout" class="pt-3">
+          <ThemeStudioInspectorLayoutPanel
+            sections={sections()}
+            layoutValue={layoutValue}
+            patchLayout={patchLayout}
+            componentLayoutValue={componentLayoutValue}
+            patchComponentLayout={patchComponentLayout}
+          />
+        </TabsContent>
+
+        <TabsContent value="typography" class="pt-3">
+          <ThemeStudioInspectorTypographyPanel
+            sections={sections()}
+            fontFamily={themeStudioStore.state.draftPack.app?.typography?.fontFamily ?? ''}
+            onFontFamilyChange={(value) => patchTypographyTokens({ fontFamily: value || undefined })}
+            fontFamilyMono={themeStudioStore.state.draftPack.app?.typography?.fontFamilyMono ?? ''}
+            onFontFamilyMonoChange={(value) =>
+              patchTypographyTokens({ fontFamilyMono: value || undefined })
+            }
+            typeScale={String(themeStudioStore.state.draftPack.app?.typography?.scale ?? '')}
+            onTypeScaleChange={(value) =>
+              patchTypographyTokens({
+                scale: value ? Number(value) : undefined,
+              })
+            }
+            typeLineHeight={String(themeStudioStore.state.draftPack.app?.typography?.lineHeight ?? '')}
+            onTypeLineHeightChange={(value) =>
+              patchTypographyTokens({
+                lineHeight: value ? Number(value) : undefined,
+              })
+            }
+            componentTypographyValue={componentTypographyValue}
+            patchComponentTypography={patchComponentTypography}
+          />
         </TabsContent>
 
         <TabsContent value="motion" class="space-y-3 pt-3">

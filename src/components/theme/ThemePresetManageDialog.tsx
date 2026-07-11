@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 主题预设批量管理对话框
  */
 
@@ -13,7 +13,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput, TextFieldLabel } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import {
   BUILTIN_DEFAULT_PRESET_ID,
   createThemePreset,
@@ -225,14 +225,14 @@ export function ThemePresetManageDialog(props: ThemePresetManageDialogProps) {
 
           <div class="relative">
             <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <TextField class="w-full">
-              <TextFieldInput
+            <AppTextField class="w-full">
+              <AppTextFieldInput
                 class="h-9 pl-8"
                 placeholder="搜索预设名称…"
                 value={searchQuery()}
                 onInput={(event) => setSearchQuery(event.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
           </div>
 
           <Show when={loading()}>
@@ -365,13 +365,13 @@ export function ThemePresetManageDialog(props: ThemePresetManageDialogProps) {
             <AppDialogTitle>新建主题预设</AppDialogTitle>
             <AppDialogDescription>创建空白预设，可在主题工作室中继续编辑。</AppDialogDescription>
           </AppDialogHeader>
-          <TextField>
-            <TextFieldLabel>预设名称</TextFieldLabel>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldLabel>预设名称</AppTextFieldLabel>
+            <AppTextFieldInput
               value={createName()}
               onInput={(event) => setCreateName(event.currentTarget.value)}
             />
-          </TextField>
+          </AppTextField>
           <AppDialogFooter>
             <Button variant="outline" class="cursor-pointer" onClick={() => setCreateOpen(false)}>
               取消
@@ -393,13 +393,13 @@ export function ThemePresetManageDialog(props: ThemePresetManageDialogProps) {
           <AppDialogHeader>
             <AppDialogTitle>重命名预设</AppDialogTitle>
           </AppDialogHeader>
-          <TextField>
-            <TextFieldLabel>新名称</TextFieldLabel>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldLabel>新名称</AppTextFieldLabel>
+            <AppTextFieldInput
               value={renameValue()}
               onInput={(event) => setRenameValue(event.currentTarget.value)}
             />
-          </TextField>
+          </AppTextField>
           <AppDialogFooter>
             <Button variant="outline" class="cursor-pointer" onClick={() => setRenameTarget(null)}>
               取消

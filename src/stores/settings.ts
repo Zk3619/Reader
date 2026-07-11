@@ -113,6 +113,14 @@ export interface AppSettings {
   importKeepGroup?: boolean;
   /** 导入书源时保留本地启用/发现状态（对齐 Legado importKeepEnable） */
   importKeepEnable?: boolean;
+  /** 主题库本地目录（可选，用于扫描导入） */
+  themesLibraryPath?: string;
+  /** 导入主题时保留本地显示名 */
+  importKeepThemeName?: boolean;
+  /** 导入主题时保留当前激活预设不被覆盖 */
+  importKeepThemeActive?: boolean;
+  /** 导入主题 ZIP 时覆盖本地资产（false 则保留已有资产清单） */
+  importOverwriteThemeAssets?: boolean;
   /** 目录分页安全阈值开关（超限中止，避免 nextTocUrl 死循环） */
   tocPaginationSafetyEnabled?: boolean;
   /** 目录分页最大抓取页数（含第一页） */
@@ -580,6 +588,15 @@ export const settingsStore = {
     importKeepName?: boolean;
     importKeepGroup?: boolean;
     importKeepEnable?: boolean;
+  }): Promise<void> {
+    await this.updateAppSettings(options);
+  },
+
+  async setImportThemeKeepOptions(options: {
+    importKeepThemeName?: boolean;
+    importKeepThemeActive?: boolean;
+    importOverwriteThemeAssets?: boolean;
+    themesLibraryPath?: string;
   }): Promise<void> {
     await this.updateAppSettings(options);
   },
