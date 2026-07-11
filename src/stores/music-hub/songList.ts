@@ -61,7 +61,6 @@ export function setSongListSource(source: MusicSdkSource): void {
     sortId: sorts[0]?.id ?? 'hot',
     tagId: null,
     page: 1,
-    playlists: [],
     detail: null,
     error: null,
   });

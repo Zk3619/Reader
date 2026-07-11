@@ -71,13 +71,26 @@ export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
   mg: '咪咕',
 };
 
-export type SearchSource = AudioTrackSource | `userApi:${string}`;
+export const AGGREGATE_SEARCH_SOURCE = 'all' as const;
+
+export type SearchSource = AudioTrackSource | `userApi:${string}` | typeof AGGREGATE_SEARCH_SOURCE;
 
 export function listSearchSources(): SearchSource[] {
   const apis = listUserApiSearchScripts().map(
     (s) => userApiSourceKey(s.id) as SearchSource,
   );
   return [...BUILTIN_SOURCES, ...apis];
+}
+
+/** Hub 搜索页来源选项（含聚合） */
+export function listHubSearchSources(): SearchSource[] {
+  return [AGGREGATE_SEARCH_SOURCE, ...listSearchSources()];
+}
+
+export function searchSourceLabel(source: SearchSource): string {
+  if (source === AGGREGATE_SEARCH_SOURCE) return '聚合';
+  if (source.startsWith('userApi:')) return '自定义源';
+  return BUILTIN_SOURCE_LABELS[source] ?? source;
 }
 
 export async function searchOnline(source: SearchSource, keyword: string) {

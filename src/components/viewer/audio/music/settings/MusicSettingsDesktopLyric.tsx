@@ -4,9 +4,20 @@
 
 import { createSignal, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { isTauri, isAndroid } from '@/lib/platform/detect';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import type { LyricTrackKind } from '@/lib/media/audio/lyric-types';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+
+const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
+const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
+  lyric: '原文',
+  tlyric: '翻译',
+  rlyric: '罗马音',
+  lxlyric: '逐字',
+};
 
 export const MusicSettingsDesktopLyric: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -58,52 +69,55 @@ export const MusicSettingsDesktopLyric: Component = () => {
           </Button>
         </div>
         <label class="flex items-center gap-2">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={settings().desktopLyricPenetrate ?? false}
-            onChange={(e) => void setPenetrate(e.currentTarget.checked)}
+            onChange={(checked) => void setPenetrate(checked)}
           />
           鼠标穿透（点击歌词窗不拦截操作）
         </label>
-        <div>
+        <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">默认歌词轨：</span>
-          <select
-            class="ml-2 rounded border px-2 py-1"
+          <MusicAppSelect
             value={settings().desktopLyricTrack ?? settings().lyricTrack}
-            onChange={(e) =>
-              apply({ desktopLyricTrack: e.currentTarget.value as LyricTrackKind })
-            }
-          >
-            <option value="lyric">原文</option>
-            <option value="tlyric">翻译</option>
-            <option value="rlyric">罗马音</option>
-            <option value="lxlyric">逐字</option>
-          </select>
+            onChange={(v) => apply({ desktopLyricTrack: v as LyricTrackKind })}
+            options={LYRIC_TRACKS}
+            optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
+            triggerClass="w-28"
+            aria-label="默认歌词轨"
+          />
         </div>
-        <div>
+        <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">字号：</span>
-          <input
-            type="range"
-            min={12}
-            max={48}
-            value={settings().desktopLyricFontSize ?? 20}
-            onInput={(e) =>
-              apply({ desktopLyricFontSize: Number(e.currentTarget.value) })
-            }
-          />
-          <span class="ml-2 tabular-nums">{settings().desktopLyricFontSize ?? 20}px</span>
+          <Slider
+            class="w-40"
+            minValue={12}
+            maxValue={48}
+            step={1}
+            value={[settings().desktopLyricFontSize ?? 20]}
+            onChange={(v) => apply({ desktopLyricFontSize: v[0] ?? 20 })}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+          <span class="tabular-nums">{settings().desktopLyricFontSize ?? 20}px</span>
         </div>
-        <div>
+        <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">不透明度：</span>
-          <input
-            type="range"
-            min={20}
-            max={100}
-            value={Math.round((settings().desktopLyricOpacity ?? 0.85) * 100)}
-            onInput={(e) =>
-              apply({ desktopLyricOpacity: Number(e.currentTarget.value) / 100 })
-            }
-          />
+          <Slider
+            class="w-40"
+            minValue={20}
+            maxValue={100}
+            step={1}
+            value={[Math.round((settings().desktopLyricOpacity ?? 0.85) * 100)]}
+            onChange={(v) => apply({ desktopLyricOpacity: (v[0] ?? 85) / 100 })}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
         </div>
       </Show>
       <Show when={isAndroid()}>

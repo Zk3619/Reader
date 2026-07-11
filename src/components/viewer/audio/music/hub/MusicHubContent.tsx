@@ -1,9 +1,11 @@
 /**
- * 音乐 Hub 主内容区（按 section 切换）
+ * 音乐 Hub 主内容区（按 section 切换，子页 keep-alive 避免重复挂载闪烁）
  */
 
-import { createSignal, Match, Switch, type Component } from 'solid-js';
+import { createSignal, onMount, type Component, type JSX } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
+import type { MusicHubSection } from '@/stores/viewer/base-state';
+import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
 import { MusicSearchPane } from '@/components/viewer/audio/music/hub/MusicSearchPane';
 import { MusicSongListPane } from '@/components/viewer/audio/music/hub/MusicSongListPane';
 import { MusicLeaderboardPane } from '@/components/viewer/audio/music/hub/MusicLeaderboardPane';
@@ -13,9 +15,11 @@ import { UserApiBrowsePane } from '@/components/viewer/audio/music/hub/UserApiBr
 import { MusicPlayDetail } from '@/components/viewer/audio/music/hub/MusicPlayDetail';
 import { AudioDownloadPanel } from '@/components/viewer/audio/music/AudioDownloadPanel';
 import { MusicSettingsPanel } from '@/components/viewer/audio/music/settings/MusicSettingsPanel';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { AudioLocalScanDialog } from '@/components/viewer/audio/music/AudioLocalScanDialog';
 import { MusicHubListPane } from '@/components/viewer/audio/music/hub/MusicHubListPane';
 import { type useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
+import { cn } from '@/lib/utils';
 
 export interface MusicHubContentProps {
   player: ReturnType<typeof useMusicHubPlayer>;
@@ -23,54 +27,81 @@ export interface MusicHubContentProps {
   onListDrawerToggle?: () => void;
 }
 
+function MusicHubSection(props: {
+  section: MusicHubSection;
+  active: boolean;
+  children: JSX.Element;
+}) {
+  return (
+    <div
+      class={cn(
+        'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+        !props.active && 'hidden',
+      )}
+      aria-hidden={!props.active}
+      data-music-hub-section={props.section}
+    >
+      {props.children}
+    </div>
+  );
+}
+
 export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
   const [scanOpen, setScanOpen] = createSignal(false);
 
+  onMount(() => {
+    void ensureLocalMusicSearchCache();
+  });
+
   const section = () => viewerStore.state.musicSection;
+  const isActive = (name: MusicHubSection) => section() === name;
 
   return (
     <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <Switch>
-        <Match when={section() === 'search'}>
-          <MusicSearchPane />
-        </Match>
-        <Match when={section() === 'songlist'}>
-          <MusicSongListPane />
-        </Match>
-        <Match when={section() === 'leaderboard'}>
-          <MusicLeaderboardPane />
-        </Match>
-        <Match when={section() === 'album'}>
-          <MusicAlbumPane />
-        </Match>
-        <Match when={section() === 'singer'}>
-          <MusicSingerPane />
-        </Match>
-        <Match when={section() === 'userApi'}>
-          <UserApiBrowsePane />
-        </Match>
-        <Match when={section() === 'list'}>
-          <MusicHubListPane
-            drawerOpen={props.listDrawerOpen}
-            onDrawerOpen={props.onListDrawerToggle}
-            onScanLocal={() => setScanOpen(true)}
-          />
-        </Match>
-        <Match when={section() === 'download'}>
-          <AudioDownloadPanel open inline />
-        </Match>
-        <Match when={section() === 'settings'}>
+      <MusicHubSection section="search" active={isActive('search')}>
+        <MusicSearchPane />
+      </MusicHubSection>
+      <MusicHubSection section="songlist" active={isActive('songlist')}>
+        <MusicSongListPane />
+      </MusicHubSection>
+      <MusicHubSection section="leaderboard" active={isActive('leaderboard')}>
+        <MusicLeaderboardPane />
+      </MusicHubSection>
+      <MusicHubSection section="album" active={isActive('album')}>
+        <MusicAlbumPane />
+      </MusicHubSection>
+      <MusicHubSection section="singer" active={isActive('singer')}>
+        <MusicSingerPane />
+      </MusicHubSection>
+      <MusicHubSection section="userApi" active={isActive('userApi')}>
+        <UserApiBrowsePane />
+      </MusicHubSection>
+      <MusicHubSection section="list" active={isActive('list')}>
+        <MusicHubListPane
+          drawerOpen={props.listDrawerOpen}
+          onDrawerOpen={props.onListDrawerToggle}
+          onScanLocal={() => setScanOpen(true)}
+        />
+      </MusicHubSection>
+      <MusicHubSection section="download" active={isActive('download')}>
+        <MusicHubPageShell section="download" scrollClass="overflow-hidden">
+          <AudioDownloadPanel open inline hideHeader />
+        </MusicHubPageShell>
+      </MusicHubSection>
+      <MusicHubSection section="settings" active={isActive('settings')}>
+        <MusicHubPageShell section="settings" scrollClass="overflow-hidden">
           <MusicSettingsPanel />
-        </Match>
-        <Match when={section() === 'nowPlaying'}>
-          <MusicPlayDetail player={props.player} />
-        </Match>
-      </Switch>
+        </MusicHubPageShell>
+      </MusicHubSection>
+      <MusicHubSection section="nowPlaying" active={isActive('nowPlaying')}>
+        <MusicPlayDetail player={props.player} />
+      </MusicHubSection>
 
       <AudioLocalScanDialog
         open={scanOpen()}
         onOpenChange={setScanOpen}
         onImported={(tracks) => {
+          invalidateLocalMusicSearchCache();
           if (tracks.length > 0) {
             void import('@/stores/viewer/media/audio').then(({ playPlaylist }) =>
               playPlaylist(tracks, 0),

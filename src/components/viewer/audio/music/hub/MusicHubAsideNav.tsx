@@ -1,9 +1,11 @@
 /**
- * 桌面侧栏图标导航（lx Aside）
+ * Hub 侧栏图标导航（lx Aside）
  */
 
 import { For, type Component } from 'solid-js';
 import { Search, ListMusic, Download, Settings2, Library, Trophy, Disc3, Mic2, Plug } from 'lucide-solid';
+import { Button } from '@/components/ui/button';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { cn } from '@/lib/utils';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
@@ -26,7 +28,7 @@ export const MusicHubAsideNav: Component = () => {
 
   const navButtonClass = (id: MusicHubSection) =>
     cn(
-      'flex flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs transition-colors',
+      'flex h-auto flex-col items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs transition-colors',
       section() === id
         ? 'bg-primary/10 text-primary font-medium'
         : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -37,16 +39,24 @@ export const MusicHubAsideNav: Component = () => {
       <For each={NAV_ITEMS}>
         {(item) => {
           const Icon = item.icon;
+          const isActive = () => section() === item.id;
           return (
-            <button
-              type="button"
-              class={navButtonClass(item.id)}
-              onClick={() => setMusicSection(item.id)}
-              title={item.label}
-            >
-              <Icon class="h-5 w-5" />
-              <span class="hidden md:inline">{item.label}</span>
-            </button>
+            <AppTooltip>
+              <AppTooltipTrigger
+                as={Button}
+                type="button"
+                variant="ghost"
+                class={navButtonClass(item.id)}
+                data-active={isActive() || undefined}
+                onClick={() => setMusicSection(item.id)}
+                aria-label={item.label}
+                aria-current={isActive() ? 'page' : undefined}
+              >
+                <Icon class="h-5 w-5" />
+                <span class="hidden md:inline">{item.label}</span>
+              </AppTooltipTrigger>
+              <AppTooltipContent layer="viewer">{item.label}</AppTooltipContent>
+            </AppTooltip>
           );
         }}
       </For>

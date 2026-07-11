@@ -2,7 +2,7 @@
  * lx 式底栏 PlayBar
  */
 
-import { Show, type Component } from 'solid-js';
+import { Show, createMemo, type Component } from 'solid-js';
 import { Play, Pause, SkipBack, SkipForward } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { audioI18n } from '@/lib/media/audio/audio-i18n';
@@ -16,6 +16,7 @@ export interface MusicHubPlayBarProps {
 
 export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const track = () => props.player.currentTrack();
+  const offline = createMemo(() => getMusicOfflineMode());
 
   return (
     <div
@@ -36,7 +37,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
         <p class="truncate text-sm font-medium">{track()?.name ?? '未播放'}</p>
         <p class="truncate text-xs text-muted-foreground">
           {track()?.artist ?? audioI18n.hubTitle()}
-          <Show when={getMusicOfflineMode()}>
+          <Show when={offline()}>
             <span class="ml-1 text-amber-600">· 离线</span>
           </Show>
         </p>

@@ -4,6 +4,7 @@
 
 import { For, Show, type Component } from 'solid-js';
 import { Search, ListMusic, Download, Settings2, X, Library, Trophy } from 'lucide-solid';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
@@ -42,28 +43,38 @@ export const MusicHubDrawerNav: Component<MusicHubDrawerNavProps> = (props) => {
         <aside class="relative z-10 flex h-full w-56 flex-col border-r bg-background shadow-lg">
           <div class="flex items-center justify-between border-b px-4 py-3">
             <span class="text-sm font-medium">音乐</span>
-            <button type="button" class="rounded p-1 hover:bg-muted" onClick={props.onClose}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="h-8 w-8"
+              onClick={props.onClose}
+              aria-label="关闭导航"
+            >
               <X class="h-5 w-5" />
-            </button>
+            </Button>
           </div>
           <nav class="flex flex-1 flex-col gap-1 p-2">
             <For each={NAV_ITEMS}>
               {(item) => {
                 const Icon = item.icon;
+                const isActive = () => section() === item.id;
                 return (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     class={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
-                      section() === item.id
+                      'h-auto justify-start gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
+                      isActive()
                         ? 'bg-primary/10 text-primary font-medium'
                         : 'text-muted-foreground hover:bg-muted/60',
                     )}
+                    aria-current={isActive() ? 'page' : undefined}
                     onClick={() => select(item.id)}
                   >
                     <Icon class="h-5 w-5" />
                     {item.label}
-                  </button>
+                  </Button>
                 );
               }}
             </For>

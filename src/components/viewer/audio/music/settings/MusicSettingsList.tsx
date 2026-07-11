@@ -1,5 +1,6 @@
 import { createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { syncAllBoundLists } from '@/lib/media/audio/list/sync-source-list';
 import { listAudioTracks, upsertAudioTracks } from '@/lib/database/audio-library';
@@ -36,11 +37,10 @@ export const MusicSettingsList: Component = () => {
   return (
     <div class="space-y-4 p-4 text-sm">
       <label class="flex items-center gap-2">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={settings().syncAutoUpdateLists}
-          onChange={(e) => {
-            setMusicSettings({ syncAutoUpdateLists: e.currentTarget.checked });
+          onChange={(checked) => {
+            setMusicSettings({ syncAutoUpdateLists: checked });
             setLocal(getMusicSettings());
           }}
         />

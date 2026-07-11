@@ -4,6 +4,7 @@
 
 import { createResource, createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareTextArea } from '@/components/shared/AppTextField';
 import {
   checkAuthHealth,
   cookiesFromManualInput,
@@ -74,8 +75,8 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
             <Button size="sm" onClick={() => void openPlatformLogin(platform())}>
               WebView 登录
             </Button>
-            <textarea
-              class="w-full rounded-md border bg-background px-3 py-2 text-xs"
+            <AppTextFieldBareTextArea
+              class="text-xs"
               rows={3}
               placeholder="或粘贴 Cookie"
               value={cookieInput()}
@@ -98,9 +99,10 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
                 <For each={playlists() ?? []}>
                   {(pl) => (
                     <li>
-                      <button
+                      <Button
                         type="button"
-                        class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted/60"
+                        variant="ghost"
+                        class="h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal hover:bg-muted/60"
                         onClick={() =>
                           void loadNeteasePlaylistTracks(pl.id).then((tracks) =>
                             playPlaylist(tracks, 0),
@@ -109,7 +111,7 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
                       >
                         {pl.name}
                         <span class="ml-2 text-xs text-muted-foreground">{pl.trackCount} 首</span>
-                      </button>
+                      </Button>
                     </li>
                   )}
                 </For>

@@ -47,7 +47,12 @@ async function resolveUserApiUrl(
   userApiId: string,
   track: AudioTrack,
 ): Promise<string | null> {
-  return userApiMusicUrl(userApiId, track, undefined, getPlayQuality());
+  try {
+    return await userApiMusicUrl(userApiId, track, undefined, getPlayQuality());
+  } catch (err) {
+    console.warn('[user-api] musicUrl failed', err);
+    return null;
+  }
 }
 
 export async function resolveTrackPlaybackUrls(
@@ -93,12 +98,16 @@ export async function resolveTrackPlaybackUrls(
     if (url) return { urls: [url], revokeAll: () => {} };
   }
 
-  if (urlMode === 'builtin' || urlMode === 'auto') {
-    url = await resolveBuiltinUrl(track, options?.cookies, options);
-    if (!url && urlMode === 'auto' && userApiId) {
+  if (urlMode === 'auto') {
+    if (userApiId) {
       url = await resolveUserApiUrl(userApiId, track);
     }
-  } else if (userApiId && track.source !== 'userApi') {
+    if (!url) {
+      url = await resolveBuiltinUrl(track, options?.cookies, options);
+    }
+  } else if (urlMode === 'builtin') {
+    url = await resolveBuiltinUrl(track, options?.cookies, options);
+  } else if (userApiId) {
     url = await resolveUserApiUrl(userApiId, track);
   }
 

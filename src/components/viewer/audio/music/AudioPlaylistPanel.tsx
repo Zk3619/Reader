@@ -4,6 +4,7 @@
 
 import { createResource, createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { loadLibraryPlaylists, loadPlaylistTracks } from '@/lib/media/audio/library/playlist-store';
 import {
   createPlaylist,
@@ -15,6 +16,7 @@ import { playPlaylist } from '@/stores/viewer/media/audio';
 import { saveNeteasePlaylistAsLocal } from '@/lib/media/audio/platform/playlist-sync';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
+import { cn } from '@/lib/utils';
 
 export interface AudioPlaylistPanelProps {
   open: boolean;
@@ -74,8 +76,8 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
     <AudioPanelShell open={props.open} inline={props.inline} title="歌单" onClose={props.onClose}>
       <div class="space-y-2 border-b p-4">
         <div class="flex gap-2">
-          <input
-            class="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
+          <AppTextFieldBareInput
+            class="min-w-0 flex-1"
             placeholder="新建歌单名称"
             value={newName()}
             onInput={(e) => setNewName(e.currentTarget.value)}
@@ -90,16 +92,20 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
           <For each={playlists() ?? []}>
             {(pl) => (
               <li>
-                <button
+                <Button
                   type="button"
-                  class={`w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted/60 ${selectedId() === pl.id ? 'bg-muted' : ''}`}
+                  variant="ghost"
+                  class={cn(
+                    'h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal hover:bg-muted/60',
+                    selectedId() === pl.id && 'bg-muted',
+                  )}
                   onClick={() => {
                     setSelectedId(pl.id);
                     setRenameValue(pl.name);
                   }}
                 >
                   {pl.name}
-                </button>
+                </Button>
               </li>
             )}
           </For>
@@ -107,8 +113,8 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
         <div class="min-w-0 flex-1 overflow-y-auto p-2">
           <Show when={selectedId()}>
             <div class="mb-2 flex flex-wrap gap-2">
-              <input
-                class="min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
+              <AppTextFieldBareInput
+                class="min-w-0 flex-1"
                 value={renameValue()}
                 onInput={(e) => setRenameValue(e.currentTarget.value)}
               />

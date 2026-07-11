@@ -15,6 +15,7 @@ import {
 } from '@thisbeyond/solid-dnd';
 import { createMemo, createResource, createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   getTracksForGroupId,
   removeTrackFromPlaylist,
@@ -28,6 +29,8 @@ import { syncSourceList } from '@/lib/media/audio/list/sync-source-list';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
+import { invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
+import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
 export interface MusicTrackListProps {
@@ -79,22 +82,25 @@ function SortableTrackRow(props: {
           isDragging() && 'transition-transform duration-200 ease-out',
         )}
       >
-        <button
+        <Button
           type="button"
-          class="shrink-0 cursor-grab touch-none px-1 text-muted-foreground active:cursor-grabbing"
+          variant="ghost"
+          size="icon"
+          class="h-auto w-auto shrink-0 cursor-grab touch-none px-1 text-muted-foreground active:cursor-grabbing"
           aria-label="拖拽排序"
           {...sortable.dragActivators}
         >
           ≡
-        </button>
-        <input
-          type="checkbox"
+        </Button>
+        <Checkbox
           checked={props.selected}
-          onChange={props.onToggleSelect}
+          onChange={() => props.onToggleSelect()}
+          aria-label={`选择 ${props.track.name}`}
         />
-        <button
+        <Button
           type="button"
-          class="min-w-0 flex-1 text-left"
+          variant="ghost"
+          class="h-auto min-w-0 flex-1 justify-start text-left font-normal"
           onClick={props.onPlay}
         >
           <p class="truncate text-sm font-medium">{props.track.name}</p>
@@ -104,7 +110,7 @@ function SortableTrackRow(props: {
               <span class="ml-2 tabular-nums">{props.track.duration}</span>
             </Show>
           </p>
-        </button>
+        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -126,6 +132,11 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     props.active !== false ? getTracksForGroupId(id) : Promise.resolve([]),
   );
 
+  const reloadTracks = () => {
+    invalidateLocalMusicSearchCache();
+    void refetch();
+  };
+
   const playAll = () => {
     const list = tracks() ?? [];
     if (list.length > 0) void playPlaylist(list, 0);
@@ -138,7 +149,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     try {
       await saveNeteasePlaylistAsLocal(listId);
       showAppToast({ title: '已保存为本地歌单' });
-      void refetch();
+      void reloadTracks();
     } catch (e) {
       showAppToast({ title: '保存失败', description: String(e), variant: 'destructive' });
     }
@@ -148,7 +159,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     const group = await getGroupById(groupId());
     if (!group?.listId) return;
     await removeTrackFromPlaylist(group.listId, trackId);
-    void refetch();
+    void reloadTracks();
   };
 
   const removeSelected = async () => {
@@ -158,14 +169,14 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
       await removeTrackFromPlaylist(group.listId, id);
     }
     setSelected(new Set<string>());
-    void refetch();
+    void reloadTracks();
   };
 
   const handleReorder = async (ids: Id[]) => {
     const group = await getGroupById(groupId());
     if (!group?.listId) return;
     await reorderPlaylistTracks(group.listId, ids.map(String));
-    void refetch();
+    void reloadTracks();
   };
 
   const syncList = async () => {
@@ -174,7 +185,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     try {
       await syncSourceList(group.listId);
       showAppToast({ title: '列表已更新' });
-      void refetch();
+      void reloadTracks();
     } catch (e) {
       showAppToast({ title: '更新失败', description: String(e), variant: 'destructive' });
     }
@@ -216,7 +227,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
         </Show>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto">
-        <Show when={tracks.loading}>
+        <Show when={shouldShowBlockingLoading(tracks.loading, list().length)}>
           <p class="p-4 text-sm text-muted-foreground">加载中…</p>
         </Show>
         <Show when={list().length === 0 && !tracks.loading}>

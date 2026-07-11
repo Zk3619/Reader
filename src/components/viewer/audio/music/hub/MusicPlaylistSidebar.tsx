@@ -4,6 +4,7 @@
 
 import { createResource, createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   createPlaylist,
   deletePlaylist,
@@ -15,6 +16,7 @@ import { setActiveMusicGroupId } from '@/stores/viewer/media/audio';
 import { MediaGroupId } from '@/types/book-group';
 import type { BookGroup } from '@/types';
 import { cn } from '@/lib/utils';
+import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 
 export interface MusicPlaylistSidebarProps {
   active?: boolean;
@@ -78,8 +80,8 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
     <aside class={cn('flex min-h-0 w-44 shrink-0 flex-col border-r md:w-52', props.class)}>
       <div class="space-y-2 border-b p-3">
         <div class="flex gap-2">
-          <input
-            class="min-w-0 flex-1 rounded-md border px-2 py-1.5 text-sm"
+          <AppTextFieldBareInput
+            class="min-w-0 flex-1"
             placeholder="新建歌单"
             value={newName()}
             onInput={(e) => setNewName(e.currentTarget.value)}
@@ -100,22 +102,23 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
         </Show>
       </div>
       <ul class="min-h-0 flex-1 overflow-y-auto p-2">
-        <Show when={groups.loading}>
+        <Show when={shouldShowBlockingLoading(groups.loading, (groups() ?? []).length)}>
           <li class="px-3 py-2 text-sm text-muted-foreground">加载中…</li>
         </Show>
         <For each={groups() ?? []}>
           {(group) => (
             <li>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 class={cn(
-                  'w-full rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60',
+                  'h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal transition-colors hover:bg-muted/60',
                   activeGroupId() === group.groupId && 'bg-muted font-medium',
                 )}
                 onClick={() => setActiveMusicGroupId(group.groupId)}
               >
                 {group.groupName}
-              </button>
+              </Button>
             </li>
           )}
         </For>

@@ -167,22 +167,23 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
 
   const usesRowGapPadding = () => !!props.rowGapCssVar;
 
+  const rowContentHeightPx = () => {
+    if (rowHeightMode() === 'fixed') {
+      return roundVirtualGridPx(fixedRowHeight());
+    }
+    const measured = measuredRowHeightPx();
+    if (measured != null) return measured;
+    return roundVirtualGridPx(responsiveCardHeightPx());
+  };
+
   const estimatedRowSlotPx = (rowIndex: number) => {
-    const base =
-      rowHeightMode() === 'fixed'
-        ? roundVirtualGridPx(fixedRowHeight())
-        : roundVirtualGridPx(responsiveCardHeightPx());
+    const base = rowContentHeightPx();
     if (!usesRowGapPadding()) return base;
     const last = rowIndex >= rowIndices().length - 1;
     return last ? base : base + interRowGapPx();
   };
 
-  const rowSlotHeightPx = (rowIndex: number) => {
-    if (rowHeightMode() === 'fixed') return estimatedRowSlotPx(rowIndex);
-    const measured = measuredRowHeightPx();
-    if (measured != null) return measured;
-    return estimatedRowSlotPx(rowIndex);
-  };
+  const rowSlotHeightPx = (rowIndex: number) => estimatedRowSlotPx(rowIndex);
 
   const layoutRevision = createMemo(() => {
     const mode = rowHeightMode();
@@ -190,13 +191,17 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     const cols = props.colCount();
     const measured = measuredRowHeightPx();
     const deps = props.remeasureDeps?.();
-    return `${mode}|${w}|${cols}|${rowSlotHeightPx(0)}|${interRowGapPx()}|${measured ?? ''}|${deps ?? ''}`;
+    return `${mode}|${w}|${cols}|${rowContentHeightPx()}|${interRowGapPx()}|${measured ?? ''}|${deps ?? ''}`;
   });
 
   const syncSampleRowHeight = () => {
     const el = sampleRowEl;
     if (!el || rowHeightMode() !== 'responsive') return;
-    const h = roundVirtualGridPx(el.offsetHeight);
+    let h = roundVirtualGridPx(el.offsetHeight);
+    if (h > 0 && usesRowGapPadding() && rowIndices().length > 1) {
+      // 样本行（index 0）非末行时 ul 含 padding-bottom，需剥离后作为统一内容高度
+      h = Math.max(0, h - interRowGapPx());
+    }
     if (h > 0) setMeasuredRowHeightPx(h);
   };
 

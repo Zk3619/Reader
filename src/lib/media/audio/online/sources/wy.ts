@@ -37,6 +37,7 @@ function mapResource(item: WySongResource): AudioTrack | null {
     duration: ms > 0 ? formatDurationSec(ms / 1000) : '00:00',
     meta: {
       songId: id,
+      songmid: id,
       albumId: String(song.al?.id ?? ''),
       albumName: String(song.al?.name ?? ''),
       coverUrl: String(song.al?.picUrl ?? ''),
@@ -58,6 +59,7 @@ function mapSongRecord(s: Record<string, unknown>): AudioTrack | null {
     duration: ms > 0 ? formatDurationSec(ms / 1000) : '00:00',
     meta: {
       songId: id,
+      songmid: id,
       albumId: String(al?.id ?? ''),
       albumName: String(al?.name ?? ''),
       coverUrl: String(al?.picUrl ?? ''),

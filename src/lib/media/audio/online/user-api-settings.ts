@@ -2,8 +2,20 @@
  * UserApi 默认源与启用状态
  */
 
+import { createSignal } from 'solid-js';
+
 const DEFAULT_KEY = 'reader_audio_user_api_default';
 const OFFLINE_KEY = 'reader_audio_offline_mode';
+
+function readOfflineFromStorage(): boolean {
+  try {
+    return localStorage.getItem(OFFLINE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+const [offlineMode, setOfflineModeSignal] = createSignal(readOfflineFromStorage());
 
 export function getDefaultUserApiId(): string | null {
   try {
@@ -32,7 +44,7 @@ export function resolveUserApiIdForTrack(
   }
   if (activeSource?.startsWith('userApi:')) return activeSource.slice('userApi:'.length);
   if (activeSource === 'userApi') return getDefaultUserApiId();
-  return null;
+  return getDefaultUserApiId();
 }
 
 export function userApiSourceKey(scriptId: string): string {
@@ -40,11 +52,7 @@ export function userApiSourceKey(scriptId: string): string {
 }
 
 export function getMusicOfflineMode(): boolean {
-  try {
-    return localStorage.getItem(OFFLINE_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return offlineMode();
 }
 
 export function setMusicOfflineMode(enabled: boolean): void {
@@ -53,4 +61,5 @@ export function setMusicOfflineMode(enabled: boolean): void {
   } catch {
     // ignore
   }
+  setOfflineModeSignal(enabled);
 }

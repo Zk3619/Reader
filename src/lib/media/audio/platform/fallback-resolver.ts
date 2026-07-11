@@ -6,6 +6,8 @@ import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
 import { resolveOnlineTrackUrl } from '@/lib/media/audio/online/source-router';
+import { userApiMusicUrl } from '@/lib/media/audio/online/user-api-engine';
+import { getDefaultUserApiId } from '@/lib/media/audio/online/user-api-settings';
 import { getPlayQuality, qualityFallbackChain } from '@/lib/media/audio/music-quality';
 import * as wy from '@/lib/media/audio/online/sources/wy';
 import * as kw from '@/lib/media/audio/online/sources/kw';
@@ -57,10 +59,26 @@ async function searchBili(keyword: string): Promise<AudioTrack | null> {
   }
 }
 
+async function tryResolveUserApiUrl(track: AudioTrack): Promise<string | null> {
+  const urlMode = getMusicSettings().urlSourceMode;
+  if (urlMode === 'builtin') return null;
+  const scriptId = getDefaultUserApiId();
+  if (!scriptId) return null;
+  try {
+    return await userApiMusicUrl(scriptId, track);
+  } catch (err) {
+    console.warn('[user-api] fallback musicUrl failed', err);
+    return null;
+  }
+}
+
 async function tryResolveUrl(
   track: AudioTrack,
   cookies?: string,
 ): Promise<{ url: string; track: AudioTrack } | null> {
+  const userApiUrl = await tryResolveUserApiUrl(track);
+  if (userApiUrl) return { url: userApiUrl, track };
+
   const qualities = qualityFallbackChain(getPlayQuality());
   for (const q of qualities) {
     const url = await resolveOnlineTrackUrl(track, cookies, { skipCache: true, quality: q });

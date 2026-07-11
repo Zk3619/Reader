@@ -12,6 +12,7 @@ export interface AudioDownloadPanelProps {
   open: boolean;
   onClose?: () => void;
   inline?: boolean;
+  hideHeader?: boolean;
 }
 
 export const AudioDownloadPanel: Component<AudioDownloadPanelProps> = (props) => {
@@ -25,6 +26,7 @@ export const AudioDownloadPanel: Component<AudioDownloadPanelProps> = (props) =>
       open={props.open}
       inline={props.inline}
       title="下载队列"
+      hideHeader={props.hideHeader}
       onClose={props.onClose}
       headerExtra={
         <Button size="sm" variant="outline" onClick={() => void processDownloadQueue().then(() => refetch())}>

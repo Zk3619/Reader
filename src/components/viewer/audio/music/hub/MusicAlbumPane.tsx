@@ -4,6 +4,7 @@
 
 import { createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   MUSIC_SDK_SOURCES,
   MUSIC_SDK_SOURCE_LABELS,
@@ -12,6 +13,8 @@ import { fetchAlbumDetail, type AlbumDetail } from '@/lib/media/audio/music-sdk/
 import type { MusicSdkSource } from '@/lib/media/audio/music-sdk/types';
 import { playPlaylist } from '@/stores/viewer/media/audio';
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 
 export const MusicAlbumPane: Component = () => {
   const [source, setSource] = createSignal<MusicSdkSource>('wy');
@@ -32,30 +35,33 @@ export const MusicAlbumPane: Component = () => {
   };
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div class="shrink-0 space-y-2 border-b p-4">
-        <select
-          class="rounded-md border bg-background px-2 py-1.5 text-sm"
-          value={source()}
-          onChange={(e) => setSource(e.currentTarget.value as MusicSdkSource)}
-        >
-          <For each={MUSIC_SDK_SOURCES}>
-            {(s) => <option value={s}>{MUSIC_SDK_SOURCE_LABELS[s]}</option>}
-          </For>
-        </select>
-        <div class="flex gap-2">
-          <input
-            class="flex-1 rounded-md border px-3 py-1.5 text-sm"
-            placeholder="专辑 ID"
-            value={albumId()}
-            onInput={(e) => setAlbumId(e.currentTarget.value)}
+    <MusicHubPageShell
+      section="album"
+      below={
+        <div class="space-y-2 px-4 pb-2">
+          <MusicAppSelect
+            value={source()}
+            onChange={(v) => setSource(v as MusicSdkSource)}
+            options={MUSIC_SDK_SOURCES}
+            optionLabel={(v) => MUSIC_SDK_SOURCE_LABELS[v as MusicSdkSource]}
+            aria-label="音乐源"
           />
-          <Button size="sm" onClick={() => void load()}>
-            加载
-          </Button>
+          <div class="flex gap-2">
+            <AppTextFieldBareInput
+              fieldClass="flex-1"
+              class="min-w-0"
+              placeholder="专辑 ID"
+              value={albumId()}
+              onInput={(e) => setAlbumId(e.currentTarget.value)}
+            />
+            <Button size="sm" onClick={() => void load()}>
+              加载
+            </Button>
+          </div>
         </div>
-      </div>
-      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+      }
+    >
+      <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4">
         <Show when={loading()}>
           <p class="text-sm text-muted-foreground">加载中…</p>
         </Show>
@@ -82,13 +88,14 @@ export const MusicAlbumPane: Component = () => {
                 <For each={d().tracks}>
                   {(t, i) => (
                     <li>
-                      <button
+                      <Button
                         type="button"
-                        class="w-full rounded px-2 py-1 text-left hover:bg-muted"
+                        variant="ghost"
+                        class="h-auto w-full justify-start rounded px-2 py-1 font-normal hover:bg-muted"
                         onClick={() => void playPlaylist(d().tracks, i())}
                       >
-                        {t.name} — {t.artist}
-                      </button>
+                        {t.name}
+                      </Button>
                     </li>
                   )}
                 </For>
@@ -97,6 +104,6 @@ export const MusicAlbumPane: Component = () => {
           )}
         </Show>
       </div>
-    </div>
+    </MusicHubPageShell>
   );
 };

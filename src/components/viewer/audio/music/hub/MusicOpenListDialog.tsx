@@ -4,6 +4,7 @@
 
 import { createSignal, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { openListFromUrlInput } from '@/stores/music-hub/songList';
 
 export interface MusicOpenListDialogProps {
@@ -36,11 +37,10 @@ export const MusicOpenListDialog: Component<MusicOpenListDialogProps> = (props) 
       <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
         <div class="w-full max-w-md rounded-lg border bg-background p-4 shadow-lg">
           <h3 class="mb-3 font-medium">打开歌单链接</h3>
-          <input
-            class="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          <AppTextFieldBareInput
             placeholder="粘贴歌单 URL 或 ID"
             value={url()}
-            onInput={(e: InputEvent) => setUrl((e.currentTarget as HTMLInputElement).value)}
+            onInput={(e) => setUrl(e.currentTarget.value)}
             onKeyDown={(e: KeyboardEvent) => e.key === 'Enter' && void submit()}
           />
           <Show when={error()}>

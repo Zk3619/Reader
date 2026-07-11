@@ -2,8 +2,10 @@
  * 同步设置
  */
 
-import { createResource, createSignal, For, Show, type Component } from 'solid-js';
+import { createResource, createSignal, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 import {
   connectLxSyncClient,
   disconnectLxSyncClient,
@@ -128,26 +130,24 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
       <div class="space-y-4 p-4">
             <section>
               <h3 class="mb-2 text-sm font-medium">同步模式</h3>
-              <select
-                class="w-full rounded-md border px-3 py-2 text-sm"
+              <MusicAppSelect
                 value={syncMode()}
-                onChange={(e) => setSyncMode(e.currentTarget.value as LxSyncMode)}
-              >
-                <For each={SYNC_MODES}>
-                  {(m) => <option value={m.value}>{m.label}</option>}
-                </For>
-              </select>
+                onChange={(v) => setSyncMode(v as LxSyncMode)}
+                options={SYNC_MODES.map((m) => m.value)}
+                optionLabel={(v) => SYNC_MODES.find((m) => m.value === v)?.label ?? v}
+                aria-label="同步模式"
+              />
             </section>
             <section>
               <h3 class="mb-2 text-sm font-medium">lx-music-sync-server</h3>
-              <input
-                class="mb-2 w-full rounded-md border px-3 py-2 text-sm"
+              <AppTextFieldBareInput
+                class="mb-2"
                 placeholder="http://127.0.0.1:9527"
                 value={serverUrl() || config()?.serverUrl || ''}
                 onInput={(e) => setServerUrl(e.currentTarget.value)}
               />
-              <input
-                class="mb-2 w-full rounded-md border px-3 py-2 text-sm"
+              <AppTextFieldBareInput
+                class="mb-2"
                 placeholder="连接密码"
                 type="password"
                 value={password()}
@@ -216,8 +216,8 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
             </section>
             <section>
               <h3 class="mb-2 text-sm font-medium">GitHub 快照（可选）</h3>
-              <input
-                class="mb-2 w-full rounded-md border px-3 py-2 text-sm"
+              <AppTextFieldBareInput
+                class="mb-2"
                 placeholder="https://gist.githubusercontent.com/..."
                 value={githubUrl()}
                 onInput={(e) => {

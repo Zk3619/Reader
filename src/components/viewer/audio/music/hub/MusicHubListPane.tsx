@@ -8,12 +8,14 @@ import { isMobile } from '@/lib/platform/detect';
 import { MusicPlaylistSidebar } from '@/components/viewer/audio/music/hub/MusicPlaylistSidebar';
 import { MusicTrackList } from '@/components/viewer/audio/music/hub/MusicTrackList';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { viewerStore } from '@/stores/viewer';
 import {
   getPlaylistTracks,
   setPlaylistTracks,
 } from '@/lib/database/audio-library';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 
 export interface MusicHubListPaneProps {
   drawerOpen?: boolean;
@@ -93,20 +95,18 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
   };
 
   return (
-    <div class="flex min-h-0 flex-1 overflow-hidden">
-      <Show when={!isMobile()}>
-        <MusicPlaylistSidebar />
-      </Show>
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+    <MusicHubPageShell
+      section="list"
+      toolbar={
         <Show when={isMobile()}>
-          <div class="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-            <Button size="sm" variant="outline" onClick={props.onDrawerOpen}>
-              <Menu class="mr-1 h-4 w-4" />
-              歌单
-            </Button>
-          </div>
+          <Button size="sm" variant="outline" onClick={props.onDrawerOpen}>
+            <Menu class="mr-1 h-4 w-4" />
+            歌单
+          </Button>
         </Show>
-        <div class="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
+      }
+      below={
+        <div class="flex flex-wrap items-center gap-2 px-4 pb-2 text-sm">
           <Button size="sm" variant="outline" onClick={() => void exportShare()}>
             <Share2 class="mr-1 h-3 w-3" />
             导出分享码
@@ -115,8 +115,9 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
             <Filter class="mr-1 h-3 w-3" />
             去重
           </Button>
-          <input
-            class="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
+          <AppTextFieldBareInput
+            fieldClass="min-w-0 flex-1"
+            class="text-xs"
             placeholder="粘贴分享码导入"
             value={importCode()}
             onInput={(e) => setImportCode(e.currentTarget.value)}
@@ -126,20 +127,29 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
             导入
           </Button>
         </div>
-        <MusicTrackList onScanLocal={props.onScanLocal} />
-      </div>
-      <Show when={isMobile() && props.drawerOpen}>
-        <div class="fixed inset-0 z-30 flex">
-          <div
-            class="absolute inset-0 bg-black/40"
-            onClick={props.onDrawerOpen}
-            role="presentation"
-          />
-          <MusicPlaylistSidebar
-            class="relative z-10 h-full w-56 bg-background shadow-lg"
-          />
+      }
+      scrollClass="overflow-hidden"
+    >
+      <div class="flex min-h-0 flex-1 overflow-hidden">
+        <Show when={!isMobile()}>
+          <MusicPlaylistSidebar />
+        </Show>
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <MusicTrackList onScanLocal={props.onScanLocal} />
         </div>
-      </Show>
-    </div>
+        <Show when={isMobile() && props.drawerOpen}>
+          <div class="fixed inset-0 z-30 flex">
+            <div
+              class="absolute inset-0 bg-black/40"
+              onClick={props.onDrawerOpen}
+              role="presentation"
+            />
+            <MusicPlaylistSidebar
+              class="relative z-10 h-full w-56 bg-background shadow-lg"
+            />
+          </div>
+        </Show>
+      </div>
+    </MusicHubPageShell>
   );
 };

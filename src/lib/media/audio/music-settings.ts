@@ -8,9 +8,15 @@ import type { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
 
 const STORAGE_KEY = 'reader_music_settings';
 
+export type MusicSearchControlStyle = 'select' | 'tabs';
+
 export interface MusicSettings {
   defaultSource: AudioTrackSource;
   defaultSearchTab: 'song' | 'playlist';
+  /** 音乐搜索页：来源选择控件风格 */
+  musicSearchSourceControl?: MusicSearchControlStyle;
+  /** 音乐搜索页：歌曲/歌单切换控件风格 */
+  musicSearchTabControl?: MusicSearchControlStyle;
   searchHistoryEnabled: boolean;
   playSpeed: number;
   eqPreset: keyof typeof EQ_PRESETS;
@@ -39,6 +45,8 @@ export interface MusicSettings {
 const DEFAULTS: MusicSettings = {
   defaultSource: 'wy',
   defaultSearchTab: 'song',
+  musicSearchSourceControl: 'select',
+  musicSearchTabControl: 'select',
   searchHistoryEnabled: true,
   playSpeed: 1,
   eqPreset: 'flat',

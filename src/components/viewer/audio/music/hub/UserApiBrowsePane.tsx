@@ -4,6 +4,7 @@
 
 import { createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   listUserApiScripts,
   userApiLeaderboard,
@@ -12,6 +13,8 @@ import {
 import { normalizeUserApiTracks } from '@/lib/media/audio/online/user-api-engine';
 import { playPlaylist } from '@/stores/viewer/media/audio';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 
 function extractUserApiTracks(raw: unknown): AudioTrack[] {
   if (Array.isArray(raw)) return raw as AudioTrack[];
@@ -21,6 +24,13 @@ function extractUserApiTracks(raw: unknown): AudioTrack[] {
   }
   return [];
 }
+
+const USER_API_ACTIONS = ['tags', 'boards', 'list'] as const;
+const USER_API_ACTION_LABELS: Record<(typeof USER_API_ACTIONS)[number], string> = {
+  tags: '歌单标签',
+  boards: '排行榜',
+  list: '歌单详情',
+};
 
 export const UserApiBrowsePane: Component = () => {
   const [scriptId, setScriptId] = createSignal('');
@@ -59,77 +69,77 @@ export const UserApiBrowsePane: Component = () => {
   };
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div class="shrink-0 space-y-2 border-b p-4 text-sm">
+    <MusicHubPageShell
+      section="userApi"
+      below={
         <Show
           when={scripts().length > 0}
           fallback={
-            <p class="text-muted-foreground">
+            <p class="px-4 pb-2 text-sm text-muted-foreground">
               暂无已启用的 UserApi 脚本。请在「设置 → 基本」中导入自定义源。
             </p>
           }
         >
-          <select
-            class="w-full rounded-md border px-2 py-1.5"
-            value={scriptId() || scripts()[0]?.id}
-            onChange={(e) => setScriptId(e.currentTarget.value)}
-          >
-            <For each={scripts()}>
-              {(s) => <option value={s.id}>{s.name}</option>}
-            </For>
-          </select>
-          <select
-            class="w-full rounded-md border px-2 py-1.5"
-            value={action()}
-            onChange={(e) => setAction(e.currentTarget.value as 'tags' | 'boards' | 'list')}
-          >
-            <option value="tags">歌单标签</option>
-            <option value="boards">排行榜</option>
-            <option value="list">歌单详情</option>
-          </select>
-          <Show when={action() === 'list'}>
-            <input
-              class="w-full rounded-md border px-3 py-1.5"
-              placeholder="歌单 ID"
-              value={param()}
-              onInput={(e) => setParam(e.currentTarget.value)}
+          <div class="space-y-2 px-4 pb-2 text-sm">
+            <MusicAppSelect
+              value={scriptId() || scripts()[0]?.id || ''}
+              onChange={setScriptId}
+              options={scripts().map((s) => s.id)}
+              optionLabel={(id) => scripts().find((s) => s.id === id)?.name ?? id}
+              aria-label="UserApi 脚本"
             />
-          </Show>
-          <Button size="sm" onClick={() => void browse()}>
-            浏览
-          </Button>
+            <MusicAppSelect
+              value={action()}
+              onChange={(v) => setAction(v as 'tags' | 'boards' | 'list')}
+              options={USER_API_ACTIONS}
+              optionLabel={(v) => USER_API_ACTION_LABELS[v]}
+              aria-label="浏览类型"
+            />
+            <Show when={action() === 'list'}>
+              <AppTextFieldBareInput
+                placeholder="歌单 ID"
+                value={param()}
+                onInput={(e) => setParam(e.currentTarget.value)}
+              />
+            </Show>
+            <Button size="sm" onClick={() => void browse()}>
+              浏览
+            </Button>
+          </div>
         </Show>
-      </div>
-      <div class="min-h-0 flex-1 overflow-y-auto p-4 text-sm">
+      }
+    >
+      <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4 text-sm">
         <Show when={loading()}>
           <p class="text-muted-foreground">加载中…</p>
         </Show>
         <Show when={tracks().length > 0}>
-          <Button size="sm" class="mb-2" onClick={() => void playPlaylist(tracks(), 0)}>
+          <Button size="sm" onClick={() => void playPlaylist(tracks(), 0)}>
             播放全部
           </Button>
           <ul class="space-y-1">
             <For each={tracks()}>
               {(t, i) => (
                 <li>
-                  <button
+                  <Button
                     type="button"
-                    class="w-full rounded px-2 py-1 text-left hover:bg-muted"
+                    variant="ghost"
+                    class="h-auto w-full justify-start rounded px-2 py-1 font-normal hover:bg-muted"
                     onClick={() => void playPlaylist(tracks(), i())}
                   >
                     {t.name} — {t.artist}
-                  </button>
+                  </Button>
                 </li>
               )}
             </For>
           </ul>
         </Show>
         <Show when={rawPreview()}>
-          <pre class="mt-2 whitespace-pre-wrap break-all rounded border bg-muted/30 p-2 text-xs">
+          <pre class="whitespace-pre-wrap break-all rounded border bg-muted/30 p-2 text-xs">
             {rawPreview()}
           </pre>
         </Show>
       </div>
-    </div>
+    </MusicHubPageShell>
   );
 };

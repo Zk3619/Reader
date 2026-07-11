@@ -20,7 +20,10 @@ import {
 import { getSongListSorts } from '@/lib/media/audio/music-sdk';
 import { MusicSongListDetail } from '@/components/viewer/audio/music/hub/MusicSongListDetail';
 import { MusicOpenListDialog } from '@/components/viewer/audio/music/hub/MusicOpenListDialog';
-import { cn } from '@/lib/utils';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
+import { MusicPlaylistVirtualList } from '@/components/viewer/audio/music/hub/MusicPlaylistVirtualList';
+import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 
 export const MusicSongListPane: Component = () => {
   const state = getSongListState;
@@ -34,114 +37,95 @@ export const MusicSongListPane: Component = () => {
   const sorts = () => getSongListSorts(state().source);
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <Show
-        when={!state().detail}
-        fallback={
-          <MusicSongListDetail onBack={() => closeSongListDetail()} />
+    <Show
+      when={!state().detail}
+      fallback={<MusicSongListDetail onBack={() => closeSongListDetail()} />}
+    >
+      <MusicHubPageShell
+        section="songlist"
+        scrollClass="overflow-hidden"
+        toolbar={
+          <Button size="sm" variant="outline" onClick={() => setOpenListOpen(true)}>
+            <Link2 class="mr-1 h-4 w-4" />
+            打开链接
+          </Button>
         }
-      >
-        <div class="shrink-0 space-y-2 border-b p-4">
-          <div class="flex flex-wrap items-center gap-2">
-            <select
-              class="rounded-md border bg-background px-2 py-1.5 text-sm"
-              value={state().source}
-              onChange={(e: Event) =>
-                setSongListSource(
-                  (e.currentTarget as HTMLSelectElement).value as ReturnType<
-                    typeof getSongListState
-                  >['source'],
-                )
-              }
-            >
-              <For each={MUSIC_SDK_SOURCES}>
-                {(src) => <option value={src}>{MUSIC_SDK_SOURCE_LABELS[src]}</option>}
-              </For>
-            </select>
-            <For each={sorts()}>
-              {(sort) => (
-                <button
-                  type="button"
-                  class={cn(
-                    'rounded-lg px-2 py-1 text-sm',
-                    state().sortId === sort.id ? 'bg-primary text-primary-foreground' : 'bg-muted',
-                  )}
-                  onClick={() => setSongListSort(sort.id)}
-                >
-                  {sort.name}
-                </button>
-              )}
-            </For>
-            <Button size="sm" variant="outline" onClick={() => setOpenListOpen(true)}>
-              <Link2 class="mr-1 h-4 w-4" />
-              打开链接
-            </Button>
-          </div>
-          <Show when={state().hotTags.length > 0}>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                class={cn(
-                  'rounded-full px-2 py-0.5 text-xs',
-                  state().tagId === null ? 'bg-primary text-primary-foreground' : 'bg-muted',
-                )}
-                onClick={() => setSongListTag(null)}
-              >
-                全部
-              </button>
-              <For each={state().hotTags}>
-                {(tag) => (
-                  <button
+        below={
+          <div class="space-y-2 px-4 pb-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <MusicAppSelect
+                value={state().source}
+                onChange={(v) =>
+                  setSongListSource(
+                    v as ReturnType<typeof getSongListState>['source'],
+                  )
+                }
+                options={MUSIC_SDK_SOURCES}
+                optionLabel={(v) => MUSIC_SDK_SOURCE_LABELS[v as keyof typeof MUSIC_SDK_SOURCE_LABELS]}
+                triggerClass="w-32"
+                aria-label="音乐源"
+              />
+              <For each={sorts()}>
+                {(sort) => (
+                  <Button
                     type="button"
-                    class={cn(
-                      'rounded-full px-2 py-0.5 text-xs',
-                      state().tagId === tag.id ? 'bg-primary text-primary-foreground' : 'bg-muted',
-                    )}
-                    onClick={() => setSongListTag(tag.id)}
+                    variant={state().sortId === sort.id ? 'default' : 'secondary'}
+                    size="sm"
+                    class="h-auto rounded-lg px-2 py-1"
+                    onClick={() => setSongListSort(sort.id)}
                   >
-                    {tag.name}
-                  </button>
+                    {sort.name}
+                  </Button>
                 )}
               </For>
             </div>
-          </Show>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <Show when={state().loading}>
-            <p class="text-sm text-muted-foreground">加载中…</p>
+            <Show when={state().hotTags.length > 0}>
+              <div class="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  variant={state().tagId === null ? 'default' : 'secondary'}
+                  size="sm"
+                  class="h-auto rounded-full px-2 py-0.5 text-xs"
+                  onClick={() => setSongListTag(null)}
+                >
+                  全部
+                </Button>
+                <For each={state().hotTags}>
+                  {(tag) => (
+                    <Button
+                      type="button"
+                      variant={state().tagId === tag.id ? 'default' : 'secondary'}
+                      size="sm"
+                      class="h-auto rounded-full px-2 py-0.5 text-xs"
+                      onClick={() => setSongListTag(tag.id)}
+                    >
+                      {tag.name}
+                    </Button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        }
+      >
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
+          <Show when={shouldShowBlockingLoading(state().loading, state().playlists.length)}>
+            <p class="shrink-0 py-2 text-sm text-muted-foreground">加载中…</p>
           </Show>
           <Show when={state().error}>
-            <p class="text-sm text-destructive">{state().error}</p>
+            <p class="shrink-0 py-2 text-sm text-destructive">{state().error}</p>
           </Show>
-          <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <For each={state().playlists}>
-              {(pl) => (
-                <li>
-                  <button
-                    type="button"
-                    class="flex w-full gap-3 rounded-lg border p-2 text-left hover:bg-muted"
-                    onClick={() => void openSongListDetail(pl.id)}
-                  >
-                    <Show when={pl.coverUrl}>
-                      <img src={pl.coverUrl} alt="" class="h-16 w-16 rounded object-cover" />
-                    </Show>
-                    <div class="min-w-0 flex-1">
-                      <p class="line-clamp-2 font-medium">{pl.name}</p>
-                      <p class="truncate text-xs text-muted-foreground">{pl.author}</p>
-                      <Show when={pl.playCount}>
-                        <p class="text-xs text-muted-foreground">{pl.playCount} 播放</p>
-                      </Show>
-                    </div>
-                  </button>
-                </li>
-              )}
-            </For>
-          </ul>
+          <Show when={state().playlists.length > 0}>
+            <MusicPlaylistVirtualList
+              class="min-h-0 flex-1"
+              playlists={() => state().playlists}
+              onOpen={(pl) => void openSongListDetail(pl.id)}
+            />
+          </Show>
         </div>
-      </Show>
+      </MusicHubPageShell>
 
       <MusicOpenListDialog open={openListOpen()} onOpenChange={setOpenListOpen} />
-    </div>
+    </Show>
   );
 };

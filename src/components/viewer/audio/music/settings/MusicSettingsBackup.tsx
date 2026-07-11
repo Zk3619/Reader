@@ -1,5 +1,6 @@
 import { createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareTextArea } from '@/components/shared/AppTextField';
 import {
   exportMusicSettings,
   importMusicSettings,
@@ -73,8 +74,8 @@ export const MusicSettingsBackup: Component = () => {
           仅导出曲库快照
         </Button>
       </div>
-      <textarea
-        class="h-32 w-full rounded border p-2 font-mono text-xs"
+      <AppTextFieldBareTextArea
+        class="h-32 font-mono text-xs"
         placeholder="粘贴备份 JSON（含 settings / snapshot）"
         value={importText()}
         onInput={(e) => setImportText(e.currentTarget.value)}

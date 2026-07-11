@@ -38,6 +38,18 @@ import { BUILTIN_SOURCE_LABELS } from '@/lib/media/audio/online/source-router';
 import { applyMusicTrack } from '@/stores/viewer/media/audio';
 import { viewerStore } from '@/stores/viewer';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
+
+const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
+const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
+  lyric: '原文',
+  tlyric: '翻译',
+  rlyric: '罗马音',
+  lxlyric: '逐字',
+};
+
+const PLAY_SPEEDS = ['0.5', '0.75', '1', '1.25', '1.5', '2'] as const;
 
 export interface MusicPlayDetailProps {
   player: ReturnType<typeof useMusicHubPlayer>;
@@ -110,8 +122,12 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   };
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div class="flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto px-6 py-6">
+    <MusicHubPageShell
+      section="nowPlaying"
+      title={track()?.name ?? '正在播放'}
+      description={track()?.artist ?? '当前曲目与播放控制'}
+    >
+      <div class="flex min-h-0 w-full flex-1 flex-col items-center gap-4 pb-4">
         <Show when={track()?.meta?.coverUrl}>
           <img
             src={String(track()?.meta.coverUrl)}
@@ -140,29 +156,27 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               lyricOffset={getMusicSettings().lyricOffset ?? 0}
             />
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <select
-                class="rounded-md border bg-background px-2 py-1 text-xs"
+              <MusicAppSelect
                 value={props.player.lyricTrack()}
-                onChange={(e) => {
-                  const kind = e.currentTarget.value as LyricTrackKind;
-                  props.player.setLyricTrack(kind);
-                  setMusicSettings({ lyricTrack: kind });
+                onChange={(kind) => {
+                  props.player.setLyricTrack(kind as LyricTrackKind);
+                  setMusicSettings({ lyricTrack: kind as LyricTrackKind });
                 }}
-              >
-                <option value="lyric">原文</option>
-                <option value="tlyric">翻译</option>
-                <option value="rlyric">罗马音</option>
-                <option value="lxlyric">逐字</option>
-              </select>
-              <select
-                class="rounded-md border bg-background px-2 py-1 text-xs"
+                options={LYRIC_TRACKS}
+                optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
+                layout="compact"
+                triggerClass="h-8 w-24 text-xs"
+                aria-label="歌词轨"
+              />
+              <MusicAppSelect
                 value={getPlayQuality()}
-                onChange={(e) => setPlayQuality(e.currentTarget.value as MusicQuality)}
-              >
-                {Object.entries(QUALITY_LABELS).map(([k, label]) => (
-                  <option value={k}>{label}</option>
-                ))}
-              </select>
+                onChange={(v) => setPlayQuality(v as MusicQuality)}
+                options={Object.keys(QUALITY_LABELS)}
+                optionLabel={(v) => QUALITY_LABELS[v as MusicQuality]}
+                layout="compact"
+                triggerClass="h-8 w-24 text-xs"
+                aria-label="播放音质"
+              />
               <Button size="sm" variant="outline" class="text-xs" onClick={() => void loadAltSources()}>
                 {altLoading() ? '匹配中…' : '换源'}
               </Button>
@@ -171,13 +185,15 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               <div class="flex flex-wrap justify-center gap-1">
                 <For each={altSources()}>
                   {(alt) => (
-                    <button
+                    <Button
                       type="button"
-                      class="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+                      variant="outline"
+                      size="sm"
+                      class="h-auto px-2 py-0.5 text-xs"
                       onClick={() => void switchToAlt(alt)}
                     >
                       {BUILTIN_SOURCE_LABELS[alt.source] ?? alt.source}
-                    </button>
+                    </Button>
                   )}
                 </For>
               </div>
@@ -206,26 +222,23 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               </span>
             </div>
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <select
-                class="rounded-md border bg-background px-2 py-1 text-xs"
-                value={playSpeed()}
-                onChange={(e) => applySpeed(parseFloat(e.currentTarget.value))}
-              >
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
-                  <option value={s}>{s}x</option>
-                ))}
-              </select>
-              <select
-                class="rounded-md border bg-background px-2 py-1 text-xs"
+              <MusicAppSelect
+                value={String(playSpeed())}
+                onChange={(v) => applySpeed(parseFloat(v))}
+                options={PLAY_SPEEDS}
+                optionLabel={(v) => `${v}x`}
+                layout="compact"
+                triggerClass="h-8 w-20 text-xs"
+                aria-label="播放倍速"
+              />
+              <MusicAppSelect
                 value={eqPreset()}
-                onChange={(e) =>
-                  applyEq(e.currentTarget.value as keyof typeof EQ_PRESETS)
-                }
-              >
-                {Object.keys(EQ_PRESETS).map((k) => (
-                  <option value={k}>{k}</option>
-                ))}
-              </select>
+                onChange={(v) => applyEq(v as keyof typeof EQ_PRESETS)}
+                options={Object.keys(EQ_PRESETS) as (keyof typeof EQ_PRESETS)[]}
+                layout="compact"
+                triggerClass="h-8 w-24 text-xs"
+                aria-label="均衡器预设"
+              />
             </div>
             <div class="flex items-center justify-center gap-3">
               <Button variant="ghost" size="icon" onClick={() => void toggleLove()}>
@@ -280,6 +293,6 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         </Show>
       </div>
       <MusicQueuePanel open={queueOpen()} onOpenChange={setQueueOpen} />
-    </div>
+    </MusicHubPageShell>
   );
 };

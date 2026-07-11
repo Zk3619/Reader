@@ -79,11 +79,18 @@ export type LxGlobal = {
 };
 
 export function isLxUserApiScript(script: string): boolean {
-  return (
-    /globalThis\.lx\b/.test(script) ||
-    /\blx_setup\b/.test(script) ||
-    /\blx\.send\s*\(\s*['"]inited['"]/.test(script)
-  );
+  if (isHandlerOnlyUserApiScript(script)) return false;
+  // 社区 LX UserApi 脚本格式多样，非 handler 脚本一律走 LX 运行时
+  return true;
+}
+
+/** Legado handler / module.exports 风格脚本，不走 LX 运行时 */
+export function isHandlerOnlyUserApiScript(script: string): boolean {
+  if (/\blx_setup\b/.test(script)) return false;
+  if (/globalThis[\.\[]\s*['"]?lx['"]?\s*\]?/.test(script)) return false;
+  if (/\blx\.(on|send|request)\b/.test(script)) return false;
+  if (/@name\s+\S/.test(script) && !/\bhandler\s*[=(]/.test(script)) return false;
+  return /\bhandler\s*[=(]/.test(script) || /module\.exports/.test(script);
 }
 
 function promisifyInflate(buf: Uint8Array): Promise<Uint8Array> {
@@ -104,7 +111,33 @@ function promisifyDeflate(data: Uint8Array): Promise<Uint8Array> {
   });
 }
 
-type LxGlobalHost = typeof globalThis & { lx?: LxGlobal };
+type LxGlobalHost = typeof globalThis & {
+  lx?: LxGlobal;
+  lx_setup?: (...args: unknown[]) => void;
+};
+
+export type LxScriptHeaderMeta = {
+  name?: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  homepage?: string;
+};
+
+/** 解析 LX UserApi 脚本头部 @name / @version 等注释 */
+export function parseLxScriptHeaderMeta(script: string): LxScriptHeaderMeta {
+  const meta: LxScriptHeaderMeta = {};
+  const head = script.slice(0, 4096);
+  for (const line of head.split('\n')) {
+    const m = line.match(/^\s*\*\s*@(name|version|description|author|homepage)\s+(.+?)\s*$/);
+    if (!m) continue;
+    const key = m[1] as keyof LxScriptHeaderMeta;
+    meta[key] = m[2].trim();
+  }
+  return meta;
+}
+
+let lxScriptLoadChain: Promise<unknown> = Promise.resolve();
 
 function toUint8(input: unknown): Uint8Array {
   if (input instanceof Uint8Array) return input;
@@ -170,6 +203,7 @@ export function createLxUserApiEnvironment(meta: {
   lx: LxGlobal;
   initPromise: Promise<LxUserApiSourceInfo>;
   invokeRequest: (data: LxRequestPayload) => Promise<unknown>;
+  rejectInit: (err: Error) => void;
 } {
   let requestHandler: LxRequestHandler | null = null;
   let initResolve!: (info: LxUserApiSourceInfo) => void;
@@ -180,6 +214,10 @@ export function createLxUserApiEnvironment(meta: {
     initResolve = resolve;
     initReject = reject;
   });
+
+  function rejectInit(err: Error): void {
+    if (!inited) initReject(err);
+  }
 
   const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local'];
   const supportQualitys: Record<string, string[]> = {
@@ -336,10 +374,18 @@ export function createLxUserApiEnvironment(meta: {
 
   async function invokeRequest(data: LxRequestPayload): Promise<unknown> {
     if (!requestHandler) throw new Error('UserApi request handler not registered');
-    return requestHandler(lx, data);
+    const host = globalThis as LxGlobalHost;
+    const prevLx = host.lx;
+    host.lx = lx;
+    try {
+      return await requestHandler(lx, data);
+    } finally {
+      if (prevLx === undefined) delete host.lx;
+      else host.lx = prevLx;
+    }
   }
 
-  return { lx, initPromise, invokeRequest };
+  return { lx, initPromise, invokeRequest, rejectInit };
 }
 
 export async function loadLxUserApiScript(script: {
@@ -349,33 +395,67 @@ export async function loadLxUserApiScript(script: {
   sourceInfo: LxUserApiSourceInfo;
   invokeRequest: (data: LxRequestPayload) => Promise<unknown>;
 }> {
-  const env = createLxUserApiEnvironment({
-    name: script.name,
-    rawScript: script.script,
-  });
+  const runLoad = async () => {
+    const headerMeta = parseLxScriptHeaderMeta(script.script);
+    const env = createLxUserApiEnvironment({
+      name: headerMeta.name ?? script.name,
+      description: headerMeta.description,
+      version: headerMeta.version ?? '1',
+      author: headerMeta.author,
+      homepage: headerMeta.homepage,
+      rawScript: script.script,
+    });
 
-  const host = globalThis as LxGlobalHost;
-  const prevLx = host.lx;
-  host.lx = env.lx;
+    const host = globalThis as LxGlobalHost;
+    const prevLx = host.lx;
+    const prevLxSetup = host.lx_setup;
+    host.lx = env.lx;
+    host.lx_setup = (
+      _key: unknown,
+      _id: unknown,
+      _name: unknown,
+      _description: unknown,
+      _version: unknown,
+      _author: unknown,
+      _homepage: unknown,
+      rawScript: unknown,
+    ) => {
+      delete host.lx_setup;
+      if (typeof rawScript === 'string' && rawScript.trim()) {
+        const inner = new Function(rawScript);
+        inner();
+      }
+    };
 
-  try {
-    const runner = new Function(script.script);
-    runner();
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      env.rejectInit(
+        event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
+      );
+    };
+    globalThis.addEventListener('unhandledrejection', onUnhandledRejection);
 
-    const sourceInfo = await Promise.race([
-      env.initPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('UserApi 初始化超时')), 15_000),
-      ),
-    ]);
+    try {
+      const runner = new Function(script.script);
+      runner();
 
-    if (prevLx === undefined) delete host.lx;
-    else host.lx = prevLx;
+      const sourceInfo = await Promise.race([
+        env.initPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('UserApi 初始化超时')), 30_000),
+        ),
+      ]);
 
-    return { sourceInfo, invokeRequest: env.invokeRequest };
-  } catch (err) {
-    if (prevLx === undefined) delete host.lx;
-    else host.lx = prevLx;
-    throw err;
-  }
+      return { sourceInfo, invokeRequest: env.invokeRequest };
+    } finally {
+      globalThis.removeEventListener('unhandledrejection', onUnhandledRejection);
+      if (prevLx === undefined) delete host.lx;
+      else host.lx = prevLx;
+      if (prevLxSetup === undefined) delete host.lx_setup;
+      else host.lx_setup = prevLxSetup;
+    }
+  };
+
+  const result = lxScriptLoadChain.then(runLoad, runLoad);
+  lxScriptLoadChain = result.catch(() => {});
+  return result;
 }

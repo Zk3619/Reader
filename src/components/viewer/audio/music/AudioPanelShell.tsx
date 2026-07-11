@@ -12,6 +12,8 @@ export interface AudioPanelShellProps {
   title: string;
   onClose?: () => void;
   headerExtra?: JSX.Element;
+  /** inline 嵌入 Hub 子页时由 PageToolbar 承担标题 */
+  hideHeader?: boolean;
   class?: string;
   children: JSX.Element;
 }
@@ -19,17 +21,19 @@ export interface AudioPanelShellProps {
 export function AudioPanelShell(props: AudioPanelShellProps) {
   const body = (
     <>
-      <div class="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <h2 class="font-semibold">{props.title}</h2>
-        <div class="flex items-center gap-2">
-          {props.headerExtra}
-          <Show when={!props.inline && props.onClose}>
-            <Button variant="ghost" size="sm" onClick={props.onClose}>
-              关闭
-            </Button>
-          </Show>
+      <Show when={!props.hideHeader}>
+        <div class="flex shrink-0 items-center justify-between border-b px-4 py-3">
+          <h2 class="font-semibold">{props.title}</h2>
+          <div class="flex items-center gap-2">
+            {props.headerExtra}
+            <Show when={!props.inline && props.onClose}>
+              <Button variant="ghost" size="sm" onClick={props.onClose}>
+                关闭
+              </Button>
+            </Show>
+          </div>
         </div>
-      </div>
+      </Show>
       <div class={cn('min-h-0 flex-1 overflow-y-auto', props.class)}>{props.children}</div>
     </>
   );

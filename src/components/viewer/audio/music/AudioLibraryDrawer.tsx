@@ -48,16 +48,17 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
           <For each={tracks() ?? []}>
             {(track) => (
               <li>
-                <button
+                <Button
                   type="button"
-                  class="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                  variant="ghost"
+                  class="h-auto w-full flex-col items-start rounded-lg px-3 py-2 font-normal hover:bg-muted/60"
                   onClick={() => void playPlaylist([track], 0)}
                 >
                   <span class="truncate text-sm font-medium">{track.name}</span>
                   <span class="truncate text-xs text-muted-foreground">
                     {track.artist} · {track.duration}
                   </span>
-                </button>
+                </Button>
               </li>
             )}
           </For>

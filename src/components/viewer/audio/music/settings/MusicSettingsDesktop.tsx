@@ -4,6 +4,11 @@
 
 import { createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import {
+  NumberField,
+  NumberFieldInput,
+} from '@/components/ui/number-field';
 import { isTauri } from '@/lib/platform/detect';
 import {
   startMusicOpenApi,
@@ -119,48 +124,56 @@ export const MusicSettingsDesktop: Component = () => {
     <div class="space-y-4 p-4 text-sm">
       <section class="space-y-2">
         <h3 class="font-medium">OpenAPI</h3>
-        <input
-          type="number"
-          class="w-24 rounded border px-2 py-1"
-          value={openapiPort()}
-          onInput={(e) => setOpenapiPort(Number(e.currentTarget.value))}
-        />
-        <input
-          class="ml-2 w-32 rounded border px-2 py-1"
-          placeholder="绑定 IP"
-          value={openapiBind()}
-          onInput={(e) => setOpenapiBind(e.currentTarget.value)}
-        />
-        <Button size="sm" class="ml-2" onClick={() => void toggleOpenapi()}>
-          {openapiOn() ? '停止' : '启动'}
-        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+          <NumberField
+            rawValue={openapiPort()}
+            onRawValueChange={setOpenapiPort}
+            minValue={1}
+            maxValue={65535}
+          >
+            <NumberFieldInput class="w-24" aria-label="OpenAPI 端口" />
+          </NumberField>
+          <AppTextFieldBareInput
+            class="w-32"
+            placeholder="绑定 IP"
+            value={openapiBind()}
+            onInput={(e) => setOpenapiBind(e.currentTarget.value)}
+          />
+          <Button size="sm" onClick={() => void toggleOpenapi()}>
+            {openapiOn() ? '停止' : '启动'}
+          </Button>
+        </div>
       </section>
       <section class="space-y-2">
         <h3 class="font-medium">本机 Sync Server</h3>
-        <input
-          type="number"
-          class="w-24 rounded border px-2 py-1"
-          value={syncPort()}
-          onInput={(e) => setSyncPort(Number(e.currentTarget.value))}
-        />
-        <input
-          type="password"
-          class="ml-2 w-32 rounded border px-2 py-1"
-          placeholder="同步密码"
-          value={syncPassword()}
-          onInput={(e) => setSyncPassword(e.currentTarget.value)}
-        />
-        <Button size="sm" class="ml-2" onClick={() => void toggleSyncServer()}>
-          {syncOn() ? '停止托管' : '本机托管'}
-        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+          <NumberField
+            rawValue={syncPort()}
+            onRawValueChange={setSyncPort}
+            minValue={1}
+            maxValue={65535}
+          >
+            <NumberFieldInput class="w-24" aria-label="Sync 端口" />
+          </NumberField>
+          <AppTextFieldBareInput
+            class="w-32"
+            type="password"
+            placeholder="同步密码"
+            value={syncPassword()}
+            onInput={(e) => setSyncPassword(e.currentTarget.value)}
+          />
+          <Button size="sm" onClick={() => void toggleSyncServer()}>
+            {syncOn() ? '停止托管' : '本机托管'}
+          </Button>
+        </div>
       </section>
       <section class="space-y-2">
         <h3 class="font-medium">全局热键</h3>
         {(['play', 'pause', 'next', 'prev', 'vol_up', 'vol_down', 'seek_forward', 'seek_back'] as const).map((k) => (
           <label class="flex items-center gap-2">
             <span class="w-12 text-muted-foreground">{k}</span>
-            <input
-              class="flex-1 rounded border px-2 py-1"
+            <AppTextFieldBareInput
+              class="flex-1"
               value={hotkeys()[k]}
               onInput={(e) => setHotkeys((h) => ({ ...h, [k]: e.currentTarget.value }))}
             />

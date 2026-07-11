@@ -3,28 +3,17 @@
  */
 
 import { createSignal, For, Show, type Accessor, type Component } from 'solid-js';
-import { Menu, Search, ListMusic, Settings2, Library, Trophy } from 'lucide-solid';
+import { Search, ListMusic, Settings2, Library, Trophy } from 'lucide-solid';
+import { Button } from '@/components/ui/button';
 import { MusicHubDrawerNav } from '@/components/viewer/audio/music/hub/MusicHubDrawerNav';
 import { MusicHubContent } from '@/components/viewer/audio/music/hub/MusicHubContent';
 import { MusicHubPlayBar } from '@/components/viewer/audio/music/hub/MusicHubPlayBar';
+import { MusicHubMobileChromeContext } from '@/components/viewer/audio/music/hub/music-hub-mobile-chrome';
 import type { useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { viewerStore } from '@/stores/viewer';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { cn } from '@/lib/utils';
-
-const SECTION_LABELS: Record<MusicHubSection, string> = {
-  search: '搜索',
-  songlist: '在线歌单',
-  leaderboard: '排行榜',
-  album: '专辑',
-  singer: '歌手',
-  userApi: 'UserApi',
-  list: '我的列表',
-  download: '下载',
-  settings: '设置',
-  nowPlaying: '正在播放',
-};
 
 const BOTTOM_NAV: { id: MusicHubSection; label: string; icon: typeof Search }[] = [
   { id: 'search', label: '搜索', icon: Search },
@@ -48,57 +37,57 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
 
   const navButtonClass = (id: MusicHubSection) =>
     cn(
-      'flex flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 text-xs transition-colors',
+      'flex h-auto flex-1 flex-col items-center justify-center gap-0.5 rounded-lg py-2 text-xs transition-colors',
       section() === id
         ? 'text-primary font-medium'
         : 'text-muted-foreground',
     );
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col">
-      <Show when={!props.hideChrome}>
-        <header class="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-          <button
-            type="button"
-            class="rounded p-1.5 hover:bg-muted"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="打开导航"
-          >
-            <Menu class="h-5 w-5" />
-          </button>
-          <span class="text-sm font-medium">{SECTION_LABELS[section()]}</span>
-        </header>
-      </Show>
+    <MusicHubMobileChromeContext.Provider
+      value={() =>
+        props.hideChrome
+          ? {}
+          : { onOpenDrawer: () => setDrawerOpen(true) }
+      }
+    >
+      <div class="flex min-h-0 flex-1 flex-col">
+        <MusicHubDrawerNav open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
 
-      <MusicHubDrawerNav open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
+        <MusicHubContent
+          player={props.player}
+          listDrawerOpen={listDrawerOpen()}
+          onListDrawerToggle={() => setListDrawerOpen((v) => !v)}
+        />
 
-      <MusicHubContent
-        player={props.player}
-        listDrawerOpen={listDrawerOpen()}
-        onListDrawerToggle={() => setListDrawerOpen((v) => !v)}
-      />
-
-      <Show when={!props.hideChrome}>
-        <nav class="flex shrink-0 items-center justify-around border-t px-1 py-0.5">
+        <Show when={!props.hideChrome}>
+          <nav class="flex shrink-0 items-center justify-around border-t px-1 py-0.5">
           <For each={BOTTOM_NAV}>
             {(item) => {
               const Icon = item.icon;
+              const isActive = () => section() === item.id;
               return (
-                <button
+                <Button
                   type="button"
-                  class={navButtonClass(item.id)}
+                  variant="ghost"
+                  class={cn(
+                    navButtonClass(item.id),
+                    isActive() && 'text-primary font-medium',
+                  )}
+                  aria-current={isActive() ? 'page' : undefined}
                   onClick={() => setMusicSection(item.id)}
                 >
-                  <Icon class="h-5 w-5" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            }}
-          </For>
-        </nav>
-      </Show>
+                    <Icon class="h-5 w-5" />
+                    <span>{item.label}</span>
+                  </Button>
+                );
+              }}
+            </For>
+          </nav>
+        </Show>
 
-      <MusicHubPlayBar player={props.player} />
-    </div>
+        <MusicHubPlayBar player={props.player} />
+      </div>
+    </MusicHubMobileChromeContext.Provider>
   );
 };

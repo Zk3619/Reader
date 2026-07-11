@@ -1,13 +1,12 @@
 /**
- * 音乐 Hub 根壳层：响应式分支桌面/移动
+ * 音乐 Hub 根壳层：响应式分支桌面/移动，导航遵循主壳配置
  */
 
 import { onMount, onCleanup, Show, type Accessor, type Component } from 'solid-js';
-import { isMobile } from '@/lib/platform/detect';
+import { useMusicHubShellNav } from '@/components/viewer/audio/music/hub/music-hub-mobile-chrome';
 import { useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { MusicHubDesktopLayout } from '@/components/viewer/audio/music/hub/MusicHubDesktopLayout';
 import { MusicHubMobileLayout } from '@/components/viewer/audio/music/hub/MusicHubMobileLayout';
-import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-openapi-client';
 import { playNextTrack, playPrevTrack } from '@/stores/viewer/media/audio';
 import { isTauri } from '@/lib/platform/detect';
@@ -18,11 +17,7 @@ export interface MusicHubShellProps {
 
 export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   const hubPlayer = useMusicHubPlayer();
-  const shell = useShellLayout();
-  const hideDesktopAside = () =>
-    shell().showModuleSidebarRail || shell().showFusedModuleNav;
-  const hideMobileHubChrome = () =>
-    shell().showTopNavigation || shell().showModuleSidebarNav;
+  const { useMobileLayout, hideInternalNav } = useMusicHubShellNav();
 
   onMount(() => {
     const unreg = registerMusicOpenApiHandler((action, payload) => {
@@ -113,13 +108,13 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   return (
     <div class="flex min-h-0 flex-1 flex-col">
       <Show
-        when={isMobile()}
-        fallback={<MusicHubDesktopLayout player={hubPlayer} hideAside={hideDesktopAside()} />}
+        when={useMobileLayout()}
+        fallback={<MusicHubDesktopLayout player={hubPlayer} hideAside={hideInternalNav()} />}
       >
         <MusicHubMobileLayout
           player={hubPlayer}
           active={_props.active}
-          hideChrome={hideMobileHubChrome()}
+          hideChrome={hideInternalNav()}
         />
       </Show>
     </div>

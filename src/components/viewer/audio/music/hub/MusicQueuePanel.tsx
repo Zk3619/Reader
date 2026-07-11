@@ -38,14 +38,15 @@ export const MusicQueuePanel: Component<MusicQueuePanelProps> = (props) => {
                   }
                 >
                   <div class="flex items-center gap-2 px-4 py-2">
-                    <button
+                    <Button
                       type="button"
-                      class="min-w-0 flex-1 text-left"
+                      variant="ghost"
+                      class="h-auto min-w-0 flex-1 justify-start text-left font-normal"
                       onClick={() => void playPlaylist(queue(), i())}
                     >
                       <p class="truncate text-sm">{track.name}</p>
                       <p class="truncate text-xs text-muted-foreground">{track.artist}</p>
-                    </button>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"

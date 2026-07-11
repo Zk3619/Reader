@@ -39,7 +39,6 @@ export function getLeaderboardState(): MusicHubLeaderboardState {
 export function setLeaderboardSource(source: MusicSdkSource): void {
   setLeaderboardState({
     source,
-    boards: [],
     selectedBoard: null,
     detail: null,
     page: 1,

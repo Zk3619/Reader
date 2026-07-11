@@ -4,6 +4,7 @@
 
 import { createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   searchOnline,
   listSearchSources,
@@ -12,6 +13,7 @@ import {
 } from '@/lib/media/audio/online/source-router';
 import { playTrack } from '@/stores/viewer/media/audio';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
+import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 
 export interface AudioSearchPanelProps {
   open: boolean;
@@ -63,22 +65,20 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
       onClose={props.onClose}
     >
       <div class="space-y-2 border-b p-4">
-        <select
-          class="w-full rounded-md border bg-background px-3 py-2 text-sm"
+        <MusicAppSelect
           value={source()}
-          onChange={(e) => setSource(e.currentTarget.value as SearchSource)}
-        >
-          <For each={listSearchSources()}>
-            {(s) => <option value={s}>{sourceLabel(s)}</option>}
-          </For>
-        </select>
+          onChange={(v) => setSource(v as SearchSource)}
+          options={listSearchSources()}
+          optionLabel={sourceLabel}
+          aria-label="搜索源"
+        />
         <div class="flex gap-2">
-          <input
-            class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+          <AppTextFieldBareInput
+            class="min-w-0 flex-1"
             placeholder="搜索歌曲、歌手"
             value={keyword()}
             onInput={(e) => setKeyword(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void doSearch()}
+            onKeyDown={(e: KeyboardEvent) => e.key === 'Enter' && void doSearch()}
           />
           <Button disabled={loading()} onClick={() => void doSearch()}>
             {loading() ? '搜索中…' : '搜索'}
@@ -102,16 +102,17 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
           <For each={results()}>
             {(track) => (
               <li>
-                <button
+                <Button
                   type="button"
-                  class="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-muted/60"
+                  variant="ghost"
+                  class="h-auto w-full flex-col items-start rounded-lg px-3 py-2 font-normal hover:bg-muted/60"
                   onClick={() => void playTrack(track)}
                 >
                   <span class="truncate text-sm font-medium">{track.name}</span>
                   <span class="truncate text-xs text-muted-foreground">
                     {track.artist} · {BUILTIN_SOURCE_LABELS[track.source] ?? track.source}
                   </span>
-                </button>
+                </Button>
               </li>
             )}
           </For>

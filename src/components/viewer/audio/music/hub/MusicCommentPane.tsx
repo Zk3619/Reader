@@ -4,6 +4,7 @@
 
 import { createEffect, createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import {
   fetchTrackComments,
   type CommentSort,
@@ -73,13 +74,15 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
     <div class="max-h-48 overflow-y-auto text-sm">
       <div class="mb-2 flex gap-2">
         {(['hot', 'latest'] as const).map((tab) => (
-          <button
+          <Button
             type="button"
-            class={sort() === tab ? 'font-medium text-primary' : 'text-muted-foreground'}
+            variant="ghost"
+            size="sm"
+            class={cn('h-auto px-0', sort() === tab ? 'font-medium text-primary' : 'text-muted-foreground')}
             onClick={() => switchSort(tab)}
           >
             {tab === 'hot' ? '热门' : '最新'}
-          </button>
+          </Button>
         ))}
       </div>
       <Show when={loading() && comments().length === 0}>

@@ -3,15 +3,35 @@
  */
 
 import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { MusicSettingsPanel } from '@/components/viewer/audio/music/settings/MusicSettingsPanel';
-import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
+import {
+  mainShellPageRoot,
+  mainShellTabEnterClass,
+  pageToolbarBottomBorder,
+} from '@/lib/ui/viewport-classes';
+import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 
 export function MusicSettingsPage() {
+  const tabEnterClass = () =>
+    mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
+
   return (
-    <div class={cn(mainShellPageRoot, 'flex min-h-0 flex-1 flex-col overflow-hidden')}>
-      <PageToolbar title="音乐设置" description="音源、播放、同步与网络" />
+    <section class={cn(tabEnterClass(), mainShellPageRoot)}>
+      <PageToolbar
+        class={pageToolbarBottomBorder}
+        title="音乐设置"
+        description="音源、播放、同步与网络"
+        titleSlot={
+          <PageToolbarTitleDropdown
+            title="音乐设置"
+            description="音源、播放、同步与网络"
+            dropdownEnabled={false}
+          />
+        }
+      />
       <MusicSettingsPanel />
-    </div>
+    </section>
   );
 }
