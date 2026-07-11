@@ -14,6 +14,40 @@ import type { TextViewerThemeAppearanceConfig } from '@/lib/media/text/reader-ui
 import { DEFAULT_APP_THEME } from '@/lib/theme/AppTheme';
 
 export const THEME_PACK_SCHEMA_VERSION = 1 as const;
+export const THEME_PACK_SCHEMA_VERSION_V2 = 2 as const;
+
+export type ThemePackSchemaVersion =
+  | typeof THEME_PACK_SCHEMA_VERSION
+  | typeof THEME_PACK_SCHEMA_VERSION_V2;
+
+export type ThemePackLicense = 'CC0' | 'CC-BY' | 'CC-BY-NC' | 'MIT' | 'personal';
+
+export type ThemePackCategory = 'minimal' | 'glass' | 'paper' | 'dark' | 'custom';
+
+export interface ThemePackMeta {
+  minAppVersion?: string;
+  license?: ThemePackLicense;
+  author?: string;
+  locale?: string;
+  category?: ThemePackCategory;
+  previewAssetId?: string;
+}
+
+export interface ThemePackGeneration {
+  primarySeed?: string;
+  backgroundSeed?: string;
+  accentSeed?: string;
+  stylePresetId?: string;
+  generatedAt?: string;
+  lockedPaths?: string[];
+}
+
+export type ThemePackTargetContrast = 'AA' | 'AAA' | 'relaxed';
+
+export interface ThemePackAccessibility {
+  targetContrast?: ThemePackTargetContrast;
+  enforceOnExport?: boolean;
+}
 
 /** App 壳层可预览/可编辑组件 ID */
 export type AppComponentId =
@@ -352,7 +386,7 @@ export interface AdvancedThemeSection {
 }
 
 export interface ReaderThemePackV1 {
-  schemaVersion: typeof THEME_PACK_SCHEMA_VERSION;
+  schemaVersion: ThemePackSchemaVersion;
   id: string;
   name: string;
   author?: string;
@@ -368,6 +402,12 @@ export interface ReaderThemePackV1 {
   viewer?: ViewerThemeSection;
   advanced?: AdvancedThemeSection;
   assets?: ThemeAssetManifest;
+  /** v2 可选：社区分享元数据 */
+  meta?: ThemePackMeta;
+  /** v2 可选：快速生成参数回显 */
+  generation?: ThemePackGeneration;
+  /** v2 可选：无障碍导出策略 */
+  accessibility?: ThemePackAccessibility;
 }
 
 export type ThemePresetKind = 'builtin' | 'user' | 'imported';

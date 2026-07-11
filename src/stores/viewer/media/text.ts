@@ -70,6 +70,8 @@ import {
 import { isReaderNightTheme } from '@/lib/media/text/reader-theme-classes';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
 import { settingsState } from '@/stores/settings';
+import { resolveBookTextThemeConfig } from '@/lib/theme/resolve-book-text-theme';
+import { getActiveViewerThemePackSnapshot } from '@/stores/theme-active-pack';
 
 const defaultConfig = defaultTextViewerUiConfig;
 
@@ -397,6 +399,23 @@ function attachTocProgressWhileReadingImpl(
   });
 }
 
+function applyBookTextThemeToConfig(book: Book): void {
+  const viewerPreset = getActiveViewerThemePackSnapshot()?.viewer?.text;
+  const effective = resolveBookTextThemeConfig(
+    book,
+    {
+      theme: state.config.theme,
+      themeSurfaceAppearance: state.config.themeSurfaceAppearance,
+    },
+    { viewerPresetText: viewerPreset },
+  );
+  setState('config', (prev) => ({
+    ...prev,
+    theme: effective.theme,
+    themeSurfaceAppearance: effective.themeSurfaceAppearance,
+  }));
+}
+
 export function setTextBookInitialState(book: Book): void {
   bootstrapReaderConfigSync();
   resetChapterContentPool(book.bookUrl);
@@ -405,6 +424,7 @@ export function setTextBookInitialState(book: Book): void {
     book,
     contentFetching: false,
   });
+  applyBookTextThemeToConfig(book);
   beginSessionContentLoad(book.bookUrl);
 }
 
@@ -446,6 +466,8 @@ export async function openTextBook(
   } else {
     setState({ kind: MediaKind.text, guestReading });
   }
+
+  applyBookTextThemeToConfig(activeBook);
 
   try {
     const initialCatalog = options?.initialCatalog?.length

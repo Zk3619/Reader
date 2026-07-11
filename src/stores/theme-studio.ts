@@ -12,8 +12,10 @@ import {
   type ThemeComponentId,
 } from '@/lib/theme/schema/theme-pack-v1';
 import type { ThemePreviewViewport } from '@/lib/theme/preview/preview-viewport';
+import { themeStudioHistory } from '@/stores/theme-studio-history';
 
 export type ThemeStudioEntry = 'settings' | 'reader';
+export type ThemeStudioEditMode = 'quick' | 'pro' | 'advanced';
 
 export interface ThemeStudioState {
   open: boolean;
@@ -29,6 +31,9 @@ export interface ThemeStudioState {
   viewport: ThemePreviewViewport;
   presetId: string | null;
   dirty: boolean;
+  editMode: ThemeStudioEditMode;
+  abCompareEnabled: boolean;
+  abSnapshotPack: ReaderThemePackV1 | null;
 }
 
 const defaultPack = createDefaultThemePack({ name: '未命名主题' });
@@ -50,6 +55,9 @@ const [state, setState] = createStore<ThemeStudioState>({
   viewport: 'desktop',
   presetId: null,
   dirty: false,
+  editMode: 'pro',
+  abCompareEnabled: false,
+  abSnapshotPack: null,
 });
 
 function syncDirty(pack: ReaderThemePackV1): void {
@@ -57,16 +65,34 @@ function syncDirty(pack: ReaderThemePackV1): void {
   setState('dirty', snap !== state.savedSnapshot);
 }
 
+function applyDraftPack(pack: ReaderThemePackV1, options?: { recordHistory?: boolean }): void {
+  const recordHistory = options?.recordHistory !== false;
+  if (recordHistory) {
+    themeStudioHistory.pushBeforeChange(state.draftPack);
+  }
+  setState('draftPack', pack);
+  bumpDraftRevision();
+  syncDirty(pack);
+}
+
 export const themeStudioStore = {
   state,
+  get canUndo(): boolean {
+    return themeStudioHistory.canUndo;
+  },
+  get canRedo(): boolean {
+    return themeStudioHistory.canRedo;
+  },
   openStudio(options?: {
     entry?: ThemeStudioEntry;
     scope?: ThemeApplyScope;
     pack?: ReaderThemePackV1;
     presetId?: string | null;
+    editMode?: ThemeStudioEditMode;
   }): void {
     const pack = options?.pack ? cloneThemePack(options.pack) : createDefaultThemePack();
     const snap = JSON.stringify(pack);
+    themeStudioHistory.clear();
     setState({
       open: true,
       entry: options?.entry ?? 'settings',
@@ -80,21 +106,54 @@ export const themeStudioStore = {
       viewport: 'desktop',
       presetId: options?.presetId ?? pack.id,
       dirty: false,
+      editMode: options?.editMode ?? 'pro',
+      abCompareEnabled: false,
+      abSnapshotPack: null,
     });
   },
   closeStudio(): void {
     setState('open', false);
+    setState('abCompareEnabled', false);
+    setState('abSnapshotPack', null);
   },
   setDraftPack(pack: ReaderThemePackV1): void {
-    setState('draftPack', pack);
-    bumpDraftRevision();
-    syncDirty(pack);
+    applyDraftPack(pack);
   },
   patchDraft(updater: (draft: ReaderThemePackV1) => ReaderThemePackV1): void {
     const next = touchThemePack(updater(cloneThemePack(state.draftPack)));
-    setState('draftPack', next);
-    bumpDraftRevision();
-    syncDirty(next);
+    applyDraftPack(next);
+  },
+  undo(): boolean {
+    const restored = themeStudioHistory.undo(state.draftPack);
+    if (!restored) return false;
+    applyDraftPack(restored, { recordHistory: false });
+    return true;
+  },
+  redo(): boolean {
+    const restored = themeStudioHistory.redo(state.draftPack);
+    if (!restored) return false;
+    applyDraftPack(restored, { recordHistory: false });
+    return true;
+  },
+  setEditMode(mode: ThemeStudioEditMode): void {
+    setState('editMode', mode);
+  },
+  setAbCompareEnabled(enabled: boolean): void {
+    setState('abCompareEnabled', enabled);
+    if (!enabled) {
+      setState('abSnapshotPack', null);
+    }
+  },
+  captureAbSnapshot(): void {
+    setState('abSnapshotPack', cloneThemePack(state.draftPack));
+    setState('abCompareEnabled', true);
+  },
+  adoptAbSnapshot(side: 'a' | 'b'): void {
+    if (side === 'b' && state.abSnapshotPack) {
+      applyDraftPack(cloneThemePack(state.abSnapshotPack));
+    }
+    setState('abCompareEnabled', false);
+    setState('abSnapshotPack', null);
   },
   markSaved(): void {
     setState('savedSnapshot', JSON.stringify(state.draftPack));
@@ -118,8 +177,8 @@ export const themeStudioStore = {
   },
   resetDraft(): void {
     const pack = JSON.parse(state.savedSnapshot) as ReaderThemePackV1;
-    setState('draftPack', pack);
-    bumpDraftRevision();
+    applyDraftPack(pack, { recordHistory: false });
+    themeStudioHistory.clear();
     setState('dirty', false);
   },
 };

@@ -4,6 +4,33 @@
  */
 
 import type { BaseBook } from '@/types/base-book';
+import type { TextViewerThemeAppearanceConfig } from '@/lib/media/text/reader-ui-config';
+import type { TextViewerThemeId } from '@/lib/theme/types';
+
+/** 本书阅读主题自定义色板（不含 brightnessChrome，运行时派生） */
+export interface BookTextThemeCustomPalette {
+  bg: string;
+  text: string;
+  accent: string;
+  border: string;
+  link?: string;
+  quoteBg?: string;
+  codeBg?: string;
+  selection?: string;
+}
+
+/**
+ * 本书阅读主题覆盖（Theme System v2 Workstream D）
+ * mode=default 时跟随全局 reader_ui_config / 阅读器主题预设
+ */
+export interface BookTextThemeOverride {
+  mode: 'default' | 'custom';
+  paletteId?: TextViewerThemeId | 'custom';
+  customPalette?: BookTextThemeCustomPalette;
+  surfaceAppearance?: TextViewerThemeAppearanceConfig;
+  /** 可选引用完整 viewer 主题预设子集 */
+  presetId?: string;
+}
 
 /**
  * 阅读配置
@@ -40,6 +67,8 @@ export interface ReadConfig {
   playMode?: number;
   /** 音频播放速度（Legado playSpeed） */
   playSpeed?: number;
+  /** 本书阅读主题覆盖（默认跟随全局） */
+  themeOverride?: BookTextThemeOverride;
   /** 其他阅读配置... */
   [key: string]: unknown;
 }

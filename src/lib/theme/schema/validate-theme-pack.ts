@@ -7,8 +7,13 @@ import {
   createDefaultThemePack,
   createThemePackId,
   THEME_PACK_SCHEMA_VERSION,
+  THEME_PACK_SCHEMA_VERSION_V2,
   type ReaderThemePackV1,
   type ThemeEffectConfig,
+  type ThemePackAccessibility,
+  type ThemePackGeneration,
+  type ThemePackMeta,
+  type ThemePackSchemaVersion,
 } from '@/lib/theme/schema/theme-pack-v1';
 
 const FORBIDDEN_CSS_PATTERNS = [
@@ -75,6 +80,65 @@ function validateEffects(effects: unknown, issues: ThemePackValidationIssue[]): 
   });
 }
 
+function normalizeSchemaVersion(value: unknown): ThemePackSchemaVersion {
+  if (value === THEME_PACK_SCHEMA_VERSION_V2) return THEME_PACK_SCHEMA_VERSION_V2;
+  return THEME_PACK_SCHEMA_VERSION;
+}
+
+function normalizeMeta(raw: unknown): ThemePackMeta | undefined {
+  if (!isRecord(raw)) return undefined;
+  const license = raw.license;
+  const category = raw.category;
+  return {
+    minAppVersion: asString(raw.minAppVersion) || undefined,
+    license:
+      license === 'CC0' ||
+      license === 'CC-BY' ||
+      license === 'CC-BY-NC' ||
+      license === 'MIT' ||
+      license === 'personal'
+        ? license
+        : undefined,
+    author: asString(raw.author) || undefined,
+    locale: asString(raw.locale) || undefined,
+    category:
+      category === 'minimal' ||
+      category === 'glass' ||
+      category === 'paper' ||
+      category === 'dark' ||
+      category === 'custom'
+        ? category
+        : undefined,
+    previewAssetId: asString(raw.previewAssetId) || undefined,
+  };
+}
+
+function normalizeGeneration(raw: unknown): ThemePackGeneration | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    primarySeed: asString(raw.primarySeed) || undefined,
+    backgroundSeed: asString(raw.backgroundSeed) || undefined,
+    accentSeed: asString(raw.accentSeed) || undefined,
+    stylePresetId: asString(raw.stylePresetId) || undefined,
+    generatedAt: asString(raw.generatedAt) || undefined,
+    lockedPaths: Array.isArray(raw.lockedPaths)
+      ? raw.lockedPaths.filter((p): p is string => typeof p === 'string')
+      : undefined,
+  };
+}
+
+function normalizeAccessibility(raw: unknown): ThemePackAccessibility | undefined {
+  if (!isRecord(raw)) return undefined;
+  const targetContrast = raw.targetContrast;
+  return {
+    targetContrast:
+      targetContrast === 'AA' || targetContrast === 'AAA' || targetContrast === 'relaxed'
+        ? targetContrast
+        : undefined,
+    enforceOnExport: raw.enforceOnExport === true ? true : undefined,
+  };
+}
+
 function normalizePack(raw: Record<string, unknown>): ReaderThemePackV1 {
   const now = new Date().toISOString();
   const fallback = createDefaultThemePack();
@@ -83,7 +147,7 @@ function normalizePack(raw: Record<string, unknown>): ReaderThemePackV1 {
   const tokensRaw = appRaw && isRecord(appRaw.tokens) ? appRaw.tokens : null;
 
   return {
-    schemaVersion: THEME_PACK_SCHEMA_VERSION,
+    schemaVersion: normalizeSchemaVersion(raw.schemaVersion),
     id: asString(raw.id, createThemePackId()),
     name: asString(raw.name, '导入的主题'),
     author: asString(raw.author) || undefined,
@@ -128,6 +192,9 @@ function normalizePack(raw: Record<string, unknown>): ReaderThemePackV1 {
     viewer: (raw.viewer as ReaderThemePackV1['viewer']) ?? fallback.viewer,
     advanced: raw.advanced as ReaderThemePackV1['advanced'],
     assets: raw.assets as ReaderThemePackV1['assets'],
+    meta: normalizeMeta(raw.meta),
+    generation: normalizeGeneration(raw.generation),
+    accessibility: normalizeAccessibility(raw.accessibility),
   };
 }
 
@@ -140,10 +207,10 @@ export function parseThemePackJson(input: unknown): ThemePackValidationResult {
   }
 
   const version = input.schemaVersion;
-  if (version !== THEME_PACK_SCHEMA_VERSION) {
+  if (version !== THEME_PACK_SCHEMA_VERSION && version !== THEME_PACK_SCHEMA_VERSION_V2) {
     issues.push({
       path: 'schemaVersion',
-      message: `不支持的 schema 版本: ${String(version)}，期望 ${THEME_PACK_SCHEMA_VERSION}`,
+      message: `不支持的 schema 版本: ${String(version)}，期望 ${THEME_PACK_SCHEMA_VERSION} 或 ${THEME_PACK_SCHEMA_VERSION_V2}`,
     });
   }
 

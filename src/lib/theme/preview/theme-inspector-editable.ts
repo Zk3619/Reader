@@ -33,6 +33,8 @@ export interface InspectorEditableSections {
   /** 底色透明度/模糊（组件 surface 或阅读器 content/chrome） */
   showComponentSurfaceAppearance: boolean;
   showViewerChromeSurface: boolean;
+  showViewerPageTipSurface: boolean;
+  showViewerBrightnessSurface: boolean;
 }
 
 const ALL_SEMANTIC_KEYS = new Set(
@@ -134,6 +136,8 @@ export function resolveInspectorEditableSections(
   const showViewerChromeSurface = paths.some(
     (p) => p.includes('chromeBackground') || p.includes('surfaceAppearance.chrome'),
   );
+  const showViewerPageTipSurface = paths.some((p) => p.includes('surfaceAppearance.pageTip'));
+  const showViewerBrightnessSurface = paths.some((p) => p.includes('surfaceAppearance.brightness'));
 
   return {
     semanticGroups: filterSemanticGroups(semanticKeys),
@@ -153,8 +157,12 @@ export function resolveInspectorEditableSections(
     showComponentSurfaceAppearance:
       (hasAppComponent || hasViewerComponent) &&
       !showViewerContentBackground &&
-      !showViewerChromeSurface,
+      !showViewerChromeSurface &&
+      !showViewerPageTipSurface &&
+      !showViewerBrightnessSurface,
     showViewerChromeSurface,
+    showViewerPageTipSurface,
+    showViewerBrightnessSurface,
   };
 }
 

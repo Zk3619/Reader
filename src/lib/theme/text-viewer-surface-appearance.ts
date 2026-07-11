@@ -35,6 +35,8 @@ export const TEXT_VIEWER_THEME_SURFACE_APPEARANCE_BY_ID: Partial<
 
 export interface ResolveTextViewerSurfaceAppearanceOptions {
   config?: Pick<{ themeSurfaceAppearance?: TextViewerThemeAppearanceConfig }, 'themeSurfaceAppearance'>;
+  /** 书籍级 surface 覆盖（最高优先级） */
+  bookOverride?: TextViewerThemeAppearanceConfig;
 }
 
 function readPartialAppearance(
@@ -69,12 +71,14 @@ export function resolveTextViewerSurfaceAppearance(
   kind: TextViewerSurfaceKind,
   options: ResolveTextViewerSurfaceAppearanceOptions = {},
 ): TextViewerSurfaceAppearance {
+  const bookLayer = readPartialAppearance(options.bookOverride?.[kind]);
   const configLayer = readPartialAppearance(options.config?.themeSurfaceAppearance?.[kind]);
   const presetLayer = readPartialAppearance(
     TEXT_VIEWER_THEME_SURFACE_APPEARANCE_BY_ID[themeId]?.[kind],
   );
 
   if (kind === 'pageTip' || kind === 'brightness') {
+    const chromeBook = readPartialAppearance(options.bookOverride?.chrome);
     const chromeConfig = readPartialAppearance(options.config?.themeSurfaceAppearance?.chrome);
     const chromePreset = readPartialAppearance(
       TEXT_VIEWER_THEME_SURFACE_APPEARANCE_BY_ID[themeId]?.chrome,
@@ -85,25 +89,35 @@ export function resolveTextViewerSurfaceAppearance(
         { opacity: appChrome.opacity, blurPx: appChrome.blurPx },
         chromePreset,
         chromeConfig,
+        chromeBook,
         presetLayer,
         configLayer,
+        bookLayer,
       ),
     );
   }
 
   if (kind === 'chrome') {
+    const chromeBook = readPartialAppearance(options.bookOverride?.chrome);
     const appChrome = readViewerChromeOverlayAppearance();
     return applyVisualEffectsToChromeAppearance(
       mergeAppearanceLayers(
         { opacity: appChrome.opacity, blurPx: appChrome.blurPx },
         presetLayer,
         configLayer,
+        chromeBook,
+        bookLayer,
       ),
     );
   }
 
   return applyVisualEffectsToChromeAppearance(
-    mergeAppearanceLayers(TEXT_VIEWER_SURFACE_APPEARANCE_DEFAULT, presetLayer, configLayer),
+    mergeAppearanceLayers(
+      TEXT_VIEWER_SURFACE_APPEARANCE_DEFAULT,
+      presetLayer,
+      configLayer,
+      bookLayer,
+    ),
   );
 }
 

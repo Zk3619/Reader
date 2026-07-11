@@ -32,11 +32,17 @@ export function importThemePackJson(json: string): ThemePackValidationResult {
   return parseThemePackJsonString(json);
 }
 
-/** 导出 .reader-theme.zip Blob（含 assets/） */
-export async function exportThemePackZip(pack: ReaderThemePackV1): Promise<Blob> {
+/** 导出 .reader-theme.zip Blob（含 assets/，可选 preview.png） */
+export async function exportThemePackZip(
+  pack: ReaderThemePackV1,
+  options?: { previewPng?: Uint8Array },
+): Promise<Blob> {
   const files: Record<string, Uint8Array> = {
     [THEME_JSON]: encodeText(exportThemePackJson(pack)),
   };
+  if (options?.previewPng?.byteLength) {
+    files[PREVIEW_PNG] = options.previewPng;
+  }
   const assetFiles = await readThemeAssetsForExport(pack.id, pack.assets);
   Object.assign(files, assetFiles);
 
@@ -107,8 +113,12 @@ export function downloadThemePackJson(pack: ReaderThemePackV1, filename?: string
   URL.revokeObjectURL(url);
 }
 
-export async function downloadThemePackZip(pack: ReaderThemePackV1, filename?: string): Promise<void> {
-  const blob = await exportThemePackZip(pack);
+export async function downloadThemePackZip(
+  pack: ReaderThemePackV1,
+  filename?: string,
+  options?: { previewPng?: Uint8Array },
+): Promise<void> {
+  const blob = await exportThemePackZip(pack, options);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

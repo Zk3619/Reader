@@ -15,6 +15,8 @@ export type {
   BookInfo,
   BookProgress,
   ReadConfig,
+  BookTextThemeOverride,
+  BookTextThemeCustomPalette,
 } from '@/types/book';
 
 // 书源相关类型
