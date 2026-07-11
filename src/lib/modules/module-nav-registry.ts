@@ -17,7 +17,7 @@ import {
 import type { ReaderInternalTab } from '@/stores/reader-internal-tab';
 import { readerInternalTabValue, setReaderInternalTab } from '@/stores/reader-internal-tab';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
-import { viewerStore } from '@/stores/viewer';
+import { state } from '@/stores/viewer/media/state';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 
@@ -78,13 +78,17 @@ export function hasModuleSidebarRailContent(shellPage: PageType): boolean {
   return getModuleNavItems(page).length > 0;
 }
 
+export function musicHubSectionValue(): MusicHubSection {
+  return state.musicSection;
+}
+
 export function getActiveModuleNavId(shellPage: PageType): string {
   const page = normalizePageType(shellPage);
   switch (page) {
     case 'reader':
       return readerInternalTabValue();
     case 'music':
-      return viewerStore.state.musicSection;
+      return musicHubSectionValue();
     case 'tv':
     case 'subscribe':
       return 'home';
@@ -112,6 +116,9 @@ export function navigateModuleNav(shellPage: PageType, navId: string): void {
 }
 
 export function getModuleNavItemLabel(shellPage: PageType, navId: string): string {
+  if (normalizePageType(shellPage) === 'reader' && navId === 'search') {
+    return '搜索';
+  }
   const items = getModuleNavItems(shellPage);
   return items.find((i) => i.id === navId)?.label ?? navId;
 }

@@ -19,6 +19,7 @@ import {
   mainShellPageRoot,
   mainShellPageScroll,
   mainShellTabEnterClass,
+  pageToolbarBottomBorder,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
@@ -154,6 +155,7 @@ export function BookmarkPage(props: BookmarkPageProps) {
   return (
     <section class={cn(tabEnterClass(), mainShellPageRoot)}>
       <PageToolbar
+        class={pageToolbarBottomBorder}
         title="书签"
         description="查看你的全部书签"
         titleSlot={

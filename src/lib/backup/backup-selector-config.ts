@@ -34,6 +34,7 @@ export const BACKUP_SELECTOR_ITEMS: BackupSelectorItem[] = [
   { key: 'readShareConfig', fileName: 'shareReadConfig.json', title: '共享阅读样式', group: '配置' },
   { key: 'readerUiConfig', fileName: 'readerUiConfig.json', title: 'Reader UI 配置', group: '配置' },
   { key: 'readerPrefs', fileName: 'readerPrefs.json', title: 'Legado 阅读偏好', group: '配置' },
+  { key: 'themePresets', fileName: 'themePresets.json', title: '主题预设', group: '配置' },
   { key: 'backgroundImages', fileName: 'bg', title: '背景图片', group: '其他' },
   { key: 'bookCache', fileName: 'book_cache', title: '书籍章节缓存', group: '其他' },
 ];

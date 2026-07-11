@@ -18,6 +18,7 @@ export interface ReaderPageProps {
   shelf: JSX.Element;
   explore: JSX.Element;
   sources: JSX.Element;
+  search: JSX.Element;
   bookmark: JSX.Element;
   record: JSX.Element;
   rss: JSX.Element;
@@ -44,6 +45,9 @@ export function ReaderPage(props: ReaderPageProps) {
         </div>
         <div class={cn('flex min-h-0 flex-1 flex-col', tab() !== 'sources' && 'hidden')}>
           {props.sources}
+        </div>
+        <div class={cn('flex min-h-0 flex-1 flex-col', tab() !== 'search' && 'hidden')}>
+          {props.search}
         </div>
         <div class={cn('flex min-h-0 flex-1 flex-col', tab() !== 'bookmark' && 'hidden')}>
           {props.bookmark}

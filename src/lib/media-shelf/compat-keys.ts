@@ -19,7 +19,8 @@ const PAGE_TYPE_ALIASES: Record<string, PageType> = {
   rss: 'reader',
   subscription: 'subscribe',
   'bookshelf-cache': 'media-cache',
-  'book-search': 'media-search',
+  'book-search': 'reader',
+  'media-search': 'reader',
 };
 
 const LEGACY_PAGE_TYPES = new Set([

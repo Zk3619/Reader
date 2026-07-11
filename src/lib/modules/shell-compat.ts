@@ -18,6 +18,8 @@ const SHELL_TAB_ALIASES: Record<string, PageType> = {
   sources: 'reader',
   bookmark: 'reader',
   record: 'reader',
+  'book-search': 'reader',
+  'media-search': 'reader',
   /** Legado RSS 在阅读模块内部 Tab */
   rss: 'reader',
   /** Folo 占位壳 Tab */
@@ -31,6 +33,8 @@ const READER_INTERNAL_TAB_ALIASES: Record<string, ReaderInternalTab> = {
   bookshelf: 'shelf',
   scout: 'explore',
   sources: 'sources',
+  'book-search': 'search',
+  'media-search': 'search',
   bookmark: 'bookmark',
   record: 'record',
   rss: 'rss',

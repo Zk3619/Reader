@@ -520,11 +520,13 @@ function buildExploreJsLibThisBindLines(): string {
   ];
   for (const name of EXPLORE_JSLIB_THIS_BIND_TARGETS) {
     lines.push(
-      `  if (typeof ${name} === 'function') {`,
-      `    var __readerOrig_${name} = ${name};`,
-      `    ${name} = function() { return __readerOrig_${name}.apply(__ctx, arguments); };`,
-      `    __ctx.${name} = ${name};`,
-      '  }',
+      '  try {',
+      `    if (typeof ${name} === 'function') {`,
+      `      var __readerOrig_${name} = ${name};`,
+      `      ${name} = function() { return __readerOrig_${name}.apply(__ctx, arguments); };`,
+      `      __ctx.${name} = ${name};`,
+      '    }',
+      '  } catch (e) {}',
     );
   }
   lines.push('})();');

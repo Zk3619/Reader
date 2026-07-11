@@ -58,4 +58,25 @@ function BaseUrl() {
     fn(scope, script);
     expect(String(scope.result)).toBe('https://v1.gyks.cf');
   });
+
+  it('jsLib 中 let key 不会触发 TDZ 绑定错误', () => {
+    const jsLib = `
+let key = 'search-key';
+function BaseUrl() { return key; }
+`;
+    const scope: Record<string, unknown> = {
+      result: undefined,
+      source: { getVariable: () => '{}', setVariable: () => {} },
+      cache: { put: () => {}, get: () => null, remove: () => {} },
+      java: {},
+    };
+    const script = buildLegadoExploreScriptBundle(jsLib, 'result = BaseUrl();');
+    const fn = new Function(
+      '__scope__',
+      'scriptText',
+      'with(__scope__) { eval(scriptText); }',
+    );
+    expect(() => fn(scope, script)).not.toThrow();
+    expect(String(scope.result)).toBe('search-key');
+  });
 });

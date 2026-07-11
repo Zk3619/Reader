@@ -833,7 +833,6 @@ export async function confirmInnerWebClose(
     void invoke('set_inner_web_panel_visible', { visible: false }).catch(() => {
       /* panel 可能已隐藏 */
     });
-    return;
   }
   // 不 await：立即让登录脚本继续，关闭动画与 panel 在后台完成
   void requestInnerWebDismiss();

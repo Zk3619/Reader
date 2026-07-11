@@ -2,7 +2,7 @@
  * 阅读模块侧栏：子页导航 + 最近读过
  */
 
-import { For, Show } from 'solid-js';
+import { type Accessor, For, Show } from 'solid-js';
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -15,7 +15,6 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import {
   getModuleNavItems,
-  type ModuleNavItem,
 } from '@/lib/modules/module-nav-registry';
 import { BookOpenIcon } from '@/components/shared/icons';
 import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
@@ -24,7 +23,7 @@ import { Dynamic } from 'solid-js/web';
 
 export interface ReaderModuleSidebarSectionProps {
   collapsed?: boolean;
-  activeTab: string;
+  activeTab: string | Accessor<string>;
   onTabChange: (tabId: string) => void;
   recentBooks?: RecentReadBook[];
   onOpenRecentBook?: (book: RecentReadBook) => void;
@@ -43,39 +42,44 @@ function sidebarNavButtonClass(active: boolean, extra?: string) {
 
 const READER_ITEMS = getModuleNavItems('reader');
 
+function resolveActiveTab(activeTab: string | Accessor<string>): Accessor<string> {
+  return typeof activeTab === 'function' ? activeTab : () => activeTab;
+}
+
 export function ReaderModuleSidebarSection(props: ReaderModuleSidebarSectionProps) {
   const recentBooks = () => props.recentBooks ?? [];
   const isCollapsed = () => props.collapsed ?? false;
-
-  const renderNavItem = (item: ModuleNavItem) => (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={props.activeTab === item.id}
-        onClick={() => props.onTabChange(item.id)}
-        tooltip={item.label}
-        class={sidebarNavButtonClass(
-          props.activeTab === item.id,
-          cn('group/menu-button h-10', isCollapsed() && 'justify-center'),
-        )}
-      >
-        <Show when={item.icon}>
-          <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
-            <Dynamic component={item.icon!} class="h-5 w-5" />
-          </span>
-        </Show>
-        <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
-          {item.label}
-        </span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
+  const activeTab = resolveActiveTab(props.activeTab);
 
   return (
     <>
       <SidebarGroup>
         <SidebarGroupContent>
           <SidebarMenu>
-            <For each={READER_ITEMS}>{renderNavItem}</For>
+            <For each={READER_ITEMS}>
+              {(item) => (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeTab() === item.id}
+                    onClick={() => props.onTabChange(item.id)}
+                    tooltip={item.label}
+                    class={sidebarNavButtonClass(
+                      activeTab() === item.id,
+                      cn('group/menu-button h-10', isCollapsed() && 'justify-center'),
+                    )}
+                  >
+                    <Show when={item.icon}>
+                      <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
+                        <Dynamic component={item.icon!} class="h-5 w-5" />
+                      </span>
+                    </Show>
+                    <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
+                      {item.label}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </For>
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 阅读内全书搜索（对齐 Legado SearchMenu / SearchContentActivity）
  */
 
@@ -7,7 +7,7 @@ import { textViewerStore } from '@/stores/viewer';
 import { searchBookContent, type BookSearchHit } from '@/lib/media/text/book-content-search';
 import { plainTextForAloud } from '@/lib/media/text/read-aloud';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
@@ -101,13 +101,13 @@ export function ReaderSearchDrawer(props: ReaderSearchDrawerProps) {
               void runSearch();
             }}
           >
-            <TextField class="flex-1">
-              <TextFieldInput
+            <AppTextField class="flex-1">
+              <AppTextFieldInput
                 value={keyword()}
                 onInput={(e) => setKeyword(e.currentTarget.value)}
                 placeholder="输入关键词"
               />
-            </TextField>
+            </AppTextField>
             <Button type="submit" disabled={searching()}>
               {searching() ? '搜索中…' : '搜索'}
             </Button>

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 书源编辑页（对齐 Legado Max BookSourceEditActivity + web SourceEditor）
  */
 
@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   Resizable,
   ResizableHandle,
@@ -392,8 +392,8 @@ export function SourceEditPage(props: SourceEditPageProps) {
       return (
         <div class="block space-y-1.5">
           <span class="text-sm font-medium text-foreground">{field.title}</span>
-          <TextField>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldInput
               type="number"
               min={0}
               value={numValue()}
@@ -404,7 +404,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
                 })
               }
             />
-          </TextField>
+          </AppTextField>
         </div>
       );
     }
@@ -490,8 +490,8 @@ export function SourceEditPage(props: SourceEditPageProps) {
             </Button>
           </div>
         </div>
-        <TextField>
-          <TextFieldTextArea
+        <AppTextField>
+          <AppTextFieldTextArea
             class={SOURCE_EDIT_TEXTAREA_CLASS}
             placeholder={field.hint}
             value={strValue()}
@@ -502,7 +502,7 @@ export function SourceEditPage(props: SourceEditPageProps) {
               })
             }
           />
-        </TextField>
+        </AppTextField>
         <Show when={field.hint}>
           <p class="text-xs text-muted-foreground">{field.hint}</p>
         </Show>

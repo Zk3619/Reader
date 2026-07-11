@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 订阅源编辑页（对齐 Legado RssSourceEditActivity + SourceEditPage）
  */
 
@@ -21,7 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { TextField, TextFieldInput, TextFieldTextArea } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput, AppTextFieldTextArea } from '@/components/shared/AppTextField';
 import {
   Resizable,
   ResizableHandle,
@@ -331,8 +331,8 @@ export function RssSourceEditPage(props: RssSourceEditPageProps) {
       return (
         <div class="block space-y-1.5">
           <span class="text-sm font-medium text-foreground">{field.title}</span>
-          <TextField>
-            <TextFieldInput
+          <AppTextField>
+            <AppTextFieldInput
               type="number"
               min={0}
               value={numValue()}
@@ -343,7 +343,7 @@ export function RssSourceEditPage(props: RssSourceEditPageProps) {
                 })
               }
             />
-          </TextField>
+          </AppTextField>
         </div>
       );
     }
@@ -429,8 +429,8 @@ export function RssSourceEditPage(props: RssSourceEditPageProps) {
             </Button>
           </div>
         </div>
-        <TextField>
-          <TextFieldTextArea
+        <AppTextField>
+          <AppTextFieldTextArea
             class={RSS_EDIT_TEXTAREA_CLASS}
             placeholder={field.hint}
             value={strValue()}
@@ -441,7 +441,7 @@ export function RssSourceEditPage(props: RssSourceEditPageProps) {
               })
             }
           />
-        </TextField>
+        </AppTextField>
         <Show when={field.hint}>
           <p class="text-xs text-muted-foreground">{field.hint}</p>
         </Show>

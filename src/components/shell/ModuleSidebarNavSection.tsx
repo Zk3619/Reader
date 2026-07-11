@@ -2,7 +2,7 @@
  * 模块侧栏子页导航（阅读以外的模块共用，样式与阅读模块一致）
  */
 
-import { For, Show } from 'solid-js';
+import { type Accessor, For, Show } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import {
   SidebarGroup,
@@ -16,13 +16,13 @@ import type { PageType } from '@/components/shell/Navigation';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 import {
   getModuleNavItems,
-  type ModuleNavItem,
 } from '@/lib/modules/module-nav-registry';
 
 export interface ModuleSidebarNavSectionProps {
   shellPage: PageType;
   collapsed?: boolean;
-  activeTab: string;
+  /** 传 Accessor 可在子页切换时保持选中态响应式更新 */
+  activeTab: string | Accessor<string>;
   onTabChange: (tabId: string) => void;
 }
 
@@ -36,47 +36,43 @@ function sidebarNavButtonClass(active: boolean, extra?: string) {
   );
 }
 
-function renderNavItem(
-  item: ModuleNavItem,
-  activeTab: string,
-  isCollapsed: boolean,
-  onTabChange: (tabId: string) => void,
-) {
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={activeTab === item.id}
-        onClick={() => onTabChange(item.id)}
-        tooltip={item.label}
-        class={sidebarNavButtonClass(
-          activeTab === item.id,
-          cn('group/menu-button h-10', isCollapsed && 'justify-center'),
-        )}
-      >
-        <Show when={item.icon}>
-          <span class={cn('shrink-0', isCollapsed && 'mx-auto')}>
-            <Dynamic component={item.icon!} class="h-5 w-5" />
-          </span>
-        </Show>
-        <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed && 'hidden')}>
-          {item.label}
-        </span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
+function resolveActiveTab(activeTab: string | Accessor<string>): Accessor<string> {
+  return typeof activeTab === 'function' ? activeTab : () => activeTab;
 }
 
 export function ModuleSidebarNavSection(props: ModuleSidebarNavSectionProps) {
   const shellPage = () => normalizePageType(props.shellPage);
   const items = () => getModuleNavItems(shellPage());
   const isCollapsed = () => props.collapsed ?? false;
+  const activeTab = resolveActiveTab(props.activeTab);
 
   return (
     <SidebarGroup>
       <SidebarGroupContent>
         <SidebarMenu>
           <For each={items()}>
-            {(item) => renderNavItem(item, props.activeTab, isCollapsed(), props.onTabChange)}
+            {(item) => (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={activeTab() === item.id}
+                  onClick={() => props.onTabChange(item.id)}
+                  tooltip={item.label}
+                  class={sidebarNavButtonClass(
+                    activeTab() === item.id,
+                    cn('group/menu-button h-10', isCollapsed() && 'justify-center'),
+                  )}
+                >
+                  <Show when={item.icon}>
+                    <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
+                      <Dynamic component={item.icon!} class="h-5 w-5" />
+                    </span>
+                  </Show>
+                  <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
+                    {item.label}
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </For>
         </SidebarMenu>
       </SidebarGroupContent>

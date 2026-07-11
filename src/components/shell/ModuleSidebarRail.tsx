@@ -81,14 +81,14 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
                 <ModuleSidebarNavSection
                   shellPage={shellPage()}
                   collapsed={isCollapsed()}
-                  activeTab={activeId()}
+                  activeTab={activeId}
                   onTabChange={(id) => navigateModuleNav(shellPage(), id)}
                 />
               }
             >
               <ReaderModuleSidebarSection
                 collapsed={isCollapsed()}
-                activeTab={activeId()}
+                activeTab={activeId}
                 onTabChange={(id) => navigateModuleNav('reader', id)}
                 recentBooks={props.recentBooks}
                 onOpenRecentBook={props.onOpenRecentBook}

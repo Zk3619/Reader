@@ -8,6 +8,7 @@ export type ReaderInternalTab =
   | 'shelf'
   | 'explore'
   | 'sources'
+  | 'search'
   | 'bookmark'
   | 'record'
   | 'rss'
@@ -22,6 +23,7 @@ function readStoredTab(): ReaderInternalTab {
     raw === 'shelf' ||
     raw === 'explore' ||
     raw === 'sources' ||
+    raw === 'search' ||
     raw === 'bookmark' ||
     raw === 'record' ||
     raw === 'rss' ||

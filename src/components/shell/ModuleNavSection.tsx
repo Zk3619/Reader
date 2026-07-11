@@ -42,7 +42,7 @@ export function ModuleNavSection(props: ModuleNavSectionProps) {
           <ModuleSidebarNavSection
             shellPage={shellPage()}
             collapsed={isCollapsed()}
-            activeTab={activeId()}
+            activeTab={activeId}
             onTabChange={handleNav}
           />
         }

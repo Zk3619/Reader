@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 规则订阅管理（对齐 Legado RuleSubActivity）
  */
 
@@ -18,7 +18,7 @@ import {
   NumberFieldInput,
   NumberFieldLabel,
 } from '@/components/ui/number-field';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   AppDialog,
   AppDialogContent,
@@ -418,20 +418,20 @@ export function RuleSubPage(props: RuleSubPageProps) {
                 </AppSelectContent>
               </AppSelect>
             </div>
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 placeholder="名称"
                 value={draft().name}
                 onInput={(e) => setDraft((d) => ({ ...d, name: e.currentTarget.value }))}
               />
-            </TextField>
-            <TextField>
-              <TextFieldInput
+            </AppTextField>
+            <AppTextField>
+              <AppTextFieldInput
                 placeholder="远程 JSON 列表 URL"
                 value={draft().url}
                 onInput={(e) => setDraft((d) => ({ ...d, url: e.currentTarget.value }))}
               />
-            </TextField>
+            </AppTextField>
             <RuleSubCheckRow
               checked={draft().autoUpdate}
               label="自动更新"

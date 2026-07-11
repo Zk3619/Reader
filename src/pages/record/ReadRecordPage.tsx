@@ -49,6 +49,7 @@ import {
   mainShellPageRoot,
   mainShellPageScroll,
   mainShellTabEnterClass,
+  pageToolbarBottomBorder,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
@@ -138,6 +139,7 @@ export function ReadRecordPage(props: ReadRecordPageProps) {
   return (
     <section class={cn(tabEnterClass(), mainShellPageRoot)}>
       <PageToolbar
+        class={pageToolbarBottomBorder}
         title="阅读记录"
         description="查看你的阅读历史"
         titleSlot={

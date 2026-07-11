@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HttpTTS 引擎管理（对标 Legado SpeakEngineDialog）
  */
 
@@ -13,7 +13,7 @@ import {
 } from '@/components/shared/AppDialog';
 import { VirtualList } from '@/components/shared/virtual-list';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { deleteHttpTTS, getAllHttpTTS } from '@/lib/database/http-tts';
 import {
   exportHttpTtsToJson,
@@ -196,13 +196,13 @@ export function HttpTtsEngineManager(props: HttpTtsEngineManagerProps) {
               </Button>
             </div>
             <div class="flex gap-2">
-              <TextField class="flex-1">
-                <TextFieldInput
+              <AppTextField class="flex-1">
+                <AppTextFieldInput
                   placeholder="从 URL 导入 JSON"
                   value={importUrl()}
                   onInput={(e) => setImportUrl(e.currentTarget.value)}
                 />
-              </TextField>
+              </AppTextField>
               <Button size="sm" disabled={importing()} onClick={() => void handleImportUrl()}>
                 导入
               </Button>

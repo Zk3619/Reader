@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TXT 目录规则管理（对齐 Legado TxtTocRuleActivity + 书源管理页交互）
  */
 
@@ -24,7 +24,7 @@ import { VirtualRuleManageList } from '@/components/replace-rules/VirtualRuleMan
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
 import type { TxtTocRule } from '@/types';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   AppDialog,
   AppDialogContent,
@@ -604,17 +604,17 @@ export function TxtTocRulesPage(props: TxtTocRulesPageProps) {
             <AppDialogTitle>网络导入</AppDialogTitle>
             <AppDialogDescription>输入 TXT 目录规则 JSON 文件的 URL</AppDialogDescription>
           </AppDialogHeader>
-          <TextField class="px-6">
+          <AppTextField class="px-6">
             <div class="relative">
               <LinkIcon class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <TextFieldInput
+              <AppTextFieldInput
                 class="pl-8"
                 placeholder="https://..."
                 value={importUrl()}
                 onInput={(e) => setImportUrl(e.currentTarget.value)}
               />
             </div>
-          </TextField>
+          </AppTextField>
           <AppDialogFooter class="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setImportUrlOpen(false)}>
               取消

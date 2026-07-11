@@ -96,7 +96,7 @@ import {
 import type { BookTitleDisplay, ViewMode } from '@/stores/bookshelf-layout';
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
-import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { mainShellPageRoot, mainShellPageScroll, pageToolbarBottomBorder } from '@/lib/ui/viewport-classes';
 import { notifyPageError } from '@/lib/ui/page-notify';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { QuickScrollButtons } from '@/components/shell/QuickScrollButtons';
@@ -803,6 +803,7 @@ export function MediaShelfPage(props: MediaShelfPageProps) {
   return (
     <div class={mainShellPageRoot}>
       <PageToolbar
+        class={pageToolbarBottomBorder}
         belowHorizontalWheel={showGroupTabsBelow()}
         title={pageTitle()}
         description={pageDescription()}

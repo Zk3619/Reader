@@ -65,6 +65,7 @@
     "flv.js": "^1.6.2",
     "fontoxpath": "^3.34.0",
     "hls.js": "^1.6.16",
+    "html-to-image": "^1.11.13",
     "json5": "^2.2.3",
     "jsonpath-plus": "^10.4.0",
     "jsqr": "^1.4.0",

@@ -12,6 +12,9 @@ import * as searchKeywordsDb from '@/lib/database/search-keywords';
 import * as serversDb from '@/lib/database/servers';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
 import { importTxtTocRulesFromJson } from '@/lib/book-source/import-txt-toc-rule';
+import { importSelectedThemes } from '@/lib/theme/import/import-theme-batch';
+import { parseThemePackJson } from '@/lib/theme/schema/validate-theme-pack';
+import type { ReaderThemePackV1 } from '@/lib/theme/schema/theme-pack-v1';
 import { pickZipEntry } from '@/lib/book-source/legado-zip';
 import { decryptBackupJsonIfNeeded } from '@/lib/backup/backup-aes';
 import { getBackupPassword } from '@/lib/backup/backup-config-storage';
@@ -191,6 +194,19 @@ async function importServersFromJson(text: string): Promise<number> {
   return count;
 }
 
+async function importThemePresetsFromJson(text: string): Promise<number> {
+  const parsed = JSON.parse(text) as unknown;
+  const rawList = Array.isArray(parsed) ? parsed : [parsed];
+  const packs: ReaderThemePackV1[] = [];
+  for (const item of rawList) {
+    const result = parseThemePackJson(item);
+    if (result.ok && result.pack) packs.push(result.pack);
+  }
+  if (packs.length === 0) return 0;
+  const result = await importSelectedThemes(packs, { kind: 'imported' });
+  return result.inserted;
+}
+
 export async function importExtraBackupJsonEntries(
   text: Record<string, string>,
   selected?: Set<string>,
@@ -274,6 +290,14 @@ export async function importExtraBackupJsonEntries(
     const decrypted = decryptBackupJsonIfNeeded(serversJson, password);
     const n = await importServersFromJson(decrypted);
     if (n > 0) summary.push(`服务器配置 ${n} 条`);
+  }
+
+  const themePresetsJson = include('themePresets.json')
+    ? pickZipEntry(text, ['themepresets.json', 'theme_presets.json', 'themePresets.json'])
+    : null;
+  if (themePresetsJson) {
+    const n = await importThemePresetsFromJson(themePresetsJson);
+    if (n > 0) summary.push(`主题预设 ${n} 个`);
   }
 
   return summary;

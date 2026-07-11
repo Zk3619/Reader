@@ -17,6 +17,7 @@ import * as searchKeywordsDb from '@/lib/database/search-keywords';
 import * as serversDb from '@/lib/database/servers';
 import * as sourcesDb from '@/lib/database/sources';
 import * as txtTocRulesDb from '@/lib/database/txt-toc-rules';
+import { listThemePresets } from '@/lib/database/theme-presets';
 import type { BackupItemInfo } from '@/lib/database/reader-backup';
 import { backupAesEncrypt } from '@/lib/backup/backup-aes';
 
@@ -72,6 +73,7 @@ export async function collectBackupJsonBundle(
     rssStars,
     readRecordDetails,
     servers,
+    themePresets,
   ] = await Promise.all([
     booksDb.getAllBooks(),
     sourcesDb.getAllSources(),
@@ -88,6 +90,7 @@ export async function collectBackupJsonBundle(
     rssStarsDb.getAllRssStars(),
     readRecordDetailsDb.getAllReadRecordDetails(),
     serversDb.getAllServers(),
+    listThemePresets(),
   ]);
 
   const entries: Record<string, string> = {};
@@ -118,6 +121,16 @@ export async function collectBackupJsonBundle(
   push(item('rssStar.json', 'RSS 收藏', 'RSS 收藏文章', rssStars));
   push(item('readRecordDetail.json', '阅读记录详情', '阅读记录明细', readRecordDetails));
   push(item('servers.json', '服务器', 'WebDAV 等服务器配置', servers));
+  push(
+    item(
+      'themePresets.json',
+      '主题预设',
+      '用户与导入的主题包',
+      themePresets
+        .filter((p) => p.kind !== 'builtin')
+        .map((p) => p.manifest),
+    ),
+  );
 
   return { entries, items };
 }

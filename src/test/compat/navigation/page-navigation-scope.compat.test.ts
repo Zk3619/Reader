@@ -57,7 +57,8 @@ describe('normalizePageType (shell route compat)', () => {
   it('maps legacy routes to new shell tabs', () => {
     expect(normalizePageType('bookshelf')).toBe('reader');
     expect(normalizePageType('bookshelf-cache')).toBe('media-cache');
-    expect(normalizePageType('book-search')).toBe('media-search');
+    expect(normalizePageType('book-search')).toBe('reader');
+    expect(normalizePageType('media-search')).toBe('reader');
     expect(normalizePageType('media')).toBe('reader');
     expect(normalizePageType('sources')).toBe('reader');
     expect(normalizePageType('scout')).toBe('reader');
@@ -71,6 +72,11 @@ describe('prepareShellNavigation (reader internal tab compat)', () => {
   it('queues reader internal tab for legacy pages', () => {
     expect(prepareShellNavigation('sources')).toBe('reader');
     expect(consumePendingReaderTab()).toBe('sources');
+  });
+
+  it('queues search tab for book-search routes', () => {
+    expect(prepareShellNavigation('book-search')).toBe('reader');
+    expect(consumePendingReaderTab()).toBe('search');
   });
 });
 

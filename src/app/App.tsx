@@ -11,11 +11,11 @@ import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
 import { TxtTocRulesPage } from "@/pages/txt-toc-rules/TxtTocRulesPage";
 import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
 import { ThemeStudioPage } from "@/pages/settings/ThemeStudioPage";
+import { ThemesManagePage } from "@/pages/settings/ThemesManagePage";
 import { GlobalThemeEffectsLayer } from "@/components/theme/GlobalThemeEffectsLayer";
 import { SideBar } from "@/components/shell/SideBar";
 import { ModuleSidebarRail } from "@/components/shell/ModuleSidebarRail";
 import { BottomBar } from "@/components/shell/BottomBar";
-import { ShellSidebarTrigger } from "@/components/shell/ShellSidebarTrigger";
 import {
   GlobalMediaPlayer,
   useGlobalMediaPlayerFixedInset,
@@ -92,6 +92,8 @@ import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog"
 import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
 import { ImportCodeDialog } from "@/components/shared/ImportCodeDialog";
 import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
+import { ImportThemeLocalDialog } from "@/components/theme/ImportThemeLocalDialog";
+import { ImportThemeSelectDialog } from "@/components/theme/ImportThemeSelectDialog";
 import { ImportRssSourceSelectDialog } from "@/components/rss/ImportRssSourceSelectDialog";
 import { RssPageToolbar } from "@/components/rss/RssPageToolbar";
 import { RssSourcesManageFilterDialog } from "@/components/rss/RssSourcesManageFilterDialog";
@@ -119,7 +121,15 @@ import {
   readModuleSidebarRailExpanded,
 } from "@/lib/shell/module-sidebar-rail-state";
 import {
+  closeReaderBookSearch,
+  consumeReaderBookSearchStandaloneRequest,
+  openReaderBookSearch,
+  readerBookSearchRequest,
+  readerBookSearchReturnTab,
+} from "@/stores/reader-search-page";
+import {
   readerInternalTabValue,
+  setReaderInternalTab,
   type ReaderInternalTab,
 } from "@/stores/reader-internal-tab";
 import { isPreviewBook, resolvePreviewBookForOpen } from "@/lib/bookshelf/preview-book";
@@ -164,6 +174,7 @@ import {
   mainShellInset,
   mainShellPageRoot,
   mainShellTabEnterClass,
+  pageToolbarBottomBorder,
 } from "@/lib/ui/viewport-classes";
 import { showAppToast, AppToastHost, createAppToastIcons } from "@/components/shared/AppToasts";
 import { initDatabase } from "@/lib/database";
@@ -178,6 +189,7 @@ import { ThemedComponentBackground } from "@/components/theme/ThemedComponentBac
 import { ThemePackRuntimeProvider } from "@/components/theme/ThemePackRuntimeProvider";
 import { componentDataAttr } from "@/lib/theme/preview/component-registry";
 import { themeStudioStore } from "@/stores/theme-studio";
+import type { ReaderThemePackV1 } from "@/lib/theme/schema/theme-pack-v1";
 import { getBook, getBookByNameAndAuthor, hasBook } from "@/lib/database/books";
 import { getRecentReadBooks, type RecentReadBook } from "@/lib/bookshelf/recent-reading";
 import {
@@ -288,6 +300,20 @@ import {
   type ImportRssSourceComparison,
 } from "@/lib/book-source/import-rss-resolver";
 import { getAllRssSourceGroups, getRssSource } from "@/lib/database/rss-sources";
+import {
+  buildImportComparisons as buildThemeImportComparisons,
+  defaultImportSelection as defaultThemeImportSelection,
+  flattenResolvedThemes,
+  resolveThemesFromLocalFiles,
+  resolveThemesFromNetworkUrl,
+  resolveThemesFromText,
+  type ImportThemeComparison,
+  type ThemeImportProgress,
+} from "@/lib/theme/import/import-theme-resolver";
+import { importSelectedThemes } from "@/lib/theme/import/import-theme-batch";
+import { emitThemePresetsChanged } from "@/lib/theme/theme-preset-events";
+import { pickLocalThemeFiles } from "@/lib/theme/import/pick-local-theme-file";
+import { pickLocalThemeDirectory } from "@/lib/theme/import/pick-local-theme-directory";
 import { runAutoRuleSubUpdates } from "@/lib/rss-source";
 import { importDatabase } from "@/lib/database/export-import";
 import { RssOverlayShell } from "@/components/rss/RssOverlayShell";
@@ -365,6 +391,7 @@ function AppContent() {
 
   const navigateToPage = (page: PageType) => {
     if (page === "book-search" || page === "media-search") {
+      nav.navigateShell("reader");
       openBookSearch();
       return;
     }
@@ -417,6 +444,7 @@ function AppContent() {
   const [showGroupManage, setShowGroupManage] = createSignal(false);
   const [showBookshelfManage, setShowBookshelfManage] = createSignal(false);
   const [showSourcesManage, setShowSourcesManage] = createSignal(false);
+  const [showThemesManage, setShowThemesManage] = createSignal(false);
   /** null=关闭；'new'=新建；string=编辑该书源 URL */
   const [sourceEditTarget, setSourceEditTarget] = createSignal<null | "new" | string>(null);
 
@@ -428,6 +456,11 @@ function AppContent() {
     openReaderAtTab('sources');
     nav.navigateShell('reader');
     setShowSourcesManage(true);
+  };
+
+  const openThemesManagePage = () => {
+    navigateToPage('settings');
+    setShowThemesManage(true);
   };
   const [showBookshelfCache, setShowBookshelfCache] = createSignal(false);
   const [bookshelfCacheGroupId, setBookshelfCacheGroupId] = createSignal(-1);
@@ -461,6 +494,19 @@ function AppContent() {
   const [importGroupName, setImportGroupName] = createSignal('');
   const [importGroupOptions, setImportGroupOptions] = createSignal<string[]>([]);
   const [importAdjustGroup, setImportAdjustGroup] = createSignal(false);
+  const [showImportThemeLocalDialog, setShowImportThemeLocalDialog] = createSignal(false);
+  const [importThemeLocalBusy, setImportThemeLocalBusy] = createSignal(false);
+  const [showImportThemeNetworkDialog, setShowImportThemeNetworkDialog] = createSignal(false);
+  const [showImportThemeCodeDialog, setShowImportThemeCodeDialog] = createSignal(false);
+  const [showImportThemeSelectDialog, setShowImportThemeSelectDialog] = createSignal(false);
+  const [importThemeLoading, setImportThemeLoading] = createSignal(false);
+  const [importThemeProgress, setImportThemeProgress] = createSignal<ThemeImportProgress | null>(null);
+  const [importThemeCandidates, setImportThemeCandidates] = createSignal<ReaderThemePackV1[]>([]);
+  const [importThemeComparisons, setImportThemeComparisons] = createSignal<ImportThemeComparison[]>([]);
+  const [importThemeSelectedIds, setImportThemeSelectedIds] = createSignal<Set<string>>(new Set());
+  const [importKeepThemeName, setImportKeepThemeName] = createSignal(false);
+  const [importKeepThemeActive, setImportKeepThemeActive] = createSignal(false);
+  const [importOverwriteThemeAssets, setImportOverwriteThemeAssets] = createSignal(true);
   /** 书源页：分组管理对话框 */
   const [showSourceGroupManageDialog, setShowSourceGroupManageDialog] = createSignal(false);
   /** 书籍搜索页：书架/书源入口 */
@@ -860,6 +906,16 @@ function AppContent() {
   };
 
   const openBookSearch = (query?: string, scope?: string) => {
+    if (nav.shellTab() !== "reader") {
+      nav.navigateShell("reader");
+    }
+    openReaderBookSearch({ initialQuery: query, initialScope: scope });
+  };
+
+  const openBookSearchStandalone = (query?: string, scope?: string) => {
+    if (readerInternalTabValue() === "search") {
+      setReaderInternalTab(readerBookSearchReturnTab());
+    }
     nav.push({
       kind: "book-search",
       initialQuery: query?.trim() || undefined,
@@ -867,6 +923,12 @@ function AppContent() {
       originShell: nav.shellTab(),
     });
   };
+
+  createEffect(() => {
+    if (!consumeReaderBookSearchStandaloneRequest()) return;
+    const req = readerBookSearchRequest();
+    openBookSearchStandalone(req?.initialQuery, req?.initialScope);
+  });
 
   const sourcePageToolbarTitle = () => "来源";
 
@@ -925,7 +987,7 @@ function AppContent() {
 
   /** 任意关闭路径（含 history.back / 父级 setOpen）均恢复 InnerWeb panel */
   createEffect(() => {
-    if (showImportRssSelectDialog() || showImportSourceSelectDialog()) return;
+    if (showImportRssSelectDialog() || showImportSourceSelectDialog() || showImportThemeSelectDialog()) return;
     releaseImportSelectDialogPanelIfNeeded();
   });
 
@@ -1385,6 +1447,202 @@ function AppContent() {
     } finally {
       setImportSourceLoading(false);
       setImportSourceProgress(null);
+    }
+  };
+
+  const openImportThemeSelectLoading = async () => {
+    setImportThemeLoading(true);
+    setImportThemeProgress({ stage: 'parse', message: '正在准备导入…' });
+    setImportThemeCandidates([]);
+    setImportThemeComparisons([]);
+    setImportThemeSelectedIds(new Set<string>());
+    const app = settingsStore.state.app;
+    setImportKeepThemeName(app.importKeepThemeName ?? false);
+    setImportKeepThemeActive(app.importKeepThemeActive ?? false);
+    setImportOverwriteThemeAssets(app.importOverwriteThemeAssets !== false);
+    setShowImportThemeSelectDialog(true);
+  };
+
+  const reportImportThemeProgress = (progress: ThemeImportProgress) => {
+    setImportThemeProgress(progress);
+  };
+
+  const applyRecognizedThemes = async (packs: ReaderThemePackV1[], title = '导入主题') => {
+    if (packs.length === 0) {
+      setShowImportThemeSelectDialog(false);
+      setImportThemeProgress(null);
+      showAppToast({ title, description: '未识别到有效主题包', variant: 'default' });
+      return;
+    }
+    const comparisons = await buildThemeImportComparisons(packs);
+    setImportThemeCandidates(packs);
+    setImportThemeComparisons(comparisons);
+    setImportThemeSelectedIds(defaultThemeImportSelection(comparisons));
+    setImportThemeLoading(false);
+    setImportThemeProgress(null);
+  };
+
+  const identifyThemesFromNetwork = async (url: string) => {
+    const normalized = url.trim();
+    if (!/^https?:\/\//i.test(normalized)) {
+      showAppToast({ title: '网络导入主题', description: '链接无效', variant: 'destructive' });
+      return;
+    }
+    await openImportThemeSelectLoading();
+    try {
+      const resolved = await resolveThemesFromNetworkUrl(normalized, undefined, reportImportThemeProgress);
+      await applyRecognizedThemes(flattenResolvedThemes(resolved), '网络导入主题');
+    } catch (err) {
+      setShowImportThemeSelectDialog(false);
+      setImportThemeProgress(null);
+      showAppToast({ title: '网络导入主题失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportThemeLoading(false);
+      setImportThemeProgress(null);
+    }
+  };
+
+  const identifyThemesFromRawText = async (raw: string) => {
+    await openImportThemeSelectLoading();
+    try {
+      const resolved = await resolveThemesFromText(raw, undefined, reportImportThemeProgress);
+      await applyRecognizedThemes(flattenResolvedThemes(resolved), '代码导入主题');
+    } catch (err) {
+      setShowImportThemeSelectDialog(false);
+      showAppToast({ title: '代码导入主题失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportThemeLoading(false);
+      setImportThemeProgress(null);
+    }
+  };
+
+  const pickAndImportThemeFiles = async () => {
+    setImportThemeLocalBusy(true);
+    try {
+      const files = await pickLocalThemeFiles();
+      if (!files?.length) return;
+      await openImportThemeSelectLoading();
+      const resolved = await resolveThemesFromLocalFiles(files, undefined, reportImportThemeProgress);
+      await applyRecognizedThemes(flattenResolvedThemes(resolved));
+    } catch (err) {
+      setShowImportThemeSelectDialog(false);
+      showAppToast({ title: '本地导入主题失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportThemeLocalBusy(false);
+      setImportThemeLoading(false);
+      setImportThemeProgress(null);
+    }
+  };
+
+  const pickAndImportThemeDirectory = async () => {
+    setImportThemeLocalBusy(true);
+    try {
+      const picked = await pickLocalThemeDirectory();
+      if (!picked?.files.length) return;
+      await openImportThemeSelectLoading();
+      const resolved = await resolveThemesFromLocalFiles(picked.files, undefined, reportImportThemeProgress);
+      await applyRecognizedThemes(flattenResolvedThemes(resolved));
+    } catch (err) {
+      setShowImportThemeSelectDialog(false);
+      showAppToast({ title: '目录导入主题失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportThemeLocalBusy(false);
+      setImportThemeLoading(false);
+      setImportThemeProgress(null);
+    }
+  };
+
+  const toggleImportThemeSelected = (id: string, checked: boolean) => {
+    setImportThemeSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleImportThemeSelectAll = () => {
+    const candidates = importThemeCandidates();
+    if (candidates.length === 0) return;
+    const allSelected = importThemeSelectedIds().size === candidates.length;
+    setImportThemeSelectedIds(
+      allSelected ? new Set<string>() : new Set<string>(candidates.map((p) => p.id)),
+    );
+  };
+
+  const toggleImportThemeInvert = () => {
+    const current = importThemeSelectedIds();
+    const next = new Set<string>();
+    for (const pack of importThemeCandidates()) {
+      if (!current.has(pack.id)) next.add(pack.id);
+    }
+    setImportThemeSelectedIds(next);
+  };
+
+  const toggleImportThemeSelectNew = () => {
+    const comparisons = importThemeComparisons();
+    const current = importThemeSelectedIds();
+    const newIds = comparisons.filter((c) => c.status === 'new').map((c) => c.incoming.id);
+    const allNewSelected = newIds.length > 0 && newIds.every((id) => current.has(id));
+    const next = new Set(current);
+    for (const id of newIds) {
+      if (allNewSelected) next.delete(id);
+      else next.add(id);
+    }
+    setImportThemeSelectedIds(next);
+  };
+
+  const toggleImportThemeSelectUpdate = () => {
+    const comparisons = importThemeComparisons();
+    const current = importThemeSelectedIds();
+    const updateIds = comparisons.filter((c) => c.status === 'update').map((c) => c.incoming.id);
+    const allUpdateSelected = updateIds.length > 0 && updateIds.every((id) => current.has(id));
+    const next = new Set(current);
+    for (const id of updateIds) {
+      if (allUpdateSelected) next.delete(id);
+      else next.add(id);
+    }
+    setImportThemeSelectedIds(next);
+  };
+
+  const persistImportThemeKeepSettings = async () => {
+    await settingsStore.setImportThemeKeepOptions({
+      importKeepThemeName: importKeepThemeName(),
+      importKeepThemeActive: importKeepThemeActive(),
+      importOverwriteThemeAssets: importOverwriteThemeAssets(),
+    });
+  };
+
+  const confirmImportSelectedThemes = async () => {
+    const selected = new Set(importThemeSelectedIds());
+    const list = importThemeCandidates().filter((p) => selected.has(p.id));
+    if (list.length === 0) {
+      showAppToast({ title: '导入主题', description: '请先选择主题', variant: 'default' });
+      return;
+    }
+    try {
+      setImportThemeLoading(true);
+      await persistImportThemeKeepSettings();
+      const result = await importSelectedThemes(list, {
+        keepName: importKeepThemeName(),
+        keepActive: importKeepThemeActive(),
+        overwriteAssets: importOverwriteThemeAssets(),
+      });
+      showAppToast({
+        title: '导入主题',
+        description: `已导入 ${result.inserted} 个主题${result.keptActive > 0 ? `，保留激活 ${result.keptActive} 个` : ''}`,
+        variant: 'default',
+      });
+      setShowImportThemeSelectDialog(false);
+      setImportThemeCandidates([]);
+      setImportThemeComparisons([]);
+      setImportThemeSelectedIds(new Set<string>());
+      emitThemePresetsChanged();
+    } catch (err) {
+      showAppToast({ title: '导入主题失败', description: String(err), variant: 'destructive' });
+    } finally {
+      setImportThemeLoading(false);
+      setImportThemeProgress(null);
     }
   };
 
@@ -3076,6 +3334,8 @@ function AppContent() {
   const isReaderInternalTab = (tab: ReaderInternalTab) =>
     isReaderShellPage() && readerInternalTabValue() === tab;
 
+  const readerBookSearchParams = createMemo(() => readerBookSearchRequest());
+
   const shellTabEnter = () => mainShellTabEnterClass(reduceMotion());
 
   const getOpenBackLayers = (): BackLayerDefinition[] => {
@@ -3157,6 +3417,7 @@ function AppContent() {
       () => setSourceFilterDialogOpen(false),
     );
     push("sources-manage", showSourcesManage(), () => setShowSourcesManage(false));
+    push("themes-manage", showThemesManage(), () => setShowThemesManage(false));
     push("rss-manage", showRssManage(), () => setShowRssManage(false));
     push("rule-sub", showRuleSub(), () => setShowRuleSub(false));
     push("rss-favorites", showRssFavorites(), () => setShowRssFavorites(false));
@@ -3394,12 +3655,6 @@ function AppContent() {
           />
         </Show>
 
-        <Show when={!isStandalonePage() && shell().showModuleSidebarNav && !showTopNav()}>
-          <div class="fixed left-3 top-[calc(var(--safe-area-top-effective)+0.5rem)] z-50">
-            <ShellSidebarTrigger class="h-9 w-9 rounded-lg border border-border/50 bg-background/95 shadow-sm" />
-          </div>
-        </Show>
-
         {/* 底栏 - 移动壳层；独立页面时隐藏 */}
         <Show when={showBottomBar()}>
           <BottomBar
@@ -3550,6 +3805,7 @@ function AppContent() {
                   )}
                 >
                   <PageToolbar
+                    class={pageToolbarBottomBorder}
                     title={sourcePageToolbarTitle()}
                     description={sourcePageToolbarDescription()}
                     titleSlot={
@@ -3689,6 +3945,19 @@ function AppContent() {
                 </Show>
               </>
                 }
+                search={
+              <BookSearchPage
+                presentation="embedded"
+                active={() => isReaderInternalTab("search")}
+                initialQuery={readerBookSearchParams()?.initialQuery}
+                initialScope={readerBookSearchParams()?.initialScope}
+                onBack={closeReaderBookSearch}
+                onOpenBook={(book) => openReaderPage(book)}
+                onOpenBookInfo={(source, book) => {
+                  openBookInfo({ source, book, originShell: "reader" });
+                }}
+              />
+                }
                 bookmark={
               <BookmarkPage
                 onBack={
@@ -3741,6 +4010,7 @@ function AppContent() {
                   )}
                 >
                   <PageToolbar
+                    class={pageToolbarBottomBorder}
                     title="订阅"
                     description={
                       hasEffectiveRssSourceListFilter(
@@ -3918,6 +4188,7 @@ function AppContent() {
                   "flex min-h-0 flex-1 flex-col w-full",
                   readingRulePage() && "hidden pointer-events-none",
                   themeStudioStore.state.open && "hidden pointer-events-none",
+                  showThemesManage() && "hidden pointer-events-none",
                 )}
               >
                 <SettingsPage
@@ -3934,8 +4205,25 @@ function AppContent() {
                     themeStudioStore.openStudio({ entry: "settings", scope: "all" });
                     navigateToPage("settings");
                   }}
+                  onOpenThemesManage={openThemesManagePage}
                 />
               </div>
+              <Show when={currentPage() === "settings" && showThemesManage()}>
+                <ThemesManagePage
+                  onClose={() => setShowThemesManage(false)}
+                  onThemesImportLocal={() => setShowImportThemeLocalDialog(true)}
+                  onThemesImportNetwork={() => setShowImportThemeNetworkDialog(true)}
+                  onThemesImportCode={() => setShowImportThemeCodeDialog(true)}
+                  onOpenThemeStudio={(record) => {
+                    themeStudioStore.openStudio({
+                      entry: "settings",
+                      scope: "all",
+                      pack: record?.manifest,
+                      presetId: record?.id ?? null,
+                    });
+                  }}
+                />
+              </Show>
               <Show when={currentPage() === "settings" && readingRulePage() === "txt-toc"}>
                 <TxtTocRulesPage onBack={() => setReadingRulePage(null)} />
               </Show>
@@ -4064,7 +4352,7 @@ function AppContent() {
                       initialQuery={e.initialQuery}
                       initialScope={e.initialScope}
                       active={() => overlayEntryVisible(entry)}
-                      overlayStack
+                      presentation="overlay"
                       onBack={() => nav.pop()}
                       onOpenBook={(book) => openReaderPage(book)}
                       onOpenBookInfo={(source, book) => {
@@ -4190,6 +4478,54 @@ function AppContent() {
           description="粘贴书源 JSON 数组或对象，也支持 legado:// / yuedu:// 深链接与 http(s) 书源地址。"
           onIdentify={(raw) => {
             void identifySourcesFromRawText(raw, 'code');
+          }}
+        />
+        <ImportThemeLocalDialog
+          open={showImportThemeLocalDialog()}
+          busy={importThemeLocalBusy()}
+          onOpenChange={setShowImportThemeLocalDialog}
+          onPickFile={() => void pickAndImportThemeFiles()}
+          onPickDirectory={() => void pickAndImportThemeDirectory()}
+        />
+        <ImportSourceNetworkDialog
+          open={showImportThemeNetworkDialog()}
+          onOpenChange={setShowImportThemeNetworkDialog}
+          title="网络导入主题"
+          description="输入主题包 JSON 或 ZIP 的 http(s) 地址。"
+          onIdentify={(url) => {
+            void identifyThemesFromNetwork(url);
+          }}
+        />
+        <ImportCodeDialog
+          open={showImportThemeCodeDialog()}
+          onOpenChange={setShowImportThemeCodeDialog}
+          title="代码导入主题"
+          description="粘贴主题 JSON / 数组，或 http(s) 主题包地址。"
+          onIdentify={(raw) => {
+            void identifyThemesFromRawText(raw);
+          }}
+        />
+        <ImportThemeSelectDialog
+          open={showImportThemeSelectDialog()}
+          loading={importThemeLoading()}
+          loadingMessage={importThemeProgress()?.message}
+          packs={importThemeCandidates()}
+          comparisons={importThemeComparisons()}
+          selectedIds={importThemeSelectedIds()}
+          keepName={importKeepThemeName()}
+          keepActive={importKeepThemeActive()}
+          overwriteAssets={importOverwriteThemeAssets()}
+          onOpenChange={setShowImportThemeSelectDialog}
+          onToggle={toggleImportThemeSelected}
+          onSelectAllToggle={toggleImportThemeSelectAll}
+          onInvertSelect={toggleImportThemeInvert}
+          onSelectNewToggle={toggleImportThemeSelectNew}
+          onSelectUpdateToggle={toggleImportThemeSelectUpdate}
+          onKeepNameChange={setImportKeepThemeName}
+          onKeepActiveChange={setImportKeepThemeActive}
+          onOverwriteAssetsChange={setImportOverwriteThemeAssets}
+          onConfirm={() => {
+            void confirmImportSelectedThemes();
           }}
         />
         <ImportSourceSelectDialog

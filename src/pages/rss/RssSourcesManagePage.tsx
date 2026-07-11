@@ -1,4 +1,4 @@
-/**
+﻿/**
  * RSS 订阅源管理：列表、启用、删除、导入、拖拽排序
  */
 
@@ -80,7 +80,7 @@ import {
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import { SourceShareQrDialog } from '@/components/sources/SourceShareQrDialog';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   addRssGroupsToSource,
   collectRssSourceGroupNames,
@@ -1260,13 +1260,13 @@ export function RssSourcesManagePage(props: RssSourcesManagePageProps) {
             </AppDialogDescription>
           </AppDialogHeader>
           <div class="space-y-3 px-6 py-2">
-            <TextField>
-              <TextFieldInput
+            <AppTextField>
+              <AppTextFieldInput
                 placeholder="输入分组名称"
                 value={groupDialogInput()}
                 onInput={(e) => setGroupDialogInput(e.currentTarget.value)}
               />
-            </TextField>
+            </AppTextField>
             <Show when={sourceGroups().length > 0}>
               <ul class="max-h-48 space-y-1 overflow-y-auto overscroll-contain">
                 <For each={sourceGroups()}>

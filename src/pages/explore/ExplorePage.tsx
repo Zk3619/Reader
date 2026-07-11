@@ -46,7 +46,7 @@ import {
 } from '@/stores/explore-page-layout';
 import { pageCacheStore } from '@/stores/page-cache';
 import { cn } from '@/lib/utils';
-import { mainShellPageRoot, mainShellPageScroll } from '@/lib/ui/viewport-classes';
+import { mainShellPageRoot, mainShellPageScroll, pageToolbarBottomBorder } from '@/lib/ui/viewport-classes';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import {
   ExploreSourceNav,
@@ -364,6 +364,7 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
   return (
     <div class={mainShellPageRoot}>
       <PageToolbar
+        class={pageToolbarBottomBorder}
         title={EXPLORE_PAGE_TITLE}
         description={pageDescription()}
         titleSlot={

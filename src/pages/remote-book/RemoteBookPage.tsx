@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 远程书籍页面
  * 参考 legado 项目的 RemoteBookActivity 实现
  * 支持浏览 WebDav 远程书籍并导入到书架
@@ -7,7 +7,7 @@
 import { createSignal, Show, For, onMount } from 'solid-js';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { Button } from '@/components/ui/button';
-import { TextField, TextFieldInput } from '@/components/ui/text-field';
+import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -357,15 +357,15 @@ export function RemoteBookPage(props: RemoteBookPageProps) {
         <div class="mt-4 flex items-center gap-4">
           <div class="relative flex-1">
             <SearchIcon class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground z-10" />
-            <TextField class="w-full">
-              <TextFieldInput
+            <AppTextField class="w-full">
+              <AppTextFieldInput
                 type="text"
                 placeholder="搜索文件..."
                 value={searchQuery()}
                 onInput={(e: Event) => setSearchQuery((e.currentTarget as HTMLInputElement).value)}
                 class="pl-9"
               />
-            </TextField>
+            </AppTextField>
           </div>
           <div class="flex gap-2">
             <Button
