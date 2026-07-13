@@ -297,7 +297,7 @@ async fn download_binary(
     // 构建 reqwest 客户端
     // 信任所有证书：许多书源网站使用的证书不在 Mozilla CA 列表中（UnknownIssuer 错误）
     // 参考 legado 项目使用 SSLHelper.unsafeTrustManager 信任所有证书的做法
-    // 注意：桌面端使用 native-tls（支持此功能），移动端使用 rustls-tls（可能不完全支持，但 Tauri HTTP 插件已处理）
+    // 使用 native-tls（Windows SChannel），对齐系统网络栈；信任无效证书以兼容部分书源
     const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     const OKHTTP_UA: &str = "okhttp/4.9.1";
 
@@ -316,6 +316,7 @@ async fn download_binary(
         .gzip(true)
         .brotli(true)
         .deflate(true)
+        .http1_only() // 对齐 needle/curl；部分音乐 CDN 在 HTTP/2 下会 RST 连接
         .danger_accept_invalid_certs(true); // 信任所有证书，以兼容各种书源网站
 
     if !has_custom_ua {
@@ -325,10 +326,6 @@ async fn download_binary(
             CHROME_UA
         };
         client_builder = client_builder.user_agent(ua);
-    }
-
-    if use_okhttp_user_agent.unwrap_or(false) {
-        client_builder = client_builder.http1_only();
     }
 
     let client = client_builder
@@ -397,10 +394,22 @@ async fn download_binary(
     let final_url = response.url().to_string();
 
     // 安全地转换响应头（使用 lossy UTF-8 转换）
+    // Set-Cookie 可能有多条，HashMap 单值会丢；合并后供 UserApi 解析 Hm_Iuvt_
     let mut resp_headers = HashMap::new();
     for (key, value) in response.headers().iter() {
         let header_value = String::from_utf8_lossy(value.as_bytes()).into_owned();
-        resp_headers.insert(key.as_str().to_string(), header_value);
+        let key_str = key.as_str();
+        if key_str.eq_ignore_ascii_case("set-cookie") {
+            resp_headers
+                .entry("set-cookie".to_string())
+                .and_modify(|existing: &mut String| {
+                    existing.push_str(", ");
+                    existing.push_str(&header_value);
+                })
+                .or_insert(header_value);
+        } else {
+            resp_headers.insert(key_str.to_string(), header_value);
+        }
     }
 
     let data = response
