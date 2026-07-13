@@ -4,7 +4,7 @@
 
 import type { ReaderTextColumn, ReaderTextLine } from '@/lib/media/text/reader-text-layout-entities';
 import { dualColumnForElement } from '@/lib/media/text/text-viewer-paginate-dual';
-import { readLineHeightPx, resolvePagedMeasureRoot } from '@/lib/media/text/text-viewer-paginate';
+import { readLineHeightPx, READER_CHAPTER_TITLE_HEADING_SELECTOR, resolvePagedMeasureRoot } from '@/lib/media/text/text-viewer-paginate';
 
 export interface CollectLineMetricsOptions {
   fontSize?: number;
@@ -85,7 +85,7 @@ export function collectDomTextLines(
     const column = dualColumnForElement(rootRect, block);
     const textEl =
       block.querySelector<HTMLElement>('.reader-p') ??
-      block.querySelector<HTMLElement>('h2');
+      block.querySelector<HTMLElement>(READER_CHAPTER_TITLE_HEADING_SELECTOR);
     if (!textEl) return;
 
     const lineHeightPx = readLineHeightPx(

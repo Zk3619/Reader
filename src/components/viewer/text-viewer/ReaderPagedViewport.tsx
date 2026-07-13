@@ -153,6 +153,7 @@ import {
   dualSpreadColumnContentSpanPx,
   lastNonBlankPageIndex,
   pageContentSpanPx,
+  READER_MEASURE_BLOCK_TEXT_SELECTOR,
   resolvePagedMeasureRoot,
   trimPageStartsBeforeClipStraddle,
   trimPageStartsToSegmentVisualBounds,
@@ -1087,7 +1088,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (!root) return false;
     if (pagedMeasureRootHasUsableBlocks(root)) return true;
     const body = root.querySelector<HTMLElement>('.reader-body') ?? root;
-    return body.querySelector('.reader-p, h2, figure, .prose') != null;
+    return body.querySelector(`${READER_MEASURE_BLOCK_TEXT_SELECTOR}, figure, .prose`) != null;
   };
 
   const dualSpreadInterimLiveMounted = () => {
@@ -2821,9 +2822,11 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
       if (!l) return false;
       const leftIndices = visibleBlocksForSpreadColumn('left', targetPage, l);
       if (!leftIndices || leftIndices.length === 0) return false;
-      return content.querySelector('.reader-p, h2, figure') != null;
+      return content.querySelector(`${READER_MEASURE_BLOCK_TEXT_SELECTOR}, figure`) != null;
     }
-    return content.querySelector('.reader-p, h2, figure, [data-reader-measure-block]') != null;
+    return content.querySelector(
+      `${READER_MEASURE_BLOCK_TEXT_SELECTOR}, figure, [data-reader-measure-block]`,
+    ) != null;
   };
 
   const isDomReadyForPage = (

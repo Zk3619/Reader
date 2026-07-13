@@ -4,6 +4,12 @@ import { readerLineHeightPx, readerParagraphMarginPx } from '@/lib/media/text/re
 import { textViewerPagedContentInsets } from '@/lib/media/text/reader-ui-config';
 import { computePageStartsForLayout } from '@/lib/media/text/text-viewer-paginate-dual';
 
+/** ReaderContent 章节标题元素（见 ReaderContent.tsx） */
+export const READER_CHAPTER_TITLE_HEADING_SELECTOR = 'h1,h2,h3,h4,h5,h6';
+
+/** 段落或章节标题文本根（用于 DOM 测量与跨页检测） */
+export const READER_MEASURE_BLOCK_TEXT_SELECTOR = `.reader-p, ${READER_CHAPTER_TITLE_HEADING_SELECTOR}`;
+
 export interface ReaderBlockMetric {
   blockIndex: number;
   top: number;
@@ -94,10 +100,17 @@ function relativeBottom(rootRect: DOMRect, el: Element): number {
   return el.getBoundingClientRect().bottom - rootRect.top;
 }
 
+function queryMeasureBlockTextEl(block: HTMLElement): HTMLElement | null {
+  return (
+    block.querySelector<HTMLElement>('.reader-p') ??
+    block.querySelector<HTMLElement>(READER_CHAPTER_TITLE_HEADING_SELECTOR)
+  );
+}
+
 /** 章节标题 measure-block：间距在 wrapper padding 上，须按整块测量 */
 function isChapterTitleMeasureBlock(block: HTMLElement): boolean {
   return (
-    block.querySelector('h2') != null &&
+    block.querySelector(READER_CHAPTER_TITLE_HEADING_SELECTOR) != null &&
     block.querySelector('.reader-p') == null &&
     block.querySelector('figure') == null
   );
@@ -269,9 +282,7 @@ function collectLineSegmentsInBlock(
   block: HTMLElement,
   lineHeightPx: number,
 ): ReaderLayoutSegment[] {
-  const textEl =
-    block.querySelector<HTMLElement>('.reader-p') ??
-    block.querySelector<HTMLElement>('h2');
+  const textEl = queryMeasureBlockTextEl(block);
   if (!textEl) return [];
 
   const textNode = readParagraphTextContentsEl(textEl);
@@ -319,7 +330,7 @@ export function measureLayoutSegments(
   const segments: ReaderLayoutSegment[] = [];
   const sampleLineEl =
     measureRoot.querySelector<HTMLElement>('.reader-p') ??
-    measureRoot.querySelector<HTMLElement>('h2');
+    measureRoot.querySelector<HTMLElement>(READER_CHAPTER_TITLE_HEADING_SELECTOR);
   const defaultLineH = sampleLineEl
     ? readLineHeightPx(sampleLineEl, fontSize, lineSpacing)
     : readerLineHeightPx(fontSize ?? 18, lineSpacing ?? 0.8);
@@ -343,9 +354,7 @@ export function measureLayoutSegments(
       return;
     }
 
-    const textEl =
-      block.querySelector<HTMLElement>('.reader-p') ??
-      block.querySelector<HTMLElement>('h2');
+    const textEl = queryMeasureBlockTextEl(block);
     if (!textEl) return;
 
     if (blockNeedsLegadoInlineMeasure(block)) {
@@ -452,7 +461,7 @@ export function measureLayoutSegments(
 }
 
 const PAGE_STRADDLE_BLOCK_SELECTORS =
-  '.reader-p, h2, figure, [data-reader-measure-block]';
+  `${READER_MEASURE_BLOCK_TEXT_SELECTOR}, figure, [data-reader-measure-block]`;
 const PAGE_STRADDLE_INLINE_SELECTORS =
   '[data-reader-inline-img], [data-legado-cmt], .reader-legado-cmt-img, .reader-comment-bubble';
 
@@ -487,7 +496,9 @@ export function pageWindowHasStraddle(
     }
   }
 
-  for (const textEl of measureRoot.querySelectorAll<HTMLElement>('.reader-p, h2')) {
+  for (const textEl of measureRoot.querySelectorAll<HTMLElement>(
+    READER_MEASURE_BLOCK_TEXT_SELECTOR,
+  )) {
     const range = document.createRange();
     range.selectNodeContents(textEl);
     for (const rect of range.getClientRects()) {

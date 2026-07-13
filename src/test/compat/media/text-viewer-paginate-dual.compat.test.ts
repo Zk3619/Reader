@@ -6,6 +6,7 @@ import {
   contentBlockIndicesForColumn,
   contentBlockIndicesForSpreadPage,
   columnShowsChapterTitle,
+  columnShowsChapterTitleOnSpreadPage,
   dualSpreadColumnPackLimit,
   dualSpreadColumnWidthPx,
   normalizeDualColumnSegments,
@@ -1001,5 +1002,42 @@ describe('contentBlockIndicesForColumn', () => {
     expect(columnShowsChapterTitle(segments, 1)).toBe(false);
     expect(contentBlockIndicesForColumn(segments, 0)).toEqual([0]);
     expect(contentBlockIndicesForColumn(segments, 1)).toEqual([1]);
+  });
+});
+
+describe('columnShowsChapterTitleOnSpreadPage', () => {
+  it('shows chapter title on first spread when block 0 is in that column', () => {
+    const layout = {
+      pageStarts: [0, 96],
+      rightPageStarts: [0, 0],
+      dualPage: true as const,
+      contentExtent: 200,
+      leftColumnExtent: 128,
+      rightColumnExtent: 0,
+      segments: [
+        { top: 0, bottom: 32, column: 0 as const, blockIndex: 0 },
+        { top: 32, bottom: 64, column: 0 as const, blockIndex: 1 },
+      ],
+    };
+    expect(columnShowsChapterTitleOnSpreadPage(layout, 0, 0)).toBe(true);
+    expect(columnShowsChapterTitleOnSpreadPage(layout, 1, 0)).toBe(false);
+    expect(columnShowsChapterTitleOnSpreadPage(layout, 0, 1)).toBe(false);
+  });
+
+  it('shows chapter title on right column when title block was assigned there', () => {
+    const layout = {
+      pageStarts: [0, 80],
+      rightPageStarts: [0, 64],
+      dualPage: true as const,
+      contentExtent: 200,
+      leftColumnExtent: 80,
+      rightColumnExtent: 96,
+      segments: [
+        { top: 0, bottom: 32, column: 1 as const, blockIndex: 0 },
+        { top: 0, bottom: 32, column: 0 as const, blockIndex: 1 },
+      ],
+    };
+    expect(columnShowsChapterTitleOnSpreadPage(layout, 1, 0)).toBe(true);
+    expect(columnShowsChapterTitleOnSpreadPage(layout, 0, 0)).toBe(false);
   });
 });
