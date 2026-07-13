@@ -14,6 +14,7 @@ import {
 import { parseParsedAudioUrls } from '@/lib/media/audio/parsed-audio-url';
 import { resolveAudioPlaybackList } from '@/lib/media/audio/resolve-audio-playback';
 import { resolveTrackPlaybackUrls } from '@/lib/media/audio/online/online-resolver';
+import { MusicPlaybackStatusText } from '@/lib/media/audio/music-playback-status';
 import { invalidateTrackUrlCache } from '@/lib/media/audio/online/url-cache';
 import { recordRecentPlay } from '@/lib/database/audio-library';
 import { isTrackDisliked } from '@/lib/media/audio/library/dislike-filter';
@@ -199,58 +200,98 @@ export async function applyMusicTrack(
     });
     return;
   }
-  setState({ loading: true, error: null, trackIndex: index });
-  clearPlayTimeout();
-  if (options?.forceRefreshUrl) {
-    await invalidateTrackUrlCache(track.id);
-  }
-  revokeAudioPlaybackUrls();
-  const { urls, revokeAll } = await resolveTrackPlaybackUrls(track, {
-    skipCache: options?.forceRefreshUrl,
-    activeSource: state.activeSource,
+  setState({
+    loading: true,
+    error: null,
+    playbackStatus: MusicPlaybackStatusText.gettingUrl,
+    trackIndex: index,
   });
-  playbackRevoke = revokeAll;
-  if (urls.length === 0) {
+  clearPlayTimeout();
+  try {
+    if (options?.forceRefreshUrl) {
+      await invalidateTrackUrlCache(track.id);
+    }
+    revokeAudioPlaybackUrls();
+    const { urls, revokeAll, toggled, track: resolvedTrack } = await resolveTrackPlaybackUrls(
+      track,
+      {
+        skipCache: options?.forceRefreshUrl,
+        activeSource: state.activeSource,
+        onStatus: (message) => setState({ playbackStatus: message }),
+        onToggleSource: (alt) => {
+          console.info('[music] toggle source:', alt.source, alt.name, alt.artist);
+        },
+      },
+    );
+    playbackRevoke = revokeAll;
+    if (urls.length === 0) {
+      setState({
+        loading: false,
+        playbackStatus: null,
+        mediaUrls: [],
+        primaryUrl: null,
+        error: toggled
+          ? MusicPlaybackStatusText.toggleFailed
+          : '无法解析播放地址',
+        contentSession: createMusicHubSession(queue, index),
+      });
+      return;
+    }
+
+    // 换源成功：回写队列曲目，避免 UI 仍显示原源
+    let nextQueue = queue;
+    const playTrack = resolvedTrack ?? track;
+    if (toggled && resolvedTrack && resolvedTrack.id !== track.id) {
+      nextQueue = [...queue];
+      nextQueue[index] = resolvedTrack;
+    }
+
     setState({
       loading: false,
+      playbackStatus: null,
+      rawContent: '',
+      trackQueue: nextQueue,
+      mediaUrls: urls,
+      primaryUrl: urls[0] ?? null,
+      error: null,
+      activeSource: playTrack.source,
+      contentSession: createMusicHubSession(nextQueue, index),
+    });
+    void recordRecentPlay(playTrack.id);
+    const coverUrl =
+      typeof playTrack.meta.coverUrl === 'string' ? playTrack.meta.coverUrl : undefined;
+    globalMediaPlayerStore.activate(
+      'audio',
+      {
+        title: playTrack.name,
+        subtitle: playTrack.artist,
+        preview: playTrack.artist,
+        coverUrl,
+      },
+      AUDIO_HUB_BOOK_URL,
+    );
+
+    const cfg = getMusicPlayConfig();
+    const nextIdx = resolveNextChapterIndex(index, nextQueue.length, cfg.playMode);
+    if (nextIdx != null && nextIdx !== index) {
+      const nextTrack = nextQueue[nextIdx];
+      if (nextTrack) {
+        void preloadTrackUrl(nextTrack, { activeSource: state.activeSource });
+      }
+    }
+    schedulePlayTimeout();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '播放地址解析失败';
+    console.warn('[music] applyMusicTrack failed', err);
+    setState({
+      loading: false,
+      playbackStatus: null,
       mediaUrls: [],
       primaryUrl: null,
-      error: '无法解析播放地址',
+      error: message,
       contentSession: createMusicHubSession(queue, index),
     });
-    return;
   }
-  setState({
-    loading: false,
-    rawContent: '',
-    mediaUrls: urls,
-    primaryUrl: urls[0] ?? null,
-    error: null,
-    contentSession: createMusicHubSession(queue, index),
-  });
-  void recordRecentPlay(track.id);
-  const coverUrl =
-    typeof track.meta.coverUrl === 'string' ? track.meta.coverUrl : undefined;
-  globalMediaPlayerStore.activate(
-    'audio',
-    {
-      title: track.name,
-      subtitle: track.artist,
-      preview: track.artist,
-      coverUrl,
-    },
-    AUDIO_HUB_BOOK_URL,
-  );
-
-  const cfg = getMusicPlayConfig();
-  const nextIdx = resolveNextChapterIndex(index, queue.length, cfg.playMode);
-  if (nextIdx != null && nextIdx !== index) {
-    const nextTrack = queue[nextIdx];
-    if (nextTrack) {
-      void preloadTrackUrl(nextTrack, { activeSource: state.activeSource });
-    }
-  }
-  schedulePlayTimeout();
 }
 
 /** 播放失败时刷新 URL 并重试（最多 1 次） */

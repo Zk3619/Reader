@@ -143,8 +143,9 @@ export async function mgGetMusicUrl(
   track: AudioTrack,
   quality = getPlayQuality(),
 ): Promise<string | null> {
-  const copyrightId = String(track.meta.copyrightId ?? track.meta.songId ?? '');
-  if (!copyrightId) return null;
+  const songId = String(track.meta.songId ?? track.meta.songmid ?? '');
+  const copyrightId = String(track.meta.copyrightId ?? '');
+  if (!songId && !copyrightId) return null;
   const formatTypes: Record<string, string> = {
     '128k': 'PQ',
     '320k': 'HQ',
@@ -152,9 +153,35 @@ export async function mgGetMusicUrl(
     flac24bit: 'ZQ',
   };
   for (const q of qualityFallbackChain(quality)) {
-    const formatType = formatTypes[q] ?? 'PQ';
-    const url = `https://app.c.nf.migu.cn/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=2&formatType=${formatType}`;
+    const toneFlag = formatTypes[q] ?? 'PQ';
+    // 对齐官方 lx-music-source：listen-url/v2.2
+    if (songId) {
+      try {
+        const url =
+          `https://app.c.nf.migu.cn/MIGUM2.0/strategy/listen-url/v2.2` +
+          `?netType=01&resourceType=E&songId=${encodeURIComponent(songId)}&toneFlag=${toneFlag}`;
+        const body = await onlineFetchJson<{
+          code?: string;
+          data?: { url?: string };
+        }>(url, {
+          headers: {
+            ...mgSearchHeaders(songId),
+            channel: '0146951',
+            uid: '0',
+          },
+        });
+        let playUrl = body.data?.url?.trim();
+        if (playUrl) {
+          if (playUrl.startsWith('//')) playUrl = `https:${playUrl}`;
+          return playUrl.replace(/\+/g, '%2B').split('?')[0] ?? playUrl;
+        }
+      } catch {
+        // fallback below
+      }
+    }
+    if (!copyrightId) continue;
     try {
+      const url = `https://app.c.nf.migu.cn/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=2&formatType=${toneFlag}`;
       const body = await onlineFetchJson<{
         playUrl?: string;
         url?: string;

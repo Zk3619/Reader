@@ -50,6 +50,8 @@ export interface ViewerState extends BaseViewerState {
   mediaUrls: string[];
   primaryUrl: string | null;
   loading: boolean;
+  /** music 模式：获取链接 / 换源过程中的状态提示（对齐 lx setAllStatus） */
+  playbackStatus: string | null;
   error: string | null;
   /** 当前章实际命中的替换规则（Legado effectiveReplaceRules） */
   effectiveReplaceRules: ReplaceRule[];

@@ -45,8 +45,16 @@ function mapEnrichedHitToTrack(item: Record<string, unknown>): AudioTrack {
     songmid: item.songmid != null ? String(item.songmid) : undefined,
     songId: item.songId != null ? String(item.songId) : undefined,
     hash: item.hash != null ? String(item.hash) : undefined,
+    hash_320: item.hash_320 != null ? String(item.hash_320) : undefined,
+    hash_flac: item.hash_flac != null ? String(item.hash_flac) : undefined,
+    hash_high: item.hash_high != null ? String(item.hash_high) : undefined,
+    mediaMid: item.mediaMid != null ? String(item.mediaMid) : undefined,
+    albumMid: item.albumMid != null ? String(item.albumMid) : undefined,
     copyrightId: item.copyrightId != null ? String(item.copyrightId) : undefined,
     albumName: item.albumName != null ? String(item.albumName) : undefined,
+    albumId: item.albumId != null ? String(item.albumId) : undefined,
+    _qualitys: item._qualitys as Record<string, { hash: string }> | undefined,
+    qualitys: Array.isArray(item.qualitys) ? (item.qualitys as string[]) : undefined,
   });
 }
 
@@ -58,8 +66,16 @@ function mapHitToTrack(hit: {
   songmid?: string;
   songId?: string;
   hash?: string;
+  hash_320?: string;
+  hash_flac?: string;
+  hash_high?: string;
+  mediaMid?: string;
+  albumMid?: string;
   copyrightId?: string;
   albumName?: string;
+  albumId?: string;
+  _qualitys?: Record<string, { hash: string }>;
+  qualitys?: string[];
 }): AudioTrack {
   const source = hit.source as AudioTrackSource;
   const songId = String(hit.songId ?? hit.songmid ?? '');
@@ -75,8 +91,17 @@ function mapHitToTrack(hit: {
       songId,
       songmid: hit.songmid ?? songId,
       hash: hit.hash,
+      hash_320: hit.hash_320,
+      hash_flac: hit.hash_flac,
+      hash_high: hit.hash_high,
+      mediaMid: hit.mediaMid,
+      strMediaMid: hit.mediaMid,
+      albumMid: hit.albumMid,
+      albumId: hit.albumId,
       copyrightId: hit.copyrightId,
       albumName: hit.albumName,
+      _qualitys: hit._qualitys,
+      qualitys: hit.qualitys,
     },
   };
 }
@@ -100,6 +125,9 @@ async function searchSource(
           songId: t.meta.songId,
           songmid: t.meta.songmid,
           albumName: t.meta.albumName,
+          albumId: t.meta.albumId,
+          _qualitys: t.meta._qualitys,
+          qualitys: t.meta.qualitys,
         }));
       }
       case 'wy': {
@@ -123,7 +151,13 @@ async function searchSource(
           interval: t.duration,
           songId: t.meta.songId,
           hash: t.meta.hash,
+          hash_320: t.meta.hash_320,
+          hash_flac: t.meta.hash_flac,
+          hash_high: t.meta.hash_high,
+          albumId: t.meta.albumId,
           albumName: t.meta.albumName,
+          _qualitys: t.meta._qualitys,
+          qualitys: t.meta.qualitys,
         }));
       }
       case 'tx': {
@@ -135,6 +169,8 @@ async function searchSource(
           interval: t.duration,
           songId: t.meta.songId,
           songmid: t.meta.songmid,
+          mediaMid: t.meta.mediaMid,
+          albumMid: t.meta.albumMid,
           albumName: t.meta.albumName,
         }));
       }

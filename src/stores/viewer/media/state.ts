@@ -43,6 +43,7 @@ export const initialViewerState: ViewerState = {
   mediaUrls: [],
   primaryUrl: null,
   loading: false,
+  playbackStatus: null,
   error: null,
   effectiveReplaceRules: [],
   playbackMode: 'audiobook',

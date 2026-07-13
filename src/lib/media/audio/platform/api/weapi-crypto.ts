@@ -4,6 +4,7 @@
 
 import CryptoJS from 'crypto-js';
 import { request } from '@/lib/http';
+import { isTauri } from '@/lib/platform/detect';
 
 const IV = '0102030405060708';
 const PRESET_KEY = '0CoJUm6Qyw8W8jud';
@@ -100,6 +101,8 @@ export async function linuxapiPost<T>(
       Cookie: cookies,
     },
     body: new URLSearchParams({ eparams }).toString(),
+    useBackendHttp: isTauri(),
+    ignorePageNavigationAbort: true,
   });
   if (!res.ok) throw new Error(`linuxapi HTTP ${res.status}`);
   return res.json<T>();
@@ -123,6 +126,8 @@ export async function weapiPost<T>(
       ...(cookies ? { Cookie: cookies } : {}),
     },
     body,
+    useBackendHttp: isTauri(),
+    ignorePageNavigationAbort: true,
   });
   if (!res.ok) throw new Error(`weapi ${path} HTTP ${res.status}`);
   const text = await res.text();

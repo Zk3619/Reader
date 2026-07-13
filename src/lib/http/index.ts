@@ -188,6 +188,10 @@ export interface RequestOptions {
   ignorePageNavigationAbort?: boolean;
   /** 对齐 Legado ruleContent ajax：仅使用传入 headers（不加 Accept 等浏览器默认头） */
   legadoMinimalHeaders?: boolean;
+  /**
+   * Tauri 下走 Rust download_binary，对齐 lx-music UserApi 的 needle（绕过 WebView plugin-http / rustls 兼容问题）
+   */
+  useBackendHttp?: boolean;
 }
 
 /**
@@ -221,7 +225,7 @@ export class HttpError extends Error {
   }
 }
 
-/** Tauri HTTP 插件按 fetch 规范会丢弃这些头，须走 download_binary */
+/** Tauri fetch 会丢弃 Cookie/Referer/Origin；书源与音乐 useBackendHttp 均直走 download_binary */
 const TAURI_FETCH_STRIPPED_HEADERS = new Set(['referer', 'cookie', 'origin']);
 
 function requestNeedsDownloadBinary(headers: Record<string, string>): boolean {
@@ -321,6 +325,7 @@ async function executeRequest(
     signal: userSignal,
     legadoMinimalHeaders = false,
     ignorePageNavigationAbort = false,
+    useBackendHttp = false,
   } = options;
 
   const pageSignal = ignorePageNavigationAbort ? undefined : getPageNavigationSignal();
@@ -386,23 +391,27 @@ async function executeRequest(
 
     if (useTauriHttp) {
       const bodyForRust = typeof body === 'string' ? body : undefined;
-      const useRustDirect = requestNeedsDownloadBinary(defaultHeaders);
+      const preferOkHttp = legadoMinimalHeaders || useBackendHttp;
+      const useRustDirect =
+        useBackendHttp || requestNeedsDownloadBinary(defaultHeaders);
 
-      if (useRustDirect) {
-        response = await raceWithAbortSignal(
+      const fetchViaRust = () =>
+        raceWithAbortSignal(
           fetchViaDownloadBinary(
             normalizedUrl,
             method,
             defaultHeaders,
             bodyForRust,
             timeout,
-            legadoMinimalHeaders,
+            preferOkHttp,
           ),
           combinedSignal,
         );
+
+      if (useRustDirect) {
+        response = await fetchViaRust();
       } else {
-      // 使用 Tauri 环境
-      // 优先使用 Tauri HTTP 插件，如果失败（如非 UTF-8 响应），回退到自定义 Rust 命令
+      // 普通书源 GET：优先 Tauri HTTP 插件；失败（非取消）再回退 download_binary
       try {
         const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
 
@@ -517,6 +526,10 @@ async function executeRequest(
           },
         } as Response;
       } catch (tauriFetchError: any) {
+        if (isAbortError(tauriFetchError)) {
+          throw tauriFetchError;
+        }
+
         // Tauri HTTP 插件失败（如非 UTF-8 响应头/体、危险设置未启用等），回退到自定义 Rust 命令
         const errMsg = String(tauriFetchError?.message || tauriFetchError || '');
         const errorDetails = {
@@ -563,22 +576,16 @@ async function executeRequest(
             );
           }
 
-          response = await raceWithAbortSignal(
-            fetchViaDownloadBinary(
-              normalizedUrl,
-              method,
-              defaultHeaders,
-              bodyForRust,
-              timeout,
-              legadoMinimalHeaders,
-            ),
-            combinedSignal,
-          );
+          response = await fetchViaRust();
 
           if (!isDangerousSettingsError) {
             console.debug('[HTTP] download_binary 成功，状态码:', response.status);
           }
         } catch (invokeError: any) {
+          if (isAbortError(invokeError)) {
+            throw invokeError;
+          }
+
           // Rust 命令也失败了，记录详细错误信息
           const invokeErrorMsg = String(invokeError?.message || invokeError || '');
           const invokeErrorDetails = {

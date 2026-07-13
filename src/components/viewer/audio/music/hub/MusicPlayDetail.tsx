@@ -140,7 +140,9 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           <p class="truncate text-sm text-muted-foreground">{track()?.artist ?? ''}</p>
         </div>
         <Show when={props.player.loading()}>
-          <p class="text-sm text-muted-foreground">加载中…</p>
+          <p class="text-sm text-muted-foreground">
+            {props.player.playbackStatus() || '加载中…'}
+          </p>
         </Show>
         <Show when={props.player.error()}>
           <p class="text-sm text-destructive">{props.player.error()}</p>

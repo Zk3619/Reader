@@ -21,6 +21,33 @@ import {
 
 export { getDefaultUserApiId, setDefaultUserApiId };
 
+/** 给默认音源打分：直连平台源优先，第三方聚合代理靠后 */
+export function scoreUserApiScript(s: { name: string; script: string }): number {
+  const text = `${s.name}\n${s.script.slice(0, 4000)}`;
+  let score = 0;
+  if (/小熊猫|lx-music-source|Free listen/i.test(text)) score += 100;
+  if (/interface3\.music\.163\.com|kuwo\.cn\/api\/v1\/www\/music\/playUrl/i.test(text)) {
+    score += 50;
+  }
+  if (/cenguigui\.cn|hhlqilongzhu\.cn|97\.64\.37\.235/i.test(text)) score -= 100;
+  if (/聚合API|野草|野花/i.test(s.name)) score -= 40;
+  return score;
+}
+
+/** 官方小熊猫一类：直连平台，应对齐 lx-music 优先走脚本 */
+export function isDirectPlatformUserApi(scriptId: string | null | undefined): boolean {
+  if (!scriptId) return false;
+  const s = scripts.get(scriptId);
+  return !!s && scoreUserApiScript(s) >= 50;
+}
+
+/** 依赖第三方聚合代理的脚本：失败才熔断，避免拖垮直连源 */
+export function isFragileUserApi(scriptId: string | null | undefined): boolean {
+  if (!scriptId) return true;
+  const s = scripts.get(scriptId);
+  return !s || scoreUserApiScript(s) < 0;
+}
+
 export type UserApiAction =
   | 'musicUrl'
   | 'lyric'
@@ -106,11 +133,17 @@ function loadScriptsFromStorage(): void {
         setDefaultUserApiId(null);
       }
     }
-    if (!getDefaultUserApiId()) {
-      const firstReady = [...scripts.values()].find(
-        (s) => s.enabled && isUserApiInitReady(s),
-      );
-      if (firstReady) setDefaultUserApiId(firstReady.id);
+    // 若当前默认是聚合代理等低分源，且存在小熊猫等高分直连源，自动切过去
+    const ranked = [...scripts.values()]
+      .filter((s) => s.enabled && isUserApiInitReady(s))
+      .sort((a, b) => scoreUserApiScript(b) - scoreUserApiScript(a));
+    const best = ranked[0];
+    if (best) {
+      const curId = getDefaultUserApiId();
+      const cur = curId ? scripts.get(curId) : null;
+      if (!cur || scoreUserApiScript(cur) < scoreUserApiScript(best) - 30) {
+        setDefaultUserApiId(best.id);
+      }
     }
   } catch {
     // ignore
@@ -238,8 +271,19 @@ export function setUserApiScriptEnabled(id: string, enabled: boolean): void {
   persistScripts();
   notifyScriptsChanged();
   if (!enabled && getDefaultUserApiId() === id) {
-    const fallback = listUserApiScripts().find((s) => s.enabled && isUserApiInitReady(s));
-    setDefaultUserApiId(fallback?.id ?? null);
+    const ranked = listUserApiScripts()
+      .filter((s) => s.enabled && isUserApiInitReady(s))
+      .sort((a, b) => scoreUserApiScript(b) - scoreUserApiScript(a));
+    setDefaultUserApiId(ranked[0]?.id ?? null);
+  } else if (enabled && !getDefaultUserApiId()) {
+    setDefaultUserApiId(id);
+  } else if (enabled && scoreUserApiScript(script) >= 50) {
+    // 启用高质量直连源时自动切为默认（覆盖坏掉的聚合代理）
+    const current = getDefaultUserApiId();
+    const curScript = current ? scripts.get(current) : null;
+    if (!curScript || scoreUserApiScript(curScript) < scoreUserApiScript(script)) {
+      setDefaultUserApiId(id);
+    }
   }
 }
 
@@ -268,6 +312,21 @@ export function normalizeUserApiTracks(
 
 export function listUserApiScripts(): UserApiScript[] {
   return [...scripts.values()];
+}
+
+/** 取链顺序：默认源优先，其余按评分（直连 > 聚合） */
+export function listEnabledUserApiScriptIdsForUrl(): string[] {
+  const enabled = listUserApiScripts().filter(
+    (s) => s.enabled && isUserApiInitReady(s),
+  );
+  if (!enabled.length) return [];
+  const defaultId = getDefaultUserApiId();
+  const ranked = [...enabled].sort((a, b) => {
+    if (a.id === defaultId) return -1;
+    if (b.id === defaultId) return 1;
+    return scoreUserApiScript(b) - scoreUserApiScript(a);
+  });
+  return ranked.map((s) => s.id);
 }
 
 /** LX UserApi 脚本仅用于 URL/歌词解析，不支持搜索 */
@@ -304,6 +363,22 @@ export function trackToLxSongInfo(track: AudioTrack): Record<string, unknown> {
   const rawId = track.id.includes('__') ? track.id.split('__').slice(1).join('__') : track.id;
   const songmid = String(track.meta.songmid ?? track.meta.songId ?? rawId);
 
+  const qualitys = Array.isArray(track.meta.qualitys) ? track.meta.qualitys : [];
+  let _types =
+    (track.meta._qualitys as Record<string, unknown> | undefined) ??
+    (track.meta._types as Record<string, unknown> | undefined) ??
+    {};
+
+  // kg：若未带 _qualitys，用 hash_* 字段补齐，供 UserApi 按音质取 hash
+  if (source === 'kg' && Object.keys(_types).length === 0) {
+    const built: Record<string, { hash: string }> = {};
+    if (track.meta.hash) built['128k'] = { hash: String(track.meta.hash) };
+    if (track.meta.hash_320) built['320k'] = { hash: String(track.meta.hash_320) };
+    if (track.meta.hash_flac) built.flac = { hash: String(track.meta.hash_flac) };
+    if (track.meta.hash_high) built.flac24bit = { hash: String(track.meta.hash_high) };
+    _types = built;
+  }
+
   const info: Record<string, unknown> = {
     name: track.name,
     singer: track.artist,
@@ -314,8 +389,10 @@ export function trackToLxSongInfo(track: AudioTrack): Record<string, unknown> {
     albumId: String(track.meta.albumId ?? ''),
     img: String(track.meta.coverUrl ?? track.meta.picUrl ?? ''),
     typeUrl: {},
-    types: track.meta.qualitys ?? [],
-    _types: track.meta._qualitys ?? {},
+    types: qualitys.length
+      ? qualitys
+      : Object.keys(_types).map((type) => ({ type, size: '' })),
+    _types,
   };
 
   if (source === 'kg') {
@@ -325,7 +402,9 @@ export function trackToLxSongInfo(track: AudioTrack): Record<string, unknown> {
     info.copyrightId = String(track.meta.copyrightId ?? track.meta.songId ?? songmid);
   }
   if (source === 'tx') {
-    info.strMediaMid = String(track.meta.strMediaMid ?? track.meta.songmid ?? songmid);
+    info.strMediaMid = String(
+      track.meta.strMediaMid ?? track.meta.mediaMid ?? songmid,
+    );
     info.songId = track.meta.songId ?? track.meta.id;
     info.albumMid = String(track.meta.albumMid ?? '');
   }
@@ -459,16 +538,50 @@ export async function userApiMusicUrl(
   platformSource?: string,
   quality?: import('@/lib/media/audio/lyric-types').MusicQuality,
 ): Promise<string | null> {
+  const script = scripts.get(scriptId);
+  if (!script?.enabled) throw new Error(`UserApi ${scriptId} 未启用`);
   const source = platformSource ?? resolveLxPlatformSource(track);
-  const type = quality ?? (await import('@/lib/media/audio/music-quality')).getPlayQuality();
-  const musicInfo = trackToLxSongInfo(track);
-  const result = await invokeUserApi(scriptId, 'musicUrl', {
-    track,
-    musicInfo,
-    source,
-    type,
-  });
-  return normalizeUserApiMusicUrl(result);
+  const preferred =
+    quality ?? (await import('@/lib/media/audio/music-quality')).getPlayQuality();
+  const { qualityFallbackChain } = await import('@/lib/media/audio/music-quality');
+
+  // 对齐 lx-music：只请求脚本登记的音质（无 wy_token 时小熊猫 wy 仅 128k）
+  let supported: string[] = [];
+  if (isLxUserApiScript(script.script)) {
+    try {
+      const runtime = await getLxRuntime(script);
+      supported = runtime.sourceInfo.sources[source]?.qualitys ?? [];
+    } catch {
+      supported = [];
+    }
+  }
+  const chain = qualityFallbackChain(preferred).filter(
+    (q) => !supported.length || supported.includes(q),
+  );
+  const toTry = chain.length
+    ? chain
+    : supported.length
+      ? (supported as typeof chain)
+      : [preferred];
+
+  let lastErr: unknown;
+  for (const type of toTry) {
+    try {
+      const result = await invokeUserApi(scriptId, 'musicUrl', {
+        track,
+        musicInfo: trackToLxSongInfo(track),
+        source,
+        type,
+      });
+      const url = normalizeUserApiMusicUrl(result);
+      if (url) return url;
+    } catch (err) {
+      lastErr = err;
+      console.warn('[user-api] musicUrl try failed', scriptId, source, type, err);
+    }
+  }
+  if (lastErr) throw lastErr;
+  return null;
 }
 
 export async function userApiPic(

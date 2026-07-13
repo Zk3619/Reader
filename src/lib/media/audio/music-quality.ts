@@ -48,6 +48,21 @@ export function wyLevelForQuality(q: MusicQuality): string {
   }
 }
 
+/** 网易 eapi `br` 参数（对齐社区 LX 音源脚本） */
+export function wyBrForQuality(q: MusicQuality): number {
+  switch (q) {
+    case 'flac24bit':
+    case 'flac':
+      return 999000;
+    case '320k':
+      return 320000;
+    case '192k':
+      return 192000;
+    default:
+      return 128000;
+  }
+}
+
 export function kwTypeForQuality(q: MusicQuality): string {
   switch (q) {
     case 'flac24bit':

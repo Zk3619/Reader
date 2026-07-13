@@ -72,6 +72,7 @@ export function useMusicHubPlayer() {
   const url = () => state().primaryUrl;
   const mediaUrls = () => state().mediaUrls;
   const loading = () => state().loading;
+  const playbackStatus = () => state().playbackStatus;
   const error = () => state().error;
 
   const audioConfig = createMemo(() => ({
@@ -300,6 +301,7 @@ export function useMusicHubPlayer() {
     currentTrack,
     url,
     loading,
+    playbackStatus,
     error,
     fetchedLyric,
     fetchedLyricBundle,

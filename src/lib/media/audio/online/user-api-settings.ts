@@ -3,6 +3,7 @@
  */
 
 import { createSignal } from 'solid-js';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 
 const DEFAULT_KEY = 'reader_audio_user_api_default';
 const OFFLINE_KEY = 'reader_audio_offline_mode';
@@ -32,6 +33,13 @@ export function setDefaultUserApiId(id: string | null): void {
   } catch {
     // ignore
   }
+  // 切换默认音源时重置熔断（动态 import 避免环）
+  void import('@/lib/media/audio/platform/fallback-resolver')
+    .then((m) => m.resetUserApiCircuit?.())
+    .catch(() => {});
+  void import('@/lib/media/audio/online/online-resolver')
+    .then((m) => m.resetPrimaryUserApiCircuit?.())
+    .catch(() => {});
 }
 
 export function resolveUserApiIdForTrack(
@@ -44,6 +52,7 @@ export function resolveUserApiIdForTrack(
   }
   if (activeSource?.startsWith('userApi:')) return activeSource.slice('userApi:'.length);
   if (activeSource === 'userApi') return getDefaultUserApiId();
+  if (getMusicSettings().urlSourceMode === 'builtin') return null;
   return getDefaultUserApiId();
 }
 

@@ -180,18 +180,60 @@ export async function txGetMusicUrl(
   quality = getPlayQuality(),
 ): Promise<string | null> {
   const songmid = String(track.meta.songmid ?? track.meta.songId ?? '');
-  if (!songmid) return null;
-  const fileTypes: Record<string, string> = {
-    '128k': 'M500',
-    '320k': 'M800',
-    flac: 'F000',
-    flac24bit: 'RS01',
+  // 对齐 lx-music-source：filename 使用 strMediaMid / mediaMid
+  const mediaMid = String(
+    track.meta.strMediaMid ?? track.meta.mediaMid ?? songmid,
+  );
+  if (!songmid || !mediaMid) return null;
+  const fileTypes: Record<string, { prefix: string; ext: string }> = {
+    '128k': { prefix: 'M500', ext: 'mp3' },
+    '320k': { prefix: 'M800', ext: 'mp3' },
+    flac: { prefix: 'F000', ext: 'flac' },
+    flac24bit: { prefix: 'RS01', ext: 'flac' },
   };
   for (const q of qualityFallbackChain(quality)) {
-    const filename = `${fileTypes[q] ?? 'M500'}${songmid}.mp3`;
+    const ft = fileTypes[q] ?? fileTypes['128k']!;
+    const filename = `${ft.prefix}${mediaMid}.${ft.ext}`;
     try {
+      // 对齐官方：req_0 + GET data=（部分环境比 signed POST 更稳）
+      const reqData = {
+        req_0: {
+          module: 'vkey.GetVkeyServer',
+          method: 'CgiGetVkey',
+          param: {
+            filename: [filename],
+            guid: '10000',
+            songmid: [songmid],
+            songtype: [0],
+            uin: '0',
+            loginflag: 1,
+            platform: '20',
+          },
+        },
+        loginUin: '0',
+        comm: { uin: '0', format: 'json', ct: 24, cv: 0 },
+      };
+      const getUrl =
+        `https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(reqData))}`;
+      const getBody = await safeCall(() =>
+        onlineFetchJson<{
+          req_0?: {
+            data?: {
+              sip?: string[];
+              midurlinfo?: Array<{ purl?: string }>;
+            };
+          };
+        }>(getUrl, {
+          headers: { Referer: 'https://y.qq.com/', channel: '0146951', uid: '1234' },
+        }),
+      );
+      const purl = getBody?.req_0?.data?.midurlinfo?.[0]?.purl;
+      const sip = getBody?.req_0?.data?.sip?.[0];
+      if (purl && sip) return `${sip}${purl}`;
+      if (purl) return `https://isure.stream.qqmusic.qq.com/${purl}`;
+
       const body = await txSignedRequest<{
-        req?: { data?: { midurlinfo?: Array<{ purl?: string }> } };
+        req?: { data?: { midurlinfo?: Array<{ purl?: string }>; sip?: string[] } };
       }>({
         comm: { ct: 11, cv: 14090508 },
         req: {
@@ -208,8 +250,10 @@ export async function txGetMusicUrl(
           },
         },
       });
-      const purl = body?.req?.data?.midurlinfo?.[0]?.purl;
-      if (purl) return `https://isure.stream.qqmusic.qq.com/${purl}`;
+      const signedPurl = body?.req?.data?.midurlinfo?.[0]?.purl;
+      const signedSip = body?.req?.data?.sip?.[0];
+      if (signedPurl && signedSip) return `${signedSip}${signedPurl}`;
+      if (signedPurl) return `https://isure.stream.qqmusic.qq.com/${signedPurl}`;
     } catch {
       // try next quality
     }

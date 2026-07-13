@@ -47,11 +47,16 @@ export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<Lyric
   let bundle = await resolveBuiltinLyric(track);
   if (hasLyricContent(bundle)) return bundle;
 
-  if (getMusicSettings().fallbackLyric) {
-    const others = await findMusic(track);
-    for (const alt of others) {
-      bundle = await resolveBuiltinLyric(alt);
-      if (hasLyricContent(bundle)) return bundle;
+  // 主源歌词失败时换平台搜同曲（默认开启；与播放换源独立）
+  if (getMusicSettings().fallbackLyric !== false) {
+    try {
+      const others = await findMusic(track);
+      for (const alt of others) {
+        bundle = await resolveBuiltinLyric(alt);
+        if (hasLyricContent(bundle)) return bundle;
+      }
+    } catch {
+      // ignore
     }
   }
   return bundle;

@@ -26,8 +26,99 @@ export type LxRequestPayload = {
   info: Record<string, unknown>;
 };
 
+type LxHttpResponse = {
+  statusCode: number;
+  statusMessage: string;
+  headers: Record<string, string | string[]>;
+  body: unknown;
+  raw: string;
+};
+
+const LX_REQUEST_TIMEOUT_MS = 15_000;
+
+const LX_FAILED_SCRIPT_BODY = {
+  code: -1,
+  data: [{ url: null, freeTrialInfo: null }],
+};
+
+/** 社区音源常在检查 err 前访问 resp.body，失败时不能传 null */
+function createEmptyLxResponse(err?: Error | null): LxHttpResponse {
+  return {
+    statusCode: 0,
+    statusMessage: err?.message ?? '',
+    headers: {},
+    body: { ...LX_FAILED_SCRIPT_BODY },
+    raw: '',
+  };
+}
+
+/**
+ * 仅规范化「已解析的 JSON 对象」。
+ * HTML/JS 等字符串 body 必须原样返回（酷我 getToken 会 `response.body.match(...)`）。
+ * 官方小熊猫成功体为 `data: { url }`，绝不能改成 `data: [{ url: null }]`。
+ */
+function normalizeLxJsonResponseBody(parsed: Record<string, unknown>, statusCode: number): unknown {
+  const failedData = LX_FAILED_SCRIPT_BODY.data;
+  if (statusCode >= 400) {
+    return { code: statusCode, data: failedData, ...parsed };
+  }
+  if (parsed.data === undefined || parsed.data === null) {
+    return { ...parsed, data: failedData };
+  }
+  if (Array.isArray(parsed.data) && parsed.data.length === 0) {
+    return { ...parsed, data: failedData };
+  }
+  return parsed;
+}
+
+/** needle 下 set-cookie 常为 string[]；部分脚本用 .find / .match */
+function normalizeLxResponseHeaders(
+  headers: Record<string, string>,
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = { ...headers };
+  const setCookie =
+    headers['set-cookie'] ??
+    headers['Set-Cookie'] ??
+    headers['SET-COOKIE'];
+  if (typeof setCookie === 'string' && setCookie.trim()) {
+    // 可能被合并成一条；按常见分隔拆成数组供脚本 .find
+    const parts = setCookie.split(/,(?=\s*[^;=]+=)/).map((s) => s.trim()).filter(Boolean);
+    out['set-cookie'] = parts.length > 1 ? parts : [setCookie];
+  }
+  return out;
+}
+
+function invokeLxRequestCallback(
+  callback: (
+    err: Error | null,
+    resp: LxHttpResponse,
+    body: unknown,
+  ) => void,
+  err: Error | null,
+  resp: LxHttpResponse | null,
+  body: unknown,
+): void {
+  const safeResp = resp ?? createEmptyLxResponse(err);
+  const safeBody = body ?? safeResp.body;
+  try {
+    callback(err, safeResp, safeBody);
+  } catch (syncErr) {
+    console.warn('[user-api] request callback threw', syncErr);
+    if (!err) {
+      const retryErr =
+        syncErr instanceof Error ? syncErr : new Error(String(syncErr));
+      try {
+        callback(retryErr, safeResp, safeBody);
+      } catch {
+        // 脚本未正确处理 err，依赖 invokeRequest 超时兜底
+      }
+    }
+  }
+}
+
+/** 与 lx-music preload：`events.request.call(lx, { source, action, info })` */
 type LxRequestHandler = (
-  ctx: LxGlobal,
+  this: LxGlobal,
   data: LxRequestPayload,
 ) => Promise<unknown>;
 
@@ -45,13 +136,7 @@ export type LxGlobal = {
     },
     callback: (
       err: Error | null,
-      resp: {
-        statusCode: number;
-        statusMessage: string;
-        headers: Record<string, string>;
-        body: unknown;
-        raw: string;
-      } | null,
+      resp: LxHttpResponse | null,
       body: unknown,
     ) => void,
   ) => () => void;
@@ -59,7 +144,12 @@ export type LxGlobal = {
   on: (eventName: string, handler: LxRequestHandler) => Promise<void>;
   utils: {
     crypto: {
-      aesEncrypt: (buffer: Uint8Array, mode: string, key: Uint8Array, iv: Uint8Array) => Uint8Array;
+      aesEncrypt: (
+        buffer: Uint8Array | string,
+        mode: string,
+        key: Uint8Array | string,
+        iv: Uint8Array | string,
+      ) => Uint8Array;
       rsaEncrypt: (buffer: Uint8Array, key: string) => Uint8Array;
       randomBytes: (size: number) => Uint8Array;
       md5: (str: string) => string;
@@ -147,34 +237,50 @@ function toUint8(input: unknown): Uint8Array {
     return out;
   }
   if (Array.isArray(input)) return new Uint8Array(input);
+  if (input && typeof (input as ArrayBuffer).byteLength === 'number') {
+    return new Uint8Array(input as ArrayBuffer);
+  }
   throw new Error('buffer.from: unsupported input');
 }
 
+/** 对齐 Node Buffer / lx-music：string 按 UTF-8，Uint8Array 按原始字节 */
+function toWordArray(input: unknown): CryptoJS.lib.WordArray {
+  if (typeof input === 'string') return CryptoJS.enc.Utf8.parse(input);
+  const u8 = toUint8(input);
+  const latin1: string[] = [];
+  for (let i = 0; i < u8.length; i++) latin1.push(String.fromCharCode(u8[i]!));
+  return CryptoJS.enc.Latin1.parse(latin1.join(''));
+}
+
+/**
+ * 对齐 lx-music：`aesEncrypt(buffer, mode, key, iv)`
+ * 脚本侧常传入 string（eapi），不能对 string 做 `String.fromCharCode(...key)`。
+ */
 function aesEncrypt(
-  buffer: Uint8Array,
+  buffer: unknown,
   mode: string,
-  key: Uint8Array,
-  iv: Uint8Array,
+  key: unknown,
+  iv: unknown,
 ): Uint8Array {
-  const keyStr = String.fromCharCode(...key);
-  const ivStr = String.fromCharCode(...iv);
-  const plain = CryptoJS.lib.WordArray.create(buffer as unknown as number[]);
-  const encrypted =
-    mode.includes('CBC') || mode.includes('PKCS7')
-      ? CryptoJS.AES.encrypt(plain, CryptoJS.enc.Latin1.parse(keyStr), {
-          iv: CryptoJS.enc.Latin1.parse(ivStr),
-          mode: CryptoJS.mode.CBC,
-          padding: CryptoJS.pad.Pkcs7,
-        })
-      : CryptoJS.AES.encrypt(plain, CryptoJS.enc.Latin1.parse(keyStr), {
-          mode: CryptoJS.mode.ECB,
-          padding: CryptoJS.pad.NoPadding,
-        });
+  const plain = toWordArray(buffer);
+  const keyWa = toWordArray(key);
+  const modeLower = String(mode ?? '').toLowerCase();
+  const useCbc = modeLower.includes('cbc');
+  const encrypted = useCbc
+    ? CryptoJS.AES.encrypt(plain, keyWa, {
+        iv: toWordArray(iv ?? ''),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7,
+      })
+    : CryptoJS.AES.encrypt(plain, keyWa, {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7,
+      });
   const words = encrypted.ciphertext.words;
   const sigBytes = encrypted.ciphertext.sigBytes;
   const out = new Uint8Array(sigBytes);
   for (let i = 0; i < sigBytes; i++) {
-    out[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+    out[i] = (words[i >>> 2]! >>> (24 - (i % 4) * 8)) & 0xff;
   }
   return out;
 }
@@ -244,14 +350,14 @@ export function createLxUserApiEnvironment(meta: {
       let aborted = false;
       const method = (options.method ?? 'get').toUpperCase() as 'GET' | 'POST';
       const headers = { ...(options.headers ?? {}) };
-      let body: string | undefined;
+      let reqBody: string | undefined;
       if (options.body) {
-        body = options.body;
+        reqBody = options.body;
       } else if (options.form) {
-        body = new URLSearchParams(options.form).toString();
+        reqBody = new URLSearchParams(options.form).toString();
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
       } else if (options.formData) {
-        body = new URLSearchParams(options.formData).toString();
+        reqBody = new URLSearchParams(options.formData).toString();
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
       }
 
@@ -262,24 +368,77 @@ export function createLxUserApiEnvironment(meta: {
 
       void (async () => {
         try {
-          const res = await request(url, { method, headers, body, timeout: timeoutMs });
+          // 酷我 Cookie 名会轮换；脚本若用过期 defaultKey 会报 The request is illegal!
+          // 对 playUrl 用内置鉴权覆盖 Secret/Cookie，与 lx 可用链路对齐
+          if (/kuwo\.cn\/api\/v1\/www\/music\/playUrl/i.test(url)) {
+            try {
+              const { getKwPlayAuth } = await import('@/lib/media/audio/online/sources/kw');
+              const auth = await getKwPlayAuth();
+              if (auth) {
+                headers.Secret = auth.secret;
+                headers.Cookie = auth.cookie;
+                headers.cookie = auth.cookie;
+              }
+            } catch {
+              // ignore，继续用脚本自带 Secret
+            }
+          }
+          // 统一常见头大小写，避免部分 CDN/网关敏感
+          if (headers.cookie && !headers.Cookie) {
+            headers.Cookie = headers.cookie;
+            delete headers.cookie;
+          }
+
+          const res = await request(url, {
+            method,
+            headers,
+            body: reqBody,
+            timeout: timeoutMs,
+            allowNon2xx: true,
+            useBackendHttp: true,
+            ignorePageNavigationAbort: true,
+          });
           if (aborted) return;
           const raw = await res.text();
-          let parsed: unknown = raw;
-          try {
-            parsed = JSON.parse(raw);
-          } catch {
-            // keep raw string
+          // 对齐 needle：非 JSON 保持字符串；仅 JSON 对象做 data 补齐
+          let respBody: unknown = raw;
+          const trimmed = raw.trim();
+          if (
+            trimmed.startsWith('{') ||
+            trimmed.startsWith('[')
+          ) {
+            try {
+              const parsed = JSON.parse(raw) as unknown;
+              respBody =
+                parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                  ? normalizeLxJsonResponseBody(
+                      parsed as Record<string, unknown>,
+                      res.status,
+                    )
+                  : parsed;
+            } catch {
+              respBody = raw;
+            }
+          } else if (res.status >= 400 && !trimmed) {
+            respBody = { ...LX_FAILED_SCRIPT_BODY, code: res.status };
           }
-          callback(null, {
-            statusCode: res.status,
-            statusMessage: res.statusText,
-            headers: res.headers,
-            body: parsed,
-            raw,
-          }, parsed);
+          invokeLxRequestCallback(
+            callback,
+            null,
+            {
+              statusCode: res.status,
+              statusMessage: res.statusText,
+              headers: normalizeLxResponseHeaders(res.headers),
+              body: respBody,
+              raw,
+            },
+            respBody,
+          );
         } catch (err) {
-          if (!aborted) callback(err instanceof Error ? err : new Error(String(err)), null, null);
+          if (!aborted) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            invokeLxRequestCallback(callback, error, null, null);
+          }
         }
       })();
 
@@ -378,7 +537,15 @@ export function createLxUserApiEnvironment(meta: {
     const prevLx = host.lx;
     host.lx = lx;
     try {
-      return await requestHandler(lx, data);
+      return await Promise.race([
+        requestHandler.call(lx, data),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`UserApi ${data.action} 请求超时`)),
+            LX_REQUEST_TIMEOUT_MS,
+          ),
+        ),
+      ]);
     } finally {
       if (prevLx === undefined) delete host.lx;
       else host.lx = prevLx;

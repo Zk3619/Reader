@@ -26,6 +26,15 @@ function mapKgItem(item: Record<string, unknown>): AudioTrack | null {
   const hash = String(item.FileHash ?? '');
   if (!songId || !hash) return null;
   const sec = Number(item.Duration ?? 0);
+  const hash320 = String(item.HQFileHash ?? '');
+  const hashFlac = String(item.SQFileHash ?? '');
+  const hashHigh = String(item.ResFileHash ?? '');
+  const _qualitys: Record<string, { hash: string }> = {
+    '128k': { hash },
+  };
+  if (hash320) _qualitys['320k'] = { hash: hash320 };
+  if (hashFlac) _qualitys.flac = { hash: hashFlac };
+  if (hashHigh) _qualitys.flac24bit = { hash: hashHigh };
   return {
     id: buildTrackId('kg', `${songId}_${hash}`),
     name: String(item.SongName ?? item.OriSongName ?? '未知'),
@@ -35,9 +44,14 @@ function mapKgItem(item: Record<string, unknown>): AudioTrack | null {
     meta: {
       songId,
       hash,
+      hash_320: hash320 || undefined,
+      hash_flac: hashFlac || undefined,
+      hash_high: hashHigh || undefined,
       albumId: String(item.AlbumID ?? ''),
       albumName: String(item.AlbumName ?? ''),
       songmid: songId,
+      _qualitys,
+      qualitys: Object.keys(_qualitys),
     },
   };
 }
@@ -101,6 +115,9 @@ export async function kgSearch(keyword: string, page = 1): Promise<OnlineSearchR
 
 function kgHashForQuality(track: AudioTrack, quality: MusicQuality): string {
   const m = track.meta;
+  const fromTypes = (m._qualitys as Record<string, { hash?: string }> | undefined)?.[quality]
+    ?.hash;
+  if (fromTypes) return String(fromTypes);
   switch (quality) {
     case 'flac24bit':
       return String(m.hash_high ?? m.hash_flac ?? m.hash ?? '');
@@ -109,7 +126,7 @@ function kgHashForQuality(track: AudioTrack, quality: MusicQuality): string {
     case '320k':
       return String(m.hash_320 ?? m.hash ?? '');
     default:
-      return String(m.hash ?? m.songId ?? '');
+      return String(m.hash ?? '');
   }
 }
 

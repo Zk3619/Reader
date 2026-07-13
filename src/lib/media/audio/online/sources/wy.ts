@@ -3,12 +3,27 @@
  */
 
 import { firstSuccess, hasItems } from '@/lib/media/audio/music-sdk/fallback';
-import { eapiPost, unwrapEapiBody } from '@/lib/media/audio/platform/api/eapi-crypto';
+import { eapiPost, eapiPlayerUrlPost, unwrapEapiBody } from '@/lib/media/audio/platform/api/eapi-crypto';
 import { weapiPost } from '@/lib/media/audio/platform/api/weapi-crypto';
+import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { buildTrackId, formatDurationSec } from '@/lib/media/audio/track-types';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
-import { wyLevelForQuality, qualityFallbackChain, getPlayQuality } from '@/lib/media/audio/music-quality';
+import {
+  wyLevelForQuality,
+  wyBrForQuality,
+  qualityFallbackChain,
+  getPlayQuality,
+} from '@/lib/media/audio/music-quality';
+
+const WY_DEFAULT_COOKIE = 'MUSIC_U=; os=pc';
+
+async function resolveWyCookies(cookies?: string): Promise<string> {
+  if (cookies?.trim()) return cookies;
+  const auth = await loadAuthSession('netease');
+  if (auth?.cookies?.trim()) return auth.cookies;
+  return WY_DEFAULT_COOKIE;
+}
 
 type WySongResource = {
   baseInfo?: {
@@ -142,16 +157,35 @@ export async function wyGetMusicUrl(
   cookies?: string,
   quality = getPlayQuality(),
 ): Promise<string | null> {
-  const id = String(track.meta.songId ?? '');
+  const id = String(track.meta.songId ?? track.meta.songmid ?? '');
   if (!id) return null;
+  const cookie = await resolveWyCookies(cookies);
+
   for (const q of qualityFallbackChain(quality)) {
-    const body = await weapiPost<{ data?: Array<{ url?: string | null }> }>(
-      'song/enhance/player/url/v1',
-      { ids: JSON.stringify([id]), level: wyLevelForQuality(q), encodeType: 'mp3' },
-      cookies,
-    );
-    const url = body.data?.[0]?.url;
-    if (url?.trim()) return url;
+    try {
+      // 对齐官方 lx-music-source：直连 player/url，不用 eapi/batch
+      const body = await eapiPlayerUrlPost<{
+        code?: number;
+        data?: Array<{ url?: string | null; freeTrialInfo?: unknown }>;
+      }>({ ids: `[${id}]`, br: wyBrForQuality(q) }, cookie);
+      const hit = body.data?.[0];
+      const url = hit?.url;
+      if (url?.trim() && !hit?.freeTrialInfo) return url;
+    } catch {
+      // eapi 失败时降级 weapi
+    }
+
+    try {
+      const body = await weapiPost<{ data?: Array<{ url?: string | null }> }>(
+        'song/enhance/player/url/v1',
+        { ids: JSON.stringify([id]), level: wyLevelForQuality(q), encodeType: 'mp3' },
+        cookie,
+      );
+      const url = body.data?.[0]?.url;
+      if (url?.trim()) return url;
+    } catch {
+      // 尝试下一档音质
+    }
   }
   return null;
 }
@@ -159,23 +193,41 @@ export async function wyGetMusicUrl(
 export async function wyGetLyric(track: AudioTrack): Promise<LyricBundle | null> {
   const id = String(track.meta.songId ?? '');
   if (!id) return null;
-  try {
-    const body = await weapiPost<{
-      lrc?: { lyric?: string };
-      tlyric?: { lyric?: string };
-      romalrc?: { lyric?: string };
-    }>('song/lyric', {
-      id,
-      lv: -1,
-      kv: -1,
-      tv: -1,
-      rv: -1,
-    });
+  const payload = { id, lv: -1, kv: -1, tv: -1, rv: -1 };
+
+  const parse = (body: {
+    lrc?: { lyric?: string };
+    tlyric?: { lyric?: string };
+    romalrc?: { lyric?: string };
+  }): LyricBundle | null => {
     const lyric = body.lrc?.lyric ?? null;
     const tlyric = body.tlyric?.lyric ?? null;
     const rlyric = body.romalrc?.lyric ?? null;
     if (!lyric?.trim() && !tlyric?.trim()) return null;
     return { lyric, tlyric, rlyric };
+  };
+
+  try {
+    const { eapiLyricPost } = await import('@/lib/media/audio/platform/api/eapi-crypto');
+    const cookie = await resolveWyCookies();
+    const body = await eapiLyricPost<{
+      lrc?: { lyric?: string };
+      tlyric?: { lyric?: string };
+      romalrc?: { lyric?: string };
+    }>(payload, cookie);
+    const hit = parse(body);
+    if (hit) return hit;
+  } catch {
+    // fall through to weapi
+  }
+
+  try {
+    const body = await weapiPost<{
+      lrc?: { lyric?: string };
+      tlyric?: { lyric?: string };
+      romalrc?: { lyric?: string };
+    }>('song/lyric', payload);
+    return parse(body);
   } catch {
     return null;
   }

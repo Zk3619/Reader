@@ -288,16 +288,17 @@ export async function setGroupItems(
   itemIds: string[],
 ): Promise<void> {
   const db = await getDatabase();
+  const uniqueIds = [...new Set(itemIds.filter(Boolean))];
   await db.execute('DELETE FROM media_group_items WHERE group_id = ? AND item_kind = ?', [
     groupId,
     itemKind,
   ]);
   const now = Date.now();
-  for (let i = 0; i < itemIds.length; i++) {
+  for (let i = 0; i < uniqueIds.length; i++) {
     await db.execute(
-      `INSERT INTO media_group_items (group_id, item_kind, item_id, sort_order, created_at)
+      `INSERT OR IGNORE INTO media_group_items (group_id, item_kind, item_id, sort_order, created_at)
        VALUES (?, ?, ?, ?, ?)`,
-      [groupId, itemKind, itemIds[i], i, now],
+      [groupId, itemKind, uniqueIds[i], i, now],
     );
   }
 }
