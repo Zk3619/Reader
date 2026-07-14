@@ -18,34 +18,21 @@ import {
   parseLxScriptHeaderMeta,
   type LxRequestPayload,
 } from '@/lib/media/audio/online/lx-user-api-shim';
+import {
+  getUserApiInitMode,
+  isUserApiUpdateGloballyMuted,
+  type UserApiInitMode,
+} from '@/lib/media/audio/online/user-api-update-prefs';
 
 export { getDefaultUserApiId, setDefaultUserApiId };
 
-/** 给默认音源打分：直连平台源优先，第三方聚合代理靠后 */
-export function scoreUserApiScript(s: { name: string; script: string }): number {
-  const text = `${s.name}\n${s.script.slice(0, 4000)}`;
-  let score = 0;
-  if (/小熊猫|lx-music-source|Free listen/i.test(text)) score += 100;
-  if (/interface3\.music\.163\.com|kuwo\.cn\/api\/v1\/www\/music\/playUrl/i.test(text)) {
-    score += 50;
+/** 挑选下一个默认活跃源：启用且就绪，按导入顺序；不按脚本内容打分（用户源不可控） */
+function pickFallbackDefaultUserApiId(excludeId?: string | null): string | null {
+  for (const s of scripts.values()) {
+    if (excludeId && s.id === excludeId) continue;
+    if (s.enabled && isUserApiInitReady(s)) return s.id;
   }
-  if (/cenguigui\.cn|hhlqilongzhu\.cn|97\.64\.37\.235/i.test(text)) score -= 100;
-  if (/聚合API|野草|野花/i.test(s.name)) score -= 40;
-  return score;
-}
-
-/** 官方小熊猫一类：直连平台，应对齐 lx-music 优先走脚本 */
-export function isDirectPlatformUserApi(scriptId: string | null | undefined): boolean {
-  if (!scriptId) return false;
-  const s = scripts.get(scriptId);
-  return !!s && scoreUserApiScript(s) >= 50;
-}
-
-/** 依赖第三方聚合代理的脚本：失败才熔断，避免拖垮直连源 */
-export function isFragileUserApi(scriptId: string | null | undefined): boolean {
-  if (!scriptId) return true;
-  const s = scripts.get(scriptId);
-  return !s || scoreUserApiScript(s) < 0;
+  return null;
 }
 
 export type UserApiAction =
@@ -64,18 +51,70 @@ export interface UserApiScript {
   /** 脚本源码 */
   script: string;
   enabled: boolean;
+  /** 对齐 lx：是否允许弹出音源更新提示（默认 true） */
+  allowShowUpdateAlert?: boolean;
   /** 初始化状态：添加音源或设置页校验时更新 */
   initStatus?: 'pending' | 'ready' | 'failed';
   initError?: string;
 }
 
 const scripts = new Map<string, UserApiScript>();
+/** 进行中的 init：并发取链时复用同一 Promise，避免 pending 被直接跳过 */
+const initInFlight = new Map<string, Promise<{ ok: true } | { ok: false; error: string }>>();
 const lxRuntimeCache = new Map<
   string,
   Awaited<ReturnType<typeof loadLxUserApiScript>>
 >();
 const STORAGE_KEY = 'reader_audio_user_api_scripts';
 const scriptListeners = new Set<() => void>();
+
+/** 对齐 lx：初始化失败弹窗 */
+export type UserApiInitFailedAlert = {
+  name: string;
+  message: string;
+};
+
+type InitFailedListener = (alert: UserApiInitFailedAlert) => void;
+const initFailedListeners = new Set<InitFailedListener>();
+
+export function subscribeUserApiInitFailed(listener: InitFailedListener): () => void {
+  initFailedListeners.add(listener);
+  return () => initFailedListeners.delete(listener);
+}
+
+function notifyUserApiInitFailed(alert: UserApiInitFailedAlert): void {
+  for (const fn of initFailedListeners) fn(alert);
+}
+
+/** 将底层网络/运行时错误转成用户可读文案；保留音源脚本自行抛出的业务提示 */
+export function toUserFacingInitError(raw: unknown): string {
+  const msg = (raw instanceof Error ? raw.message : String(raw ?? '')).trim();
+  if (!msg) return '音源初始化失败';
+
+  const looksTechnical =
+    /HttpError|发送请求失败|error sending request|unexpected EOF|Network Error|Failed to fetch|ECONNREFUSED|ENOTFOUND|TLS|handshake|certificate|超时|timeout|statusCode|Cannot read propert|TypeError|UserApi 初始化超时|at async|https?:\/\//i.test(
+      msg,
+    );
+
+  // 音源业务文案（如「当前版本音源已关闭」）保留
+  if (/[\u4e00-\u9fff]/.test(msg) && !looksTechnical && msg.length <= 300) {
+    return msg;
+  }
+
+  if (/发送请求失败|error sending request|unexpected EOF|Network Error|Failed to fetch|ECONNREFUSED|ENOTFOUND|TLS|handshake|certificate/i.test(msg)) {
+    return '音源接口无法访问，请检查网络或稍后再试';
+  }
+  if (/UserApi 初始化超时|timeout|超时/i.test(msg)) {
+    return '音源初始化超时，请稍后再试';
+  }
+  if (/statusCode|Cannot read propert|TypeError/i.test(msg)) {
+    return '音源脚本运行异常';
+  }
+  if (looksTechnical) {
+    return '音源初始化失败，请更换音源或稍后再试';
+  }
+  return msg.length > 300 ? `${msg.slice(0, 300)}…` : msg;
+}
 
 function notifyScriptsChanged(): void {
   for (const fn of scriptListeners) fn();
@@ -114,8 +153,14 @@ function loadScriptsFromStorage(): void {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const list = JSON.parse(raw) as UserApiScript[];
+    let droppedFailed = false;
     for (const s of list) {
       const initStatus = s.initStatus ?? 'pending';
+      // 失败源不进列表（对齐 lx：异常源只弹窗，不留在自定义源列表）
+      if (initStatus === 'failed') {
+        droppedFailed = true;
+        continue;
+      }
       scripts.set(
         s.id,
         applyScriptHeaderMeta({
@@ -123,9 +168,12 @@ function loadScriptsFromStorage(): void {
           initStatus,
           initError: s.initError,
           enabled: initStatus === 'ready' ? s.enabled : false,
+          allowShowUpdateAlert: s.allowShowUpdateAlert !== false,
         }),
       );
     }
+    if (droppedFailed) persistScripts();
+    // 仅清除无效默认；无默认时取第一个启用且就绪的导入源
     const defaultId = getDefaultUserApiId();
     if (defaultId) {
       const current = scripts.get(defaultId);
@@ -133,17 +181,9 @@ function loadScriptsFromStorage(): void {
         setDefaultUserApiId(null);
       }
     }
-    // 若当前默认是聚合代理等低分源，且存在小熊猫等高分直连源，自动切过去
-    const ranked = [...scripts.values()]
-      .filter((s) => s.enabled && isUserApiInitReady(s))
-      .sort((a, b) => scoreUserApiScript(b) - scoreUserApiScript(a));
-    const best = ranked[0];
-    if (best) {
-      const curId = getDefaultUserApiId();
-      const cur = curId ? scripts.get(curId) : null;
-      if (!cur || scoreUserApiScript(cur) < scoreUserApiScript(best) - 30) {
-        setDefaultUserApiId(best.id);
-      }
+    if (!getDefaultUserApiId()) {
+      const next = pickFallbackDefaultUserApiId();
+      if (next) setDefaultUserApiId(next);
     }
   } catch {
     // ignore
@@ -181,35 +221,54 @@ export function registerUserApiScript(script: UserApiScript): void {
 export async function initUserApiScript(
   id: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const existing = initInFlight.get(id);
+  if (existing) return existing;
+
   const script = scripts.get(id);
   if (!script) return { ok: false, error: '脚本不存在' };
-
-  patchUserApiScript(id, { initStatus: 'pending', initError: undefined });
-
-  try {
-    if (isLxUserApiScript(script.script)) {
-      lxRuntimeCache.delete(id);
-      const runtime = await loadLxUserApiScript(script);
-      lxRuntimeCache.set(id, runtime);
-    } else {
-      await initQuickJSRuntime();
-    }
-    patchUserApiScript(id, { initStatus: 'ready', initError: undefined });
+  if (script.initStatus === 'ready' && (!isLxUserApiScript(script.script) || lxRuntimeCache.has(id))) {
     return { ok: true };
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    lxRuntimeCache.delete(id);
-    patchUserApiScript(id, {
-      initStatus: 'failed',
-      initError: error,
-      enabled: false,
-    });
-    if (getDefaultUserApiId() === id) setDefaultUserApiId(null);
-    return { ok: false, error };
   }
+
+  const task = (async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    patchUserApiScript(id, { initStatus: 'pending', initError: undefined });
+    try {
+      const cur = scripts.get(id);
+      if (!cur) return { ok: false, error: '脚本不存在' };
+      if (isLxUserApiScript(cur.script)) {
+        lxRuntimeCache.delete(id);
+        const runtime = await loadLxUserApiScript({
+          id: cur.id,
+          name: cur.name,
+          script: cur.script,
+          allowShowUpdateAlert: cur.allowShowUpdateAlert !== false,
+        });
+        lxRuntimeCache.set(id, runtime);
+      } else {
+        await initQuickJSRuntime();
+      }
+      patchUserApiScript(id, { initStatus: 'ready', initError: undefined });
+      return { ok: true };
+    } catch (err) {
+      const error = toUserFacingInitError(err);
+      lxRuntimeCache.delete(id);
+      patchUserApiScript(id, {
+        initStatus: 'failed',
+        initError: error,
+        enabled: false,
+      });
+      if (getDefaultUserApiId() === id) setDefaultUserApiId(null);
+      return { ok: false, error };
+    } finally {
+      initInFlight.delete(id);
+    }
+  })();
+
+  initInFlight.set(id, task);
+  return task;
 }
 
-/** 导入并初始化音源；初始化失败时不启用 */
+/** 导入并初始化音源：成功前不进列表；失败弹窗（用户可读文案） */
 export async function importUserApiScript(input: {
   script: string;
   fileName?: string;
@@ -223,42 +282,120 @@ export async function importUserApiScript(input: {
       input.fileName?.replace(/\.[^.]+$/, '') ||
       '未命名音源');
 
-  registerUserApiScript({
-    id,
-    name,
-    script: input.script,
-    enabled: false,
-    initStatus: 'pending',
-  });
+  try {
+    if (isLxUserApiScript(input.script)) {
+      const runtime = await loadLxUserApiScript({
+        id,
+        name,
+        script: input.script,
+        allowShowUpdateAlert: true,
+      });
+      const normalized = applyScriptHeaderMeta({
+        id,
+        name,
+        script: input.script,
+        enabled: false,
+        allowShowUpdateAlert: true,
+        initStatus: 'ready',
+      });
+      scripts.set(normalized.id, normalized);
+      lxRuntimeCache.set(id, runtime);
+    } else {
+      await initQuickJSRuntime();
+      const normalized = applyScriptHeaderMeta({
+        id,
+        name,
+        script: input.script,
+        enabled: false,
+        allowShowUpdateAlert: true,
+        initStatus: 'ready',
+      });
+      scripts.set(normalized.id, normalized);
+    }
 
-  const result = await initUserApiScript(id);
-  if (!result.ok) {
-    return { id, name, ok: false, error: result.error };
+    persistScripts();
+    notifyScriptsChanged();
+
+    const hasEnabled = listUserApiScripts().some((s) => s.id !== id && s.enabled);
+    if (!hasEnabled) {
+      setUserApiScriptEnabled(id, true);
+      if (!getDefaultUserApiId()) setDefaultUserApiId(id);
+    }
+
+    return { id, name, ok: true };
+  } catch (err) {
+    lxRuntimeCache.delete(id);
+    scripts.delete(id);
+    const message = toUserFacingInitError(err);
+    notifyUserApiInitFailed({ name, message });
+    return { id, name, ok: false, error: message };
   }
-
-  const hasEnabled = listUserApiScripts().some((s) => s.id !== id && s.enabled);
-  if (!hasEnabled) {
-    setUserApiScriptEnabled(id, true);
-    if (!getDefaultUserApiId()) setDefaultUserApiId(id);
-  }
-
-  return { id, name, ok: true };
 }
 
-/** 设置页打开时补校验未就绪的已存脚本 */
-export async function ensureUserApiScriptsInitialized(): Promise<void> {
-  const pending = listUserApiScripts().filter(
-    (s) => s.initStatus !== 'ready' && s.initStatus !== 'failed',
-  );
-  for (const script of pending) {
-    await initUserApiScript(script.id);
+/** 本会话是否已为 updateAlert 强制重载过 runtime */
+let sessionUpdateAlertWarmed = false;
+
+/** 按初始化策略挑选待预热音源（永不包含未启用） */
+export function listUserApiScriptsForWarmup(mode?: UserApiInitMode): UserApiScript[] {
+  const initMode = mode ?? getUserApiInitMode();
+  const enabled = listUserApiScripts().filter((s) => s.enabled);
+  if (initMode === 'allEnabled') return enabled;
+  const activeId = getDefaultUserApiId();
+  const active = activeId ? enabled.find((s) => s.id === activeId) : undefined;
+  if (active) return [active];
+  return enabled[0] ? [enabled[0]] : [];
+}
+
+/**
+ * 按策略初始化 / 预热音源（触发 updateAlert）。
+ * - activeOnly：仅默认活跃（启用）源
+ * - allEnabled：全部已启用源
+ * - 未启用源不预热；启用时再 init
+ * - forceUpdateCheck：切换策略后强制对各目标重载 runtime 以检查更新
+ */
+export async function ensureUserApiScriptsInitialized(options?: {
+  forceUpdateCheck?: boolean;
+}): Promise<void> {
+  if (options?.forceUpdateCheck) {
+    sessionUpdateAlertWarmed = false;
   }
+
+  const targets = listUserApiScriptsForWarmup();
+  for (const script of targets) {
+    if (script.initStatus === 'failed') {
+      continue;
+    }
+    if (script.initStatus !== 'ready') {
+      const result = await initUserApiScript(script.id);
+      if (!result.ok) {
+        const name = scripts.get(script.id)?.name ?? script.name;
+        const message = toUserFacingInitError(result.error ?? '初始化失败');
+        // 启动预热失败：移出列表并弹窗（不把异常源留在列表）
+        removeUserApiScript(script.id);
+        notifyUserApiInitFailed({ name, message });
+      }
+      continue;
+    }
+    if (!isLxUserApiScript(script.script)) continue;
+    // 全局静音期内不强制重载检查更新；首次取链仍会按需创建 runtime
+    if (!sessionUpdateAlertWarmed && !isUserApiUpdateGloballyMuted()) {
+      lxRuntimeCache.delete(script.id);
+    }
+    try {
+      await getLxRuntime(script);
+    } catch (err) {
+      console.warn('[user-api] warm runtime failed', script.name, err);
+    }
+  }
+  sessionUpdateAlertWarmed = true;
 }
 
 export function removeUserApiScript(id: string): void {
   scripts.delete(id);
   lxRuntimeCache.delete(id);
-  if (getDefaultUserApiId() === id) setDefaultUserApiId(null);
+  if (getDefaultUserApiId() === id) {
+    setDefaultUserApiId(pickFallbackDefaultUserApiId(id));
+  }
   persistScripts();
   notifyScriptsChanged();
 }
@@ -266,25 +403,45 @@ export function removeUserApiScript(id: string): void {
 export function setUserApiScriptEnabled(id: string, enabled: boolean): void {
   const script = scripts.get(id);
   if (!script) return;
-  if (enabled && !isUserApiInitReady(script)) return;
-  scripts.set(id, { ...script, enabled });
+  if (enabled) {
+    // 启用时才初始化：未就绪则异步 init，失败则回滚启用
+    scripts.set(id, { ...script, enabled: true });
+    if (!getDefaultUserApiId()) setDefaultUserApiId(id);
+    persistScripts();
+    notifyScriptsChanged();
+    if (!isUserApiInitReady(script) && script.initStatus !== 'pending') {
+      void initUserApiScript(id).then((result) => {
+        if (result.ok) return;
+        const cur = scripts.get(id);
+        const name = cur?.name ?? id;
+        const message = toUserFacingInitError(result.error ?? '初始化失败');
+        // 启用时初始化失败：移除并弹窗，避免失败源留在列表
+        removeUserApiScript(id);
+        notifyUserApiInitFailed({ name, message });
+      });
+    } else if (isUserApiInitReady(script) && isLxUserApiScript(script.script) && !lxRuntimeCache.has(id)) {
+      void getLxRuntime(scripts.get(id)!).catch((err) => {
+        console.warn('[user-api] enable warm failed', script.name, err);
+      });
+    }
+    return;
+  }
+
+  scripts.set(id, { ...script, enabled: false });
+  if (getDefaultUserApiId() === id) {
+    setDefaultUserApiId(pickFallbackDefaultUserApiId(id));
+  }
   persistScripts();
   notifyScriptsChanged();
-  if (!enabled && getDefaultUserApiId() === id) {
-    const ranked = listUserApiScripts()
-      .filter((s) => s.enabled && isUserApiInitReady(s))
-      .sort((a, b) => scoreUserApiScript(b) - scoreUserApiScript(a));
-    setDefaultUserApiId(ranked[0]?.id ?? null);
-  } else if (enabled && !getDefaultUserApiId()) {
-    setDefaultUserApiId(id);
-  } else if (enabled && scoreUserApiScript(script) >= 50) {
-    // 启用高质量直连源时自动切为默认（覆盖坏掉的聚合代理）
-    const current = getDefaultUserApiId();
-    const curScript = current ? scripts.get(current) : null;
-    if (!curScript || scoreUserApiScript(curScript) < scoreUserApiScript(script)) {
-      setDefaultUserApiId(id);
-    }
-  }
+}
+
+/** 对齐 lx setAllowShowUserApiUpdateAlert */
+export function setUserApiAllowShowUpdateAlert(id: string, allow: boolean): void {
+  const script = scripts.get(id);
+  if (!script) return;
+  scripts.set(id, { ...script, allowShowUpdateAlert: allow });
+  persistScripts();
+  notifyScriptsChanged();
 }
 
 export function setUserApiDefaultScript(id: string | null): void {
@@ -296,7 +453,38 @@ export function setUserApiDefaultScript(id: string | null): void {
   const script = scripts.get(id);
   if (!script || !isUserApiInitReady(script)) return;
   setDefaultUserApiId(id);
+  // 设为活跃时自动启用（对齐 lx 单一 apiSource）
+  if (!script.enabled) {
+    scripts.set(id, { ...script, enabled: true });
+    persistScripts();
+  }
   notifyScriptsChanged();
+}
+
+/** 活跃源是否在熔断保护白名单（用户默认源永不因熔断被跳过） */
+export function isActiveUserApiId(scriptId: string | null | undefined): boolean {
+  if (!scriptId) return false;
+  return getDefaultUserApiId() === scriptId;
+}
+
+/** 当前活跃 UserApi 展示名（状态栏用） */
+export function getActiveUserApiDisplayName(): string | null {
+  const id = getDefaultUserApiId();
+  if (!id) return null;
+  return scripts.get(id)?.name ?? id;
+}
+
+/** 脚本登记的全平台音质并集（驱动 UI gating） */
+export function getActiveUserApiQualitys(): string[] {
+  const id = getDefaultUserApiId();
+  if (!id) return [];
+  const runtime = lxRuntimeCache.get(id);
+  if (!runtime?.sourceInfo?.sources) return [];
+  const set = new Set<string>();
+  for (const src of Object.values(runtime.sourceInfo.sources)) {
+    for (const q of src.qualitys ?? []) set.add(q);
+  }
+  return [...set];
 }
 
 export function normalizeUserApiTracks(
@@ -314,17 +502,21 @@ export function listUserApiScripts(): UserApiScript[] {
   return [...scripts.values()];
 }
 
-/** 取链顺序：默认源优先，其余按评分（直连 > 聚合） */
+/** 取链顺序：当前活跃源 → 其他启用源（含尚未 init 完成的启用项；失败态除外） */
 export function listEnabledUserApiScriptIdsForUrl(): string[] {
   const enabled = listUserApiScripts().filter(
-    (s) => s.enabled && isUserApiInitReady(s),
+    (s) => s.enabled && s.initStatus !== 'failed',
   );
   if (!enabled.length) return [];
   const defaultId = getDefaultUserApiId();
   const ranked = [...enabled].sort((a, b) => {
     if (a.id === defaultId) return -1;
     if (b.id === defaultId) return 1;
-    return scoreUserApiScript(b) - scoreUserApiScript(a);
+    // 已就绪优先；其余保持导入顺序（不按脚本内容打分）
+    const readyA = a.initStatus === 'ready' ? 1 : 0;
+    const readyB = b.initStatus === 'ready' ? 1 : 0;
+    if (readyA !== readyB) return readyB - readyA;
+    return 0;
   });
   return ranked.map((s) => s.id);
 }
@@ -340,7 +532,12 @@ async function getLxRuntime(script: UserApiScript) {
   let runtime = lxRuntimeCache.get(script.id);
   if (!runtime) {
     try {
-      runtime = await loadLxUserApiScript(script);
+      runtime = await loadLxUserApiScript({
+        id: script.id,
+        name: script.name,
+        script: script.script,
+        allowShowUpdateAlert: script.allowShowUpdateAlert !== false,
+      });
       lxRuntimeCache.set(script.id, runtime);
     } catch (err) {
       lxRuntimeCache.delete(script.id);
@@ -578,6 +775,11 @@ export async function userApiMusicUrl(
     } catch (err) {
       lastErr = err;
       console.warn('[user-api] musicUrl try failed', scriptId, source, type, err);
+      const msg = err instanceof Error ? err.message : String(err ?? '');
+      // IP 封禁 / 限流：再试其它音质只会继续被封，立刻中止本脚本音质链
+      if (/block\s*ip|too many requests|封禁|频繁|rate.?limit/i.test(msg)) {
+        throw err instanceof Error ? err : new Error(msg);
+      }
     }
   }
   if (lastErr) throw lastErr;

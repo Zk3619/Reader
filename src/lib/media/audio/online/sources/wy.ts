@@ -2,7 +2,7 @@
  * 网易云音乐源（搜索 eapi 优先，cloudsearch / weapi 降级）
  */
 
-import { firstSuccess, hasItems } from '@/lib/media/audio/music-sdk/fallback';
+import { firstFullest, hasItems } from '@/lib/media/audio/music-sdk/fallback';
 import { eapiPost, eapiPlayerUrlPost, unwrapEapiBody } from '@/lib/media/audio/platform/api/eapi-crypto';
 import { weapiPost } from '@/lib/media/audio/platform/api/weapi-crypto';
 import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
@@ -34,9 +34,49 @@ type WySongResource = {
       ar?: Array<{ name?: string }>;
       al?: { id?: number | string; name?: string; picUrl?: string };
       privilege?: { maxbr?: number; maxBrLevel?: string };
+      hr?: { size?: number };
+      sq?: { size?: number };
+      h?: { size?: number };
+      l?: { size?: number };
     };
   };
 };
+
+/** 对齐 lx wy handleResult：按 privilege.maxbr / maxBrLevel 填充 types */
+function wyQualityFromSong(song: {
+  privilege?: { maxbr?: number; maxBrLevel?: string };
+  hr?: { size?: number };
+  sq?: { size?: number };
+  h?: { size?: number };
+  l?: { size?: number };
+}): { qualitys: string[]; _qualitys: Record<string, { size?: number }> } {
+  const _qualitys: Record<string, { size?: number }> = {};
+  const qualitys: string[] = [];
+  const privilege = song.privilege;
+  if (privilege?.maxBrLevel === 'hires') {
+    _qualitys.flac24bit = { size: song.hr?.size };
+    qualitys.push('flac24bit');
+  }
+  const maxbr = Number(privilege?.maxbr ?? 0);
+  if (maxbr >= 999000) {
+    _qualitys.flac = { size: song.sq?.size };
+    qualitys.push('flac');
+  }
+  if (maxbr >= 320000) {
+    _qualitys['320k'] = { size: song.h?.size };
+    qualitys.push('320k');
+  }
+  if (maxbr >= 128000 || maxbr === 192000) {
+    _qualitys['128k'] = { size: song.l?.size };
+    qualitys.push('128k');
+  }
+  // 无 privilege 时保底 128k，避免完全无徽标依据
+  if (qualitys.length === 0) {
+    _qualitys['128k'] = {};
+    qualitys.push('128k');
+  }
+  return { qualitys, _qualitys };
+}
 
 function mapResource(item: WySongResource): AudioTrack | null {
   const song = item.baseInfo?.simpleSongData;
@@ -44,6 +84,7 @@ function mapResource(item: WySongResource): AudioTrack | null {
   const id = String(song.id);
   const ms = Number(song.dt ?? 0);
   const artists = song.ar ?? [];
+  const { qualitys, _qualitys } = wyQualityFromSong(song);
   return {
     id: buildTrackId('wy', id),
     name: String(song.name ?? ''),
@@ -56,6 +97,8 @@ function mapResource(item: WySongResource): AudioTrack | null {
       albumId: String(song.al?.id ?? ''),
       albumName: String(song.al?.name ?? ''),
       coverUrl: String(song.al?.picUrl ?? ''),
+      qualitys,
+      _qualitys,
     },
   };
 }
@@ -66,6 +109,14 @@ function mapSongRecord(s: Record<string, unknown>): AudioTrack | null {
   const ms = Number(s.dt ?? 0);
   const artists = (s.ar as Array<{ name?: string }> | undefined) ?? [];
   const al = s.al as { id?: number | string; name?: string; picUrl?: string } | undefined;
+  const privilege = s.privilege as { maxbr?: number; maxBrLevel?: string } | undefined;
+  const { qualitys, _qualitys } = wyQualityFromSong({
+    privilege,
+    hr: s.hr as { size?: number } | undefined,
+    sq: s.sq as { size?: number } | undefined,
+    h: s.h as { size?: number } | undefined,
+    l: s.l as { size?: number } | undefined,
+  });
   return {
     id: buildTrackId('wy', id),
     name: String(s.name ?? ''),
@@ -78,6 +129,8 @@ function mapSongRecord(s: Record<string, unknown>): AudioTrack | null {
       albumId: String(al?.id ?? ''),
       albumName: String(al?.name ?? ''),
       coverUrl: String(al?.picUrl ?? ''),
+      qualitys,
+      _qualitys,
     },
   };
 }
@@ -97,10 +150,11 @@ async function searchEapiNew(keyword: string, page: number, limit: number): Prom
     data?: { resources?: WySongResource[] };
   }>(raw);
   if (body.code !== 200) return null;
-  const tracks = (body.data?.resources ?? [])
+  const resources = body.data?.resources ?? [];
+  const ok = resources
     .map(mapResource)
     .filter((t): t is AudioTrack => t !== null);
-  return hasItems(tracks) ? tracks : null;
+  return hasItems(ok) ? ok : null;
 }
 
 async function searchEapiCloud(keyword: string, page: number, limit: number): Promise<AudioTrack[] | null> {
@@ -116,10 +170,9 @@ async function searchEapiCloud(keyword: string, page: number, limit: number): Pr
     result?: { songs?: Record<string, unknown>[] };
   }>(raw);
   if (body.code !== 200) return null;
-  const tracks = (body.result?.songs ?? [])
-    .map(mapSongRecord)
-    .filter((t): t is AudioTrack => t !== null);
-  return hasItems(tracks) ? tracks : null;
+  const songs = body.result?.songs ?? [];
+  const ok = songs.map(mapSongRecord).filter((t): t is AudioTrack => t !== null);
+  return hasItems(ok) ? ok : null;
 }
 
 async function searchWeapi(keyword: string, page: number, limit: number): Promise<AudioTrack[] | null> {
@@ -134,19 +187,20 @@ async function searchWeapi(keyword: string, page: number, limit: number): Promis
     total: page === 1,
   });
   if (body.code !== 200) return null;
-  const tracks = (body.result?.songs ?? [])
-    .map(mapSongRecord)
-    .filter((t): t is AudioTrack => t !== null);
-  return hasItems(tracks) ? tracks : null;
+  const songs = body.result?.songs ?? [];
+  const ok = songs.map(mapSongRecord).filter((t): t is AudioTrack => t !== null);
+  return hasItems(ok) ? ok : null;
 }
 
 export async function wySearch(keyword: string, page = 1, limit = 30): Promise<AudioTrack[]> {
-  const tracks = await firstSuccess(
+  const tracks = await firstFullest(
     [
       () => searchEapiNew(keyword, page, limit),
       () => searchEapiCloud(keyword, page, limit),
       () => searchWeapi(keyword, page, limit),
     ],
+    (list) => list.length,
+    limit,
     hasItems,
   );
   return tracks ?? [];
@@ -193,30 +247,63 @@ export async function wyGetMusicUrl(
 export async function wyGetLyric(track: AudioTrack): Promise<LyricBundle | null> {
   const id = String(track.meta.songId ?? '');
   if (!id) return null;
-  const payload = { id, lv: -1, kv: -1, tv: -1, rv: -1 };
+  const { fixWyTimeLabel, parseWyYrcBundle } = await import(
+    '@/lib/media/audio/platform/api/wy-yrc-parse'
+  );
 
-  const parse = (body: {
-    lrc?: { lyric?: string };
-    tlyric?: { lyric?: string };
-    romalrc?: { lyric?: string };
+  const toBundle = (info: {
+    lyric: string;
+    tlyric: string;
+    rlyric: string;
+    lxlyric: string;
   }): LyricBundle | null => {
-    const lyric = body.lrc?.lyric ?? null;
-    const tlyric = body.tlyric?.lyric ?? null;
-    const rlyric = body.romalrc?.lyric ?? null;
-    if (!lyric?.trim() && !tlyric?.trim()) return null;
-    return { lyric, tlyric, rlyric };
+    if (!info.lyric?.trim() && !info.tlyric?.trim()) return null;
+    return {
+      lyric: info.lyric || null,
+      tlyric: info.tlyric || null,
+      rlyric: info.rlyric || null,
+      lxlyric: info.lxlyric || null,
+    };
   };
 
   try {
     const { eapiLyricPost } = await import('@/lib/media/audio/platform/api/eapi-crypto');
     const cookie = await resolveWyCookies();
     const body = await eapiLyricPost<{
+      code?: number;
       lrc?: { lyric?: string };
       tlyric?: { lyric?: string };
       romalrc?: { lyric?: string };
-    }>(payload, cookie);
-    const hit = parse(body);
-    if (hit) return hit;
+      yrc?: { lyric?: string };
+      ytlrc?: { lyric?: string };
+      yromalrc?: { lyric?: string };
+    }>(
+      {
+        id,
+        cp: false,
+        tv: 0,
+        lv: 0,
+        rv: 0,
+        kv: 0,
+        yv: 0,
+        ytv: 0,
+        yrv: 0,
+      },
+      cookie,
+    );
+    if (body.code === 200 || body.lrc?.lyric || body.yrc?.lyric) {
+      const fixed = fixWyTimeLabel(body.lrc?.lyric, body.tlyric?.lyric, body.romalrc?.lyric);
+      const info = parseWyYrcBundle(
+        body.yrc?.lyric,
+        body.ytlrc?.lyric,
+        body.yromalrc?.lyric,
+        fixed.lrc,
+        fixed.tlrc,
+        fixed.romalrc,
+      );
+      const hit = toBundle(info);
+      if (hit) return hit;
+    }
   } catch {
     // fall through to weapi
   }
@@ -226,8 +313,11 @@ export async function wyGetLyric(track: AudioTrack): Promise<LyricBundle | null>
       lrc?: { lyric?: string };
       tlyric?: { lyric?: string };
       romalrc?: { lyric?: string };
-    }>('song/lyric', payload);
-    return parse(body);
+    }>('song/lyric', { id, lv: -1, kv: -1, tv: -1, rv: -1 });
+    const fixed = fixWyTimeLabel(body.lrc?.lyric, body.tlyric?.lyric, body.romalrc?.lyric);
+    return toBundle(
+      parseWyYrcBundle(null, null, null, fixed.lrc, fixed.tlrc, fixed.romalrc),
+    );
   } catch {
     return null;
   }

@@ -16,14 +16,20 @@ export const LX_PLAYLIST_COVER_WIDTH_RATIO = 0.4;
 /** 桌面列间距（Tailwind gap-x-5） */
 export const LX_PLAYLIST_DESKTOP_COL_GAP_PX = 20;
 
-/** 桌面行间距（Tailwind gap-y-6） */
-export const LX_PLAYLIST_DESKTOP_ROW_GAP_PX = 24;
+/** 桌面行间距：与列间距一致 */
+export const LX_PLAYLIST_DESKTOP_ROW_GAP_PX = LX_PLAYLIST_DESKTOP_COL_GAP_PX;
+
+/** 行顶留白：容纳悬停 translateY(-2px) 与阴影，避免被虚拟行裁切 */
+export const LX_PLAYLIST_ROW_HOVER_PAD_PX = 4;
+
+/** 列表水平内边距合计（与 listInnerClass px-2 一致） */
+export const LX_PLAYLIST_LIST_HORIZONTAL_PADDING_PX = 16;
 
 /** 移动列间距（Tailwind gap-x-6） */
 export const LX_PLAYLIST_MOBILE_COL_GAP_PX = 24;
 
-/** 移动行间距（Tailwind gap-y-5） */
-export const LX_PLAYLIST_MOBILE_ROW_GAP_PX = 20;
+/** 移动行间距：与列间距一致 */
+export const LX_PLAYLIST_MOBILE_ROW_GAP_PX = LX_PLAYLIST_MOBILE_COL_GAP_PX;
 
 /** 移动网格卡内边距合计（bookGroupGridCardClass p-1 × 2） */
 export const LX_PLAYLIST_MOBILE_CARD_PADDING_PX = 8;
@@ -52,14 +58,15 @@ export function lxPlaylistCardHeightPx(cardWidth: number): number {
 
 export function estimateLxDesktopPlaylistRowHeightPx(metrics: VirtualGridRowLayoutMetrics): number {
   const cardWidth = lxPlaylistCardWidthPx(metrics.colWidth);
-  return lxPlaylistCardHeightPx(cardWidth);
+  return lxPlaylistCardHeightPx(cardWidth) + LX_PLAYLIST_ROW_HOVER_PAD_PX;
 }
 
 export function estimateLxMobilePlaylistRowHeightPx(metrics: VirtualGridRowLayoutMetrics): number {
   return (
     metrics.colWidth +
     LX_PLAYLIST_MOBILE_CARD_PADDING_PX +
-    LX_PLAYLIST_MOBILE_META_HEIGHT_PX
+    LX_PLAYLIST_MOBILE_META_HEIGHT_PX +
+    LX_PLAYLIST_ROW_HOVER_PAD_PX
   );
 }
 

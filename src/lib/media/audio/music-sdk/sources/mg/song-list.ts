@@ -377,31 +377,85 @@ export function parseListIdFromUrl(url: string): string | null {
 export async function searchPlaylists(
   keyword: string,
   page = 1,
+  limit = LIMIT,
 ): Promise<SongListSearchResult> {
-  const url = `https://music.migu.cn/v3/api/search/searchAll?keyword=${encodeURIComponent(keyword)}&pageNo=${page}&pageSize=${LIMIT}&searchType=2`;
-  const body = await safeCall(() =>
-    onlineFetchJson<{
-      data?: {
-        songListResult?: {
-          songLists?: Record<string, unknown>[];
-          totalCount?: number;
-        };
-      };
-    }>(url, { headers: mgHeaders(keyword) }),
+  const pageSize = Math.max(1, limit);
+  // 对齐 lx songList.search：jadeite searchAll + songlist switch
+  const url =
+    `https://jadeite.migu.cn/music_search/v3/search/searchAll?isCorrect=1&isCopyright=1` +
+    `&searchSwitch=%7B%22song%22%3A0%2C%22album%22%3A0%2C%22singer%22%3A0%2C%22tagSong%22%3A0%2C%22mvSong%22%3A0%2C%22bestShow%22%3A0%2C%22songlist%22%3A1%2C%22lyricSong%22%3A0%7D` +
+    `&pageSize=${pageSize}&text=${encodeURIComponent(keyword)}&pageNo=${page}&sort=0&sid=USS`;
+
+  const result = await firstSuccess(
+    [
+      async () => {
+        const body = await safeCall(() =>
+          onlineFetchJson<{
+            songListResultData?: {
+              result?: Record<string, unknown>[];
+              totalCount?: number | string;
+            };
+          }>(url, { headers: mgHeaders(keyword) }),
+        );
+        const raw = body?.songListResultData?.result ?? [];
+        if (!hasItems(raw)) return null;
+        const list: OnlinePlaylistSummary[] = [];
+        for (const item of raw) {
+          const id = String(item.id ?? '');
+          if (!id) continue;
+          const playNum = parseInt(String(item.playNum ?? ''), 10);
+          list.push({
+            id,
+            name: String(item.name ?? ''),
+            author: String(item.userName ?? ''),
+            coverUrl: String(item.musicListPicUrl ?? item.img ?? ''),
+            playCount: Number.isFinite(playNum) ? formatMgPlayCount(playNum) : undefined,
+            trackCount: Number(item.musicNum ?? 0) || undefined,
+            source: SOURCE,
+          });
+        }
+        if (!hasItems(list)) return null;
+        return {
+          list,
+          total: parseInt(String(body?.songListResultData?.totalCount ?? list.length), 10) || list.length,
+          page,
+          limit: pageSize,
+          source: SOURCE,
+        } satisfies SongListSearchResult;
+      },
+      async () => {
+        // 降级：旧 web 搜索
+        const webUrl = `https://music.migu.cn/v3/api/search/searchAll?keyword=${encodeURIComponent(keyword)}&pageNo=${page}&pageSize=${pageSize}&searchType=2`;
+        const body = await safeCall(() =>
+          onlineFetchJson<{
+            data?: {
+              songListResult?: {
+                songLists?: Record<string, unknown>[];
+                totalCount?: number;
+              };
+            };
+          }>(webUrl, { headers: mgHeaders(keyword) }),
+        );
+        const raw = body?.data?.songListResult?.songLists ?? [];
+        if (!hasItems(raw)) return null;
+        const list: OnlinePlaylistSummary[] = raw.map((item) => ({
+          id: String(item.musicListId ?? item.id ?? ''),
+          name: String(item.title ?? item.name ?? ''),
+          author: String(item.ownerName ?? ''),
+          coverUrl: String(item.img ?? ''),
+          source: SOURCE,
+        }));
+        return {
+          list,
+          total: Number(body?.data?.songListResult?.totalCount ?? list.length),
+          page,
+          limit: pageSize,
+          source: SOURCE,
+        } satisfies SongListSearchResult;
+      },
+    ],
+    (r) => hasItems(r.list),
   );
-  const raw = body?.data?.songListResult?.songLists ?? [];
-  const list = raw.map((item) => ({
-    id: String(item.musicListId ?? item.id ?? ''),
-    name: String(item.title ?? item.name ?? ''),
-    author: String(item.ownerName ?? ''),
-    coverUrl: String(item.img ?? ''),
-    source: SOURCE,
-  }));
-  return {
-    list,
-    total: Number(body?.data?.songListResult?.totalCount ?? list.length),
-    page,
-    limit: LIMIT,
-    source: SOURCE,
-  };
+
+  return result ?? { list: [], total: 0, page, limit: pageSize, source: SOURCE };
 }

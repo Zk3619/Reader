@@ -4,6 +4,7 @@
 
 import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { onlineFetchJson, onlineFetchText } from '@/lib/media/audio/online/online-http';
+import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 import { buildTrackId, formatDurationSec } from '@/lib/media/audio/track-types';
 import type {
   MusicSdkSource,
@@ -132,8 +133,31 @@ function mapPlaylistCategory(basic: Record<string, unknown>): OnlinePlaylistSumm
 function mapTrack(item: Record<string, unknown>) {
   const songId = String(item.songid ?? item.id ?? '');
   const mid = String(item.songmid ?? item.mid ?? songId);
+  if (!mid) return null;
+  const file = item.file as Record<string, unknown> | undefined;
+  const mediaMid = String(file?.media_mid ?? mid);
   const sec = Number(item.interval ?? item.duration ?? 0);
   const album = item.album as { name?: string; mid?: string } | undefined;
+  const qualitys: string[] = [];
+  const _qualitys: Record<string, { size?: number }> = {};
+  if (file) {
+    if (Number(file.size_128mp3 ?? 0) !== 0) {
+      qualitys.push('128k');
+      _qualitys['128k'] = { size: Number(file.size_128mp3) };
+    }
+    if (Number(file.size_320mp3 ?? 0) !== 0) {
+      qualitys.push('320k');
+      _qualitys['320k'] = { size: Number(file.size_320mp3) };
+    }
+    if (Number(file.size_flac ?? 0) !== 0) {
+      qualitys.push('flac');
+      _qualitys.flac = { size: Number(file.size_flac) };
+    }
+    if (Number(file.size_hires ?? 0) !== 0) {
+      qualitys.push('flac24bit');
+      _qualitys.flac24bit = { size: Number(file.size_hires) };
+    }
+  }
   return {
     id: buildTrackId(SOURCE, mid),
     name: String(item.title ?? item.songname ?? '未知'),
@@ -143,8 +167,12 @@ function mapTrack(item: Record<string, unknown>) {
     meta: {
       songId,
       songmid: mid,
+      strMediaMid: mediaMid,
+      mediaMid,
       albumName: String(album?.name ?? ''),
       albumId: String(album?.mid ?? ''),
+      qualitys,
+      _qualitys,
     },
   };
 }
@@ -332,7 +360,7 @@ async function loadDetailFcg(pid: string): Promise<OnlinePlaylistDetail | null> 
   );
   const cd = body?.cdlist?.[0];
   if (!cd || body?.code !== SUCCESS_CODE) return null;
-  const tracks = (cd.songlist ?? []).map(mapTrack);
+  const tracks = (cd.songlist ?? []).map(mapTrack).filter((t): t is NonNullable<typeof t> => t != null);
   if (!hasItems(tracks) && !cd.dissname) return null;
   return {
     info: {
@@ -383,7 +411,7 @@ async function loadDetailMusicu(pid: string): Promise<OnlinePlaylistDetail | nul
   const data = body?.req?.data;
   const dir = data?.dirinfo;
   if (!data || body?.code !== SUCCESS_CODE) return null;
-  const tracks = (data.songlist ?? []).map(mapTrack);
+  const tracks = (data.songlist ?? []).map(mapTrack).filter((t): t is NonNullable<typeof t> => t != null);
   if (!hasItems(tracks) && !dir?.title) return null;
   return {
     info: {
@@ -421,8 +449,10 @@ export function parseListIdFromUrl(url: string): string | null {
 export async function searchPlaylists(
   keyword: string,
   page = 1,
+  limit = LIMIT_LIST,
 ): Promise<SongListSearchResult> {
-  const url = `http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${LIMIT_LIST}&format=json&query=${encodeURIComponent(keyword)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`;
+  const pageSize = Math.max(1, limit);
+  const url = `http://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=${page - 1}&num_per_page=${pageSize}&format=json&query=${encodeURIComponent(keyword)}&remoteplace=txt.yqq.playlist&inCharset=utf8&outCharset=utf-8`;
   const body = await safeCall(() =>
     onlineFetchJson<{
       code?: number;
@@ -436,8 +466,8 @@ export async function searchPlaylists(
   );
   const list = (body?.data?.list ?? []).map((item) => ({
     id: String(item.dissid ?? ''),
-    name: String(item.dissname ?? ''),
-    author: String((item.creator as { name?: string } | undefined)?.name ?? ''),
+    name: decodeHtmlEntities(String(item.dissname ?? '')),
+    author: decodeHtmlEntities(String((item.creator as { name?: string } | undefined)?.name ?? '')),
     coverUrl: String(item.imgurl ?? ''),
     playCount: item.listennum != null ? formatPlayCount(Number(item.listennum)) : undefined,
     trackCount: Number(item.song_count ?? 0) || undefined,
@@ -448,7 +478,7 @@ export async function searchPlaylists(
     list,
     total: Number(body?.data?.sum ?? list.length),
     page,
-    limit: LIMIT_LIST,
+    limit: pageSize,
     source: SOURCE,
   };
 }

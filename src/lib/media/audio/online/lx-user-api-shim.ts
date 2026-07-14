@@ -13,6 +13,79 @@ export const LX_EVENT_NAMES = {
   updateAlert: 'updateAlert',
 } as const;
 
+export type UserApiUpdateAlert = {
+  scriptId?: string;
+  scriptName: string;
+  log: string;
+  updateUrl: string;
+};
+
+type UpdateAlertBatchListener = (alerts: UserApiUpdateAlert[]) => void;
+
+const updateAlertListeners = new Set<UpdateAlertBatchListener>();
+let pendingUpdateAlerts = new Map<string, UserApiUpdateAlert>();
+let lastUpdateAlertBatch: UserApiUpdateAlert[] = [];
+let updateAlertFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function subscribeUserApiUpdateAlert(
+  listener: UpdateAlertBatchListener,
+): () => void {
+  updateAlertListeners.add(listener);
+  if (lastUpdateAlertBatch.length) listener(lastUpdateAlertBatch);
+  return () => updateAlertListeners.delete(listener);
+}
+
+/** @deprecated 请用 getLastUserApiUpdateAlertBatch */
+export function getLastUserApiUpdateAlert(): UserApiUpdateAlert | null {
+  return lastUpdateAlertBatch[0] ?? null;
+}
+
+export function getLastUserApiUpdateAlertBatch(): UserApiUpdateAlert[] {
+  return [...lastUpdateAlertBatch];
+}
+
+export function clearUserApiUpdateAlert(): void {
+  lastUpdateAlertBatch = [];
+  pendingUpdateAlerts.clear();
+  if (updateAlertFlushTimer) {
+    clearTimeout(updateAlertFlushTimer);
+    updateAlertFlushTimer = null;
+  }
+}
+
+function flushPendingUpdateAlerts(): void {
+  updateAlertFlushTimer = null;
+  const batch = [...pendingUpdateAlerts.values()];
+  pendingUpdateAlerts.clear();
+  if (!batch.length) return;
+  lastUpdateAlertBatch = batch;
+  for (const fn of updateAlertListeners) fn(batch);
+}
+
+async function notifyUserApiUpdateAlert(alert: UserApiUpdateAlert): Promise<void> {
+  try {
+    const { shouldSuppressUserApiUpdateAlert } = await import(
+      '@/lib/media/audio/online/user-api-update-prefs'
+    );
+    if (
+      shouldSuppressUserApiUpdateAlert({
+        scriptId: alert.scriptId,
+        updateUrl: alert.updateUrl,
+      })
+    ) {
+      console.info('[user-api] updateAlert suppressed by prefs', alert.scriptName);
+      return;
+    }
+  } catch (err) {
+    console.warn('[user-api] updateAlert prefs check failed, show anyway', err);
+  }
+  const key = alert.scriptId || alert.scriptName || alert.updateUrl || String(Date.now());
+  pendingUpdateAlerts.set(key, alert);
+  if (updateAlertFlushTimer) clearTimeout(updateAlertFlushTimer);
+  // 多个音源顺序 init 时合并为一次列表弹窗
+  updateAlertFlushTimer = setTimeout(flushPendingUpdateAlerts, 800);
+}
+
 export type LxUserApiSourceInfo = {
   sources: Record<
     string,
@@ -56,11 +129,24 @@ function createEmptyLxResponse(err?: Error | null): LxHttpResponse {
  * 仅规范化「已解析的 JSON 对象」。
  * HTML/JS 等字符串 body 必须原样返回（酷我 getToken 会 `response.body.match(...)`）。
  * 官方小熊猫成功体为 `data: { url }`，绝不能改成 `data: [{ url: null }]`。
+ * 野花/野草成功体为 `data: "http://..."` 字符串 URL，必须原样保留。
  */
 function normalizeLxJsonResponseBody(parsed: Record<string, unknown>, statusCode: number): unknown {
+  // npm package.json / 音源更新检查响应带 version，勿注入假音乐 data 字段
+  if (
+    statusCode < 400 &&
+    typeof parsed.version === 'string' &&
+    (parsed.data === undefined || parsed.data === null)
+  ) {
+    return parsed;
+  }
   const failedData = LX_FAILED_SCRIPT_BODY.data;
   if (statusCode >= 400) {
     return { code: statusCode, data: failedData, ...parsed };
+  }
+  // 字符串 URL（代理源）/ 对象 {url}（直连源）一律保留
+  if (typeof parsed.data === 'string' || (parsed.data && typeof parsed.data === 'object')) {
+    return parsed;
   }
   if (parsed.data === undefined || parsed.data === null) {
     return { ...parsed, data: failedData };
@@ -88,30 +174,58 @@ function normalizeLxResponseHeaders(
   return out;
 }
 
+function settleLxRequestCallbackResult(
+  result: unknown,
+  onAsyncRejection?: (error: Error) => void,
+): void {
+  if (result == null || typeof (result as PromiseLike<unknown>).then !== 'function') {
+    return;
+  }
+  // 脚本常写 async callback 并在失败时 throw/reject，未 await 会变成 Uncaught (in promise)
+  void Promise.resolve(result).catch((asyncErr) => {
+    console.warn('[user-api] request callback async rejection', asyncErr);
+    onAsyncRejection?.(
+      asyncErr instanceof Error ? asyncErr : new Error(String(asyncErr)),
+    );
+  });
+}
+
+/**
+ * 失败时始终给空壳 resp（六音等会读 resp.statusCode，不能为 null）。
+ * err 仍按 lx/needle 原样传入，脚本可先判 err。
+ */
 function invokeLxRequestCallback(
   callback: (
     err: Error | null,
-    resp: LxHttpResponse,
+    resp: LxHttpResponse | null,
     body: unknown,
-  ) => void,
+  ) => void | Promise<void>,
   err: Error | null,
   resp: LxHttpResponse | null,
   body: unknown,
+  onAsyncRejection?: (error: Error) => void,
 ): void {
   const safeResp = resp ?? createEmptyLxResponse(err);
   const safeBody = body ?? safeResp.body;
   try {
-    callback(err, safeResp, safeBody);
+    settleLxRequestCallbackResult(callback(err, safeResp, safeBody), onAsyncRejection);
   } catch (syncErr) {
     console.warn('[user-api] request callback threw', syncErr);
     if (!err) {
       const retryErr =
         syncErr instanceof Error ? syncErr : new Error(String(syncErr));
       try {
-        callback(retryErr, safeResp, safeBody);
+        settleLxRequestCallbackResult(
+          callback(retryErr, safeResp, safeBody),
+          onAsyncRejection,
+        );
       } catch {
         // 脚本未正确处理 err，依赖 invokeRequest 超时兜底
       }
+    } else {
+      onAsyncRejection?.(
+        syncErr instanceof Error ? syncErr : new Error(String(syncErr)),
+      );
     }
   }
 }
@@ -222,18 +336,31 @@ export function parseLxScriptHeaderMeta(script: string): LxScriptHeaderMeta {
     const m = line.match(/^\s*\*\s*@(name|version|description|author|homepage)\s+(.+?)\s*$/);
     if (!m) continue;
     const key = m[1] as keyof LxScriptHeaderMeta;
-    meta[key] = m[2].trim();
+    let value = m[2].trim();
+    // 部分音源写成 @version v1.2.0，去掉前缀便于统一展示
+    if (key === 'version') value = value.replace(/^v+/i, '');
+    meta[key] = value;
   }
   return meta;
 }
 
 let lxScriptLoadChain: Promise<unknown> = Promise.resolve();
 
-function toUint8(input: unknown): Uint8Array {
+function toUint8(input: unknown, encoding?: string): Uint8Array {
   if (input instanceof Uint8Array) return input;
   if (typeof input === 'string') {
+    if (encoding === 'hex') {
+      const hex = input.replace(/\s+/g, '');
+      if (hex.length % 2 !== 0) throw new Error('buffer.from: invalid hex');
+      const out = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < out.length; i++) {
+        out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      }
+      return out;
+    }
+    // 对齐 Node Buffer.from(str, 'binary')：按 latin1 字节
     const out = new Uint8Array(input.length);
-    for (let i = 0; i < input.length; i++) out[i] = input.charCodeAt(i);
+    for (let i = 0; i < input.length; i++) out[i] = input.charCodeAt(i) & 0xff;
     return out;
   }
   if (Array.isArray(input)) return new Uint8Array(input);
@@ -299,12 +426,15 @@ function rsaEncrypt(buffer: Uint8Array, keyPem: string): Uint8Array {
 }
 
 export function createLxUserApiEnvironment(meta: {
+  id?: string;
   name: string;
   description?: string;
   version?: string;
   author?: string;
   homepage?: string;
   rawScript: string;
+  /** 对齐 lx allowShowUpdateAlert；默认允许 */
+  allowShowUpdateAlert?: boolean;
 }): {
   lx: LxGlobal;
   initPromise: Promise<LxUserApiSourceInfo>;
@@ -315,14 +445,34 @@ export function createLxUserApiEnvironment(meta: {
   let initResolve!: (info: LxUserApiSourceInfo) => void;
   let initReject!: (err: Error) => void;
   let inited = false;
+  /** 对齐 lx preload：每个运行时只允许一次 updateAlert */
+  let isShowedUpdateAlert = false;
+  /** inited 已发送，但 initPromise 可能仍在等 bootstrap 请求结束（便于 updateAlert） */
+  let pendingSourceInfo: LxUserApiSourceInfo | null = null;
+  let bootstrapPending = 0;
+  let initSettled = false;
 
   const initPromise = new Promise<LxUserApiSourceInfo>((resolve, reject) => {
     initResolve = resolve;
     initReject = reject;
   });
 
+  function settleInit(): void {
+    if (initSettled || !pendingSourceInfo) return;
+    if (bootstrapPending > 0) return;
+    initSettled = true;
+    // 对齐 lx：脚本已 send(inited) 即初始化成功。
+    // checkUpdate 等 bootstrap 请求的网络失败不再撤销成功状态（否则「全部已启用源」预热会误杀可用源）。
+    initResolve(pendingSourceInfo);
+  }
+
   function rejectInit(err: Error): void {
-    if (!inited) initReject(err);
+    if (initSettled) return;
+    // 对齐 lx onError：仅尚未 inited 时判定初始化失败
+    if (!inited) {
+      initSettled = true;
+      initReject(err);
+    }
   }
 
   const allSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'local'];
@@ -366,6 +516,17 @@ export function createLxUserApiEnvironment(meta: {
           ? Math.min(options.timeout, 60_000)
           : 60_000;
 
+      // 记录 init 完成前发出的请求：失败则整次初始化失败（ikun checkUpdate 等）
+      const tracksBootstrap = !inited && !initSettled;
+      if (tracksBootstrap) bootstrapPending++;
+      let bootstrapReleased = false;
+      const releaseBootstrap = () => {
+        if (!tracksBootstrap || bootstrapReleased) return;
+        bootstrapReleased = true;
+        bootstrapPending = Math.max(0, bootstrapPending - 1);
+        settleInit();
+      };
+
       void (async () => {
         try {
           // 酷我 Cookie 名会轮换；脚本若用过期 defaultKey 会报 The request is illegal!
@@ -381,6 +542,30 @@ export function createLxUserApiEnvironment(meta: {
               }
             } catch {
               // ignore，继续用脚本自带 Secret
+            }
+          }
+          // 小熊猫等脚本默认 @wy_token null；若 Reader 已登录网易，注入 MUSIC_U 才能解 VIP
+          if (/music\.163\.com/i.test(url)) {
+            try {
+              const { loadAuthSession } = await import(
+                '@/lib/media/audio/platform/auth/session'
+              );
+              const auth = await loadAuthSession('netease');
+              const sessionCookie = auth?.cookies?.trim();
+              if (sessionCookie && /MUSIC_U\s*=\s*[^;]+/i.test(sessionCookie)) {
+                const existing = headers.Cookie || headers.cookie || '';
+                if (!/MUSIC_U\s*=\s*[^;\s]+/i.test(existing)) {
+                  headers.Cookie = existing
+                    ? `${sessionCookie}; ${existing}`
+                    : sessionCookie.includes('os=')
+                      ? sessionCookie
+                      : `${sessionCookie}; os=pc`;
+                  delete headers.cookie;
+                  console.info('[user-api] inject netease MUSIC_U for', url.slice(0, 60));
+                }
+              }
+            } catch {
+              // ignore
             }
           }
           // 统一常见头大小写，避免部分 CDN/网关敏感
@@ -433,14 +618,33 @@ export function createLxUserApiEnvironment(meta: {
               raw,
             },
             respBody,
+            tracksBootstrap ? rejectInit : undefined,
           );
         } catch (err) {
           if (!aborted) {
             const error = err instanceof Error ? err : new Error(String(err));
-            invokeLxRequestCallback(callback, error, null, null);
+            // 空壳 resp，避免六音等读 resp.statusCode 抛错
+            invokeLxRequestCallback(
+              callback,
+              error,
+              null,
+              null,
+              tracksBootstrap ? rejectInit : undefined,
+            );
           }
+        } finally {
+          releaseBootstrap();
         }
-      })();
+      })().catch((uncaught) => {
+        // 兜底：避免 IIFE 自身未捕获 Promise 冒泡到控制台
+        console.warn('[user-api] lx.request internal error', uncaught);
+        if (tracksBootstrap && !inited) {
+          rejectInit(
+            uncaught instanceof Error ? uncaught : new Error(String(uncaught)),
+          );
+        }
+        releaseBootstrap();
+      });
 
       return () => {
         aborted = true;
@@ -467,14 +671,51 @@ export function createLxUserApiEnvironment(meta: {
             };
           }
         } catch (err) {
+          initSettled = true;
           initReject(err instanceof Error ? err : new Error(String(err)));
           throw err;
         }
-        initResolve(sourceInfo);
+        // 等 init 前发出的请求结束；任一失败则初始化失败（如 ikun checkUpdate TLS 失败）
+        pendingSourceInfo = sourceInfo;
+        settleInit();
         return;
       }
       if (eventName === LX_EVENT_NAMES.updateAlert) {
-        console.info('[user-api] updateAlert', data);
+        // 对齐 lx preload handleShowUpdateAlert
+        if (isShowedUpdateAlert) {
+          throw new Error('The update alert can only be called once.');
+        }
+        if (!data || typeof data !== 'object') {
+          throw new Error('parameter format error.');
+        }
+        const payload = data as { log?: unknown; updateUrl?: unknown };
+        // data: null（无新版本）时脚本仍可能误调 updateAlert 且无 log —— 静默忽略
+        if (!payload.log || typeof payload.log !== 'string') {
+          return;
+        }
+        let log = payload.log;
+        if (log.length > 1024) log = `${log.substring(0, 1024)}...`;
+        let updateUrl =
+          typeof payload.updateUrl === 'string' ? payload.updateUrl : '';
+        if (
+          updateUrl &&
+          (!/^https?:\/\/\S+$/i.test(updateUrl) || updateUrl.length > 1024)
+        ) {
+          updateUrl = '';
+        }
+        if (meta.allowShowUpdateAlert === false) {
+          console.info('[user-api] updateAlert suppressed (allowShowUpdateAlert=false)', meta.name);
+          isShowedUpdateAlert = true;
+          return;
+        }
+        isShowedUpdateAlert = true;
+        console.info('[user-api] updateAlert', { log, updateUrl, name: meta.name });
+        void notifyUserApiUpdateAlert({
+          scriptId: meta.id,
+          scriptName: meta.name,
+          log,
+          updateUrl,
+        });
         return;
       }
       throw new Error('The event is not supported: ' + eventName);
@@ -501,13 +742,21 @@ export function createLxUserApiEnvironment(meta: {
       },
       buffer: {
         from(...args: unknown[]) {
-          return toUint8(args[0]);
+          // 对齐 Node Buffer.from(value, encoding?)
+          return toUint8(args[0], typeof args[1] === 'string' ? args[1] : undefined);
         },
-        bufToString(buf: Uint8Array, format: string) {
+        bufToString(buf: Uint8Array | string, format: string) {
+          // 对齐 lx preload：Buffer.from(buf, 'binary').toString(format)
+          const u8 = typeof buf === 'string' ? toUint8(buf) : toUint8(buf);
           if (format === 'hex') {
-            return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
+            return Array.from(u8, (b) => b.toString(16).padStart(2, '0')).join('');
           }
-          return new TextDecoder().decode(buf);
+          if (format === 'base64') {
+            let binary = '';
+            for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]!);
+            return btoa(binary);
+          }
+          return new TextDecoder().decode(u8);
         },
       },
       zlib: {
@@ -556,8 +805,10 @@ export function createLxUserApiEnvironment(meta: {
 }
 
 export async function loadLxUserApiScript(script: {
+  id?: string;
   name: string;
   script: string;
+  allowShowUpdateAlert?: boolean;
 }): Promise<{
   sourceInfo: LxUserApiSourceInfo;
   invokeRequest: (data: LxRequestPayload) => Promise<unknown>;
@@ -565,12 +816,14 @@ export async function loadLxUserApiScript(script: {
   const runLoad = async () => {
     const headerMeta = parseLxScriptHeaderMeta(script.script);
     const env = createLxUserApiEnvironment({
+      id: script.id,
       name: headerMeta.name ?? script.name,
       description: headerMeta.description,
       version: headerMeta.version ?? '1',
       author: headerMeta.author,
       homepage: headerMeta.homepage,
       rawScript: script.script,
+      allowShowUpdateAlert: script.allowShowUpdateAlert !== false,
     });
 
     const host = globalThis as LxGlobalHost;
@@ -594,10 +847,17 @@ export async function loadLxUserApiScript(script: {
       }
     };
 
+    // 对齐 lx preload：挂到卸载前；仅未 inited 时把 rejection 视为初始化失败
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      // 串行加载下旧运行时的监听器可能仍在 90s 窗口内，只处理当前活跃 lx
+      if (host.lx !== env.lx) return;
       env.rejectInit(
-        event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
+        event.reason instanceof Error
+          ? event.reason
+          : new Error(String(event.reason)),
       );
+      // 已处理：抑制控制台 Uncaught（checkUpdate / updateAlert 等脚本内未 catch 的 Promise）
+      event.preventDefault();
     };
     globalThis.addEventListener('unhandledrejection', onUnhandledRejection);
 
@@ -614,11 +874,17 @@ export async function loadLxUserApiScript(script: {
 
       return { sourceInfo, invokeRequest: env.invokeRequest };
     } finally {
-      globalThis.removeEventListener('unhandledrejection', onUnhandledRejection);
-      if (prevLx === undefined) delete host.lx;
-      else host.lx = prevLx;
-      if (prevLxSetup === undefined) delete host.lx_setup;
-      else host.lx_setup = prevLxSetup;
+      // 延迟卸载监听与还原 lx：checkUpdate / updateAlert 常在 inited 之后异步触发
+      window.setTimeout(() => {
+        globalThis.removeEventListener('unhandledrejection', onUnhandledRejection);
+        if (host.lx === env.lx) {
+          if (prevLx === undefined) delete host.lx;
+          else host.lx = prevLx;
+        }
+        if (host.lx_setup !== undefined && prevLxSetup === undefined) {
+          // lx_setup 通常已在脚本内 delete；无操作
+        }
+      }, 90_000);
     }
   };
 

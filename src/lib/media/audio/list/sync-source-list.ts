@@ -18,6 +18,8 @@ export interface SourceListBinding {
   type: 'songlist' | 'leaderboard';
   sourceId: string;
   lastSyncAt?: number;
+  /** 是否参与自动更新 */
+  isAutoUpdate?: boolean;
 }
 
 const BINDINGS_KEY = 'reader_music_source_bindings';
@@ -41,8 +43,18 @@ export function listSourceBindings(): SourceListBinding[] {
 
 export function bindPlaylistToSource(binding: Omit<SourceListBinding, 'lastSyncAt'>): void {
   const list = loadBindings().filter((b) => b.playlistId !== binding.playlistId);
-  list.push({ ...binding, lastSyncAt: Date.now() });
+  list.push({ ...binding, lastSyncAt: Date.now(), isAutoUpdate: binding.isAutoUpdate ?? true });
   saveBindings(list);
+}
+
+export function setBindingAutoUpdate(playlistId: string, isAutoUpdate: boolean): void {
+  saveBindings(
+    loadBindings().map((b) => (b.playlistId === playlistId ? { ...b, isAutoUpdate } : b)),
+  );
+}
+
+export function removeSourceBinding(playlistId: string): void {
+  saveBindings(loadBindings().filter((b) => b.playlistId !== playlistId));
 }
 
 export async function syncSourceList(playlistId: string): Promise<AudioTrack[]> {
@@ -75,8 +87,9 @@ export async function syncSourceList(playlistId: string): Promise<AudioTrack[]> 
   return tracks;
 }
 
-export async function syncAllBoundLists(): Promise<void> {
+export async function syncAllBoundLists(options?: { onlyAuto?: boolean }): Promise<void> {
   for (const binding of loadBindings()) {
+    if (options?.onlyAuto && binding.isAutoUpdate === false) continue;
     try {
       await syncSourceList(binding.playlistId);
     } catch {

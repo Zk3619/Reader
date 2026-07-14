@@ -147,12 +147,26 @@ function parseHotTags(body: WyTagRaw): SongListTag[] {
   }).filter((t) => t.id);
 }
 
+/** 并行 getTags/getHotTags 共用同一次 eapi，避免重复 /eapi/batch */
+let tagsEapiInflight: Promise<WyTagRaw | null> | null = null;
+
 async function loadTagsEapi(): Promise<WyTagRaw | null> {
-  const body = await safeCall(() =>
-    eapiPostBody<{ code?: number } & WyTagRaw>('/api/playlist/tags', {}),
-  );
-  if (!body || body.code !== SUCCESS_CODE) return null;
-  return body;
+  if (tagsEapiInflight) return tagsEapiInflight;
+  tagsEapiInflight = (async () => {
+    try {
+      const body = await safeCall(() =>
+        eapiPostBody<{ code?: number } & WyTagRaw>('/api/playlist/tags', {}),
+      );
+      if (!body || body.code !== SUCCESS_CODE) return null;
+      return body;
+    } finally {
+      // 保留短时共用；下一轮刷新仍可重新请求
+      queueMicrotask(() => {
+        tagsEapiInflight = null;
+      });
+    }
+  })();
+  return tagsEapiInflight;
 }
 
 async function loadTagsWeapiCatalogue(): Promise<WyTagRaw | null> {
@@ -235,19 +249,37 @@ export function getSortList(): SongListSort[] {
   return SORT_LIST;
 }
 
+/** 对齐 lx：优先 weapi catalogue；eapi 作降级 */
 export async function getTags(): Promise<SongListTagGroup[]> {
-  const body = await firstSuccess([loadTagsEapi, loadTagsWeapiCatalogue], (b) =>
+  const body = await firstSuccess([loadTagsWeapiCatalogue, loadTagsEapi], (b) =>
     hasItems(parseTagGroups(b)),
   );
   return body ? parseTagGroups(body) : [];
 }
 
+/** 对齐 lx：优先 weapi hottags；eapi 作降级 */
 export async function getHotTags(): Promise<SongListTag[]> {
-  const body = await firstSuccess(
-    [loadTagsEapi, loadTagsWeapiHot],
-    (b) => hasItems(parseHotTags(b)),
+  const body = await firstSuccess([loadTagsWeapiHot, loadTagsEapi], (b) =>
+    hasItems(parseHotTags(b)),
   );
   return body ? parseHotTags(body) : [];
+}
+
+function mapListResponse(
+  body: { playlists?: Record<string, unknown>[]; total?: number },
+  page: number,
+): PaginatedPlaylists | null {
+  const list = (body.playlists ?? []).map(mapPlaylist);
+  if (!hasItems(list)) return null;
+  const total = Number(body.total);
+  return {
+    list,
+    // 对齐 lx：parseInt(body.total)；无 total 时勿用 list.length 冒充（会导致只显示 1 页）
+    total: Number.isFinite(total) && total > 0 ? total : list.length,
+    page,
+    limit: LIMIT_LIST,
+    source: SOURCE,
+  };
 }
 
 export async function getList(
@@ -256,63 +288,37 @@ export async function getList(
   page = 1,
 ): Promise<PaginatedPlaylists> {
   const offset = (page - 1) * LIMIT_LIST;
-
+  const payload = {
+    cat: tagId ?? '全部',
+    order: sortId,
+    limit: LIMIT_LIST,
+    offset,
+    total: true,
+  };
+  // 对齐 lx weapi/playlist/list。
+  // 切勿降级到 /api/playlist/category/list：会前置约 4 条精品且常不带正确 total，页数严重偏差。
   const result = await firstSuccess(
     [
-      async () => {
-        const body = await eapiPostBody<{
-          code?: number;
-          playlists?: Record<string, unknown>[];
-          total?: number;
-        }>('/api/playlist/category/list', {
-          cat: tagId ?? '全部',
-          order: sortId,
-          limit: LIMIT_LIST,
-          offset,
-          total: page === 1,
-        });
-        if (body.code !== SUCCESS_CODE) return null;
-        const list = (body.playlists ?? []).map(mapPlaylist);
-        if (!hasItems(list)) return null;
-        return {
-          list,
-          total: Number(
-            body.total ?? (list.length < LIMIT_LIST ? offset + list.length : offset + LIMIT_LIST + 1),
-          ),
-          page,
-          limit: LIMIT_LIST,
-          source: SOURCE,
-        } satisfies PaginatedPlaylists;
-      },
       async () => {
         const body = await weapiPost<{
           code?: number;
           playlists?: Record<string, unknown>[];
           total?: number;
-        }>(
-          'playlist/list',
-          {
-            cat: tagId ?? '全部',
-            order: sortId,
-            limit: LIMIT_LIST,
-            offset,
-            total: page === 1,
-          },
-          WY_COOKIE,
-        );
+        }>('playlist/list', payload, WY_COOKIE);
         if (body.code !== SUCCESS_CODE) return null;
-        const list = (body.playlists ?? []).map(mapPlaylist);
-        if (!hasItems(list)) return null;
-        return {
-          list,
-          total: Number(body.total ?? list.length),
-          page,
-          limit: LIMIT_LIST,
-          source: SOURCE,
-        } satisfies PaginatedPlaylists;
+        return mapListResponse(body, page);
+      },
+      async () => {
+        const body = await eapiPostBody<{
+          code?: number;
+          playlists?: Record<string, unknown>[];
+          total?: number;
+        }>('/api/playlist/list', payload);
+        if (body.code !== SUCCESS_CODE) return null;
+        return mapListResponse(body, page);
       },
     ],
-    () => true,
+    (v) => hasItems(v.list),
   );
 
   return result ?? { list: [], total: 0, page, limit: LIMIT_LIST, source: SOURCE };
@@ -380,7 +386,9 @@ export function parseListIdFromUrl(url: string): string | null {
 export async function searchPlaylists(
   keyword: string,
   page = 1,
+  limit = LIMIT_LIST,
 ): Promise<SongListSearchResult> {
+  const pageSize = Math.max(1, limit);
   const result = await firstSuccess(
     [
       async () => {
@@ -389,8 +397,8 @@ export async function searchPlaylists(
         }>('/api/cloudsearch/pc', {
           s: keyword,
           type: 1000,
-          limit: LIMIT_LIST,
-          offset: (page - 1) * LIMIT_LIST,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
           total: page === 1,
         });
         const list = (body.result?.playlists ?? []).map(mapPlaylist);
@@ -399,7 +407,7 @@ export async function searchPlaylists(
           list,
           total: Number(body.result?.playlistCount ?? list.length),
           page,
-          limit: LIMIT_LIST,
+          limit: pageSize,
           source: SOURCE,
         } satisfies SongListSearchResult;
       },
@@ -412,8 +420,8 @@ export async function searchPlaylists(
           {
             s: keyword,
             type: 1000,
-            limit: LIMIT_LIST,
-            offset: (page - 1) * LIMIT_LIST,
+            limit: pageSize,
+            offset: (page - 1) * pageSize,
           },
           WY_COOKIE,
         );
@@ -424,7 +432,7 @@ export async function searchPlaylists(
           list,
           total: Number(body.result?.playlistCount ?? list.length),
           page,
-          limit: LIMIT_LIST,
+          limit: pageSize,
           source: SOURCE,
         } satisfies SongListSearchResult;
       },
@@ -432,5 +440,5 @@ export async function searchPlaylists(
     () => true,
   );
 
-  return result ?? { list: [], total: 0, page, limit: LIMIT_LIST, source: SOURCE };
+  return result ?? { list: [], total: 0, page, limit: pageSize, source: SOURCE };
 }

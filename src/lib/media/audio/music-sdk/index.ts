@@ -30,7 +30,7 @@ import {
   tipSearchForSource,
 } from '@/lib/media/audio/music-sdk/discovery';
 
-export const MUSIC_SDK_SOURCES: MusicSdkSource[] = ['kw', 'wy', 'kg', 'tx', 'mg'];
+export const MUSIC_SDK_SOURCES: MusicSdkSource[] = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 export const MUSIC_SDK_SOURCE_LABELS: Record<MusicSdkSource, string> = {
   kw: '酷我',
@@ -47,7 +47,11 @@ type SongListModule = {
   getList: (sortId: string, tagId: string | null, page?: number) => Promise<PaginatedPlaylists>;
   getListDetail: (id: string, page?: number) => Promise<OnlinePlaylistDetail>;
   parseListIdFromUrl?: (url: string) => string | null;
-  searchPlaylists?: (keyword: string, page?: number) => Promise<SongListSearchResult>;
+  searchPlaylists?: (
+    keyword: string,
+    page?: number,
+    limit?: number,
+  ) => Promise<SongListSearchResult>;
 };
 
 type LeaderboardModule = {
@@ -114,13 +118,14 @@ export async function searchSongLists(
   source: MusicSdkSource,
   keyword: string,
   page = 1,
+  limit?: number,
 ): Promise<SongListSearchResult> {
   const mod = SONG_LIST[source];
   if (mod.searchPlaylists) {
-    const result = await mod.searchPlaylists(keyword, page);
+    const result = await mod.searchPlaylists(keyword, page, limit);
     return { ...result, source };
   }
-  return { list: [], total: 0, page, limit: 30, source };
+  return { list: [], total: 0, page, limit: limit ?? 30, source };
 }
 
 export async function getLeaderboardBoards(source: MusicSdkSource): Promise<LeaderboardBoard[]> {

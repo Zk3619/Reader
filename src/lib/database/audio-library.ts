@@ -189,10 +189,33 @@ export async function listPlaylistItems(): Promise<
   return result;
 }
 
+/** 用户可排序歌单（`pl_` 前缀） */
+export async function listUserMusicPlaylists(): Promise<
+  Array<{ groupId: number; listId: string; name: string; order: number }>
+> {
+  const groups = await getMusicGroups();
+  return groups
+    .filter((g) => !!g.listId?.startsWith('pl_'))
+    .map((g) => ({
+      groupId: g.groupId,
+      listId: g.listId!,
+      name: g.groupName,
+      order: g.order,
+    }))
+    .sort((a, b) => a.order - b.order || a.groupId - b.groupId);
+}
+
+/** 按给定顺序重排用户歌单（编号从 0 起） */
+export async function reorderUserMusicPlaylists(orderedGroupIds: number[]): Promise<void> {
+  const { updateGroupsOrder } = await import('@/lib/database/media-groups');
+  await updateGroupsOrder(orderedGroupIds.map((groupId, order) => ({ groupId, order })));
+}
+
 export async function createPlaylist(
   id: string,
   name: string,
   source: AudioPlaylist['source'] = 'local',
+  options?: { position?: number },
 ): Promise<AudioPlaylist> {
   const db = await getDatabase();
   const now = Date.now();
@@ -208,10 +231,15 @@ export async function createPlaylist(
     [id, name, source, now, now],
   );
   const groupId = await getNextMusicUserGroupId();
+  const existing = await listUserMusicPlaylists();
+  const pos =
+    options?.position == null
+      ? existing.length
+      : Math.max(0, Math.min(Math.floor(options.position), existing.length));
   await insertMediaGroup({
     groupId,
     groupName: name,
-    order: 0,
+    order: pos,
     enableRefresh: false,
     show: true,
     bookSort: -1,
@@ -220,6 +248,12 @@ export async function createPlaylist(
     listId: id,
     source,
   });
+  const nextIds = [
+    ...existing.slice(0, pos).map((g) => g.groupId),
+    groupId,
+    ...existing.slice(pos).map((g) => g.groupId),
+  ];
+  await reorderUserMusicPlaylists(nextIds);
   return pl;
 }
 
@@ -252,6 +286,11 @@ export async function renamePlaylist(playlistId: string, name: string): Promise<
     Date.now(),
     playlistId,
   ]);
+  const group = await getMusicGroupByListId(playlistId);
+  if (group) {
+    const { updateGroup } = await import('@/lib/database/media-groups');
+    await updateGroup({ ...group, groupName: name });
+  }
 }
 
 export async function removeTrackFromPlaylist(

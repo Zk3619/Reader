@@ -1,12 +1,14 @@
 /**
- * 多源兜底解析（主源失败时 findMusic + 备用源）
+ * 多源兜底：findMusic 跨平台匹配 + 关键词末位兜底
+ *
+ * lx-music 换源语义：同一 UserApi（音源）下切换平台（kw/wy/kg/…），
+ * 由 online-resolver 按「音源 × 平台」穷尽；本文件只提供候选列表与末位兜底。
  */
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
 import { resolveOnlineTrackUrl } from '@/lib/media/audio/online/source-router';
-import { userApiMusicUrl, isFragileUserApi, listEnabledUserApiScriptIdsForUrl } from '@/lib/media/audio/online/user-api-engine';
 import { getPlayQuality, qualityFallbackChain } from '@/lib/media/audio/music-quality';
 import {
   MusicPlaybackStatusText,
@@ -19,14 +21,13 @@ import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
 
 const FALLBACK_KEY = 'reader_audio_fallback_enabled';
-const USER_API_FALLBACK_TIMEOUT_MS = 20_000;
 
 export type ToggleSourceCallbacks = {
   onStatus?: (message: string | null) => void;
   onToggleSource?: (track: AudioTrack) => void;
 };
 
-function notifyToggleTry(track: AudioTrack, callbacks?: ToggleSourceCallbacks): void {
+export function notifyToggleTry(track: AudioTrack, callbacks?: ToggleSourceCallbacks): void {
   callbacks?.onToggleSource?.(track);
   callbacks?.onStatus?.(formatToggleSourceTry(track));
   console.info('[music] try toggle to:', track.source, track.name, track.artist, track.duration);
@@ -47,6 +48,26 @@ export function setFallbackResolverEnabled(enabled: boolean): void {
   } catch {
     // ignore
   }
+}
+
+/** 对齐 lx getOtherSource / findMusic：同一首歌在其它平台的匹配曲目 */
+export async function getOtherSourceTracks(track: AudioTrack): Promise<AudioTrack[]> {
+  if (!isFallbackResolverEnabled()) return [];
+  const others = await findMusic(track);
+  console.info('[music] findMusic candidates:', others.map((t) => t.source).join(',') || '(none)');
+  return others;
+}
+
+export async function tryResolveBuiltinUrl(
+  track: AudioTrack,
+  cookies?: string,
+): Promise<string | null> {
+  const qualities = qualityFallbackChain(getPlayQuality());
+  for (const q of qualities) {
+    const url = await resolveOnlineTrackUrl(track, cookies, { skipCache: true, quality: q });
+    if (url) return url;
+  }
+  return null;
 }
 
 async function searchBili(keyword: string): Promise<AudioTrack | null> {
@@ -74,139 +95,18 @@ async function searchBili(keyword: string): Promise<AudioTrack | null> {
   }
 }
 
-async function tryResolveOneUserApi(
-  scriptId: string,
+/**
+ * findMusic / 音源×平台矩阵都失败后的末位兜底（关键词搜网易/酷我/B 站）。
+ * resolveAlt：由调用方决定对该候选如何取链（内置或指定 UserApi）。
+ */
+export async function resolveLastResortTrackUrl(
   track: AudioTrack,
-): Promise<string | null> {
-  if (isUserApiCircuitOpen(scriptId)) {
-    console.warn('[user-api] circuit open, skip', scriptId);
-    return null;
-  }
-  try {
-    const result = await Promise.race([
-      userApiMusicUrl(scriptId, track),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), USER_API_FALLBACK_TIMEOUT_MS);
-      }),
-    ]);
-    if (result) {
-      noteUserApiSuccess();
-      return result;
-    }
-    noteUserApiFailure(scriptId);
-    return null;
-  } catch (err) {
-    noteUserApiFailure(scriptId);
-    console.warn('[user-api] fallback musicUrl failed', scriptId, err);
-    return null;
-  }
-}
-
-async function tryResolveUserApiUrl(track: AudioTrack): Promise<string | null> {
-  const urlMode = getMusicSettings().urlSourceMode;
-  if (urlMode === 'builtin') return null;
-  const ids = listEnabledUserApiScriptIdsForUrl();
-  for (const id of ids) {
-    const url = await tryResolveOneUserApi(id, track);
-    if (url) {
-      console.info('[user-api] fallback musicUrl ok via', id);
-      return url;
-    }
-  }
-  return null;
-}
-
-/** 脆弱第三方代理连续失败时熔断；直连源（小熊猫等）不熔断 */
-let userApiFailStreak = 0;
-let userApiCircuitUntil = 0;
-
-function isUserApiCircuitOpen(scriptId?: string | null): boolean {
-  if (scriptId && !isFragileUserApi(scriptId)) return false;
-  return Date.now() < userApiCircuitUntil;
-}
-
-function noteUserApiFailure(scriptId?: string | null): void {
-  if (scriptId && !isFragileUserApi(scriptId)) return;
-  userApiFailStreak += 1;
-  if (userApiFailStreak >= 2) {
-    userApiCircuitUntil = Date.now() + 5 * 60_000;
-    userApiFailStreak = 0;
-    console.warn('[user-api] circuit opened for 5min (third-party proxy failing)');
-  }
-}
-
-function noteUserApiSuccess(): void {
-  userApiFailStreak = 0;
-  userApiCircuitUntil = 0;
-}
-
-export function resetUserApiCircuit(): void {
-  userApiFailStreak = 0;
-  userApiCircuitUntil = 0;
-}
-
-async function tryResolveBuiltinUrl(
-  track: AudioTrack,
-  cookies?: string,
-): Promise<string | null> {
-  const qualities = qualityFallbackChain(getPlayQuality());
-  for (const q of qualities) {
-    const url = await resolveOnlineTrackUrl(track, cookies, { skipCache: true, quality: q });
-    if (url) return url;
-  }
-  return null;
-}
-
-async function tryResolveUrl(
-  track: AudioTrack,
-  cookies?: string,
-  accept?: (url: string, track: AudioTrack) => Promise<boolean>,
-): Promise<{ url: string; track: AudioTrack } | null> {
-  // 换源取链：默认/其他 UserApi → 内置
-  const userApiUrl = await tryResolveUserApiUrl(track);
-  if (userApiUrl && !/bitrate\$1(?:&|$)/i.test(userApiUrl)) {
-    if (!accept || (await accept(userApiUrl, track))) {
-      console.info('[music] user-api url ok:', track.source, track.name);
-      return { url: userApiUrl, track };
-    }
-    console.warn('[music] user-api url rejected by validator:', track.source, track.name);
-  }
-
-  const url = await tryResolveBuiltinUrl(track, cookies);
-  if (url && !/bitrate\$1(?:&|$)/i.test(url)) {
-    if (!accept || (await accept(url, track))) {
-      console.info('[music] builtin url ok:', track.source, track.name);
-      return { url, track };
-    }
-    console.warn('[music] builtin url rejected by validator:', track.source, track.name);
-  }
-
-  console.warn('[music] resolve url failed:', track.source, track.name, track.id);
-  return null;
-}
-
-/** 主源 URL 解析失败时尝试备用源（对齐 lx-music getOnlineOtherSourceMusicUrl） */
-export async function resolveFallbackTrackUrl(
-  track: AudioTrack,
-  cookies?: string,
-  callbacks?: ToggleSourceCallbacks & {
-    /** 可选：校验播放地址是否可用（如拉流后非占位/非试听片段） */
-    acceptUrl?: (url: string, track: AudioTrack) => Promise<boolean>;
-  },
+  resolveAlt: (alt: AudioTrack) => Promise<{ url: string; track: AudioTrack } | null>,
+  callbacks?: ToggleSourceCallbacks,
 ): Promise<{ url: string; track: AudioTrack } | null> {
   if (!isFallbackResolverEnabled()) return null;
 
   callbacks?.onStatus?.(MusicPlaybackStatusText.toggleTry);
-  const accept = callbacks?.acceptUrl;
-
-  const others = await findMusic(track);
-  console.info('[music] findMusic candidates:', others.map((t) => t.source).join(','));
-  for (const alt of others) {
-    notifyToggleTry(alt, callbacks);
-    const hit = await tryResolveUrl(alt, cookies, accept);
-    if (hit) return hit;
-  }
-
   const keyword = `${track.name} ${track.artist}`.trim();
   if (!keyword) return null;
 
@@ -216,7 +116,7 @@ export async function resolveFallbackTrackUrl(
       const hit = wyTracks[0];
       if (hit) {
         notifyToggleTry(hit, callbacks);
-        const resolved = await tryResolveUrl(hit, cookies, accept);
+        const resolved = await resolveAlt(hit);
         if (resolved) return resolved;
       }
     } catch {
@@ -230,7 +130,7 @@ export async function resolveFallbackTrackUrl(
       const hit = res.tracks[0];
       if (hit) {
         notifyToggleTry(hit, callbacks);
-        const resolved = await tryResolveUrl(hit, cookies, accept);
+        const resolved = await resolveAlt(hit);
         if (resolved) return resolved;
       }
     } catch {
@@ -242,10 +142,41 @@ export async function resolveFallbackTrackUrl(
   if (biliTrack) {
     notifyToggleTry(biliTrack, callbacks);
     const url = await getBiliSongUrl(biliTrack);
-    if (url && (!accept || (await accept(url, biliTrack)))) {
-      return { url, track: biliTrack };
-    }
+    if (url) return { url, track: biliTrack };
   }
 
   return null;
 }
+
+/** @deprecated 兼容旧调用；请用 getOtherSourceTracks + resolveLastResortTrackUrl */
+export async function resolveFallbackTrackUrl(
+  track: AudioTrack,
+  cookies?: string,
+  callbacks?: ToggleSourceCallbacks & {
+    acceptUrl?: (url: string, track: AudioTrack) => Promise<boolean>;
+  },
+): Promise<{ url: string; track: AudioTrack } | null> {
+  const accept = callbacks?.acceptUrl;
+  const others = await getOtherSourceTracks(track);
+  for (const alt of others) {
+    notifyToggleTry(alt, callbacks);
+    const url = await tryResolveBuiltinUrl(alt, cookies);
+    if (!url || /bitrate\$1(?:&|$)/i.test(url)) continue;
+    if (!accept || (await accept(url, alt))) {
+      return { url, track: alt };
+    }
+  }
+  return resolveLastResortTrackUrl(
+    track,
+    async (alt) => {
+      const url = await tryResolveBuiltinUrl(alt, cookies);
+      if (!url || /bitrate\$1(?:&|$)/i.test(url)) return null;
+      if (accept && !(await accept(url, alt))) return null;
+      return { url, track: alt };
+    },
+    callbacks,
+  );
+}
+
+/** 兼容设置切换重置；实际熔断在 online-resolver primary circuit */
+export function resetUserApiCircuit(): void {}

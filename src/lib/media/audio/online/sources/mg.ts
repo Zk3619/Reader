@@ -3,7 +3,7 @@
  */
 
 import CryptoJS from 'crypto-js';
-import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
+import { firstFullest, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
@@ -47,6 +47,38 @@ function mapMgSong(data: Record<string, unknown>): AudioTrack | null {
   const copyrightId = String(data.copyrightId ?? '');
   if (!songId || !copyrightId) return null;
   const sec = Number(data.duration ?? 0);
+  // 对齐 lx mg filterData：audioFormats → PQ/HQ/SQ/ZQ24
+  const _qualitys: Record<string, { size?: number | string }> = {};
+  const qualitys: string[] = [];
+  const formats = data.audioFormats;
+  if (Array.isArray(formats)) {
+    for (const raw of formats) {
+      if (!raw || typeof raw !== 'object') continue;
+      const type = raw as { formatType?: string; asize?: number | string; isize?: number | string };
+      const size = type.asize ?? type.isize;
+      switch (type.formatType) {
+        case 'PQ':
+          _qualitys['128k'] = { size };
+          qualitys.push('128k');
+          break;
+        case 'HQ':
+          _qualitys['320k'] = { size };
+          qualitys.push('320k');
+          break;
+        case 'SQ':
+          _qualitys.flac = { size };
+          qualitys.push('flac');
+          break;
+        case 'ZQ24':
+        case 'ZQ':
+          _qualitys.flac24bit = { size };
+          qualitys.push('flac24bit');
+          break;
+        default:
+          break;
+      }
+    }
+  }
   return {
     id: buildTrackId('mg', copyrightId),
     name: String(data.name ?? '未知'),
@@ -59,6 +91,7 @@ function mapMgSong(data: Record<string, unknown>): AudioTrack | null {
       copyrightId,
       albumId: String(data.albumId ?? ''),
       albumName: String(data.album ?? ''),
+      ...(qualitys.length > 0 ? { qualitys, _qualitys } : {}),
     },
   };
 }
@@ -128,12 +161,15 @@ async function searchAppNf(keyword: string, page: number, limit: number): Promis
   return { tracks, total: Number.isNaN(total) ? tracks.length : total };
 }
 
-export async function mgSearch(keyword: string, page = 1, limit = 20): Promise<OnlineSearchResult> {
-  const result = await firstSuccess(
+/** 默认 30 对齐 lx listInfos 聚合/单源搜索传入的 limit（musicSearch.limit=20 仅无参兜底） */
+export async function mgSearch(keyword: string, page = 1, limit = 30): Promise<OnlineSearchResult> {
+  const result = await firstFullest(
     [
       () => searchJadeite(keyword, page, limit),
       () => searchAppNf(keyword, page, limit),
     ],
+    (r) => r.tracks.length,
+    limit,
     (r) => hasItems(r.tracks),
   );
   return result ?? { tracks: [], total: 0 };
@@ -199,13 +235,84 @@ export async function mgGetMusicUrl(
 export async function mgGetLyric(track: AudioTrack): Promise<LyricBundle | null> {
   const copyrightId = String(track.meta.copyrightId ?? track.meta.songId ?? '');
   if (!copyrightId) return null;
-  const url = `https://app.c.nf.migu.cn/v1.0/content/getLyric.do?copyrightId=${copyrightId}`;
+
+  type MgLyricInfo = {
+    mrcUrl?: string;
+    lrcUrl?: string;
+    trcUrl?: string;
+  };
+
+  const resolveInfo = async (): Promise<MgLyricInfo> => {
+    if (track.meta.mrcUrl || track.meta.lrcUrl) {
+      return {
+        mrcUrl: String(track.meta.mrcUrl ?? ''),
+        lrcUrl: String(track.meta.lrcUrl ?? ''),
+        trcUrl: String(track.meta.trcUrl ?? ''),
+      };
+    }
+    const body = await safeCall(() =>
+      onlineFetchJson<{
+        resource?: Array<{
+          mrcUrl?: string;
+          lrcUrl?: string;
+          trcUrl?: string;
+          lyricUrl?: string;
+        }>;
+        data?: Array<{
+          mrcUrl?: string;
+          lrcUrl?: string;
+          trcUrl?: string;
+        }>;
+      }>(
+        `https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?copyrightId=${copyrightId}&resourceType=2`,
+        { headers: mgSearchHeaders(copyrightId) },
+      ),
+    );
+    const item = body?.resource?.[0] ?? body?.data?.[0];
+    return {
+      mrcUrl: item?.mrcUrl,
+      lrcUrl: item?.lrcUrl ?? (item as { lyricUrl?: string } | undefined)?.lyricUrl,
+      trcUrl: item?.trcUrl,
+    };
+  };
+
   try {
-    const body = await onlineFetchJson<{ lyric?: string; lrc?: { lyric?: string } }>(url, {
-      headers: mgSearchHeaders(copyrightId),
-    });
-    const lyric = body.lyric ?? body.lrc?.lyric ?? null;
-    return lyric?.trim() ? { lyric } : null;
+    const info = await resolveInfo();
+    const { decryptMrc, parseMrcLyric } = await import(
+      '@/lib/media/audio/platform/api/mg-mrc-decode'
+    );
+    const { onlineFetchText } = await import('@/lib/media/audio/online/online-http');
+    const headers = {
+      Referer: 'https://app.c.nf.migu.cn/',
+      'User-Agent':
+        'Mozilla/5.0 (Linux; Android 5.1.1; Nexus 6 Build/LYZ28E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Mobile Safari/537.36',
+      channel: '0146921',
+    };
+
+    let lyric = '';
+    let lxlyric = '';
+    if (info.mrcUrl) {
+      const raw = await onlineFetchText(info.mrcUrl, { headers });
+      const parsed = parseMrcLyric(decryptMrc(raw));
+      lyric = parsed.lyric;
+      lxlyric = parsed.lxlyric;
+    } else if (info.lrcUrl) {
+      lyric = await onlineFetchText(info.lrcUrl, { headers });
+    } else {
+      const url = `https://app.c.nf.migu.cn/v1.0/content/getLyric.do?copyrightId=${copyrightId}`;
+      const body = await onlineFetchJson<{ lyric?: string; lrc?: { lyric?: string } }>(url, {
+        headers: mgSearchHeaders(copyrightId),
+      });
+      lyric = body.lyric ?? body.lrc?.lyric ?? '';
+    }
+
+    let tlyric: string | null = null;
+    if (info.trcUrl) {
+      tlyric = await onlineFetchText(info.trcUrl, { headers }).catch(() => null);
+    }
+
+    if (!lyric?.trim()) return null;
+    return { lyric, tlyric, lxlyric: lxlyric || null };
   } catch {
     return null;
   }

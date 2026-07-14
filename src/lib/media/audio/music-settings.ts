@@ -9,6 +9,10 @@ import type { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
 const STORAGE_KEY = 'reader_music_settings';
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
+/** 音乐搜索页列表加载：滚动追加 / 分页切换 */
+export type MusicSearchPaginationPreference = 'scroll' | 'pagination';
+/** 在线歌单页：标签控件（lx 分组下拉 / 探索页徽标堆叠） */
+export type MusicSongListTagControlStyle = 'grouped' | 'stacked';
 
 export interface MusicSettings {
   defaultSource: AudioTrackSource;
@@ -17,6 +21,18 @@ export interface MusicSettings {
   musicSearchSourceControl?: MusicSearchControlStyle;
   /** 音乐搜索页：歌曲/歌单切换控件风格 */
   musicSearchTabControl?: MusicSearchControlStyle;
+  /** 音乐搜索页：翻页方式（对齐探索页：滚动加载 / 分页） */
+  musicSearchPaginationPreference?: MusicSearchPaginationPreference;
+  /** 在线歌单页：来源选择控件风格 */
+  musicSongListSourceControl?: MusicSearchControlStyle;
+  /** 在线歌单页：排序选择控件风格 */
+  musicSongListSortControl?: MusicSearchControlStyle;
+  /** 在线歌单页：标签选择控件风格 */
+  musicSongListTagControl?: MusicSongListTagControlStyle;
+  /** 在线歌单页：列表翻页方式（滚动加载 / 分页） */
+  musicSongListPaginationPreference?: MusicSearchPaginationPreference;
+  /** 排行榜页：列表翻页方式（滚动加载 / 分页） */
+  musicLeaderboardPaginationPreference?: MusicSearchPaginationPreference;
   searchHistoryEnabled: boolean;
   playSpeed: number;
   eqPreset: keyof typeof EQ_PRESETS;
@@ -40,6 +56,12 @@ export interface MusicSettings {
   downloadQuality?: import('@/lib/media/audio/lyric-types').MusicQuality;
   downloadFileNameTemplate?: string;
   playTimeoutSec?: number;
+  /** 取链/解码失败时自动下一首 */
+  autoSkipOnError?: boolean;
+  /** 歌词是否显示翻译 */
+  showLyricTranslation?: boolean;
+  /** 歌词是否显示罗马音 */
+  showLyricRoma?: boolean;
 }
 
 const DEFAULTS: MusicSettings = {
@@ -47,6 +69,15 @@ const DEFAULTS: MusicSettings = {
   defaultSearchTab: 'song',
   musicSearchSourceControl: 'select',
   musicSearchTabControl: 'select',
+  /** 对齐 lx 搜索默认用分页条；仍可通过「更多」切换为滚动加载 */
+  musicSearchPaginationPreference: 'pagination',
+  musicSongListSourceControl: 'select',
+  musicSongListSortControl: 'select',
+  musicSongListTagControl: 'grouped',
+  /** 对齐 lx 歌单默认用分页条 */
+  musicSongListPaginationPreference: 'pagination',
+  /** 对齐 lx 排行榜默认用分页条 */
+  musicLeaderboardPaginationPreference: 'pagination',
   searchHistoryEnabled: true,
   playSpeed: 1,
   eqPreset: 'flat',
@@ -70,6 +101,9 @@ const DEFAULTS: MusicSettings = {
   downloadQuality: '320k',
   downloadFileNameTemplate: '{artist}-{name}',
   playTimeoutSec: 0,
+  autoSkipOnError: true,
+  showLyricTranslation: true,
+  showLyricRoma: true,
 };
 
 function readRaw(): Partial<MusicSettings> {

@@ -5,6 +5,7 @@
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { TRY_QUALITYS_LIST } from '@/lib/media/audio/lyric-types';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
+import { getActiveUserApiQualitys } from '@/lib/media/audio/online/user-api-engine';
 
 export type { MusicQuality };
 
@@ -24,6 +25,15 @@ export function getPlayQuality(): MusicQuality {
 
 export function setPlayQuality(q: MusicQuality): void {
   setMusicSettings({ playQuality: q });
+}
+
+/** 当前活跃 UserApi 允许的音质（空 = 未限制，展示全量） */
+export function listPlayQualityOptions(): MusicQuality[] {
+  const all = Object.keys(QUALITY_LABELS) as MusicQuality[];
+  const supported = getActiveUserApiQualitys();
+  if (!supported.length) return all;
+  const filtered = all.filter((q) => supported.includes(q));
+  return filtered.length ? filtered : all;
 }
 
 /** 从用户偏好向下尝试可用音质 */

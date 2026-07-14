@@ -2,8 +2,9 @@
  * 酷我音乐源（search.kuwo.cn 优先，wapi 降级）
  */
 
-import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
-import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
+import { firstFullest, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
+import { onlineFetchJson, onlineFetchText } from '@/lib/media/audio/online/online-http';
+import { parseKuwoObjStr } from '@/lib/media/audio/music-sdk/sources/kw/parse-kuwo-json';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
 import {
   decodeKwLyricRaw,
@@ -15,14 +16,16 @@ import { request } from '@/lib/http';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { buildTrackId, formatDurationSec } from '@/lib/media/audio/track-types';
 import { kwTypeForQuality, qualityFallbackChain, getPlayQuality } from '@/lib/media/audio/music-quality';
+import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 
 export interface OnlineSearchResult {
   tracks: AudioTrack[];
   total: number;
 }
 
+/** 酷我 ARTIST 用 & 分隔歌手；须先 decodeName（&#32; 等），再替换分隔符 */
 function formatKwArtist(raw: unknown): string {
-  const text = String(raw ?? '');
+  const text = decodeHtmlEntities(String(raw ?? ''));
   return text.replace(/&/g, '、').trim() || '未知';
 }
 
@@ -72,7 +75,7 @@ function mapAbslistItem(info: Record<string, unknown>): AudioTrack | null {
   const { qualitys, _qualitys } = parseKwNMinfo(String(info.N_MINFO));
   return {
     id: buildTrackId('kw', songId),
-    name: String(info.SONGNAME ?? '未知'),
+    name: decodeHtmlEntities(String(info.SONGNAME ?? '未知')),
     artist: formatKwArtist(info.ARTIST),
     source: 'kw',
     duration: sec > 0 ? formatDurationSec(sec) : '00:00',
@@ -80,7 +83,7 @@ function mapAbslistItem(info: Record<string, unknown>): AudioTrack | null {
       songId,
       songmid: songId,
       albumId: String(info.ALBUMID ?? ''),
-      albumName: String(info.ALBUM ?? ''),
+      albumName: decodeHtmlEntities(String(info.ALBUM ?? '')),
       qualitys,
       _qualitys,
     },
@@ -93,7 +96,7 @@ function mapWapiItem(info: Record<string, unknown>): AudioTrack | null {
   const sec = parseInt(String(info.duration ?? '0'), 10);
   return {
     id: buildTrackId('kw', songId),
-    name: String(info.name ?? '未知'),
+    name: decodeHtmlEntities(String(info.name ?? '未知')),
     artist: formatKwArtist(info.artist),
     source: 'kw',
     duration: sec > 0 ? formatDurationSec(sec) : '00:00',
@@ -101,7 +104,7 @@ function mapWapiItem(info: Record<string, unknown>): AudioTrack | null {
       songId,
       songmid: songId,
       albumId: String(info.albumid ?? ''),
-      albumName: String(info.album ?? ''),
+      albumName: decodeHtmlEntities(String(info.album ?? '')),
     },
   };
 }
@@ -112,19 +115,26 @@ async function searchKuwoR(keyword: string, page: number, limit: number): Promis
     `&pn=${page - 1}&rn=${limit}&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1` +
     `&show_copyright_off=1&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8` +
     `&rformat=json&vermerge=1&mobi=1&issubtitle=1`;
-  const body = await safeCall(() =>
-    onlineFetchJson<{
-      TOTAL?: string;
-      abslist?: Array<Record<string, unknown>>;
-    }>(url),
-  );
-  const tracks = (body?.abslist ?? [])
+  const text = await safeCall(() => onlineFetchText(url));
+  if (!text) return null;
+  let body: { TOTAL?: string; abslist?: Array<Record<string, unknown>>; SHOW?: string };
+  try {
+    body = parseKuwoObjStr(text);
+  } catch {
+    return null;
+  }
+  // 对齐 lx kw/musicSearch.search：TOTAL 非 0 但 SHOW=0 时整页失败，走降级/重试
+  if (body.TOTAL !== '0' && body.SHOW === '0') return null;
+  const rawList = body.abslist ?? [];
+  // 对齐 lx handleResult：任一缺 N_MINFO 则整页失败（勿静默丢条目，否则聚合页 < 150）
+  if (rawList.some((info) => !info.N_MINFO)) return null;
+  const tracks = rawList
     .map(mapAbslistItem)
     .filter((t): t is AudioTrack => t !== null);
   if (!hasItems(tracks)) return null;
   return {
     tracks,
-    total: parseInt(String(body?.TOTAL ?? tracks.length), 10) || tracks.length,
+    total: parseInt(String(body.TOTAL ?? tracks.length), 10) || tracks.length,
   };
 }
 
@@ -153,11 +163,16 @@ export async function kwSearch(
   page = 1,
   limit = 30,
 ): Promise<OnlineSearchResult> {
-  const result = await firstSuccess(
+  // 对齐 lx：同接口重试，并优先选用满页结果（避免 r.s 短页直接截断）
+  const result = await firstFullest(
     [
+      () => searchKuwoR(keyword, page, limit),
+      () => searchKuwoR(keyword, page, limit),
       () => searchKuwoR(keyword, page, limit),
       () => searchWapi(keyword, page, limit),
     ],
+    (r) => r.tracks.length,
+    limit,
     (r) => hasItems(r.tracks),
   );
   return result ?? { tracks: [], total: 0 };
@@ -331,10 +346,17 @@ export async function kwGetLyric(track: AudioTrack): Promise<LyricBundle | null>
   const decoded = await decodeKwLyricRaw(raw, true);
   if (!decoded) return null;
   const parsed = parseKwLrcText(decoded);
-  let lyric = stripKwWordTimeTags(parsed.lyric);
+  let lxlyric: string | null = null;
+  try {
+    const { parseKwLxLyric } = await import('@/lib/media/audio/platform/api/kw-lyric-decode');
+    lxlyric = parseKwLxLyric(parsed.lyric) || null;
+  } catch {
+    lxlyric = null;
+  }
+  const lyric = stripKwWordTimeTags(parsed.lyric);
   const tlyric = parsed.tlyric ? stripKwWordTimeTags(parsed.tlyric) : '';
   if (!isValidKwLrc(lyric)) return null;
-  return { lyric, tlyric: tlyric || null, lxlyric: lyric };
+  return { lyric, tlyric: tlyric || null, lxlyric };
 }
 
 export async function kwHotSearch(): Promise<string[]> {

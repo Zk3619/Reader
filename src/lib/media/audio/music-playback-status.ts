@@ -22,3 +22,21 @@ export function formatToggleSourceTry(track: { source: string; name: string }): 
   const label = SOURCE_LABELS[track.source] ?? track.source;
   return `尝试切换到${label}：${track.name}`;
 }
+
+/** 将 UserApi / 平台错误映射为可读文案 */
+export function formatMusicUrlError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  const msg = raw.trim();
+  if (!msg) return '无法解析播放地址';
+  if (/付费|vip|试听|会员|收费|版权|无版权|空.?purl|freeTrial|trial/i.test(msg)) {
+    return msg.length > 120 ? `${msg.slice(0, 120)}…` : msg;
+  }
+  if (/timeout|超时/i.test(msg)) return '获取链接超时';
+  if (/block\s*ip|too many requests|封禁|频繁/i.test(msg)) {
+    return '音源已封禁当前 IP（多为请求过频；可飞行模式换 IP，或暂时禁用该源）';
+  }
+  if (/failed|FAILED|服务器异常/i.test(msg)) {
+    return '音源拒绝返回链接（多为 VIP/试听或代理失效；可登录网易会员或换可用代理源）';
+  }
+  return msg.length > 160 ? `${msg.slice(0, 160)}…` : msg;
+}

@@ -24,11 +24,19 @@ const SORT_LIST: SongListSort[] = [
   { id: '5', name: '推荐' },
   { id: '6', name: '最热' },
   { id: '7', name: '最新' },
+  { id: '3', name: '热藏' },
+  { id: '8', name: '飙升' },
 ];
 
 const LIST_DATA_RE = /global\.data = (\[.+\]);/;
 const LIST_INFO_RE = /global = {[\s\S]+?name: "(.+)"[\s\S]+?pic: "(.+)"[\s\S]+?};/;
 const LIST_DETAIL_LINK_RE = /^.+\/(\d+)\.html(?:\?.*|&.*$|#.*$|$)/;
+
+/** 对齐 lx：按 tag 缓存分页信息，避免每页重复打 is_smarty */
+let currentTagInfo: {
+  id: string | null | undefined;
+  info?: { limit: number; page: number; total: number; source: MusicSdkSource };
+} = { id: undefined };
 
 function formatPlayCount(num: number | string): string {
   const n = Number(num);
@@ -40,16 +48,19 @@ function formatPlayCount(num: number | string): string {
 
 function mapPlaylist(item: Record<string, unknown>): OnlinePlaylistSummary {
   const specialId = item.specialid ?? item.id;
+  // 对齐 lx：优先已格式化的 total_play_count，否则格式化 play_count / playcount
+  const playCount =
+    item.total_play_count != null && item.total_play_count !== ''
+      ? String(item.total_play_count)
+      : item.play_count != null || item.playcount != null
+        ? formatPlayCount((item.play_count ?? item.playcount) as number | string)
+        : undefined;
   return {
     id: `id_${specialId}`,
     name: String(item.specialname ?? item.name ?? ''),
     author: String(item.nickname ?? ''),
     coverUrl: String(item.img ?? item.imgurl ?? '').replace('{size}', '400'),
-    playCount: item.play_count != null
-      ? formatPlayCount(item.play_count as number | string)
-      : item.total_play_count != null
-        ? formatPlayCount(item.total_play_count as number | string)
-        : undefined,
+    playCount,
     trackCount: Number(item.songcount ?? 0) || undefined,
     desc: String(item.intro ?? ''),
     source: SOURCE,
@@ -228,37 +239,132 @@ export async function getHotTags(): Promise<SongListTag[]> {
   return tags ?? [];
 }
 
+function getInfoUrl(tagId: string | null): string {
+  return tagId
+    ? `http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_smarty=1&cdn=cdn&t=5&c=${tagId}`
+    : 'http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_smarty=1&';
+}
+
+function getSongListUrl(sortId: string, tagId: string | null, page: number): string {
+  const c = tagId ?? '';
+  return `http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_ajax=1&cdn=cdn&t=${sortId}&c=${c}&p=${page}`;
+}
+
+/** 对齐 lx：从 is_smarty 响应读取 pagesize / total（ajax 列表响应不含分页元数据） */
+async function getListInfo(tagId: string | null, tryNum = 0): Promise<{
+  limit: number;
+  page: number;
+  total: number;
+  source: MusicSdkSource;
+}> {
+  if (tryNum > 2) throw new Error('酷狗歌单分页信息加载失败');
+  try {
+    const body = await onlineFetchJson<{
+      status?: number;
+      data?: { params?: { pagesize?: number; p?: number; total?: number } };
+    }>(getInfoUrl(tagId), { headers: KUGOU_HEADERS });
+    if (body.status !== 1 || !body.data?.params) {
+      return getListInfo(tagId, tryNum + 1);
+    }
+    return {
+      limit: Number(body.data.params.pagesize ?? LIMIT),
+      page: Number(body.data.params.p ?? 1),
+      total: Number(body.data.params.total ?? 0),
+      source: SOURCE,
+    };
+  } catch {
+    return getListInfo(tagId, tryNum + 1);
+  }
+}
+
+async function getSongList(
+  sortId: string,
+  tagId: string | null,
+  page: number,
+  tryNum = 0,
+): Promise<OnlinePlaylistSummary[]> {
+  if (tryNum > 2) throw new Error('酷狗歌单列表加载失败');
+  try {
+    const body = await onlineFetchJson<{
+      status?: number;
+      special_db?: Record<string, unknown>[];
+    }>(getSongListUrl(sortId, tagId, page), { headers: KUGOU_HEADERS });
+    if (!body || body.status !== 1) return getSongList(sortId, tagId, page, tryNum + 1);
+    return (body.special_db ?? []).map(mapPlaylist);
+  } catch {
+    return getSongList(sortId, tagId, page, tryNum + 1);
+  }
+}
+
+/** 对齐 lx：默认「推荐」分类首页前置猜你喜欢歌单 */
+async function getSongListRecommend(tryNum = 0): Promise<OnlinePlaylistSummary[]> {
+  if (tryNum > 2) return [];
+  try {
+    const body = await onlineFetchJson<{
+      status?: number;
+      data?: { special_list?: Record<string, unknown>[] };
+    }>('http://everydayrec.service.kugou.com/guess_special_recommend', {
+      method: 'POST',
+      headers: {
+        'User-Agent': 'KuGou2012-8275-web_browser_event_handler',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        appid: 1001,
+        clienttime: 1566798337219,
+        clientver: 8275,
+        key: 'f1f93580115bb106680d2375f8032d96',
+        mid: '21511157a05844bd085308bc76ef3343',
+        platform: 'pc',
+        userid: '262643156',
+        return_min: 6,
+        return_max: 15,
+      }),
+    });
+    if (body.status !== 1) return getSongListRecommend(tryNum + 1);
+    return (body.data?.special_list ?? []).map(mapPlaylist);
+  } catch {
+    return getSongListRecommend(tryNum + 1);
+  }
+}
+
 export async function getList(
   sortId: string,
   tagId: string | null,
   page = 1,
 ): Promise<PaginatedPlaylists> {
-  const result = await firstSuccess(
-    [
-      async () => {
-        const c = tagId ?? '';
-        const url = `http://www2.kugou.kugou.com/yueku/v9/special/getSpecial?is_ajax=1&cdn=cdn&t=${sortId}&c=${c}&p=${page}`;
-        const body = await onlineFetchJson<{
-          status?: number;
-          special_db?: Record<string, unknown>[];
-          data?: { params?: { total?: number } };
-        }>(url, { headers: KUGOU_HEADERS });
-        if (body.status !== 1) return null;
-        const list = (body.special_db ?? []).map(mapPlaylist);
-        if (!hasItems(list)) return null;
-        return {
-          list,
-          total: Number(body.data?.params?.total ?? list.length),
-          page,
-          limit: LIMIT,
-          source: SOURCE,
-        } satisfies PaginatedPlaylists;
-      },
-      () => loadListLegacy(sortId, tagId, page),
-    ],
-    () => true,
-  );
-  return result ?? { list: [], total: 0, page, limit: LIMIT, source: SOURCE };
+  try {
+    const listTask = getSongList(sortId, tagId, page);
+    const infoTask =
+      currentTagInfo.id === tagId && currentTagInfo.info
+        ? Promise.resolve(currentTagInfo.info)
+        : getListInfo(tagId).then((info) => {
+            currentTagInfo = { id: tagId, info: { ...info } };
+            return info;
+          });
+
+    // 对齐 lx：无分类 + 首页 + 「推荐」排序时拼接猜你喜欢
+    const shouldRecommend = !tagId && page === 1 && sortId === SORT_LIST[0]!.id;
+    const [list, info, recommendList] = await Promise.all([
+      listTask,
+      infoTask,
+      shouldRecommend ? getSongListRecommend() : Promise.resolve([] as OnlinePlaylistSummary[]),
+    ]);
+
+    if (recommendList.length) list.unshift(...recommendList);
+
+    return {
+      list,
+      total: info.total,
+      page,
+      limit: info.limit > 0 ? info.limit : LIMIT,
+      source: SOURCE,
+    };
+  } catch {
+    // yueku 不可用时再降级（内容与 lx 不完全一致，仅作兜底）
+    const legacy = await loadListLegacy(sortId, tagId, page);
+    return legacy ?? { list: [], total: 0, page, limit: LIMIT, source: SOURCE };
+  }
 }
 
 export async function getListDetail(id: string, page = 1): Promise<OnlinePlaylistDetail> {
@@ -411,22 +517,27 @@ export function parseListIdFromUrl(url: string): string | null {
 export async function searchPlaylists(
   keyword: string,
   page = 1,
+  limit = LIMIT,
 ): Promise<SongListSearchResult> {
+  const pageSize = Math.max(1, limit);
   const body = await safeCall(() =>
     onlineFetchJson<{
       errcode?: number;
       data?: { info?: Record<string, unknown>[]; total?: number };
     }>(
-      `http://msearchretry.kugou.com/api/v3/search/special?keyword=${encodeURIComponent(keyword)}&page=${page}&pagesize=${LIMIT}&showtype=10&filter=0&version=7910&sver=2`,
+      `http://msearchretry.kugou.com/api/v3/search/special?keyword=${encodeURIComponent(keyword)}&page=${page}&pagesize=${pageSize}&showtype=10&filter=0&version=7910&sver=2`,
       { headers: KUGOU_HEADERS },
     ),
   );
-  const list = (body?.data?.info ?? []).map(mapPlaylist);
+  if (!body || body.errcode != 0) {
+    return { list: [], total: 0, page, limit: pageSize, source: SOURCE };
+  }
+  const list = (body.data?.info ?? []).map(mapPlaylist);
   return {
     list,
     total: Number(body?.data?.total ?? list.length),
     page,
-    limit: LIMIT,
+    limit: pageSize,
     source: SOURCE,
   };
 }

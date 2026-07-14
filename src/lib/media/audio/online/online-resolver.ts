@@ -4,48 +4,117 @@
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { resolveLocalTrackUrl } from '@/lib/media/audio/library/local-resolver';
-import { resolveOnlineTrackUrl } from '@/lib/media/audio/online/source-router';
-import { userApiMusicUrl, isFragileUserApi, listEnabledUserApiScriptIdsForUrl } from '@/lib/media/audio/online/user-api-engine';
+import {
+  userApiMusicUrl,
+  isActiveUserApiId,
+  listEnabledUserApiScriptIdsForUrl,
+  listUserApiScripts,
+  getActiveUserApiDisplayName,
+  initUserApiScript,
+} from '@/lib/media/audio/online/user-api-engine';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
-import { getPlayQuality, qualityFallbackChain } from '@/lib/media/audio/music-quality';
+import { getPlayQuality } from '@/lib/media/audio/music-quality';
 import {
   cacheMusicTrackAudio,
   createAudioObjectUrl,
   getCachedMusicTrackByTrackId,
 } from '@/lib/media/audio/audio-disk-cache';
-import { resolveFallbackTrackUrl, type ToggleSourceCallbacks } from '@/lib/media/audio/platform/fallback-resolver';
+import {
+  resolveLastResortTrackUrl,
+  getOtherSourceTracks,
+  tryResolveBuiltinUrl,
+  notifyToggleTry,
+  isFallbackResolverEnabled,
+  type ToggleSourceCallbacks,
+} from '@/lib/media/audio/platform/fallback-resolver';
 import { MusicPlaybackStatusText } from '@/lib/media/audio/music-playback-status';
 import { request } from '@/lib/http';
 import { isTauri } from '@/lib/platform/detect';
 
-/** 脆弱第三方代理连续失败时跳过（直连源不熔断） */
-let primaryUserApiFailStreak = 0;
-let primaryUserApiCircuitUntil = 0;
+/** 按脚本独立熔断：依据错误信号，不依据脚本名/域名打分 */
+const primaryFailStreakByScript = new Map<string, number>();
+const primaryCircuitUntilByScript = new Map<string, number>();
+/** 单次取链内硬失败跳过，避免同一次换源反复打同一脚本 */
+const sessionHardSkipScripts = new Set<string>();
 
-function isPrimaryUserApiCircuitOpen(scriptId?: string | null): boolean {
-  if (scriptId && !isFragileUserApi(scriptId)) return false;
-  return Date.now() < primaryUserApiCircuitUntil;
+function errorMessage(reason?: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason ?? '');
 }
 
-function notePrimaryUserApiFailure(scriptId?: string | null): void {
-  if (scriptId && !isFragileUserApi(scriptId)) return;
-  primaryUserApiFailStreak += 1;
-  if (primaryUserApiFailStreak >= 2) {
-    primaryUserApiCircuitUntil = Date.now() + 5 * 60_000;
-    primaryUserApiFailStreak = 0;
-    console.warn('[user-api] primary circuit opened for 5min (fragile proxy)');
+/** 公共代理滥用信号（脚本通用文案，不绑定具体源） */
+function isUserApiIpBanError(reason?: unknown): boolean {
+  return /block\s*ip|too many requests|封禁|频繁|rate.?limit/i.test(
+    errorMessage(reason),
+  );
+}
+
+function isPrimaryUserApiCircuitOpen(scriptId?: string | null): boolean {
+  if (!scriptId) return false;
+  if (sessionHardSkipScripts.has(scriptId)) return true;
+  const until = primaryCircuitUntilByScript.get(scriptId) ?? 0;
+  return Date.now() < until;
+}
+
+function notePrimaryUserApiFailure(
+  scriptId?: string | null,
+  reason?: unknown,
+): void {
+  if (!scriptId) return;
+  const msg = errorMessage(reason);
+
+  // IP 封禁 / 限流：立刻跳过本轮 + 长熔断（含活跃源），禁止换源矩阵继续请求该脚本
+  if (isUserApiIpBanError(reason)) {
+    sessionHardSkipScripts.add(scriptId);
+    primaryCircuitUntilByScript.set(scriptId, Date.now() + 30 * 60_000);
+    primaryFailStreakByScript.set(scriptId, 0);
+    console.warn(
+      '[user-api] IP-ban circuit opened 30min for script',
+      scriptId,
+      msg.slice(0, 40),
+    );
+    return;
+  }
+
+  // 硬失败（空消息 / 超时 / 连接失败等）：本轮跳过；活跃源不写持久熔断
+  const hardFail =
+    !msg.trim() ||
+    /404|Not Found|ECONN|ETIMEDOUT|circuit|请求超时|get url error/i.test(msg);
+  if (hardFail) {
+    sessionHardSkipScripts.add(scriptId);
+    if (isActiveUserApiId(scriptId)) {
+      console.warn('[user-api] session skip active after hard fail', scriptId);
+      return;
+    }
+  } else if (isActiveUserApiId(scriptId)) {
+    return;
+  }
+  const streak = hardFail
+    ? 3
+    : (primaryFailStreakByScript.get(scriptId) ?? 0) + 1;
+  primaryFailStreakByScript.set(scriptId, streak);
+  if (streak >= 3) {
+    primaryCircuitUntilByScript.set(scriptId, Date.now() + 5 * 60_000);
+    primaryFailStreakByScript.set(scriptId, 0);
+    console.warn(
+      '[user-api] circuit opened 5min for script',
+      scriptId,
+      hardFail ? `(hard: ${msg.slice(0, 40) || 'empty'})` : '',
+    );
   }
 }
 
-function notePrimaryUserApiSuccess(): void {
-  primaryUserApiFailStreak = 0;
-  primaryUserApiCircuitUntil = 0;
+function notePrimaryUserApiSuccess(scriptId?: string | null): void {
+  if (!scriptId) return;
+  primaryFailStreakByScript.set(scriptId, 0);
+  primaryCircuitUntilByScript.delete(scriptId);
+  sessionHardSkipScripts.delete(scriptId);
 }
 
 export function resetPrimaryUserApiCircuit(): void {
-  primaryUserApiFailStreak = 0;
-  primaryUserApiCircuitUntil = 0;
+  primaryFailStreakByScript.clear();
+  primaryCircuitUntilByScript.clear();
+  sessionHardSkipScripts.clear();
 }
 
 async function tryCachePlayback(
@@ -61,23 +130,15 @@ async function tryCachePlayback(
   }
 }
 
-async function resolveBuiltinUrl(
-  track: AudioTrack,
-  cookies?: string,
-  options?: { skipCache?: boolean },
-): Promise<string | null> {
-  const qualities = qualityFallbackChain(getPlayQuality());
-  for (const q of qualities) {
-    const url = await resolveOnlineTrackUrl(track, cookies, {
-      skipCache: options?.skipCache,
-      quality: q,
-    });
-    if (url) return url;
-  }
-  return null;
-}
-
 const USER_API_MUSIC_URL_TIMEOUT_MS = 20_000;
+/** 非活跃源略短超时，尽快进入下一个脚本（通用策略，不绑定具体源） */
+const USER_API_SIDE_TIMEOUT_MS = 12_000;
+
+function musicUrlTimeoutMs(userApiId: string): number {
+  return isActiveUserApiId(userApiId)
+    ? USER_API_MUSIC_URL_TIMEOUT_MS
+    : USER_API_SIDE_TIMEOUT_MS;
+}
 
 async function resolveUserApiUrl(
   userApiId: string,
@@ -87,37 +148,234 @@ async function resolveUserApiUrl(
     console.warn('[user-api] circuit open, skip', userApiId);
     return null;
   }
+  // 已启用但尚未 ready（含 activeOnly 未预热）：取链前补初始化
+  const scriptMeta = listUserApiScripts().find((s) => s.id === userApiId);
+  if (scriptMeta && scriptMeta.initStatus !== 'ready') {
+    console.info(
+      '[user-api] ensure init before musicUrl',
+      scriptMeta.name,
+      scriptMeta.initStatus ?? 'undefined',
+    );
+    const init = await initUserApiScript(userApiId);
+    if (!init.ok) {
+      console.warn('[user-api] ensure init failed', userApiId, init.error);
+      return null;
+    }
+  }
+  const timeoutMs = musicUrlTimeoutMs(userApiId);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   try {
     const result = await Promise.race([
-      userApiMusicUrl(userApiId, track, undefined, getPlayQuality()),
+      userApiMusicUrl(userApiId, track, undefined, getPlayQuality()).finally(() => {
+        if (timer) clearTimeout(timer);
+      }),
       new Promise<null>((resolve) => {
-        setTimeout(() => {
-          console.warn('[user-api] musicUrl timeout', userApiId);
+        timer = setTimeout(() => {
+          timedOut = true;
+          console.warn('[user-api] musicUrl timeout', userApiId, `${timeoutMs}ms`);
           resolve(null);
-        }, USER_API_MUSIC_URL_TIMEOUT_MS);
+        }, timeoutMs);
       }),
     ]);
+    if (timer) clearTimeout(timer);
     if (result) {
-      notePrimaryUserApiSuccess();
+      notePrimaryUserApiSuccess(userApiId);
       return result;
     }
-    notePrimaryUserApiFailure(userApiId);
+    notePrimaryUserApiFailure(
+      userApiId,
+      timedOut ? new Error('请求超时') : undefined,
+    );
     return null;
   } catch (err) {
-    notePrimaryUserApiFailure(userApiId);
+    if (timer) clearTimeout(timer);
+    notePrimaryUserApiFailure(userApiId, err);
     console.warn('[user-api] musicUrl failed', userApiId, err);
+    lastUserApiError = err;
     return null;
   }
 }
 
-/** 默认音源 → 其他已启用音源 */
-async function resolveAcrossUserApis(track: AudioTrack): Promise<string | null> {
+let lastUserApiError: unknown = null;
+
+/** 最近一次 UserApi 失败信息（供状态栏展示 VIP/付费等原因） */
+export function consumeLastUserApiError(): unknown {
+  const err = lastUserApiError;
+  lastUserApiError = null;
+  return err;
+}
+
+/**
+ * 对齐 lx 换源 + Reader 多 UserApi：
+ * 1) 原平台：按「活跃 → 其他启用」各试一次（旁路 VIP 源可在此命中）
+ * 2) 原平台内置
+ * 3) 跨平台（findMusic）：**仅当前活跃源**跟 lx 一样逐平台试；不要对每个旁路源再乘平台矩阵
+ *    （否则一首歌会把公共代理打爆触发 block ip）
+ * 4) 跨平台内置
+ */
+async function resolveAcrossUserApiAndPlatforms(
+  track: AudioTrack,
+  accept: (url: string, t: AudioTrack) => Promise<{ url: string; revoke: () => void } | null>,
+  callbacks?: ToggleSourceCallbacks,
+  cookies?: string,
+  options?: { tryBuiltin?: boolean },
+): Promise<{
+  playable: { url: string; revoke: () => void };
+  track: AudioTrack;
+  toggled: boolean;
+} | null> {
+  lastUserApiError = null;
+  sessionHardSkipScripts.clear();
+  const tryBuiltin = options?.tryBuiltin !== false;
   const ids = listEnabledUserApiScriptIdsForUrl();
-  for (const id of ids) {
-    const url = await resolveUserApiUrl(id, track);
-    if (url) {
-      console.info('[user-api] musicUrl ok via', id);
-      return url;
+  if (!ids.length && !tryBuiltin) {
+    console.warn('[user-api] no enabled scripts for url resolve');
+    return null;
+  }
+  const activeId = ids[0] ?? null;
+  if (ids.length) {
+    console.info(
+      '[user-api] resolve order (active→others):',
+      ids
+        .map((id) => {
+          const s = listUserApiScripts().find((x) => x.id === id);
+          return s ? `${s.name}(${s.initStatus ?? '?'})` : id;
+        })
+        .join(' → '),
+    );
+  }
+
+  const tryScriptOnTrack = async (
+    scriptId: string,
+    candidate: AudioTrack,
+    tag: string,
+  ): Promise<{ url: string; revoke: () => void } | null> => {
+    const url = await resolveUserApiUrl(scriptId, candidate);
+    if (!url) return null;
+    const ok = await accept(url, candidate);
+    if (ok) {
+      console.info(`[user-api] musicUrl ok via ${scriptId}`, tag, candidate.source, candidate.name);
+      return ok;
+    }
+    console.warn(`[user-api] rejected by validator via ${scriptId}`, tag, candidate.source);
+    return null;
+  };
+
+  const tryBuiltinOnTrack = async (
+    candidate: AudioTrack,
+    tag: string,
+  ): Promise<{ url: string; revoke: () => void } | null> => {
+    if (!tryBuiltin) return null;
+    callbacks?.onStatus?.(
+      `${MusicPlaybackStatusText.gettingUrl}（内置 · ${candidate.source}）`,
+    );
+    const url = await tryResolveBuiltinUrl(candidate, cookies);
+    if (!url) return null;
+    const ok = await accept(url, candidate);
+    if (ok) {
+      console.info('[music] builtin url ok', tag, candidate.source);
+      return ok;
+    }
+    return null;
+  };
+
+  // Phase 1：同平台换音源（活跃 → 其他启用，各一次）
+  for (const scriptId of ids) {
+    const scriptName =
+      listUserApiScripts().find((x) => x.id === scriptId)?.name ?? scriptId;
+    callbacks?.onStatus?.(
+      `${MusicPlaybackStatusText.gettingUrl}（${scriptName} · ${track.source}）`,
+    );
+    console.info(
+      '[user-api] try script same-platform',
+      scriptName,
+      track.source,
+      track.name,
+    );
+    const hit = await tryScriptOnTrack(scriptId, track, 'same-platform');
+    if (hit) return { playable: hit, track, toggled: false };
+  }
+
+  // Phase 1.5：同平台内置
+  {
+    const hit = await tryBuiltinOnTrack(track, 'same-platform');
+    if (hit) return { playable: hit, track, toggled: false };
+  }
+
+  // Phase 2：对齐 lx — 仅活跃源跨平台（findMusic 每个候选只打活跃脚本一次）
+  if (!isFallbackResolverEnabled()) return null;
+  callbacks?.onStatus?.(MusicPlaybackStatusText.toggleTry);
+  const others = await getOtherSourceTracks(track);
+  if (!others.length) return null;
+
+  if (activeId && !isPrimaryUserApiCircuitOpen(activeId)) {
+    const activeName =
+      listUserApiScripts().find((x) => x.id === activeId)?.name ?? activeId;
+    for (const alt of others) {
+      notifyToggleTry(alt, callbacks);
+      console.info(
+        '[user-api] try active script other-platform (lx-style)',
+        activeName,
+        alt.source,
+        alt.name,
+      );
+      const hit = await tryScriptOnTrack(activeId, alt, 'other-platform');
+      if (hit) return { playable: hit, track: alt, toggled: true };
+      if (isPrimaryUserApiCircuitOpen(activeId)) {
+        console.warn('[user-api] active script circuit open, stop platform toggle');
+        break;
+      }
+    }
+  }
+
+  // Phase 2.5：跨平台仅内置（旁路 UserApi 不再乘平台）
+  for (const alt of others) {
+    notifyToggleTry(alt, callbacks);
+    const builtinHit = await tryBuiltinOnTrack(alt, 'other-platform');
+    if (builtinHit) return { playable: builtinHit, track: alt, toggled: true };
+  }
+  return null;
+}
+
+/**
+ * 内置源：原平台 → findMusic 其它平台
+ */
+async function resolveBuiltinAcrossPlatforms(
+  track: AudioTrack,
+  accept: (url: string, t: AudioTrack) => Promise<{ url: string; revoke: () => void } | null>,
+  cookies?: string,
+  callbacks?: ToggleSourceCallbacks,
+  cachedOthers?: AudioTrack[],
+): Promise<{
+  playable: { url: string; revoke: () => void };
+  track: AudioTrack;
+  toggled: boolean;
+} | null> {
+  const primaryUrl = await tryResolveBuiltinUrl(track, cookies);
+  if (primaryUrl) {
+    const ok = await accept(primaryUrl, track);
+    if (ok) {
+      console.info('[music] builtin url ok', track.source);
+      return { playable: ok, track, toggled: false };
+    }
+  }
+
+  if (!isFallbackResolverEnabled()) return null;
+  const others =
+    cachedOthers ??
+    (await (async () => {
+      callbacks?.onStatus?.(MusicPlaybackStatusText.toggleTry);
+      return getOtherSourceTracks(track);
+    })());
+  for (const alt of others) {
+    notifyToggleTry(alt, callbacks);
+    const url = await tryResolveBuiltinUrl(alt, cookies);
+    if (!url) continue;
+    const ok = await accept(url, alt);
+    if (ok) {
+      console.info('[music] builtin url ok after toggle', alt.source);
+      return { playable: ok, track: alt, toggled: true };
     }
   }
   return null;
@@ -139,7 +397,7 @@ export async function resolveTrackPlaybackUrls(
 }> {
   const offline = getMusicOfflineMode();
   const urlMode = getMusicSettings().urlSourceMode;
-  // options.userApiId / activeSource 仍保留兼容，取链统一按「默认→其他启用」遍历
+  // options.userApiId / activeSource 仍保留兼容；取链统一按「活跃 → 其他启用 →（auto）内置」
 
   if (track.source === 'local') {
     const url = resolveLocalTrackUrl(track);
@@ -162,10 +420,14 @@ export async function resolveTrackPlaybackUrls(
     return { urls: [], revokeAll: () => {}, track };
   }
 
-  options?.onStatus?.(MusicPlaybackStatusText.gettingUrl);
+  const activeName = getActiveUserApiDisplayName();
+  options?.onStatus?.(
+    activeName
+      ? `${MusicPlaybackStatusText.gettingUrl}（${activeName}）`
+      : MusicPlaybackStatusText.gettingUrl,
+  );
 
   let playable: { url: string; revoke: () => void } | null = null;
-  let toggled = false;
 
   const acceptUrl = async (
     candidateUrl: string,
@@ -193,48 +455,110 @@ export async function resolveTrackPlaybackUrls(
   const acceptUrlValidator = async (url: string, t: AudioTrack) =>
     (await acceptUrl(url, t)) !== null;
 
-  // 取链顺序：默认 UserApi → 其他已启用 UserApi → 内置
-  let primaryUrl: string | null = null;
-  if (urlMode !== 'builtin') {
-    primaryUrl = await resolveAcrossUserApis(track);
-  }
-  if (!primaryUrl && urlMode !== 'userApi') {
-    primaryUrl = await resolveBuiltinUrl(track, options?.cookies, options);
-  }
+  /**
+   * 活跃→其他 UserApi；auto 模式下同平台/跨平台穿插内置，避免矩阵拖死。
+   * builtin 模式纯走内置矩阵。
+   */
+  let resolved: {
+    playable: { url: string; revoke: () => void };
+    track: AudioTrack;
+    toggled: boolean;
+  } | null = null;
 
-  const acceptedPrimary = primaryUrl ? await acceptUrl(primaryUrl, track) : null;
-  if (acceptedPrimary) {
-    options?.onStatus?.(null);
-    return {
-      urls: [acceptedPrimary.url],
-      revokeAll: acceptedPrimary.revoke,
-      toggled: false,
+  if (urlMode === 'builtin') {
+    resolved = await resolveBuiltinAcrossPlatforms(
       track,
-    };
+      acceptUrl,
+      options?.cookies,
+      {
+        onStatus: options?.onStatus,
+        onToggleSource: options?.onToggleSource,
+      },
+    );
+  } else {
+    resolved = await resolveAcrossUserApiAndPlatforms(
+      track,
+      acceptUrl,
+      {
+        onStatus: options?.onStatus,
+        onToggleSource: options?.onToggleSource,
+      },
+      options?.cookies,
+      { tryBuiltin: urlMode === 'auto' },
+    );
   }
 
-  toggled = true;
-  const fallback = await resolveFallbackTrackUrl(track, options?.cookies, {
-    onStatus: options?.onStatus,
-    onToggleSource: options?.onToggleSource,
-    acceptUrl: acceptUrlValidator,
-  });
-  options?.onStatus?.(null);
-
-  if (fallback) {
-    const resolvedPlayable =
-      playable ?? (await acceptUrl(fallback.url, fallback.track));
-    if (resolvedPlayable) {
-      return {
-        urls: [resolvedPlayable.url],
-        revokeAll: resolvedPlayable.revoke,
-        toggled: true,
-        track: fallback.track,
-      };
+  if (!resolved && urlMode !== 'userApi') {
+    const last = await resolveLastResortTrackUrl(
+      track,
+      async (alt) => {
+        const url = await tryResolveBuiltinUrl(alt, options?.cookies);
+        if (!url) return null;
+        if (!(await acceptUrlValidator(url, alt))) return null;
+        return { url, track: alt };
+      },
+      {
+        onStatus: options?.onStatus,
+        onToggleSource: options?.onToggleSource,
+      },
+    );
+    if (last) {
+      const resolvedPlayable =
+        playable ?? (await acceptUrl(last.url, last.track));
+      if (resolvedPlayable) {
+        resolved = {
+          playable: resolvedPlayable,
+          track: last.track,
+          toggled: true,
+        };
+      }
+    }
+  } else if (!resolved && urlMode === 'userApi' && isFallbackResolverEnabled()) {
+    // 仅 UserApi：关键词候选也只喂活跃源（对齐 lx，避免再乘旁路脚本）
+    const activeId = listEnabledUserApiScriptIdsForUrl()[0];
+    const last = await resolveLastResortTrackUrl(
+      track,
+      async (alt) => {
+        if (!activeId || isPrimaryUserApiCircuitOpen(activeId)) return null;
+        notifyToggleTry(alt, {
+          onStatus: options?.onStatus,
+          onToggleSource: options?.onToggleSource,
+        });
+        const url = await resolveUserApiUrl(activeId, alt);
+        if (!url) return null;
+        if (!(await acceptUrlValidator(url, alt))) return null;
+        return { url, track: alt };
+      },
+      {
+        onStatus: options?.onStatus,
+        onToggleSource: options?.onToggleSource,
+      },
+    );
+    if (last) {
+      const resolvedPlayable =
+        playable ?? (await acceptUrl(last.url, last.track));
+      if (resolvedPlayable) {
+        resolved = {
+          playable: resolvedPlayable,
+          track: last.track,
+          toggled: true,
+        };
+      }
     }
   }
 
-  return { urls: [], revokeAll: () => {}, toggled, track };
+  options?.onStatus?.(null);
+
+  if (resolved) {
+    return {
+      urls: [resolved.playable.url],
+      revokeAll: resolved.playable.revoke,
+      toggled: resolved.toggled,
+      track: resolved.track,
+    };
+  }
+
+  return { urls: [], revokeAll: () => {}, toggled: true, track };
 }
 
 function parseTrackDurationSec(duration: string | undefined): number {

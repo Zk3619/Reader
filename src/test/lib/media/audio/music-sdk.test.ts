@@ -82,6 +82,10 @@ describe.skipIf(process.env.CI === 'true')('music-sdk discovery live smoke', () 
     it(`${source} tipSearch returns suggestions`, async () => {
       const words = await tipSearchKeywords(source, '周');
       expect(Array.isArray(words)).toBe(true);
+      // 咪咕 suggest 接口当前常返回 HTML；其余源应对齐 lx 有结果
+      if (source !== 'mg') {
+        expect(words.length).toBeGreaterThan(0);
+      }
     }, 20_000);
   }
 });

@@ -3,7 +3,9 @@
  */
 
 import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
-import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
+import { onlineFetchJson, onlineFetchText } from '@/lib/media/audio/online/online-http';
+import { parseKuwoObjStr } from '@/lib/media/audio/music-sdk/sources/kw/parse-kuwo-json';
+import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 import { buildTrackId, formatDurationSec } from '@/lib/media/audio/track-types';
 import type {
   MusicSdkSource,
@@ -40,12 +42,12 @@ function formatPlayCount(num: number): string {
 function mapPlaylistItem(item: Record<string, unknown>): OnlinePlaylistSummary {
   return {
     id: String(item.id ?? ''),
-    name: String(item.name ?? ''),
-    author: String(item.uname ?? item.author ?? ''),
+    name: decodeHtmlEntities(String(item.name ?? '')),
+    author: decodeHtmlEntities(String(item.uname ?? item.author ?? '')),
     coverUrl: String(item.img ?? item.pic ?? ''),
     playCount: item.listencnt != null ? formatPlayCount(Number(item.listencnt)) : undefined,
     trackCount: Number(item.total ?? 0) || undefined,
-    desc: String(item.desc ?? ''),
+    desc: decodeHtmlEntities(String(item.desc ?? '')),
     source: SOURCE,
   };
 }
@@ -250,28 +252,39 @@ export function parseListIdFromUrl(url: string): string | null {
 export async function searchPlaylists(
   keyword: string,
   page = 1,
+  limit = LIMIT_LIST,
 ): Promise<SongListSearchResult> {
+  const pageSize = Math.max(1, limit);
   const url =
-    `http://search.kuwo.cn/r.s?all=${encodeURIComponent(keyword)}&pn=${page - 1}&rn=${LIMIT_LIST}` +
-    `&rformat=json&encoding=utf8&ver=mbox&vipver=MUSIC_8.7.7.0_BCS37&plat=pc&ft=playlist`;
-  const raw = await safeCall(() => onlineFetchJson<unknown>(url));
-  const body = typeof raw === 'string'
-    ? (JSON.parse(raw.replace(/'/g, '"')) as { abslist?: Record<string, unknown>[]; TOTAL?: string })
-    : (raw as { abslist?: Record<string, unknown>[]; TOTAL?: string });
-  const list = (body?.abslist ?? []).map((item) => mapPlaylistItem({
-    id: item.playlistid,
-    name: item.name,
-    uname: item.nickname,
-    img: item.pic,
-    listencnt: item.playcnt,
-    total: item.songnum,
-    desc: item.intro,
-  }));
+    `http://search.kuwo.cn/r.s?all=${encodeURIComponent(keyword)}&pn=${page - 1}&rn=${pageSize}` +
+    `&rformat=json&encoding=utf8&ver=mbox&vipver=MUSIC_8.7.7.0_BCS37&plat=pc&devid=28156413&ft=playlist&pay=0&needliveshow=0`;
+  // 对齐 lx：text + objStr2JSON（勿用 Response.json，单引号体会直接失败）
+  const text = await safeCall(() => onlineFetchText(url));
+  if (!text) {
+    return { list: [], total: 0, page, limit: pageSize, source: SOURCE };
+  }
+  let body: { abslist?: Record<string, unknown>[]; TOTAL?: string };
+  try {
+    body = parseKuwoObjStr(text);
+  } catch {
+    return { list: [], total: 0, page, limit: pageSize, source: SOURCE };
+  }
+  const list = (body.abslist ?? []).map((item) =>
+    mapPlaylistItem({
+      id: item.playlistid,
+      name: item.name,
+      uname: item.nickname,
+      img: item.pic,
+      listencnt: item.playcnt,
+      total: item.songnum,
+      desc: item.intro,
+    }),
+  );
   return {
     list,
-    total: parseInt(String(body?.TOTAL ?? list.length), 10) || list.length,
+    total: parseInt(String(body.TOTAL ?? list.length), 10) || list.length,
     page,
-    limit: LIMIT_LIST,
+    limit: pageSize,
     source: SOURCE,
   };
 }

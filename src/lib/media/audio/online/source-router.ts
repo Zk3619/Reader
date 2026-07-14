@@ -34,25 +34,56 @@ import {
 import { getPlayQuality } from '@/lib/media/audio/music-quality';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
+import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
+
+/** 对齐 lx 搜索默认每页条数 */
+export const MUSIC_SEARCH_PAGE_LIMIT = 30;
 
 function inferQualitys(track: AudioTrack): MusicQuality[] {
   const existing = track.meta.qualitys;
   if (Array.isArray(existing) && existing.length > 0) {
     return existing as MusicQuality[];
   }
+  const typed = track.meta._qualitys;
+  if (typed && typeof typed === 'object' && !Array.isArray(typed)) {
+    return Object.keys(typed as Record<string, unknown>) as MusicQuality[];
+  }
   const maxbr = Number(track.meta.maxbr ?? track.meta.maxBr ?? 0);
   const out: MusicQuality[] = ['128k'];
-  if (maxbr >= 192000 || track.meta.hash320) out.push('192k');
-  if (maxbr >= 320000 || track.meta.hash320) out.push('320k');
-  if (track.meta.hashFlac || maxbr >= 1000000) out.push('flac');
-  if (track.meta.hashFlac24bit) out.push('flac24bit');
+  if (maxbr >= 192000 || track.meta.hash320 || track.meta.hash_320) out.push('192k');
+  if (maxbr >= 320000 || track.meta.hash320 || track.meta.hash_320) out.push('320k');
+  if (track.meta.hashFlac || track.meta.hash_flac || maxbr >= 1000000) out.push('flac');
+  if (track.meta.hashFlac24bit || track.meta.hash_high) out.push('flac24bit');
   return [...new Set(out)];
 }
 
 function enrichTrackMeta(track: AudioTrack): AudioTrack {
   const qualitys = inferQualitys(track);
-  if (qualitys.length === 0) return track;
-  return { ...track, meta: { ...track.meta, qualitys } };
+  const albumRaw = track.meta.albumName ?? track.meta.album;
+  const albumName =
+    typeof albumRaw === 'string' && albumRaw.length > 0
+      ? decodeHtmlEntities(albumRaw)
+      : typeof albumRaw === 'string'
+        ? albumRaw
+        : undefined;
+  const existingTypes = track.meta._qualitys;
+  const _qualitys =
+    existingTypes && typeof existingTypes === 'object' && !Array.isArray(existingTypes)
+      ? existingTypes
+      : qualitys.length > 0
+        ? Object.fromEntries(qualitys.map((q) => [q, {}]))
+        : undefined;
+  return {
+    ...track,
+    name: decodeHtmlEntities(track.name),
+    artist: decodeHtmlEntities(track.artist),
+    meta: {
+      ...track.meta,
+      ...(albumName !== undefined ? { albumName } : {}),
+      ...(qualitys.length > 0 ? { qualitys } : {}),
+      ...(_qualitys ? { _qualitys } : {}),
+    },
+  };
 }
 
 function enrichSearchResults(tracks: AudioTrack[]): AudioTrack[] {
@@ -61,7 +92,7 @@ function enrichSearchResults(tracks: AudioTrack[]): AudioTrack[] {
 
 export { type MusicSdkSource } from '@/lib/media/audio/music-sdk';
 
-export const BUILTIN_SOURCES: AudioTrackSource[] = ['kw', 'wy', 'kg', 'tx', 'mg'];
+export const BUILTIN_SOURCES: AudioTrackSource[] = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
   kw: '酷我',
@@ -70,6 +101,20 @@ export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
   tx: 'QQ音乐',
   mg: '咪咕',
 };
+
+/** 聚合搜索结果行上来源短码（对齐 lx OnlineList source 徽章） */
+export const BUILTIN_SOURCE_SHORT_LABELS: Record<string, string> = {
+  kw: 'kw',
+  wy: 'wy',
+  kg: 'kg',
+  tx: 'tx',
+  mg: 'mg',
+};
+
+/** lx 歌单聚合搜索每源条数 listInfos.all.limit */
+export const MUSIC_PLAYLIST_SEARCH_AGGREGATE_LIMIT = 15;
+/** lx 单源歌单搜索条数 listInfos[source].limit */
+export const MUSIC_PLAYLIST_SEARCH_SOURCE_LIMIT = 18;
 
 export const AGGREGATE_SEARCH_SOURCE = 'all' as const;
 
@@ -93,7 +138,17 @@ export function searchSourceLabel(source: SearchSource): string {
   return BUILTIN_SOURCE_LABELS[source] ?? source;
 }
 
-export async function searchOnline(source: SearchSource, keyword: string) {
+/** 列表行短来源标签（聚合结果用，避免「网易」等中文换行撑高卡片） */
+export function searchSourceShortLabel(source: string): string {
+  return BUILTIN_SOURCE_SHORT_LABELS[source] ?? source;
+}
+
+export async function searchOnline(
+  source: SearchSource,
+  keyword: string,
+  page = 1,
+  limit = MUSIC_SEARCH_PAGE_LIMIT,
+) {
   if (source.startsWith('userApi:')) {
     const scriptId = source.slice('userApi:'.length);
     const tracks = await userApiSearch(scriptId, keyword);
@@ -102,19 +157,24 @@ export async function searchOnline(source: SearchSource, keyword: string) {
   let result: { tracks: AudioTrack[]; total: number };
   switch (source) {
     case 'kw':
-      result = await kw.kwSearch(keyword);
+      result = await kw.kwSearch(keyword, page, limit);
       break;
-    case 'wy':
-      result = { tracks: await wy.wySearch(keyword), total: 0 };
+    case 'wy': {
+      const tracks = await wy.wySearch(keyword, page, limit);
+      // 网易部分接口不回 total：页满则按「还有下一页」估算（对齐 lx）
+      const total =
+        tracks.length >= limit ? page * limit + 1 : (page - 1) * limit + tracks.length;
+      result = { tracks, total };
       break;
+    }
     case 'kg':
-      result = await kg.kgSearch(keyword);
+      result = await kg.kgSearch(keyword, page, limit);
       break;
     case 'tx':
-      result = await tx.txSearch(keyword);
+      result = await tx.txSearch(keyword, page, limit);
       break;
     case 'mg':
-      result = await mg.mgSearch(keyword);
+      result = await mg.mgSearch(keyword, page, limit);
       break;
     case 'bili': {
       const { biliSearch } = await import('@/lib/media/audio/platform/api/bili-ytm');

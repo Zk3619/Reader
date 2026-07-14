@@ -2,7 +2,7 @@
  * QQ 音乐源（musics.fcg 签名优先，musicu POST 降级）
  */
 
-import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
+import { firstFullest, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import { zzcSign } from '@/lib/media/audio/platform/api/tx-sign';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
@@ -86,15 +86,35 @@ function buildTxSearchPayload(keyword: string, page: number, limit: number) {
   };
 }
 
-function mapSearchItems(list: Array<Record<string, unknown>>): AudioTrack[] {
+function mapSearchItems(list: Array<Record<string, unknown>>): AudioTrack[] | null {
   const tracks: AudioTrack[] = [];
   for (const item of list) {
     const file = item.file as Record<string, unknown> | undefined;
+    // 对齐 lx：无 media_mid 则跳过该条（非整页失败）
     if (!file?.media_mid) continue;
     const songId = String(item.id ?? '');
     const songmid = String(item.mid ?? '');
     const sec = Number(item.interval ?? 0);
     const album = item.album as { name?: string; mid?: string } | undefined;
+    // 对齐 lx tx handleResult：按 file.size_* 填充音质
+    const _qualitys: Record<string, { size?: number }> = {};
+    const qualitys: string[] = [];
+    if (Number(file.size_128mp3 ?? 0) !== 0) {
+      _qualitys['128k'] = { size: Number(file.size_128mp3) };
+      qualitys.push('128k');
+    }
+    if (Number(file.size_320mp3 ?? 0) !== 0) {
+      _qualitys['320k'] = { size: Number(file.size_320mp3) };
+      qualitys.push('320k');
+    }
+    if (Number(file.size_flac ?? 0) !== 0) {
+      _qualitys.flac = { size: Number(file.size_flac) };
+      qualitys.push('flac');
+    }
+    if (Number(file.size_hires ?? 0) !== 0) {
+      _qualitys.flac24bit = { size: Number(file.size_hires) };
+      qualitys.push('flac24bit');
+    }
     tracks.push({
       id: buildTrackId('tx', songId || songmid),
       name: String(item.title ?? item.songname ?? '未知'),
@@ -107,6 +127,8 @@ function mapSearchItems(list: Array<Record<string, unknown>>): AudioTrack[] {
         mediaMid: String(file.media_mid ?? ''),
         albumMid: String(album?.mid ?? ''),
         albumName: String(album?.name ?? ''),
+        qualitys,
+        _qualitys,
       },
     });
   }
@@ -126,7 +148,7 @@ async function searchSigned(keyword: string, page: number, limit: number): Promi
   }>(buildTxSearchPayload(keyword, page, limit));
   if (!envelope?.req || envelope.code !== 0 || envelope.req.code !== 0) return null;
   const tracks = mapSearchItems(envelope.req.data?.body?.item_song ?? []);
-  if (!hasItems(tracks)) return null;
+  if (!tracks || !hasItems(tracks)) return null;
   return {
     tracks,
     total: envelope.req.data?.meta?.estimate_sum ?? tracks.length,
@@ -157,7 +179,7 @@ async function searchMusicu(keyword: string, page: number, limit: number): Promi
   );
   if (!envelope?.req || envelope.code !== 0 || envelope.req.code !== 0) return null;
   const tracks = mapSearchItems(envelope.req.data?.body?.item_song ?? []);
-  if (!hasItems(tracks)) return null;
+  if (!tracks || !hasItems(tracks)) return null;
   return {
     tracks,
     total: envelope.req.data?.meta?.estimate_sum ?? tracks.length,
@@ -165,11 +187,13 @@ async function searchMusicu(keyword: string, page: number, limit: number): Promi
 }
 
 export async function txSearch(keyword: string, page = 1, limit = 30): Promise<OnlineSearchResult> {
-  const result = await firstSuccess(
+  const result = await firstFullest(
     [
       () => searchSigned(keyword, page, limit),
       () => searchMusicu(keyword, page, limit),
     ],
+    (r) => r.tracks.length,
+    limit,
     (r) => hasItems(r.tracks),
   );
   return result ?? { tracks: [], total: 0 };
@@ -263,7 +287,74 @@ export async function txGetMusicUrl(
 
 export async function txGetLyric(track: AudioTrack): Promise<LyricBundle | null> {
   const songmid = String(track.meta.songmid ?? track.meta.songId ?? '');
-  if (!songmid) return null;
+  const songId = String(track.meta.songId ?? '');
+  if (!songmid && !songId) return null;
+
+  const { decodeTxQrc, parseTxQrcBundle } = await import(
+    '@/lib/media/audio/platform/api/tx-qrc-parse'
+  );
+
+  // 优先 QRC（对齐 lx：qrc:1 + crypt）；解密失败回退 LRC
+  try {
+    const qrcBody = await safeCall(() =>
+      onlineFetchJson<{
+        code?: number;
+        req?: { code?: number; data?: { lyric?: string; trans?: string; roma?: string } };
+      }>('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+        method: 'POST',
+        headers: {
+          Referer: 'https://y.qq.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          comm: { ct: '19', cv: '1859', uin: '0' },
+          req: {
+            method: 'GetPlayLyricInfo',
+            module: 'music.musichallSong.PlayLyricInfo',
+            param: {
+              format: 'json',
+              crypt: 1,
+              ct: 19,
+              cv: 1873,
+              interval: 0,
+              lrc_t: 0,
+              qrc: 1,
+              qrc_t: 0,
+              roma: 1,
+              roma_t: 0,
+              songID: Number(songId) || undefined,
+              songmid: songmid || undefined,
+              trans: 1,
+              trans_t: 0,
+              type: -1,
+            },
+          },
+        }),
+      }),
+    );
+    const data = qrcBody?.req?.data;
+    if (data?.lyric && qrcBody?.code === 0) {
+      const decoded = await decodeTxQrc(
+        data.lyric,
+        data.trans ?? '',
+        data.roma ?? '',
+      );
+      if (decoded?.lyric) {
+        const parsed = parseTxQrcBundle(decoded.lyric, decoded.tlyric, decoded.rlyric);
+        if (parsed.lyric?.trim()) {
+          return {
+            lyric: parsed.lyric,
+            tlyric: parsed.tlyric || null,
+            rlyric: parsed.rlyric || null,
+            lxlyric: parsed.lxlyric || null,
+          };
+        }
+      }
+    }
+  } catch {
+    // fall through to LRC
+  }
+
   try {
     const body = await txSignedRequest<{
       req?: { data?: { lyric?: string; trans?: string; roma?: string } };
@@ -272,7 +363,7 @@ export async function txGetLyric(track: AudioTrack): Promise<LyricBundle | null>
       req: {
         module: 'music.musichallSong.PlayLyricInfo',
         method: 'GetPlayLyricInfo',
-        param: { songmid },
+        param: { songmid: songmid || songId },
       },
     });
     const b64 = body?.req?.data?.lyric;
