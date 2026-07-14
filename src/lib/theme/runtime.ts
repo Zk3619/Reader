@@ -93,6 +93,27 @@ let mediaQuery: MediaQueryList | null = null;
 let mediaListener: (() => void) | null = null;
 let scheduleThemeTimer: number | null = null;
 
+/** document 实际明暗切换后通知（含 ThemeSwitch / auto / schedule） */
+type DocumentColorModeListener = (dark: boolean) => void;
+const documentColorModeListeners = new Set<DocumentColorModeListener>();
+
+export function onDocumentColorModeChange(listener: DocumentColorModeListener): () => void {
+  documentColorModeListeners.add(listener);
+  return () => {
+    documentColorModeListeners.delete(listener);
+  };
+}
+
+function notifyDocumentColorModeListeners(dark: boolean): void {
+  for (const listener of documentColorModeListeners) {
+    try {
+      listener(dark);
+    } catch (e) {
+      console.warn('[theme] color mode listener failed:', e);
+    }
+  }
+}
+
 function getPreferredDark(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -182,14 +203,19 @@ function scheduleThemeRefresh(): void {
   const hours = readThemeScheduleHours();
   const delay = Math.max(60_000, nextScheduleBoundary(hours).getTime() - Date.now());
   scheduleThemeTimer = window.setTimeout(() => {
-    document.documentElement.classList.toggle('dark', getEffectiveDark('schedule'));
+    applyDocumentDark(getEffectiveDark('schedule'));
     scheduleThemeRefresh();
   }, delay);
 }
 
 function applyDocumentDark(dark: boolean): void {
   if (typeof document === 'undefined') return;
-  document.documentElement.classList.toggle('dark', dark);
+  const root = document.documentElement;
+  const wasDark = root.classList.contains('dark');
+  root.classList.toggle('dark', dark);
+  if (wasDark !== dark) {
+    notifyDocumentColorModeListeners(dark);
+  }
 }
 
 /** 将主题应用到 document.documentElement（classList dark） */

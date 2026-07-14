@@ -189,10 +189,20 @@
   display: none;
 }
 
-/* 应用层滚动区：提前占位 + 双侧对称（不含 components/ui 基元，由业务 class 标记） */
+/* 应用层滚动区：scrollbar-gutter 模式（模式 class 写在后面以便覆盖 contain-layout） */
 .contain-layout,
 .scroll-gutter-stable-both {
   scrollbar-gutter: stable both-edges;
+}
+
+/* 单侧预留（通常为滚动条所在侧） */
+.scroll-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+/* 自动：不提前占位，滚动条显隐时可能轻微横向抖动 */
+.scroll-gutter-auto {
+  scrollbar-gutter: auto;
 }
 
 /* 设置页分类 Tab：forceMount 时隐藏未选中面板，避免重复挂载触发数据请求 */

@@ -6,7 +6,7 @@ import { applyAppThemeDefinition, DEFAULT_APP_THEME } from '@/lib/theme/AppTheme
 import { cssVarMapToStyle } from '@/lib/theme/apply-css-vars';
 import { applyCssVarMap } from '@/lib/theme/apply-css-vars';
 import { mediaViewerChromeCssVars } from '@/lib/theme/MediaViewerTheme';
-import { getEffectiveDark } from '@/lib/theme/runtime';
+import { getEffectiveDark, onDocumentColorModeChange } from '@/lib/theme/runtime';
 import type {
   ComponentStyleOverride,
   CustomCssBlock,
@@ -219,6 +219,27 @@ export function applyPreviewThemePackToElement(
 }
 
 let activeDocumentPackId: string | null = null;
+let activeDocumentPack: ReaderThemePackV1 | null = null;
+let documentColorModeUnsub: (() => void) | null = null;
+
+/** ThemeSwitch / auto / schedule 切换明暗时，按当前 mode 重写 app 语义色（音乐 Hub 等同吃 document token） */
+function syncActiveDocumentPackColorMode(dark: boolean): void {
+  if (typeof document === 'undefined' || !activeDocumentPack?.scopes.app || !activeDocumentPack.app) {
+    return;
+  }
+  applyAppSectionToElement(
+    document.documentElement,
+    activeDocumentPack,
+    dark ? 'dark' : 'light',
+  );
+}
+
+function ensureDocumentColorModeSync(): void {
+  if (documentColorModeUnsub) return;
+  documentColorModeUnsub = onDocumentColorModeChange((dark) => {
+    syncActiveDocumentPackColorMode(dark);
+  });
+}
 
 export function applyActiveThemePackToDocument(
   pack: ReaderThemePackV1 | null,
@@ -229,9 +250,13 @@ export function applyActiveThemePackToDocument(
   if (!pack) {
     clearThemePackSurfacePreset();
     activeDocumentPackId = null;
+    activeDocumentPack = null;
     document.documentElement.removeAttribute('data-theme-pack-id');
     return;
   }
+
+  activeDocumentPack = pack;
+  ensureDocumentColorModeSync();
 
   if (pack.scopes.app && pack.app) {
     applyAppSectionToElement(document.documentElement, pack, options.colorMode);
@@ -248,6 +273,11 @@ export function applyActiveThemePackToDocument(
 
 export function getActiveDocumentThemePackId(): string | null {
   return activeDocumentPackId;
+}
+
+/** @internal 测试用：当前缓存的 document 主题包 */
+export function getActiveDocumentThemePack(): ReaderThemePackV1 | null {
+  return activeDocumentPack;
 }
 
 export function themeScopeDataAttr(scope: ThemeScopeId): Record<string, string> {
