@@ -126,7 +126,7 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
               </Button>
               <Button
                 size="sm"
-                onClick={() => void loadPlaylistTracks(selectedId()!).then((t) => playPlaylist(t, 0))}
+                onClick={() => void loadPlaylistTracks(selectedId()!).then((t) => playPlaylist(t, 0, { origin: 'list' }))}
               >
                 播放
               </Button>

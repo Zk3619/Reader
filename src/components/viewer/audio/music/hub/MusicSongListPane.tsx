@@ -2,39 +2,154 @@
  * Hub 在线歌单浏览
  */
 
-import { createEffect, createSignal, For, Show, type Component } from 'solid-js';
-import { Link2 } from 'lucide-solid';
-import { Button } from '@/components/ui/button';
+import { createEffect, createSignal, Show, type Component } from 'solid-js';
+import {
+  Pagination,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationItems,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import {
   closeSongListDetail,
   getSongListState,
+  goToSongListPage,
+  loadMoreSongList,
   loadSongListPage,
   loadSongListTags,
-  MUSIC_SDK_SOURCES,
-  MUSIC_SDK_SOURCE_LABELS,
   openSongListDetail,
-  setSongListSort,
-  setSongListSource,
-  setSongListTag,
+  songListPageCount,
 } from '@/stores/music-hub/songList';
-import { getSongListSorts } from '@/lib/media/audio/music-sdk';
+import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
 import { MusicSongListDetail } from '@/components/viewer/audio/music/hub/MusicSongListDetail';
 import { MusicOpenListDialog } from '@/components/viewer/audio/music/hub/MusicOpenListDialog';
-import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { MusicPlaylistVirtualList } from '@/components/viewer/audio/music/hub/MusicPlaylistVirtualList';
+import { MusicHubQuickScroll } from '@/components/viewer/audio/music/hub/MusicHubQuickScroll';
+import {
+  MusicSongListPaneBelow,
+  MusicSongListPaneToolbar,
+} from '@/components/viewer/audio/music/hub/MusicSongListPaneToolbar';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { musicHubListInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { scrollToTop } from '@/lib/ui/scroll-to-top';
+import { settingsStore } from '@/stores/settings';
+import { cn } from '@/lib/utils';
+
+function SongListScrollFooter() {
+  const ui = getMusicSongListUi;
+  const state = getSongListState;
+  return (
+    <Show when={ui().paginationPreference === 'scroll'}>
+      <Show when={state().playlists.length > 0}>
+        <Show when={state().loadingMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">加载中…</div>
+        </Show>
+        <Show when={!state().loadingMore && !state().hasMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">没有更多了</div>
+        </Show>
+      </Show>
+    </Show>
+  );
+}
+
+function SongListPaginationBar(props: { class?: string }) {
+  const state = getSongListState;
+  const ui = getMusicSongListUi;
+  const pageCount = () => songListPageCount();
+
+  return (
+    <Show
+      when={
+        ui().paginationPreference === 'pagination' &&
+        pageCount() > 1 &&
+        state().playlists.length > 0
+      }
+    >
+      <div class={cn('flex shrink-0 justify-center py-3', props.class)}>
+        <Pagination
+          count={pageCount()}
+          page={state().page}
+          onPageChange={(page) => void goToSongListPage(page)}
+          disabled={state().loading || state().loadingMore}
+          itemComponent={(itemProps) => (
+            <PaginationItem page={itemProps.page}>{itemProps.page}</PaginationItem>
+          )}
+          ellipsisComponent={() => <PaginationEllipsis />}
+        >
+          <PaginationPrevious>上一页</PaginationPrevious>
+          <PaginationItems />
+          <PaginationNext>下一页</PaginationNext>
+        </Pagination>
+      </div>
+    </Show>
+  );
+}
+
+function SongListFooter() {
+  return (
+    <>
+      <SongListScrollFooter />
+      {/* 对齐搜索页 / lx：分页条放在虚拟列表 footer 内，避免与 h-full 列表并排裁切 */}
+      <SongListPaginationBar />
+    </>
+  );
+}
+
+function useSongListScrollLoad() {
+  const ui = getMusicSongListUi;
+  const state = getSongListState;
+  let lastScrollTop = 0;
+
+  const handleScroll = (el: HTMLDivElement) => {
+    const top = el.scrollTop;
+    const moved = top !== lastScrollTop;
+    lastScrollTop = top;
+    if (ui().paginationPreference !== 'scroll') return;
+    if (!moved || state().loadingMore || !state().hasMore) return;
+    const distanceToBottom = el.scrollHeight - top - el.clientHeight;
+    if (distanceToBottom < 120) {
+      void loadMoreSongList();
+    }
+  };
+
+  return { handleScroll };
+}
+
+function useScrollToTopOnPageChange(scrollEl: () => HTMLElement | undefined) {
+  const state = getSongListState;
+  const ui = getMusicSongListUi;
+  createEffect(() => {
+    const page = state().page;
+    if (ui().paginationPreference !== 'pagination') return;
+    const el = scrollEl();
+    if (!el) return;
+    void page;
+    const reduceMotion = settingsStore.state.app.reduceMotion;
+    requestAnimationFrame(() => {
+      scrollToTop(el, { reduceMotion });
+    });
+  });
+}
 
 export const MusicSongListPane: Component = () => {
   const state = getSongListState;
+  const ui = getMusicSongListUi;
   const [openListOpen, setOpenListOpen] = createSignal(false);
+  const [listScrollEl, setListScrollEl] = createSignal<HTMLDivElement | undefined>();
+  const { handleScroll } = useSongListScrollLoad();
+  useScrollToTopOnPageChange(listScrollEl);
 
   createEffect(() => {
     void loadSongListTags();
     void loadSongListPage(1);
   });
 
-  const sorts = () => getSongListSorts(state().source);
+  const showBelow = () =>
+    ui().sourceControl === 'tabs' ||
+    ui().sortControl === 'tabs' ||
+    ui().tagControl === 'stacked';
 
   return (
     <Show
@@ -44,71 +159,11 @@ export const MusicSongListPane: Component = () => {
       <MusicHubPageShell
         section="songlist"
         scrollClass="overflow-hidden"
-        toolbar={
-          <Button size="sm" variant="outline" onClick={() => setOpenListOpen(true)}>
-            <Link2 class="mr-1 h-4 w-4" />
-            打开链接
-          </Button>
-        }
-        below={
-          <div class="space-y-2 px-4 pb-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <MusicAppSelect
-                value={state().source}
-                onChange={(v) =>
-                  setSongListSource(
-                    v as ReturnType<typeof getSongListState>['source'],
-                  )
-                }
-                options={MUSIC_SDK_SOURCES}
-                optionLabel={(v) => MUSIC_SDK_SOURCE_LABELS[v as keyof typeof MUSIC_SDK_SOURCE_LABELS]}
-                triggerClass="w-32"
-                aria-label="音乐源"
-              />
-              <For each={sorts()}>
-                {(sort) => (
-                  <Button
-                    type="button"
-                    variant={state().sortId === sort.id ? 'default' : 'secondary'}
-                    size="sm"
-                    class="h-auto rounded-lg px-2 py-1"
-                    onClick={() => setSongListSort(sort.id)}
-                  >
-                    {sort.name}
-                  </Button>
-                )}
-              </For>
-            </div>
-            <Show when={state().hotTags.length > 0}>
-              <div class="flex flex-wrap gap-1.5">
-                <Button
-                  type="button"
-                  variant={state().tagId === null ? 'default' : 'secondary'}
-                  size="sm"
-                  class="h-auto rounded-full px-2 py-0.5 text-xs"
-                  onClick={() => setSongListTag(null)}
-                >
-                  全部
-                </Button>
-                <For each={state().hotTags}>
-                  {(tag) => (
-                    <Button
-                      type="button"
-                      variant={state().tagId === tag.id ? 'default' : 'secondary'}
-                      size="sm"
-                      class="h-auto rounded-full px-2 py-0.5 text-xs"
-                      onClick={() => setSongListTag(tag.id)}
-                    >
-                      {tag.name}
-                    </Button>
-                  )}
-                </For>
-              </div>
-            </Show>
-          </div>
-        }
+        toolbar={<MusicSongListPaneToolbar onOpenLink={() => setOpenListOpen(true)} />}
+        below={showBelow() ? <MusicSongListPaneBelow /> : undefined}
+        belowHorizontalWheel={ui().sourceControl === 'tabs' || ui().sortControl === 'tabs'}
       >
-        <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
+        <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <Show when={shouldShowBlockingLoading(state().loading, state().playlists.length)}>
             <p class="shrink-0 py-2 text-sm text-muted-foreground">加载中…</p>
           </Show>
@@ -117,11 +172,21 @@ export const MusicSongListPane: Component = () => {
           </Show>
           <Show when={state().playlists.length > 0}>
             <MusicPlaylistVirtualList
-              class="min-h-0 flex-1"
+              class="min-h-0 flex-1 my-2"
+              listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
               playlists={() => state().playlists}
               onOpen={(pl) => void openSongListDetail(pl.id)}
+              onScrollContainer={setListScrollEl}
+              onScroll={handleScroll}
+              scrollFooter={<SongListFooter />}
             />
           </Show>
+          <MusicHubQuickScroll
+            container={listScrollEl}
+            contentRevision={() =>
+              `${state().playlists.length}:${state().page}:${ui().paginationPreference}:${state().source}:${state().tagId ?? ''}:${state().sortId}`
+            }
+          />
         </div>
       </MusicHubPageShell>
 

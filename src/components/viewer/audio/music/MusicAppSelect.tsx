@@ -11,6 +11,7 @@ import {
   AppSelectTrigger,
   AppSelectValue,
   type AppSelectTriggerLayout,
+  type ScrollGutterMode,
 } from '@/components/shared/AppSelect';
 import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 
@@ -21,6 +22,12 @@ export interface MusicAppSelectProps<T extends string> {
   optionLabel?: (value: T) => string;
   triggerClass?: string;
   layout?: AppSelectTriggerLayout;
+  /** 是否在选中项左侧显示 √（默认 true） */
+  showCheckmark?: boolean;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
   'aria-label'?: string;
 }
 
@@ -33,6 +40,7 @@ export function MusicAppSelect<T extends string>(props: MusicAppSelectProps<T>):
         if (v != null) props.onChange(v as T);
       }}
       options={[...props.options]}
+      showCheckmark={props.showCheckmark}
       itemComponent={(itemProps) => (
         <AppSelectItem item={itemProps.item}>
           {label(itemProps.item.rawValue as T)}
@@ -53,7 +61,7 @@ export function MusicAppSelect<T extends string>(props: MusicAppSelectProps<T>):
         <AppSelectIcon />
       </AppSelectTrigger>
       <ViewerAppSelectContent>
-        <AppSelectListbox />
+        <AppSelectListbox scrollGutter={props.scrollGutter} />
       </ViewerAppSelectContent>
     </AppSelect>
   );

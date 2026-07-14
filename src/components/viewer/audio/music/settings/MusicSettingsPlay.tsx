@@ -1,4 +1,4 @@
-import { createSignal, type Component } from 'solid-js';
+import { createMemo, createSignal, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   NumberField,
@@ -11,11 +11,17 @@ import { playModeLabel } from '@/lib/media/audio/music-play-config';
 import {
   QUALITY_LABELS,
   getPlayQuality,
+  listPlayQualityOptions,
   setPlayQuality,
 } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import type { LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import {
+  getDefaultUserApiId,
+  subscribeUserApiScripts,
+} from '@/lib/media/audio/online/user-api-engine';
+import { onCleanup, onMount } from 'solid-js';
 
 const PLAY_MODES = [
   AudioPlayMode.listLoop,
@@ -24,11 +30,17 @@ const PLAY_MODES = [
   AudioPlayMode.listEndStop,
 ] as const;
 
-const URL_SOURCE_MODES = ['auto', 'builtin', 'userApi'] as const;
+const URL_SOURCE_MODES = ['auto', 'userApi', 'builtin'] as const;
 const URL_SOURCE_LABELS: Record<(typeof URL_SOURCE_MODES)[number], string> = {
-  auto: '自动（UserApi 优先）',
-  builtin: '仅内置源',
   userApi: '仅 UserApi',
+  auto: '音源×平台 → 内置',
+  builtin: '仅内置源',
+};
+const URL_SOURCE_HINTS: Record<(typeof URL_SOURCE_MODES)[number], string> = {
+  userApi:
+    '一个音源含多平台：先活跃音源穷尽原平台+换平台，再其它启用音源；不含内置试听。',
+  auto: '同上 UserApi 音源×平台矩阵后，再走内置跨平台（推荐）。',
+  builtin: '完全跳过自定义音源。',
 };
 
 const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
@@ -41,7 +53,18 @@ const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
 
 export const MusicSettingsPlay: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
+  const [apiRev, setApiRev] = createSignal(0);
   const playCfg = () => getMusicPlayConfig();
+  const qualityOptions = createMemo(() => {
+    apiRev();
+    getDefaultUserApiId();
+    return listPlayQualityOptions();
+  });
+
+  onMount(() => {
+    const unsub = subscribeUserApiScripts(() => setApiRev((v) => v + 1));
+    onCleanup(unsub);
+  });
 
   const applySettings = (patch: Parameters<typeof setMusicSettings>[0]) => {
     setMusicSettings(patch);
@@ -64,6 +87,13 @@ export const MusicSettingsPlay: Component = () => {
         />
         记忆播放进度
       </label>
+      <label class="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={settings().autoSkipOnError !== false}
+          onChange={(checked) => applySettings({ autoSkipOnError: checked })}
+        />
+        取链/解码失败时自动下一首（仅歌单 / 我的列表）
+      </label>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">默认播放模式：</span>
         <MusicAppSelect
@@ -75,32 +105,46 @@ export const MusicSettingsPlay: Component = () => {
           aria-label="默认播放模式"
         />
       </div>
-      <div class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="text-muted-foreground">播放音质：</span>
-        <MusicAppSelect
-          value={getPlayQuality()}
-          onChange={(v) => {
-            setPlayQuality(v as MusicQuality);
-            setLocal(getMusicSettings());
-          }}
-          options={Object.keys(QUALITY_LABELS)}
-          optionLabel={(v) => QUALITY_LABELS[v as MusicQuality]}
-          triggerClass="w-32"
-          aria-label="播放音质"
-        />
+      <div class="space-y-1">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="text-muted-foreground">播放音质：</span>
+          <MusicAppSelect
+            value={
+              qualityOptions().includes(getPlayQuality())
+                ? getPlayQuality()
+                : (qualityOptions()[0] ?? getPlayQuality())
+            }
+            onChange={(v) => {
+              setPlayQuality(v as MusicQuality);
+              setLocal(getMusicSettings());
+            }}
+            options={qualityOptions()}
+            optionLabel={(v) => QUALITY_LABELS[v as MusicQuality] ?? v}
+            triggerClass="w-32"
+            aria-label="播放音质"
+          />
+        </div>
+        <p class="text-xs text-muted-foreground">
+          列表受当前活跃自定义源 qualitys 限制（无登记时显示全部）。
+        </p>
       </div>
-      <div class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="text-muted-foreground">取流策略：</span>
-        <MusicAppSelect
-          value={settings().urlSourceMode}
-          onChange={(v) =>
-            applySettings({ urlSourceMode: v as 'builtin' | 'userApi' | 'auto' })
-          }
-          options={URL_SOURCE_MODES}
-          optionLabel={(v) => URL_SOURCE_LABELS[v]}
-          triggerClass="w-40"
-          aria-label="取流策略"
-        />
+      <div class="space-y-1">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class="text-muted-foreground">取流策略：</span>
+          <MusicAppSelect
+            value={settings().urlSourceMode}
+            onChange={(v) =>
+              applySettings({ urlSourceMode: v as 'builtin' | 'userApi' | 'auto' })
+            }
+            options={URL_SOURCE_MODES}
+            optionLabel={(v) => URL_SOURCE_LABELS[v]}
+            triggerClass="w-52"
+            aria-label="取流策略"
+          />
+        </div>
+        <p class="text-xs text-muted-foreground">
+          {URL_SOURCE_HINTS[settings().urlSourceMode]}
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">默认歌词轨：</span>
@@ -113,6 +157,20 @@ export const MusicSettingsPlay: Component = () => {
           aria-label="默认歌词轨"
         />
       </div>
+      <label class="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={settings().showLyricTranslation !== false}
+          onChange={(checked) => applySettings({ showLyricTranslation: checked })}
+        />
+        显示歌词翻译
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={settings().showLyricRoma !== false}
+          onChange={(checked) => applySettings({ showLyricRoma: checked })}
+        />
+        显示罗马音
+      </label>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">歌词偏移（秒）：</span>
         <NumberField
@@ -123,7 +181,7 @@ export const MusicSettingsPlay: Component = () => {
         </NumberField>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="text-muted-foreground">播放超时（秒，0=关闭）：</span>
+        <span class="text-muted-foreground">定时停止（秒，0=关闭）：</span>
         <NumberField
           rawValue={settings().playTimeoutSec ?? 0}
           onRawValueChange={(v) => applySettings({ playTimeoutSec: v })}

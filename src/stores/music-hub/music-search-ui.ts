@@ -1,5 +1,5 @@
 /**
- * 音乐搜索页 UI 偏好（来源/类型控件：下拉或标签 Tab）
+ * 音乐搜索页 UI 偏好（来源/类型控件：下拉或标签 Tab；列表翻页方式）
  */
 
 import { createStore } from 'solid-js/store';
@@ -7,13 +7,15 @@ import {
   getMusicSettings,
   setMusicSettings,
   type MusicSearchControlStyle,
+  type MusicSearchPaginationPreference,
 } from '@/lib/media/audio/music-settings';
 
-export type { MusicSearchControlStyle };
+export type { MusicSearchControlStyle, MusicSearchPaginationPreference };
 
 interface MusicSearchUiState {
   sourceControl: MusicSearchControlStyle;
   tabControl: MusicSearchControlStyle;
+  paginationPreference: MusicSearchPaginationPreference;
 }
 
 function loadUiState(): MusicSearchUiState {
@@ -21,6 +23,8 @@ function loadUiState(): MusicSearchUiState {
   return {
     sourceControl: settings.musicSearchSourceControl ?? 'select',
     tabControl: settings.musicSearchTabControl ?? 'select',
+    paginationPreference:
+      settings.musicSearchPaginationPreference === 'scroll' ? 'scroll' : 'pagination',
   };
 }
 
@@ -38,4 +42,11 @@ export function setMusicSearchSourceControl(style: MusicSearchControlStyle): voi
 export function setMusicSearchTabControl(style: MusicSearchControlStyle): void {
   setMusicSearchUi('tabControl', style);
   setMusicSettings({ musicSearchTabControl: style });
+}
+
+export function setMusicSearchPaginationPreference(
+  preference: MusicSearchPaginationPreference,
+): void {
+  setMusicSearchUi('paginationPreference', preference);
+  setMusicSettings({ musicSearchPaginationPreference: preference });
 }

@@ -22,7 +22,7 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
   const [tracks] = createResource(() => (active() ? loadPlaylistTracks('local') : []));
 
   const playAll = (list: AudioTrack[]) => {
-    void playPlaylist(list, 0);
+    void playPlaylist(list, 0, { origin: 'list' });
   };
 
   return (
@@ -52,7 +52,7 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
                   type="button"
                   variant="ghost"
                   class="h-auto w-full flex-col items-start rounded-lg px-3 py-2 font-normal hover:bg-muted/60"
-                  onClick={() => void playPlaylist([track], 0)}
+                  onClick={() => void playPlaylist([track], 0, { origin: 'list' })}
                 >
                   <span class="truncate text-sm font-medium">{track.name}</span>
                   <span class="truncate text-xs text-muted-foreground">

@@ -7,9 +7,12 @@ import { useMusicHubShellNav } from '@/components/viewer/audio/music/hub/music-h
 import { useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { MusicHubDesktopLayout } from '@/components/viewer/audio/music/hub/MusicHubDesktopLayout';
 import { MusicHubMobileLayout } from '@/components/viewer/audio/music/hub/MusicHubMobileLayout';
+import { UserApiUpdateAlertHost } from '@/components/viewer/audio/music/UserApiUpdateAlertHost';
+import { UserApiInitFailedHost } from '@/components/viewer/audio/music/UserApiInitFailedHost';
 import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-openapi-client';
 import { playNextTrack, playPrevTrack } from '@/stores/viewer/media/audio';
 import { isTauri } from '@/lib/platform/detect';
+import { ensureUserApiScriptsInitialized } from '@/lib/media/audio/online/user-api-engine';
 
 export interface MusicHubShellProps {
   active?: boolean | Accessor<boolean>;
@@ -20,6 +23,8 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   const { useMobileLayout, hideInternalNav } = useMusicHubShellNav();
 
   onMount(() => {
+    // 先挂好更新弹窗订阅（组件内），再预热音源 runtime 触发 updateAlert
+    void ensureUserApiScriptsInitialized();
     const unreg = registerMusicOpenApiHandler((action, payload) => {
       switch (action) {
         case 'play':
@@ -107,6 +112,8 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
+      <UserApiUpdateAlertHost />
+      <UserApiInitFailedHost />
       <Show
         when={useMobileLayout()}
         fallback={<MusicHubDesktopLayout player={hubPlayer} hideAside={hideInternalNav()} />}

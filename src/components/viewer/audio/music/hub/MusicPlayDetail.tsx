@@ -29,7 +29,12 @@ import {
 import { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
 import { addTrackToLove, removeTrackFromLove } from '@/lib/database/audio-library';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
-import { QUALITY_LABELS, setPlayQuality, getPlayQuality } from '@/lib/media/audio/music-quality';
+import {
+  QUALITY_LABELS,
+  setPlayQuality,
+  getPlayQuality,
+  listPlayQualityOptions,
+} from '@/lib/media/audio/music-quality';
 import type { LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { cn } from '@/lib/utils';
@@ -156,6 +161,8 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               lyricTrack={props.player.lyricTrack()}
               positionSec={props.player.player.currentTime()}
               lyricOffset={getMusicSettings().lyricOffset ?? 0}
+              showTranslation={getMusicSettings().showLyricTranslation !== false}
+              showRoma={getMusicSettings().showLyricRoma !== false}
             />
             <div class="flex flex-wrap items-center justify-center gap-2">
               <MusicAppSelect
@@ -164,17 +171,26 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
                   props.player.setLyricTrack(kind as LyricTrackKind);
                   setMusicSettings({ lyricTrack: kind as LyricTrackKind });
                 }}
-                options={LYRIC_TRACKS}
+                options={LYRIC_TRACKS.filter((k) => {
+                  const s = getMusicSettings();
+                  if (k === 'tlyric' && s.showLyricTranslation === false) return false;
+                  if (k === 'rlyric' && s.showLyricRoma === false) return false;
+                  return true;
+                })}
                 optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
                 layout="compact"
                 triggerClass="h-8 w-24 text-xs"
                 aria-label="歌词轨"
               />
               <MusicAppSelect
-                value={getPlayQuality()}
+                value={
+                  listPlayQualityOptions().includes(getPlayQuality())
+                    ? getPlayQuality()
+                    : (listPlayQualityOptions()[0] ?? getPlayQuality())
+                }
                 onChange={(v) => setPlayQuality(v as MusicQuality)}
-                options={Object.keys(QUALITY_LABELS)}
-                optionLabel={(v) => QUALITY_LABELS[v as MusicQuality]}
+                options={listPlayQualityOptions()}
+                optionLabel={(v) => QUALITY_LABELS[v as MusicQuality] ?? v}
                 layout="compact"
                 triggerClass="h-8 w-24 text-xs"
                 aria-label="播放音质"
@@ -244,7 +260,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
             </div>
             <div class="flex items-center justify-center gap-3">
               <Button variant="ghost" size="icon" onClick={() => void toggleLove()}>
-                <Heart class={cn('h-5 w-5', loved() && 'fill-red-500 text-red-500')} />
+                <Heart class={cn('h-5 w-5', loved() && 'fill-destructive text-destructive')} />
               </Button>
               <Button
                 variant="ghost"

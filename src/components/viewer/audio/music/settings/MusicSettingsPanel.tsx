@@ -11,6 +11,7 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { MusicSettingsRouter, type MusicSettingsSection } from '@/components/viewer/audio/music/settings/MusicSettingsRouter';
+import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { cn } from '@/lib/utils';
 
 const SETTINGS_SECTIONS: { id: MusicSettingsSection; label: string }[] = [
@@ -38,7 +39,7 @@ export function MusicSettingsPanel() {
   const [settingsSection, setSettingsSection] = createSignal<MusicSettingsSection>('basic');
 
   return (
-    <div class="flex min-h-0 flex-1 overflow-hidden">
+    <div class={cn('flex min-h-0 flex-1 overflow-hidden', musicHubPageContentInsetClass)}>
       <nav class="w-28 shrink-0 overflow-y-auto border-r border-border/60 p-2 md:w-36">
         <SidebarGroup class="p-0">
           <SidebarGroupContent class="p-0">

@@ -3500,6 +3500,7 @@ function AppContent() {
     const showBottomBar = () => !isStandalonePage() && shell().showBottomBar;
     const mediaPlayerFixedInset = useGlobalMediaPlayerFixedInset({
       shellOverlayOpen: isStandalonePage,
+      currentShellPage: currentPage,
       showTopNav,
       showBottomBar,
     });
@@ -3665,6 +3666,7 @@ function AppContent() {
 
         <GlobalMediaPlayer
           shellOverlayOpen={isStandalonePage}
+          currentShellPage={currentPage}
           showTopNav={showTopNav}
           showBottomBar={showBottomBar}
           shellMainLeftClass={shellMainLeftClass()}

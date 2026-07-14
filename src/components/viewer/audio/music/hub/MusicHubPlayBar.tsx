@@ -38,7 +38,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
         <p class="truncate text-xs text-muted-foreground">
           {track()?.artist ?? audioI18n.hubTitle()}
           <Show when={offline()}>
-            <span class="ml-1 text-amber-600">· 离线</span>
+            <span class="ml-1 text-warning-foreground">· 离线</span>
           </Show>
         </p>
       </div>

@@ -50,6 +50,7 @@ export const initialViewerState: ViewerState = {
   contentSession: null,
   trackQueue: [],
   trackIndex: 0,
+  musicQueueOrigin: 'other',
   activePlaylistId: null,
   activeMusicGroupId: null,
   activeSource: null,

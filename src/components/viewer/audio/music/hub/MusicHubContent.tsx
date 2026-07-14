@@ -1,8 +1,16 @@
 /**
- * 音乐 Hub 主内容区（按 section 切换，子页 keep-alive 避免重复挂载闪烁）
+ * 音乐 Hub 主内容区
+ * 对齐 lx-music router：仅当前 section 首次进入时挂载；之后 keep-alive 避免闪烁
  */
 
-import { createSignal, onMount, type Component, type JSX } from 'solid-js';
+import {
+  Show,
+  createEffect,
+  createSignal,
+  onMount,
+  type Component,
+  type JSX,
+} from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
@@ -27,27 +35,37 @@ export interface MusicHubContentProps {
   onListDrawerToggle?: () => void;
 }
 
+/** 首次 active 才挂载子页；之后仅 hidden，避免预拉各源网络 */
 function MusicHubSection(props: {
   section: MusicHubSection;
   active: boolean;
   children: JSX.Element;
 }) {
+  const [visited, setVisited] = createSignal(props.active);
+
+  createEffect(() => {
+    if (props.active) setVisited(true);
+  });
+
   return (
-    <div
-      class={cn(
-        'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-        !props.active && 'hidden',
-      )}
-      aria-hidden={!props.active}
-      data-music-hub-section={props.section}
-    >
-      {props.children}
-    </div>
+    <Show when={visited()}>
+      <div
+        class={cn(
+          'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+          !props.active && 'hidden',
+        )}
+        aria-hidden={!props.active}
+        data-music-hub-section={props.section}
+      >
+        {props.children}
+      </div>
+    </Show>
   );
 }
 
 export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
   const [scanOpen, setScanOpen] = createSignal(false);
+  const [scanRevision, setScanRevision] = createSignal(0);
 
   onMount(() => {
     void ensureLocalMusicSearchCache();
@@ -81,6 +99,7 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
           drawerOpen={props.listDrawerOpen}
           onDrawerOpen={props.onListDrawerToggle}
           onScanLocal={() => setScanOpen(true)}
+          scanRevision={scanRevision()}
         />
       </MusicHubSection>
       <MusicHubSection section="download" active={isActive('download')}>
@@ -102,6 +121,7 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
         onOpenChange={setScanOpen}
         onImported={(tracks) => {
           invalidateLocalMusicSearchCache();
+          setScanRevision((n) => n + 1);
           if (tracks.length > 0) {
             void import('@/stores/viewer/media/audio').then(({ playPlaylist }) =>
               playPlaylist(tracks, 0),

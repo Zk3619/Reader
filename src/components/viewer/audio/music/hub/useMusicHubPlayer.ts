@@ -111,7 +111,22 @@ export function useMusicHubPlayer() {
       const { applyMusicTrack } = await import('@/stores/viewer/media/audio');
       await applyMusicTrack(index);
     },
-    onPlaybackError: () => void retryMusicTrackPlayback(),
+    onPlaybackError: () => {
+      void (async () => {
+        const { getMusicSettings } = await import('@/lib/media/audio/music-settings');
+        const origin = viewerStore.state.musicQueueOrigin;
+        if (
+          getMusicSettings().autoSkipOnError !== false &&
+          origin === 'list' &&
+          trackQueue().length > 1
+        ) {
+          console.warn('[music] autoSkipOnError after decode/playback error');
+          await playNextTrack();
+          return;
+        }
+        await retryMusicTrackPlayback();
+      })();
+    },
   });
 
   createEffect(() => {
@@ -163,15 +178,25 @@ export function useMusicHubPlayer() {
 
   createEffect(() => {
     const t = currentTrack();
+    // 依赖换源后的 id/source，确保换源成功会重拉歌词
+    void t?.id;
+    void t?.source;
     if (!t) {
       setFetchedLyricBundle(null);
       return;
     }
+    setFetchedLyricBundle(null);
     if (typeof t.meta.lyricText === 'string' && t.meta.lyricText.trim()) {
       setFetchedLyricBundle({ lyric: t.meta.lyricText });
       return;
     }
-    void resolveOnlineLyricFull(t).then((bundle) => setFetchedLyricBundle(bundle));
+    let cancelled = false;
+    void resolveOnlineLyricFull(t).then((bundle) => {
+      if (!cancelled) setFetchedLyricBundle(bundle);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
   });
 
   createEffect(() => {

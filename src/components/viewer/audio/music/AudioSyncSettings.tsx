@@ -168,7 +168,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
                 </Button>
               </div>
               <Show when={config()?.connected}>
-                <p class="mt-2 text-xs text-green-600">已连接（v4 协议，连接时自动同步）</p>
+                <p class="mt-2 text-xs text-success-foreground">已连接（v4 协议，连接时自动同步）</p>
               </Show>
             </section>
             <section>

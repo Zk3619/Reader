@@ -13,8 +13,12 @@ import {
 } from '@/lib/media/audio/audio-chapter-cache';
 import { parseParsedAudioUrls } from '@/lib/media/audio/parsed-audio-url';
 import { resolveAudioPlaybackList } from '@/lib/media/audio/resolve-audio-playback';
-import { resolveTrackPlaybackUrls } from '@/lib/media/audio/online/online-resolver';
-import { MusicPlaybackStatusText } from '@/lib/media/audio/music-playback-status';
+import { resolveTrackPlaybackUrls, consumeLastUserApiError } from '@/lib/media/audio/online/online-resolver';
+import {
+  MusicPlaybackStatusText,
+  formatMusicUrlError,
+} from '@/lib/media/audio/music-playback-status';
+import { getActiveUserApiDisplayName } from '@/lib/media/audio/online/user-api-engine';
 import { invalidateTrackUrlCache } from '@/lib/media/audio/online/url-cache';
 import { recordRecentPlay } from '@/lib/database/audio-library';
 import { isTrackDisliked } from '@/lib/media/audio/library/dislike-filter';
@@ -83,6 +87,7 @@ export function setAudioBookInitialState(book: Book): void {
     contentSession: createAudiobookSession(book, state.catalog, state.chapterIndex, state.chapterPos),
     trackQueue: [],
     trackIndex: 0,
+    musicQueueOrigin: 'other',
     activePlaylistId: null,
     activeSource: null,
   });
@@ -203,7 +208,12 @@ export async function applyMusicTrack(
   setState({
     loading: true,
     error: null,
-    playbackStatus: MusicPlaybackStatusText.gettingUrl,
+    playbackStatus: (() => {
+      const name = getActiveUserApiDisplayName();
+      return name
+        ? `${MusicPlaybackStatusText.gettingUrl}（${name}）`
+        : MusicPlaybackStatusText.gettingUrl;
+    })(),
     trackIndex: index,
   });
   clearPlayTimeout();
@@ -225,16 +235,23 @@ export async function applyMusicTrack(
     );
     playbackRevoke = revokeAll;
     if (urls.length === 0) {
+      const apiErr = consumeLastUserApiError();
+      const detail = apiErr ? formatMusicUrlError(apiErr) : null;
+      const failMsg = toggled
+        ? MusicPlaybackStatusText.toggleFailed
+        : detail ?? '无法解析播放地址';
       setState({
         loading: false,
         playbackStatus: null,
         mediaUrls: [],
         primaryUrl: null,
-        error: toggled
-          ? MusicPlaybackStatusText.toggleFailed
-          : '无法解析播放地址',
+        error: failMsg,
         contentSession: createMusicHubSession(queue, index),
       });
+      if (shouldAutoSkipOnError(queue.length)) {
+        console.warn('[music] autoSkipOnError after resolve fail');
+        setTimeout(() => void playNextTrack(), 0);
+      }
       return;
     }
 
@@ -281,7 +298,7 @@ export async function applyMusicTrack(
     }
     schedulePlayTimeout();
   } catch (err) {
-    const message = err instanceof Error ? err.message : '播放地址解析失败';
+    const message = formatMusicUrlError(err);
     console.warn('[music] applyMusicTrack failed', err);
     setState({
       loading: false,
@@ -291,6 +308,10 @@ export async function applyMusicTrack(
       error: message,
       contentSession: createMusicHubSession(queue, index),
     });
+    if (shouldAutoSkipOnError(queue.length)) {
+      console.warn('[music] autoSkipOnError after exception');
+      setTimeout(() => void playNextTrack(), 0);
+    }
   }
 }
 
@@ -299,27 +320,49 @@ export async function retryMusicTrackPlayback(): Promise<void> {
   await applyMusicTrack(state.trackIndex, { forceRefreshUrl: true });
 }
 
+/** 队列来源：仅 list（歌单 / 我的列表）在失败时允许自动下一首 */
+export type MusicQueueOrigin = 'search' | 'list' | 'other';
+
+function shouldAutoSkipOnError(queueLength: number): boolean {
+  return (
+    getMusicSettings().autoSkipOnError !== false &&
+    state.musicQueueOrigin === 'list' &&
+    queueLength > 1
+  );
+}
+
 export function setMusicTrackQueue(
   tracks: AudioTrack[],
   startIndex = 0,
   source?: AudioTrackSource,
+  origin?: MusicQueueOrigin,
 ): void {
   setState({
     trackQueue: tracks,
     trackIndex: startIndex,
     activeSource: source ?? tracks[0]?.source ?? null,
+    ...(origin !== undefined ? { musicQueueOrigin: origin } : {}),
     contentSession: createMusicHubSession(tracks, startIndex),
   });
   void applyMusicTrack(startIndex);
 }
 
 export async function playTrack(track: AudioTrack): Promise<void> {
-  setMusicTrackQueue([track], 0, track.source);
+  setMusicTrackQueue([track], 0, track.source, 'other');
 }
 
-export async function playPlaylist(tracks: AudioTrack[], startIndex = 0): Promise<void> {
+export async function playPlaylist(
+  tracks: AudioTrack[],
+  startIndex = 0,
+  options?: { origin?: MusicQueueOrigin },
+): Promise<void> {
   if (tracks.length === 0) return;
-  setMusicTrackQueue(tracks, startIndex, tracks[startIndex]?.source);
+  setMusicTrackQueue(
+    tracks,
+    startIndex,
+    tracks[startIndex]?.source,
+    options?.origin ?? 'other',
+  );
 }
 
 export function removeFromQueue(index: number): void {
@@ -339,6 +382,22 @@ export function removeFromQueue(index: number): void {
     contentSession: createMusicHubSession(queue, nextIndex),
   });
   if (wasCurrent && queue.length > 0) void applyMusicTrack(nextIndex);
+}
+
+/** 下一首播放：插入当前曲目之后（对齐 lx playLater） */
+export function playTracksLater(tracks: AudioTrack[]): void {
+  if (tracks.length === 0) return;
+  const queue = [...state.trackQueue];
+  if (queue.length === 0) {
+    setMusicTrackQueue(tracks, 0, tracks[0]?.source, 'other');
+    return;
+  }
+  const insertAt = Math.min(state.trackIndex + 1, queue.length);
+  queue.splice(insertAt, 0, ...tracks);
+  setState({
+    trackQueue: queue,
+    contentSession: createMusicHubSession(queue, state.trackIndex),
+  });
 }
 
 export async function playNextTrack(): Promise<void> {

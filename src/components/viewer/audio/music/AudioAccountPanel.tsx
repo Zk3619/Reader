@@ -105,7 +105,7 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
                         class="h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal hover:bg-muted/60"
                         onClick={() =>
                           void loadNeteasePlaylistTracks(pl.id).then((tracks) =>
-                            playPlaylist(tracks, 0),
+                            playPlaylist(tracks, 0, { origin: 'list' }),
                           )
                         }
                       >

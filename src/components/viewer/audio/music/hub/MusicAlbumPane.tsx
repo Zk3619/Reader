@@ -1,5 +1,5 @@
 /**
- * Hub 专辑浏览
+ * Hub 专辑浏览（支持分页 hasMore）
  */
 
 import { createSignal, For, Show, type Component } from 'solid-js';
@@ -21,16 +21,38 @@ export const MusicAlbumPane: Component = () => {
   const [albumId, setAlbumId] = createSignal('');
   const [detail, setDetail] = createSignal<AlbumDetail | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [loadingMore, setLoadingMore] = createSignal(false);
 
   const load = async () => {
     const id = albumId().trim();
     if (!id) return;
     setLoading(true);
     try {
-      const d = await fetchAlbumDetail(source() as AudioTrackSource, id);
+      const d = await fetchAlbumDetail(source() as AudioTrackSource, id, 1);
       setDetail(d);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    const d = detail();
+    const id = albumId().trim();
+    if (!d?.hasMore || !id || loadingMore()) return;
+    setLoadingMore(true);
+    try {
+      const next = await fetchAlbumDetail(
+        source() as AudioTrackSource,
+        id,
+        (d.page ?? 1) + 1,
+      );
+      if (!next) return;
+      setDetail({
+        ...next,
+        tracks: [...d.tracks, ...next.tracks],
+      });
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -100,6 +122,17 @@ export const MusicAlbumPane: Component = () => {
                   )}
                 </For>
               </ul>
+              <Show when={d().hasMore}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  class="w-full"
+                  disabled={loadingMore()}
+                  onClick={() => void loadMore()}
+                >
+                  {loadingMore() ? '加载中…' : '加载更多'}
+                </Button>
+              </Show>
             </div>
           )}
         </Show>

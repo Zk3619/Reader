@@ -3,21 +3,50 @@
  * 在线结果使用 VirtualList，对齐阅读模块虚拟滚动。
  */
 
-import { For, Show, type Component } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createSignal,
+  type Accessor,
+  type Component,
+  type JSX,
+} from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Pagination,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationItems,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { VirtualList } from '@/components/shared/virtual-list';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { MusicPlaylistVirtualList } from '@/components/viewer/audio/music/hub/MusicPlaylistVirtualList';
+import { MusicHubQuickScroll } from '@/components/viewer/audio/music/hub/MusicHubQuickScroll';
 import { AGGREGATE_SEARCH_SOURCE } from '@/lib/media/audio/online/source-router';
 import type { SearchSource } from '@/lib/media/audio/online/source-router';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import {
   trackAlbumName,
+  trackBadgeToneClass,
   trackQualityBadge,
   trackSourceBadgeLabel,
 } from '@/lib/media/audio/music-search-result-ui';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import {
+  getSearchState,
+  goToSearchPage,
+  loadMoreSearch,
+  searchPageCount,
+} from '@/stores/music-hub/search';
+import { getMusicSearchUi } from '@/stores/music-hub/music-search-ui';
+import { scrollToTop } from '@/lib/ui/scroll-to-top';
+import { settingsStore } from '@/stores/settings';
+import { musicHubListInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { MusicTrackContextMenu } from '@/components/viewer/audio/music/hub/MusicTrackContextMenu';
 import { cn } from '@/lib/utils';
 
 const DESKTOP_TRACK_ROW_HEIGHT_PX = 44;
@@ -29,6 +58,106 @@ const LOCAL_GROUP_LIST_MAX_HEIGHT_PX = 360;
 function trackRowHeightPx(mobile: boolean) {
   return mobile ? MOBILE_TRACK_ROW_HEIGHT_PX : DESKTOP_TRACK_ROW_HEIGHT_PX;
 }
+
+function SearchScrollFooter() {
+  const ui = getMusicSearchUi;
+  const state = getSearchState;
+  return (
+    <Show when={ui().paginationPreference === 'scroll'}>
+      <Show when={state().tracks.length > 0 || state().playlists.length > 0}>
+        <Show when={state().loadingMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">加载中…</div>
+        </Show>
+        <Show when={!state().loadingMore && !state().hasMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">没有更多了</div>
+        </Show>
+      </Show>
+    </Show>
+  );
+}
+
+function SearchListFooter() {
+  return (
+    <>
+      <SearchScrollFooter />
+      {/* 对齐 lx：分页条放在虚拟列表 footer 内，避免与 h-full 列表并排裁切末行卡片 */}
+      <MusicSearchPaginationBar />
+    </>
+  );
+}
+
+function useSearchScrollLoad() {
+  const ui = getMusicSearchUi;
+  const state = getSearchState;
+  let lastScrollTop = 0;
+
+  const handleScroll = (el: HTMLDivElement) => {
+    const top = el.scrollTop;
+    const moved = top !== lastScrollTop;
+    lastScrollTop = top;
+    if (ui().paginationPreference !== 'scroll') return;
+    if (!moved || state().loadingMore || !state().hasMore) return;
+    const distanceToBottom = el.scrollHeight - top - el.clientHeight;
+    if (distanceToBottom < 120) {
+      void loadMoreSearch();
+    }
+  };
+
+  return { handleScroll };
+}
+
+/** 分页切页时滚动结果列表回顶（平滑动画，对齐「回到顶部」） */
+function useScrollToTopOnPageChange(
+  scrollEl: () => HTMLElement | undefined,
+) {
+  const state = getSearchState;
+  const ui = getMusicSearchUi;
+  createEffect(() => {
+    const page = state().page;
+    if (ui().paginationPreference !== 'pagination') return;
+    const el = scrollEl();
+    if (!el) return;
+    void page;
+    const reduceMotion = settingsStore.state.app.reduceMotion;
+    requestAnimationFrame(() => {
+      scrollToTop(el, { reduceMotion });
+    });
+  });
+}
+
+export function MusicSearchPaginationBar(props: { class?: string }) {
+  const state = getSearchState;
+  const ui = getMusicSearchUi;
+  const pageCount = () => searchPageCount();
+
+  return (
+    <Show
+      when={
+        ui().paginationPreference === 'pagination' &&
+        pageCount() > 1 &&
+        (state().tab === 'song' ? state().tracks.length > 0 : state().playlists.length > 0)
+      }
+    >
+      <div class={cn('flex shrink-0 justify-center py-3', props.class)}>
+        <Pagination
+          count={pageCount()}
+          page={state().page}
+          onPageChange={(page) => void goToSearchPage(page)}
+          disabled={state().loading || state().loadingMore}
+          itemComponent={(itemProps) => (
+            <PaginationItem page={itemProps.page}>{itemProps.page}</PaginationItem>
+          )}
+          ellipsisComponent={() => <PaginationEllipsis />}
+        >
+          <PaginationPrevious>上一页</PaginationPrevious>
+          <PaginationItems />
+          <PaginationNext>下一页</PaginationNext>
+        </Pagination>
+      </div>
+    </Show>
+  );
+}
+
 
 function trackItemKey(track: AudioTrack, index: number) {
   return `${track.source}|${track.id}|${index}`;
@@ -44,16 +173,13 @@ function TrackBadges(props: {
     <>
       <Show when={quality()}>
         {(badge) => (
-          <Badge
-            variant={props.mobile && badge().variant === 'default' ? 'secondary' : badge().variant}
-            class="shrink-0 px-1 py-0 text-[10px] font-normal leading-4"
-          >
+          <Badge variant="outline" class={trackBadgeToneClass(badge().tone)}>
             {badge().label}
           </Badge>
         )}
       </Show>
       <Show when={props.showSource}>
-        <Badge variant="outline" class="shrink-0 px-1 py-0 text-[10px] font-normal leading-4">
+        <Badge variant="outline" class={trackBadgeToneClass('source')}>
           {trackSourceBadgeLabel(props.track)}
         </Badge>
       </Show>
@@ -61,21 +187,30 @@ function TrackBadges(props: {
   );
 }
 
+/** 桌面扁平歌曲列：表头与行共用，保证对齐 */
+const DESKTOP_TRACK_COLS =
+  'grid w-full min-w-0 grid-cols-[3.25rem_minmax(0,1fr)_minmax(6rem,24%)_minmax(6rem,27%)_4.5rem] items-center gap-0 px-2 text-left';
+
 function DesktopTrackHeaderRow() {
   return (
-    <div class="flex items-center px-2 py-2 text-xs font-medium text-muted-foreground">
-      <span class="w-[5%] shrink-0 text-center">#</span>
-      <span class="min-w-0 flex-1 px-1">歌曲名</span>
-      <span class="w-[24%] shrink-0 truncate px-1">艺术家</span>
-      <span class="w-[27%] shrink-0 truncate px-1">专辑名</span>
-      <span class="w-[10%] shrink-0 text-right px-1">时长</span>
+    <div
+      class={cn(
+        DESKTOP_TRACK_COLS,
+        'py-2 text-xs font-medium text-muted-foreground',
+      )}
+    >
+      <span class="truncate px-1">#</span>
+      <span class="min-w-0 truncate px-1">歌曲名</span>
+      <span class="min-w-0 truncate px-1">艺术家</span>
+      <span class="min-w-0 truncate px-1">专辑名</span>
+      <span class="min-w-0 truncate px-1">时长</span>
     </div>
   );
 }
 
 function DesktopTrackHeader() {
   return (
-    <div class="sticky top-0 z-10 shrink-0 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
+    <div class="sticky top-0 z-10 shrink-0 border-b bg-background">
       <DesktopTrackHeaderRow />
     </div>
   );
@@ -84,42 +219,51 @@ function DesktopTrackHeader() {
 function DesktopTrackRow(props: {
   track: AudioTrack;
   index: number;
+  tracks: AudioTrack[];
   showSource: boolean;
+  origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
   return (
-    <div class="h-full border-b border-border/40">
-      <Button
-        type="button"
-        variant="ghost"
-        class="h-full w-full items-center rounded-none px-2 py-2.5 text-left text-xs font-normal hover:bg-muted/50 sm:text-sm"
-        onClick={props.onPlay}
-      >
-        <span class="flex w-full items-center">
-          <span class="w-[5%] shrink-0 text-center tabular-nums text-muted-foreground">
-            {props.index + 1}
-          </span>
-          <span class="flex min-w-0 flex-1 items-center gap-1.5 px-1">
+    <MusicTrackContextMenu
+      track={props.track}
+      tracks={props.tracks}
+      index={props.index}
+      variant="online"
+      origin={props.origin ?? 'search'}
+    >
+      <div class="h-full border-b border-border/40">
+        <button
+          type="button"
+          class={cn(
+            DESKTOP_TRACK_COLS,
+            'h-full cursor-pointer rounded-none py-2.5 text-xs font-normal hover:bg-muted/50 sm:text-sm',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          )}
+          onClick={props.onPlay}
+        >
+          <span class="truncate px-1 tabular-nums text-muted-foreground">{props.index + 1}</span>
+          <span class="flex min-w-0 items-center gap-1.5 px-1">
             <span class="min-w-0 truncate">{props.track.name}</span>
             <TrackBadges track={props.track} showSource={props.showSource} />
           </span>
-          <span class="w-[24%] shrink-0 truncate px-1 text-muted-foreground">{props.track.artist}</span>
-          <span class="w-[27%] shrink-0 truncate px-1 text-muted-foreground">
-            {trackAlbumName(props.track)}
-          </span>
-          <span class="w-[10%] shrink-0 text-right px-1 tabular-nums text-muted-foreground">
+          <span class="min-w-0 truncate px-1 text-muted-foreground">{props.track.artist}</span>
+          <span class="min-w-0 truncate px-1 text-muted-foreground">{trackAlbumName(props.track)}</span>
+          <span class="min-w-0 truncate px-1 tabular-nums text-muted-foreground">
             {props.track.duration || '--:--'}
           </span>
-        </span>
-      </Button>
-    </div>
+        </button>
+      </div>
+    </MusicTrackContextMenu>
   );
 }
 
 function MobileTrackRow(props: {
   track: AudioTrack;
   index: number;
+  tracks: AudioTrack[];
   showSource: boolean;
+  origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
   const album = () => trackAlbumName(props.track);
@@ -131,30 +275,38 @@ function MobileTrackRow(props: {
   };
 
   return (
-    <div class="h-full border-b border-border/40">
-      <Button
-        type="button"
-        variant="ghost"
-        class="h-full min-h-[54px] w-full justify-start gap-2 rounded-none px-3 py-0 font-normal hover:bg-muted/50"
-        onClick={props.onPlay}
-      >
-        <span class="w-9 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
-          {props.index + 1}
-        </span>
-        <span class="min-w-0 flex-1 overflow-hidden text-left">
-          <span class="flex min-w-0 items-center gap-1">
-            <span class="min-w-0 truncate text-sm">{props.track.name}</span>
-            <TrackBadges track={props.track} showSource={props.showSource} mobile />
+    <MusicTrackContextMenu
+      track={props.track}
+      tracks={props.tracks}
+      index={props.index}
+      variant="online"
+      origin={props.origin ?? 'search'}
+    >
+      <div class="h-full border-b border-border/40">
+        <Button
+          type="button"
+          variant="ghost"
+          class="h-full min-h-[54px] w-full justify-start gap-2 rounded-none px-3 py-0 font-normal hover:bg-muted/50"
+          onClick={props.onPlay}
+        >
+          <span class="w-9 shrink-0 text-left text-xs tabular-nums text-muted-foreground">
+            {props.index + 1}
           </span>
-          <Show when={subtitle()}>
-            <p class="truncate text-xs text-muted-foreground">{subtitle()}</p>
-          </Show>
-        </span>
-        <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {props.track.duration || '--:--'}
-        </span>
-      </Button>
-    </div>
+          <span class="min-w-0 flex-1 overflow-hidden text-left">
+            <span class="flex min-w-0 items-center gap-1">
+              <span class="min-w-0 truncate text-sm">{props.track.name}</span>
+              <TrackBadges track={props.track} showSource={props.showSource} mobile />
+            </span>
+            <Show when={subtitle()}>
+              <p class="truncate text-xs text-muted-foreground">{subtitle()}</p>
+            </Show>
+          </span>
+          <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {props.track.duration || '--:--'}
+          </span>
+        </Button>
+      </div>
+    </MusicTrackContextMenu>
   );
 }
 
@@ -173,6 +325,7 @@ function TrackListRows(props: {
             <DesktopTrackRow
               track={track}
               index={index()}
+              tracks={props.tracks}
               showSource={props.showSource}
               onPlay={() => props.onPlay(props.tracks, index())}
             />
@@ -181,6 +334,7 @@ function TrackListRows(props: {
           <MobileTrackRow
             track={track}
             index={index()}
+            tracks={props.tracks}
             showSource={props.showSource}
             onPlay={() => props.onPlay(props.tracks, index())}
           />
@@ -190,32 +344,50 @@ function TrackListRows(props: {
   );
 }
 
-export interface MusicSearchTrackListProps {
-  tracks: AudioTrack[];
-  source: SearchSource;
+export interface MusicOnlineTrackListProps {
+  tracks: Accessor<readonly AudioTrack[]> | readonly AudioTrack[];
   onPlay: (tracks: AudioTrack[], index: number) => void;
+  showSource?: boolean;
+  /** 右键菜单播放来源标记 */
+  origin?: 'search' | 'list';
   class?: string;
+  /** 覆盖默认列表水平留白（外层已有页级 inset 时用 px-0） */
+  listInnerClass?: string;
+  scrollFooter?: JSX.Element;
+  contentRevision?: Accessor<unknown>;
+  enableQuickScroll?: boolean;
+  onScroll?: (el: HTMLDivElement) => void;
+  onScrollContainer?: (el: HTMLDivElement | undefined) => void;
 }
 
-export const MusicSearchTrackList: Component<MusicSearchTrackListProps> = (props) => {
+/** 在线歌曲虚拟列表（搜索 / 歌单详情等共用，对齐 lx 桌面列与移动双行） */
+export const MusicOnlineTrackList: Component<MusicOnlineTrackListProps> = (props) => {
   const shell = useShellLayout();
   const isMobileLayout = () => shell().useMobileShell;
-  const showSource = () => props.source === AGGREGATE_SEARCH_SOURCE;
-  const items = () => props.tracks;
+  const items = () =>
+    (typeof props.tracks === 'function' ? props.tracks() : props.tracks) as AudioTrack[];
   const remeasureLayout = () => `${isMobileLayout()}|${shell().windowWidth}`;
+  const [scrollEl, setScrollEl] = createSignal<HTMLDivElement | undefined>();
+
+  const setScrollContainer = (el: HTMLDivElement | undefined) => {
+    setScrollEl(el);
+    props.onScrollContainer?.(el);
+  };
 
   return (
-    <div class={cn('flex min-h-0 flex-1 flex-col', props.class)}>
-      <Show when={!isMobileLayout()}>
-        <DesktopTrackHeader />
-      </Show>
+    <div class={cn('relative flex min-h-0 flex-1 flex-col', props.class)}>
       <VirtualList<AudioTrack>
-        class="min-h-0 flex-1"
+        class="min-h-0 flex-1 my-2"
+        listInnerClass={props.listInnerClass ?? musicHubListInsetClass}
         items={items}
         estimateSize={() => trackRowHeightPx(isMobileLayout())}
         remeasureWhen={remeasureLayout}
         overscan={8}
         getItemKey={trackItemKey}
+        onScrollContainer={setScrollContainer}
+        onScroll={props.onScroll}
+        scrollHeader={!isMobileLayout() ? <DesktopTrackHeader /> : undefined}
+        scrollFooter={props.scrollFooter}
       >
         {(track, index) => (
           <Show
@@ -224,21 +396,61 @@ export const MusicSearchTrackList: Component<MusicSearchTrackListProps> = (props
               <DesktopTrackRow
                 track={track}
                 index={index}
-                showSource={showSource()}
-                onPlay={() => props.onPlay(props.tracks, index)}
+                tracks={items()}
+                showSource={props.showSource === true}
+                origin={props.origin}
+                onPlay={() => props.onPlay(items(), index)}
               />
             }
           >
             <MobileTrackRow
               track={track}
               index={index}
-              showSource={showSource()}
-              onPlay={() => props.onPlay(props.tracks, index)}
+              tracks={items()}
+              showSource={props.showSource === true}
+              origin={props.origin}
+              onPlay={() => props.onPlay(items(), index)}
             />
           </Show>
         )}
       </VirtualList>
+      <Show when={props.enableQuickScroll !== false}>
+        <MusicHubQuickScroll
+          container={scrollEl}
+          contentRevision={
+            props.contentRevision ?? (() => items().length)
+          }
+        />
+      </Show>
     </div>
+  );
+};
+
+export interface MusicSearchTrackListProps {
+  tracks: AudioTrack[];
+  source: SearchSource;
+  onPlay: (tracks: AudioTrack[], index: number) => void;
+  class?: string;
+}
+
+export const MusicSearchTrackList: Component<MusicSearchTrackListProps> = (props) => {
+  const { handleScroll } = useSearchScrollLoad();
+  const [scrollEl, setScrollEl] = createSignal<HTMLDivElement | undefined>();
+  useScrollToTopOnPageChange(scrollEl);
+
+  return (
+    <MusicOnlineTrackList
+      class={props.class}
+      tracks={() => props.tracks}
+      showSource={props.source === AGGREGATE_SEARCH_SOURCE}
+      onPlay={props.onPlay}
+      onScroll={handleScroll}
+      onScrollContainer={setScrollEl}
+      scrollFooter={<SearchListFooter />}
+      contentRevision={() =>
+        `${props.tracks.length}:${getSearchState().page}:${getMusicSearchUi().paginationPreference}`
+      }
+    />
   );
 };
 
@@ -254,15 +466,29 @@ export interface MusicSearchPlaylistListProps {
 
 export const MusicSearchPlaylistList: Component<MusicSearchPlaylistListProps> = (props) => {
   const showSource = () => props.source === AGGREGATE_SEARCH_SOURCE;
+  const { handleScroll } = useSearchScrollLoad();
+  const [scrollEl, setScrollEl] = createSignal<HTMLDivElement | undefined>();
+  useScrollToTopOnPageChange(scrollEl);
 
   return (
-    <MusicPlaylistVirtualList
-      class={props.class}
-      listInnerClass="px-4 pb-4 pt-1"
-      playlists={() => props.playlists}
-      showSource={showSource()}
-      onOpen={props.onOpen}
-    />
+    <div class={cn('relative flex min-h-0 flex-1 flex-col', props.class)}>
+      <MusicPlaylistVirtualList
+        class="min-h-0 flex-1 my-2"
+        listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
+        playlists={() => props.playlists}
+        showSource={showSource()}
+        onOpen={props.onOpen}
+        onScrollContainer={setScrollEl}
+        onScroll={handleScroll}
+        scrollFooter={<SearchListFooter />}
+      />
+      <MusicHubQuickScroll
+        container={scrollEl}
+        contentRevision={() =>
+          `${props.playlists.length}:${getSearchState().page}:${getMusicSearchUi().paginationPreference}`
+        }
+      />
+    </div>
   );
 };
 
@@ -290,21 +516,23 @@ export const MusicSearchLocalGroupList: Component<MusicSearchLocalGroupListProps
           <section>
             <h3 class="mb-2 text-xs font-medium text-muted-foreground">{group.groupName}</h3>
             <div class={cn('overflow-hidden', !isMobileLayout() && 'rounded-lg border')}>
-              <Show when={!isMobileLayout()}>
-                <div class="border-b bg-muted/30">
-                  <DesktopTrackHeaderRow />
-                </div>
-              </Show>
               <Show
                 when={group.tracks.length > LOCAL_GROUP_VIRTUALIZE_THRESHOLD}
                 fallback={
-                  <div class="divide-y">
-                    <TrackListRows
-                      tracks={group.tracks}
-                      showSource={showSource()}
-                      mobile={isMobileLayout()}
-                      onPlay={props.onPlay}
-                    />
+                  <div>
+                    <Show when={!isMobileLayout()}>
+                      <div class="border-b bg-muted/30">
+                        <DesktopTrackHeaderRow />
+                      </div>
+                    </Show>
+                    <div class="divide-y">
+                      <TrackListRows
+                        tracks={group.tracks}
+                        showSource={showSource()}
+                        mobile={isMobileLayout()}
+                        onPlay={props.onPlay}
+                      />
+                    </div>
                   </div>
                 }
               >
@@ -319,6 +547,15 @@ export const MusicSearchLocalGroupList: Component<MusicSearchLocalGroupListProps
                     remeasureWhen={remeasureLayout}
                     overscan={6}
                     getItemKey={trackItemKey}
+                    scrollHeader={
+                      !isMobileLayout() ? (
+                        <div class="sticky top-0 z-10 border-b bg-background">
+                          <div class="bg-muted/30">
+                            <DesktopTrackHeaderRow />
+                          </div>
+                        </div>
+                      ) : undefined
+                    }
                   >
                     {(track, index) => (
                       <Show
@@ -327,6 +564,7 @@ export const MusicSearchLocalGroupList: Component<MusicSearchLocalGroupListProps
                           <DesktopTrackRow
                             track={track}
                             index={index}
+                            tracks={group.tracks}
                             showSource={showSource()}
                             onPlay={() => props.onPlay(group.tracks, index)}
                           />
@@ -335,6 +573,7 @@ export const MusicSearchLocalGroupList: Component<MusicSearchLocalGroupListProps
                         <MobileTrackRow
                           track={track}
                           index={index}
+                          tracks={group.tracks}
                           showSource={showSource()}
                           onPlay={() => props.onPlay(group.tracks, index)}
                         />

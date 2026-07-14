@@ -1,5 +1,5 @@
 /**
- * Hub 歌手浏览
+ * Hub 歌手浏览（tx 正式接口；wy/kg 分页；kw/mg 需歌手名兜底）
  */
 
 import { createSignal, For, Show, type Component } from 'solid-js';
@@ -22,6 +22,7 @@ export const MusicSingerPane: Component = () => {
   const [singerName, setSingerName] = createSignal('');
   const [detail, setDetail] = createSignal<SingerDetail | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [loadingMore, setLoadingMore] = createSignal(false);
 
   const load = async () => {
     const id = singerId().trim();
@@ -32,10 +33,33 @@ export const MusicSingerPane: Component = () => {
         source() as AudioTrackSource,
         id,
         singerName().trim() || undefined,
+        1,
       );
       setDetail(d);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    const d = detail();
+    const id = singerId().trim();
+    if (!d?.hasMore || !id || loadingMore()) return;
+    setLoadingMore(true);
+    try {
+      const next = await fetchSingerDetail(
+        source() as AudioTrackSource,
+        id,
+        singerName().trim() || undefined,
+        (d.page ?? 1) + 1,
+      );
+      if (!next) return;
+      setDetail({
+        ...next,
+        tracks: [...d.tracks, ...next.tracks],
+      });
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -57,7 +81,7 @@ export const MusicSingerPane: Component = () => {
             onInput={(e) => setSingerId(e.currentTarget.value)}
           />
           <AppTextFieldBareInput
-            placeholder="歌手名（kw/tx/mg 必填）"
+            placeholder="歌手名（仅 kw/mg 搜索兜底需要）"
             value={singerName()}
             onInput={(e) => setSingerName(e.currentTarget.value)}
           />
@@ -105,6 +129,17 @@ export const MusicSingerPane: Component = () => {
                   )}
                 </For>
               </ul>
+              <Show when={d().hasMore}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  class="w-full"
+                  disabled={loadingMore()}
+                  onClick={() => void loadMore()}
+                >
+                  {loadingMore() ? '加载中…' : '加载更多'}
+                </Button>
+              </Show>
             </div>
           )}
         </Show>

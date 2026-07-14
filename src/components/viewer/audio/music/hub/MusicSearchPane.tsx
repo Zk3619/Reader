@@ -3,7 +3,6 @@
  */
 
 import { createEffect, createMemo, createSignal, For, onMount, Show, type Component } from 'solid-js';
-import { Button } from '@/components/ui/button';
 import { SearchHistoryChip } from '@/components/bookshelf/SearchHistoryChip';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import {
@@ -17,8 +16,9 @@ import {
   getSearchState,
   refreshHotKeywords,
   removeSearchHistoryItem,
-  setSearchKeyword,
-  submitSearch,
+  scheduleTipSearch,
+  cancelTipSearch,
+  searchByKeyword,
 } from '@/stores/music-hub/search';
 import { AGGREGATE_SEARCH_SOURCE } from '@/lib/media/audio/online/source-router';
 import { playPlaylist } from '@/stores/viewer/media/audio';
@@ -36,7 +36,6 @@ import {
   MusicSearchPlaylistList,
   MusicSearchTrackList,
 } from '@/components/viewer/audio/music/hub/MusicSearchResultLists';
-import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
 export const MusicSearchPane: Component = () => {
@@ -52,6 +51,14 @@ export const MusicSearchPane: Component = () => {
     if (typeof src === 'string' && !src.startsWith('userApi:')) {
       void refreshHotKeywords(src as AudioTrackSource);
     }
+  });
+
+  createEffect(() => {
+    if (state().submitted) {
+      cancelTipSearch();
+      return;
+    }
+    scheduleTipSearch(state().keyword, state().source);
   });
 
   const [localCache, setLocalCache] = createSignal<LocalMusicSearchCache | null>(null);
@@ -107,7 +114,7 @@ export const MusicSearchPane: Component = () => {
       <div
         class={cn(
           'flex min-h-0 w-full flex-1 flex-col',
-          showOnlineResults() ? 'overflow-hidden px-0 pb-0' : cn(mainShellPageScroll, 'gap-4 px-4 pb-4'),
+          showOnlineResults() ? 'overflow-hidden' : 'gap-4 pb-4',
         )}
       >
         <Show when={showWelcome()}>
@@ -122,18 +129,12 @@ export const MusicSearchPane: Component = () => {
             <div class="flex flex-wrap gap-2 pb-2">
               <For each={state().hotKeywords}>
                 {(word) => (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    class="h-auto rounded-full px-2.5 py-1 text-xs"
-                    onClick={() => {
-                      setSearchKeyword(word);
-                      void submitSearch();
+                  <SearchHistoryChip
+                    item={{ word, usage: 0, lastUseTime: 0 }}
+                    onSelect={(selected) => {
+                      void searchByKeyword(selected);
                     }}
-                  >
-                    {word}
-                  </Button>
+                  />
                 )}
               </For>
             </div>
@@ -160,8 +161,7 @@ export const MusicSearchPane: Component = () => {
                   <SearchHistoryChip
                     item={{ word, usage: 0, lastUseTime: 0 }}
                     onSelect={(selected) => {
-                      setSearchKeyword(selected);
-                      void submitSearch();
+                      void searchByKeyword(selected);
                     }}
                     onDelete={async (selected) => {
                       removeSearchHistoryItem(selected);
@@ -187,7 +187,9 @@ export const MusicSearchPane: Component = () => {
               >
                 <MusicSearchLocalGroupList
                   groups={localHits()}
-                  onPlay={(tracks, index) => void playPlaylist(tracks, index)}
+                  onPlay={(tracks, index) =>
+                    void playPlaylist(tracks, index, { origin: 'list' })
+                  }
                 />
               </Show>
             </Show>
@@ -207,14 +209,14 @@ export const MusicSearchPane: Component = () => {
 
         <Show when={showOnlineResults()}>
           <Show when={state().error}>
-            <p class="px-4 py-2 text-sm text-destructive">{state().error}</p>
+            <p class="py-2 text-sm text-destructive">{state().error}</p>
           </Show>
           <Show when={state().tab === 'song'}>
             <Show
               when={state().tracks.length > 0}
               fallback={
                 <Show when={shouldShowBlockingLoading(state().loading, 0)}>
-                  <p class="px-4 py-6 text-sm text-muted-foreground">搜索中…</p>
+                  <p class="py-6 text-sm text-muted-foreground">搜索中…</p>
                 </Show>
               }
             >
@@ -223,12 +225,14 @@ export const MusicSearchPane: Component = () => {
                   class={cn('min-h-0 flex-1', state().loading && 'opacity-60')}
                   tracks={state().tracks}
                   source={state().source}
-                  onPlay={(tracks, index) => void playPlaylist(tracks, index)}
+                  onPlay={(tracks, index) =>
+                    void playPlaylist(tracks, index, { origin: 'search' })
+                  }
                 />
               </div>
             </Show>
             <Show when={!state().loading && state().tracks.length === 0 && state().keyword}>
-              <p class="px-4 py-12 text-center text-sm text-muted-foreground">无结果</p>
+              <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
           </Show>
           <Show when={state().tab === 'playlist'}>
@@ -236,7 +240,7 @@ export const MusicSearchPane: Component = () => {
               when={state().playlists.length > 0}
               fallback={
                 <Show when={shouldShowBlockingLoading(state().loading, 0)}>
-                  <p class="px-4 py-6 text-sm text-muted-foreground">搜索中…</p>
+                  <p class="py-6 text-sm text-muted-foreground">搜索中…</p>
                 </Show>
               }
             >
@@ -254,7 +258,7 @@ export const MusicSearchPane: Component = () => {
               </div>
             </Show>
             <Show when={!state().loading && state().playlists.length === 0 && state().keyword}>
-              <p class="px-4 py-12 text-center text-sm text-muted-foreground">无结果</p>
+              <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
           </Show>
         </Show>

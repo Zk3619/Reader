@@ -62,6 +62,11 @@ export interface ViewerState extends BaseViewerState {
   /** music 模式播放队列 */
   trackQueue: AudioTrack[];
   trackIndex: number;
+  /**
+   * 队列来源：决定失败自动切歌等行为。
+   * list = 歌单 / 「我的列表」；search = 搜索结果；other = 榜单/专辑/单曲等。
+   */
+  musicQueueOrigin: 'search' | 'list' | 'other';
   activePlaylistId: string | null;
   /** music 模式当前 media_groups 分组 ID */
   activeMusicGroupId: number | null;
