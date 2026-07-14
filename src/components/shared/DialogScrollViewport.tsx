@@ -10,7 +10,11 @@ import {
   dialogNestedScrollTrack,
   dialogScrollFrameFlex,
   dialogScrollTrack,
+  scrollGutterClass,
+  type ScrollGutterMode,
 } from '@/lib/ui/viewport-classes';
+
+export type { ScrollGutterMode };
 
 export type DialogScrollViewportProps = {
   class?: string;
@@ -19,6 +23,10 @@ export type DialogScrollViewportProps = {
   compact?: boolean;
   /** 弹窗内嵌套小列表（圆角边框面板） */
   nested?: boolean;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）。
+   */
+  scrollGutter?: ScrollGutterMode;
   trackRef?: (el: HTMLDivElement) => void;
   children: JSX.Element;
 };
@@ -29,13 +37,18 @@ export function DialogScrollViewport(props: DialogScrollViewportProps) {
     'frameClass',
     'compact',
     'nested',
+    'scrollGutter',
     'trackRef',
     'children',
   ]);
   const frameClass = () =>
     local.frameClass ??
     (local.nested ? dialogNestedScrollFrame : dialogScrollFrameFlex);
-  const trackClass = () => (local.nested ? dialogNestedScrollTrack : dialogScrollTrack);
+  const trackClass = () =>
+    cn(
+      local.nested ? dialogNestedScrollTrack : dialogScrollTrack,
+      scrollGutterClass(local.scrollGutter),
+    );
 
   if (local.compact) {
     return (

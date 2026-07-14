@@ -31,6 +31,7 @@ import {
   popperContentViewportPanel,
   popperMenuPanelShell,
   popperOverflowPadding,
+  type ScrollGutterMode,
 } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import {
@@ -42,6 +43,7 @@ import {
   withBlurBefore,
 } from '@/utils/accessibility';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
+import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { appDropdownMenuContentMotionClass } from '@/lib/ui/menu-motion';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
@@ -232,6 +234,10 @@ type AppDropdownMenuContentProps = ComponentProps<typeof DropdownMenuContent> & 
   portalZClass?: string;
   /** 挂 body 并用显式 portalZClass（阅读器内用 ViewerAppDropdownMenuContent） */
   portalToBody?: boolean;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
 };
 
 export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (props) => {
@@ -241,6 +247,7 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
     'portalZClass',
     'portalToBody',
     'onCloseAutoFocus',
+    'scrollGutter',
     'children',
   ]);
   const layout = () => local.layout ?? 'compact';
@@ -265,9 +272,14 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
     >
       <ThemedComponentBackground componentId="dropdown" />
       {useInnerScroll() ? (
-        <PopperScrollViewport class="relative z-1 px-1">{local.children}</PopperScrollViewport>
+        <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
+          {local.children}
+        </PopperScrollViewport>
       ) : useTitleScroll() ? (
-        <PopperScrollViewport class="relative z-1 flex min-h-0 flex-1 flex-col">
+        <PopperScrollViewport
+          class="relative z-1 flex min-h-0 flex-1 flex-col"
+          scrollGutter={local.scrollGutter}
+        >
           {local.children}
         </PopperScrollViewport>
       ) : (
@@ -279,18 +291,27 @@ export const AppDropdownMenuContent: Component<AppDropdownMenuContentProps> = (p
 
 type AppDropdownMenuSubContentProps = ComponentProps<typeof DropdownMenuSubContent> & {
   portalZClass?: string;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
 };
 
 export const AppDropdownMenuSubContent: Component<AppDropdownMenuSubContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
+  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'scrollGutter', 'children']);
+  const mount = useOverlayPortalMount();
   const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   return (
-    <DropdownMenuSubContent
-      {...rest}
-      class={cn(popperMenuPanelShell, popperZ(), local.class)}
-    >
-      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
-    </DropdownMenuSubContent>
+    <DropdownMenuPortal mount={mount}>
+      <DropdownMenuSubContent
+        {...rest}
+        class={cn(popperMenuPanelShell, 'min-w-32', popperZ(), local.class)}
+      >
+        <PopperScrollViewport class="px-1" scrollGutter={local.scrollGutter}>
+          {local.children}
+        </PopperScrollViewport>
+      </DropdownMenuSubContent>
+    </DropdownMenuPortal>
   );
 };
 

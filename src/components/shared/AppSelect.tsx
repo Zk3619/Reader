@@ -3,8 +3,8 @@
  * 底层仍使用 @/components/ui/select（Kobalte Select 原语）。
  */
 
-import type { Component, JSX, ParentProps, ValidComponent } from 'solid-js';
-import { onCleanup, splitProps } from 'solid-js';
+import type { Accessor, Component, JSX, ParentProps, ValidComponent } from 'solid-js';
+import { Show, createContext, onCleanup, splitProps, useContext } from 'solid-js';
 import {
   useAppDrawerOverlayLock,
   useAppDrawerPortalMount,
@@ -21,21 +21,27 @@ import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import {
   popperMenuPanelShell,
   popperOverflowPadding,
+  type ScrollGutterMode,
 } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { blurActiveElement } from '@/utils/accessibility';
 import { scheduleOverlayPositionSync } from '@/lib/ui/overlay-position-sync';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 
-/** 选项行：与表单/对话框内其它 Select 一致，缩小左侧勾选留白 */
-export const APP_SELECT_ITEM_CLASS = 'pl-2';
+export type { ScrollGutterMode };
+
+/** 有 √ 时的选项行左侧留白（给 absolute 勾选图标留位，勿再用 pl-2 覆盖） */
+export const APP_SELECT_ITEM_CLASS = 'pl-8';
+
+/** 无 √ 时的选项行内边距 */
+export const APP_SELECT_ITEM_PLAIN_CLASS = 'pl-2 pr-2';
 
 /** 表单 / 对话框：全宽触发器 */
 export const APP_SELECT_TRIGGER_FORM = 'w-full';
 
 /** 探索枢纽等内联芯片内嵌选择 */
 export const APP_SELECT_TRIGGER_INLINE =
-  'h-7 w-full min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus:ring-0';
+  'h-7 w-full min-w-0 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0';
 
 /** 书源展开区等紧凑行内选择 */
 export const APP_SELECT_TRIGGER_COMPACT =
@@ -57,13 +63,15 @@ const CONTENT_LAYOUT_CLASS: Record<AppSelectContentLayout, string> = {
 };
 
 const APP_SELECT_TRIGGER_BASE_CLASS =
-  'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
+  'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 const APP_SELECT_CONTENT_MOTION_CLASS =
   'relative min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2';
 
 const APP_SELECT_ITEM_BASE_CLASS =
-  'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50';
+  'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50';
+
+const AppSelectCheckmarkContext = createContext<Accessor<boolean>>(() => true);
 
 function mergeOpenChange(
   userOnOpenChange: ((open: boolean) => void) | undefined,
@@ -75,9 +83,12 @@ function mergeOpenChange(
     if (open) {
       scheduleOverlayPositionSync();
       requestAnimationFrame(() => blurActiveElement());
-    } else {
-      blurActiveElement();
+      return;
     }
+    // 选完会把焦点还回 Trigger；延后到 focus restore 之后再 blur，避免焦点环闪现
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => blurActiveElement());
+    });
   };
 }
 
@@ -87,13 +98,22 @@ export type AppSelectProps<Option = string, OptGroup = never> = ParentProps<
      * 为 true 时不注入打开/关闭时的 blur（与内嵌页手势等极少数场景协调时使用）
      */
     disableAccessibilityAnnounce?: boolean;
+    /**
+     * 是否在选中项左侧显示 √（默认 true）。
+     * 可在根上统一关闭；也可在 AppSelectItem 上逐项覆盖。
+     */
+    showCheckmark?: boolean;
   }
 >;
 
 export function AppSelect<Option = string, OptGroup = never>(
   props: AppSelectProps<Option, OptGroup>
 ) {
-  const [local, rest] = splitProps(props, ['onOpenChange', 'disableAccessibilityAnnounce']);
+  const [local, rest] = splitProps(props, [
+    'onOpenChange',
+    'disableAccessibilityAnnounce',
+    'showCheckmark',
+  ]);
   const drawerOverlayLock = useAppDrawerOverlayLock();
   const inAppDrawer = () => drawerOverlayLock != null;
   const overlayReleaseRef: { current: (() => void) | undefined } = { current: undefined };
@@ -106,13 +126,16 @@ export function AppSelect<Option = string, OptGroup = never>(
       local.disableAccessibilityAnnounce || inAppDrawer(),
     )(open);
   };
+  const showCheckmark = () => local.showCheckmark !== false;
   return (
-    <Select
-      fitViewport
-      overflowPadding={popperOverflowPadding}
-      {...rest}
-      onOpenChange={handleOpenChange}
-    />
+    <AppSelectCheckmarkContext.Provider value={showCheckmark}>
+      <Select
+        fitViewport
+        overflowPadding={popperOverflowPadding}
+        {...rest}
+        onOpenChange={handleOpenChange}
+      />
+    </AppSelectCheckmarkContext.Provider>
   );
 }
 
@@ -203,34 +226,57 @@ type AppSelectItemProps<T extends ValidComponent = 'li'> =
   SelectPrimitive.SelectItemProps<T> & {
     class?: string | undefined;
     children?: JSX.Element;
+    /**
+     * 是否显示左侧 √（默认跟随 AppSelect.showCheckmark，再默认 true）。
+     * 设为 false 时去掉勾选图标并收紧左侧留白。
+     */
+    showCheckmark?: boolean;
   };
 
 export const AppSelectItem = <T extends ValidComponent = 'li'>(
   props: PolymorphicProps<T, AppSelectItemProps<T>>,
 ) => {
-  const [local, others] = splitProps(props as AppSelectItemProps, ['class', 'children']);
+  const [local, others] = splitProps(props as AppSelectItemProps, [
+    'class',
+    'children',
+    'showCheckmark',
+  ]);
+  const ctxShowCheckmark = useContext(AppSelectCheckmarkContext);
+  const showCheckmark = () => local.showCheckmark ?? ctxShowCheckmark();
   return (
     <SelectPrimitive.Item
-      class={cn(APP_SELECT_ITEM_BASE_CLASS, APP_SELECT_ITEM_CLASS, local.class)}
+      class={cn(
+        APP_SELECT_ITEM_BASE_CLASS,
+        showCheckmark() ? APP_SELECT_ITEM_CLASS : APP_SELECT_ITEM_PLAIN_CLASS,
+        local.class,
+      )}
       {...others}
     >
-      <SelectPrimitive.ItemIndicator class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-        <CheckIcon class="h-4 w-4" />
-      </SelectPrimitive.ItemIndicator>
+      <Show when={showCheckmark()}>
+        <SelectPrimitive.ItemIndicator class="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+          <CheckIcon class="h-4 w-4" />
+        </SelectPrimitive.ItemIndicator>
+      </Show>
       <SelectPrimitive.ItemLabel>{local.children}</SelectPrimitive.ItemLabel>
     </SelectPrimitive.Item>
   );
 };
 
 type AppSelectListboxProps<T extends ValidComponent = 'ul'> =
-  SelectPrimitive.SelectListboxProps<T> & { class?: string | undefined };
+  SelectPrimitive.SelectListboxProps<T> & {
+    class?: string | undefined;
+    /**
+     * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+     */
+    scrollGutter?: ScrollGutterMode;
+  };
 
 export const AppSelectListbox = <T extends ValidComponent = 'ul'>(
   props: PolymorphicProps<T, AppSelectListboxProps<T>>,
 ) => {
-  const [local, others] = splitProps(props as AppSelectListboxProps, ['class']);
+  const [local, others] = splitProps(props as AppSelectListboxProps, ['class', 'scrollGutter']);
   return (
-    <PopperScrollViewport class="px-1">
+    <PopperScrollViewport class="px-1" scrollGutter={local.scrollGutter}>
       <SelectPrimitive.Listbox class={cn('p-0', local.class)} {...others} />
     </PopperScrollViewport>
   );

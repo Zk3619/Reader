@@ -53,6 +53,8 @@ export interface VirtualListProps<T> {
   onScroll?: (el: HTMLDivElement) => void;
   /** 列表外壳 padding（加在滚动宿主层；行绝对定位时内层 relative 的 padding 不生效） */
   listInnerClass?: string;
+  /** 滚动容器内、虚拟列表之前的顶部内容（如粘性表头，须与行同宽以对齐） */
+  scrollHeader?: JSX.Element;
   /** 滚动容器内、虚拟列表之后的底部内容（如加载更多占位） */
   scrollFooter?: JSX.Element;
   /** 使用外部滚动容器（书架主滚动区等），避免双层滚动 */
@@ -471,6 +473,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
     <VirtualListScrollCoalesceContext.Provider value={scrollCoalesce}>
       {useExternalScroll() ? (
         <>
+          {props.scrollHeader}
           {listBody}
           {props.scrollFooter}
         </>
@@ -480,7 +483,10 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
           class={cn(
             'min-w-0 w-full flex-1 overflow-y-auto',
             scrollGutterStableBoth,
-            scrollEdgeInset,
+            // 粘性表头贴顶：勿用 scrollEdgeInset 的 padding-top，否则滚动时表头上方透出行内容
+            props.scrollHeader
+              ? 'pt-0 pb-2 app-scroll-bottom-inset'
+              : scrollEdgeInset,
             props.listInnerClass,
             props.class,
           )}
@@ -491,6 +497,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
           onScroll={props.onScroll}
           markScrolling={() => scrollCoalesce.markScrolling()}
         >
+          {props.scrollHeader}
           {listBody}
           {props.scrollFooter}
         </VirtualListScrollHost>

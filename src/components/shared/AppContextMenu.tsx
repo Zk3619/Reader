@@ -28,6 +28,7 @@ import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBac
 import {
   popperMenuPanelShell,
   popperOverflowPadding,
+  type ScrollGutterMode,
 } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
@@ -89,10 +90,20 @@ type AppContextMenuContentProps = ComponentProps<typeof ContextMenuContent> & {
   layout?: AppContextMenuContentLayout;
   /** 附加在 Content 上的 z-index 等 */
   portalZClass?: string;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
 };
 
 export const AppContextMenuContent: Component<AppContextMenuContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'layout', 'portalZClass', 'children']);
+  const [local, rest] = splitProps(props, [
+    'class',
+    'layout',
+    'portalZClass',
+    'scrollGutter',
+    'children',
+  ]);
   const layout = () => local.layout ?? 'compact';
   const mount = useOverlayPortalMount();
   const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
@@ -103,25 +114,42 @@ export const AppContextMenuContent: Component<AppContextMenuContentProps> = (pro
       class={cn(CONTENT_LAYOUT_CLASS[layout()], popperZ(), 'overflow-hidden isolate', local.class)}
     >
       <ThemedComponentBackground componentId="contextMenu" />
-      <PopperScrollViewport class="relative z-1 px-1">{local.children}</PopperScrollViewport>
+      <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
+        {local.children}
+      </PopperScrollViewport>
     </ContextMenuContent>
   );
 };
 
 type AppContextMenuSubContentProps = ComponentProps<typeof ContextMenuSubContent> & {
   portalZClass?: string;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
 };
 
 export const AppContextMenuSubContent: Component<AppContextMenuSubContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'children']);
+  const [local, rest] = splitProps(props, ['class', 'portalZClass', 'scrollGutter', 'children']);
+  const mount = useOverlayPortalMount();
   const popperZ = () => local.portalZClass ?? overlayLayerZ().popper;
   return (
-    <ContextMenuSubContent
-      {...rest}
-      class={cn(popperMenuPanelShell, popperZ(), local.class)}
-    >
-      <PopperScrollViewport class="px-1">{local.children}</PopperScrollViewport>
-    </ContextMenuSubContent>
+    <ContextMenuPortal mount={mount}>
+      <ContextMenuSubContent
+        {...rest}
+        class={cn(
+          APP_CONTEXT_MENU_CONTENT_COMPACT,
+          popperZ(),
+          'overflow-hidden isolate',
+          local.class,
+        )}
+      >
+        <ThemedComponentBackground componentId="contextMenu" />
+        <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
+          {local.children}
+        </PopperScrollViewport>
+      </ContextMenuSubContent>
+    </ContextMenuPortal>
   );
 };
 

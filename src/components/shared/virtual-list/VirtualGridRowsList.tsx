@@ -303,7 +303,6 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     orderedItems,
     rowIndices,
     colCount: props.colCount,
-    rowHeightMode,
     rowSlotHeightPx,
     layoutRevision,
     overscan: props.overscan,

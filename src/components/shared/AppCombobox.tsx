@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
-import { popperMenuPanelShell } from '@/lib/ui/viewport-classes';
+import { popperMenuPanelShell, type ScrollGutterMode } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 
 export type AppComboboxProps = {
@@ -29,6 +29,10 @@ export type AppComboboxProps = {
   class?: string;
   /** 下拉层 z-index，对话框内可传 portalZClass 并叠加更高层级 */
   contentClass?: string;
+  /**
+   * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
+   */
+  scrollGutter?: ScrollGutterMode;
   'aria-label'?: string;
 };
 
@@ -41,6 +45,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
     'placeholder',
     'class',
     'contentClass',
+    'scrollGutter',
     'aria-label',
   ]);
 
@@ -75,7 +80,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
           class={cn(popperMenuPanelShell, overlayLayerZ().popper, 'overflow-hidden isolate', local.contentClass)}
         >
           <ThemedComponentBackground componentId="combobox" />
-          <PopperScrollViewport class="relative z-1 px-1">
+          <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
             <ComboboxPrimitive.Listbox class="m-0 p-0" />
           </PopperScrollViewport>
         </ComboboxPrimitive.Content>

@@ -112,7 +112,7 @@ export function PageToolbar(props: PageToolbarProps) {
           </Show>
         </div>
         <Show when={props.children || showShellTrailingChrome()}>
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 no-drag">
+          <div class="relative z-30 flex shrink-0 flex-wrap items-center justify-end gap-2 overflow-visible no-drag">
             <Show when={props.children}>{props.children}</Show>
             <PageToolbarShellTrailing showLeadingSeparator={!!props.children} />
           </div>

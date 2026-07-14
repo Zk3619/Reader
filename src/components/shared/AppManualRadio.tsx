@@ -69,12 +69,13 @@ export function AppManualRadioOption(props: AppManualRadioOptionProps) {
 export type AppManualRadioGroupProps = {
   class?: string;
   children: JSX.Element;
+  'aria-label'?: string;
 };
 
 export function AppManualRadioGroup(props: AppManualRadioGroupProps) {
   const [local, rest] = splitProps(props, ['class', 'children']);
   return (
-    <div class={cn('flex flex-col', local.class)} {...rest}>
+    <div class={cn('flex flex-col', local.class)} role="radiogroup" {...rest}>
       {local.children}
     </div>
   );

@@ -143,10 +143,37 @@ export const minHBookInfoActions = 'min-h-[calc(100dvh-320px)]';
 export const maxHTitleMenu = 'max-h-[min(24rem,calc(100dvh-11rem))]';
 
 /**
- * 双侧 stable scrollbar gutter（与 App.css 中同名 class 一致）。
- * 用于 overflow 滚动区，避免滚动条显隐时内容横向抖动。
+ * 滚动条沟槽预留模式（与 app-shell.css 中同名 class 一致）。
+ * - both：两侧预留（stable both-edges）
+ * - single：单侧预留（stable）
+ * - auto：自动（默认，不提前占位）
  */
+export type ScrollGutterMode = 'both' | 'single' | 'auto';
+
+/** 浮层/下拉滚动区默认 gutter 模式 */
+export const SCROLL_GUTTER_DEFAULT: ScrollGutterMode = 'auto';
+
+/** 双侧 stable scrollbar gutter */
 export const scrollGutterStableBoth = 'scroll-gutter-stable-both';
+
+/** 单侧 stable scrollbar gutter */
+export const scrollGutterStable = 'scroll-gutter-stable';
+
+/** 自动 scrollbar gutter（不提前占位） */
+export const scrollGutterAuto = 'scroll-gutter-auto';
+
+/** 按模式解析 scrollbar-gutter class（默认 auto） */
+export function scrollGutterClass(mode: ScrollGutterMode = SCROLL_GUTTER_DEFAULT): string {
+  switch (mode) {
+    case 'both':
+      return scrollGutterStableBoth;
+    case 'single':
+      return scrollGutterStable;
+    case 'auto':
+    default:
+      return scrollGutterAuto;
+  }
+}
 
 /**
  * 滚动视口内上下留白（加在 overflow-y-auto 元素上，内容滚入/滚出时不贴边）。
@@ -194,17 +221,19 @@ export const popperMenuScrollFrame = cn(
   scrollEdgeInset,
 );
 
-/** Popper 内层滚动轨（置于 popperMenuScrollFrame 内） */
-export const popperMenuScrollTrack = cn(
+/** Popper 内层滚动轨基底（不含 gutter；由 PopperScrollViewport 按模式叠加） */
+export const popperMenuScrollTrackBase = cn(
   'min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth,
 );
+
+/** Popper 内层滚动轨（默认 auto gutter；自定义模式请用 trackBase + scrollGutterClass） */
+export const popperMenuScrollTrack = cn(popperMenuScrollTrackBase, scrollGutterAuto);
 
 /**（`--kb-popper-content-available-height`），面板内纵向滚动 */
 export const popperContentViewportScroll = cn(
   'max-h-[var(--kb-popper-content-available-height)]',
   'overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth,
+  scrollGutterAuto,
   scrollEdgeInset,
 );
 
@@ -232,6 +261,12 @@ export const mainShellPageScroll = cn(
   scrollEdgeInset,
 );
 
+/**
+ * 子层 VirtualList / 独立列表自行滚动时的外框。
+ * 勿挂 scroll-gutter：外层不滚动时 both-edges 沟槽仍会白占两侧宽度。
+ */
+export const mainShellPageHost = 'main-shell-page-host flex min-h-0 flex-1 flex-col overflow-hidden';
+
 /** 设置内嵌规则管理页（TXT/替换/字典）：占满父级高度，列表区内滚、底栏固定于组件底部 */
 export const settingsRuleManagePageRoot =
   'flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card';
@@ -257,11 +292,9 @@ export const dialogScrollFrame = cn(
 /** 外框占满 Header / Footer 之间的剩余高度 */
 export const dialogScrollFrameFlex = cn(dialogScrollFrame, 'flex-1');
 
-/** 弹窗内滚动轨（置于 dialogScrollFrame 内） */
-export const dialogScrollTrack = cn(
-  'min-h-0 flex-1 overflow-y-auto overscroll-contain contain-layout',
-  scrollGutterStableBoth,
-);
+/** 弹窗内滚动轨（置于 dialogScrollFrame 内；gutter 由 DialogScrollViewport.scrollGutter 叠加） */
+export const dialogScrollTrack =
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain';
 
 /** 弹窗内嵌套小列表外框（分组筛选等） */
 export const dialogNestedScrollFrame = cn(
@@ -269,10 +302,9 @@ export const dialogNestedScrollFrame = cn(
   scrollEdgeInset,
 );
 
-export const dialogNestedScrollTrack = cn(
-  'min-h-0 flex-1 overflow-y-auto overscroll-contain',
-  scrollGutterStableBoth,
-);
+/** 嵌套小列表滚动轨（gutter 由 DialogScrollViewport.scrollGutter 叠加） */
+export const dialogNestedScrollTrack =
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain';
 
 /** 弹窗正文 track 修饰：垂直间距 */
 export const appDialogScrollBodySpaceY2 = 'space-y-2';
@@ -289,16 +321,15 @@ export const appDialogScrollBodyMaxH70SpaceY4 = cn(
 /** 弹窗内虚拟长列表 track（与 dialogVirtualListPanelHeight 配合，外层用 DialogScrollViewport） */
 export const dialogVirtualListScroll = 'min-h-0 flex-1 space-y-2';
 
-/** 多区块设置类弹窗：外框 flex-1，track 限高 */
-export const appDialogSettingsScrollTrack = cn(
-  dialogScrollTrack,
-  'space-y-4',
-);
+/**
+ * 多区块设置类弹窗 track 修饰（仅间距；滚动轨与 gutter 由 AppDialogScrollBody 提供，勿再叠 dialogScrollTrack）
+ */
+export const appDialogSettingsScrollTrack = appDialogScrollBodySpaceY4;
 
-/** Popper 内嵌套可滚动列表（下拉选项分组等） */
+/** Popper 内嵌套可滚动列表（下拉选项分组等；默认 auto gutter） */
 export const popperNestedListScroll = cn(
   'overflow-y-auto overflow-x-hidden overscroll-contain',
-  scrollGutterStableBoth,
+  scrollGutterAuto,
   scrollEdgeInset,
 );
 

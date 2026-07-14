@@ -496,6 +496,7 @@ export function MediaGroupPage(props: MediaGroupPageProps = {}) {
   onMount(async () => {
     const onBookshelfRefresh = () => void reloadAllGroupBookCounts();
     const offRefresh = onMediaRefresh(onBookshelfRefresh);
+    onCleanup(offRefresh);
 
     await initBookshelfLayoutSettings();
     if (!useParentGroups()) {
@@ -506,7 +507,6 @@ export function MediaGroupPage(props: MediaGroupPageProps = {}) {
         setAllGroupsOrder([...all].sort((a, b) => a.order - b.order));
       });
     }
-    onCleanup(offRefresh);
   });
 
   /**

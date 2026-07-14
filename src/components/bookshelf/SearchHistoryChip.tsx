@@ -1,7 +1,7 @@
 /**
  * 搜索历史标签（对齐 Legado HistoryKeyAdapter）
  * - 点击：发起搜索
- * - 长按：破碎动画后删除（桌面端也可点关闭按钮删除）
+ * - 可删除时：长按破碎动画后删除（桌面端也可点关闭按钮删除）
  * - 移动端隐藏关闭按钮
  */
 
@@ -19,7 +19,8 @@ const MOVE_THRESHOLD = 10;
 export interface SearchHistoryChipProps {
   item: SearchKeyword;
   onSelect: (word: string) => void;
-  onDelete: (word: string) => void | Promise<void>;
+  /** 不传则不可删除（无关闭按钮、无长按删除），用于热搜等只读徽标 */
+  onDelete?: (word: string) => void | Promise<void>;
   class?: string;
 }
 
@@ -34,6 +35,8 @@ export function SearchHistoryChip(props: SearchHistoryChipProps) {
   let longPressTriggered = false;
   let suppressNextClick = false;
 
+  const deletable = () => typeof props.onDelete === 'function';
+
   const clearPressTimer = () => {
     if (longPressTimer !== null) {
       clearTimeout(longPressTimer);
@@ -44,7 +47,7 @@ export function SearchHistoryChip(props: SearchHistoryChipProps) {
   onCleanup(() => clearPressTimer());
 
   const runDelete = async () => {
-    if (deleting()) return;
+    if (!deletable() || deleting()) return;
     setDeleting(true);
     const el = rootRef;
     if (el) {
@@ -52,11 +55,11 @@ export function SearchHistoryChip(props: SearchHistoryChipProps) {
         reduceMotion: settingsStore.state.app.reduceMotion,
       });
     }
-    await props.onDelete(props.item.word);
+    await props.onDelete?.(props.item.word);
   };
 
   const onPointerDown = (e: PointerEvent) => {
-    if (deleting() || e.button !== 0) return;
+    if (!deletable() || deleting() || e.button !== 0) return;
     pressStartX = e.clientX;
     pressStartY = e.clientY;
     hasMoved = false;
@@ -113,7 +116,7 @@ export function SearchHistoryChip(props: SearchHistoryChipProps) {
         type="button"
         class={cn(
           'min-w-0 truncate rounded-full py-1 pl-3 text-left text-inherit outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          isMobile() ? 'pr-3' : 'pr-1',
+          !deletable() || isMobile() ? 'pr-3' : 'pr-1',
         )}
         onClick={(e) => {
           if (suppressNextClick || deleting()) {
@@ -126,7 +129,7 @@ export function SearchHistoryChip(props: SearchHistoryChipProps) {
       >
         {props.item.word}
       </button>
-      <Show when={!isMobile()}>
+      <Show when={deletable() && !isMobile()}>
         <button
           type="button"
           class="mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"

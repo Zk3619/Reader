@@ -9,6 +9,7 @@ import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/s
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/shared/icons';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { settingsStore } from '@/stores/settings';
+import { scrollToTop as scrollElementToTop } from '@/lib/ui/scroll-to-top';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_EDGE_THRESHOLD = 120;
@@ -109,7 +110,7 @@ export function QuickScrollButtons(props: QuickScrollButtonsProps) {
   function scrollToTop() {
     const el = props.container();
     if (!el) return;
-    el.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' });
+    scrollElementToTop(el, { reduceMotion: reduceMotion() });
   }
 
   function scrollToBottom() {

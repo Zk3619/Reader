@@ -142,9 +142,10 @@ function panelToSection(
   }
 }
 
+/** 是否处于音乐 Hub（独立 music 壳页，或旧版 media 页 audio/music 子 Tab） */
 export function isMusicHubShellActive(currentShellPage?: string): boolean {
-  if (currentShellPage) {
-    return currentShellPage === 'music' || currentShellPage === 'media';
-  }
+  if (currentShellPage === 'music') return true;
+  // 旧路径：音乐 Hub 挂在 media 页；传入其它壳页时明确为否
+  if (currentShellPage != null && currentShellPage !== 'media') return false;
   return mediaKindTab() === 'audio' && audioMediaSubTab() === 'music';
 }

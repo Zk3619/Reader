@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { cn } from '@/lib/utils';
 import { ChevronUpIcon } from '@/components/shared/icons';
+import { scrollToTop as scrollElementToTop } from '@/lib/ui/scroll-to-top';
+import { settingsStore } from '@/stores/settings';
 
 interface ScrollToTopProps {
   /** 滚动容器元素（默认为 window），可以是元素、函数或 undefined */
@@ -36,10 +38,11 @@ export function ScrollToTop(props: ScrollToTopProps) {
   // 滚动到顶部
   function scrollToTop() {
     const containerEl = getContainer();
+    const reduceMotion = settingsStore.state.app.reduceMotion;
     if (containerEl === window) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
     } else if (containerEl instanceof HTMLElement) {
-      containerEl.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollElementToTop(containerEl, { reduceMotion });
     }
   }
 

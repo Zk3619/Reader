@@ -66,6 +66,8 @@ import {
 export interface GlobalMediaPlayerProps {
   /** 独立页（阅读器等）打开时隐藏壳层播放器 */
   shellOverlayOpen: Accessor<boolean>;
+  /** 当前壳层页（用于在音乐模块内隐藏全局播放器） */
+  currentShellPage: Accessor<string>;
   showTopNav: Accessor<boolean>;
   showBottomBar: Accessor<boolean>;
   /** 与主内容区一致的左侧偏移（桌面侧栏） */
@@ -76,11 +78,15 @@ export interface GlobalMediaPlayerProps {
 
 export function useGlobalMediaPlayerFixedInset(props: {
   shellOverlayOpen: Accessor<boolean>;
+  currentShellPage: Accessor<string>;
   showTopNav: Accessor<boolean>;
   showBottomBar: Accessor<boolean>;
 }): Accessor<{ top: boolean; bottom: boolean; heightPx: number }> {
   return createMemo(() => {
     if (props.shellOverlayOpen()) return { top: false, bottom: false, heightPx: 0 };
+    if (isMusicHubShellActive(props.currentShellPage())) {
+      return { top: false, bottom: false, heightPx: 0 };
+    }
     if (!globalMediaPlayerState.shellActive || !globalMediaPlayerState.kind) {
       return { top: false, bottom: false, heightPx: 0 };
     }
@@ -300,7 +306,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     globalMediaPlayerState.shellActive &&
     !!globalMediaPlayerState.kind &&
     !props.shellOverlayOpen() &&
-    !isMusicHubShellActive() &&
+    !isMusicHubShellActive(props.currentShellPage()) &&
     sessionActive();
 
   const meta = () => globalMediaPlayerState.meta;

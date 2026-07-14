@@ -10,13 +10,10 @@ import type { VirtualListSortableConfig } from '@/components/shared/virtual-list
 import type { Id } from '@thisbeyond/solid-dnd';
 import { cn } from '@/lib/utils';
 
-type VirtualGridRowHeightMode = 'fixed' | 'responsive';
-
 export type VirtualGridListBodyProps<T> = {
   orderedItems: Accessor<readonly T[]>;
   rowIndices: Accessor<readonly number[]>;
   colCount: Accessor<number>;
-  rowHeightMode: Accessor<VirtualGridRowHeightMode>;
   rowSlotHeightPx: (rowIndex: number) => number;
   layoutRevision: Accessor<unknown>;
   overscan?: number;
@@ -152,11 +149,8 @@ export function VirtualGridListBody<T>(props: VirtualGridListBodyProps<T>) {
               props.usesRowGapPadding() && 'box-border items-start',
             )}
             style={{
-              ...(props.rowHeightMode() === 'responsive'
-                ? {
-                    'grid-template-columns': `repeat(${Math.max(1, props.colCount())}, minmax(0, 1fr))`,
-                  }
-                : undefined),
+              // fixed / responsive 都按 colCount 铺列；否则仅 `grid` class 会塌成单列
+              'grid-template-columns': `repeat(${Math.max(1, props.colCount())}, minmax(0, 1fr))`,
               ...(gapVar && !lastRow
                 ? { 'padding-bottom': `var(--${gapVar})` }
                 : undefined),

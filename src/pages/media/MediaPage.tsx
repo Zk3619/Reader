@@ -111,7 +111,10 @@ export function MediaPage(props: MediaPageProps) {
                 />
               }
             >
-              <MusicHubShell active={isActive()} />
+              {/* 媒体页隐藏时不挂载 Hub，避免预拉网易云热搜等 */}
+              <Show when={isActive()}>
+                <MusicHubShell active={isActive} />
+              </Show>
             </Show>
           </div>
         </Match>
