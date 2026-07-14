@@ -27,6 +27,7 @@ mod music_openapi;
 mod lx_sync_server;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_lyric;
+mod tx_qrc_decode;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod global_hotkey;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2203,6 +2204,7 @@ pub fn run() {
             media_convert::media_convert_probe,
             media_convert::convert_image_bytes,
             media_convert::convert_audio_bytes,
+            tx_qrc_decode::decode_tx_qrc_lyric,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

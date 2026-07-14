@@ -87,4 +87,5 @@ commands.allow = [
   "media_convert_probe",
   "convert_image_bytes",
   "convert_audio_bytes",
+  "decode_tx_qrc_lyric",
 ]
