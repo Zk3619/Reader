@@ -49,7 +49,7 @@ function parseLxLyric(lyric: string): LrcLine[] | null {
     const min = Number(m[1]);
     const sec = Number(m[2]);
     const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
-    const text = line.replace(lineRe, '').replace(/<\d{1,2}:\d{2}(?:\.\d{1,3})?>/g, '').trim();
+    const text = line.replace(lineRe, '').replace(/<\d+,\d+>/g, '').trim();
     if (text) parsed.push({ timeMs: min * 60_000 + sec * 1000 + frac, text });
   }
   return parsed.length ? parsed : null;
@@ -57,19 +57,20 @@ function parseLxLyric(lyric: string): LrcLine[] | null {
 
 function parseLxWords(line: string, lineStartMs: number): LxWord[] {
   const words: LxWord[] = [];
-  const re = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>([^<]*)/g;
+  // 对齐 lx：`<相对行起点ms,持续ms>字`
+  const re = /<(\d+),(\d+)>([^<]*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(line)) !== null) {
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
     words.push({
-      timeMs: min * 60_000 + sec * 1000 + frac,
-      text: m[4] ?? '',
+      timeMs: lineStartMs + Number(m[1]),
+      text: m[3] ?? '',
     });
   }
   if (words.length === 0 && line.trim()) {
-    words.push({ timeMs: lineStartMs, text: line.replace(/<\d{1,2}:\d{2}(?:\.\d{1,3})?>/g, '').trim() });
+    words.push({
+      timeMs: lineStartMs,
+      text: line.replace(/<\d+,\d+>/g, '').trim(),
+    });
   }
   return words;
 }
@@ -81,6 +82,8 @@ export interface AudioLyricPanelProps {
   positionSec: number;
   lyricOffset?: number;
   class?: string;
+  showTranslation?: boolean;
+  showRoma?: boolean;
 }
 
 export function AudioLyricPanel(props: AudioLyricPanelProps) {
@@ -92,9 +95,17 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
   const secondaryText = createMemo(() => {
     const kind = props.lyricTrack ?? 'lyric';
     if (!props.bundle) return null;
-    if (kind === 'lyric' && props.bundle.tlyric?.trim()) return props.bundle.tlyric;
+    const showT = props.showTranslation !== false;
+    const showR = props.showRoma !== false;
+    if (kind === 'lyric') {
+      if (showT && props.bundle.tlyric?.trim()) return props.bundle.tlyric;
+      if (showR && props.bundle.rlyric?.trim()) return props.bundle.rlyric;
+      return null;
+    }
     if (kind === 'tlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
-    return props.bundle.tlyric?.trim() ? props.bundle.tlyric : null;
+    if (kind === 'rlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
+    if (showT && props.bundle.tlyric?.trim()) return props.bundle.tlyric;
+    return null;
   });
 
   const isLxLyric = createMemo(() => {

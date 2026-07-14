@@ -104,16 +104,23 @@ export async function eapiPlayerUrlPost<T>(
 }
 
 const EAPI_LYRIC_URLS = [
+  'https://interface3.music.163.com/eapi/song/lyric/v1',
+  'http://interface.music.163.com/eapi/song/lyric/v1',
   'https://interface3.music.163.com/eapi/song/lyric',
   'http://interface.music.163.com/eapi/song/lyric',
 ] as const;
 
-/** 歌词：直连 eapi/song/lyric，避免 weapi 被掐 / batch 503 */
+/** 歌词：优先 v1（含 yrc），回退旧 lyric，避免 weapi 被掐 / batch 503 */
 export async function eapiLyricPost<T>(
   data: Record<string, unknown>,
   cookies?: string,
 ): Promise<T> {
-  return eapiPostToUrls<T>(EAPI_LYRIC_URLS, '/api/song/lyric', data, cookies);
+  const path = data.yv !== undefined ? '/api/song/lyric/v1' : '/api/song/lyric';
+  const urls =
+    path === '/api/song/lyric/v1'
+      ? (EAPI_LYRIC_URLS.slice(0, 2) as unknown as readonly string[])
+      : (EAPI_LYRIC_URLS.slice(2) as unknown as readonly string[]);
+  return eapiPostToUrls<T>(urls, path, data, cookies);
 }
 
 /** eapi batch 响应常为数组，取首项作为业务 body */

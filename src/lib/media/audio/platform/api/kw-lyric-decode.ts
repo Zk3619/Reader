@@ -117,3 +117,100 @@ export function stripKwWordTimeTags(lrc: string): string {
 export function isValidKwLrc(lrc: string): boolean {
   return EXIST_TIME_EXP.test(lrc);
 }
+
+/** 对齐 lx kw/util.js lrcTools：将酷我 `<a,b,c>` 转为 `<start,dur>` */
+type KwWordInfo = {
+  startTime: number;
+  endTime: number;
+  timeStr: string;
+  newTimeStr?: string;
+};
+
+const lrcToolsBase = {
+  wordLine: /^(\[\d{1,2}:.*\d{1,4}\])\s*(\S+(?:\s+\S+)*)?\s*/,
+  tagLine: /\[(ver|ti|ar|al|offset|by|kuwo):\s*(\S+(?:\s+\S+)*)\s*\]/,
+  wordTimeAll: /<(-?\d+),(-?\d+)(?:,-?\d+)?>/g,
+  wordTime: /<(-?\d+),(-?\d+)(?:,-?\d+)?>/,
+};
+
+function getKwWordInfo(
+  offset: number,
+  offset2: number,
+  scale: number,
+  scale2: number,
+  prevWord?: KwWordInfo,
+): KwWordInfo {
+  let startTime = Math.abs((offset + offset2) / (scale * 2));
+  let endTime = Math.abs((offset - offset2) / (scale2 * 2)) + startTime;
+  const info: KwWordInfo = {
+    startTime,
+    endTime,
+    timeStr: `<${startTime},${endTime - startTime}>`,
+  };
+  if (prevWord) {
+    if (startTime < prevWord.endTime) {
+      prevWord.endTime = startTime;
+      if (prevWord.startTime > prevWord.endTime) prevWord.startTime = prevWord.endTime;
+      prevWord.newTimeStr = `<${prevWord.startTime},${prevWord.endTime - prevWord.startTime}>`;
+    }
+  }
+  return info;
+}
+
+export function parseKwLxLyric(lrc: string): string {
+  const lines = lrc.split(/\r\n|\r|\n/);
+  let isOK = true;
+  let offset = 1;
+  let offset2 = 1;
+  const outLines: string[] = [];
+  const tags: string[] = [];
+
+  for (const line of lines) {
+    if (!isOK) throw new Error('failed');
+    if (line.length < 6) continue;
+    let result = lrcToolsBase.wordLine.exec(line);
+    if (result) {
+      const time = result[1]!;
+      let words = result[2] ?? '';
+      const wordTimes = words.match(lrcToolsBase.wordTimeAll);
+      if (!wordTimes) continue;
+      let preTimeInfo: KwWordInfo | undefined;
+      for (const timeStr of wordTimes) {
+        const m = lrcToolsBase.wordTime.exec(timeStr);
+        if (!m) continue;
+        const wordInfo = getKwWordInfo(
+          parseInt(m[1]!, 10),
+          parseInt(m[2]!, 10),
+          offset,
+          offset2,
+          preTimeInfo,
+        );
+        words = words.replace(timeStr, wordInfo.timeStr);
+        if (preTimeInfo?.newTimeStr) {
+          words = words.replace(preTimeInfo.timeStr, preTimeInfo.newTimeStr);
+        }
+        preTimeInfo = wordInfo;
+      }
+      outLines.push(time + words);
+      continue;
+    }
+    result = lrcToolsBase.tagLine.exec(line);
+    if (!result) continue;
+    if (result[1] === 'kuwo') {
+      let content = result[2] ?? '';
+      if (content.includes('][')) content = content.substring(0, content.indexOf(']['));
+      const valueOf = parseInt(content, 8);
+      offset = Math.trunc(valueOf / 10);
+      offset2 = Math.trunc(valueOf % 10);
+      if (offset === 0 || Number.isNaN(offset) || offset2 === 0 || Number.isNaN(offset2)) {
+        isOK = false;
+      }
+    } else {
+      tags.push(line);
+    }
+  }
+  if (!outLines.length) return '';
+  let lrcs = outLines.join('\n');
+  if (tags.length) lrcs = `${tags.join('\n')}\n${lrcs}`;
+  return lrcs;
+}
