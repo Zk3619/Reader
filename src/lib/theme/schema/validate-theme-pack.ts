@@ -3,11 +3,13 @@
  */
 
 import { DEFAULT_APP_THEME } from '@/lib/theme/AppTheme';
+import { isThemeTargetId } from '@/lib/theme/theme-targets';
 import {
   createDefaultThemePack,
   createThemePackId,
   THEME_PACK_SCHEMA_VERSION,
   THEME_PACK_SCHEMA_VERSION_V2,
+  THEME_PACK_SCHEMA_VERSION_V3,
   type ReaderThemePackV1,
   type ThemeEffectConfig,
   type ThemePackAccessibility,
@@ -81,6 +83,7 @@ function validateEffects(effects: unknown, issues: ThemePackValidationIssue[]): 
 }
 
 function normalizeSchemaVersion(value: unknown): ThemePackSchemaVersion {
+  if (value === THEME_PACK_SCHEMA_VERSION_V3) return THEME_PACK_SCHEMA_VERSION_V3;
   if (value === THEME_PACK_SCHEMA_VERSION_V2) return THEME_PACK_SCHEMA_VERSION_V2;
   return THEME_PACK_SCHEMA_VERSION;
 }
@@ -139,6 +142,16 @@ function normalizeAccessibility(raw: unknown): ThemePackAccessibility | undefine
   };
 }
 
+function normalizeTargets(raw: unknown): ReaderThemePackV1['targets'] {
+  if (!isRecord(raw)) return undefined;
+  const targets: NonNullable<ReaderThemePackV1['targets']> = {};
+  for (const [target, section] of Object.entries(raw)) {
+    if (!isThemeTargetId(target) || !isRecord(section)) continue;
+    targets[target] = section as NonNullable<ReaderThemePackV1['targets']>[typeof target];
+  }
+  return Object.keys(targets).length > 0 ? targets : undefined;
+}
+
 function normalizePack(raw: Record<string, unknown>): ReaderThemePackV1 {
   const now = new Date().toISOString();
   const fallback = createDefaultThemePack();
@@ -190,6 +203,7 @@ function normalizePack(raw: Record<string, unknown>): ReaderThemePackV1 {
         }
       : fallback.app,
     viewer: (raw.viewer as ReaderThemePackV1['viewer']) ?? fallback.viewer,
+    targets: normalizeTargets(raw.targets),
     advanced: raw.advanced as ReaderThemePackV1['advanced'],
     assets: raw.assets as ReaderThemePackV1['assets'],
     meta: normalizeMeta(raw.meta),
@@ -207,10 +221,14 @@ export function parseThemePackJson(input: unknown): ThemePackValidationResult {
   }
 
   const version = input.schemaVersion;
-  if (version !== THEME_PACK_SCHEMA_VERSION && version !== THEME_PACK_SCHEMA_VERSION_V2) {
+  if (
+    version !== THEME_PACK_SCHEMA_VERSION &&
+    version !== THEME_PACK_SCHEMA_VERSION_V2 &&
+    version !== THEME_PACK_SCHEMA_VERSION_V3
+  ) {
     issues.push({
       path: 'schemaVersion',
-      message: `不支持的 schema 版本: ${String(version)}，期望 ${THEME_PACK_SCHEMA_VERSION} 或 ${THEME_PACK_SCHEMA_VERSION_V2}`,
+      message: `不支持的 schema 版本: ${String(version)}，期望 ${THEME_PACK_SCHEMA_VERSION}、${THEME_PACK_SCHEMA_VERSION_V2} 或 ${THEME_PACK_SCHEMA_VERSION_V3}`,
     });
   }
 

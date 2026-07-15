@@ -85,6 +85,15 @@ function countBlurLayers(pack: ReaderThemePackV1): number {
 
   visitBackground(pack.viewer?.text?.contentBackground);
   visitBackground(pack.viewer?.text?.chromeBackground);
+  for (const section of Object.values(pack.targets ?? {})) {
+    if (!section) continue;
+    visitBackground(section.background);
+    for (const override of Object.values(section.components ?? {})) {
+      if (!override) continue;
+      visitSurface(override.surfaceAppearance);
+      visitBackground(override.background);
+    }
+  }
 
   return count;
 }
@@ -94,6 +103,7 @@ function checkSemanticContrast(
   mode: 'light' | 'dark',
   level: ContrastLevel,
   issues: ThemeQualityIssue[],
+  basePath = 'app.tokens',
 ): void {
   for (const pair of CONTRAST_PAIRS) {
     const fg = tokens[pair.fg];
@@ -106,7 +116,7 @@ function checkSemanticContrast(
 
     if (!pass || ratio < 7) {
       issues.push({
-        path: `app.tokens.${mode}.${pair.fg}`,
+        path: `${basePath}.${mode}.${pair.fg}`,
         message: `${mode === 'light' ? '浅色' : '深色'}模式 ${pair.label} 对比度 ${ratio.toFixed(2)}:1${pass ? '（未达 AAA）' : '（未达 AA）'}`,
         severity: pass ? 'warning' : severity,
       });
@@ -129,6 +139,26 @@ export function runThemePackQualityGate(
   }
   if (pack.app?.tokens.dark) {
     checkSemanticContrast(pack.app.tokens.dark, 'dark', level, issues);
+  }
+  for (const [target, section] of Object.entries(pack.targets ?? {})) {
+    if (section?.tokens?.light) {
+      checkSemanticContrast(
+        section.tokens.light,
+        'light',
+        level,
+        issues,
+        `targets.${target}.tokens`,
+      );
+    }
+    if (section?.tokens?.dark) {
+      checkSemanticContrast(
+        section.tokens.dark,
+        'dark',
+        level,
+        issues,
+        `targets.${target}.tokens`,
+      );
+    }
   }
 
   const blurLayers = countBlurLayers(pack);

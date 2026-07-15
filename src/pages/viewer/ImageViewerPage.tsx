@@ -412,6 +412,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
         layout={() => uiConfig().viewerChromeLayout}
       >
       <MediaViewerShell
+        themeTarget="viewer.image"
         entryVisible={props.entryVisible}
         tapToToggleBars={false}
         chromePointerInput

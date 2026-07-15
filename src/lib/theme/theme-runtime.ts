@@ -4,7 +4,7 @@
 
 import { applyAppThemeDefinition, DEFAULT_APP_THEME } from '@/lib/theme/AppTheme';
 import { cssVarMapToStyle } from '@/lib/theme/apply-css-vars';
-import { applyCssVarMap } from '@/lib/theme/apply-css-vars';
+import { applyCssVarMap, applyCssVarMapWithTailwindBridges } from '@/lib/theme/apply-css-vars';
 import { mediaViewerChromeCssVars } from '@/lib/theme/MediaViewerTheme';
 import { getEffectiveDark, onDocumentColorModeChange } from '@/lib/theme/runtime';
 import type {
@@ -19,8 +19,11 @@ import { componentSurfaceAppearanceToStyle } from '@/lib/theme/component-surface
 import { TEXT_VIEWER_THEME_SURFACE_APPEARANCE_BY_ID } from '@/lib/theme/text-viewer-surface-appearance';
 import { textViewerCssVars } from '@/lib/theme/TextViewerTheme';
 import type { TextViewerThemeId } from '@/lib/theme/types';
+import { getThemeTargetChain, type ThemeTargetId } from '@/lib/theme/theme-targets';
+import { appThemeToCssVarMap } from '@/lib/theme/merge-theme';
 
 const SCOPED_STYLE_ATTR = 'data-theme-pack-style';
+const targetInlineStyleSnapshot = new WeakMap<HTMLElement, string>();
 
 let activeSurfacePresetThemeId: TextViewerThemeId | null = null;
 
@@ -145,6 +148,73 @@ export function applyTextViewerSectionToElement(el: HTMLElement, pack: ReaderThe
       '--reader-accent': text.customPalette.accent,
       '--reader-border': text.customPalette.border,
     });
+  }
+}
+
+/**
+ * 将 v3 的单个目标覆写应用到对应 DOM 子树。
+ * 调用方负责先通过目标继承链选出有效主题包。
+ */
+export function applyThemeTargetToElement(
+  el: HTMLElement,
+  pack: ReaderThemePackV1,
+  target: ThemeTargetId,
+  mode?: 'light' | 'dark',
+): void {
+  if (!targetInlineStyleSnapshot.has(el)) {
+    targetInlineStyleSnapshot.set(el, el.style.cssText);
+  }
+  el.setAttribute('data-theme-target', target);
+  el.setAttribute('data-theme-scope', target);
+  el.setAttribute('data-theme-pack-id', pack.id);
+
+  const resolvedMode = mode ?? (getEffectiveDark() ? 'dark' : 'light');
+  if (pack.scopes.app !== false && pack.app) {
+    applyAppSectionToElement(el, pack, resolvedMode);
+  }
+  if (target === 'module.reading' || target.startsWith('viewer.')) {
+    if (pack.scopes.viewer !== false && pack.viewer) {
+      applyViewerSharedToElement(el, pack);
+      if (target === 'viewer.text') applyTextViewerSectionToElement(el, pack);
+    }
+  }
+
+  // 同一主题包内由 app → 模块 → 精确目标逐层覆写，字段缺失时保留父层值。
+  for (const candidate of getThemeTargetChain(target).reverse()) {
+    const targetSection = pack.targets?.[candidate];
+    if (!targetSection) continue;
+    if (targetSection.tokens) {
+      applyCssVarMapWithTailwindBridges(
+        el,
+        appThemeToCssVarMap(targetSection.tokens, resolvedMode),
+      );
+    }
+    if (targetSection.typography?.fontFamily) {
+      el.style.setProperty('--font-sans', targetSection.typography.fontFamily);
+    }
+    if (targetSection.typography?.scale != null) {
+      el.style.setProperty('--theme-font-scale', String(targetSection.typography.scale));
+    }
+    if (targetSection.motion?.durationNormal) {
+      el.style.setProperty('--theme-duration-normal', targetSection.motion.durationNormal);
+    }
+  }
+  injectScopedStyle(el, buildScopedCss(pack), `${pack.id}-${target}`);
+}
+
+export function clearThemeTargetFromElement(el: HTMLElement): void {
+  el.removeAttribute('data-theme-target');
+  el.removeAttribute('data-theme-scope');
+  el.removeAttribute('data-theme-pack-id');
+  const originalInlineStyle = targetInlineStyleSnapshot.get(el);
+  if (originalInlineStyle != null) {
+    el.style.cssText = originalInlineStyle;
+    targetInlineStyleSnapshot.delete(el);
+  }
+  for (const child of Array.from(el.children)) {
+    if (child instanceof HTMLStyleElement && child.hasAttribute(SCOPED_STYLE_ATTR)) {
+      child.remove();
+    }
   }
 }
 

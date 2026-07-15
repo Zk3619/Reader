@@ -7,6 +7,7 @@ import {
   createDefaultThemePack,
   THEME_PACK_SCHEMA_VERSION,
   THEME_PACK_SCHEMA_VERSION_V2,
+  THEME_PACK_SCHEMA_VERSION_V3,
 } from '@/lib/theme/schema/theme-pack-v1';
 
 describe('validate-theme-pack', () => {
@@ -28,10 +29,32 @@ describe('validate-theme-pack', () => {
   });
 
   it('accepts schema version 1', () => {
-    const pack = createDefaultThemePack();
+    const pack = {
+      ...createDefaultThemePack(),
+      schemaVersion: THEME_PACK_SCHEMA_VERSION,
+    };
     const result = parseThemePackJson(pack);
     expect(result.ok).toBe(true);
     expect(result.pack?.schemaVersion).toBe(THEME_PACK_SCHEMA_VERSION);
+  });
+
+  it('round-trips schema v3 target sections and drops unknown targets', () => {
+    const pack = createDefaultThemePack({ name: '目标主题' });
+    const result = parseThemePackJson({
+      ...pack,
+      schemaVersion: THEME_PACK_SCHEMA_VERSION_V3,
+      targets: {
+        'music.playDetail': {
+          typography: { fontFamily: 'Target Sans', scale: 1.1 },
+        },
+        unknown: { typography: { fontFamily: 'Ignored' } },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.pack?.targets?.['music.playDetail']?.typography?.fontFamily).toBe(
+      'Target Sans',
+    );
+    expect(result.pack?.targets).not.toHaveProperty('unknown');
   });
 
   it('rejects unsupported schema version', () => {

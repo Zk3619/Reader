@@ -21,6 +21,22 @@ export function applyCssVarMap(el: HTMLElement, vars: ThemeCssVarMap): void {
   }
 }
 
+/**
+ * 子树级语义主题必须同时覆盖 Tailwind v4 的 --color-* 桥接变量。
+ * 根节点的 @theme 变量已在根作用域解析，单独覆盖 --primary 等变量不会改变子树工具类颜色。
+ */
+export function applyCssVarMapWithTailwindBridges(
+  el: HTMLElement,
+  vars: ThemeCssVarMap,
+): void {
+  applyCssVarMap(el, vars);
+  for (const [name, value] of Object.entries(vars)) {
+    if (!value) continue;
+    const colorBridge = CSS_VAR_TO_TAILWIND_COLOR[normalizeCssVarName(name)];
+    if (colorBridge) el.style.setProperty(colorBridge, `hsl(${value})`);
+  }
+}
+
 /** 清除先前通过 applyCssVarMap 写入的内联变量 */
 export function clearCssVarMap(el: HTMLElement, varNames: string[]): void {
   for (const name of varNames) {

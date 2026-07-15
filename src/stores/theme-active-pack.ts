@@ -4,6 +4,7 @@
 
 import { createSignal } from 'solid-js';
 import type { ReaderThemePackV1 } from '@/lib/theme/schema/theme-pack-v1';
+import type { ThemeTargetId } from '@/lib/theme/theme-targets';
 
 const [activeThemePackSnapshot, setActiveThemePackSnapshot] = createSignal<ReaderThemePackV1 | null>(
   null,
@@ -13,6 +14,8 @@ const [activeThemePackRevision, setActiveThemePackRevision] = createSignal(0);
 const [activeViewerThemePackSnapshot, setActiveViewerThemePackSnapshot] =
   createSignal<ReaderThemePackV1 | null>(null);
 const [activeViewerThemePackRevision, setActiveViewerThemePackRevision] = createSignal(0);
+const [activeThemeTargetRevision, setActiveThemeTargetRevision] = createSignal(0);
+const targetThemePackSnapshots = new Map<ThemeTargetId, ReaderThemePackV1>();
 
 export function publishActiveThemePack(pack: ReaderThemePackV1 | null): void {
   setActiveThemePackSnapshot(pack);
@@ -38,4 +41,28 @@ export function getActiveViewerThemePackSnapshot(): ReaderThemePackV1 | null {
 
 export function useActiveViewerThemePackRevision(): number {
   return activeViewerThemePackRevision();
+}
+
+/** 任意模块/子目标活动预设变化时通知运行时重新解析。 */
+export function publishActiveThemeTargetChange(): void {
+  setActiveThemeTargetRevision((n) => n + 1);
+}
+
+export function useActiveThemeTargetRevision(): number {
+  return activeThemeTargetRevision();
+}
+
+export function publishActiveThemeTargetPack(
+  target: ThemeTargetId,
+  pack: ReaderThemePackV1 | null,
+): void {
+  if (pack) targetThemePackSnapshots.set(target, pack);
+  else targetThemePackSnapshots.delete(target);
+  publishActiveThemeTargetChange();
+}
+
+export function getActiveThemeTargetPackSnapshot(
+  target: ThemeTargetId,
+): ReaderThemePackV1 | null {
+  return targetThemePackSnapshots.get(target) ?? null;
 }

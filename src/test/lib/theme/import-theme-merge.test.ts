@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockApp = {
   activeThemePresetId: '',
   activeViewerThemePresetId: '',
+  activeThemePresetByTarget: {} as Record<string, string>,
 };
 
 vi.mock('@/stores/settings', () => ({
@@ -38,6 +39,7 @@ describe('import-theme-merge', () => {
   beforeEach(() => {
     mockApp.activeThemePresetId = '';
     mockApp.activeViewerThemePresetId = '';
+    mockApp.activeThemePresetByTarget = {};
   });
 
   it('returns null for builtin default preset', () => {
@@ -73,6 +75,13 @@ describe('import-theme-merge', () => {
     const incoming = createDefaultThemePack();
     const existing = makeRecord(incoming);
     mockApp.activeThemePresetId = incoming.id;
+    expect(mergeThemePackForImport(incoming, existing, { keepActive: true })).toBeNull();
+  });
+
+  it('protects a preset active on a v3 target during import merge', () => {
+    const incoming = createDefaultThemePack();
+    const existing = makeRecord(incoming);
+    mockApp.activeThemePresetByTarget = { 'music.playDetail': incoming.id };
     expect(mergeThemePackForImport(incoming, existing, { keepActive: true })).toBeNull();
   });
 

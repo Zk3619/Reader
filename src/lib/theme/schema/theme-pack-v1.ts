@@ -12,13 +12,16 @@ import type {
 } from '@/lib/theme/types';
 import type { TextViewerThemeAppearanceConfig } from '@/lib/media/text/reader-ui-config';
 import { DEFAULT_APP_THEME } from '@/lib/theme/AppTheme';
+import type { ThemeTargetId } from '@/lib/theme/theme-targets';
 
 export const THEME_PACK_SCHEMA_VERSION = 1 as const;
 export const THEME_PACK_SCHEMA_VERSION_V2 = 2 as const;
+export const THEME_PACK_SCHEMA_VERSION_V3 = 3 as const;
 
 export type ThemePackSchemaVersion =
   | typeof THEME_PACK_SCHEMA_VERSION
-  | typeof THEME_PACK_SCHEMA_VERSION_V2;
+  | typeof THEME_PACK_SCHEMA_VERSION_V2
+  | typeof THEME_PACK_SCHEMA_VERSION_V3;
 
 export type ThemePackLicense = 'CC0' | 'CC-BY' | 'CC-BY-NC' | 'MIT' | 'personal';
 
@@ -98,7 +101,8 @@ export type ThemeScopeId =
   | 'appShell'
   | 'readerContent'
   | 'readerChrome'
-  | 'readerBackground';
+  | 'readerBackground'
+  | ThemeTargetId;
 
 export type AdvancedMountPoint =
   | 'appShellBackground'
@@ -237,6 +241,18 @@ export interface ViewerThemeSection {
   video?: VideoViewerThemeSection;
   file?: FileViewerThemeSection;
   components?: Partial<Record<ViewerComponentId, ComponentStyleOverride>>;
+}
+
+/**
+ * v3 主题目标覆写。目标可以只提供少量字段，其余内容由运行时沿目标继承链回退。
+ * `tokens` 复用应用语义色，保证模块仍可使用统一的 Tailwind 语义 token。
+ */
+export interface ThemeTargetSection {
+  tokens?: AppThemeDefinition;
+  components?: Partial<Record<ThemeComponentId, ComponentStyleOverride>>;
+  typography?: TypographyTokens;
+  motion?: MotionTokens;
+  background?: ContainerBackgroundConfig;
 }
 
 export interface CustomCssBlock {
@@ -400,6 +416,8 @@ export interface ReaderThemePackV1 {
   };
   app?: AppThemeSection;
   viewer?: ViewerThemeSection;
+  /** v3：模块、阅读器与音乐子页面的独立主题内容 */
+  targets?: Partial<Record<ThemeTargetId, ThemeTargetSection>>;
   advanced?: AdvancedThemeSection;
   assets?: ThemeAssetManifest;
   /** v2 可选：社区分享元数据 */
@@ -441,7 +459,7 @@ export function createDefaultThemePack(overrides?: Partial<Pick<ReaderThemePackV
   const now = new Date().toISOString();
   const id = createThemePackId();
   return {
-    schemaVersion: THEME_PACK_SCHEMA_VERSION,
+    schemaVersion: THEME_PACK_SCHEMA_VERSION_V3,
     id,
     name: overrides?.name ?? '未命名主题',
     createdAt: now,

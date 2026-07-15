@@ -11,6 +11,7 @@ import { useThemePackRuntime } from '@/components/theme/ThemePackRuntimeProvider
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import { componentOverrideToStyle } from '@/lib/theme/theme-runtime';
 import { cn } from '@/lib/utils';
+import { useThemeTarget } from '@/components/theme/ThemeTargetHost';
 
 export type ThemedCardVariant =
   | 'bookshelfCard'
@@ -48,14 +49,18 @@ export function ThemedAppCardShell(props: ThemedAppCardShellProps) {
   const [local, rest] = splitProps(props, ['variant', 'class', 'style', 'children', 'as']);
   const draftRuntime = useThemeDraftRuntime();
   const runtime = useThemePackRuntime();
+  const target = useThemeTarget();
   const componentId = () => CARD_VARIANT_TO_ID[local.variant];
   const Tag = () => local.as ?? 'div';
 
   const themeOverrideStyle = createMemo(() => {
-    const pack = draftRuntime?.appPack() ?? runtime.appPack();
+    const pack = target
+      ? (draftRuntime ?? runtime).targetPack(target)
+      : (draftRuntime?.appPack() ?? runtime.appPack());
     if (!pack) return {};
     const id = componentId();
-    const override = pack.app?.components?.[id];
+    const override = (target ? pack.targets?.[target]?.components?.[id] : undefined)
+      ?? pack.app?.components?.[id];
     if (override) {
       void override.cssVars;
       void override.layout;

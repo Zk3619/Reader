@@ -49,6 +49,23 @@ describe('theme-pack-quality-gate', () => {
     ).toBe(true);
   });
 
+  it('includes v3 target component blur layers in the performance gate', () => {
+    const pack = createDefaultThemePack();
+    const blurSurface = { surfaceAppearance: { opacity: 80, blurPx: 8 } };
+    pack.targets = {
+      'module.music': {
+        components: {
+          appShell: blurSurface,
+          sidebar: blurSurface,
+          topNav: blurSurface,
+          button: blurSurface,
+        },
+      },
+    };
+    const result = runThemePackQualityGate(pack);
+    expect(result.issues.some((issue) => issue.path === 'surfaceAppearance')).toBe(true);
+  });
+
   it('blocks contrast errors when enforceOnExport is enabled', () => {
     const pack = createDefaultThemePack();
     pack.accessibility = { enforceOnExport: true, targetContrast: 'AA' };

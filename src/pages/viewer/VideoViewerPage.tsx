@@ -208,7 +208,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell entryVisible={props.entryVisible}>
+      <MediaViewerShell themeTarget="viewer.video" entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={

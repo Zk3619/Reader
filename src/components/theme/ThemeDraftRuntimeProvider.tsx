@@ -8,6 +8,7 @@ import type { ReaderThemePackV1, ThemeApplyScope } from '@/lib/theme/schema/them
 import { mergeThemeAssetManifests } from '@/lib/theme/component-background';
 import { resolveThemeAssetUrl, revokeThemeAssetUrls } from '@/lib/theme/theme-asset-storage';
 import type { ThemePackRuntimeContextValue } from '@/components/theme/ThemePackRuntimeProvider';
+import type { ThemeTargetId } from '@/lib/theme/theme-targets';
 
 const ThemeDraftRuntimeContext = createContext<ThemePackRuntimeContextValue>();
 
@@ -87,6 +88,14 @@ export function ThemeDraftRuntimeProvider(props: ThemeDraftRuntimeProviderProps)
   const value: ThemePackRuntimeContextValue = {
     appPack,
     viewerPack,
+    targetPack: (target: ThemeTargetId) => {
+      const pack = readAccessor(props.pack);
+      if (pack.targets?.[target]) return pack;
+      if (target === 'module.reading' || target.startsWith('viewer.')) {
+        return viewerPack() ?? appPack();
+      }
+      return appPack();
+    },
     resolveAssetUrl: (assetId: string) => assetUrlMap()[assetId],
   };
 

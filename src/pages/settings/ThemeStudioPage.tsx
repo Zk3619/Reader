@@ -61,6 +61,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from '@/components/shared/icons';
+import { THEME_TARGETS } from '@/lib/theme/theme-targets';
 
 const ADVANCED_SCENE_COMPONENT_IDS: ThemeComponentId[] = [
   'pageTip',
@@ -194,6 +195,27 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
 
   const editMode = () => themeStudioStore.state.editMode;
 
+  const materializeTargetSection = () => {
+    const draft = structuredClone(themeStudioStore.state.draftPack);
+    const target = themeStudioStore.state.target;
+    if (target !== 'app' && draft.app) {
+      draft.targets = {
+        ...draft.targets,
+        [target]: {
+          ...draft.targets?.[target],
+          tokens: structuredClone(draft.app.tokens),
+          typography: draft.app.typography
+            ? structuredClone(draft.app.typography)
+            : draft.targets?.[target]?.typography,
+          motion: draft.app.motion
+            ? structuredClone(draft.app.motion)
+            : draft.targets?.[target]?.motion,
+        },
+      };
+    }
+    return draft;
+  };
+
   const reloadPresets = async () => {
     setLoadingPresets(true);
     try {
@@ -210,7 +232,8 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
   });
 
   const handleSave = async () => {
-    const pack = themeStudioStore.state.draftPack;
+    const pack = materializeTargetSection();
+    themeStudioStore.setDraftPack(pack);
     await upsertThemePreset(pack, 'user');
     themeStudioStore.markSaved();
     await reloadPresets();
@@ -218,17 +241,18 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
   };
 
   const handleApply = async () => {
-    const pack = themeStudioStore.state.draftPack;
+    const pack = materializeTargetSection();
+    themeStudioStore.setDraftPack(pack);
     await upsertThemePreset(pack, 'user');
     themeStudioStore.markSaved();
+    const target = themeStudioStore.state.target;
+    await settingsStore.setActiveThemePresetForTarget(target, pack.id);
 
-    if (pack.scopes.app) {
-      settingsStore.setActiveThemePresetId(pack.id);
+    if (target === 'app' && pack.scopes.app) {
       applyActiveThemePackToDocument(pack);
       publishActiveThemePack(pack);
     }
-    if (pack.scopes.viewer) {
-      await settingsStore.setActiveViewerThemePresetId(pack.id);
+    if (target === 'module.reading' && pack.scopes.viewer) {
       publishActiveViewerThemePack(pack);
       const cfg = await import('@/lib/media/text/read-config-storage').then((m) =>
         m.loadReaderUiConfig(),
@@ -505,6 +529,28 @@ export function ThemeStudioPage(props: ThemeStudioPageProps) {
 
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <aside class="flex min-h-0 w-52 shrink-0 flex-col overflow-hidden border-r border-border bg-card/30">
+          <div class="border-b border-border p-3">
+            <label for="theme-studio-target" class="mb-2 block text-xs font-medium text-muted-foreground">
+              编辑目标
+            </label>
+            <select
+              id="theme-studio-target"
+              class="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
+              value={themeStudioStore.state.target}
+              onChange={(event) =>
+                themeStudioStore.setTarget(
+                  event.currentTarget.value as (typeof THEME_TARGETS)[number]['id'],
+                )
+              }
+            >
+              <For each={THEME_TARGETS}>
+                {(target) => <option value={target.id}>{target.label}</option>}
+              </For>
+            </select>
+            <p class="mt-1 text-[11px] text-muted-foreground">
+              保存时将当前语义色写入该目标；未设置字段继续继承父目标。
+            </p>
+          </div>
           <div class="border-b border-border p-3">
             <p class="mb-2 text-xs font-medium text-muted-foreground">作用域</p>
             <div class="flex flex-col gap-1">

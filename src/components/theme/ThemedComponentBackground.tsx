@@ -11,6 +11,7 @@ import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import { cn } from '@/lib/utils';
 import { useThemePackRuntime } from '@/components/theme/ThemePackRuntimeProvider';
 import { useThemeDraftRuntime } from '@/components/theme/ThemeDraftRuntimeProvider';
+import { useThemeTarget } from '@/components/theme/ThemeTargetHost';
 
 export interface ThemedComponentBackgroundProps {
   componentId: AppComponentId | ViewerComponentId;
@@ -20,8 +21,10 @@ export interface ThemedComponentBackgroundProps {
 export function ThemedComponentBackground(props: ThemedComponentBackgroundProps) {
   const draftRuntime = useThemeDraftRuntime();
   const runtime = useThemePackRuntime();
+  const target = useThemeTarget();
   const pack = createMemo(() => {
     const draft = draftRuntime;
+    if (target) return (draft ?? runtime).targetPack(target);
     if (draft) {
       return isAppComponentId(props.componentId) ? draft.appPack() : draft.viewerPack();
     }
@@ -31,6 +34,11 @@ export function ThemedComponentBackground(props: ThemedComponentBackgroundProps)
     const p = pack();
     if (!p) return undefined;
     const id = props.componentId;
+    const targetOverride = target ? p.targets?.[target]?.components?.[id] : undefined;
+    if (targetOverride) {
+      void targetOverride.background;
+      return targetOverride.background ?? getThemeComponentBackground(p, id);
+    }
     if (isAppComponentId(id)) {
       const override = p.app?.components?.[id];
       if (override) void override.background;
@@ -47,6 +55,7 @@ export function ThemedComponentBackground(props: ThemedComponentBackgroundProps)
       const p = pack();
       return p?.assets;
     }
+    if (target) return pack()?.assets;
     return mergeThemeAssetManifests(runtime.appPack()?.assets, runtime.viewerPack()?.assets);
   });
   const resolveAssetUrl = (assetId: string) =>

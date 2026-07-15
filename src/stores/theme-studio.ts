@@ -13,6 +13,7 @@ import {
 } from '@/lib/theme/schema/theme-pack-v1';
 import type { ThemePreviewViewport } from '@/lib/theme/preview/preview-viewport';
 import { themeStudioHistory } from '@/stores/theme-studio-history';
+import type { ThemeTargetId } from '@/lib/theme/theme-targets';
 
 export type ThemeStudioEntry = 'settings' | 'reader';
 export type ThemeStudioEditMode = 'quick' | 'pro' | 'advanced';
@@ -25,6 +26,7 @@ export interface ThemeStudioState {
   draftRevision: number;
   savedSnapshot: string;
   scope: ThemeApplyScope;
+  target: ThemeTargetId;
   previewMode: 'full' | 'component';
   selectedComponentId: ThemeComponentId;
   colorMode: 'light' | 'dark';
@@ -49,6 +51,7 @@ const [state, setState] = createStore<ThemeStudioState>({
   draftRevision: 0,
   savedSnapshot: JSON.stringify(defaultPack),
   scope: 'all',
+  target: 'app',
   previewMode: 'full',
   selectedComponentId: 'appShell',
   colorMode: 'light',
@@ -89,6 +92,7 @@ export const themeStudioStore = {
     pack?: ReaderThemePackV1;
     presetId?: string | null;
     editMode?: ThemeStudioEditMode;
+    target?: ThemeTargetId;
   }): void {
     const pack = options?.pack ? cloneThemePack(options.pack) : createDefaultThemePack();
     const snap = JSON.stringify(pack);
@@ -100,6 +104,7 @@ export const themeStudioStore = {
       draftRevision: 0,
       savedSnapshot: snap,
       scope: options?.scope ?? (options?.entry === 'reader' ? 'viewer' : 'all'),
+      target: options?.target ?? (options?.entry === 'reader' ? 'module.reading' : 'app'),
       previewMode: 'full',
       selectedComponentId: options?.scope === 'viewer' ? 'readerChrome' : 'appShell',
       colorMode: 'light',
@@ -161,6 +166,9 @@ export const themeStudioStore = {
   },
   setScope(scope: ThemeApplyScope): void {
     setState('scope', scope);
+  },
+  setTarget(target: ThemeTargetId): void {
+    setState('target', target);
   },
   setPreviewMode(mode: 'full' | 'component'): void {
     setState('previewMode', mode);

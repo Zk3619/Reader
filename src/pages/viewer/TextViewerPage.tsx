@@ -1436,6 +1436,7 @@ export function BookReader(props: BookReaderProps) {
         layout={() => textViewerStore.state.config.viewerChromeLayout}
       >
         <MediaViewerShell
+          themeTarget="viewer.text"
           entryVisible={props.entryVisible}
           tapToToggleBars={false}
           chromePointerInput

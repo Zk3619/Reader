@@ -77,7 +77,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell entryVisible={props.entryVisible}>
+      <MediaViewerShell themeTarget="viewer.file" entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={

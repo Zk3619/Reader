@@ -6,6 +6,10 @@ import { BUILTIN_DEFAULT_PRESET_ID } from '@/lib/theme/theme-preset-file-storage
 import { getThemePreset } from '@/lib/database/theme-presets';
 import type { ReaderThemePackV1, ThemePresetRecord } from '@/lib/theme/schema/theme-pack-v1';
 import { settingsStore } from '@/stores/settings';
+import {
+  isThemePresetActive,
+  normalizeActiveThemePresetByTarget,
+} from '@/lib/theme/theme-targets';
 
 export interface ImportThemeOptions {
   /** 已存在时保留本地显示名 */
@@ -32,7 +36,10 @@ function parsePackUpdatedAt(pack: ReaderThemePackV1): number {
 
 function isActiveThemePreset(id: string): boolean {
   const app = settingsStore.state.app;
-  return app.activeThemePresetId === id || app.activeViewerThemePresetId === id;
+  return isThemePresetActive(
+    id,
+    normalizeActiveThemePresetByTarget(app.activeThemePresetByTarget, app),
+  );
 }
 
 async function compareOneTheme(pack: ReaderThemePackV1): Promise<ImportThemeComparison> {

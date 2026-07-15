@@ -8,6 +8,7 @@ import { MusicHubShell } from '@/components/viewer/audio/music/hub/MusicHubShell
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
+import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 
 export interface MusicPageProps {
   active?: boolean | Accessor<boolean>;
@@ -22,10 +23,13 @@ export function MusicPage(props: MusicPageProps) {
   });
 
   return (
-    <div class={cn(mainShellPageRoot, 'flex min-h-0 flex-1 flex-col overflow-hidden')}>
+    <ThemeTargetHost
+      target="module.music"
+      class={cn(mainShellPageRoot, 'flex min-h-0 flex-1 flex-col overflow-hidden')}
+    >
       <Show when={hubReady()}>
         <MusicHubShell active={isActive} />
       </Show>
-    </div>
+    </ThemeTargetHost>
   );
 }

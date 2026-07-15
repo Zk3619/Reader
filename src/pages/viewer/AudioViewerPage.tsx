@@ -292,7 +292,7 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
 
   return (
     <>
-      <MediaViewerShell entryVisible={props.entryVisible}>
+      <MediaViewerShell themeTarget="viewer.audio" entryVisible={props.entryVisible}>
         <MediaViewerShellMain>
           <MediaViewerChromeSlots
             header={

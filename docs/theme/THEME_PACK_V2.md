@@ -72,3 +72,4 @@ Theme System v2 在 v1 规范（`.reader-theme.json` / `.reader-theme.zip`）基
 - 用户预设目录：`{appData}/Themes/*.json`（Tauri）或 OPFS `reader-themes/`（Web）
 - 主题资产：`{appData}/themes/{presetId}/assets/`
 - 文档：[`THEME_PACK_V1.md`](./THEME_PACK_V1.md)
+- 模块独立主题与继承：[`THEME_PACK_V3.md`](./THEME_PACK_V3.md)

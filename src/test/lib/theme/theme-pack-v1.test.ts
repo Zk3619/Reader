@@ -5,9 +5,9 @@ import { legadoThemeEntryToPack } from '@/lib/theme/adapters/legado-theme-adapte
 import { exportThemePackJson, importThemePackJson } from '@/lib/theme/theme-pack-io';
 
 describe('theme-pack-v1', () => {
-  it('creates default pack with schema version 1', () => {
+  it('creates a default pack with the latest schema version', () => {
     const pack = createDefaultThemePack({ name: '测试' });
-    expect(pack.schemaVersion).toBe(1);
+    expect(pack.schemaVersion).toBe(3);
     expect(pack.name).toBe('测试');
     expect(pack.scopes.app).toBe(true);
     expect(pack.app?.tokens.light.background).toBeTruthy();
@@ -31,6 +31,23 @@ describe('theme-pack-v1', () => {
     const result = parseThemePackJsonString(JSON.stringify(pack));
     expect(result.ok).toBe(true);
     expect(result.issues).toHaveLength(0);
+  });
+
+  it('keeps valid v3 targets and drops unknown targets', () => {
+    const pack = createDefaultThemePack();
+    const result = parseThemePackJson({
+      ...pack,
+      targets: {
+        'module.music': { background: { type: 'solid', color: '#101010' } },
+        unknown: { background: { type: 'solid', color: '#ffffff' } },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.pack?.targets?.['module.music']?.background).toEqual({
+      type: 'solid',
+      color: '#101010',
+    });
+    expect(Object.keys(result.pack?.targets ?? {})).not.toContain('unknown');
   });
 
   it('converts legado theme entry', () => {

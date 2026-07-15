@@ -27,6 +27,8 @@ import { useViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { isMobile } from '@/lib/platform/detect';
 import { mediaViewerChromeDesktopMinWidthClass } from '@/components/viewer/viewer-chrome';
 import { ViewerGlobalThemeEffectsLayer } from '@/components/theme/GlobalThemeEffectsLayer';
+import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
+import type { ThemeTargetId } from '@/lib/theme/theme-targets';
 
 export type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
 
@@ -34,6 +36,8 @@ export interface MediaViewerShellProps {
   children: JSX.Element;
   class?: string;
   style?: JSX.CSSProperties;
+  /** v3 主题目标；宿主使用 display: contents，不改变现有 fixed 布局。 */
+  themeTarget?: ThemeTargetId;
   /** 顶栏显隐；不传则 Shell 内部管理（点击主区可切换）*/
   headerVisible?: boolean;
   onHeaderVisibleChange?: (visible: boolean) => void;
@@ -64,6 +68,7 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
     'children',
     'class',
     'style',
+    'themeTarget',
     'headerVisible',
     'onHeaderVisibleChange',
     'tapToToggleBars',
@@ -310,23 +315,25 @@ function MediaViewerShellRoot(props: MediaViewerShellProps) {
   };
 
   return (
-    <MediaViewerShellContextProvider value={shellValue()}>
-      <div
-        ref={(el) => activeChromeInput()?.bindShellElement(el)}
-        data-reader-brightness-host
-        class={cn(
-          'fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground',
-          !isMobile() && mediaViewerChromeDesktopMinWidthClass,
-          local.class,
-        )}
-        style={local.style}
-        onPointerLeave={(e) => activeChromeInput()?.onShellPointerLeave(e)}
-        onPointerEnter={(e) => activeChromeInput()?.onShellPointerEnter(e)}
-      >
-        <ViewerGlobalThemeEffectsLayer />
-        {local.children}
-      </div>
-    </MediaViewerShellContextProvider>
+    <ThemeTargetHost target={local.themeTarget ?? 'module.reading'}>
+      <MediaViewerShellContextProvider value={shellValue()}>
+        <div
+          ref={(el) => activeChromeInput()?.bindShellElement(el)}
+          data-reader-brightness-host
+          class={cn(
+            'fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground',
+            !isMobile() && mediaViewerChromeDesktopMinWidthClass,
+            local.class,
+          )}
+          style={local.style}
+          onPointerLeave={(e) => activeChromeInput()?.onShellPointerLeave(e)}
+          onPointerEnter={(e) => activeChromeInput()?.onShellPointerEnter(e)}
+        >
+          <ViewerGlobalThemeEffectsLayer />
+          {local.children}
+        </div>
+      </MediaViewerShellContextProvider>
+    </ThemeTargetHost>
   );
 }
 

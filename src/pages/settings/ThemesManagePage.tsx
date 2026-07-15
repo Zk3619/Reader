@@ -50,6 +50,12 @@ import { settingsStore } from '@/stores/settings';
 import { saveReaderUiConfig, loadReaderUiConfig } from '@/lib/media/text/read-config-storage';
 import { AppTextField, AppTextFieldInput, AppTextFieldLabel } from '@/components/shared/AppTextField';
 import { CheckIcon } from '@/components/shared/icons';
+import {
+  isThemePresetActive,
+  normalizeActiveThemePresetByTarget,
+  THEME_TARGETS,
+  type ThemeTargetId,
+} from '@/lib/theme/theme-targets';
 
 const PRESET_KIND_LABEL: Record<ThemePresetRecord['kind'], string> = {
   builtin: '内置',
@@ -75,6 +81,7 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
   const [renameValue, setRenameValue] = createSignal('');
   const [batchDeleteCount, setBatchDeleteCount] = createSignal(0);
   const [actionBusy, setActionBusy] = createSignal(false);
+  const [applyTarget, setApplyTarget] = createSignal<ThemeTargetId>('app');
 
   const showSkeleton = useSkeletonLoading(loading, { delay: 100, minDisplayTime: 300 });
 
@@ -114,18 +121,15 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
 
   const pageDescription = () => `共 ${filteredPresets().length} 个主题预设`;
 
-  const activeAppId = () => settingsStore.state.app.activeThemePresetId;
-  const activeViewerId = () => settingsStore.state.app.activeViewerThemePresetId;
-
-  const isActive = (record: ThemePresetRecord) => {
-    const manifest = record.manifest;
-    const appActive = manifest.scopes.app !== false && activeAppId() === record.id;
-    const viewerActive = manifest.scopes.viewer !== false && activeViewerId() === record.id;
-    if (manifest.scopes.app && manifest.scopes.viewer) return appActive && viewerActive;
-    if (manifest.scopes.app) return appActive;
-    if (manifest.scopes.viewer) return viewerActive;
-    return appActive || viewerActive;
-  };
+  const activeByTarget = () =>
+    normalizeActiveThemePresetByTarget(
+      settingsStore.state.app.activeThemePresetByTarget,
+      settingsStore.state.app,
+    );
+  const isActive = (record: ThemePresetRecord) =>
+    isThemePresetActive(record.id, activeByTarget());
+  const isActiveAtApplyTarget = (record: ThemePresetRecord) =>
+    activeByTarget()[applyTarget()] === record.id;
 
   const allFilteredSelected = createMemo(() => {
     const list = filteredPresets().filter((p) => p.kind !== 'builtin');
@@ -158,17 +162,17 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
   };
 
   const applyPreset = async (record: ThemePresetRecord) => {
-    if (isActive(record)) return;
+    if (isActiveAtApplyTarget(record)) return;
     setActionBusy(true);
     try {
       const manifest = record.manifest;
-      if (manifest.scopes.app !== false && manifest.app) {
-        settingsStore.setActiveThemePresetId(record.id);
+      const target = applyTarget();
+      await settingsStore.setActiveThemePresetForTarget(target, record.id);
+      if (target === 'app') {
         applyActiveThemePackToDocument(manifest);
         publishActiveThemePack(manifest);
       }
-      if (manifest.scopes.viewer !== false && manifest.viewer) {
-        await settingsStore.setActiveViewerThemePresetId(record.id);
+      if (target === 'module.reading') {
         publishActiveViewerThemePack(manifest);
         const cfg = await loadReaderUiConfig();
         if (cfg && manifest.viewer?.text?.surfaceAppearance) {
@@ -182,7 +186,10 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
           });
         }
       }
-      showAppToast({ title: `已应用「${record.name}」` });
+      showAppToast({
+        title: `已应用「${record.name}」`,
+        description: THEME_TARGETS.find((item) => item.id === target)?.label,
+      });
     } finally {
       setActionBusy(false);
     }
@@ -309,6 +316,21 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
       </PageToolbar>
 
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+        <div class="mb-2 flex shrink-0 items-center justify-end gap-2 px-1">
+          <label for="theme-apply-target" class="text-xs text-muted-foreground">
+            应用到
+          </label>
+          <select
+            id="theme-apply-target"
+            class="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+            value={applyTarget()}
+            onChange={(event) => setApplyTarget(event.currentTarget.value as ThemeTargetId)}
+          >
+            <For each={THEME_TARGETS}>
+              {(target) => <option value={target.id}>{target.label}</option>}
+            </For>
+          </select>
+        </div>
         <Show when={showSkeleton()}>
           <ul class="shrink-0 space-y-2 px-1">
             <For each={[1, 2, 3, 4, 5]}>
@@ -404,7 +426,7 @@ export function ThemesManagePage(props: ThemesManagePageProps) {
                               使用中
                             </Badge>
                           </Show>
-                          <Show when={!active()}>
+                          <Show when={!isActiveAtApplyTarget(record)}>
                             <Button
                               size="sm"
                               variant="outline"
