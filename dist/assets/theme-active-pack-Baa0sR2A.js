@@ -1,0 +1,1 @@
+import{d as e}from"./toc-page-parser.worker-DLB_UAgo.js";const[h,t]=e(null),[v,a]=e(0),[m,n]=e(null),[k,s]=e(0);function P(i){t(i),a(c=>c+1)}function T(i){n(i),s(c=>c+1)}export{P as publishActiveThemePack,T as publishActiveViewerThemePack};
