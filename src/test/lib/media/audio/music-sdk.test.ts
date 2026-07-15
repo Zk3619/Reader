@@ -14,7 +14,7 @@ import { qualityFallbackChain } from '@/lib/media/audio/music-quality';
 
 describe('music-sdk', () => {
   it('exports all builtin sources', () => {
-    expect(MUSIC_SDK_SOURCES).toEqual(['kw', 'wy', 'kg', 'tx', 'mg']);
+    expect(MUSIC_SDK_SOURCES).toEqual(['kw', 'kg', 'tx', 'wy', 'mg']);
   });
 
   it('assertMusicSdkSource validates source id', () => {

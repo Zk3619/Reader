@@ -26,6 +26,8 @@ const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
   lxlyric: '逐字',
 };
 const LYRIC_ALIGNS: MusicLyricAlign[] = ['left', 'center', 'right'];
+const DIRECTIONS = ['horizontal', 'vertical'] as const;
+const SCROLL_POSITIONS = ['top', 'center', 'bottom'] as const;
 
 export const MusicSettingsDesktopLyric: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -54,6 +56,23 @@ export const MusicSettingsDesktopLyric: Component = () => {
     await invoke('set_desktop_lyric_ignore_cursor', { ignore });
   };
 
+  const applyWindowOptions = async (patch: Parameters<typeof setMusicSettings>[0]) => {
+    apply(patch);
+    if (!isTauri()) return;
+    const next = getMusicSettings();
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('set_desktop_lyric_window_options', {
+      alwaysOnTop: next.desktopLyricAlwaysOnTop,
+      locked: next.desktopLyricLocked,
+    }).catch(() => undefined);
+  };
+
+  const resetWindowGeometry = async () => {
+    if (!isTauri()) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('reset_desktop_lyric_window_geometry');
+  };
+
   const requestOverlayPermission = async () => {
     if (!isAndroid()) return;
     try {
@@ -66,8 +85,15 @@ export const MusicSettingsDesktopLyric: Component = () => {
 
   return (
     <div class="space-y-4 p-4 text-sm">
-      <h3 class="font-medium">桌面悬浮歌词</h3>
+      <h2 class="text-base font-semibold">桌面歌词设置</h2>
       <Show when={isTauri() && !isAndroid()}>
+        <div>
+          <h3 class="font-medium">Reader 平台控制 · 桌面歌词窗口</h3>
+          <p class="mt-1 text-xs text-muted-foreground">
+            Reader 通过 Tauri 独立窗口提供桌面歌词；打开、关闭与鼠标穿透不是 LX
+            Music 设置原项。
+          </p>
+        </div>
         <div class="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => void openLyric()}>
             打开
@@ -83,40 +109,145 @@ export const MusicSettingsDesktopLyric: Component = () => {
             onChange={(checked) => void setPenetrate(checked)}
           />
           <Label for="music-desktop-lyric-penetrate-input">
-            鼠标穿透（点击歌词窗不拦截操作）
+            鼠标穿透
           </Label>
         </div>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-2">
+            <Checkbox
+              checked={settings().desktopLyricLocked}
+              onChange={(checked) => void applyWindowOptions({ desktopLyricLocked: checked })}
+            />
+            <span>锁定歌词</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <Checkbox
+              checked={settings().desktopLyricAlwaysOnTop}
+              onChange={(checked) => void applyWindowOptions({ desktopLyricAlwaysOnTop: checked })}
+            />
+            <span>使歌词总是在其他窗口之上</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <Checkbox
+              checked={settings().desktopLyricHideWhenPaused}
+              onChange={(checked) => apply({ desktopLyricHideWhenPaused: checked })}
+            />
+            <span>暂停时隐藏歌词（Reader 行为）</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <Checkbox
+              checked={settings().desktopLyricHideWhenFullscreen}
+              onChange={(checked) => apply({ desktopLyricHideWhenFullscreen: checked })}
+            />
+            <span>全屏时自动关闭歌词</span>
+          </label>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          LX Music 的暂停选项会提高歌词透明度；Reader 当前实现为隐藏歌词，故单独标注。
+        </p>
+        <h3 class="border-t pt-4 font-medium">Reader 扩展 · 歌词内容</h3>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">默认歌词轨：</span>
+          <span class="text-muted-foreground">桌面歌词轨：</span>
           <MusicAppSelect
             value={settings().desktopLyricTrack ?? settings().lyricTrack}
             onChange={(v) => apply({ desktopLyricTrack: v as LyricTrackKind })}
             options={LYRIC_TRACKS}
             optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
             triggerClass="w-28"
-            aria-label="默认歌词轨"
+            aria-label="桌面歌词轨"
+          />
+        </div>
+        <h3 class="border-t pt-4 font-medium">歌词布局</h3>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">歌词显示方向：</span>
+          <MusicAppSelect
+            value={settings().desktopLyricDirection}
+            onChange={(value) => apply({ desktopLyricDirection: value })}
+            options={DIRECTIONS}
+            optionLabel={(value) =>
+              value === 'vertical' ? '垂直方向' : '水平方向'
+            }
+            triggerClass="w-24"
+            aria-label="桌面歌词方向"
+          />
+          <span class="text-muted-foreground">正在播放歌词滚动位置：</span>
+          <MusicAppSelect
+            value={settings().desktopLyricScrollPosition}
+            onChange={(value) => apply({ desktopLyricScrollPosition: value })}
+            options={SCROLL_POSITIONS}
+            optionLabel={(value) =>
+              value === 'top' ? '顶部' : value === 'bottom' ? '底部（Reader 扩展）' : '中心'
+            }
+            triggerClass="w-24"
+            aria-label="桌面歌词滚动位置"
           />
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">歌词对齐：</span>
+          <span class="text-muted-foreground">歌词对齐方式：</span>
           <MusicAppSelect
             value={settings().desktopLyricAlign}
             onChange={(v) => apply({ desktopLyricAlign: v as MusicLyricAlign })}
             options={LYRIC_ALIGNS}
             optionLabel={(v) =>
-              v === 'left' ? '左对齐' : v === 'right' ? '右对齐' : '居中'
+              v === 'left' ? '居左' : v === 'right' ? '居右' : '居中'
             }
             triggerClass="w-28"
             aria-label="桌面歌词对齐"
           />
         </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">歌词字体：</span>
+          <AppTextFieldBareInput
+            class="w-48"
+            placeholder="默认"
+            value={settings().desktopLyricFontFamily}
+            onInput={(event) => apply({ desktopLyricFontFamily: event.currentTarget.value })}
+          />
+          <span class="text-muted-foreground">歌词间距：</span>
+          <NumberField
+            rawValue={settings().desktopLyricLineHeight}
+            onRawValueChange={(value) => apply({ desktopLyricLineHeight: value })}
+            minValue={1}
+            maxValue={3}
+            step={0.1}
+          >
+            <NumberFieldInput class="w-20" aria-label="桌面歌词行距" />
+          </NumberField>
+        </div>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-2">
+            <Checkbox checked={settings().desktopLyricShadow} onChange={(checked) => apply({ desktopLyricShadow: checked })} />
+            <span>歌词阴影</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <Checkbox checked={settings().desktopLyricBold} onChange={(checked) => apply({ desktopLyricBold: checked })} />
+            <span>加粗字体</span>
+          </label>
+          <label class="flex items-center gap-2">
+            <Checkbox
+              checked={!settings().desktopLyricWrap}
+              onChange={(checked) => apply({ desktopLyricWrap: !checked })}
+            />
+            <span>不允许歌词换行</span>
+          </label>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void resetWindowGeometry()}>
+          重置窗口设置
+        </Button>
+        <p class="text-xs text-muted-foreground">
+          Reader 平台限制：Windows/macOS/Linux 支持锁定、置顶和窗口设置重置；任务栏显示、
+          自动刷新置顶与锁屏边界限制当前不提供。
+        </p>
+        <h3 class="border-t pt-4 font-medium">Reader 扩展 · 显示细节</h3>
         <div class="flex items-center gap-2">
           <Checkbox
             id="music-desktop-lyric-zoom-active-input"
             checked={settings().desktopLyricZoomActive}
             onChange={(checked) => apply({ desktopLyricZoomActive: checked })}
           />
-          <Label for="music-desktop-lyric-zoom-active-input">放大当前歌词行</Label>
+          <Label for="music-desktop-lyric-zoom-active-input">
+            缩放当前播放的歌词
+          </Label>
         </div>
         <div class="flex items-center gap-2">
           <Checkbox
@@ -139,7 +270,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
           </NumberField>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">当前行颜色：</span>
+          <span class="text-muted-foreground">已播放颜色：</span>
           <AppTextFieldBareInput
             class="w-40 font-mono text-xs"
             value={settings().desktopLyricPlayedColor}
@@ -159,7 +290,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
           />
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">字号：</span>
+          <span class="text-muted-foreground">歌词字体大小：</span>
           <Slider
             class="w-40"
             minValue={12}

@@ -51,8 +51,14 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
   );
 
   return (
-    <AudioPanelShell open={props.open} inline={props.inline} title="账号" onClose={props.onClose}>
-      <div class="flex flex-wrap gap-2 border-b p-4">
+    <AudioPanelShell
+      open={props.open}
+      inline={props.inline}
+      hideHeader={props.inline}
+      title="平台账号"
+      onClose={props.onClose}
+    >
+      <div class={`flex flex-wrap gap-2 border-b ${props.inline ? 'pb-3 pt-2' : 'p-4'}`}>
             <For each={PLATFORMS}>
               {(p) => (
                 <Button
@@ -65,7 +71,7 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
               )}
             </For>
           </div>
-          <div class="space-y-3 border-b p-4">
+          <div class={`space-y-3 border-b ${props.inline ? 'py-3' : 'p-4'}`}>
             <p class="text-sm">
               登录状态：
               <span class={auth()?.healthy ? 'text-primary' : 'text-muted-foreground'}>
@@ -93,7 +99,7 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
             </Button>
           </div>
           <Show when={platform() === 'netease' && auth()?.healthy}>
-            <div class="min-h-0 flex-1 overflow-y-auto p-4">
+            <div class={`min-h-0 flex-1 overflow-y-auto ${props.inline ? 'pt-3' : 'p-4'}`}>
               <p class="mb-2 text-xs font-medium text-muted-foreground">推荐歌单</p>
               <ul class="space-y-1">
                 <For each={playlists() ?? []}>

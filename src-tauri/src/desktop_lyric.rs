@@ -2,7 +2,7 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod imp {
-    use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{AppHandle, Manager, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
     pub fn open(app: AppHandle) -> Result<(), String> {
         if app.get_webview_window("desktop-lyric").is_some() {
@@ -36,6 +36,29 @@ mod imp {
         w.set_ignore_cursor_events(ignore)
             .map_err(|e| format!("set_ignore_cursor_events: {e}"))
     }
+
+    pub fn set_options(
+        app: AppHandle,
+        always_on_top: bool,
+        locked: bool,
+    ) -> Result<(), String> {
+        let w = app
+            .get_webview_window("desktop-lyric")
+            .ok_or_else(|| "桌面歌词窗口未打开".to_string())?;
+        w.set_always_on_top(always_on_top)
+            .map_err(|e| format!("set_always_on_top: {e}"))?;
+        w.set_resizable(!locked)
+            .map_err(|e| format!("set_resizable: {e}"))
+    }
+
+    pub fn reset_geometry(app: AppHandle) -> Result<(), String> {
+        let w = app
+            .get_webview_window("desktop-lyric")
+            .ok_or_else(|| "桌面歌词窗口未打开".to_string())?;
+        w.set_size(PhysicalSize::new(600_u32, 200_u32))
+            .map_err(|e| format!("set_size: {e}"))?;
+        w.center().map_err(|e| format!("center: {e}"))
+    }
 }
 
 #[tauri::command]
@@ -68,6 +91,36 @@ pub fn set_desktop_lyric_ignore_cursor(app: tauri::AppHandle, ignore: bool) -> R
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (app, ignore);
+        Err("桌面歌词仅桌面端可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn set_desktop_lyric_window_options(
+    app: tauri::AppHandle,
+    always_on_top: bool,
+    locked: bool,
+) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::set_options(app, always_on_top, locked);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (app, always_on_top, locked);
+        Err("桌面歌词仅桌面端可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn reset_desktop_lyric_window_geometry(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::reset_geometry(app);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = app;
         Err("桌面歌词仅桌面端可用".into())
     }
 }

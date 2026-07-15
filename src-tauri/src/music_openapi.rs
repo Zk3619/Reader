@@ -223,6 +223,10 @@ mod imp {
             }
         }
     }
+
+    pub fn is_running() -> bool {
+        RUNNING.load(Ordering::SeqCst)
+    }
 }
 
 #[tauri::command]
@@ -246,6 +250,18 @@ pub fn start_music_openapi(
 pub fn stop_music_openapi() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     imp::stop();
+}
+
+#[tauri::command]
+pub fn get_music_openapi_status() -> serde_json::Value {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return serde_json::json!({ "running": imp::is_running() });
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        serde_json::json!({ "running": false })
+    }
 }
 
 #[tauri::command]

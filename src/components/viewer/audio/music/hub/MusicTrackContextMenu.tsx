@@ -130,7 +130,7 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
           </AppContextMenuItem>
           <AppContextMenuItem
             disabled={actionTracks().every((track) => track.source === 'local')}
-            onSelect={() => void downloadTracks(actionTracks())}
+            onSelect={() => void downloadTracks(actionTracks(), props.playlistId)}
           >
             下载
           </AppContextMenuItem>

@@ -12,6 +12,7 @@ import {
 import { viewerStore } from '@/stores/viewer';
 import {
   playNextTrack,
+  playNextTrackAfterError,
   playPrevTrack,
   retryMusicTrackPlayback,
   setMusicSection,
@@ -31,11 +32,17 @@ import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types'
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
 import {
   getMusicSettings,
+  setMusicSettings,
   subscribeMusicSettings,
 } from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
 import { startMusicOpenApiStateSync } from '@/lib/media/audio/platform/music-openapi-state';
+import {
+  setMusicPlaybackSleepBlocked,
+  setMusicTaskbarProgress,
+} from '@/lib/media/audio/platform/music-playback-platform';
 import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
+import { isTrackInLove } from '@/lib/database/audio-library';
 
 const MUSIC_PROGRESS_STORAGE_KEY = 'reader_music_track_progress';
 
@@ -87,6 +94,8 @@ async function emitDesktopLyric(payload: {
     lxlyric: string;
   };
   positionSec: number;
+  playing: boolean;
+  fullscreen: boolean;
 }): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -98,12 +107,23 @@ async function emitDesktopLyric(payload: {
 }
 
 export function useMusicHubPlayer() {
-  const [settings, setSettings] = createSignal(getMusicSettings());
+  const initialSettings = getMusicSettings();
+  const [settings, setSettings] = createSignal(initialSettings);
   const [fetchedLyricBundle, setFetchedLyricBundle] = createSignal<LyricBundle | null>(null);
-  const [lyricTrack, setLyricTrack] = createSignal<LyricTrackKind>(settings().lyricTrack);
-  const [musicVolume, setMusicVolume] = createSignal(1);
-  const [musicMuted, setMusicMuted] = createSignal(false);
+  const [lyricTrack, setLyricTrack] = createSignal<LyricTrackKind>(initialSettings.lyricTrack);
+  const [musicVolume, setMusicVolumeSignal] = createSignal(initialSettings.musicVolume);
+  const [musicMuted, setMusicMutedSignal] = createSignal(initialSettings.musicMuted);
+  const [musicCollected, setMusicCollected] = createSignal(false);
   const [musicPlayMode, setMusicPlayMode] = createSignal(getMusicPlayConfig().playMode);
+  const setMusicVolume = (value: number) => {
+    const normalized = Math.max(0, Math.min(1, value));
+    setMusicVolumeSignal(normalized);
+    setMusicSettings({ musicVolume: normalized });
+  };
+  const setMusicMuted = (value: boolean) => {
+    setMusicMutedSignal(value);
+    setMusicSettings({ musicMuted: value });
+  };
 
   const fetchedLyric = createMemo(() =>
     pickLyricText(fetchedLyricBundle(), lyricTrack()) ?? '',
@@ -135,8 +155,19 @@ export function useMusicHubPlayer() {
     return item;
   });
 
+  let startupAutoPlayPending = currentTrack() != null;
+  const shouldAutoPlay = () => {
+    if (!startupAutoPlayPending) return settings().autoPlay;
+    startupAutoPlayPending = false;
+    return settings().startupAutoPlay;
+  };
+
   let stopAfterCurrentTrack = false;
   let playTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let playTimeoutDeadline: number | undefined;
+  let configuredPlayTimeoutSec = 0;
+  let playTimeoutCompleted = false;
+  const playTimeoutSec = createMemo(() => settings().playTimeoutSec ?? 0);
 
   const handleEnded = async () => {
     if (stopAfterCurrentTrack) {
@@ -156,7 +187,7 @@ export function useMusicHubPlayer() {
     book: () => null,
     audioConfig,
     loading,
-    autoPlay: () => settings().autoPlay,
+    autoPlay: shouldAutoPlay,
     onChapterPosChange: (pos) => {
       viewerStore.setChapterPos(pos);
       const track = currentTrack();
@@ -180,7 +211,7 @@ export function useMusicHubPlayer() {
           trackQueue().length > 1
         ) {
           console.warn('[music] autoSkipOnError after decode/playback error');
-          await playNextTrack();
+          await playNextTrackAfterError();
           return;
         }
         await retryMusicTrackPlayback();
@@ -190,19 +221,26 @@ export function useMusicHubPlayer() {
 
   createEffect(() => {
     const track = currentTrack();
-    const timeoutSec = settings().playTimeoutSec ?? 0;
-    const waitForTrackEnd = settings().playTimeoutWaitForTrackEnd;
-    if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
-    stopAfterCurrentTrack = false;
-    if (!track || timeoutSec <= 0) return;
+    const timeoutSec = playTimeoutSec();
+    if (timeoutSec !== configuredPlayTimeoutSec) {
+      if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
+      playTimeoutTimer = undefined;
+      playTimeoutDeadline = undefined;
+      playTimeoutCompleted = false;
+      stopAfterCurrentTrack = false;
+      configuredPlayTimeoutSec = timeoutSec;
+    }
+    if (!track || timeoutSec <= 0 || playTimeoutCompleted || playTimeoutTimer) return;
+    playTimeoutDeadline ??= Date.now() + timeoutSec * 1000;
     playTimeoutTimer = setTimeout(() => {
       playTimeoutTimer = undefined;
-      if (waitForTrackEnd) {
+      playTimeoutCompleted = true;
+      if (getMusicSettings().playTimeoutWaitForTrackEnd) {
         stopAfterCurrentTrack = true;
       } else if (player.playing()) {
         player.togglePlay();
       }
-    }, timeoutSec * 1000);
+    }, Math.max(0, playTimeoutDeadline - Date.now()));
   });
   onCleanup(() => {
     if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
@@ -226,7 +264,7 @@ export function useMusicHubPlayer() {
       duration: player.duration(),
       volume: musicVolume(),
       muted: musicMuted(),
-      collected: false,
+      collected: musicCollected(),
       trackName: t?.name,
       trackArtist: t?.artist,
       trackSource: t?.source,
@@ -262,6 +300,37 @@ export function useMusicHubPlayer() {
         coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
       });
     }
+  });
+
+  createEffect(() => {
+    void setMusicPlaybackSleepBlocked(
+      settings().preventSleepWhilePlaying && player.playing(),
+    );
+  });
+
+  createEffect(() => {
+    void setMusicTaskbarProgress({
+      enabled: settings().showTaskbarProgress,
+      playing: player.playing(),
+      hasError: Boolean(error()),
+      position: player.currentTime(),
+      duration: player.duration(),
+    });
+  });
+
+  createEffect(() => {
+    const track = currentTrack();
+    if (!track) {
+      setMusicCollected(false);
+      return;
+    }
+    let cancelled = false;
+    void isTrackInLove(track.id).then((collected) => {
+      if (!cancelled) setMusicCollected(collected);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
   });
 
   createEffect(() => {
@@ -312,6 +381,8 @@ export function useMusicHubPlayer() {
           }
         : undefined,
       positionSec: player.currentTime(),
+      playing: player.playing(),
+      fullscreen: document.fullscreenElement != null,
     });
   });
 
@@ -319,11 +390,31 @@ export function useMusicHubPlayer() {
   let unlistenAndroid: (() => void) | undefined;
 
   onMount(() => {
+    let outputDeviceIdentity: string | undefined;
+    const readOutputDeviceIdentity = async (outputId: string): Promise<string> => {
+      const devices = await WebAudioPlayerEngine.enumerateOutputDevices();
+      const selected = outputId
+        ? devices.find((device) => device.deviceId === outputId)
+        : devices.find((device) => device.isDefault || device.deviceId === 'default');
+      return selected ? `${selected.deviceId}:${selected.label}` : `missing:${outputId}`;
+    };
+    void readOutputDeviceIdentity(settings().audioOutputDeviceId).then((identity) => {
+      outputDeviceIdentity = identity;
+    });
     const unsubscribeSettings = subscribeMusicSettings((next) => {
       setSettings(next);
+      setLyricTrack(next.lyricTrack);
+      setMusicVolumeSignal(next.musicVolume);
+      setMusicMutedSignal(next.musicMuted);
       const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
       if (el) el.preservesPitch = next.preservesPitch;
-      webAudio?.applyEqPreset(next.eqPreset);
+      if (next.eqCustomGains) webAudio?.applyCustomEq(next.eqCustomGains);
+      else webAudio?.applyEqPreset(next.eqPreset);
+      webAudio?.setMaxChannels(next.audioUseMaxChannels ? 32 : next.audioMaxChannels);
+      void webAudio?.setOutputDevice(next.audioOutputDeviceId);
+      void readOutputDeviceIdentity(next.audioOutputDeviceId).then((identity) => {
+        outputDeviceIdentity = identity;
+      });
     });
     onCleanup(unsubscribeSettings);
 
@@ -374,6 +465,20 @@ export function useMusicHubPlayer() {
         }),
       );
     }
+    const handleDeviceChange = async () => {
+      const outputId = settings().audioOutputDeviceId;
+      const nextIdentity = await readOutputDeviceIdentity(outputId);
+      const changed =
+        outputDeviceIdentity !== undefined && outputDeviceIdentity !== nextIdentity;
+      outputDeviceIdentity = nextIdentity;
+      if (changed && settings().audioPauseOnDeviceRemoved && player.playing()) {
+        player.togglePlay();
+      }
+    };
+    navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange);
+    onCleanup(() =>
+      navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange),
+    );
     registerAudioShellHandlers({
       togglePlay: () => player.togglePlay(),
       skipPrev: () => void playPrevTrack(),
@@ -401,6 +506,14 @@ export function useMusicHubPlayer() {
   onCleanup(() => {
     unlistenAndroid?.();
     registerAudioShellHandlers(null);
+    void setMusicPlaybackSleepBlocked(false);
+    void setMusicTaskbarProgress({
+      enabled: false,
+      playing: false,
+      hasError: false,
+      position: 0,
+      duration: 0,
+    });
   });
 
   createEffect(() => {
@@ -423,7 +536,13 @@ export function useMusicHubPlayer() {
     webAudio?.dispose();
     webAudio = new WebAudioPlayerEngine({
       audioElement: el,
+      gain: 1,
       eqPreset: currentSettings.eqPreset,
+      eqCustomGains: currentSettings.eqCustomGains,
+      outputDeviceId: currentSettings.audioOutputDeviceId,
+      maxChannels: currentSettings.audioUseMaxChannels
+        ? 32
+        : currentSettings.audioMaxChannels,
     });
     void webAudio.resume();
   };
@@ -446,6 +565,8 @@ export function useMusicHubPlayer() {
     setMusicVolume,
     musicMuted,
     setMusicMuted,
+    musicCollected,
+    setMusicCollected,
     bindAudio,
     getWebAudio: () => webAudio,
   };

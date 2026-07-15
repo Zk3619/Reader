@@ -44,6 +44,7 @@ import type { Book, BookChapter } from '@/types';
 import { resolveNextChapterIndex } from '@/lib/media/audio/play-mode';
 import { preloadTrackUrl } from '@/lib/media/audio/online/track-preload';
 import { getMusicPlayConfig } from '@/lib/media/audio/music-play-config';
+import { resolveOnlinePic } from '@/lib/media/audio/online/source-router';
 import {
   getMusicActivePlaylistId,
   getMusicSettings,
@@ -57,6 +58,28 @@ import type { MusicHubSection } from '@/stores/viewer/base-state';
 
 let playbackRevoke: (() => void) | null = null;
 let restorePlaylistRequestId = 0;
+let randomPlayedTrackKeys = new Set<string>();
+let randomQueueSignature = '';
+
+const musicTrackKey = (track: AudioTrack): string => `${track.source}:${track.id}`;
+
+function getQueueSignature(tracks: readonly AudioTrack[]): string {
+  return tracks.map(musicTrackKey).join('\n');
+}
+
+function resolveRandomUnplayedIndex(queue: readonly AudioTrack[], current: number): number | null {
+  if (queue.length <= 1) return queue.length === 1 ? 0 : null;
+  let candidates = queue
+    .map((track, index) => ({ index, key: musicTrackKey(track) }))
+    .filter(({ index, key }) => index !== current && !randomPlayedTrackKeys.has(key));
+  if (candidates.length === 0) {
+    randomPlayedTrackKeys = new Set([musicTrackKey(queue[current]!)]);
+    candidates = queue
+      .map((track, index) => ({ index, key: musicTrackKey(track) }))
+      .filter(({ index }) => index !== current);
+  }
+  return candidates[Math.floor(Math.random() * candidates.length)]?.index ?? null;
+}
 
 export function normalizeMusicHubSection(section: unknown): MusicHubSection {
   switch (section) {
@@ -184,11 +207,24 @@ export function setActiveMusicGroupId(
   playlistId?: string | null,
 ): void {
   restorePlaylistRequestId += 1;
+  const clearQueue =
+    getMusicSettings().listClearQueueOnSwitch &&
+    state.activeMusicGroupId != null &&
+    state.activeMusicGroupId !== groupId;
   if (playlistId !== undefined) {
     setMusicActivePlaylistId(playlistId ?? 'local');
   }
   setState({
     activeMusicGroupId: groupId,
+    ...(clearQueue
+      ? {
+          trackQueue: [],
+          trackIndex: 0,
+          mediaUrls: [],
+          primaryUrl: null,
+          musicQueueOrigin: 'other' as const,
+        }
+      : {}),
     ...(playlistId !== undefined ? { activePlaylistId: playlistId } : {}),
   });
 }
@@ -238,6 +274,7 @@ export async function applyMusicTrack(
     });
     return;
   }
+  randomPlayedTrackKeys.add(musicTrackKey(track));
   if (await isTrackDisliked(track)) {
     setState({
       loading: false,
@@ -292,7 +329,7 @@ export async function applyMusicTrack(
       });
       if (shouldAutoSkipOnError(queue.length)) {
         console.warn('[music] autoSkipOnError after resolve fail');
-        setTimeout(() => void playNextTrack(), 0);
+        setTimeout(() => void playNextTrackAfterError(), 0);
       }
       return;
     }
@@ -331,6 +368,25 @@ export async function applyMusicTrack(
       },
       AUDIO_HUB_BOOK_URL,
     );
+    if (!coverUrl && getMusicSettings().fallbackPic) {
+      void resolveOnlinePic(playTrack)
+        .then((resolvedCover) => {
+          if (!resolvedCover) return;
+          const current = state.trackQueue[index];
+          if (!current || musicTrackKey(current) !== musicTrackKey(playTrack)) return;
+          const queueWithCover = [...state.trackQueue];
+          queueWithCover[index] = {
+            ...current,
+            meta: { ...current.meta, coverUrl: resolvedCover },
+          };
+          setState({
+            trackQueue: queueWithCover,
+            contentSession: createMusicHubSession(queueWithCover, index),
+          });
+          globalMediaPlayerStore.updateMeta({ coverUrl: resolvedCover });
+        })
+        .catch(() => undefined);
+    }
 
     const cfg = getMusicPlayConfig();
     const nextIdx = resolveNextChapterIndex(index, nextQueue.length, cfg.playMode);
@@ -353,7 +409,7 @@ export async function applyMusicTrack(
     });
     if (shouldAutoSkipOnError(queue.length)) {
       console.warn('[music] autoSkipOnError after exception');
-      setTimeout(() => void playNextTrack(), 0);
+      setTimeout(() => void playNextTrackAfterError(), 0);
     }
   }
 }
@@ -380,6 +436,14 @@ export function setMusicTrackQueue(
   source?: AudioTrackSource,
   origin?: MusicQueueOrigin,
 ): void {
+  const nextSignature = getQueueSignature(tracks);
+  if (
+    nextSignature !== randomQueueSignature ||
+    getMusicSettings().autoCleanPlayedList
+  ) {
+    randomPlayedTrackKeys.clear();
+  }
+  randomQueueSignature = nextSignature;
   setState({
     trackQueue: tracks,
     trackIndex: startIndex,
@@ -464,9 +528,25 @@ export async function playNextTrack(): Promise<void> {
     await applyMusicTrack(cur);
     return;
   }
-  const next = resolveNextChapterIndex(cur, queue.length, cfg.playMode);
+  const next =
+    cfg.playMode === AudioPlayMode.random
+      ? resolveRandomUnplayedIndex(queue, cur)
+      : resolveNextChapterIndex(cur, queue.length, cfg.playMode);
   if (next == null) return;
   await applyMusicTrack(next);
+}
+
+/** 错误恢复必须切换到其它歌曲，不受“单曲循环”限制。 */
+export async function playNextTrackAfterError(): Promise<void> {
+  const queue = state.trackQueue;
+  if (queue.length <= 1) return;
+  const cur = state.trackIndex;
+  const cfg = getMusicPlayConfig();
+  const next =
+    cfg.playMode === AudioPlayMode.random
+      ? resolveRandomUnplayedIndex(queue, cur)
+      : (cur + 1) % queue.length;
+  if (next != null && next !== cur) await applyMusicTrack(next);
 }
 
 export async function playPrevTrack(): Promise<void> {
@@ -475,7 +555,7 @@ export async function playPrevTrack(): Promise<void> {
   const cfg = getMusicPlayConfig();
   const cur = state.trackIndex;
   if (cfg.playMode === AudioPlayMode.random) {
-    const next = resolveNextChapterIndex(cur, queue.length, AudioPlayMode.random);
+    const next = resolveRandomUnplayedIndex(queue, cur);
     if (next != null) await applyMusicTrack(next);
     return;
   }

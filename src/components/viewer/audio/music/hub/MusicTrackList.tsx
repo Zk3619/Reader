@@ -43,6 +43,8 @@ import { useVirtualListSortableRow } from '@/components/shared/virtual-list/Virt
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   getMusicSettings,
+  getMusicListScrollPosition,
+  setMusicListScrollPosition,
   subscribeMusicSettings,
   type MusicSettings,
 } from '@/lib/media/audio/music-settings';
@@ -127,7 +129,8 @@ function SortableTrackRow(props: {
       suppressPlayUntil = performance.now() + 350;
     }
   });
-  const handlePlay = () => {
+  const handlePlay = (doubleClick = false) => {
+    if (props.settings.listDoubleClickToPlay !== doubleClick) return;
     if (
       props.reorderBusy ||
       sortable?.isActiveDraggable() ||
@@ -210,7 +213,8 @@ function SortableTrackRow(props: {
                 type="button"
                 variant="ghost"
                 class="col-span-5 grid h-full min-w-0 grid-cols-subgrid items-center rounded-none px-0 font-normal"
-                onClick={handlePlay}
+                onClick={() => handlePlay(false)}
+                onDblClick={() => handlePlay(true)}
               >
                 <span
                   class={cn(
@@ -265,7 +269,8 @@ function SortableTrackRow(props: {
               type="button"
               variant="ghost"
               class="h-full min-w-0 flex-1 justify-start gap-2 rounded-none px-1 font-normal"
-              onClick={handlePlay}
+              onClick={() => handlePlay(false)}
+              onDblClick={() => handlePlay(true)}
             >
               <span
                 class={cn(
@@ -407,6 +412,16 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     setSelected(allSelected() ? new Set<string>() : new Set(list().map((track) => track.id)));
   };
   const [scrollEl, setScrollEl] = createSignal<HTMLElement | undefined>();
+  createEffect(() => {
+    const id = String(groupId());
+    const el = scrollEl();
+    const savePosition = settings().listSaveScrollPosition;
+    if (!el) return;
+    queueMicrotask(() => {
+      if (String(groupId()) !== id) return;
+      el.scrollTop = savePosition ? getMusicListScrollPosition(id) : 0;
+    });
+  });
 
   return (
     <div class={cn('relative flex min-h-0 min-w-0 flex-1 flex-col', props.class)}>
@@ -439,6 +454,11 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
           class="min-h-0 flex-1"
           getItemKey={(track) => track.id}
           onScrollContainer={setScrollEl}
+          onScroll={(el) => {
+            if (settings().listSaveScrollPosition) {
+              setMusicListScrollPosition(String(groupId()), el.scrollTop);
+            }
+          }}
           remeasureWhen={isMobileLayout}
           sortable={{
             enabled: () => props.reorderEnabled !== false,

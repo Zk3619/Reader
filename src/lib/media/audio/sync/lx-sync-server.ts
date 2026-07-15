@@ -20,3 +20,14 @@ export async function stopLxSyncServer(): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('stop_lx_sync_server');
 }
+
+export async function getLxSyncServerStatus(): Promise<{
+  running: boolean;
+  serverId?: string;
+  devices: unknown[];
+}> {
+  const { isTauri } = await import('@/lib/platform/detect');
+  if (!isTauri()) return { running: false, devices: [] };
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke('get_lx_sync_server_status');
+}

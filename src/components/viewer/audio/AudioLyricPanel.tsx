@@ -2,7 +2,7 @@
  * 歌词展示（LRC / 多轨 / lxlyric 逐字，对齐 lx）
  */
 
-import { createMemo, For, Show } from 'solid-js';
+import { createEffect, createMemo, For, onCleanup, Show } from 'solid-js';
 import { cn } from '@/lib/utils';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
@@ -93,9 +93,19 @@ export interface AudioLyricPanelProps {
   maxLines?: number;
   playedColor?: string;
   unplayedColor?: string;
+  scrollDelayMs?: number;
+  scrollPosition?: 'top' | 'center' | 'bottom';
+  fontFamily?: string;
+  lineHeight?: number;
+  textShadow?: boolean;
+  bold?: boolean;
+  wrap?: boolean;
+  direction?: 'horizontal' | 'vertical';
 }
 
 export function AudioLyricPanel(props: AudioLyricPanelProps) {
+  let container: HTMLDivElement | undefined;
+  let scrollTimer: ReturnType<typeof setTimeout> | undefined;
   const primaryText = createMemo(() => {
     if (props.lyric?.trim()) return props.lyric;
     return pickLyricText(props.bundle, props.lyricTrack ?? 'lyric');
@@ -192,9 +202,30 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
     return lines.map((line, originalIndex) => ({ line, originalIndex }));
   });
 
+  createEffect(() => {
+    void activeIndex();
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      const active = container?.querySelector<HTMLElement>('[data-lyric-active="true"]');
+      active?.scrollIntoView({
+        behavior: 'smooth',
+        block:
+          props.scrollPosition === 'top'
+            ? 'start'
+            : props.scrollPosition === 'bottom'
+              ? 'end'
+              : 'center',
+      });
+    }, Math.max(0, props.scrollDelayMs ?? 0));
+  });
+  onCleanup(() => {
+    if (scrollTimer) clearTimeout(scrollTimer);
+  });
+
   return (
     <Show when={primaryText()?.trim()}>
       <div
+        ref={container}
         class={cn(
           'max-h-32 w-full max-w-md overflow-y-auto rounded-lg bg-black/20 px-3 py-2 text-center text-sm text-white/90',
           props.class,
@@ -202,17 +233,23 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
         style={{
           'font-size': `${props.fontSize ?? 14}px`,
           'text-align': props.align ?? 'center',
+          'font-family': props.fontFamily || undefined,
+          'line-height': String(props.lineHeight ?? 1.5),
+          'text-shadow': props.textShadow ? '0 1px 4px rgba(0,0,0,.9)' : undefined,
+          'font-weight': props.bold ? '700' : undefined,
+          'writing-mode': props.direction === 'vertical' ? 'vertical-rl' : undefined,
         }}
       >
         <Show
           when={lrcLines()}
-          fallback={<p class="whitespace-pre-wrap leading-relaxed">{primaryText()}</p>}
+          fallback={<p class={props.wrap === false ? 'whitespace-nowrap' : 'whitespace-pre-wrap'}>{primaryText()}</p>}
         >
           {(_lines) => (
             <ul class="space-y-1">
               <For each={visibleLines()}>
                 {(entry) => (
                   <li
+                    data-lyric-active={entry.originalIndex === activeIndex() ? 'true' : undefined}
                     class={cn(
                       'transition-colors',
                       props.onSeek && 'cursor-pointer hover:text-white/80',
@@ -228,6 +265,7 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
                         entry.originalIndex === activeIndex()
                           ? props.playedColor
                           : props.unplayedColor,
+                      'white-space': props.wrap === false ? 'nowrap' : 'normal',
                     }}
                     onClick={() => props.onSeek?.(entry.line.timeMs / 1000)}
                   >

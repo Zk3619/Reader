@@ -8,13 +8,14 @@ import {
   userApiMusicUrl,
   isActiveUserApiId,
   listEnabledUserApiScriptIdsForUrl,
+  listUserApiScriptIdsForPlayback,
   listUserApiScripts,
   getActiveUserApiDisplayName,
-  initUserApiScript,
 } from '@/lib/media/audio/online/user-api-engine';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { getPlayQuality } from '@/lib/media/audio/music-quality';
+import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import {
   cacheMusicTrackAudio,
   createAudioObjectUrl,
@@ -143,31 +144,23 @@ function musicUrlTimeoutMs(userApiId: string): number {
 async function resolveUserApiUrl(
   userApiId: string,
   track: AudioTrack,
+  quality?: MusicQuality,
 ): Promise<string | null> {
   if (isPrimaryUserApiCircuitOpen(userApiId)) {
     console.warn('[user-api] circuit open, skip', userApiId);
     return null;
   }
-  // 已启用但尚未 ready（含 activeOnly 未预热）：取链前补初始化
   const scriptMeta = listUserApiScripts().find((s) => s.id === userApiId);
-  if (scriptMeta && scriptMeta.initStatus !== 'ready') {
-    console.info(
-      '[user-api] ensure init before musicUrl',
-      scriptMeta.name,
-      scriptMeta.initStatus ?? 'undefined',
-    );
-    const init = await initUserApiScript(userApiId);
-    if (!init.ok) {
-      console.warn('[user-api] ensure init failed', userApiId, init.error);
-      return null;
-    }
+  if (!scriptMeta?.enabled || scriptMeta.initStatus !== 'ready') {
+    console.info('[user-api] skip non-ready source', userApiId);
+    return null;
   }
   const timeoutMs = musicUrlTimeoutMs(userApiId);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
   try {
     const result = await Promise.race([
-      userApiMusicUrl(userApiId, track, undefined, getPlayQuality()).finally(() => {
+      userApiMusicUrl(userApiId, track, undefined, quality ?? getPlayQuality(track)).finally(() => {
         if (timer) clearTimeout(timer);
       }),
       new Promise<null>((resolve) => {
@@ -219,7 +212,7 @@ async function resolveAcrossUserApiAndPlatforms(
   accept: (url: string, t: AudioTrack) => Promise<{ url: string; revoke: () => void } | null>,
   callbacks?: ToggleSourceCallbacks,
   cookies?: string,
-  options?: { tryBuiltin?: boolean },
+  options?: { tryBuiltin?: boolean; quality?: MusicQuality },
 ): Promise<{
   playable: { url: string; revoke: () => void };
   track: AudioTrack;
@@ -228,7 +221,7 @@ async function resolveAcrossUserApiAndPlatforms(
   lastUserApiError = null;
   sessionHardSkipScripts.clear();
   const tryBuiltin = options?.tryBuiltin !== false;
-  const ids = listEnabledUserApiScriptIdsForUrl();
+  const ids = listUserApiScriptIdsForPlayback(isFallbackResolverEnabled());
   if (!ids.length && !tryBuiltin) {
     console.warn('[user-api] no enabled scripts for url resolve');
     return null;
@@ -251,7 +244,7 @@ async function resolveAcrossUserApiAndPlatforms(
     candidate: AudioTrack,
     tag: string,
   ): Promise<{ url: string; revoke: () => void } | null> => {
-    const url = await resolveUserApiUrl(scriptId, candidate);
+    const url = await resolveUserApiUrl(scriptId, candidate, options?.quality);
     if (!url) return null;
     const ok = await accept(url, candidate);
     if (ok) {
@@ -270,7 +263,7 @@ async function resolveAcrossUserApiAndPlatforms(
     callbacks?.onStatus?.(
       `${MusicPlaybackStatusText.gettingUrl}（内置 · ${candidate.source}）`,
     );
-    const url = await tryResolveBuiltinUrl(candidate, cookies);
+    const url = await tryResolveBuiltinUrl(candidate, cookies, options?.quality);
     if (!url) return null;
     const ok = await accept(url, candidate);
     if (ok) {
@@ -347,12 +340,13 @@ async function resolveBuiltinAcrossPlatforms(
   cookies?: string,
   callbacks?: ToggleSourceCallbacks,
   cachedOthers?: AudioTrack[],
+  quality?: MusicQuality,
 ): Promise<{
   playable: { url: string; revoke: () => void };
   track: AudioTrack;
   toggled: boolean;
 } | null> {
-  const primaryUrl = await tryResolveBuiltinUrl(track, cookies);
+  const primaryUrl = await tryResolveBuiltinUrl(track, cookies, quality);
   if (primaryUrl) {
     const ok = await accept(primaryUrl, track);
     if (ok) {
@@ -370,7 +364,7 @@ async function resolveBuiltinAcrossPlatforms(
     })());
   for (const alt of others) {
     notifyToggleTry(alt, callbacks);
-    const url = await tryResolveBuiltinUrl(alt, cookies);
+    const url = await tryResolveBuiltinUrl(alt, cookies, quality);
     if (!url) continue;
     const ok = await accept(url, alt);
     if (ok) {
@@ -388,6 +382,7 @@ export async function resolveTrackPlaybackUrls(
     userApiId?: string;
     skipCache?: boolean;
     activeSource?: string | null;
+    quality?: MusicQuality;
   } & ToggleSourceCallbacks,
 ): Promise<{
   urls: string[];
@@ -404,7 +399,8 @@ export async function resolveTrackPlaybackUrls(
     return { urls: url ? [url] : [], revokeAll: () => {}, track };
   }
 
-  if (!options?.skipCache) {
+  // 离线模式是硬边界：即使调用方要求刷新，也只允许读取本地音频缓存。
+  if (!options?.skipCache || offline) {
     const cached = await getCachedMusicTrackByTrackId(track.id);
     if (cached) {
       const blobUrl = createAudioObjectUrl(cached.bytes, cached.mime);
@@ -474,6 +470,8 @@ export async function resolveTrackPlaybackUrls(
         onStatus: options?.onStatus,
         onToggleSource: options?.onToggleSource,
       },
+      undefined,
+      options?.quality,
     );
   } else {
     resolved = await resolveAcrossUserApiAndPlatforms(
@@ -484,7 +482,7 @@ export async function resolveTrackPlaybackUrls(
         onToggleSource: options?.onToggleSource,
       },
       options?.cookies,
-      { tryBuiltin: urlMode === 'auto' },
+      { tryBuiltin: urlMode === 'auto', quality: options?.quality },
     );
   }
 
@@ -492,7 +490,7 @@ export async function resolveTrackPlaybackUrls(
     const last = await resolveLastResortTrackUrl(
       track,
       async (alt) => {
-        const url = await tryResolveBuiltinUrl(alt, options?.cookies);
+        const url = await tryResolveBuiltinUrl(alt, options?.cookies, options?.quality);
         if (!url) return null;
         if (!(await acceptUrlValidator(url, alt))) return null;
         return { url, track: alt };
@@ -524,7 +522,7 @@ export async function resolveTrackPlaybackUrls(
           onStatus: options?.onStatus,
           onToggleSource: options?.onToggleSource,
         });
-        const url = await resolveUserApiUrl(activeId, alt);
+        const url = await resolveUserApiUrl(activeId, alt, options?.quality);
         if (!url) return null;
         if (!(await acceptUrlValidator(url, alt))) return null;
         return { url, track: alt };

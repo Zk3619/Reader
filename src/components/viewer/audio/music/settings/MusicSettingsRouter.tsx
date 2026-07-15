@@ -3,30 +3,20 @@
  */
 
 import { Match, Switch, type Component } from 'solid-js';
+import { MusicSettingsTheme } from '@/components/viewer/audio/music/settings/MusicSettingsTheme';
 import { MusicSettingsBasic } from '@/components/viewer/audio/music/settings/MusicSettingsBasic';
 import { MusicSettingsPlay } from '@/components/viewer/audio/music/settings/MusicSettingsPlay';
 import { MusicSettingsPlayDetail } from '@/components/viewer/audio/music/settings/MusicSettingsPlayDetail';
 import { MusicSettingsSearch } from '@/components/viewer/audio/music/settings/MusicSettingsSearch';
 import { MusicSettingsList } from '@/components/viewer/audio/music/settings/MusicSettingsList';
 import { MusicSettingsDownload } from '@/components/viewer/audio/music/settings/MusicSettingsDownload';
-import { MusicSettingsSync } from '@/components/viewer/audio/music/settings/MusicSettingsSync';
-import { MusicSettingsBackup } from '@/components/viewer/audio/music/settings/MusicSettingsBackup';
-import { MusicSettingsOther } from '@/components/viewer/audio/music/settings/MusicSettingsOther';
-import { MusicSettingsDesktop } from '@/components/viewer/audio/music/settings/MusicSettingsDesktop';
 import { MusicSettingsDesktopLyric } from '@/components/viewer/audio/music/settings/MusicSettingsDesktopLyric';
+import { MusicSettingsHotKey } from '@/components/viewer/audio/music/settings/MusicSettingsHotKey';
+import { MusicSettingsServices } from '@/components/viewer/audio/music/settings/MusicSettingsServices';
+import { MusicSettingsDataMaintenance } from '@/components/viewer/audio/music/settings/MusicSettingsDataMaintenance';
+import type { MusicSettingsSection } from '@/components/viewer/audio/music/settings/music-settings-sections';
 
-export type MusicSettingsSection =
-  | 'basic'
-  | 'play'
-  | 'playDetail'
-  | 'desktopLyric'
-  | 'search'
-  | 'list'
-  | 'download'
-  | 'sync'
-  | 'desktop'
-  | 'backup'
-  | 'other';
+export type { MusicSettingsSection } from '@/components/viewer/audio/music/settings/music-settings-sections';
 
 export interface MusicSettingsRouterProps {
   section: MusicSettingsSection;
@@ -34,6 +24,9 @@ export interface MusicSettingsRouterProps {
 
 export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) => (
   <Switch>
+    <Match when={props.section === 'theme'}>
+      <MusicSettingsTheme />
+    </Match>
     <Match when={props.section === 'basic'}>
       <MusicSettingsBasic />
     </Match>
@@ -55,17 +48,14 @@ export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) 
     <Match when={props.section === 'download'}>
       <MusicSettingsDownload />
     </Match>
-    <Match when={props.section === 'sync'}>
-      <MusicSettingsSync />
+    <Match when={props.section === 'hotKey'}>
+      <MusicSettingsHotKey />
     </Match>
-    <Match when={props.section === 'desktop'}>
-      <MusicSettingsDesktop />
+    <Match when={props.section === 'services'}>
+      <MusicSettingsServices />
     </Match>
-    <Match when={props.section === 'backup'}>
-      <MusicSettingsBackup />
-    </Match>
-    <Match when={props.section === 'other'}>
-      <MusicSettingsOther />
+    <Match when={props.section === 'dataMaintenance'}>
+      <MusicSettingsDataMaintenance />
     </Match>
   </Switch>
 );

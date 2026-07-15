@@ -41,13 +41,12 @@ import {
   subscribeMusicSettings,
 } from '@/lib/media/audio/music-settings';
 import {
-  QUALITY_LABELS,
+  QUALITY_PREFERENCE_LABELS,
   setPlayQuality,
-  getPlayQuality,
-  listPlayQualityOptions,
+  listPlayQualityPreferenceOptions,
+  type MusicQualityPreference,
 } from '@/lib/media/audio/music-quality';
 import type { LyricTrackKind } from '@/lib/media/audio/lyric-types';
-import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { cn } from '@/lib/utils';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
 import { BUILTIN_SOURCE_LABELS } from '@/lib/media/audio/online/source-router';
@@ -56,6 +55,8 @@ import { viewerStore } from '@/stores/viewer';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
+import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
+import { MusicAudioVisualizer } from '@/components/viewer/audio/music/hub/MusicAudioVisualizer';
 
 const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
 const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
@@ -79,6 +80,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     getMusicSettings().eqPreset ?? 'flat',
   );
   const [playSpeed, setPlaySpeed] = createSignal(getMusicSettings().playSpeed ?? 1);
+  const [musicSettings, setMusicSettingsSignal] = createSignal(getMusicSettings());
   const [altSources, setAltSources] = createSignal<AudioTrack[]>([]);
   const [altLoading, setAltLoading] = createSignal(false);
 
@@ -86,6 +88,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     const unsubscribe = subscribeMusicSettings((settings) => {
       setPlaySpeed(settings.playSpeed);
       setEqPreset(settings.eqPreset);
+      setMusicSettingsSignal(settings);
     });
     onCleanup(unsubscribe);
   });
@@ -134,16 +137,17 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
 
   const applyEq = (preset: keyof typeof EQ_PRESETS) => {
     setEqPreset(preset);
-    setMusicSettings({ eqPreset: preset });
+    setMusicSettings({ eqPreset: preset, eqCustomGains: null });
     props.player.getWebAudio()?.applyEqPreset(preset);
   };
 
   return (
-    <MusicHubPageShell
-      section="nowPlaying"
-      title={track()?.name ?? '正在播放'}
-      description={track()?.artist ?? '当前曲目与播放控制'}
-    >
+    <ThemeTargetHost target="music.playDetail">
+      <MusicHubPageShell
+        section="nowPlaying"
+        title={track()?.name ?? '正在播放'}
+        description={track()?.artist ?? '当前曲目与播放控制'}
+      >
       <div class="flex min-h-0 w-full flex-1 flex-col items-center gap-4 pb-4">
         <Show when={track()?.meta?.coverUrl}>
           <img
@@ -171,20 +175,24 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               bundle={props.player.fetchedLyricBundle()}
               lyricTrack={props.player.lyricTrack()}
               positionSec={props.player.player.currentTime()}
-              lyricOffset={getMusicSettings().lyricOffset ?? 0}
-              showTranslation={getMusicSettings().showLyricTranslation !== false}
-              showRoma={getMusicSettings().showLyricRoma !== false}
-              secondaryOrder={getMusicSettings().lyricSecondaryOrder}
-              align={getMusicSettings().playDetailLyricAlign}
-              fontSize={getMusicSettings().playDetailLyricFontSize}
-              zoomActiveLyric={getMusicSettings().playDetailZoomActiveLyric}
+              lyricOffset={musicSettings().lyricOffset ?? 0}
+              showTranslation={musicSettings().showLyricTranslation !== false}
+              showRoma={musicSettings().showLyricRoma !== false}
+              secondaryOrder={musicSettings().lyricSecondaryOrder}
+              align={musicSettings().playDetailLyricAlign}
+              fontSize={musicSettings().playDetailLyricFontSize}
+              zoomActiveLyric={musicSettings().playDetailZoomActiveLyric}
+              scrollDelayMs={musicSettings().playDetailLyricScrollDelayMs}
               onSeek={
-                getMusicSettings().playDetailAllowLyricSeek
+                musicSettings().playDetailAllowLyricSeek
                   ? (positionSec) =>
                       props.player.player.seekTo(positionSec, props.player.player.playing())
                   : undefined
               }
             />
+            <Show when={musicSettings().audioVisualizationEnabled}>
+              <MusicAudioVisualizer engine={props.player.getWebAudio} />
+            </Show>
             <div class="flex flex-wrap items-center justify-center gap-2">
               <MusicAppSelect
                 value={props.player.lyricTrack()}
@@ -193,7 +201,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
                   setMusicSettings({ lyricTrack: kind as LyricTrackKind });
                 }}
                 options={LYRIC_TRACKS.filter((k) => {
-                  const s = getMusicSettings();
+                  const s = musicSettings();
                   if (k === 'tlyric' && s.showLyricTranslation === false) return false;
                   if (k === 'rlyric' && s.showLyricRoma === false) return false;
                   if (k === 'lxlyric' && s.lyricUseLxLyric === false) return false;
@@ -205,14 +213,10 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
                 aria-label="歌词轨"
               />
               <MusicAppSelect
-                value={
-                  listPlayQualityOptions().includes(getPlayQuality())
-                    ? getPlayQuality()
-                    : (listPlayQualityOptions()[0] ?? getPlayQuality())
-                }
-                onChange={(v) => setPlayQuality(v as MusicQuality)}
-                options={listPlayQualityOptions()}
-                optionLabel={(v) => QUALITY_LABELS[v as MusicQuality] ?? v}
+                value={musicSettings().playQualityPreference}
+                onChange={(v) => setPlayQuality(v as MusicQualityPreference)}
+                options={listPlayQualityPreferenceOptions()}
+                optionLabel={(v) => QUALITY_PREFERENCE_LABELS[v]}
                 layout="compact"
                 triggerClass="h-8 w-24 text-xs"
                 aria-label="播放音质"
@@ -244,7 +248,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               </span>
               <Slider
                 class="flex-1"
-                disabled={!getMusicSettings().allowProgressBarSeek}
+                disabled={!musicSettings().allowProgressBarSeek}
                 minValue={0}
                 maxValue={Math.max(props.player.player.duration(), 1)}
                 step={0.1}
@@ -334,6 +338,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         </Show>
       </div>
       <MusicQueuePanel open={queueOpen()} onOpenChange={setQueueOpen} />
-    </MusicHubPageShell>
+      </MusicHubPageShell>
+    </ThemeTargetHost>
   );
 };

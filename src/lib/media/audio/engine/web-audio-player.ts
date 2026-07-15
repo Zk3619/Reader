@@ -15,12 +15,22 @@ export interface WebAudioPlayerOptions {
   audioElement: HTMLAudioElement;
   gain?: number;
   eqPreset?: keyof typeof EQ_PRESETS;
+  eqCustomGains?: number[] | null;
+  outputDeviceId?: string;
+  maxChannels?: number;
+}
+
+export interface AudioOutputDevice {
+  deviceId: string;
+  label: string;
+  isDefault: boolean;
 }
 
 export class WebAudioPlayerEngine {
   private ctx: AudioContext | null = null;
   private source: MediaElementAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
+  private analyserNode: AnalyserNode | null = null;
   private eqNodes: BiquadFilterNode[] = [];
   private audioEl: HTMLAudioElement;
 
@@ -28,6 +38,9 @@ export class WebAudioPlayerEngine {
     this.audioEl = options.audioElement;
     const savedGain = readSavedGain();
     this.ensureGraph(options.gain ?? savedGain, options.eqPreset ?? 'flat');
+    if (options.eqCustomGains) this.applyCustomEq(options.eqCustomGains);
+    this.setMaxChannels(options.maxChannels ?? 2);
+    if (options.outputDeviceId) void this.setOutputDevice(options.outputDeviceId);
   }
 
   private ensureGraph(gain: number, preset: keyof typeof EQ_PRESETS): void {
@@ -53,8 +66,11 @@ export class WebAudioPlayerEngine {
       prev = node;
       return node;
     });
+    this.analyserNode = this.ctx.createAnalyser();
+    this.analyserNode.fftSize = 256;
     prev.connect(this.gainNode);
-    this.gainNode.connect(this.ctx.destination);
+    this.gainNode.connect(this.analyserNode);
+    this.analyserNode.connect(this.ctx.destination);
     this.applyEqPreset(preset);
   }
 
@@ -63,6 +79,63 @@ export class WebAudioPlayerEngine {
     for (let i = 0; i < this.eqNodes.length; i++) {
       this.eqNodes[i]!.gain.value = gains[i] ?? 0;
     }
+  }
+
+  applyCustomEq(gains: readonly number[]): void {
+    for (let i = 0; i < this.eqNodes.length; i++) {
+      this.eqNodes[i]!.gain.value = Math.max(-12, Math.min(12, gains[i] ?? 0));
+    }
+  }
+
+  async setOutputDevice(deviceId: string): Promise<boolean> {
+    const target = this.audioEl as HTMLAudioElement & {
+      setSinkId?: (sinkId: string) => Promise<void>;
+    };
+    if (!target.setSinkId) return false;
+    try {
+      await target.setSinkId(deviceId || 'default');
+      return true;
+    } catch {
+      if (deviceId) {
+        await target.setSinkId('default').catch(() => undefined);
+      }
+      return false;
+    }
+  }
+
+  setMaxChannels(channels: number): void {
+    if (!this.ctx) return;
+    const destination = this.ctx.destination;
+    const max = Math.max(1, Math.min(destination.maxChannelCount || 2, Math.round(channels)));
+    try {
+      destination.channelCountMode = 'explicit';
+      destination.channelCount = max;
+    } catch {
+      // 部分 WebView 不允许修改 destination 声道数。
+    }
+  }
+
+  getFrequencyData(): Uint8Array | null {
+    if (!this.analyserNode) return null;
+    const data = new Uint8Array(this.analyserNode.frequencyBinCount);
+    this.analyserNode.getByteFrequencyData(data);
+    return data;
+  }
+
+  static supportsOutputSelection(): boolean {
+    return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+  }
+
+  static async enumerateOutputDevices(): Promise<AudioOutputDevice[]> {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+      .filter((device) => device.kind === 'audiooutput')
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `音频输出 ${index + 1}`,
+        isDefault: device.deviceId === 'default',
+      }));
   }
 
   setGain(value: number): void {
@@ -84,6 +157,7 @@ export class WebAudioPlayerEngine {
       this.source?.disconnect();
       for (const n of this.eqNodes) n.disconnect();
       this.gainNode?.disconnect();
+      this.analyserNode?.disconnect();
       void this.ctx?.close();
     } catch {
       // ignore
@@ -91,6 +165,7 @@ export class WebAudioPlayerEngine {
     this.ctx = null;
     this.source = null;
     this.gainNode = null;
+    this.analyserNode = null;
     this.eqNodes = [];
   }
 }

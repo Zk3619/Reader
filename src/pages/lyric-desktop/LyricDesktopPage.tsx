@@ -4,21 +4,28 @@
 
 import { createEffect, createSignal, onCleanup, onMount, type Component } from 'solid-js';
 import { AudioLyricPanel } from '@/components/viewer/audio/AudioLyricPanel';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import {
+  getMusicSettings,
+  subscribeMusicSettings,
+} from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
+import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 
 export const LyricDesktopPage: Component = () => {
   const [title, setTitle] = createSignal('');
   const [artist, setArtist] = createSignal('');
   const [lyricBundle, setLyricBundle] = createSignal<LyricBundle | null>(null);
   const [positionSec, setPositionSec] = createSignal(0);
+  const [settings, setSettings] = createSignal(getMusicSettings());
+  const [playing, setPlaying] = createSignal(false);
+  const [mainFullscreen, setMainFullscreen] = createSignal(false);
 
   const lyricTrack = (): LyricTrackKind =>
-    getMusicSettings().desktopLyricTrack ?? getMusicSettings().lyricTrack ?? 'lxlyric';
+    settings().desktopLyricTrack ?? settings().lyricTrack ?? 'lxlyric';
 
   const startDrag = async (e: MouseEvent) => {
-    if (!isTauri() || e.button !== 0) return;
+    if (!isTauri() || e.button !== 0 || settings().desktopLyricLocked) return;
     try {
       const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
       await getCurrentWebviewWindow().startDragging();
@@ -51,6 +58,8 @@ export const LyricDesktopPage: Component = () => {
         lyric?: string;
         lyricAll?: LyricBundle;
         positionSec?: number;
+        playing?: boolean;
+        fullscreen?: boolean;
       }>('desktop-lyric-update', (e) => {
         if (e.payload.title) setTitle(e.payload.title);
         if (e.payload.artist) setArtist(e.payload.artist);
@@ -60,6 +69,8 @@ export const LyricDesktopPage: Component = () => {
           setLyricBundle({ lyric: e.payload.lyric });
         }
         if (e.payload.positionSec != null) setPositionSec(e.payload.positionSec);
+        if (e.payload.playing != null) setPlaying(e.payload.playing);
+        if (e.payload.fullscreen != null) setMainFullscreen(e.payload.fullscreen);
       }).then((fn) => {
         unlistenUpdate = fn;
       });
@@ -83,24 +94,46 @@ export const LyricDesktopPage: Component = () => {
         invoke('set_desktop_lyric_ignore_cursor', { ignore: true }),
       );
     }
+    const unsubscribeSettings = subscribeMusicSettings(setSettings);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'reader_music_settings') setSettings(getMusicSettings());
+    };
+    window.addEventListener('storage', handleStorage);
+    const current = getMusicSettings();
+    void import('@tauri-apps/api/core').then(({ invoke }) =>
+      invoke('set_desktop_lyric_window_options', {
+        alwaysOnTop: current.desktopLyricAlwaysOnTop,
+        locked: current.desktopLyricLocked,
+      }),
+    );
 
     onCleanup(() => {
       unlistenUpdate?.();
       unlistenCmd?.();
+      unsubscribeSettings();
+      window.removeEventListener('storage', handleStorage);
     });
   });
 
   createEffect(() => {
-    const opacity = getMusicSettings().desktopLyricOpacity ?? 0.85;
+    const opacity = settings().desktopLyricOpacity ?? 0.85;
     document.body.style.background = `rgba(0,0,0,${opacity})`;
   });
 
-  const fontSize = () => getMusicSettings().desktopLyricFontSize ?? 20;
+  const fontSize = () => settings().desktopLyricFontSize ?? 20;
+  const hidden = () =>
+    (settings().desktopLyricHideWhenPaused && !playing()) ||
+    (settings().desktopLyricHideWhenFullscreen && mainFullscreen());
 
   return (
-    <div
+    <ThemeTargetHost
+      target="music.desktopLyric"
       class="flex h-screen w-screen select-none items-center justify-center p-4 text-white"
-      style={{ 'font-size': `${fontSize()}px` }}
+      style={{
+        'font-size': `${fontSize()}px`,
+        visibility: hidden() ? 'hidden' : 'visible',
+        'font-family': settings().desktopLyricFontFamily || undefined,
+      }}
       onMouseDown={(e) => void startDrag(e)}
       onDblClick={() => void emitCommand('toggle-penetrate')}
     >
@@ -112,19 +145,26 @@ export const LyricDesktopPage: Component = () => {
           bundle={lyricBundle()}
           lyricTrack={lyricTrack()}
           positionSec={positionSec()}
-          lyricOffset={getMusicSettings().lyricOffset}
-          showTranslation={getMusicSettings().showLyricTranslation}
-          showRoma={getMusicSettings().showLyricRoma}
-          secondaryOrder={getMusicSettings().lyricSecondaryOrder}
-          align={getMusicSettings().desktopLyricAlign}
-          fontSize={getMusicSettings().desktopLyricFontSize}
-          zoomActiveLyric={getMusicSettings().desktopLyricZoomActive}
-          singleLine={getMusicSettings().desktopLyricSingleLine}
-          maxLines={getMusicSettings().desktopLyricMaxLines}
-          playedColor={getMusicSettings().desktopLyricPlayedColor}
-          unplayedColor={getMusicSettings().desktopLyricUnplayedColor}
+          lyricOffset={settings().lyricOffset}
+          showTranslation={settings().showLyricTranslation}
+          showRoma={settings().showLyricRoma}
+          secondaryOrder={settings().lyricSecondaryOrder}
+          align={settings().desktopLyricAlign}
+          fontSize={settings().desktopLyricFontSize}
+          zoomActiveLyric={settings().desktopLyricZoomActive}
+          singleLine={settings().desktopLyricSingleLine}
+          maxLines={settings().desktopLyricMaxLines}
+          playedColor={settings().desktopLyricPlayedColor}
+          unplayedColor={settings().desktopLyricUnplayedColor}
+          scrollPosition={settings().desktopLyricScrollPosition}
+          fontFamily={settings().desktopLyricFontFamily}
+          lineHeight={settings().desktopLyricLineHeight}
+          textShadow={settings().desktopLyricShadow}
+          bold={settings().desktopLyricBold}
+          wrap={settings().desktopLyricWrap}
+          direction={settings().desktopLyricDirection}
         />
       </div>
-    </div>
+    </ThemeTargetHost>
   );
 };

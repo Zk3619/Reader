@@ -21,9 +21,23 @@ export function invalidateDislikeRulesCache(): void {
   cachedRules = null;
 }
 
+export function isValidDislikePattern(pattern: string): boolean {
+  try {
+    new RegExp(pattern, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function matchField(track: AudioTrack, field: string, pattern: string): boolean {
   if (!pattern.trim()) return false;
-  const re = new RegExp(pattern, 'i');
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern, 'i');
+  } catch {
+    return false;
+  }
   switch (field) {
     case 'name':
       return re.test(track.name);

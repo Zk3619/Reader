@@ -6,10 +6,11 @@
  */
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
 import { resolveOnlineTrackUrl } from '@/lib/media/audio/online/source-router';
 import { getPlayQuality, qualityFallbackChain } from '@/lib/media/audio/music-quality';
+import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import {
   MusicPlaybackStatusText,
   formatToggleSourceTry,
@@ -19,8 +20,6 @@ import * as kw from '@/lib/media/audio/online/sources/kw';
 import { getBiliSongUrl } from '@/lib/media/audio/platform/api/bili-ytm';
 import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
-
-const FALLBACK_KEY = 'reader_audio_fallback_enabled';
 
 export type ToggleSourceCallbacks = {
   onStatus?: (message: string | null) => void;
@@ -34,20 +33,11 @@ export function notifyToggleTry(track: AudioTrack, callbacks?: ToggleSourceCallb
 }
 
 export function isFallbackResolverEnabled(): boolean {
-  if (!getMusicSettings().fallbackUrl) return false;
-  try {
-    return localStorage.getItem(FALLBACK_KEY) !== '0';
-  } catch {
-    return true;
-  }
+  return getMusicSettings().fallbackUrl;
 }
 
 export function setFallbackResolverEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem(FALLBACK_KEY, enabled ? '1' : '0');
-  } catch {
-    // ignore
-  }
+  setMusicSettings({ fallbackUrl: enabled });
 }
 
 /** 对齐 lx getOtherSource / findMusic：同一首歌在其它平台的匹配曲目 */
@@ -61,8 +51,9 @@ export async function getOtherSourceTracks(track: AudioTrack): Promise<AudioTrac
 export async function tryResolveBuiltinUrl(
   track: AudioTrack,
   cookies?: string,
+  quality: MusicQuality = getPlayQuality(track),
 ): Promise<string | null> {
-  const qualities = qualityFallbackChain(getPlayQuality());
+  const qualities = qualityFallbackChain(quality);
   for (const q of qualities) {
     const url = await resolveOnlineTrackUrl(track, cookies, { skipCache: true, quality: q });
     if (url) return url;

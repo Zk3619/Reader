@@ -199,7 +199,7 @@ export async function resolveOnlineTrackUrl(
   cookies?: string,
   options?: { skipCache?: boolean; quality?: import('@/lib/media/audio/lyric-types').MusicQuality },
 ): Promise<string | null> {
-  const quality = options?.quality ?? getPlayQuality();
+  const quality = options?.quality ?? getPlayQuality(track);
   if (track.source === 'netease' || track.source === 'bili' || track.source === 'ytm') {
     return resolvePlatformStreamUrl(track, cookies, options);
   }
@@ -234,7 +234,7 @@ export async function resolveOnlineLyricFull(track: AudioTrack): Promise<LyricBu
   return resolveOnlineLyricBundle(track);
 }
 
-export async function resolveOnlinePic(track: AudioTrack): Promise<string | null> {
+async function resolveTrackSourcePic(track: AudioTrack): Promise<string | null> {
   const cover = track.meta.coverUrl;
   if (typeof cover === 'string' && cover.trim()) return cover;
 
@@ -268,15 +268,17 @@ export async function resolveOnlinePic(track: AudioTrack): Promise<string | null
     default:
       break;
   }
-  if (pic) return pic;
+  return pic;
+}
 
+export async function resolveOnlinePic(track: AudioTrack): Promise<string | null> {
+  const pic = await resolveTrackSourcePic(track);
+  if (pic) return pic;
   if (!getMusicSettings().fallbackPic) return null;
   const { findMusic } = await import('@/lib/media/audio/music-sdk/find-music');
   const others = await findMusic(track);
   for (const alt of others) {
-    const altCover = alt.meta.coverUrl;
-    if (typeof altCover === 'string' && altCover.trim()) return altCover;
-    const altPic = await resolveOnlinePic(alt);
+    const altPic = await resolveTrackSourcePic(alt);
     if (altPic) return altPic;
   }
   return null;

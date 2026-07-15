@@ -10,6 +10,8 @@ import {
   type Component,
 } from 'solid-js';
 import {
+  FastForward,
+  Gauge,
   ListMusic,
   ListPlus,
   Music2,
@@ -17,6 +19,7 @@ import {
   Play,
   Repeat,
   Repeat1,
+  Rewind,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -50,7 +53,13 @@ import {
   playModeLabel,
   setMusicPlayMode,
 } from '@/lib/media/audio/music-play-config';
+import {
+  getMusicSettings,
+  setMusicSettings,
+  subscribeMusicSettings,
+} from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
   { value: AudioPlayMode.listEndStop, label: '列表结束停止', icon: Square },
@@ -95,9 +104,14 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const offline = createMemo(() => getMusicOfflineMode());
   const [addOpen, setAddOpen] = createSignal(false);
   const [volumeOpen, setVolumeOpen] = createSignal(false);
+  const [speedOpen, setSpeedOpen] = createSignal(false);
+  const [playSpeed, setPlaySpeed] = createSignal(getMusicSettings().playSpeed);
+  const [speedInput, setSpeedInput] = createSignal(String(playSpeed()));
   const [desktopLyricOpen, setDesktopLyricOpen] = createSignal(false);
   let volumeOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let volumeCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  let speedOpenTimer: ReturnType<typeof setTimeout> | undefined;
+  let speedCloseTimer: ReturnType<typeof setTimeout> | undefined;
 
   const lyricLine = createMemo(() =>
     currentLyricLine(
@@ -136,7 +150,51 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     if (volumeCloseTimer) clearTimeout(volumeCloseTimer);
     volumeCloseTimer = undefined;
   };
-  onCleanup(clearVolumeTimers);
+  const clearSpeedTimers = () => {
+    if (speedOpenTimer) clearTimeout(speedOpenTimer);
+    if (speedCloseTimer) clearTimeout(speedCloseTimer);
+    speedOpenTimer = undefined;
+    speedCloseTimer = undefined;
+  };
+  const scheduleSpeedOpen = () => {
+    if (speedOpen()) return;
+    clearSpeedTimers();
+    speedOpenTimer = setTimeout(() => setSpeedOpen(true), 350);
+  };
+  const scheduleSpeedClose = () => {
+    if (speedOpenTimer) clearTimeout(speedOpenTimer);
+    speedOpenTimer = undefined;
+    if (!speedOpen()) return;
+    speedCloseTimer = setTimeout(() => setSpeedOpen(false), 300);
+  };
+  const keepSpeedOpen = () => {
+    if (speedCloseTimer) clearTimeout(speedCloseTimer);
+    speedCloseTimer = undefined;
+  };
+  const applyPlaySpeed = (value: number) => {
+    const speed = Math.max(0.5, Math.min(3, value));
+    setPlaySpeed(speed);
+    setSpeedInput(String(speed));
+    props.player.player.setPlaybackRate(speed);
+    setMusicSettings({ playSpeed: speed });
+  };
+  const commitSpeedInput = () => {
+    const value = Number(speedInput());
+    if (!Number.isFinite(value)) {
+      setSpeedInput(String(playSpeed()));
+      return;
+    }
+    applyPlaySpeed(value);
+  };
+  const unsubscribeSettings = subscribeMusicSettings((settings) => {
+    setPlaySpeed(settings.playSpeed);
+    setSpeedInput(String(settings.playSpeed));
+  });
+  onCleanup(() => {
+    clearVolumeTimers();
+    clearSpeedTimers();
+    unsubscribeSettings();
+  });
 
   const applyPlayMode = (mode: AudioPlayMode) => {
     setMusicPlayMode(mode);
@@ -294,6 +352,73 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
               </PopoverContent>
             </Popover>
           </div>
+          <div
+            class="hidden md:inline-flex"
+            onMouseEnter={scheduleSpeedOpen}
+            onMouseLeave={scheduleSpeedClose}
+          >
+            <Popover
+              open={speedOpen()}
+              onOpenChange={(open) => {
+                setSpeedOpen(open);
+                if (open) setSpeedInput(String(playSpeed()));
+              }}
+            >
+              <PopoverTrigger
+                as={Button}
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9"
+                aria-label={`播放倍速 ${playSpeed()} 倍`}
+              >
+                <Gauge class="h-4 w-4" />
+              </PopoverTrigger>
+              <PopoverContent
+                class="w-52 p-3"
+                onMouseEnter={keepSpeedOpen}
+                onMouseLeave={scheduleSpeedClose}
+              >
+                <div class="space-y-3">
+                  <div class="flex items-center px-1 gap-3">
+                    <Slider
+                      class="flex-1"
+                      minValue={0.5}
+                      maxValue={3}
+                      step={0.05}
+                      value={[playSpeed()]}
+                      onChange={(value) => applyPlaySpeed(value[0] ?? 1)}
+                    >
+                      <SliderTrack>
+                        <SliderFill />
+                        <SliderThumb />
+                      </SliderTrack>
+                    </Slider>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <AppTextFieldBareInput
+                      type="number"
+                      min="0.5"
+                      max="3"
+                      step="0.01"
+                      value={speedInput()}
+                      class="h-8 text-sm tabular-nums"
+                      fieldClass="flex-1"
+                      aria-label="精调播放倍速"
+                      onInput={(event) => setSpeedInput(event.currentTarget.value)}
+                      onBlur={commitSpeedInput}
+                      onKeyDown={(event: KeyboardEvent) => {
+                        if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
+                          event.target.blur();
+                        }
+                      }}
+                    />
+                    <span class="text-sm text-muted-foreground">x</span>
+                  </div>
+                  <p class="text-xs text-muted-foreground">范围 0.5x–3x</p>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
               <MultiSwitch
@@ -311,6 +436,21 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             <AppTooltipContent layer="viewer">
               {playModeLabel(props.player.musicPlayMode())}
             </AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger as="div" class="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9"
+                aria-label="快退 5 秒"
+                disabled={!track()}
+                onClick={() => props.player.player.skipBy(-5)}
+              >
+                <Rewind class="h-4 w-4" />
+              </Button>
+            </AppTooltipTrigger>
+            <AppTooltipContent layer="viewer">快退 5 秒</AppTooltipContent>
           </AppTooltip>
           <AppTooltip>
             <AppTooltipTrigger as="div" class="inline-flex">
@@ -363,6 +503,21 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
               </Button>
             </AppTooltipTrigger>
             <AppTooltipContent layer="viewer">下一首</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger as="div" class="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9"
+                aria-label="快进 5 秒"
+                disabled={!track()}
+                onClick={() => props.player.player.skipBy(5)}
+              >
+                <FastForward class="h-4 w-4" />
+              </Button>
+            </AppTooltipTrigger>
+            <AppTooltipContent layer="viewer">快进 5 秒</AppTooltipContent>
           </AppTooltip>
         </div>
       </div>

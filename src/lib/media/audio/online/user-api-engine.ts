@@ -336,12 +336,22 @@ export async function importUserApiScript(input: {
 let sessionUpdateAlertWarmed = false;
 
 /** 按初始化策略挑选待预热音源（永不包含未启用） */
+export function shouldInitializeUserApiScriptForMode(
+  mode: UserApiInitMode,
+  scriptId: string,
+  activeId: string | null,
+): boolean {
+  return mode === 'allEnabled' || scriptId === activeId;
+}
+
 export function listUserApiScriptsForWarmup(mode?: UserApiInitMode): UserApiScript[] {
   const initMode = mode ?? getUserApiInitMode();
   const enabled = listUserApiScripts().filter((s) => s.enabled);
   if (initMode === 'allEnabled') return enabled;
   const activeId = getDefaultUserApiId();
-  const active = activeId ? enabled.find((s) => s.id === activeId) : undefined;
+  const active = enabled.find((s) =>
+    shouldInitializeUserApiScriptForMode(initMode, s.id, activeId),
+  );
   if (active) return [active];
   return enabled[0] ? [enabled[0]] : [];
 }
@@ -354,13 +364,14 @@ export function listUserApiScriptsForWarmup(mode?: UserApiInitMode): UserApiScri
  * - forceUpdateCheck：切换策略后强制对各目标重载 runtime 以检查更新
  */
 export async function ensureUserApiScriptsInitialized(options?: {
+  mode?: UserApiInitMode;
   forceUpdateCheck?: boolean;
 }): Promise<void> {
   if (options?.forceUpdateCheck) {
     sessionUpdateAlertWarmed = false;
   }
 
-  const targets = listUserApiScriptsForWarmup();
+  const targets = listUserApiScriptsForWarmup(options?.mode);
   for (const script of targets) {
     if (script.initStatus === 'failed') {
       continue;
@@ -409,7 +420,16 @@ export function setUserApiScriptEnabled(id: string, enabled: boolean): void {
     if (!getDefaultUserApiId()) setDefaultUserApiId(id);
     persistScripts();
     notifyScriptsChanged();
-    if (!isUserApiInitReady(script) && script.initStatus !== 'pending') {
+    const shouldInitialize = shouldInitializeUserApiScriptForMode(
+      getUserApiInitMode(),
+      id,
+      getDefaultUserApiId(),
+    );
+    if (
+      shouldInitialize &&
+      !isUserApiInitReady(script) &&
+      (script.initStatus !== 'pending' || !initInFlight.has(id))
+    ) {
       void initUserApiScript(id).then((result) => {
         if (result.ok) return;
         const cur = scripts.get(id);
@@ -451,7 +471,7 @@ export function setUserApiDefaultScript(id: string | null): void {
     return;
   }
   const script = scripts.get(id);
-  if (!script || !isUserApiInitReady(script)) return;
+  if (!script) return;
   setDefaultUserApiId(id);
   // 设为活跃时自动启用（对齐 lx 单一 apiSource）
   if (!script.enabled) {
@@ -459,6 +479,16 @@ export function setUserApiDefaultScript(id: string | null): void {
     persistScripts();
   }
   notifyScriptsChanged();
+  if (!isUserApiInitReady(script) && !initInFlight.has(id)) {
+    void initUserApiScript(id).then((result) => {
+      if (result.ok) return;
+      const current = scripts.get(id);
+      const name = current?.name ?? id;
+      const message = toUserFacingInitError(result.error ?? '初始化失败');
+      removeUserApiScript(id);
+      notifyUserApiInitFailed({ name, message });
+    });
+  }
 }
 
 /** 活跃源是否在熔断保护白名单（用户默认源永不因熔断被跳过） */
@@ -502,23 +532,40 @@ export function listUserApiScripts(): UserApiScript[] {
   return [...scripts.values()];
 }
 
-/** 取链顺序：当前活跃源 → 其他启用源（含尚未 init 完成的启用项；失败态除外） */
-export function listEnabledUserApiScriptIdsForUrl(): string[] {
-  const enabled = listUserApiScripts().filter(
-    (s) => s.enabled && s.initStatus !== 'failed',
+export function selectReadyUserApiScriptIdsForPlayback(
+  candidates: Array<Pick<UserApiScript, 'id' | 'enabled' | 'initStatus'>>,
+  activeId: string | null,
+  includeFallback: boolean,
+): string[] {
+  const enabled = candidates.filter(
+    (s) => s.enabled && s.initStatus === 'ready',
   );
   if (!enabled.length) return [];
-  const defaultId = getDefaultUserApiId();
   const ranked = [...enabled].sort((a, b) => {
-    if (a.id === defaultId) return -1;
-    if (b.id === defaultId) return 1;
-    // 已就绪优先；其余保持导入顺序（不按脚本内容打分）
-    const readyA = a.initStatus === 'ready' ? 1 : 0;
-    const readyB = b.initStatus === 'ready' ? 1 : 0;
-    if (readyA !== readyB) return readyB - readyA;
+    if (a.id === activeId) return -1;
+    if (b.id === activeId) return 1;
     return 0;
   });
-  return ranked.map((s) => s.id);
+  return ranked
+    .filter((script) => includeFallback || script.id === activeId)
+    .map((script) => script.id);
+}
+
+/** 取链顺序：当前活跃源 → 其他已启用且初始化成功的源。 */
+export function listEnabledUserApiScriptIdsForUrl(): string[] {
+  return selectReadyUserApiScriptIdsForPlayback(
+    listUserApiScripts(),
+    getDefaultUserApiId(),
+    true,
+  );
+}
+
+export function listUserApiScriptIdsForPlayback(includeFallback: boolean): string[] {
+  return selectReadyUserApiScriptIdsForPlayback(
+    listUserApiScripts(),
+    getDefaultUserApiId(),
+    includeFallback,
+  );
 }
 
 /** LX UserApi 脚本仅用于 URL/歌词解析，不支持搜索 */
@@ -739,7 +786,7 @@ export async function userApiMusicUrl(
   if (!script?.enabled) throw new Error(`UserApi ${scriptId} 未启用`);
   const source = platformSource ?? resolveLxPlatformSource(track);
   const preferred =
-    quality ?? (await import('@/lib/media/audio/music-quality')).getPlayQuality();
+    quality ?? (await import('@/lib/media/audio/music-quality')).getPlayQuality(track);
   const { qualityFallbackChain } = await import('@/lib/media/audio/music-quality');
 
   // 对齐 lx-music：只请求脚本登记的音质（无 wy_token 时小熊猫 wy 仅 128k）

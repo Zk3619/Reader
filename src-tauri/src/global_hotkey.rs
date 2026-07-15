@@ -36,6 +36,8 @@ mod imp {
                         "RIGHT" => Some(Code::ArrowRight),
                         "UP" => Some(Code::ArrowUp),
                         "DOWN" => Some(Code::ArrowDown),
+                        "[" | "BRACKETLEFT" => Some(Code::BracketLeft),
+                        "]" | "BRACKETRIGHT" => Some(Code::BracketRight),
                         c if c.len() == 1 => {
                             let ch = c.chars().next()?;
                             if ch.is_ascii_alphabetic() {

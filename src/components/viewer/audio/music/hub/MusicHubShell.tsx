@@ -13,6 +13,14 @@ import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-op
 import { playNextTrack, playPrevTrack } from '@/stores/viewer/media/audio';
 import { isTauri } from '@/lib/platform/detect';
 import { ensureUserApiScriptsInitialized } from '@/lib/media/audio/online/user-api-engine';
+import {
+  addTrackToLove,
+  isTrackInLove,
+  removeTrackFromLove,
+} from '@/lib/database/audio-library';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { startMusicOpenApi } from '@/lib/media/audio/platform/music-openapi-client';
+import { startLxSyncServer } from '@/lib/media/audio/sync/lx-sync-server';
 
 export interface MusicHubShellProps {
   active?: boolean | Accessor<boolean>;
@@ -25,10 +33,39 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   onMount(() => {
     // 先挂好更新弹窗订阅（组件内），再预热音源 runtime 触发 updateAlert
     void ensureUserApiScriptsInitialized();
-    const unreg = registerMusicOpenApiHandler((action, payload) => {
+    const serviceSettings = getMusicSettings();
+    if (isTauri() && serviceSettings.openApiEnabled && serviceSettings.openApiAutoStart) {
+      void startMusicOpenApi(
+        serviceSettings.openApiPort,
+        serviceSettings.openApiBindAddress,
+      ).catch((error) => console.warn('[music] OpenAPI 自动启动失败', error));
+    }
+    if (isTauri() && serviceSettings.localSyncEnabled && serviceSettings.localSyncAutoStart) {
+      void startLxSyncServer({ port: serviceSettings.localSyncPort }).catch((error) =>
+        console.warn('[music] Sync Server 自动启动失败', error),
+      );
+    }
+    let desktopLyricOpen = false;
+    const setCollected = async (requested?: boolean) => {
+      const track = hubPlayer.currentTrack();
+      if (!track) return;
+      const collected = requested ?? !(await isTrackInLove(track.id));
+      if (collected) await addTrackToLove(track.id);
+      else await removeTrackFromLove(track.id);
+      hubPlayer.setMusicCollected(collected);
+    };
+    const toggleDesktopLyric = async () => {
+      if (!isTauri()) return;
+      const { invoke } = await import('@tauri-apps/api/core');
+      desktopLyricOpen = !desktopLyricOpen;
+      await invoke(
+        desktopLyricOpen ? 'open_desktop_lyric_window' : 'close_desktop_lyric_window',
+      );
+    };
+    const handleAction = (action: string, payload: Record<string, unknown> = {}) => {
       switch (action) {
         case 'play':
-          hubPlayer.player.togglePlay();
+          if (!hubPlayer.player.playing()) hubPlayer.player.togglePlay();
           break;
         case 'pause':
           if (hubPlayer.player.playing()) hubPlayer.player.togglePlay();
@@ -49,62 +86,50 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
           if (Number.isFinite(vol)) hubPlayer.setMusicVolume(Math.max(0, Math.min(1, vol)));
           break;
         }
+        case 'vol_up':
+          hubPlayer.setMusicVolume(Math.min(1, hubPlayer.musicVolume() + 0.05));
+          break;
+        case 'vol_down':
+          hubPlayer.setMusicVolume(Math.max(0, hubPlayer.musicVolume() - 0.05));
+          break;
         case 'mute':
           hubPlayer.setMusicMuted(!hubPlayer.musicMuted());
           break;
+        case 'seek_forward':
+          hubPlayer.player.seekTo(hubPlayer.player.currentTime() + 10);
+          break;
+        case 'seek_back':
+          hubPlayer.player.seekTo(Math.max(0, hubPlayer.player.currentTime() - 10));
+          break;
         case 'collect':
-          void import('@/lib/database/audio-library').then(({ addTrackToLove, removeTrackFromLove }) => {
-            const t = hubPlayer.currentTrack();
-            if (!t) return;
-            if (payload.collect === false) void removeTrackFromLove(t.id);
-            else void addTrackToLove(t.id);
-          });
+          void setCollected(
+            typeof payload.collect === 'boolean' ? payload.collect : undefined,
+          );
+          break;
+        case 'lyric_toggle':
+          void toggleDesktopLyric();
           break;
         case 'lyric-all':
           break;
         default:
           break;
       }
-    });
+    };
+    const unreg = registerMusicOpenApiHandler(handleAction);
     let unlistenHotkey: (() => void) | undefined;
+    let cleanedUp = false;
     if (isTauri()) {
       void import('@tauri-apps/api/event').then(({ listen }) =>
         listen<{ action?: string }>('music-hotkey', (e) => {
-          switch (e.payload.action) {
-            case 'play':
-              hubPlayer.player.togglePlay();
-              break;
-            case 'pause':
-              if (hubPlayer.player.playing()) hubPlayer.player.togglePlay();
-              break;
-            case 'next':
-              void playNextTrack();
-              break;
-            case 'prev':
-              void playPrevTrack();
-              break;
-            case 'vol_up':
-              hubPlayer.setMusicVolume(Math.min(1, hubPlayer.musicVolume() + 0.05));
-              break;
-            case 'vol_down':
-              hubPlayer.setMusicVolume(Math.max(0, hubPlayer.musicVolume() - 0.05));
-              break;
-            case 'mute':
-              hubPlayer.setMusicMuted(!hubPlayer.musicMuted());
-              break;
-            case 'seek_forward':
-              hubPlayer.player.seekTo(hubPlayer.player.currentTime() + 10);
-              break;
-            case 'seek_back':
-              hubPlayer.player.seekTo(Math.max(0, hubPlayer.player.currentTime() - 10));
-              break;
-          }
+          handleAction(e.payload.action ?? '');
         }).then((fn) => {
-          unlistenHotkey = fn;
+          if (cleanedUp) fn();
+          else unlistenHotkey = fn;
         }),
       );
     }
     onCleanup(() => {
+      cleanedUp = true;
       unreg();
       unlistenHotkey?.();
     });

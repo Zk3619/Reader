@@ -237,3 +237,37 @@ pub fn set_keep_screen_on(app: tauri::AppHandle, seconds: i32) -> Result<(), Str
         Ok(())
     }
 }
+
+#[tauri::command]
+pub fn set_music_sleep_blocked(app: tauri::AppHandle, blocked: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let _ = &app;
+        use windows::Win32::System::Power::{
+            SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
+        };
+        unsafe {
+            SetThreadExecutionState(if blocked {
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+            } else {
+                ES_CONTINUOUS
+            });
+        }
+        return Ok(());
+    }
+    #[cfg(target_os = "android")]
+    {
+        if let Some(result) = crate::platform::android::display_brightness::with_android(
+            &app,
+            |android| android.set_keep_screen_on(if blocked { -1 } else { 0 }),
+        ) {
+            return result;
+        }
+        return Err("display reader plugin not initialized".into());
+    }
+    #[cfg(not(any(windows, target_os = "android")))]
+    {
+        let _ = (app, blocked);
+        Ok(())
+    }
+}

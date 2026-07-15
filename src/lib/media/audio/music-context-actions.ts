@@ -74,9 +74,12 @@ export async function downloadTrack(track: AudioTrack): Promise<void> {
   showAppToast({ title: '已加入下载队列', variant: 'success' });
 }
 
-export async function downloadTracks(tracks: AudioTrack[]): Promise<void> {
+export async function downloadTracks(tracks: AudioTrack[], playlistId?: string | null): Promise<void> {
   const downloadable = tracks.filter((track) => track.source !== 'local');
-  for (const track of downloadable) await enqueueTrackDownload(track);
+  const playlistName = playlistId
+    ? (await listPlaylistTargets()).find((playlist) => playlist.listId === playlistId)?.name
+    : undefined;
+  for (const track of downloadable) await enqueueTrackDownload(track, { playlistName });
   showAppToast({ title: `已加入下载队列 ${downloadable.length} 首`, variant: 'success' });
 }
 

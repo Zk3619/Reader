@@ -16,11 +16,18 @@ export async function stopMusicOpenApi(): Promise<void> {
   await invoke('stop_music_openapi');
 }
 
+export async function getMusicOpenApiStatus(): Promise<{ running: boolean }> {
+  if (!isTauri()) return { running: false };
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<{ running: boolean }>('get_music_openapi_status');
+}
+
 export function registerMusicOpenApiHandler(
   handler: (action: string, payload: Record<string, unknown>) => void,
 ): () => void {
   if (!isTauri()) return () => undefined;
   let unlisten: (() => void) | undefined;
+  let disposed = false;
   void import('@tauri-apps/api/event').then(({ listen }) =>
     listen<{ action?: string; payload?: Record<string, unknown> }>(
       'music-openapi-command',
@@ -29,8 +36,12 @@ export function registerMusicOpenApiHandler(
         handler(action, e.payload?.payload ?? {});
       },
     ).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     }),
   );
-  return () => unlisten?.();
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
 }

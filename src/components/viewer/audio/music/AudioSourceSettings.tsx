@@ -3,9 +3,7 @@ import { createSignal, For, onCleanup, onMount, Show, type Component } from 'sol
 import { LoaderCircle, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
-import { BUILTIN_SOURCES } from '@/lib/media/audio/online/source-router';
 import {
   getDefaultUserApiId,
   importUserApiScript,
@@ -18,18 +16,10 @@ import {
   ensureUserApiScriptsInitialized,
 } from '@/lib/media/audio/online/user-api-engine';
 import {
-  getMusicOfflineMode,
-  setMusicOfflineMode,
-} from '@/lib/media/audio/online/user-api-settings';
-import {
   getUserApiInitMode,
   setUserApiInitMode,
   type UserApiInitMode,
 } from '@/lib/media/audio/online/user-api-update-prefs';
-import {
-  isFallbackResolverEnabled,
-  setFallbackResolverEnabled,
-} from '@/lib/media/audio/platform/fallback-resolver';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppManualRadioGroup,
@@ -60,8 +50,6 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     return listUserApiScripts().filter((s) => s.initStatus !== 'failed');
   };
   const [defaultId, setDefaultId] = createSignal(getDefaultUserApiId() ?? '');
-  const [offline, setOffline] = createSignal(getMusicOfflineMode());
-  const [fallback, setFallback] = createSignal(isFallbackResolverEnabled());
   const [initMode, setInitMode] = createSignal<UserApiInitMode>(getUserApiInitMode());
   const [importing, setImporting] = createSignal(false);
   const [importError, setImportError] = createSignal<string | null>(null);
@@ -164,44 +152,18 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     <AudioPanelShell
       open={props.open}
       inline={props.inline}
-      title="音源设置"
+      title="自定义源管理"
+      hideHeader={props.inline}
       onClose={props.onClose}
     >
-      <div class="space-y-4 p-4">
+      <div class={props.inline ? 'space-y-4 pt-2' : 'space-y-4 p-4'}>
         <section>
-          <h3 class="mb-2 text-sm font-medium">内置源</h3>
-          <ul class="text-sm text-muted-foreground">
-            <For each={BUILTIN_SOURCES}>{(s) => <li>{s.toUpperCase()}</li>}</For>
-          </ul>
-        </section>
-        <section class="space-y-2">
-          <div class="flex items-center gap-2 text-sm">
-            <Checkbox
-              id="music-source-offline-first-input"
-              checked={offline()}
-              onChange={(checked) => {
-                setOffline(checked);
-                setMusicOfflineMode(checked);
-              }}
-            />
-            <Label for="music-source-offline-first-input">
-              离线优先（仅播放已缓存曲目）
-            </Label>
-          </div>
-          <div class="flex items-center gap-2 text-sm">
-            <Checkbox
-              id="music-source-fallback-enabled-input"
-              checked={fallback()}
-              onChange={(checked) => {
-                setFallback(checked);
-                setFallbackResolverEnabled(checked);
-              }}
-            />
-            <Label for="music-source-fallback-enabled-input">
-              多源兜底（主源失败时自动换源）
-            </Label>
-          </div>
-          <div class="space-y-1">
+          <h3 class="mb-1 text-sm font-medium">自定义源管理</h3>
+          <p class="mb-2 text-xs text-muted-foreground">
+            点选一项作为当前自定义源。版本与初始化状态跟随源名称显示；Reader
+            额外允许启用多个源参与取链，当前源仍具有最高优先级。
+          </p>
+          <div class="mb-3 space-y-1">
             <div class="flex flex-wrap items-center gap-2 text-sm">
               <span class="text-muted-foreground">启动初始化：</span>
               <MusicAppSelect
@@ -210,33 +172,29 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                   const mode = v as UserApiInitMode;
                   setInitMode(mode);
                   setUserApiInitMode(mode);
-                  // 切换策略后强制按新范围重载 runtime / 检查更新
-                  void ensureUserApiScriptsInitialized({ forceUpdateCheck: true });
+                  void ensureUserApiScriptsInitialized({
+                    mode,
+                    forceUpdateCheck: true,
+                  });
                 }}
                 options={['activeOnly', 'allEnabled']}
                 optionLabel={(v) =>
-                  v === 'activeOnly' ? '仅默认活跃源' : '全部已启用源'
+                  v === 'activeOnly' ? '仅当前自定义源' : '全部已启用源'
                 }
                 triggerClass="w-44"
                 aria-label="音源初始化策略"
               />
             </div>
             <p class="text-xs text-muted-foreground">
-              未启用音源不会自动初始化；启用开关打开时再初始化。与洛雪「一次只加载当前源」可对齐为「仅默认活跃源」。
+              「仅当前自定义源」最接近 LX Music 一次只加载当前源的行为；未启用的源不会初始化。
             </p>
           </div>
-        </section>
-
-        <section>
-          <h3 class="mb-1 text-sm font-medium">UserApi 自定义源</h3>
-          <p class="mb-2 text-xs text-muted-foreground">
-            整行点选设为默认活跃源；「启用」开关打开的源在同平台参与取链。跨平台换源对齐 lx：仅活跃源跟 findMusic
-            候选逐平台试，避免一首歌把同一代理打爆。然后才内置兜底。
-          </p>
           <div class="flex flex-wrap items-center gap-2">
             <input
               type="file"
               accept=".js,.txt,.json"
+              title="从本地导入自定义源"
+              aria-label="从本地导入自定义源"
               class="text-sm"
               disabled={importing()}
               onChange={(e) => {
@@ -274,24 +232,26 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
             when={userApis().length > 0}
             fallback={<p class="mt-2 text-sm text-muted-foreground">暂无自定义源</p>}
           >
-            <AppManualRadioGroup class="mt-2 space-y-2" aria-label="活跃自定义源">
+            <AppManualRadioGroup class="mt-2 space-y-2" aria-label="当前自定义源">
               <For each={userApis()}>
                 {(s) => {
                   const indicator = initStatusIndicator(s.initStatus);
                   const isActive = () => defaultId() === s.id;
+                  const showInitStatus = () =>
+                    s.enabled && (initMode() === 'allEnabled' || isActive());
                   return (
                     <div
-                      class={`flex items-stretch rounded-md border text-sm ${
-                        isActive() ? 'border-primary/60 bg-primary/5' : ''
+                      class={`group flex items-stretch rounded-md border text-sm transition-colors ${
+                        isActive()
+                          ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                          : 'hover:bg-accent/50'
                       }`}
                     >
                       <AppManualRadioOption
                         selected={isActive()}
                         disabled={!canUseScript(s)}
                         onSelect={() => setActive(s.id)}
-                        class={`min-h-0 flex-1 rounded-md border-0 px-3 py-2.5 ${
-                          isActive() ? 'hover:bg-transparent' : ''
-                        }`}
+                        class="min-h-0 flex-1 rounded-md border-0 px-3 py-2.5 hover:bg-transparent"
                       >
                         <div class="min-w-0 flex-1">
                           <p class="flex min-w-0 items-center gap-2 truncate">
@@ -303,24 +263,26 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                             </Show>
                             <Show when={isActive()}>
                               <span class="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
-                                活跃
+                                当前
                               </span>
                             </Show>
-                            <AppTooltip>
-                              <AppTooltipTrigger
-                                as="span"
-                                class={`size-2 shrink-0 rounded-full shadow-[0_0_0_1px_rgba(0,0,0,0.08)] ${indicator.class} ${
-                                  indicator.pulse ? 'animate-pulse' : ''
-                                }`}
-                                aria-label={indicator.label}
-                              />
-                              <AppTooltipContent layer="viewer">{indicator.label}</AppTooltipContent>
-                            </AppTooltip>
+                            <Show when={showInitStatus()}>
+                              <AppTooltip>
+                                <AppTooltipTrigger
+                                  as="span"
+                                  class={`size-2 shrink-0 rounded-full shadow-[0_0_0_1px_rgba(0,0,0,0.08)] ${indicator.class} ${
+                                    indicator.pulse ? 'animate-pulse' : ''
+                                  }`}
+                                  aria-label={indicator.label}
+                                />
+                                <AppTooltipContent layer="viewer">{indicator.label}</AppTooltipContent>
+                              </AppTooltip>
+                            </Show>
                           </p>
-                          <Show when={s.initStatus === 'pending'}>
+                          <Show when={showInitStatus() && s.initStatus === 'pending'}>
                             <p class="text-xs text-muted-foreground">初始化中…</p>
                           </Show>
-                          <Show when={s.initStatus === 'failed' && s.initError}>
+                          <Show when={showInitStatus() && s.initStatus === 'failed' && s.initError}>
                             <p class="truncate text-xs text-destructive">{s.initError}</p>
                           </Show>
                         </div>

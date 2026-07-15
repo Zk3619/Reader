@@ -3,6 +3,7 @@
  */
 
 import { createSignal, For } from 'solid-js';
+import { ChevronRight } from 'lucide-solid';
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -10,43 +11,51 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { MusicSettingsRouter, type MusicSettingsSection } from '@/components/viewer/audio/music/settings/MusicSettingsRouter';
+import { MusicSettingsRouter } from '@/components/viewer/audio/music/settings/MusicSettingsRouter';
+import {
+  MUSIC_SETTINGS_SECTIONS,
+  type MusicSettingsSection,
+} from '@/components/viewer/audio/music/settings/music-settings-sections';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
-
-const SETTINGS_SECTIONS: { id: MusicSettingsSection; label: string }[] = [
-  { id: 'basic', label: '基本' },
-  { id: 'play', label: '播放' },
-  { id: 'playDetail', label: '播放详情' },
-  { id: 'desktopLyric', label: '桌面歌词' },
-  { id: 'search', label: '搜索' },
-  { id: 'list', label: '列表' },
-  { id: 'download', label: '下载' },
-  { id: 'sync', label: '同步' },
-  { id: 'desktop', label: '桌面集成' },
-  { id: 'backup', label: '备份' },
-  { id: 'other', label: '其他' },
-];
 
 function settingsNavButtonClass(active: boolean) {
   return cn(
-    'mb-1 h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm transition-colors',
+    'h-9 w-full min-w-0 justify-start rounded-md px-2.5 text-left text-[13px] font-normal',
+    'transition-[color,background-color] duration-300 ease-out',
     active
-      ? 'border-l-primary bg-primary/10! text-primary! font-medium shadow-sm'
-      : 'border-l-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+      ? 'bg-primary/10! font-medium text-primary!'
+      : 'text-foreground hover:bg-primary/10! hover:text-foreground!',
+  );
+}
+
+function SettingsActiveIndicator(props: { active: boolean }) {
+  const reduceMotion = () => settingsStore.state.app.reduceMotion;
+  return (
+    <span
+      class={cn(
+        'inline-flex shrink-0 items-center justify-center overflow-hidden',
+        reduceMotion() ? '' : 'transition-[width,opacity] duration-130 ease-out',
+        props.active ? 'mr-0.5 w-[0.9em] opacity-100' : 'w-0 opacity-0',
+      )}
+      aria-hidden="true"
+    >
+      <ChevronRight class="h-[0.9em] w-[0.9em] shrink-0" />
+    </span>
   );
 }
 
 export function MusicSettingsPanel() {
-  const [settingsSection, setSettingsSection] = createSignal<MusicSettingsSection>('basic');
+  const [settingsSection, setSettingsSection] = createSignal<MusicSettingsSection>('theme');
 
   return (
     <div class={cn('flex min-h-0 flex-1 overflow-hidden', musicHubPageContentInsetClass)}>
-      <nav class="w-28 shrink-0 overflow-y-auto border-r border-border/60 p-2 md:w-36">
+      <nav class="w-44 shrink-0 overflow-y-auto border-r border-border/60 p-2 md:w-52">
         <SidebarGroup class="p-0">
           <SidebarGroupContent class="p-0">
-            <SidebarMenu>
-              <For each={SETTINGS_SECTIONS}>
+            <SidebarMenu class="gap-0.5">
+              <For each={MUSIC_SETTINGS_SECTIONS}>
                 {(section) => (
                   <SidebarMenuItem>
                     <SidebarMenuButton
@@ -54,7 +63,8 @@ export function MusicSettingsPanel() {
                       onClick={() => setSettingsSection(section.id)}
                       class={settingsNavButtonClass(settingsSection() === section.id)}
                     >
-                      {section.label}
+                      <SettingsActiveIndicator active={settingsSection() === section.id} />
+                      <span class="min-w-0 flex-1 truncate">{section.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )}
