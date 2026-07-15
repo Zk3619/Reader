@@ -1,0 +1,1 @@
+import{c as i}from"./toc-page-parser.worker-DjN3tDuj.js";const[v,c]=i(null),[T,a]=i(0),[m,n]=i(null),[r,s]=i(0),[k,h]=i(0);function P(e){c(e),a(t=>t+1)}function p(e){n(e),s(t=>t+1)}function l(){h(e=>e+1)}export{P as publishActiveThemePack,l as publishActiveThemeTargetChange,p as publishActiveViewerThemePack};
