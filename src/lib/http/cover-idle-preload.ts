@@ -38,9 +38,8 @@ function scheduleFlush(): void {
   }
 }
 
-/** 停滚后入队；滚动中直接丢弃（由 BookCoverImg 在 idle 后再调） */
+/** 始终入队；滚动期间由 flush 延后启动，不能丢弃已登记为 pending 的任务 */
 export function enqueueIdleCoverTask(task: IdleCoverTask): void {
-  if (!isCoverLoadScrollIdle()) return;
   queue.push(task);
   scheduleFlush();
 }

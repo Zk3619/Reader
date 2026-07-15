@@ -21,6 +21,9 @@ import {
 } from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
 import { cn } from '@/lib/utils';
 
+const VIRTUAL_LIST_SCROLL_ROOT_SELECTOR = '[data-virtual-list-scroll-root]';
+const COVER_VISIBILITY_MARGIN_PX = 80;
+
 export interface BookCoverImgProps {
   src?: string | null;
   referer?: string | null;
@@ -57,14 +60,34 @@ export function BookCoverImg(props: BookCoverImgProps) {
       setMayLoad(true);
       return;
     }
+    const scrollRoot = el.closest<HTMLElement>(VIRTUAL_LIST_SCROLL_ROOT_SELECTOR);
+    const markMayLoadIfVisible = () => {
+      const rect = el.getBoundingClientRect();
+      const rootRect = scrollRoot?.getBoundingClientRect();
+      const top = rootRect?.top ?? 0;
+      const bottom = rootRect?.bottom ?? window.innerHeight;
+      if (
+        rect.bottom >= top - COVER_VISIBILITY_MARGIN_PX &&
+        rect.top <= bottom + COVER_VISIBILITY_MARGIN_PX
+      ) {
+        setMayLoad(true);
+      }
+    };
     const io = new IntersectionObserver(
       ([entry]) => {
         if (entry?.isIntersecting) setMayLoad(true);
       },
-      { rootMargin: '80px' },
+      {
+        root: scrollRoot,
+        rootMargin: `${COVER_VISIBILITY_MARGIN_PX}px`,
+      },
     );
     io.observe(el);
-    onCleanup(() => io.disconnect());
+    const frame = requestAnimationFrame(markMayLoadIfVisible);
+    onCleanup(() => {
+      cancelAnimationFrame(frame);
+      io.disconnect();
+    });
   });
 
   const normalizedSrc = () => {
@@ -180,7 +203,7 @@ export function BookCoverImg(props: BookCoverImgProps) {
         <img
           src={displaySrc()!}
           alt={props.alt ?? ''}
-          class={cn('relative z-[1] h-full w-full object-cover', props.class)}
+          class={cn('relative z-1 h-full w-full object-cover', props.class)}
           loading={props.loading}
           draggable={props.draggable}
           onError={() => setFailed(true)}
