@@ -18,11 +18,17 @@ import {
   createResource,
   createSignal,
   For,
+  onCleanup,
+  onMount,
   Show,
   type Component,
 } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { deletePlaylist, renamePlaylist } from '@/lib/database/audio-library';
+import {
+  deletePlaylist,
+  MUSIC_PLAYLISTS_CHANGED_EVENT,
+  renamePlaylist,
+} from '@/lib/database/audio-library';
 import { getGroupById, getMusicGroups, updateGroupsOrder } from '@/lib/database/media-groups';
 import { viewerStore } from '@/stores/viewer';
 import { setActiveMusicGroupId } from '@/stores/viewer/media/audio';
@@ -43,6 +49,8 @@ import {
   ViewerAppDialogTitle,
 } from '@/components/viewer/viewer-app-overlay';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { ChevronRight } from 'lucide-solid';
+import { settingsStore } from '@/stores/settings';
 
 export interface MusicPlaylistSidebarProps {
   active?: boolean;
@@ -54,24 +62,52 @@ export interface MusicPlaylistSidebarProps {
 
 type SidebarGroup = BookGroup & { sortable: boolean };
 
+function playlistIdForGroup(group: BookGroup): string | null {
+  return group.groupId === MediaGroupId.Favorite ? 'love' : group.listId ?? null;
+}
+
 async function loadSidebarGroups(): Promise<SidebarGroup[]> {
   const [favorite, music] = await Promise.all([
     getGroupById(MediaGroupId.Favorite),
     getMusicGroups(),
   ]);
-  const builtins = music.filter(
-    (g) => g.listId && !g.listId.startsWith('pl_') && g.listId !== 'love',
-  );
   const users = music
     .filter((g) => g.listId?.startsWith('pl_'))
     .sort((a, b) => a.order - b.order || a.groupId - b.groupId);
-  const pinned: SidebarGroup[] = [];
-  if (favorite) pinned.push({ ...favorite, sortable: false });
-  for (const g of builtins) {
-    if (g.listId === 'default') continue;
-    pinned.push({ ...g, sortable: false });
-  }
+  const builtins = new Map(
+    music
+      .filter((g) => g.listId && !g.listId.startsWith('pl_'))
+      .map((g) => [g.listId!, g]),
+  );
+  const pinned: SidebarGroup[] = [
+    builtins.get('default')
+      ? { ...builtins.get('default')!, groupName: '试听列表', sortable: false }
+      : null,
+    builtins.get('recent')
+      ? { ...builtins.get('recent')!, groupName: '最近播放', sortable: false }
+      : null,
+    builtins.get('local')
+      ? { ...builtins.get('local')!, groupName: '本地音乐', sortable: false }
+      : null,
+    favorite ? { ...favorite, groupName: '我的收藏', sortable: false } : null,
+  ].filter((group): group is SidebarGroup => group != null);
   return [...pinned, ...users.map((g) => ({ ...g, sortable: true }))];
+}
+
+function PlaylistActiveIndicator(props: { active: boolean }) {
+  const reduceMotion = () => settingsStore.state.app.reduceMotion;
+  return (
+    <span
+      class={cn(
+        'inline-flex shrink-0 items-center justify-center overflow-hidden',
+        reduceMotion() ? '' : 'transition-[width,opacity] duration-130 ease-out',
+        props.active ? 'mr-0.5 w-[0.9em] opacity-100' : 'w-0 opacity-0',
+      )}
+      aria-hidden={!props.active}
+    >
+      <ChevronRight class="h-[0.9em] w-[0.9em] shrink-0" />
+    </span>
+  );
 }
 
 function ReorderBridge(props: { onReorder: (ids: Id[]) => void | Promise<void> }) {
@@ -105,10 +141,13 @@ function SortableListRow(props: {
       <div
         ref={sortable}
         class={cn(
-          'flex items-center gap-0.5 rounded-lg',
+          'flex min-h-9 items-center gap-0.5 rounded-md',
+          'transition-[color,background-color] duration-300 ease-out',
           sortable.isActiveDraggable && 'z-10 bg-background shadow-sm',
           isDragging() && 'transition-transform duration-200 ease-out',
-          props.active && 'bg-muted',
+          props.active
+            ? 'bg-primary/10 text-primary'
+            : 'text-foreground hover:bg-primary/10',
         )}
       >
         <Button
@@ -125,11 +164,14 @@ function SortableListRow(props: {
           type="button"
           variant="ghost"
           class={cn(
-            'h-auto min-w-0 flex-1 justify-start rounded-lg px-2 py-2 text-left text-sm font-normal',
+            'h-9 min-w-0 flex-1 justify-start rounded-md px-1.5 text-left text-[13px] font-normal text-inherit hover:bg-transparent',
             props.active && 'font-medium',
           )}
-          onClick={props.onSelect}
+          onClick={() => {
+            if (!props.active) props.onSelect();
+          }}
         >
+          <PlaylistActiveIndicator active={props.active} />
           <span class="truncate">{props.group.groupName}</span>
         </Button>
       </div>
@@ -142,6 +184,14 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
     () => ({ active: props.active !== false, rev: props.listsRevision ?? 0 }),
     (key) => (key.active ? loadSidebarGroups() : Promise.resolve([])),
   );
+
+  onMount(() => {
+    const handlePlaylistsChanged = () => void refetch();
+    window.addEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged);
+    onCleanup(() =>
+      window.removeEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged),
+    );
+  });
 
   const [renameOpen, setRenameOpen] = createSignal(false);
   const [renameValue, setRenameValue] = createSignal('');
@@ -178,7 +228,7 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
     const group = activeGroup();
     if (!group?.listId?.startsWith('pl_')) return;
     await deletePlaylist(group.listId);
-    setActiveMusicGroupId(MediaGroupId.MusicLocal);
+    setActiveMusicGroupId(MediaGroupId.MusicLocal, 'local');
     void refetch();
     props.onListsChanged?.();
     showAppToast({ title: '列表已删除', variant: 'success' });
@@ -214,12 +264,19 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
                   type="button"
                   variant="ghost"
                   class={cn(
-                    'h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal transition-colors hover:bg-muted/60',
-                    activeGroupId() === group.groupId && 'bg-muted font-medium',
+                    'h-9 w-full min-w-0 justify-start rounded-md px-2.5 text-left text-[13px] font-normal',
+                    'transition-[color,background-color] duration-300 ease-out',
+                    activeGroupId() === group.groupId
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-foreground hover:bg-primary/10',
                   )}
-                  onClick={() => setActiveMusicGroupId(group.groupId)}
+                  onClick={() => {
+                    if (activeGroupId() === group.groupId) return;
+                    setActiveMusicGroupId(group.groupId, playlistIdForGroup(group));
+                  }}
                 >
-                  {group.groupName}
+                  <PlaylistActiveIndicator active={activeGroupId() === group.groupId} />
+                  <span class="min-w-0 flex-1 truncate">{group.groupName}</span>
                 </Button>
               </li>
             )}
@@ -236,7 +293,9 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
                     <SortableListRow
                       group={group}
                       active={activeGroupId() === group.groupId}
-                      onSelect={() => setActiveMusicGroupId(group.groupId)}
+                      onSelect={() =>
+                        setActiveMusicGroupId(group.groupId, playlistIdForGroup(group))
+                      }
                     />
                   )}
                 </For>

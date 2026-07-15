@@ -5,11 +5,18 @@
 import { createSignal, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { isTauri, isAndroid } from '@/lib/platform/detect';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import type { LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import type { MusicLyricAlign } from '@/lib/media/audio/music-settings';
+import {
+  NumberField,
+  NumberFieldInput,
+} from '@/components/ui/number-field';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 
 const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
 const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
@@ -18,6 +25,7 @@ const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
   rlyric: '罗马音',
   lxlyric: '逐字',
 };
+const LYRIC_ALIGNS: MusicLyricAlign[] = ['left', 'center', 'right'];
 
 export const MusicSettingsDesktopLyric: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -68,13 +76,16 @@ export const MusicSettingsDesktopLyric: Component = () => {
             关闭
           </Button>
         </div>
-        <label class="flex items-center gap-2">
+        <div class="flex items-center gap-2">
           <Checkbox
+            id="music-desktop-lyric-penetrate-input"
             checked={settings().desktopLyricPenetrate ?? false}
             onChange={(checked) => void setPenetrate(checked)}
           />
-          鼠标穿透（点击歌词窗不拦截操作）
-        </label>
+          <Label for="music-desktop-lyric-penetrate-input">
+            鼠标穿透（点击歌词窗不拦截操作）
+          </Label>
+        </div>
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">默认歌词轨：</span>
           <MusicAppSelect
@@ -84,6 +95,67 @@ export const MusicSettingsDesktopLyric: Component = () => {
             optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
             triggerClass="w-28"
             aria-label="默认歌词轨"
+          />
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">歌词对齐：</span>
+          <MusicAppSelect
+            value={settings().desktopLyricAlign}
+            onChange={(v) => apply({ desktopLyricAlign: v as MusicLyricAlign })}
+            options={LYRIC_ALIGNS}
+            optionLabel={(v) =>
+              v === 'left' ? '左对齐' : v === 'right' ? '右对齐' : '居中'
+            }
+            triggerClass="w-28"
+            aria-label="桌面歌词对齐"
+          />
+        </div>
+        <div class="flex items-center gap-2">
+          <Checkbox
+            id="music-desktop-lyric-zoom-active-input"
+            checked={settings().desktopLyricZoomActive}
+            onChange={(checked) => apply({ desktopLyricZoomActive: checked })}
+          />
+          <Label for="music-desktop-lyric-zoom-active-input">放大当前歌词行</Label>
+        </div>
+        <div class="flex items-center gap-2">
+          <Checkbox
+            id="music-desktop-lyric-single-line-input"
+            checked={settings().desktopLyricSingleLine}
+            onChange={(checked) => apply({ desktopLyricSingleLine: checked })}
+          />
+          <Label for="music-desktop-lyric-single-line-input">仅显示当前歌词行</Label>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">最多显示行数：</span>
+          <NumberField
+            rawValue={settings().desktopLyricMaxLines}
+            onRawValueChange={(value) => apply({ desktopLyricMaxLines: value })}
+            minValue={1}
+            maxValue={8}
+            disabled={settings().desktopLyricSingleLine}
+          >
+            <NumberFieldInput class="w-20" aria-label="桌面歌词最大行数" />
+          </NumberField>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">当前行颜色：</span>
+          <AppTextFieldBareInput
+            class="w-40 font-mono text-xs"
+            value={settings().desktopLyricPlayedColor}
+            onInput={(event) =>
+              apply({ desktopLyricPlayedColor: event.currentTarget.value })
+            }
+          />
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">未播放颜色：</span>
+          <AppTextFieldBareInput
+            class="w-40 font-mono text-xs"
+            value={settings().desktopLyricUnplayedColor}
+            onInput={(event) =>
+              apply({ desktopLyricUnplayedColor: event.currentTarget.value })
+            }
           />
         </div>
         <div class="flex flex-wrap items-center gap-2">

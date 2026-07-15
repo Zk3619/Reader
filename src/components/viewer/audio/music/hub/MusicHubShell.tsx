@@ -112,6 +112,7 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
+      <audio ref={hubPlayer.bindAudio} class="hidden" />
       <UserApiUpdateAlertHost />
       <UserApiInitFailedHost />
       <Show

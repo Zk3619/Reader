@@ -3,9 +3,17 @@
  * 页头：播放全部 / 新建列表 / 更多（更新管理·导入·导出·去重）
  */
 
-import { createResource, createSignal, Show, type Component } from 'solid-js';
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+  type Component,
+} from 'solid-js';
 import { Menu } from 'lucide-solid';
-import { isMobile } from '@/lib/platform/detect';
+import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { MusicPlaylistSidebar } from '@/components/viewer/audio/music/hub/MusicPlaylistSidebar';
 import { MusicTrackList } from '@/components/viewer/audio/music/hub/MusicTrackList';
 import { MusicListCreateDialog } from '@/components/viewer/audio/music/hub/MusicListCreateDialog';
@@ -16,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDropdownMenu,
+  AppDropdownMenuCheckboxItem,
   AppDropdownMenuContent,
   AppDropdownMenuIconTrigger,
   AppDropdownMenuItem,
@@ -24,13 +33,21 @@ import {
 import { FolderPlusIcon, MoreIcon, PlayIcon } from '@/components/shared/icons';
 import { viewerStore } from '@/stores/viewer';
 import { getTracksForGroupId } from '@/lib/database/audio-library';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import {
+  playPlaylist,
+  restoreActiveMusicPlaylistSelection,
+} from '@/stores/viewer/media/audio';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dedupePlaylistTracks } from '@/lib/media/audio/list/playlist-share';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
+import {
+  getMusicSettings,
+  setMusicSettings,
+  subscribeMusicSettings,
+} from '@/lib/media/audio/music-settings';
 
 export interface MusicHubListPaneProps {
   drawerOpen?: boolean;
@@ -40,8 +57,53 @@ export interface MusicHubListPaneProps {
   scanRevision?: number;
 }
 
+function MusicListMoreMenu(props: {
+  dragSortEnabled: boolean;
+  onDragSortChange: (checked: boolean) => void;
+  onOpenUpdate: () => void;
+  onOpenImport: () => void;
+  onOpenExport: () => void;
+  onDeduplicate: () => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <AppDropdownMenu open={open()} onOpenChange={setOpen}>
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
+                <MoreIcon class="h-4 w-4" />
+                <span class="sr-only">更多</span>
+              </AppDropdownMenuIconTrigger>
+            )}
+          />
+        </AppTooltipTrigger>
+        <AppTooltipContent>更多</AppTooltipContent>
+      </AppTooltip>
+      <AppDropdownMenuContent layout="compact">
+        <AppDropdownMenuCheckboxItem
+          closeOnSelect={false}
+          checked={props.dragSortEnabled}
+          onChange={props.onDragSortChange}
+        >
+          拖拽排序
+        </AppDropdownMenuCheckboxItem>
+        <AppDropdownMenuItem onSelect={props.onOpenUpdate}>列表更新管理</AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onOpenImport}>导入</AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onOpenExport}>导出</AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onDeduplicate}>去重</AppDropdownMenuItem>
+      </AppDropdownMenuContent>
+    </AppDropdownMenu>
+  );
+}
+
 export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
-  const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const shell = useShellLayout();
+  const isMobileLayout = () => shell().useMobileShell;
+  const [dragSortEnabled, setDragSortEnabled] = createSignal(
+    getMusicSettings().musicListDragSortEnabled !== false,
+  );
   const [createOpen, setCreateOpen] = createSignal(false);
   const [updateOpen, setUpdateOpen] = createSignal(false);
   const [importOpen, setImportOpen] = createSignal(false);
@@ -49,8 +111,20 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
   const [listsRevision, setListsRevision] = createSignal(0);
   const [tracksRevision, setTracksRevision] = createSignal(0);
 
+  onMount(() => {
+    const unsubscribe = subscribeMusicSettings((settings) => {
+      setDragSortEnabled(settings.musicListDragSortEnabled !== false);
+    });
+    onCleanup(unsubscribe);
+  });
+
   const bumpLists = () => setListsRevision((v) => v + 1);
   const bumpTracks = () => setTracksRevision((v) => v + 1);
+
+  createEffect(() => {
+    if (viewerStore.state.musicSection !== 'list') return;
+    void restoreActiveMusicPlaylistSelection();
+  });
 
   const groupId = () => viewerStore.state.activeMusicGroupId ?? MediaGroupId.MusicLocal;
   const contentRev = () => tracksRevision() + (props.scanRevision ?? 0);
@@ -85,7 +159,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
         section="list"
         toolbar={
           <>
-            <Show when={isMobile()}>
+            <Show when={isMobileLayout()}>
               <Button size="sm" variant="outline" onClick={props.onDrawerOpen}>
                 <Menu class="mr-1 h-4 w-4" />
                 歌单
@@ -123,70 +197,36 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               <AppTooltipContent>新建列表</AppTooltipContent>
             </AppTooltip>
 
-            <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-              <AppTooltip>
-                <AppTooltipTrigger as="div">
-                  <AppDropdownMenuTrigger
-                    as={(triggerProps: Record<string, unknown>) => (
-                      <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
-                        <MoreIcon class="h-4 w-4" />
-                        <span class="sr-only">更多</span>
-                      </AppDropdownMenuIconTrigger>
-                    )}
-                  />
-                </AppTooltipTrigger>
-                <AppTooltipContent>更多</AppTooltipContent>
-              </AppTooltip>
-              <AppDropdownMenuContent layout="compact">
-                <AppDropdownMenuItem
-                  onSelect={() => {
-                    setMoreMenuOpen(false);
-                    setUpdateOpen(true);
-                  }}
-                >
-                  列表更新管理
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem
-                  onSelect={() => {
-                    setMoreMenuOpen(false);
-                    setImportOpen(true);
-                  }}
-                >
-                  导入
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem
-                  onSelect={() => {
-                    setMoreMenuOpen(false);
-                    setExportOpen(true);
-                  }}
-                >
-                  导出
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem
-                  onSelect={() => {
-                    setMoreMenuOpen(false);
-                    void dedupPlaylist();
-                  }}
-                >
-                  去重
-                </AppDropdownMenuItem>
-              </AppDropdownMenuContent>
-            </AppDropdownMenu>
+            <MusicListMoreMenu
+              dragSortEnabled={dragSortEnabled()}
+              onDragSortChange={(checked) => {
+                setDragSortEnabled(checked);
+                setMusicSettings({ musicListDragSortEnabled: checked });
+              }}
+              onOpenUpdate={() => setUpdateOpen(true)}
+              onOpenImport={() => setImportOpen(true)}
+              onOpenExport={() => setExportOpen(true)}
+              onDeduplicate={() => void dedupPlaylist()}
+            />
           </>
         }
         scrollClass="overflow-hidden"
       >
         <div class={cn('flex min-h-0 flex-1 overflow-hidden', musicHubPageContentInsetClass)}>
-          <Show when={!isMobile()}>
+          <Show when={!isMobileLayout()}>
             <MusicPlaylistSidebar
               listsRevision={listsRevision()}
               onListsChanged={bumpLists}
             />
           </Show>
           <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <MusicTrackList tracksRevision={contentRev()} />
+            <MusicTrackList
+              reorderEnabled={dragSortEnabled()}
+              tracksRevision={contentRev()}
+              onListsChanged={bumpLists}
+            />
           </div>
-          <Show when={isMobile() && props.drawerOpen}>
+          <Show when={isMobileLayout() && props.drawerOpen}>
             <div class="fixed inset-0 z-30 flex">
               <div
                 class="absolute inset-0 bg-black/40"

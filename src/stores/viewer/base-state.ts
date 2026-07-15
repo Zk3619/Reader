@@ -17,11 +17,7 @@ export type MusicHubSection =
   | 'search'
   | 'songlist'
   | 'leaderboard'
-  | 'album'
-  | 'singer'
-  | 'userApi'
   | 'list'
-  | 'download'
   | 'settings'
   | 'nowPlaying';
 

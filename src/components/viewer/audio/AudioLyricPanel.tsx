@@ -84,6 +84,15 @@ export interface AudioLyricPanelProps {
   class?: string;
   showTranslation?: boolean;
   showRoma?: boolean;
+  secondaryOrder?: 'translation-first' | 'roma-first';
+  align?: 'left' | 'center' | 'right';
+  fontSize?: number;
+  zoomActiveLyric?: boolean;
+  onSeek?: (positionSec: number) => void;
+  singleLine?: boolean;
+  maxLines?: number;
+  playedColor?: string;
+  unplayedColor?: string;
 }
 
 export function AudioLyricPanel(props: AudioLyricPanelProps) {
@@ -98,9 +107,17 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
     const showT = props.showTranslation !== false;
     const showR = props.showRoma !== false;
     if (kind === 'lyric') {
-      if (showT && props.bundle.tlyric?.trim()) return props.bundle.tlyric;
-      if (showR && props.bundle.rlyric?.trim()) return props.bundle.rlyric;
-      return null;
+      const candidates =
+        props.secondaryOrder === 'roma-first'
+          ? [
+              showR ? props.bundle.rlyric : null,
+              showT ? props.bundle.tlyric : null,
+            ]
+          : [
+              showT ? props.bundle.tlyric : null,
+              showR ? props.bundle.rlyric : null,
+            ];
+      return candidates.find((text) => text?.trim()) ?? null;
     }
     if (kind === 'tlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
     if (kind === 'rlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
@@ -156,6 +173,25 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
     return idx;
   });
 
+  const visibleLines = createMemo(() => {
+    const lines = lrcLines() ?? [];
+    const active = activeIndex();
+    if (props.singleLine && lines[active]) {
+      return [{ line: lines[active]!, originalIndex: active }];
+    }
+    const maxLines = Math.max(0, Math.floor(props.maxLines ?? 0));
+    if (maxLines > 0 && lines.length > maxLines) {
+      const start = Math.max(
+        0,
+        Math.min(lines.length - maxLines, active - Math.floor(maxLines / 2)),
+      );
+      return lines
+        .slice(start, start + maxLines)
+        .map((line, index) => ({ line, originalIndex: start + index }));
+    }
+    return lines.map((line, originalIndex) => ({ line, originalIndex }));
+  });
+
   return (
     <Show when={primaryText()?.trim()}>
       <div
@@ -163,24 +199,41 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
           'max-h-32 w-full max-w-md overflow-y-auto rounded-lg bg-black/20 px-3 py-2 text-center text-sm text-white/90',
           props.class,
         )}
+        style={{
+          'font-size': `${props.fontSize ?? 14}px`,
+          'text-align': props.align ?? 'center',
+        }}
       >
         <Show
           when={lrcLines()}
           fallback={<p class="whitespace-pre-wrap leading-relaxed">{primaryText()}</p>}
         >
-          {(lines) => (
+          {(_lines) => (
             <ul class="space-y-1">
-              <For each={lines()}>
-                {(line, i) => (
+              <For each={visibleLines()}>
+                {(entry) => (
                   <li
                     class={cn(
                       'transition-colors',
-                      i() === activeIndex() ? 'text-white font-medium scale-105' : 'text-white/50',
+                      props.onSeek && 'cursor-pointer hover:text-white/80',
+                      entry.originalIndex === activeIndex()
+                        ? cn(
+                            'text-white font-medium',
+                            props.zoomActiveLyric !== false && 'scale-105',
+                          )
+                        : 'text-white/50',
                     )}
+                    style={{
+                      color:
+                        entry.originalIndex === activeIndex()
+                          ? props.playedColor
+                          : props.unplayedColor,
+                    }}
+                    onClick={() => props.onSeek?.(entry.line.timeMs / 1000)}
                   >
                     <Show
-                      when={i() === activeIndex() && activeWords()}
-                      fallback={line.text}
+                      when={entry.originalIndex === activeIndex() && activeWords()}
+                      fallback={entry.line.text}
                     >
                       {(words) => (
                         <span>

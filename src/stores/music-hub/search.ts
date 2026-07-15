@@ -33,6 +33,7 @@ export type SearchTab = 'song' | 'playlist';
 
 const SEARCH_HISTORY_KEY = 'reader.music.searchHistory';
 const MAX_HISTORY = 20;
+const initialSearchSettings = getMusicSettings();
 
 export interface MusicHubSearchState {
   tab: SearchTab;
@@ -61,8 +62,8 @@ export interface MusicHubSearchState {
 }
 
 const [searchState, setSearchState] = createStore<MusicHubSearchState>({
-  tab: 'song',
-  source: AGGREGATE_SEARCH_SOURCE,
+  tab: initialSearchSettings.defaultSearchTab,
+  source: initialSearchSettings.defaultSource,
   keyword: '',
   page: 1,
   limit: MUSIC_SEARCH_PAGE_LIMIT,
@@ -293,6 +294,23 @@ export function setSearchHelpVisible(visible: boolean): void {
 
 export function setSearchSubmitted(submitted: boolean): void {
   setSearchState('submitted', submitted);
+}
+
+export function clearSearchResults(): void {
+  searchRequestId += 1;
+  setSearchState({
+    page: 1,
+    loading: false,
+    loadingMore: false,
+    hasMore: false,
+    error: null,
+    tracks: [],
+    trackTotal: 0,
+    playlists: [],
+    playlistTotal: 0,
+    submitted: false,
+    helpVisible: true,
+  });
 }
 
 let tipTimer: ReturnType<typeof setTimeout> | null = null;

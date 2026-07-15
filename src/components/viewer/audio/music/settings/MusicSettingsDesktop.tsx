@@ -17,6 +17,7 @@ import {
 } from '@/lib/media/audio/platform/music-openapi-client';
 import { startLxSyncServer, stopLxSyncServer } from '@/lib/media/audio/sync/lx-sync-server';
 import { playNextTrack, playPrevTrack } from '@/stores/viewer/media/audio';
+import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 
 const HOTKEY_STORAGE = 'reader.music.hotkeys';
 
@@ -44,13 +45,14 @@ function loadHotkeys() {
 }
 
 export const MusicSettingsDesktop: Component = () => {
-  const [openapiPort, setOpenapiPort] = createSignal(2333);
-  const [syncPort, setSyncPort] = createSignal(9527);
+  const initialSettings = getMusicSettings();
+  const [openapiPort, setOpenapiPort] = createSignal(initialSettings.openApiPort);
+  const [syncPort, setSyncPort] = createSignal(initialSettings.localSyncPort);
   const [hotkeys, setHotkeys] = createSignal(loadHotkeys());
   const [openapiOn, setOpenapiOn] = createSignal(false);
   const [syncOn, setSyncOn] = createSignal(false);
   const [syncPassword, setSyncPassword] = createSignal('');
-  const [openapiBind, setOpenapiBind] = createSignal('127.0.0.1');
+  const [openapiBind, setOpenapiBind] = createSignal(initialSettings.openApiBindAddress);
 
   const toggleOpenapi = async () => {
     if (!isTauri()) return;
@@ -127,7 +129,10 @@ export const MusicSettingsDesktop: Component = () => {
         <div class="flex flex-wrap items-center gap-2">
           <NumberField
             rawValue={openapiPort()}
-            onRawValueChange={setOpenapiPort}
+            onRawValueChange={(value) => {
+              setOpenapiPort(value);
+              setMusicSettings({ openApiPort: value });
+            }}
             minValue={1}
             maxValue={65535}
           >
@@ -137,7 +142,11 @@ export const MusicSettingsDesktop: Component = () => {
             class="w-32"
             placeholder="绑定 IP"
             value={openapiBind()}
-            onInput={(e) => setOpenapiBind(e.currentTarget.value)}
+            onInput={(e) => {
+              const value = e.currentTarget.value;
+              setOpenapiBind(value);
+              setMusicSettings({ openApiBindAddress: value });
+            }}
           />
           <Button size="sm" onClick={() => void toggleOpenapi()}>
             {openapiOn() ? '停止' : '启动'}
@@ -149,7 +158,10 @@ export const MusicSettingsDesktop: Component = () => {
         <div class="flex flex-wrap items-center gap-2">
           <NumberField
             rawValue={syncPort()}
-            onRawValueChange={setSyncPort}
+            onRawValueChange={(value) => {
+              setSyncPort(value);
+              setMusicSettings({ localSyncPort: value });
+            }}
             minValue={1}
             maxValue={65535}
           >

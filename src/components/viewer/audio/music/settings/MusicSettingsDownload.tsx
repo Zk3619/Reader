@@ -9,6 +9,8 @@ import { QUALITY_LABELS } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { AudioDownloadPanel } from '@/components/viewer/audio/music/AudioDownloadPanel';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 export const MusicSettingsDownload: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -21,15 +23,9 @@ export const MusicSettingsDownload: Component = () => {
   return (
     <div class="space-y-4">
       <div class="space-y-2 p-4 text-sm">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">下载路径：</span>
-          <AppTextFieldBareInput
-            class="min-w-0 flex-1"
-            placeholder="留空使用默认"
-            value={settings().downloadPath}
-            onInput={(e) => applySettings({ downloadPath: e.currentTarget.value })}
-          />
-        </div>
+        <p class="text-xs text-muted-foreground">
+          下载内容写入 Reader 音乐离线缓存；缓存位置与清理由系统存储设置统一管理。
+        </p>
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">下载音质：</span>
           <MusicAppSelect
@@ -60,6 +56,14 @@ export const MusicSettingsDownload: Component = () => {
           >
             <NumberFieldInput class="w-16" aria-label="下载并发数" />
           </NumberField>
+        </div>
+        <div class="flex items-center gap-2">
+          <Checkbox
+            id="music-download-skip-existing-input"
+            checked={settings().downloadSkipExisting}
+            onChange={(checked) => applySettings({ downloadSkipExisting: checked })}
+          />
+          <Label for="music-download-skip-existing-input">跳过已经下载完成的歌曲</Label>
         </div>
       </div>
       <AudioDownloadPanel open inline />

@@ -24,6 +24,7 @@ import {
 import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   clearUserApiUpdateAlert,
   subscribeUserApiUpdateAlert,
@@ -236,13 +237,14 @@ export const UserApiUpdateAlertHost: Component = () => {
           </ul>
         </AppDialogScrollBody>
         <div class="px-6 pb-2">
-          <label class="flex items-center gap-2 text-sm text-muted-foreground">
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
             <Checkbox
+              id="user-api-update-global-mute-input"
               checked={globalMute7Days()}
               onChange={(checked) => setGlobalMute7Days(checked)}
             />
-            7 天内不再检查更新
-          </label>
+            <Label for="user-api-update-global-mute-input">7 天内不再检查更新</Label>
+          </div>
         </div>
         <ViewerAppDialogFooter class="gap-2 sm:justify-end">
           <Button variant="ghost" onClick={() => closeDialog()}>

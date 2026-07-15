@@ -76,6 +76,15 @@ export async function enqueueTrackDownload(
   _options?: { quality?: MusicQuality },
 ): Promise<string> {
   const db = await getDatabase();
+  if (getMusicSettings().downloadSkipExisting) {
+    const existing = await db.select<{ id: string }>(
+      `SELECT id FROM audio_download_tasks
+       WHERE track_id = ? AND status = 'completed'
+       ORDER BY updated_at DESC LIMIT 1`,
+      [track.id],
+    );
+    if (existing[0]?.id) return existing[0].id;
+  }
   const id = `dl_${track.id}_${Date.now()}`;
   const now = Date.now();
   await db.execute(

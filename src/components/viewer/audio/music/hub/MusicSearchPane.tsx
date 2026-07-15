@@ -86,10 +86,14 @@ export const MusicSearchPane: Component = () => {
     state().helpVisible &&
     !state().submitted &&
     !state().keyword.trim() &&
-    getMusicSettings().searchHistoryEnabled;
+    getMusicSettings().searchHistoryEnabled &&
+    state().history.length > 0;
 
   const showHot = () =>
-    state().helpVisible && !state().submitted && !state().keyword.trim();
+    getMusicSettings().searchHotEnabled &&
+    state().helpVisible &&
+    !state().submitted &&
+    !state().keyword.trim();
 
   const showLocalMatches = () =>
     state().helpVisible &&
@@ -145,15 +149,13 @@ export const MusicSearchPane: Component = () => {
           <section class="pt-1">
             <div class="mb-2 flex items-center justify-between">
               <h3 class="text-xs font-medium text-muted-foreground">搜索历史</h3>
-              <Show when={state().history.length > 0}>
-                <button
-                  type="button"
-                  class="text-xs text-muted-foreground hover:text-foreground"
-                  onClick={clearSearchHistory}
-                >
-                  清空
-                </button>
-              </Show>
+              <button
+                type="button"
+                class="text-xs text-muted-foreground hover:text-foreground"
+                onClick={clearSearchHistory}
+              >
+                清空
+              </button>
             </div>
             <div class="flex flex-wrap gap-2 pb-4">
               <For each={state().history}>
@@ -169,9 +171,6 @@ export const MusicSearchPane: Component = () => {
                   />
                 )}
               </For>
-              <Show when={state().history.length === 0}>
-                <p class="py-2 text-sm text-muted-foreground">暂无搜索历史</p>
-              </Show>
             </div>
           </section>
         </Show>

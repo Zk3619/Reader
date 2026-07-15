@@ -44,7 +44,11 @@ import type { Book, BookChapter } from '@/types';
 import { resolveNextChapterIndex } from '@/lib/media/audio/play-mode';
 import { preloadTrackUrl } from '@/lib/media/audio/online/track-preload';
 import { getMusicPlayConfig } from '@/lib/media/audio/music-play-config';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import {
+  getMusicActivePlaylistId,
+  getMusicSettings,
+  setMusicActivePlaylistId,
+} from '@/lib/media/audio/music-settings';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { MediaGroupId } from '@/types/book-group';
@@ -52,22 +56,22 @@ import { getMusicGroupByListId } from '@/lib/database/media-groups';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 
 let playbackRevoke: (() => void) | null = null;
-let playTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+let restorePlaylistRequestId = 0;
 
-function clearPlayTimeout(): void {
-  if (playTimeoutTimer != null) {
-    clearTimeout(playTimeoutTimer);
-    playTimeoutTimer = null;
+export function normalizeMusicHubSection(section: unknown): MusicHubSection {
+  switch (section) {
+    case 'search':
+    case 'songlist':
+    case 'leaderboard':
+    case 'list':
+    case 'settings':
+    case 'nowPlaying':
+      return section;
+    case 'download':
+      return 'settings';
+    default:
+      return 'search';
   }
-}
-
-function schedulePlayTimeout(): void {
-  clearPlayTimeout();
-  const sec = getMusicSettings().playTimeoutSec ?? 0;
-  if (sec <= 0) return;
-  playTimeoutTimer = setTimeout(() => {
-    void playNextTrack();
-  }, sec * 1000);
 }
 
 export function isMusicPlaybackMode(): boolean {
@@ -78,6 +82,26 @@ export function revokeAudioPlaybackUrls(): void {
   playbackRevoke?.();
   playbackRevoke = null;
   revokeAllWebTrackBlobs();
+}
+
+export async function restoreActiveMusicPlaylistSelection(): Promise<void> {
+  const requestId = ++restorePlaylistRequestId;
+  const rememberedPlaylistId = getMusicActivePlaylistId();
+  let activePlaylistId = 'local';
+  let activeMusicGroupId: number = MediaGroupId.MusicLocal;
+  if (rememberedPlaylistId === 'love') {
+    activePlaylistId = 'love';
+    activeMusicGroupId = MediaGroupId.Favorite;
+  } else {
+    const rememberedGroup = await getMusicGroupByListId(rememberedPlaylistId);
+    if (requestId !== restorePlaylistRequestId) return;
+    if (rememberedGroup) {
+      activePlaylistId = rememberedPlaylistId;
+      activeMusicGroupId = rememberedGroup.groupId;
+    }
+  }
+  if (requestId !== restorePlaylistRequestId) return;
+  setState({ activePlaylistId, activeMusicGroupId });
 }
 
 export function setAudioBookInitialState(book: Book): void {
@@ -98,6 +122,7 @@ export async function openMusicHub(options?: {
   section?: MusicHubSection;
 }): Promise<void> {
   revokeAudioPlaybackUrls();
+  await restoreActiveMusicPlaylistSelection();
   const section: MusicHubSection =
     options?.section ??
     (options?.panel === 'search'
@@ -106,7 +131,7 @@ export async function openMusicHub(options?: {
         ? 'list'
         : options?.panel === 'sync'
           ? 'settings'
-          : state.musicSection || 'search');
+          : normalizeMusicHubSection(state.musicSection));
   setState({
     kind: MediaKind.audio,
     book: null,
@@ -144,7 +169,7 @@ export async function openMusicHub(options?: {
 
 export function setMusicSection(section: MusicHubSection): void {
   setState({
-    musicSection: section,
+    musicSection: normalizeMusicHubSection(section),
     musicLibraryOpen: false,
     musicSearchOpen: false,
     musicAccountOpen: false,
@@ -154,24 +179,42 @@ export function setMusicSection(section: MusicHubSection): void {
   });
 }
 
-export function setActiveMusicGroupId(groupId: number | null): void {
-  setState({ activeMusicGroupId: groupId });
+export function setActiveMusicGroupId(
+  groupId: number | null,
+  playlistId?: string | null,
+): void {
+  restorePlaylistRequestId += 1;
+  if (playlistId !== undefined) {
+    setMusicActivePlaylistId(playlistId ?? 'local');
+  }
+  setState({
+    activeMusicGroupId: groupId,
+    ...(playlistId !== undefined ? { activePlaylistId: playlistId } : {}),
+  });
 }
 
 export function setActivePlaylistId(playlistId: string | null): void {
+  restorePlaylistRequestId += 1;
   if (!playlistId) {
+    setMusicActivePlaylistId('local');
     setState({ activePlaylistId: null, activeMusicGroupId: null });
     return;
   }
-  if (playlistId === 'favorite' || playlistId === String(MediaGroupId.Favorite)) {
+  if (
+    playlistId === 'love' ||
+    playlistId === 'favorite' ||
+    playlistId === String(MediaGroupId.Favorite)
+  ) {
+    setMusicActivePlaylistId('love');
     setState({
-      activePlaylistId: null,
+      activePlaylistId: 'love',
       activeMusicGroupId: MediaGroupId.Favorite,
     });
     return;
   }
   void getMusicGroupByListId(playlistId).then((group) => {
     if (group) {
+      setMusicActivePlaylistId(playlistId);
       setState({
         activePlaylistId: playlistId,
         activeMusicGroupId: group.groupId,
@@ -216,7 +259,6 @@ export async function applyMusicTrack(
     })(),
     trackIndex: index,
   });
-  clearPlayTimeout();
   try {
     if (options?.forceRefreshUrl) {
       await invalidateTrackUrlCache(track.id);
@@ -274,7 +316,9 @@ export async function applyMusicTrack(
       activeSource: playTrack.source,
       contentSession: createMusicHubSession(nextQueue, index),
     });
-    void recordRecentPlay(playTrack.id);
+    void recordRecentPlay(playTrack).catch((error) => {
+      console.warn('[music] failed to persist recent play:', error);
+    });
     const coverUrl =
       typeof playTrack.meta.coverUrl === 'string' ? playTrack.meta.coverUrl : undefined;
     globalMediaPlayerStore.activate(
@@ -296,7 +340,6 @@ export async function applyMusicTrack(
         void preloadTrackUrl(nextTrack, { activeSource: state.activeSource });
       }
     }
-    schedulePlayTimeout();
   } catch (err) {
     const message = formatMusicUrlError(err);
     console.warn('[music] applyMusicTrack failed', err);
@@ -396,6 +439,18 @@ export function playTracksLater(tracks: AudioTrack[]): void {
   queue.splice(insertAt, 0, ...tracks);
   setState({
     trackQueue: queue,
+    contentSession: createMusicHubSession(queue, state.trackIndex),
+  });
+}
+
+export function replaceTrackInQueue(oldTrack: AudioTrack, replacement: AudioTrack): void {
+  const queue = state.trackQueue.map((track) =>
+    track.id === oldTrack.id && track.source === oldTrack.source ? replacement : track,
+  );
+  setState({
+    trackQueue: queue,
+    activeSource:
+      queue[state.trackIndex]?.source ?? state.activeSource,
     contentSession: createMusicHubSession(queue, state.trackIndex),
   });
 }

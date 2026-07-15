@@ -68,6 +68,7 @@ export const MusicListCreateDialog: Component<MusicListCreateDialogProps> = (pro
       const groups = await getMusicGroups();
       setActiveMusicGroupId(
         groups.find((g) => g.listId === id)?.groupId ?? MediaGroupId.MusicLocal,
+        id,
       );
       showAppToast({ title: '列表已创建', variant: 'success' });
       props.onCreated?.();

@@ -113,6 +113,16 @@ export const LyricDesktopPage: Component = () => {
           lyricTrack={lyricTrack()}
           positionSec={positionSec()}
           lyricOffset={getMusicSettings().lyricOffset}
+          showTranslation={getMusicSettings().showLyricTranslation}
+          showRoma={getMusicSettings().showLyricRoma}
+          secondaryOrder={getMusicSettings().lyricSecondaryOrder}
+          align={getMusicSettings().desktopLyricAlign}
+          fontSize={getMusicSettings().desktopLyricFontSize}
+          zoomActiveLyric={getMusicSettings().desktopLyricZoomActive}
+          singleLine={getMusicSettings().desktopLyricSingleLine}
+          maxLines={getMusicSettings().desktopLyricMaxLines}
+          playedColor={getMusicSettings().desktopLyricPlayedColor}
+          unplayedColor={getMusicSettings().desktopLyricUnplayedColor}
         />
       </div>
     </div>

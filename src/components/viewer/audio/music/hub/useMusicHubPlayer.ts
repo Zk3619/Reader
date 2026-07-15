@@ -29,9 +29,52 @@ import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { WebAudioPlayerEngine } from '@/lib/media/audio/engine/web-audio-player';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import {
+  getMusicSettings,
+  subscribeMusicSettings,
+} from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
 import { startMusicOpenApiStateSync } from '@/lib/media/audio/platform/music-openapi-state';
+import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
+
+const MUSIC_PROGRESS_STORAGE_KEY = 'reader_music_track_progress';
+
+function readTrackProgress(trackKey: string): number {
+  try {
+    const raw = localStorage.getItem(MUSIC_PROGRESS_STORAGE_KEY);
+    const value = raw
+      ? Number((JSON.parse(raw) as Record<string, number>)[trackKey])
+      : 0;
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveTrackProgress(trackKey: string, positionSec: number): void {
+  try {
+    const raw = localStorage.getItem(MUSIC_PROGRESS_STORAGE_KEY);
+    const progress = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    progress[trackKey] = Math.max(0, positionSec);
+    localStorage.setItem(MUSIC_PROGRESS_STORAGE_KEY, JSON.stringify(progress));
+  } catch {
+    // ignore
+  }
+}
+
+async function convertLyricBundle(
+  bundle: LyricBundle,
+  type: 0 | 1 | 2,
+): Promise<LyricBundle> {
+  if (type === 0) return bundle;
+  const entries = await Promise.all(
+    Object.entries(bundle).map(async ([key, value]) => [
+      key,
+      typeof value === 'string' ? await convertChineseText(value, type) : value,
+    ]),
+  );
+  return Object.fromEntries(entries) as LyricBundle;
+}
 
 async function emitDesktopLyric(payload: {
   title: string;
@@ -55,8 +98,9 @@ async function emitDesktopLyric(payload: {
 }
 
 export function useMusicHubPlayer() {
+  const [settings, setSettings] = createSignal(getMusicSettings());
   const [fetchedLyricBundle, setFetchedLyricBundle] = createSignal<LyricBundle | null>(null);
-  const [lyricTrack, setLyricTrack] = createSignal<LyricTrackKind>(getMusicSettings().lyricTrack);
+  const [lyricTrack, setLyricTrack] = createSignal<LyricTrackKind>(settings().lyricTrack);
   const [musicVolume, setMusicVolume] = createSignal(1);
   const [musicMuted, setMusicMuted] = createSignal(false);
   const [musicPlayMode, setMusicPlayMode] = createSignal(getMusicPlayConfig().playMode);
@@ -77,6 +121,7 @@ export function useMusicHubPlayer() {
 
   const audioConfig = createMemo(() => ({
     ...getMusicPlayConfig(),
+    playSpeed: settings().playSpeed,
     playMode: musicPlayMode(),
   }));
 
@@ -90,7 +135,14 @@ export function useMusicHubPlayer() {
     return item;
   });
 
+  let stopAfterCurrentTrack = false;
+  let playTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
   const handleEnded = async () => {
+    if (stopAfterCurrentTrack) {
+      stopAfterCurrentTrack = false;
+      return;
+    }
     await playNextTrack();
   };
 
@@ -104,7 +156,14 @@ export function useMusicHubPlayer() {
     book: () => null,
     audioConfig,
     loading,
-    onChapterPosChange: (pos) => viewerStore.setChapterPos(pos),
+    autoPlay: () => settings().autoPlay,
+    onChapterPosChange: (pos) => {
+      viewerStore.setChapterPos(pos);
+      const track = currentTrack();
+      if (track && settings().rememberProgress) {
+        saveTrackProgress(`${track.source}:${track.id}`, pos);
+      }
+    },
     onEndedChapter: handleEnded,
     onSaveProgress: async () => {},
     onSkipVolumeChapter: async (index) => {
@@ -127,6 +186,35 @@ export function useMusicHubPlayer() {
         await retryMusicTrackPlayback();
       })();
     },
+  });
+
+  createEffect(() => {
+    const track = currentTrack();
+    const timeoutSec = settings().playTimeoutSec ?? 0;
+    const waitForTrackEnd = settings().playTimeoutWaitForTrackEnd;
+    if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
+    stopAfterCurrentTrack = false;
+    if (!track || timeoutSec <= 0) return;
+    playTimeoutTimer = setTimeout(() => {
+      playTimeoutTimer = undefined;
+      if (waitForTrackEnd) {
+        stopAfterCurrentTrack = true;
+      } else if (player.playing()) {
+        player.togglePlay();
+      }
+    }, timeoutSec * 1000);
+  });
+  onCleanup(() => {
+    if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
+  });
+
+  createEffect(() => {
+    const track = currentTrack();
+    if (!track) return;
+    const position = settings().rememberProgress
+      ? readTrackProgress(`${track.source}:${track.id}`)
+      : 0;
+    viewerStore.setChapterPos(position);
   });
 
   createEffect(() => {
@@ -178,6 +266,7 @@ export function useMusicHubPlayer() {
 
   createEffect(() => {
     const t = currentTrack();
+    const conversion = settings().lyricChineseConversion;
     // 依赖换源后的 id/source，确保换源成功会重拉歌词
     void t?.id;
     void t?.source;
@@ -186,14 +275,20 @@ export function useMusicHubPlayer() {
       return;
     }
     setFetchedLyricBundle(null);
-    if (typeof t.meta.lyricText === 'string' && t.meta.lyricText.trim()) {
-      setFetchedLyricBundle({ lyric: t.meta.lyricText });
-      return;
-    }
     let cancelled = false;
-    void resolveOnlineLyricFull(t).then((bundle) => {
-      if (!cancelled) setFetchedLyricBundle(bundle);
-    });
+    if (typeof t.meta.lyricText === 'string' && t.meta.lyricText.trim()) {
+      void convertLyricBundle({ lyric: t.meta.lyricText }, conversion).then(
+        (bundle) => {
+          if (!cancelled) setFetchedLyricBundle(bundle);
+        },
+      );
+    } else {
+      void resolveOnlineLyricFull(t).then(async (bundle) => {
+        if (!bundle || cancelled) return;
+        const converted = await convertLyricBundle(bundle, conversion);
+        if (!cancelled) setFetchedLyricBundle(converted);
+      });
+    }
     onCleanup(() => {
       cancelled = true;
     });
@@ -224,6 +319,14 @@ export function useMusicHubPlayer() {
   let unlistenAndroid: (() => void) | undefined;
 
   onMount(() => {
+    const unsubscribeSettings = subscribeMusicSettings((next) => {
+      setSettings(next);
+      const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+      if (el) el.preservesPitch = next.preservesPitch;
+      webAudio?.applyEqPreset(next.eqPreset);
+    });
+    onCleanup(unsubscribeSettings);
+
     void listenAndroidMediaActions((action) => {
       switch (action) {
         case 'play':
@@ -311,12 +414,17 @@ export function useMusicHubPlayer() {
   });
 
   const bindAudio = (el: HTMLAudioElement) => {
+    const currentSettings = settings();
     el.setAttribute('data-music-hub-player', '1');
     el.volume = musicVolume();
     el.muted = musicMuted();
+    el.preservesPitch = currentSettings.preservesPitch;
     player.audioRef(el);
     webAudio?.dispose();
-    webAudio = new WebAudioPlayerEngine({ audioElement: el, eqPreset: 'flat' });
+    webAudio = new WebAudioPlayerEngine({
+      audioElement: el,
+      eqPreset: currentSettings.eqPreset,
+    });
     void webAudio.resume();
   };
   onCleanup(() => webAudio?.dispose());

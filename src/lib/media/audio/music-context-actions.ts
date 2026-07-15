@@ -10,7 +10,6 @@ import {
   saveDislikeRule,
   setPlaylistTracks,
 } from '@/lib/database/audio-library';
-import { getGroupById, getMusicGroups } from '@/lib/database/media-groups';
 import { enqueueTrackDownload } from '@/lib/media/audio/audio-download';
 import { invalidateDislikeRulesCache } from '@/lib/media/audio/library/dislike-filter';
 import { getSongListDetail } from '@/lib/media/audio/music-sdk';
@@ -25,8 +24,8 @@ import {
   setMusicSection,
 } from '@/stores/viewer/media/audio';
 import { setSearchTab, searchByKeyword } from '@/stores/music-hub/search';
-import { MediaGroupId } from '@/types/book-group';
 import { bindPlaylistToSource } from '@/lib/media/audio/list/sync-source-list';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 
 export interface PlaylistTarget {
   listId: string;
@@ -34,25 +33,12 @@ export interface PlaylistTarget {
 }
 
 export async function listPlaylistTargets(): Promise<PlaylistTarget[]> {
-  const [favorite, music, users] = await Promise.all([
-    getGroupById(MediaGroupId.Favorite),
-    getMusicGroups(),
-    listUserMusicPlaylists(),
-  ]);
-  const targets: PlaylistTarget[] = [];
-  if (favorite?.listId) {
-    targets.push({ listId: favorite.listId, name: favorite.groupName });
-  }
-  for (const g of music) {
-    if (!g.listId || g.listId.startsWith('pl_')) continue;
-    if (g.listId === 'love' || g.listId === favorite?.listId) continue;
-    if (g.listId === BUILTIN_PLAYLIST_IDS.RECENT) continue;
-    targets.push({ listId: g.listId, name: g.groupName });
-  }
-  for (const u of users) {
-    targets.push({ listId: u.listId, name: u.name });
-  }
-  return targets;
+  const users = await listUserMusicPlaylists();
+  return [
+    { listId: BUILTIN_PLAYLIST_IDS.DEFAULT, name: '试听列表' },
+    { listId: BUILTIN_PLAYLIST_IDS.LOVE, name: '我的收藏' },
+    ...users.map((u) => ({ listId: u.listId, name: u.name })),
+  ];
 }
 
 export function formatTrackDisplayName(track: AudioTrack): string {
@@ -74,6 +60,11 @@ export function playTrackLater(track: AudioTrack): void {
   showAppToast({ title: '已添加到下一首播放', variant: 'success' });
 }
 
+export function playTracksLaterFromMenu(tracks: AudioTrack[]): void {
+  playTracksLater(tracks);
+  showAppToast({ title: `已添加 ${tracks.length} 首到下一首播放`, variant: 'success' });
+}
+
 export async function downloadTrack(track: AudioTrack): Promise<void> {
   if (track.source === 'local') {
     showAppToast({ title: '本地曲目无需下载', variant: 'warning' });
@@ -83,8 +74,16 @@ export async function downloadTrack(track: AudioTrack): Promise<void> {
   showAppToast({ title: '已加入下载队列', variant: 'success' });
 }
 
+export async function downloadTracks(tracks: AudioTrack[]): Promise<void> {
+  const downloadable = tracks.filter((track) => track.source !== 'local');
+  for (const track of downloadable) await enqueueTrackDownload(track);
+  showAppToast({ title: `已加入下载队列 ${downloadable.length} 首`, variant: 'success' });
+}
+
 export async function addTrackToPlaylist(playlistId: string, track: AudioTrack): Promise<void> {
-  await addTracksToPlaylist(playlistId, [track]);
+  await addTracksToPlaylist(playlistId, [track], {
+    position: getMusicSettings().listAddPosition,
+  });
   showAppToast({ title: '已添加到列表', variant: 'success' });
 }
 
@@ -94,7 +93,9 @@ export async function moveTrackToPlaylist(
   track: AudioTrack,
 ): Promise<void> {
   if (fromPlaylistId === toPlaylistId) return;
-  await addTracksToPlaylist(toPlaylistId, [track]);
+  await addTracksToPlaylist(toPlaylistId, [track], {
+    position: getMusicSettings().listAddPosition,
+  });
   await removeTrackFromPlaylist(fromPlaylistId, track.id);
   showAppToast({ title: '已移动到目标列表', variant: 'success' });
 }
@@ -104,10 +105,19 @@ export async function removeTrackFromList(playlistId: string, trackId: string): 
   showAppToast({ title: '已从列表移除', variant: 'success' });
 }
 
+export async function removeTracksFromList(
+  playlistId: string,
+  tracks: AudioTrack[],
+): Promise<void> {
+  for (const track of tracks) await removeTrackFromPlaylist(playlistId, track.id);
+  showAppToast({ title: `已从列表移除 ${tracks.length} 首`, variant: 'success' });
+}
+
 export async function dislikeTrack(track: AudioTrack): Promise<void> {
+  const escapedName = track.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   await saveDislikeRule({
     id: `dislike_${Date.now()}`,
-    pattern: track.name,
+    pattern: `^${escapedName}$`,
     field: 'name',
   });
   invalidateDislikeRulesCache();
@@ -228,5 +238,23 @@ export async function moveTrackToPosition(
   await setPlaylistTracks(
     playlistId,
     next.map((t) => t.id),
+  );
+}
+
+export async function moveTracksToPosition(
+  playlistId: string,
+  trackIds: string[],
+  position: number,
+): Promise<void> {
+  const tracks = await getPlaylistTracks(playlistId);
+  const selected = new Set(trackIds);
+  const moving = tracks.filter((track) => selected.has(track.id));
+  if (moving.length === 0) return;
+  const remaining = tracks.filter((track) => !selected.has(track.id));
+  const target = Math.max(0, Math.min(Math.floor(position), remaining.length));
+  remaining.splice(target, 0, ...moving);
+  await setPlaylistTracks(
+    playlistId,
+    remaining.map((track) => track.id),
   );
 }

@@ -5,11 +5,11 @@
 import { Match, Switch, type Component } from 'solid-js';
 import { MusicSettingsBasic } from '@/components/viewer/audio/music/settings/MusicSettingsBasic';
 import { MusicSettingsPlay } from '@/components/viewer/audio/music/settings/MusicSettingsPlay';
+import { MusicSettingsPlayDetail } from '@/components/viewer/audio/music/settings/MusicSettingsPlayDetail';
 import { MusicSettingsSearch } from '@/components/viewer/audio/music/settings/MusicSettingsSearch';
 import { MusicSettingsList } from '@/components/viewer/audio/music/settings/MusicSettingsList';
 import { MusicSettingsDownload } from '@/components/viewer/audio/music/settings/MusicSettingsDownload';
 import { MusicSettingsSync } from '@/components/viewer/audio/music/settings/MusicSettingsSync';
-import { MusicSettingsNetwork } from '@/components/viewer/audio/music/settings/MusicSettingsNetwork';
 import { MusicSettingsBackup } from '@/components/viewer/audio/music/settings/MusicSettingsBackup';
 import { MusicSettingsOther } from '@/components/viewer/audio/music/settings/MusicSettingsOther';
 import { MusicSettingsDesktop } from '@/components/viewer/audio/music/settings/MusicSettingsDesktop';
@@ -18,11 +18,13 @@ import { MusicSettingsDesktopLyric } from '@/components/viewer/audio/music/setti
 export type MusicSettingsSection =
   | 'basic'
   | 'play'
+  | 'playDetail'
+  | 'desktopLyric'
   | 'search'
   | 'list'
   | 'download'
   | 'sync'
-  | 'network'
+  | 'desktop'
   | 'backup'
   | 'other';
 
@@ -38,6 +40,12 @@ export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) 
     <Match when={props.section === 'play'}>
       <MusicSettingsPlay />
     </Match>
+    <Match when={props.section === 'playDetail'}>
+      <MusicSettingsPlayDetail />
+    </Match>
+    <Match when={props.section === 'desktopLyric'}>
+      <MusicSettingsDesktopLyric />
+    </Match>
     <Match when={props.section === 'search'}>
       <MusicSettingsSearch />
     </Match>
@@ -50,15 +58,13 @@ export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) 
     <Match when={props.section === 'sync'}>
       <MusicSettingsSync />
     </Match>
-    <Match when={props.section === 'network'}>
-      <MusicSettingsNetwork />
+    <Match when={props.section === 'desktop'}>
+      <MusicSettingsDesktop />
     </Match>
     <Match when={props.section === 'backup'}>
       <MusicSettingsBackup />
     </Match>
     <Match when={props.section === 'other'}>
-      <MusicSettingsDesktop />
-      <MusicSettingsDesktopLyric />
       <MusicSettingsOther />
     </Match>
   </Switch>

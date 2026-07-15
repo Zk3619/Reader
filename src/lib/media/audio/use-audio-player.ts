@@ -23,6 +23,8 @@ export interface UseAudioPlayerOptions {
   chapterPos: Accessor<number>;
   book: Accessor<Book | null>;
   audioConfig: Accessor<AudioPlayConfig>;
+  /** 首次绑定或曲目地址变化后是否自动开始播放 */
+  autoPlay?: Accessor<boolean>;
   /** 章节正文/播放地址加载中时不应沿用旧 URL 或自动开播 */
   loading?: Accessor<boolean>;
   /** 统一 PlayableItem 队列（music / 听书共用） */
@@ -264,7 +266,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       return;
     }
     lastSegmentKey = key;
-    loadSegment(0, true);
+    loadSegment(0, options.autoPlay?.() ?? true);
   };
 
   createEffect(
@@ -284,7 +286,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
         lastSegmentKey = key;
         pendingLoadAfterFetch = false;
         playbackErrorHandled = false;
-        loadSegment(0, !userPaused);
+        loadSegment(0, !userPaused && (options.autoPlay?.() ?? true));
       },
       { defer: true },
     ),

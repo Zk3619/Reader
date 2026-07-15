@@ -66,6 +66,53 @@ const LEADERBOARD_SIDE_WIDTH = 'w-[14.8%]';
 const LEADERBOARD_SOURCE_ROW =
   'flex h-9.5 shrink-0 items-center border-b border-border/50';
 
+function LeaderboardMoreMenu(props: { onReloadFirstPage: () => void }) {
+  const ui = getMusicLeaderboardUi;
+  const [open, setOpen] = createSignal(false);
+  return (
+    <AppDropdownMenu open={open()} onOpenChange={setOpen}>
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
+                <MoreIcon class="h-4 w-4" />
+                <span class="sr-only">更多</span>
+              </AppDropdownMenuIconTrigger>
+            )}
+          />
+        </AppTooltipTrigger>
+        <AppTooltipContent>更多</AppTooltipContent>
+      </AppTooltip>
+      <AppDropdownMenuContent layout="compact">
+        <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+          列表分页方式
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setMusicLeaderboardPaginationPreference('scroll');
+            props.onReloadFirstPage();
+          }}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={ui().paginationPreference === 'scroll'} />
+          <span>滚动加载</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setMusicLeaderboardPaginationPreference('pagination');
+            props.onReloadFirstPage();
+          }}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={ui().paginationPreference === 'pagination'} />
+          <span>分页加载</span>
+        </AppDropdownMenuItem>
+      </AppDropdownMenuContent>
+    </AppDropdownMenu>
+  );
+}
+
 /** 桌面曲目列：与搜索页歌曲列表对齐；justify-items-start 保证各列内容左对齐 */
 const DESKTOP_TRACK_COLS =
   'grid w-full min-w-0 grid-cols-[3.25rem_minmax(0,1fr)_minmax(6rem,24%)_minmax(6rem,27%)_4.5rem] items-center justify-items-start gap-0 px-2 text-left';
@@ -255,7 +302,6 @@ export const MusicLeaderboardPane: Component = () => {
   const isMobileLayout = () => shell().useMobileShell;
   const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLElement | undefined>();
   const [boardsScrollEl, setBoardsScrollEl] = createSignal<HTMLElement | undefined>();
-  const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
 
   let lastTracksScrollTop = 0;
@@ -384,46 +430,7 @@ export const MusicLeaderboardPane: Component = () => {
             <AppTooltipContent>刷新</AppTooltipContent>
           </AppTooltip>
 
-          <AppDropdownMenu open={moreMenuOpen()} onOpenChange={setMoreMenuOpen}>
-            <AppTooltip>
-              <AppTooltipTrigger as="div">
-                <AppDropdownMenuTrigger
-                  as={(triggerProps: Record<string, unknown>) => (
-                    <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
-                      <MoreIcon class="h-4 w-4" />
-                      <span class="sr-only">更多</span>
-                    </AppDropdownMenuIconTrigger>
-                  )}
-                />
-              </AppTooltipTrigger>
-              <AppTooltipContent>更多</AppTooltipContent>
-            </AppTooltip>
-            <AppDropdownMenuContent layout="compact">
-              <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
-                列表分页方式
-              </AppDropdownMenuItem>
-              <AppDropdownMenuItem
-                onSelect={() => {
-                  setMusicLeaderboardPaginationPreference('scroll');
-                  reloadFirstPage();
-                }}
-                class="flex items-center gap-2"
-              >
-                <MenuRadioIndicator selected={ui().paginationPreference === 'scroll'} />
-                <span>滚动加载</span>
-              </AppDropdownMenuItem>
-              <AppDropdownMenuItem
-                onSelect={() => {
-                  setMusicLeaderboardPaginationPreference('pagination');
-                  reloadFirstPage();
-                }}
-                class="flex items-center gap-2"
-              >
-                <MenuRadioIndicator selected={ui().paginationPreference === 'pagination'} />
-                <span>分页加载</span>
-              </AppDropdownMenuItem>
-            </AppDropdownMenuContent>
-          </AppDropdownMenu>
+          <LeaderboardMoreMenu onReloadFirstPage={reloadFirstPage} />
         </>
       }
       scrollClass="overflow-hidden"

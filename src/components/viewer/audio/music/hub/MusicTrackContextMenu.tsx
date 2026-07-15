@@ -1,43 +1,30 @@
-/**
- * 曲目右键菜单（对齐 lx OnlineList / MusicList）
- */
-
-import {
-  For,
-  Show,
-  createResource,
-  createSignal,
-  type Component,
-  type JSX,
-} from 'solid-js';
+import { Show, createSignal, type Component, type JSX } from 'solid-js';
 import {
   AppContextMenu,
   AppContextMenuItem,
   AppContextMenuSeparator,
-  AppContextMenuSub,
-  AppContextMenuSubContent,
-  AppContextMenuSubTrigger,
   AppContextMenuTrigger,
 } from '@/components/shared/AppContextMenu';
+import { Button } from '@/components/ui/button';
+import { MoreIcon } from '@/components/shared/icons';
 import {
   ViewerAppContextMenuContent,
   VIEWER_OVERLAY_Z,
 } from '@/components/viewer/viewer-app-overlay';
+import { MusicAddToListDialog } from '@/components/viewer/audio/music/hub/MusicAddToListDialog';
+import { MusicMovePositionDialog } from '@/components/viewer/audio/music/hub/MusicMovePositionDialog';
+import { MusicTrackSourceDialog } from '@/components/viewer/audio/music/hub/MusicTrackSourceDialog';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import {
-  addTrackToPlaylist,
   buildTrackSourceDetailUrl,
   copyTrackName,
   dislikeTrack,
-  downloadTrack,
-  listPlaylistTargets,
-  moveTrackToPlaylist,
-  playTrackAt,
-  playTrackLater,
-  removeTrackFromList,
-  searchSimilarTrack,
+  downloadTracks,
   openTrackSourceDetail,
-  type PlaylistTarget,
+  playTrackAt,
+  playTracksLaterFromMenu,
+  removeTracksFromList,
+  searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
 import { cn } from '@/lib/utils';
 
@@ -46,148 +33,190 @@ export type MusicTrackContextVariant = 'online' | 'library';
 export interface MusicTrackContextMenuProps {
   track: AudioTrack;
   tracks: AudioTrack[];
+  selectedTracks?: AudioTrack[];
   index: number;
   variant?: MusicTrackContextVariant;
-  /** 当前所属用户/内置列表 id（library 用于移除/移动） */
   playlistId?: string | null;
   origin?: 'search' | 'list';
   onChanged?: () => void;
+  showActionButton?: boolean;
   class?: string;
   children: JSX.Element;
 }
 
-function PlaylistSubItems(props: {
-  targets: PlaylistTarget[];
-  currentPlaylistId?: string | null;
-  onPick: (listId: string) => void;
-}) {
-  return (
-    <For each={props.targets}>
-      {(t) => (
-        <AppContextMenuItem
-          disabled={t.listId === props.currentPlaylistId}
-          onSelect={() => props.onPick(t.listId)}
-        >
-          {t.name}
-        </AppContextMenuItem>
-      )}
-    </For>
-  );
-}
-
 export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (props) => {
-  const [menuOpen, setMenuOpen] = createSignal(false);
-  const [targets] = createResource(menuOpen, (open) =>
-    open ? listPlaylistTargets() : Promise.resolve([] as PlaylistTarget[]),
-  );
-
+  let triggerEl: HTMLDivElement | undefined;
+  const [addDialogOpen, setAddDialogOpen] = createSignal(false);
+  const [moveDialogOpen, setMoveDialogOpen] = createSignal(false);
+  const [positionDialogOpen, setPositionDialogOpen] = createSignal(false);
+  const [sourceDialogOpen, setSourceDialogOpen] = createSignal(false);
   const variant = () => props.variant ?? 'online';
-  const sourceDetailAvailable = () => !!buildTrackSourceDetailUrl(props.track);
-  const canDownload = () => props.track.source !== 'local';
   const playlistId = () => props.playlistId ?? null;
+  const actionTracks = () => {
+    const selected = props.selectedTracks ?? [];
+    return selected.some(
+      (track) => track.id === props.track.id && track.source === props.track.source,
+    )
+      ? selected
+      : [props.track];
+  };
+
+  const openFromActionButton = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect =
+      event.currentTarget instanceof HTMLElement
+        ? event.currentTarget.getBoundingClientRect()
+        : triggerEl?.getBoundingClientRect();
+    triggerEl?.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect?.left ?? 0,
+        clientY: rect?.bottom ?? 0,
+      }),
+    );
+  };
+
+  const removeSelected = async () => {
+    const listId = playlistId();
+    if (!listId) return;
+    const selected = actionTracks();
+    if (
+      selected.length > 1 &&
+      !window.confirm(`确定从当前列表移除所选 ${selected.length} 首歌曲吗？`)
+    ) {
+      return;
+    }
+    await removeTracksFromList(listId, selected);
+    props.onChanged?.();
+  };
+
+  const markDisliked = async () => {
+    if (!window.confirm(`确定将“${props.track.name}”加入不喜欢吗？`)) return;
+    await dislikeTrack(props.track);
+    props.onChanged?.();
+  };
 
   return (
-    <AppContextMenu onOpenChange={setMenuOpen}>
-      <AppContextMenuTrigger as="div" class={cn('h-full w-full min-w-0', props.class)}>
-        {props.children}
-      </AppContextMenuTrigger>
-      <ViewerAppContextMenuContent layout="compact" portalZClass={VIEWER_OVERLAY_Z.popper}>
-        <AppContextMenuItem
-          onSelect={() =>
-            playTrackAt(props.tracks, props.index, props.origin)
-          }
+    <>
+      <AppContextMenu>
+        <AppContextMenuTrigger
+          as="div"
+          ref={(element: HTMLDivElement) => {
+            triggerEl = element;
+          }}
+          class={cn('relative h-full w-full min-w-0', props.class)}
         >
-          播放
-        </AppContextMenuItem>
-        <AppContextMenuItem
-          disabled={!canDownload()}
-          onSelect={() => void downloadTrack(props.track)}
-        >
-          下载
-        </AppContextMenuItem>
-        <AppContextMenuItem onSelect={() => playTrackLater(props.track)}>
-          下一首播放
-        </AppContextMenuItem>
-
-        <AppContextMenuSub>
-          <AppContextMenuSubTrigger>添加到</AppContextMenuSubTrigger>
-          <AppContextMenuSubContent portalZClass={VIEWER_OVERLAY_Z.popper}>
-            <Show
-              when={(targets() ?? []).length > 0}
-              fallback={
-                <AppContextMenuItem disabled class="text-muted-foreground">
-                  暂无可用列表
-                </AppContextMenuItem>
-              }
+          {props.children}
+          <Show when={props.showActionButton}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="absolute right-1 top-1/2 z-2 h-10 w-10 -translate-y-1/2 text-muted-foreground"
+              aria-label={`更多操作 ${props.track.name}`}
+              onClick={openFromActionButton}
             >
-              <PlaylistSubItems
-                targets={targets() ?? []}
-                currentPlaylistId={playlistId()}
-                onPick={(listId) => void addTrackToPlaylist(listId, props.track)}
-              />
-            </Show>
-          </AppContextMenuSubContent>
-        </AppContextMenuSub>
-
-        <Show when={variant() === 'library' && playlistId()}>
-          <AppContextMenuSub>
-            <AppContextMenuSubTrigger>移动到</AppContextMenuSubTrigger>
-            <AppContextMenuSubContent portalZClass={VIEWER_OVERLAY_Z.popper}>
-              <Show
-                when={(targets() ?? []).length > 0}
-                fallback={
-                  <AppContextMenuItem disabled class="text-muted-foreground">
-                    暂无可用列表
-                  </AppContextMenuItem>
-                }
-              >
-                <PlaylistSubItems
-                  targets={targets() ?? []}
-                  currentPlaylistId={playlistId()}
-                  onPick={(listId) =>
-                    void moveTrackToPlaylist(playlistId()!, listId, props.track).then(() =>
-                      props.onChanged?.(),
-                    )
-                  }
-                />
-              </Show>
-            </AppContextMenuSubContent>
-          </AppContextMenuSub>
-        </Show>
-
-        <Show when={variant() === 'library'}>
-          <AppContextMenuItem onSelect={() => void copyTrackName(props.track)}>
-            复制歌曲名
-          </AppContextMenuItem>
-        </Show>
-
-        <AppContextMenuItem
-          disabled={!sourceDetailAvailable()}
-          onSelect={() => void openTrackSourceDetail(props.track)}
-        >
-          歌曲详情页
-        </AppContextMenuItem>
-        <AppContextMenuItem onSelect={() => searchSimilarTrack(props.track)}>
-          搜索
-        </AppContextMenuItem>
-        <AppContextMenuItem onSelect={() => void dislikeTrack(props.track)}>
-          不喜欢
-        </AppContextMenuItem>
-
-        <Show when={variant() === 'library' && playlistId()}>
-          <AppContextMenuSeparator />
+              <MoreIcon class="h-4 w-4" />
+            </Button>
+          </Show>
+        </AppContextMenuTrigger>
+        <ViewerAppContextMenuContent layout="compact" portalZClass={VIEWER_OVERLAY_Z.popper}>
           <AppContextMenuItem
-            class="text-destructive focus:text-destructive"
-            onSelect={() =>
-              void removeTrackFromList(playlistId()!, props.track.id).then(() =>
-                props.onChanged?.(),
-              )
-            }
+            onSelect={() => playTrackAt(props.tracks, props.index, props.origin)}
           >
-            从列表移除
+            播放
           </AppContextMenuItem>
-        </Show>
-      </ViewerAppContextMenuContent>
-    </AppContextMenu>
+          <AppContextMenuItem
+            disabled={actionTracks().every((track) => track.source === 'local')}
+            onSelect={() => void downloadTracks(actionTracks())}
+          >
+            下载
+          </AppContextMenuItem>
+          <AppContextMenuItem onSelect={() => playTracksLaterFromMenu(actionTracks())}>
+            稍后播放
+          </AppContextMenuItem>
+          <AppContextMenuItem onSelect={() => setAddDialogOpen(true)}>
+            添加到...
+          </AppContextMenuItem>
+
+          <Show when={variant() === 'library' && playlistId()}>
+            <AppContextMenuItem onSelect={() => setMoveDialogOpen(true)}>
+              移动到...
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => setPositionDialogOpen(true)}>
+              调整位置
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => setSourceDialogOpen(true)}>
+              歌曲换源
+            </AppContextMenuItem>
+            <AppContextMenuItem onSelect={() => void copyTrackName(props.track)}>
+              复制歌曲名
+            </AppContextMenuItem>
+          </Show>
+
+          <AppContextMenuItem
+            disabled={!buildTrackSourceDetailUrl(props.track)}
+            onSelect={() => void openTrackSourceDetail(props.track)}
+          >
+            歌曲详情页
+          </AppContextMenuItem>
+          <AppContextMenuItem onSelect={() => searchSimilarTrack(props.track)}>
+            搜索
+          </AppContextMenuItem>
+          <AppContextMenuItem onSelect={() => void markDisliked()}>
+            不喜欢
+          </AppContextMenuItem>
+
+          <Show when={variant() === 'library' && playlistId()}>
+            <AppContextMenuSeparator />
+            <AppContextMenuItem
+              class="text-destructive focus:text-destructive"
+              onSelect={() => void removeSelected()}
+            >
+              从列表移除
+            </AppContextMenuItem>
+          </Show>
+        </ViewerAppContextMenuContent>
+      </AppContextMenu>
+
+      <MusicAddToListDialog
+        open={addDialogOpen()}
+        tracks={actionTracks()}
+        mode="add"
+        onOpenChange={setAddDialogOpen}
+        onChanged={props.onChanged}
+      />
+      <Show when={playlistId()}>
+        {(listId) => (
+          <>
+            <MusicAddToListDialog
+              open={moveDialogOpen()}
+              tracks={actionTracks()}
+              mode="move"
+              fromPlaylistId={listId()}
+              onOpenChange={setMoveDialogOpen}
+              onChanged={props.onChanged}
+            />
+            <MusicMovePositionDialog
+              open={positionDialogOpen()}
+              playlistId={listId()}
+              tracks={actionTracks()}
+              maxPosition={props.tracks.length}
+              onOpenChange={setPositionDialogOpen}
+              onChanged={props.onChanged}
+            />
+            <MusicTrackSourceDialog
+              open={sourceDialogOpen()}
+              playlistId={listId()}
+              track={props.track}
+              onOpenChange={setSourceDialogOpen}
+              onChanged={props.onChanged}
+            />
+          </>
+        )}
+      </Show>
+    </>
   );
 };

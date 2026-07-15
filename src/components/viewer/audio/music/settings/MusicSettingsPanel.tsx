@@ -17,11 +17,13 @@ import { cn } from '@/lib/utils';
 const SETTINGS_SECTIONS: { id: MusicSettingsSection; label: string }[] = [
   { id: 'basic', label: '基本' },
   { id: 'play', label: '播放' },
+  { id: 'playDetail', label: '播放详情' },
+  { id: 'desktopLyric', label: '桌面歌词' },
   { id: 'search', label: '搜索' },
   { id: 'list', label: '列表' },
   { id: 'download', label: '下载' },
   { id: 'sync', label: '同步' },
-  { id: 'network', label: '网络' },
+  { id: 'desktop', label: '桌面集成' },
   { id: 'backup', label: '备份' },
   { id: 'other', label: '其他' },
 ];

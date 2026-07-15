@@ -14,7 +14,7 @@ export const MusicSettingsBasic: Component = () => (
         <ul class="mt-2 list-inside list-disc space-y-1">
           <li>在上方「UserApi 自定义源」区域粘贴 LX 兼容脚本并保存</li>
           <li>前往「源管理」页导入社区分享的 music source JSON</li>
-          <li>导入后在 Hub「自定义」分区浏览歌单与排行榜</li>
+          <li>导入后可在播放设置中选择 UserApi 取流策略</li>
         </ul>
       </section>
     </Show>

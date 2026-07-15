@@ -28,6 +28,7 @@ import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
 import { SearchIcon, MoreIcon, RefreshIcon, XIcon } from '@/components/shared/icons';
 import {
   getSearchState,
+  clearSearchResults,
   listHubSearchSources,
   searchSourceLabel,
   searchByKeyword,
@@ -54,6 +55,8 @@ import { APP_TOAST_Z } from '@/lib/ui/overlay-z';
 import { pageToolbarBelowScrollTrack, popperMenuPanelShell } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
 import { cn } from '@/lib/utils';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { viewerStore } from '@/stores/viewer';
 
 /** 与 AppSelectContent 动画/外观一致（非 Select 原语的轻量 tip 列表面板） */
 const TIP_PANEL_CLASS = cn(
@@ -172,6 +175,20 @@ export function MusicSearchPaneToolbar() {
     setSearchExpanded(true);
     setTipDropdownOpen(true);
   };
+
+  let previousSection: string | null = null;
+  createEffect(() => {
+    const section = viewerStore.state.musicSection;
+    const settings = getMusicSettings();
+    if (section === 'search' && previousSection !== 'search' && settings.searchFocusOnEnter) {
+      expandSearch();
+      queueMicrotask(() => searchInputEl()?.focus());
+    } else if (section !== 'search' && previousSection === 'search') {
+      if (settings.searchClearInputOnLeave) setSearchKeyword('');
+      if (settings.searchClearResultsOnLeave) clearSearchResults();
+    }
+    previousSection = section;
+  });
 
   createEffect(() => {
     searchQueryRef.current = state().keyword;

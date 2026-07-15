@@ -3,6 +3,7 @@ import { createSignal, For, onCleanup, onMount, Show, type Component } from 'sol
 import { LoaderCircle, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { BUILTIN_SOURCES } from '@/lib/media/audio/online/source-router';
 import {
@@ -174,26 +175,32 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
           </ul>
         </section>
         <section class="space-y-2">
-          <label class="flex items-center gap-2 text-sm">
+          <div class="flex items-center gap-2 text-sm">
             <Checkbox
+              id="music-source-offline-first-input"
               checked={offline()}
               onChange={(checked) => {
                 setOffline(checked);
                 setMusicOfflineMode(checked);
               }}
             />
-            离线优先（仅播放已缓存曲目）
-          </label>
-          <label class="flex items-center gap-2 text-sm">
+            <Label for="music-source-offline-first-input">
+              离线优先（仅播放已缓存曲目）
+            </Label>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
             <Checkbox
+              id="music-source-fallback-enabled-input"
               checked={fallback()}
               onChange={(checked) => {
                 setFallback(checked);
                 setFallbackResolverEnabled(checked);
               }}
             />
-            多源兜底（主源失败时自动换源）
-          </label>
+            <Label for="music-source-fallback-enabled-input">
+              多源兜底（主源失败时自动换源）
+            </Label>
+          </div>
           <div class="space-y-1">
             <div class="flex flex-wrap items-center gap-2 text-sm">
               <span class="text-muted-foreground">启动初始化：</span>

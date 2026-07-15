@@ -2,7 +2,14 @@
  * 完整播放页（封面、歌词、倍速、EQ、队列）
  */
 
-import { createSignal, For, Show, type Component } from 'solid-js';
+import {
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type Component,
+} from 'solid-js';
 import {
   Play,
   Pause,
@@ -28,7 +35,11 @@ import {
 } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
 import { addTrackToLove, removeTrackFromLove } from '@/lib/database/audio-library';
-import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
+import {
+  getMusicSettings,
+  setMusicSettings,
+  subscribeMusicSettings,
+} from '@/lib/media/audio/music-settings';
 import {
   QUALITY_LABELS,
   setPlayQuality,
@@ -71,6 +82,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const [altSources, setAltSources] = createSignal<AudioTrack[]>([]);
   const [altLoading, setAltLoading] = createSignal(false);
 
+  onMount(() => {
+    const unsubscribe = subscribeMusicSettings((settings) => {
+      setPlaySpeed(settings.playSpeed);
+      setEqPreset(settings.eqPreset);
+    });
+    onCleanup(unsubscribe);
+  });
+
   const track = () => props.player.currentTrack();
 
   const loadAltSources = async () => {
@@ -111,13 +130,6 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const applySpeed = (speed: number) => {
     setPlaySpeed(speed);
     setMusicSettings({ playSpeed: speed });
-    import('@/lib/media/audio/music-play-config').then(({ getMusicPlayConfig }) => {
-      const cfg = getMusicPlayConfig();
-      localStorage.setItem(
-        'reader_music_play_config',
-        JSON.stringify({ ...cfg, playSpeed: speed }),
-      );
-    });
   };
 
   const applyEq = (preset: keyof typeof EQ_PRESETS) => {
@@ -152,7 +164,6 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <Show when={props.player.error()}>
           <p class="text-sm text-destructive">{props.player.error()}</p>
         </Show>
-        <audio ref={props.player.bindAudio} class="hidden" />
         <Show when={props.player.url()}>
           <div class="flex w-full max-w-lg flex-col gap-4">
             <AudioLyricPanel
@@ -163,6 +174,16 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               lyricOffset={getMusicSettings().lyricOffset ?? 0}
               showTranslation={getMusicSettings().showLyricTranslation !== false}
               showRoma={getMusicSettings().showLyricRoma !== false}
+              secondaryOrder={getMusicSettings().lyricSecondaryOrder}
+              align={getMusicSettings().playDetailLyricAlign}
+              fontSize={getMusicSettings().playDetailLyricFontSize}
+              zoomActiveLyric={getMusicSettings().playDetailZoomActiveLyric}
+              onSeek={
+                getMusicSettings().playDetailAllowLyricSeek
+                  ? (positionSec) =>
+                      props.player.player.seekTo(positionSec, props.player.player.playing())
+                  : undefined
+              }
             />
             <div class="flex flex-wrap items-center justify-center gap-2">
               <MusicAppSelect
@@ -175,6 +196,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
                   const s = getMusicSettings();
                   if (k === 'tlyric' && s.showLyricTranslation === false) return false;
                   if (k === 'rlyric' && s.showLyricRoma === false) return false;
+                  if (k === 'lxlyric' && s.lyricUseLxLyric === false) return false;
                   return true;
                 })}
                 optionLabel={(v) => LYRIC_TRACK_LABELS[v]}
@@ -222,6 +244,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               </span>
               <Slider
                 class="flex-1"
+                disabled={!getMusicSettings().allowProgressBarSeek}
                 minValue={0}
                 maxValue={Math.max(props.player.player.duration(), 1)}
                 step={0.1}

@@ -17,17 +17,15 @@ import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/
 import { MusicSearchPane } from '@/components/viewer/audio/music/hub/MusicSearchPane';
 import { MusicSongListPane } from '@/components/viewer/audio/music/hub/MusicSongListPane';
 import { MusicLeaderboardPane } from '@/components/viewer/audio/music/hub/MusicLeaderboardPane';
-import { MusicAlbumPane } from '@/components/viewer/audio/music/hub/MusicAlbumPane';
-import { MusicSingerPane } from '@/components/viewer/audio/music/hub/MusicSingerPane';
-import { UserApiBrowsePane } from '@/components/viewer/audio/music/hub/UserApiBrowsePane';
 import { MusicPlayDetail } from '@/components/viewer/audio/music/hub/MusicPlayDetail';
-import { AudioDownloadPanel } from '@/components/viewer/audio/music/AudioDownloadPanel';
 import { MusicSettingsPanel } from '@/components/viewer/audio/music/settings/MusicSettingsPanel';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { AudioLocalScanDialog } from '@/components/viewer/audio/music/AudioLocalScanDialog';
 import { MusicHubListPane } from '@/components/viewer/audio/music/hub/MusicHubListPane';
 import { type useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { cn } from '@/lib/utils';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { syncAllBoundLists } from '@/lib/media/audio/list/sync-source-list';
 
 export interface MusicHubContentProps {
   player: ReturnType<typeof useMusicHubPlayer>;
@@ -69,6 +67,9 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
 
   onMount(() => {
     void ensureLocalMusicSearchCache();
+    if (getMusicSettings().syncAutoUpdateLists) {
+      void syncAllBoundLists();
+    }
   });
 
   const section = () => viewerStore.state.musicSection;
@@ -85,15 +86,6 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
       <MusicHubSection section="leaderboard" active={isActive('leaderboard')}>
         <MusicLeaderboardPane />
       </MusicHubSection>
-      <MusicHubSection section="album" active={isActive('album')}>
-        <MusicAlbumPane />
-      </MusicHubSection>
-      <MusicHubSection section="singer" active={isActive('singer')}>
-        <MusicSingerPane />
-      </MusicHubSection>
-      <MusicHubSection section="userApi" active={isActive('userApi')}>
-        <UserApiBrowsePane />
-      </MusicHubSection>
       <MusicHubSection section="list" active={isActive('list')}>
         <MusicHubListPane
           drawerOpen={props.listDrawerOpen}
@@ -101,11 +93,6 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
           onScanLocal={() => setScanOpen(true)}
           scanRevision={scanRevision()}
         />
-      </MusicHubSection>
-      <MusicHubSection section="download" active={isActive('download')}>
-        <MusicHubPageShell section="download" scrollClass="overflow-hidden">
-          <AudioDownloadPanel open inline hideHeader />
-        </MusicHubPageShell>
       </MusicHubSection>
       <MusicHubSection section="settings" active={isActive('settings')}>
         <MusicHubPageShell section="settings" scrollClass="overflow-hidden">

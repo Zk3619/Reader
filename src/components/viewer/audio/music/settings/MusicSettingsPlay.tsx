@@ -1,5 +1,6 @@
 import { createMemo, createSignal, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   NumberField,
   NumberFieldInput,
@@ -22,6 +23,7 @@ import {
   subscribeUserApiScripts,
 } from '@/lib/media/audio/online/user-api-engine';
 import { onCleanup, onMount } from 'solid-js';
+import { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
 
 const PLAY_MODES = [
   AudioPlayMode.listLoop,
@@ -50,6 +52,8 @@ const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
   rlyric: '罗马音',
   lxlyric: '逐字',
 };
+const PLAY_SPEEDS = ['0.5', '0.75', '1', '1.25', '1.5', '2'] as const;
+const LYRIC_SECONDARY_ORDERS = ['translation-first', 'roma-first'] as const;
 
 export const MusicSettingsPlay: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -73,27 +77,84 @@ export const MusicSettingsPlay: Component = () => {
 
   return (
     <div class="space-y-4 p-4">
-      <label class="flex items-center gap-2 text-sm">
+      <div class="flex items-center gap-2 text-sm">
         <Checkbox
+          id="music-play-auto-play-input"
           checked={settings().autoPlay}
           onChange={(checked) => applySettings({ autoPlay: checked })}
         />
-        自动播放
-      </label>
-      <label class="flex items-center gap-2 text-sm">
+        <Label for="music-play-auto-play-input">自动播放</Label>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
         <Checkbox
+          id="music-play-remember-progress-input"
           checked={settings().rememberProgress}
           onChange={(checked) => applySettings({ rememberProgress: checked })}
         />
-        记忆播放进度
-      </label>
-      <label class="flex items-center gap-2 text-sm">
+        <Label for="music-play-remember-progress-input">记忆播放进度</Label>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
         <Checkbox
+          id="music-play-auto-skip-error-input"
           checked={settings().autoSkipOnError !== false}
           onChange={(checked) => applySettings({ autoSkipOnError: checked })}
         />
-        取链/解码失败时自动下一首（仅歌单 / 我的列表）
-      </label>
+        <Label for="music-play-auto-skip-error-input">
+          取链/解码失败时自动下一首（仅歌单 / 我的列表）
+        </Label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">默认播放倍速：</span>
+        <MusicAppSelect
+          value={String(settings().playSpeed)}
+          onChange={(value) => {
+            const playSpeed = Number(value);
+            applySettings({ playSpeed });
+            const audio = document.querySelector<HTMLAudioElement>(
+              'audio[data-music-hub-player]',
+            );
+            if (audio) audio.playbackRate = playSpeed;
+          }}
+          options={PLAY_SPEEDS}
+          optionLabel={(value) => `${value}x`}
+          triggerClass="w-24"
+          aria-label="默认播放倍速"
+        />
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Checkbox
+          id="music-play-preserve-pitch-input"
+          checked={settings().preservesPitch}
+          onChange={(checked) => {
+            applySettings({ preservesPitch: checked });
+            const audio = document.querySelector<HTMLAudioElement>(
+              'audio[data-music-hub-player]',
+            );
+            if (audio) audio.preservesPitch = checked;
+          }}
+        />
+        <Label for="music-play-preserve-pitch-input">倍速播放时保持音高</Label>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Checkbox
+          id="music-play-allow-progress-seek-input"
+          checked={settings().allowProgressBarSeek}
+          onChange={(checked) => applySettings({ allowProgressBarSeek: checked })}
+        />
+        <Label for="music-play-allow-progress-seek-input">允许拖动播放进度条</Label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">均衡器预设：</span>
+        <MusicAppSelect
+          value={settings().eqPreset}
+          onChange={(value) =>
+            applySettings({ eqPreset: value as keyof typeof EQ_PRESETS })
+          }
+          options={Object.keys(EQ_PRESETS) as (keyof typeof EQ_PRESETS)[]}
+          triggerClass="w-28"
+          aria-label="均衡器预设"
+        />
+      </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">默认播放模式：</span>
         <MusicAppSelect
@@ -157,20 +218,60 @@ export const MusicSettingsPlay: Component = () => {
           aria-label="默认歌词轨"
         />
       </div>
-      <label class="flex items-center gap-2 text-sm">
+      <div class="flex items-center gap-2 text-sm">
         <Checkbox
+          id="music-play-show-lyric-translation-input"
           checked={settings().showLyricTranslation !== false}
           onChange={(checked) => applySettings({ showLyricTranslation: checked })}
         />
-        显示歌词翻译
-      </label>
-      <label class="flex items-center gap-2 text-sm">
+        <Label for="music-play-show-lyric-translation-input">显示歌词翻译</Label>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
         <Checkbox
+          id="music-play-show-lyric-roma-input"
           checked={settings().showLyricRoma !== false}
           onChange={(checked) => applySettings({ showLyricRoma: checked })}
         />
-        显示罗马音
-      </label>
+        <Label for="music-play-show-lyric-roma-input">显示罗马音</Label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">副歌词优先显示：</span>
+        <MusicAppSelect
+          value={settings().lyricSecondaryOrder}
+          onChange={(value) =>
+            applySettings({
+              lyricSecondaryOrder: value as 'translation-first' | 'roma-first',
+            })
+          }
+          options={LYRIC_SECONDARY_ORDERS}
+          optionLabel={(value) => (value === 'translation-first' ? '翻译' : '罗马音')}
+          triggerClass="w-28"
+          aria-label="副歌词优先顺序"
+        />
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Checkbox
+          id="music-play-word-by-word-lyric-input"
+          checked={settings().lyricUseLxLyric}
+          onChange={(checked) => applySettings({ lyricUseLxLyric: checked })}
+        />
+        <Label for="music-play-word-by-word-lyric-input">启用逐字歌词</Label>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">歌词简繁转换：</span>
+        <MusicAppSelect
+          value={String(settings().lyricChineseConversion)}
+          onChange={(value) =>
+            applySettings({ lyricChineseConversion: Number(value) as 0 | 1 | 2 })
+          }
+          options={['0', '1', '2'] as const}
+          optionLabel={(value) =>
+            value === '1' ? '繁体转简体' : value === '2' ? '简体转繁体' : '关闭'
+          }
+          triggerClass="w-32"
+          aria-label="歌词简繁转换"
+        />
+      </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">歌词偏移（秒）：</span>
         <NumberField
@@ -190,29 +291,45 @@ export const MusicSettingsPlay: Component = () => {
           <NumberFieldInput class="w-20" aria-label="播放超时" />
         </NumberField>
       </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Checkbox
+          id="music-play-timeout-wait-track-end-input"
+          checked={settings().playTimeoutWaitForTrackEnd}
+          disabled={(settings().playTimeoutSec ?? 0) <= 0}
+          onChange={(checked) =>
+            applySettings({ playTimeoutWaitForTrackEnd: checked })
+          }
+        />
+        <Label for="music-play-timeout-wait-track-end-input">
+          定时结束后等待当前歌曲播放完成
+        </Label>
+      </div>
       <fieldset class="space-y-2 text-sm">
         <legend class="text-muted-foreground">跨源兜底</legend>
-        <label class="flex items-center gap-2">
+        <div class="flex items-center gap-2">
           <Checkbox
+            id="music-play-fallback-url-input"
             checked={settings().fallbackUrl}
             onChange={(checked) => applySettings({ fallbackUrl: checked })}
           />
-          URL 失败换源
-        </label>
-        <label class="flex items-center gap-2">
+          <Label for="music-play-fallback-url-input">URL 失败换源</Label>
+        </div>
+        <div class="flex items-center gap-2">
           <Checkbox
+            id="music-play-fallback-lyric-input"
             checked={settings().fallbackLyric}
             onChange={(checked) => applySettings({ fallbackLyric: checked })}
           />
-          歌词换源
-        </label>
-        <label class="flex items-center gap-2">
+          <Label for="music-play-fallback-lyric-input">歌词换源</Label>
+        </div>
+        <div class="flex items-center gap-2">
           <Checkbox
+            id="music-play-fallback-cover-input"
             checked={settings().fallbackPic}
             onChange={(checked) => applySettings({ fallbackPic: checked })}
           />
-          封面换源
-        </label>
+          <Label for="music-play-fallback-cover-input">封面换源</Label>
+        </div>
       </fieldset>
     </div>
   );
