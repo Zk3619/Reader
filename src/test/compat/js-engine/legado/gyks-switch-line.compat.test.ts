@@ -1,10 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   buildLegadoExploreScriptBundle,
+  GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM,
   GYKS_SWITCH_LINE_SHIM,
   createSourceVariableHandlers,
   getSourceArgsKey,
 } from '@/lib/js-engine/legado/source-script-shared';
+import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
 import { patchExploreScriptGyksDynamicBaseUrl } from '@/lib/js-engine/legado/legado-explore-java-device';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import type { BookSource } from '@/types';
@@ -99,6 +101,73 @@ describe('GYKS_SWITCH_LINE_SHIM', () => {
 
     fn(scope, script);
     expect(String(scope.result)).toBe('https://v2.gyks.cf');
+  });
+});
+
+describe('GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM', () => {
+  it('同步挂起标记须继续抛出，不能误切聚合线路', () => {
+    let switchCount = 0;
+    const scope = {
+      request: () => '',
+      BaseUrl: () => 'https://v1.gyks.cf',
+      getToken: () => '',
+      getVariable: () => 'true',
+      switchToNextLine: () => {
+        switchCount += 1;
+        return 'https://v2.gyks.cf';
+      },
+      java: {
+        androidId: () => 'device-id',
+        ajax: () => {
+          throw new Error(LEGADO_SUSPEND_MARKER);
+        },
+        log: () => {},
+      },
+      cache: {},
+      source: {},
+    };
+    const run = new Function(
+      '__scope__',
+      'shim',
+      'with (__scope__) { eval(shim); return request("/detail"); }',
+    );
+
+    expect(() => run(scope, GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM)).toThrow(
+      LEGADO_SUSPEND_MARKER,
+    );
+    expect(switchCount).toBe(0);
+  });
+
+  it('真实请求异常仍会触发自动切线', () => {
+    let switchCount = 0;
+    const scope = {
+      request: () => '',
+      BaseUrl: () => 'https://v1.gyks.cf',
+      getToken: () => '',
+      getVariable: () => 'true',
+      switchToNextLine: () => {
+        switchCount += 1;
+        return 'https://v2.gyks.cf';
+      },
+      java: {
+        androidId: () => 'device-id',
+        ajax: () => {
+          throw new Error('network failed');
+        },
+        log: () => {},
+      },
+      cache: {},
+      source: {},
+      hosts: ['https://v1.gyks.cf', 'https://v2.gyks.cf'],
+    };
+    const run = new Function(
+      '__scope__',
+      'shim',
+      'with (__scope__) { eval(shim); return request("/detail"); }',
+    );
+
+    expect(run(scope, GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM)).toBe('');
+    expect(switchCount).toBe(1);
   });
 });
 

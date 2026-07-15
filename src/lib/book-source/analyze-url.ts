@@ -71,6 +71,8 @@ export interface FetchByAnalyzeUrlParams {
   timeoutMs?: number;
   /** CF panel 拉取前等待 SPA 列表渲染（仅 Tauri 桌面端） */
   cfPanelWait?: CfPanelWaitOptions;
+  signal?: AbortSignal;
+  ignorePageNavigationAbort?: boolean;
 }
 
 export interface FetchByAnalyzeUrlResult {
@@ -258,6 +260,8 @@ async function fetchHttpOnce(
   headers: Record<string, string>,
   enabledCookieJar: boolean,
   timeoutMs?: number,
+  signal?: AbortSignal,
+  ignorePageNavigationAbort?: boolean,
 ): Promise<string> {
   const { url: finalUrl, method, body } = prepareHttpRequest(url, option, headers);
   const res = await request(finalUrl, {
@@ -266,6 +270,8 @@ async function fetchHttpOnce(
     body,
     enableCookieJar: enabledCookieJar,
     timeout: timeoutMs,
+    signal,
+    ignorePageNavigationAbort,
   });
   return res.text();
 }
@@ -276,12 +282,22 @@ async function fetchHttpWithRetry(
   headers: Record<string, string>,
   enabledCookieJar: boolean,
   timeoutMs?: number,
+  signal?: AbortSignal,
+  ignorePageNavigationAbort?: boolean,
 ): Promise<string> {
   const maxAttempts = Math.max(1, (option.retry ?? 0) + 1);
   let lastError: unknown;
   for (let i = 0; i < maxAttempts; i += 1) {
     try {
-      return await fetchHttpOnce(url, option, headers, enabledCookieJar, timeoutMs);
+      return await fetchHttpOnce(
+        url,
+        option,
+        headers,
+        enabledCookieJar,
+        timeoutMs,
+        signal,
+        ignorePageNavigationAbort,
+      );
     } catch (e) {
       lastError = e;
       if (i < maxAttempts - 1) {
@@ -300,6 +316,8 @@ async function maybeFollowJsMirrorJump(
   enabledCookieJar: boolean,
   timeoutMs: number | undefined,
   source: BookSource | undefined,
+  signal?: AbortSignal,
+  ignorePageNavigationAbort?: boolean,
 ): Promise<{ body: string; url: string } | null> {
   if (!isJsMirrorJumpPage(body)) return null;
 
@@ -314,6 +332,8 @@ async function maybeFollowJsMirrorJump(
         headers,
         enabledCookieJar,
         timeoutMs,
+        signal,
+        ignorePageNavigationAbort,
       );
       if (!looksLikeJsMirrorJumpResolved(mirrorBody)) continue;
       if (source) {
@@ -485,7 +505,15 @@ export async function fetchByAnalyzeUrl(
       );
     } else {
       const useCookieJar = params.source?.enabledCookieJar === true;
-      body = await fetchHttpWithRetry(url, option, headers, useCookieJar, params.timeoutMs);
+      body = await fetchHttpWithRetry(
+        url,
+        option,
+        headers,
+        useCookieJar,
+        params.timeoutMs,
+        params.signal,
+        params.ignorePageNavigationAbort,
+      );
       const acwBypass = await maybeBypassAcwScChallenge(
         body,
         url,
@@ -494,7 +522,16 @@ export async function fetchByAnalyzeUrl(
         useCookieJar,
         params.timeoutMs,
         params.source,
-        fetchHttpWithRetry,
+        (nextUrl, nextOption, nextHeaders, nextCookieJar, nextTimeout) =>
+          fetchHttpWithRetry(
+            nextUrl,
+            nextOption,
+            nextHeaders,
+            nextCookieJar,
+            nextTimeout,
+            params.signal,
+            params.ignorePageNavigationAbort,
+          ),
       );
       if (acwBypass) {
         body = acwBypass.body;
@@ -508,6 +545,8 @@ export async function fetchByAnalyzeUrl(
         useCookieJar,
         params.timeoutMs,
         params.source,
+        params.signal,
+        params.ignorePageNavigationAbort,
       );
       if (jumped) {
         body = jumped.body;

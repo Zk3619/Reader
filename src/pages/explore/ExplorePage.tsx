@@ -30,7 +30,6 @@ import {
   shouldShowExploreSectionsSkeleton,
   updateExploreSourceArgument,
 } from '@/lib/book-source/explore-sections';
-import { getPageNavigationRevision } from '@/lib/navigation/page-navigation-scope';
 import { applyExploreSelectChange } from '@/lib/book-source/explore-select-change';
 import { getExploreSourceArgsVersion } from '@/stores/explore-source-args';
 import { getLegadoSourceKey } from '@/lib/js-engine/legado/source-script-shared';
@@ -110,12 +109,11 @@ export const ExplorePage: Component<ExplorePageProps> = (props) => {
 
   const [dynamicSections, { refetch: refetchExploreSections }] = createResource(
     () => {
-      if (!isActive()) return null;
       const s = selectedSource();
       const v = exploreArgsVersion();
       if (!s) return null;
       if (isExploreUrlScript(s.exploreUrl)) {
-        return { source: s, argsVersion: v, navRevision: getPageNavigationRevision() };
+        return { source: s, argsVersion: v };
       }
       return null;
     },

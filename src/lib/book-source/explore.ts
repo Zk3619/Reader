@@ -210,6 +210,7 @@ async function exploreBookViaLegadoAjax(
       concurrentRate: source.concurrentRate,
       timeout: 30000,
       signal,
+      ignorePageNavigationAbort: !!signal,
     };
     const html =
       ajax.method === 'POST'
@@ -351,6 +352,8 @@ export async function exploreBook(
         page,
         baseUrl: resolveBookSourceRequestOrigin(source) || source.sourceUrl,
         scriptNotice: noticeBus,
+        signal,
+        ignorePageNavigationAbort: !!signal,
       });
       html = fetched.body;
       const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =

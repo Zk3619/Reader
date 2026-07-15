@@ -2,7 +2,7 @@
  * 书籍信息页 — 查看目录（对齐 legado BookInfoActivity.openChapterList）
  */
 
-import { Show, createEffect, createMemo, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import {
   AppDialog,
   AppDialogHeader,
@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import {
   dialogScrollFrameFlex,
   dialogVirtualListPanelMinHeight,
+  dialogVirtualListPanelStableHeight,
   dialogVirtualListPanelWidth,
   dialogVirtualListScroll,
 } from '@/lib/ui/viewport-classes';
@@ -82,21 +83,52 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
   );
   const isChapterCached = (idx: number) => cachedIndices().has(idx);
 
+  const [contentReady, setContentReady] = createSignal(false);
+  let firstPaintFrame: number | undefined;
+  let listMountFrame: number | undefined;
+  const cancelDeferredListMount = () => {
+    if (firstPaintFrame !== undefined) cancelAnimationFrame(firstPaintFrame);
+    if (listMountFrame !== undefined) cancelAnimationFrame(listMountFrame);
+    firstPaintFrame = undefined;
+    listMountFrame = undefined;
+  };
+  const scheduleListMountAfterDialogPaint = () => {
+    cancelDeferredListMount();
+    setContentReady(false);
+    firstPaintFrame = requestAnimationFrame(() => {
+      firstPaintFrame = undefined;
+      listMountFrame = requestAnimationFrame(() => {
+        listMountFrame = undefined;
+        setContentReady(true);
+      });
+    });
+  };
+
+  createEffect(() => {
+    if (props.open) return;
+    cancelDeferredListMount();
+    setContentReady(false);
+  });
+  onCleanup(cancelDeferredListMount);
+
   const rows = createMemo(() => buildChapterRowMetas(props.chapters));
+  const showLoadingPlaceholder = () =>
+    !contentReady() || Boolean(props.loading && props.chapters.length === 0);
   const { resolveTitle } = useChapterDisplayTitles(
-    () => props.chapters,
+    // 自动预取完成时弹窗通常仍关闭；此时不应在 UI 线程提前处理整份章节标题。
+    () => (props.open && contentReady() ? props.chapters : []),
     () => props.book,
     () => props.book?.origin,
     () => (props.book as Book | undefined)?.readConfig?.useReplaceRule !== false,
   );
 
-  let scrollTrack: HTMLDivElement | undefined;
+  const [scrollTrack, setScrollTrack] = createSignal<HTMLDivElement>();
 
   createEffect(() => {
     if (!props.open) return;
     const idx = props.currentChapterIndex ?? -1;
     requestAnimationFrame(() => {
-      const el = scrollTrack;
+      const el = scrollTrack();
       if (!el) return;
       if (idx >= 0 && rows().length > 0) {
         scrollCatalogIndexIntoView(el, idx, CATALOG_ROW_HEIGHT_PX, 'auto');
@@ -108,22 +140,34 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
 
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <BookInfoDrawerDialogContent class={dialogVirtualListPanelWidth}>
+      <BookInfoDrawerDialogContent
+        class={cn(dialogVirtualListPanelWidth, dialogVirtualListPanelStableHeight)}
+        onOpenAutoFocus={scheduleListMountAfterDialogPaint}
+      >
         <AppDialogHeader>
           <AppDialogTitle class="text-base">目录 · {props.bookName}</AppDialogTitle>
         </AppDialogHeader>
         <AppDialogScrollBody
           compact
           frameClass={cn(dialogScrollFrameFlex, dialogVirtualListPanelMinHeight)}
-          class={dialogVirtualListScroll}
-          trackRef={(el) => {
-            scrollTrack = el;
-          }}
+          class={cn(dialogVirtualListScroll, 'overflow-hidden!')}
         >
           <Show
-            when={!props.loading}
+            when={!showLoadingPlaceholder()}
             fallback={
-              <p class="px-4 py-8 text-center text-sm text-muted-foreground">正在加载目录…</p>
+              <div
+                class="mb-2 flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-1 py-2"
+                aria-label="正在加载目录"
+              >
+                {Array.from({ length: 6 }, (_, index) => (
+                  <div
+                    class={cn(
+                      'h-10 shrink-0 animate-pulse rounded-md bg-muted',
+                      index % 3 === 0 ? 'w-4/5' : index % 3 === 1 ? 'w-full' : 'w-11/12',
+                    )}
+                  />
+                ))}
+              </div>
             }
           >
             <Show
@@ -135,8 +179,9 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
               }
             >
               <VirtualChapterList
+                class="my-2 min-h-0 w-full flex-1 overflow-y-auto"
                 count={rows().length}
-                externalScrollElement={() => scrollTrack ?? null}
+                onScrollContainer={setScrollTrack}
               >
                 {(index) => {
                   const row = rows()[index];
@@ -147,7 +192,7 @@ export function BookInfoChapterListDialog(props: BookInfoChapterListDialogProps)
                   return (
                     <div
                       class={cn(
-                        'box-border w-full min-w-0 border-b border-border/30 last:border-0',
+                        'box-border w-full min-w-0 border-b border-border/30 pb-1 last:border-0',
                         chapter.isVolume && 'bg-muted/30',
                         !chapter.isVolume && underVolume && 'pl-3',
                       )}

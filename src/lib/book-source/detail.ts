@@ -240,6 +240,8 @@ export interface GetBookInfoOptions {
   bookVariable?: string;
   /** 搜索/书架侧已有字段，供 ruleBookInfo 中 {{book.*}} 与 @js 使用 */
   book?: Record<string, unknown>;
+  /** 详情页组件生命周期信号。 */
+  signal?: AbortSignal;
 }
 
 function bookSnapshotString(
@@ -621,6 +623,8 @@ async function getBookInfoFromDataUrl(
   const requestCommon = {
     enableCookieJar: source.enabledCookieJar,
     timeout: 15000,
+    signal: options?.signal,
+    ignorePageNavigationAbort: !!options?.signal,
   };
 
   let detailUrl = '';
@@ -717,6 +721,8 @@ export async function getBookInfo(
     const html = await getBookSourcePage(source, bookUrl, {
       timeout: 30_000,
       cfTitle: `书籍详情 — ${source.sourceName?.trim() || '书源'}`,
+      signal: options?.signal,
+      ignorePageNavigationAbort: !!options?.signal,
     });
     const { isBookSourceDebugSession, emitBookSourceDebugCapture, emitBookSourceDebugMessage, BOOK_SOURCE_DEBUG_HTML } =
       await import('@/lib/book-source/book-source-debug-hook');

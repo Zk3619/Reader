@@ -35,6 +35,10 @@ export default defineConfig(async () => ({
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
   base: process.env.NODE_ENV === "production" ? "./" : "",
   assetsInclude: ["**/*.wasm"],
+  worker: {
+    // 目录解析 Worker 会共享规则引擎分块，必须使用支持 code-splitting 的 ES 格式。
+    format: "es" as const,
+  },
   optimizeDeps: {
     exclude: ["quickjs-emscripten", "@jitl/quickjs-wasmfile-release-sync"],
   },

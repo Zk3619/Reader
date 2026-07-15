@@ -14,6 +14,7 @@ import {
   patchExploreScriptForReaderWeb,
 } from '@/lib/js-engine/legado/legado-explore-java-device';
 import { parseHostsFromJsLib } from '@/lib/js-engine/legado/jslib-hosts';
+import { LEGADO_SUSPEND_MARKER } from '@/lib/js-engine/core/runtime';
 
 export const STORAGE_PREFIX_ARGS = 'reader_source_args_';
 export const STORAGE_PREFIX_COOKIES = 'reader_source_cookies_';
@@ -787,6 +788,8 @@ export const GYKS_REQUEST_NO_SYNC_FAILOVER_SHIM = `
       var parsed = JSON.parse(data);
       if (parsed && parsed.__readerAjaxPending) return '';
     } catch (error) {
+      var errorMessage = error && error.message != null ? String(error.message) : String(error || '');
+      if (errorMessage.indexOf('${LEGADO_SUSPEND_MARKER}') >= 0) throw error;
       requestFailed = true;
     } finally {
       var duration = new Date().getTime() - startTime;

@@ -65,6 +65,9 @@ export async function buildChapterDisplayTitleMap(
   const useReplace = options?.useReplace ?? isReplaceRuleEnabledForBook(book);
 
   for (let index = 0; index < chapters.length; index += 1) {
+    if (index > 0 && index % 32 === 0) {
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+    }
     const chapter = chapters[index];
     let base = formatTocChapterDisplayTitle(chapter?.title, index);
     if (base && useReplace) {

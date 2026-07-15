@@ -5,7 +5,7 @@
  *   - 宽屏（桌面端）：左右分栏，左侧封面+名称，右侧详情+简介（参考 layout-land/activity_book_info.xml）
  */
 
-import { createSignal, createEffect, Show, onMount, For } from 'solid-js';
+import { createSignal, createEffect, Show, onCleanup, onMount, For } from 'solid-js';
 import { BookCoverPreviewButton } from '@/components/books/BookCoverPreviewButton';
 import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
 import { BookInfoChapterListDialog } from '@/components/books/BookInfoChapterListDialog';
@@ -157,7 +157,6 @@ function InfoRowWithAction(props: {
 
 /* ─── Skeleton 加载占位组件 ─── */
 
-/** 单行 shimmer 骨架条 */
 function ShimmerLine(props: { class?: string; width?: string; height?: string }) {
   return (
     <div
@@ -170,7 +169,6 @@ function ShimmerLine(props: { class?: string; width?: string; height?: string })
   );
 }
 
-/** 信息行骨架 — 图标 + 标签 + 值 */
 function InfoRowSkeleton() {
   return (
     <div class="flex items-center gap-2 py-1">
@@ -181,7 +179,6 @@ function InfoRowSkeleton() {
   );
 }
 
-/** 详情信息列表骨架 */
 function DetailInfoListSkeleton() {
   return (
     <div class="space-y-1">
@@ -194,7 +191,6 @@ function DetailInfoListSkeleton() {
   );
 }
 
-/** 简介骨架 */
 function IntroSkeleton() {
   return (
     <div class="mt-3">
@@ -210,7 +206,6 @@ function IntroSkeleton() {
   );
 }
 
-/** 窄屏模式下的书名+标签骨架 */
 function NameBadgesSkeleton() {
   return (
     <div class="flex flex-col items-center gap-2 mb-3">
@@ -286,6 +281,8 @@ export interface BookInfoPageProps {
 }
 
 export function BookInfoPage(props: BookInfoPageProps) {
+  const requestAbortController = new AbortController();
+  onCleanup(() => requestAbortController.abort());
   const isPagePresentation = () => (props.presentation ?? 'page') === 'page';
   /** 独立页按视口 md 分栏；抽屉始终纵向布局 */
   const stackedLayoutVisibleClass = () => (isPagePresentation() ? 'md:hidden' : '');
@@ -318,10 +315,13 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [isLoading, setIsLoading] = createSignal(needsRefresh);
   const [loadError, setLoadError] = createSignal<string | null>(null);
   /** 对齐 legado：详情页后台预加载目录，加入书架时直接写入 */
+  const initialPreloadedChapters = resolveInitialPreloadedChapters(bookUrl, cachedBook);
   const [preloadedChapters, setPreloadedChapters] = createSignal<BookChapter[] | null>(
-    resolveInitialPreloadedChapters(bookUrl, cachedBook),
+    initialPreloadedChapters,
   );
-  const [tocLoading, setTocLoading] = createSignal(false);
+  const [tocLoading, setTocLoading] = createSignal(
+    isOnlineSearchBook(initialBook) && !initialPreloadedChapters?.length,
+  );
   const [tocLoadError, setTocLoadError] = createSignal<string | null>(null);
   const [shelfBook, setShelfBook] = createSignal<Book | null>(null);
   const [userGroups, setUserGroups] = createSignal<BookGroup[]>([]);
@@ -398,9 +398,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setTocLoadError(null);
 
     if (preloadedChapters()?.length) {
+      setTocLoading(false);
       return;
     }
 
+    setTocLoading(true);
     try {
       const inDb = await getDbChapterList(book.bookUrl);
       if (inDb.length > 0 && !shelfCachedChapterListLooksStale(inDb, book)) {
@@ -413,12 +415,17 @@ export function BookInfoPage(props: BookInfoPageProps) {
           expected: shelfBook()?.totalChapterNum ?? 0,
         });
       }
-      setTocLoading(true);
+      let firstPartialCommitted = false;
       const list = await fetchChapterListDeduped(source, tocUrl, {
         bookUrl: book.bookUrl,
         bookVariable: book.variable,
+        signal: requestAbortController.signal,
+        partialUpdates: 'first',
         onPartial: async (partial) => {
-          if (partial.chapters.length > 0) {
+          // 分页目录可能回调数十次。每次复制整表并写响应式缓存会形成 O(n²)
+          // 主线程压力；首批用于尽快展示，完整结果在请求结束后一次性提交。
+          if (!firstPartialCommitted && partial.chapters.length > 0) {
+            firstPartialCommitted = true;
             commitPreloadedChapters(book, partial.chapters);
             setTocLoading(false);
           }
@@ -451,14 +458,17 @@ export function BookInfoPage(props: BookInfoPageProps) {
     setIsLoading(true);
     
     try {
-      const source = await getSource(props.book.origin);
+      const source = bookSource() ?? await getSource(props.book.origin);
       if (!source) {
         const errorMsg = '无法获取书源，请检查书源是否存在';
         console.warn('[BookInfo]', errorMsg);
         setLoadError(errorMsg);
         setIsLoading(false);
+        setTocLoading(false);
+        setTocLoadError('无法获取书源');
         return;
       }
+      setBookSource(source);
 
       console.log('[BookInfo] 开始获取书籍详情，bookUrl:', bookUrl.substring(0, 100));
       const durTitle = shelfBook()?.durChapterTitle?.trim() ?? '';
@@ -466,6 +476,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
         durChapterTitle: durTitle || undefined,
         bookVariable: props.book.variable,
         book: props.book as unknown as Record<string, unknown>,
+        signal: requestAbortController.signal,
       });
 
       if (bookInfo) {
@@ -518,17 +529,31 @@ export function BookInfoPage(props: BookInfoPageProps) {
         if (bookUrl) {
           pageCacheStore.setBookInfoCache(bookUrl, mergedBook, preloadedChapters() ?? undefined);
         }
-        void preloadChapterList(mergedBook, source);
+        // 对齐 Legado BookInfoViewModel：详情完成后自动预取目录。目录页的
+        // 列表提取与逐章解析由 Worker 承担，不占用 Solid UI 主线程。
+        window.setTimeout(() => {
+          if (!requestAbortController.signal.aborted) {
+            void preloadChapterList(mergedBook, source);
+          }
+        }, 0);
         void syncShelfBookIfNeeded(mergedBook);
       } else {
         const errorMsg = '获取书籍详情失败，返回数据为空';
         console.warn('[BookInfo]', errorMsg);
         setLoadError(errorMsg);
+        if (!preloadedChapters()?.length) {
+          setTocLoading(false);
+          setTocLoadError('书籍详情加载失败，无法获取目录');
+        }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '网络请求失败，请检查网络连接';
       console.warn('[BookInfo] 刷新书籍信息失败:', error);
       setLoadError(errorMsg);
+      if (!preloadedChapters()?.length) {
+        setTocLoading(false);
+        setTocLoadError('书籍详情加载失败，无法获取目录');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -537,18 +562,26 @@ export function BookInfoPage(props: BookInfoPageProps) {
   // 检查并刷新书籍信息（参考 legado BookInfoViewModel.loadBookInfo）
   // data: URL 和标准 HTTP URL 均由 getBookInfo（detail.ts）统一处理
   onMount(async () => {
-    const inShelf = await hasBook(props.book.bookUrl);
+    // 详情请求与本地数据库初始化并行，首屏直接使用探索页传入的数据。
+    void loadBookInfo();
+
+    const [inShelf, groups, source, inDb] = await Promise.all([
+      hasBook(props.book.bookUrl),
+      getAllGroups(),
+      bookSource() ? Promise.resolve(bookSource()) : getSource(props.book.origin),
+      preloadedChapters()?.length
+        ? Promise.resolve<BookChapter[]>([])
+        : getDbChapterList(props.book.bookUrl),
+    ]);
     setIsInShelf(inShelf);
     if (inShelf) await refreshShelfBook();
-    setUserGroups((await getAllGroups()).filter((g) => g.groupId > 0));
+    setUserGroups(groups.filter((g) => g.groupId > 0));
 
-    if (!bookSource()) {
-      const source = await getSource(props.book.origin);
+    if (!bookSource() && source) {
       setBookSource(source ?? undefined);
     }
 
     if (!preloadedChapters()?.length) {
-      const inDb = await getDbChapterList(props.book.bookUrl);
       if (isLocalBook(props.book)) {
         if (inDb.length > 0) commitPreloadedChapters(props.book, inDb);
       } else if (isOnlineSearchBook(props.book)) {
@@ -561,6 +594,22 @@ export function BookInfoPage(props: BookInfoPageProps) {
           commitPreloadedChapters(props.book, inDb);
         }
       }
+    }
+    if (preloadedChapters()?.length) {
+      setTocLoading(false);
+    }
+
+    if (
+      !needsRefresh &&
+      source &&
+      !preloadedChapters()?.length &&
+      isOnlineSearchBook(props.book)
+    ) {
+      window.setTimeout(() => {
+        if (!requestAbortController.signal.aborted) {
+          void preloadChapterList(currentBook(), source);
+        }
+      }, 0);
     }
 
     if (isLocalTxtBook(props.book)) {
@@ -575,8 +624,6 @@ export function BookInfoPage(props: BookInfoPageProps) {
       hasIntro: !!props.book.intro,
       hasCoverUrl: !!props.book.coverUrl,
     });
-
-    await loadBookInfo();
   });
 
   function shelfAddOptions(chapters?: BookChapter[]) {
@@ -840,8 +887,11 @@ export function BookInfoPage(props: BookInfoPageProps) {
   };
 
   const handleViewToc = async () => {
-    // 先打开目录 UI，再在后台补全章节数据（对齐 legado 即时弹出列表）
+    // 弹窗先响应点击；目录尚未就绪时由弹窗骨架屏承接后台预取状态。
     setShowTocDialog(true);
+    if (tocLoading() && !preloadedChapters()?.length) {
+      return;
+    }
 
     let list = preloadedChapters();
     if (!list || list.length === 0) {
@@ -1074,6 +1124,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             label="目录："
             actionLabel="查看目录"
             onAction={() => void handleViewToc()}
+            actionDisabled={tocLoading() && !preloadedChapters()?.length}
           >
             {tocRowText()}
           </InfoRowWithAction>

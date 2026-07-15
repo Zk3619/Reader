@@ -53,6 +53,10 @@ import {
 } from '@/lib/book-source/rate-limit-guard';
 import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import { withIgnoredPageNavigationAbort } from '@/lib/navigation/page-navigation-scope';
+import {
+  canParseTocPageOffMainThread,
+  parseTocPageOffMainThread,
+} from '@/lib/book-source/toc-page-parser';
 
 const DEFAULT_TOC_PAGINATION_MAX_PAGES = 80;
 const HARD_TOC_PAGINATION_MAX_PAGES = 5000;
@@ -69,12 +73,16 @@ export interface GetChapterListOptions {
   reverseToc?: boolean;
   /** 每加载完一页目录后回调（formatJs 仅在 isComplete 时执行） */
   onPartial?: (partial: PartialChapterList) => void | Promise<void>;
+  /** UI 预取只需首批和最终结果，避免分页时反复复制、排序整份目录。 */
+  partialUpdates?: 'all' | 'first';
   /** 书架书籍 variable（对齐 Legado book.getVariable('custom')） */
   bookVariable?: string;
   /** data: 目录失败时用于补全 book_id/sources/tab 的书籍 URL */
   bookUrl?: string;
   /** 脚本 toast 回调（内部透传） */
   onScriptToast?: (msg?: unknown, level?: unknown) => void;
+  /** 仅用于 UI 预加载的组件生命周期信号。 */
+  signal?: AbortSignal;
   /**
    * 书架写库 / 手动更新目录等后台任务：与详情页 UI 预加载分开去重，且切页不中止。
    * 勿与仅用于展示的 preloadChapterList 共用同一 in-flight 条目。
@@ -258,6 +266,16 @@ function getTocPaginationSafetyOptions(): { enabled: boolean; maxPages: number }
       ? Math.max(1, Math.min(HARD_TOC_PAGINATION_MAX_PAGES, Math.floor(rawMax)))
       : DEFAULT_TOC_PAGINATION_MAX_PAGES;
   return { enabled, maxPages };
+}
+
+async function yieldTocWorkToUi(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
 }
 
 async function notifyTocPaginationSafetyHit(payload: {
@@ -586,6 +604,7 @@ async function mapCatalogRowsToChapters(
 async function fetchCatalogHtmlForPayload(
   source: BookSource,
   payload: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const pageUrl = (payload.url || payload.toc_url || '').trim();
   if (!pageUrl) return '';
@@ -609,6 +628,8 @@ async function fetchCatalogHtmlForPayload(
     return await getBookSourcePage(source, pageUrl, {
       timeout: 30_000,
       cfTitle: `章节目录 — ${source.sourceName?.trim() || '书源'}`,
+      signal,
+      ignorePageNavigationAbort: !!signal,
     });
   } catch {
     return '';
@@ -635,6 +656,7 @@ async function requestCatalogChapterRowsOnce(
   tab: string,
   variable: string,
   html: string,
+  signal?: AbortSignal,
 ): Promise<{
   rows: Record<string, unknown>[] | null;
   failure: { code: unknown; msg: string; book_id_len: number } | null;
@@ -661,10 +683,14 @@ async function requestCatalogChapterRowsOnce(
       ? await postBookSourcePage(source, parsed.urlStr, postBody, {
           headers,
           timeout: 30_000,
+          signal,
+          ignorePageNavigationAbort: !!signal,
         })
       : await getBookSourcePage(source, parsed.urlStr, {
           headers,
           timeout: 30_000,
+          signal,
+          ignorePageNavigationAbort: !!signal,
         });
   await assertLoginCheckPassed(source, responseText, parsed.urlStr);
 
@@ -696,6 +722,7 @@ async function fetchCatalogChapterRows(
   source: BookSource,
   payload: Record<string, string>,
   bookVariable?: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>[] | null> {
   const bookId = payload.book_id?.trim();
   if (!bookId) return null;
@@ -714,7 +741,7 @@ async function fetchCatalogChapterRows(
   // 对齐 detail API：不擅自默认 tab=小说，避免漫画书源 catalog 400
   const tab = (payload.tab || '').trim();
   const variable = buildCatalogApiVariable(bookVariable);
-  const html = await fetchCatalogHtmlForPayload(source, payload);
+  const html = await fetchCatalogHtmlForPayload(source, payload, signal);
 
   let lastFailure: { code: unknown; msg: string; book_id_len: number } | null = null;
   let lastHttpError: unknown;
@@ -732,6 +759,7 @@ async function fetchCatalogChapterRows(
           tab,
           variable,
           html,
+          signal,
         );
         if (result.rows) {
           if (candidateBookId !== bookId || si > 0) {
@@ -1143,7 +1171,12 @@ async function fetchCatalogRowsForDataUrlToc(
     return null;
   }
 
-  let rows = await fetchCatalogChapterRows(source, payload, options?.bookVariable);
+  let rows = await fetchCatalogChapterRows(
+    source,
+    payload,
+    options?.bookVariable,
+    options?.signal,
+  );
   if (rows?.length) {
     return { rows, payload };
   }
@@ -1162,7 +1195,12 @@ async function fetchCatalogRowsForDataUrlToc(
         sources: bookPayload.sources || bookPayload.source,
         tab: bookPayload.tab,
       });
-      rows = await fetchCatalogChapterRows(source, bookPayload, options?.bookVariable);
+      rows = await fetchCatalogChapterRows(
+        source,
+        bookPayload,
+        options?.bookVariable,
+        options?.signal,
+      );
       if (rows?.length) {
         return { rows, payload: bookPayload };
       }
@@ -1272,23 +1310,24 @@ export async function getChapterList(
     const reverseToc = mergedOptions.reverseToc === true;
     const onPartial = mergedOptions.onPartial;
 
-    /** 不 await：避免 DB/UI 回调阻塞后续分页请求（进入阅读器时卡顿的主因之一） */
+    let emittedFirstPartial = false;
+    /** 延后到独立任务提交，避免 Worker 响应后的响应式更新占用当前 UI 事件。 */
     const emitPartial = (raw: BookChapter[], isComplete: boolean) => {
       if (!onPartial || raw.length === 0) return;
-      void (async () => {
-        let ordered = finalizeTocChapterOrder(raw, listRuleReverse, reverseToc);
-        if (isComplete) {
-          ordered = await applyFormatJs(
-            source,
-            rule,
-            ordered,
-            tocUrl,
-            mergedOptions.onScriptToast,
-          );
-        }
-        ordered = ordered.map((chapter, index) => ({ ...chapter, index }));
-        await onPartial({ chapters: ordered, isComplete });
-      })();
+      if (
+        !isComplete &&
+        mergedOptions.partialUpdates === 'first' &&
+        emittedFirstPartial
+      ) {
+        return;
+      }
+      if (!isComplete) emittedFirstPartial = true;
+      const snapshot = raw.slice();
+      globalThis.setTimeout(() => {
+        void Promise.resolve(onPartial({ chapters: snapshot, isComplete })).catch((e) => {
+          console.warn('[chapters] onPartial 失败:', e);
+        });
+      }, 0);
     };
 
     const chapters: BookChapter[] = [];
@@ -1301,6 +1340,9 @@ export async function getChapterList(
     const { fetchSourcePage } = await import('@/lib/book-source/fetch-source-page');
 
     while (pendingTocPages.length > 0) {
+      if (seenTocPages.size > 0) {
+        await yieldTocWorkToUi(mergedOptions.signal);
+      }
       if (tocSafety.enabled && seenTocPages.size >= tocSafety.maxPages) {
         const pendingPages = pendingTocPages.length;
         const truncatedPages = pendingPages;
@@ -1336,6 +1378,8 @@ export async function getChapterList(
           source,
           baseUrl: source.sourceUrl,
           scriptNotice: noticeBus,
+          signal: mergedOptions.signal,
+          ignorePageNavigationAbort: !!mergedOptions.signal,
         });
         fetchedBody = fetched.body;
         if (seenTocPages.size === 1) {
@@ -1356,13 +1400,18 @@ export async function getChapterList(
         }
         throw e;
       }
-      const html = await applyPreUpdateJs(
-        source,
-        rule,
-        fetchedBody,
-        currentTocUrl,
-        mergedOptions.onScriptToast,
-      );
+      // 与 Legado Dispatchers.IO 对齐：可独立执行的 preUpdateJs 连同目录解析
+      // 一起交给 Worker；仅依赖宿主能力的规则走兼容路径。
+      const useParserWorker = canParseTocPageOffMainThread(rule);
+      const html = useParserWorker
+        ? fetchedBody
+        : await applyPreUpdateJs(
+            source,
+            rule,
+            fetchedBody,
+            currentTocUrl,
+            mergedOptions.onScriptToast,
+          );
       if (consumeHtmlRateLimitNotice(noticeBus, html)) {
         break;
       }
@@ -1378,7 +1427,11 @@ export async function getChapterList(
 
       // 处理 init 规则（如 "$.data"）：先导航到 JSON 子节点再应用其他规则
       let contextContent = html;
-      if ((rule as unknown as { init?: string }).init && contentType === 'json') {
+      if (
+        !useParserWorker &&
+        (rule as unknown as { init?: string }).init &&
+        contentType === 'json'
+      ) {
         try {
           const initResult = await analyzeString((rule as unknown as { init: string }).init, {
             content: html,
@@ -1412,53 +1465,80 @@ export async function getChapterList(
           chapterListRule = `${chapterListRule}@all`;
         }
 
-        let listItems = await analyzeListElements(chapterListRule, context);
-        if (listItems.length === 0) {
-          const split = splitTocChapterListJsRule(chapterListRule);
-          if (split?.tailRule?.trim()) {
-            let tailRule = split.tailRule.trim();
-            if (legadoListRuleNeedsAllSuffix(tailRule)) {
-              tailRule = `${tailRule}@all`;
+        const workerChapters = await parseTocPageOffMainThread({
+          body: contextContent,
+          contentType: context.contentType ?? detectContentType(contextContent),
+          baseUrl: currentTocUrl,
+          source,
+          rule: useParserWorker ? rule : { ...rule, preUpdateJs: undefined },
+          listRule: chapterListRule,
+          initRule: useParserWorker
+            ? (rule as unknown as { init?: string }).init
+            : undefined,
+          startIndex: chapters.length,
+        }, mergedOptions.signal);
+
+        if (workerChapters) {
+          for (const chapter of workerChapters) {
+            if (!seenChapterUrls.has(chapter.url)) {
+              seenChapterUrls.add(chapter.url);
+              pageChapters.push(chapter);
             }
-            console.log('[chapters] chapterList 0 命中，尝试跳过 <js> 段直解析 tailRule:', {
-              original: chapterListRule,
-              tailRule,
-            });
-            listItems = await analyzeListElements(tailRule, context);
           }
-        }
-        if (listItems.length === 0) {
-          const relaxedRule = buildRelaxedTocXPathListRule(chapterListRule);
-          if (relaxedRule && relaxedRule !== chapterListRule) {
-            console.log('[chapters] chapterList 0 命中，尝试去掉 XPath 序号谓词回退:', {
-              original: chapterListRule,
-              relaxed: relaxedRule,
-            });
-            listItems = await analyzeListElements(relaxedRule, context);
+          console.log('[chapters] Worker 提取到章节数:', workerChapters.length);
+        } else {
+          let listItems = await analyzeListElements(chapterListRule, context);
+          if (listItems.length === 0) {
+            const split = splitTocChapterListJsRule(chapterListRule);
+            if (split?.tailRule?.trim()) {
+              let tailRule = split.tailRule.trim();
+              if (legadoListRuleNeedsAllSuffix(tailRule)) {
+                tailRule = `${tailRule}@all`;
+              }
+              console.log('[chapters] chapterList 0 命中，尝试跳过 <js> 段直解析 tailRule:', {
+                original: chapterListRule,
+                tailRule,
+              });
+              listItems = await analyzeListElements(tailRule, context);
+            }
           }
-        }
-        console.log('[chapters] 提取到章节元素数:', listItems.length);
+          if (listItems.length === 0) {
+            const relaxedRule = buildRelaxedTocXPathListRule(chapterListRule);
+            if (relaxedRule && relaxedRule !== chapterListRule) {
+              console.log('[chapters] chapterList 0 命中，尝试去掉 XPath 序号谓词回退:', {
+                original: chapterListRule,
+                relaxed: relaxedRule,
+              });
+              listItems = await analyzeListElements(relaxedRule, context);
+            }
+          }
+          console.log('[chapters] 提取到章节元素数:', listItems.length);
 
-        for (const item of listItems) {
-          const elementContext = enrichJsonListItemContext(
-            item.content,
-            context.contentType ?? detectContentType(item.content),
-            currentTocUrl,
-            source as unknown as Record<string, unknown>,
-            { regexGroups: item.regexGroups },
-          );
-          elementContext.onScriptToast = mergedOptions.onScriptToast;
+          for (let itemIndex = 0; itemIndex < listItems.length; itemIndex += 1) {
+            if (itemIndex > 0 && itemIndex % 16 === 0) {
+              await yieldTocWorkToUi(mergedOptions.signal);
+            }
+            const item = listItems[itemIndex]!;
+            const elementContext = enrichJsonListItemContext(
+              item.content,
+              context.contentType ?? detectContentType(item.content),
+              currentTocUrl,
+              source as unknown as Record<string, unknown>,
+              { regexGroups: item.regexGroups },
+            );
+            elementContext.onScriptToast = mergedOptions.onScriptToast;
 
-          const chapter = await parseChapter(
-            source,
-            rule,
-            elementContext,
-            currentTocUrl,
-            chapters.length,
-          );
-          if (chapter && !seenChapterUrls.has(chapter.url)) {
-            seenChapterUrls.add(chapter.url);
-            pageChapters.push(chapter);
+            const chapter = await parseChapter(
+              source,
+              rule,
+              elementContext,
+              currentTocUrl,
+              chapters.length,
+            );
+            if (chapter && !seenChapterUrls.has(chapter.url)) {
+              seenChapterUrls.add(chapter.url);
+              pageChapters.push(chapter);
+            }
           }
         }
       } else {
@@ -1471,6 +1551,16 @@ export async function getChapterList(
 
       chapters.push(...pageChapters);
       emitPartial(chapters, false);
+
+      // 当前页没有任何章节时立即结束。继续计算 nextTocUrl 只会让空目录
+      // 在后台反复请求/执行规则，并长时间占用详情页的 UI 任务队列。
+      if (pageChapters.length === 0) {
+        console.warn('[chapters] 当前目录页未解析到章节，停止继续分页', {
+          source: source.sourceName,
+          tocUrl: currentTocUrl,
+        });
+        break;
+      }
 
       // Legado：nextTocUrl 仅在首屏目录解析一次（避免 baseUrl 为 6963_2.html 时拼出 6963_2.html2.html）
       if (rule.nextTocUrl?.trim() && !nextTocUrlsResolved) {

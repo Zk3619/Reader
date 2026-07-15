@@ -39,6 +39,10 @@ export interface FetchSourcePageParams {
   placeholders?: Record<string, string>;
   /** 统一脚本通知总线（toast + HTML 限流拦截） */
   scriptNotice?: ScriptNoticeBus;
+  /** 调用方自己的生命周期信号。 */
+  signal?: AbortSignal;
+  /** 已有明确生命周期信号时，不再合并当前栈顶页面信号。 */
+  ignorePageNavigationAbort?: boolean;
 }
 
 /**
@@ -95,6 +99,8 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
       cookies: resolveSourceCookiesForHttp(params.source, pageUrl),
       scriptNotice: params.scriptNotice,
       onScriptToast: params.scriptNotice?.onScriptToast,
+      signal: params.signal,
+      ignorePageNavigationAbort: params.ignorePageNavigationAbort,
     };
   };
 

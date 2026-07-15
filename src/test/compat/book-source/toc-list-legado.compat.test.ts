@@ -87,4 +87,36 @@ describe('目录列表 Legado getElements', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('当前目录页无章节时不再请求 nextTocUrl', async () => {
+    const source = {
+      sourceName: 'empty-toc-test',
+      sourceUrl: 'https://example.com',
+      bookSourceUrl: 'https://example.com',
+      enabledCookieJar: false,
+      sourceType: 0,
+      ruleToc: {
+        chapterList: 'dl@dd',
+        chapterName: 'a@text',
+        chapterUrl: 'a@href',
+        nextTocUrl: '/toc/page-2',
+      },
+    } as unknown as BookSource;
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return new Response('<html><body><dl></dl></body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    };
+    try {
+      const chapters = await getChapterList(source, 'https://example.com/toc/page-1');
+      expect(chapters).toEqual([]);
+      expect(fetchCount).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

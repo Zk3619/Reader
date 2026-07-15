@@ -31,6 +31,7 @@ export interface BookSourceHttpOpts {
   concurrentRate?: string;
   timeout?: number;
   signal?: AbortSignal;
+  ignorePageNavigationAbort?: boolean;
   allowNon2xx?: boolean;
   legadoMinimalHeaders?: boolean;
   responseCharset?: string;
@@ -66,6 +67,7 @@ function toHttpOpts(
     concurrentRate: opts?.concurrentRate ?? source.concurrentRate,
     timeout: opts?.timeout ?? 30_000,
     signal: opts?.signal,
+    ignorePageNavigationAbort: opts?.ignorePageNavigationAbort,
     allowNon2xx: opts?.allowNon2xx,
     legadoMinimalHeaders: opts?.legadoMinimalHeaders,
   };
