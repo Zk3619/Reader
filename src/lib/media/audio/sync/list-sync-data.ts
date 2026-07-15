@@ -71,7 +71,11 @@ function lxMusicToTrack(info: LxMusicInfo): AudioTrack {
 
 export async function getLocalLxListData(): Promise<LxListData> {
   const playlists = await listPlaylists();
-  const data: LxListData = { defaultList: [], loveList: [], userList: [] };
+  const data: LxListData = {
+    defaultList: [],
+    loveList: (await getPlaylistTracks(BUILTIN_PLAYLIST_IDS.LOVE)).map(trackToLxMusic),
+    userList: [],
+  };
 
   for (const pl of playlists) {
     const tracks = await getPlaylistTracks(pl.id);
@@ -101,15 +105,22 @@ export function getLxListDataMd5(data: LxListData): string {
 export async function setLocalLxListData(data: LxListData): Promise<void> {
   const applyList = async (listId: string, name: string, musicList: LxMusicInfo[]) => {
     const playlists = await listPlaylists();
-    if (!playlists.some((p) => p.id === listId)) {
-      await createPlaylist(listId, name, listId === BUILTIN_PLAYLIST_IDS.DEFAULT || listId === BUILTIN_PLAYLIST_IDS.LOVE ? 'builtin' : 'sync');
+    if (
+      listId !== BUILTIN_PLAYLIST_IDS.LOVE &&
+      !playlists.some((p) => p.id === listId)
+    ) {
+      await createPlaylist(
+        listId,
+        name,
+        listId === BUILTIN_PLAYLIST_IDS.DEFAULT ? 'builtin' : 'sync',
+      );
     }
     const tracks = musicList.map(lxMusicToTrack);
     await upsertAudioTracks(tracks);
     await setPlaylistTracks(listId, tracks.map((t) => t.id));
   };
 
-  await applyList(BUILTIN_PLAYLIST_IDS.DEFAULT, '默认列表', data.defaultList);
+  await applyList(BUILTIN_PLAYLIST_IDS.DEFAULT, '试听列表', data.defaultList);
   await applyList(BUILTIN_PLAYLIST_IDS.LOVE, '我的收藏', data.loveList);
 
   const existing = await listPlaylists();

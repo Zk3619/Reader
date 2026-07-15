@@ -44,6 +44,10 @@ import {
   MEDIASBOX_SCHEMA_VERSION,
   migrateMediaboxV105,
 } from '@/lib/database/migration-v105-mediabox';
+import {
+  MUSIC_LISTS_SCHEMA_VERSION,
+  migrateMusicListsV106,
+} from '@/lib/database/migration-v106-music-lists';
 
 export { LEGADO_SCHEMA_VERSION };
 export { CHAPTER_CACHE_SCHEMA_VERSION };
@@ -498,5 +502,9 @@ export const migrations: Migration[] = [
   {
     version: MEDIASBOX_SCHEMA_VERSION,
     up: migrateMediaboxV105,
+  },
+  {
+    version: MUSIC_LISTS_SCHEMA_VERSION,
+    up: migrateMusicListsV106,
   },
 ];

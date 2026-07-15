@@ -303,6 +303,67 @@ export async function setGroupItems(
   }
 }
 
+function isDatabaseBusy(error: unknown): boolean {
+  return /database is locked|database is busy|SQLITE_BUSY/i.test(String(error));
+}
+
+async function executeWithBusyRetry(
+  operation: () => Promise<unknown>,
+  retries = 4,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      if (!isDatabaseBusy(error) || attempt >= retries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * 2 ** attempt));
+    }
+  }
+}
+
+/** 仅调整现有分组项顺序；单条 UPDATE 避免跨异步调用长期持有写锁。 */
+export async function reorderGroupItems(
+  groupId: number,
+  itemKind: MediaGroupItemKind,
+  itemIds: string[],
+): Promise<void> {
+  const db = await getDatabase();
+  const uniqueIds = [...new Set(itemIds.filter(Boolean))];
+  if (uniqueIds.length !== itemIds.length) {
+    throw new Error('排序列表包含重复或无效项目');
+  }
+
+  const current = await getGroupItemIds(groupId, itemKind);
+  const currentIds = current.map((item) => item.itemId);
+  const nextIdSet = new Set(uniqueIds);
+  if (
+    currentIds.length !== uniqueIds.length ||
+    currentIds.some((id) => !nextIdSet.has(id))
+  ) {
+    throw new Error('列表内容已变化，请重试排序');
+  }
+
+  if (uniqueIds.length === 0) return;
+  await executeWithBusyRetry(() =>
+    db.execute(
+      `WITH desired(item_id, sort_order) AS (
+         SELECT CAST(value AS TEXT), CAST(key AS INTEGER)
+         FROM json_each(?)
+       )
+       UPDATE media_group_items
+       SET sort_order = (
+         SELECT desired.sort_order
+         FROM desired
+         WHERE desired.item_id = media_group_items.item_id
+       )
+       WHERE group_id = ? AND item_kind = ?
+         AND item_id IN (SELECT item_id FROM desired)`,
+      [JSON.stringify(uniqueIds), groupId, itemKind],
+    ),
+  );
+}
+
 export async function isItemInGroup(
   groupId: number,
   itemKind: MediaGroupItemKind,

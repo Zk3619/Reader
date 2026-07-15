@@ -12,6 +12,7 @@ import {
   isTrackFavorite,
   removeFavoriteTrack,
   removeGroupItem,
+  reorderGroupItems,
   setGroupItems,
   getNextMusicUserGroupId,
   insertGroup as insertMediaGroup,
@@ -25,6 +26,29 @@ import type {
   AudioSyncState,
 } from '@/lib/media/audio/track-types';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
+
+export const MUSIC_PLAYLISTS_CHANGED_EVENT = 'reader:music-playlists-changed';
+
+function notifyMusicPlaylistsChanged(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(MUSIC_PLAYLISTS_CHANGED_EVENT));
+  }
+}
+
+function isDatabaseBusy(error: unknown): boolean {
+  return /database is locked|database is busy|SQLITE_BUSY/i.test(String(error));
+}
+
+async function withDatabaseBusyRetry<T>(operation: () => Promise<T>, retries = 4): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isDatabaseBusy(error) || attempt >= retries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 40 * 2 ** attempt));
+    }
+  }
+}
 
 function parseMeta(json: string): AudioTrackMeta {
   try {
@@ -133,6 +157,16 @@ export async function getPlaylistTracks(playlistId: string): Promise<AudioTrack[
   return getTracksForGroupId(groupId);
 }
 
+export async function isTrackInPlaylist(
+  playlistId: string,
+  trackId: string,
+): Promise<boolean> {
+  const groupId = await groupIdForPlaylist(playlistId);
+  if (groupId == null) return false;
+  const items = await getGroupItemIds(groupId, 'track');
+  return items.some((item) => item.itemId === trackId);
+}
+
 export async function addTrackToPlaylist(
   playlistId: string,
   trackId: string,
@@ -151,10 +185,22 @@ export async function addTrackToPlaylist(
 export async function addTracksToPlaylist(
   playlistId: string,
   tracks: AudioTrack[],
+  options?: { position?: 'top' | 'bottom' },
 ): Promise<void> {
+  const previousIds =
+    options?.position === 'top'
+      ? (await getPlaylistTracks(playlistId)).map((track) => track.id)
+      : [];
   await upsertAudioTracks(tracks);
   for (const track of tracks) {
     await addTrackToPlaylist(playlistId, track.id);
+  }
+  if (options?.position === 'top') {
+    const addedIds = tracks.map((track) => track.id);
+    await setPlaylistTracks(
+      playlistId,
+      [...addedIds, ...previousIds.filter((id) => !addedIds.includes(id))],
+    );
   }
 }
 
@@ -163,6 +209,29 @@ export async function reorderPlaylistTracks(
   trackIds: string[],
 ): Promise<void> {
   await setPlaylistTracks(playlistId, trackIds);
+}
+
+export async function reorderGroupTracks(
+  groupId: number,
+  trackIds: string[],
+): Promise<void> {
+  await reorderGroupItems(groupId, 'track', trackIds);
+}
+
+export async function replaceTrackInPlaylist(
+  playlistId: string,
+  oldTrackId: string,
+  replacement: AudioTrack,
+): Promise<void> {
+  await upsertAudioTrack(replacement);
+  const tracks = await getPlaylistTracks(playlistId);
+  if (!tracks.some((track) => track.id === oldTrackId)) {
+    throw new Error('原歌曲已不在当前列表中');
+  }
+  const nextIds = tracks.map((track) =>
+    track.id === oldTrackId ? replacement.id : track.id,
+  );
+  await setPlaylistTracks(playlistId, nextIds);
 }
 
 export async function setPlaylistTracks(
@@ -254,6 +323,7 @@ export async function createPlaylist(
     ...existing.slice(pos).map((g) => g.groupId),
   ];
   await reorderUserMusicPlaylists(nextIds);
+  notifyMusicPlaylistsChanged();
   return pl;
 }
 
@@ -277,6 +347,7 @@ export async function deletePlaylist(playlistId: string): Promise<void> {
     await deleteGroup(group.groupId);
   }
   await db.execute('DELETE FROM audio_playlists WHERE id = ?', [playlistId]);
+  notifyMusicPlaylistsChanged();
 }
 
 export async function renamePlaylist(playlistId: string, name: string): Promise<void> {
@@ -291,6 +362,7 @@ export async function renamePlaylist(playlistId: string, name: string): Promise<
     const { updateGroup } = await import('@/lib/database/media-groups');
     await updateGroup({ ...group, groupName: name });
   }
+  notifyMusicPlaylistsChanged();
 }
 
 export async function removeTrackFromPlaylist(
@@ -331,15 +403,42 @@ export async function clearTrackUrlCache(trackId: string): Promise<void> {
 }
 
 const RECENT_MAX = 200;
+let recentPlayWriteQueue = Promise.resolve();
 
-/** 写入最近播放（去重，最新在前） */
-export async function recordRecentPlay(trackId: string): Promise<void> {
-  const groupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.RECENT);
-  if (groupId == null) return;
-  const existing = await getGroupItemIds(groupId, 'track');
-  const filtered = existing.filter((r) => r.itemId !== trackId);
-  const ids = [trackId, ...filtered.map((r) => r.itemId)].slice(0, RECENT_MAX);
-  await setPlaylistTracks(BUILTIN_PLAYLIST_IDS.RECENT, ids);
+/** 写入最近播放（任意来源，去重，最新在前） */
+export function recordRecentPlay(track: AudioTrack): Promise<void> {
+  const persist = async () => {
+    await withDatabaseBusyRetry(() => upsertAudioTrack(track));
+    const groupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.RECENT);
+    if (groupId == null) return;
+    const db = await getDatabase();
+    await withDatabaseBusyRetry(() =>
+      db.execute(
+        `UPDATE media_group_items
+         SET sort_order = sort_order + 1
+         WHERE group_id = ? AND item_kind = 'track' AND item_id <> ?`,
+        [groupId, track.id],
+      ),
+    );
+    await withDatabaseBusyRetry(() =>
+      db.execute(
+        `INSERT OR REPLACE INTO media_group_items
+         (group_id, item_kind, item_id, sort_order, created_at)
+         VALUES (?, 'track', ?, 0, ?)`,
+        [groupId, track.id, Date.now()],
+      ),
+    );
+    await withDatabaseBusyRetry(() =>
+      db.execute(
+        `DELETE FROM media_group_items
+         WHERE group_id = ? AND item_kind = 'track' AND sort_order >= ?`,
+        [groupId, RECENT_MAX],
+      ),
+    );
+  };
+  const result = recentPlayWriteQueue.then(persist, persist);
+  recentPlayWriteQueue = result.catch(() => undefined);
+  return result;
 }
 
 export async function addTrackToLove(trackId: string): Promise<void> {

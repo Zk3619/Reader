@@ -37,6 +37,8 @@ export async function initDatabase(): Promise<DatabaseAdapter> {
     try {
       // 使用平台适配层初始化数据库
       db = await initPlatformDatabase();
+      // 并发的播放记录、缓存与列表操作短暂争用写锁时等待，而不是立即失败。
+      await db.execute('PRAGMA busy_timeout = 3000');
 
       // 运行迁移
       await runMigrations(db);
@@ -191,13 +193,13 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
 
   await db.execute(`
     INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
-    SELECT -20, '默认列表', 0, 0, 1, -1, 'music', 'default', 'builtin'
+    SELECT -20, '试听列表', -4, 0, 1, -1, 'music', 'default', 'builtin'
     WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -20)
   `);
 
   await db.execute(`
     INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
-    SELECT -21, '最近播放', -1, 0, 1, -1, 'music', 'recent', 'builtin'
+    SELECT -21, '最近播放', -3, 0, 1, -1, 'music', 'recent', 'builtin'
     WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -21)
   `);
 
