@@ -33,6 +33,7 @@ import {
   INNER_WEB_OVERLAY_Z,
 } from "@/lib/platform/inner-web-panel-overlay"
 import { appDialogScrollBodySpaceY4 } from "@/lib/ui/viewport-classes"
+import { settingsStore } from "@/stores/settings"
 
 export function WindowControlButtons() {
   const [isTauri, setIsTauri] = createSignal(false)
@@ -72,7 +73,11 @@ export function WindowControlButtons() {
   async function minimizeWindow() {
     if (appWindow) {
       try {
-        await appWindow.minimize()
+        if (settingsStore.state.app.minimizeToTray) {
+          await hideWindowAndSaveState()
+        } else {
+          await appWindow.minimize()
+        }
       } catch (error) {
         console.error("最小化窗口失败:", error)
       }
@@ -99,6 +104,10 @@ export function WindowControlButtons() {
     if (!isTauri()) return
     if (event?.target instanceof HTMLElement) {
       ; (event.target as HTMLElement).blur()
+    }
+    if (settingsStore.state.app.closeToTray) {
+      await executeCloseAction("hide")
+      return
     }
     const savedChoice = localStorage.getItem("closeAction")
     if (savedChoice === "hide" || savedChoice === "quit") {

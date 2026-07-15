@@ -52,7 +52,7 @@ export interface SettingsPageProps {
 }
 
 const SETTINGS_PAGE_TITLE = '设置';
-const SETTINGS_PAGE_DESCRIPTION = '主题、导航、备份与应用级选项';
+const SETTINGS_PAGE_DESCRIPTION = '常规、窗口、网络、外观、存储与应用信息';
 
 const settingsPageScrollTrackClass =
   'flex min-h-0 w-full min-w-0 flex-1 flex-col items-stretch';
@@ -72,7 +72,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const shell = useShellLayout();
   const useMobileLayout = () => shell().useMobileShell;
 
-  const [activeTab, setActiveTabSignal] = createSignal<SettingsCategoryId>('appearance');
+  const [activeTab, setActiveTabSignal] = createSignal<SettingsCategoryId>('general');
   const setActiveTab = (id: SettingsCategoryId) => {
     setActiveTabSignal(id);
   };
@@ -243,7 +243,7 @@ export function SettingsPage(props: SettingsPageProps) {
         fallback={
           <div class={settingsSearchEmptyStateClass}>
             <p>未找到匹配的设置项</p>
-            <p class="mt-1">尝试其他关键词，如「主题」「缓存」「备份」</p>
+            <p class="mt-1">尝试其他关键词，如「语言」「托盘」「网络」或「主题」</p>
           </div>
         }
       >

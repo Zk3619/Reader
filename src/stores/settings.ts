@@ -51,6 +51,23 @@ import {
   normalizeThemeScheduleHours,
   syncThemeBootstrapSnapshotFromAppSettings,
 } from '@/lib/theme';
+import {
+  DEFAULT_AUTO_CHECK_UPDATES,
+  DEFAULT_APP_FONT_FAMILY,
+  DEFAULT_APP_FONT_SIZE,
+  DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
+  DEFAULT_NETWORK_RETRY_COUNT,
+  DEFAULT_STARTUP_PAGE,
+  normalizeMainProgramSettings,
+  applyMainProgramAppearance,
+  setRuntimeNetworkDefaults,
+  type StartupPage,
+} from '@/lib/settings/main-program-settings';
+import {
+  normalizeActiveThemePresetByTarget,
+  type ActiveThemePresetByTarget,
+  type ThemeTargetId,
+} from '@/lib/theme/theme-targets';
 
 /**
  * 应用设置接口
@@ -72,6 +89,18 @@ export interface AppSettings {
   closeToTray: boolean;
   /** 启动时恢复窗口状态 */
   restoreWindowState: boolean;
+  /** 主程序启动后打开的页面 */
+  startupPage?: StartupPage;
+  /** 主程序网络请求的默认超时（秒） */
+  networkRequestTimeoutSeconds?: number;
+  /** 主程序网络请求失败后的默认重试次数 */
+  networkRetryCount?: number;
+  /** 启动后自动检查应用更新 */
+  autoCheckUpdates?: boolean;
+  /** 应用界面基础字号（px） */
+  appFontSize?: number;
+  /** 应用界面字体族；空字符串表示系统默认 */
+  appFontFamily?: string;
   /** 减少动效（无障碍 / 偏好） */
   reduceMotion: boolean;
   /** 是否显示界面工具提示（按钮悬停说明等） */
@@ -154,6 +183,8 @@ export interface AppSettings {
   activeThemePresetId?: string;
   /** 当前激活的阅读器主题预设 ID */
   activeViewerThemePresetId?: string;
+  /** v3：按应用壳层、模块、阅读器或音乐页面记录活动主题 */
+  activeThemePresetByTarget?: ActiveThemePresetByTarget;
   /** 全局媒体播放器布局：fixed | stacked | floating */
   mediaPlayerChromeLayout?: ViewerChromeLayout;
   /** 全局媒体播放器位置：top | bottom */
@@ -180,6 +211,12 @@ const defaultAppSettings: AppSettings = {
   minimizeToTray: true,
   closeToTray: true,
   restoreWindowState: true,
+  startupPage: DEFAULT_STARTUP_PAGE,
+  networkRequestTimeoutSeconds: DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
+  networkRetryCount: DEFAULT_NETWORK_RETRY_COUNT,
+  autoCheckUpdates: DEFAULT_AUTO_CHECK_UPDATES,
+  appFontSize: DEFAULT_APP_FONT_SIZE,
+  appFontFamily: DEFAULT_APP_FONT_FAMILY,
   reduceMotion: false,
   showTooltips: true,
   shellLayout: 'auto',
@@ -248,8 +285,22 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     ...defaultAppSettings,
     ...stored,
   });
+  const mainProgramSettings = normalizeMainProgramSettings(merged);
+  setRuntimeNetworkDefaults({
+    timeoutSeconds: mainProgramSettings.networkRequestTimeoutSeconds,
+    retryCount: mainProgramSettings.networkRetryCount,
+  });
+  applyMainProgramAppearance({
+    appFontSize: mainProgramSettings.appFontSize,
+    appFontFamily: mainProgramSettings.appFontFamily,
+  });
+  const activeThemePresetByTarget = normalizeActiveThemePresetByTarget(
+    merged.activeThemePresetByTarget,
+    merged,
+  );
   const result = {
     ...merged,
+    ...mainProgramSettings,
     theme: normalizeThemeMode(merged.theme),
     themeScheduleDayHour: clampThemeHour(
       merged.themeScheduleDayHour,
@@ -268,6 +319,9 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     viewerChromeOverlayBlurPx: normalizeViewerChromeOverlayBlurPx(
       merged.viewerChromeOverlayBlurPx,
     ),
+    activeThemePresetByTarget,
+    activeThemePresetId: activeThemePresetByTarget.app,
+    activeViewerThemePresetId: activeThemePresetByTarget['module.reading'],
   };
   syncThemeBootstrapSnapshotFromAppSettings(result);
   return result;
@@ -338,7 +392,11 @@ export const settingsStore = {
         if (stored) {
           const migrated = mergeStoredAppSettings(stored);
           setState({ app: migrated, loading: false });
-          if (migrated.booksStorageRoot && migrated.booksStorageRoot !== stored.booksStorageRoot) {
+          if (
+            (migrated.booksStorageRoot && migrated.booksStorageRoot !== stored.booksStorageRoot) ||
+            (!stored.activeThemePresetByTarget &&
+              Object.keys(migrated.activeThemePresetByTarget ?? {}).length > 0)
+          ) {
             await setStorage(SETTINGS_STORAGE_KEY, migrated);
           }
         } else {
@@ -415,6 +473,11 @@ export const settingsStore = {
    */
   async setAutoStart(autoStart: boolean): Promise<void> {
     await this.updateAppSettings({ autoStart });
+    if (isTauri()) {
+      const { enable, disable } = await import('@tauri-apps/plugin-autostart');
+      if (autoStart) await enable();
+      else await disable();
+    }
   },
 
   /**
@@ -429,6 +492,57 @@ export const settingsStore = {
    */
   async setCloseToTray(closeToTray: boolean): Promise<void> {
     await this.updateAppSettings({ closeToTray });
+  },
+
+  async setRestoreWindowState(restoreWindowState: boolean): Promise<void> {
+    await this.updateAppSettings({ restoreWindowState });
+  },
+
+  async setStartupPage(startupPage: StartupPage): Promise<void> {
+    await this.updateAppSettings({ startupPage });
+  },
+
+  async setNetworkRequestTimeoutSeconds(networkRequestTimeoutSeconds: number): Promise<void> {
+    const normalized = normalizeMainProgramSettings({ networkRequestTimeoutSeconds });
+    await this.updateAppSettings({
+      networkRequestTimeoutSeconds: normalized.networkRequestTimeoutSeconds,
+    });
+    setRuntimeNetworkDefaults({
+      timeoutSeconds: normalized.networkRequestTimeoutSeconds,
+      retryCount: state.app.networkRetryCount ?? DEFAULT_NETWORK_RETRY_COUNT,
+    });
+  },
+
+  async setNetworkRetryCount(networkRetryCount: number): Promise<void> {
+    const normalized = normalizeMainProgramSettings({ networkRetryCount });
+    await this.updateAppSettings({ networkRetryCount: normalized.networkRetryCount });
+    setRuntimeNetworkDefaults({
+      timeoutSeconds:
+        state.app.networkRequestTimeoutSeconds ?? DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
+      retryCount: normalized.networkRetryCount,
+    });
+  },
+
+  async setAutoCheckUpdates(autoCheckUpdates: boolean): Promise<void> {
+    await this.updateAppSettings({ autoCheckUpdates });
+  },
+
+  async setAppFontSize(appFontSize: number): Promise<void> {
+    const normalized = normalizeMainProgramSettings({ appFontSize });
+    await this.updateAppSettings({ appFontSize: normalized.appFontSize });
+    applyMainProgramAppearance({
+      appFontSize: normalized.appFontSize,
+      appFontFamily: state.app.appFontFamily ?? DEFAULT_APP_FONT_FAMILY,
+    });
+  },
+
+  async setAppFontFamily(appFontFamily: string): Promise<void> {
+    const normalized = normalizeMainProgramSettings({ appFontFamily });
+    await this.updateAppSettings({ appFontFamily: normalized.appFontFamily });
+    applyMainProgramAppearance({
+      appFontSize: state.app.appFontSize ?? DEFAULT_APP_FONT_SIZE,
+      appFontFamily: normalized.appFontFamily,
+    });
   },
 
   /**
@@ -451,12 +565,40 @@ export const settingsStore = {
   },
 
   setActiveThemePresetId(activeThemePresetId: string | undefined): void {
-    setState('app', 'activeThemePresetId', activeThemePresetId);
-    void this.saveSettings();
+    void this.setActiveThemePresetForTarget('app', activeThemePresetId);
   },
 
   async setActiveViewerThemePresetId(activeViewerThemePresetId: string | undefined): Promise<void> {
-    await this.updateAppSettings({ activeViewerThemePresetId });
+    await this.setActiveThemePresetForTarget('module.reading', activeViewerThemePresetId);
+  },
+
+  async setActiveThemePresetForTarget(
+    target: ThemeTargetId,
+    presetId: string | undefined,
+  ): Promise<void> {
+    const next = {
+      ...normalizeActiveThemePresetByTarget(state.app.activeThemePresetByTarget, state.app),
+    };
+    const normalizedId = presetId?.trim();
+    if (normalizedId) next[target] = normalizedId;
+    else delete next[target];
+
+    const legacyUpdates =
+      target === 'app'
+        ? { activeThemePresetId: normalizedId }
+        : target === 'module.reading'
+          ? { activeViewerThemePresetId: normalizedId }
+          : {};
+    await this.updateAppSettings({
+      activeThemePresetByTarget: next,
+      ...legacyUpdates,
+    });
+    const { publishActiveThemeTargetChange } = await import('@/stores/theme-active-pack');
+    publishActiveThemeTargetChange();
+  },
+
+  async clearActiveThemePresetForTarget(target: ThemeTargetId): Promise<void> {
+    await this.setActiveThemePresetForTarget(target, undefined);
   },
 
   async setShowTooltips(showTooltips: boolean): Promise<void> {

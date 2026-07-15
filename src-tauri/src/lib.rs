@@ -2075,6 +2075,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             music_openapi::stop_music_openapi,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            music_openapi::get_music_openapi_status,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             lx_sync_server::start_lx_sync_server,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             lx_sync_server::stop_lx_sync_server,
@@ -2086,6 +2088,10 @@ pub fn run() {
             desktop_lyric::close_desktop_lyric_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_ignore_cursor,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_window_options,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::reset_desktop_lyric_window_geometry,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::register_music_hotkeys,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2100,6 +2106,7 @@ pub fn run() {
             display_reader_commands::open_display_write_settings,
             display_reader_commands::set_screen_orientation,
             display_reader_commands::set_keep_screen_on,
+            display_reader_commands::set_music_sleep_blocked,
             download_binary,
             fetch_url_text,
             extract_zip_json_entries,

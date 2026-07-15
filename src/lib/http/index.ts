@@ -31,6 +31,7 @@ import {
 } from '@/lib/http/abort';
 import { getPageNavigationSignal } from '@/lib/navigation/page-navigation-scope';
 import { decodeBookSourceResponseBytes } from '@/lib/book-source/response-charset';
+import { getRuntimeNetworkDefaults } from '@/lib/settings/main-program-settings';
 
 export { isAbortError } from '@/lib/http/abort';
 
@@ -314,12 +315,13 @@ async function executeRequest(
 ): Promise<HttpResponse> {
   // 规范化 URL，确保跨平台兼容性
   const normalizedUrl = normalizeUrl(url);
+  const networkDefaults = getRuntimeNetworkDefaults();
 
   const {
     method = 'GET',
     headers = {},
     body,
-    timeout = 30000,
+    timeout = networkDefaults.timeoutSeconds * 1000,
     followRedirects = true,
     enableCookieJar = false,
     signal: userSignal,
@@ -735,7 +737,7 @@ async function requestWithRetry(
   url: string,
   options: RequestOptions = {}
 ): Promise<HttpResponse> {
-  const { retry = 0, retryDelay = 1000 } = options;
+  const { retry = getRuntimeNetworkDefaults().retryCount, retryDelay = 1000 } = options;
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= retry; attempt++) {

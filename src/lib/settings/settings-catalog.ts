@@ -1,6 +1,12 @@
 import { fuzzyMatchQuery } from '@/lib/sources/source-list-filter';
 
-export type SettingsCategoryId = 'appearance' | 'storage' | 'other';
+export type SettingsCategoryId =
+  | 'general'
+  | 'appearance'
+  | 'window-system'
+  | 'network'
+  | 'storage'
+  | 'about';
 
 export interface SettingsCategoryDef {
   id: SettingsCategoryId;
@@ -19,9 +25,24 @@ export interface SettingsItemDef {
 /** 壳层设置分类（阅读/音乐模块设置已下沉至各模块） */
 export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
+    id: 'general',
+    label: '常规',
+    description: '界面语言与主程序启动偏好',
+  },
+  {
     id: 'appearance',
     label: '外观与主题',
     description: '主题、导航布局、Toast 与全局媒体播放器',
+  },
+  {
+    id: 'window-system',
+    label: '窗口与系统',
+    description: '桌面自启动、系统托盘与窗口状态恢复',
+  },
+  {
+    id: 'network',
+    label: '网络',
+    description: '网络默认值与 Web 服务',
   },
   {
     id: 'storage',
@@ -29,13 +50,20 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
     description: '程序数据目录、备份编排与应用级缓存入口',
   },
   {
-    id: 'other',
-    label: '其他设置',
-    description: '应用技术栈信息',
+    id: 'about',
+    label: '关于',
+    description: '版本、运行环境与更新能力',
   },
 ];
 
 export const SETTINGS_ITEMS: SettingsItemDef[] = [
+  {
+    id: 'general-preferences',
+    categoryId: 'general',
+    title: '常规偏好',
+    description: '界面语言、字体字号与启动页面',
+    keywords: ['常规', '语言', '字体', '字号', '简体中文', '繁体中文', 'English', '启动页面', '书架', '上次页面'],
+  },
   {
     id: 'theme',
     categoryId: 'appearance',
@@ -107,6 +135,27 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['播放器', '朗读', '后台', '音频', '视频', '悬浮', '层叠', '固定'],
   },
   {
+    id: 'desktop-integration',
+    categoryId: 'window-system',
+    title: '桌面集成',
+    description: '开机启动、托盘与窗口状态恢复',
+    keywords: ['窗口', '系统', '开机启动', '自动启动', '托盘', '最小化', '关闭', '恢复窗口'],
+  },
+  {
+    id: 'network-defaults',
+    categoryId: 'network',
+    title: '网络默认值',
+    description: '主程序网络请求的超时与重试偏好',
+    keywords: ['网络', '请求', '超时', '重试', 'timeout', 'retry'],
+  },
+  {
+    id: 'web-service',
+    categoryId: 'network',
+    title: 'Web 服务',
+    description: '局域网访问、端口与 Token 认证',
+    keywords: ['Web 服务', '局域网', '端口', 'Token', '认证', 'API', 'WebSocket'],
+  },
+  {
     id: 'storage-webview',
     categoryId: 'storage',
     title: '程序数据与 WebView',
@@ -121,11 +170,11 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     keywords: ['备份', '恢复', '数据库', '导出', '导入', 'WebDAV', '云备份', '坚果云'],
   },
   {
-    id: 'tech-stack',
-    categoryId: 'other',
-    title: '技术栈',
-    description: '当前应用技术栈信息',
-    keywords: ['技术栈', 'tauri', 'solidjs', 'tailwind'],
+    id: 'about-reader',
+    categoryId: 'about',
+    title: '关于 Reader',
+    description: '版本、运行环境与自动更新偏好',
+    keywords: ['关于', '版本', '更新', '检查更新', 'tauri', 'android', 'web', '技术栈'],
   },
 ];
 

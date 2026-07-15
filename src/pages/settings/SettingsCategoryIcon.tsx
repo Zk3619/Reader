@@ -4,6 +4,9 @@ import {
   LayoutIcon,
   SettingsIcon,
   GroupLocalIcon,
+  GlobeIcon,
+  ThemeSystemIcon,
+  BookInfoIcon,
 } from '@/components/shared/icons';
 
 export interface SettingsCategoryIconProps {
@@ -14,14 +17,23 @@ export interface SettingsCategoryIconProps {
 export function SettingsCategoryIcon(props: SettingsCategoryIconProps) {
   return (
     <Switch>
+      <Match when={props.categoryId === 'general'}>
+        <SettingsIcon class={props.class} size={20} />
+      </Match>
       <Match when={props.categoryId === 'appearance'}>
         <LayoutIcon class={props.class} size={20} />
+      </Match>
+      <Match when={props.categoryId === 'window-system'}>
+        <ThemeSystemIcon class={props.class} size={20} />
+      </Match>
+      <Match when={props.categoryId === 'network'}>
+        <GlobeIcon class={props.class} size={20} />
       </Match>
       <Match when={props.categoryId === 'storage'}>
         <GroupLocalIcon class={props.class} size={20} />
       </Match>
-      <Match when={props.categoryId === 'other'}>
-        <SettingsIcon class={props.class} size={20} />
+      <Match when={props.categoryId === 'about'}>
+        <BookInfoIcon class={props.class} size={20} />
       </Match>
     </Switch>
   );

@@ -54,6 +54,7 @@ import {
 } from "@/components/sources/SourcesTypeTabs";
 import { navigateToMusicHub } from "@/stores/shell-tabs";
 import { registerGlobalAudioOpenViewer } from "@/lib/media/audio/audio-shell-controls";
+import { registerMusicHotkeys } from "@/lib/media/audio/platform/music-hotkeys";
 import {
   BookReader,
   ImageViewerPage,
@@ -182,11 +183,16 @@ import { clearAppDataDirCache } from "@/lib/platform/app-data-dir";
 import { isDesktopTauri } from "@/lib/platform/webview-storage";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
+import {
+  persistLastShellPage,
+  readLastShellPage,
+} from "@/lib/settings/main-program-settings";
 import { applyThemeToDocument } from "@/lib/theme";
 import { applyActiveThemePackToDocument } from "@/lib/theme/theme-runtime";
 import { getThemePreset } from "@/lib/database/theme-presets";
 import { ThemedComponentBackground } from "@/components/theme/ThemedComponentBackground";
 import { ThemePackRuntimeProvider } from "@/components/theme/ThemePackRuntimeProvider";
+import { ThemeTargetHost } from "@/components/theme/ThemeTargetHost";
 import { componentDataAttr } from "@/lib/theme/preview/component-registry";
 import { themeStudioStore } from "@/stores/theme-studio";
 import type { ReaderThemePackV1 } from "@/lib/theme/schema/theme-pack-v1";
@@ -367,9 +373,16 @@ function AppContent() {
   );
   const currentPage = nav.currentPage;
   const isStandalonePage = nav.isStandaloneVisible;
+  const [settingsReady, setSettingsReady] = createSignal(false);
 
   createEffect(() => {
     publishActiveOverlayLayer(nav.top(), nav.entries());
+  });
+
+  createEffect(() => {
+    if (!settingsReady()) return;
+    const page = currentPage();
+    if (!isOverlayPage(page)) persistLastShellPage(page);
   });
 
   const [settingsQuickPageReturn, setSettingsQuickPageReturn] = createSignal<
@@ -2836,9 +2849,26 @@ function AppContent() {
 
   // 设置尽早加载；数据库等重初始化延至开屏结束，避免动画结束后主线程长时间无响应
   onMount(() => {
-    void settingsStore.loadSettings().catch((e) => {
-      console.warn('加载应用设置失败:', e);
-    });
+    void settingsStore
+      .loadSettings()
+      .then(() => {
+        if (settingsStore.state.app.startupPage === 'last-used') {
+          const lastPage = readLastShellPage();
+          if (lastPage) nav.navigateShell(normalizeShellTab(normalizeRestoredPage(lastPage)));
+        } else {
+          nav.navigateShell('reader');
+        }
+        setSettingsReady(true);
+      })
+      .catch((e) => {
+        console.warn('加载应用设置失败:', e);
+        setSettingsReady(true);
+      });
+    if (isDesktopTauri()) {
+      void registerMusicHotkeys().catch((e) => {
+        console.warn('恢复音乐全局热键失败:', e);
+      });
+    }
   });
 
   let appHeavyInitStarted = false;
@@ -4843,20 +4873,26 @@ const appToastIcons = createAppToastIcons();
 
 function App() {
   if (typeof window !== "undefined" && window.location.hash === "#lyric-desktop") {
-    return <LyricDesktopPage />;
+    return (
+      <ThemePackRuntimeProvider>
+        <LyricDesktopPage />
+      </ThemePackRuntimeProvider>
+    );
   }
   return (
     <ThemePackRuntimeProvider>
-      <SidebarProvider
-        style={appSidebarStyle}
-        class={cn(hViewport, "relative min-h-0 overflow-hidden")}
-        {...componentDataAttr('appShell')}
-      >
-        <ThemedComponentBackground componentId="appShell" />
-        <AppContent />
-        <AppToastHost icons={appToastIcons} />
-        <GlobalThemeEffectsLayer domain="app" />
-      </SidebarProvider>
+      <ThemeTargetHost target="app">
+        <SidebarProvider
+          style={appSidebarStyle}
+          class={cn(hViewport, "relative min-h-0 overflow-hidden")}
+          {...componentDataAttr('appShell')}
+        >
+          <ThemedComponentBackground componentId="appShell" />
+          <AppContent />
+          <AppToastHost icons={appToastIcons} />
+          <GlobalThemeEffectsLayer domain="app" />
+        </SidebarProvider>
+      </ThemeTargetHost>
     </ThemePackRuntimeProvider>
   );
 }

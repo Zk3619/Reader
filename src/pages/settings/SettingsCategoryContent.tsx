@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js';
+import { Show } from 'solid-js';
 import { ThemeSwitch } from '@/components/shell/ThemeSwitch';
 import { ThemeScheduleSetting } from '@/components/settings/ThemeScheduleSetting';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
@@ -10,6 +10,13 @@ import { ThemePresetListSetting } from '@/components/settings/ThemePresetListSet
 import { CustomThemeSetting } from '@/components/settings/CustomThemeSetting';
 import { StorageAndWebViewSetting } from '@/components/settings/StorageAndWebViewSetting';
 import { DataBackupSetting } from '@/components/settings/DataBackupSetting';
+import {
+  AboutProgramSetting,
+  GeneralProgramSetting,
+  NetworkProgramSetting,
+  WindowSystemSetting,
+} from '@/components/settings/MainProgramSettings';
+import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
@@ -26,6 +33,15 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
 
   return (
     <div class="w-full space-y-4">
+      <Show when={props.categoryId === 'general'}>
+        <SettingItemAnchor
+          id="general-preferences"
+          highlighted={highlight('general-preferences')}
+        >
+          <GeneralProgramSetting />
+        </SettingItemAnchor>
+      </Show>
+
       <Show when={props.categoryId === 'appearance'}>
         <SettingItemAnchor id="theme" highlighted={highlight('theme')}>
           <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -117,6 +133,25 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
         </SettingItemAnchor>
       </Show>
 
+      <Show when={props.categoryId === 'window-system'}>
+        <SettingItemAnchor
+          id="desktop-integration"
+          highlighted={highlight('desktop-integration')}
+        >
+          <WindowSystemSetting />
+        </SettingItemAnchor>
+      </Show>
+
+      <Show when={props.categoryId === 'network'}>
+        <SettingItemAnchor id="network-defaults" highlighted={highlight('network-defaults')}>
+          <NetworkProgramSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="web-service" highlighted={highlight('web-service')}>
+          <WebServiceSettingBlock />
+        </SettingItemAnchor>
+      </Show>
+
       <Show when={props.categoryId === 'storage'}>
         <SettingItemAnchor id="storage-webview" highlighted={highlight('storage-webview')}>
           <StorageAndWebViewSetting />
@@ -135,20 +170,9 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
         </SettingItemAnchor>
       </Show>
 
-      <Show when={props.categoryId === 'other'}>
-        <SettingItemAnchor id="tech-stack" highlighted={highlight('tech-stack')}>
-          <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6">
-            <h3 class="mb-3 font-semibold text-foreground">技术栈</h3>
-            <div class="flex flex-wrap gap-2">
-              <For each={['Tauri 2.0', 'SolidJS', 'TailwindCSS v4', 'solid-ui', 'Kobalte']}>
-                {(tech) => (
-                  <span class="rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
-                    {tech}
-                  </span>
-                )}
-              </For>
-            </div>
-          </div>
+      <Show when={props.categoryId === 'about'}>
+        <SettingItemAnchor id="about-reader" highlighted={highlight('about-reader')}>
+          <AboutProgramSetting />
         </SettingItemAnchor>
       </Show>
     </div>
