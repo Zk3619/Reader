@@ -28,6 +28,9 @@ export const dialogVirtualListPanelWidth = 'w-[min(32rem,85dvw)] shrink-0';
 export const dialogVirtualListPanelMaxHeight =
   'max-h-[min(60dvh,calc(85dvh-8rem))]';
 export const dialogVirtualListPanelMinHeight = 'min-h-[200px]';
+/** 大型虚拟列表弹窗的稳定实际高度，避免占位与数据挂载时尺寸跳变。 */
+export const dialogVirtualListPanelStableHeight =
+  'h-[min(75dvh,calc(85dvh-8rem))] min-h-[200px]';
 export const dialogVirtualListPanelHeight = cn(
   dialogVirtualListPanelMaxHeight,
   dialogVirtualListPanelMinHeight,

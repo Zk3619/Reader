@@ -148,7 +148,7 @@ import {
   markBackNavigationPreservedHistory,
   ROOT_EXIT_CONFIRM_MS,
 } from "@/lib/navigation/back-navigation";
-import { bumpPageNavigationScope } from "@/lib/navigation/page-navigation-scope";
+import { syncPageNavigationScopeStack } from "@/lib/navigation/page-navigation-scope";
 import { publishActiveOverlayLayer } from "@/lib/ui/overlay-layer-active";
 import {
   afterViewerShellOverlaysClosed,
@@ -808,11 +808,21 @@ function AppContent() {
     dismissFloatingOverlaysForShellChange();
   });
 
-  /** 切换页面 / 叠层时中止上一页进行中的 HTTP 请求 */
+  /** 同步 shell / 叠层请求作用域；叠层不得取消仍挂载的底层页面请求 */
   createEffect(() => {
-    const page = currentPage();
-    const overlayId = nav.top()?.id ?? "shell";
-    bumpPageNavigationScope(`${page}\0${overlayId}`);
+    const shell = nav.shellTab();
+    const entries = nav.entries();
+    syncPageNavigationScopeStack([
+      {
+        key: `${shell}\0shell`,
+        cancelExploreOnExit: shell === "reader",
+      },
+      ...entries.map((entry) => ({
+        key: `${entry.kind}\0${entry.id}`,
+        cancelExploreOnExit: entry.kind === "explore",
+        inheritParent: entry.kind === "book-info",
+      })),
+    ]);
   });
 
   /** DEV HMR：页面仍停在媒体阅读器但 store 已重置时，尝试从缓存会话恢复或退回书架 */

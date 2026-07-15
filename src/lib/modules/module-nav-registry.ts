@@ -3,7 +3,7 @@
  */
 
 import type { Component } from 'solid-js';
-import { Search, ListMusic, Library, Trophy, Disc3, Mic2, Plug, Download, Settings2 } from 'lucide-solid';
+import { Search, ListMusic, Library, Trophy, Settings2 } from 'lucide-solid';
 import type { PageType } from '@/components/shell/Navigation';
 import {
   BookshelfIcon,
@@ -42,11 +42,7 @@ const MUSIC_NAV: ModuleNavItem[] = [
   { id: 'search', label: '搜索', icon: Search },
   { id: 'songlist', label: '歌单', icon: Library },
   { id: 'leaderboard', label: '排行榜', icon: Trophy },
-  { id: 'album', label: '专辑', icon: Disc3 },
-  { id: 'singer', label: '歌手', icon: Mic2 },
-  { id: 'userApi', label: '自定义', icon: Plug },
   { id: 'list', label: '我的列表', icon: ListMusic },
-  { id: 'download', label: '下载', icon: Download },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

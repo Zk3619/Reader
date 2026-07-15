@@ -5,6 +5,7 @@ import {
   getPageNavigationRevision,
   getPageNavigationScopeKey,
   getPageNavigationSignal,
+  syncPageNavigationScopeStack,
   withIgnoredPageNavigationAbort,
 } from '@/lib/navigation/page-navigation-scope';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
@@ -50,6 +51,77 @@ describe('page-navigation-scope', () => {
       expect(pageSignal.aborted).toBe(true);
       expect(getPageNavigationSignal().aborted).toBe(false);
     });
+  });
+
+  it('keeps the underlying shell request alive while book info is pushed', () => {
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+    const exploreSignal = getPageNavigationSignal();
+
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+      { key: 'book-info\0overlay-1' },
+    ]);
+
+    expect(exploreSignal.aborted).toBe(false);
+    expect(getPageNavigationScopeKey()).toBe('book-info\0overlay-1');
+    expect(getPageNavigationSignal()).not.toBe(exploreSignal);
+  });
+
+  it('aborts only book info requests when returning to the shell', () => {
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+    const exploreSignal = getPageNavigationSignal();
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+      { key: 'book-info\0overlay-1' },
+    ]);
+    const detailSignal = getPageNavigationSignal();
+
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+
+    expect(detailSignal.aborted).toBe(true);
+    expect(exploreSignal.aborted).toBe(false);
+    expect(getPageNavigationSignal()).toBe(exploreSignal);
+    expect(getPageNavigationScopeKey()).toBe('reader\0shell');
+  });
+
+  it('does not change the parent scope for a self-managed book info overlay', () => {
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+    const exploreSignal = getPageNavigationSignal();
+    const revision = getPageNavigationRevision();
+
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+      { key: 'book-info\0overlay-1', inheritParent: true },
+    ]);
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+
+    expect(getPageNavigationSignal()).toBe(exploreSignal);
+    expect(exploreSignal.aborted).toBe(false);
+    expect(getPageNavigationRevision()).toBe(revision);
+  });
+
+  it('aborts the shell request when switching shell pages', () => {
+    syncPageNavigationScopeStack([
+      { key: 'reader\0shell', cancelExploreOnExit: true },
+    ]);
+    const exploreSignal = getPageNavigationSignal();
+
+    syncPageNavigationScopeStack([
+      { key: 'settings\0shell' },
+    ]);
+
+    expect(exploreSignal.aborted).toBe(true);
+    expect(getPageNavigationSignal().aborted).toBe(false);
   });
 });
 
