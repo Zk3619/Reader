@@ -261,6 +261,7 @@ function VirtualListScrollHost(props: {
 
   return (
     <div
+      data-virtual-list-scroll-root=""
       ref={(el) => {
         props.setScrollEl(el);
         if (!props.useExternalScroll) {

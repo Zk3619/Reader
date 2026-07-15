@@ -63,7 +63,12 @@ function SortableReorderBridge(props: {
         props.setDisplayIds([...sorted]);
         props.setDisplayIdsAuthoritative(true);
       }
-      void props.onReorder([...sorted]);
+      void Promise.resolve(props.onReorder([...sorted])).catch(() => {
+        if (props.persistOnly()) {
+          props.setDisplayIds([...initial]);
+          props.setDisplayIdsAuthoritative(false);
+        }
+      });
     }
     props.onDragFinalize?.();
   };

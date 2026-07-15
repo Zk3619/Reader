@@ -20,7 +20,6 @@ import {
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
-import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { settingsState } from "@/stores/settings"
 
 const KEY_PERMANENT = "reader.immersiveToastDismissed"
@@ -406,9 +405,7 @@ function SonnerAppToastHost(props: AppToastHostProps) {
   const sonnerExpand = createMemo(() => resolveSonnerToasterExpand(stackScaling()))
 
   return (
-    <div class="reader-toast-host isolate overflow-hidden" data-kb-top-layer style={appToastHostStyle()}>
-      <ThemedComponentBackground componentId="toast" />
-      <div class="relative z-1">
+    <div class="reader-toast-host" style={appToastHostStyle()}>
       <SonnerInteractionFix />
       <Toaster
         duration={DEFAULT_TOAST_DURATION}
@@ -423,7 +420,6 @@ function SonnerAppToastHost(props: AppToastHostProps) {
         swipeDirections={appToastSwipeDirections(position())}
         class={APP_TOAST_Z}
       />
-      </div>
     </div>
   )
 }

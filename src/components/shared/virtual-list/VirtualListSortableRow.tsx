@@ -4,7 +4,7 @@ import {
   useSortableContext,
   type Id,
 } from '@thisbeyond/solid-dnd';
-import { Show, type JSX } from 'solid-js';
+import { Show, createContext, useContext, type Accessor, type JSX } from 'solid-js';
 import { cn } from '@/lib/utils';
 import type { VirtualListDragStyle } from '@/components/shared/virtual-list/types';
 
@@ -15,6 +15,19 @@ export interface VirtualListSortableRowProps {
   class?: string;
   style?: JSX.CSSProperties;
   children: JSX.Element;
+}
+
+interface VirtualListSortableRowContextValue {
+  dragActivators: Record<string, unknown>;
+  isActiveDraggable: Accessor<boolean>;
+  isDragging: Accessor<boolean>;
+}
+
+const VirtualListSortableRowContext =
+  createContext<VirtualListSortableRowContextValue>();
+
+export function useVirtualListSortableRow(): VirtualListSortableRowContextValue | undefined {
+  return useContext(VirtualListSortableRowContext);
 }
 
 /** 在 SortableProvider 内包裹单行；enabled=false 时不注册 sortable */
@@ -101,6 +114,11 @@ function VirtualListSortableRowDnd(props: {
   const sortable = createSortable(props.id);
   const ctx = useDragDropContext();
   const isDragging = () => !!ctx?.[0].active.draggable;
+  const sortableRow: VirtualListSortableRowContextValue = {
+    dragActivators: sortable.dragActivators as Record<string, unknown>,
+    isActiveDraggable: () => sortable.isActiveDraggable,
+    isDragging,
+  };
 
   return (
     <div
@@ -113,7 +131,9 @@ function VirtualListSortableRowDnd(props: {
       )}
       style={props.style}
     >
-      {props.children}
+      <VirtualListSortableRowContext.Provider value={sortableRow}>
+        {props.children}
+      </VirtualListSortableRowContext.Provider>
     </div>
   );
 }
