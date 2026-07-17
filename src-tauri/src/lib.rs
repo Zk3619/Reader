@@ -204,6 +204,31 @@ fn request_app_exit(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// 由音乐播放定时器显式触发系统关机。
+#[tauri::command]
+fn shutdown_system() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("shutdown");
+        command.args(["/s", "/t", "0"]);
+        command
+    };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let mut command = {
+        let mut command = std::process::Command::new("shutdown");
+        command.args(["-h", "now"]);
+        command
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    return Err("当前平台不支持系统关机".to_string());
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("启动系统关机失败: {error}"))
+}
+
 /// 返回应用数据根目录：由 config.json 的 dataDir 决定，无则用默认（桌面=exe 旁 AppData，移动端=系统目录）
 #[tauri::command]
 fn get_app_data_root(app: tauri::AppHandle) -> Result<String, String> {
@@ -2113,6 +2138,7 @@ pub fn run() {
             decode_gbk,
             encode_form_urlencoded_gbk,
             request_app_exit,
+            shutdown_system,
             get_app_data_root,
             get_default_app_data_base,
             get_config,

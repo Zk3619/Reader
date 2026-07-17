@@ -4,7 +4,8 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "reader-inner-web-child"
+    "reader-inner-web-child",
+    "desktop-lyric"
   ],
   "remote": {
     "urls": [
