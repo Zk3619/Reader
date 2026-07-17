@@ -165,7 +165,10 @@ const DRAG_DIRECTION_DEADZONE_PX = 8;
 /** 跨章拖拽：超过此位移后再切 staging/live，避免起手瞬间层切换卡顿 */
 const CROSS_CHAPTER_DRAG_STAGING_PX = 12;
 const LAYOUT_REMEASURE_DEBOUNCE_MS = 200;
+/** 连续拖拽改窗口尺寸时，等尺寸安静后再做一次完整重排，避免每帧 DOM 排版卡死 */
+const VIEWPORT_RESIZE_SETTLE_MS = 180;
 const VIEWPORT_RESIZE_EPS_PX = 2;
+const LAYOUT_CLIP_HEIGHT_EPS_PX = 2;
 const CROSS_CHAPTER_LAYOUT_TIMEOUT_MS = 5000;
 
 type TurnStage = 'idle' | 'anim' | 'drag';
@@ -269,6 +272,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let remeasureDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let remeasureInFlight = false;
   let remeasurePendingKey = '';
+  /** remeasure 进行中又被请求时，结束后补跑一次，避免最新视口尺寸丢失 */
+  let remeasureResume: { bypassCache?: boolean; syncOnly?: boolean } | null = null;
   let lastMeasureTriggerKey = '';
   let lastLayoutRemeasureKey = '';
   let dualMeasureRetryRaf = 0;
@@ -276,6 +281,9 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   let lastViewportW = 0;
   let lastViewportH = 0;
   let lastClipLayoutOuterH = 0;
+  let viewportResizeRaf = 0;
+  let viewportResizeSettleTimer: ReturnType<typeof setTimeout> | undefined;
+  let viewportResizeSettling = false;
 
   const textSelectGesture = getSharedReaderTextSelectionGesture();
   let detachTextSelectionBridge: (() => void) | undefined;
@@ -990,7 +998,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     if (live <= 0 || clipHeight <= 0) {
       return !pageTipChromeActive();
     }
-    return Math.abs(clipHeight - live) <= 2;
+    return Math.abs(clipHeight - live) <= LAYOUT_CLIP_HEIGHT_EPS_PX;
   };
 
   /** tip-body 尚未实测时允许暂用排版 clip，避免切章/翻页后 span-clip 高度为 0 白屏 */
@@ -1006,7 +1014,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const syncLayoutClipToTipBody = (layout: ReaderChapterLayout): ReaderChapterLayout => {
     const live = effectivePagedClipHeightPx();
     if (live <= 0) return layout;
-    if (Math.abs(layout.clipHeight - live) <= 2) {
+    if (Math.abs(layout.clipHeight - live) <= LAYOUT_CLIP_HEIGHT_EPS_PX) {
       return layout.clipHeight === live ? layout : { ...layout, clipHeight: live };
     }
     return layout;
@@ -1398,6 +1406,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const tick = () => {
       dualMeasureRetryRaf = 0;
       if (viewerState.chapterIndex !== dualMeasureRetryChapter) return;
+      if (viewportResizeSettling) {
+        dualMeasureRetryRaf = requestAnimationFrame(tick);
+        return;
+      }
       if (turnStage() !== 'idle') {
         dualMeasureRetryRaf = requestAnimationFrame(tick);
         return;
@@ -1480,7 +1492,19 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
   const remeasureAllowed = () => turnStage() === 'idle';
 
   const remeasure = (options?: { bypassCache?: boolean; syncOnly?: boolean }) => {
-    if (!viewportEl || remeasureInFlight || !remeasureAllowed()) {
+    if (!viewportEl || !remeasureAllowed()) {
+      return;
+    }
+    if (remeasureInFlight) {
+      const prev = remeasureResume;
+      remeasureResume = {
+        bypassCache: Boolean(options?.bypassCache) || Boolean(prev?.bypassCache),
+        // 任一请求需要完整排版则不能只 sync
+        syncOnly:
+          prev == null
+            ? Boolean(options?.syncOnly)
+            : Boolean(options?.syncOnly) && Boolean(prev.syncOnly),
+      };
       return;
     }
     const pageWindow = pageWindowMetrics();
@@ -1662,7 +1686,13 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         }
       } finally {
         remeasureInFlight = false;
+        const resume = remeasureResume;
+        remeasureResume = null;
         queueMicrotask(() => {
+          if (resume) {
+            remeasure(resume);
+            return;
+          }
           revealPagedChapterWhenReady();
           if (turnStage() === 'idle' && !turnVisualActive()) {
             scheduleIdleLivePagePaint(incomingDisplayPage());
@@ -3610,6 +3640,8 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     // 此处不得再 bypassCache 强制 DOM 重排覆盖，否则切章落点页文字重新分页而抖动。
     // 仍更新去重 key，使该章后续走缓存命中、保持版式稳定。
     if (crossChapterCommitInFlight) return;
+    // 窗口尺寸仍在变化：只记录最新 key，等 settle 后再统一重排，避免每帧强制排版。
+    if (viewportResizeSettling) return;
     scheduleRemeasure({
       immediate: w <= 0 || h <= 0,
       bypassCache: bypassCache || pageTipChromeActive(),
@@ -3657,6 +3689,10 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     const poll = () => {
       if (cancelled || viewerState.chapterIndex !== ch) return;
       if (isChapterLayoutComplete(layout(), ch)) return;
+      if (viewportResizeSettling) {
+        requestAnimationFrame(poll);
+        return;
+      }
 
       const hostRoot =
         dualMeasureContentEl ?? queryPagedMeasureContentRoot(pageTipBodyEl);
@@ -3681,13 +3717,15 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   /** layout.clipHeight 与 tip-body 实测偏差时重测，避免页界按错误窗高计算导致裁字 */
   createEffect(() => {
-    if (turnStage() !== 'idle' || crossChapterCommitInFlight) return;
+    if (turnStage() !== 'idle' || crossChapterCommitInFlight || viewportResizeSettling) {
+      return;
+    }
     const l = layout();
     if (!l || !isChapterLayoutComplete(l, viewerState.chapterIndex)) return;
     const liveClip = tipBodyBandHeightPx();
     if (liveClip <= 0 || l.clipHeight <= 0) return;
-    if (Math.floor(l.clipHeight) === liveClip) return;
-    scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+    if (Math.abs(l.clipHeight - liveClip) <= LAYOUT_CLIP_HEIGHT_EPS_PX) return;
+    scheduleRemeasure({ immediate: false, bypassCache: true, force: true });
   });
 
   createEffect(() => {
@@ -4320,6 +4358,24 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
 
   let resizeObserver: ResizeObserver | undefined;
 
+  const flushViewportResizeSettle = () => {
+    viewportResizeSettleTimer = undefined;
+    const el = viewportEl;
+    if (!el) {
+      viewportResizeSettling = false;
+      return;
+    }
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    lastViewportW = w;
+    lastViewportH = h;
+    // settling 仍为 true：createEffect 只更新 key、不额外排版；尺寸稳定后再统一重排一次
+    lastMeasureTriggerKey = '';
+    syncViewportSize(w, h);
+    viewportResizeSettling = false;
+    scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+  };
+
   const applyViewportElementResize = (w: number, h: number) => {
     if (
       Math.abs(w - lastViewportW) < VIEWPORT_RESIZE_EPS_PX &&
@@ -4329,20 +4385,48 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     }
     lastViewportW = w;
     lastViewportH = h;
+    viewportResizeSettling = true;
+    // 连续拖拽改尺寸时只更新几何信号，不立刻跑完整 DOM 排版
     syncViewportSize(w, h);
-    scheduleRemeasure({ immediate: true, bypassCache: true });
+    if (viewportResizeSettleTimer !== undefined) {
+      clearTimeout(viewportResizeSettleTimer);
+    }
+    viewportResizeSettleTimer = setTimeout(
+      flushViewportResizeSettle,
+      VIEWPORT_RESIZE_SETTLE_MS,
+    );
   };
 
-  onMount(() =>
-    subscribeViewportGeometryChange(() => {
+  /** 合并 window resize / visualViewport / ResizeObserver 到每帧一次 */
+  const queueViewportElementResize = () => {
+    if (viewportResizeRaf) return;
+    viewportResizeRaf = requestAnimationFrame(() => {
+      viewportResizeRaf = 0;
       const el = viewportEl;
       if (!el) return;
       applyViewportElementResize(el.clientWidth, el.clientHeight);
+    });
+  };
+
+  onMount(() =>
+    subscribeViewportGeometryChange(queueViewportElementResize, {
+      // 分页排版不依赖 visualViewport scroll（地址栏显隐易误触发风暴）
+      listenVisualViewportScroll: false,
     }),
   );
 
   onCleanup(() => {
     resizeObserver?.disconnect();
+    if (viewportResizeRaf) {
+      cancelAnimationFrame(viewportResizeRaf);
+      viewportResizeRaf = 0;
+    }
+    if (viewportResizeSettleTimer !== undefined) {
+      clearTimeout(viewportResizeSettleTimer);
+      viewportResizeSettleTimer = undefined;
+    }
+    viewportResizeSettling = false;
+    remeasureResume = null;
     cancelAnimFrame();
     cancelDragTurnPaint();
     cancelCrossChapterDragFooterSync();
@@ -5927,13 +6011,16 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
           }
         }
       }
+      // 视口尺寸仍在变化时，把 tip-body 重测交给 settle 路径，避免与完整排版叠暴
+      if (viewportResizeSettling) return;
       if (tipChromeResizeDebounce !== undefined) {
         clearTimeout(tipChromeResizeDebounce);
       }
       tipChromeResizeDebounce = setTimeout(() => {
         tipChromeResizeDebounce = undefined;
+        if (viewportResizeSettling) return;
         syncTipBodyClipPxFromDom();
-        scheduleRemeasure({ immediate: true, bypassCache: true, force: true });
+        scheduleRemeasure({ immediate: false, bypassCache: true, force: true });
       }, 120);
     });
     observeTipChromeNode(el);
@@ -6117,7 +6204,7 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
         syncViewportSize(el.clientWidth, el.clientHeight);
         resizeObserver?.disconnect();
         resizeObserver = new ResizeObserver(() => {
-          applyViewportElementResize(el.clientWidth, el.clientHeight);
+          queueViewportElementResize();
         });
         resizeObserver.observe(el);
         lastViewportW = el.clientWidth;

@@ -90,6 +90,7 @@ import {
   Trash2,
   ThumbsDown,
   ThumbsUp,
+  CopyMinus,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -173,6 +174,7 @@ export const ReplaceIcon = icon(ArrowLeftRight);
 export const XIcon = icon(X);
 export const CheckIcon = icon(Check);
 export const SaveIcon = icon(Save);
+export const DeduplicateIcon = icon(CopyMinus);
 export const MinusIcon = icon(Minus);
 export const ChevronsUpDownIcon = icon(ChevronsUpDown);
 export const PanelLeftIcon = icon(PanelLeft);

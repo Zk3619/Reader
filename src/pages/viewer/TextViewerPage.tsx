@@ -932,11 +932,19 @@ export function BookReader(props: BookReaderProps) {
   createEffect(() => {
     const el = scrollContainerEl();
     if (!el) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     const ro = new ResizeObserver(() => {
-      setDualPageLayoutProbe((p) => p + 1);
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        setDualPageLayoutProbe((p) => p + 1);
+      }, 160);
     });
     ro.observe(el);
-    onCleanup(() => ro.disconnect());
+    onCleanup(() => {
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      ro.disconnect();
+    });
   });
 
   createEffect(
@@ -1048,13 +1056,29 @@ export function BookReader(props: BookReaderProps) {
   });
 
   onMount(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastWide: boolean | undefined;
     const syncLayout = () => {
       const w = window.innerWidth;
-      setIsWideScreen(w >= 480);
-      setDualPageLayoutProbe((p) => p + 1);
+      const wide = w >= 480;
+      if (lastWide !== wide) {
+        lastWide = wide;
+        setIsWideScreen(wide);
+      }
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        setDualPageLayoutProbe((p) => p + 1);
+      }, 160);
     };
     syncLayout();
-    return subscribeViewportGeometryChange(syncLayout);
+    const unsubscribe = subscribeViewportGeometryChange(syncLayout, {
+      listenVisualViewportScroll: false,
+    });
+    onCleanup(() => {
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      unsubscribe();
+    });
   });
 
   const dismissClickRegional = () => {

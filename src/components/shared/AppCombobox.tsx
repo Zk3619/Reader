@@ -77,7 +77,12 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       </ComboboxControl>
       <ComboboxPrimitive.Portal mount={mount}>
         <ComboboxPrimitive.Content
-          class={cn(popperMenuPanelShell, overlayLayerZ().popper, 'overflow-hidden isolate', local.contentClass)}
+          class={cn(
+            popperMenuPanelShell,
+            overlayLayerZ().popper,
+            'relative isolate overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+            local.contentClass,
+          )}
         >
           <ThemedComponentBackground componentId="combobox" />
           <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>

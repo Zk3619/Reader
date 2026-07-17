@@ -101,15 +101,33 @@ export function useVirtualGridContainerWidth(
     const el = scrollContainer();
     if (!el || typeof ResizeObserver === 'undefined') return;
 
-    const sync = () => {
+    let raf = 0;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const apply = () => {
       const next = el.clientWidth;
-      if (next > 0) setWidth(next);
+      if (next > 0) setWidth((prev) => (prev === next ? prev : next));
+    };
+    const sync = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        // 连续拖拽改窗：先 rAF 合并，再短延迟 settle，避免列数/行高每像素重算
+        if (settleTimer !== undefined) clearTimeout(settleTimer);
+        settleTimer = setTimeout(() => {
+          settleTimer = undefined;
+          apply();
+        }, 120);
+      });
     };
 
-    sync();
-    const ro = new ResizeObserver(() => sync());
+    apply();
+    const ro = new ResizeObserver(sync);
     ro.observe(el);
-    onCleanup(() => ro.disconnect());
+    onCleanup(() => {
+      if (raf) cancelAnimationFrame(raf);
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      ro.disconnect();
+    });
   });
 
   return width;
