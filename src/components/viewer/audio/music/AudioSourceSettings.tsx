@@ -1,4 +1,4 @@
-/** 音源设置（对齐 lx：单一活跃 UserApi + 在线导入） */
+/** 音源设置（对齐 lx：单一活跃 UserApi + 本地/在线导入） */
 import { createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
 import { LoaderCircle, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,18 @@ import {
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 import { request } from '@/lib/http';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { ImportSourceNetworkDialog } from '@/components/sources/ImportSourceNetworkDialog';
+import { ImportUserApiLocalDialog } from '@/components/viewer/audio/music/ImportUserApiLocalDialog';
+import { ImportUserApiSelectDialog } from '@/components/viewer/audio/music/ImportUserApiSelectDialog';
+import { pickLocalUserApiFiles } from '@/lib/media/audio/online/pick-local-user-api-file';
+import { pickLocalUserApiDirectory } from '@/lib/media/audio/online/pick-local-user-api-directory';
+import {
+  identifyUserApiScriptFromText,
+  identifyUserApiScriptsFromFiles,
+  type IdentifiedUserApiScript,
+} from '@/lib/media/audio/online/user-api-import-identify';
+import { openUrlInBrowser } from '@/lib/platform/open-url';
+import { showAppToast } from '@/components/shared/AppToasts';
 
 export interface AudioSourceSettingsProps {
   open: boolean;
@@ -35,25 +47,33 @@ export interface AudioSourceSettingsProps {
   inline?: boolean;
 }
 
+const USER_API_README_URL = 'https://lyswhut.github.io/lx-music-doc/desktop/custom-source';
+const MAX_USER_API_COUNT = 20;
+
 /** 统一展示为 v1.2.0；脚本 @version 已带 v/V 时不再重复前缀 */
 function formatUserApiVersionLabel(version: string): string {
   const raw = version.trim();
   if (!raw) return '';
-  return `v${raw.replace(/^v+/i, '')}`;
+  return /^\d/.test(raw) ? `v${raw}` : raw;
 }
 
 export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) => {
   const [listRevision, setListRevision] = createSignal(0);
   const userApis = () => {
     listRevision();
-    // 仅展示就绪/初始化中；失败源已移除或过滤
     return listUserApiScripts().filter((s) => s.initStatus !== 'failed');
   };
   const [defaultId, setDefaultId] = createSignal(getDefaultUserApiId() ?? '');
   const [initMode, setInitMode] = createSignal<UserApiInitMode>(getUserApiInitMode());
   const [importing, setImporting] = createSignal(false);
-  const [importError, setImportError] = createSignal<string | null>(null);
-  const [importUrl, setImportUrl] = createSignal('');
+  const [localChoiceOpen, setLocalChoiceOpen] = createSignal(false);
+  const [localBusy, setLocalBusy] = createSignal(false);
+  const [onlineOpen, setOnlineOpen] = createSignal(false);
+  const [selectOpen, setSelectOpen] = createSignal(false);
+  const [selectLoading, setSelectLoading] = createSignal(false);
+  const [selectLoadingMessage, setSelectLoadingMessage] = createSignal<string | undefined>();
+  const [identifiedSources, setIdentifiedSources] = createSignal<IdentifiedUserApiScript[]>([]);
+  const [selectedIds, setSelectedIds] = createSignal(new Set<string>());
 
   onMount(() => {
     const unsub = subscribeUserApiScripts(() => {
@@ -63,58 +83,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     onCleanup(() => {
       unsub();
     });
-    // 启动预热由 MusicHubShell 按策略执行；此处仅订阅列表，避免重复 warm 干扰策略
   });
-
-  const importScriptText = async (text: string, fileName?: string) => {
-    setImportError(null);
-    setImporting(true);
-    try {
-      // 初始化失败由 UserApiInitFailedHost 弹窗，且不会进列表
-      await importUserApiScript({
-        script: text,
-        fileName: fileName ?? 'online.js',
-      });
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const importScriptFile = async (file: File) => {
-    const text = await file.text();
-    await importScriptText(text, file.name);
-  };
-
-  const importScriptFromUrl = async () => {
-    const url = importUrl().trim();
-    if (!url) {
-      setImportError('请粘贴脚本 raw URL');
-      return;
-    }
-    setImportError(null);
-    setImporting(true);
-    try {
-      const res = await request(url, {
-        method: 'GET',
-        allowNon2xx: true,
-        useBackendHttp: true,
-        ignorePageNavigationAbort: true,
-      });
-      if (res.status >= 400) {
-        throw new Error(`下载失败 HTTP ${res.status}`);
-      }
-      const text = await res.text();
-      if (!text.trim()) throw new Error('脚本内容为空');
-      const nameGuess = url.split('/').pop()?.split('?')[0] || 'online.js';
-      await importScriptText(text, nameGuess);
-      setImportUrl('');
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : String(err));
-      setImporting(false);
-    }
-  };
 
   const canUseScript = (s: ReturnType<typeof listUserApiScripts>[number]) =>
     s.initStatus === 'ready';
@@ -148,6 +117,188 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     setDefaultId(id);
   };
 
+  const ensureImportCapacity = (incomingCount: number): boolean => {
+    if (userApis().length + incomingCount <= MAX_USER_API_COUNT) return true;
+    showAppToast({
+      title: '自定义源数量已达上限',
+      description:
+        '最多只能同时存在 20 个源。想要继续导入的话，请先移除一些旧的源腾出位置吧',
+      variant: 'warning',
+    });
+    return false;
+  };
+
+  const openIdentifyDialog = (sources: IdentifiedUserApiScript[]) => {
+    setIdentifiedSources(sources);
+    setSelectedIds(new Set<string>(sources.map((source) => source.id)));
+    setSelectLoading(false);
+    setSelectLoadingMessage(undefined);
+    setSelectOpen(true);
+  };
+
+  const beginIdentifyLoading = (message: string) => {
+    setIdentifiedSources([]);
+    setSelectedIds(new Set<string>());
+    setSelectLoading(true);
+    setSelectLoadingMessage(message);
+    setSelectOpen(true);
+  };
+
+  const identifyFromFiles = async (files: File[]) => {
+    if (files.length === 0) {
+      showAppToast({ title: '未找到可导入的自定义源文件', variant: 'warning' });
+      return;
+    }
+    beginIdentifyLoading('正在识别自定义源…');
+    try {
+      const sources = await identifyUserApiScriptsFromFiles(files);
+      openIdentifyDialog(sources);
+    } catch (err) {
+      setSelectOpen(false);
+      showAppToast({
+        title: '识别失败',
+        description: err instanceof Error ? err.message : String(err),
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleLocalPickFile = () => {
+    setLocalChoiceOpen(false);
+    void (async () => {
+      setLocalBusy(true);
+      try {
+        const files = await pickLocalUserApiFiles();
+        if (!files?.length) return;
+        await identifyFromFiles(files);
+      } catch (err) {
+        showAppToast({
+          title: '选择文件失败',
+          description: err instanceof Error ? err.message : String(err),
+          variant: 'error',
+        });
+      } finally {
+        setLocalBusy(false);
+      }
+    })();
+  };
+
+  const handleLocalPickDirectory = () => {
+    setLocalChoiceOpen(false);
+    void (async () => {
+      setLocalBusy(true);
+      try {
+        const picked = await pickLocalUserApiDirectory();
+        if (!picked) return;
+        await identifyFromFiles(picked.files);
+      } catch (err) {
+        showAppToast({
+          title: '选择目录失败',
+          description: err instanceof Error ? err.message : String(err),
+          variant: 'error',
+        });
+      } finally {
+        setLocalBusy(false);
+      }
+    })();
+  };
+
+  const handleOnlineIdentify = (url: string) => {
+    void (async () => {
+      beginIdentifyLoading('正在下载并识别自定义源…');
+      try {
+        const res = await request(url, {
+          method: 'GET',
+          allowNon2xx: true,
+          useBackendHttp: true,
+          ignorePageNavigationAbort: true,
+        });
+        if (res.status >= 400) {
+          throw new Error(`下载失败 HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        if (!text.trim()) throw new Error('脚本内容为空');
+        const nameGuess = url.split('/').pop()?.split('?')[0] || 'online.js';
+        const identified = identifyUserApiScriptFromText(text, nameGuess);
+        openIdentifyDialog(identified ? [identified] : []);
+      } catch (err) {
+        setSelectOpen(false);
+        showAppToast({
+          title: '在线导入失败',
+          description: err instanceof Error ? err.message : String(err),
+          variant: 'error',
+        });
+      }
+    })();
+  };
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const selectAllToggle = () => {
+    const sources = identifiedSources();
+    setSelectedIds((prev) =>
+      prev.size === sources.length
+        ? new Set<string>()
+        : new Set<string>(sources.map((source) => source.id)),
+    );
+  };
+
+  const invertSelect = () => {
+    const sources = identifiedSources();
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const source of sources) {
+        if (!prev.has(source.id)) next.add(source.id);
+      }
+      return next;
+    });
+  };
+
+  const confirmImport = async () => {
+    const selected = identifiedSources().filter((source) => selectedIds().has(source.id));
+    if (selected.length === 0) return;
+    if (!ensureImportCapacity(selected.length)) return;
+
+    setImporting(true);
+    setSelectLoading(true);
+    setSelectLoadingMessage('正在导入自定义源…');
+    try {
+      let successCount = 0;
+      for (const source of selected) {
+        const result = await importUserApiScript({
+          script: source.script,
+          fileName: source.fileName,
+          fallbackName: source.name,
+        });
+        if (result.ok) successCount += 1;
+      }
+      setSelectOpen(false);
+      if (successCount > 0) {
+        showAppToast({
+          title: `已导入 ${successCount} 个自定义源`,
+          variant: 'success',
+        });
+      }
+    } catch (err) {
+      showAppToast({
+        title: '导入失败',
+        description: err instanceof Error ? err.message : String(err),
+        variant: 'error',
+      });
+    } finally {
+      setImporting(false);
+      setSelectLoading(false);
+      setSelectLoadingMessage(undefined);
+    }
+  };
+
   return (
     <AudioPanelShell
       open={props.open}
@@ -157,13 +308,16 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
       onClose={props.onClose}
     >
       <div class={props.inline ? 'space-y-4 pt-2' : 'space-y-4 p-4'}>
-        <section>
-          <h3 class="mb-1 text-sm font-medium">自定义源管理</h3>
-          <p class="mb-2 text-xs text-muted-foreground">
-            点选一项作为当前自定义源。版本与初始化状态跟随源名称显示；Reader
-            额外允许启用多个源参与取链，当前源仍具有最高优先级。
-          </p>
-          <div class="mb-3 space-y-1">
+        <section class="space-y-3">
+          <div>
+            <h3 class="mb-1 text-sm font-medium">自定义源管理</h3>
+            <p class="text-xs text-muted-foreground">
+              点选一项作为当前自定义源。版本与初始化状态跟随源名称显示；Reader
+              额外允许启用多个源参与取链，当前源仍具有最高优先级。
+            </p>
+          </div>
+
+          <div class="space-y-1">
             <div class="flex flex-wrap items-center gap-2 text-sm">
               <span class="text-muted-foreground">启动初始化：</span>
               <MusicAppSelect
@@ -189,50 +343,47 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               「仅当前自定义源」最接近 LX Music 一次只加载当前源的行为；未启用的源不会初始化。
             </p>
           </div>
+
           <div class="flex flex-wrap items-center gap-2">
-            <input
-              type="file"
-              accept=".js,.txt,.json"
-              title="从本地导入自定义源"
-              aria-label="从本地导入自定义源"
-              class="text-sm"
-              disabled={importing()}
-              onChange={(e) => {
-                const file = e.currentTarget.files?.[0];
-                e.currentTarget.value = '';
-                if (file) void importScriptFile(file);
-              }}
-            />
-            <Show when={importing()}>
-              <LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
-            </Show>
-          </div>
-          <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              type="url"
-              class="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
-              placeholder="在线导入：粘贴 raw.js URL"
-              value={importUrl()}
-              disabled={importing()}
-              onInput={(e) => setImportUrl(e.currentTarget.value)}
-            />
             <Button
               size="sm"
               variant="secondary"
-              disabled={importing()}
-              onClick={() => void importScriptFromUrl()}
+              disabled={importing() || localBusy()}
+              onClick={() => {
+                if (!ensureImportCapacity(1)) return;
+                setLocalChoiceOpen(true);
+              }}
             >
-              导入 URL
+              本地导入
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={importing() || localBusy()}
+              onClick={() => {
+                if (!ensureImportCapacity(1)) return;
+                setOnlineOpen(true);
+              }}
+            >
+              在线导入
+            </Button>
+            <Show when={importing() || localBusy()}>
+              <LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
+            </Show>
           </div>
-          <Show when={importError()}>
-            <p class="mt-2 text-xs text-destructive">{importError()}</p>
-          </Show>
+
           <Show
             when={userApis().length > 0}
-            fallback={<p class="mt-2 text-sm text-muted-foreground">暂无自定义源</p>}
+            fallback={
+              <div class="flex h-40 items-center justify-center rounded-md border text-sm text-muted-foreground">
+                这里竟然是空的
+              </div>
+            }
           >
-            <AppManualRadioGroup class="mt-2 space-y-2" aria-label="当前自定义源">
+            <AppManualRadioGroup
+              class="h-64 space-y-2 overflow-y-auto rounded-md border p-2"
+              aria-label="当前自定义源"
+            >
               <For each={userApis()}>
                 {(s) => {
                   const indicator = initStatusIndicator(s.initStatus);
@@ -241,7 +392,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                     s.enabled && (initMode() === 'allEnabled' || isActive());
                   return (
                     <div
-                      class={`group flex items-stretch rounded-md border text-sm transition-colors ${
+                      class={`group flex items-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors ${
                         isActive()
                           ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
                           : 'hover:bg-accent/50'
@@ -251,7 +402,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                         selected={isActive()}
                         disabled={!canUseScript(s)}
                         onSelect={() => setActive(s.id)}
-                        class="min-h-0 flex-1 rounded-md border-0 px-3 py-2.5 hover:bg-transparent"
+                        class="min-h-0 min-w-0 flex-1 rounded-md border-0 px-1 py-1 hover:bg-transparent"
                       >
                         <div class="min-w-0 flex-1">
                           <p class="flex min-w-0 items-center gap-2 truncate">
@@ -275,7 +426,9 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                                   }`}
                                   aria-label={indicator.label}
                                 />
-                                <AppTooltipContent layer="viewer">{indicator.label}</AppTooltipContent>
+                                <AppTooltipContent layer="viewer">
+                                  {indicator.label}
+                                </AppTooltipContent>
                               </AppTooltip>
                             </Show>
                           </p>
@@ -287,8 +440,9 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                           </Show>
                         </div>
                       </AppManualRadioOption>
-                      <div class="flex shrink-0 flex-col items-end gap-1.5 py-2 pr-3">
-                        <label class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+
+                      <div class="flex shrink-0 items-center gap-2">
+                        <label class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                           <Checkbox
                             checked={s.allowShowUpdateAlert !== false}
                             onChange={(checked) =>
@@ -297,26 +451,37 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                           />
                           更新提示
                         </label>
-                        <div class="flex items-center gap-3">
-                        <AppSwitch
-                          checked={s.enabled}
-                          disabled={s.initStatus === 'pending'}
-                          onChange={(checked) => setUserApiScriptEnabled(s.id, checked)}
-                        >
-                            <AppSwitchControl>
-                              <AppSwitchThumb />
-                            </AppSwitchControl>
-                          </AppSwitch>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            aria-label={`删除 ${s.name}`}
-                            onClick={() => removeUserApiScript(s.id)}
-                          >
-                            <Trash2 class="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <AppTooltip>
+                          <AppTooltipTrigger as="div">
+                            <AppSwitch
+                              checked={s.enabled}
+                              disabled={s.initStatus === 'pending'}
+                              onChange={(checked) => setUserApiScriptEnabled(s.id, checked)}
+                              aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
+                            >
+                              <AppSwitchControl>
+                                <AppSwitchThumb />
+                              </AppSwitchControl>
+                            </AppSwitch>
+                          </AppTooltipTrigger>
+                          <AppTooltipContent layer="viewer">
+                            {s.enabled ? '禁用此源' : '启用此源'}
+                          </AppTooltipContent>
+                        </AppTooltip>
+                        <AppTooltip>
+                          <AppTooltipTrigger as="div">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              aria-label={`删除 ${s.name}`}
+                              onClick={() => removeUserApiScript(s.id)}
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </Button>
+                          </AppTooltipTrigger>
+                          <AppTooltipContent layer="viewer">移除自定义源</AppTooltipContent>
+                        </AppTooltip>
                       </div>
                     </div>
                   );
@@ -324,8 +489,52 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               </For>
             </AppManualRadioGroup>
           </Show>
+
+          <div class="space-y-1.5 rounded-md border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            <p>
+              源编写说明：
+              <button
+                type="button"
+                class="ml-1 underline underline-offset-2 hover:text-foreground"
+                onClick={() => void openUrlInBrowser(USER_API_README_URL)}
+              >
+                FAQ
+              </button>
+            </p>
+            <p>
+              提示：虽然我们已经尽可能地隔离了脚本的运行环境，但导入包含恶意行为的脚本仍可能会影响你的系统，请谨慎导入。
+            </p>
+          </div>
         </section>
       </div>
+
+      <ImportUserApiLocalDialog
+        open={localChoiceOpen()}
+        busy={localBusy()}
+        onOpenChange={setLocalChoiceOpen}
+        onPickFile={handleLocalPickFile}
+        onPickDirectory={handleLocalPickDirectory}
+      />
+      <ImportSourceNetworkDialog
+        open={onlineOpen()}
+        onOpenChange={setOnlineOpen}
+        onIdentify={handleOnlineIdentify}
+        title="在线导入自定义源"
+        description="输入自定义源脚本的链接（http/https），将拉取并识别。桌面端由应用内网络拉取，不受跨域限制；浏览器环境下若遇跨域请改用「本地导入」。"
+        placeholder="https://example.com/source.js"
+      />
+      <ImportUserApiSelectDialog
+        open={selectOpen()}
+        loading={selectLoading()}
+        loadingMessage={selectLoadingMessage()}
+        sources={identifiedSources()}
+        selectedIds={selectedIds()}
+        onOpenChange={setSelectOpen}
+        onToggle={toggleSelected}
+        onSelectAllToggle={selectAllToggle}
+        onInvertSelect={invertSelect}
+        onConfirm={() => void confirmImport()}
+      />
     </AudioPanelShell>
   );
 };
