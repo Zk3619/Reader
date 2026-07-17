@@ -86,7 +86,8 @@ export async function migrateAudioLibraryV101(db: DatabaseAdapter): Promise<void
 
   const now = Date.now();
   const builtins = [
-    { id: 'default', name: '试听列表' },
+    { id: 'default', name: '播放列表' },
+    { id: 'trial', name: '试听列表' },
     { id: 'love', name: '我的收藏' },
     { id: 'recent', name: '最近播放' },
     { id: 'local', name: '本地音乐' },

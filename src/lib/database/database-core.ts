@@ -193,8 +193,14 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
 
   await db.execute(`
     INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
-    SELECT -20, '试听列表', -4, 0, 1, -1, 'music', 'default', 'builtin'
+    SELECT -20, '播放列表', -5, 0, 1, -1, 'music', 'default', 'builtin'
     WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -20)
+  `);
+
+  await db.execute(`
+    INSERT INTO ${groupsTable}(groupId, groupName, "order", enableRefresh, show, bookSort, domain, listId, source)
+    SELECT -23, '试听列表', -4, 0, 1, -1, 'music', 'trial', 'builtin'
+    WHERE NOT EXISTS (SELECT * FROM ${groupsTable} WHERE groupId = -23)
   `);
 
   await db.execute(`

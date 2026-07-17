@@ -38,6 +38,7 @@ async function addColumnIfMissing(
 
 const MUSIC_BUILTIN: Record<string, number> = {
   default: MediaGroupId.MusicDefault,
+  trial: MediaGroupId.MusicTrial,
   recent: MediaGroupId.MusicRecent,
   local: MediaGroupId.MusicLocal,
 };

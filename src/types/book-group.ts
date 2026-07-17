@@ -43,6 +43,8 @@ export const MediaGroupId = {
   MusicDefault: -20,
   MusicRecent: -21,
   MusicLocal: -22,
+  /** 试听列表（播放过且未加入其它列表） */
+  MusicTrial: -23,
   MusicUserStart: -1000,
 } as const;
 

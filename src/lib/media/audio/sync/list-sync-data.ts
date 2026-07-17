@@ -84,7 +84,14 @@ export async function getLocalLxListData(): Promise<LxListData> {
       data.defaultList = musicList;
     } else if (pl.id === BUILTIN_PLAYLIST_IDS.LOVE) {
       data.loveList = musicList;
-    } else if (pl.source !== 'builtin' || ![BUILTIN_PLAYLIST_IDS.RECENT, BUILTIN_PLAYLIST_IDS.LOCAL].includes(pl.id as 'recent' | 'local')) {
+    } else if (
+      pl.source !== 'builtin' ||
+      ![
+        BUILTIN_PLAYLIST_IDS.RECENT,
+        BUILTIN_PLAYLIST_IDS.LOCAL,
+        BUILTIN_PLAYLIST_IDS.TRIAL,
+      ].includes(pl.id as 'recent' | 'local' | 'trial')
+    ) {
       data.userList.push({
         id: pl.id,
         name: pl.name,
@@ -120,7 +127,7 @@ export async function setLocalLxListData(data: LxListData): Promise<void> {
     await setPlaylistTracks(listId, tracks.map((t) => t.id));
   };
 
-  await applyList(BUILTIN_PLAYLIST_IDS.DEFAULT, '试听列表', data.defaultList);
+  await applyList(BUILTIN_PLAYLIST_IDS.DEFAULT, '播放列表', data.defaultList);
   await applyList(BUILTIN_PLAYLIST_IDS.LOVE, '我的收藏', data.loveList);
 
   const existing = await listPlaylists();
@@ -129,6 +136,7 @@ export async function setLocalLxListData(data: LxListData): Promise<void> {
     if (
       pl.source !== 'builtin' &&
       pl.id !== BUILTIN_PLAYLIST_IDS.DEFAULT &&
+      pl.id !== BUILTIN_PLAYLIST_IDS.TRIAL &&
       pl.id !== BUILTIN_PLAYLIST_IDS.LOVE &&
       !incomingIds.has(pl.id)
     ) {

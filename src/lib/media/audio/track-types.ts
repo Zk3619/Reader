@@ -40,7 +40,10 @@ export interface AudioTrackMeta {
 export type AudioPlaybackMode = 'audiobook' | 'music';
 
 export const BUILTIN_PLAYLIST_IDS = {
+  /** 播放列表：承接搜索/单曲「加入并播放」；不再被歌单/排行榜整表覆盖 */
   DEFAULT: 'default',
+  /** 试听列表：播放过且未加入其它收藏/用户/本地列表的歌曲 */
+  TRIAL: 'trial',
   LOVE: 'love',
   RECENT: 'recent',
   LOCAL: 'local',

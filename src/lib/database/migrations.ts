@@ -48,6 +48,10 @@ import {
   MUSIC_LISTS_SCHEMA_VERSION,
   migrateMusicListsV106,
 } from '@/lib/database/migration-v106-music-lists';
+import {
+  MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
+  migrateMusicPlayTrialListsV107,
+} from '@/lib/database/migration-v107-music-play-trial-lists';
 
 export { LEGADO_SCHEMA_VERSION };
 export { CHAPTER_CACHE_SCHEMA_VERSION };
@@ -506,5 +510,9 @@ export const migrations: Migration[] = [
   {
     version: MUSIC_LISTS_SCHEMA_VERSION,
     up: migrateMusicListsV106,
+  },
+  {
+    version: MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
+    up: migrateMusicPlayTrialListsV107,
   },
 ];

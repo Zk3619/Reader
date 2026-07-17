@@ -29,6 +29,8 @@ import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 
 export const MUSIC_PLAYLISTS_CHANGED_EVENT = 'reader:music-playlists-changed';
 
+const RECENT_MAX = 200;
+
 function notifyMusicPlaylistsChanged(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(MUSIC_PLAYLISTS_CHANGED_EVENT));
@@ -182,6 +184,79 @@ export async function addTrackToPlaylist(
   ]).catch(() => undefined);
 }
 
+function isCuratedPlaylistId(playlistId: string): boolean {
+  return (
+    playlistId === BUILTIN_PLAYLIST_IDS.LOVE ||
+    playlistId === BUILTIN_PLAYLIST_IDS.LOCAL ||
+    playlistId.startsWith('pl_')
+  );
+}
+
+/** 歌曲是否已加入收藏 / 本地 / 用户列表（不含播放列表、最近播放、试听列表） */
+export async function isTrackInCuratedList(trackId: string): Promise<boolean> {
+  const db = await getDatabase();
+  const rows = await db.select<{ ok: number }>(
+    `SELECT 1 AS ok
+     FROM media_group_items o
+     INNER JOIN media_groups g ON g.groupId = o.group_id
+     WHERE o.item_kind = 'track'
+       AND o.item_id = ?
+       AND (
+         g.groupId = ?
+         OR g.listId = ?
+         OR g.listId LIKE 'pl_%'
+       )
+     LIMIT 1`,
+    [trackId, MediaGroupId.Favorite, BUILTIN_PLAYLIST_IDS.LOCAL],
+  );
+  return rows.length > 0;
+}
+
+/** 维护试听列表：未加入其它列表则写入，已加入则移出 */
+export async function syncTrialListMembership(track: AudioTrack): Promise<void> {
+  if (await isTrackInCuratedList(track.id)) {
+    await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, track.id);
+    return;
+  }
+  await upsertAudioTrack(track);
+  const groupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL);
+  if (groupId == null) return;
+  const db = await getDatabase();
+  await withDatabaseBusyRetry(() =>
+    db.execute(
+      `UPDATE media_group_items
+       SET sort_order = sort_order + 1
+       WHERE group_id = ? AND item_kind = 'track' AND item_id <> ?`,
+      [groupId, track.id],
+    ),
+  );
+  await withDatabaseBusyRetry(() =>
+    db.execute(
+      `INSERT OR REPLACE INTO media_group_items
+       (group_id, item_kind, item_id, sort_order, created_at)
+       VALUES (?, 'track', ?, 0, ?)`,
+      [groupId, track.id, Date.now()],
+    ),
+  );
+  await withDatabaseBusyRetry(() =>
+    db.execute(
+      `DELETE FROM media_group_items
+       WHERE group_id = ? AND item_kind = 'track' AND sort_order >= ?`,
+      [groupId, RECENT_MAX],
+    ),
+  );
+}
+
+/** 用给定曲目整体替换「播放列表」（显式收藏/导入场景；在线整表播放请用临时队列） */
+export async function replaceDefaultPlayList(tracks: AudioTrack[]): Promise<void> {
+  await upsertAudioTracks(tracks);
+  await setPlaylistTracks(
+    BUILTIN_PLAYLIST_IDS.DEFAULT,
+    tracks.map((track) => track.id),
+  );
+  notifyMusicPlaylistsChanged();
+}
+
 export async function addTracksToPlaylist(
   playlistId: string,
   tracks: AudioTrack[],
@@ -201,6 +276,14 @@ export async function addTracksToPlaylist(
       playlistId,
       [...addedIds, ...previousIds.filter((id) => !addedIds.includes(id))],
     );
+  }
+  if (isCuratedPlaylistId(playlistId) && tracks.length > 0) {
+    for (const track of tracks) {
+      await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, track.id);
+    }
+  }
+  if (tracks.length > 0) {
+    notifyMusicPlaylistsChanged();
   }
 }
 
@@ -241,6 +324,11 @@ export async function setPlaylistTracks(
   const groupId = await groupIdForPlaylist(playlistId);
   if (groupId == null) return;
   await setGroupItems(groupId, 'track', trackIds);
+  if (isCuratedPlaylistId(playlistId) && trackIds.length > 0) {
+    for (const trackId of trackIds) {
+      await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, trackId);
+    }
+  }
 }
 
 export async function listPlaylistItems(): Promise<
@@ -330,6 +418,7 @@ export async function createPlaylist(
 export async function deletePlaylist(playlistId: string): Promise<void> {
   if (
     playlistId === BUILTIN_PLAYLIST_IDS.DEFAULT ||
+    playlistId === BUILTIN_PLAYLIST_IDS.TRIAL ||
     playlistId === BUILTIN_PLAYLIST_IDS.RECENT ||
     playlistId === BUILTIN_PLAYLIST_IDS.LOCAL ||
     playlistId === BUILTIN_PLAYLIST_IDS.LOVE
@@ -402,7 +491,6 @@ export async function clearTrackUrlCache(trackId: string): Promise<void> {
   await db.execute('DELETE FROM audio_url_cache WHERE track_id = ?', [trackId]);
 }
 
-const RECENT_MAX = 200;
 let recentPlayWriteQueue = Promise.resolve();
 
 /** 写入最近播放（任意来源，去重，最新在前） */
@@ -435,6 +523,8 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
         [groupId, RECENT_MAX],
       ),
     );
+    await syncTrialListMembership(track);
+    notifyMusicPlaylistsChanged();
   };
   const result = recentPlayWriteQueue.then(persist, persist);
   recentPlayWriteQueue = result.catch(() => undefined);
@@ -443,6 +533,8 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
 
 export async function addTrackToLove(trackId: string): Promise<void> {
   await addFavoriteTrack(trackId);
+  await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, trackId);
+  notifyMusicPlaylistsChanged();
 }
 
 export async function removeTrackFromLove(trackId: string): Promise<void> {
