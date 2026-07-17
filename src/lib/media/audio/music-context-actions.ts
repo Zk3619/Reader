@@ -35,7 +35,7 @@ export interface PlaylistTarget {
 export async function listPlaylistTargets(): Promise<PlaylistTarget[]> {
   const users = await listUserMusicPlaylists();
   return [
-    { listId: BUILTIN_PLAYLIST_IDS.DEFAULT, name: '试听列表' },
+    { listId: BUILTIN_PLAYLIST_IDS.DEFAULT, name: '播放列表' },
     { listId: BUILTIN_PLAYLIST_IDS.LOVE, name: '我的收藏' },
     ...users.map((u) => ({ listId: u.listId, name: u.name })),
   ];
@@ -52,7 +52,11 @@ export async function copyTrackName(track: AudioTrack): Promise<void> {
 }
 
 export function playTrackAt(tracks: AudioTrack[], index: number, origin?: 'search' | 'list'): void {
-  void playPlaylist(tracks, index, { origin: origin ?? 'other' });
+  void playPlaylist(tracks, index, {
+    origin: origin ?? 'other',
+    listKind: origin === 'search' ? 'search' : origin === 'list' ? 'temporary' : 'single',
+    listName: origin === 'search' ? '搜索结果' : origin === 'list' ? '当前列表' : null,
+  });
 }
 
 export function playTrackLater(track: AudioTrack): void {
@@ -202,7 +206,11 @@ export async function playOnlinePlaylist(playlist: OnlinePlaylistSummary): Promi
     showAppToast({ title: '歌单暂无歌曲', variant: 'warning' });
     return;
   }
-  void playPlaylist(detail.tracks, 0, { origin: 'list' });
+  const { playAsTemp } = await import('@/stores/viewer/media/audio');
+  void playAsTemp(detail.tracks, 0, {
+    listName: playlist.name,
+    listKind: 'online-playlist',
+  });
 }
 
 export async function collectOnlinePlaylist(playlist: OnlinePlaylistSummary): Promise<void> {
@@ -215,7 +223,7 @@ export async function collectOnlinePlaylist(playlist: OnlinePlaylistSummary): Pr
     sourceId: playlist.id,
   });
   showAppToast({
-    title: `已收藏 ${detail.tracks.length} 首到默认列表`,
+    title: `已收藏 ${detail.tracks.length} 首到播放列表`,
     variant: 'success',
   });
 }

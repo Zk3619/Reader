@@ -10,7 +10,7 @@ import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/s
 import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
 import { PlayIcon, PlusIcon } from '@/components/shared/icons';
 import { getSongListState } from '@/stores/music-hub/songList';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
@@ -100,7 +100,12 @@ export const MusicSongListDetail: Component<MusicSongListDetailProps> = (props) 
                     variant="ghost"
                     size="icon"
                     class="h-9 w-9 shrink-0"
-                    onClick={() => void playPlaylist(d().tracks, 0, { origin: 'list' })}
+                    onClick={() =>
+                      void playAsTemp(d().tracks, 0, {
+                        listName: d().info.name,
+                        listKind: 'online-playlist',
+                      })
+                    }
                     disabled={d().tracks.length === 0}
                   >
                     <PlayIcon class="h-4 w-4" />
@@ -186,7 +191,10 @@ export const MusicSongListDetail: Component<MusicSongListDetailProps> = (props) 
                   tracks={() => d().tracks}
                   origin="list"
                   onPlay={(tracks, index) =>
-                    void playPlaylist(tracks, index, { origin: 'list' })
+                    void playAsTemp(tracks, index, {
+                      listName: d().info.name,
+                      listKind: 'online-playlist',
+                    })
                   }
                   contentRevision={() => `${d().info.id}:${d().tracks.length}`}
                 />

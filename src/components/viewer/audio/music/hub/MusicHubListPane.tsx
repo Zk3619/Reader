@@ -1,10 +1,11 @@
 /**
  * 列表分区：桌面左右分栏 / 移动全宽曲目 + Drawer 歌单
- * 页头：播放全部 / 新建列表 / 更多（更新管理·导入·导出·去重）
+ * 页头：播放全部 / 新建列表 / 更多（更新管理·导入·导出·去重·保存列表）
  */
 
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   onCleanup,
@@ -17,6 +18,7 @@ import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { MusicPlaylistSidebar } from '@/components/viewer/audio/music/hub/MusicPlaylistSidebar';
 import { MusicTrackList } from '@/components/viewer/audio/music/hub/MusicTrackList';
 import { MusicListCreateDialog } from '@/components/viewer/audio/music/hub/MusicListCreateDialog';
+import { MusicListSaveDialog } from '@/components/viewer/audio/music/hub/MusicListSaveDialog';
 import { MusicListUpdateManageDialog } from '@/components/viewer/audio/music/hub/MusicListUpdateManageDialog';
 import { MusicListImportDialog } from '@/components/viewer/audio/music/hub/MusicListImportDialog';
 import { MusicListExportDialog } from '@/components/viewer/audio/music/hub/MusicListExportDialog';
@@ -30,10 +32,25 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { FolderPlusIcon, MoreIcon, PlayIcon } from '@/components/shared/icons';
-import { viewerStore } from '@/stores/viewer';
-import { getTracksForGroupId } from '@/lib/database/audio-library';
 import {
+  DeduplicateIcon,
+  ExportIcon,
+  FolderPlusIcon,
+  GripVerticalIcon,
+  ImportIcon,
+  ListRefreshIcon,
+  MoreIcon,
+  PlayIcon,
+  SaveIcon,
+} from '@/components/shared/icons';
+import { viewerStore } from '@/stores/viewer';
+import {
+  getTracksForGroupId,
+  MUSIC_PLAYLISTS_CHANGED_EVENT,
+} from '@/lib/database/audio-library';
+import { getGroupById } from '@/lib/database/media-groups';
+import {
+  playByListId,
   playPlaylist,
   restoreActiveMusicPlaylistSelection,
 } from '@/stores/viewer/media/audio';
@@ -41,6 +58,7 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import { dedupePlaylistTracks } from '@/lib/media/audio/list/playlist-share';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
 import {
@@ -57,6 +75,12 @@ export interface MusicHubListPaneProps {
   scanRevision?: number;
 }
 
+const SAVEABLE_LIST_IDS = new Set<string>([
+  BUILTIN_PLAYLIST_IDS.DEFAULT,
+  BUILTIN_PLAYLIST_IDS.TRIAL,
+  BUILTIN_PLAYLIST_IDS.RECENT,
+]);
+
 function MusicListMoreMenu(props: {
   dragSortEnabled: boolean;
   onDragSortChange: (checked: boolean) => void;
@@ -64,6 +88,8 @@ function MusicListMoreMenu(props: {
   onOpenImport: () => void;
   onOpenExport: () => void;
   onDeduplicate: () => void;
+  canSaveList: boolean;
+  onSaveList: () => void;
 }) {
   const [open, setOpen] = createSignal(false);
   return (
@@ -87,12 +113,33 @@ function MusicListMoreMenu(props: {
           checked={props.dragSortEnabled}
           onChange={props.onDragSortChange}
         >
-          拖拽排序
+          <span class="flex items-center gap-2">
+            <GripVerticalIcon class="h-4 w-4" />
+            <span>拖拽排序</span>
+          </span>
         </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuItem onSelect={props.onOpenUpdate}>列表更新管理</AppDropdownMenuItem>
-        <AppDropdownMenuItem onSelect={props.onOpenImport}>导入</AppDropdownMenuItem>
-        <AppDropdownMenuItem onSelect={props.onOpenExport}>导出</AppDropdownMenuItem>
-        <AppDropdownMenuItem onSelect={props.onDeduplicate}>去重</AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onOpenUpdate}>
+          <ListRefreshIcon class="h-4 w-4" />
+          <span>列表更新管理</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onOpenImport}>
+          <ImportIcon class="h-4 w-4" />
+          <span>导入</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onOpenExport}>
+          <ExportIcon class="h-4 w-4" />
+          <span>导出</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={props.onDeduplicate}>
+          <DeduplicateIcon class="h-4 w-4" />
+          <span>去重</span>
+        </AppDropdownMenuItem>
+        <Show when={props.canSaveList}>
+          <AppDropdownMenuItem onSelect={props.onSaveList}>
+            <SaveIcon class="h-4 w-4" />
+            <span>保存列表</span>
+          </AppDropdownMenuItem>
+        </Show>
       </AppDropdownMenuContent>
     </AppDropdownMenu>
   );
@@ -105,6 +152,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
     getMusicSettings().musicListDragSortEnabled !== false,
   );
   const [createOpen, setCreateOpen] = createSignal(false);
+  const [saveOpen, setSaveOpen] = createSignal(false);
   const [updateOpen, setUpdateOpen] = createSignal(false);
   const [importOpen, setImportOpen] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
@@ -115,7 +163,15 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
     const unsubscribe = subscribeMusicSettings((settings) => {
       setDragSortEnabled(settings.musicListDragSortEnabled !== false);
     });
-    onCleanup(unsubscribe);
+    const handlePlaylistsChanged = () => {
+      setListsRevision((v) => v + 1);
+      setTracksRevision((v) => v + 1);
+    };
+    window.addEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged);
+    onCleanup(() => {
+      unsubscribe();
+      window.removeEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged);
+    });
   });
 
   const bumpLists = () => setListsRevision((v) => v + 1);
@@ -132,6 +188,28 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
     () => ({ id: groupId(), rev: contentRev() }),
     (key) => getTracksForGroupId(key.id),
   );
+  const [activeGroup] = createResource(
+    () => ({ id: groupId(), rev: listsRevision() }),
+    (key) => getGroupById(key.id),
+  );
+
+  const activeListId = createMemo(() => {
+    if (groupId() === MediaGroupId.Favorite) return BUILTIN_PLAYLIST_IDS.LOVE;
+    return activeGroup()?.listId ?? viewerStore.state.activePlaylistId ?? null;
+  });
+
+  const canSaveList = createMemo(() => {
+    const listId = activeListId();
+    return !!listId && SAVEABLE_LIST_IDS.has(listId);
+  });
+
+  const saveSuggestedName = createMemo(() => {
+    const listId = activeListId();
+    if (listId === BUILTIN_PLAYLIST_IDS.DEFAULT) return '播放列表副本';
+    if (listId === BUILTIN_PLAYLIST_IDS.TRIAL) return '试听列表副本';
+    if (listId === BUILTIN_PLAYLIST_IDS.RECENT) return '最近播放副本';
+    return activeGroup()?.groupName ? `${activeGroup()!.groupName}副本` : '新列表';
+  });
 
   const playAll = () => {
     const list = tracks() ?? [];
@@ -139,7 +217,19 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
       showAppToast({ title: '当前列表暂无曲目', variant: 'warning' });
       return;
     }
-    void playPlaylist(list, 0, { origin: 'list' });
+    const listId = activeListId();
+    if (listId) {
+      void playByListId(listId, 0, {
+        listName: activeGroup()?.groupName,
+        listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
+      });
+      return;
+    }
+    void playPlaylist(list, 0, {
+      origin: 'list',
+      listName: activeGroup()?.groupName ?? '我的列表',
+      listKind: 'temporary',
+    });
   };
 
   const dedupPlaylist = async () => {
@@ -207,6 +297,8 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               onOpenImport={() => setImportOpen(true)}
               onOpenExport={() => setExportOpen(true)}
               onDeduplicate={() => void dedupPlaylist()}
+              canSaveList={canSaveList()}
+              onSaveList={() => setSaveOpen(true)}
             />
           </>
         }
@@ -247,6 +339,16 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
         open={createOpen()}
         onOpenChange={setCreateOpen}
         onCreated={() => {
+          bumpLists();
+          bumpTracks();
+        }}
+      />
+      <MusicListSaveDialog
+        open={saveOpen()}
+        onOpenChange={setSaveOpen}
+        sourceGroupId={canSaveList() ? groupId() : null}
+        suggestedName={saveSuggestedName()}
+        onSaved={() => {
           bumpLists();
           bumpTracks();
         }}

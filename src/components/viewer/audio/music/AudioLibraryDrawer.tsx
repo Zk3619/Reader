@@ -5,8 +5,8 @@
 import { createResource, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { loadLibraryPlaylists, loadPlaylistTracks } from '@/lib/media/audio/library/playlist-store';
-import { playPlaylist } from '@/stores/viewer/media/audio';
-import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { playByListId } from '@/stores/viewer/media/audio';
+import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 
 export interface AudioLibraryDrawerProps {
@@ -21,8 +21,11 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
   const [playlists] = createResource(() => (active() ? loadLibraryPlaylists() : []));
   const [tracks] = createResource(() => (active() ? loadPlaylistTracks('local') : []));
 
-  const playAll = (list: AudioTrack[]) => {
-    void playPlaylist(list, 0, { origin: 'list' });
+  const playAll = () => {
+    void playByListId(BUILTIN_PLAYLIST_IDS.LOCAL, 0, {
+      listName: '本地音乐',
+      listKind: 'builtin',
+    });
   };
 
   return (
@@ -46,13 +49,18 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
         <p class="mb-2 text-xs font-medium text-muted-foreground">本地音乐</p>
         <ul class="space-y-1">
           <For each={tracks() ?? []}>
-            {(track) => (
+            {(track, index) => (
               <li>
                 <Button
                   type="button"
                   variant="ghost"
                   class="h-auto w-full flex-col items-start rounded-lg px-3 py-2 font-normal hover:bg-muted/60"
-                  onClick={() => void playPlaylist([track], 0, { origin: 'list' })}
+                  onClick={() =>
+                    void playByListId(BUILTIN_PLAYLIST_IDS.LOCAL, index(), {
+                      listName: '本地音乐',
+                      listKind: 'builtin',
+                    })
+                  }
                 >
                   <span class="truncate text-sm font-medium">{track.name}</span>
                   <span class="truncate text-xs text-muted-foreground">
@@ -64,7 +72,7 @@ export const AudioLibraryDrawer: Component<AudioLibraryDrawerProps> = (props) =>
           </For>
         </ul>
         <Show when={(tracks()?.length ?? 0) > 0}>
-          <Button class="mt-3 w-full" size="sm" onClick={() => playAll(tracks() ?? [])}>
+          <Button class="mt-3 w-full" size="sm" onClick={() => playAll()}>
             播放全部
           </Button>
         </Show>

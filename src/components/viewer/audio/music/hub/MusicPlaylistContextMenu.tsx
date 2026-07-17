@@ -40,7 +40,7 @@ export const MusicPlaylistContextMenu: Component<MusicPlaylistContextMenuProps> 
           播放全部
         </AppContextMenuItem>
         <AppContextMenuItem onSelect={() => void collectOnlinePlaylist(props.playlist)}>
-          收藏到默认列表
+          收藏到播放列表
         </AppContextMenuItem>
         <AppContextMenuItem
           onSelect={() => void copyText(props.playlist.name, '已复制歌单名')}

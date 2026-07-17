@@ -245,10 +245,18 @@ export function MusicSearchPaneToolbar() {
 
   createEffect(() => {
     if (!showTipDropdown()) return;
-    const onReposition = () => updateTipPanelPosition();
+    let raf = 0;
+    const onReposition = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        updateTipPanelPosition();
+      });
+    };
     window.addEventListener('resize', onReposition);
     window.addEventListener('scroll', onReposition, true);
     onCleanup(() => {
+      if (raf) cancelAnimationFrame(raf);
       window.removeEventListener('resize', onReposition);
       window.removeEventListener('scroll', onReposition, true);
     });

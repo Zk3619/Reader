@@ -50,8 +50,9 @@ export function startMusicOpenApiStateSync(
 ): () => void {
   stopMusicOpenApiStateSync();
   const tick = () => void pushMusicOpenApiState(getter());
-  tick();
+  // 首帧延后，避免在 Solid createEffect 同步调用时把 getter 内的 currentTime 等信号记成依赖
   pushTimer = setInterval(tick, intervalMs);
+  queueMicrotask(tick);
   return stopMusicOpenApiStateSync;
 }
 

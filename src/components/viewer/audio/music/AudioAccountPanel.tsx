@@ -17,7 +17,7 @@ import {
   fetchNeteaseRecommendPlaylists,
   loadNeteasePlaylistTracks,
 } from '@/lib/media/audio/platform/playlist-sync';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import { playAsTemp } from '@/stores/viewer/media/audio';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 
 export interface AudioAccountPanelProps {
@@ -111,7 +111,10 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
                         class="h-auto w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-normal hover:bg-muted/60"
                         onClick={() =>
                           void loadNeteasePlaylistTracks(pl.id).then((tracks) =>
-                            playPlaylist(tracks, 0, { origin: 'list' }),
+                            playAsTemp(tracks, 0, {
+                              listName: pl.name,
+                              listKind: 'online-playlist',
+                            }),
                           )
                         }
                       >

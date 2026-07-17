@@ -3040,16 +3040,23 @@ function AppContent() {
     });
   });
 
-  // 监听窗口宽度变化
+  // 监听窗口宽度变化（rAF 合并，避免拖拽改窗时整壳每事件重算）
   onMount(() => {
+    let raf = 0;
     const handleResize = () => {
-      setWindowWidth(window.innerWidth);
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const w = window.innerWidth;
+        setWindowWidth((prev) => (prev === w ? prev : w));
+      });
     };
 
     handleResize();
     window.addEventListener("resize", handleResize);
 
     onCleanup(() => {
+      if (raf) cancelAnimationFrame(raf);
       window.removeEventListener("resize", handleResize);
     });
   });

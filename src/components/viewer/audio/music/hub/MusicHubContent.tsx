@@ -110,8 +110,11 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
           invalidateLocalMusicSearchCache();
           setScanRevision((n) => n + 1);
           if (tracks.length > 0) {
-            void import('@/stores/viewer/media/audio').then(({ playPlaylist }) =>
-              playPlaylist(tracks, 0),
+            void import('@/stores/viewer/media/audio').then(({ playAsTemp }) =>
+              playAsTemp(tracks, 0, {
+                listName: '本地导入',
+                listKind: 'temporary',
+              }),
             );
           }
         }}

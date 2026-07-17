@@ -81,7 +81,10 @@ async function loadSidebarGroups(): Promise<SidebarGroup[]> {
   );
   const pinned: SidebarGroup[] = [
     builtins.get('default')
-      ? { ...builtins.get('default')!, groupName: '试听列表', sortable: false }
+      ? { ...builtins.get('default')!, groupName: '播放列表', sortable: false }
+      : null,
+    builtins.get('trial')
+      ? { ...builtins.get('trial')!, groupName: '试听列表', sortable: false }
       : null,
     builtins.get('recent')
       ? { ...builtins.get('recent')!, groupName: '最近播放', sortable: false }

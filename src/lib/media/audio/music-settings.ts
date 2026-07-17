@@ -9,7 +9,7 @@ const STORAGE_KEY = 'reader_music_settings';
 const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 const LIST_SCROLL_STORAGE_KEY = 'reader_music_list_scroll_positions';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 4;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 8;
 const listeners = new Set<(settings: MusicSettings) => void>();
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
@@ -22,6 +22,13 @@ export type MusicListAddPosition = 'top' | 'bottom';
 export type MusicLyricDirection = 'horizontal' | 'vertical';
 export type MusicLyricScrollPosition = 'top' | 'center' | 'bottom';
 export type MusicDownloadSourceStrategy = 'primary' | 'fallback';
+/** 播放栏进度条布局，对齐 LX Music 的 mini / middle / full。 */
+export type MusicPlayBarProgressStyle = 'mini' | 'middle' | 'full';
+export type MusicPlayTimerAction =
+  | 'pause'
+  | 'stop-after-track'
+  | 'exit-after-track'
+  | 'shutdown-after-track';
 
 export interface MusicSettings {
   schemaVersion: number;
@@ -73,6 +80,12 @@ export interface MusicSettings {
   playDetailZoomActiveLyric: boolean;
   playDetailAllowLyricSeek: boolean;
   playDetailLyricScrollDelayMs: number;
+  /** 播放详情以独立全视口覆盖层展示（覆盖主壳顶栏/侧栏） */
+  playDetailStandalone: boolean;
+  /** 隐藏播放详情顶栏，将返回/设置按钮分布到内容顶部 */
+  playDetailHideHeader: boolean;
+  /** 桌面端评论/播放队列使用右侧抽屉，而非可调整宽度的内嵌面板 */
+  playDetailDesktopSidePaneDrawer: boolean;
   allowProgressBarSeek: boolean;
   playQuality: import('@/lib/media/audio/lyric-types').MusicQuality;
   playQualityPreference:
@@ -94,6 +107,8 @@ export interface MusicSettings {
   autoCleanPlayedList: boolean;
   /** 在桌面任务栏显示当前歌曲播放进度。 */
   showTaskbarProgress: boolean;
+  /** 播放栏进度条样式。 */
+  playBarProgressStyle: MusicPlayBarProgressStyle;
   listShowSource: boolean;
   listShowAlbum: boolean;
   listShowDuration: boolean;
@@ -140,9 +155,14 @@ export interface MusicSettings {
   localSyncAutoStart: boolean;
   downloadQuality?: import('@/lib/media/audio/lyric-types').MusicQuality;
   downloadFileNameTemplate?: string;
+  /** 最近使用的定时时长（秒），作为下次打开定时弹窗的默认值。 */
   playTimeoutSec?: number;
+  /** 兼容旧设置；新逻辑由 playTimerAction 决定。 */
   playTimeoutWaitForTrackEnd: boolean;
-  /** 取链/解码失败时自动下一首 */
+  /** 当前定时任务的绝对截止时间（Unix 毫秒）；0 表示未启用。 */
+  playTimerTargetAt: number;
+  playTimerAction: MusicPlayTimerAction;
+  /** 取链/解码失败时自动下一首（仅 list 来源的系统/用户列表队列） */
   autoSkipOnError?: boolean;
   /** 歌词是否显示翻译 */
   showLyricTranslation?: boolean;
@@ -195,6 +215,9 @@ const DEFAULTS: MusicSettings = {
   playDetailZoomActiveLyric: true,
   playDetailAllowLyricSeek: false,
   playDetailLyricScrollDelayMs: 0,
+  playDetailStandalone: false,
+  playDetailHideHeader: false,
+  playDetailDesktopSidePaneDrawer: false,
   allowProgressBarSeek: true,
   playQuality: '320k',
   playQualityPreference: '320k',
@@ -208,13 +231,14 @@ const DEFAULTS: MusicSettings = {
   rememberProgress: false,
   autoCleanPlayedList: false,
   showTaskbarProgress: true,
+  playBarProgressStyle: 'full',
   listShowSource: true,
   listShowAlbum: true,
   listShowDuration: true,
   listActionButtonsVisible: false,
   listAddPosition: 'top',
   listSaveScrollPosition: true,
-  listDoubleClickToPlay: false,
+  listDoubleClickToPlay: true,
   listClearQueueOnSwitch: false,
   downloadConcurrent: 2,
   downloadSkipExisting: true,
@@ -256,6 +280,8 @@ const DEFAULTS: MusicSettings = {
   downloadFileNameTemplate: '{artist}-{name}',
   playTimeoutSec: 0,
   playTimeoutWaitForTrackEnd: true,
+  playTimerTargetAt: 0,
+  playTimerAction: 'pause',
   autoSkipOnError: true,
   showLyricTranslation: false,
   showLyricRoma: false,
@@ -298,6 +324,13 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   desktopLyricScrollPosition: ['top', 'center', 'bottom'],
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   downloadSourceStrategy: ['primary', 'fallback'],
+  playBarProgressStyle: ['mini', 'middle', 'full'],
+  playTimerAction: [
+    'pause',
+    'stop-after-track',
+    'exit-after-track',
+    'shutdown-after-track',
+  ],
 };
 
 const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
@@ -317,6 +350,7 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'player.powerSaveBlocker': 'preventSleepWhilePlaying',
   'player.isAutoCleanPlayedList': 'autoCleanPlayedList',
   'player.isShowTaskProgess': 'showTaskbarProgress',
+  'common.playBarProgressStyle': 'playBarProgressStyle',
   'player.isMaxOutputChannelCount': 'audioUseMaxChannels',
   'player.isMediaDeviceRemovedStopPlay': 'audioPauseOnDeviceRemoved',
   'player.autoSkipOnError': 'autoSkipOnError',
@@ -398,10 +432,14 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return Math.max(1, Math.min(32, Math.round(value)));
     case 'playDetailLyricScrollDelayMs':
       return Math.max(0, Math.min(5000, Math.round(value)));
+    case 'playDetailLyricFontSize':
+      return Math.max(12, Math.min(32, Math.round(value)));
     case 'desktopLyricLineHeight':
       return Math.max(1, Math.min(3, value));
     case 'playTimeoutSec':
       return Math.max(0, value);
+    case 'playTimerTargetAt':
+      return Math.max(0, Math.round(value));
     default:
       return value;
   }
@@ -452,6 +490,21 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
     ENUM_VALUES.playQuality?.includes(source.playQuality)
   ) {
     normalized.playQualityPreference = normalized.playQuality;
+  }
+  if (
+    source.playTimerAction === undefined &&
+    source.playTimeoutWaitForTrackEnd === true
+  ) {
+    normalized.playTimerAction = 'stop-after-track';
+  }
+  if (
+    (normalized.playTimerTargetAt as number) <= 0 &&
+    typeof source.playTimeoutSec === 'number' &&
+    source.playTimeoutSec > 0 &&
+    source.playTimerTargetAt === undefined
+  ) {
+    // 旧版仅保存时长：升级后不自动启动，仅保留为默认时长。
+    normalized.playTimerTargetAt = 0;
   }
   return normalized as MusicSettings;
 }

@@ -1,78 +1,118 @@
 /**
  * 歌词展示（LRC / 多轨 / lxlyric 逐字，对齐 lx）
+ * - 原文/翻译/罗马音按时间戳合并到同一行
+ * - 手动滚动暂停自动跟随，约 3s 后恢复
+ * - 可选进度预览线 + 确认跳转
  */
 
-import { createEffect, createMemo, For, onCleanup, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+  type Component,
+} from 'solid-js';
+import { Play } from 'lucide-solid';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
 
-interface LrcLine {
-  timeMs: number;
-  text: string;
-}
-
 interface LxWord {
   timeMs: number;
+  durationMs: number;
   text: string;
 }
 
-function parseLrc(lyric: string): LrcLine[] | null {
+interface ParsedLine {
+  timeMs: number;
+  text: string;
+  words: LxWord[] | null;
+  raw: string;
+}
+
+interface MergedLine {
+  timeMs: number;
+  text: string;
+  words: LxWord[] | null;
+  extended: string[];
+}
+
+function parseTimeTag(tag: string): number | null {
+  const m = tag.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/);
+  if (!m) return null;
+  const min = Number(m[1]);
+  const sec = Number(m[2]);
+  const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
+  return min * 60_000 + sec * 1000 + frac;
+}
+
+function parseLxWords(lineBody: string, lineStartMs: number): LxWord[] {
+  const words: LxWord[] = [];
+  const re = /<(\d+),(\d+)>([^<]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(lineBody)) !== null) {
+    words.push({
+      timeMs: lineStartMs + Number(m[1]),
+      durationMs: Number(m[2]),
+      text: m[3] ?? '',
+    });
+  }
+  if (words.length === 0) {
+    const plain = lineBody.replace(/<\d+,\d+>/g, '').trim();
+    if (plain) words.push({ timeMs: lineStartMs, durationMs: 0, text: plain });
+  }
+  return words;
+}
+
+function parseTimedLines(lyric: string, asLx: boolean): ParsedLine[] {
   const lines = lyric.split(/\r?\n/);
-  const parsed: LrcLine[] = [];
-  const re = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+  const parsed: ParsedLine[] = [];
+  const timeRe = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
   for (const line of lines) {
-    const matches = [...line.matchAll(re)];
+    const matches = [...line.matchAll(timeRe)];
     if (matches.length === 0) continue;
-    const text = line.replace(re, '').trim();
-    if (!text) continue;
+    const body = line.replace(timeRe, '');
+    const text = body.replace(/<\d+,\d+>/g, '').trim();
+    if (!text && !asLx) continue;
     for (const m of matches) {
-      const min = Number(m[1]);
-      const sec = Number(m[2]);
-      const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
-      parsed.push({ timeMs: min * 60_000 + sec * 1000 + frac, text });
+      const timeMs = parseTimeTag(m[0]);
+      if (timeMs == null) continue;
+      parsed.push({
+        timeMs,
+        text: text || body.trim(),
+        words: asLx ? parseLxWords(body, timeMs) : null,
+        raw: line,
+      });
     }
   }
-  if (parsed.length === 0) return null;
   parsed.sort((a, b) => a.timeMs - b.timeMs);
   return parsed;
 }
 
-function parseLxLyric(lyric: string): LrcLine[] | null {
-  const lines = lyric.split(/\r?\n/).filter((l) => l.trim());
+function nearestLineText(lines: ParsedLine[], timeMs: number, windowMs = 1200): string | null {
   if (lines.length === 0) return null;
-  const parsed: LrcLine[] = [];
-  const lineRe = /^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/;
+  let best: ParsedLine | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
   for (const line of lines) {
-    const m = line.match(lineRe);
-    if (!m) continue;
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
-    const text = line.replace(lineRe, '').replace(/<\d+,\d+>/g, '').trim();
-    if (text) parsed.push({ timeMs: min * 60_000 + sec * 1000 + frac, text });
+    const delta = Math.abs(line.timeMs - timeMs);
+    if (delta < bestDelta) {
+      best = line;
+      bestDelta = delta;
+    }
+    if (line.timeMs > timeMs + windowMs) break;
   }
-  return parsed.length ? parsed : null;
+  if (!best || bestDelta > windowMs) return null;
+  return best.text || null;
 }
 
-function parseLxWords(line: string, lineStartMs: number): LxWord[] {
-  const words: LxWord[] = [];
-  // 对齐 lx：`<相对行起点ms,持续ms>字`
-  const re = /<(\d+),(\d+)>([^<]*)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(line)) !== null) {
-    words.push({
-      timeMs: lineStartMs + Number(m[1]),
-      text: m[3] ?? '',
-    });
-  }
-  if (words.length === 0 && line.trim()) {
-    words.push({
-      timeMs: lineStartMs,
-      text: line.replace(/<\d+,\d+>/g, '').trim(),
-    });
-  }
-  return words;
+function formatPreviewTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 export interface AudioLyricPanelProps {
@@ -89,6 +129,8 @@ export interface AudioLyricPanelProps {
   fontSize?: number;
   zoomActiveLyric?: boolean;
   onSeek?: (positionSec: number) => void;
+  /** 开启后：手动浏览显示时间预览线并可确认跳转 */
+  allowProgressPreview?: boolean;
   singleLine?: boolean;
   maxLines?: number;
   playedColor?: string;
@@ -101,56 +143,94 @@ export interface AudioLyricPanelProps {
   bold?: boolean;
   wrap?: boolean;
   direction?: 'horizontal' | 'vertical';
+  emptyText?: string;
+  loading?: boolean;
+  errorText?: string | null;
+  active?: boolean;
 }
 
-export function AudioLyricPanel(props: AudioLyricPanelProps) {
+export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   let container: HTMLDivElement | undefined;
   let scrollTimer: ReturnType<typeof setTimeout> | undefined;
-  const primaryText = createMemo(() => {
+  let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+  const [userBrowsing, setUserBrowsing] = createSignal(false);
+  const [previewTimeSec, setPreviewTimeSec] = createSignal<number | null>(null);
+
+  const primaryKind = () => props.lyricTrack ?? 'lyric';
+
+  const primaryRaw = createMemo(() => {
     if (props.lyric?.trim()) return props.lyric;
-    return pickLyricText(props.bundle, props.lyricTrack ?? 'lyric');
+    return pickLyricText(props.bundle, primaryKind()) ?? '';
   });
 
-  const secondaryText = createMemo(() => {
-    const kind = props.lyricTrack ?? 'lyric';
-    if (!props.bundle) return null;
-    const showT = props.showTranslation !== false;
-    const showR = props.showRoma !== false;
-    if (kind === 'lyric') {
-      const candidates =
-        props.secondaryOrder === 'roma-first'
-          ? [
-              showR ? props.bundle.rlyric : null,
-              showT ? props.bundle.tlyric : null,
-            ]
-          : [
-              showT ? props.bundle.tlyric : null,
-              showR ? props.bundle.rlyric : null,
-            ];
-      return candidates.find((text) => text?.trim()) ?? null;
-    }
-    if (kind === 'tlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
-    if (kind === 'rlyric' && props.bundle.lyric?.trim()) return props.bundle.lyric;
-    if (showT && props.bundle.tlyric?.trim()) return props.bundle.tlyric;
-    return null;
+  const useLx = createMemo(() => {
+    const kind = primaryKind();
+    const raw = primaryRaw();
+    if (kind === 'lxlyric') return true;
+    // 仅当当前主轨文本本身含逐字标记时按逐字处理，避免有 lxlyric 却选中原文时误判
+    return /<\d+,\d+>/.test(raw);
   });
 
-  const isLxLyric = createMemo(() => {
-    const raw = primaryText();
-    return !!raw && (props.lyricTrack === 'lxlyric' || !!props.bundle?.lxlyric?.trim());
+  const primaryLines = createMemo(() => {
+    const raw = primaryRaw().trim();
+    if (!raw) return [] as ParsedLine[];
+    return parseTimedLines(raw, useLx());
   });
 
-  const lrcLines = createMemo(() => {
-    const raw = primaryText()?.trim();
-    if (!raw) return null;
-    if (isLxLyric()) return parseLxLyric(raw) ?? parseLrc(raw);
-    return parseLrc(raw);
+  const translationLines = createMemo(() => {
+    if (props.showTranslation === false) return [] as ParsedLine[];
+    const raw = props.bundle?.tlyric?.trim();
+    if (!raw) return [] as ParsedLine[];
+    return parseTimedLines(raw, false);
+  });
+
+  const romaLines = createMemo(() => {
+    if (props.showRoma === false) return [] as ParsedLine[];
+    const raw = props.bundle?.rlyric?.trim();
+    if (!raw) return [] as ParsedLine[];
+    return parseTimedLines(raw, false);
+  });
+
+  const mergedLines = createMemo((): MergedLine[] => {
+    const primary = primaryLines();
+    if (primary.length === 0) return [];
+    const kind = primaryKind();
+    const tLines = translationLines();
+    const rLines = romaLines();
+    const order = props.secondaryOrder === 'roma-first' ? (['roma', 'translation'] as const) : (['translation', 'roma'] as const);
+
+    return primary.map((line) => {
+      const extended: string[] = [];
+      // 主轨为翻译/罗马音时，副轨优先显示原文
+      if (kind === 'tlyric' || kind === 'rlyric') {
+        const original = props.bundle?.lyric?.trim()
+          ? nearestLineText(parseTimedLines(props.bundle.lyric, false), line.timeMs)
+          : null;
+        if (original) extended.push(original);
+      }
+      for (const which of order) {
+        if (kind === 'tlyric' && which === 'translation') continue;
+        if (kind === 'rlyric' && which === 'roma') continue;
+        const text =
+          which === 'translation'
+            ? nearestLineText(tLines, line.timeMs)
+            : nearestLineText(rLines, line.timeMs);
+        if (text) extended.push(text);
+      }
+      return {
+        timeMs: line.timeMs,
+        text: line.text,
+        words: line.words,
+        extended,
+      };
+    });
   });
 
   const activeIndex = createMemo(() => {
-    const lines = lrcLines();
-    if (!lines) return -1;
+    const lines = mergedLines();
+    if (lines.length === 0) return -1;
     const posMs = (props.positionSec + (props.lyricOffset ?? 0)) * 1000;
+    if (posMs < lines[0]!.timeMs) return -1;
     let idx = 0;
     for (let i = 0; i < lines.length; i++) {
       if (lines[i]!.timeMs <= posMs) idx = i;
@@ -160,34 +240,36 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
   });
 
   const activeWords = createMemo(() => {
-    const raw = primaryText()?.trim();
-    const lines = lrcLines();
+    const lines = mergedLines();
     const idx = activeIndex();
-    if (!raw || !lines || idx < 0 || !isLxLyric()) return null;
-    const line = lines[idx];
-    if (!line) return null;
-    const rawLines = raw.split(/\r?\n/);
-    const rawLine = rawLines.find((l) => l.includes(line.text.slice(0, 4))) ?? '';
-    return parseLxWords(rawLine, line.timeMs);
+    if (idx < 0) return null;
+    return lines[idx]?.words ?? null;
   });
 
   const activeWordIndex = createMemo(() => {
     const words = activeWords();
-    if (!words) return -1;
+    if (!words || words.length === 0) return -1;
     const posMs = (props.positionSec + (props.lyricOffset ?? 0)) * 1000;
-    let idx = 0;
+    let idx = -1;
     for (let i = 0; i < words.length; i++) {
-      if (words[i]!.timeMs <= posMs) idx = i;
-      else break;
+      const word = words[i]!;
+      const end = word.durationMs > 0 ? word.timeMs + word.durationMs : undefined;
+      if (posMs >= word.timeMs && (end == null || posMs < end || i === words.length - 1)) {
+        idx = i;
+      } else if (posMs >= word.timeMs) {
+        idx = i;
+      }
     }
     return idx;
   });
 
   const visibleLines = createMemo(() => {
-    const lines = lrcLines() ?? [];
-    const active = activeIndex();
-    if (props.singleLine && lines[active]) {
-      return [{ line: lines[active]!, originalIndex: active }];
+    const lines = mergedLines();
+    const active = Math.max(0, activeIndex());
+    if (props.singleLine) {
+      const idx = activeIndex();
+      if (idx < 0 || !lines[idx]) return [] as Array<{ line: MergedLine; originalIndex: number }>;
+      return [{ line: lines[idx]!, originalIndex: idx }];
     }
     const maxLines = Math.max(0, Math.floor(props.maxLines ?? 0));
     if (maxLines > 0 && lines.length > maxLines) {
@@ -202,63 +284,141 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
     return lines.map((line, originalIndex) => ({ line, originalIndex }));
   });
 
+  const scrollActiveIntoView = () => {
+    if (!container || userBrowsing()) return;
+    const active = container.querySelector<HTMLElement>('[data-lyric-active="true"]');
+    active?.scrollIntoView({
+      behavior: 'smooth',
+      block:
+        props.scrollPosition === 'top'
+          ? 'start'
+          : props.scrollPosition === 'bottom'
+            ? 'end'
+            : 'center',
+    });
+  };
+
   createEffect(() => {
     void activeIndex();
+    void props.active;
+    if (props.active === false) return;
     if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(() => {
-      const active = container?.querySelector<HTMLElement>('[data-lyric-active="true"]');
-      active?.scrollIntoView({
-        behavior: 'smooth',
-        block:
-          props.scrollPosition === 'top'
-            ? 'start'
-            : props.scrollPosition === 'bottom'
-              ? 'end'
-              : 'center',
-      });
-    }, Math.max(0, props.scrollDelayMs ?? 0));
-  });
-  onCleanup(() => {
-    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(scrollActiveIntoView, Math.max(0, props.scrollDelayMs ?? 0));
   });
 
+  const updatePreviewFromScroll = () => {
+    if (!container || !props.allowProgressPreview || !props.onSeek) {
+      setPreviewTimeSec(null);
+      return;
+    }
+    const centerY = container.scrollTop + container.clientHeight * 0.42;
+    const items = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-lyric-time]'),
+    );
+    let bestEl: HTMLElement | undefined;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const el of items) {
+      const mid = el.offsetTop + el.offsetHeight / 2;
+      const delta = Math.abs(mid - centerY);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestEl = el;
+      }
+    }
+    if (!bestEl) {
+      setPreviewTimeSec(null);
+      return;
+    }
+    const timeMs = Number(bestEl.dataset.lyricTime);
+    if (Number.isFinite(timeMs)) setPreviewTimeSec(timeMs / 1000);
+  };
+
+  const markBrowsing = () => {
+    setUserBrowsing(true);
+    updatePreviewFromScroll();
+    if (resumeTimer) clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(() => {
+      setUserBrowsing(false);
+      setPreviewTimeSec(null);
+      scrollActiveIntoView();
+    }, 3000);
+  };
+
+  onCleanup(() => {
+    if (scrollTimer) clearTimeout(scrollTimer);
+    if (resumeTimer) clearTimeout(resumeTimer);
+  });
+
+  const hasTimedLyric = () => mergedLines().length > 0;
+  const plainText = () => primaryRaw().trim();
+
   return (
-    <Show when={primaryText()?.trim()}>
-      <div
-        ref={container}
-        class={cn(
-          'max-h-32 w-full max-w-md overflow-y-auto rounded-lg bg-black/20 px-3 py-2 text-center text-sm text-white/90',
-          props.class,
-        )}
-        style={{
-          'font-size': `${props.fontSize ?? 14}px`,
-          'text-align': props.align ?? 'center',
-          'font-family': props.fontFamily || undefined,
-          'line-height': String(props.lineHeight ?? 1.5),
-          'text-shadow': props.textShadow ? '0 1px 4px rgba(0,0,0,.9)' : undefined,
-          'font-weight': props.bold ? '700' : undefined,
-          'writing-mode': props.direction === 'vertical' ? 'vertical-rl' : undefined,
-        }}
-      >
-        <Show
-          when={lrcLines()}
-          fallback={<p class={props.wrap === false ? 'whitespace-nowrap' : 'whitespace-pre-wrap'}>{primaryText()}</p>}
+    <div
+      class={cn(
+        'relative flex min-h-0 w-full flex-1 flex-col overflow-hidden',
+        props.class,
+      )}
+    >
+      <Show when={props.loading}>
+        <p class="px-3 py-6 text-center text-sm text-muted-foreground">歌词加载中…</p>
+      </Show>
+      <Show when={!props.loading && props.errorText}>
+        <p class="px-3 py-6 text-center text-sm text-destructive">{props.errorText}</p>
+      </Show>
+      <Show when={!props.loading && !props.errorText && !plainText()}>
+        <p class="px-3 py-6 text-center text-sm text-muted-foreground">
+          {props.emptyText ?? '暂无歌词'}
+        </p>
+      </Show>
+      <Show when={!props.loading && !props.errorText && plainText()}>
+        <div
+          ref={container}
+          class={cn(
+            'min-h-0 flex-1 overflow-y-auto px-3 py-8 mask-[linear-gradient(transparent,black_12%,black_88%,transparent)]',
+            props.align === 'left' && 'text-left',
+            props.align === 'right' && 'text-right',
+            (!props.align || props.align === 'center') && 'text-center',
+          )}
+          style={{
+            'font-size': `${props.fontSize ?? 16}px`,
+            'font-family': props.fontFamily || undefined,
+            'line-height': String(props.lineHeight ?? 1.6),
+            'text-shadow': props.textShadow ? '0 1px 4px rgba(0,0,0,.35)' : undefined,
+            'font-weight': props.bold ? '700' : undefined,
+            'writing-mode': props.direction === 'vertical' ? 'vertical-rl' : undefined,
+          }}
+          onWheel={markBrowsing}
+          onTouchStart={markBrowsing}
+          onScroll={() => {
+            if (userBrowsing()) updatePreviewFromScroll();
+          }}
         >
-          {(_lines) => (
-            <ul class="space-y-1">
+          <Show when={!props.singleLine && !(props.maxLines && props.maxLines > 0)}>
+            <div class="h-[38%]" aria-hidden="true" />
+          </Show>
+          <Show
+            when={hasTimedLyric()}
+            fallback={
+              <p class={props.wrap === false ? 'whitespace-nowrap' : 'whitespace-pre-wrap opacity-80'}>
+                {plainText()}
+              </p>
+            }
+          >
+            <ul class="space-y-3">
               <For each={visibleLines()}>
                 {(entry) => (
                   <li
                     data-lyric-active={entry.originalIndex === activeIndex() ? 'true' : undefined}
+                    data-lyric-time={String(entry.line.timeMs)}
                     class={cn(
-                      'transition-colors',
-                      props.onSeek && 'cursor-pointer hover:text-white/80',
+                      'transition-all duration-200',
+                      props.onSeek && 'cursor-pointer hover:opacity-90',
                       entry.originalIndex === activeIndex()
                         ? cn(
-                            'text-white font-medium',
-                            props.zoomActiveLyric !== false && 'scale-105',
+                            'font-medium text-foreground',
+                            props.zoomActiveLyric !== false && 'scale-[1.04]',
                           )
-                        : 'text-white/50',
+                        : 'text-muted-foreground/70',
                     )}
                     style={{
                       color:
@@ -267,11 +427,14 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
                           : props.unplayedColor,
                       'white-space': props.wrap === false ? 'nowrap' : 'normal',
                     }}
-                    onClick={() => props.onSeek?.(entry.line.timeMs / 1000)}
+                    onClick={() => {
+                      if (!props.onSeek || props.allowProgressPreview) return;
+                      props.onSeek(entry.line.timeMs / 1000);
+                    }}
                   >
                     <Show
-                      when={entry.originalIndex === activeIndex() && activeWords()}
-                      fallback={entry.line.text}
+                      when={entry.originalIndex === activeIndex() && entry.line.words}
+                      fallback={<span>{entry.line.text}</span>}
                     >
                       {(words) => (
                         <span>
@@ -279,7 +442,9 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
                             {(w, wi) => (
                               <span
                                 class={cn(
-                                  wi() <= activeWordIndex() ? 'text-white' : 'text-white/40',
+                                  wi() <= activeWordIndex()
+                                    ? 'text-primary'
+                                    : 'text-muted-foreground/50',
                                 )}
                               >
                                 {w.text}
@@ -289,16 +454,47 @@ export function AudioLyricPanel(props: AudioLyricPanelProps) {
                         </span>
                       )}
                     </Show>
+                    <For each={entry.line.extended}>
+                      {(ext) => (
+                        <p class="mt-0.5 text-[0.85em] leading-snug opacity-70">{ext}</p>
+                      )}
+                    </For>
                   </li>
                 )}
               </For>
             </ul>
-          )}
-        </Show>
-        <Show when={secondaryText()?.trim()}>
-          <p class="mt-2 text-xs text-white/60 leading-relaxed">{secondaryText()}</p>
-        </Show>
-      </div>
-    </Show>
+          </Show>
+          <Show when={!props.singleLine && !(props.maxLines && props.maxLines > 0)}>
+            <div class="h-[38%]" aria-hidden="true" />
+          </Show>
+        </div>
+      </Show>
+
+      <Show when={userBrowsing() && props.allowProgressPreview && previewTimeSec() != null && props.onSeek}>
+        <div class="pointer-events-none absolute inset-x-3 top-[42%] z-10 flex -translate-y-1/2 items-center gap-2">
+          <div class="h-px flex-1 border-t border-dashed border-primary/70" />
+          <span class="rounded bg-background/90 px-2 py-0.5 text-xs tabular-nums text-primary shadow">
+            {formatPreviewTime(previewTimeSec() ?? 0)}
+          </span>
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            class="pointer-events-auto h-8 w-8 shadow"
+            aria-label="跳转到此处播放"
+            onClick={() => {
+              const t = previewTimeSec();
+              if (t == null) return;
+              props.onSeek?.(t);
+              setUserBrowsing(false);
+              setPreviewTimeSec(null);
+            }}
+          >
+            <Play class="h-4 w-4" />
+          </Button>
+          <div class="h-px flex-1 border-t border-dashed border-primary/70" />
+        </div>
+      </Show>
+    </div>
   );
-}
+};

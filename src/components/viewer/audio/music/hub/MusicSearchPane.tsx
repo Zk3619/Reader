@@ -187,7 +187,11 @@ export const MusicSearchPane: Component = () => {
                 <MusicSearchLocalGroupList
                   groups={localHits()}
                   onPlay={(tracks, index) =>
-                    void playPlaylist(tracks, index, { origin: 'list' })
+                    void playPlaylist(tracks, index, {
+                      origin: 'list',
+                      listName: '本地匹配',
+                      listKind: 'temporary',
+                    })
                   }
                 />
               </Show>
@@ -225,7 +229,11 @@ export const MusicSearchPane: Component = () => {
                   tracks={state().tracks}
                   source={state().source}
                   onPlay={(tracks, index) =>
-                    void playPlaylist(tracks, index, { origin: 'search' })
+                    void playPlaylist(tracks, index, {
+                      origin: 'search',
+                      listName: `搜索：${state().keyword.trim() || '结果'}`,
+                      listKind: 'search',
+                    })
                   }
                 />
               </div>

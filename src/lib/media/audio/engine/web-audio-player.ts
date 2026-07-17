@@ -26,6 +26,29 @@ export interface AudioOutputDevice {
   isDefault: boolean;
 }
 
+export interface ResolvedOutputDevice {
+  /** 实际可用的 deviceId（缺失时回退为 'default'） */
+  deviceId: string;
+  label: string;
+  /** 保存的设备已不存在，已回退到默认 */
+  missing: boolean;
+}
+
+/** 为无 label 的设备生成兜底名称，并美化 default/communications 伪设备 */
+function friendlyOutputLabel(
+  device: Pick<MediaDeviceInfo, 'deviceId' | 'label'>,
+  index: number,
+): string {
+  const raw = device.label?.trim();
+  if (device.deviceId === 'default') {
+    return raw ? `系统默认（${raw.replace(/^default\s*-\s*/i, '')}）` : '系统默认';
+  }
+  if (device.deviceId === 'communications') {
+    return raw ? `通信设备（${raw.replace(/^communications\s*-\s*/i, '')}）` : '通信设备';
+  }
+  return raw || `音频输出 ${index + 1}`;
+}
+
 export class WebAudioPlayerEngine {
   private ctx: AudioContext | null = null;
   private source: MediaElementAudioSourceNode | null = null;
@@ -115,27 +138,106 @@ export class WebAudioPlayerEngine {
     }
   }
 
+  private freqData: Uint8Array | null = null;
+
   getFrequencyData(): Uint8Array | null {
     if (!this.analyserNode) return null;
-    const data = new Uint8Array(this.analyserNode.frequencyBinCount);
-    this.analyserNode.getByteFrequencyData(data);
-    return data;
+    if (!this.freqData || this.freqData.length !== this.analyserNode.frequencyBinCount) {
+      this.freqData = new Uint8Array(this.analyserNode.frequencyBinCount);
+    }
+    this.analyserNode.getByteFrequencyData(this.freqData);
+    return this.freqData;
   }
 
   static supportsOutputSelection(): boolean {
     return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   }
 
+  static supportsDeviceEnumeration(): boolean {
+    return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.enumerateDevices;
+  }
+
+  /**
+   * 请求媒体权限以显示设备名称：浏览器/WebView 未授权时 enumerateDevices
+   * 返回的 audiooutput label 为空，需先获取一次麦克风权限才能读取标签。
+   * 返回是否成功解锁标签。
+   */
+  static async requestDeviceLabelPermission(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 立即释放，仅为解锁设备标签
+      for (const track of stream.getTracks()) track.stop();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   static async enumerateOutputDevices(): Promise<AudioOutputDevice[]> {
     if (!navigator.mediaDevices?.enumerateDevices) return [];
     const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices
-      .filter((device) => device.kind === 'audiooutput')
-      .map((device, index) => ({
+    const outputs = devices.filter((device) => device.kind === 'audiooutput');
+    const seen = new Set<string>();
+    const result: AudioOutputDevice[] = [];
+    outputs.forEach((device, index) => {
+      // 未授权时 deviceId 为空字符串，不能据此丢弃设备
+      if (device.deviceId && seen.has(device.deviceId)) return;
+      if (device.deviceId) seen.add(device.deviceId);
+      result.push({
         deviceId: device.deviceId,
-        label: device.label || `音频输出 ${index + 1}`,
-        isDefault: device.deviceId === 'default',
-      }));
+        label: friendlyOutputLabel(device, index),
+        isDefault: device.deviceId === 'default' || !device.deviceId,
+      });
+    });
+    // 未授权时可能只拿到空 id 设备：合并为一条“系统默认”，保证可选可用
+    if (result.length > 0 && !result.some((device) => device.deviceId)) {
+      return [{ deviceId: 'default', label: '系统默认', isDefault: true }];
+    }
+    return result;
+  }
+
+  /** 枚举结果是否受权限限制（存在设备但拿不到真实 deviceId/label） */
+  static async isEnumerationRestricted(): Promise<boolean> {
+    if (!navigator.mediaDevices?.enumerateDevices) return false;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outputs = devices.filter((device) => device.kind === 'audiooutput');
+    if (outputs.length === 0) return false;
+    return outputs.every((device) => !device.deviceId || device.deviceId === 'default');
+  }
+
+  /** 是否有任何设备缺少可读标签（需请求权限才能显示名称） */
+  static async hasReadableDeviceLabels(): Promise<boolean> {
+    if (!navigator.mediaDevices?.enumerateDevices) return true;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outputs = devices.filter((device) => device.kind === 'audiooutput');
+    if (outputs.length === 0) return true;
+    return outputs.some((device) => device.label.trim().length > 0);
+  }
+
+  /**
+   * 解析保存的输出设备：对齐 LX 的 getMediaDevice —— 找不到则回退 'default'，
+   * 并标记 missing 以便调用方持久化回退结果。
+   */
+  static async resolveOutputDevice(savedId: string): Promise<ResolvedOutputDevice> {
+    const devices = await WebAudioPlayerEngine.enumerateOutputDevices();
+    const wanted = savedId || 'default';
+    const exact = devices.find((device) => device.deviceId === wanted);
+    if (exact) {
+      return { deviceId: exact.deviceId, label: exact.label, missing: false };
+    }
+    // 未授权时列表只有伪“默认”项，看不到真实设备，不能据此判定保存的设备已失效
+    const restricted = await WebAudioPlayerEngine.isEnumerationRestricted();
+    if (restricted && savedId) {
+      return { deviceId: savedId, label: '', missing: false };
+    }
+    const fallback =
+      devices.find((device) => device.deviceId === 'default') ?? devices[0];
+    return {
+      deviceId: fallback?.deviceId ?? 'default',
+      label: fallback?.label ?? '系统默认',
+      missing: Boolean(savedId),
+    };
   }
 
   setGain(value: number): void {

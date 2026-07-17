@@ -20,7 +20,11 @@ import {
 } from '@/lib/media/audio/music-playback-status';
 import { getActiveUserApiDisplayName } from '@/lib/media/audio/online/user-api-engine';
 import { invalidateTrackUrlCache } from '@/lib/media/audio/online/url-cache';
-import { recordRecentPlay } from '@/lib/database/audio-library';
+import {
+  addTracksToPlaylist,
+  getPlaylistTracks,
+  recordRecentPlay,
+} from '@/lib/database/audio-library';
 import { isTrackDisliked } from '@/lib/media/audio/library/dislike-filter';
 import { revokeAllWebTrackBlobs } from '@/lib/media/audio/library/local-resolver';
 import {
@@ -28,7 +32,11 @@ import {
   createMusicHubSession,
   AUDIO_HUB_BOOK_URL,
 } from '@/lib/media/content-session';
-import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types';
+import {
+  BUILTIN_PLAYLIST_IDS,
+  type AudioTrack,
+  type AudioTrackSource,
+} from '@/lib/media/audio/track-types';
 import {
   dispatchMediaTextFallback,
   ReaderMediaMessages,
@@ -54,12 +62,49 @@ import { AudioPlayMode } from '@/lib/media/audio/types';
 import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { MediaGroupId } from '@/types/book-group';
 import { getMusicGroupByListId } from '@/lib/database/media-groups';
-import type { MusicHubSection } from '@/stores/viewer/base-state';
+import type { MusicHubSection, MusicPlayerListKind } from '@/stores/viewer/base-state';
 
 let playbackRevoke: (() => void) | null = null;
 let restorePlaylistRequestId = 0;
 let randomPlayedTrackKeys = new Set<string>();
 let randomQueueSignature = '';
+const TEMP_PLAYER_LIST_ID = 'temp';
+const PLAYER_LIST_STATE_KEY = 'reader_music_player_list_state';
+
+interface PlayerListSource {
+  id: string | null;
+  name: string | null;
+  kind: MusicPlayerListKind | null;
+}
+
+function persistPlayerListState(listId: string | null, trackIndex: number): void {
+  if (typeof localStorage === 'undefined') return;
+  if (!listId || listId === TEMP_PLAYER_LIST_ID) {
+    localStorage.removeItem(PLAYER_LIST_STATE_KEY);
+    return;
+  }
+  localStorage.setItem(PLAYER_LIST_STATE_KEY, JSON.stringify({ listId, trackIndex }));
+}
+
+function readPersistedPlayerListState(): { listId: string; trackIndex: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PLAYER_LIST_STATE_KEY) ?? 'null') as {
+      listId?: unknown;
+      trackIndex?: unknown;
+    } | null;
+    if (!parsed || typeof parsed.listId !== 'string') return null;
+    return {
+      listId: parsed.listId,
+      trackIndex:
+        typeof parsed.trackIndex === 'number' && Number.isFinite(parsed.trackIndex)
+          ? Math.max(0, Math.floor(parsed.trackIndex))
+          : 0,
+    };
+  } catch {
+    return null;
+  }
+}
 
 const musicTrackKey = (track: AudioTrack): string => `${track.source}:${track.id}`;
 
@@ -127,6 +172,44 @@ export async function restoreActiveMusicPlaylistSelection(): Promise<void> {
   setState({ activePlaylistId, activeMusicGroupId });
 }
 
+async function resolvePlayerListSource(listId: string): Promise<PlayerListSource | null> {
+  if (listId === BUILTIN_PLAYLIST_IDS.LOVE) {
+    return { id: listId, name: '我的收藏', kind: 'builtin' };
+  }
+  const group = await getMusicGroupByListId(listId);
+  if (!group) return null;
+  return {
+    id: listId,
+    name: group.groupName,
+    kind: listId.startsWith('pl_') ? 'user' : 'builtin',
+  };
+}
+
+/** 按持久列表指针恢复队列快照；只恢复上下文，不自动开始播放。 */
+async function restorePlayerListSelection(): Promise<void> {
+  if (state.trackQueue.length > 0 || state.playerListId) return;
+  const remembered = readPersistedPlayerListState();
+  if (!remembered) return;
+  const source = await resolvePlayerListSource(remembered.listId);
+  if (!source) {
+    persistPlayerListState(null, 0);
+    return;
+  }
+  const tracks = await getPlaylistTracks(remembered.listId);
+  if (tracks.length === 0) return;
+  const trackIndex = Math.min(remembered.trackIndex, tracks.length - 1);
+  setState({
+    trackQueue: tracks,
+    trackIndex,
+    playerListId: source.id,
+    playerListName: source.name,
+    playerListKind: source.kind,
+    musicQueueOrigin: 'list',
+    activeSource: tracks[trackIndex]?.source ?? null,
+    contentSession: createMusicHubSession(tracks, trackIndex),
+  });
+}
+
 export function setAudioBookInitialState(book: Book): void {
   setMediaBookInitialState(book, MediaKind.audio);
   setState({
@@ -135,6 +218,9 @@ export function setAudioBookInitialState(book: Book): void {
     trackQueue: [],
     trackIndex: 0,
     musicQueueOrigin: 'other',
+    playerListId: null,
+    playerListName: null,
+    playerListKind: null,
     activePlaylistId: null,
     activeSource: null,
   });
@@ -146,6 +232,7 @@ export async function openMusicHub(options?: {
 }): Promise<void> {
   revokeAudioPlaybackUrls();
   await restoreActiveMusicPlaylistSelection();
+  await restorePlayerListSelection();
   const section: MusicHubSection =
     options?.section ??
     (options?.panel === 'search'
@@ -190,9 +277,22 @@ export async function openMusicHub(options?: {
   }
 }
 
+/** 进入播放详情前的分区，用于详情页返回 */
+let musicSectionBeforeNowPlaying: MusicHubSection = 'list';
+
+export function getMusicSectionBeforeNowPlaying(): MusicHubSection {
+  return musicSectionBeforeNowPlaying === 'nowPlaying'
+    ? 'list'
+    : musicSectionBeforeNowPlaying;
+}
+
 export function setMusicSection(section: MusicHubSection): void {
+  const next = normalizeMusicHubSection(section);
+  if (state.musicSection !== 'nowPlaying' && next === 'nowPlaying') {
+    musicSectionBeforeNowPlaying = state.musicSection;
+  }
   setState({
-    musicSection: normalizeMusicHubSection(section),
+    musicSection: next,
     musicLibraryOpen: false,
     musicSearchOpen: false,
     musicAccountOpen: false,
@@ -214,6 +314,7 @@ export function setActiveMusicGroupId(
   if (playlistId !== undefined) {
     setMusicActivePlaylistId(playlistId ?? 'local');
   }
+  if (clearQueue) persistPlayerListState(null, 0);
   setState({
     activeMusicGroupId: groupId,
     ...(clearQueue
@@ -223,6 +324,9 @@ export function setActiveMusicGroupId(
           mediaUrls: [],
           primaryUrl: null,
           musicQueueOrigin: 'other' as const,
+          playerListId: null,
+          playerListName: null,
+          playerListKind: null,
         }
       : {}),
     ...(playlistId !== undefined ? { activePlaylistId: playlistId } : {}),
@@ -296,6 +400,10 @@ export async function applyMusicTrack(
     })(),
     trackIndex: index,
   });
+  persistPlayerListState(
+    state.playerListKind === 'temporary' ? null : state.playerListId,
+    index,
+  );
   try {
     if (options?.forceRefreshUrl) {
       await invalidateTrackUrlCache(track.id);
@@ -419,23 +527,64 @@ export async function retryMusicTrackPlayback(): Promise<void> {
   await applyMusicTrack(state.trackIndex, { forceRefreshUrl: true });
 }
 
-/** 队列来源：仅 list（歌单 / 我的列表）在失败时允许自动下一首 */
+/** 队列来源：决定失败自动切歌等行为。 */
 export type MusicQueueOrigin = 'search' | 'list' | 'other';
+
+export interface PlayQueueSourceOptions {
+  origin?: MusicQueueOrigin;
+  listId?: string | null;
+  listName?: string | null;
+  listKind?: MusicPlayerListKind | null;
+}
 
 function shouldAutoSkipOnError(queueLength: number): boolean {
   return (
     getMusicSettings().autoSkipOnError !== false &&
-    state.musicQueueOrigin === 'list' &&
+    (state.musicQueueOrigin === 'list' ||
+      state.playerListKind === 'online-playlist' ||
+      state.playerListKind === 'leaderboard' ||
+      state.playerListKind === 'temporary' ||
+      state.playerListKind === 'builtin' ||
+      state.playerListKind === 'user') &&
     queueLength > 1
   );
+}
+
+function playerListPatch(source?: PlayQueueSourceOptions | null) {
+  if (!source) {
+    return {
+      playerListId: null as string | null,
+      playerListName: null as string | null,
+      playerListKind: null as MusicPlayerListKind | null,
+    };
+  }
+  return {
+    playerListId: source.listId ?? null,
+    playerListName: source.listName ?? null,
+    playerListKind: source.listKind ?? null,
+  };
+}
+
+function markQueueTemporary(reasonName?: string | null): void {
+  if (state.playerListKind === 'temporary' || state.playerListKind === 'single') return;
+  setState({
+    playerListId: TEMP_PLAYER_LIST_ID,
+    playerListName: reasonName?.trim() || state.playerListName || '临时播放队列',
+    playerListKind: 'temporary',
+  });
+  persistPlayerListState(null, state.trackIndex);
 }
 
 export function setMusicTrackQueue(
   tracks: AudioTrack[],
   startIndex = 0,
   source?: AudioTrackSource,
-  origin?: MusicQueueOrigin,
+  originOrOptions?: MusicQueueOrigin | PlayQueueSourceOptions,
 ): void {
+  const options: PlayQueueSourceOptions =
+    typeof originOrOptions === 'string'
+      ? { origin: originOrOptions }
+      : (originOrOptions ?? {});
   const nextSignature = getQueueSignature(tracks);
   if (
     nextSignature !== randomQueueSignature ||
@@ -444,32 +593,139 @@ export function setMusicTrackQueue(
     randomPlayedTrackKeys.clear();
   }
   randomQueueSignature = nextSignature;
+  const listPatch = playerListPatch(options);
+  persistPlayerListState(
+    listPatch.playerListKind === 'temporary' ? null : listPatch.playerListId,
+    startIndex,
+  );
   setState({
     trackQueue: tracks,
     trackIndex: startIndex,
     activeSource: source ?? tracks[0]?.source ?? null,
-    ...(origin !== undefined ? { musicQueueOrigin: origin } : {}),
+    ...(options.origin !== undefined ? { musicQueueOrigin: options.origin } : {}),
+    ...listPatch,
     contentSession: createMusicHubSession(tracks, startIndex),
   });
   void applyMusicTrack(startIndex);
 }
 
+/** 我的列表指针播放：加载列表内容作为工作队列，不写入 default。 */
+export async function playByListId(
+  listId: string,
+  startIndex = 0,
+  options?: { listName?: string | null; listKind?: MusicPlayerListKind | null },
+): Promise<void> {
+  const tracks = await getPlaylistTracks(listId);
+  if (tracks.length === 0) return;
+  const source =
+    (await resolvePlayerListSource(listId)) ??
+    ({
+      id: listId,
+      name: options?.listName ?? listId,
+      kind: options?.listKind ?? (listId.startsWith('pl_') ? 'user' : 'builtin'),
+    } satisfies PlayerListSource);
+  const safeIndex = Math.min(Math.max(0, startIndex), tracks.length - 1);
+  setMusicTrackQueue(tracks, safeIndex, tracks[safeIndex]?.source, {
+    origin: 'list',
+    listId: source.id,
+    listName: options?.listName ?? source.name,
+    listKind: options?.listKind ?? source.kind,
+  });
+}
+
+/** 在线歌单/排行榜：写入临时队列，不覆盖播放列表。 */
+export async function playAsTemp(
+  tracks: AudioTrack[],
+  startIndex = 0,
+  options?: {
+    listName?: string | null;
+    listKind?: Extract<MusicPlayerListKind, 'online-playlist' | 'leaderboard' | 'temporary'> | null;
+  },
+): Promise<void> {
+  if (tracks.length === 0) return;
+  setMusicTrackQueue(tracks, startIndex, tracks[startIndex]?.source, {
+    origin: 'list',
+    listId: TEMP_PLAYER_LIST_ID,
+    listName: options?.listName?.trim() || '临时播放队列',
+    listKind: options?.listKind ?? 'temporary',
+  });
+}
+
+/** 搜索/在线单曲：追加到播放列表后按指针播放。 */
+export async function playIntoDefault(
+  tracks: AudioTrack[],
+  startIndex = 0,
+  options?: { listName?: string | null; replace?: boolean },
+): Promise<void> {
+  if (tracks.length === 0) return;
+  if (options?.replace) {
+    const { replaceDefaultPlayList } = await import('@/lib/database/audio-library');
+    await replaceDefaultPlayList(tracks);
+  } else {
+    await addTracksToPlaylist(BUILTIN_PLAYLIST_IDS.DEFAULT, tracks, { position: 'top' });
+  }
+  await playByListId(BUILTIN_PLAYLIST_IDS.DEFAULT, startIndex, {
+    listName: options?.listName ?? '播放列表',
+    listKind: 'builtin',
+  });
+}
+
 export async function playTrack(track: AudioTrack): Promise<void> {
-  setMusicTrackQueue([track], 0, track.source, 'other');
+  await playIntoDefault([track], 0, { listName: '播放列表' });
 }
 
 export async function playPlaylist(
   tracks: AudioTrack[],
   startIndex = 0,
-  options?: { origin?: MusicQueueOrigin },
+  options?: PlayQueueSourceOptions & {
+    /** @deprecated 在线整表播放已改为 temp；保留兼容旧调用点 */
+    replacePlayList?: boolean;
+  },
 ): Promise<void> {
   if (tracks.length === 0) return;
-  setMusicTrackQueue(
-    tracks,
-    startIndex,
-    tracks[startIndex]?.source,
-    options?.origin ?? 'other',
-  );
+  if (options?.listId && options.listId !== TEMP_PLAYER_LIST_ID) {
+    await playByListId(options.listId, startIndex, {
+      listName: options.listName,
+      listKind: options.listKind,
+    });
+    return;
+  }
+  if (
+    options?.replacePlayList ||
+    options?.listKind === 'online-playlist' ||
+    options?.listKind === 'leaderboard' ||
+    options?.listKind === 'temporary'
+  ) {
+    await playAsTemp(tracks, startIndex, {
+      listName: options.listName,
+      listKind:
+        options.listKind === 'online-playlist' || options.listKind === 'leaderboard'
+          ? options.listKind
+          : 'temporary',
+    });
+    return;
+  }
+  if (options?.origin === 'search' || options?.listKind === 'search') {
+    if (getMusicSettings().listDoubleClickToPlay) {
+      await playAsTemp(tracks, startIndex, {
+        listName: options.listName ?? '搜索结果',
+        listKind: 'temporary',
+      });
+      return;
+    }
+    const track = tracks[startIndex] ?? tracks[0];
+    if (!track) return;
+    await playIntoDefault([track], 0, {
+      listName: options.listName ?? '播放列表',
+    });
+    return;
+  }
+  setMusicTrackQueue(tracks, startIndex, tracks[startIndex]?.source, {
+    origin: options?.origin ?? 'other',
+    listId: options?.listId ?? null,
+    listName: options?.listName ?? null,
+    listKind: options?.listKind ?? 'single',
+  });
 }
 
 export function removeFromQueue(index: number): void {
@@ -483,6 +739,8 @@ export function removeFromQueue(index: number): void {
   } else if (index < state.trackIndex) {
     nextIndex = state.trackIndex - 1;
   }
+  markQueueTemporary(state.playerListName ? `${state.playerListName}（已编辑）` : '临时播放队列');
+  persistPlayerListState(null, nextIndex);
   setState({
     trackQueue: queue,
     trackIndex: nextIndex,
@@ -496,11 +754,17 @@ export function playTracksLater(tracks: AudioTrack[]): void {
   if (tracks.length === 0) return;
   const queue = [...state.trackQueue];
   if (queue.length === 0) {
-    setMusicTrackQueue(tracks, 0, tracks[0]?.source, 'other');
+    setMusicTrackQueue(tracks, 0, tracks[0]?.source, {
+      origin: 'other',
+      listId: TEMP_PLAYER_LIST_ID,
+      listName: '稍后播放',
+      listKind: 'temporary',
+    });
     return;
   }
   const insertAt = Math.min(state.trackIndex + 1, queue.length);
   queue.splice(insertAt, 0, ...tracks);
+  markQueueTemporary(state.playerListName ? `${state.playerListName}（含稍后播放）` : '临时播放队列');
   setState({
     trackQueue: queue,
     contentSession: createMusicHubSession(queue, state.trackIndex),

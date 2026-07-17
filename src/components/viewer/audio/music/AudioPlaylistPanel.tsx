@@ -12,7 +12,7 @@ import {
   renamePlaylist,
   removeTrackFromPlaylist,
 } from '@/lib/database/audio-library';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import { playByListId } from '@/stores/viewer/media/audio';
 import { saveNeteasePlaylistAsLocal } from '@/lib/media/audio/platform/playlist-sync';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
@@ -126,7 +126,12 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
               </Button>
               <Button
                 size="sm"
-                onClick={() => void loadPlaylistTracks(selectedId()!).then((t) => playPlaylist(t, 0, { origin: 'list' }))}
+                onClick={() =>
+                  void playByListId(selectedId()!, 0, {
+                    listName: selectedId()!,
+                    listKind: selectedId()!.startsWith('pl_') ? 'user' : 'builtin',
+                  })
+                }
               >
                 播放
               </Button>

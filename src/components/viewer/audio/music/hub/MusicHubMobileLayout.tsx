@@ -34,6 +34,7 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
   const [listDrawerOpen, setListDrawerOpen] = createSignal(false);
 
   const section = () => viewerStore.state.musicSection;
+  const inPlayDetail = () => section() === 'nowPlaying';
 
   const navButtonClass = (id: MusicHubSection) =>
     cn(
@@ -60,7 +61,7 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
           onListDrawerToggle={() => setListDrawerOpen((v) => !v)}
         />
 
-        <Show when={!props.hideChrome}>
+        <Show when={!props.hideChrome && !inPlayDetail()}>
           <nav class="flex shrink-0 items-center justify-around border-t px-1 py-0.5">
           <For each={BOTTOM_NAV}>
             {(item) => {
@@ -86,7 +87,9 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
           </nav>
         </Show>
 
-        <MusicHubPlayBar player={props.player} />
+        <Show when={!inPlayDetail()}>
+          <MusicHubPlayBar player={props.player} />
+        </Show>
       </div>
     </MusicHubMobileChromeContext.Provider>
   );

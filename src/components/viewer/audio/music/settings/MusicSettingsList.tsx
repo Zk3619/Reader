@@ -48,15 +48,20 @@ export const MusicSettingsList: Component = () => {
               记住播放列表滚动条位置（仅对「我的列表」有效）
             </Label>
           </div>
-          <div class="flex items-center gap-2">
-            <Checkbox
-              id="music-list-double-click-play-input"
-              checked={settings().listDoubleClickToPlay}
-              onChange={(checked) => applySettings({ listDoubleClickToPlay: checked })}
-            />
-            <Label for="music-list-double-click-play-input">
-              双击列表里的歌曲时自动切换到当前列表播放（仅对「歌单」和「排行榜」有效）
-            </Label>
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-list-double-click-play-input"
+                checked={settings().listDoubleClickToPlay}
+                onChange={(checked) => applySettings({ listDoubleClickToPlay: checked })}
+              />
+              <Label for="music-list-double-click-play-input">
+                双击列表里的歌曲时自动切换到当前列表播放（对「歌单」「排行榜」「我的列表」均有效；搜索结果开启后会以临时队列播放整页，关闭则加入「播放列表」）
+              </Label>
+            </div>
+            <p class="pl-6 text-xs text-muted-foreground">
+              「播放列表」承接搜索/单曲加入并播放；真正切歌依据仍是播放队列。在线歌单/排行榜整表播放使用临时队列，不会覆盖播放列表。
+            </p>
           </div>
         </div>
         <div class="space-y-2 pt-1">

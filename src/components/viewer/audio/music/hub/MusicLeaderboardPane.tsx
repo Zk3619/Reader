@@ -44,7 +44,7 @@ import {
   getMusicLeaderboardUi,
   setMusicLeaderboardPaginationPreference,
 } from '@/stores/music-hub/music-leaderboard-ui';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
 import { bindPlaylistToSource } from '@/lib/media/audio/list/sync-source-list';
 import { BUILTIN_PLAYLIST_IDS, type AudioTrack } from '@/lib/media/audio/track-types';
@@ -381,7 +381,12 @@ export const MusicLeaderboardPane: Component = () => {
                     variant="ghost"
                     class="h-9 w-9 shrink-0"
                     disabled={d().tracks.length === 0}
-                    onClick={() => void playPlaylist(d().tracks, 0)}
+                    onClick={() =>
+                      void playAsTemp(d().tracks, 0, {
+                        listName: d().board.name,
+                        listKind: 'leaderboard',
+                      })
+                    }
                     aria-label="播放全部"
                   >
                     <PlayIcon class="h-4 w-4" />
@@ -547,7 +552,12 @@ export const MusicLeaderboardPane: Component = () => {
                                 track={track}
                                 index={i()}
                                 tracks={d().tracks}
-                                onPlay={() => void playPlaylist(d().tracks, i())}
+                                onPlay={() =>
+                                  void playAsTemp(d().tracks, i(), {
+                                    listName: d().board.name,
+                                    listKind: 'leaderboard',
+                                  })
+                                }
                               />
                             }
                           >
@@ -555,7 +565,12 @@ export const MusicLeaderboardPane: Component = () => {
                               track={track}
                               index={i()}
                               tracks={d().tracks}
-                              onPlay={() => void playPlaylist(d().tracks, i())}
+                              onPlay={() =>
+                                void playAsTemp(d().tracks, i(), {
+                                  listName: d().board.name,
+                                  listKind: 'leaderboard',
+                                })
+                              }
                             />
                           </Show>
                         </li>

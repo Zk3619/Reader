@@ -24,7 +24,7 @@ import {
   reorderGroupTracks,
 } from '@/lib/database/audio-library';
 import { getGroupById } from '@/lib/database/media-groups';
-import { playPlaylist } from '@/stores/viewer/media/audio';
+import { playByListId, playPlaylist } from '@/stores/viewer/media/audio';
 import { viewerStore } from '@/stores/viewer';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
@@ -492,7 +492,21 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
               reorderBusy={reorderBusy()}
               settings={settings()}
               onToggleSelect={() => toggleSelect(track.id)}
-              onPlay={() => void playPlaylist(list(), index, { origin: 'list' })}
+              onPlay={() => {
+                const listId = playlistId();
+                if (listId) {
+                  void playByListId(listId, index, {
+                    listName: group()?.groupName,
+                    listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
+                  });
+                  return;
+                }
+                void playPlaylist(list(), index, {
+                  origin: 'list',
+                  listName: group()?.groupName ?? '我的列表',
+                  listKind: 'temporary',
+                });
+              }}
               onChanged={handleListChanged}
             />
           )}

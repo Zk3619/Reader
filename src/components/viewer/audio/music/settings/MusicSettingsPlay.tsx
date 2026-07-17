@@ -5,7 +5,14 @@ import {
   NumberField,
   NumberFieldInput,
 } from '@/components/ui/number-field';
-import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
+import {
+  getMusicSettings,
+  setMusicSettings,
+} from '@/lib/media/audio/music-settings';
+import {
+  MUSIC_PLAY_TIMER_ACTION_LABELS,
+  MUSIC_PLAY_TIMER_ACTIONS,
+} from '@/lib/media/audio/music-play-timer';
 import { getMusicPlayConfig, setMusicPlayMode } from '@/lib/media/audio/music-play-config';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { playModeLabel } from '@/lib/media/audio/music-play-config';
@@ -23,6 +30,7 @@ import {
 } from '@/lib/media/audio/online/user-api-engine';
 import { onCleanup, onMount } from 'solid-js';
 import { MusicSettingsAudioOutput } from '@/components/viewer/audio/music/settings/MusicSettingsAudioOutput';
+import type { MusicPlayBarProgressStyle } from '@/lib/media/audio/music-settings';
 import {
   getMusicOfflineMode,
   setMusicOfflineMode,
@@ -56,6 +64,12 @@ const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
   lxlyric: '逐字',
 };
 const PLAY_SPEEDS = ['0.5', '0.75', '1', '1.25', '1.5', '2', '3'] as const;
+const PLAY_BAR_PROGRESS_STYLES = ['mini', 'middle', 'full'] as const;
+const PLAY_BAR_PROGRESS_STYLE_LABELS: Record<MusicPlayBarProgressStyle, string> = {
+  mini: '迷你',
+  middle: '中等',
+  full: '全宽',
+};
 
 export const MusicSettingsPlay: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
@@ -151,15 +165,20 @@ export const MusicSettingsPlay: Component = () => {
           调换歌词翻译与歌词罗马音位置
         </Label>
       </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Checkbox
-          id="music-play-auto-skip-error-input"
-          checked={settings().autoSkipOnError !== false}
-          onChange={(checked) => applySettings({ autoSkipOnError: checked })}
-        />
-        <Label for="music-play-auto-skip-error-input">
-          播放错误时自动切换歌曲
-        </Label>
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2 text-sm">
+          <Checkbox
+            id="music-play-auto-skip-error-input"
+            checked={settings().autoSkipOnError !== false}
+            onChange={(checked) => applySettings({ autoSkipOnError: checked })}
+          />
+          <Label for="music-play-auto-skip-error-input">
+            播放错误时自动切换歌曲
+          </Label>
+        </div>
+        <p class="pl-6 text-xs text-muted-foreground">
+          仅在以列表方式播放（「我的列表」指针队列、「歌单/排行榜」临时队列，且多于一首）时生效；单曲加入播放列表后的短队列也会跳过。
+        </p>
       </div>
       <div class="flex items-center gap-2 text-sm">
         <Checkbox
@@ -280,6 +299,21 @@ export const MusicSettingsPlay: Component = () => {
         <Label for="music-play-allow-progress-seek-input">允许拖动播放进度条</Label>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">播放栏进度条样式：</span>
+        <MusicAppSelect
+          value={settings().playBarProgressStyle}
+          onChange={(value) =>
+            applySettings({
+              playBarProgressStyle: value as MusicPlayBarProgressStyle,
+            })
+          }
+          options={PLAY_BAR_PROGRESS_STYLES}
+          optionLabel={(value) => PLAY_BAR_PROGRESS_STYLE_LABELS[value]}
+          triggerClass="w-28"
+          aria-label="播放栏进度条样式"
+        />
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">默认播放模式：</span>
         <MusicAppSelect
           value={String(playCfg().playMode)}
@@ -387,28 +421,44 @@ export const MusicSettingsPlay: Component = () => {
           <NumberFieldInput class="w-20" aria-label="歌词偏移" />
         </NumberField>
       </div>
-      <div class="flex flex-wrap items-center gap-2 text-sm">
-        <span class="text-muted-foreground">定时停止（秒，0=关闭）：</span>
-        <NumberField
-          rawValue={settings().playTimeoutSec ?? 0}
-          onRawValueChange={(v) => applySettings({ playTimeoutSec: v })}
-          minValue={0}
-        >
-          <NumberFieldInput class="w-20" aria-label="播放超时" />
-        </NumberField>
-      </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Checkbox
-          id="music-play-timeout-wait-track-end-input"
-          checked={settings().playTimeoutWaitForTrackEnd}
-          disabled={(settings().playTimeoutSec ?? 0) <= 0}
-          onChange={(checked) =>
-            applySettings({ playTimeoutWaitForTrackEnd: checked })
-          }
-        />
-        <Label for="music-play-timeout-wait-track-end-input">
-          定时结束后等待当前歌曲播放完成
-        </Label>
+      <div class="space-y-3 text-sm">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">默认定时时长（分钟，0=关闭）：</span>
+          <NumberField
+            rawValue={Math.round((settings().playTimeoutSec ?? 0) / 60)}
+            onRawValueChange={(v) =>
+              applySettings({
+                playTimeoutSec: Math.max(0, Math.round(v) * 60),
+                playTimerTargetAt:
+                  settings().playTimerTargetAt > Date.now()
+                    ? Date.now() + Math.max(0, Math.round(v) * 60_000)
+                    : settings().playTimerTargetAt,
+              })
+            }
+            minValue={0}
+          >
+            <NumberFieldInput class="w-20" aria-label="默认定时时长分钟" />
+          </NumberField>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-muted-foreground">定时结束后行为：</span>
+          <MusicAppSelect
+            value={settings().playTimerAction}
+            onChange={(value) =>
+              applySettings({
+                playTimerAction: value,
+                playTimeoutWaitForTrackEnd: value !== 'pause',
+              })
+            }
+            options={[...MUSIC_PLAY_TIMER_ACTIONS]}
+            optionLabel={(value) => MUSIC_PLAY_TIMER_ACTION_LABELS[value]}
+            triggerClass="w-56"
+            aria-label="定时结束后行为"
+          />
+        </div>
+        <p class="text-xs text-muted-foreground">
+          详情页可按持续时长或指定日期时间启用定时。“暂停播放”立即执行，其余行为会等待当前歌曲播放完毕。
+        </p>
       </div>
       <div class="flex items-center gap-2 text-sm">
         <Checkbox

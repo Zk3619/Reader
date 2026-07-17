@@ -21,6 +21,15 @@ export type MusicHubSection =
   | 'settings'
   | 'nowPlaying';
 
+export type MusicPlayerListKind =
+  | 'builtin'
+  | 'user'
+  | 'online-playlist'
+  | 'leaderboard'
+  | 'search'
+  | 'temporary'
+  | 'single';
+
 /** 所有 Viewer 共享的基础状态 */
 export interface BaseViewerState {
   book: Book | null;
@@ -63,6 +72,12 @@ export interface ViewerState extends BaseViewerState {
    * list = 歌单 / 「我的列表」；search = 搜索结果；other = 榜单/专辑/单曲等。
    */
   musicQueueOrigin: 'search' | 'list' | 'other';
+  /** 当前播放队列绑定的列表；与侧栏浏览中的 activePlaylistId 相互独立。 */
+  playerListId: string | null;
+  /** 播放来源列表名快照，用于播放条和队列面板展示。 */
+  playerListName: string | null;
+  /** 当前队列的来源类型；temporary 表示在线歌单/排行榜或已分离的编辑队列。 */
+  playerListKind: MusicPlayerListKind | null;
   activePlaylistId: string | null;
   /** music 模式当前 media_groups 分组 ID */
   activeMusicGroupId: number | null;

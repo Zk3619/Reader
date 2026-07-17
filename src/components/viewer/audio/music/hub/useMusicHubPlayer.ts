@@ -8,6 +8,7 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
 } from 'solid-js';
 import { viewerStore } from '@/stores/viewer';
 import {
@@ -34,7 +35,9 @@ import {
   getMusicSettings,
   setMusicSettings,
   subscribeMusicSettings,
+  type MusicPlayTimerAction,
 } from '@/lib/media/audio/music-settings';
+import { executeMusicPlayTimerSystemAction } from '@/lib/media/audio/music-play-timer';
 import { isTauri } from '@/lib/platform/detect';
 import { startMusicOpenApiStateSync } from '@/lib/media/audio/platform/music-openapi-state';
 import {
@@ -117,10 +120,12 @@ export function useMusicHubPlayer() {
   const [musicPlayMode, setMusicPlayMode] = createSignal(getMusicPlayConfig().playMode);
   const setMusicVolume = (value: number) => {
     const normalized = Math.max(0, Math.min(1, value));
+    if (normalized === musicVolume()) return;
     setMusicVolumeSignal(normalized);
     setMusicSettings({ musicVolume: normalized });
   };
   const setMusicMuted = (value: boolean) => {
+    if (value === musicMuted()) return;
     setMusicMutedSignal(value);
     setMusicSettings({ musicMuted: value });
   };
@@ -162,16 +167,18 @@ export function useMusicHubPlayer() {
     return settings().startupAutoPlay;
   };
 
-  let stopAfterCurrentTrack = false;
   let playTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
-  let playTimeoutDeadline: number | undefined;
-  let configuredPlayTimeoutSec = 0;
-  let playTimeoutCompleted = false;
-  const playTimeoutSec = createMemo(() => settings().playTimeoutSec ?? 0);
+  let configuredPlayTimerTargetAt = 0;
+  let pendingTimerEndAction: Exclude<MusicPlayTimerAction, 'pause'> | null = null;
+  const playTimerTargetAt = createMemo(() => settings().playTimerTargetAt ?? 0);
 
   const handleEnded = async () => {
-    if (stopAfterCurrentTrack) {
-      stopAfterCurrentTrack = false;
+    const timerAction = pendingTimerEndAction;
+    if (timerAction) {
+      pendingTimerEndAction = null;
+      if (timerAction === 'exit-after-track' || timerAction === 'shutdown-after-track') {
+        await executeMusicPlayTimerSystemAction(timerAction);
+      }
       return;
     }
     await playNextTrack();
@@ -205,11 +212,17 @@ export function useMusicHubPlayer() {
       void (async () => {
         const { getMusicSettings } = await import('@/lib/media/audio/music-settings');
         const origin = viewerStore.state.musicQueueOrigin;
-        if (
+        const kind = viewerStore.state.playerListKind;
+        const canAutoSkip =
           getMusicSettings().autoSkipOnError !== false &&
-          origin === 'list' &&
-          trackQueue().length > 1
-        ) {
+          trackQueue().length > 1 &&
+          (origin === 'list' ||
+            kind === 'online-playlist' ||
+            kind === 'leaderboard' ||
+            kind === 'temporary' ||
+            kind === 'builtin' ||
+            kind === 'user');
+        if (canAutoSkip) {
           console.warn('[music] autoSkipOnError after decode/playback error');
           await playNextTrackAfterError();
           return;
@@ -221,26 +234,24 @@ export function useMusicHubPlayer() {
 
   createEffect(() => {
     const track = currentTrack();
-    const timeoutSec = playTimeoutSec();
-    if (timeoutSec !== configuredPlayTimeoutSec) {
+    const targetAt = playTimerTargetAt();
+    if (targetAt !== configuredPlayTimerTargetAt) {
       if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
       playTimeoutTimer = undefined;
-      playTimeoutDeadline = undefined;
-      playTimeoutCompleted = false;
-      stopAfterCurrentTrack = false;
-      configuredPlayTimeoutSec = timeoutSec;
+      configuredPlayTimerTargetAt = targetAt;
+      if (targetAt > 0) pendingTimerEndAction = null;
     }
-    if (!track || timeoutSec <= 0 || playTimeoutCompleted || playTimeoutTimer) return;
-    playTimeoutDeadline ??= Date.now() + timeoutSec * 1000;
+    if (!track || targetAt <= 0 || playTimeoutTimer) return;
     playTimeoutTimer = setTimeout(() => {
       playTimeoutTimer = undefined;
-      playTimeoutCompleted = true;
-      if (getMusicSettings().playTimeoutWaitForTrackEnd) {
-        stopAfterCurrentTrack = true;
-      } else if (player.playing()) {
-        player.togglePlay();
+      const action = getMusicSettings().playTimerAction;
+      if (action === 'pause') {
+        if (player.playing()) player.togglePlay();
+      } else {
+        pendingTimerEndAction = action;
       }
-    }, Math.max(0, playTimeoutDeadline - Date.now()));
+      setMusicSettings({ playTimerTargetAt: 0 });
+    }, Math.max(0, targetAt - Date.now()));
   });
   onCleanup(() => {
     if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
@@ -258,40 +269,50 @@ export function useMusicHubPlayer() {
   createEffect(() => {
     const t = currentTrack();
     const bundle = fetchedLyricBundle();
-    const stopSync = startMusicOpenApiStateSync(() => ({
-      playing: player.playing(),
-      position: player.currentTime(),
-      duration: player.duration(),
-      volume: musicVolume(),
-      muted: musicMuted(),
-      collected: musicCollected(),
-      trackName: t?.name,
-      trackArtist: t?.artist,
-      trackSource: t?.source,
-      lyric: fetchedLyric(),
-      lyricAll: bundle
-        ? {
-            lyric: pickLyricText(bundle, 'lyric') ?? '',
-            tlyric: pickLyricText(bundle, 'tlyric') ?? '',
-            rlyric: pickLyricText(bundle, 'rlyric') ?? '',
-            lxlyric: pickLyricText(bundle, 'lxlyric') ?? '',
-          }
-        : undefined,
-    }));
+    // 仅在曲目/歌词包变化时重建同步；进度由 interval 内 untrack 读取
+    void t?.id;
+    void t?.source;
+    void bundle;
+    const stopSync = startMusicOpenApiStateSync(() =>
+      untrack(() => ({
+        playing: player.playing(),
+        position: player.currentTime(),
+        duration: player.duration(),
+        volume: musicVolume(),
+        muted: musicMuted(),
+        collected: musicCollected(),
+        trackName: currentTrack()?.name,
+        trackArtist: currentTrack()?.artist,
+        trackSource: currentTrack()?.source,
+        lyric: fetchedLyric(),
+        lyricAll: fetchedLyricBundle()
+          ? {
+              lyric: pickLyricText(fetchedLyricBundle(), 'lyric') ?? '',
+              tlyric: pickLyricText(fetchedLyricBundle(), 'tlyric') ?? '',
+              rlyric: pickLyricText(fetchedLyricBundle(), 'rlyric') ?? '',
+              lxlyric: pickLyricText(fetchedLyricBundle(), 'lxlyric') ?? '',
+            }
+          : undefined,
+      })),
+    );
     onCleanup(stopSync);
   });
 
   createEffect(() => {
     notifyAudioShellPlayingChanged();
     const t = currentTrack();
-    void syncAndroidMediaSession({
-      playing: player.playing(),
-      title: t?.name ?? '音乐',
-      artist: t?.artist,
-      coverUrl: typeof t?.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
-      positionSec: player.currentTime(),
-      durationSec: player.duration(),
-    });
+    const playing = player.playing();
+    const pushSession = () => {
+      void syncAndroidMediaSession({
+        playing: untrack(() => player.playing()),
+        title: t?.name ?? '音乐',
+        artist: t?.artist,
+        coverUrl: typeof t?.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
+        positionSec: untrack(() => player.currentTime()),
+        durationSec: untrack(() => player.duration()),
+      });
+    };
+    pushSession();
     if (t) {
       globalMediaPlayerStore.updateMeta({
         title: t.name,
@@ -300,6 +321,9 @@ export function useMusicHubPlayer() {
         coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
       });
     }
+    if (!playing) return;
+    const timer = window.setInterval(pushSession, 1000);
+    onCleanup(() => clearInterval(timer));
   });
 
   createEffect(() => {
@@ -309,13 +333,29 @@ export function useMusicHubPlayer() {
   });
 
   createEffect(() => {
+    const enabled = settings().showTaskbarProgress;
+    const playing = player.playing();
+    const hasError = Boolean(error());
+    // 曲目切换时推一次；播放中由定时器刷新进度
+    void currentTrack()?.id;
     void setMusicTaskbarProgress({
-      enabled: settings().showTaskbarProgress,
-      playing: player.playing(),
-      hasError: Boolean(error()),
-      position: player.currentTime(),
-      duration: player.duration(),
+      enabled,
+      playing,
+      hasError,
+      position: untrack(() => player.currentTime()),
+      duration: untrack(() => player.duration()),
     });
+    if (!enabled) return;
+    const timer = window.setInterval(() => {
+      void setMusicTaskbarProgress({
+        enabled: true,
+        playing: untrack(() => player.playing()),
+        hasError: Boolean(untrack(() => error())),
+        position: untrack(() => player.currentTime()),
+        duration: untrack(() => player.duration()),
+      });
+    }, 1000);
+    onCleanup(() => clearInterval(timer));
   });
 
   createEffect(() => {
@@ -368,38 +408,52 @@ export function useMusicHubPlayer() {
     const lyric = fetchedLyric();
     const bundle = fetchedLyricBundle();
     if (!t || !lyric) return;
-    void emitDesktopLyric({
-      title: t.name,
-      artist: t.artist,
-      lyric,
-      lyricAll: bundle
-        ? {
-            lyric: pickLyricText(bundle, 'lyric') ?? '',
-            tlyric: pickLyricText(bundle, 'tlyric') ?? '',
-            rlyric: pickLyricText(bundle, 'rlyric') ?? '',
-            lxlyric: pickLyricText(bundle, 'lxlyric') ?? '',
-          }
-        : undefined,
-      positionSec: player.currentTime(),
-      playing: player.playing(),
-      fullscreen: document.fullscreenElement != null,
-    });
+    const playing = player.playing();
+    const push = () => {
+      void emitDesktopLyric({
+        title: t.name,
+        artist: t.artist,
+        lyric,
+        lyricAll: bundle
+          ? {
+              lyric: pickLyricText(bundle, 'lyric') ?? '',
+              tlyric: pickLyricText(bundle, 'tlyric') ?? '',
+              rlyric: pickLyricText(bundle, 'rlyric') ?? '',
+              lxlyric: pickLyricText(bundle, 'lxlyric') ?? '',
+            }
+          : undefined,
+        positionSec: untrack(() => player.currentTime()),
+        playing: untrack(() => player.playing()),
+        fullscreen: document.fullscreenElement != null,
+      });
+    };
+    push();
+    if (!playing) return;
+    const timer = window.setInterval(push, 500);
+    onCleanup(() => clearInterval(timer));
   });
 
   let webAudio: WebAudioPlayerEngine | undefined;
   let unlistenAndroid: (() => void) | undefined;
 
   onMount(() => {
-    let outputDeviceIdentity: string | undefined;
-    const readOutputDeviceIdentity = async (outputId: string): Promise<string> => {
-      const devices = await WebAudioPlayerEngine.enumerateOutputDevices();
-      const selected = outputId
-        ? devices.find((device) => device.deviceId === outputId)
-        : devices.find((device) => device.isDefault || device.deviceId === 'default');
-      return selected ? `${selected.deviceId}:${selected.label}` : `missing:${outputId}`;
+    // 以 label 作为“当前设备身份”，对齐 LX：设备拔插后 label 变化才算切换
+    let prevDeviceLabel: string | undefined;
+    const applyResolvedOutput = async (savedId: string) => {
+      const resolved = await WebAudioPlayerEngine.resolveOutputDevice(savedId);
+      if (resolved.missing) {
+        // 保存的设备已不存在：回退到默认并持久化
+        setMusicSettings({
+          audioOutputDeviceId: resolved.deviceId === 'default' ? '' : resolved.deviceId,
+        });
+      }
+      await webAudio?.setOutputDevice(
+        resolved.deviceId === 'default' ? '' : resolved.deviceId,
+      );
+      return resolved;
     };
-    void readOutputDeviceIdentity(settings().audioOutputDeviceId).then((identity) => {
-      outputDeviceIdentity = identity;
+    void applyResolvedOutput(settings().audioOutputDeviceId).then((resolved) => {
+      prevDeviceLabel = resolved.label;
     });
     const unsubscribeSettings = subscribeMusicSettings((next) => {
       setSettings(next);
@@ -411,9 +465,8 @@ export function useMusicHubPlayer() {
       if (next.eqCustomGains) webAudio?.applyCustomEq(next.eqCustomGains);
       else webAudio?.applyEqPreset(next.eqPreset);
       webAudio?.setMaxChannels(next.audioUseMaxChannels ? 32 : next.audioMaxChannels);
-      void webAudio?.setOutputDevice(next.audioOutputDeviceId);
-      void readOutputDeviceIdentity(next.audioOutputDeviceId).then((identity) => {
-        outputDeviceIdentity = identity;
+      void applyResolvedOutput(next.audioOutputDeviceId).then((resolved) => {
+        prevDeviceLabel = resolved.label;
       });
     });
     onCleanup(unsubscribeSettings);
@@ -466,11 +519,11 @@ export function useMusicHubPlayer() {
       );
     }
     const handleDeviceChange = async () => {
-      const outputId = settings().audioOutputDeviceId;
-      const nextIdentity = await readOutputDeviceIdentity(outputId);
+      const resolved = await applyResolvedOutput(settings().audioOutputDeviceId);
       const changed =
-        outputDeviceIdentity !== undefined && outputDeviceIdentity !== nextIdentity;
-      outputDeviceIdentity = nextIdentity;
+        prevDeviceLabel !== undefined && prevDeviceLabel !== resolved.label;
+      prevDeviceLabel = resolved.label;
+      // 对齐 LX：当前声音输出设备被改变时暂停播放
       if (changed && settings().audioPauseOnDeviceRemoved && player.playing()) {
         player.togglePlay();
       }
@@ -544,6 +597,19 @@ export function useMusicHubPlayer() {
         ? 32
         : currentSettings.audioMaxChannels,
     });
+    // 绑定后再次解析：若保存设备已失效则回退并持久化
+    void WebAudioPlayerEngine.resolveOutputDevice(currentSettings.audioOutputDeviceId).then(
+      async (resolved) => {
+        if (resolved.missing) {
+          setMusicSettings({
+            audioOutputDeviceId: resolved.deviceId === 'default' ? '' : resolved.deviceId,
+          });
+        }
+        await webAudio?.setOutputDevice(
+          resolved.deviceId === 'default' ? '' : resolved.deviceId,
+        );
+      },
+    );
     void webAudio.resume();
   };
   onCleanup(() => webAudio?.dispose());

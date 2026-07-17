@@ -11,7 +11,6 @@ import {
 } from 'solid-js';
 import {
   FastForward,
-  Gauge,
   ListMusic,
   ListPlus,
   Music2,
@@ -43,6 +42,7 @@ import {
 import { audioI18n } from '@/lib/media/audio/audio-i18n';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
 import { playNextTrack, playPrevTrack, setMusicSection } from '@/stores/viewer/media/audio';
+import { viewerStore } from '@/stores/viewer';
 import {
   formatMusicTime,
   type useMusicHubPlayer,
@@ -55,11 +55,11 @@ import {
 } from '@/lib/media/audio/music-play-config';
 import {
   getMusicSettings,
-  setMusicSettings,
   subscribeMusicSettings,
+  type MusicPlayBarProgressStyle,
 } from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
-import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { cn } from '@/lib/utils';
 
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
   { value: AudioPlayMode.listEndStop, label: '列表结束停止', icon: Square },
@@ -99,19 +99,69 @@ export interface MusicHubPlayBarProps {
   player: ReturnType<typeof useMusicHubPlayer>;
 }
 
+interface MusicProgressSliderProps {
+  currentTime: number;
+  duration: number;
+  disabled: boolean;
+  variant: MusicPlayBarProgressStyle;
+  onSeek: (seconds: number) => void;
+}
+
+const MusicProgressSlider: Component<MusicProgressSliderProps> = (props) => {
+  const duration = () =>
+    Number.isFinite(props.duration) && props.duration > 0 ? props.duration : 0;
+  const currentTime = () =>
+    Math.max(0, Math.min(duration(), Number.isFinite(props.currentTime) ? props.currentTime : 0));
+
+  return (
+    <Slider
+      class={
+        props.variant === 'full'
+          ? 'group h-3 w-full cursor-pointer px-1.5'
+          : 'group h-5 w-full cursor-pointer'
+      }
+      minValue={0}
+      maxValue={Math.max(1, duration())}
+      step={0.1}
+      value={[currentTime()]}
+      disabled={props.disabled || duration() <= 0}
+      aria-label="播放进度"
+      onChange={(value) => {
+        const next = value[0];
+        if (duration() > 0 && Number.isFinite(next)) props.onSeek(next);
+      }}
+    >
+      <SliderTrack
+        class={
+          props.variant === 'full'
+            ? 'h-0.5 rounded-none bg-muted-foreground/25'
+            : 'h-1 bg-muted-foreground/25'
+        }
+      >
+        <SliderFill class={props.variant === 'full' ? 'rounded-none' : undefined} />
+        <SliderThumb class="top-[-4px] size-3 border-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
+      </SliderTrack>
+    </Slider>
+  );
+};
+
 export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const track = () => props.player.currentTrack();
   const offline = createMemo(() => getMusicOfflineMode());
   const [addOpen, setAddOpen] = createSignal(false);
+  const [progressOpen, setProgressOpen] = createSignal(false);
   const [volumeOpen, setVolumeOpen] = createSignal(false);
-  const [speedOpen, setSpeedOpen] = createSignal(false);
-  const [playSpeed, setPlaySpeed] = createSignal(getMusicSettings().playSpeed);
-  const [speedInput, setSpeedInput] = createSignal(String(playSpeed()));
+  const [progressStyle, setProgressStyle] = createSignal(
+    getMusicSettings().playBarProgressStyle,
+  );
+  const [allowProgressSeek, setAllowProgressSeek] = createSignal(
+    getMusicSettings().allowProgressBarSeek,
+  );
   const [desktopLyricOpen, setDesktopLyricOpen] = createSignal(false);
   let volumeOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let volumeCloseTimer: ReturnType<typeof setTimeout> | undefined;
-  let speedOpenTimer: ReturnType<typeof setTimeout> | undefined;
-  let speedCloseTimer: ReturnType<typeof setTimeout> | undefined;
+  let progressOpenTimer: ReturnType<typeof setTimeout> | undefined;
+  let progressCloseTimer: ReturnType<typeof setTimeout> | undefined;
 
   const lyricLine = createMemo(() =>
     currentLyricLine(
@@ -120,15 +170,42 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     ),
   );
   const statusLine = createMemo(() => {
+    const source = viewerStore.state.playerListName;
     const status = props.player.error() || props.player.playbackStatus();
     const lyric = lyricLine();
-    const parts = [status, lyric].filter(
+    const parts = [source ? `来自 ${source}` : null, status, lyric].filter(
       (value, index, values) => value && values.indexOf(value) === index,
     );
     if (offline()) parts.push('离线');
     return parts.join(' · ') || audioI18n.hubTitle();
   });
+  const progressRatio = createMemo(() => {
+    const duration = props.player.player.duration();
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    return Math.max(0, Math.min(1, props.player.player.currentTime() / duration));
+  });
 
+  const clearProgressTimers = () => {
+    if (progressOpenTimer) clearTimeout(progressOpenTimer);
+    if (progressCloseTimer) clearTimeout(progressCloseTimer);
+    progressOpenTimer = undefined;
+    progressCloseTimer = undefined;
+  };
+  const scheduleProgressOpen = () => {
+    if (progressOpen()) return;
+    clearProgressTimers();
+    progressOpenTimer = setTimeout(() => setProgressOpen(true), 350);
+  };
+  const scheduleProgressClose = () => {
+    if (progressOpenTimer) clearTimeout(progressOpenTimer);
+    progressOpenTimer = undefined;
+    if (!progressOpen()) return;
+    progressCloseTimer = setTimeout(() => setProgressOpen(false), 300);
+  };
+  const keepProgressOpen = () => {
+    if (progressCloseTimer) clearTimeout(progressCloseTimer);
+    progressCloseTimer = undefined;
+  };
   const clearVolumeTimers = () => {
     if (volumeOpenTimer) clearTimeout(volumeOpenTimer);
     if (volumeCloseTimer) clearTimeout(volumeCloseTimer);
@@ -150,49 +227,13 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     if (volumeCloseTimer) clearTimeout(volumeCloseTimer);
     volumeCloseTimer = undefined;
   };
-  const clearSpeedTimers = () => {
-    if (speedOpenTimer) clearTimeout(speedOpenTimer);
-    if (speedCloseTimer) clearTimeout(speedCloseTimer);
-    speedOpenTimer = undefined;
-    speedCloseTimer = undefined;
-  };
-  const scheduleSpeedOpen = () => {
-    if (speedOpen()) return;
-    clearSpeedTimers();
-    speedOpenTimer = setTimeout(() => setSpeedOpen(true), 350);
-  };
-  const scheduleSpeedClose = () => {
-    if (speedOpenTimer) clearTimeout(speedOpenTimer);
-    speedOpenTimer = undefined;
-    if (!speedOpen()) return;
-    speedCloseTimer = setTimeout(() => setSpeedOpen(false), 300);
-  };
-  const keepSpeedOpen = () => {
-    if (speedCloseTimer) clearTimeout(speedCloseTimer);
-    speedCloseTimer = undefined;
-  };
-  const applyPlaySpeed = (value: number) => {
-    const speed = Math.max(0.5, Math.min(3, value));
-    setPlaySpeed(speed);
-    setSpeedInput(String(speed));
-    props.player.player.setPlaybackRate(speed);
-    setMusicSettings({ playSpeed: speed });
-  };
-  const commitSpeedInput = () => {
-    const value = Number(speedInput());
-    if (!Number.isFinite(value)) {
-      setSpeedInput(String(playSpeed()));
-      return;
-    }
-    applyPlaySpeed(value);
-  };
   const unsubscribeSettings = subscribeMusicSettings((settings) => {
-    setPlaySpeed(settings.playSpeed);
-    setSpeedInput(String(settings.playSpeed));
+    setProgressStyle(settings.playBarProgressStyle);
+    setAllowProgressSeek(settings.allowProgressBarSeek);
   });
   onCleanup(() => {
+    clearProgressTimers();
     clearVolumeTimers();
-    clearSpeedTimers();
     unsubscribeSettings();
   });
 
@@ -211,8 +252,22 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   return (
     <>
       <div
-        class="flex min-h-16 shrink-0 items-center gap-3 border-t bg-background/95 px-3 py-2 backdrop-blur sm:px-4"
+        class={cn(
+          'relative flex min-h-16 shrink-0 items-center gap-3 bg-background/95 px-3 py-2 backdrop-blur sm:px-4',
+          progressStyle() !== 'full' && 'border-t',
+        )}
       >
+        <Show when={progressStyle() === 'full'}>
+          <div class="absolute inset-x-0 top-0 z-10 -translate-y-1/2">
+            <MusicProgressSlider
+              currentTime={props.player.player.currentTime()}
+              duration={props.player.player.duration()}
+              disabled={!track() || !allowProgressSeek()}
+              variant="full"
+              onSeek={(seconds) => props.player.player.seekTo(seconds)}
+            />
+          </div>
+        </Show>
         <AppTooltip>
           <AppTooltipTrigger as="div" class="shrink-0">
             <button
@@ -247,10 +302,83 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
           class="flex shrink-0 items-center gap-0.5 sm:gap-1"
           onClick={(event) => event.stopPropagation()}
         >
-          <span class="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground lg:inline">
-            {formatMusicTime(props.player.player.currentTime())} /{' '}
-            {formatMusicTime(props.player.player.duration())}
-          </span>
+          <Show
+            when={progressStyle() === 'middle'}
+            fallback={
+              <Show
+                when={progressStyle() === 'mini'}
+                fallback={
+                  <span class="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground lg:inline">
+                    {formatMusicTime(props.player.player.currentTime())} /{' '}
+                    {formatMusicTime(props.player.player.duration())}
+                  </span>
+                }
+              >
+                <div
+                  class="hidden lg:inline-flex"
+                  onMouseEnter={scheduleProgressOpen}
+                  onMouseLeave={scheduleProgressClose}
+                >
+                  <Popover open={progressOpen()} onOpenChange={setProgressOpen}>
+                    <PopoverTrigger
+                      as={Button}
+                      variant="ghost"
+                      class="flex h-9 w-28 flex-col gap-1 px-2 py-1"
+                      aria-label="播放进度"
+                    >
+                      <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                        {formatMusicTime(props.player.player.currentTime())} /{' '}
+                        {formatMusicTime(props.player.player.duration())}
+                      </span>
+                      <span class="h-0.5 w-full overflow-hidden rounded-full bg-muted-foreground/25">
+                        <span
+                          class="block h-full w-full origin-left rounded-full bg-primary"
+                          style={{ transform: `scaleX(${progressRatio()})` }}
+                        />
+                      </span>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      class="w-80 p-3"
+                      onMouseEnter={keepProgressOpen}
+                      onMouseLeave={scheduleProgressClose}
+                    >
+                      <div class="flex items-center gap-3">
+                        <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                          {formatMusicTime(props.player.player.currentTime())}
+                        </span>
+                        <MusicProgressSlider
+                          currentTime={props.player.player.currentTime()}
+                          duration={props.player.player.duration()}
+                          disabled={!track() || !allowProgressSeek()}
+                          variant="mini"
+                          onSeek={(seconds) => props.player.player.seekTo(seconds)}
+                        />
+                        <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                          {formatMusicTime(props.player.player.duration())}
+                        </span>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </Show>
+            }
+          >
+            <div class="hidden w-[clamp(12rem,24vw,28rem)] items-center gap-2 lg:flex">
+              <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                {formatMusicTime(props.player.player.currentTime())}
+              </span>
+              <MusicProgressSlider
+                currentTime={props.player.player.currentTime()}
+                duration={props.player.player.duration()}
+                disabled={!track() || !allowProgressSeek()}
+                variant="middle"
+                onSeek={(seconds) => props.player.player.seekTo(seconds)}
+              />
+              <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                {formatMusicTime(props.player.player.duration())}
+              </span>
+            </div>
+          </Show>
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
               <Button
@@ -348,73 +476,6 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                       </SliderTrack>
                     </Slider>
                   </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div
-            class="hidden md:inline-flex"
-            onMouseEnter={scheduleSpeedOpen}
-            onMouseLeave={scheduleSpeedClose}
-          >
-            <Popover
-              open={speedOpen()}
-              onOpenChange={(open) => {
-                setSpeedOpen(open);
-                if (open) setSpeedInput(String(playSpeed()));
-              }}
-            >
-              <PopoverTrigger
-                as={Button}
-                variant="ghost"
-                size="icon"
-                class="h-9 w-9"
-                aria-label={`播放倍速 ${playSpeed()} 倍`}
-              >
-                <Gauge class="h-4 w-4" />
-              </PopoverTrigger>
-              <PopoverContent
-                class="w-52 p-3"
-                onMouseEnter={keepSpeedOpen}
-                onMouseLeave={scheduleSpeedClose}
-              >
-                <div class="space-y-3">
-                  <div class="flex items-center px-1 gap-3">
-                    <Slider
-                      class="flex-1"
-                      minValue={0.5}
-                      maxValue={3}
-                      step={0.05}
-                      value={[playSpeed()]}
-                      onChange={(value) => applyPlaySpeed(value[0] ?? 1)}
-                    >
-                      <SliderTrack>
-                        <SliderFill />
-                        <SliderThumb />
-                      </SliderTrack>
-                    </Slider>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <AppTextFieldBareInput
-                      type="number"
-                      min="0.5"
-                      max="3"
-                      step="0.01"
-                      value={speedInput()}
-                      class="h-8 text-sm tabular-nums"
-                      fieldClass="flex-1"
-                      aria-label="精调播放倍速"
-                      onInput={(event) => setSpeedInput(event.currentTarget.value)}
-                      onBlur={commitSpeedInput}
-                      onKeyDown={(event: KeyboardEvent) => {
-                        if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
-                          event.target.blur();
-                        }
-                      }}
-                    />
-                    <span class="text-sm text-muted-foreground">x</span>
-                  </div>
-                  <p class="text-xs text-muted-foreground">范围 0.5x–3x</p>
                 </div>
               </PopoverContent>
             </Popover>
