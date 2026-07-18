@@ -1,6 +1,13 @@
-# 数据库策略：兼容、补缺与优化
+# 数据库策略：兼容、补缺与优化（阅读域）
 
-> 回答：改造 Reader 时**要不要**考虑 Legado Max 的数据库重构与优化？  
+> **范围**：本文仅描述 **阅读子模块 ↔ Legado / Max** 的字段语义与兼容注意点。  
+> **整 App 库结构总纲**（拆 `media_groups`、全量模块前缀 `reader_`/`audio_`/`video_`/`shell_`、`mediabox.db`、M1–M4）以 [SHELL_MODULE_MIGRATION.md](./SHELL_MODULE_MIGRATION.md) **§3.0** 为准。
+>
+> **目标表名（已拍板）**：阅读域 `reader_*`；音频域 `audio_*`（模块 ID `audio`，含音乐及未来其它音频）；视频域 `video_*`（由现状 `tv_*` 迁入，模块 ID `video`）。  
+> 与官方库互导：`books` ↔ `reader_books`、`book_groups` ↔ `reader_book_groups`。  
+> 现状 `media_groups` 为过渡形态，**M2** 拆为 `reader_book_groups` + `audio_groups` + shell 表。
+>
+> 回答：改造阅读能力时**要不要**考虑 Legado Max 的数据库重构与优化？  
 > 结论：**要考虑，但方式不是照搬 Max 的 96 次 Room 迁移，而是「兼容导入 + 按需增量 + Reader 侧优化」。**
 
 ---
@@ -9,17 +16,23 @@
 
 | 对象 | 角色 |
 |------|------|
-| **Legado_Max-main** | 参考**表结构、字段语义、备份格式**；**不修改**其 Android 工程内的 DB |
-| **Reader `legado.db`** | 独立演进：`schema_version` + 少量迁移（当前 v1） |
-| **用户已有库** | 可能来自官方 Legado / Max 备份，需**导入适配** |
+| **legados-main / Legado Max** | 参考**表结构、字段语义、备份格式**；**不修改**其 Android 工程内的 DB |
+| **MediaBox `reader.db`（将改 `mediabox.db`）** | 独立演进：全局 `schema_version`（待拆 `schema_modules`）；阅读域对齐 Legado，并扩展音频/视频 |
+| **用户已有库** | 可能来自官方 Legado / Max 备份，需**导入适配**（含 `book_groups`→`media_groups`） |
 
 ---
 
-## 2. 当前差异（Reader v1 vs Max v96）
+## 2. 当前差异（MediaBox 阅读域 vs Legado / Max）
 
-### 2.1 Reader 已对齐的核心表
+### 2.1 已对齐的核心表（阅读）
 
-`books`、`book_groups`、`chapters`、`book_sources`、`searchBooks`、`search_keywords`、`replace_rules`、`rss*`、`bookmarks`、`readRecord`、`cookies`、`caches` — 与 Legado 3.x 主路径一致。
+语义与 Legado 3.x 主路径一致。**目标物理表名**带 `reader_` 前缀（见壳文档 §3.2）；**现状**仍多为无前缀或 `media_groups`。
+
+| Legado 原名 | 目标 MediaBox | 备注 |
+|-------------|---------------|------|
+| `books` | `reader_books` | |
+| `book_groups` | `reader_book_groups` | 现状多为 `media_groups`(shelf)；M2 拆分 |
+| `chapters` / `book_sources` / … | `reader_chapters` / `reader_book_sources` / … | M3 加前缀 |
 
 ### 2.2 Reader 尚未建表（Max 已有）
 
@@ -35,13 +48,17 @@
 | `url_records` | Max URL 记录 | Max 特性，可选 |
 | `direct_link_upload_rules` / `upload_histories` | 直链上传 | Max 特性，可选 |
 
+> 注：上表「尚未建表」以早期文档为准；若代码中已存在对应迁移，以 `migrations.ts` 为准。目标命名加 `reader_` 前缀。
+
 ### 2.3 结构不一致（需迁移脚本，非忽略）
 
-| 项 | Max | Reader v1 | 处理 |
-|----|-----|-----------|------|
-| `readRecord` 主键 | `(deviceId, bookName, bookAuthor)` | `(deviceId, bookName)` | **迁移 v2** 加 `bookAuthor` 并调整 PK |
-| 章节正文缓存 | 文件系统 `book_cache/*.nb` | 表 `chapter_cache` | 见 §4 |
-| 版本号 | Room **96** | `schema_version` **1** | 不追求数字一致，追求**导入兼容** |
+| 项 | Legado / Max | MediaBox 目标 | 处理 |
+|----|--------------|---------------|------|
+| 分组表 | `book_groups` | `reader_book_groups` | 适配器映射；中间态 `media_groups` 由 M2 拆掉 |
+| 分组成员 | `books."group"` 位掩码 | `reader_book_group_items` | 导入后展开 |
+| 系统分组 `-3`/`-6` | `IdAudio` / `IdVideo` | 不建行 | 备份可识别即可 |
+| 章节正文缓存 | 文件 `book_cache/*.nb` | `reader_chapter_cache` 或文件 | 见 §4 |
+| 版本号 | Room 96 等 | `schema_modules` | 见壳文档 |
 
 ---
 

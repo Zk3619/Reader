@@ -1,17 +1,24 @@
-# Reader 改造文档索引
+# MediaBox / Reader 改造文档索引
 
-本目录为将 **Reader** 改造成对标 **Legado_Max-main（阅读 Max）** 的跨平台阅读器（**Tauri 2 + SolidJS + lucide-solid + Tailwind CSS v4**）提供设计与实施依据。
+本目录同时覆盖两层叙事：
+
+1. **主壳 + 子模块**（MediaBox = 阅读 / 音频 / 视频 / 订阅…）——见 [SHELL_MODULE_MIGRATION.md](./SHELL_MODULE_MIGRATION.md)  
+2. **阅读子模块对标 Legado Max**（历史主线）——见下方 LEGADO / DATABASE / ROADMAP 等
+
+技术栈：**Tauri 2 + SolidJS + lucide-solid + Tailwind CSS v4**。
 
 ## 文档清单
 
 | 文档 | 用途 |
 |------|------|
-| [LEGADO_MAX_MIGRATION.md](./LEGADO_MAX_MIGRATION.md) | **主文档**：目标、原则、模块映射、书源引擎、数据层、UI 规范 |
+| [SHELL_MODULE_MIGRATION.md](./SHELL_MODULE_MIGRATION.md) | **壳架构总纲**：拆分组、模块前缀、`audio`/`video` 命名、数据库目标结构 |
+| [RENAME_CHECKLIST_AUDIO_VIDEO.md](./RENAME_CHECKLIST_AUDIO_VIDEO.md) | **重命名清单**：`music`→`audio`、`tv`→`video` 的目录/文件（不改代码） |
+| [LEGADO_MAX_MIGRATION.md](./LEGADO_MAX_MIGRATION.md) | 阅读子模块：目标、原则、模块映射、书源引擎、数据层、UI 规范 |
 | [PROJECT_COMPARISON.md](./PROJECT_COMPARISON.md) | 六仓库对比：legado / legado-main / Legado_Max / read-main / Yeader / Reader |
 | [FEATURE_MATRIX.md](./FEATURE_MATRIX.md) | Legado Max 功能清单 vs Reader 完成度与优先级 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 分层架构：前端优先 → Rust → Tauri 插件 |
-| [DATABASE.md](./DATABASE.md) | 数据库：兼容 Max、增量迁移、优化策略 |
-| [ROADMAP.md](./ROADMAP.md) | 分阶段实施路线与验收标准 |
+| [DATABASE.md](./DATABASE.md) | **阅读域**数据库：兼容 Max、增量迁移、优化策略（整 App 策略以 SHELL_MODULE 为准） |
+| [ROADMAP.md](./ROADMAP.md) | 阅读子模块分阶段实施路线与验收标准 |
 | [UI.md](./UI.md) | 顶栏/侧栏/书架响应式 UI 规范（已有） |
 | [text-viewer-latent-capabilities.md](./text-viewer-latent-capabilities.md) | 文本阅读器已实现但未启用/未接数据的段评与 UI 能力说明 |
 | [PORTABLE.md](./PORTABLE.md) | 便携模式与数据目录（已有） |
@@ -38,10 +45,11 @@ D:\Projects\Rust\Reader\
 
 ## 建议阅读顺序
 
-1. `PROJECT_COMPARISON.md` — 了解各仓库角色  
-2. `LEGADO_MAX_MIGRATION.md` — 理解映射关系  
-3. `ARCHITECTURE.md` — 定分层边界  
-4. `FEATURE_MATRIX.md` + `ROADMAP.md` — 排期开发  
-5. `UI.md` — 实现界面时对照  
+1. `SHELL_MODULE_MIGRATION.md` — **先读**：主壳边界、命名与数据库迁往何处  
+2. `PROJECT_COMPARISON.md` — 了解各上游仓库角色  
+3. `LEGADO_MAX_MIGRATION.md` — 阅读子模块与 Legado 映射  
+4. `ARCHITECTURE.md` — 定分层边界  
+5. `FEATURE_MATRIX.md` + `ROADMAP.md` — 阅读能力排期  
+6. `UI.md` — 实现界面时对照  
 
 外部补充：`legado/docs/cross-platform-guide.md`、`legado/docs/architecture-analysis.md`。
