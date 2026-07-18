@@ -5,8 +5,6 @@ import App from "@/app/App";
 import MigrationSplash from "@/migration/MigrationSplash";
 import { isTauri } from "@/lib/platform/detect";
 import { settingsStore } from "@/stores/settings";
-import { warmReaderUiConfigCache } from "@/lib/media/text/read-config-storage";
-import { applyPersistedReaderUiConfig } from "@/stores/viewer/media/text";
 import {
   applyThemeToDocument,
   syncThemeBootstrapSnapshotFromAppSettings,
@@ -30,10 +28,11 @@ async function bootstrap() {
   });
   applyThemeToDocument(settingsStore.state.app.theme);
   syncThemeBootstrapSnapshotFromAppSettings(settingsStore.state.app);
-  await warmReaderUiConfigCache().catch((e) => {
-    console.warn("预加载阅读器配置失败:", e);
+  // 阅读器 UI 等 critical 域由统一管线 hydrate（reader.ui）
+  const { runPersistenceHydrateCritical } = await import("@/lib/persistence");
+  await runPersistenceHydrateCritical().catch((e) => {
+    console.warn("[persistence] hydrateCritical failed", e);
   });
-  applyPersistedReaderUiConfig();
   render(() => <App />, root);
 }
 
