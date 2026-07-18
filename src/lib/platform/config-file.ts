@@ -1,5 +1,5 @@
 /**
- * config.json 读写（便携版在 exe/AppData/config.json）
+ * settings.json 读写（便携版在 exe/AppData/settings.json；旧名 config.json 启动时迁移）
  * 用于程序配置与数据路径（如 dataDir），用户可迁移或手动编辑
  */
 
@@ -16,17 +16,13 @@ export type ConfigJson = Record<string, unknown> & {
   dataDirMigrationBackup?: string | null;
 };
 
-/**
- * 读取 config.json 全文
- */
+/** 读取 settings.json 全文 */
 export async function getConfig(): Promise<ConfigJson> {
   const raw = await invoke<Record<string, unknown>>('get_config');
   return raw as ConfigJson;
 }
 
-/**
- * 写入 config.json 全文；若修改了 dataDir，需重启应用后数据目录才生效
- */
+/** 写入 settings.json 全文；若修改了 dataDir，需重启应用后数据目录才生效 */
 export async function setConfig(config: ConfigJson): Promise<void> {
   await invoke('set_config', { config });
   clearAppDataDirCache();

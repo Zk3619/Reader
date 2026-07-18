@@ -41,3 +41,11 @@ export async function convertChineseText(
   if (type === 2) return s2tConverter!(text);
   return text;
 }
+
+/** 同步转换（须先 preloadChineseConverter）；未加载时原样返回 */
+export function convertChineseSync(text: string, type: ChineseConverterType): string {
+  if (!text || type === 0) return text;
+  if (type === 1 && t2sConverter) return t2sConverter(text);
+  if (type === 2 && s2tConverter) return s2tConverter(text);
+  return text;
+}

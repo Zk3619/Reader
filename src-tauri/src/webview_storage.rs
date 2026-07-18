@@ -124,7 +124,7 @@ pub fn clear_webview_disk_cache(app: tauri::AppHandle) -> Result<usize, String> 
     Ok(remove_cache_dirs_under(&target, 0))
 }
 
-/// 清除所有 WebView 的 Cookie（不影响业务 SQLite / config.json）
+/// 清除所有 WebView 的 Cookie（不影响业务 SQLite / settings.json）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn clear_webview_cookies(app: tauri::AppHandle) -> Result<usize, String> {

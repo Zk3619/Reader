@@ -93,7 +93,7 @@ type StoreLike = {
 };
 
 /**
- * 使用 config.json 作为后端的“存储”（应用设置与 dataDir 等均在此文件中）
+ * 使用 settings.json 作为后端的“存储”（应用设置与 dataDir 等均在此文件中）
  */
 async function createConfigBackedStore(): Promise<StoreLike> {
     return {
@@ -121,7 +121,7 @@ async function createConfigBackedStore(): Promise<StoreLike> {
 }
 
 /**
- * Tauri平台存储实现：默认 settings 使用 config.json，其他文件仍用 Store 插件
+ * Tauri平台存储实现：默认 settings 使用 settings.json，其他文件仍用 Store 插件
  */
 class TauriStorage {
     private fileName: string;

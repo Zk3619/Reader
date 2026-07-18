@@ -8,7 +8,7 @@ mod imp {
         if app.get_webview_window("desktop-lyric").is_some() {
             return Ok(());
         }
-        WebviewWindowBuilder::new(
+        let mut builder = WebviewWindowBuilder::new(
             &app,
             "desktop-lyric",
             WebviewUrl::App("index.html#lyric-desktop".into()),
@@ -17,9 +17,19 @@ mod imp {
         .inner_size(600.0, 200.0)
         .always_on_top(true)
         .decorations(false)
-        .resizable(true)
-        .build()
-        .map_err(|e| format!("desktop lyric window: {e}"))?;
+        .resizable(true);
+        if let Ok(config_path) = crate::portable_paths::config_file_path() {
+            if let Ok(root) = crate::portable_paths::effective_webview_data_root(&config_path) {
+                if let Ok(data_dir) =
+                    crate::portable_paths::webview_data_directory(&root, "desktop-lyric")
+                {
+                    builder = builder.data_directory(data_dir);
+                }
+            }
+        }
+        builder
+            .build()
+            .map_err(|e| format!("desktop lyric window: {e}"))?;
         Ok(())
     }
 

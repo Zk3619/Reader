@@ -43,7 +43,10 @@ export function MediaPage(props: MediaPageProps) {
   createEffect(() => {
     if (!isActive()) return;
     if (mediaTab() === 'audio' && audioSubTab() === 'music') {
-      void viewerStore.openMusicHub({ section: props.musicSection });
+      // 显式 section 才覆盖；否则走 openMusicHub 内持久化分区恢复
+      void viewerStore.openMusicHub(
+        props.musicSection ? { section: props.musicSection } : undefined,
+      );
     }
   });
 

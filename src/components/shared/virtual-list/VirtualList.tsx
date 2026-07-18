@@ -122,7 +122,9 @@ function VirtualListEntityVisibleRow<T>(props: {
   const flatIndex = createMemo(() => {
     const items = props.renderedItems();
     for (let i = 0; i < items.length; i++) {
-      if (String(props.resolveRowId(items[i]!, i)) === props.entityKey) return i;
+      const entry = items[i];
+      if (entry == null) continue;
+      if (String(props.resolveRowId(entry, i)) === props.entityKey) return i;
     }
     return -1;
   });
@@ -354,8 +356,10 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
       ),
     getItemKey: (i) => {
       if (useEntitySortableKeys()) return String(i);
+      const item = renderedItems()[i];
+      if (item == null) return String(i);
       if (props.getItemKey) {
-        return String(props.getItemKey!(renderedItems()[i]!, i));
+        return String(props.getItemKey(item, i));
       }
       return String(i);
     },
@@ -372,9 +376,11 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
   let visibleEntityKeysCache: readonly string[] = [];
   const visibleEntityKeys = createMemo(() => {
     const items = renderedItems();
-    const next = visibleIndices().map((index) =>
-      String(rowId(items[index]!, index)),
-    );
+    const next = visibleIndices().map((index) => {
+      const item = items[index];
+      if (item == null) return `gap:${index}`;
+      return String(rowId(item, index));
+    });
     const stabilized = stabilizePrimitiveList(visibleEntityKeysCache, next);
     visibleEntityKeysCache = stabilized;
     return stabilized;
@@ -455,8 +461,10 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
               rowSortable={() => {
                 const items = renderedItems();
                 for (let i = 0; i < items.length; i++) {
-                  if (String(rowId(items[i]!, i)) !== entityKey) continue;
-                  return sortableEnabled() && isRowSortable(items[i]!, i);
+                  const item = items[i];
+                  if (item == null) continue;
+                  if (String(rowId(item, i)) !== entityKey) continue;
+                  return sortableEnabled() && isRowSortable(item, i);
                 }
                 return false;
               }}

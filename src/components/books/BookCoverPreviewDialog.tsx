@@ -3,6 +3,7 @@
  */
 
 import { createSignal, createEffect, Show } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { getSource } from '@/lib/database/sources';
 import {
   loadCoverImageObjectUrl,
@@ -14,7 +15,7 @@ import type { BookSource } from '@/types';
 
 function resolveCoverBackgroundUrl(
   coverUrl: string | undefined,
-  blobUrl: string | null
+  blobUrl: string | null,
 ): string | undefined {
   const raw = coverUrl?.trim();
   if (!raw) return undefined;
@@ -97,35 +98,49 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
   });
 
   return (
-    <Show when={props.open && previewSrc()}>
-      <div
-        class="fixed inset-0 z-60 flex items-center justify-center bg-background/80 backdrop-blur-sm"
-        onClick={() => props.onOpenChange(false)}
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(e: MouseEvent) => {
-            e.stopPropagation();
-            props.onOpenChange(false);
-          }}
-          class="absolute top-[max(0.75rem,env(safe-area-inset-top,0px))] right-3 z-10"
-          aria-label="关闭"
-        >
-          <XIcon class="h-5 w-5" size={20} />
-        </Button>
+    <Show when={props.open}>
+      <Portal>
+        {/* 须高于播放详情独立层 z-110，且 Portal 到 body 避免被 overflow/transform 裁切 */}
         <div
-          class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden border border-border/60 bg-card shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
+          class="fixed inset-0 z-200 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+          onClick={() => props.onOpenChange(false)}
         >
-          <img
-            src={previewSrc()}
-            alt={props.name}
-            class="max-w-full max-h-[80dvh] object-contain"
-          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={(e: MouseEvent) => {
+              e.stopPropagation();
+              props.onOpenChange(false);
+            }}
+            class="absolute top-[max(0.75rem,env(safe-area-inset-top,0px))] right-3 z-10"
+            aria-label="关闭"
+          >
+            <XIcon class="h-5 w-5" size={20} />
+          </Button>
+          <div
+            class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden border border-border/60 bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Show
+              when={previewSrc()}
+              fallback={
+                <div class="flex h-48 w-64 items-center justify-center text-sm text-muted-foreground">
+                  加载封面…
+                </div>
+              }
+            >
+              {(src) => (
+                <img
+                  src={src()}
+                  alt={props.name}
+                  class="max-w-full max-h-[80dvh] object-contain"
+                />
+              )}
+            </Show>
+          </div>
         </div>
-      </div>
+      </Portal>
     </Show>
   );
 }

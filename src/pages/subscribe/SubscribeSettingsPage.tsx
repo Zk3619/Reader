@@ -13,6 +13,7 @@ import {
   pageToolbarBottomBorder,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
+import { setSubscribeSection } from '@/stores/subscribe-hub/section';
 
 export interface SubscribeSettingsPageProps {
   onBack?: () => void;
@@ -35,7 +36,16 @@ export function SubscribeSettingsPage(props: SubscribeSettingsPageProps) {
             dropdownEnabled={false}
           />
         }
-        leading={props.onBack ? <SettingsToolbarLeading onBack={props.onBack} /> : undefined}
+        leading={
+          props.onBack ? (
+            <SettingsToolbarLeading
+              onBack={() => {
+                setSubscribeSection('home');
+                props.onBack?.();
+              }}
+            />
+          ) : undefined
+        }
       />
       <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}>
         <div class="flex min-h-0 flex-1 flex-col items-center justify-center pb-4 text-center text-sm text-muted-foreground">

@@ -6,18 +6,18 @@ import type { MediaKind } from '@/lib/book-source/book-type';
 import type { BookGroup } from '@/types';
 import { MediaGroupId } from '@/types/book-group';
 
-/** Preview 分组在当前媒体 Tab 下的显示文案 */
+/** Preview 分组在当前媒体 Tab 下的显示文案（对齐音乐「试听列表」） */
 export function getPreviewGroupLabel(mediaKind?: MediaKind): string {
   switch (mediaKind) {
     case 'audio':
-      return '试听';
+      return '试听列表';
     case 'video':
     case 'image':
-      return '试看';
+      return '试看列表';
     case 'text':
     case 'file':
     default:
-      return '试读';
+      return '试读列表';
   }
 }
 

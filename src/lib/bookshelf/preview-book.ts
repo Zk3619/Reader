@@ -22,6 +22,11 @@ export function previewIdFromBookUrl(bookUrl: string): string {
   return bookUrl.slice(PREVIEW_BOOK_URL_PREFIX.length);
 }
 
+/** 与 upsertGuestPreview 一致的稳定 id，便于进度回写 */
+export function previewItemIdFromRealBookUrl(bookUrl: string): string {
+  return bookUrl.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || `p_${Date.now()}`;
+}
+
 export function bookFromPreviewItem(item: MediaPreviewItem): Book | null {
   try {
     const parsed = JSON.parse(item.refJson) as Partial<Book>;
@@ -42,7 +47,8 @@ export function bookFromPreviewItem(item: MediaPreviewItem): Book | null {
       totalChapterNum: parsed.totalChapterNum ?? 0,
       durChapterIndex: parsed.durChapterIndex ?? 0,
       durChapterPos: parsed.durChapterPos ?? 0,
-      durChapterTime: parsed.durChapterTime ?? 0,
+      durChapterTime: parsed.durChapterTime ?? item.lastOpenedAt ?? 0,
+      durChapterTitle: parsed.durChapterTitle,
       durVolumeIndex: parsed.durVolumeIndex ?? 0,
       chapterInVolumeIndex: parsed.chapterInVolumeIndex ?? 0,
       canUpdate: parsed.canUpdate ?? true,
@@ -62,10 +68,11 @@ export function bookFromPreviewItem(item: MediaPreviewItem): Book | null {
 }
 
 export function buildPreviewPayload(book: Book): string {
+  const realUrl = book.bookUrl.startsWith(PREVIEW_BOOK_URL_PREFIX)
+    ? previewIdFromBookUrl(book.bookUrl)
+    : book.bookUrl;
   return JSON.stringify({
-    bookUrl: book.bookUrl.startsWith(PREVIEW_BOOK_URL_PREFIX)
-      ? previewIdFromBookUrl(book.bookUrl)
-      : book.bookUrl,
+    bookUrl: realUrl,
     tocUrl: book.tocUrl,
     name: book.name,
     author: book.author,
@@ -77,8 +84,13 @@ export function buildPreviewPayload(book: Book): string {
     kind: book.kind,
     variable: book.variable,
     readConfig: book.readConfig,
+    totalChapterNum: book.totalChapterNum,
     durChapterIndex: book.durChapterIndex,
     durChapterPos: book.durChapterPos,
+    durChapterTime: book.durChapterTime,
+    durChapterTitle: book.durChapterTitle,
+    durVolumeIndex: book.durVolumeIndex,
+    chapterInVolumeIndex: book.chapterInVolumeIndex,
   });
 }
 
@@ -102,7 +114,7 @@ export async function upsertGuestPreview(
 ): Promise<void> {
   if (book.bookUrl.startsWith(PREVIEW_BOOK_URL_PREFIX)) return;
   const { upsertPreviewItem } = await import('@/lib/database/media-groups');
-  const id = book.bookUrl.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || `p_${Date.now()}`;
+  const id = previewItemIdFromRealBookUrl(book.bookUrl);
   await upsertPreviewItem({
     id,
     mediaKind,
@@ -111,4 +123,37 @@ export async function upsertGuestPreview(
     coverUrl: book.coverUrl,
     refJson: buildPreviewPayload(book),
   });
+}
+
+/** 客书进度写入试读条目（不入 books 表） */
+export async function updateGuestPreviewProgress(
+  book: Book,
+  mediaKind: MediaKind,
+): Promise<void> {
+  if (book.bookUrl.startsWith(PREVIEW_BOOK_URL_PREFIX)) return;
+  const { upsertPreviewItem } = await import('@/lib/database/media-groups');
+  const id = previewItemIdFromRealBookUrl(book.bookUrl);
+  await upsertPreviewItem({
+    id,
+    mediaKind,
+    title: book.name,
+    author: book.author,
+    coverUrl: book.coverUrl,
+    refJson: buildPreviewPayload(book),
+  });
+  window.dispatchEvent(new CustomEvent('read-record-updated'));
+}
+
+/** 按书名作者从试读表还原展示用 Book（供最近阅读打开） */
+export async function findPreviewDisplayBookByNameAuthor(
+  name: string,
+  author: string,
+): Promise<Book | null> {
+  const { getPreviewItemsByKind } = await import('@/lib/database/media-groups');
+  const items = await getPreviewItemsByKind();
+  const match = items.find(
+    (item) =>
+      (item.title ?? '') === name && (item.author ?? '') === (author ?? ''),
+  );
+  return match ? bookFromPreviewItem(match) : null;
 }

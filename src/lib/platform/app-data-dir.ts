@@ -1,6 +1,6 @@
 /**
  * 应用数据根目录
- * - 桌面：config.json 与默认数据均在 exe/AppData（可由 config.dataDir 或 reader.json 覆盖）
+ * - 桌面：settings.json 与默认数据均在 exe/AppData（可由 settings.dataDir 或 reader.json 覆盖）
  * - 移动端：仍使用系统应用数据目录
  */
 

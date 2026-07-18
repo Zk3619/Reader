@@ -1,5 +1,5 @@
 /**
- * 窗口控制按钮（最小化、最大化/还原、关闭）
+ * 窗口控制按钮（置顶、最小化、最大化/还原、关闭）
  * 仅在桌面平台 + Tauri 环境显示，与导航栏逻辑一致。
  * 关闭时支持「隐藏到托盘」/「退出应用」选择及「记住我的选择」。
  */
@@ -21,6 +21,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { hideWindowAndSaveState, saveWindowStateBeforeExit } from "@/utils/window-state"
 import {
+  PinWindowIcon,
+  UnpinWindowIcon,
   MinimizeWindowIcon,
   MaximizeWindowIcon,
   RestoreWindowIcon,
@@ -39,6 +41,7 @@ export function WindowControlButtons() {
   const [isTauri, setIsTauri] = createSignal(false)
   const [isDesktopPlatform, setIsDesktopPlatform] = createSignal(false)
   const [isMaximized, setIsMaximized] = createSignal(false)
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = createSignal(false)
   const [showCloseDialog, setShowCloseDialog] = createSignal(false)
   const [closeAction, setCloseAction] = createSignal<"hide" | "quit">("hide")
   const [rememberChoice, setRememberChoice] = createSignal(false)
@@ -62,6 +65,10 @@ export function WindowControlButtons() {
           })
         })
         .catch(() => { })
+      win
+        .isAlwaysOnTop()
+        .then(setIsAlwaysOnTop)
+        .catch(() => { })
     } catch {
       setIsTauri(false)
     }
@@ -69,6 +76,17 @@ export function WindowControlButtons() {
   })
 
   const showWindowControls = () => isDesktopPlatform() && isTauri()
+
+  async function toggleAlwaysOnTop() {
+    if (!appWindow) return
+    try {
+      const next = !isAlwaysOnTop()
+      await appWindow.setAlwaysOnTop(next)
+      setIsAlwaysOnTop(next)
+    } catch (error) {
+      console.error("切换窗口置顶失败:", error)
+    }
+  }
 
   async function minimizeWindow() {
     if (appWindow) {
@@ -168,6 +186,21 @@ export function WindowControlButtons() {
     <>
       <Show when={showWindowControls()}>
         <div class="flex items-center gap-1 no-drag">
+          <AppTooltip>
+            <AppTooltipTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class={`h-9 w-9 rounded-md hover:bg-muted transition-colors ${isAlwaysOnTop() ? "bg-muted text-foreground" : ""}`}
+              onClick={toggleAlwaysOnTop}
+            >
+              <Show when={isAlwaysOnTop()} fallback={<PinWindowIcon class="h-4 w-4" size={16} />}>
+                <UnpinWindowIcon class="h-4 w-4" size={16} />
+              </Show>
+              <span class="sr-only">{isAlwaysOnTop() ? "取消置顶" : "窗口置顶"}</span>
+            </AppTooltipTrigger>
+            <AppTooltipContent>{isAlwaysOnTop() ? "取消置顶" : "窗口置顶"}</AppTooltipContent>
+          </AppTooltip>
           <AppTooltip>
             <AppTooltipTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9 rounded-md hover:bg-muted transition-colors" onClick={minimizeWindow}>
               <MinimizeWindowIcon class="h-4 w-4" size={16} />

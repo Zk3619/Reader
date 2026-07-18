@@ -381,7 +381,7 @@ fn migrate_desktop_legacy_only(app: &AppHandle) -> Result<DataMigrationResult, S
     let mut migrated = false;
 
     if normalize_config_data_dir(&config_path, &legacy_root)? {
-        copied.push("config.json:dataDir 已规范化".into());
+        copied.push("settings.json:dataDir 已规范化".into());
     }
 
     let default_base = crate::default_app_data_base(app)?;
@@ -451,8 +451,10 @@ fn migrate_desktop_legacy_only(app: &AppHandle) -> Result<DataMigrationResult, S
                 copied.push(name.to_string());
             }
         }
-        if merge_config_from_legacy(&config_path, &legacy_root.join("config.json"))? {
-            copied.push("config.json（自旧目录合并）".into());
+        if merge_config_from_legacy(&config_path, &legacy_root.join("settings.json"))?
+            || merge_config_from_legacy(&config_path, &legacy_root.join("config.json"))?
+        {
+            copied.push("settings.json（自旧目录合并）".into());
         }
     }
 
@@ -675,7 +677,7 @@ fn maybe_emit_progress(
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn read_config_json(config_path: &Path) -> Result<serde_json::Value, String> {
     let s = std::fs::read_to_string(config_path).unwrap_or_else(|_| "{}".into());
-    serde_json::from_str(&s).map_err(|e| format!("解析 config.json 失败: {e}"))
+    serde_json::from_str(&s).map_err(|e| format!("解析 settings.json 失败: {e}"))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -739,7 +741,7 @@ fn merge_config_from_legacy(portable_config: &Path, legacy_config: &Path) -> Res
 
     let legacy_s = std::fs::read_to_string(legacy_config).map_err(|e| e.to_string())?;
     let mut legacy: serde_json::Value =
-        serde_json::from_str(&legacy_s).map_err(|e| format!("解析旧 config.json 失败: {e}"))?;
+        serde_json::from_str(&legacy_s).map_err(|e| format!("解析旧 settings/config.json 失败: {e}"))?;
     if let Some(obj) = legacy.as_object_mut() {
         obj.remove("dataDir");
     }

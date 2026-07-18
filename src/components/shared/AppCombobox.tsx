@@ -33,6 +33,11 @@ export type AppComboboxProps = {
    * 滚动条预留：both 两侧 / single 单侧 / auto 自动（默认）
    */
   scrollGutter?: ScrollGutterMode;
+  /**
+   * 为 true 时不按当前输入过滤选项（下拉始终展示完整列表；
+   * 用于倍速/音调等：输入框显示实际值，选项仅为预设）。
+   */
+  disableFilter?: boolean;
   'aria-label'?: string;
 };
 
@@ -46,12 +51,14 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
     'class',
     'contentClass',
     'scrollGutter',
+    'disableFilter',
     'aria-label',
   ]);
 
   const filter = createFilter({ sensitivity: 'base' });
 
   const filteredOptions = createMemo(() => {
+    if (local.disableFilter) return local.options;
     const q = local.value.trim();
     if (!q) return local.options;
     return local.options.filter((opt) => filter.contains(opt, q));

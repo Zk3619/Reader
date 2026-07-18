@@ -14,6 +14,7 @@ import {
   pageToolbarBottomBorder,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
+import { setSubscribeSection } from '@/stores/subscribe-hub/section';
 
 export interface SubscribePageProps {
   onOpenSubscribeSettings?: () => void;
@@ -44,7 +45,10 @@ export function SubscribePage(props: SubscribePageProps) {
             size="icon"
             class="h-9 w-9"
             aria-label="订阅设置"
-            onClick={props.onOpenSubscribeSettings}
+            onClick={() => {
+              setSubscribeSection('settings');
+              props.onOpenSubscribeSettings?.();
+            }}
           >
             <Settings2Icon class="h-4 w-4" />
           </Button>
