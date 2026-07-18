@@ -16,6 +16,7 @@ export const THEME_TARGET_IDS = [
   'module.music',
   'music.playDetail',
   'music.desktopLyric',
+  'module.tv',
 ] as const;
 
 export type ThemeTargetId = (typeof THEME_TARGET_IDS)[number];
@@ -88,6 +89,12 @@ export const THEME_TARGETS: readonly ThemeTargetDefinition[] = [
     label: '桌面歌词',
     description: '独立桌面歌词窗口',
     parent: 'module.music',
+  },
+  {
+    id: 'module.tv',
+    label: '影视模块',
+    description: '影视点播、直播、搜索与播放',
+    parent: 'app',
   },
 ] as const;
 

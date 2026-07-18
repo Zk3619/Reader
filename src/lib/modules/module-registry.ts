@@ -30,7 +30,7 @@ export const SHELL_MODULES: ShellModuleEntry[] = [
     id: 'tv',
     shellPage: 'tv',
     label: '影视',
-    description: '影视点播与直播（开发中）',
+    description: '影视点播与直播',
   },
   {
     id: 'subscribe',

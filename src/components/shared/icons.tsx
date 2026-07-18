@@ -78,6 +78,8 @@ import {
   X,
   Maximize,
   Minimize,
+  Pin,
+  PinOff,
   Volume2,
   VolumeOff,
   ChevronUp,
@@ -186,6 +188,8 @@ export const ImageIcon = icon(Image);
 export const MinimizeWindowIcon = icon(Minus);
 export const MaximizeWindowIcon = icon(Maximize);
 export const RestoreWindowIcon = icon(Minimize);
+export const PinWindowIcon = icon(Pin);
+export const UnpinWindowIcon = icon(PinOff);
 
 export const ArrowUpIcon = icon(ArrowUp);
 export const ArrowDownIcon = icon(ArrowDown);

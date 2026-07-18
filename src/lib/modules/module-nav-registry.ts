@@ -3,7 +3,17 @@
  */
 
 import type { Component } from 'solid-js';
-import { Search, ListMusic, Library, Trophy, Settings2 } from 'lucide-solid';
+import {
+  Search,
+  ListMusic,
+  Library,
+  Trophy,
+  Settings2,
+  History,
+  Heart,
+  Radio,
+  Home,
+} from 'lucide-solid';
 import type { PageType } from '@/components/shell/Navigation';
 import {
   BookshelfIcon,
@@ -19,6 +29,12 @@ import { readerInternalTabValue, setReaderInternalTab } from '@/stores/reader-in
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { state } from '@/stores/viewer/media/state';
 import { setMusicSection } from '@/stores/viewer/media/audio';
+import type { TvHubSection } from '@/lib/media/tv/types';
+import { setTvSection, tvHubSectionValue } from '@/stores/tv-hub/section';
+import {
+  setSubscribeSection,
+  subscribeHubSectionValue,
+} from '@/stores/subscribe-hub/section';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 
 export type ModuleNavItem = {
@@ -46,8 +62,18 @@ const MUSIC_NAV: ModuleNavItem[] = [
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 
-const PLACEHOLDER_NAV: ModuleNavItem[] = [
+const TV_NAV: ModuleNavItem[] = [
+  { id: 'home', label: '首页', icon: Home },
+  { id: 'live', label: '直播', icon: Radio },
+  { id: 'search', label: '搜索', icon: Search },
+  { id: 'keep', label: '收藏', icon: Heart },
+  { id: 'history', label: '历史', icon: History },
+  { id: 'settings', label: '设置', icon: Settings2 },
+];
+
+const SUBSCRIBE_NAV: ModuleNavItem[] = [
   { id: 'home', label: '首页', icon: GroupVideoIcon },
+  { id: 'settings', label: '设置', icon: Settings2 },
 ];
 
 export function getModuleNavItems(shellPage: PageType): ModuleNavItem[] {
@@ -58,8 +84,9 @@ export function getModuleNavItems(shellPage: PageType): ModuleNavItem[] {
     case 'music':
       return MUSIC_NAV;
     case 'tv':
+      return TV_NAV;
     case 'subscribe':
-      return PLACEHOLDER_NAV;
+      return SUBSCRIBE_NAV;
     case 'settings':
       return [];
     default:
@@ -85,9 +112,13 @@ export function getActiveModuleNavId(shellPage: PageType): string {
       return readerInternalTabValue();
     case 'music':
       return musicHubSectionValue();
-    case 'tv':
+    case 'tv': {
+      const s = tvHubSectionValue();
+      if (s === 'detail' || s === 'play') return 'home';
+      return s;
+    }
     case 'subscribe':
-      return 'home';
+      return subscribeHubSectionValue();
     default:
       return '';
   }
@@ -105,6 +136,12 @@ export function navigateModuleNav(shellPage: PageType, navId: string): void {
       break;
     case 'music':
       setMusicSection(navId as MusicHubSection);
+      break;
+    case 'tv':
+      setTvSection(navId as TvHubSection);
+      break;
+    case 'subscribe':
+      setSubscribeSection(navId === 'settings' ? 'settings' : 'home');
       break;
     default:
       break;

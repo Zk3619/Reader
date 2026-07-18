@@ -53,6 +53,7 @@ import {
   SourcesTypeTabs,
 } from "@/components/sources/SourcesTypeTabs";
 import { navigateToMusicHub } from "@/stores/shell-tabs";
+import { subscribeHubSectionValue, setSubscribeSection } from "@/stores/subscribe-hub/section";
 import { registerGlobalAudioOpenViewer } from "@/lib/media/audio/audio-shell-controls";
 import { registerMusicHotkeys } from "@/lib/media/audio/platform/music-hotkeys";
 import {
@@ -421,6 +422,11 @@ function AppContent() {
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
   const [showTvSettings, setShowTvSettings] = createSignal(false);
   const [showSubscribeSettings, setShowSubscribeSettings] = createSignal(false);
+  createEffect(() => {
+    const section = subscribeHubSectionValue();
+    if (section === 'settings') setShowSubscribeSettings(true);
+    else setShowSubscribeSettings(false);
+  });
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
   const [readingRulePage, setReadingRulePage] = createSignal<ReadingRulePageId | null>(null);
@@ -1872,6 +1878,19 @@ function AppContent() {
       openReaderPage(book);
       return;
     }
+    if (item.missingFromShelf) {
+      const { findPreviewDisplayBookByNameAuthor } = await import(
+        "@/lib/bookshelf/preview-book"
+      );
+      const preview = await findPreviewDisplayBookByNameAuthor(
+        item.title,
+        item.author,
+      );
+      if (preview) {
+        openReaderPage(preview);
+        return;
+      }
+    }
     openBookSearch(item.title);
   }
 
@@ -2885,6 +2904,11 @@ function AppContent() {
         setDbInitialized(true);
         console.log('数据库初始化成功');
 
+        const { runPersistenceHydrateDeferred } = await import('@/lib/persistence');
+        await runPersistenceHydrateDeferred().catch((e) => {
+          console.warn('[persistence] hydrateDeferred failed', e);
+        });
+
         const { clearInvalidChapterCache } = await import('@/lib/chapter-cache');
         void clearInvalidChapterCache().catch((e) => {
           console.warn('[chapter-cache] clearInvalidChapterCache', e);
@@ -3506,7 +3530,7 @@ function AppContent() {
       () => setSourcesExpandedSourceUrl(null),
     );
     push("tv-settings", showTvSettings(), () => setShowTvSettings(false));
-    push("subscribe-settings", showSubscribeSettings(), () => setShowSubscribeSettings(false));
+    push("subscribe-settings", showSubscribeSettings(), () => setSubscribeSection('home'));
 
     // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
     if (nav.top()) {
@@ -4195,7 +4219,7 @@ function AppContent() {
               <MusicPage active={() => isMusicShellPage()} />
             </section>
 
-            {/* 影视模块（占位） */}
+            {/* 影视模块（TV-fongmi） */}
             <section
               class={cn(
                 mainShellPageRoot,
@@ -4205,8 +4229,11 @@ function AppContent() {
               <Show when={showTvSettings()}>
                 <TvSettingsPage onBack={() => setShowTvSettings(false)} />
               </Show>
-              <div class={cn(showTvSettings() && 'hidden pointer-events-none')}>
-                <TvPage onOpenTvSettings={() => setShowTvSettings(true)} />
+              <div class={cn(showTvSettings() && 'hidden pointer-events-none', 'flex min-h-0 flex-1 flex-col')}>
+                <TvPage
+                  active={() => isTvShellPage()}
+                  onOpenTvSettings={() => setShowTvSettings(true)}
+                />
               </div>
             </section>
 
@@ -4218,10 +4245,10 @@ function AppContent() {
               )}
             >
               <Show when={showSubscribeSettings()}>
-                <SubscribeSettingsPage onBack={() => setShowSubscribeSettings(false)} />
+                <SubscribeSettingsPage onBack={() => setSubscribeSection('home')} />
               </Show>
               <div class={cn(showSubscribeSettings() && 'hidden pointer-events-none')}>
-                <SubscribePage onOpenSubscribeSettings={() => setShowSubscribeSettings(true)} />
+                <SubscribePage onOpenSubscribeSettings={() => setSubscribeSection('settings')} />
               </div>
             </section>
 
