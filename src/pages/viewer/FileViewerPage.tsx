@@ -128,7 +128,7 @@ export function FileViewerPage(props: FileViewerPageProps) {
             </Show>
             <Show when={!bootstrapping() && !loading() && error()}>
               <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-                <p class="text-sm text-destructive">{error()}</p>
+                <p class="text-sm text-muted-foreground">内容加载失败</p>
                 <Button
                   size="sm"
                   variant="outline"

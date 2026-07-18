@@ -451,9 +451,7 @@ export async function openTextBook(
     activeBook = await ensureLocalTxtCatalogFresh(book);
   }
 
-  if (!guestReading) {
-    startReadingSession(activeBook);
-  }
+  startReadingSession(activeBook);
 
   if (state.book?.bookUrl !== activeBook.bookUrl || !state.contentLoading) {
     setState({
@@ -574,6 +572,8 @@ export async function openTextBook(
             contentBootstrapping: false,
             showContent: true,
           });
+          const { notifyPageError } = await import('@/lib/ui/page-notify');
+          notifyPageError('内容加载失败', error);
         }
       };
 
@@ -699,12 +699,15 @@ export async function loadTextChapter(
       await saveTextProgress();
     } catch (e) {
       console.error('加载本地章节失败:', e);
+      const msg = e instanceof Error ? e.message : '未知错误';
       setState({
-        content: `加载失败: ${e instanceof Error ? e.message : '未知错误'}`,
+        content: `加载失败: ${msg}`,
         contentLoading: false,
         contentFetching: false,
         showContent: true,
       });
+      const { notifyPageError } = await import('@/lib/ui/page-notify');
+      notifyPageError('内容加载失败', msg);
       throw e;
     }
     return;
@@ -719,6 +722,8 @@ export async function loadTextChapter(
   const source = await sourcesDb.getSource(book.origin);
   if (!source?.enabled) {
     commitChapterContent(index, '书源不存在或已禁用', book);
+    const { notifyPageError } = await import('@/lib/ui/page-notify');
+    notifyPageError('内容加载失败', '书源不存在或已禁用');
     await saveTextProgress();
     return;
   }
@@ -771,13 +776,16 @@ export async function loadTextChapter(
     const changed = await tryAutoChangeSourceOnLoadError(index, e);
     if (changed) return;
     markSessionContentReady(book.bookUrl);
+    const msg = e instanceof Error ? e.message : '未知错误';
     setState({
-      content: `加载失败: ${e instanceof Error ? e.message : '未知错误'}`,
+      content: `加载失败: ${msg}`,
       contentLoading: false,
       contentFetching: false,
       contentBootstrapping: false,
       showContent: true,
     });
+    const { notifyPageError } = await import('@/lib/ui/page-notify');
+    notifyPageError('内容加载失败', msg);
     throw e;
   }
 }
@@ -817,7 +825,7 @@ export async function fetchProcessedChapterContent(index: number): Promise<strin
 
 export async function saveTextProgress(): Promise<void> {
   const book = state.book;
-  if (!book || state.guestReading) {
+  if (!book) {
     return;
   }
   tickReadingSession();
@@ -826,6 +834,27 @@ export async function saveTextProgress(): Promise<void> {
   const chapterIndex = state.chapterIndex;
   const chapterPos = Math.min(1, Math.max(0, state.chapterPos));
   const chapterTitle = state.catalog[chapterIndex]?.title;
+  const now = Date.now();
+
+  if (state.guestReading) {
+    const updated: Book = {
+      ...book,
+      durChapterIndex: chapterIndex,
+      durChapterPos: chapterPos,
+      durChapterTime: now,
+      durChapterTitle: chapterTitle ?? book.durChapterTitle,
+    };
+    setState({ book: updated });
+    try {
+      const { updateGuestPreviewProgress } = await import(
+        '@/lib/bookshelf/preview-book'
+      );
+      await updateGuestPreviewProgress(updated, MediaKind.text);
+    } catch (e) {
+      console.error('保存试读进度失败:', e);
+    }
+    return;
+  }
 
   try {
     await booksDb.updateReadProgress(bookUrl, {

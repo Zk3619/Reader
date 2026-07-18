@@ -416,20 +416,15 @@ export function ReaderContent(props: ReaderContentProps) {
         <Show
           when={!isErrorContent()}
           fallback={
-            <div class="flex flex-col items-center justify-center min-h-[200px] px-4 py-8">
-              <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-6 py-8 max-w-md w-full">
-                <div class="mb-4 text-center text-sm text-destructive">
-                  <p class="font-medium mb-2 text-base">内容加载失败</p>
-                  <Show when={errorDetail()}>
-                    <p class="text-xs text-destructive/80 wrap-break-word">{errorDetail()}</p>
-                  </Show>
-                </div>
-                <div class="flex justify-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => textViewerStore.refreshChapter(chapterIndex())}>
-                    重试
-                  </Button>
-                </div>
-              </div>
+            <div class="flex flex-col items-center justify-center min-h-[200px] gap-3 px-4 py-8">
+              <p class="text-sm text-muted-foreground">内容加载失败</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => textViewerStore.refreshChapter(chapterIndex())}
+              >
+                重试
+              </Button>
             </div>
           }
         >

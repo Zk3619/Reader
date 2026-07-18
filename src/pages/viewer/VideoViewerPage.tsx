@@ -248,6 +248,7 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
                   catalogLength={catalog().length}
                   loading={loading()}
                   chapterTitle={chapterTitle()}
+                  chapterNavAboveStatus
                   statusMeta={
                     <span>
                       {chapterIndex() + 1} / {playableCatalogLength()} 集

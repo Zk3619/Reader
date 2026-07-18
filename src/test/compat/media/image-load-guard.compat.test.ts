@@ -13,11 +13,11 @@ describe('image-load-guard', () => {
 
   it('mangaImageLoadBlockedHint 在冷却期内返回提示', () => {
     const url = 'https://example.com/page/1.jpg';
-    rememberMangaImageLoadFailure(url, 'src-a');
-    rememberMangaImageLoadFailure(url, 'src-a');
-    rememberMangaImageLoadFailure(url, 'src-a');
+    for (let i = 0; i < 5; i++) {
+      rememberMangaImageLoadFailure(url, 'src-a');
+    }
     expect(isMangaImageLoadBlocked(url, 'src-a')).toBe(true);
-    expect(mangaImageLoadBlockedHint(url, 'src-a')).toContain('分钟后');
+    expect(mangaImageLoadBlockedHint(url, 'src-a')).toContain('后可重试');
   });
 
   it('未阻断时不返回 hint', () => {

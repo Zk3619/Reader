@@ -23,6 +23,28 @@ function buildInitialReaderConfig(): TextViewerUiConfig {
   };
 }
 
+function readInitialMusicSection(): ViewerState['musicSection'] {
+  if (typeof localStorage === 'undefined') return 'search';
+  try {
+    const raw = localStorage.getItem('reader_music_hub_section');
+    switch (raw) {
+      case 'search':
+      case 'songlist':
+      case 'leaderboard':
+      case 'list':
+      case 'settings':
+      case 'nowPlaying':
+        return raw;
+      case 'download':
+        return 'settings';
+      default:
+        return 'search';
+    }
+  } catch {
+    return 'search';
+  }
+}
+
 export const initialViewerState: ViewerState = {
   kind: null,
   book: null,
@@ -43,6 +65,10 @@ export const initialViewerState: ViewerState = {
   mediaUrls: [],
   primaryUrl: null,
   loading: false,
+  musicMediaUrls: [],
+  musicPrimaryUrl: null,
+  musicLoading: false,
+  musicError: null,
   playbackStatus: null,
   error: null,
   effectiveReplaceRules: [],
@@ -63,7 +89,7 @@ export const initialViewerState: ViewerState = {
   musicSyncOpen: false,
   musicPlaylistOpen: false,
   musicSourceOpen: false,
-  musicSection: 'search',
+  musicSection: readInitialMusicSection(),
 };
 
 export const [state, setState] = createStore<ViewerState>({ ...initialViewerState });

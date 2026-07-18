@@ -2,13 +2,14 @@ import Artplayer from 'artplayer';
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 import artplayerPluginVttThumbnail from 'artplayer-plugin-vtt-thumbnail';
 import './reader-artplayer-theme.css';
-import { buildReaderArtplayerCustomTypes } from '@/lib/media/video/artplayer/custom-types';
+import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders } from '@/lib/media/video/artplayer/custom-types';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
 
 export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Artplayer {
-  const { container, url, autoplay, playbackRate, extras } = options;
+  const { container, url, autoplay, playbackRate, extras, headers } = options;
   const streamType = detectArtplayerStreamType(url);
+  setArtplayerSessionHeaders(headers);
 
   const plugins: Array<(art: Artplayer) => unknown> = [
     artplayerPluginDanmuku({
@@ -28,11 +29,13 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     );
   }
 
+  const subtitleUrl = extras?.subtitleUrl?.trim();
   const art = new Artplayer({
     container,
     url,
-    type: streamType,
-    poster: extras?.poster,
+    // 勿传 type/subtitle: undefined，Artplayer 会校验失败
+    ...(streamType ? { type: streamType } : {}),
+    poster: extras?.poster ?? '',
     theme: '#a78bfa',
     lang: 'zh-cn',
     autoplay: autoplay ?? false,
@@ -56,12 +59,14 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     screenshot: false,
     customType: buildReaderArtplayerCustomTypes(),
     plugins,
-    subtitle: extras?.subtitleUrl?.trim()
+    ...(subtitleUrl
       ? {
-          url: extras.subtitleUrl.trim(),
-          type: extras.subtitleType ?? 'vtt',
+          subtitle: {
+            url: subtitleUrl,
+            type: extras?.subtitleType ?? 'vtt',
+          },
         }
-      : undefined,
+      : {}),
     moreVideoAttr: {
       playsInline: true,
     },

@@ -43,7 +43,7 @@ export function resetMediaChapterSession(): void {
   chapterLoadSeq = 0;
   mediaOpenSeq = 0;
   allowMediaTextFallback = false;
-  void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrls());
+  void import('@/stores/viewer/media/audio').then((m) => m.revokeAudioPlaybackUrlsUnlessMusic());
   void import('@/stores/viewer/media/video').then((m) => m.revokeVideoPlaybackUrls());
   void import('@/lib/media/video/video-chapter-cache').then((m) => m.clearVideoChapterCache());
   void import('@/lib/media/image/image-prefetch').then((m) =>
@@ -70,6 +70,45 @@ function isMediaOpenStillActive(
     state.kind === kind &&
     state.book?.bookUrl === bookUrl
   );
+}
+
+/**
+ * 听书/视频异步拉流收尾前校验：切到文本/漫画或换章后不得再写共享 mediaUrls。
+ */
+export function isMediaApplyStillCurrent(params: {
+  kind: MediaKind;
+  bookUrl: string;
+  chapterIndex: number;
+  openSeq: number;
+  loadSeq: number;
+}): boolean {
+  if (params.openSeq !== mediaOpenSeq) return false;
+  if (params.loadSeq !== chapterLoadSeq) return false;
+  if (state.kind !== params.kind) return false;
+  if (state.book?.bookUrl !== params.bookUrl) return false;
+  if (state.chapterIndex !== params.chapterIndex) return false;
+  if (params.kind === MediaKind.audio && state.playbackMode === 'music') {
+    return false;
+  }
+  return true;
+}
+
+/** 在 apply* 入口捕获 seq，返回收尾前可重复调用的守卫 */
+export function createMediaApplyGuard(params: {
+  kind: MediaKind;
+  bookUrl: string;
+  chapterIndex: number;
+}): () => boolean {
+  const openSeq = mediaOpenSeq;
+  const loadSeq = chapterLoadSeq;
+  return () =>
+    isMediaApplyStillCurrent({
+      kind: params.kind,
+      bookUrl: params.bookUrl,
+      chapterIndex: params.chapterIndex,
+      openSeq,
+      loadSeq,
+    });
 }
 
 export function clampChapterIndex(index: number, length: number): number {
@@ -128,7 +167,7 @@ export async function loadChapterRaw(
     next?.url,
     index,
   );
-  if (forceRefresh && raw?.trim()) {
+  if (raw?.trim()) {
     const { clearChapterInlineImageLoadFailures } = await import(
       '@/lib/http/cover-image-loader'
     );
@@ -171,6 +210,11 @@ export async function openMediaBookWithKind(
   }
   setState({ guestReading });
 
+  if (guestReading) {
+    const { upsertGuestPreview } = await import('@/lib/bookshelf/preview-book');
+    void upsertGuestPreview(book, kind);
+  }
+
   let activeBook = book;
   if (!guestReading && !isLocalBook(book)) {
     activeBook = await ensureShelfBookReadyForReading(book);
@@ -180,6 +224,9 @@ export async function openMediaBookWithKind(
     }
     setState({ book: activeBook });
   }
+
+  const { startReadingSession } = await import('@/lib/media/text/reading-session');
+  startReadingSession(activeBook);
 
   const rawIndex = activeBook.durChapterIndex ?? 0;
   const chapterPos = activeBook.durChapterPos ?? 0;
@@ -279,6 +326,8 @@ export async function loadMediaChapterWithApply(
   if (!chapter) throw new Error('章节不存在');
 
   const seq = ++chapterLoadSeq;
+  const openSeq = mediaOpenSeq;
+  const bookUrl = book.bookUrl;
   const allowTextFallback = allowMediaTextFallback;
   setState({ loading: true, chapterIndex: index, error: null });
 
@@ -291,8 +340,10 @@ export async function loadMediaChapterWithApply(
       options?.forceRefresh === true,
     );
     if (seq !== chapterLoadSeq) return;
+    if (!isMediaOpenStillActive(bookUrl, kind, openSeq)) return;
     await applyFromRaw(raw, index, chapter, { allowTextFallback });
     if (seq !== chapterLoadSeq) return;
+    if (!isMediaOpenStillActive(bookUrl, kind, openSeq)) return;
     setState({ loading: false });
     allowMediaTextFallback = false;
     if (state.catalog.length > 0) {
@@ -303,6 +354,7 @@ export async function loadMediaChapterWithApply(
     }
   } catch (e) {
     if (seq !== chapterLoadSeq) return;
+    if (!isMediaOpenStillActive(bookUrl, kind, openSeq)) return;
     const msg = e instanceof Error ? e.message : '加载失败';
     setState({
       loading: false,
@@ -310,13 +362,15 @@ export async function loadMediaChapterWithApply(
       mediaUrls: [],
       primaryUrl: null,
     });
+    const { notifyPageError } = await import('@/lib/ui/page-notify');
+    notifyPageError('内容加载失败', msg);
     throw e;
   }
 }
 
 export async function saveMediaProgress(): Promise<void> {
   const book = state.book;
-  if (!book || state.guestReading) return;
+  if (!book) return;
 
   const chapter = state.catalog[state.chapterIndex];
   const now = Date.now();
@@ -328,6 +382,22 @@ export async function saveMediaProgress(): Promise<void> {
     durChapterTitle: chapter?.title ?? book.durChapterTitle,
   };
   setState({ book: updated });
+
+  if (state.guestReading) {
+    const kind = state.kind;
+    if (kind) {
+      try {
+        const { updateGuestPreviewProgress } = await import(
+          '@/lib/bookshelf/preview-book'
+        );
+        await updateGuestPreviewProgress(updated, kind);
+      } catch (e) {
+        console.error('保存试读进度失败:', e);
+      }
+    }
+    return;
+  }
+
   await booksDb.updateBook(updated);
   window.dispatchEvent(
     new CustomEvent('bookshelf-book-updated', {

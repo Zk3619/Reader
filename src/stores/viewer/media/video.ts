@@ -23,6 +23,7 @@ import {
   loadMediaChapterWithApply,
   openMediaBookWithKind,
   setMediaBookInitialState,
+  createMediaApplyGuard,
 } from '@/stores/viewer/media/chapter';
 import type { Book, BookChapter } from '@/types';
 
@@ -45,12 +46,24 @@ export async function applyVideoFromRaw(
 ): Promise<void> {
   const allowTextFallback = options?.allowTextFallback === true;
   const forceRefresh = options?.forceRefresh === true;
+  const bookUrl = state.book?.bookUrl ?? '';
+  const stillCurrent = createMediaApplyGuard({
+    kind: MediaKind.video,
+    bookUrl,
+    chapterIndex,
+  });
+  const commitVideoState = (patch: Partial<typeof state>) => {
+    if (!stillCurrent()) return false;
+    setState(patch);
+    return true;
+  };
 
+  if (!stillCurrent()) return;
   revokeVideoPlaybackUrls();
 
   /** 光遇等：正文为内嵌页占位，实际在 startBrowser 浮层播放 */
   if (isLegadoBrowserPlaceholderContent(raw)) {
-    setState({
+    commitVideoState({
       rawContent: raw,
       mediaUrls: [],
       primaryUrl: null,
@@ -64,13 +77,16 @@ export async function applyVideoFromRaw(
     const key = buildVideoChapterCacheKey(book, chapter);
     const cached = getCachedVideoChapterPlayback(key);
     if (cached) {
-      setState({
-        rawContent: raw,
-        mediaUrls: cached.urls,
-        primaryUrl: cached.primaryUrl,
-        error: null,
-      });
-      preloadNextVideoChapter(book, state.catalog, chapterIndex);
+      if (
+        commitVideoState({
+          rawContent: raw,
+          mediaUrls: cached.urls,
+          primaryUrl: cached.primaryUrl,
+          error: null,
+        })
+      ) {
+        preloadNextVideoChapter(book, state.catalog, chapterIndex);
+      }
       return;
     }
   }
@@ -80,15 +96,22 @@ export async function applyVideoFromRaw(
       ? await sourcesDb.getSource(book.origin)
       : undefined;
 
+  if (!stillCurrent()) return;
+
   const resolved = await resolveVideoFromRawContent(raw, {
     source: source ?? undefined,
     chapter,
     book: book ?? undefined,
   });
 
+  if (!stillCurrent()) {
+    if (resolved.ok) resolved.revoke();
+    return;
+  }
+
   if (!resolved.ok) {
     if (resolved.empty) {
-      setState({
+      commitVideoState({
         rawContent: raw,
         mediaUrls: [],
         primaryUrl: null,
@@ -99,13 +122,13 @@ export async function applyVideoFromRaw(
     if (import.meta.env.DEV && raw.trim()) {
       console.warn('[video] 正文未解析出 URL，前 200 字:', raw.trim().slice(0, 200));
     }
-    setState({
+    commitVideoState({
       rawContent: raw,
       mediaUrls: [],
       primaryUrl: null,
       error: resolved.message,
     });
-    if (allowTextFallback && state.book) {
+    if (allowTextFallback && stillCurrent() && state.book) {
       dispatchMediaTextFallback({
         bookUrl: state.book.bookUrl,
         chapterIndex,
@@ -134,14 +157,20 @@ export async function applyVideoFromRaw(
     });
   }
 
-  setState({
-    rawContent: raw,
-    mediaUrls: resolved.urls,
-    primaryUrl: resolved.primaryUrl,
-    error: null,
-  });
+  if (
+    !commitVideoState({
+      rawContent: raw,
+      mediaUrls: resolved.urls,
+      primaryUrl: resolved.primaryUrl,
+      error: null,
+    })
+  ) {
+    resolved.revoke?.();
+    playbackRevoke = null;
+    return;
+  }
 
-  if (book) {
+  if (book && stillCurrent()) {
     preloadNextVideoChapter(book, state.catalog, chapterIndex);
   }
 }

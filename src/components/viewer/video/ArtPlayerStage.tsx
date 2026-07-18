@@ -52,7 +52,7 @@ export function ArtPlayerStage(props: ArtPlayerStageProps) {
 
       <Show when={!props.loading() && props.error()}>
         <div class="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-          <p class="max-w-md text-sm text-red-400">{props.error()}</p>
+          <p class="max-w-md text-sm text-white/70">内容加载失败</p>
           <Show when={props.onRetry}>
             <Button class="mt-4" size="sm" variant="outline" onClick={props.onRetry}>
               重试

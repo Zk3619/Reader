@@ -211,7 +211,7 @@ export const viewerStore = {
   },
 
   async saveProgress(): Promise<void> {
-    if (!state.book || state.guestReading) return;
+    if (!state.book) return;
     if (state.kind === MediaKind.text) {
       await saveTextProgress();
       return;
@@ -237,8 +237,12 @@ export const viewerStore = {
     const book = state.book;
     const kind = state.kind;
     const isMusicHub = state.playbackMode === 'music' && !book;
+    const { snapshotMusicPlayback, restoreMusicPlayback } = await import(
+      '@/stores/viewer/media/audio'
+    );
+    const musicSnap = isMusicHub ? null : snapshotMusicPlayback();
 
-    if (book && !state.guestReading) {
+    if (book) {
       await viewerStore.saveProgress();
     }
 
@@ -250,15 +254,19 @@ export const viewerStore = {
     }
 
     if (kind === MediaKind.text) {
-      await flushReadingSession(state.guestReading ? null : book);
+      await flushReadingSession(state.book ?? book);
       if (book?.bookUrl) cancelPrefetchOnRead(book.bookUrl);
       resetTextViewerSession();
     } else if (kind) {
+      await flushReadingSession(state.book ?? book);
       resetMediaChapterSession();
     }
 
     clearChapterContentPool();
     resetViewerState();
+    if (musicSnap) {
+      restoreMusicPlayback(musicSnap);
+    }
   },
 
   async switchToTextAtChapter(chapterIndex: number): Promise<void> {
@@ -266,11 +274,19 @@ export const viewerStore = {
     const catalog = state.catalog.length > 0 ? [...state.catalog] : undefined;
     if (!book) return;
 
+    const { snapshotMusicPlayback, restoreMusicPlayback } = await import(
+      '@/stores/viewer/media/audio'
+    );
+    const musicSnap = snapshotMusicPlayback();
+
     resetMediaChapterSession();
     cancelPrefetchOnRead(book.bookUrl);
     resetTextViewerSession();
     clearChapterContentPool();
     resetViewerState();
+    if (musicSnap) {
+      restoreMusicPlayback(musicSnap);
+    }
 
     setTextBookInitialState(book);
     await openTextBook(book, { initialCatalog: catalog });

@@ -55,6 +55,14 @@ export interface ViewerState extends BaseViewerState {
   mediaUrls: string[];
   primaryUrl: string | null;
   loading: boolean;
+  /**
+   * 音乐后台播放专用地址（与 mediaUrls 隔离）。
+   * 漫画/听书/视频阅读时切歌不得改写 mediaUrls/rawContent/loading，否则会把正文冲成单条音频 URL。
+   */
+  musicMediaUrls: string[];
+  musicPrimaryUrl: string | null;
+  musicLoading: boolean;
+  musicError: string | null;
   /** music 模式：获取链接 / 换源过程中的状态提示（对齐 lx setAllStatus） */
   playbackStatus: string | null;
   error: string | null;

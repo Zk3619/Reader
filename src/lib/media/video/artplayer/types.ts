@@ -15,4 +15,6 @@ export interface CreateReaderArtplayerOptions {
   autoplay?: boolean;
   playbackRate?: number;
   extras?: VideoPlaybackExtras;
+  /** 播放请求头（Referer / Cookie 等），供 HLS/FLV/DASH 与直链 fetch 使用 */
+  headers?: Record<string, string>;
 }

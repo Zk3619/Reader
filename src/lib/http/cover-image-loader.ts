@@ -59,6 +59,7 @@ import type { BookSource } from '@/types';
 import type { CoverCacheMeta } from '@/lib/cover/cover-disk-cache';
 import { isCoverLoadScrollIdle } from '@/components/shared/virtual-list/virtual-list-scroll-coalesce';
 import { parseImgRefsFromHtml } from '@/lib/media/text/reader-content-blocks';
+import { clearMangaImageLoadFailure } from '@/lib/media/image/image-load-guard';
 
 /** Web 以内存为主；Tauri 列表滚动易触发 L1 淘汰后反复读盘（plugin-fs 桥接开销大） */
 const MAX_CACHE = isTauri() ? 2048 : 128;
@@ -871,15 +872,17 @@ function scheduleBackgroundCoverUpdate(
 }
 
 /**
- * 刷新本章后清除正文内联图的失败冷却与内存 blob，避免旧版校验误杀后 30 分钟内一直 failure-cached。
+ * 刷新本章后清除正文内联图的失败冷却与内存 blob，避免旧版校验误杀后长时间一直 failure-cached。
  */
 export function clearChapterInlineImageLoadFailures(
   html: string,
   source?: BookSource | null,
 ): void {
   if (!html.trim()) return;
+  const sourceId = source?.sourceUrl ?? source?.sourceName;
   for (const ref of parseImgRefsFromHtml(html)) {
     evictCoverImageMemoryCache(ref.url, source);
+    clearMangaImageLoadFailure(ref.url, sourceId);
   }
 }
 

@@ -193,6 +193,8 @@ export interface RequestOptions {
    * Tauri 下走 Rust download_binary，对齐 lx-music UserApi 的 needle（绕过 WebView plugin-http / rustls 兼容问题）
    */
   useBackendHttp?: boolean;
+  /** 可选 HTTP/HTTPS 代理（如 http://127.0.0.1:7890），仅 useBackendHttp / download_binary 路径生效 */
+  proxy?: string;
 }
 
 /**
@@ -249,6 +251,7 @@ async function fetchViaDownloadBinary(
   body: string | undefined,
   timeout: number,
   useOkHttpUserAgent = false,
+  proxy?: string,
 ): Promise<Response> {
   const result = await invoke<DownloadBinaryResult>('download_binary', {
     url: normalizedUrl,
@@ -257,6 +260,7 @@ async function fetchViaDownloadBinary(
     body,
     timeoutMs: timeout,
     useOkhttpUserAgent: useOkHttpUserAgent,
+    proxy: proxy || null,
   });
 
   const data = new Uint8Array(result.data);
@@ -328,6 +332,7 @@ async function executeRequest(
     legadoMinimalHeaders = false,
     ignorePageNavigationAbort = false,
     useBackendHttp = false,
+    proxy,
   } = options;
 
   const pageSignal = ignorePageNavigationAbort ? undefined : getPageNavigationSignal();
@@ -395,7 +400,7 @@ async function executeRequest(
       const bodyForRust = typeof body === 'string' ? body : undefined;
       const preferOkHttp = legadoMinimalHeaders || useBackendHttp;
       const useRustDirect =
-        useBackendHttp || requestNeedsDownloadBinary(defaultHeaders);
+        useBackendHttp || !!proxy || requestNeedsDownloadBinary(defaultHeaders);
 
       const fetchViaRust = () =>
         raceWithAbortSignal(
@@ -406,6 +411,7 @@ async function executeRequest(
             bodyForRust,
             timeout,
             preferOkHttp,
+            proxy,
           ),
           combinedSignal,
         );

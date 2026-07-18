@@ -4,8 +4,9 @@
 
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 
-const MAX_FAILURES = 3;
-const COOLDOWN_MS = 5 * 60 * 1000;
+const MAX_FAILURES = 5;
+/** CDN 瞬时 5xx/522 常见，冷却不宜过长；手动重试仍会立即清冷却 */
+const COOLDOWN_MS = 60 * 1000;
 
 type FailureEntry = { count: number; until: number };
 
@@ -59,7 +60,11 @@ export function mangaImageLoadBlockedHint(
   if (!entry || entry.count < MAX_FAILURES || Date.now() >= entry.until) {
     return null;
   }
-  const mins = Math.max(1, Math.ceil((entry.until - Date.now()) / 60_000));
+  const secs = Math.max(1, Math.ceil((entry.until - Date.now()) / 1000));
+  if (secs < 60) {
+    return `加载失败，约 ${secs} 秒后可重试`;
+  }
+  const mins = Math.max(1, Math.ceil(secs / 60));
   return `加载失败，约 ${mins} 分钟后可重试`;
 }
 

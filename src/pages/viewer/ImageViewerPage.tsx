@@ -144,8 +144,13 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     const ch = catalog()[idx];
     const refs: ReaderInlineImageRef[] =
       flowImageRefs(rawContent(), ch?.url ?? ch?.baseUrl ?? '');
+    // 仅信任正文解析结果；mediaUrls 曾与音乐共用，禁止在 rawContent 空时回退到可能被污染的 URL
     const list: ReaderInlineImageRef[] =
-      refs.length > 0 ? refs : mediaUrls().map((url) => ({ url }));
+      refs.length > 0
+        ? refs
+        : viewerStore.state.kind === 'image'
+          ? mediaUrls().map((url) => ({ url }))
+          : [];
     return list.map((ref, i) => ({
       url: ref.url,
       legadoHeaders: ref.legadoHeaders,
@@ -449,6 +454,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                   catalogLength={catalog().length}
                   loading={loading()}
                   chapterTitle={chapterTitle()}
+                  chapterNavAboveStatus
                   statusMeta={
                     <Show when={totalPages() > 0}>
                       <span>
@@ -478,7 +484,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
               </Show>
               <Show when={!bootstrapping() && !loading() && error()}>
                 <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
-                  <p class="text-sm whitespace-pre-wrap text-destructive">{error()}</p>
+                  <p class="text-sm text-muted-foreground">内容加载失败</p>
                   <Button size="sm" variant="outline" onClick={refreshChapter}>
                     重试
                   </Button>

@@ -10,6 +10,24 @@ type ArtplayerWithEngines = Artplayer & {
   dash?: dashjs.MediaPlayerClass;
 };
 
+/** 当前播放会话 headers（由 createReaderArtplayer 注入） */
+let sessionHeaders: Record<string, string> = {};
+
+export function setArtplayerSessionHeaders(headers?: Record<string, string>): void {
+  sessionHeaders = headers ?? {};
+}
+
+function xhrSetupHeaders(xhr: XMLHttpRequest): void {
+  for (const [k, v] of Object.entries(sessionHeaders)) {
+    if (!k || v == null) continue;
+    try {
+      xhr.setRequestHeader(k, v);
+    } catch {
+      /* forbidden header */
+    }
+  }
+}
+
 function destroyEngine(art: ArtplayerWithEngines, key: 'hls' | 'flv' | 'dash'): void {
   const engine = art[key];
   if (!engine) return;
@@ -37,7 +55,10 @@ function playM3u8(this: Artplayer, video: HTMLVideoElement, url: string, art: Ar
   destroyEngine(a, 'dash');
 
   if (Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: true });
+    const hls = new Hls({
+      enableWorker: true,
+      xhrSetup: (xhr) => xhrSetupHeaders(xhr),
+    });
     hls.loadSource(url);
     hls.attachMedia(video);
     a.hls = hls;
@@ -61,7 +82,12 @@ function playFlv(this: Artplayer, video: HTMLVideoElement, url: string, art: Art
     art.notice.show = '当前环境不支持 FLV 播放';
     return;
   }
-  const flv = flvjs.createPlayer({ type: 'flv', url, isLive: false });
+  const flv = flvjs.createPlayer(
+    { type: 'flv', url, isLive: false },
+    {
+      headers: sessionHeaders,
+    },
+  );
   flv.attachMediaElement(video);
   flv.load();
   a.flv = flv;
@@ -80,6 +106,14 @@ function playMpd(this: Artplayer, video: HTMLVideoElement, url: string, art: Art
   destroyEngine(a, 'dash');
 
   const player = dashjs.MediaPlayer().create();
+  if (Object.keys(sessionHeaders).length) {
+    player.extend('RequestModifier', () => ({
+      modifyRequestHeader: (xhr: XMLHttpRequest) => {
+        xhrSetupHeaders(xhr);
+        return xhr;
+      },
+    }), true);
+  }
   player.initialize(video, url, false);
   a.dash = player;
   art.on('destroy', () => {

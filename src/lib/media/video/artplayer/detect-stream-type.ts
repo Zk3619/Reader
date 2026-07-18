@@ -18,8 +18,18 @@ export function detectArtplayerStreamType(url: string): ArtplayerStreamType | un
 
   try {
     const u = new URL(raw, 'https://local.invalid');
-    const target = u.searchParams.get('target');
-    if (target) return detectArtplayerStreamType(decodeURIComponent(target));
+    // 本地 proxy：?do=http&url=… / ?target=…
+    for (const key of ['url', 'target', 'u'] as const) {
+      const nested = u.searchParams.get(key);
+      if (!nested) continue;
+      try {
+        const decoded = decodeURIComponent(nested);
+        const nestedType = detectArtplayerStreamType(decoded);
+        if (nestedType) return nestedType;
+      } catch {
+        /* try next */
+      }
+    }
   } catch {
     /* ignore */
   }

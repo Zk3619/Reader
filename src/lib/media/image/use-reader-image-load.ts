@@ -61,6 +61,8 @@ export interface ReaderImageLoadInput {
 export function createReaderImageLoad(input: ReaderImageLoadInput) {
   const [phase, setPhase] = createSignal<ReaderImageLoadPhase>('loading');
   const [blobSrc, setBlobSrc] = createSignal<string | null>(null);
+  /** blobSrc 对应的规范化 URL，避免换章/换页时误复用旧 blob */
+  const [blobForNorm, setBlobForNorm] = createSignal<string | null>(null);
   const [loadGeneration, setLoadGeneration] = createSignal(0);
   const [statusHint, setStatusHint] = createSignal('');
   const [forceBlobFetch, setForceBlobFetch] = createSignal(false);
@@ -127,8 +129,15 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
     const norm = normalizedSrc();
     if (!norm) return undefined;
     if (norm.startsWith('data:')) return norm;
-    if (usesBlobFetch()) return blobSrc() ?? undefined;
+    if (usesBlobFetch()) {
+      return blobForNorm() === norm ? (blobSrc() ?? undefined) : undefined;
+    }
     return directImgSrc();
+  };
+
+  const assignBlob = (norm: string, url: string | null) => {
+    setBlobSrc(url);
+    setBlobForNorm(url ? norm : null);
   };
 
   const usesMangaCache = () => Boolean(input.getBookUrl?.()?.trim());
@@ -207,16 +216,8 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setInView(true);
-            continue;
-          }
-          setInView(false);
-          if (!input.getDeferUntilVisible?.() || !usesMangaCache()) continue;
-          const norm = normalizedSrc();
-          if (!norm || failedNorm() === norm) continue;
-          evictMangaImageMemoryCache(norm, input.getSource?.() ?? null);
-          setBlobSrc(null);
+          // 仅控制「是否开始拉取」；已加载成功的图滚出视口后仍保留 blob，避免闪回加载中
+          setInView(entry.isIntersecting);
         }
       },
       {
@@ -255,7 +256,7 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
       (cur) => {
         const { norm } = cur;
         if (!norm) {
-          setBlobSrc(null);
+          assignBlob('', null);
           setFailedNorm(null);
           setPhase('error');
           setStatusHint('无效图片地址');
@@ -267,9 +268,23 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
         }
 
         if (cur.defer && !cur.visible) {
-          setBlobSrc(null);
           if (failedNorm() === norm) {
             setPhase('error');
+            setStatusHint(failureHint(norm));
+            return;
+          }
+          // 已成功加载过：保持 ready + blob，不卸载、不闪占位
+          if (phase() === 'ready' && blobForNorm() === norm && (blobSrc() || !usesBlobFetch())) {
+            return;
+          }
+          const peekedWhileHidden = usesMangaCache()
+            ? peekMangaImageObjectUrl(norm, loadOptions())
+            : null;
+          if (peekedWhileHidden) {
+            assignBlob(norm, peekedWhileHidden);
+            setPhase('ready');
+            setReadyGeneration(cur.gen);
+            setStatusHint('');
             return;
           }
           setPhase('loading');
@@ -291,34 +306,43 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
         setStatusHint('');
 
         if (norm.startsWith('data:')) {
-          setBlobSrc(norm);
+          assignBlob(norm, norm);
           setPhase('ready');
           setReadyGeneration(cur.gen);
           return;
         }
 
         if (!usesBlobFetch()) {
-          setBlobSrc(null);
+          assignBlob(norm, null);
           setPhase('ready');
           setReadyGeneration(cur.gen);
           return;
         }
 
-        let cancelled = false;
-        setPhase('loading');
-        setBlobSrc(null);
-        setStatusHint('正在加载图片…');
-
+        // 先命中内存/已有 blob，避免「先清再加载」造成闪烁
         const peeked = usesMangaCache()
           ? peekMangaImageObjectUrl(norm, loadOptions())
           : null;
         if (peeked) {
-          setBlobSrc(peeked);
+          assignBlob(norm, peeked);
           setPhase('ready');
           setReadyGeneration(cur.gen);
           setStatusHint('');
           return;
         }
+        if (
+          blobForNorm() === norm &&
+          blobSrc() &&
+          phase() === 'ready' &&
+          readyGeneration() === cur.gen
+        ) {
+          setStatusHint('');
+          return;
+        }
+
+        let cancelled = false;
+        setPhase('loading');
+        setStatusHint('正在加载图片…');
 
         const loadPromise = usesMangaCache()
           ? loadMangaImageObjectUrl(input.getSrc()?.trim() ?? norm, loadOptions())
@@ -328,7 +352,7 @@ export function createReaderImageLoad(input: ReaderImageLoadInput) {
           if (cancelled) return;
           if (url) {
             setFailedNorm(null);
-            setBlobSrc(url);
+            assignBlob(norm, url);
             setPhase('ready');
             setReadyGeneration(cur.gen);
             setStatusHint('');
