@@ -6,11 +6,13 @@ import {
   NumberFieldInput,
 } from '@/components/ui/number-field';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { MusicPlayDetailLyricFontSizeField } from '@/components/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
 import {
   getMusicSettings,
   setMusicSettings,
   type MusicLyricAlign,
 } from '@/lib/media/audio/music-settings';
+import type { MusicFontSizeUnit } from '@/lib/media/audio/play-detail-lyric-font';
 
 const ALIGN_OPTIONS: MusicLyricAlign[] = ['left', 'center', 'right'];
 const ALIGN_LABELS: Record<MusicLyricAlign, string> = {
@@ -87,7 +89,10 @@ export const MusicSettingsPlayDetail: Component = () => {
             <span class="text-muted-foreground">延迟歌词滚动：</span>
             <NumberField
               rawValue={settings().playDetailLyricScrollDelayMs}
-              onRawValueChange={(value) => apply({ playDetailLyricScrollDelayMs: value })}
+              onRawValueChange={(value) => {
+                if (!Number.isFinite(value)) return;
+                apply({ playDetailLyricScrollDelayMs: value });
+              }}
               minValue={0}
               maxValue={5000}
               step={100}
@@ -105,7 +110,14 @@ export const MusicSettingsPlayDetail: Component = () => {
             <Checkbox
               id="music-play-detail-allow-lyric-seek-input"
               checked={settings().playDetailAllowLyricSeek}
-              onChange={(checked) => apply({ playDetailAllowLyricSeek: checked })}
+              onChange={(checked) =>
+                apply({
+                  playDetailAllowLyricSeek: checked,
+                  ...(checked
+                    ? {}
+                    : { playDetailLyricSeekAutoPlayOnRelease: false }),
+                })
+              }
             />
             <Label for="music-play-detail-allow-lyric-seek-input">
               允许通过拖拽歌词调整播放进度
@@ -113,6 +125,35 @@ export const MusicSettingsPlayDetail: Component = () => {
           </div>
           <p class="text-xs text-muted-foreground">
             开启后，手动浏览歌词时显示时间预览线，点击播放按钮跳转到对应位置。
+          </p>
+        </div>
+        <div class="space-y-1 pl-6">
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-lyric-seek-auto-release"
+              checked={settings().playDetailLyricSeekAutoPlayOnRelease}
+              disabled={!settings().playDetailAllowLyricSeek}
+              onChange={(checked) =>
+                apply({ playDetailLyricSeekAutoPlayOnRelease: checked })
+              }
+            />
+            <Label for="music-play-detail-lyric-seek-auto-release">松开后自动跳转播放</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            启用后拖拽歌词并松手即跳转播放，无需再点播放按钮。默认关闭。
+          </p>
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-lyric-dblclick-seek"
+              checked={settings().playDetailLyricDoubleClickSeek}
+              onChange={(checked) => apply({ playDetailLyricDoubleClickSeek: checked })}
+            />
+            <Label for="music-play-detail-lyric-dblclick-seek">双击歌词跳转到对应进度</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            启用后双击某一行歌词即可跳转到该行时间并开始播放。
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -151,18 +192,14 @@ export const MusicSettingsPlayDetail: Component = () => {
 
       <section class="space-y-3 border-t pt-4">
         <h2 class="text-base font-semibold">歌词字体</h2>
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">歌词字体大小：</span>
-          <NumberField
-            rawValue={settings().playDetailLyricFontSize}
-            onRawValueChange={(value) => apply({ playDetailLyricFontSize: value })}
-            minValue={12}
-            maxValue={32}
-          >
-            <NumberFieldInput class="w-20" aria-label="播放详情歌词字号" />
-          </NumberField>
-          <span class="text-muted-foreground">px</span>
-        </div>
+        <MusicPlayDetailLyricFontSizeField
+          remValue={settings().playDetailLyricFontSize}
+          unit={settings().playDetailLyricFontSizeUnit}
+          onRemChange={(rem) => apply({ playDetailLyricFontSize: rem })}
+          onUnitChange={(unit) =>
+            apply({ playDetailLyricFontSizeUnit: unit as MusicFontSizeUnit })
+          }
+        />
       </section>
     </div>
   );

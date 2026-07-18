@@ -51,11 +51,18 @@ import { BUILTIN_PLAYLIST_IDS, type AudioTrack } from '@/lib/media/audio/track-t
 import { trackAlbumName } from '@/lib/media/audio/music-search-result-ui';
 import { cn } from '@/lib/utils';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { MusicHubQuickScroll } from '@/components/viewer/audio/music/hub/MusicHubQuickScroll';
 import { MusicTrackContextMenu } from '@/components/viewer/audio/music/hub/MusicTrackContextMenu';
+import {
+  MusicSidebarListSkeleton,
+  MusicTrackListSkeleton,
+} from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
+import { shouldAcceptListPlayGesture } from '@/components/viewer/audio/music/hub/list-track-play-gesture';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { scrollToTop } from '@/lib/ui/scroll-to-top';
 import { settingsStore } from '@/stores/settings';
 
@@ -65,6 +72,20 @@ const LEADERBOARD_SIDE_WIDTH = 'w-[14.8%]';
 /** 左栏源选择行高（与桌面曲目表头行高对齐） */
 const LEADERBOARD_SOURCE_ROW =
   'flex h-9.5 shrink-0 items-center border-b border-border/50';
+
+function useLeaderboardTrackPlayGesture(isMobileLayout: () => boolean) {
+  return (doubleClick: boolean, onPlay: () => void) => {
+    if (
+      !shouldAcceptListPlayGesture(doubleClick, {
+        isMobileLayout: isMobileLayout(),
+        listDoubleClickToPlay: getMusicSettings().listDoubleClickToPlay,
+      })
+    ) {
+      return;
+    }
+    onPlay();
+  };
+}
 
 function LeaderboardMoreMenu(props: { onReloadFirstPage: () => void }) {
   const ui = getMusicLeaderboardUi;
@@ -156,6 +177,8 @@ function DesktopTrackRow(props: {
   tracks: AudioTrack[];
   onPlay: () => void;
 }) {
+  const shell = useShellLayout();
+  const acceptPlay = useLeaderboardTrackPlayGesture(() => shell().useMobileShell);
   return (
     <MusicTrackContextMenu
       track={props.track}
@@ -171,7 +194,8 @@ function DesktopTrackRow(props: {
           'h-auto w-full cursor-pointer rounded-none border-b border-border/40 py-2.5 text-xs font-normal hover:bg-muted/50 sm:text-sm',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         )}
-        onClick={props.onPlay}
+        onClick={() => acceptPlay(false, props.onPlay)}
+        onDblClick={() => acceptPlay(true, props.onPlay)}
       >
         <span class="w-full truncate px-1 text-left tabular-nums text-muted-foreground">
           {props.index + 1}
@@ -197,6 +221,8 @@ function MobileTrackRow(props: {
   tracks: AudioTrack[];
   onPlay: () => void;
 }) {
+  const shell = useShellLayout();
+  const acceptPlay = useLeaderboardTrackPlayGesture(() => shell().useMobileShell);
   const album = () => trackAlbumName(props.track);
   const subtitle = () => {
     const artist = props.track.artist?.trim();
@@ -217,7 +243,8 @@ function MobileTrackRow(props: {
         type="button"
         variant="ghost"
         class="h-auto min-h-[54px] w-full justify-start gap-2 rounded-none border-b border-border/40 px-3 py-2 font-normal hover:bg-muted/50"
-        onClick={props.onPlay}
+        onClick={() => acceptPlay(false, props.onPlay)}
+        onDblClick={() => acceptPlay(true, props.onPlay)}
       >
         <span class="w-9 shrink-0 text-left text-xs tabular-nums text-muted-foreground">
           {props.index + 1}
@@ -303,6 +330,12 @@ export const MusicLeaderboardPane: Component = () => {
   const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLElement | undefined>();
   const [boardsScrollEl, setBoardsScrollEl] = createSignal<HTMLElement | undefined>();
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
+  const showBoardsSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state().loading, state().boards.length),
+  );
+  const showTracksSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state().loading, state().detail ? 1 : 0),
+  );
 
   let lastTracksScrollTop = 0;
 
@@ -470,57 +503,56 @@ export const MusicLeaderboardPane: Component = () => {
             ref={(el) => setBoardsScrollEl(el)}
             class="my-2 min-h-0 flex-1 overflow-y-auto py-1"
           >
-            <Show when={shouldShowBlockingLoading(state().loading, state().boards.length)}>
-              <p class="px-2.5 py-2 text-sm text-muted-foreground">加载中…</p>
+            <Show when={showBoardsSkeleton()}>
+              <MusicSidebarListSkeleton />
             </Show>
-            <ul class="space-y-0.5 px-1.5">
-              <For each={state().boards}>
-                {(board) => {
-                  const active = () => state().selectedBoard?.id === board.id;
-                  return (
-                    <li>
-                      <button
-                        type="button"
-                        class={cn(
-                          'flex h-9 w-full min-w-0 items-center rounded-md px-2.5 text-left text-[13px]',
-                          'transition-[color,background-color] duration-300 ease-out',
-                          active()
-                            ? 'bg-primary/10 text-primary'
-                            : 'text-foreground hover:bg-primary/10',
-                        )}
-                        onClick={() => {
-                          if (active()) return;
-                          void selectLeaderboardBoard(board, 1);
-                        }}
-                      >
-                        <span
+            <Show when={!showBoardsSkeleton()}>
+              <ul class="space-y-0.5 px-1.5">
+                <For each={state().boards}>
+                  {(board) => {
+                    const active = () => state().selectedBoard?.id === board.id;
+                    return (
+                      <li>
+                        <button
+                          type="button"
                           class={cn(
-                            'inline-flex shrink-0 items-center justify-center overflow-hidden',
-                            reduceMotion()
-                              ? ''
-                              : 'transition-[width,opacity] duration-130 ease-out',
-                            active() ? 'mr-0.5 w-[0.9em] opacity-100' : 'w-0 opacity-0',
+                            'flex h-9 w-full min-w-0 items-center rounded-md px-2.5 text-left text-[13px]',
+                            'transition-[color,background-color] duration-300 ease-out',
+                            active()
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-foreground hover:bg-primary/10',
                           )}
-                          aria-hidden={!active()}
+                          onClick={() => {
+                            if (active()) return;
+                            void selectLeaderboardBoard(board, 1);
+                          }}
                         >
-                          <ChevronRight class="h-[0.9em] w-[0.9em] shrink-0" />
-                        </span>
-                        <span class="min-w-0 flex-1 truncate">{board.name}</span>
-                      </button>
-                    </li>
-                  );
-                }}
-              </For>
-            </ul>
+                          <span
+                            class={cn(
+                              'inline-flex shrink-0 items-center justify-center overflow-hidden',
+                              reduceMotion()
+                                ? ''
+                                : 'transition-[width,opacity] duration-130 ease-out',
+                              active() ? 'mr-0.5 w-[0.9em] opacity-100' : 'w-0 opacity-0',
+                            )}
+                            aria-hidden={!active()}
+                          >
+                            <ChevronRight class="h-[0.9em] w-[0.9em] shrink-0" />
+                          </span>
+                          <span class="min-w-0 flex-1 truncate">{board.name}</span>
+                        </button>
+                      </li>
+                    );
+                  }}
+                </For>
+              </ul>
+            </Show>
           </div>
         </aside>
 
         <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <Show when={shouldShowBlockingLoading(state().loading, detail() ? 1 : 0)}>
-            <p class="shrink-0 p-4 text-sm text-muted-foreground">加载中…</p>
-          </Show>
-          <Show when={state().error}>
-            <p class="shrink-0 p-4 text-sm text-destructive">{state().error}</p>
+          <Show when={showTracksSkeleton()}>
+            <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden px-0" />
           </Show>
 
           {/* 稳定滚动容器，保证快速滚动按钮始终挂在真实溢出区域 */}
@@ -529,10 +561,11 @@ export const MusicLeaderboardPane: Component = () => {
             class={cn(
               'my-2 min-h-0 flex-1 overflow-y-auto pb-4',
               (state().loading || state().loadingMore) && detail() && 'opacity-60',
+              showTracksSkeleton() && 'hidden',
             )}
             onScroll={(e) => handleTracksScroll(e.currentTarget)}
           >
-            <Show when={!isMobileLayout()}>
+            <Show when={!isMobileLayout() && detail()}>
               <div class="sticky top-0 z-10">
                 <DesktopTrackHeaderRow />
               </div>
@@ -582,7 +615,7 @@ export const MusicLeaderboardPane: Component = () => {
               )}
             </Show>
 
-            <Show when={!detail() && !state().loading}>
+            <Show when={!detail() && !state().loading && !showTracksSkeleton()}>
               <p class="p-4 text-sm text-muted-foreground">选择排行榜查看曲目</p>
             </Show>
           </div>

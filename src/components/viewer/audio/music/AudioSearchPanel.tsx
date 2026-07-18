@@ -5,6 +5,7 @@
 import { createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { showAppToast } from '@/components/shared/AppToasts';
 import {
   searchOnline,
   listSearchSources,
@@ -25,7 +26,6 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
   const [keyword, setKeyword] = createSignal('');
   const [source, setSource] = createSignal<SearchSource>('wy');
   const [loading, setLoading] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
   const [searched, setSearched] = createSignal(false);
   const [results, setResults] = createSignal<
     Awaited<ReturnType<typeof searchOnline>>['tracks']
@@ -42,7 +42,6 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
     const q = keyword().trim();
     if (!q) return;
     setLoading(true);
-    setError(null);
     setSearched(false);
     try {
       const res = await searchOnline(source(), q);
@@ -51,7 +50,11 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
     } catch (e) {
       setResults([]);
       setSearched(true);
-      setError(e instanceof Error ? e.message : '搜索失败');
+      showAppToast({
+        title: '搜索失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -84,15 +87,12 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
             {loading() ? '搜索中…' : '搜索'}
           </Button>
         </div>
-        <Show when={error()}>
-          <p class="text-sm text-destructive">{error()}</p>
-        </Show>
       </div>
       <ul class="p-2">
         <Show
           when={active() && results().length > 0}
           fallback={
-            <Show when={active() && searched() && !loading() && !error()}>
+            <Show when={active() && searched() && !loading()}>
               <li class="px-3 py-8 text-center text-sm text-muted-foreground">
                 未找到相关歌曲，可换关键词或其他音源重试
               </li>

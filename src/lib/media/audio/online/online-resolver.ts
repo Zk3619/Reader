@@ -32,6 +32,7 @@ import {
 import { MusicPlaybackStatusText } from '@/lib/media/audio/music-playback-status';
 import { request } from '@/lib/http';
 import { isTauri } from '@/lib/platform/detect';
+import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
 
 /** 按脚本独立熔断：依据错误信号，不依据脚本名/域名打分 */
 const primaryFailStreakByScript = new Map<string, number>();
@@ -383,6 +384,8 @@ export async function resolveTrackPlaybackUrls(
     skipCache?: boolean;
     activeSource?: string | null;
     quality?: MusicQuality;
+    /** false 时不走跨平台换源（用于已挂载的 toggleMusicInfo） */
+    allowToggleSource?: boolean;
   } & ToggleSourceCallbacks,
 ): Promise<{
   urls: string[];
@@ -392,6 +395,7 @@ export async function resolveTrackPlaybackUrls(
 }> {
   const offline = getMusicOfflineMode();
   const urlMode = getMusicSettings().urlSourceMode;
+  const allowToggleSource = options?.allowToggleSource !== false;
   // options.userApiId / activeSource 仍保留兼容；取链统一按「活跃 → 其他启用 →（auto）内置」
 
   if (track.source === 'local') {
@@ -414,6 +418,25 @@ export async function resolveTrackPlaybackUrls(
 
   if (offline) {
     return { urls: [], revokeAll: () => {}, track };
+  }
+
+  // 对齐 lx：已有 toggleMusicInfo 时优先用其取链（不再二次换源）
+  if (allowToggleSource) {
+    const toggleInfo = getToggleMusicInfo(track);
+    if (toggleInfo) {
+      const cleanToggle: AudioTrack = {
+        ...toggleInfo,
+        meta: { ...toggleInfo.meta, toggleMusicInfo: undefined },
+      };
+      const fromToggle = await resolveTrackPlaybackUrls(cleanToggle, {
+        ...options,
+        allowToggleSource: false,
+      });
+      if (fromToggle.urls.length > 0) {
+        return { ...fromToggle, toggled: true, track: toggleInfo };
+      }
+      // 换源曲目失效则回退原曲并允许再次换源
+    }
   }
 
   const activeName = getActiveUserApiDisplayName();
@@ -454,6 +477,7 @@ export async function resolveTrackPlaybackUrls(
   /**
    * 活跃→其他 UserApi；auto 模式下同平台/跨平台穿插内置，避免矩阵拖死。
    * builtin 模式纯走内置矩阵。
+   * allowToggleSource=false：仅同平台取链，不 findMusic 跨平台（用于 toggleMusicInfo）。
    */
   let resolved: {
     playable: { url: string; revoke: () => void };
@@ -461,7 +485,26 @@ export async function resolveTrackPlaybackUrls(
     toggled: boolean;
   } | null = null;
 
-  if (urlMode === 'builtin') {
+  if (!allowToggleSource) {
+    // 仅打当前曲目所属源
+    const ids = listUserApiScriptIdsForPlayback(isFallbackResolverEnabled());
+    for (const scriptId of ids) {
+      const url = await resolveUserApiUrl(scriptId, track, options?.quality);
+      if (!url) continue;
+      const ok = await acceptUrl(url, track);
+      if (ok) {
+        resolved = { playable: ok, track, toggled: false };
+        break;
+      }
+    }
+    if (!resolved && urlMode !== 'userApi') {
+      const url = await tryResolveBuiltinUrl(track, options?.cookies, options?.quality);
+      if (url) {
+        const ok = await acceptUrl(url, track);
+        if (ok) resolved = { playable: ok, track, toggled: false };
+      }
+    }
+  } else if (urlMode === 'builtin') {
     resolved = await resolveBuiltinAcrossPlatforms(
       track,
       acceptUrl,
@@ -486,7 +529,7 @@ export async function resolveTrackPlaybackUrls(
     );
   }
 
-  if (!resolved && urlMode !== 'userApi') {
+  if (!resolved && allowToggleSource && urlMode !== 'userApi') {
     const last = await resolveLastResortTrackUrl(
       track,
       async (alt) => {
@@ -511,7 +554,7 @@ export async function resolveTrackPlaybackUrls(
         };
       }
     }
-  } else if (!resolved && urlMode === 'userApi' && isFallbackResolverEnabled()) {
+  } else if (!resolved && allowToggleSource && urlMode === 'userApi' && isFallbackResolverEnabled()) {
     // 仅 UserApi：关键词候选也只喂活跃源（对齐 lx，避免再乘旁路脚本）
     const activeId = listEnabledUserApiScriptIdsForUrl()[0];
     const last = await resolveLastResortTrackUrl(

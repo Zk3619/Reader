@@ -16,6 +16,8 @@ export function resolveNextChapterIndex(
       return currentIndex + 1 < catalogLength ? currentIndex + 1 : null;
     case AudioPlayMode.singleLoop:
       return currentIndex;
+    case AudioPlayMode.none:
+      return null;
     case AudioPlayMode.random:
       if (catalogLength === 1) return 0;
       let next = currentIndex;

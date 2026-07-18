@@ -19,6 +19,7 @@ import type {
   SongListTag,
   SongListTagGroup,
 } from '@/lib/media/audio/music-sdk/types';
+import { notifyPageError } from '@/lib/ui/page-notify';
 import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
 
 const DEFAULT_LIMIT = 30;
@@ -180,12 +181,14 @@ export async function loadSongListPage(
       hasMore: resolveHasMore(page, limit, list.length, nextTotal),
     });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : '歌单加载失败';
     setSongListState({
       loading: false,
       loadingMore: false,
-      error: err instanceof Error ? err.message : '歌单加载失败',
+      error: msg,
       ...(append ? {} : { playlists: [], hasMore: false }),
     });
+    notifyPageError('歌单加载失败', msg);
   }
 }
 
@@ -195,11 +198,13 @@ export async function openSongListDetail(id: string, page = 1): Promise<void> {
     const detail = await getSongListDetail(songListState.source, id, page);
     setSongListState({ detail, detailLoading: false });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : '歌单详情加载失败';
     setSongListState({
       detailLoading: false,
-      error: err instanceof Error ? err.message : '歌单详情加载失败',
+      error: msg,
       detail: null,
     });
+    notifyPageError('歌单详情加载失败', msg);
   }
 }
 

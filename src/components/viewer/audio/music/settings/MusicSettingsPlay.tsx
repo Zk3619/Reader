@@ -41,6 +41,7 @@ const PLAY_MODES = [
   AudioPlayMode.singleLoop,
   AudioPlayMode.random,
   AudioPlayMode.listEndStop,
+  AudioPlayMode.none,
 ] as const;
 
 const URL_SOURCE_MODES = ['auto', 'userApi', 'builtin'] as const;
@@ -199,7 +200,7 @@ export const MusicSettingsPlay: Component = () => {
           onChange={(checked) => applySettings({ lyricUseLxLyric: checked })}
         />
         <Label for="music-play-word-by-word-lyric-input">
-          使用卡拉 OK 式歌词播放（如果可用）
+          使用卡拉 OK 式歌词播放（有逐字轨时用逐字；否则按句时长均分每个字）
         </Label>
       </div>
       <div class="flex items-center gap-2 text-sm">

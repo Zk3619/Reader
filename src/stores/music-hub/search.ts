@@ -27,11 +27,15 @@ import { sortByKeywordSimilarity } from '@/lib/media/audio/music-sdk/search-simi
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
+import { notifyPageError, notifyPageWarning } from '@/lib/ui/page-notify';
 import { getMusicSearchUi } from '@/stores/music-hub/music-search-ui';
+import {
+  getMusicUiSnapshot,
+  patchMusicUiSnapshot,
+} from '@/lib/persistence/domains/music-ui';
 
 export type SearchTab = 'song' | 'playlist';
 
-const SEARCH_HISTORY_KEY = 'reader.music.searchHistory';
 const MAX_HISTORY = 20;
 const initialSearchSettings = getMusicSettings();
 
@@ -84,20 +88,16 @@ const [searchState, setSearchState] = createStore<MusicHubSearchState>({
 });
 
 function loadHistory(): string[] {
-  try {
-    const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
+  return getMusicUiSnapshot().searchHistory.slice(0, MAX_HISTORY);
 }
 
 function saveHistory(items: string[]): void {
-  try {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(items));
-  } catch {
-    /* ignore */
-  }
+  patchMusicUiSnapshot({ searchHistory: items });
+}
+
+/** music.ui hydrate 后同步到内存 store */
+export function syncSearchHistoryFromPersist(items: string[]): void {
+  setSearchState('history', items.slice(0, MAX_HISTORY));
 }
 
 function decodeKeywordList(words: string[]): string[] {
@@ -282,6 +282,7 @@ export async function searchByKeyword(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) {
     setSearchState({ error: '请输入关键词', submitted: false, helpVisible: true });
+    notifyPageWarning('请输入关键词');
     return;
   }
   setSearchState({ keyword: trimmed });
@@ -417,6 +418,7 @@ export async function submitSearch(page = 1): Promise<void> {
   const keyword = searchState.keyword.trim();
   if (!keyword) {
     setSearchState({ error: '请输入关键词', submitted: false, helpVisible: true });
+    notifyPageWarning('请输入关键词');
     return;
   }
   cancelTipSearch();
@@ -472,6 +474,7 @@ export async function runSearch(
   const keyword = searchState.keyword.trim();
   if (!keyword) {
     setSearchState({ error: '请输入关键词', tracks: [], playlists: [], hasMore: false });
+    notifyPageWarning('请输入关键词');
     return;
   }
   const append = options?.append === true;
@@ -651,14 +654,16 @@ export async function runSearch(
     }
   } catch (err) {
     if (requestId !== searchRequestId) return;
+    const msg = err instanceof Error ? err.message : '搜索失败';
     setSearchState({
       loading: false,
       loadingMore: false,
-      error: err instanceof Error ? err.message : '搜索失败',
+      error: msg,
       ...(append
         ? {}
         : { tracks: [], playlists: [], trackTotal: 0, playlistTotal: 0, hasMore: false }),
     });
+    notifyPageError('搜索失败', msg);
   }
 }
 

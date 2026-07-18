@@ -31,7 +31,12 @@ import {
   MusicSongListPaneBelow,
   MusicSongListPaneToolbar,
 } from '@/components/viewer/audio/music/hub/MusicSongListPaneToolbar';
+import {
+  MusicPlaylistGridSkeleton,
+  MusicSongListDetailSkeleton,
+} from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { musicHubListInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { scrollToTop } from '@/lib/ui/scroll-to-top';
 import { settingsStore } from '@/stores/settings';
@@ -140,6 +145,14 @@ export const MusicSongListPane: Component = () => {
   const [listScrollEl, setListScrollEl] = createSignal<HTMLDivElement | undefined>();
   const { handleScroll } = useSongListScrollLoad();
   useScrollToTopOnPageChange(listScrollEl);
+  const showListSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state().loading, state().playlists.length),
+  );
+  /** 打开详情：立即出骨架，避免仍停在列表页无反馈 */
+  const showDetailSkeleton = useSkeletonLoading(
+    () => state().detailLoading && !state().detail,
+    { delay: 0, minDisplayTime: 200 },
+  );
 
   createEffect(() => {
     void loadSongListTags();
@@ -156,41 +169,47 @@ export const MusicSongListPane: Component = () => {
       when={!state().detail}
       fallback={<MusicSongListDetail onBack={() => closeSongListDetail()} />}
     >
-      <MusicHubPageShell
-        section="songlist"
-        scrollClass="overflow-hidden"
-        toolbar={<MusicSongListPaneToolbar onOpenLink={() => setOpenListOpen(true)} />}
-        below={showBelow() ? <MusicSongListPaneBelow /> : undefined}
-        belowHorizontalWheel={ui().sourceControl === 'tabs' || ui().sortControl === 'tabs'}
-      >
-        <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Show when={shouldShowBlockingLoading(state().loading, state().playlists.length)}>
-            <p class="shrink-0 py-2 text-sm text-muted-foreground">加载中…</p>
-          </Show>
-          <Show when={state().error}>
-            <p class="shrink-0 py-2 text-sm text-destructive">{state().error}</p>
-          </Show>
-          <Show when={state().playlists.length > 0}>
-            <MusicPlaylistVirtualList
-              class="min-h-0 flex-1 my-2"
-              listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
-              playlists={() => state().playlists}
-              onOpen={(pl) => void openSongListDetail(pl.id)}
-              onScrollContainer={setListScrollEl}
-              onScroll={handleScroll}
-              scrollFooter={<SongListFooter />}
-            />
-          </Show>
-          <MusicHubQuickScroll
-            container={listScrollEl}
-            contentRevision={() =>
-              `${state().playlists.length}:${state().page}:${ui().paginationPreference}:${state().source}:${state().tagId ?? ''}:${state().sortId}`
-            }
-          />
-        </div>
-      </MusicHubPageShell>
+      <Show
+        when={showDetailSkeleton()}
+        fallback={
+          <>
+            <MusicHubPageShell
+              section="songlist"
+              scrollClass="overflow-hidden"
+              toolbar={<MusicSongListPaneToolbar onOpenLink={() => setOpenListOpen(true)} />}
+              below={showBelow() ? <MusicSongListPaneBelow /> : undefined}
+              belowHorizontalWheel={ui().sourceControl === 'tabs' || ui().sortControl === 'tabs'}
+            >
+              <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                <Show when={showListSkeleton()}>
+                  <MusicPlaylistGridSkeleton class="min-h-0 flex-1 overflow-y-auto" />
+                </Show>
+                <Show when={!showListSkeleton() && state().playlists.length > 0}>
+                  <MusicPlaylistVirtualList
+                    class="min-h-0 flex-1 my-2"
+                    listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
+                    playlists={() => state().playlists}
+                    onOpen={(pl) => void openSongListDetail(pl.id)}
+                    onScrollContainer={setListScrollEl}
+                    onScroll={handleScroll}
+                    scrollFooter={<SongListFooter />}
+                  />
+                </Show>
+                <MusicHubQuickScroll
+                  container={listScrollEl}
+                  contentRevision={() =>
+                    `${state().playlists.length}:${state().page}:${ui().paginationPreference}:${state().source}:${state().tagId ?? ''}:${state().sortId}`
+                  }
+                />
+              </div>
+            </MusicHubPageShell>
 
-      <MusicOpenListDialog open={openListOpen()} onOpenChange={setOpenListOpen} />
+            <MusicOpenListDialog open={openListOpen()} onOpenChange={setOpenListOpen} />
+          </>
+        }
+      >
+        <MusicSongListDetailSkeleton onBack={() => closeSongListDetail()} />
+      </Show>
     </Show>
   );
 };

@@ -16,6 +16,7 @@ import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { MusicOnlineTrackList } from '@/components/viewer/audio/music/hub/MusicSearchResultLists';
+import { MusicTrackListSkeleton } from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import { cn } from '@/lib/utils';
 
 export interface MusicSongListDetailProps {
@@ -170,11 +171,8 @@ export const MusicSongListDetail: Component<MusicSongListDetailProps> = (props) 
                 </div>
               </div>
 
-              <Show when={state().detailLoading}>
-                <p class="shrink-0 py-2 text-sm text-muted-foreground">加载中…</p>
-              </Show>
-              <Show when={state().error}>
-                <p class="shrink-0 py-2 text-sm text-destructive">{state().error}</p>
+              <Show when={state().detailLoading && d().tracks.length === 0}>
+                <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
               </Show>
 
               <Show

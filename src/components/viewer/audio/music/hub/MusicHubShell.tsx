@@ -71,10 +71,10 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
           if (hubPlayer.player.playing()) hubPlayer.player.togglePlay();
           break;
         case 'next':
-          void playNextTrack();
+          void playNextTrack({ manual: true });
           break;
         case 'prev':
-          void playPrevTrack();
+          void playPrevTrack({ manual: true });
           break;
         case 'seek': {
           const pos = Number(payload.position ?? 0);

@@ -371,7 +371,7 @@ export async function txGetLyric(track: AudioTrack): Promise<LyricBundle | null>
     const lyric = atob(b64);
     const tlyric = body?.req?.data?.trans ? atob(body.req.data.trans) : null;
     const rlyric = body?.req?.data?.roma ? atob(body.req.data.roma) : null;
-    return { lyric, tlyric, rlyric, lxlyric: lyric };
+    return { lyric, tlyric, rlyric, lxlyric: null };
   } catch {
     return null;
   }

@@ -36,6 +36,8 @@ import { MediaGroupId } from '@/types/book-group';
 import type { BookGroup } from '@/types';
 import { cn } from '@/lib/utils';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { MusicSidebarListSkeleton } from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import {
   AppTextField,
   AppTextFieldInput,
@@ -63,7 +65,20 @@ export interface MusicPlaylistSidebarProps {
 type SidebarGroup = BookGroup & { sortable: boolean };
 
 function playlistIdForGroup(group: BookGroup): string | null {
-  return group.groupId === MediaGroupId.Favorite ? 'love' : group.listId ?? null;
+  if (group.groupId === MediaGroupId.Favorite) return 'love';
+  if (group.listId) return group.listId;
+  switch (group.groupId) {
+    case MediaGroupId.MusicDefault:
+      return 'default';
+    case MediaGroupId.MusicTrial:
+      return 'trial';
+    case MediaGroupId.MusicRecent:
+      return 'recent';
+    case MediaGroupId.MusicLocal:
+      return 'local';
+    default:
+      return null;
+  }
 }
 
 async function loadSidebarGroups(): Promise<SidebarGroup[]> {
@@ -198,6 +213,9 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
 
   const [renameOpen, setRenameOpen] = createSignal(false);
   const [renameValue, setRenameValue] = createSignal('');
+  const showSidebarSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(groups.loading, (groups() ?? []).length),
+  );
 
   const activeGroupId = () =>
     viewerStore.state.activeMusicGroupId ?? MediaGroupId.MusicLocal;
@@ -256,55 +274,57 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
         </div>
       </Show>
       <div class="min-h-0 flex-1 overflow-y-auto p-2">
-        <Show when={shouldShowBlockingLoading(groups.loading, (groups() ?? []).length)}>
-          <p class="px-3 py-2 text-sm text-muted-foreground">加载中…</p>
+        <Show when={showSidebarSkeleton()}>
+          <MusicSidebarListSkeleton class="px-0" />
         </Show>
-        <ul class="space-y-0.5">
-          <For each={pinned()}>
-            {(group) => (
-              <li>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  class={cn(
-                    'h-9 w-full min-w-0 justify-start rounded-md px-2.5 text-left text-[13px] font-normal',
-                    'transition-[color,background-color] duration-300 ease-out',
-                    activeGroupId() === group.groupId
-                      ? 'bg-primary/10 font-medium text-primary'
-                      : 'text-foreground hover:bg-primary/10',
-                  )}
-                  onClick={() => {
-                    if (activeGroupId() === group.groupId) return;
-                    setActiveMusicGroupId(group.groupId, playlistIdForGroup(group));
-                  }}
-                >
-                  <PlaylistActiveIndicator active={activeGroupId() === group.groupId} />
-                  <span class="min-w-0 flex-1 truncate">{group.groupName}</span>
-                </Button>
-              </li>
-            )}
-          </For>
-        </ul>
-        <Show when={sortableGroups().length > 0}>
-          <DragDropProvider collisionDetector={closestCenter}>
-            <DragDropSensors />
-            <SortableProvider ids={sortableIds()}>
-              <ReorderBridge onReorder={handleReorder} />
-              <ul class="mt-1 space-y-0.5 border-t pt-1">
-                <For each={sortableGroups()}>
-                  {(group) => (
-                    <SortableListRow
-                      group={group}
-                      active={activeGroupId() === group.groupId}
-                      onSelect={() =>
-                        setActiveMusicGroupId(group.groupId, playlistIdForGroup(group))
-                      }
-                    />
-                  )}
-                </For>
-              </ul>
-            </SortableProvider>
-          </DragDropProvider>
+        <Show when={!showSidebarSkeleton()}>
+          <ul class="space-y-0.5">
+            <For each={pinned()}>
+              {(group) => (
+                <li>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    class={cn(
+                      'h-9 w-full min-w-0 justify-start rounded-md px-2.5 text-left text-[13px] font-normal',
+                      'transition-[color,background-color] duration-300 ease-out',
+                      activeGroupId() === group.groupId
+                        ? 'bg-primary/10 font-medium text-primary'
+                        : 'text-foreground hover:bg-primary/10',
+                    )}
+                    onClick={() => {
+                      if (activeGroupId() === group.groupId) return;
+                      setActiveMusicGroupId(group.groupId, playlistIdForGroup(group));
+                    }}
+                  >
+                    <PlaylistActiveIndicator active={activeGroupId() === group.groupId} />
+                    <span class="min-w-0 flex-1 truncate">{group.groupName}</span>
+                  </Button>
+                </li>
+              )}
+            </For>
+          </ul>
+          <Show when={sortableGroups().length > 0}>
+            <DragDropProvider collisionDetector={closestCenter}>
+              <DragDropSensors />
+              <SortableProvider ids={sortableIds()}>
+                <ReorderBridge onReorder={handleReorder} />
+                <ul class="mt-1 space-y-0.5 border-t pt-1">
+                  <For each={sortableGroups()}>
+                    {(group) => (
+                      <SortableListRow
+                        group={group}
+                        active={activeGroupId() === group.groupId}
+                        onSelect={() =>
+                          setActiveMusicGroupId(group.groupId, playlistIdForGroup(group))
+                        }
+                      />
+                    )}
+                  </For>
+                </ul>
+              </SortableProvider>
+            </DragDropProvider>
+          </Show>
         </Show>
       </div>
 

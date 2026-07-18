@@ -18,6 +18,7 @@ import { jsonApiResult } from '@/lib/web-api/response';
 export async function getAudioStatusApi(): Promise<WebApiDispatchResult> {
   const state = viewerStore.state;
   const track = state.trackQueue[state.trackIndex];
+  const isMusic = state.playbackMode === 'music';
   return jsonApiResult(
     legadoOk({
       playbackMode: state.playbackMode,
@@ -27,9 +28,9 @@ export async function getAudioStatusApi(): Promise<WebApiDispatchResult> {
       current: track
         ? { id: track.id, name: track.name, artist: track.artist, source: track.source }
         : null,
-      primaryUrl: state.primaryUrl,
-      loading: state.loading,
-      error: state.error,
+      primaryUrl: isMusic ? state.musicPrimaryUrl : state.primaryUrl,
+      loading: isMusic ? state.musicLoading : state.loading,
+      error: isMusic ? state.musicError : state.error,
     }),
   );
 }

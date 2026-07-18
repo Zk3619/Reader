@@ -118,9 +118,20 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     setBufferedEnd(0);
   };
 
-  const pauseAndResetUi = () => {
+  const pauseAndResetUi = (clearSrc = false) => {
     if (audioEl) {
+      seekingFromUser = true;
       audioEl.pause();
+      if (clearSrc) {
+        audioEl.removeAttribute('src');
+        // 打断旧缓冲，避免与随后 loadSegment 并行出声
+        try {
+          audioEl.load();
+        } catch {
+          // ignore
+        }
+      }
+      seekingFromUser = false;
     }
     setPlaying(false);
     resetProgressUi(0);
@@ -130,7 +141,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     const urls = segmentUrls();
     if (!audioEl) return;
     if (urls.length === 0) {
-      pauseAndResetUi();
+      pauseAndResetUi(true);
       return;
     }
     const clamped = Math.min(Math.max(0, index), urls.length - 1);
@@ -156,7 +167,10 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       setCurrentTime(seek);
     } else if (srcChanged && seek <= 0) {
       audioEl.currentTime = 0;
+      setCurrentTime(0);
     }
+    // 选中/切歌自动播放时，清掉「用户暂停」以免旧暂停状态挡住新曲
+    if (autoplay) userPaused = false;
     const shouldPlay = autoplay && !userPaused;
     if (shouldPlay) {
       void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
@@ -275,10 +289,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       ([key, isLoading]) => {
         if (!audioEl) return;
         if (isLoading) {
-          if (key !== lastSegmentKey) {
-            pendingLoadAfterFetch = true;
-            pauseAndResetUi();
-          }
+          // 切歌取链中：必须停掉旧音频并重置进度，避免旧 URL 与新曲并行
+          pendingLoadAfterFetch = true;
+          pauseAndResetUi(true);
           return;
         }
         const keyChanged = key !== lastSegmentKey;
@@ -286,7 +299,8 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
         lastSegmentKey = key;
         pendingLoadAfterFetch = false;
         playbackErrorHandled = false;
-        loadSegment(0, !userPaused && (options.autoPlay?.() ?? true));
+        // 切歌后按「选中/自动切歌后开始播放」设置决定，不沿用上一曲的用户暂停
+        loadSegment(0, options.autoPlay?.() ?? true);
       },
       { defer: true },
     ),

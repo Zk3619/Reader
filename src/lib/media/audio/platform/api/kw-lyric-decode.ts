@@ -143,13 +143,13 @@ function getKwWordInfo(
   let startTime = Math.abs((offset + offset2) / (scale * 2));
   let endTime = Math.abs((offset - offset2) / (scale2 * 2)) + startTime;
   const info: KwWordInfo = {
-    startTime,
-    endTime,
-    timeStr: `<${startTime},${endTime - startTime}>`,
+    startTime: Math.round(startTime),
+    endTime: Math.round(endTime),
+    timeStr: `<${Math.round(startTime)},${Math.round(endTime - startTime)}>`,
   };
   if (prevWord) {
     if (startTime < prevWord.endTime) {
-      prevWord.endTime = startTime;
+      prevWord.endTime = Math.round(startTime);
       if (prevWord.startTime > prevWord.endTime) prevWord.startTime = prevWord.endTime;
       prevWord.newTimeStr = `<${prevWord.startTime},${prevWord.endTime - prevWord.startTime}>`;
     }

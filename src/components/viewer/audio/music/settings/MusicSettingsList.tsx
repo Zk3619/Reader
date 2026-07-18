@@ -56,7 +56,7 @@ export const MusicSettingsList: Component = () => {
                 onChange={(checked) => applySettings({ listDoubleClickToPlay: checked })}
               />
               <Label for="music-list-double-click-play-input">
-                双击列表里的歌曲时自动切换到当前列表播放（对「歌单」「排行榜」「我的列表」均有效；搜索结果开启后会以临时队列播放整页，关闭则加入「播放列表」）
+                桌面端双击列表歌曲才播放（对「歌单」「排行榜」「我的列表」均有效；移动端始终单击。搜索结果开启后会以临时队列播放整页，关闭则加入「播放列表」）
               </Label>
             </div>
             <p class="pl-6 text-xs text-muted-foreground">

@@ -9,7 +9,11 @@ import {
   hotSearchKeywords,
   tipSearchKeywords,
 } from '@/lib/media/audio/music-sdk';
-import { pickLyricText, hasLyricContent } from '@/lib/media/audio/lyric-types';
+import {
+  pickLyricText,
+  hasLyricContent,
+  resolveEffectiveLyricTrack,
+} from '@/lib/media/audio/lyric-types';
 import { qualityFallbackChain } from '@/lib/media/audio/music-quality';
 
 describe('music-sdk', () => {
@@ -60,6 +64,20 @@ describe('lyric-types', () => {
   it('hasLyricContent detects any track', () => {
     expect(hasLyricContent({ tlyric: 'x' })).toBe(true);
     expect(hasLyricContent({})).toBe(false);
+  });
+
+  it('resolveEffectiveLyricTrack prefers lxlyric when karaoke enabled', () => {
+    const bundle = { lyric: '原', lxlyric: '[00:01.00]<0,100>字' };
+    expect(resolveEffectiveLyricTrack(bundle, 'lyric', true)).toBe('lxlyric');
+    expect(resolveEffectiveLyricTrack(bundle, 'lxlyric', true)).toBe('lxlyric');
+    expect(resolveEffectiveLyricTrack(bundle, 'lyric', false)).toBe('lyric');
+    expect(resolveEffectiveLyricTrack(bundle, 'lxlyric', false)).toBe('lyric');
+    expect(resolveEffectiveLyricTrack(bundle, 'tlyric', true)).toBe('tlyric');
+    expect(resolveEffectiveLyricTrack({ lyric: '原' }, 'lyric', true)).toBe('lyric');
+    // 假逐字（无标签）不得切入
+    expect(
+      resolveEffectiveLyricTrack({ lyric: '原', lxlyric: '[00:01.00]字' }, 'lyric', true),
+    ).toBe('lyric');
   });
 });
 

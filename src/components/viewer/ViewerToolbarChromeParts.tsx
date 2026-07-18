@@ -22,6 +22,8 @@ export interface ViewerToolbarWindowControlsProps {
   /** 强制隐藏（如移动端顶栏） */
   hidden?: boolean;
   class?: string;
+  /** 与宿主顶栏内联融合，禁用悬浮布局下的胶囊包裹 */
+  inline?: boolean;
   /** 继承父级顶栏 chrom 文字/悬停色（阅读器顶栏跟随页面时） */
   inheritChromeColors?: boolean;
   /** 阅读主题 id（跟随页面时用于胶囊光晕） */
@@ -33,12 +35,12 @@ export interface ViewerToolbarWindowControlsProps {
 /** 主题切换 + 窗口控件（始终成组） */
 export function ViewerToolbarWindowControls(props: ViewerToolbarWindowControlsProps) {
   const floating = useMediaViewerChromeFloating();
-  const useCapsule = () => floating.isFloating();
+  const useCapsule = () => floating.isFloating() && !props.inline;
   const showSeparator = () =>
     props.showLeadingSeparator !== false &&
     isTauri() &&
     !isMobile() &&
-    !floating.isFloating();
+    (!floating.isFloating() || !!props.inline);
 
   const capsuleStyle = (): JSX.CSSProperties | undefined => {
     if (!useCapsule()) return undefined;

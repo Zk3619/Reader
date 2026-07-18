@@ -29,7 +29,7 @@ import { viewerStore } from '@/stores/viewer';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
 import { invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
-import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import {
   trackAlbumName,
@@ -38,6 +38,8 @@ import {
 } from '@/lib/media/audio/music-search-result-ui';
 import { MusicHubQuickScroll } from '@/components/viewer/audio/music/hub/MusicHubQuickScroll';
 import { MusicTrackContextMenu } from '@/components/viewer/audio/music/hub/MusicTrackContextMenu';
+import { MusicTrackListSkeleton } from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
+import { shouldAcceptListPlayGesture } from '@/components/viewer/audio/music/hub/list-track-play-gesture';
 import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
 import { useVirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -130,7 +132,14 @@ function SortableTrackRow(props: {
     }
   });
   const handlePlay = (doubleClick = false) => {
-    if (props.settings.listDoubleClickToPlay !== doubleClick) return;
+    if (
+      !shouldAcceptListPlayGesture(doubleClick, {
+        isMobileLayout: props.mobile,
+        listDoubleClickToPlay: props.settings.listDoubleClickToPlay,
+      })
+    ) {
+      return;
+    }
     if (
       props.reorderBusy ||
       sortable?.isActiveDraggable() ||
@@ -327,8 +336,11 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
   );
 
   const [group] = createResource(groupId, getGroupById);
-  const playlistId = () =>
-    groupId() === MediaGroupId.Favorite ? 'love' : group()?.listId ?? null;
+  /** 优先用 store 同步的 playlistId，避免 group resource 未刷新时打到上一列表 */
+  const playlistId = () => {
+    if (groupId() === MediaGroupId.Favorite) return 'love';
+    return viewerStore.state.activePlaylistId ?? group()?.listId ?? null;
+  };
 
   onMount(() => {
     const unsubscribe = subscribeMusicSettings(setSettings);
@@ -362,6 +374,12 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
 
   const [reorderBusy, setReorderBusy] = createSignal(false);
   let reorderQueue = Promise.resolve();
+  /**
+   * createResource 切 source 后仍短暂持有上一列表数据，不可直接展示。
+   * 按 groupId 缓存已解析结果：切回已访问列表立刻显示，避免「加载中」闪烁；
+   * 首次进入某列表仍走阻塞加载。
+   */
+  const tracksCache = new Map<number, AudioTrack[]>();
   const handleReorder = (ids: Id[]): Promise<void> => {
     const targetGroupId = groupId();
     const orderedIds = ids.map(String);
@@ -377,6 +395,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
         if (reordered.length === current.length && groupId() === targetGroupId) {
           // 沿用现有实体引用，仅同步内存顺序；VirtualList 保留现有 DOM，不再查询并重建列表。
           mutate(reordered);
+          tracksCache.set(targetGroupId, reordered);
         }
         invalidateLocalMusicSearchCache();
       } catch (error) {
@@ -402,26 +421,76 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     setSelected(next);
   };
 
-  const list = () => tracks() ?? [];
-  const sortableIds = createMemo(() => list().map((t) => t.id));
+  createEffect(() => {
+    const id = groupId();
+    void tracks.loading;
+    void tracks.state;
+    const data = tracks();
+    if (!tracks.loading && tracks.state !== 'unresolved') {
+      tracksCache.set(id, data ?? []);
+    }
+  });
+
+  const listReady = () => {
+    const id = groupId();
+    if (!tracks.loading && tracks.state !== 'unresolved') return true;
+    return tracksCache.has(id);
+  };
+  const list = (): AudioTrack[] => {
+    const id = groupId();
+    if (!tracks.loading && tracks.state !== 'unresolved') {
+      return tracks() ?? [];
+    }
+    // 加载中绝不回退到上一列表的 resource 值，只用本列表缓存
+    return tracksCache.get(id) ?? [];
+  };
+  const sortableIds = createMemo(() =>
+    list()
+      .filter((t): t is AudioTrack => t != null && typeof t.id === 'string')
+      .map((t) => t.id),
+  );
   const selectedTracks = createMemo(() =>
-    list().filter((track) => selected().has(track.id)),
+    list().filter((track) => track != null && selected().has(track.id)),
   );
   const allSelected = () => list().length > 0 && selected().size === list().length;
   const toggleAll = () => {
     setSelected(allSelected() ? new Set<string>() : new Set(list().map((track) => track.id)));
   };
   const [scrollEl, setScrollEl] = createSignal<HTMLElement | undefined>();
+  let restoringScroll = false;
   createEffect(() => {
     const id = String(groupId());
     const el = scrollEl();
     const savePosition = settings().listSaveScrollPosition;
-    if (!el) return;
+    if (!el || !listReady()) return;
+    restoringScroll = true;
     queueMicrotask(() => {
-      if (String(groupId()) !== id) return;
+      if (String(groupId()) !== id) {
+        restoringScroll = false;
+        return;
+      }
       el.scrollTop = savePosition ? getMusicListScrollPosition(id) : 0;
+      queueMicrotask(() => {
+        restoringScroll = false;
+      });
     });
   });
+
+  /** 仅「本列表尚无任何快照」时出骨架；空列表已缓存则直接「暂无曲目」，避免反复闪 */
+  const showBlockingLoading = () => {
+    if (tracksCache.has(groupId())) return false;
+    if (list().length > 0) return false;
+    return tracks.loading || !listReady();
+  };
+  const delayedSkeleton = useSkeletonLoading(showBlockingLoading, {
+    delay: 0,
+    minDisplayTime: 160,
+  });
+  // 覆盖 minDisplayTime：切到已缓存空列表时立刻取消骨架
+  const showTrackSkeleton = () => {
+    if (tracksCache.has(groupId())) return false;
+    return delayedSkeleton();
+  };
 
   return (
     <div class={cn('relative flex min-h-0 min-w-0 flex-1 flex-col', props.class)}>
@@ -432,7 +501,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
           </Button>
         </div>
       </Show>
-      <Show when={!isMobileLayout() && list().length > 0}>
+      <Show when={!isMobileLayout() && list().length > 0 && !showTrackSkeleton()}>
         <DesktopTrackHeader
           allSelected={allSelected()}
           someSelected={selected().size > 0}
@@ -440,77 +509,81 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
           settings={settings()}
         />
       </Show>
-      <Show when={shouldShowBlockingLoading(tracks.loading, list().length)}>
-        <p class="p-4 text-sm text-muted-foreground">加载中…</p>
+      <Show when={showTrackSkeleton()}>
+        <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
       </Show>
-      <Show when={list().length === 0 && !tracks.loading}>
+      <Show when={listReady() && list().length === 0 && !showTrackSkeleton()}>
         <p class="p-4 text-sm text-muted-foreground">暂无曲目</p>
       </Show>
-      <Show when={list().length > 0}>
-        <VirtualList<AudioTrack>
-          items={list}
-          estimateSize={() => (isMobileLayout() ? 56 : 44)}
-          overscan={10}
-          class="min-h-0 flex-1"
-          getItemKey={(track) => track.id}
-          onScrollContainer={setScrollEl}
-          onScroll={(el) => {
-            if (settings().listSaveScrollPosition) {
-              setMusicListScrollPosition(String(groupId()), el.scrollTop);
-            }
-          }}
-          remeasureWhen={isMobileLayout}
-          sortable={{
-            enabled: () => props.reorderEnabled !== false,
-            ids: sortableIds,
-            onReorder: handleReorder,
-            persistOnly: true,
-            dragStyle: {
-              rowClass: 'touch-none',
-              activeClass: 'z-10 bg-background shadow-sm',
-            },
-          }}
-          renderDragOverlay={(activeId) => {
-            const track = list().find((item) => item.id === String(activeId));
-            return (
-              <div class="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
-                {track?.name ?? '歌曲'}
-              </div>
-            );
-          }}
-        >
-          {(track, index) => (
-            <SortableTrackRow
-              track={track}
-              index={index}
-              list={list()}
-              playlistId={playlistId()}
-              selected={selected().has(track.id)}
-              selectedTracks={selectedTracks()}
-              mobile={isMobileLayout()}
-              reorderEnabled={props.reorderEnabled !== false}
-              reorderBusy={reorderBusy()}
-              settings={settings()}
-              onToggleSelect={() => toggleSelect(track.id)}
-              onPlay={() => {
-                const listId = playlistId();
-                if (listId) {
-                  void playByListId(listId, index, {
-                    listName: group()?.groupName,
-                    listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
+      {/* keyed：换列表强制 remount，清掉 persistOnly displayIds / 滚动 / 行实例污染 */}
+      <Show when={listReady() && list().length > 0 && groupId() && !showTrackSkeleton()} keyed>
+        {(gid) => (
+          <VirtualList<AudioTrack>
+            items={list}
+            estimateSize={() => (isMobileLayout() ? 56 : 44)}
+            overscan={10}
+            class="min-h-0 flex-1"
+            getItemKey={(track, index) => track?.id ?? `idx:${index}`}
+            onScrollContainer={setScrollEl}
+            onScroll={(el) => {
+              if (restoringScroll) return;
+              if (!settings().listSaveScrollPosition) return;
+              // 使用 keyed 的 gid，避免切列表瞬间把滚动写到错误 key
+              setMusicListScrollPosition(String(gid), el.scrollTop);
+            }}
+            remeasureWhen={isMobileLayout}
+            sortable={{
+              enabled: () => props.reorderEnabled !== false,
+              ids: sortableIds,
+              onReorder: handleReorder,
+              persistOnly: true,
+              dragStyle: {
+                rowClass: 'touch-none',
+                activeClass: 'z-10 bg-background shadow-sm',
+              },
+            }}
+            renderDragOverlay={(activeId) => {
+              const track = list().find((item) => item.id === String(activeId));
+              return (
+                <div class="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+                  {track?.name ?? '歌曲'}
+                </div>
+              );
+            }}
+          >
+            {(track, index) => (
+              <SortableTrackRow
+                track={track}
+                index={index}
+                list={list()}
+                playlistId={playlistId()}
+                selected={selected().has(track.id)}
+                selectedTracks={selectedTracks()}
+                mobile={isMobileLayout()}
+                reorderEnabled={props.reorderEnabled !== false}
+                reorderBusy={reorderBusy()}
+                settings={settings()}
+                onToggleSelect={() => toggleSelect(track.id)}
+                onPlay={() => {
+                  const listId = playlistId();
+                  if (listId) {
+                    void playByListId(listId, index, {
+                      listName: group()?.groupName,
+                      listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
+                    });
+                    return;
+                  }
+                  void playPlaylist(list(), index, {
+                    origin: 'list',
+                    listName: group()?.groupName ?? '我的列表',
+                    listKind: 'temporary',
                   });
-                  return;
-                }
-                void playPlaylist(list(), index, {
-                  origin: 'list',
-                  listName: group()?.groupName ?? '我的列表',
-                  listKind: 'temporary',
-                });
-              }}
-              onChanged={handleListChanged}
-            />
-          )}
-        </VirtualList>
+                }}
+                onChanged={handleListChanged}
+              />
+            )}
+          </VirtualList>
+        )}
       </Show>
       <MusicHubQuickScroll
         container={scrollEl}

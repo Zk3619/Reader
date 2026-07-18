@@ -8,6 +8,7 @@ import {
   setMusicListScrollPosition,
   setMusicSettings,
 } from '@/lib/media/audio/music-settings';
+import { migratePlayDetailLyricFontSizeToRem } from '@/lib/media/audio/play-detail-lyric-font';
 import {
   DEFAULT_MUSIC_HOTKEYS,
   normalizeMusicHotkeys,
@@ -159,7 +160,23 @@ describe('music settings schema migration', () => {
       showTaskbarProgress: true,
       audioUseMaxChannels: false,
       audioPauseOnDeviceRemoved: false,
+      playDetailLyricFontSize: 0.875,
+      playDetailLyricFontSizeUnit: 'rem',
     });
+  });
+
+  it('migrates legacy playDetailLyricFontSize from px to rem', () => {
+    expect(migratePlayDetailLyricFontSizeToRem(14)).toBe(0.875);
+    const migrated = normalizeMusicSettings({
+      schemaVersion: 8,
+      playDetailLyricFontSize: 16,
+    });
+    expect(migrated.playDetailLyricFontSize).toBe(1);
+    const alreadyRem = normalizeMusicSettings({
+      schemaVersion: 9,
+      playDetailLyricFontSize: 0.875,
+    });
+    expect(alreadyRem.playDetailLyricFontSize).toBe(0.875);
   });
 });
 

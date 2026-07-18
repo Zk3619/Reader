@@ -5,6 +5,7 @@
 import { createSignal, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { openListFromUrlInput } from '@/stores/music-hub/songList';
 
 export interface MusicOpenListDialogProps {
@@ -14,21 +15,22 @@ export interface MusicOpenListDialogProps {
 
 export const MusicOpenListDialog: Component<MusicOpenListDialogProps> = (props) => {
   const [url, setUrl] = createSignal('');
-  const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
 
   const submit = async () => {
     const value = url().trim();
     if (!value) return;
     setLoading(true);
-    setError(null);
     const ok = await openListFromUrlInput(value);
     setLoading(false);
     if (ok) {
       props.onOpenChange(false);
       setUrl('');
     } else {
-      setError('无法识别歌单链接');
+      showAppToast({
+        title: '无法识别歌单链接',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -43,9 +45,6 @@ export const MusicOpenListDialog: Component<MusicOpenListDialogProps> = (props) 
             onInput={(e) => setUrl(e.currentTarget.value)}
             onKeyDown={(e: KeyboardEvent) => e.key === 'Enter' && void submit()}
           />
-          <Show when={error()}>
-            <p class="mt-2 text-sm text-destructive">{error()}</p>
-          </Show>
           <div class="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => props.onOpenChange(false)}>
               取消

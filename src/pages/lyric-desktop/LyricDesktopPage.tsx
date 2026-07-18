@@ -10,6 +10,7 @@ import {
 } from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
+import { resolveEffectiveLyricTrack } from '@/lib/media/audio/lyric-types';
 import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 
 export const LyricDesktopPage: Component = () => {
@@ -22,7 +23,11 @@ export const LyricDesktopPage: Component = () => {
   const [mainFullscreen, setMainFullscreen] = createSignal(false);
 
   const lyricTrack = (): LyricTrackKind =>
-    settings().desktopLyricTrack ?? settings().lyricTrack ?? 'lxlyric';
+    resolveEffectiveLyricTrack(
+      lyricBundle(),
+      settings().desktopLyricTrack ?? settings().lyricTrack ?? 'lxlyric',
+      settings().lyricUseLxLyric !== false,
+    );
 
   const startDrag = async (e: MouseEvent) => {
     if (!isTauri() || e.button !== 0 || settings().desktopLyricLocked) return;
@@ -145,6 +150,7 @@ export const LyricDesktopPage: Component = () => {
           bundle={lyricBundle()}
           lyricTrack={lyricTrack()}
           positionSec={positionSec()}
+          playing={playing()}
           lyricOffset={settings().lyricOffset}
           showTranslation={settings().showLyricTranslation}
           showRoma={settings().showLyricRoma}
@@ -163,6 +169,7 @@ export const LyricDesktopPage: Component = () => {
           bold={settings().desktopLyricBold}
           wrap={settings().desktopLyricWrap}
           direction={settings().desktopLyricDirection}
+          karaokeMode={settings().lyricUseLxLyric !== false}
         />
       </div>
     </ThemeTargetHost>

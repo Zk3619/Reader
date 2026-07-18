@@ -11,6 +11,7 @@ import {
   type MusicSdkSource,
 } from '@/lib/media/audio/music-sdk';
 import type { LeaderboardBoard, LeaderboardDetail } from '@/lib/media/audio/music-sdk/types';
+import { notifyPageError } from '@/lib/ui/page-notify';
 import { getMusicLeaderboardUi } from '@/stores/music-hub/music-leaderboard-ui';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
@@ -291,11 +292,13 @@ export async function loadLeaderboardBoards(options?: {
     });
   } catch (err) {
     if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
+    const msg = err instanceof Error ? err.message : '排行榜加载失败';
     setLeaderboardState({
       loading: false,
       loadingMore: false,
-      error: err instanceof Error ? err.message : '排行榜加载失败',
+      error: msg,
     });
+    notifyPageError('排行榜加载失败', msg);
     if (!options?.replaceOnReady) {
       setLeaderboardState({
         boards: [],
@@ -400,12 +403,14 @@ async function fetchBoardPage(
     if (seq !== loadDetailSeq || leaderboardState.source !== source) return;
     if (leaderboardState.selectedBoard?.id !== board.id) return;
     if (!append) detailCache.delete(key);
+    const msg = err instanceof Error ? err.message : '榜单曲目加载失败';
     setLeaderboardState({
       loading: false,
       loadingMore: false,
-      error: err instanceof Error ? err.message : '榜单曲目加载失败',
+      error: msg,
       ...(append ? {} : { detail: null, hasMore: false, total: 0 }),
     });
+    notifyPageError('榜单曲目加载失败', msg);
   }
 }
 
@@ -479,11 +484,13 @@ export async function refreshLeaderboard(): Promise<void> {
     }
   } catch (err) {
     if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
+    const msg = err instanceof Error ? err.message : '排行榜刷新失败';
     setLeaderboardState({
       loading: false,
       loadingMore: false,
-      error: err instanceof Error ? err.message : '排行榜刷新失败',
+      error: msg,
     });
+    notifyPageError('排行榜刷新失败', msg);
   }
 }
 

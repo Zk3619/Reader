@@ -12,8 +12,10 @@ import {
 import {
   FastForward,
   ListMusic,
+  ListOrdered,
   ListPlus,
   Music2,
+  Ban,
   Pause,
   Play,
   Repeat,
@@ -22,7 +24,6 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
-  Square,
   SquareActivity,
   Volume2,
   VolumeX,
@@ -48,6 +49,14 @@ import {
   type useMusicHubPlayer,
 } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { MusicAddToListDialog } from '@/components/viewer/audio/music/hub/MusicAddToListDialog';
+import { MusicQueuePane } from '@/components/viewer/audio/music/hub/MusicQueuePane';
+import {
+  ViewerAppDrawer,
+  ViewerAppDrawerBody,
+  ViewerAppDrawerContent,
+  ViewerAppDrawerHeader,
+  ViewerAppDropdownMenuContent,
+} from '@/components/viewer/viewer-app-overlay';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import {
   playModeLabel,
@@ -60,12 +69,14 @@ import {
 } from '@/lib/media/audio/music-settings';
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
+import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
-  { value: AudioPlayMode.listEndStop, label: '列表结束停止', icon: Square },
+  { value: AudioPlayMode.listEndStop, label: '顺序播放', icon: ListOrdered },
   { value: AudioPlayMode.singleLoop, label: '单曲循环', icon: Repeat1 },
-  { value: AudioPlayMode.random, label: '随机播放', icon: Shuffle },
+  { value: AudioPlayMode.random, label: '列表随机播放', icon: Shuffle },
   { value: AudioPlayMode.listLoop, label: '列表循环', icon: Repeat },
+  { value: AudioPlayMode.none, label: '禁止切换', icon: Ban },
 ];
 
 function currentLyricLine(lyric: string, positionSec: number): string {
@@ -74,17 +85,23 @@ function currentLyricLine(lyric: string, positionSec: number): string {
   for (const rawLine of lyric.split(/\r?\n/)) {
     const matches = [...rawLine.matchAll(timestamp)];
     if (matches.length === 0) continue;
-    const text = rawLine.replace(timestamp, '').replace(/<\d+,\d+>/g, '').trim();
+    const text = rawLine.replace(timestamp, '').replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim();
     if (!text) continue;
     for (const match of matches) {
-      const fraction = match[3]
-        ? Number(match[3].padEnd(3, '0').slice(0, 3)) / 1000
-        : 0;
+      const fraction = match[3] ? parseInt(match[3], 10) / 1000 : 0;
       lines.push({
-        time: Number(match[1]) * 60 + Number(match[2]) + fraction,
+        time: Number(match[1]) * 60 + Number(match[2]) + (Number.isFinite(fraction) ? fraction : 0),
         text,
       });
     }
+  }
+  if (lines.length === 0) {
+    // 无时间戳：展示首行可读文本，避免播放栏空白
+    const plain = lyric
+      .split(/\r?\n/)
+      .map((line) => line.replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim())
+      .find((line) => line.length > 0 && !line.startsWith('['));
+    return plain ?? '';
   }
   lines.sort((a, b) => a.time - b.time);
   let active = '';
@@ -112,14 +129,11 @@ const MusicProgressSlider: Component<MusicProgressSliderProps> = (props) => {
     Number.isFinite(props.duration) && props.duration > 0 ? props.duration : 0;
   const currentTime = () =>
     Math.max(0, Math.min(duration(), Number.isFinite(props.currentTime) ? props.currentTime : 0));
+  const isFull = () => props.variant === 'full';
 
   return (
     <Slider
-      class={
-        props.variant === 'full'
-          ? 'group h-3 w-full cursor-pointer px-1.5'
-          : 'group h-5 w-full cursor-pointer'
-      }
+      class={cn('group w-full cursor-pointer', isFull() && 'px-1.5')}
       minValue={0}
       maxValue={Math.max(1, duration())}
       step={0.1}
@@ -132,23 +146,31 @@ const MusicProgressSlider: Component<MusicProgressSliderProps> = (props) => {
       }}
     >
       <SliderTrack
-        class={
-          props.variant === 'full'
-            ? 'h-0.5 rounded-none bg-muted-foreground/25'
-            : 'h-1 bg-muted-foreground/25'
-        }
+        class={cn(
+          // 加高命中区；细轨用 before 绘制，避免只能点中 2–4px 轨道
+          'relative h-5 bg-transparent before:pointer-events-none before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:bg-muted-foreground/25',
+          isFull() ? 'before:h-0.5 before:rounded-none' : 'before:h-1 before:rounded-full',
+        )}
       >
-        <SliderFill class={props.variant === 'full' ? 'rounded-none' : undefined} />
-        <SliderThumb class="top-[-4px] size-3 border-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
+        <SliderFill
+          class={cn(
+            'top-1/2 -translate-y-1/2',
+            isFull() ? 'h-0.5 rounded-none' : 'h-1',
+          )}
+        />
+        <SliderThumb class="top-1/2 size-3 -translate-y-1/2 border-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
       </SliderTrack>
     </Slider>
   );
 };
 
 export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
+  const shell = useShellLayout();
+  const isMobileLayout = () => shell().useMobileShell;
   const track = () => props.player.currentTrack();
   const offline = createMemo(() => getMusicOfflineMode());
   const [addOpen, setAddOpen] = createSignal(false);
+  const [queueOpen, setQueueOpen] = createSignal(false);
   const [progressOpen, setProgressOpen] = createSignal(false);
   const [volumeOpen, setVolumeOpen] = createSignal(false);
   const [progressStyle, setProgressStyle] = createSignal(
@@ -170,14 +192,18 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     ),
   );
   const statusLine = createMemo(() => {
-    const source = viewerStore.state.playerListName;
     const status = props.player.error() || props.player.playbackStatus();
     const lyric = lyricLine();
-    const parts = [source ? `来自 ${source}` : null, status, lyric].filter(
+    const parts = [status, lyric].filter(
       (value, index, values) => value && values.indexOf(value) === index,
     );
     if (offline()) parts.push('离线');
     return parts.join(' · ') || audioI18n.hubTitle();
+  });
+  const titleLine = createMemo(() => {
+    const t = track();
+    if (!t) return `未播放 - ${audioI18n.hubTitle()}`;
+    return `${t.name} - ${t.artist || '未知歌手'}`;
   });
   const progressRatio = createMemo(() => {
     const duration = props.player.player.duration();
@@ -291,11 +317,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
           <AppTooltipContent layer="viewer">进入播放详情</AppTooltipContent>
         </AppTooltip>
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium">
-            {track()
-              ? `${track()!.name} - ${track()!.artist || '未知歌手'}`
-              : `未播放 - ${audioI18n.hubTitle()}`}
-          </p>
+          <p class="truncate text-sm font-medium">{titleLine()}</p>
           <p class="truncate text-xs text-muted-foreground">{statusLine()}</p>
         </div>
         <div
@@ -395,6 +417,20 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             <AppTooltipContent layer="viewer">添加到</AppTooltipContent>
           </AppTooltip>
           <AppTooltip>
+            <AppTooltipTrigger as="div" class="inline-flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9"
+                aria-label="播放队列"
+                onClick={() => setQueueOpen(true)}
+              >
+                <ListMusic class="h-4 w-4" />
+              </Button>
+            </AppTooltipTrigger>
+            <AppTooltipContent layer="viewer">播放队列</AppTooltipContent>
+          </AppTooltip>
+          <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
               <Toggle
                 pressed={desktopLyricOpen()}
@@ -487,6 +523,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 value={props.player.musicPlayMode}
                 onChange={applyPlayMode}
                 sizeClass="h-9 w-9"
+                DropdownMenuContent={ViewerAppDropdownMenuContent}
               >
                 {(option) => {
                   const Icon = option.icon ?? ListMusic;
@@ -521,7 +558,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 class="h-9 w-9"
                 aria-label="上一首"
                 disabled={!track()}
-                onClick={() => void playPrevTrack()}
+                onClick={() => void playPrevTrack({ manual: true })}
               >
                 <SkipBack class="h-4 w-4" />
               </Button>
@@ -558,7 +595,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 class="h-9 w-9"
                 aria-label="下一首"
                 disabled={!track()}
-                onClick={() => void playNextTrack()}
+                onClick={() => void playNextTrack({ manual: true })}
               >
                 <SkipForward class="h-4 w-4" />
               </Button>
@@ -587,6 +624,42 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
         track={track()}
         onOpenChange={setAddOpen}
       />
+      <ViewerAppDrawer
+        open={queueOpen()}
+        onOpenChange={setQueueOpen}
+        side={isMobileLayout() ? 'bottom' : 'right'}
+        snapPoints={[0, 1]}
+        defaultSnapPoint={1}
+      >
+        <ViewerAppDrawerContent
+          class={
+            isMobileLayout()
+              ? 'flex max-h-[75dvh] flex-col'
+              : 'flex h-full w-[min(85dvw,24rem)] max-w-none flex-col'
+          }
+          showNativeDragHandle={false}
+        >
+          <ViewerAppDrawerHeader
+            title={`播放队列${
+              viewerStore.state.trackQueue.length
+                ? ` (${viewerStore.state.trackQueue.length})`
+                : ''
+            }`}
+            actions={
+              <Show when={viewerStore.state.playerListName}>
+                {(name) => (
+                  <span class="max-w-36 truncate text-xs text-muted-foreground">
+                    来自 {name()}
+                  </span>
+                )}
+              </Show>
+            }
+          />
+          <ViewerAppDrawerBody disableDragClose class="min-h-0 flex-1">
+            <MusicQueuePane />
+          </ViewerAppDrawerBody>
+        </ViewerAppDrawerContent>
+      </ViewerAppDrawer>
     </>
   );
 };

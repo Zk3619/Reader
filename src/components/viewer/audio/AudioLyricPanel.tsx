@@ -1,8 +1,8 @@
 /**
  * 歌词展示（LRC / 多轨 / lxlyric 逐字，对齐 lx）
  * - 原文/翻译/罗马音按时间戳合并到同一行
- * - 手动滚动暂停自动跟随，约 3s 后恢复
- * - 可选进度预览线 + 确认跳转
+ * - 拖拽/滚轮手动浏览：暂停自动跟随，约 3s 后恢复（对齐 lx useLyric）
+ * - 可选进度预览线（elementFromPoint）+ 确认跳转
  */
 
 import {
@@ -11,6 +11,7 @@ import {
   createSignal,
   For,
   onCleanup,
+  onMount,
   Show,
   type Component,
 } from 'solid-js';
@@ -19,6 +20,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
+
+/** 对齐 lx：自动滚动锚点与预览线均在容器高度约 38% 处 */
+const LYRIC_SCROLL_ANCHOR = 0.38;
 
 interface LxWord {
   timeMs: number;
@@ -40,31 +44,66 @@ interface MergedLine {
   extended: string[];
 }
 
+/** 对齐 lx line-player：小数部分按原始整数毫秒解析（勿 padEnd） */
 function parseTimeTag(tag: string): number | null {
   const m = tag.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/);
   if (!m) return null;
   const min = Number(m[1]);
   const sec = Number(m[2]);
-  const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0;
-  return min * 60_000 + sec * 1000 + frac;
+  const frac = m[3] ? parseInt(m[3], 10) : 0;
+  return min * 60_000 + sec * 1000 + (Number.isFinite(frac) ? frac : 0);
 }
 
-function parseLxWords(lineBody: string, lineStartMs: number): LxWord[] {
+function parseLxWords(lineBody: string, lineStartMs: number): LxWord[] | null {
   const words: LxWord[] = [];
-  const re = /<(\d+),(\d+)>([^<]*)/g;
+  const re = /<(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)>([^<]*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(lineBody)) !== null) {
     words.push({
-      timeMs: lineStartMs + Number(m[1]),
-      durationMs: Number(m[2]),
+      timeMs: lineStartMs + Math.round(Number(m[1])),
+      durationMs: Math.max(0, Math.round(Number(m[2]))),
       text: m[3] ?? '',
     });
   }
-  if (words.length === 0) {
-    const plain = lineBody.replace(/<\d+,\d+>/g, '').trim();
-    if (plain) words.push({ timeMs: lineStartMs, durationMs: 0, text: plain });
+  // 无逐字标签 → 行模式，不做假逐字
+  return words.length > 0 ? words : null;
+}
+
+/** 无逐字轨时：句持续时间内按字均分（对齐卡拉 OK 降级） */
+function synthesizeEqualWords(
+  text: string,
+  startMs: number,
+  durationMs: number,
+): LxWord[] | null {
+  const chars = Array.from(text);
+  if (chars.length === 0 || durationMs <= 0) return null;
+  const each = durationMs / chars.length;
+  return chars.map((ch, i) => ({
+    timeMs: startMs + Math.round(i * each),
+    durationMs: Math.max(1, Math.round(each)),
+    text: ch,
+  }));
+}
+
+function attachKaraokeWords(
+  lines: ParsedLine[],
+  karaoke: boolean,
+): ParsedLine[] {
+  if (!karaoke) {
+    return lines.map((line) => ({ ...line, words: null }));
   }
-  return words;
+  if (lines.length === 0) return lines;
+  return lines.map((line, i) => {
+    if (line.words && line.words.length > 0) return line;
+    const next = lines[i + 1];
+    const durationMs = next
+      ? Math.max(200, next.timeMs - line.timeMs)
+      : 4000;
+    return {
+      ...line,
+      words: synthesizeEqualWords(line.text, line.timeMs, durationMs),
+    };
+  });
 }
 
 function parseTimedLines(lyric: string, asLx: boolean): ParsedLine[] {
@@ -75,7 +114,7 @@ function parseTimedLines(lyric: string, asLx: boolean): ParsedLine[] {
     const matches = [...line.matchAll(timeRe)];
     if (matches.length === 0) continue;
     const body = line.replace(timeRe, '');
-    const text = body.replace(/<\d+,\d+>/g, '').trim();
+    const text = body.replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim();
     if (!text && !asLx) continue;
     for (const m of matches) {
       const timeMs = parseTimeTag(m[0]);
@@ -115,22 +154,58 @@ function formatPreviewTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/** 对齐 lx FontPlayer：字内 background-size 线性推进 */
+function wordFillPercent(word: LxWord, posMs: number): number {
+  if (posMs < word.timeMs) return 0;
+  if (word.durationMs <= 0) return posMs >= word.timeMs ? 100 : 0;
+  return Math.max(0, Math.min(100, ((posMs - word.timeMs) / word.durationMs) * 100));
+}
+
+function karaokeWordStyle(
+  fillPercent: number,
+  playedColor: string,
+  unplayedColor: string,
+  vertical: boolean,
+): Record<string, string> {
+  const size = vertical ? `100% ${fillPercent}%` : `${fillPercent}% 100%`;
+  return {
+    display: 'inline-block',
+    color: unplayedColor,
+    'background-color': unplayedColor,
+    'background-image': `linear-gradient(to ${vertical ? 'bottom' : 'right'}, ${playedColor}, ${playedColor})`,
+    'background-repeat': 'no-repeat',
+    'background-size': size,
+    '-webkit-background-clip': 'text',
+    'background-clip': 'text',
+    '-webkit-text-fill-color': 'transparent',
+  };
+}
+
 export interface AudioLyricPanelProps {
   lyric?: string | null;
   bundle?: LyricBundle | null;
   lyricTrack?: LyricTrackKind;
   positionSec: number;
+  /** 播放中时用 rAF 插值，保证卡拉 OK 扫光流畅 */
+  playing?: boolean;
   lyricOffset?: number;
   class?: string;
   showTranslation?: boolean;
   showRoma?: boolean;
   secondaryOrder?: 'translation-first' | 'roma-first';
   align?: 'left' | 'center' | 'right';
+  /** 字号（rem，默认约 0.875 ≈ 14px @16px 根字号） */
   fontSize?: number;
   zoomActiveLyric?: boolean;
   onSeek?: (positionSec: number) => void;
-  /** 开启后：手动浏览显示时间预览线并可确认跳转 */
+  /** 开启后：手动浏览显示时间预览线并可确认跳转（对齐 playDetail.isShowLyricProgressSetting） */
   allowProgressPreview?: boolean;
+  /** 拖拽松手后自动跳转播放（默认关闭） */
+  autoPlayOnRelease?: boolean;
+  /** 双击歌词行跳转到对应进度 */
+  doubleClickSeek?: boolean;
+  /** 用于预览跳转时钳制上限（对齐 playProgress.maxPlayTime） */
+  durationSec?: number;
   singleLine?: boolean;
   maxLines?: number;
   playedColor?: string;
@@ -147,14 +222,30 @@ export interface AudioLyricPanelProps {
   loading?: boolean;
   errorText?: string | null;
   active?: boolean;
+  /**
+   * 卡拉 OK 模式（对齐 lx isPlayLxlrc）：
+   * 有逐字标签则扫光；无则按句时长均分每个字。
+   */
+  karaokeMode?: boolean;
 }
 
 export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   let container: HTMLDivElement | undefined;
+  let skipLineEl: HTMLDivElement | undefined;
   let scrollTimer: ReturnType<typeof setTimeout> | undefined;
   let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+  let msDown = false;
+  let msDownY = 0;
+  let msDownScrollY = 0;
+  let didDrag = false;
+  let skipHover = false;
+  let lastPreviewEl: Element | null = null;
+  const DRAG_THRESHOLD_PX = 5;
+
   const [userBrowsing, setUserBrowsing] = createSignal(false);
+  const [dragging, setDragging] = createSignal(false);
   const [previewTimeSec, setPreviewTimeSec] = createSignal<number | null>(null);
+  const [smoothPositionSec, setSmoothPositionSec] = createSignal(props.positionSec);
 
   const primaryKind = () => props.lyricTrack ?? 'lyric';
 
@@ -163,18 +254,34 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     return pickLyricText(props.bundle, primaryKind()) ?? '';
   });
 
-  const useLx = createMemo(() => {
-    const kind = primaryKind();
-    const raw = primaryRaw();
-    if (kind === 'lxlyric') return true;
-    // 仅当当前主轨文本本身含逐字标记时按逐字处理，避免有 lxlyric 却选中原文时误判
-    return /<\d+,\d+>/.test(raw);
+  const karaokeMode = () => props.karaokeMode === true;
+  /** 开启卡拉 OK 时即启用扫光插值（含无逐字时的均分降级） */
+  const useKaraoke = createMemo(() => karaokeMode());
+
+  // timeupdate 约 4Hz，卡拉 OK 需更密采样：播放中用墙钟插值
+  createEffect(() => {
+    const base = props.positionSec;
+    setSmoothPositionSec(base);
+    if (props.playing !== true || !useKaraoke()) return;
+    const baseAt = performance.now();
+    let raf = 0;
+    const tick = () => {
+      setSmoothPositionSec(base + (performance.now() - baseAt) / 1000);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    onCleanup(() => cancelAnimationFrame(raf));
   });
+
+  const positionMs = createMemo(
+    () => (smoothPositionSec() + (props.lyricOffset ?? 0)) * 1000,
+  );
 
   const primaryLines = createMemo(() => {
     const raw = primaryRaw().trim();
     if (!raw) return [] as ParsedLine[];
-    return parseTimedLines(raw, useLx());
+    const parsed = parseTimedLines(raw, karaokeMode());
+    return attachKaraokeWords(parsed, karaokeMode());
   });
 
   const translationLines = createMemo(() => {
@@ -229,7 +336,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   const activeIndex = createMemo(() => {
     const lines = mergedLines();
     if (lines.length === 0) return -1;
-    const posMs = (props.positionSec + (props.lyricOffset ?? 0)) * 1000;
+    const posMs = positionMs();
     if (posMs < lines[0]!.timeMs) return -1;
     let idx = 0;
     for (let i = 0; i < lines.length; i++) {
@@ -239,29 +346,10 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     return idx;
   });
 
-  const activeWords = createMemo(() => {
-    const lines = mergedLines();
-    const idx = activeIndex();
-    if (idx < 0) return null;
-    return lines[idx]?.words ?? null;
-  });
-
-  const activeWordIndex = createMemo(() => {
-    const words = activeWords();
-    if (!words || words.length === 0) return -1;
-    const posMs = (props.positionSec + (props.lyricOffset ?? 0)) * 1000;
-    let idx = -1;
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i]!;
-      const end = word.durationMs > 0 ? word.timeMs + word.durationMs : undefined;
-      if (posMs >= word.timeMs && (end == null || posMs < end || i === words.length - 1)) {
-        idx = i;
-      } else if (posMs >= word.timeMs) {
-        idx = i;
-      }
-    }
-    return idx;
-  });
+  const karaokePlayedColor = () => props.playedColor || 'hsl(var(--primary))';
+  const karaokeUnplayedColor = () =>
+    props.unplayedColor || 'hsl(var(--muted-foreground) / 0.45)';
+  const karaokeVertical = () => props.direction === 'vertical';
 
   const visibleLines = createMemo(() => {
     const lines = mergedLines();
@@ -284,10 +372,26 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     return lines.map((line, originalIndex) => ({ line, originalIndex }));
   });
 
+  const useFullScrollLayout = () =>
+    !props.singleLine && !(props.maxLines && props.maxLines > 0);
+
   const scrollActiveIntoView = () => {
     if (!container || userBrowsing()) return;
     const active = container.querySelector<HTMLElement>('[data-lyric-active="true"]');
-    active?.scrollIntoView({
+    if (!active) {
+      container.scrollTop = 0;
+      return;
+    }
+    if (useFullScrollLayout()) {
+      // 对齐 lx：scrollTop = offsetTop - clientHeight * 0.38
+      const target = Math.max(
+        0,
+        active.offsetTop - container.clientHeight * LYRIC_SCROLL_ANCHOR,
+      );
+      container.scrollTo({ top: target, behavior: 'smooth' });
+      return;
+    }
+    active.scrollIntoView({
       behavior: 'smooth',
       block:
         props.scrollPosition === 'top'
@@ -306,47 +410,171 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     scrollTimer = setTimeout(scrollActiveIntoView, Math.max(0, props.scrollDelayMs ?? 0));
   });
 
-  const updatePreviewFromScroll = () => {
-    if (!container || !props.allowProgressPreview || !props.onSeek) {
-      setPreviewTimeSec(null);
-      return;
-    }
-    const centerY = container.scrollTop + container.clientHeight * 0.42;
-    const items = Array.from(
-      container.querySelectorAll<HTMLElement>('[data-lyric-time]'),
-    );
-    let bestEl: HTMLElement | undefined;
-    let bestDelta = Number.POSITIVE_INFINITY;
-    for (const el of items) {
-      const mid = el.offsetTop + el.offsetHeight / 2;
-      const delta = Math.abs(mid - centerY);
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        bestEl = el;
-      }
-    }
-    if (!bestEl) {
-      setPreviewTimeSec(null);
-      return;
-    }
-    const timeMs = Number(bestEl.dataset.lyricTime);
-    if (Number.isFinite(timeMs)) setPreviewTimeSec(timeMs / 1000);
+  const clearResumeTimer = () => {
+    if (!resumeTimer) return;
+    clearTimeout(resumeTimer);
+    resumeTimer = undefined;
   };
 
-  const markBrowsing = () => {
-    setUserBrowsing(true);
-    updatePreviewFromScroll();
-    if (resumeTimer) clearTimeout(resumeTimer);
+  const startResumeTimer = () => {
+    clearResumeTimer();
+    if (skipHover) return;
     resumeTimer = setTimeout(() => {
+      resumeTimer = undefined;
       setUserBrowsing(false);
       setPreviewTimeSec(null);
+      lastPreviewEl = null;
+      if (props.playing === false) return;
       scrollActiveIntoView();
     }, 3000);
   };
 
+  /** 对齐 lx throttleSetTime：用预览线 elementFromPoint 取行时间 */
+  const updatePreviewFromSkipLine = () => {
+    if (!props.allowProgressPreview || !props.onSeek || !skipLineEl) {
+      setPreviewTimeSec(null);
+      return;
+    }
+    const rect = skipLineEl.getBoundingClientRect();
+    let el = document.elementFromPoint(rect.x, rect.y) as HTMLElement | null;
+    if (!el) return;
+    if (el === lastPreviewEl) return;
+
+    if (el.tagName === 'SPAN') {
+      el = (el.parentElement?.parentElement as HTMLElement | null) ?? el;
+    }
+
+    const lineEl = el.closest?.('[data-lyric-time]') as HTMLElement | null;
+    const spaceEl = el.closest?.('[data-lyric-space]') as HTMLElement | null;
+
+    const lines = mergedLines();
+    let timeMs: number | null = null;
+    if (lineEl) {
+      const raw = Number(lineEl.dataset.lyricTime);
+      timeMs = Number.isFinite(raw) ? raw : null;
+    } else if (spaceEl?.dataset.lyricSpace === 'pre') {
+      timeMs = 0;
+    } else if (spaceEl?.dataset.lyricSpace === 'post' || (!lineEl && lines.length > 0)) {
+      timeMs = lines[lines.length - 1]?.timeMs ?? 0;
+    }
+
+    lastPreviewEl = el;
+    if (timeMs == null) {
+      setPreviewTimeSec(null);
+      return;
+    }
+
+    // 对齐 lx：time = max(line.time - offset, 0) / 1000，并钳制到时长
+    const offsetSec = props.lyricOffset ?? 0;
+    let sec = Math.max(timeMs / 1000 - offsetSec, 0);
+    const max = props.durationSec;
+    if (typeof max === 'number' && Number.isFinite(max) && max > 0 && sec > max) {
+      sec = max;
+    }
+    setPreviewTimeSec(sec);
+  };
+
+  const lineTimeToSeekSec = (timeMs: number): number => {
+    const offsetSec = props.lyricOffset ?? 0;
+    let sec = Math.max(timeMs / 1000 - offsetSec, 0);
+    const max = props.durationSec;
+    if (typeof max === 'number' && Number.isFinite(max) && max > 0 && sec > max) {
+      sec = max;
+    }
+    return sec;
+  };
+
+  const handleSkipPlay = () => {
+    const t = previewTimeSec();
+    if (t == null || !props.onSeek) return;
+    skipHover = false;
+    clearResumeTimer();
+    setUserBrowsing(false);
+    setPreviewTimeSec(null);
+    lastPreviewEl = null;
+    props.onSeek(t);
+  };
+
+  const seekToLine = (timeMs: number) => {
+    if (!props.onSeek) return;
+    skipHover = false;
+    clearResumeTimer();
+    setUserBrowsing(false);
+    setPreviewTimeSec(null);
+    lastPreviewEl = null;
+    props.onSeek(lineTimeToSeekSec(timeMs));
+  };
+
+  const handleLyricDown = (y: number) => {
+    if (!container) return;
+    if (scrollTimer) {
+      clearTimeout(scrollTimer);
+      scrollTimer = undefined;
+    }
+    msDown = true;
+    didDrag = false;
+    setDragging(true);
+    msDownY = y;
+    msDownScrollY = container.scrollTop;
+  };
+
+  const handleMove = (y: number) => {
+    if (!msDown || !container) return;
+    if (Math.abs(msDownY - y) >= DRAG_THRESHOLD_PX) didDrag = true;
+    if (!didDrag) return;
+    if (!userBrowsing()) lastPreviewEl = null;
+    setUserBrowsing(true);
+    container.scrollTop = msDownScrollY + msDownY - y;
+    startResumeTimer();
+    updatePreviewFromSkipLine();
+  };
+
+  const handleUp = () => {
+    const shouldAutoPlay =
+      msDown &&
+      didDrag &&
+      props.autoPlayOnRelease === true &&
+      props.allowProgressPreview === true &&
+      props.onSeek != null;
+    msDown = false;
+    setDragging(false);
+    if (shouldAutoPlay) {
+      updatePreviewFromSkipLine();
+      handleSkipPlay();
+    }
+    didDrag = false;
+  };
+
+  const handleWheel = (event: WheelEvent) => {
+    if (!container) return;
+    event.preventDefault();
+    if (!userBrowsing()) lastPreviewEl = null;
+    setUserBrowsing(true);
+    container.scrollTop += event.deltaY;
+    startResumeTimer();
+    updatePreviewFromSkipLine();
+  };
+
+  onMount(() => {
+    const onMouseMove = (e: MouseEvent) => handleMove(e.clientY);
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.changedTouches.length) handleMove(e.changedTouches[0]!.clientY);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('touchend', handleUp);
+    onCleanup(() => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', handleUp);
+    });
+  });
+
   onCleanup(() => {
     if (scrollTimer) clearTimeout(scrollTimer);
-    if (resumeTimer) clearTimeout(resumeTimer);
+    clearResumeTimer();
   });
 
   const hasTimedLyric = () => mergedLines().length > 0;
@@ -374,27 +602,34 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
         <div
           ref={container}
           class={cn(
-            'min-h-0 flex-1 overflow-y-auto px-3 py-8 mask-[linear-gradient(transparent,black_12%,black_88%,transparent)]',
+            // 对齐 lx：overflow hidden + 自定义拖拽/滚轮，避免原生滚动条抢交互
+            'min-h-0 flex-1 overflow-hidden px-3 py-8 mask-[linear-gradient(transparent,black_12%,black_88%,transparent)] select-none',
+            dragging() ? 'cursor-grabbing' : 'cursor-grab',
             props.align === 'left' && 'text-left',
             props.align === 'right' && 'text-right',
             (!props.align || props.align === 'center') && 'text-center',
           )}
           style={{
-            'font-size': `${props.fontSize ?? 16}px`,
+            'font-size': `${props.fontSize ?? 0.875}rem`,
             'font-family': props.fontFamily || undefined,
             'line-height': String(props.lineHeight ?? 1.6),
             'text-shadow': props.textShadow ? '0 1px 4px rgba(0,0,0,.35)' : undefined,
             'font-weight': props.bold ? '700' : undefined,
             'writing-mode': props.direction === 'vertical' ? 'vertical-rl' : undefined,
           }}
-          onWheel={markBrowsing}
-          onTouchStart={markBrowsing}
-          onScroll={() => {
-            if (userBrowsing()) updatePreviewFromScroll();
+          onWheel={handleWheel}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            handleLyricDown(e.clientY);
+          }}
+          onTouchStart={(e) => {
+            if (e.changedTouches.length) {
+              handleLyricDown(e.changedTouches[0]!.clientY);
+            }
           }}
         >
-          <Show when={!props.singleLine && !(props.maxLines && props.maxLines > 0)}>
-            <div class="h-[38%]" aria-hidden="true" />
+          <Show when={useFullScrollLayout()}>
+            <div class="h-[38%]" data-lyric-space="pre" aria-hidden="true" />
           </Show>
           <Show
             when={hasTimedLyric()}
@@ -412,12 +647,21 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                     data-lyric-time={String(entry.line.timeMs)}
                     class={cn(
                       'transition-all duration-200',
-                      props.onSeek && 'cursor-pointer hover:opacity-90',
+                      (props.doubleClickSeek ||
+                        (props.onSeek && !props.allowProgressPreview)) &&
+                      'cursor-pointer hover:opacity-90',
                       entry.originalIndex === activeIndex()
                         ? cn(
-                            'font-medium text-foreground',
-                            props.zoomActiveLyric !== false && 'scale-[1.04]',
-                          )
+                          'font-medium text-foreground',
+                          // 有逐字时避免 transform:scale 破坏 background-clip 扫光
+                          props.zoomActiveLyric !== false &&
+                          !(entry.line.words && entry.line.words.length > 0) &&
+                          'scale-[1.04]',
+                          props.zoomActiveLyric !== false &&
+                          entry.line.words &&
+                          entry.line.words.length > 0 &&
+                          'text-[1.04em]',
+                        )
                         : 'text-muted-foreground/70',
                     )}
                     style={{
@@ -428,8 +672,16 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                       'white-space': props.wrap === false ? 'nowrap' : 'normal',
                     }}
                     onClick={() => {
-                      if (!props.onSeek || props.allowProgressPreview) return;
-                      props.onSeek(entry.line.timeMs / 1000);
+                      // 开启进度预览时单击不跳转（需点播放按钮或松手自动播放）
+                      if (!props.onSeek || props.allowProgressPreview || props.doubleClickSeek)
+                        return;
+                      seekToLine(entry.line.timeMs);
+                    }}
+                    onDblClick={(e) => {
+                      if (!props.doubleClickSeek || !props.onSeek) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      seekToLine(entry.line.timeMs);
                     }}
                   >
                     <Show
@@ -439,12 +691,13 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                       {(words) => (
                         <span>
                           <For each={words()}>
-                            {(w, wi) => (
+                            {(w) => (
                               <span
-                                class={cn(
-                                  wi() <= activeWordIndex()
-                                    ? 'text-primary'
-                                    : 'text-muted-foreground/50',
+                                style={karaokeWordStyle(
+                                  wordFillPercent(w, positionMs()),
+                                  karaokePlayedColor(),
+                                  karaokeUnplayedColor(),
+                                  karaokeVertical(),
                                 )}
                               >
                                 {w.text}
@@ -464,35 +717,57 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
               </For>
             </ul>
           </Show>
-          <Show when={!props.singleLine && !(props.maxLines && props.maxLines > 0)}>
-            <div class="h-[38%]" aria-hidden="true" />
+          <Show when={useFullScrollLayout()}>
+            <div class="h-[38%]" data-lyric-space="post" aria-hidden="true" />
           </Show>
         </div>
       </Show>
 
-      <Show when={userBrowsing() && props.allowProgressPreview && previewTimeSec() != null && props.onSeek}>
-        <div class="pointer-events-none absolute inset-x-3 top-[42%] z-10 flex -translate-y-1/2 items-center gap-2">
-          <div class="h-px flex-1 border-t border-dashed border-primary/70" />
-          <span class="rounded bg-background/90 px-2 py-0.5 text-xs tabular-nums text-primary shadow">
-            {formatPreviewTime(previewTimeSec() ?? 0)}
-          </span>
-          <Button
-            type="button"
-            size="icon"
-            variant="secondary"
-            class="pointer-events-auto h-8 w-8 shadow"
-            aria-label="跳转到此处播放"
-            onClick={() => {
-              const t = previewTimeSec();
-              if (t == null) return;
-              props.onSeek?.(t);
-              setUserBrowsing(false);
-              setPreviewTimeSec(null);
-            }}
-          >
-            <Play class="h-4 w-4" />
-          </Button>
-          <div class="h-px flex-1 border-t border-dashed border-primary/70" />
+      {/* 对齐 lx：设置开启时始终挂载预览线，供 elementFromPoint；仅浏览时显示 */}
+      <Show when={props.allowProgressPreview && props.onSeek}>
+        <div
+          class={cn(
+            'pointer-events-none absolute inset-x-0 z-10 transition-opacity',
+            userBrowsing() && previewTimeSec() != null ? 'opacity-100' : 'opacity-0',
+          )}
+          style={{
+            top: `calc(${LYRIC_SCROLL_ANCHOR * 100}% + ${props.fontSize ?? 0.875}rem + 4px)`,
+          }}
+          aria-hidden={!(userBrowsing() && previewTimeSec() != null)}
+        >
+          {/* 线在左，时间与播放按钮在右侧，互不重叠；整体垂直居中于锚点 */}
+          <div class="mx-3 flex -translate-y-1/2 items-center gap-2">
+            <div
+              ref={skipLineEl}
+              class="min-w-0 flex-1 border-t-2 border-dotted border-primary/20 mask-[linear-gradient(90deg,transparent,transparent_15%,black)]"
+            />
+            <span class="shrink-0 text-xs tabular-nums text-primary/70">
+              {formatPreviewTime(previewTimeSec() ?? 0)}
+            </span>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              class={cn(
+                'h-8 w-8 shrink-0 opacity-80 hover:opacity-60',
+                userBrowsing() && previewTimeSec() != null
+                  ? 'pointer-events-auto'
+                  : 'pointer-events-none',
+              )}
+              aria-label="跳转到此处播放"
+              onMouseEnter={() => {
+                skipHover = true;
+                clearResumeTimer();
+              }}
+              onMouseLeave={() => {
+                skipHover = false;
+                startResumeTimer();
+              }}
+              onClick={handleSkipPlay}
+            >
+              <Play class="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </Show>
     </div>

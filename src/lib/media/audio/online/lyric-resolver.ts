@@ -4,7 +4,11 @@
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
-import { hasLyricContent, pickLyricText } from '@/lib/media/audio/lyric-types';
+import {
+  hasLyricContent,
+  hasLxWordTags,
+  pickLyricText,
+} from '@/lib/media/audio/lyric-types';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
 import * as kw from '@/lib/media/audio/online/sources/kw';
@@ -13,6 +17,7 @@ import * as kg from '@/lib/media/audio/online/sources/kg';
 import * as tx from '@/lib/media/audio/online/sources/tx';
 import * as mg from '@/lib/media/audio/online/sources/mg';
 import { userApiLyric } from '@/lib/media/audio/online/user-api-engine';
+import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
 
 async function resolveBuiltinLyric(track: AudioTrack): Promise<LyricBundle | null> {
   switch (track.source) {
@@ -36,6 +41,13 @@ async function resolveBuiltinLyric(track: AudioTrack): Promise<LyricBundle | nul
   }
 }
 
+function bundleHasLx(bundle: LyricBundle | null | undefined): boolean {
+  return hasLxWordTags(bundle?.lxlyric);
+}
+
+/**
+ * 拉取歌词：开启卡拉 OK 时优先拿到带逐字标签的 bundle（可跨平台补全）。
+ */
 export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<LyricBundle | null> {
   if (track.source === 'userApi') {
     const userApiId = track.meta.userApiId;
@@ -44,22 +56,35 @@ export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<Lyric
     return lyric ? { lyric } : null;
   }
 
-  let bundle = await resolveBuiltinLyric(track);
-  if (hasLyricContent(bundle)) return bundle;
+  const preferLx = getMusicSettings().lyricUseLxLyric !== false;
+  const allowFallback = getMusicSettings().fallbackLyric !== false;
 
-  // 主源歌词失败时换平台搜同曲（默认开启；与播放换源独立）
-  if (getMusicSettings().fallbackLyric !== false) {
+  let best: LyricBundle | null = null;
+
+  const consider = (bundle: LyricBundle | null) => {
+    if (!hasLyricContent(bundle)) return false;
+    if (!best) best = bundle;
+    else if (preferLx && bundleHasLx(bundle) && !bundleHasLx(best)) best = bundle;
+    return preferLx ? bundleHasLx(bundle) : true;
+  };
+
+  // 手动/自动换源挂载的备用曲目：优先尝试（对齐 lx 换源后仍可拉歌词）
+  const toggle = getToggleMusicInfo(track);
+  if (toggle && consider(await resolveBuiltinLyric(toggle))) return best;
+
+  if (consider(await resolveBuiltinLyric(track))) return best;
+
+  if (allowFallback) {
     try {
       const others = await findMusic(track);
       for (const alt of others) {
-        bundle = await resolveBuiltinLyric(alt);
-        if (hasLyricContent(bundle)) return bundle;
+        if (consider(await resolveBuiltinLyric(alt))) return best;
       }
     } catch {
       // ignore
     }
   }
-  return bundle;
+  return best;
 }
 
 export async function resolveOnlineLyricText(track: AudioTrack): Promise<string | null> {

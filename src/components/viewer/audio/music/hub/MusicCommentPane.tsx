@@ -1,11 +1,16 @@
 /**
- * 播放详情评论面板
+ * 播放详情评论面板（对齐 lx MusicComment / CommentFloor）
+ * - 热门 / 最新分页加载
+ * - 递归嵌套回复：左侧缩进 + 浅底色块
  */
 
 import { createEffect, createSignal, For, Show, type Component } from 'solid-js';
-import { Heart, LoaderCircle, MessageCircle } from 'lucide-solid';
+import { LoaderCircle, MessageCircle, ThumbsUp } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
+import { showAppToast } from '@/components/shared/AppToasts';
 import { cn } from '@/lib/utils';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { MusicCommentListSkeleton } from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import {
   fetchTrackComments,
   type CommentSort,
@@ -18,32 +23,139 @@ export interface MusicCommentPaneProps {
   class?: string;
 }
 
+/** 头像：优先远端图，失败回落到首字 */
+const CommentAvatar: Component<{ src?: string | null; name: string }> = (props) => {
+  const [broken, setBroken] = createSignal(false);
+  const letter = () => props.name.trim().slice(0, 1).toUpperCase() || '匿';
+  return (
+    <Show
+      when={props.src && !broken()}
+      fallback={
+        <div class="flex h-10 w-10 items-center justify-center rounded bg-primary/10 text-sm font-semibold text-primary shadow-sm">
+          {letter()}
+        </div>
+      }
+    >
+      <img
+        src={props.src!}
+        alt=""
+        class="h-10 w-10 rounded object-cover shadow-sm"
+        loading="lazy"
+        decoding="async"
+        onError={() => setBroken(true)}
+      />
+    </Show>
+  );
+};
+
+/** 对齐 lx CommentFloor：列表项 + 递归 reply */
+const CommentFloor: Component<{
+  comments: MusicComment[];
+  nested?: boolean;
+}> = (props) => (
+  <ul>
+    <For each={props.comments}>
+      {(item, index) => (
+        <li
+          class={cn(
+            'border-b border-dashed border-primary/20',
+            props.nested && index() === props.comments.length - 1 && 'border-b-0',
+          )}
+        >
+          <div class="flex gap-2.5 py-3 text-[13px]">
+            <div class="shrink-0">
+              <CommentAvatar src={item.avatar} name={item.user} />
+            </div>
+            <div class={cn('min-w-0 flex-1', props.nested && 'pr-2.5')}>
+              <div class="flex h-10 w-full items-start gap-3 leading-snug text-muted-foreground">
+                <div class="flex min-w-0 flex-1 flex-col justify-evenly self-stretch">
+                  <p class="truncate text-foreground/80">{item.user}</p>
+                  <div class="flex min-w-0 gap-2.5 overflow-hidden text-xs">
+                    <Show when={item.time}>
+                      <time class="shrink-0">{item.time}</time>
+                    </Show>
+                    <Show when={item.location}>
+                      <span class="truncate">来自{item.location}</span>
+                    </Show>
+                  </div>
+                </div>
+                <Show when={item.likedCount != null}>
+                  <div class="flex shrink-0 items-start gap-0.5 pt-0.5 text-[11px]">
+                    <ThumbsUp class="mt-px h-3 w-3 text-primary/50" />
+                    <span>{item.likedCount}</span>
+                  </div>
+                </Show>
+              </div>
+              <p class="whitespace-pre-wrap break-all text-justify text-sm leading-normal text-foreground">
+                {item.content}
+              </p>
+              <Show when={item.images && item.images.length > 0}>
+                <div class="mt-1.5 flex flex-wrap gap-1.5">
+                  <For each={item.images}>
+                    {(url) => (
+                      <img
+                        src={url}
+                        alt=""
+                        class="max-w-60 rounded object-cover"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </div>
+          <Show when={item.reply && item.reply.length > 0}>
+            {/* 对齐 lx .reply_floor：同一元素上 margin + padding + 浅底，保证头像不贴边 */}
+            <div class="mb-3 ml-[30px] rounded-lg bg-primary/5 pl-[15px] pr-2.5">
+              <CommentFloor comments={item.reply!} nested />
+            </div>
+          </Show>
+        </li>
+      )}
+    </For>
+  </ul>
+);
+
 export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
   const [sort, setSort] = createSignal<CommentSort>('hot');
   const [page, setPage] = createSignal(1);
   const [comments, setComments] = createSignal<MusicComment[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [hasMore, setHasMore] = createSignal(false);
-  const [error, setError] = createSignal('');
+  const [failed, setFailed] = createSignal(false);
+  const showCommentSkeleton = useSkeletonLoading(
+    () => loading() && comments().length === 0,
+  );
   let requestId = 0;
+  let listEl: HTMLDivElement | undefined;
+
+  const notifyCommentError = (cause: unknown) => {
+    const msg = cause instanceof Error ? cause.message : '评论加载失败';
+    showAppToast({ title: '评论加载失败', description: msg, variant: 'destructive' });
+  };
 
   const load = async (reset = false) => {
     const t = props.track;
     if (!t) return;
     const currentRequest = ++requestId;
     setLoading(true);
-    setError('');
+    setFailed(false);
     try {
       const nextPage = reset ? 1 : page();
       const result = await fetchTrackComments(t, nextPage, sort());
       if (currentRequest !== requestId) return;
       setComments((prev) => (reset ? result.comments : [...prev, ...result.comments]));
       setHasMore(result.hasMore);
-      if (reset) setPage(1);
-      else setPage(nextPage);
+      if (reset) {
+        setPage(1);
+        if (listEl) listEl.scrollTop = 0;
+      } else setPage(nextPage);
     } catch (cause) {
       if (currentRequest === requestId) {
-        setError(cause instanceof Error ? cause.message : '评论加载失败');
+        setFailed(true);
+        notifyCommentError(cause);
       }
     } finally {
       if (currentRequest === requestId) setLoading(false);
@@ -62,6 +174,7 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
   });
 
   const switchSort = (next: CommentSort) => {
+    if (next === sort()) return;
     setSort(next);
     setPage(1);
     void load(true);
@@ -76,7 +189,6 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
       if (!t) return;
       const currentRequest = ++requestId;
       setLoading(true);
-      setError('');
       try {
         const result = await fetchTrackComments(t, next, sort());
         if (currentRequest !== requestId) return;
@@ -84,7 +196,7 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
         setHasMore(result.hasMore);
       } catch (cause) {
         if (currentRequest === requestId) {
-          setError(cause instanceof Error ? cause.message : '评论加载失败');
+          notifyCommentError(cause);
         }
       } finally {
         if (currentRequest === requestId) setLoading(false);
@@ -112,57 +224,32 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
           </Button>
         ))}
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto pr-1">
-        <Show when={loading() && comments().length === 0}>
-          <div class="flex h-32 items-center justify-center gap-2 text-muted-foreground">
-            <LoaderCircle class="h-4 w-4 animate-spin" />
-            <span>加载评论…</span>
-          </div>
+      <div
+        ref={listEl}
+        class={cn(
+          'min-h-0 flex-1 overflow-y-auto pr-1 transition-opacity',
+          loading() && comments().length > 0 && 'opacity-40',
+        )}
+      >
+        <Show when={showCommentSkeleton()}>
+          <MusicCommentListSkeleton />
         </Show>
-        <Show when={error() && comments().length === 0}>
+        <Show when={failed() && comments().length === 0 && !showCommentSkeleton()}>
           <div class="flex h-32 flex-col items-center justify-center gap-2 px-4 text-center">
-            <p class="text-sm text-destructive">{error()}</p>
+            <p class="text-sm text-muted-foreground">评论加载失败</p>
             <Button size="sm" variant="outline" onClick={() => void load(true)}>
               重新加载
             </Button>
           </div>
         </Show>
-        <Show when={!loading() && !error() && comments().length === 0}>
+        <Show when={!loading() && !failed() && comments().length === 0}>
           <div class="flex h-32 flex-col items-center justify-center gap-2 text-muted-foreground">
             <MessageCircle class="h-8 w-8 opacity-40" />
             <p>还没有评论</p>
           </div>
         </Show>
-        <ul class="divide-y divide-border/60">
-          <For each={comments()}>
-            {(c) => (
-              <li class="flex gap-3 px-1 py-3">
-                <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                  {c.user.trim().slice(0, 1).toUpperCase() || '匿'}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="truncate text-xs font-medium">{c.user}</p>
-                    <Show when={c.time}>
-                      <span class="shrink-0 text-[11px] text-muted-foreground">{c.time}</span>
-                    </Show>
-                  </div>
-                  <p class="mt-1 whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground/85">
-                    {c.content}
-                  </p>
-                  <Show when={(c.likedCount ?? 0) > 0}>
-                    <span class="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Heart class="h-3 w-3" />
-                      {c.likedCount}
-                    </span>
-                  </Show>
-                </div>
-              </li>
-            )}
-          </For>
-        </ul>
-        <Show when={error() && comments().length > 0}>
-          <p class="py-2 text-center text-xs text-destructive">{error()}</p>
+        <Show when={comments().length > 0}>
+          <CommentFloor comments={comments()} />
         </Show>
         <Show when={hasMore()}>
           <Button

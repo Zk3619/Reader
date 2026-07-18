@@ -1,4 +1,8 @@
 import { isTauri } from '@/lib/platform/detect';
+import {
+  patchMusicConfig,
+  peekMusicConfigSync,
+} from '@/lib/media/audio/music-config-storage';
 
 export const MUSIC_HOTKEY_STORAGE_KEY = 'reader.music.hotkeys';
 
@@ -30,12 +34,7 @@ export function normalizeMusicHotkeys(input: unknown): MusicHotkeys {
 }
 
 export function loadMusicHotkeys(): MusicHotkeys {
-  try {
-    const raw = localStorage.getItem(MUSIC_HOTKEY_STORAGE_KEY);
-    return normalizeMusicHotkeys(raw ? JSON.parse(raw) : null);
-  } catch {
-    return normalizeMusicHotkeys(null);
-  }
+  return normalizeMusicHotkeys(peekMusicConfigSync().hotkeys);
 }
 
 export async function registerMusicHotkeys(
@@ -60,6 +59,6 @@ export async function registerMusicHotkeys(
 
 export async function saveAndRegisterMusicHotkeys(hotkeys: MusicHotkeys): Promise<void> {
   const normalized = normalizeMusicHotkeys(hotkeys);
-  localStorage.setItem(MUSIC_HOTKEY_STORAGE_KEY, JSON.stringify(normalized));
+  patchMusicConfig({ hotkeys: normalized });
   await registerMusicHotkeys(normalized);
 }

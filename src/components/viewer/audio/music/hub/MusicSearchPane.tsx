@@ -11,6 +11,7 @@ import {
   type LocalMusicSearchCache,
 } from '@/lib/media/audio/music-local-search';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import {
   clearSearchHistory,
   getSearchState,
@@ -36,11 +37,21 @@ import {
   MusicSearchPlaylistList,
   MusicSearchTrackList,
 } from '@/components/viewer/audio/music/hub/MusicSearchResultLists';
+import {
+  MusicPlaylistGridSkeleton,
+  MusicTrackListSkeleton,
+} from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import { cn } from '@/lib/utils';
 
 export const MusicSearchPane: Component = () => {
   const state = getSearchState;
   const ui = getMusicSearchUi;
+  const showTrackSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state().loading, state().tracks.length),
+  );
+  const showPlaylistSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state().loading, state().playlists.length),
+  );
 
   createEffect(() => {
     const src = state().source;
@@ -211,15 +222,12 @@ export const MusicSearchPane: Component = () => {
         </Show>
 
         <Show when={showOnlineResults()}>
-          <Show when={state().error}>
-            <p class="py-2 text-sm text-destructive">{state().error}</p>
-          </Show>
           <Show when={state().tab === 'song'}>
             <Show
               when={state().tracks.length > 0}
               fallback={
-                <Show when={shouldShowBlockingLoading(state().loading, 0)}>
-                  <p class="py-6 text-sm text-muted-foreground">搜索中…</p>
+                <Show when={showTrackSkeleton()}>
+                  <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
                 </Show>
               }
             >
@@ -238,7 +246,7 @@ export const MusicSearchPane: Component = () => {
                 />
               </div>
             </Show>
-            <Show when={!state().loading && state().tracks.length === 0 && state().keyword}>
+            <Show when={!state().loading && state().tracks.length === 0 && state().keyword && !showTrackSkeleton()}>
               <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
           </Show>
@@ -246,8 +254,8 @@ export const MusicSearchPane: Component = () => {
             <Show
               when={state().playlists.length > 0}
               fallback={
-                <Show when={shouldShowBlockingLoading(state().loading, 0)}>
-                  <p class="py-6 text-sm text-muted-foreground">搜索中…</p>
+                <Show when={showPlaylistSkeleton()}>
+                  <MusicPlaylistGridSkeleton class="min-h-0 flex-1 overflow-y-auto" />
                 </Show>
               }
             >
@@ -264,7 +272,7 @@ export const MusicSearchPane: Component = () => {
                 />
               </div>
             </Show>
-            <Show when={!state().loading && state().playlists.length === 0 && state().keyword}>
+            <Show when={!state().loading && state().playlists.length === 0 && state().keyword && !showPlaylistSkeleton()}>
               <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
           </Show>

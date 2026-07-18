@@ -4,12 +4,26 @@
 
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
 import { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
+import {
+  PLAY_DETAIL_LYRIC_FONT_REM_DEFAULT,
+  clampPlayDetailLyricFontRem,
+  migratePlayDetailLyricFontSizeToRem,
+  type MusicFontSizeUnit,
+} from '@/lib/media/audio/play-detail-lyric-font';
+import {
+  getMusicUiSnapshot,
+  patchMusicUiSnapshot,
+} from '@/lib/persistence/domains/music-ui';
+import {
+  bindMusicSettingsNormalizer,
+  patchMusicConfig,
+  peekMusicConfigSync,
+} from '@/lib/media/audio/music-config-storage';
 
 const STORAGE_KEY = 'reader_music_settings';
 const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
-const LIST_SCROLL_STORAGE_KEY = 'reader_music_list_scroll_positions';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 8;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 9;
 const listeners = new Set<(settings: MusicSettings) => void>();
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
@@ -61,6 +75,8 @@ export interface MusicSettings {
   searchClearResultsOnLeave: boolean;
   playSpeed: number;
   preservesPitch: boolean;
+  /** 音调倍率（对齐 lx pitchShifter.playbackRate），1 为原调，约 0.5～1.5 */
+  pitchShifterRate: number;
   eqPreset: keyof typeof EQ_PRESETS;
   /** 自定义十段 EQ；非 null 时覆盖 eqPreset。 */
   eqCustomGains: number[] | null;
@@ -76,9 +92,16 @@ export interface MusicSettings {
   lyricUseLxLyric: boolean;
   lyricChineseConversion: 0 | 1 | 2;
   playDetailLyricAlign: MusicLyricAlign;
+  /** 播放详情歌词字号（rem） */
   playDetailLyricFontSize: number;
+  /** 设置页字号输入单位（仅影响编辑显示，存储始终为 rem） */
+  playDetailLyricFontSizeUnit: MusicFontSizeUnit;
   playDetailZoomActiveLyric: boolean;
   playDetailAllowLyricSeek: boolean;
+  /** 拖拽歌词松手后自动跳转播放（依赖 playDetailAllowLyricSeek） */
+  playDetailLyricSeekAutoPlayOnRelease: boolean;
+  /** 双击歌词行跳转到对应进度 */
+  playDetailLyricDoubleClickSeek: boolean;
   playDetailLyricScrollDelayMs: number;
   /** 播放详情以独立全视口覆盖层展示（覆盖主壳顶栏/侧栏） */
   playDetailStandalone: boolean;
@@ -198,6 +221,7 @@ const DEFAULTS: MusicSettings = {
   searchClearResultsOnLeave: false,
   playSpeed: 1,
   preservesPitch: true,
+  pitchShifterRate: 1,
   eqPreset: 'flat',
   eqCustomGains: null,
   audioOutputDeviceId: '',
@@ -211,9 +235,12 @@ const DEFAULTS: MusicSettings = {
   lyricUseLxLyric: true,
   lyricChineseConversion: 0,
   playDetailLyricAlign: 'center',
-  playDetailLyricFontSize: 14,
+  playDetailLyricFontSize: PLAY_DETAIL_LYRIC_FONT_REM_DEFAULT,
+  playDetailLyricFontSizeUnit: 'rem',
   playDetailZoomActiveLyric: true,
   playDetailAllowLyricSeek: false,
+  playDetailLyricSeekAutoPlayOnRelease: false,
+  playDetailLyricDoubleClickSeek: false,
   playDetailLyricScrollDelayMs: 0,
   playDetailStandalone: false,
   playDetailHideHeader: false,
@@ -304,6 +331,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   lyricSecondaryOrder: ['translation-first', 'roma-first'],
   lyricChineseConversion: [0, 1, 2],
   playDetailLyricAlign: ['left', 'center', 'right'],
+  playDetailLyricFontSizeUnit: ['rem', 'px'],
   playQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   playQualityPreference: [
     'lowest',
@@ -341,6 +369,7 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'odc.isAutoClearSearchList': 'searchClearResultsOnLeave',
   'player.playbackRate': 'playSpeed',
   'player.preservesPitch': 'preservesPitch',
+  'player.soundEffect.pitchShifter.playbackRate': 'pitchShifterRate',
   'player.playQuality': 'playQuality',
   'player.isPlayLxlrc': 'lyricUseLxLyric',
   'player.isShowLyricTranslation': 'showLyricTranslation',
@@ -390,11 +419,12 @@ function importLxDottedKeys(raw: Record<string, unknown>): Record<string, unknow
     mapped.playDetailLyricFontSize === undefined &&
     typeof raw['playDetail.style.fontSize'] === 'number'
   ) {
-    // LX 使用百分比；Reader 使用 px，按默认 14px 折算并限制到 UI 范围。
-    mapped.playDetailLyricFontSize = Math.max(
+    // LX 使用百分比；先按默认 14px 折算为 px，再转为 rem
+    const px = Math.max(
       12,
       Math.min(32, Math.round((raw['playDetail.style.fontSize'] / 100) * 14)),
     );
+    mapped.playDetailLyricFontSize = migratePlayDetailLyricFontSizeToRem(px);
   }
   if (
     mapped.lyricSecondaryOrder === undefined &&
@@ -424,6 +454,8 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return Math.max(1, Math.min(20, Math.round(value)));
     case 'playSpeed':
       return Math.max(0.5, Math.min(3, value));
+    case 'pitchShifterRate':
+      return Math.max(0.5, Math.min(1.5, Math.round(value * 100) / 100));
     case 'desktopLyricOpacity':
       return Math.max(0, Math.min(1, value));
     case 'desktopLyricMaxLines':
@@ -433,7 +465,7 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'playDetailLyricScrollDelayMs':
       return Math.max(0, Math.min(5000, Math.round(value)));
     case 'playDetailLyricFontSize':
-      return Math.max(12, Math.min(32, Math.round(value)));
+      return clampPlayDetailLyricFontRem(value);
     case 'desktopLyricLineHeight':
       return Math.max(1, Math.min(3, value));
     case 'playTimeoutSec':
@@ -506,6 +538,18 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
     // 旧版仅保存时长：升级后不自动启动，仅保留为默认时长。
     normalized.playTimerTargetAt = 0;
   }
+  // schema < 9 时 playDetailLyricFontSize 为 px，需迁到 rem
+  if (
+    typeof source.playDetailLyricFontSize === 'number' &&
+    Number.isFinite(source.playDetailLyricFontSize)
+  ) {
+    const prevSchema =
+      typeof source.schemaVersion === 'number' ? source.schemaVersion : 0;
+    normalized.playDetailLyricFontSize =
+      prevSchema < 9
+        ? migratePlayDetailLyricFontSizeToRem(source.playDetailLyricFontSize)
+        : clampPlayDetailLyricFontRem(source.playDetailLyricFontSize);
+  }
   return normalized as MusicSettings;
 }
 
@@ -524,11 +568,16 @@ function writeSettings(settings: MusicSettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {
-    // SSR / Node 测试环境或存储不可用时仍返回归一化默认值。
+    // SSR / Node
   }
+  patchMusicConfig({ settings: settings as unknown as Record<string, unknown> });
 }
 
 export function getMusicSettings(): MusicSettings {
+  const fromConfig = peekMusicConfigSync().settings;
+  if (fromConfig && Object.keys(fromConfig).length > 0) {
+    return normalizeMusicSettings(fromConfig);
+  }
   const raw = readRaw();
   if (raw.fallbackUrl === undefined) {
     try {
@@ -546,11 +595,10 @@ export function getMusicSettings(): MusicSettings {
 }
 
 export function setMusicSettings(patch: Partial<MusicSettings>): void {
-  const next = normalizeMusicSettings({ ...readRaw(), ...patch });
+  const next = normalizeMusicSettings({ ...getMusicSettings(), ...patch });
   writeSettings(next);
   for (const listener of listeners) listener(next);
 }
-
 export function subscribeMusicSettings(
   listener: (settings: MusicSettings) => void,
 ): () => void {
@@ -587,28 +635,18 @@ export function importMusicSettings(json: string): void {
   for (const listener of listeners) listener(settings);
 }
 
-function readListScrollPositions(): Record<string, number> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(LIST_SCROLL_STORAGE_KEY) ?? '{}') as unknown;
-    if (!parsed || typeof parsed !== 'object') return {};
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, number] =>
-          typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] >= 0,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
 export function getMusicListScrollPosition(listId: string): number {
-  return readListScrollPositions()[listId] ?? 0;
+  return getMusicUiSnapshot().listScrollPositions[listId] ?? 0;
 }
 
 export function setMusicListScrollPosition(listId: string, position: number): void {
   if (!getMusicSettings().listSaveScrollPosition) return;
-  const positions = readListScrollPositions();
+  const positions = { ...getMusicUiSnapshot().listScrollPositions };
   positions[listId] = Math.max(0, Number.isFinite(position) ? position : 0);
-  localStorage.setItem(LIST_SCROLL_STORAGE_KEY, JSON.stringify(positions));
+  patchMusicUiSnapshot({ listScrollPositions: positions });
 }
+
+/** 供 music-config-storage 归一化 settings 字段（副作用：模块加载即绑定） */
+bindMusicSettingsNormalizer((input) =>
+  normalizeMusicSettings(input) as unknown as Record<string, unknown>,
+);

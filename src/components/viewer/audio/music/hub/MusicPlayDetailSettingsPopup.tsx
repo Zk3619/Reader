@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { MusicPlayDetailLyricFontSizeField } from '@/components/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -17,6 +18,11 @@ import {
   type MusicLyricAlign,
   type MusicSettings,
 } from '@/lib/media/audio/music-settings';
+import {
+  PLAY_DETAIL_LYRIC_FONT_REM_MAX,
+  PLAY_DETAIL_LYRIC_FONT_REM_MIN,
+  type MusicFontSizeUnit,
+} from '@/lib/media/audio/play-detail-lyric-font';
 import type { useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 
 const ALIGN_OPTIONS: { value: MusicLyricAlign; label: string }[] = [
@@ -129,9 +135,37 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                   <Checkbox
                     id="detail-popup-lyric-seek"
                     checked={settings().playDetailAllowLyricSeek}
-                    onChange={(checked) => patchIfChanged({ playDetailAllowLyricSeek: checked })}
+                    onChange={(checked) =>
+                      patchIfChanged({
+                        playDetailAllowLyricSeek: checked,
+                        ...(checked
+                          ? {}
+                          : { playDetailLyricSeekAutoPlayOnRelease: false }),
+                      })
+                    }
                   />
                   <Label for="detail-popup-lyric-seek">允许通过拖拽歌词调整播放进度</Label>
+                </div>
+                <div class="flex items-center gap-2 pl-6">
+                  <Checkbox
+                    id="detail-popup-lyric-seek-auto-release"
+                    checked={settings().playDetailLyricSeekAutoPlayOnRelease}
+                    disabled={!settings().playDetailAllowLyricSeek}
+                    onChange={(checked) =>
+                      patchIfChanged({ playDetailLyricSeekAutoPlayOnRelease: checked })
+                    }
+                  />
+                  <Label for="detail-popup-lyric-seek-auto-release">松开后自动跳转播放</Label>
+                </div>
+                <div class="flex items-center gap-2">
+                  <Checkbox
+                    id="detail-popup-lyric-dblclick-seek"
+                    checked={settings().playDetailLyricDoubleClickSeek}
+                    onChange={(checked) =>
+                      patchIfChanged({ playDetailLyricDoubleClickSeek: checked })
+                    }
+                  />
+                  <Label for="detail-popup-lyric-dblclick-seek">双击歌词跳转到对应进度</Label>
                 </div>
                 <div class="flex items-center gap-2">
                   <Checkbox
@@ -164,17 +198,24 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                   </div>
                 </div>
                 <div class="space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-muted-foreground">字号</span>
-                    <span class="tabular-nums">{settings().playDetailLyricFontSize}px</span>
-                  </div>
+                  <MusicPlayDetailLyricFontSizeField
+                    compact
+                    remValue={settings().playDetailLyricFontSize}
+                    unit={settings().playDetailLyricFontSizeUnit}
+                    onRemChange={(rem) => patchIfChanged({ playDetailLyricFontSize: rem })}
+                    onUnitChange={(unit) =>
+                      patchIfChanged({
+                        playDetailLyricFontSizeUnit: unit as MusicFontSizeUnit,
+                      })
+                    }
+                  />
                   <Slider
-                    minValue={12}
-                    maxValue={32}
-                    step={1}
+                    minValue={PLAY_DETAIL_LYRIC_FONT_REM_MIN}
+                    maxValue={PLAY_DETAIL_LYRIC_FONT_REM_MAX}
+                    step={0.05}
                     value={[settings().playDetailLyricFontSize]}
                     onChange={(value) => {
-                      const next = Math.round(value[0] ?? 14);
+                      const next = value[0] ?? PLAY_DETAIL_LYRIC_FONT_REM_MIN;
                       patchIfChanged({ playDetailLyricFontSize: next });
                     }}
                   >

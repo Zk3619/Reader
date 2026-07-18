@@ -17,6 +17,7 @@ import {
   playPrevTrack,
   retryMusicTrackPlayback,
   setMusicSection,
+  updatePersistedPlayProgress,
 } from '@/stores/viewer/media/audio';
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
 import { getMusicPlayConfig } from '@/lib/media/audio/music-play-config';
@@ -30,7 +31,7 @@ import { resolveOnlineLyricFull } from '@/lib/media/audio/online/source-router';
 import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { WebAudioPlayerEngine } from '@/lib/media/audio/engine/web-audio-player';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
-import { pickLyricText } from '@/lib/media/audio/lyric-types';
+import { pickLyricText, resolveEffectiveLyricTrack } from '@/lib/media/audio/lyric-types';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -46,6 +47,7 @@ import {
 } from '@/lib/media/audio/platform/music-playback-platform';
 import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
 import { isTrackInLove } from '@/lib/database/audio-library';
+import { consumeMusicStartupAutoPlayGate } from '@/lib/persistence/domains/music-session';
 
 const MUSIC_PROGRESS_STORAGE_KEY = 'reader_music_track_progress';
 
@@ -130,8 +132,16 @@ export function useMusicHubPlayer() {
     setMusicSettings({ musicMuted: value });
   };
 
+  const effectiveLyricTrack = createMemo(() =>
+    resolveEffectiveLyricTrack(
+      fetchedLyricBundle(),
+      lyricTrack(),
+      settings().lyricUseLxLyric !== false,
+    ),
+  );
+
   const fetchedLyric = createMemo(() =>
-    pickLyricText(fetchedLyricBundle(), lyricTrack()) ?? '',
+    pickLyricText(fetchedLyricBundle(), effectiveLyricTrack()) ?? '',
   );
 
   const state = () => viewerStore.state;
@@ -160,11 +170,11 @@ export function useMusicHubPlayer() {
     return item;
   });
 
-  let startupAutoPlayPending = currentTrack() != null;
   const shouldAutoPlay = () => {
-    if (!startupAutoPlayPending) return settings().autoPlay;
-    startupAutoPlayPending = false;
-    return settings().startupAutoPlay;
+    // 冷启动恢复队列：尊重「启动软件后自动播放」；其余走「选中/切歌后播放」
+    const startup = consumeMusicStartupAutoPlayGate();
+    if (startup != null) return startup;
+    return settings().autoPlay;
   };
 
   let playTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -184,6 +194,18 @@ export function useMusicHubPlayer() {
     await playNextTrack();
   };
 
+
+  // 会话恢复后可能只有队列无 URL：挂载时补一次取链（是否自动播放由 shouldAutoPlay/startup 门闩决定）
+  onMount(() => {
+    void (async () => {
+      const st = viewerStore.state;
+      if (st.trackQueue.length === 0) return;
+      if (st.musicPrimaryUrl || (st.musicMediaUrls?.length ?? 0) > 0) return;
+      const { applyMusicTrack } = await import('@/stores/viewer/media/audio');
+      await applyMusicTrack(st.trackIndex);
+    })();
+  });
+
   const player = useAudioPlayer({
     src: url,
     mediaUrls,
@@ -196,11 +218,15 @@ export function useMusicHubPlayer() {
     loading,
     autoPlay: shouldAutoPlay,
     onChapterPosChange: (pos) => {
+      // 切歌取链中勿回写进度，否则会冲掉新曲的记忆进度 / 把旧曲进度写成 0
+      if (loading()) return;
       viewerStore.setChapterPos(pos);
       const track = currentTrack();
       if (track && settings().rememberProgress) {
         saveTrackProgress(`${track.source}:${track.id}`, pos);
       }
+      // 对齐 lx：节流写入 playInfo.time / maxTime（music.session / SQLite）
+      updatePersistedPlayProgress(pos, player.duration());
     },
     onEndedChapter: handleEnded,
     onSaveProgress: async () => {},
@@ -260,10 +286,20 @@ export function useMusicHubPlayer() {
   createEffect(() => {
     const track = currentTrack();
     if (!track) return;
-    const position = settings().rememberProgress
-      ? readTrackProgress(`${track.source}:${track.id}`)
-      : 0;
-    viewerStore.setChapterPos(position);
+    if (!settings().rememberProgress) {
+      viewerStore.setChapterPos(0);
+      return;
+    }
+    const fromLs = readTrackProgress(`${track.source}:${track.id}`);
+    // hydrate 可能已写入 chapterPos；LS 尚未就绪时不要用 0 覆盖
+    if (fromLs > 0) {
+      viewerStore.setChapterPos(fromLs);
+      return;
+    }
+    const existing = viewerStore.state.chapterPos;
+    if (!(existing > 0)) {
+      viewerStore.setChapterPos(0);
+    }
   });
 
   createEffect(() => {
@@ -624,6 +660,7 @@ export function useMusicHubPlayer() {
     fetchedLyric,
     fetchedLyricBundle,
     lyricTrack,
+    effectiveLyricTrack,
     setLyricTrack,
     musicPlayMode,
     setMusicPlayMode,

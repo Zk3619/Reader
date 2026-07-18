@@ -14,24 +14,21 @@ import {
   rsaDecrypt,
   type LxClientKeyInfo,
 } from '@/lib/media/audio/sync/sync-crypto';
+import {
+  loadMusicSyncAuthKeys,
+  saveMusicSyncAuthKeys,
+} from '@/lib/persistence/cred-jar';
 
 export type { LxClientKeyInfo };
 
-const AUTH_STORAGE_KEY = 'reader.lx.sync.authKeys';
-
 function loadAuthKeys(): Record<string, LxClientKeyInfo> {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, LxClientKeyInfo>) : {};
-  } catch {
-    return {};
-  }
+  return loadMusicSyncAuthKeys() as Record<string, LxClientKeyInfo>;
 }
 
 function saveAuthKey(serverId: string, info: LxClientKeyInfo): void {
   const all = loadAuthKeys();
   all[serverId] = info;
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(all));
+  saveMusicSyncAuthKeys(all);
 }
 
 export function getStoredAuthKey(serverId: string): LxClientKeyInfo | null {

@@ -14,7 +14,7 @@ import type { Book, ReadConfig } from '@/types';
 
 export function normalizePlayMode(value: unknown): AudioPlayMode {
   const n = typeof value === 'number' ? value : Number(value);
-  if (n >= 0 && n <= 3 && Number.isInteger(n)) {
+  if (n >= 0 && n <= 4 && Number.isInteger(n)) {
     return n as AudioPlayMode;
   }
   return AudioPlayMode.listEndStop;
@@ -46,6 +46,8 @@ export function cyclePlayMode(mode: AudioPlayMode): AudioPlayMode {
     case AudioPlayMode.random:
       return AudioPlayMode.listLoop;
     case AudioPlayMode.listLoop:
+      return AudioPlayMode.none;
+    case AudioPlayMode.none:
     default:
       return AudioPlayMode.listEndStop;
   }
@@ -54,15 +56,17 @@ export function cyclePlayMode(mode: AudioPlayMode): AudioPlayMode {
 export function playModeLabel(mode: AudioPlayMode): string {
   switch (mode) {
     case AudioPlayMode.listEndStop:
-      return '列表结束停止';
+      return '顺序播放';
     case AudioPlayMode.singleLoop:
       return '单曲循环';
     case AudioPlayMode.random:
-      return '随机播放';
+      return '列表随机播放';
     case AudioPlayMode.listLoop:
       return '列表循环';
+    case AudioPlayMode.none:
+      return '禁止切换';
     default:
-      return '列表结束停止';
+      return '顺序播放';
   }
 }
 

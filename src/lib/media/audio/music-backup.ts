@@ -8,6 +8,14 @@ import {
   importAudioLibrarySnapshot,
   type AudioLibrarySnapshot,
 } from '@/lib/media/audio/sync/remote-snapshot';
+import {
+  dumpPersistDomains,
+  importPersistDomains,
+} from '@/lib/persistence/registry';
+import { MUSIC_CONFIG_DOMAIN_ID } from '@/lib/persistence/domains/music-config';
+import { MUSIC_SESSION_DOMAIN_ID } from '@/lib/persistence/domains/music-session';
+import { MUSIC_UI_DOMAIN_ID } from '@/lib/persistence/domains/music-ui';
+import { bootstrapPersistenceRegistry } from '@/lib/persistence';
 
 export const MUSIC_BACKUP_VERSION = 1;
 
@@ -18,6 +26,8 @@ export interface MusicBackupPackage {
   exportedAt: number;
   settings: ReturnType<typeof getMusicSettings>;
   sidecarStorage: Record<string, string>;
+  /** 统一持久化域快照（music.session 等） */
+  persistDomains?: Record<string, unknown>;
   snapshot: AudioLibrarySnapshot;
 }
 
@@ -52,6 +62,12 @@ export function exportMusicSidecarStorage(): Record<string, string> {
 }
 
 export async function createMusicBackup(): Promise<MusicBackupPackage> {
+  bootstrapPersistenceRegistry();
+  const persistDomains = await dumpPersistDomains([
+    MUSIC_CONFIG_DOMAIN_ID,
+    MUSIC_SESSION_DOMAIN_ID,
+    MUSIC_UI_DOMAIN_ID,
+  ]);
   return {
     kind: 'reader-music-backup',
     version: MUSIC_BACKUP_VERSION,
@@ -59,6 +75,7 @@ export async function createMusicBackup(): Promise<MusicBackupPackage> {
     exportedAt: Date.now(),
     settings: getMusicSettings(),
     sidecarStorage: exportMusicSidecarStorage(),
+    persistDomains,
     snapshot: await exportAudioLibrarySnapshot(),
   };
 }
@@ -83,6 +100,7 @@ export async function importMusicBackup(
   backup: MusicBackupPackage,
   mode: 'merge' | 'overwrite',
 ): Promise<MusicBackupImportResult> {
+  bootstrapPersistenceRegistry();
   if (mode === 'overwrite' && typeof localStorage !== 'undefined') {
     const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
       .filter((key): key is string => !!key && isMusicSidecarStorageKey(key));
@@ -91,6 +109,9 @@ export async function importMusicBackup(
   importMusicSettings(JSON.stringify(backup.settings));
   for (const [key, value] of Object.entries(backup.sidecarStorage ?? {})) {
     if (isMusicSidecarStorageKey(key)) localStorage.setItem(key, value);
+  }
+  if (backup.persistDomains) {
+    await importPersistDomains(backup.persistDomains);
   }
   await importAudioLibrarySnapshot(backup.snapshot, { merge: mode === 'merge' });
   return {

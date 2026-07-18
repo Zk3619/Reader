@@ -47,6 +47,8 @@ import { scrollToTop } from '@/lib/ui/scroll-to-top';
 import { settingsStore } from '@/stores/settings';
 import { musicHubListInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicTrackContextMenu } from '@/components/viewer/audio/music/hub/MusicTrackContextMenu';
+import { shouldAcceptListPlayGesture } from '@/components/viewer/audio/music/hub/list-track-play-gesture';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { cn } from '@/lib/utils';
 
 const DESKTOP_TRACK_ROW_HEIGHT_PX = 44;
@@ -57,6 +59,20 @@ const LOCAL_GROUP_LIST_MAX_HEIGHT_PX = 360;
 
 function trackRowHeightPx(mobile: boolean) {
   return mobile ? MOBILE_TRACK_ROW_HEIGHT_PX : DESKTOP_TRACK_ROW_HEIGHT_PX;
+}
+
+function useOnlineTrackPlayGesture(isMobileLayout: () => boolean) {
+  return (doubleClick: boolean, onPlay: () => void) => {
+    if (
+      !shouldAcceptListPlayGesture(doubleClick, {
+        isMobileLayout: isMobileLayout(),
+        listDoubleClickToPlay: getMusicSettings().listDoubleClickToPlay,
+      })
+    ) {
+      return;
+    }
+    onPlay();
+  };
 }
 
 function SearchScrollFooter() {
@@ -224,6 +240,8 @@ function DesktopTrackRow(props: {
   origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
+  const shell = useShellLayout();
+  const acceptPlay = useOnlineTrackPlayGesture(() => shell().useMobileShell);
   return (
     <MusicTrackContextMenu
       track={props.track}
@@ -240,7 +258,8 @@ function DesktopTrackRow(props: {
             'h-full cursor-pointer rounded-none py-2.5 text-xs font-normal hover:bg-muted/50 sm:text-sm',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           )}
-          onClick={props.onPlay}
+          onClick={() => acceptPlay(false, props.onPlay)}
+          onDblClick={() => acceptPlay(true, props.onPlay)}
         >
           <span class="truncate px-1 tabular-nums text-muted-foreground">{props.index + 1}</span>
           <span class="flex min-w-0 items-center gap-1.5 px-1">
@@ -266,6 +285,8 @@ function MobileTrackRow(props: {
   origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
+  const shell = useShellLayout();
+  const acceptPlay = useOnlineTrackPlayGesture(() => shell().useMobileShell);
   const album = () => trackAlbumName(props.track);
   const subtitle = () => {
     const artist = props.track.artist?.trim();
@@ -287,7 +308,8 @@ function MobileTrackRow(props: {
           type="button"
           variant="ghost"
           class="h-full min-h-[54px] w-full justify-start gap-2 rounded-none px-3 py-0 font-normal hover:bg-muted/50"
-          onClick={props.onPlay}
+          onClick={() => acceptPlay(false, props.onPlay)}
+          onDblClick={() => acceptPlay(true, props.onPlay)}
         >
           <span class="w-9 shrink-0 text-left text-xs tabular-nums text-muted-foreground">
             {props.index + 1}

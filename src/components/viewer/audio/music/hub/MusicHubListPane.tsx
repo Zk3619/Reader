@@ -195,7 +195,8 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
 
   const activeListId = createMemo(() => {
     if (groupId() === MediaGroupId.Favorite) return BUILTIN_PLAYLIST_IDS.LOVE;
-    return activeGroup()?.listId ?? viewerStore.state.activePlaylistId ?? null;
+    // 优先 store 同步值，避免 activeGroup resource 未刷新时串到上一列表
+    return viewerStore.state.activePlaylistId ?? activeGroup()?.listId ?? null;
   });
 
   const canSaveList = createMemo(() => {

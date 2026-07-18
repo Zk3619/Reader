@@ -245,7 +245,7 @@ export async function wyGetMusicUrl(
 }
 
 export async function wyGetLyric(track: AudioTrack): Promise<LyricBundle | null> {
-  const id = String(track.meta.songId ?? '');
+  const id = String(track.meta.songId ?? track.meta.songmid ?? '');
   if (!id) return null;
   const { fixWyTimeLabel, parseWyYrcBundle } = await import(
     '@/lib/media/audio/platform/api/wy-yrc-parse'

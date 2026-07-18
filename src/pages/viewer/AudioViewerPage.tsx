@@ -3,8 +3,9 @@
  * 对齐 Legado AudioPlayActivity / AudioPlayService
  */
 
-import { createSignal, createMemo, createEffect, Show, onCleanup, onMount, type Accessor, type Component } from 'solid-js';
+import { createSignal, createMemo, createEffect, Show, onCleanup, onMount, type Accessor } from 'solid-js';
 import {
+  Ban,
   Repeat,
   Repeat1,
   Shuffle,
@@ -12,6 +13,7 @@ import {
   SkipForward,
   Rewind,
   FastForward,
+  ListOrdered,
   Play,
   Pause,
   Timer,
@@ -85,19 +87,13 @@ function formatTime(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const ListEndStopIcon: Component<{ class?: string }> = (props) => (
-  <span class={cn('relative inline-flex', props.class)}>
-    <Repeat class="h-4 w-4" />
-    <span class="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold leading-none">1</span>
-  </span>
-);
-
 /** 顺序与 cyclePlayMode 一致，供 MultiSwitch 左键循环 */
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
-  { value: AudioPlayMode.listEndStop, label: '列表结束停止', icon: ListEndStopIcon },
+  { value: AudioPlayMode.listEndStop, label: '顺序播放', icon: ListOrdered },
   { value: AudioPlayMode.singleLoop, label: '单曲循环', icon: Repeat1 },
-  { value: AudioPlayMode.random, label: '随机播放', icon: Shuffle },
+  { value: AudioPlayMode.random, label: '列表随机', icon: Shuffle },
   { value: AudioPlayMode.listLoop, label: '列表循环', icon: Repeat },
+  { value: AudioPlayMode.none, label: '禁止切换', icon: Ban },
 ];
 
 export function AudioViewerPage(props: AudioViewerPageProps) {
@@ -325,6 +321,7 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
                   catalogLength={catalog().length}
                   loading={loading()}
                   chapterTitle={chapterTitle()}
+                  chapterNavAboveStatus
                   statusMeta={
                     <span>
                       {chapterIndex() + 1} / {catalog().length} 章
@@ -357,7 +354,7 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
             </Show>
             <Show when={!bootstrapping() && !loading() && error()}>
               <div class="text-center">
-                <p class="text-sm text-destructive">{error()}</p>
+                <p class="text-sm text-muted-foreground">内容加载失败</p>
                 <Button
                   class="mt-3"
                   size="sm"

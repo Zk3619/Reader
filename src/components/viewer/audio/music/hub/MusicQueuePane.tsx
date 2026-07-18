@@ -1,5 +1,6 @@
 /**
  * 播放队列内容面板（无外壳，供详情页侧栏 / Drawer 复用）
+ * 「来自 xx」由外层标题区展示，本面板只负责列表。
  */
 
 import { For, Show, createEffect, type Component } from 'solid-js';
@@ -22,7 +23,6 @@ export interface MusicQueuePaneProps {
 export const MusicQueuePane: Component<MusicQueuePaneProps> = (props) => {
   const queue = () => viewerStore.state.trackQueue;
   const currentIndex = () => viewerStore.state.trackIndex;
-  const sourceLabel = () => viewerStore.state.playerListName;
   let listEl: HTMLUListElement | undefined;
 
   createEffect(() => {
@@ -32,17 +32,12 @@ export const MusicQueuePane: Component<MusicQueuePaneProps> = (props) => {
   });
 
   return (
-    <div class={cn('flex min-h-0 flex-1 flex-col', props.class)}>
-      <Show when={sourceLabel()}>
-        <div class="shrink-0 border-b border-border/60 px-2 py-2 text-xs text-muted-foreground">
-          来自：<span class="text-foreground">{sourceLabel()}</span>
-        </div>
-      </Show>
+    <div class={cn('flex min-h-0 flex-1 flex-col p-3', props.class)}>
       <ul
         ref={(el) => {
           listEl = el;
         }}
-        class="min-h-0 flex-1 divide-y divide-border/50 overflow-y-auto pr-1"
+        class="min-h-0 flex-1 divide-y divide-border/50 overflow-y-auto rounded-md"
       >
         <For
           each={queue()}
