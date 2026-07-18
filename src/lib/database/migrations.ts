@@ -52,6 +52,14 @@ import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
+import {
+  TV_MODULE_SCHEMA_VERSION,
+  migrateTvModuleV108,
+} from '@/lib/database/migration-v108-tv';
+import {
+  MUSIC_PLAYBACK_SCHEMA_VERSION,
+  migrateMusicPlaybackV109,
+} from '@/lib/database/migration-v109-music-playback';
 
 export { LEGADO_SCHEMA_VERSION };
 export { CHAPTER_CACHE_SCHEMA_VERSION };
@@ -514,5 +522,13 @@ export const migrations: Migration[] = [
   {
     version: MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
     up: migrateMusicPlayTrialListsV107,
+  },
+  {
+    version: TV_MODULE_SCHEMA_VERSION,
+    up: migrateTvModuleV108,
+  },
+  {
+    version: MUSIC_PLAYBACK_SCHEMA_VERSION,
+    up: migrateMusicPlaybackV109,
   },
 ];

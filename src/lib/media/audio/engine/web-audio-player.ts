@@ -2,7 +2,28 @@
  * Web Audio 增强播放（EQ 预设 / 音量记忆）
  */
 
+import { peekMusicConfigSync, patchMusicConfig } from '@/lib/media/audio/music-config-storage';
+
 const VOLUME_STORAGE_KEY = 'reader_web_audio_gain';
+
+function readPersistedGain(): number {
+  try {
+    const g = peekMusicConfigSync().volumeGain;
+    if (Number.isFinite(g) && g > 0) return g;
+  } catch { /* */ }
+  try {
+    const v = Number(localStorage.getItem(VOLUME_STORAGE_KEY));
+    if (Number.isFinite(v) && v > 0) return v;
+  } catch { /* */ }
+  return 1;
+}
+
+function writePersistedGain(gain: number): void {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(gain));
+  } catch { /* */ }
+  patchMusicConfig({ volumeGain: gain });
+}
 const EQ_PRESETS: Record<string, number[]> = {
   flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   pop: [3, 2, 0, -1, -2, -1, 0, 1, 2, 3],
@@ -49,6 +70,8 @@ function friendlyOutputLabel(
   return raw || `音频输出 ${index + 1}`;
 }
 
+type PitchShifterLoadStatus = 'none' | 'loading' | 'unconnect' | 'connected';
+
 export class WebAudioPlayerEngine {
   private ctx: AudioContext | null = null;
   private source: MediaElementAudioSourceNode | null = null;
@@ -56,6 +79,10 @@ export class WebAudioPlayerEngine {
   private analyserNode: AnalyserNode | null = null;
   private eqNodes: BiquadFilterNode[] = [];
   private audioEl: HTMLAudioElement;
+  private pitchShifterNode: AudioWorkletNode | null = null;
+  private pitchFactorParam: AudioParam | null = null;
+  private pitchLoadStatus: PitchShifterLoadStatus = 'none';
+  private pitchFactor = 1;
 
   constructor(options: WebAudioPlayerOptions) {
     this.audioEl = options.audioElement;
@@ -64,6 +91,10 @@ export class WebAudioPlayerEngine {
     if (options.eqCustomGains) this.applyCustomEq(options.eqCustomGains);
     this.setMaxChannels(options.maxChannels ?? 2);
     if (options.outputDeviceId) void this.setOutputDevice(options.outputDeviceId);
+  }
+
+  private lastEqNode(): AudioNode | null {
+    return this.eqNodes[this.eqNodes.length - 1] ?? this.source;
   }
 
   private ensureGraph(gain: number, preset: keyof typeof EQ_PRESETS): void {
@@ -91,10 +122,91 @@ export class WebAudioPlayerEngine {
     });
     this.analyserNode = this.ctx.createAnalyser();
     this.analyserNode.fftSize = 256;
+    // source -> eq -> gain -> analyser -> destination（音调节点按需插入）
     prev.connect(this.gainNode);
     this.gainNode.connect(this.analyserNode);
     this.analyserNode.connect(this.ctx.destination);
     this.applyEqPreset(preset);
+  }
+
+  private connectPitchShifter(): void {
+    if (!this.pitchShifterNode || !this.gainNode || !this.pitchFactorParam) return;
+    if (this.pitchLoadStatus === 'connected') {
+      this.pitchFactorParam.value = this.pitchFactor;
+      return;
+    }
+    const lastEq = this.lastEqNode();
+    if (!lastEq) return;
+    try {
+      lastEq.disconnect();
+      lastEq.connect(this.pitchShifterNode);
+      this.pitchShifterNode.connect(this.gainNode);
+      this.pitchLoadStatus = 'connected';
+      this.pitchFactorParam.value = this.pitchFactor;
+    } catch (err) {
+      console.warn('[music] connect pitch shifter failed', err);
+    }
+  }
+
+  private disconnectPitchShifter(): void {
+    if (this.pitchLoadStatus !== 'connected' || !this.pitchShifterNode || !this.gainNode) {
+      return;
+    }
+    const lastEq = this.lastEqNode();
+    if (!lastEq) return;
+    try {
+      lastEq.disconnect();
+      this.pitchShifterNode.disconnect();
+      lastEq.connect(this.gainNode);
+      this.pitchLoadStatus = 'unconnect';
+    } catch (err) {
+      console.warn('[music] disconnect pitch shifter failed', err);
+    }
+  }
+
+  private loadPitchShifter(): void {
+    if (!this.ctx || this.pitchLoadStatus === 'loading') return;
+    this.pitchLoadStatus = 'loading';
+    void import('./pitch-shifter/phase-vocoder.js?worker&url')
+      .then(({ default: url }) => this.ctx!.audioWorklet.addModule(url))
+      .then(() => {
+        if (!this.ctx) return;
+        this.pitchShifterNode = new AudioWorkletNode(this.ctx, 'phase-vocoder-processor', {
+          outputChannelCount: [2],
+        });
+        const param = this.pitchShifterNode.parameters.get('pitchFactor');
+        if (!param) {
+          this.pitchLoadStatus = 'none';
+          return;
+        }
+        this.pitchFactorParam = param;
+        this.pitchLoadStatus = 'unconnect';
+        if (this.pitchFactor !== 1) this.connectPitchShifter();
+      })
+      .catch((err) => {
+        console.warn('[music] pitch shifter worklet failed to load', err);
+        this.pitchLoadStatus = 'none';
+      });
+  }
+
+  /** 对齐 lx setPitchShifter：1 为原调，偏离时接入 phase-vocoder */
+  setPitchShifter(rate: number): void {
+    const next = Math.max(0.5, Math.min(1.5, Math.round(rate * 100) / 100));
+    this.pitchFactor = next;
+    switch (this.pitchLoadStatus) {
+      case 'loading':
+        break;
+      case 'none':
+        if (next !== 1) this.loadPitchShifter();
+        break;
+      case 'connected':
+        if (next === 1) this.disconnectPitchShifter();
+        else if (this.pitchFactorParam) this.pitchFactorParam.value = next;
+        break;
+      case 'unconnect':
+        if (next !== 1) this.connectPitchShifter();
+        break;
+    }
   }
 
   applyEqPreset(preset: keyof typeof EQ_PRESETS): void {
@@ -244,7 +356,7 @@ export class WebAudioPlayerEngine {
     const clamped = Math.max(0, Math.min(2, value));
     if (this.gainNode) this.gainNode.gain.value = clamped;
     try {
-      localStorage.setItem(VOLUME_STORAGE_KEY, String(clamped));
+      writePersistedGain(clamped);
     } catch {
       // ignore
     }
@@ -256,6 +368,8 @@ export class WebAudioPlayerEngine {
 
   dispose(): void {
     try {
+      this.disconnectPitchShifter();
+      this.pitchShifterNode?.disconnect();
       this.source?.disconnect();
       for (const n of this.eqNodes) n.disconnect();
       this.gainNode?.disconnect();
@@ -269,12 +383,16 @@ export class WebAudioPlayerEngine {
     this.gainNode = null;
     this.analyserNode = null;
     this.eqNodes = [];
+    this.pitchShifterNode = null;
+    this.pitchFactorParam = null;
+    this.pitchLoadStatus = 'none';
+    this.pitchFactor = 1;
   }
 }
 
 function readSavedGain(): number {
   try {
-    const v = Number(localStorage.getItem(VOLUME_STORAGE_KEY));
+    const v = readPersistedGain();
     return Number.isFinite(v) && v > 0 ? v : 1;
   } catch {
     return 1;
