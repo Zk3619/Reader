@@ -4552,6 +4552,7 @@ dependencies = [
  "rand 0.8.5",
  "reader-display-native",
  "reader-music-media-native",
+ "reader-tv-spider-native",
  "regex",
  "reqwest 0.13.2",
  "rsa",
@@ -4596,6 +4597,14 @@ dependencies = [
 
 [[package]]
 name = "reader-music-media-native"
+version = "0.1.0"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
+name = "reader-tv-spider-native"
 version = "0.1.0"
 dependencies = [
  "tauri",

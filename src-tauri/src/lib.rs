@@ -23,6 +23,8 @@ mod android_media_session;
 mod display_reader_commands;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod music_openapi;
+mod tv_proxy;
+mod tv_jar_host;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod lx_sync_server;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -56,8 +58,14 @@ fn inner_web_panel_user_agent_store() -> &'static Mutex<String> {
     STORE.get_or_init(|| Mutex::new(String::new()))
 }
 
-/// 统一配置文件名：桌面在 exe 同目录、移动端在系统目录，存放程序配置与数据路径（如 dataDir）
-const CONFIG_FILE: &str = "config.json";
+/// 统一配置文件名：桌面在 exe/AppData、移动端在系统目录；存放程序配置与 dataDir 等
+const SETTINGS_FILE: &str = "settings.json";
+/// 旧文件名（启动时迁移为 settings.json）
+const LEGACY_CONFIG_FILE: &str = "config.json";
+
+/// 供 portable_paths 等子模块引用
+pub(crate) const CONFIG_FILE: &str = SETTINGS_FILE;
+pub(crate) const LEGACY_SETTINGS_FILE: &str = LEGACY_CONFIG_FILE;
 
 /// 可选：exe 同目录 reader.json 中的 dataDir 覆盖默认 AppData
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -75,7 +83,7 @@ fn truncate_utf8_preview(text: &str, max_bytes: usize) -> &str {
     &text[..end]
 }
 
-/// 配置文件路径：桌面 = exe/AppData/config.json；移动端 = 系统 app_data_dir/config.json
+/// 配置文件路径：桌面 = exe/AppData/settings.json；移动端 = 系统 app_data_dir/settings.json
 fn get_config_file_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -88,8 +96,29 @@ fn get_config_file_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, St
             .path()
             .app_data_dir()
             .map_err(|e| format!("无法解析 app_data_dir: {}", e))?;
-        Ok(dir.join(CONFIG_FILE))
+        Ok(dir.join(SETTINGS_FILE))
     }
+}
+
+/// 若仅有旧 config.json，则迁移为 settings.json
+pub(crate) fn migrate_legacy_config_filename(settings_path: &std::path::Path) -> Result<(), String> {
+    if settings_path.exists() {
+        return Ok(());
+    }
+    let legacy = settings_path
+        .parent()
+        .map(|p| p.join(LEGACY_CONFIG_FILE))
+        .ok_or_else(|| "配置路径无父目录".to_string())?;
+    if !legacy.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&legacy, settings_path).or_else(|_| {
+        std::fs::copy(&legacy, settings_path)
+            .map(|_| ())
+            .and_then(|_| std::fs::remove_file(&legacy))
+            .map_err(|e| format!("迁移 config.json → settings.json 失败: {e}"))
+    })?;
+    Ok(())
 }
 
 /// 启动早期（尚无 AppHandle）解析当前业务数据根，供 http cookie 桥接等使用
@@ -130,8 +159,9 @@ pub(crate) fn default_app_data_base(app: &tauri::AppHandle) -> Result<std::path:
     }
 }
 
-/// 确保配置文件存在：目录存在且 config.json 存在则不动，否则创建并写入 {}
+/// 确保配置文件存在：目录存在且 settings.json 存在则不动；否则先尝试从 config.json 迁移，再创建 {}
 pub(crate) fn ensure_config_exists(path: &std::path::Path) -> Result<(), String> {
+    let _ = migrate_legacy_config_filename(path);
     if path.exists() {
         return Ok(());
     }
@@ -172,7 +202,7 @@ pub(crate) fn create_main_window_if_missing(app: &tauri::AppHandle) -> Result<()
     Ok(())
 }
 
-/// 从 config.json 读取 dataDir；若有效则作为数据根目录
+/// 从 settings.json 读取 dataDir；若有效则作为数据根目录
 pub(crate) fn effective_data_dir_from_config(
     config_path: &std::path::Path,
     default_base: &std::path::Path,
@@ -229,7 +259,7 @@ fn shutdown_system() -> Result<(), String> {
         .map_err(|error| format!("启动系统关机失败: {error}"))
 }
 
-/// 返回应用数据根目录：由 config.json 的 dataDir 决定，无则用默认（桌面=exe 旁 AppData，移动端=系统目录）
+/// 返回应用数据根目录：由 settings.json 的 dataDir 决定，无则用默认（桌面=exe 旁 AppData，移动端=系统目录）
 #[tauri::command]
 fn get_app_data_root(app: tauri::AppHandle) -> Result<String, String> {
     let config_path = get_config_file_path(&app)?;
@@ -246,7 +276,7 @@ fn get_default_app_data_base(app: tauri::AppHandle) -> Result<String, String> {
     Ok(base.to_string_lossy().into_owned())
 }
 
-/// 读取 config.json 全文（供前端展示与编辑）
+/// 读取 settings.json 全文（供前端展示与编辑）
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let config_path = get_config_file_path(&app)?;
@@ -255,7 +285,7 @@ fn get_config(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     serde_json::from_str(&s).map_err(|e| format!("解析配置失败: {}", e))
 }
 
-/// 写入 config.json 全文（前端保存后调用；dataDir 变更需重启生效）
+/// 写入 settings.json 全文（前端保存后调用；dataDir 变更需重启生效）
 #[tauri::command]
 fn set_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
     let config_path = get_config_file_path(&app)?;
@@ -290,6 +320,7 @@ async fn download_binary(
     body: Option<String>,
     timeout_ms: Option<u64>,
     use_okhttp_user_agent: Option<bool>,
+    proxy: Option<String>,
 ) -> Result<DownloadResponse, String> {
     // 规范化 URL，确保跨平台兼容性
     // 使用 reqwest 的 URL 解析功能（reqwest 内部使用 url crate）
@@ -352,6 +383,18 @@ async fn download_binary(
             CHROME_UA
         };
         client_builder = client_builder.user_agent(ua);
+    }
+
+    if let Some(proxy_url) = proxy.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        match reqwest::Proxy::all(proxy_url) {
+            Ok(p) => {
+                client_builder = client_builder.proxy(p);
+                eprintln!("[download_binary] 使用代理: {}", proxy_url);
+            }
+            Err(e) => {
+                return Err(format!("无效的代理地址 {}: {}", proxy_url, e));
+            }
+        }
     }
 
     let client = client_builder
@@ -2016,7 +2059,8 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_android_fs::init())
         .plugin(crate::platform::android::display_brightness::init_plugin())
-        .plugin(crate::platform::android::music_media::init_plugin());
+        .plugin(crate::platform::android::music_media::init_plugin())
+        .plugin(crate::platform::android::tv_spider::init_plugin());
 
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
@@ -2029,7 +2073,7 @@ pub fn run() {
 
             if data_migration::has_pending_relocation(app.handle())? {
                 use tauri::{WebviewUrl, WebviewWindowBuilder};
-                WebviewWindowBuilder::new(
+                let mut splash = WebviewWindowBuilder::new(
                     app.handle(),
                     "migration_splash",
                     WebviewUrl::default(),
@@ -2039,8 +2083,15 @@ pub fn run() {
                 .center()
                 .resizable(false)
                 .decorations(true)
-                .visible(true)
-                .build()?;
+                .visible(true);
+                if let Ok(root) = portable_paths::effective_webview_data_root(&config_path) {
+                    if let Ok(data_dir) =
+                        portable_paths::webview_data_directory(&root, "migration_splash")
+                    {
+                        splash = splash.data_directory(data_dir);
+                    }
+                }
+                splash.build()?;
                 data_migration::spawn_relocation_migration(app.handle().clone());
             } else {
                 data_migration::run_startup_migration(app.handle());
@@ -2070,6 +2121,9 @@ pub fn run() {
                 .ok_or_else(|| "tauri.conf.json 中未配置主窗口".to_string())?;
             WebviewWindowBuilder::from_config(app.handle(), win_config)?.build()?;
         }
+
+        tv_proxy::bind_app(app.handle().clone());
+        let _ = tv_proxy::ensure_started();
 
         Ok(())
     });
@@ -2101,6 +2155,15 @@ pub fn run() {
             music_openapi::stop_music_openapi,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             music_openapi::get_music_openapi_status,
+            tv_proxy::tv_proxy_base_url,
+            tv_proxy::tv_local_api_base_url,
+            tv_proxy::tv_proxy_resolve,
+            tv_proxy::tv_media_report,
+            tv_jar_host::tv_jar_engine_kind,
+            tv_jar_host::tv_jar_invoke,
+            tv_jar_host::tv_jar_json_ext,
+            tv_jar_host::tv_start_jar_host,
+            tv_jar_host::tv_jar_clear_cache,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             lx_sync_server::start_lx_sync_server,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

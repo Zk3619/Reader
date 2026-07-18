@@ -1,5 +1,5 @@
 //! 桌面端便携路径布局：
-//! - exe/AppData：config.json、.window-state.json、数据库与业务缓存
+//! - exe/AppData：settings.json、.window-state.json、数据库与业务缓存
 //! - exe/EBWebView：WebView2 用户数据（由 data_directory=exe 根目录生成）
 //! - exe/logs：运行日志
 
@@ -45,10 +45,12 @@ pub fn default_data_root() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 桌面端：config.json 位于 exe/AppData/config.json
+/// 桌面端：settings.json 位于 exe/AppData/settings.json（旧 config.json 启动时迁移）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn config_file_path() -> Result<PathBuf, String> {
-    Ok(default_data_root()?.join(super::CONFIG_FILE))
+    let path = default_data_root()?.join(super::CONFIG_FILE);
+    let _ = crate::migrate_legacy_config_filename(&path);
+    Ok(path)
 }
 
 /// 窗口状态：exe/AppData/.window-state.json
@@ -65,7 +67,7 @@ pub fn log_directory() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 从 config.json 解析 WebView user data 根目录（默认 exe 根，使 EBWebView 与 exe 同级）
+/// 从 settings.json 解析 WebView user data 根目录（默认 exe 根，使 EBWebView 与 exe 同级）
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn effective_webview_data_root(config_path: &Path) -> Result<PathBuf, String> {
     let exe = exe_dir()?;
@@ -137,7 +139,7 @@ pub fn resolve_data_root_from_relative(
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run_legacy_layout_migrations() {
     if let Err(e) = migrate_config_to_app_data() {
-        eprintln!("[portable] 迁移 config.json: {e}");
+        eprintln!("[portable] 迁移 settings.json: {e}");
     }
     if let Err(e) = migrate_window_state_to_app_data() {
         eprintln!("[portable] 迁移窗口状态: {e}");
@@ -154,9 +156,19 @@ pub fn run_legacy_layout_migrations() {}
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn migrate_config_to_app_data() -> Result<(), String> {
     let exe = exe_dir()?;
-    let legacy = exe.join(super::CONFIG_FILE);
+    // 旧布局：exe/settings.json 或 exe/config.json → AppData/settings.json
     let target = config_file_path()?;
-    migrate_file_if_missing(&legacy, &target)
+    let legacy_settings = exe.join(super::CONFIG_FILE);
+    let legacy_config = exe.join(super::LEGACY_SETTINGS_FILE);
+    if !target.exists() {
+        if legacy_settings.exists() {
+            migrate_file_if_missing(&legacy_settings, &target)?;
+        } else if legacy_config.exists() {
+            migrate_file_if_missing(&legacy_config, &target)?;
+        }
+    }
+    let _ = crate::migrate_legacy_config_filename(&target);
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

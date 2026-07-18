@@ -49,3 +49,11 @@ ehthumbs.db
 .codegraph/
 
 *.tsbuildinfo
+**/__pycache__/
+*.pyc
+
+# 影视桌面侧车：dex2jar 二进制由 fetch-dex2jar.ps1 拉取，不入库
+tools/dex2jar/**
+!tools/dex2jar/README.md
+tools/tv-jar-host/build/
+tools/tv-jar-host/lib/

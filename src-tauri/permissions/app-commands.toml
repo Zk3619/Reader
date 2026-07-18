@@ -108,4 +108,13 @@ commands.allow = [
   "convert_image_bytes",
   "convert_audio_bytes",
   "decode_tx_qrc_lyric",
+  "tv_proxy_base_url",
+  "tv_local_api_base_url",
+  "tv_proxy_resolve",
+  "tv_media_report",
+  "tv_jar_engine_kind",
+  "tv_jar_invoke",
+  "tv_jar_json_ext",
+  "tv_start_jar_host",
+  "tv_jar_clear_cache",
 ]

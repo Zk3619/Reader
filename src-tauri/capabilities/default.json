@@ -34,6 +34,7 @@
     "core:app:allow-remove-listener",
     "process:allow-exit",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-always-on-top",
     "opener:default",
     {
       "identifier": "http:default",
@@ -169,6 +170,30 @@
     "dialog:default",
     "notification:default",
     "shell:default",
+    "shell:allow-spawn",
+    "shell:allow-execute",
+    "shell:allow-kill",
+    "shell:allow-stdin-write",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "python", "cmd": "python", "args": true },
+        { "name": "python3", "cmd": "python3", "args": true },
+        { "name": "py", "cmd": "py", "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true },
+        { "name": "yt-dlp.exe", "cmd": "yt-dlp.exe", "args": true }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "python", "cmd": "python", "args": true },
+        { "name": "python3", "cmd": "python3", "args": true },
+        { "name": "py", "cmd": "py", "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true },
+        { "name": "yt-dlp.exe", "cmd": "yt-dlp.exe", "args": true }
+      ]
+    },
     "core:tray:default"
   ]
 }

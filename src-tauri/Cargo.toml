@@ -99,6 +99,7 @@ media-ffmpeg = ["dep:ffmpeg-next"]
 tauri-plugin-android-fs = "28"
 reader-display-native = { path = "android/display-reader" }
 reader-music-media-native = { path = "android/music-media" }
+reader-tv-spider-native = { path = "android/tv-spider" }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
