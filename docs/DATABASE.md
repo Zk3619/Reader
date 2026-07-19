@@ -3,9 +3,10 @@
 > **范围**：本文仅描述 **阅读子模块 ↔ Legado / Max** 的字段语义与兼容注意点。  
 > **整 App 库结构总纲**（拆 `media_groups`、全量模块前缀 `reader_`/`audio_`/`video_`/`shell_`、`mediabox.db`、M1–M4）以 [SHELL_MODULE_MIGRATION.md](./SHELL_MODULE_MIGRATION.md) **§3.0** 为准。
 >
-> **目标表名（已拍板）**：阅读域 `reader_*`；音频域 `audio_*`（模块 ID `audio`，含音乐及未来其它音频）；视频域 `video_*`（由现状 `tv_*` 迁入，模块 ID `video`）。  
-> 与官方库互导：`books` ↔ `reader_books`、`book_groups` ↔ `reader_book_groups`。  
-> 现状 `media_groups` 为过渡形态，**M2** 拆为 `reader_book_groups` + `audio_groups` + shell 表。
+> **目标表名（已拍板）**：阅读域 `reader_*`；音频域 `audio_*`（含 `audio_sources` / `audio_search_keywords`）；视频域 `video_*`（由 `tv_*` 迁入，含 `video_search_keywords`）；订阅域 `sub_*` 骨架；壳 `shell_*`。  
+> 库文件：`mediabox.db`；模块版本：`schema_modules`。  
+> 与官方库互导：`books` ↔ `reader_books`、`book_groups` ↔ `reader_book_groups`（见 `lib/database/core/legado-table-map.ts`）。  
+> 现状 `media_groups` 已由 **M2** 拆为 `reader_book_groups` + `audio_groups` + `shell_favorites`。
 >
 > 回答：改造阅读能力时**要不要**考虑 Legado Max 的数据库重构与优化？  
 > 结论：**要考虑，但方式不是照搬 Max 的 96 次 Room 迁移，而是「兼容导入 + 按需增量 + Reader 侧优化」。**
@@ -17,7 +18,7 @@
 | 对象 | 角色 |
 |------|------|
 | **legados-main / Legado Max** | 参考**表结构、字段语义、备份格式**；**不修改**其 Android 工程内的 DB |
-| **MediaBox `reader.db`（将改 `mediabox.db`）** | 独立演进：全局 `schema_version`（待拆 `schema_modules`）；阅读域对齐 Legado，并扩展音频/视频 |
+| **MediaBox `mediabox.db`（旧名 `reader.db`）** | 独立演进：`schema_modules` 分模块版本 + 全局 `schema_version`（迁移链至 v116）；阅读域对齐 Legado，并扩展音频/视频/订阅 |
 | **用户已有库** | 可能来自官方 Legado / Max 备份，需**导入适配**（含 `book_groups`→`media_groups`） |
 
 ---
@@ -34,22 +35,15 @@
 | `book_groups` | `reader_book_groups` | 现状多为 `media_groups`(shelf)；M2 拆分 |
 | `chapters` / `book_sources` / … | `reader_chapters` / `reader_book_sources` / … | M3 加前缀 |
 
-### 2.2 Reader 尚未建表（Max 已有）
+### 2.2 Max 专属表（按需再建，当前不建空表）
 
-| 表 | Max 用途 | 建议引入时机 |
-|----|----------|--------------|
-| `httpTTS` | 在线朗读引擎 | 阶段 5 TTS |
-| `txtTocRules` | 本地 TXT 目录规则 | 本地书增强 |
-| `dictRules` | 字典 | 字典功能 |
-| `ruleSubs` | 规则订阅 | 低优 |
-| `keyboardAssists` | 键盘辅助 | 低优 |
-| `servers` | WebDAV/服务器配置 | 阶段 4 WebDAV 增强 |
-| `readRecordDetail` / `readRecordSession` | 阅读统计明细/会话 | 阶段 2 阅读记录 |
-| `url_records` | Max URL 记录 | Max 特性，可选 |
-| `direct_link_upload_rules` / `upload_histories` | 直链上传 | Max 特性，可选 |
+| 表 | Max 用途 | MediaBox 策略 |
+|----|----------|---------------|
+| `url_records` | Max URL 记录 | **v114 已 DROP**；实现对应功能时再建 `reader_*` |
+| `direct_link_upload_rules` / `upload_histories` | 直链上传 | **v114 已 DROP**；同上 |
+| 其余（`httpTTS`、`txtTocRules`…） | 已对齐并加 `reader_` 前缀 | 见运行时表 |
 
-> 注：上表「尚未建表」以早期文档为准；若代码中已存在对应迁移，以 `migrations.ts` 为准。目标命名加 `reader_` 前缀。
-
+> 原则：无 UI / 无调用方不保留空表。目标命名加 `reader_` 前缀。
 ### 2.3 结构不一致（需迁移脚本，非忽略）
 
 | 项 | Legado / Max | MediaBox 目标 | 处理 |

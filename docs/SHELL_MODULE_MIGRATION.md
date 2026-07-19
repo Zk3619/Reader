@@ -306,7 +306,7 @@ Legado books."group" bits  →  reader_book_group_items
 │  shell_*     theme / cookies / favorites / preview …     │
 │  reader_*    books / book_groups / chapters / sources …  │
 │  audio_*     tracks / groups / group_items / playback …  │
-│  video_*     config / history / keep / site_pref         │
+│  video_*     sources / tracks / groups / site_pref         │
 │  sub_*       （预留）                                     │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -337,20 +337,29 @@ Legado books."group" bits  →  reader_book_group_items
 | `media_groups` (music) | `audio_groups` |
 | `media_group_items` (track) | `audio_group_items` |
 | `audio_tracks` | `audio_tracks`（保持） |
-| `audio_playlists` | 迁移进 `audio_groups` 后废弃 |
-| `audio_playlist_items`（视图） | 删除；改查 `audio_group_items` |
+| ~~`audio_playlists`~~ | **已废弃 DROP**（v114；权威为 `audio_groups`） |
+| ~~`audio_playlist_items`~~ | **已删除**；改查 `audio_group_items` |
 | `audio_*` 其余 | 保持 `audio_*` |
 | `music_playback_state` | `audio_playback_state` |
+| （新建） | `audio_sources`（builtin + user_api） |
+| （新建） | `audio_search_keywords` |
 
 #### 视频（`tv_*` → `video_*`）
 
 | 现状 | 目标 |
 |------|------|
-| `tv_config` | `video_config` |
-| `tv_history` | `video_history` |
-| `tv_keep` | `video_keep` |
+| `tv_config` / `video_configs` | `video_sources`（v117 配置包源引擎，对齐 `audio_sources`） |
+| `tv_history` / `video_history` | **`video_tracks` + `video_groups`(listId=recent)** |
+| `tv_keep` / `video_keep` | **`video_tracks` + `video_groups`(listId=keep)** |
 | `tv_site_pref` | `video_site_pref` |
-| 其它 `tv_*` | `video_*`（同语义改前缀） |
+| （新建） | `video_group_items`、用户片单 `video_groups` |
+| （新建） | `video_search_keywords` |
+
+#### 订阅（骨架）
+
+| 现状 | 目标 |
+|------|------|
+| （无） | `sub_sources` / `sub_feeds` / `sub_entries` / `sub_search_keywords` |
 
 #### 壳
 
@@ -361,18 +370,27 @@ Legado books."group" bits  →  reader_book_group_items
 | `theme_presets` | `shell_theme_presets` |
 | `cookies` / `caches` / `servers` | `shell_cookies` / `shell_caches` / `shell_servers` |
 
+**说明：`shell_favorites` / `shell_preview_items` 为 MediaBox 自有壳表**，上游无同名物理表。
+
+| MediaBox | 上游概念对标（非同名表） |
+|----------|--------------------------|
+| `shell_favorites` | Legado 无跨模块收藏；洛雪 `love`；FongMi `Keep`（均模块内） |
+| `shell_preview_items` | Legado 试读=`books`+`notShelf`；洛雪试听=`default` 列表；FongMi 无试看表（进度在 `History`） |
+
+边界：跨模块星标 / 统一未入库试读缓存 → `shell_*`；音频「试听列表」→ `audio_groups`(trial)；影视进度 → `video_tracks` + `video_groups`(listId=recent)。
+
 列名：表名加前缀；**列名尽量保留 Legado 驼峰**（`bookUrl`、`groupId`），降低字段映射成本。
 
 ### 3.3 表所有权（目标态）
 
-| 前缀 | 血统 | 归属 |
-|------|------|------|
-| `reader_*` | Legado | reader |
-| `audio_*` | 音频域（含 lx-music 曲库及未来播客/有声等） | audio |
-| `video_*` | 视频域（含 FongMi 点播/直播及未来其它视频能力） | video |
-| `shell_*` | 跨模块 | shell |
-| `sub_*` | 预留 | subscribe |
-| `schema_*` | MediaBox | meta |
+| 前缀 | 血统 | 归属 | 代表表 |
+|------|------|------|--------|
+| `reader_*` | Legado | reader | `reader_books`、`reader_book_sources`、`reader_search_keywords`、`reader_book_groups` |
+| `audio_*` | 音频域（含 lx-music） | audio | `audio_tracks`、`audio_groups`、`audio_sources`、`audio_search_keywords`、`audio_playback_state` |
+| `video_*` | 视频域（含 FongMi） | video | `video_tracks`、`video_groups`、`video_group_items`、`video_sources`、`video_site_pref`、`video_search_keywords` |
+| `shell_*` | 跨模块 | shell | `shell_favorites`、`shell_preview_items`、`shell_theme_presets`、`shell_cookies` |
+| `sub_*` | 订阅（Folo 骨架） | subscribe | `sub_sources`、`sub_feeds`、`sub_entries`、`sub_search_keywords` |
+| `schema_*` | MediaBox | meta | `schema_modules` |
 
 迁移完成后 **DROP** 运行时表 `media_groups` / `media_group_items`。
 
@@ -470,13 +488,28 @@ expand bits → reader_book_group_items
 
 ## 5. 近期任务清单
 
-1. 冻结契约：§3.0 两条决策写入评审结论。  
-2. 实现 `schema_modules` + `mediabox.db` 改名（M1）。  
-3. 编写 `legado-table-map`（无前缀 ↔ `reader_*`）与夹具测试。  
-4. 实施 M2：拆 `media_groups`（书架 / 歌单回归测）。  
-5. 实施 M3：阅读表加前缀；打开导入导出走适配器。  
-6. 实施 M4：收敛 `audio_*`、`tv_*`→`video_*`、`shell_*`，清理 `media_*` / 旧 music 命名。  
-7. Code review：拒绝无前缀新表、拒绝再往 `media_groups` 加 domain。
+1. ~~冻结契约：§3.0 两条决策写入评审结论。~~
+2. ~~实现 `schema_modules` + `mediabox.db` 改名（M1）。~~
+3. ~~编写 `legado-table-map`（无前缀 ↔ `reader_*`）与夹具测试。~~（映射已落地：`lib/database/core/legado-table-map.ts`）
+4. ~~实施 M2：拆 `media_groups` + 源表/搜索历史/订阅骨架。~~
+5. ~~实施 M3：阅读表加前缀；Legado 适配器。~~
+6. ~~实施 M4：收敛 `audio_*`、`tv_*`→`video_*`、`shell_*`，清理 `media_*`。~~
+7. ~~v114：DROP `audio_playlists` / 孤儿 `chapter_cache` / Max 空壳三表。~~
+8. ~~v115：`video_history`/`video_keep` → `video_tracks` + `video_groups` + `video_group_items`。~~
+9. ~~v116：合并并 DROP 全部无前缀双轨（`books`/`cookies`/`music_playback_state` 等）与过渡 `video_history`/`video_keep`。~~
+10. Code review：拒绝无前缀新表、拒绝再往 `media_groups` 加 domain。
+
+**v116 后库内应只剩目标态**（外加 `schema_version` / `schema_modules`）：
+
+| 前缀 | 允许表 |
+|------|--------|
+| `reader_*` | books / chapters / chapter_cache / book_sources / search_* / replace_rules / rss_* / bookmarks / read_record* / http_tts / txt_toc_rules / dict_rules / rule_subs / keyboard_assists / book_groups / book_group_items |
+| `audio_*` | tracks / groups / group_items / sources / search_keywords / url_cache / auth_sessions / sync_state / dislike_rules / download_tasks / playback_state |
+| `video_*` | sources / tracks / groups / group_items / site_pref / search_keywords |
+| `shell_*` | favorites / preview_items / theme_presets / cookies / caches / servers |
+| `sub_*` | sources / feeds / entries / search_keywords |
+
+不应再出现：`books`、`cookies`、`theme_presets`、`music_playback_state`、`video_history`、`video_keep`、`tv_*`、`media_groups*`。
 
 ---
 
@@ -512,8 +545,11 @@ Legado：适配器映射，不要求物理表保持无前缀原名
 | 路径 | 用途 |
 |------|------|
 | `src/lib/modules/module-registry.ts` | 壳模块 ID |
-| `src/lib/database/migration-v104-media-groups.ts` | 现状：`book_groups`→`media_groups`（待 M2 再拆） |
-| `src/lib/database/migration-v105-mediabox.ts` | 现状：items 统一（待按模块拆） |
+| `src/lib/database/table-names.ts` | 目标物理表名常量 |
+| `src/lib/database/core/legado-table-map.ts` | Legado ↔ reader_* 映射 |
+| `src/lib/database/core/schema-modules.ts` | `schema_modules` |
+| `src/lib/database/migration-v110-schema-modules.ts` … `v116-legacy-dual-cleanup.ts` | M1–M4 + 双轨清理 / 影视分组 / 遗留名 DROP |
+| `src/lib/database/migration-v104-media-groups.ts` | 历史：`book_groups`→`media_groups`（已被 M2 拆掉） |
+| `src/lib/platform/database.ts` | `DATABASE_NAME=mediabox.db` |
 | `src/types/book-group.ts` | 分组 ID 常量 |
-| `src/lib/platform/database.ts` | `DATABASE_NAME` |
 | 上游 | `legados-main/.../BookGroup.kt` |
