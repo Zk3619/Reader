@@ -3,7 +3,7 @@
  */
 
 import type { MediaKind } from '@/lib/book-source/book-type';
-import { MediaShelfPage, type MediaShelfPageProps } from '@/pages/media-shelf/MediaShelfPage';
+import { MediaShelfPage, type MediaShelfPageProps } from '@/pages/media/media-shelf/MediaShelfPage';
 import { getScopedBookshelfStore } from '@/stores/scoped-media-shelf';
 import { ShelfNavigationProvider } from '@/stores/shelf-navigation-context';
 

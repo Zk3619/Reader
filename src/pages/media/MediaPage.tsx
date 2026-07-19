@@ -4,7 +4,7 @@
 
 import { createEffect, Match, Show, Switch, type Accessor } from 'solid-js';
 import type { MediaKind } from '@/lib/book-source/book-type';
-import type { MediaShelfPageProps } from '@/pages/media-shelf/MediaShelfPage';
+import type { MediaShelfPageProps } from '@/pages/media/media-shelf/MediaShelfPage';
 import { MediaShelfShell } from '@/pages/media/MediaShelfShell';
 import { AppTabs } from '@/components/shared/AppTabs';
 import { MusicHubShell } from '@/components/viewer/audio/music/hub/MusicHubShell';
