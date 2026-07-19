@@ -1,13 +1,33 @@
-import { For, Show, createResource, createSignal } from 'solid-js';
-import { PageToolbar } from '@/components/shell/PageToolbar';
+import { Show, createMemo, createResource, createSignal } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { TvHubPageShell } from '@/components/viewer/tv/hub/TvHubPageShell';
 import {
-  mainShellPageScroll,
-  pageToolbarBottomBorder,
-} from '@/lib/ui/viewport-classes';
+  TvVodVirtualList,
+  type TvVodListItem,
+} from '@/components/viewer/tv/cards/TvVodVirtualList';
+import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
+import { cn } from '@/lib/utils';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { loadTvDetail } from '@/stores/tv-hub/detail';
+import {
+  bootstrapTvLive,
+  getTvLiveState,
+  playLiveChannel,
+} from '@/stores/tv-hub/live';
+
+async function openKeepItem(item: Awaited<ReturnType<typeof TvDao.listKeep>>[number]) {
+  if (item.kind === 'live') {
+    await bootstrapTvLive(item.siteKey);
+    const ch = getTvLiveState().channels.find(
+      (c) => c.name === item.vodName || c.name === item.vodId,
+    );
+    if (ch) {
+      playLiveChannel({ channel: ch });
+      return;
+    }
+  }
+  await loadTvDetail(item.siteKey, item.vodId);
+}
 
 export function TvKeepPane() {
   const [tick, setTick] = createSignal(0);
@@ -16,9 +36,36 @@ export function TvKeepPane() {
     () => TvDao.listKeep(),
   );
 
+  const listItems = createMemo((): TvVodListItem[] =>
+    (list() ?? []).map((item) => ({
+      key: item.key,
+      title: item.kind === 'live' ? `[直播] ${item.vodName}` : item.vodName,
+      coverUrl: item.vodPic?.trim() || undefined,
+      onOpen: () => void openKeepItem(item),
+      trailing: (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          class="h-7 px-2 text-xs shadow-sm"
+          onClick={(e: MouseEvent) => {
+            e.stopPropagation();
+            void TvDao.removeKeep(item.key).then(() => setTick((n) => n + 1));
+          }}
+        >
+          ×
+        </Button>
+      ),
+    })),
+  );
+
+  const showList = () => !list.loading && (list()?.length ?? 0) > 0;
+
   return (
-    <section class="flex min-h-0 flex-1 flex-col">
-      <PageToolbar class={pageToolbarBottomBorder} title="收藏" description="点播收藏">
+    <TvHubPageShell
+      section="keep"
+      scrollClass={showList() ? 'overflow-hidden' : undefined}
+      toolbar={
         <Button
           type="button"
           size="sm"
@@ -29,46 +76,18 @@ export function TvKeepPane() {
         >
           清空
         </Button>
-      </PageToolbar>
-      <div
-        class={cn(
-          mainShellPageScroll,
-          'grid grid-cols-3 gap-3 p-4 sm:grid-cols-4 md:grid-cols-6',
-        )}
-      >
-        <Show when={list.loading}>
-          <p class="text-sm text-muted-foreground">加载中…</p>
-        </Show>
-        <For each={list() ?? []}>
-          {(item) => (
-            <div class="relative flex flex-col gap-1">
-              <button
-                type="button"
-                class="flex flex-col gap-1 text-left"
-                onClick={() => void loadTvDetail(item.siteKey, item.vodId)}
-              >
-                <div class="aspect-2/3 overflow-hidden rounded-md bg-muted">
-                  <Show when={item.vodPic}>
-                    <img src={item.vodPic} alt="" class="h-full w-full object-cover" />
-                  </Show>
-                </div>
-                <span class="line-clamp-2 text-xs">{item.vodName}</span>
-              </button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                class="absolute right-0 top-0 h-7 px-2"
-                onClick={() => {
-                  void TvDao.removeKeep(item.key).then(() => setTick((n) => n + 1));
-                }}
-              >
-                ×
-              </Button>
-            </div>
-          )}
-        </For>
-      </div>
-    </section>
+      }
+    >
+      <Show when={list.loading}>
+        <p class={cn('py-3 text-sm text-muted-foreground', tvHubPageContentInsetClass)}>
+          加载中…
+        </p>
+      </Show>
+      <Show when={showList()}>
+        <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TvVodVirtualList class="min-h-0 flex-1 my-2" items={listItems} />
+        </div>
+      </Show>
+    </TvHubPageShell>
   );
 }

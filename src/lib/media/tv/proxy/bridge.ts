@@ -92,12 +92,16 @@ async function runJsProxy(params: Record<string, string>): Promise<{
 
 export async function ensureTvProxyBridge(): Promise<void> {
   if (started) return;
-  started = true;
   try {
-    // 确保 Rust 侧已绑定 AppHandle 并监听端口
-    await invoke('tv_proxy_base_url');
+    // 限时探测，避免 Rust 侧未就绪时 invoke 挂死拖垮 ensureJar
+    await Promise.race([
+      invoke('tv_proxy_base_url'),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('tv_proxy_base_url 超时')), 5_000);
+      }),
+    ]);
   } catch {
-    /* web */
+    /* web / 超时：仍尝试挂听，由 listen 成败决定 started */
   }
   try {
     unlisten = await listen<ProxyRequestPayload>('tv-proxy-request', (ev) => {
@@ -116,6 +120,7 @@ export async function ensureTvProxyBridge(): Promise<void> {
         }
       })();
     });
+    started = true;
   } catch (e) {
     console.warn('[tv-proxy-bridge]', e);
     started = false;

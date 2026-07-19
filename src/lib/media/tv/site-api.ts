@@ -4,7 +4,13 @@
 
 import * as VodConfig from './config/vod-config';
 import { pickEngine, initJarBackend } from './spider/facade';
-import { resolveProxyBaseUrl, rewriteProxyUrl, fixLocalProxyUrl, wrapMediaThroughProxy } from './proxy/client';
+import {
+  resolveProxyBaseUrl,
+  rewriteProxyUrl,
+  fixLocalProxyUrl,
+  wrapMediaThroughProxy,
+  appendProxyHeaders,
+} from './proxy/client';
 import { ensureTvProxyBridge } from './proxy/bridge';
 import { runParseJob } from './parse/parse-job';
 import { extractPlayUrl } from './play/extractors';
@@ -12,29 +18,40 @@ import type { Result, Site, Vod } from './types';
 import { jsEngine } from './spider/js-engine';
 
 let jarInited = false;
+/** 并发调用共用同一次初始化，避免重复拉起代理桥 / JAR */
+let jarInitPromise: Promise<void> | null = null;
 
+/**
+ * 初始化影视引擎（代理桥 + JAR 探测）。
+ * 超时后立即放行：不再二次 await（挂起的 invoke 可能堵住 IPC，重试会卡死整页）。
+ */
 async function ensureJar(): Promise<void> {
   if (jarInited) return;
-  try {
-    await Promise.race([
-      (async () => {
-        await ensureTvProxyBridge();
-        await initJarBackend();
-      })(),
-      new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error('初始化影视引擎超时')), 12_000);
-      }),
-    ]);
-  } catch (e) {
-    console.warn('[tv] ensureJar', e);
-    // 仍标记已尝试，避免每次 home 都卡在初始化
+  if (jarInitPromise) return jarInitPromise;
+
+  jarInitPromise = (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await initJarBackend();
-    } catch {
-      /* */
+      await Promise.race([
+        (async () => {
+          await ensureTvProxyBridge();
+          await initJarBackend();
+        })(),
+        new Promise<void>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('初始化影视引擎超时')), 12_000);
+        }),
+      ]);
+    } catch (e) {
+      console.warn('[tv] ensureJar', e);
+      // 保持 jarUnavailableEngine；后续站点调用会得到明确错误，不阻塞首页
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      jarInited = true;
+      jarInitPromise = null;
     }
-  }
-  jarInited = true;
+  })();
+
+  return jarInitPromise;
 }
 
 function attachSite(site: Site, result: Result): Result {
@@ -54,7 +71,10 @@ function looksLikeDirectMedia(url: string): boolean {
     u.includes('.flv') ||
     u.includes('.mkv') ||
     u.startsWith('magnet:') ||
-    u.includes('video/')
+    u.includes('video/') ||
+    u.includes('mpvideo.qpic') ||
+    u.includes('bilivideo') ||
+    /[?&](?:type|format)=m3u8\b/i.test(u)
   );
 }
 
@@ -204,9 +224,9 @@ export async function playerContent(
   const finalizePlayUrl = (u: string) => {
     const n = normalizeUrl(u);
     if (/^https?:\/\//i.test(n) && !n.includes('/proxy?')) {
-      return wrapMediaThroughProxy(n, proxyBase);
+      return wrapMediaThroughProxy(n, proxyBase, result.header);
     }
-    return n;
+    return appendProxyHeaders(n, result.header);
   };
 
   if (typeof result.url === 'string') {
@@ -217,7 +237,9 @@ export async function playerContent(
 
   // 抽取器：对非直链再尝试
   const playUrl0 = Array.isArray(result.url) ? result.url[0] : result.url;
-  if (playUrl0 && !looksLikeDirectMedia(String(playUrl0)) && result.parse !== 1) {
+  if (playUrl0 && looksLikeDirectMedia(String(playUrl0))) {
+    result = { ...result, parse: 0, jx: 0 };
+  } else if (playUrl0 && !looksLikeDirectMedia(String(playUrl0)) && result.parse !== 1) {
     try {
       const extracted = await extractPlayUrl(String(playUrl0));
       if (extracted.url && extracted.url !== playUrl0) {
@@ -233,7 +255,12 @@ export async function playerContent(
     }
   }
 
-  const needParse = result.parse === 1 || result.jx === 1;
+  const needParse =
+    (result.parse === 1 || result.jx === 1) &&
+    (() => {
+      const u = Array.isArray(result.url) ? result.url[0] : result.url;
+      return !!u && !looksLikeDirectMedia(String(u));
+    })();
   if (needParse) {
     const playUrl = Array.isArray(result.url) ? result.url[0] : result.url;
     if (playUrl) {
@@ -257,6 +284,14 @@ export async function playerContent(
     result = { ...result, url: finalizePlayUrl(result.url) };
   } else if (Array.isArray(result.url)) {
     result = { ...result, url: result.url.map((u) => finalizePlayUrl(String(u))) };
+  }
+
+  {
+    const finalUrl = Array.isArray(result.url) ? result.url[0] : result.url;
+    if (finalUrl) {
+      const { logTvPlayRequest } = await import('./play/play-debug');
+      logTvPlayRequest('playerContent', String(finalUrl), result.header);
+    }
   }
 
   if (!result.danmaku && VodConfig.getDanmaku()) {

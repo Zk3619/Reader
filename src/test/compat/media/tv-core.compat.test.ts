@@ -184,8 +184,8 @@ describe('tv site pref merge', () => {
     clearVodConfig();
   });
 
-  it('merges searchable/changeable from pref cache', () => {
-    loadVodConfigFromText(
+  it('merges searchable/changeable from pref cache', async () => {
+    await loadVodConfigFromText(
       JSON.stringify({
         sites: [
           {

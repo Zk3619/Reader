@@ -5,6 +5,14 @@
 export * from './types';
 export * from './play/flags';
 export * as VodConfig from './config/vod-config';
+export * as WallConfig from './config/wall-config';
+export {
+  formatTvUserError,
+  isTvTechnicalError,
+  reportTvError,
+  reportTvResultMsg,
+  tvSoftMessage,
+} from './tv-user-error';
 export * as SiteApi from './site-api';
 export * as LiveApi from './live-api';
 export * as TvDao from './db/tv-dao';

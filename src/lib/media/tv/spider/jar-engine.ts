@@ -89,9 +89,11 @@ async function callSpider(
     });
     return parseResultJson(raw);
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[TV] JAR Spider', method, site.key, e);
     return {
       ...emptyResult(),
-      msg: e instanceof Error ? e.message : String(e),
+      msg,
     };
   }
 }

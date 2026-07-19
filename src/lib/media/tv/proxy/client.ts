@@ -70,11 +70,19 @@ export function fixLocalProxyUrl(url: string, proxyBase: string): string {
   return url;
 }
 
-/** 外链媒体走本地 do=http，规避 WebView CORS */
-export function wrapMediaThroughProxy(url: string, proxyBase: string): string {
+/** 外链媒体走本地 do=http，规避 WebView CORS；可选附带上游所需头（原生 <video> 无法自定义请求头） */
+export function wrapMediaThroughProxy(
+  url: string,
+  proxyBase: string,
+  headers?: Record<string, string>,
+): string {
   if (!url || !proxyBase) return url;
   if (!/^https?:\/\//i.test(url)) return url;
-  if (/\/proxy\?/i.test(url) || url.includes('do=http')) return fixLocalProxyUrl(url, proxyBase);
+  const merged = { ...inferDefaultMediaHeaders(url), ...(headers ?? {}) };
+  if (/\/proxy\?/i.test(url) || url.includes('do=http')) {
+    const fixed = fixLocalProxyUrl(url, proxyBase);
+    return appendProxyHeaders(fixed, merged);
+  }
   try {
     const u = new URL(url);
     if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
@@ -84,7 +92,54 @@ export function wrapMediaThroughProxy(url: string, proxyBase: string): string {
     return url;
   }
   const base = proxyBase.replace(/\/$/, '');
-  return `${base}?do=http&url=${encodeURIComponent(url)}`;
+  let out = `${base}?do=http&url=${encodeURIComponent(url)}`;
+  out = appendProxyHeaders(out, merged);
+  return out;
+}
+
+/** 常见防盗链 CDN 缺 Referer 时补站点根 */
+export function inferDefaultMediaHeaders(url: string): Record<string, string> {
+  const lower = url.toLowerCase();
+  const out: Record<string, string> = {};
+  if (
+    /qpic\.cn|v\.qq|qq\.com|tfogc\.com|vfiles\.gtimg/i.test(lower)
+  ) {
+    out.Referer = 'https://v.qq.com/';
+  } else if (/iqiyi\.com|qy\.net|qiyi\.com/i.test(lower)) {
+    out.Referer = 'https://www.iqiyi.com/';
+  } else if (/youku\.com|ykimg\.com/i.test(lower)) {
+    out.Referer = 'https://www.youku.com/';
+  } else if (/bilivideo|bilibili\.com|hdslb\.com/i.test(lower)) {
+    out.Referer = 'https://www.bilibili.com/';
+  } else if (/mgtv\.com|hitv\.com/i.test(lower)) {
+    out.Referer = 'https://www.mgtv.com/';
+  }
+  return out;
+}
+
+/** 把 Referer / UA / Cookie 写入 proxy query，供 Rust do=http 转上游 */
+export function appendProxyHeaders(
+  proxyUrl: string,
+  headers?: Record<string, string>,
+): string {
+  if (!headers || !proxyUrl) return proxyUrl;
+  try {
+    const u = new URL(proxyUrl);
+    const put = (name: string, value: string | undefined) => {
+      if (!value?.trim()) return;
+      if (!u.searchParams.has(name)) u.searchParams.set(name, value.trim());
+    };
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) {
+      if (k && v != null) lower[k.toLowerCase()] = String(v);
+    }
+    put('Referer', lower.referer);
+    put('User-Agent', lower['user-agent']);
+    put('Cookie', lower.cookie);
+    return u.toString();
+  } catch {
+    return proxyUrl;
+  }
 }
 
 export function isUsableHttpUrl(url: string): boolean {

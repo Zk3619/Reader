@@ -77,7 +77,7 @@ export function TvDetailPane() {
           <p class="text-sm text-muted-foreground">加载详情…</p>
         </Show>
         <Show when={state.error}>
-          <p class="text-sm text-destructive">{state.error}</p>
+          <p class="text-sm text-muted-foreground">{state.error}</p>
         </Show>
         <Show when={state.vod}>
           {(vod) => (

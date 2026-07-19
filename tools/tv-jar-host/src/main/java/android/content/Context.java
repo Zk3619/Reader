@@ -20,6 +20,7 @@ public class Context {
     this.filesDir.mkdirs();
     this.cacheDir.mkdirs();
     ensureSpiderConfigJson();
+    ensureDoubanHistoryPref();
   }
 
   /** 与 Main 缓存目录同级：优先系统属性 / 环境变量，否则 ~/.reader */
@@ -50,6 +51,23 @@ public class Context {
       }
     } catch (Exception e) {
       System.err.println("[tv-jar-host] seed config.json skipped: " + e.getMessage());
+    }
+  }
+
+  /**
+   * 豆瓣「猜你喜欢」会 {@code new JSONArray(prefs.getString("historyvodname",""))}；
+   * 默认空串会直接 JSONException。桌面无观看历史时写入 {@code []}。
+   */
+  private void ensureDoubanHistoryPref() {
+    try {
+      SharedPreferences prefs =
+          getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
+      String raw = prefs.getString("historyvodname", null);
+      if (raw == null || raw.isBlank() || !raw.trim().startsWith("[")) {
+        prefs.edit().putString("historyvodname", "[]").apply();
+      }
+    } catch (Exception e) {
+      System.err.println("[tv-jar-host] seed historyvodname skipped: " + e.getMessage());
     }
   }
 

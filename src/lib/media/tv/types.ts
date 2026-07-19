@@ -44,6 +44,8 @@ export interface LiveSource {
   type?: number;
   url?: string;
   api?: string;
+  /** spider 扩展参数（字符串或序列化 JSON） */
+  ext?: string;
   jar?: string;
   epg?: string;
   logo?: string;
@@ -216,10 +218,17 @@ export interface TvKeepRow {
 }
 
 export interface TvConfigRow {
-  id: number;
+  /** video_sources.id（TEXT） */
+  id: string;
+  /** script_url */
   url: string;
   name: string;
+  /** meta_json.type */
   type: number;
+  /** script（配置 JSON） */
   json: string;
   updatedAt: number;
+  enabled: boolean;
+  kind: string;
+  customOrder: number;
 }

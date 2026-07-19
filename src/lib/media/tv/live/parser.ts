@@ -1,5 +1,5 @@
 /**
- * 直播 M3U / TXT(#genre#) / 内嵌 groups 解析
+ * 直播 M3U / TXT(#genre#) / 内嵌 groups / spider liveContent 解析
  */
 
 import type { LiveChannel, LiveGroup, LiveSource } from '../types';
@@ -34,9 +34,10 @@ export function parseM3u(text: string): LiveGroup[] {
     } else if (t.startsWith('#')) {
       continue;
     } else if (t.startsWith('http') || t.includes('://')) {
+      const urls = t.split('#').map((u) => u.trim()).filter(Boolean);
       current.channel.push({
-        name: pendingName || t,
-        urls: [t],
+        name: pendingName || urls[0] || t,
+        urls: urls.length ? urls : [t],
         logo: pendingLogo || undefined,
         tvgId: pendingTvgId || undefined,
         catchup: pendingCatchup || undefined,
@@ -76,11 +77,9 @@ export function parseTxtGenre(text: string): LiveGroup[] {
   return groups;
 }
 
-export async function loadLiveGroups(source: LiveSource): Promise<LiveGroup[]> {
-  if (source.groups?.length) return source.groups;
-  if (!source.url) return [];
-  const body = await tvGet(source.url, { timeout: 30000 });
+function parseLiveBody(body: string): LiveGroup[] {
   const trimmed = body.trim();
+  if (!trimmed) return [];
   if (trimmed.startsWith('#EXTM3U') || trimmed.includes('#EXTINF:')) {
     return parseM3u(trimmed);
   }
@@ -95,6 +94,45 @@ export async function loadLiveGroups(source: LiveSource): Promise<LiveGroup[]> {
     /* fallthrough */
   }
   return parseM3u(trimmed);
+}
+
+/** 对齐 fongmi LiveParser.getText：有 api 则走 spider.liveContent */
+async function fetchLiveTextViaSpider(source: LiveSource): Promise<string> {
+  const api = source.api?.trim();
+  if (!api) return '';
+  if (api.startsWith('csp_')) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const raw = await invoke<string>('tv_jar_invoke', {
+        siteKey: source.name || 'live',
+        api,
+        ext: source.ext ?? '',
+        jar: source.jar ?? '',
+        method: 'liveContent',
+        argsJson: JSON.stringify([source.url ?? '']),
+      });
+      return raw ?? '';
+    } catch (e) {
+      console.warn('[tv-live] spider liveContent', e);
+      return '';
+    }
+  }
+  // JS/Py spider liveContent 后续按需接入；无 api 时走 url 拉取
+  return '';
+}
+
+export async function loadLiveGroups(source: LiveSource): Promise<LiveGroup[]> {
+  if (source.groups?.length) return source.groups;
+  if (source.api?.trim()) {
+    const text = await fetchLiveTextViaSpider(source);
+    if (text.trim()) return parseLiveBody(text);
+  }
+  if (!source.url) return [];
+  const body = await tvGet(source.url, {
+    timeout: source.timeout ? source.timeout * 1000 : 30000,
+    headers: source.header,
+  });
+  return parseLiveBody(body);
 }
 
 export function flattenChannels(groups: LiveGroup[]): Array<LiveChannel & { group: string }> {

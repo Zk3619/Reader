@@ -11,7 +11,9 @@ export function detectArtplayerStreamType(url: string): ArtplayerStreamType | un
   const lower = raw.toLowerCase();
   const pathish = lower.split('?')[0] ?? lower;
 
-  if (pathish.includes('.m3u8') || lower.includes('format=m3u8')) return 'm3u8';
+  if (pathish.includes('.m3u8') || lower.includes('format=m3u8') || lower.includes('type=m3u8')) {
+    return 'm3u8';
+  }
   if (pathish.includes('.flv')) return 'flv';
   if (pathish.includes('.mpd') || lower.includes('application/dash+xml')) return 'mpd';
   if (pathish.includes('.ts') && !pathish.endsWith('.mts')) return 'ts';

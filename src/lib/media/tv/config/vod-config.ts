@@ -5,11 +5,22 @@
 import { fetchConfigJson, isDepotConfig, parseConfigText, resolveConfigAssetUrl } from './decoder';
 import type { Parse, Site, VodConfigJson, LiveSource } from '../types';
 import * as TvDao from '../db/tv-dao';
+import {
+  countRawLivesEntries,
+  normalizeLives,
+} from '../live/normalize-lives';
+import {
+  resolveHomeSiteKeyForConfig,
+  setPersistedHomeSiteKey,
+} from './tv-home-site';
 
 let active: VodConfigJson | null = null;
 let activeUrl = '';
 let homeSiteKey = '';
 let defaultParseName = '';
+/** 原始 lives 条数（含无效占位），用于导入提示 */
+let rawLivesCount = 0;
+let liveNormalizeNote = '';
 
 /** key -> { searchable, changeable } from DB */
 let sitePrefCache = new Map<string, { searchable: number; changeable: number }>();
@@ -87,6 +98,15 @@ export function getHomeSite(): Site | undefined {
 
 export function setHomeSiteKey(key: string): void {
   homeSiteKey = key;
+  const url = activeUrl.trim();
+  if (url && key) {
+    setPersistedHomeSiteKey(url, key);
+  }
+}
+
+/** 仅恢复内存（hydrate / 测试）；不触发落库 */
+export function applyHomeSiteKeyFromPersist(key: string): void {
+  homeSiteKey = key;
 }
 
 export function getParses(): Parse[] {
@@ -135,6 +155,14 @@ export function getLives(): LiveSource[] {
   return active?.lives ?? [];
 }
 
+export function getRawLivesCount(): number {
+  return rawLivesCount;
+}
+
+export function getLiveNormalizeNote(): string {
+  return liveNormalizeNote;
+}
+
 export function getAds(): string[] {
   return active?.ads ?? [];
 }
@@ -179,15 +207,33 @@ export async function updateSitePref(
   sitePrefCache.set(key, { searchable, changeable });
 }
 
-function afterLoad(cfg: VodConfigJson): void {
-  active = cfg;
-  homeSiteKey = getSites()[0]?.key ?? '';
+async function afterLoad(cfg: VodConfigJson, baseUrl: string): Promise<VodConfigJson> {
+  rawLivesCount = countRawLivesEntries(cfg.lives);
+  const lives = await normalizeLives(cfg.lives, baseUrl, cfg.spider);
+  if (rawLivesCount > 0 && lives.length === 0) {
+    liveNormalizeNote =
+      '配置含 lives 字段，但条目缺少 url / api / groups（常见于占位 {}），无法加载直播';
+  } else if (rawLivesCount > lives.length) {
+    liveNormalizeNote = `已忽略 ${rawLivesCount - lives.length} 条无效直播源`;
+  } else {
+    liveNormalizeNote = '';
+  }
+  const next: VodConfigJson = { ...cfg, lives };
+  active = next;
+  const siteKeys = getSites().map((s) => s.key);
+  const configKey = (baseUrl || activeUrl || '').trim();
+  homeSiteKey = await resolveHomeSiteKeyForConfig(configKey, siteKeys);
   try {
     defaultParseName = localStorage.getItem('tv.defaultParse') ?? cfg.parses?.[0]?.name ?? '';
   } catch {
     defaultParseName = cfg.parses?.[0]?.name ?? '';
   }
   void refreshSitePrefs();
+  // 对齐 VodConfig.initWall：同步 wallpaper 字段
+  void import('./wall-config').then((m) => {
+    m.syncWallFromVodConfig(next, baseUrl || activeUrl);
+  });
+  return next;
 }
 
 export async function loadVodConfigFromUrl(url: string): Promise<VodConfigJson> {
@@ -202,17 +248,21 @@ export async function loadVodConfigFromUrl(url: string): Promise<VodConfigJson> 
   } else {
     activeUrl = url;
   }
-  afterLoad(cfg);
+  const next = await afterLoad(cfg, activeUrl);
   await refreshSitePrefs();
-  return cfg;
+  return next;
 }
 
-export function loadVodConfigFromText(text: string, name = 'pasted'): VodConfigJson {
+export async function loadVodConfigFromText(
+  text: string,
+  name = 'pasted',
+): Promise<VodConfigJson> {
   const cfg = parseConfigText(text, name.startsWith('http') ? name : '');
   activeUrl = name;
-  afterLoad(cfg);
-  void refreshSitePrefs();
-  return cfg;
+  const base = name.startsWith('http') ? name : '';
+  const next = await afterLoad(cfg, base);
+  await refreshSitePrefs();
+  return next;
 }
 
 export function clearVodConfig(): void {
@@ -220,4 +270,6 @@ export function clearVodConfig(): void {
   activeUrl = '';
   homeSiteKey = '';
   sitePrefCache = new Map();
+  rawLivesCount = 0;
+  liveNormalizeNote = '';
 }

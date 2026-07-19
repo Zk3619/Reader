@@ -102,10 +102,39 @@ export function currentProgramme(
   );
 }
 
+/** 某频道今日起附近的节目单（按开始时间排序） */
+export function programmesForChannel(
+  list: EpgProgramme[],
+  channelId: string,
+  limit = 48,
+): EpgProgramme[] {
+  const id = channelId.toLowerCase();
+  const matched = list
+    .filter(
+      (p) =>
+        p.channelId.toLowerCase() === id || p.channelId.toLowerCase().includes(id),
+    )
+    .sort((a, b) => a.start - b.start);
+  const now = Date.now();
+  const startIdx = Math.max(
+    0,
+    matched.findIndex((p) => p.stop === 0 || p.stop >= now) - 2,
+  );
+  return matched.slice(startIdx, startIdx + limit);
+}
+
 export function formatProgramme(p: EpgProgramme | undefined): string {
   if (!p) return '暂无节目信息';
   const t = new Date(p.start);
   const hh = String(t.getHours()).padStart(2, '0');
   const mm = String(t.getMinutes()).padStart(2, '0');
   return `${hh}:${mm} ${p.title}`;
+}
+
+export function formatProgrammeRange(p: EpgProgramme): string {
+  const s = new Date(p.start);
+  const e = p.stop ? new Date(p.stop) : null;
+  const fmt = (d: Date) =>
+    `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return e ? `${fmt(s)}-${fmt(e)}` : fmt(s);
 }

@@ -3,11 +3,11 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { submitTvSearch } from '@/stores/tv-hub/detail';
+import { submitTvSearch, clearTvDetailPlay } from '@/stores/tv-hub/detail';
 import { importTvConfigUrl } from '@/stores/tv-hub/home';
 import { setTvSection } from '@/stores/tv-hub/section';
 import { extractPlayUrl } from '../play/extractors';
-import { setLivePlayState } from '@/components/viewer/tv/panes/TvLivePane';
+import { clearLivePlayState, setLivePlayState } from '@/stores/tv-hub/live';
 
 let unlisten: UnlistenFn | null = null;
 
@@ -37,10 +37,17 @@ export async function ensureTvLocalActionBridge(): Promise<void> {
           case 'push':
             if (p.url) {
               const extracted = await extractPlayUrl(p.url);
+              clearTvDetailPlay();
+              clearLivePlayState();
               setLivePlayState({
                 url: extracted.url,
                 name: '推送播放',
                 epgText: '',
+                lineIndex: 0,
+                sourceName: '',
+                groupName: '',
+                channelName: '',
+                urls: [extracted.url],
               });
               setTvSection('play');
             }

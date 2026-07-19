@@ -16,6 +16,14 @@ describe('detectArtplayerStreamType', () => {
     expect(detectArtplayerStreamType(proxied)).toBe('m3u8');
   });
 
+  it('识别 type=m3u8 与代理嵌套', () => {
+    expect(detectArtplayerStreamType('https://cdn.example/play?type=m3u8')).toBe('m3u8');
+    const proxied =
+      'http://127.0.0.1:9978/proxy?do=http&url=' +
+      encodeURIComponent('https://vod.example/seg/index.m3u8');
+    expect(detectArtplayerStreamType(proxied)).toBe('m3u8');
+  });
+
   it('mp4 返回 undefined 走原生', () => {
     expect(detectArtplayerStreamType('https://cdn.example/a.mp4')).toBeUndefined();
   });

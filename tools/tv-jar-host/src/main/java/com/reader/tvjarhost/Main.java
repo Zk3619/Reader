@@ -201,8 +201,97 @@ public class Main {
       Object raw = i < args.size() ? args.get(i) : null;
       callArgs[i] = coerce(raw, types[i]);
     }
-    Object out = m.invoke(spider, callArgs);
-    return out == null ? "" : String.valueOf(out);
+    // 供 jar 内 Init.getSpider / Class.forName 使用站点 ClassLoader
+    ClassLoader prev = Thread.currentThread().getContextClassLoader();
+    try {
+      Thread.currentThread().setContextClassLoader(spider.getClass().getClassLoader());
+      Object out = m.invoke(spider, callArgs);
+      return out == null ? "" : String.valueOf(out);
+    } finally {
+      Thread.currentThread().setContextClassLoader(prev);
+    }
+  }
+
+  /**
+   * 饭太硬 / fty 等 Guard jar：内含 Android .so + DexNative，只能在真机 DexClassLoader 运行。
+   * 桌面若继续反射会卡住数十秒直至前端超时。
+   */
+  static void assertNotAndroidNativeGuardJar(Path jarFile) throws Exception {
+    if (jarFile == null || !Files.isRegularFile(jarFile)) return;
+    if (!looksLikeAndroidNativeGuardJar(jarFile)) return;
+    throw new IllegalStateException(
+        "此影视 JAR 为 Android 原生加固（DexNative / .so），桌面端无法运行。"
+            + "请换用非 Guard 加固的配置，或在 Android 版使用。 path="
+            + jarFile.getFileName());
+  }
+
+  static boolean looksLikeAndroidNativeGuardJar(Path jarFile) {
+    try (ZipFile zf = new ZipFile(jarFile.toFile())) {
+      Enumeration<? extends ZipEntry> en = zf.entries();
+      while (en.hasMoreElements()) {
+        String name = en.nextElement().getName();
+        if (name == null) continue;
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".so")) return true;
+        if (lower.endsWith(".guard")) return true;
+        if (name.equals("com/github/catvod/spider/DexNative.class")) return true;
+        if (lower.contains("ftyguard") || lower.contains("dexnative")) return true;
+      }
+    } catch (Exception e) {
+      return false;
+    }
+    return false;
+  }
+
+  /** Init.getSpider(api) — 用当前/最近站点 ClassLoader 实例化同 jar 内 Spider。 */
+  public static com.github.catvod.crawler.Spider loadSpiderByApi(String api) throws Exception {
+    if (api == null || api.isBlank()) {
+      throw new IllegalArgumentException("Init.getSpider: empty api");
+    }
+    String className = resolveSpiderClassName(api);
+    // BaseSpiderGuard 构造里会再调 Init.getSpider(本类名)；桌面不能走 DexNative，禁止递归实例化 Guard
+    if (className.endsWith("Guard") || className.endsWith("BaseSpiderGuard")) {
+      throw new UnsupportedOperationException(
+          "Android DexNative Guard 在桌面不可用: "
+              + className
+              + "（需 .so 加固壳，请换源或使用 Android）");
+    }
+    ClassLoader cl = Thread.currentThread().getContextClassLoader();
+    if (cl == null && recentKey != null) cl = LOADERS.get(recentKey);
+    if (cl == null) cl = Main.class.getClassLoader();
+    Class<?> clz = null;
+    ClassNotFoundException last = null;
+    try {
+      clz = Class.forName(className, true, cl);
+    } catch (ClassNotFoundException e) {
+      last = e;
+    }
+    if (clz == null) {
+      for (URLClassLoader loader : LOADERS.values()) {
+        try {
+          clz = Class.forName(className, true, loader);
+          last = null;
+          break;
+        } catch (ClassNotFoundException ce) {
+          last = ce;
+        }
+      }
+    }
+    if (clz == null) {
+      throw last != null ? last : new ClassNotFoundException(className);
+    }
+    Object instance = clz.getDeclaredConstructor().newInstance();
+    if (!(instance instanceof com.github.catvod.crawler.Spider)) {
+      throw new ClassCastException(className + " is not Spider");
+    }
+    return (com.github.catvod.crawler.Spider) instance;
+  }
+
+  static String resolveSpiderClassName(String api) {
+    String name = api.trim();
+    if (name.startsWith("csp_")) name = name.substring(4);
+    if (name.contains(".")) return name;
+    return "com.github.catvod.spider." + name;
   }
 
   static String jsonExt(Map<String, Object> p) throws Exception {
@@ -319,6 +408,20 @@ public class Main {
   static Object getSpider(String siteKey, String api, String ext, String jar) throws Exception {
     String jaKey = md5(jar);
     String spKey = jaKey + siteKey;
+    // 先拦 Android 原生加固 JAR，避免已缓存的 Guard 实例把 homeContent 挂死
+    try {
+      assertNotAndroidNativeGuardJar(resolveJar(jar));
+    } catch (IllegalStateException e) {
+      SPIDERS.entrySet().removeIf(en -> en.getKey().startsWith(jaKey));
+      URLClassLoader doomed = LOADERS.remove(jaKey);
+      if (doomed != null) {
+        try {
+          doomed.close();
+        } catch (Exception ignored) {
+        }
+      }
+      throw e;
+    }
     Object cached = SPIDERS.get(spKey);
     if (cached != null) return cached;
     URLClassLoader loader = ensureLoader(jaKey, jar);
@@ -391,6 +494,7 @@ public class Main {
         return existing;
       }
       Path jarFile = resolveJar(jarSpec);
+      assertNotAndroidNativeGuardJar(jarFile);
       Path loadable = prepareLoadableJar(jarFile);
       List<URL> urls = new ArrayList<>();
       urls.add(loadable.toUri().toURL());

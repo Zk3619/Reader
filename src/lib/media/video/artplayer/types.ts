@@ -17,4 +17,6 @@ export interface CreateReaderArtplayerOptions {
   extras?: VideoPlaybackExtras;
   /** 播放请求头（Referer / Cookie 等），供 HLS/FLV/DASH 与直链 fetch 使用 */
   headers?: Record<string, string>;
+  /** 显式流类型（探测结果优先于 URL 推断） */
+  streamType?: import('@/lib/media/video/artplayer/detect-stream-type').ArtplayerStreamType;
 }

@@ -1,23 +1,44 @@
-import { For, Show, createSignal } from 'solid-js';
-import { PageToolbar } from '@/components/shell/PageToolbar';
+import { Show, createMemo, createSignal } from 'solid-js';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { TvHubPageShell } from '@/components/viewer/tv/hub/TvHubPageShell';
+import { TvVodGridSkeleton } from '@/components/viewer/tv/hub/TvHubSkeletons';
 import {
-  mainShellPageScroll,
-  pageToolbarBottomBorder,
-} from '@/lib/ui/viewport-classes';
+  TvVodVirtualList,
+  type TvVodListItem,
+} from '@/components/viewer/tv/cards/TvVodVirtualList';
+import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
+import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { cn } from '@/lib/utils';
 import { getTvSearchState, submitTvSearch, loadTvDetail } from '@/stores/tv-hub/detail';
 
 export function TvSearchPane() {
   const state = getTvSearchState();
   const [q, setQ] = createSignal(state.keyword);
 
+  const listItems = createMemo((): TvVodListItem[] =>
+    state.list.map((vod) => ({
+      key: `${vod.siteKey ?? ''}|${vod.vod_id}`,
+      title: vod.vod_name,
+      coverUrl: vod.vod_pic?.trim() || undefined,
+      badge: vod.vod_remarks?.trim() || undefined,
+      onOpen: () => void loadTvDetail(vod.siteKey || '', vod.vod_id),
+    })),
+  );
+
+  const showList = () => !state.loading && state.list.length > 0;
+  const showListSkeleton = useSkeletonLoading(() =>
+    shouldShowBlockingLoading(state.loading, state.list.length),
+  );
+
   return (
-    <section class="flex min-h-0 flex-1 flex-col">
-      <PageToolbar class={pageToolbarBottomBorder} title="搜索" description="多站并行搜索" />
-      <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col gap-3 p-4')}>
+    <TvHubPageShell
+      section="search"
+      scrollClass={showList() || showListSkeleton() ? 'overflow-hidden' : undefined}
+    >
+      <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <form
-          class="flex gap-2"
+          class={cn('flex shrink-0 gap-2 py-3', tvHubPageContentInsetClass)}
           onSubmit={(e) => {
             e.preventDefault();
             void submitTvSearch(q());
@@ -34,31 +55,17 @@ export function TvSearchPane() {
           </Button>
         </form>
         <Show when={state.error}>
-          <p class="text-sm text-destructive">{state.error}</p>
+          <p class={cn('shrink-0 text-sm text-muted-foreground', tvHubPageContentInsetClass)}>
+            {state.error}
+          </p>
         </Show>
-        <Show when={state.loading}>
-          <p class="text-sm text-muted-foreground">搜索中…</p>
+        <Show when={showListSkeleton()}>
+          <TvVodGridSkeleton class="min-h-0 flex-1 overflow-y-auto" />
         </Show>
-        <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-          <For each={state.list}>
-            {(vod) => (
-              <button
-                type="button"
-                class="flex flex-col gap-1 text-left"
-                onClick={() => void loadTvDetail(vod.siteKey || '', vod.vod_id)}
-              >
-                <div class="aspect-2/3 overflow-hidden rounded-md bg-muted">
-                  <Show when={vod.vod_pic}>
-                    <img src={vod.vod_pic} alt="" class="h-full w-full object-cover" loading="lazy" />
-                  </Show>
-                </div>
-                <span class="line-clamp-2 text-xs">{vod.vod_name}</span>
-                <span class="text-[10px] text-muted-foreground">{vod.siteName}</span>
-              </button>
-            )}
-          </For>
-        </div>
+        <Show when={showList()}>
+          <TvVodVirtualList class="min-h-0 flex-1" items={listItems} />
+        </Show>
       </div>
-    </section>
+    </TvHubPageShell>
   );
 }

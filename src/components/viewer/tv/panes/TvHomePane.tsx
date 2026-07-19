@@ -2,195 +2,280 @@
  * 影视首页：站点切换 / 分类 / 推荐列表
  */
 
-import { For, Show, createEffect } from 'solid-js';
-import { PageToolbar } from '@/components/shell/PageToolbar';
+import { Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import {
+  Pagination,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationItems,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
+import { TvHubPageShell } from '@/components/viewer/tv/hub/TvHubPageShell';
+import { TvVodGridSkeleton } from '@/components/viewer/tv/hub/TvHubSkeletons';
+import {
+  TvVodVirtualList,
+  vodToListItem,
+} from '@/components/viewer/tv/cards/TvVodVirtualList';
+import {
+  TvHomePaneBelow,
+  TvHomePaneToolbar,
+} from '@/components/viewer/tv/panes/TvHomePaneToolbar';
+import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
+import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import { scrollToTop } from '@/lib/ui/scroll-to-top';
+import { settingsStore } from '@/stores/settings';
 import { cn } from '@/lib/utils';
 import {
-  mainShellPageScroll,
-  pageToolbarBottomBorder,
-} from '@/lib/ui/viewport-classes';
-import {
   getTvHomeState,
-  loadCategory,
-  loadHome,
-  switchSite,
-  setFilterValue,
+  goToCategoryPage,
+  loadMoreCategory,
+  TV_HOME_RECOMMEND_TID,
 } from '@/stores/tv-hub/home';
+import { getTvHomeUi } from '@/stores/tv-hub/tv-home-ui';
 import { loadTvDetail } from '@/stores/tv-hub/detail';
 import { setTvSection } from '@/stores/tv-hub/section';
+import {
+  tvCategoryHasNextPage,
+  tvCategoryShowPager,
+} from '@/lib/media/tv/tv-pagecount';
+
+function TvHomeScrollFooter() {
+  const ui = getTvHomeUi;
+  const state = getTvHomeState;
+  return (
+    <Show when={ui().paginationPreference === 'scroll'}>
+      <Show when={state().list.length > 0 && state().tid !== TV_HOME_RECOMMEND_TID}>
+        <Show when={state().loadingMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">加载中…</div>
+        </Show>
+        <Show when={!state().loadingMore && !state().hasMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">没有更多了</div>
+        </Show>
+      </Show>
+    </Show>
+  );
+}
+
+function TvHomePaginationBar(props: { class?: string }) {
+  const state = getTvHomeState;
+  const ui = getTvHomeUi;
+
+  const showBar = () =>
+    ui().paginationPreference === 'pagination' &&
+    state().tid !== TV_HOME_RECOMMEND_TID &&
+    tvCategoryShowPager(state().page, state().pagecount, state().list.length);
+
+  const canGoNext = () =>
+    tvCategoryHasNextPage(state().page, state().pagecount, state().list.length);
+
+  return (
+    <Show when={showBar()}>
+      <Show
+        when={state().pagecount > 1}
+        fallback={
+          <div class={cn('flex items-center justify-center gap-2 py-3', props.class)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={state().page <= 1 || state().loading || state().loadingMore}
+              onClick={() => void goToCategoryPage(state().page - 1)}
+            >
+              上一页
+            </Button>
+            <span class="text-xs text-muted-foreground">第 {state().page} 页</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!canGoNext() || state().loading || state().loadingMore}
+              onClick={() => void goToCategoryPage(state().page + 1)}
+            >
+              下一页
+            </Button>
+          </div>
+        }
+      >
+        <div class={cn('flex shrink-0 justify-center py-3', props.class)}>
+          <Pagination
+            count={state().pagecount}
+            page={state().page}
+            onPageChange={(page) => void goToCategoryPage(page)}
+            disabled={state().loading || state().loadingMore}
+            itemComponent={(itemProps) => (
+              <PaginationItem page={itemProps.page}>{itemProps.page}</PaginationItem>
+            )}
+            ellipsisComponent={() => <PaginationEllipsis />}
+          >
+            <PaginationPrevious>上一页</PaginationPrevious>
+            <PaginationItems />
+            <PaginationNext>下一页</PaginationNext>
+          </Pagination>
+        </div>
+      </Show>
+    </Show>
+  );
+}
+
+function TvHomeListFooter() {
+  return (
+    <>
+      <TvHomeScrollFooter />
+      <TvHomePaginationBar />
+    </>
+  );
+}
+
+function useTvHomeScrollLoad() {
+  const ui = getTvHomeUi;
+  const state = getTvHomeState;
+  let lastScrollTop = 0;
+
+  const handleScroll = (el: HTMLDivElement) => {
+    const top = el.scrollTop;
+    const moved = top !== lastScrollTop;
+    lastScrollTop = top;
+    if (ui().paginationPreference !== 'scroll') return;
+    if (state().tid === TV_HOME_RECOMMEND_TID) return;
+    if (!moved || state().loadingMore || !state().hasMore) return;
+    const distanceToBottom = el.scrollHeight - top - el.clientHeight;
+    if (distanceToBottom < 120) {
+      void loadMoreCategory();
+    }
+  };
+
+  return { handleScroll };
+}
 
 export function TvHomePane() {
   const state = getTvHomeState();
+  const ui = getTvHomeUi;
+  const { handleScroll } = useTvHomeScrollLoad();
+  const [scrollEl, setScrollEl] = createSignal<HTMLDivElement | undefined>();
+
+  const showBelow = () =>
+    ui().siteControl === 'tabs' ||
+    ui().classControl === 'stacked' ||
+    ui().filterControl === 'stacked';
+
+  const description = () => {
+    if (state.preparing) return '正在准备…';
+    if (!state.configUrl) return '请先在设置中导入配置';
+    const site = state.sites.find((s) => s.key === state.siteKey);
+    if (site?.name) return site.name;
+    return state.configUrl;
+  };
+
+  const listItems = createMemo(() =>
+    state.list.map((vod) =>
+      vodToListItem(vod, state.siteKey, (v) =>
+        void loadTvDetail(v.siteKey || state.siteKey, v.vod_id),
+      ),
+    ),
+  );
+
+  const showList = () =>
+    !!state.configUrl && !state.loading && state.list.length > 0;
+
+  /** preparing（等 DB/配置）或首屏 Spider 加载：骨架；有旧列表时不挡 */
+  const showListSkeleton = useSkeletonLoading(
+    () =>
+      state.preparing ||
+      shouldShowBlockingLoading(state.loading, state.list.length) ||
+      (!!state.configUrl && !state.homeLoaded && !state.error && state.list.length === 0),
+  );
+
+  /** 引导结束且确认无配置 */
+  const showEmptyConfig = () =>
+    !state.preparing && !state.loading && !state.configUrl && state.homeLoaded;
 
   createEffect(() => {
-    // 仅兜底：有配置、尚未完成过首页拉取、且当前不在加载中
-    // 不可用「list 为空」作条件，否则 JAR 空首页 / 失败后会无限重载
-    if (state.configUrl && !state.homeLoaded && !state.loading) {
-      void loadHome();
-    }
+    const page = state.page;
+    if (ui().paginationPreference !== 'pagination') return;
+    const el = scrollEl();
+    if (!el) return;
+    void page;
+    const reduceMotion = settingsStore.state.app.reduceMotion;
+    requestAnimationFrame(() => {
+      scrollToTop(el, { reduceMotion });
+    });
   });
 
   return (
-    <section class="flex min-h-0 flex-1 flex-col">
-      <PageToolbar
-        class={pageToolbarBottomBorder}
-        title="影视"
-        description={state.configUrl || '请先在设置中导入配置'}
-      >
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setTvSection('settings')}
+    <TvHubPageShell
+      section="home"
+      description={description()}
+      toolbar={<TvHomePaneToolbar />}
+      below={showBelow() ? <TvHomePaneBelow /> : undefined}
+      belowHorizontalWheel={ui().siteControl === 'tabs'}
+      scrollClass={showList() || showListSkeleton() ? 'overflow-hidden' : undefined}
+    >
+      <Show when={showEmptyConfig()}>
+        <div
+          class={cn(
+            'flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-3 text-center',
+            tvHubPageContentInsetClass,
+          )}
         >
-          设置
-        </Button>
-      </PageToolbar>
-      <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col gap-3 p-4')}>
-        <Show when={state.notice}>
-          <p class="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-            {state.notice}
-          </p>
-        </Show>
-        <Show when={state.error}>
-          <p class="text-sm text-destructive">{state.error}</p>
-        </Show>
-        <Show when={!state.configUrl}>
-          <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-            <p class="text-sm text-muted-foreground">尚未导入 Vod 配置</p>
-            <Button type="button" onClick={() => setTvSection('settings')}>
-              去设置导入
-            </Button>
-          </div>
-        </Show>
-        <Show when={state.configUrl}>
-          <div class="flex flex-wrap gap-2">
-            <For each={state.sites}>
-              {(site) => (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={state.siteKey === site.key ? 'default' : 'outline'}
-                  onClick={() => switchSite(site.key)}
-                >
-                  {site.name}
-                </Button>
-              )}
-            </For>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <For each={state.classes}>
-              {(c) => (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={state.tid === c.type_id ? 'secondary' : 'ghost'}
-                  onClick={() => void loadCategory(c.type_id, 1)}
-                >
-                  {c.type_name}
-                </Button>
-              )}
-            </For>
-          </div>
-          <Show when={Object.keys(state.filters).length}>
-            <div class="flex flex-col gap-2">
-              <For each={Object.entries(state.filters)}>
-                {([fkey, opts]) => (
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-xs text-muted-foreground w-16 shrink-0">{fkey}</span>
-                    <For each={opts}>
-                      {(opt) => (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={state.extend[fkey] === opt.v ? 'default' : 'outline'}
-                          onClick={() =>
-                            setFilterValue(
-                              fkey,
-                              state.extend[fkey] === opt.v ? '' : opt.v,
-                            )
-                          }
-                        >
-                          {opt.n}
-                        </Button>
-                      )}
-                    </For>
-                  </div>
-                )}
-              </For>
-            </div>
+          <p class="text-sm text-muted-foreground">尚未导入 Vod 配置</p>
+          <Button type="button" onClick={() => setTvSection('settings')}>
+            去设置导入
+          </Button>
+        </div>
+      </Show>
+
+      <Show when={showListSkeleton()}>
+        <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TvVodGridSkeleton class="min-h-0 flex-1 overflow-y-auto" />
+        </div>
+      </Show>
+
+      <Show when={!showListSkeleton() && !!state.configUrl && !showList()}>
+        <div
+          class={cn('flex min-h-0 flex-1 flex-col gap-3 py-3', tvHubPageContentInsetClass)}
+        >
+          <Show when={state.notice}>
+            <p class="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+              {state.notice}
+            </p>
           </Show>
-          <Show when={state.loading}>
-            <p class="text-sm text-muted-foreground">加载中…</p>
+          <Show when={state.error}>
+            <p class="text-sm text-muted-foreground">{state.error}</p>
           </Show>
           <Show when={!state.loading && !state.list.length && !state.error}>
             <p class="text-sm text-muted-foreground">
-              当前站点暂无推荐内容，可切换站点或打开分类浏览
+              当前分类暂无内容，可切换站点或其它分类
             </p>
           </Show>
-          <Show when={!state.loading && state.error}>
-            <div class="flex flex-wrap items-center gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => void loadHome()}>
-                重试加载
-              </Button>
+        </div>
+      </Show>
+
+      <Show when={showList()}>
+        <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <Show when={state.notice || state.error}>
+            <div class={cn('shrink-0 space-y-2 pt-2', tvHubPageContentInsetClass)}>
+              <Show when={state.notice}>
+                <p class="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                  {state.notice}
+                </p>
+              </Show>
+              <Show when={state.error}>
+                <p class="text-sm text-muted-foreground">{state.error}</p>
+              </Show>
             </div>
           </Show>
-          <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-            <For each={state.list}>
-              {(vod) => (
-                <button
-                  type="button"
-                  class="group flex flex-col gap-1 text-left"
-                  onClick={() =>
-                    void loadTvDetail(vod.siteKey || state.siteKey, vod.vod_id)
-                  }
-                >
-                  <div class="aspect-2/3 overflow-hidden rounded-md bg-muted">
-                    <Show when={vod.vod_pic} fallback={<div class="h-full w-full" />}>
-                      <img
-                        src={vod.vod_pic}
-                        alt=""
-                        class="h-full w-full object-cover transition group-hover:scale-105"
-                        loading="lazy"
-                      />
-                    </Show>
-                  </div>
-                  <span class="line-clamp-2 text-xs font-medium">{vod.vod_name}</span>
-                  <Show when={vod.vod_remarks}>
-                    <span class="text-[10px] text-muted-foreground">{vod.vod_remarks}</span>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </div>
-          <Show when={state.pagecount > 1}>
-            <div class="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={state.page <= 1}
-                onClick={() => void loadCategory(state.tid, state.page - 1)}
-              >
-                上一页
-              </Button>
-              <span class="text-xs text-muted-foreground">
-                {state.page} / {state.pagecount}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={state.page >= state.pagecount}
-                onClick={() => void loadCategory(state.tid, state.page + 1)}
-              >
-                下一页
-              </Button>
-            </div>
-          </Show>
-        </Show>
-      </div>
-    </section>
+          <TvVodVirtualList
+            class="min-h-0 flex-1 my-2"
+            items={listItems}
+            onScroll={handleScroll}
+            onScrollContainer={setScrollEl}
+            scrollFooter={<TvHomeListFooter />}
+          />
+        </div>
+      </Show>
+    </TvHubPageShell>
   );
 }

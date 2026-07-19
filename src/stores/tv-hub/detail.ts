@@ -8,6 +8,37 @@ import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { parsePlayFlags } from '@/lib/media/tv/play/flags';
 import type { PlayFlag, Result, Vod } from '@/lib/media/tv/types';
 import { openTvDetail, openTvPlay, getTvHubState } from './section';
+import { reportTvError, reportTvResultMsg } from '@/lib/media/tv/tv-user-error';
+
+/** 补全配置/爬虫返回的弹幕 URL（vodName / vodIndex / vodUrl） */
+function fillDanmakuTemplate(
+  template: string,
+  vodName: string,
+  episodeName: string,
+  playUrl: string,
+): string {
+  if (!template.trim()) return template;
+  try {
+    const u = new URL(template);
+    const index = episodeName.match(/\d+/)?.[0] ?? episodeName;
+    if (!u.searchParams.get('vodName')) u.searchParams.set('vodName', vodName);
+    if (!u.searchParams.get('vodIndex')) u.searchParams.set('vodIndex', index);
+    if (!u.searchParams.get('vodUrl') && playUrl) {
+      u.searchParams.set('vodUrl', playUrl);
+    }
+    // 兼容 {name}/{index}/{url} 占位
+    return u
+      .toString()
+      .replace(/\{name\}/gi, encodeURIComponent(vodName))
+      .replace(/\{index\}/gi, encodeURIComponent(index))
+      .replace(/\{url\}/gi, encodeURIComponent(playUrl));
+  } catch {
+    return template
+      .replace(/\{name\}/gi, encodeURIComponent(vodName))
+      .replace(/\{index\}/gi, encodeURIComponent(episodeName.match(/\d+/)?.[0] ?? episodeName))
+      .replace(/\{url\}/gi, encodeURIComponent(playUrl));
+  }
+}
 
 const [searchState, setSearchState] = createStore({
   keyword: '',
@@ -50,7 +81,7 @@ export async function submitTvSearch(keyword: string): Promise<void> {
   } catch (e) {
     setSearchState({
       loading: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: reportTvError('搜索失败', e),
     });
   }
 }
@@ -70,14 +101,15 @@ export async function loadTvDetail(siteKey: string, vodId: string): Promise<void
       episodeIndex: 0,
       loading: false,
       error: !vod
-        ? softMsg ||
-          '未获取到详情（豆瓣等推荐源通常无播放线路，请换站或搜索同名影片）'
+        ? softMsg
+          ? reportTvResultMsg('加载详情失败', softMsg)
+          : '未获取到详情（豆瓣等推荐源通常无播放线路，请换站或搜索同名影片）'
         : '',
     });
   } catch (e) {
     setDetailState({
       loading: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: reportTvError('加载详情失败', e),
     });
   }
 }
@@ -90,6 +122,15 @@ export function selectEpisode(index: number): void {
   setDetailState('episodeIndex', index);
 }
 
+export function clearTvDetailPlay(): void {
+  setDetailState({
+    playUrl: '',
+    playHeaders: {},
+    playDanmaku: '',
+    playLoading: false,
+  });
+}
+
 export async function playCurrentEpisode(): Promise<void> {
   const { siteKey } = getTvHubState();
   const flag = detailState.flags[detailState.flagIndex];
@@ -98,26 +139,39 @@ export async function playCurrentEpisode(): Promise<void> {
   if (!flag || !ep || !vod || !siteKey) return;
 
   openTvPlay();
+  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
   setDetailState({ playLoading: true, playUrl: '', error: '' });
   try {
     const result = await SiteApi.playerContent(siteKey, flag.flag, ep.url);
     const url = Array.isArray(result.url) ? result.url[0] : result.url;
+    const urlStr = url ? String(url).trim() : '';
+    const looksMedia =
+      /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
+      /format=m3u8|type=m3u8|\/proxy\?.*do=http/i.test(urlStr);
+    const unplayable = !urlStr || (result.parse === 1 && !looksMedia);
     const danmakuRaw = result.danmaku;
     let playDanmaku: string | unknown[] = '';
     if (typeof danmakuRaw === 'string') {
-      playDanmaku = danmakuRaw;
+      playDanmaku = fillDanmakuTemplate(danmakuRaw, vod.vod_name, ep.name, urlStr);
     } else if (Array.isArray(danmakuRaw)) {
       playDanmaku = danmakuRaw
-        .map((d) => (typeof d === 'string' ? d : d?.url))
+        .map((d) => {
+          const raw = typeof d === 'string' ? d : d?.url;
+          return typeof raw === 'string'
+            ? fillDanmakuTemplate(raw, vod.vod_name, ep.name, urlStr)
+            : raw;
+        })
         .filter(Boolean) as string[];
       if (playDanmaku.length === 1) playDanmaku = playDanmaku[0] as string;
     }
     setDetailState({
-      playUrl: url ? String(url) : '',
+      playUrl: unplayable ? '' : urlStr,
       playHeaders: result.header ?? {},
       playDanmaku,
       playLoading: false,
-      error: result.msg && result.parse === 1 ? String(result.msg) : '',
+      error: unplayable
+        ? String(result.msg || '未能解析到可播放地址')
+        : '',
     });
     await TvDao.upsertHistory({
       key: `${siteKey}$${vod.vod_id}`,
@@ -142,16 +196,21 @@ export async function playCurrentEpisode(): Promise<void> {
         ep.url,
       );
       const url = Array.isArray(alt.url) ? alt.url[0] : alt.url;
+      const urlStr = url ? String(url).trim() : '';
+      const looksMedia =
+        /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
+        /format=m3u8|type=m3u8|\/proxy\?.*do=http/i.test(urlStr);
+      const unplayable = !urlStr || (alt.parse === 1 && !looksMedia);
       setDetailState({
-        playUrl: url ? String(url) : '',
+        playUrl: unplayable ? '' : urlStr,
         playHeaders: alt.header ?? {},
         playLoading: false,
-        error: '',
+        error: unplayable ? String(alt.msg || '未能解析到可播放地址') : '',
       });
     } catch {
       setDetailState({
         playLoading: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: reportTvError('播放失败', e),
       });
     }
   }
@@ -164,6 +223,7 @@ export async function switchSourceAndPlay(): Promise<void> {
   const vod = detailState.vod;
   if (!flag || !ep || !vod || !siteKey) return;
   openTvPlay();
+  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
   setDetailState({ playLoading: true, error: '' });
   try {
     const alt = await SiteApi.playWithAlternateSite(
@@ -173,15 +233,21 @@ export async function switchSourceAndPlay(): Promise<void> {
       ep.url,
     );
     const url = Array.isArray(alt.url) ? alt.url[0] : alt.url;
+    const urlStr = url ? String(url).trim() : '';
+    const looksMedia =
+      /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
+      /format=m3u8|type=m3u8|\/proxy\?.*do=http/i.test(urlStr);
+    const unplayable = !urlStr || (alt.parse === 1 && !looksMedia);
     setDetailState({
-      playUrl: url ? String(url) : '',
+      playUrl: unplayable ? '' : urlStr,
       playHeaders: alt.header ?? {},
       playLoading: false,
+      error: unplayable ? String(alt.msg || '未能解析到可播放地址') : '',
     });
   } catch (e) {
     setDetailState({
       playLoading: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: reportTvError('换源播放失败', e),
     });
   }
 }

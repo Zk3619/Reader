@@ -1,5 +1,5 @@
 /**
- * 影视 Hub 壳 — 对齐 MusicHubShell 懒挂载分区
+ * 影视 Hub 壳 — 优先挂页面框架；DB/引擎在后台就绪（对齐阅读/音乐：骨架等待）
  */
 
 import { Show, createEffect, createSignal, type Accessor } from 'solid-js';
@@ -7,10 +7,13 @@ import { cn } from '@/lib/utils';
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';
 import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
+import { whenDatabaseReady } from '@/lib/database';
 import { TvHubContent } from './TvHubContent';
-import { bootstrapTvConfig } from '@/stores/tv-hub/home';
-import { ensureTvProxyBridge } from '@/lib/media/tv/proxy/bridge';
-import { ensureTvLocalActionBridge } from '@/lib/media/tv/local/action-bridge';
+import {
+  beginTvHubPrepare,
+  bootstrapTvConfig,
+  endTvHubPrepare,
+} from '@/stores/tv-hub/home';
 
 export interface TvHubShellProps {
   active?: boolean | Accessor<boolean>;
@@ -18,15 +21,46 @@ export interface TvHubShellProps {
 
 export function TvHubShell(props: TvHubShellProps) {
   const isActive = () => readShellPageActive(props.active);
-  const [booted, setBooted] = createSignal(false);
+  /** 一进入影视就挂框架（工具栏+分区），不堵在开屏/DB 之后 */
+  const [frameworkReady, setFrameworkReady] = createSignal(false);
+  let bootStarted = false;
 
   createEffect(() => {
-    if (isActive() && !booted()) {
-      setBooted(true);
-      void bootstrapTvConfig();
-      void ensureTvProxyBridge();
-      void ensureTvLocalActionBridge();
-    }
+    if (isActive()) setFrameworkReady(true);
+  });
+
+  createEffect(() => {
+    if (!isActive() || bootStarted) return;
+    bootStarted = true;
+    beginTvHubPrepare();
+
+    void (async () => {
+      try {
+        // 等 App 开屏结束后的 initDatabase，禁止抢跑整库迁移 / JAR
+        await whenDatabaseReady();
+        if (!isActive()) {
+          bootStarted = false;
+          endTvHubPrepare();
+          return;
+        }
+        await bootstrapTvConfig();
+        void import('@/lib/media/tv/config/wall-config').then((m) =>
+          m.restoreWallFromCache().catch((e) => console.warn('[tv] wall restore', e)),
+        );
+        window.setTimeout(() => {
+          void import('@/lib/media/tv/proxy/bridge').then((m) =>
+            m.ensureTvProxyBridge().catch((e) => console.warn('[tv] proxy bridge', e)),
+          );
+          void import('@/lib/media/tv/local/action-bridge').then((m) =>
+            m.ensureTvLocalActionBridge().catch((e) => console.warn('[tv] local bridge', e)),
+          );
+        }, 0);
+      } catch (e) {
+        console.warn('[tv] hub boot failed', e);
+        bootStarted = false;
+        endTvHubPrepare();
+      }
+    })();
   });
 
   return (
@@ -34,7 +68,7 @@ export function TvHubShell(props: TvHubShellProps) {
       target="module.tv"
       class={cn(mainShellPageRoot, 'flex min-h-0 flex-1 flex-col overflow-hidden')}
     >
-      <Show when={booted()}>
+      <Show when={frameworkReady()}>
         <TvHubContent active={isActive} />
       </Show>
     </ThemeTargetHost>
