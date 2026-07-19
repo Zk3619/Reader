@@ -43,6 +43,7 @@ import { shouldAcceptListPlayGesture } from '@/components/viewer/audio/music/hub
 import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
 import { useVirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import {
   getMusicSettings,
   getMusicListScrollPosition,
@@ -99,6 +100,25 @@ function SourceBadge(props: { track: AudioTrack }) {
     <Badge variant="outline" class={trackBadgeToneClass('source')}>
       {trackSourceBadgeLabel(props.track)}
     </Badge>
+  );
+}
+
+function CacheTierBadge(props: { track: AudioTrack }) {
+  const [tier] = createResource(
+    () => props.track.id,
+    async (id) => {
+      const { getAudioTrackCacheTier } = await import('@/lib/database/audio-library');
+      return getAudioTrackCacheTier(id);
+    },
+  );
+  return (
+    <Show when={tier()}>
+      {(t) => (
+        <Badge variant="outline" class="shrink-0 text-[10px]">
+          {t() === 'manual' ? '已下载' : '已缓存'}
+        </Badge>
+      )}
+    </Show>
   );
 }
 
@@ -245,6 +265,7 @@ function SortableTrackRow(props: {
                   <Show when={props.settings.listShowSource}>
                     <SourceBadge track={props.track} />
                   </Show>
+                  <CacheTierBadge track={props.track} />
                 </span>
                 <span class="min-w-0 truncate px-1 text-left text-muted-foreground">
                   {props.track.artist}
@@ -299,6 +320,7 @@ function SortableTrackRow(props: {
                   <Show when={props.settings.listShowSource}>
                     <SourceBadge track={props.track} />
                   </Show>
+                  <CacheTierBadge track={props.track} />
                 </span>
                 <Show when={subtitle()}>
                   <span class="block truncate text-xs text-muted-foreground">
@@ -401,7 +423,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
       } catch (error) {
         showAppToast({
           title: '排序失败',
-          description: String(error),
+          description: toUserFacingMusicError(error),
           variant: 'destructive',
         });
         throw error;

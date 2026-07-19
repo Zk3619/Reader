@@ -17,10 +17,15 @@ import {
   playPrevTrack,
   retryMusicTrackPlayback,
   setMusicSection,
+  setMusicPositionSec,
   updatePersistedPlayProgress,
 } from '@/stores/viewer/media/audio';
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
-import { getMusicPlayConfig } from '@/lib/media/audio/music-play-config';
+import {
+  getMusicPlayConfig,
+  cycleMusicPlayMode,
+  setMusicPlayMode as persistMusicPlayMode,
+} from '@/lib/media/audio/music-play-config';
 import { playableFromTrack } from '@/lib/media/audio/playable-item';
 import { syncAndroidMediaSession, listenAndroidMediaActions } from '@/lib/media/audio/platform/android-media-session';
 import {
@@ -32,6 +37,7 @@ import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { WebAudioPlayerEngine } from '@/lib/media/audio/engine/web-audio-player';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText, resolveEffectiveLyricTrack } from '@/lib/media/audio/lyric-types';
+import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -48,32 +54,24 @@ import {
 import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
 import { isTrackInLove } from '@/lib/database/audio-library';
 import { consumeMusicStartupAutoPlayGate } from '@/lib/persistence/domains/music-session';
+import { consumeMusicForceAutoPlay } from '@/lib/media/audio/music-play-intent';
+import {
+  bootstrapDesktopLyricWindow,
+  setDesktopLyricEnabled,
+} from '@/lib/media/audio/desktop-lyric-window';
 
-const MUSIC_PROGRESS_STORAGE_KEY = 'reader_music_track_progress';
+import {
+  readMusicTrackProgress,
+  saveMusicTrackProgress,
+} from '@/lib/media/audio/music-track-progress';
 
 function readTrackProgress(trackKey: string): number {
-  try {
-    const raw = localStorage.getItem(MUSIC_PROGRESS_STORAGE_KEY);
-    const value = raw
-      ? Number((JSON.parse(raw) as Record<string, number>)[trackKey])
-      : 0;
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  } catch {
-    return 0;
-  }
+  return readMusicTrackProgress(trackKey);
 }
 
 function saveTrackProgress(trackKey: string, positionSec: number): void {
-  try {
-    const raw = localStorage.getItem(MUSIC_PROGRESS_STORAGE_KEY);
-    const progress = raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    progress[trackKey] = Math.max(0, positionSec);
-    localStorage.setItem(MUSIC_PROGRESS_STORAGE_KEY, JSON.stringify(progress));
-  } catch {
-    // ignore
-  }
+  saveMusicTrackProgress(trackKey, positionSec);
 }
-
 async function convertLyricBundle(
   bundle: LyricBundle,
   type: 0 | 1 | 2,
@@ -101,6 +99,7 @@ async function emitDesktopLyric(payload: {
   positionSec: number;
   playing: boolean;
   fullscreen: boolean;
+  playMode?: number;
 }): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -148,11 +147,12 @@ export function useMusicHubPlayer() {
   const trackQueue = () => state().trackQueue;
   const trackIndex = () => state().trackIndex;
   const currentTrack = createMemo(() => trackQueue()[trackIndex()]);
-  const url = () => state().primaryUrl;
-  const mediaUrls = () => state().mediaUrls;
-  const loading = () => state().loading;
+  // 音乐后台地址与听书/漫画 mediaUrls 隔离（见 applyMusicTrack → music*）
+  const url = () => state().musicPrimaryUrl;
+  const mediaUrls = () => state().musicMediaUrls;
+  const loading = () => state().musicLoading;
   const playbackStatus = () => state().playbackStatus;
-  const error = () => state().error;
+  const error = () => state().musicError;
 
   const audioConfig = createMemo(() => ({
     ...getMusicPlayConfig(),
@@ -171,6 +171,7 @@ export function useMusicHubPlayer() {
   });
 
   const shouldAutoPlay = () => {
+    if (consumeMusicForceAutoPlay()) return true;
     // 冷启动恢复队列：尊重「启动软件后自动播放」；其余走「选中/切歌后播放」
     const startup = consumeMusicStartupAutoPlayGate();
     if (startup != null) return startup;
@@ -183,6 +184,8 @@ export function useMusicHubPlayer() {
   const playTimerTargetAt = createMemo(() => settings().playTimerTargetAt ?? 0);
 
   const handleEnded = async () => {
+    // 取链中不得切歌；曲终事件本身已在播放器侧去重
+    if (viewerStore.state.musicLoading) return;
     const timerAction = pendingTimerEndAction;
     if (timerAction) {
       pendingTimerEndAction = null;
@@ -191,9 +194,9 @@ export function useMusicHubPlayer() {
       }
       return;
     }
+    setMusicPositionSec(0);
     await playNextTrack();
   };
-
 
   // 会话恢复后可能只有队列无 URL：挂载时补一次取链（是否自动播放由 shouldAutoPlay/startup 门闩决定）
   onMount(() => {
@@ -212,7 +215,7 @@ export function useMusicHubPlayer() {
     playableItem,
     chapterIndex: trackIndex,
     catalog: () => [],
-    chapterPos: () => state().chapterPos,
+    chapterPos: () => state().musicPositionSec,
     book: () => null,
     audioConfig,
     loading,
@@ -220,7 +223,9 @@ export function useMusicHubPlayer() {
     onChapterPosChange: (pos) => {
       // 切歌取链中勿回写进度，否则会冲掉新曲的记忆进度 / 把旧曲进度写成 0
       if (loading()) return;
-      viewerStore.setChapterPos(pos);
+      // 曲终切歌瞬间 loading 可能尚未置位，禁止把曲末秒数写回
+      if (viewerStore.state.musicLoading) return;
+      setMusicPositionSec(pos);
       const track = currentTrack();
       if (track && settings().rememberProgress) {
         saveTrackProgress(`${track.source}:${track.id}`, pos);
@@ -236,6 +241,8 @@ export function useMusicHubPlayer() {
     },
     onPlaybackError: () => {
       void (async () => {
+        // 取链中进度/时长为 0：此时的 media error 多为清 src 噪声，不得跳过
+        if (viewerStore.state.musicLoading) return;
         const { getMusicSettings } = await import('@/lib/media/audio/music-settings');
         const origin = viewerStore.state.musicQueueOrigin;
         const kind = viewerStore.state.playerListKind;
@@ -283,23 +290,26 @@ export function useMusicHubPlayer() {
     if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
   });
 
+  // 仅在「曲目身份」变化时重置/恢复进度；首挂载保留 session hydrate 写入的位置
+  let lastProgressTrackKey: string | null = null;
   createEffect(() => {
     const track = currentTrack();
     if (!track) return;
+    const key = `${track.source}:${track.id}`;
+    const trackChanged = lastProgressTrackKey != null && lastProgressTrackKey !== key;
+    lastProgressTrackKey = key;
+
     if (!settings().rememberProgress) {
-      viewerStore.setChapterPos(0);
+      if (trackChanged) setMusicPositionSec(0);
       return;
     }
-    const fromLs = readTrackProgress(`${track.source}:${track.id}`);
-    // hydrate 可能已写入 chapterPos；LS 尚未就绪时不要用 0 覆盖
+    const fromLs = readTrackProgress(key);
     if (fromLs > 0) {
-      viewerStore.setChapterPos(fromLs);
+      setMusicPositionSec(fromLs);
       return;
     }
-    const existing = viewerStore.state.chapterPos;
-    if (!(existing > 0)) {
-      viewerStore.setChapterPos(0);
-    }
+    // 切到新曲且无记忆进度：必须清零，禁止沿用上一曲曲末进度（列表循环会无限切歌）
+    if (trackChanged) setMusicPositionSec(0);
   });
 
   createEffect(() => {
@@ -338,6 +348,7 @@ export function useMusicHubPlayer() {
     notifyAudioShellPlayingChanged();
     const t = currentTrack();
     const playing = player.playing();
+    const lyric = fetchedLyric();
     const pushSession = () => {
       void syncAndroidMediaSession({
         playing: untrack(() => player.playing()),
@@ -348,17 +359,23 @@ export function useMusicHubPlayer() {
         durationSec: untrack(() => player.duration()),
       });
     };
-    pushSession();
-    if (t) {
+    const pushShellMeta = () => {
+      if (!t) return;
+      const line = currentLyricLine(lyric, untrack(() => player.currentTime())).trim();
       globalMediaPlayerStore.updateMeta({
         title: t.name,
         subtitle: t.artist,
-        preview: t.artist,
+        preview: line || '…',
         coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
       });
-    }
+    };
+    pushSession();
+    pushShellMeta();
     if (!playing) return;
-    const timer = window.setInterval(pushSession, 1000);
+    const timer = window.setInterval(() => {
+      pushSession();
+      pushShellMeta();
+    }, 500);
     onCleanup(() => clearInterval(timer));
   });
 
@@ -409,9 +426,13 @@ export function useMusicHubPlayer() {
     });
   });
 
+  // 只订阅简繁转换：整份 settings 对象在改音量/倍速/音调时也会换引用，
+  // 若在歌词 effect 里直接读 settings() 会误触发重拉并清空歌词。
+  const lyricChineseConversion = createMemo(() => settings().lyricChineseConversion);
+
   createEffect(() => {
     const t = currentTrack();
-    const conversion = settings().lyricChineseConversion;
+    const conversion = lyricChineseConversion();
     // 依赖换源后的 id/source，确保换源成功会重拉歌词
     void t?.id;
     void t?.source;
@@ -443,13 +464,15 @@ export function useMusicHubPlayer() {
     const t = currentTrack();
     const lyric = fetchedLyric();
     const bundle = fetchedLyricBundle();
-    if (!t || !lyric) return;
+    const mode = musicPlayMode();
+    // 无歌词文本也要推送元信息，避免桌面歌词窗空白
+    if (!t) return;
     const playing = player.playing();
     const push = () => {
       void emitDesktopLyric({
         title: t.name,
         artist: t.artist,
-        lyric,
+        lyric: lyric ?? '',
         lyricAll: bundle
           ? {
               lyric: pickLyricText(bundle, 'lyric') ?? '',
@@ -461,6 +484,7 @@ export function useMusicHubPlayer() {
         positionSec: untrack(() => player.currentTime()),
         playing: untrack(() => player.playing()),
         fullscreen: document.fullscreenElement != null,
+        playMode: mode,
       });
     };
     push();
@@ -510,7 +534,7 @@ export function useMusicHubPlayer() {
     void listenAndroidMediaActions((action) => {
       switch (action) {
         case 'play':
-          if (!player.playing()) player.togglePlay();
+          void playOrFetch();
           break;
         case 'pause':
           if (player.playing()) player.togglePlay();
@@ -527,12 +551,13 @@ export function useMusicHubPlayer() {
     });
 
     if (isTauri()) {
+      bootstrapDesktopLyricWindow();
       void import('@tauri-apps/api/event').then(({ listen }) =>
-        listen<{ action?: string }>('desktop-lyric-command', (e) => {
+        listen<{ action?: string; mode?: number }>('desktop-lyric-command', (e) => {
           const action = e.payload.action;
           switch (action) {
             case 'play':
-              if (!player.playing()) player.togglePlay();
+              void playOrFetch();
               break;
             case 'pause':
               if (player.playing()) player.togglePlay();
@@ -543,11 +568,52 @@ export function useMusicHubPlayer() {
             case 'prev':
               void playPrevTrack();
               break;
-            case 'close':
-              void import('@tauri-apps/api/core').then(({ invoke }) =>
-                invoke('close_desktop_lyric_window'),
-              );
+            case 'seek_forward':
+              player.seekTo(player.currentTime() + 10);
               break;
+            case 'seek_back':
+              player.seekTo(Math.max(0, player.currentTime() - 10));
+              break;
+            case 'set_play_mode': {
+              const mode = e.payload.mode;
+              if (typeof mode === 'number') {
+                persistMusicPlayMode(mode as import('@/lib/media/audio/types').AudioPlayMode);
+                setMusicPlayMode(mode as import('@/lib/media/audio/types').AudioPlayMode);
+              }
+              break;
+            }
+            case 'cycle_play_mode': {
+              const next = cycleMusicPlayMode();
+              setMusicPlayMode(next);
+              break;
+            }
+            case 'close':
+              void setDesktopLyricEnabled(false);
+              break;
+            case 'request-info': {
+              const t = currentTrack();
+              if (!t) break;
+              const bundle = fetchedLyricBundle();
+              const lyric = fetchedLyric() ?? '';
+              void emitDesktopLyric({
+                title: t.name,
+                artist: t.artist,
+                lyric,
+                lyricAll: bundle
+                  ? {
+                      lyric: pickLyricText(bundle, 'lyric') ?? '',
+                      tlyric: pickLyricText(bundle, 'tlyric') ?? '',
+                      rlyric: pickLyricText(bundle, 'rlyric') ?? '',
+                      lxlyric: pickLyricText(bundle, 'lxlyric') ?? '',
+                    }
+                  : undefined,
+                positionSec: player.currentTime(),
+                playing: player.playing(),
+                fullscreen: document.fullscreenElement != null,
+                playMode: musicPlayMode(),
+              });
+              break;
+            }
             default:
               break;
           }
@@ -569,7 +635,7 @@ export function useMusicHubPlayer() {
       navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange),
     );
     registerAudioShellHandlers({
-      togglePlay: () => player.togglePlay(),
+      togglePlay: () => void playOrFetch(),
       skipPrev: () => void playPrevTrack(),
       skipNext: () => void playNextTrack(),
       stop: () => globalMediaPlayerStore.deactivate(),
@@ -577,15 +643,15 @@ export function useMusicHubPlayer() {
       isPlaying: () => player.playing(),
     });
     if (currentTrack()) {
+      const t = currentTrack()!;
+      const line = currentLyricLine(fetchedLyric(), player.currentTime()).trim();
       globalMediaPlayerStore.activate(
         'audio',
         {
-          title: currentTrack()?.name ?? '音乐',
-          subtitle: currentTrack()?.artist,
-          coverUrl:
-            typeof currentTrack()?.meta.coverUrl === 'string'
-              ? currentTrack()!.meta.coverUrl
-              : undefined,
+          title: t.name ?? '音乐',
+          subtitle: t.artist,
+          preview: line || '…',
+          coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
         },
         'shell-music-hub',
       );
@@ -650,8 +716,56 @@ export function useMusicHubPlayer() {
   };
   onCleanup(() => webAudio?.dispose());
 
+  /** 详情/底栏播放键：无链、取链中、或 <audio> 未挂 src 时强制取链并起播 */
+  const playOrFetch = async () => {
+    await webAudio?.resume();
+    const st = viewerStore.state;
+    if (st.trackQueue.length === 0) return;
+
+    const hasUrl =
+      !!st.musicPrimaryUrl && (st.musicMediaUrls?.length ?? 0) > 0;
+    const audioEl =
+      typeof document !== 'undefined'
+        ? document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]')
+        : null;
+    const liveSrc = (audioEl?.currentSrc || audioEl?.getAttribute('src') || '').trim();
+    // 取链中也允许再次点击：applyMusicTrack 会 bump generation 取消旧请求
+    const needFetch =
+      st.musicLoading || !hasUrl || !!st.musicError || !liveSrc;
+
+    if (needFetch) {
+      const { requestMusicAutoPlayOnce } = await import(
+        '@/lib/media/audio/music-play-intent'
+      );
+      const { applyMusicTrack } = await import('@/stores/viewer/media/audio');
+      requestMusicAutoPlayOnce();
+      await applyMusicTrack(st.trackIndex);
+      const after = viewerStore.state;
+      if (!after.musicPrimaryUrl || after.musicError || after.musicLoading) return;
+      // 等 Solid deferred effect 跑完 loadSegment；勿用 togglePlay（playing 信号滞后时会误暂停）
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+      const primary = viewerStore.state.musicPrimaryUrl;
+      if (!el || !primary) return;
+      const mounted = (el.currentSrc || el.getAttribute('src') || '').trim();
+      if (!mounted) {
+        el.src = primary;
+        el.preload = 'auto';
+      }
+      if (el.paused) {
+        player.seekTo(Number.isFinite(el.currentTime) ? el.currentTime : 0, true);
+      }
+      return;
+    }
+
+    player.togglePlay();
+  };
+
   return {
     player,
+    playOrFetch,
     currentTrack,
     url,
     loading,

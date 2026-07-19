@@ -268,46 +268,112 @@ export async function initUserApiScript(
   return task;
 }
 
-/** 导入并初始化音源：成功前不进列表；失败弹窗（用户可读文案） */
+function normalizeScriptContent(script: string): string {
+  return script.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+}
+
+/** 按脚本文本查找已有源（对齐 LX 导入去重） */
+export function findUserApiScriptByContent(script: string): UserApiScript | null {
+  const normalized = normalizeScriptContent(script);
+  if (!normalized) return null;
+  for (const s of scripts.values()) {
+    if (s.initStatus === 'failed') continue;
+    if (normalizeScriptContent(s.script) === normalized) return s;
+  }
+  return null;
+}
+
+/** 按名称查找已有源（用于同名更新） */
+export function findUserApiScriptByName(name: string): UserApiScript | null {
+  const key = name.trim();
+  if (!key) return null;
+  for (const s of scripts.values()) {
+    if (s.initStatus === 'failed') continue;
+    if (s.name.trim() === key) return s;
+  }
+  return null;
+}
+
+export type ImportUserApiScriptResult = {
+  id: string;
+  name: string;
+  ok: boolean;
+  /** 与已有源脚本文本完全相同，未写入 */
+  skipped?: boolean;
+  /** 覆盖了已有源 */
+  updated?: boolean;
+  error?: string;
+};
+
+/**
+ * 导入并初始化音源：成功前不进列表；失败弹窗（用户可读文案）。
+ * - 脚本文本与已有源相同 → skipped（对齐 LX）
+ * - 传入 replaceId → 原地替换并 reinject，保留启用状态与更新提示偏好
+ */
 export async function importUserApiScript(input: {
   script: string;
   fileName?: string;
   fallbackName?: string;
-}): Promise<{ id: string; name: string; ok: boolean; error?: string }> {
+  /** 指定覆盖的已有源 id（同名更新 / 更新地址升级） */
+  replaceId?: string;
+}): Promise<ImportUserApiScriptResult> {
   const headerMeta = parseLxScriptHeaderMeta(input.script);
-  const id = `userapi_${Date.now()}`;
   const name =
     headerMeta.name ??
     (input.fallbackName?.trim() ||
       input.fileName?.replace(/\.[^.]+$/, '') ||
       '未命名音源');
 
+  const duplicate = findUserApiScriptByContent(input.script);
+  if (duplicate) {
+    return {
+      id: duplicate.id,
+      name: duplicate.name,
+      ok: true,
+      skipped: true,
+      error: `脚本内容与已有的源「${duplicate.name}」相同`,
+    };
+  }
+
+  const replaceId = input.replaceId?.trim() || '';
+  const existing = replaceId ? scripts.get(replaceId) : undefined;
+  if (replaceId && !existing) {
+    return { id: replaceId, name, ok: false, error: '要更新的源不存在' };
+  }
+
+  const id = existing?.id ?? `userapi_${Date.now()}`;
+  const allowShowUpdateAlert = existing?.allowShowUpdateAlert !== false;
+  const wasEnabled = existing?.enabled ?? false;
+  const keepAsDefault = existing ? getDefaultUserApiId() === existing.id : false;
+
   try {
     if (isLxUserApiScript(input.script)) {
+      lxRuntimeCache.delete(id);
       const runtime = await loadLxUserApiScript({
         id,
         name,
         script: input.script,
-        allowShowUpdateAlert: true,
+        allowShowUpdateAlert,
       });
       const normalized = applyScriptHeaderMeta({
         id,
         name,
         script: input.script,
-        enabled: false,
-        allowShowUpdateAlert: true,
+        enabled: wasEnabled,
+        allowShowUpdateAlert,
         initStatus: 'ready',
       });
       scripts.set(normalized.id, normalized);
       lxRuntimeCache.set(id, runtime);
     } else {
       await initQuickJSRuntime();
+      lxRuntimeCache.delete(id);
       const normalized = applyScriptHeaderMeta({
         id,
         name,
         script: input.script,
-        enabled: false,
-        allowShowUpdateAlert: true,
+        enabled: wasEnabled,
+        allowShowUpdateAlert,
         initStatus: 'ready',
       });
       scripts.set(normalized.id, normalized);
@@ -315,6 +381,11 @@ export async function importUserApiScript(input: {
 
     persistScripts();
     notifyScriptsChanged();
+
+    if (existing) {
+      if (keepAsDefault) setDefaultUserApiId(id);
+      return { id, name, ok: true, updated: true };
+    }
 
     const hasEnabled = listUserApiScripts().some((s) => s.id !== id && s.enabled);
     if (!hasEnabled) {
@@ -325,7 +396,12 @@ export async function importUserApiScript(input: {
     return { id, name, ok: true };
   } catch (err) {
     lxRuntimeCache.delete(id);
-    scripts.delete(id);
+    if (!existing) scripts.delete(id);
+    else {
+      scripts.set(existing.id, { ...existing });
+      persistScripts();
+      notifyScriptsChanged();
+    }
     const message = toUserFacingInitError(err);
     notifyUserApiInitFailed({ name, message });
     return { id, name, ok: false, error: message };
@@ -811,12 +887,23 @@ export async function userApiMusicUrl(
   let lastErr: unknown;
   for (const type of toTry) {
     try {
-      const result = await invokeUserApi(scriptId, 'musicUrl', {
+      let result: unknown = await invokeUserApi(scriptId, 'musicUrl', {
         track,
         musicInfo: trackToLxSongInfo(track),
         source,
         type,
       });
+      // 防御：个别脚本返回未完全展开的 thenable
+      for (
+        let i = 0;
+        i < 3 &&
+        result != null &&
+        typeof result === 'object' &&
+        typeof (result as { then?: unknown }).then === 'function';
+        i++
+      ) {
+        result = await (result as PromiseLike<unknown>);
+      }
       const url = normalizeUserApiMusicUrl(result);
       if (url) return url;
     } catch (err) {

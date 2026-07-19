@@ -18,6 +18,10 @@ import * as tx from '@/lib/media/audio/online/sources/tx';
 import * as mg from '@/lib/media/audio/online/sources/mg';
 import { userApiLyric } from '@/lib/media/audio/online/user-api-engine';
 import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
+import {
+  cacheResolvedLyricBundle,
+  getCachedLyricBundle,
+} from '@/lib/database/audio-lyric-cache';
 
 async function resolveBuiltinLyric(track: AudioTrack): Promise<LyricBundle | null> {
   switch (track.source) {
@@ -46,9 +50,9 @@ function bundleHasLx(bundle: LyricBundle | null | undefined): boolean {
 }
 
 /**
- * 拉取歌词：开启卡拉 OK 时优先拿到带逐字标签的 bundle（可跨平台补全）。
+ * 拉取歌词（不含持久化）：开启卡拉 OK 时优先拿到带逐字标签的 bundle（可跨平台补全）。
  */
-export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<LyricBundle | null> {
+export async function fetchOnlineLyricBundle(track: AudioTrack): Promise<LyricBundle | null> {
   if (track.source === 'userApi') {
     const userApiId = track.meta.userApiId;
     if (typeof userApiId !== 'string') return null;
@@ -85,6 +89,30 @@ export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<Lyric
     }
   }
   return best;
+}
+
+/**
+ * 拉取歌词：优先读本地持久化缓存，未命中再在线解析并写入。
+ */
+export async function resolveOnlineLyricBundle(track: AudioTrack): Promise<LyricBundle | null> {
+  const trackId = track.id?.trim();
+  if (trackId) {
+    try {
+      const cached = await getCachedLyricBundle(trackId);
+      if (cached) {
+        // 已解析过（含空结果）：直接返回，避免每次播放重复全平台搜索
+        return hasLyricContent(cached) || cached.rlyric?.trim() ? cached : null;
+      }
+    } catch {
+      // 缓存读失败则继续在线拉取
+    }
+  }
+
+  const bundle = await fetchOnlineLyricBundle(track);
+  if (trackId) {
+    void cacheResolvedLyricBundle(trackId, bundle).catch(() => undefined);
+  }
+  return bundle;
 }
 
 export async function resolveOnlineLyricText(track: AudioTrack): Promise<string | null> {

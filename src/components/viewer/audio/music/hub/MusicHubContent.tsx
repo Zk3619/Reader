@@ -22,6 +22,7 @@ import { MusicSettingsPanel } from '@/components/viewer/audio/music/settings/Mus
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { AudioLocalScanDialog } from '@/components/viewer/audio/music/AudioLocalScanDialog';
 import { MusicHubListPane } from '@/components/viewer/audio/music/hub/MusicHubListPane';
+import { AudioDownloadPanel } from '@/components/viewer/audio/music/AudioDownloadPanel';
 import { type useMusicHubPlayer } from '@/components/viewer/audio/music/hub/useMusicHubPlayer';
 import { cn } from '@/lib/utils';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
@@ -93,6 +94,11 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
           onScanLocal={() => setScanOpen(true)}
           scanRevision={scanRevision()}
         />
+      </MusicHubSection>
+      <MusicHubSection section="download" active={isActive('download')}>
+        <MusicHubPageShell section="download" scrollClass="overflow-hidden">
+          <AudioDownloadPanel open inline hideHeader />
+        </MusicHubPageShell>
       </MusicHubSection>
       <MusicHubSection section="settings" active={isActive('settings')}>
         <MusicHubPageShell section="settings" scrollClass="overflow-hidden">

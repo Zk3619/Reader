@@ -80,10 +80,6 @@ export const MusicSettingsList: Component = () => {
       </section>
 
       <section class="space-y-5 border-t pt-5">
-        <div>
-          <h3 class="font-medium">Reader 扩展</h3>
-          <p class="mt-1 text-xs text-muted-foreground">Reader 提供的额外列与列表交互。</p>
-        </div>
         <div class="space-y-3">
           <h4 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">列显示与交互</h4>
           <div class="flex items-center gap-2">

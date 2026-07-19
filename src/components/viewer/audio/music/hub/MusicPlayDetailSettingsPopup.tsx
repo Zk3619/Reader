@@ -175,6 +175,33 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                   />
                   <Label for="detail-popup-zoom-lyric">缩放当前正在播放的歌词</Label>
                 </div>
+                <Show when={settings().playDetailZoomActiveLyric}>
+                  <div class="flex flex-wrap items-center gap-2 pl-1">
+                    <span class="text-muted-foreground">缩放幅度</span>
+                    <Slider
+                      class="w-36"
+                      minValue={100}
+                      maxValue={160}
+                      step={1}
+                      value={[
+                        Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100),
+                      ]}
+                      onChange={(v) =>
+                        patchIfChanged({
+                          playDetailZoomActiveScale: (v[0] ?? 128) / 100,
+                        })
+                      }
+                    >
+                      <SliderTrack>
+                        <SliderFill />
+                        <SliderThumb />
+                      </SliderTrack>
+                    </Slider>
+                    <span class="tabular-nums text-xs">
+                      {Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}%
+                    </span>
+                  </div>
+                </Show>
                 <div class="space-y-2">
                   <span class="text-muted-foreground">对齐</span>
                   <div class="flex flex-wrap gap-1.5">

@@ -1,23 +1,37 @@
 import { createEffect, createMemo, createSignal, type Component } from 'solid-js';
 import { AppCombobox } from '@/components/shared/AppCombobox';
 
+/** 0.25～2.00 共 8 档，Popover 内两行四列（快捷预设；输入可超出到完整可调范围） */
 export const MUSIC_PLAYBACK_RATE_PRESETS = [
+  '0.25',
   '0.50',
   '0.75',
   '1.00',
   '1.25',
   '1.50',
+  '1.75',
   '2.00',
-  '3.00',
-];
+] as const;
 
+/** 音调快捷预设（完整可调见 MUSIC_PITCH_RATE_MIN/MAX） */
 export const MUSIC_PITCH_RATE_PRESETS = [
   '0.50',
-  '0.75',
-  '1.00',
+  '0.65',
+  '0.80',
+  '0.95',
+  '1.10',
   '1.25',
+  '1.40',
   '1.50',
-];
+] as const;
+
+/** 倍速数字输入 / 滑条可调范围 */
+export const MUSIC_PLAY_SPEED_MIN = 0.25;
+export const MUSIC_PLAY_SPEED_MAX = 4;
+
+/** 音调数字输入 / 滑条可调范围 */
+export const MUSIC_PITCH_RATE_MIN = 0.5;
+export const MUSIC_PITCH_RATE_MAX = 2;
 
 function formatRate(value: number, decimals = 2): string {
   if (!Number.isFinite(value)) return (1).toFixed(decimals);
@@ -31,6 +45,8 @@ export interface MusicRateComboboxProps {
   min: number;
   max: number;
   contentClass?: string;
+  /** 嵌在 Popover 内时关闭 Combobox Portal，避免触发外侧交互关闭浮层 */
+  disablePortal?: boolean;
   'aria-label'?: string;
   suffix?: string;
 }
@@ -38,6 +54,7 @@ export interface MusicRateComboboxProps {
 /**
  * 倍率 Combobox：输入框完整显示实际倍速/音调（如 1.05），
  * 不把显示文案吸附为某一预设；预设仅作为下拉快捷项。
+ * 注意：嵌在 AppPopover 内时易触发 dismiss，播放详情调节面板改用预设网格。
  */
 export const MusicRateCombobox: Component<MusicRateComboboxProps> = (props) => {
   const display = () => formatRate(props.value);
@@ -75,6 +92,7 @@ export const MusicRateCombobox: Component<MusicRateComboboxProps> = (props) => {
         value={input()}
         onChange={commit}
         disableFilter
+        disablePortal={props.disablePortal}
         placeholder={`${props.min.toFixed(2)}–${props.max.toFixed(2)}`}
         aria-label={props['aria-label'] ?? '倍率'}
       />
@@ -87,6 +105,7 @@ export interface MusicPlaybackRateComboboxProps {
   value: number;
   onChange: (value: number) => void;
   contentClass?: string;
+  disablePortal?: boolean;
 }
 
 export const MusicPlaybackRateCombobox: Component<
@@ -96,9 +115,10 @@ export const MusicPlaybackRateCombobox: Component<
     value={props.value}
     onChange={props.onChange}
     presets={MUSIC_PLAYBACK_RATE_PRESETS}
-    min={0.5}
-    max={3}
+    min={MUSIC_PLAY_SPEED_MIN}
+    max={MUSIC_PLAY_SPEED_MAX}
     contentClass={props.contentClass}
+    disablePortal={props.disablePortal}
     aria-label="播放倍速"
   />
 );
@@ -107,6 +127,7 @@ export interface MusicPitchRateComboboxProps {
   value: number;
   onChange: (value: number) => void;
   contentClass?: string;
+  disablePortal?: boolean;
 }
 
 export const MusicPitchRateCombobox: Component<MusicPitchRateComboboxProps> = (
@@ -116,9 +137,10 @@ export const MusicPitchRateCombobox: Component<MusicPitchRateComboboxProps> = (
     value={props.value}
     onChange={props.onChange}
     presets={MUSIC_PITCH_RATE_PRESETS}
-    min={0.5}
-    max={1.5}
+    min={MUSIC_PITCH_RATE_MIN}
+    max={MUSIC_PITCH_RATE_MAX}
     contentClass={props.contentClass}
+    disablePortal={props.disablePortal}
     aria-label="音调"
   />
 );

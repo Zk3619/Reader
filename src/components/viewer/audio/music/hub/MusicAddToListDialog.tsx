@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import {
   ViewerAppDialog,
@@ -119,7 +120,7 @@ export const MusicAddToListDialog: Component<MusicAddToListDialogProps> = (props
     } catch (error) {
       showAppToast({
         title: mode() === 'move' ? '移动失败' : '添加失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {
@@ -142,7 +143,7 @@ export const MusicAddToListDialog: Component<MusicAddToListDialogProps> = (props
     } catch (error) {
       showAppToast({
         title: '新建列表失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

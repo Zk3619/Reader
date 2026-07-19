@@ -32,6 +32,7 @@ import {
   setGithubSnapshotUrl,
 } from '@/lib/media/audio/sync/remote-snapshot';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 
 export interface AudioSyncSettingsProps {
@@ -115,7 +116,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
       await pullPlaylistsFromLx();
       showAppToast({ title: '已从 LX Music 拉取歌单' });
     } catch (e) {
-      showAppToast({ title: '拉取失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '拉取失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -127,7 +128,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
       await pushLocalPlaylistsToLx(lxSyncListAction);
       showAppToast({ title: '已向 LX Music 推送歌单' });
     } catch (e) {
-      showAppToast({ title: '推送失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '推送失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -195,9 +196,9 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
             </section>
             <section class="space-y-2 rounded-lg border border-dashed p-4">
               <div>
-                <h3 class="text-sm font-medium">Reader 扩展：WebDAV 与 JSON 快照</h3>
+                <h3 class="text-sm font-medium">WebDAV 与 JSON 快照</h3>
                 <p class="mt-1 text-xs text-muted-foreground">
-                  这些格式用于 Reader 曲库快照，不等同于 LX Sync 实时协议。
+                  这些格式用于曲库快照，不等同于 LX Sync 实时协议。
                 </p>
               </div>
               <input
@@ -222,7 +223,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
                     void syncAudioLibraryViaWebDav('upload').then(() =>
                       showAppToast({ title: '已上传到 WebDAV' }),
                     ).catch((e) =>
-                      showAppToast({ title: '上传失败', description: String(e), variant: 'destructive' }),
+                      showAppToast({ title: '上传失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
                     )
                   }
                 >
@@ -235,7 +236,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
                     void syncAudioLibraryViaWebDav('merge').then(() =>
                       showAppToast({ title: 'WebDAV 同步完成' }),
                     ).catch((e) =>
-                      showAppToast({ title: '同步失败', description: String(e), variant: 'destructive' }),
+                      showAppToast({ title: '同步失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
                     )
                   }
                 >
@@ -245,7 +246,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
             </section>
             <section class="space-y-2 rounded-lg border border-dashed p-4">
               <div>
-                <h3 class="text-sm font-medium">Reader 扩展：GitHub 快照</h3>
+                <h3 class="text-sm font-medium">GitHub 快照</h3>
                 <p class="mt-1 text-xs text-muted-foreground">配置可读写的快照地址后使用。</p>
               </div>
               <AppTextFieldBareInput
@@ -265,7 +266,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
                     void syncAudioLibraryViaGithub('upload').then(() =>
                       showAppToast({ title: '已上传到 GitHub' }),
                     ).catch((e) =>
-                      showAppToast({ title: '上传失败', description: String(e), variant: 'destructive' }),
+                      showAppToast({ title: '上传失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
                     )
                   }
                 >
@@ -278,7 +279,7 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
                     void syncAudioLibraryViaGithub('merge').then(() =>
                       showAppToast({ title: 'GitHub 同步完成' }),
                     ).catch((e) =>
-                      showAppToast({ title: '同步失败', description: String(e), variant: 'destructive' }),
+                      showAppToast({ title: '同步失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
                     )
                   }
                 >

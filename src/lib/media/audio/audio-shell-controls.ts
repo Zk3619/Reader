@@ -58,10 +58,9 @@ export function audioShellStop(): void {
 }
 
 export function audioShellOpenViewer(): void {
-  if (handlers?.openViewer) {
-    handlers.openViewer();
-    return;
-  }
+  // 先让 Hub 切到播放详情；再走全局导航（切到 music 壳页）。
+  // 仅调 handlers 时，若当前不在音乐页（例如刚退出文本阅读器），封面点击会无可见效果。
+  handlers?.openViewer?.();
   globalOpenViewer?.();
 }
 

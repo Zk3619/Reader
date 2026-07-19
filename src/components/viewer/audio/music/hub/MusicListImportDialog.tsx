@@ -20,6 +20,7 @@ import {
 } from '@/components/viewer/viewer-app-overlay';
 import { viewerStore } from '@/stores/viewer';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { pickFile } from '@/lib/platform/fs/pick-file';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
 import {
@@ -134,7 +135,7 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
         finishImport(result.count);
       } catch (e) {
         if (!isUserCancelled(e)) {
-          showAppToast({ title: '导入失败', description: String(e), variant: 'destructive' });
+          showAppToast({ title: '导入失败', description: toUserFacingMusicError(e), variant: 'destructive' });
         }
       } finally {
         setBusy(false);
@@ -173,7 +174,7 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
       }
       await importPayloadText(value, true);
     } catch (e) {
-      showAppToast({ title: '导入失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '导入失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setBusy(false);
     }

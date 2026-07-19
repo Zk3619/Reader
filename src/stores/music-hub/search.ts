@@ -370,17 +370,26 @@ export function addSearchHistory(keyword: string): void {
   const next = [trimmed, ...searchState.history.filter((h) => h !== trimmed)].slice(0, MAX_HISTORY);
   setSearchState('history', next);
   saveHistory(next);
+  void import('@/lib/database/module-search-keywords')
+    .then((m) => m.upsertAudioSearchKeyword(trimmed))
+    .catch(() => undefined);
 }
 
 export function removeSearchHistoryItem(word: string): void {
   const next = searchState.history.filter((h) => h !== word);
   setSearchState('history', next);
   saveHistory(next);
+  void import('@/lib/database/module-search-keywords')
+    .then((m) => m.deleteAudioSearchKeyword(word))
+    .catch(() => undefined);
 }
 
 export function clearSearchHistory(): void {
   setSearchState('history', []);
   saveHistory([]);
+  void import('@/lib/database/module-search-keywords')
+    .then((m) => m.clearAudioSearchKeywords())
+    .catch(() => undefined);
 }
 
 async function searchPlaylistsAggregate(

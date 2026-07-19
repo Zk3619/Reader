@@ -16,17 +16,21 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { dialogScrollFrameFlex, appDialogScrollBodySpaceY3 } from '@/lib/ui/viewport-classes';
 import type { IdentifiedUserApiScript } from '@/lib/media/audio/online/user-api-import-identify';
+import type { ImportUserApiComparison } from '@/lib/media/audio/online/user-api-import-compare';
 
 export interface ImportUserApiSelectDialogProps {
   open: boolean;
   loading: boolean;
   loadingMessage?: string;
   sources: IdentifiedUserApiScript[];
+  comparisons: ImportUserApiComparison[];
   selectedIds: Set<string>;
   onOpenChange: (open: boolean) => void;
   onToggle: (id: string, checked: boolean) => void;
   onSelectAllToggle: () => void;
   onInvertSelect: () => void;
+  onSelectNewToggle: () => void;
+  onSelectUpdateToggle: () => void;
   onConfirm: () => void;
 }
 
@@ -41,13 +45,29 @@ export function ImportUserApiSelectDialog(props: ImportUserApiSelectDialogProps)
     props.sources.length > 0 && props.selectedIds.size === props.sources.length;
   const selectedCountText = () => `(${props.selectedIds.size}/${props.sources.length})`;
 
+  const comparisonById = () => {
+    const map = new Map<string, ImportUserApiComparison>();
+    for (const c of props.comparisons) {
+      map.set(c.source.id, c);
+    }
+    return map;
+  };
+
+  const statusLabel = (id: string) => {
+    const c = comparisonById().get(id);
+    if (!c) return null;
+    if (c.isNew) return '新';
+    if (c.isUpdate) return '更新';
+    return '已有';
+  };
+
   return (
     <AppDialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <AppDialogContent portalToBody>
         <AppDialogHeader>
           <AppDialogTitle>导入自定义源</AppDialogTitle>
           <AppDialogDescription>
-            确认要导入的自定义源。导入后不会自动启用；若当前没有任何已启用源，首个导入成功项会自动启用。
+            默认勾选新增或可更新的源。脚本文本与本地完全相同的会标记为「已有」并默认不勾选；同名不同内容可更新覆盖。
           </AppDialogDescription>
         </AppDialogHeader>
         <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
@@ -70,6 +90,7 @@ export function ImportUserApiSelectDialog(props: ImportUserApiSelectDialogProps)
                 <For each={props.sources}>
                   {(source) => {
                     const checked = () => props.selectedIds.has(source.id);
+                    const tag = () => statusLabel(source.id);
                     const toggle = () => props.onToggle(source.id, !checked());
                     return (
                       <div
@@ -88,6 +109,19 @@ export function ImportUserApiSelectDialog(props: ImportUserApiSelectDialogProps)
                         <div class="min-w-0 flex-1">
                           <div class="flex min-w-0 flex-wrap items-center gap-2">
                             <span class="truncate text-sm font-medium">{source.name}</span>
+                            <Show when={tag()}>
+                              <span
+                                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                                classList={{
+                                  'bg-primary/15 text-primary': tag() === '新',
+                                  'bg-amber-500/15 text-amber-700 dark:text-amber-400':
+                                    tag() === '更新',
+                                  'bg-muted text-muted-foreground': tag() === '已有',
+                                }}
+                              >
+                                {tag()}
+                              </span>
+                            </Show>
                             <Show when={source.version}>
                               <span class="shrink-0 text-xs text-muted-foreground">
                                 {formatVersion(source.version)}
@@ -130,6 +164,20 @@ export function ImportUserApiSelectDialog(props: ImportUserApiSelectDialogProps)
             disabled={props.loading || props.sources.length === 0}
           >
             反选
+          </Button>
+          <Button
+            variant="outline"
+            onClick={props.onSelectNewToggle}
+            disabled={props.loading || props.sources.length === 0}
+          >
+            勾选新增
+          </Button>
+          <Button
+            variant="outline"
+            onClick={props.onSelectUpdateToggle}
+            disabled={props.loading || props.sources.length === 0}
+          >
+            勾选更新
           </Button>
           <div class="flex-1" />
           <div class="flex items-center gap-2">

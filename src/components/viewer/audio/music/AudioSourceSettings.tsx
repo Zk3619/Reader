@@ -1,4 +1,4 @@
-/** 音源设置（对齐 lx：单一活跃 UserApi + 本地/在线导入） */
+/** 音源设置（对齐 lx：单一活跃 UserApi + 本地/在线/代码导入） */
 import { createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
 import { LoaderCircle, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
@@ -28,18 +28,26 @@ import {
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 import { request } from '@/lib/http';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
-import { ImportSourceNetworkDialog } from '@/components/sources/ImportSourceNetworkDialog';
+import { ImportSourceNetworkDialog } from '@/components/media/reader/sources/ImportSourceNetworkDialog';
+import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { ImportUserApiLocalDialog } from '@/components/viewer/audio/music/ImportUserApiLocalDialog';
 import { ImportUserApiSelectDialog } from '@/components/viewer/audio/music/ImportUserApiSelectDialog';
 import { pickLocalUserApiFiles } from '@/lib/media/audio/online/pick-local-user-api-file';
 import { pickLocalUserApiDirectory } from '@/lib/media/audio/online/pick-local-user-api-directory';
 import {
   identifyUserApiScriptFromText,
+  identifyUserApiScriptsFromCode,
   identifyUserApiScriptsFromFiles,
   type IdentifiedUserApiScript,
 } from '@/lib/media/audio/online/user-api-import-identify';
+import {
+  buildUserApiImportComparisons,
+  defaultUserApiImportSelection,
+  type ImportUserApiComparison,
+} from '@/lib/media/audio/online/user-api-import-compare';
 import { openUrlInBrowser } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 
 export interface AudioSourceSettingsProps {
   open: boolean;
@@ -69,10 +77,12 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
   const [localChoiceOpen, setLocalChoiceOpen] = createSignal(false);
   const [localBusy, setLocalBusy] = createSignal(false);
   const [onlineOpen, setOnlineOpen] = createSignal(false);
+  const [codeOpen, setCodeOpen] = createSignal(false);
   const [selectOpen, setSelectOpen] = createSignal(false);
   const [selectLoading, setSelectLoading] = createSignal(false);
   const [selectLoadingMessage, setSelectLoadingMessage] = createSignal<string | undefined>();
   const [identifiedSources, setIdentifiedSources] = createSignal<IdentifiedUserApiScript[]>([]);
+  const [comparisons, setComparisons] = createSignal<ImportUserApiComparison[]>([]);
   const [selectedIds, setSelectedIds] = createSignal(new Set<string>());
 
   onMount(() => {
@@ -117,8 +127,9 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     setDefaultId(id);
   };
 
-  const ensureImportCapacity = (incomingCount: number): boolean => {
-    if (userApis().length + incomingCount <= MAX_USER_API_COUNT) return true;
+  /** 仅新增计入容量；更新覆盖不占新名额 */
+  const ensureImportCapacity = (newCount: number): boolean => {
+    if (userApis().length + newCount <= MAX_USER_API_COUNT) return true;
     showAppToast({
       title: '自定义源数量已达上限',
       description:
@@ -129,8 +140,10 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
   };
 
   const openIdentifyDialog = (sources: IdentifiedUserApiScript[]) => {
+    const nextComparisons = buildUserApiImportComparisons(sources, userApis());
     setIdentifiedSources(sources);
-    setSelectedIds(new Set<string>(sources.map((source) => source.id)));
+    setComparisons(nextComparisons);
+    setSelectedIds(defaultUserApiImportSelection(nextComparisons));
     setSelectLoading(false);
     setSelectLoadingMessage(undefined);
     setSelectOpen(true);
@@ -138,6 +151,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
 
   const beginIdentifyLoading = (message: string) => {
     setIdentifiedSources([]);
+    setComparisons([]);
     setSelectedIds(new Set<string>());
     setSelectLoading(true);
     setSelectLoadingMessage(message);
@@ -157,7 +171,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
       setSelectOpen(false);
       showAppToast({
         title: '识别失败',
-        description: err instanceof Error ? err.message : String(err),
+        description: toUserFacingMusicError(err),
         variant: 'error',
       });
     }
@@ -174,7 +188,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
       } catch (err) {
         showAppToast({
           title: '选择文件失败',
-          description: err instanceof Error ? err.message : String(err),
+          description: toUserFacingMusicError(err),
           variant: 'error',
         });
       } finally {
@@ -194,7 +208,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
       } catch (err) {
         showAppToast({
           title: '选择目录失败',
-          description: err instanceof Error ? err.message : String(err),
+          description: toUserFacingMusicError(err),
           variant: 'error',
         });
       } finally {
@@ -219,17 +233,37 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
         const text = await res.text();
         if (!text.trim()) throw new Error('脚本内容为空');
         const nameGuess = url.split('/').pop()?.split('?')[0] || 'online.js';
-        const identified = identifyUserApiScriptFromText(text, nameGuess);
-        openIdentifyDialog(identified ? [identified] : []);
+        const identified = /\.json$/i.test(nameGuess)
+          ? identifyUserApiScriptsFromCode(text)
+          : (() => {
+              const one = identifyUserApiScriptFromText(text, nameGuess);
+              return one ? [one] : identifyUserApiScriptsFromCode(text);
+            })();
+        openIdentifyDialog(identified);
       } catch (err) {
         setSelectOpen(false);
         showAppToast({
           title: '在线导入失败',
-          description: err instanceof Error ? err.message : String(err),
+          description: toUserFacingMusicError(err),
           variant: 'error',
         });
       }
     })();
+  };
+
+  const handleCodeIdentify = (raw: string) => {
+    beginIdentifyLoading('正在识别自定义源…');
+    try {
+      const sources = identifyUserApiScriptsFromCode(raw);
+      openIdentifyDialog(sources);
+    } catch (err) {
+      setSelectOpen(false);
+      showAppToast({
+        title: '识别失败',
+        description: toUserFacingMusicError(err),
+        variant: 'error',
+      });
+    }
   };
 
   const toggleSelected = (id: string, checked: boolean) => {
@@ -261,35 +295,73 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     });
   };
 
+  const selectNewToggle = () => {
+    setSelectedIds(
+      new Set(comparisons().filter((c) => c.isNew).map((c) => c.source.id)),
+    );
+  };
+
+  const selectUpdateToggle = () => {
+    setSelectedIds(
+      new Set(comparisons().filter((c) => c.isUpdate).map((c) => c.source.id)),
+    );
+  };
+
   const confirmImport = async () => {
     const selected = identifiedSources().filter((source) => selectedIds().has(source.id));
     if (selected.length === 0) return;
-    if (!ensureImportCapacity(selected.length)) return;
+
+    const comparisonMap = new Map(comparisons().map((c) => [c.source.id, c]));
+    const newCount = selected.filter((source) => comparisonMap.get(source.id)?.isNew).length;
+    if (!ensureImportCapacity(newCount)) return;
 
     setImporting(true);
     setSelectLoading(true);
     setSelectLoadingMessage('正在导入自定义源…');
     try {
       let successCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
       for (const source of selected) {
+        const comparison = comparisonMap.get(source.id);
         const result = await importUserApiScript({
           script: source.script,
           fileName: source.fileName,
           fallbackName: source.name,
+          replaceId: comparison?.isUpdate ? comparison.existing?.id : undefined,
         });
-        if (result.ok) successCount += 1;
+        if (result.skipped) {
+          skippedCount += 1;
+          continue;
+        }
+        if (result.ok) {
+          successCount += 1;
+          if (result.updated) updatedCount += 1;
+        }
       }
       setSelectOpen(false);
       if (successCount > 0) {
+        const parts = [`已处理 ${successCount} 个自定义源`];
+        if (updatedCount > 0) parts.push(`更新 ${updatedCount}`);
+        if (successCount - updatedCount > 0) {
+          parts.push(`新增 ${successCount - updatedCount}`);
+        }
         showAppToast({
-          title: `已导入 ${successCount} 个自定义源`,
+          title: parts[0],
+          description: parts.length > 1 ? parts.slice(1).join(' · ') : undefined,
           variant: 'success',
+        });
+      } else if (skippedCount > 0) {
+        showAppToast({
+          title: '未导入新源',
+          description: '所选源与本地脚本文本相同，已跳过',
+          variant: 'warning',
         });
       }
     } catch (err) {
       showAppToast({
         title: '导入失败',
-        description: err instanceof Error ? err.message : String(err),
+        description: toUserFacingMusicError(err),
         variant: 'error',
       });
     } finally {
@@ -349,10 +421,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               size="sm"
               variant="secondary"
               disabled={importing() || localBusy()}
-              onClick={() => {
-                if (!ensureImportCapacity(1)) return;
-                setLocalChoiceOpen(true);
-              }}
+              onClick={() => setLocalChoiceOpen(true)}
             >
               本地导入
             </Button>
@@ -360,12 +429,17 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               size="sm"
               variant="secondary"
               disabled={importing() || localBusy()}
-              onClick={() => {
-                if (!ensureImportCapacity(1)) return;
-                setOnlineOpen(true);
-              }}
+              onClick={() => setOnlineOpen(true)}
             >
               在线导入
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={importing() || localBusy()}
+              onClick={() => setCodeOpen(true)}
+            >
+              代码导入
             </Button>
             <Show when={importing() || localBusy()}>
               <LoaderCircle class="h-4 w-4 animate-spin text-muted-foreground" />
@@ -523,16 +597,27 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
         description="输入自定义源脚本的链接（http/https），将拉取并识别。桌面端由应用内网络拉取，不受跨域限制；浏览器环境下若遇跨域请改用「本地导入」。"
         placeholder="https://example.com/source.js"
       />
+      <ImportCodeDialog
+        open={codeOpen()}
+        onOpenChange={setCodeOpen}
+        language="javascript"
+        title="代码导入自定义源"
+        description="粘贴自定义源 JS 脚本，或 JSON 字符串 / 对象（script/code 字段）/ 数组。识别后可选择新增或更新同名源。"
+        onIdentify={handleCodeIdentify}
+      />
       <ImportUserApiSelectDialog
         open={selectOpen()}
         loading={selectLoading()}
         loadingMessage={selectLoadingMessage()}
         sources={identifiedSources()}
+        comparisons={comparisons()}
         selectedIds={selectedIds()}
         onOpenChange={setSelectOpen}
         onToggle={toggleSelected}
         onSelectAllToggle={selectAllToggle}
         onInvertSelect={invertSelect}
+        onSelectNewToggle={selectNewToggle}
+        onSelectUpdateToggle={selectUpdateToggle}
         onConfirm={() => void confirmImport()}
       />
     </AudioPanelShell>

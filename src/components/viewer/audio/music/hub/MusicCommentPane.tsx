@@ -16,6 +16,7 @@ import {
   type CommentSort,
   type MusicComment,
 } from '@/lib/media/audio/music-sdk/comment';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
 export interface MusicCommentPaneProps {
@@ -53,7 +54,7 @@ const CommentFloor: Component<{
   comments: MusicComment[];
   nested?: boolean;
 }> = (props) => (
-  <ul>
+  <ul class={cn(!props.nested && 'pl-2.5')}>
     <For each={props.comments}>
       {(item, index) => (
         <li
@@ -62,7 +63,7 @@ const CommentFloor: Component<{
             props.nested && index() === props.comments.length - 1 && 'border-b-0',
           )}
         >
-          <div class="flex gap-2.5 py-3 text-[13px]">
+          <div class="flex gap-2.5 py-3 text-xs">
             <div class="shrink-0">
               <CommentAvatar src={item.avatar} name={item.user} />
             </div>
@@ -80,7 +81,7 @@ const CommentFloor: Component<{
                   </div>
                 </div>
                 <Show when={item.likedCount != null}>
-                  <div class="flex shrink-0 items-start gap-0.5 pt-0.5 text-[11px]">
+                  <div class="flex shrink-0 items-start gap-0.5 pt-0.5 text-xs">
                     <ThumbsUp class="mt-px h-3 w-3 text-primary/50" />
                     <span>{item.likedCount}</span>
                   </div>
@@ -108,7 +109,7 @@ const CommentFloor: Component<{
           </div>
           <Show when={item.reply && item.reply.length > 0}>
             {/* 对齐 lx .reply_floor：同一元素上 margin + padding + 浅底，保证头像不贴边 */}
-            <div class="mb-3 ml-[30px] rounded-lg bg-primary/5 pl-[15px] pr-2.5">
+            <div class="mb-3 ml-1.5 rounded-lg bg-primary/5 pl-4 pr-2.5">
               <CommentFloor comments={item.reply!} nested />
             </div>
           </Show>
@@ -132,8 +133,11 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
   let listEl: HTMLDivElement | undefined;
 
   const notifyCommentError = (cause: unknown) => {
-    const msg = cause instanceof Error ? cause.message : '评论加载失败';
-    showAppToast({ title: '评论加载失败', description: msg, variant: 'destructive' });
+    showAppToast({
+      title: '评论加载失败',
+      description: toUserFacingMusicError(cause, '暂时无法加载评论，请稍后再试'),
+      variant: 'destructive',
+    });
   };
 
   const load = async (reset = false) => {
@@ -236,7 +240,7 @@ export const MusicCommentPane: Component<MusicCommentPaneProps> = (props) => {
         </Show>
         <Show when={failed() && comments().length === 0 && !showCommentSkeleton()}>
           <div class="flex h-32 flex-col items-center justify-center gap-2 px-4 text-center">
-            <p class="text-sm text-muted-foreground">评论加载失败</p>
+            <p class="text-sm text-muted-foreground">暂时无法加载评论，请稍后再试</p>
             <Button size="sm" variant="outline" onClick={() => void load(true)}>
               重新加载
             </Button>

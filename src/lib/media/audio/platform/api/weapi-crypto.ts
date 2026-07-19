@@ -108,10 +108,16 @@ export async function linuxapiPost<T>(
   return res.json<T>();
 }
 
+export type WeapiPostOptions = {
+  /** 覆盖默认 UA（评论等接口对齐 lx Chrome/60 Linux） */
+  userAgent?: string;
+};
+
 export async function weapiPost<T>(
   path: string,
   data: Record<string, unknown>,
   cookies?: string,
+  options?: WeapiPostOptions,
 ): Promise<T> {
   const { params, encSecKey } = weapiEncrypt(data);
   const body = new URLSearchParams({ params, encSecKey }).toString();
@@ -120,6 +126,7 @@ export async function weapiPost<T>(
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent':
+        options?.userAgent ??
         'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
       Origin: 'https://music.163.com',
       Referer: 'https://music.163.com/',

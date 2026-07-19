@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
 import {
   getPlayQuality,
@@ -33,5 +35,37 @@ describe('playback chain helpers', () => {
     expect(listPlayQualityPreferenceOptions()).toEqual(
       expect.arrayContaining(['lowest', 'highest']),
     );
+  });
+});
+
+/**
+ * 回归：applyMusicTrack 写入 musicMediaUrls / musicPrimaryUrl；
+ * Hub 播放器若仍读 mediaUrls / primaryUrl，音源取链成功也无法播放（长青等代理源尤甚）。
+ */
+describe('music hub playback url fields', () => {
+  it('useMusicHubPlayer binds music* urls/loading/error, not content mediaUrls', () => {
+    const src = readFileSync(
+      resolve(process.cwd(), 'src/components/viewer/audio/music/hub/useMusicHubPlayer.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/state\(\)\.musicPrimaryUrl/);
+    expect(src).toMatch(/state\(\)\.musicMediaUrls/);
+    expect(src).toMatch(/state\(\)\.musicLoading/);
+    expect(src).toMatch(/state\(\)\.musicError/);
+    expect(src).not.toMatch(/const url = \(\) => state\(\)\.primaryUrl/);
+    expect(src).not.toMatch(/const mediaUrls = \(\) => state\(\)\.mediaUrls/);
+    expect(src).not.toMatch(/const loading = \(\) => state\(\)\.loading/);
+    expect(src).not.toMatch(/const error = \(\) => state\(\)\.error/);
+  });
+
+  it('applyMusicTrack resets musicPositionSec atomically when switching tracks', () => {
+    const src = readFileSync(
+      resolve(process.cwd(), 'src/stores/viewer/media/audio.ts'),
+      'utf8',
+    );
+    expect(src).toMatch(/resolveMusicTrackStartPositionSec/);
+    expect(src).toMatch(/musicPositionSec,/);
+    expect(src).toMatch(/musicTrackAdvanceInFlight/);
+    expect(src).toMatch(/clearCurrentTrackProgressForAdvance/);
   });
 });

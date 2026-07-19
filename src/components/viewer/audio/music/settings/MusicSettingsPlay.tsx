@@ -243,12 +243,7 @@ export const MusicSettingsPlay: Component = () => {
         不支持的能力会自动降级。输出设备变化指已选设备被移除或不可用。
       </p>
       <section class="space-y-4 border-t pt-4">
-        <div>
-          <h2 class="text-base font-semibold">Reader 扩展 · 播放控制</h2>
-          <p class="mt-1 text-xs text-muted-foreground">
-            倍速、进度拖动与默认播放模式是 Reader 扩展能力。
-          </p>
-        </div>
+        <h2 class="text-base font-semibold">播放控制</h2>
       <div class="flex items-center gap-2 text-sm">
         <Checkbox
           id="music-play-selection-auto-play-input"
@@ -349,12 +344,7 @@ export const MusicSettingsPlay: Component = () => {
       </div>
       </section>
       <section class="space-y-4 border-t pt-4">
-        <div>
-          <h2 class="text-base font-semibold">Reader 扩展 · 取流策略</h2>
-          <p class="mt-1 text-xs text-muted-foreground">
-            此区域用于 Reader 的多源取链与内置接口兜底，不属于 LX Music 播放设置原项。
-          </p>
-        </div>
+        <h2 class="text-base font-semibold">取流策略</h2>
       <div class="space-y-1">
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <span class="text-muted-foreground">取流策略：</span>
@@ -375,7 +365,7 @@ export const MusicSettingsPlay: Component = () => {
       </div>
       </section>
       <section class="space-y-4 border-t pt-4">
-        <h2 class="text-base font-semibold">Reader 扩展 · 默认歌词轨</h2>
+        <h2 class="text-base font-semibold">默认歌词轨</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">默认歌词轨：</span>
         <MusicAppSelect
@@ -389,7 +379,7 @@ export const MusicSettingsPlay: Component = () => {
       </div>
       </section>
       <section class="space-y-4 border-t pt-4">
-        <h2 class="text-base font-semibold">Reader 扩展 · 歌词转换</h2>
+        <h2 class="text-base font-semibold">歌词转换</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">中文歌词转换：</span>
         <MusicAppSelect
@@ -407,12 +397,7 @@ export const MusicSettingsPlay: Component = () => {
       </div>
       </section>
       <section class="space-y-4 border-t pt-4">
-        <div>
-          <h2 class="text-base font-semibold">Reader 扩展 · 歌词时间与播放保护</h2>
-          <p class="mt-1 text-xs text-muted-foreground">
-            歌词偏移、定时停止、离线播放与跨源兜底为 Reader 扩展能力。
-          </p>
-        </div>
+        <h2 class="text-base font-semibold">歌词时间与播放保护</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-muted-foreground">歌词偏移（秒）：</span>
         <NumberField

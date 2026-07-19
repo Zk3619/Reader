@@ -3,7 +3,6 @@ import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { QUALITY_LABELS } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
-import { AudioDownloadPanel } from '@/components/viewer/audio/music/AudioDownloadPanel';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -55,7 +54,7 @@ export const MusicSettingsDownload: Component = () => {
           <div>
             <h2 class="text-base font-semibold">下载设置</h2>
             <p class="mt-1 text-xs text-muted-foreground">
-              桌面端保存到指定路径并保留离线缓存；Web 端由浏览器处理文件保存。
+              下载会保存到指定目录，并保留持久离线缓存（manual）。任务管理请使用侧栏「下载」页。
             </p>
           </div>
           <div class="space-y-3">
@@ -167,8 +166,24 @@ export const MusicSettingsDownload: Component = () => {
           <div>
             <h3 class="font-medium">嵌入到音频文件中的内容</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              当前版本暂不支持封面嵌入与歌词嵌入。
+              当前支持将标题/艺术家/专辑写入 MP3；可选嵌入封面与歌词（USLT）。FLAC 请使用旁路歌词文件。
             </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-download-embed-cover-input"
+              checked={settings().downloadEmbedCover}
+              onChange={(checked) => applySettings({ downloadEmbedCover: checked })}
+            />
+            <Label for="music-download-embed-cover-input">嵌入封面（MP3）</Label>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-download-embed-lyric-input"
+              checked={settings().downloadEmbedLyric}
+              onChange={(checked) => applySettings({ downloadEmbedLyric: checked })}
+            />
+            <Label for="music-download-embed-lyric-input">嵌入歌词（MP3）</Label>
           </div>
         </section>
 
@@ -176,8 +191,7 @@ export const MusicSettingsDownload: Component = () => {
           <div>
             <h3 class="font-medium">歌词下载</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              当前可将主歌词保存为独立 UTF-8 歌词文件；翻译、罗马音与 LX Music
-              歌词合并暂不支持。
+              可将主歌词保存为独立 UTF-8 歌词文件；翻译、罗马音与 LX Music 扩展字段暂不写入旁路文件。
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -188,15 +202,12 @@ export const MusicSettingsDownload: Component = () => {
             />
             <Label for="music-download-lyric-file-input">同时下载歌词文件</Label>
           </div>
-          <div class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-            歌词文件编码：UTF-8。GBK 编码当前版本暂不支持。
-          </div>
         </section>
 
         <section class="space-y-3 border-t pt-5">
           <div>
-            <h3 class="font-medium">Reader 扩展</h3>
-            <p class="mt-1 text-xs text-muted-foreground">选择下载任务优先请求的音质。</p>
+            <h3 class="font-medium">下载音质</h3>
+            <p class="mt-1 text-xs text-muted-foreground">批量下载默认音质；单曲可在入队时覆盖。</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">下载音质：</span>
@@ -211,10 +222,6 @@ export const MusicSettingsDownload: Component = () => {
           </div>
         </section>
       </div>
-
-      <section class="border-t">
-        <AudioDownloadPanel open inline />
-      </section>
     </div>
   );
 };

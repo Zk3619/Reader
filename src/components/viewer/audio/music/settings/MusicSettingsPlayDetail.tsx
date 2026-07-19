@@ -1,6 +1,7 @@
-import { createSignal, type Component } from 'solid-js';
+import { createSignal, Show, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import {
   NumberField,
   NumberFieldInput,
@@ -84,6 +85,29 @@ export const MusicSettingsPlayDetail: Component = () => {
             缩放当前正在播放的歌词
           </Label>
         </div>
+        <Show when={settings().playDetailZoomActiveLyric}>
+          <div class="ml-6 flex flex-wrap items-center gap-2">
+            <span class="text-muted-foreground">缩放幅度：</span>
+            <Slider
+              class="w-40"
+              minValue={100}
+              maxValue={160}
+              step={1}
+              value={[Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)]}
+              onChange={(v) =>
+                apply({ playDetailZoomActiveScale: (v[0] ?? 128) / 100 })
+              }
+            >
+              <SliderTrack>
+                <SliderFill />
+                <SliderThumb />
+              </SliderTrack>
+            </Slider>
+            <span class="tabular-nums">
+              {Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}%
+            </span>
+          </div>
+        </Show>
         <div class="space-y-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">延迟歌词滚动：</span>

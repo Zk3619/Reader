@@ -15,6 +15,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { isTauri } from '@/lib/platform/detect';
 import { mayUseAndroidFsLayer } from '@/lib/platform/fs/capabilities';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
 export interface AudioLocalScanDialogProps {
@@ -38,7 +39,7 @@ export const AudioLocalScanDialog: Component<AudioLocalScanDialogProps> = (props
         props.onOpenChange(false);
         showAppToast({ title: '导入完成', description: `共 ${tracks.length} 首` });
       } catch (e) {
-        showAppToast({ title: '扫描失败', description: String(e), variant: 'destructive' });
+        showAppToast({ title: '扫描失败', description: toUserFacingMusicError(e), variant: 'destructive' });
       } finally {
         setScanning(false);
         setProgress('');
@@ -60,7 +61,7 @@ export const AudioLocalScanDialog: Component<AudioLocalScanDialogProps> = (props
         showAppToast({ title: '导入完成', description: `共 ${tracks.length} 首` });
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
-          showAppToast({ title: '扫描失败', description: String(e), variant: 'destructive' });
+          showAppToast({ title: '扫描失败', description: toUserFacingMusicError(e), variant: 'destructive' });
         }
       } finally {
         setScanning(false);
@@ -78,7 +79,7 @@ export const AudioLocalScanDialog: Component<AudioLocalScanDialogProps> = (props
       props.onOpenChange(false);
       showAppToast({ title: '导入完成', description: `共 ${tracks.length} 首` });
     } catch (e) {
-      showAppToast({ title: '扫描失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '扫描失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setScanning(false);
       setProgress('');

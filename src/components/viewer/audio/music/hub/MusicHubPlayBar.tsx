@@ -32,14 +32,18 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Toggle } from '@/components/ui/toggle';
+import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
 import {
   AppTooltip,
   AppTooltipContent,
   AppTooltipTrigger,
 } from '@/components/shared/AppTooltip';
+import {
+  AppPopover,
+  AppPopoverTrigger,
+} from '@/components/shared/AppPopover';
 import { audioI18n } from '@/lib/media/audio/audio-i18n';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
 import { playNextTrack, playPrevTrack, setMusicSection } from '@/stores/viewer/media/audio';
@@ -56,6 +60,7 @@ import {
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
   ViewerAppDropdownMenuContent,
+  ViewerAppPopoverContent,
 } from '@/components/viewer/viewer-app-overlay';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import {
@@ -70,6 +75,7 @@ import {
 import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
+import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
 
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
   { value: AudioPlayMode.listEndStop, label: '顺序播放', icon: ListOrdered },
@@ -78,39 +84,6 @@ const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
   { value: AudioPlayMode.listLoop, label: '列表循环', icon: Repeat },
   { value: AudioPlayMode.none, label: '禁止切换', icon: Ban },
 ];
-
-function currentLyricLine(lyric: string, positionSec: number): string {
-  const timestamp = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
-  const lines: { time: number; text: string }[] = [];
-  for (const rawLine of lyric.split(/\r?\n/)) {
-    const matches = [...rawLine.matchAll(timestamp)];
-    if (matches.length === 0) continue;
-    const text = rawLine.replace(timestamp, '').replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim();
-    if (!text) continue;
-    for (const match of matches) {
-      const fraction = match[3] ? parseInt(match[3], 10) / 1000 : 0;
-      lines.push({
-        time: Number(match[1]) * 60 + Number(match[2]) + (Number.isFinite(fraction) ? fraction : 0),
-        text,
-      });
-    }
-  }
-  if (lines.length === 0) {
-    // 无时间戳：展示首行可读文本，避免播放栏空白
-    const plain = lyric
-      .split(/\r?\n/)
-      .map((line) => line.replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim())
-      .find((line) => line.length > 0 && !line.startsWith('['));
-    return plain ?? '';
-  }
-  lines.sort((a, b) => a.time - b.time);
-  let active = '';
-  for (const line of lines) {
-    if (line.time > positionSec) break;
-    active = line.text;
-  }
-  return active;
-}
 
 export interface MusicHubPlayBarProps {
   player: ReturnType<typeof useMusicHubPlayer>;
@@ -179,7 +152,9 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const [allowProgressSeek, setAllowProgressSeek] = createSignal(
     getMusicSettings().allowProgressBarSeek,
   );
-  const [desktopLyricOpen, setDesktopLyricOpen] = createSignal(false);
+  const [desktopLyricEnabled, setDesktopLyricEnabled] = createSignal(
+    getMusicSettings().desktopLyricEnabled === true,
+  );
   let volumeOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let volumeCloseTimer: ReturnType<typeof setTimeout> | undefined;
   let progressOpenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -256,6 +231,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const unsubscribeSettings = subscribeMusicSettings((settings) => {
     setProgressStyle(settings.playBarProgressStyle);
     setAllowProgressSeek(settings.allowProgressBarSeek);
+    setDesktopLyricEnabled(settings.desktopLyricEnabled === true);
   });
   onCleanup(() => {
     clearProgressTimers();
@@ -270,9 +246,10 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
 
   const toggleDesktopLyric = async (open: boolean) => {
     if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke(open ? 'open_desktop_lyric_window' : 'close_desktop_lyric_window');
-    setDesktopLyricOpen(open);
+    const { setDesktopLyricEnabled: setEnabled } = await import(
+      '@/lib/media/audio/desktop-lyric-window'
+    );
+    await setEnabled(open);
   };
 
   return (
@@ -306,10 +283,12 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 when={track()?.meta?.coverUrl}
                 fallback={<Music2 class="h-5 w-5" />}
               >
-                <img
+                <MusicCoverImg
                   src={String(track()?.meta.coverUrl)}
+                  trackId={track()?.id}
                   alt=""
                   class="h-full w-full object-cover"
+                  fallback={<Music2 class="h-5 w-5" />}
                 />
               </Show>
             </button>
@@ -341,8 +320,8 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                   onMouseEnter={scheduleProgressOpen}
                   onMouseLeave={scheduleProgressClose}
                 >
-                  <Popover open={progressOpen()} onOpenChange={setProgressOpen}>
-                    <PopoverTrigger
+                  <AppPopover open={progressOpen()} onOpenChange={setProgressOpen}>
+                    <AppPopoverTrigger
                       as={Button}
                       variant="ghost"
                       class="flex h-9 w-28 flex-col gap-1 px-2 py-1"
@@ -358,9 +337,10 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                           style={{ transform: `scaleX(${progressRatio()})` }}
                         />
                       </span>
-                    </PopoverTrigger>
-                    <PopoverContent
+                    </AppPopoverTrigger>
+                    <ViewerAppPopoverContent
                       class="w-80 p-3"
+                      stableAdjust
                       onMouseEnter={keepProgressOpen}
                       onMouseLeave={scheduleProgressClose}
                     >
@@ -379,8 +359,8 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                           {formatMusicTime(props.player.player.duration())}
                         </span>
                       </div>
-                    </PopoverContent>
-                  </Popover>
+                    </ViewerAppPopoverContent>
+                  </AppPopover>
                 </div>
               </Show>
             }
@@ -433,10 +413,10 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
               <Toggle
-                pressed={desktopLyricOpen()}
+                pressed={desktopLyricEnabled()}
                 onChange={(open) => void toggleDesktopLyric(open)}
                 class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
-                aria-label={desktopLyricOpen() ? '关闭桌面歌词' : '打开桌面歌词'}
+                aria-label={desktopLyricEnabled() ? '关闭桌面歌词' : '打开桌面歌词'}
                 disabled={!track() || !isTauri()}
               >
                 <SquareActivity class="h-4 w-4" />
@@ -444,7 +424,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             </AppTooltipTrigger>
             <AppTooltipContent layer="viewer">
               {isTauri()
-                ? desktopLyricOpen()
+                ? desktopLyricEnabled()
                   ? '关闭桌面歌词'
                   : '打开桌面歌词'
                 : '桌面歌词仅客户端可用'}
@@ -455,8 +435,8 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             onMouseEnter={scheduleVolumeOpen}
             onMouseLeave={scheduleVolumeClose}
           >
-            <Popover open={volumeOpen()} onOpenChange={setVolumeOpen}>
-              <PopoverTrigger
+            <AppPopover open={volumeOpen()} onOpenChange={setVolumeOpen}>
+              <AppPopoverTrigger
                 as={Button}
                 variant="ghost"
                 size="icon"
@@ -468,9 +448,10 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 >
                   <Volume2 class="h-4 w-4" />
                 </Show>
-              </PopoverTrigger>
-              <PopoverContent
+              </AppPopoverTrigger>
+              <ViewerAppPopoverContent
                 class="w-52 p-3"
+                stableAdjust
                 onMouseEnter={keepVolumeOpen}
                 onMouseLeave={scheduleVolumeClose}
               >
@@ -513,8 +494,8 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                     </Slider>
                   </div>
                 </div>
-              </PopoverContent>
-            </Popover>
+              </ViewerAppPopoverContent>
+            </AppPopover>
           </div>
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
@@ -573,7 +554,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 class="h-10 w-10 rounded-full bg-foreground text-background hover:bg-foreground/85 hover:text-background"
                 aria-label={props.player.player.playing() ? '暂停' : '播放'}
                 disabled={!track()}
-                onClick={() => props.player.player.togglePlay()}
+                onClick={() => void props.player.playOrFetch()}
               >
                 <Show
                   when={props.player.player.playing()}

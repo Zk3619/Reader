@@ -3,8 +3,7 @@
  * 视觉原语与发现页一致：bg-muted/60 animate-pulse
  */
 
-import { For, Show, type Component } from 'solid-js';
-import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
+import { For, Show, createEffect, createSignal, onCleanup, type Component } from 'solid-js';
 import {
   BOOK_GROUP_CARD_HOVER_ELEVATION,
   bookGroupGridCardClass,
@@ -12,9 +11,21 @@ import {
   bookGroupGridMetaClass,
   exploreSkeletonPulseClass,
 } from '@/lib/bookshelf/book-group-card-styles';
+import {
+  BOOKSHELF_LAYOUT_GAP_CLASS,
+  bookshelfLayoutGapToRem,
+} from '@/lib/bookshelf/bookshelf-layout-gap';
+import {
+  getBookshelfListColumnLayout,
+  getViewModeGridColumnCount,
+  isGridViewMode,
+  isListViewMode,
+} from '@/lib/bookshelf/bookshelf-layout-settings';
 import { musicHubListInsetClass, musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
 import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
+import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
+import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { cn } from '@/lib/utils';
 
 /** 与搜索/排行榜桌面曲目列对齐 */
@@ -178,26 +189,42 @@ export interface MusicPlaylistGridSkeletonProps {
 
 /** 在线歌单网格骨架（浏览 / 搜索歌单 Tab） */
 export const MusicPlaylistGridSkeleton: Component<MusicPlaylistGridSkeletonProps> = (props) => {
-  const shell = useShellLayout();
-  const isMobile = () => shell().useMobileShell;
-  const items = () => Array.from({ length: props.count ?? 12 }, (_, i) => i);
+  const ui = getMusicSongListUi;
+  const isGrid = () => isGridViewMode(ui().viewMode);
+  const cols = () => {
+    const mode = ui().viewMode;
+    if (isGridViewMode(mode)) return getViewModeGridColumnCount(mode);
+    if (isListViewMode(mode)) return getBookshelfListColumnLayout(mode);
+    return 2;
+  };
+  const items = () => Array.from({ length: props.count ?? Math.max(cols() * 3, 12) }, (_, i) => i);
+  const [root, setRoot] = createSignal<HTMLUListElement | undefined>();
+
+  createEffect(() => {
+    const el = root();
+    if (!el) return;
+    el.style.setProperty('--bookshelf-layout-gap', bookshelfLayoutGapToRem(ui().spacing));
+    onCleanup(() => el.style.removeProperty('--bookshelf-layout-gap'));
+  });
 
   return (
     <ul
+      ref={setRoot}
       class={cn(
         musicHubListInsetClass,
-        'grid gap-x-5 gap-y-5 px-2 pb-4 pt-1',
-        isMobile() ? 'grid-cols-3 gap-x-6 gap-y-6 sm:grid-cols-4' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4',
+        'grid px-2 pb-4 pt-1',
+        BOOKSHELF_LAYOUT_GAP_CLASS,
         props.listInnerClass,
         props.class,
       )}
+      style={{ 'grid-template-columns': `repeat(${cols()}, minmax(0, 1fr))` }}
       aria-busy="true"
       aria-label="加载歌单列表"
     >
       <For each={items()}>
         {() => (
           <li class="min-w-0 list-none">
-            <Show when={isMobile()} fallback={<PlaylistHorizontalCardSkeleton />}>
+            <Show when={isGrid()} fallback={<PlaylistHorizontalCardSkeleton />}>
               <PlaylistGridCardSkeleton />
             </Show>
           </li>
@@ -274,7 +301,7 @@ export interface MusicCommentListSkeletonProps {
 export const MusicCommentListSkeleton: Component<MusicCommentListSkeletonProps> = (props) => {
   const rows = () => COMMENT_ROW_WIDTHS.slice(0, props.count ?? 6);
   return (
-    <ul class={cn('w-full', props.class)} aria-busy="true" aria-label="加载评论">
+    <ul class={cn('w-full pl-2.5', props.class)} aria-busy="true" aria-label="加载评论">
       <For each={rows()}>
         {(widths) => {
           const [user, line1, line2] = widths;

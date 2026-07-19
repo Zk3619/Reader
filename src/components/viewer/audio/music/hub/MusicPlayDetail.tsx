@@ -58,7 +58,6 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Toggle } from '@/components/ui/toggle';
 import {
@@ -66,8 +65,13 @@ import {
   AppTooltipContent,
   AppTooltipTrigger,
 } from '@/components/shared/AppTooltip';
+import {
+  AppPopover,
+  AppPopoverTrigger,
+} from '@/components/shared/AppPopover';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
+import { BookCoverPreviewDialog } from '@/components/media/reader/books/BookCoverPreviewDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -86,7 +90,16 @@ import { MusicAddToListDialog } from '@/components/viewer/audio/music/hub/MusicA
 import { MusicPlayDetailSettingsPopup } from '@/components/viewer/audio/music/hub/MusicPlayDetailSettingsPopup';
 import { MusicPlayTimerDialog } from '@/components/viewer/audio/music/hub/MusicPlayTimerDialog';
 import { MusicAudioVisualizer } from '@/components/viewer/audio/music/hub/MusicAudioVisualizer';
-import { MusicPlaybackRateCombobox, MusicPitchRateCombobox } from '@/components/viewer/audio/music/hub/MusicPlaybackRateCombobox';
+import {
+  MUSIC_PLAYBACK_RATE_PRESETS,
+  MUSIC_PITCH_RATE_PRESETS,
+  MUSIC_PLAY_SPEED_MAX,
+  MUSIC_PLAY_SPEED_MIN,
+  MUSIC_PITCH_RATE_MAX,
+  MUSIC_PITCH_RATE_MIN,
+} from '@/components/viewer/audio/music/hub/MusicPlaybackRateCombobox';
+import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubPageShell';
+import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { ViewerToolbarWindowControls } from '@/components/viewer/ViewerToolbarChromeParts';
 import {
   MusicEqualizerEditor,
@@ -144,6 +157,8 @@ import { isTauri } from '@/lib/platform/detect';
 import { SHELL_SIDEBAR_MIN_WIDTH } from '@/lib/shell/layout';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
+import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
+import { loadMusicCoverBlob } from '@/lib/media/audio/music-cover-loader';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -155,6 +170,7 @@ import {
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
   ViewerAppDropdownMenuContent,
+  ViewerAppPopoverContent,
 } from '@/components/viewer/viewer-app-overlay';
 
 const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
@@ -165,6 +181,320 @@ const PLAY_MODE_OPTIONS: MultiSwitchOption<AudioPlayMode>[] = [
   { value: AudioPlayMode.none, label: '禁止切换', icon: Ban },
 ];
 const EQ_PRESET_KEYS = Object.keys(EQ_PRESETS) as (keyof typeof EQ_PRESETS)[];
+
+function applyHubElementVolume(volume01: number, unmute: boolean): void {
+  const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+  if (!el) return;
+  el.volume = Math.max(0, Math.min(1, volume01));
+  if (unmute && volume01 > 0) el.muted = false;
+}
+
+type DetailPlayer = ReturnType<typeof useMusicHubPlayer>;
+
+/** 音量：拖动只改本地 draft，松手再写 settings；勿套 Tooltip，避免与 Popover 抢指针 */
+const DetailVolumePopover: Component<{
+  player: DetailPlayer;
+  disabled?: boolean;
+}> = (props) => {
+  const [open, setOpen] = createSignal(false);
+  const [draft, setDraft] = createSignal(Math.round(props.player.musicVolume() * 100));
+
+  createEffect(() => {
+    if (!open()) return;
+    setDraft(Math.round(props.player.musicVolume() * 100));
+  });
+
+  const commit = () => {
+    const v = draft() / 100;
+    props.player.setMusicVolume(v);
+    if (v > 0) props.player.setMusicMuted(false);
+  };
+
+  return (
+    <AppPopover open={open()} onOpenChange={setOpen}>
+      <AppPopoverTrigger
+        as={Button}
+        variant="ghost"
+        size="icon"
+        class="h-10 w-10"
+        aria-label="音量"
+        title="音量"
+        disabled={props.disabled}
+      >
+        <Show
+          when={!props.player.musicMuted() && props.player.musicVolume() > 0}
+          fallback={<VolumeX class="h-5 w-5" />}
+        >
+          <Volume2 class="h-5 w-5" />
+        </Show>
+      </AppPopoverTrigger>
+      <ViewerAppPopoverContent class="w-52 p-3" stableAdjust>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3 text-sm">
+            <span class="tabular-nums">{draft()}%</span>
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-detail-muted"
+                checked={props.player.musicMuted()}
+                onChange={props.player.setMusicMuted}
+              />
+              <Label for="music-detail-muted">静音</Label>
+            </div>
+          </div>
+          <Slider
+            minValue={0}
+            maxValue={100}
+            step={1}
+            value={[draft()]}
+            onChange={(value) => {
+              const n = value[0] ?? 0;
+              setDraft(n);
+              applyHubElementVolume(n / 100, true);
+            }}
+            onChangeEnd={commit}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+        </div>
+      </ViewerAppPopoverContent>
+    </AppPopover>
+  );
+};
+
+/** 倍率预设：快捷 8 档两行四列；下方数字输入可在更大范围内自定义 */
+const DetailRatePresets: Component<{
+  presets: readonly string[];
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onCommit: (value: number) => void;
+}> = (props) => {
+  const near = (preset: string) => Math.abs(props.value - Number(preset)) < 0.001;
+  const step = () => props.step ?? 0.05;
+  return (
+    <div class="space-y-2">
+      <div class="grid grid-cols-4 gap-1">
+        <For each={[...props.presets]}>
+          {(preset) => (
+            <Button
+              type="button"
+              variant={near(preset) ? 'secondary' : 'ghost'}
+              size="sm"
+              class="h-8 px-1 text-xs tabular-nums"
+              disabled={Number(preset) < props.min || Number(preset) > props.max}
+              onClick={() => props.onCommit(Number(preset))}
+            >
+              {preset}x
+            </Button>
+          )}
+        </For>
+      </div>
+      <div class="flex items-center gap-2">
+        <input
+          type="number"
+          class="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          min={props.min}
+          max={props.max}
+          step={step()}
+          value={props.value.toFixed(2)}
+          onChange={(event) => {
+            const n = Number(event.currentTarget.value);
+            if (!Number.isFinite(n)) return;
+            props.onCommit(
+              Math.max(props.min, Math.min(props.max, Math.round(n * 100) / 100)),
+            );
+          }}
+        />
+        <span class="shrink-0 text-sm text-muted-foreground">x</span>
+      </div>
+    </div>
+  );
+};
+
+/** 倍速：拖动 live 改 playbackRate，松手再持久化 */
+const DetailSpeedPopover: Component<{
+  player: DetailPlayer;
+  preservesPitch: boolean;
+  onPreservesPitchChange: (checked: boolean) => void;
+}> = (props) => {
+  const [open, setOpen] = createSignal(false);
+  const [draft, setDraft] = createSignal(getMusicSettings().playSpeed ?? 1);
+
+  createEffect(() => {
+    if (!open()) return;
+    setDraft(getMusicSettings().playSpeed ?? 1);
+  });
+
+  const clamp = (speed: number) =>
+    Math.max(MUSIC_PLAY_SPEED_MIN, Math.min(MUSIC_PLAY_SPEED_MAX, speed));
+
+  const live = (speed: number) => {
+    const next = clamp(speed);
+    setDraft(next);
+    props.player.player.setPlaybackRate(next);
+  };
+
+  const persist = (speed: number) => {
+    const next = clamp(speed);
+    setDraft(next);
+    setMusicSettings({ playSpeed: next });
+    props.player.player.setPlaybackRate(next);
+  };
+
+  return (
+    <AppPopover open={open()} onOpenChange={setOpen}>
+      <AppPopoverTrigger
+        as={Button}
+        variant="ghost"
+        size="icon"
+        class="h-9 w-9"
+        aria-label={`播放倍速 ${draft()} 倍`}
+        title={`倍速 · ${draft().toFixed(2)}x`}
+      >
+        <Gauge class="h-4 w-4" />
+      </AppPopoverTrigger>
+      <ViewerAppPopoverContent class="w-56 p-3" stableAdjust>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="tabular-nums">{draft().toFixed(2)}x</span>
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-detail-preserves-pitch"
+                checked={props.preservesPitch}
+                onChange={props.onPreservesPitchChange}
+              />
+              <Label for="music-detail-preserves-pitch">音调补偿</Label>
+            </div>
+          </div>
+          <Slider
+            class="w-full"
+            minValue={MUSIC_PLAY_SPEED_MIN}
+            maxValue={MUSIC_PLAY_SPEED_MAX}
+            step={0.05}
+            value={[draft()]}
+            onChange={(value) => live(value[0] ?? 1)}
+            onChangeEnd={() => persist(draft())}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+          <DetailRatePresets
+            presets={MUSIC_PLAYBACK_RATE_PRESETS}
+            value={draft()}
+            min={MUSIC_PLAY_SPEED_MIN}
+            max={MUSIC_PLAY_SPEED_MAX}
+            onCommit={persist}
+          />
+          <p class="text-xs text-muted-foreground">
+            可调 {MUSIC_PLAY_SPEED_MIN}x–{MUSIC_PLAY_SPEED_MAX}x
+          </p>
+        </div>
+      </ViewerAppPopoverContent>
+    </AppPopover>
+  );
+};
+
+/** 音调：拖动 live 改 pitch shifter，松手再持久化 */
+const DetailPitchPopover: Component<{
+  player: DetailPlayer;
+  preservesPitch: boolean;
+  onPreservesPitchChange: (checked: boolean) => void;
+}> = (props) => {
+  const [open, setOpen] = createSignal(false);
+  const [draft, setDraft] = createSignal(getMusicSettings().pitchShifterRate ?? 1);
+
+  createEffect(() => {
+    if (!open()) return;
+    setDraft(getMusicSettings().pitchShifterRate ?? 1);
+  });
+
+  const clamp = (rate: number) =>
+    Math.max(
+      MUSIC_PITCH_RATE_MIN,
+      Math.min(MUSIC_PITCH_RATE_MAX, Math.round(rate * 100) / 100),
+    );
+
+  const live = (rate: number) => {
+    const next = clamp(rate);
+    setDraft(next);
+    props.player.getWebAudio()?.setPitchShifter(next);
+  };
+
+  const persist = (rate: number) => {
+    const next = clamp(rate);
+    setDraft(next);
+    setMusicSettings({ pitchShifterRate: next });
+    props.player.getWebAudio()?.setPitchShifter(next);
+  };
+
+  return (
+    <AppPopover open={open()} onOpenChange={setOpen}>
+      <AppPopoverTrigger
+        as={Button}
+        variant="ghost"
+        size="icon"
+        class="h-9 w-9"
+        aria-label={`音调 ${draft().toFixed(2)}x`}
+        title={`音调 · ${draft().toFixed(2)}x`}
+      >
+        <AudioWaveform class="h-4 w-4" />
+      </AppPopoverTrigger>
+      <ViewerAppPopoverContent class="w-56 p-3" stableAdjust>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="tabular-nums">{draft().toFixed(2)}x</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="h-7 px-2 text-xs"
+              onClick={() => persist(1)}
+            >
+              重置
+            </Button>
+          </div>
+          <Slider
+            minValue={Math.round(MUSIC_PITCH_RATE_MIN * 100)}
+            maxValue={Math.round(MUSIC_PITCH_RATE_MAX * 100)}
+            step={1}
+            value={[Math.round(draft() * 100)]}
+            onChange={(value) => live((value[0] ?? 100) / 100)}
+            onChangeEnd={() => persist(draft())}
+          >
+            <SliderTrack>
+              <SliderFill />
+              <SliderThumb />
+            </SliderTrack>
+          </Slider>
+          <DetailRatePresets
+            presets={MUSIC_PITCH_RATE_PRESETS}
+            value={draft()}
+            min={MUSIC_PITCH_RATE_MIN}
+            max={MUSIC_PITCH_RATE_MAX}
+            onCommit={persist}
+          />
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-detail-pitch-preserves"
+              checked={props.preservesPitch}
+              onChange={props.onPreservesPitchChange}
+            />
+            <Label for="music-detail-pitch-preserves">音调补偿</Label>
+          </div>
+          <p class="text-[11px] leading-snug text-muted-foreground">
+            可调 {MUSIC_PITCH_RATE_MIN}x–{MUSIC_PITCH_RATE_MAX}x；升降调不改变播放速度
+          </p>
+        </div>
+      </ViewerAppPopoverContent>
+    </AppPopover>
+  );
+};
 
 type DetailSidePane = 'comments' | 'queue' | null;
 
@@ -192,6 +522,7 @@ const DetailLyricPanel: Component<{
     align={props.settings().playDetailLyricAlign}
     fontSize={props.settings().playDetailLyricFontSize}
     zoomActiveLyric={props.settings().playDetailZoomActiveLyric}
+    zoomActiveScale={props.settings().playDetailZoomActiveScale ?? 1.28}
     scrollDelayMs={props.settings().playDetailLyricScrollDelayMs}
     allowProgressPreview={props.settings().playDetailAllowLyricSeek}
     autoPlayOnRelease={props.settings().playDetailLyricSeekAutoPlayOnRelease}
@@ -254,18 +585,16 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const [eqPreset, setEqPreset] = createSignal<keyof typeof EQ_PRESETS>(
     getMusicSettings().eqPreset ?? 'flat',
   );
-  const [playSpeed, setPlaySpeed] = createSignal(getMusicSettings().playSpeed ?? 1);
   const [musicSettings, setMusicSettingsSignal] = createSignal(getMusicSettings());
   const [altSources, setAltSources] = createSignal<AudioTrack[]>([]);
   const [altLoading, setAltLoading] = createSignal(false);
-  const [desktopLyricOpen, setDesktopLyricOpen] = createSignal(false);
   const [coverBroken, setCoverBroken] = createSignal(false);
+  const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
   let altRequestId = 0;
   let touchStartX = 0;
 
   onMount(() => {
     const unsubscribe = subscribeMusicSettings((settings) => {
-      setPlaySpeed(settings.playSpeed);
       setEqPreset(settings.eqPreset);
       setMusicSettingsSignal(settings);
     });
@@ -297,6 +626,22 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     setAltSources([]);
   });
 
+  createEffect(() => {
+    const url = coverUrl();
+    const id = track()?.id;
+    setCoverBlobUrl(null);
+    if (!url) return;
+    let cancelled = false;
+    void loadMusicCoverBlob({ coverUrl: url, trackId: id }).then((blob) => {
+      if (cancelled) return;
+      if (blob) setCoverBlobUrl(blob);
+      else setCoverBroken(true);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
   const statusText = createMemo(() => {
     if (props.player.error()) return props.player.error();
     if (props.player.loading()) return props.player.playbackStatus() || '加载中…';
@@ -310,12 +655,10 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     return Math.max(0, Math.min(1, buffered / duration));
   });
 
-  const pitchRate = () => musicSettings().pitchShifterRate ?? 1;
-
-  const applyPitchRate = (rate: number) => {
-    const next = Math.max(0.5, Math.min(1.5, Math.round(rate * 100) / 100));
-    setMusicSettings({ pitchShifterRate: next });
-    props.player.getWebAudio()?.setPitchShifter(next);
+  const applyPreservesPitch = (checked: boolean) => {
+    setMusicSettings({ preservesPitch: checked });
+    const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+    if (el) el.preservesPitch = checked;
   };
 
   const loadAltSources = async () => {
@@ -338,7 +681,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       if (requestId !== altRequestId) return;
       showAppToast({
         title: '换源失败',
-        description: error instanceof Error ? error.message : '换源匹配失败',
+        description: toUserFacingMusicError(error, '换源匹配失败'),
         variant: 'destructive',
       });
     } finally {
@@ -360,17 +703,6 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     });
     await applyMusicTrack(idx, { forceRefreshUrl: true });
     setAltSources([]);
-  };
-
-  const applySpeed = (speed: number) => {
-    const next = Math.max(0.5, Math.min(3, speed));
-    if (next === playSpeed()) {
-      props.player.player.setPlaybackRate(next);
-      return;
-    }
-    setPlaySpeed(next);
-    setMusicSettings({ playSpeed: next });
-    props.player.player.setPlaybackRate(next);
   };
 
   const applyEq = (preset: keyof typeof EQ_PRESETS) => {
@@ -408,9 +740,8 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
 
   const toggleDesktopLyric = async (open: boolean) => {
     if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke(open ? 'open_desktop_lyric_window' : 'close_desktop_lyric_window');
-    setDesktopLyricOpen(open);
+    const { setDesktopLyricEnabled } = await import('@/lib/media/audio/desktop-lyric-window');
+    await setDesktopLyricEnabled(open);
   };
 
   const leaveDetail = () => {
@@ -635,11 +966,18 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           </div>
         }
       >
-        <img
+        <MusicCoverImg
           src={coverUrl()}
+          trackId={track()?.id}
           alt=""
           class="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.02]"
+          loading="eager"
           onError={() => setCoverBroken(true)}
+          fallback={
+            <div class="flex h-full w-full items-center justify-center text-muted-foreground">
+              <Music2 class="h-16 w-16 opacity-50" />
+            </div>
+          }
         />
       </Show>
     </button>
@@ -762,8 +1100,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         aria-label={props.player.player.playing() ? '暂停' : '播放'}
         disabled={!track() && !props.player.url()}
         onClick={() => {
-          void props.player.getWebAudio()?.resume();
-          props.player.player.togglePlay();
+          void props.player.playOrFetch();
         }}
       >
         <Show when={props.player.player.playing()} fallback={<Play class="h-7 w-7" />}>
@@ -792,147 +1129,45 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <SkipForward class="h-5 w-5" />
       </Button>
 
-      <Popover>
-        <AppTooltip>
-          <AppTooltipTrigger as="div">
-            <PopoverTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-10 w-10"
-              aria-label="音量"
-              disabled={!track()}
-            >
-              <Show
-                when={!props.player.musicMuted() && props.player.musicVolume() > 0}
-                fallback={<VolumeX class="h-5 w-5" />}
-              >
-                <Volume2 class="h-5 w-5" />
-              </Show>
-            </PopoverTrigger>
-          </AppTooltipTrigger>
-          <AppTooltipContent layer="viewer">音量</AppTooltipContent>
-        </AppTooltip>
-        <PopoverContent class="z-135 w-52 p-3">
-          <div class="space-y-3">
-            <div class="flex items-center justify-between gap-3 text-sm">
-              <span class="tabular-nums">{Math.round(props.player.musicVolume() * 100)}%</span>
-              <div class="flex items-center gap-2">
-                <Checkbox
-                  id="music-detail-muted"
-                  checked={props.player.musicMuted()}
-                  onChange={props.player.setMusicMuted}
-                />
-                <Label for="music-detail-muted">静音</Label>
-              </div>
-            </div>
-            <Slider
-              minValue={0}
-              maxValue={100}
-              step={1}
-              value={[Math.round(props.player.musicVolume() * 100)]}
-              onChange={(value) => {
-                props.player.setMusicVolume((value[0] ?? 0) / 100);
-                if ((value[0] ?? 0) > 0) props.player.setMusicMuted(false);
-              }}
-            >
-              <SliderTrack>
-                <SliderFill />
-                <SliderThumb />
-              </SliderTrack>
-            </Slider>
-          </div>
-        </PopoverContent>
-      </Popover>
+      <DetailVolumePopover player={props.player} disabled={!track()} />
     </div>
   );
 
   const leftToolGroup = (): JSX.Element => (
     <>
-      <Popover>
+      <AppPopover>
         <AppTooltip>
           <AppTooltipTrigger as="div">
-            <PopoverTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9" aria-label="播放音质">
+            <AppPopoverTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9" aria-label="播放音质">
               <Music2 class="h-4 w-4" />
-            </PopoverTrigger>
+            </AppPopoverTrigger>
           </AppTooltipTrigger>
           <AppTooltipContent layer="viewer">
             音质 · {QUALITY_PREFERENCE_LABELS[musicSettings().playQualityPreference]}
           </AppTooltipContent>
         </AppTooltip>
-        <PopoverContent class="z-135 w-40 p-1">
+        <ViewerAppPopoverContent class="w-40 p-1">
           {optionList({
             values: listPlayQualityPreferenceOptions(),
             value: musicSettings().playQualityPreference,
             label: (v) => QUALITY_PREFERENCE_LABELS[v],
             onSelect: (v) => void changeQuality(v),
           })}
-        </PopoverContent>
-      </Popover>
+        </ViewerAppPopoverContent>
+      </AppPopover>
 
-      <Popover>
+      <DetailSpeedPopover
+        player={props.player}
+        preservesPitch={musicSettings().preservesPitch}
+        onPreservesPitchChange={applyPreservesPitch}
+      />
+
+      <AppPopover>
         <AppTooltip>
           <AppTooltipTrigger as="div">
-            <PopoverTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9"
-              aria-label={`播放倍速 ${playSpeed()} 倍`}
-            >
-              <Gauge class="h-4 w-4" />
-            </PopoverTrigger>
-          </AppTooltipTrigger>
-          <AppTooltipContent layer="viewer">倍速 · {playSpeed()}x</AppTooltipContent>
-        </AppTooltip>
-        <PopoverContent class="z-135 w-56 p-3">
-          <div class="space-y-3">
-            <div class="flex items-center justify-between gap-2 text-sm">
-              <span class="tabular-nums">{playSpeed().toFixed(2)}x</span>
-              <div class="flex items-center gap-2">
-                <Checkbox
-                  id="music-detail-preserves-pitch"
-                  checked={musicSettings().preservesPitch}
-                  onChange={(checked) => {
-                    setMusicSettings({ preservesPitch: checked });
-                    const el = document.querySelector<HTMLAudioElement>(
-                      'audio[data-music-hub-player]',
-                    );
-                    if (el) el.preservesPitch = checked;
-                  }}
-                />
-                <Label for="music-detail-preserves-pitch">音调补偿</Label>
-              </div>
-            </div>
-            <Slider
-              class="w-full"
-              minValue={0.5}
-              maxValue={3}
-              step={0.05}
-              value={[playSpeed()]}
-              onChange={(value) => applySpeed(value[0] ?? 1)}
-            >
-              <SliderTrack>
-                <SliderFill />
-                <SliderThumb />
-              </SliderTrack>
-            </Slider>
-            <MusicPlaybackRateCombobox
-              value={playSpeed()}
-              onChange={applySpeed}
-              contentClass="z-135"
-            />
-            <p class="text-xs text-muted-foreground">范围 0.5x–3x，可选预设或自定义</p>
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      <Popover>
-        <AppTooltip>
-          <AppTooltipTrigger as="div">
-            <PopoverTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9" aria-label="均衡器">
+            <AppPopoverTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9" aria-label="均衡器">
               <SlidersHorizontal class="h-4 w-4" />
-            </PopoverTrigger>
+            </AppPopoverTrigger>
           </AppTooltipTrigger>
           <AppTooltipContent layer="viewer">
             均衡器 ·{' '}
@@ -941,7 +1176,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               : (MUSIC_EQ_PRESET_LABELS[eqPreset()] ?? eqPreset())}
           </AppTooltipContent>
         </AppTooltip>
-        <PopoverContent class="z-135 w-56 p-1">
+        <ViewerAppPopoverContent class="w-56 p-1">
           <div class="flex max-h-64 flex-col gap-0.5 overflow-y-auto p-1">
             <For each={EQ_PRESET_KEYS}>
               {(preset) => (
@@ -972,75 +1207,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               自定义频率增益…
             </Button>
           </div>
-        </PopoverContent>
-      </Popover>
+        </ViewerAppPopoverContent>
+      </AppPopover>
 
-      <Popover>
-        <AppTooltip>
-          <AppTooltipTrigger as="div">
-            <PopoverTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9"
-              aria-label={`音调 ${pitchRate().toFixed(2)}x`}
-            >
-              <AudioWaveform class="h-4 w-4" />
-            </PopoverTrigger>
-          </AppTooltipTrigger>
-          <AppTooltipContent layer="viewer">音调 · {pitchRate().toFixed(2)}x</AppTooltipContent>
-        </AppTooltip>
-        <PopoverContent class="z-135 w-56 p-3">
-          <div class="space-y-3">
-            <div class="flex items-center justify-between gap-2 text-sm">
-              <span class="tabular-nums">{pitchRate().toFixed(2)}x</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="h-7 px-2 text-xs"
-                onClick={() => applyPitchRate(1)}
-              >
-                重置
-              </Button>
-            </div>
-            <Slider
-              minValue={50}
-              maxValue={150}
-              step={1}
-              value={[Math.round(pitchRate() * 100)]}
-              onChange={(value) => applyPitchRate((value[0] ?? 100) / 100)}
-            >
-              <SliderTrack>
-                <SliderFill />
-                <SliderThumb />
-              </SliderTrack>
-            </Slider>
-            <MusicPitchRateCombobox
-              value={pitchRate()}
-              onChange={applyPitchRate}
-              contentClass="z-135"
-            />
-            <div class="flex items-center gap-2 text-sm">
-              <Checkbox
-                id="music-detail-pitch-preserves"
-                checked={musicSettings().preservesPitch}
-                onChange={(checked) => {
-                  setMusicSettings({ preservesPitch: checked });
-                  const el = document.querySelector<HTMLAudioElement>(
-                    'audio[data-music-hub-player]',
-                  );
-                  if (el) el.preservesPitch = checked;
-                }}
-              />
-              <Label for="music-detail-pitch-preserves">音调补偿</Label>
-            </div>
-            <p class="text-[11px] leading-snug text-muted-foreground">
-              升降调不改变播放速度；音调补偿用于倍速时保持音高
-            </p>
-          </div>
-        </PopoverContent>
-      </Popover>
+      <DetailPitchPopover
+        player={props.player}
+        preservesPitch={musicSettings().preservesPitch}
+        onPreservesPitchChange={applyPreservesPitch}
+      />
     </>
   );
 
@@ -1071,10 +1245,12 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       <AppTooltip>
         <AppTooltipTrigger as="div">
           <Toggle
-            pressed={desktopLyricOpen()}
+            pressed={musicSettings().desktopLyricEnabled === true}
             onChange={(open) => void toggleDesktopLyric(open)}
             class="h-9 w-9 p-0 data-pressed:bg-accent"
-            aria-label={desktopLyricOpen() ? '关闭桌面歌词' : '打开桌面歌词'}
+            aria-label={
+              musicSettings().desktopLyricEnabled ? '关闭桌面歌词' : '打开桌面歌词'
+            }
             disabled={!track() || !isTauri()}
           >
             <SquareActivity class="h-4 w-4" />
@@ -1082,7 +1258,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         </AppTooltipTrigger>
         <AppTooltipContent layer="viewer">
           {isTauri()
-            ? desktopLyricOpen()
+            ? musicSettings().desktopLyricEnabled
               ? '关闭桌面歌词'
               : '打开桌面歌词'
             : '桌面歌词仅客户端可用'}
@@ -1109,18 +1285,17 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     </>
   );
 
-  /** <md 双行：第一行播放控制（播放键居中），第二行工具；md+ 单行：左工具 | 播放 | 右工具 */
+  /** <md 双行：播放在上、工具在下；md+ 单行：左工具 | 播放 | 右工具。transport 只挂一份，避免受控 Popover 双开（隐藏锚点会漂到视口左上角）。 */
   const controlsBlock = (): JSX.Element => (
-    <div class="flex flex-col items-center gap-2 md:flex-row md:items-center">
-      <div class="flex w-full items-center justify-center md:hidden">{transportBlock()}</div>
-      <div class="flex w-full flex-wrap items-center justify-center gap-0.5 md:contents">
-        <div class="flex flex-wrap items-center justify-center gap-0.5 md:min-w-0 md:flex-1 md:justify-start">
+    <div class="flex w-full flex-col items-center gap-2 md:flex-row md:items-center">
+      <div class="order-1 flex w-full items-center justify-center md:order-2 md:w-auto md:shrink-0 md:px-3">
+        {transportBlock()}
+      </div>
+      <div class="order-2 flex w-full flex-wrap items-center justify-center gap-0.5 md:contents">
+        <div class="flex flex-wrap items-center justify-center gap-0.5 md:order-1 md:min-w-0 md:flex-1 md:justify-start">
           {leftToolGroup()}
         </div>
-        <div class="hidden shrink-0 px-3 md:flex md:items-center md:justify-center">
-          {transportBlock()}
-        </div>
-        <div class="flex flex-wrap items-center justify-center gap-0.5 md:min-w-0 md:flex-1 md:justify-end">
+        <div class="flex flex-wrap items-center justify-center gap-0.5 md:order-3 md:min-w-0 md:flex-1 md:justify-end">
           {rightToolGroup()}
         </div>
       </div>
@@ -1311,11 +1486,11 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           standalone() && 'h-full w-full',
         )}
       >
-        <Show when={coverUrl() && !coverBroken()}>
+        <Show when={coverBlobUrl() && !coverBroken()}>
           <div
             class="pointer-events-none absolute inset-0 opacity-25"
             style={{
-              'background-image': `url(${coverUrl()})`,
+              'background-image': `url(${coverBlobUrl()})`,
               'background-size': 'cover',
               'background-position': 'center',
               filter: 'blur(40px) saturate(1.1)',
@@ -1333,7 +1508,8 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           />
         </Show>
 
-        <Show when={!hideHeader()}>
+        {/* 独立全屏页才用内嵌页头；嵌入 Hub 时走 MusicHubPageShell / PageToolbar */}
+        <Show when={standalone() && !hideHeader()}>
           <header class="relative z-10 flex shrink-0 items-center gap-2 border-b px-3 py-2">
             <Button
               type="button"
@@ -1450,7 +1626,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <BookCoverPreviewDialog
           open={coverPreviewOpen()}
           onOpenChange={setCoverPreviewOpen}
-          coverUrl={coverUrl()}
+          coverUrl={coverBlobUrl() || coverUrl()}
           bookUrl={coverUrl()}
           name={track()?.name ?? '专辑封面'}
         />
@@ -1458,13 +1634,28 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     </ThemeTargetHost>
   );
 
+  const hubEmbedded = (): JSX.Element => {
+    // 隐藏顶栏：无 PageToolbar，仅保留悬浮控件
+    if (hideHeader()) return detailBody();
+    return (
+      <MusicHubPageShell
+        section="nowPlaying"
+        leading={<SettingsToolbarLeading onBack={leaveDetail} />}
+        toolbar={headerActions()}
+        scrollClass="overflow-hidden"
+      >
+        {detailBody()}
+      </MusicHubPageShell>
+    );
+  };
+
   return (
     <Show
       when={
         standalone() &&
         viewerStore.state.musicSection === 'nowPlaying'
       }
-      fallback={detailBody()}
+      fallback={hubEmbedded()}
     >
       <Portal>
         <div class="fixed inset-0 z-110 flex flex-col bg-background">

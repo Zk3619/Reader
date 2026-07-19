@@ -25,7 +25,14 @@ import {
 } from '@/components/shared/AppSelect';
 import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerAppSelectContent } from '@/components/viewer/viewer-app-overlay';
-import { ChevronDownIcon, LinkIcon, MoreIcon, RefreshIcon } from '@/components/shared/icons';
+import {
+  ChevronDownIcon,
+  LayoutIcon,
+  LinkIcon,
+  MoreIcon,
+  RefreshIcon,
+} from '@/components/shared/icons';
+import { MusicSongListLayoutDialog } from '@/components/viewer/audio/music/hub/MusicSongListLayoutDialog';
 import {
   getMusicSongListUi,
   setMusicSongListPaginationPreference,
@@ -52,10 +59,22 @@ import { cn } from '@/lib/utils';
 const TAG_STACK_TRACK_CLASS =
   'flex max-h-32 flex-wrap items-center gap-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain p-1';
 
+/** 徽标堆叠：选中态悬停保持前景色，避免 outline 的 accent 文字把选中态冲掉 */
 const TAG_CHIP_CLASS = (selected: boolean) =>
   cn(
-    'h-auto shrink-0 rounded-lg border border-border/60 bg-background/80 px-2.5 py-1 text-xs font-medium shadow-sm',
-    selected && 'border-primary/50 bg-primary/5 ring-1 ring-primary/30',
+    'h-auto shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm',
+    selected
+      ? 'border-primary/50 bg-primary/5 text-foreground ring-1 ring-primary/30 hover:bg-primary/10 hover:text-foreground'
+      : 'border-border/60 bg-background/80 hover:bg-accent hover:text-accent-foreground',
+  );
+
+/** 分组下拉面板内筛选芯片：选中用 primary，悬停不改文字色 */
+const FILTER_CHIP_CLASS = (selected: boolean) =>
+  cn(
+    'inline-flex rounded-md px-2.5 py-1.5 text-xs transition-colors',
+    selected
+      ? 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+      : 'bg-muted/60 hover:bg-accent hover:text-accent-foreground',
   );
 
 function MenuRadioIndicator(props: { selected: boolean }) {
@@ -218,11 +237,7 @@ function HubSongListTagGroupedSelect() {
           <div class="space-y-2">
             <button
               type="button"
-              class={cn(
-                'inline-flex rounded-md bg-muted/60 px-2.5 py-1.5 text-xs transition-colors',
-                'hover:bg-accent hover:text-accent-foreground',
-                state().tagId === null && 'bg-primary text-primary-foreground hover:bg-primary/90',
-              )}
+              class={FILTER_CHIP_CLASS(state().tagId === null)}
               onClick={() => selectTag(null)}
             >
               全部
@@ -236,12 +251,7 @@ function HubSongListTagGroupedSelect() {
                       {(tag) => (
                         <button
                           type="button"
-                          class={cn(
-                            'inline-flex rounded-md bg-muted/60 px-2.5 py-1.5 text-xs transition-colors',
-                            'hover:bg-accent hover:text-accent-foreground',
-                            state().tagId === tag.id &&
-                              'bg-primary text-primary-foreground hover:bg-primary/90',
-                          )}
+                          class={FILTER_CHIP_CLASS(state().tagId === tag.id)}
                           onClick={() => selectTag(tag.id)}
                         >
                           {tag.name}
@@ -302,6 +312,7 @@ export function MusicSongListPaneToolbar(props: {
   const state = getSongListState;
   const ui = getMusicSongListUi;
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
+  const [layoutDialogOpen, setLayoutDialogOpen] = createSignal(false);
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -452,8 +463,15 @@ export function MusicSongListPaneToolbar(props: {
             <MenuRadioIndicator selected={ui().paginationPreference === 'pagination'} />
             <span>分页加载</span>
           </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
+          <AppDropdownMenuItem onSelect={() => setLayoutDialogOpen(true)}>
+            <LayoutIcon class="h-4 w-4" />
+            <span>歌单布局</span>
+          </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>
+
+      <MusicSongListLayoutDialog open={layoutDialogOpen()} onOpenChange={setLayoutDialogOpen} />
     </>
   );
 }

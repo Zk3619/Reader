@@ -3,7 +3,7 @@
  */
 
 import { createSignal, For, Show, type Accessor, type Component } from 'solid-js';
-import { Search, ListMusic, Settings2, Library, Trophy } from 'lucide-solid';
+import { Search, ListMusic, Settings2, Library, Trophy, Download } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { MusicHubDrawerNav } from '@/components/viewer/audio/music/hub/MusicHubDrawerNav';
 import { MusicHubContent } from '@/components/viewer/audio/music/hub/MusicHubContent';
@@ -20,6 +20,7 @@ const BOTTOM_NAV: { id: MusicHubSection; label: string; icon: typeof Search }[] 
   { id: 'songlist', label: '歌单', icon: Library },
   { id: 'leaderboard', label: '榜', icon: Trophy },
   { id: 'list', label: '列表', icon: ListMusic },
+  { id: 'download', label: '下载', icon: Download },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

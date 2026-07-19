@@ -6,6 +6,7 @@ import { createSignal, For, Show, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import {
   searchOnline,
   listSearchSources,
@@ -52,7 +53,7 @@ export const AudioSearchPanel: Component<AudioSearchPanelProps> = (props) => {
       setSearched(true);
       showAppToast({
         title: '搜索失败',
-        description: e instanceof Error ? e.message : '请稍后重试',
+        description: toUserFacingMusicError(e, '请稍后重试'),
         variant: 'destructive',
       });
     } finally {

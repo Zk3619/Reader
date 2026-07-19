@@ -6,8 +6,9 @@ import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types
 import { weapiPost } from '@/lib/media/audio/platform/api/weapi-crypto';
 import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import { zzcSign } from '@/lib/media/audio/platform/api/tx-sign';
-import { safeCall } from '@/lib/media/audio/music-sdk/fallback';
+import { firstSuccess, safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { md5Hex } from '@/lib/media/audio/sync/sync-crypto';
+import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
 
 async function txSignedRequest<T>(payload: Record<string, unknown>): Promise<T | null> {
   const bodyText = JSON.stringify(payload);
@@ -136,85 +137,275 @@ function comment(
   };
 }
 
-async function wyComments(
-  track: AudioTrack,
-  page = 1,
-  sort: CommentSort = 'latest',
-): Promise<CommentPageResult> {
-  const id = String(track.meta.songId ?? '');
-  if (!id) return { comments: [], page, hasMore: false };
+/** 对齐 lx wy/comment.js cursorTools：最新评论分页依赖 cursor */
+const wyCommentCursor = {
+  cache: {} as Record<
+    string,
+    {
+      page?: number;
+      cursor?: number;
+      prevCursor?: number;
+      offset?: number;
+      orderType?: number;
+    }
+  >,
+  getCursor(id: string, page: number, limit: number) {
+    let cacheData = this.cache[id];
+    if (!cacheData) cacheData = this.cache[id] = {};
+    let orderType: number | undefined;
+    let cursor: number | undefined;
+    let offset: number | undefined;
+    if (page === 1) {
+      cacheData.page = 1;
+      cursor = cacheData.cursor = cacheData.prevCursor = Date.now();
+      orderType = 1;
+      offset = 0;
+    } else if (cacheData.page) {
+      cursor = cacheData.cursor;
+      if (page > cacheData.page) {
+        orderType = 1;
+        offset = (page - cacheData.page - 1) * limit;
+      } else if (page < cacheData.page) {
+        orderType = 0;
+        offset = (cacheData.page - page - 1) * limit;
+      } else {
+        cursor = cacheData.cursor = cacheData.prevCursor;
+        offset = cacheData.offset;
+        orderType = cacheData.orderType;
+      }
+    }
+    return { orderType, cursor, offset };
+  },
+  setCursor(id: string, cursor: number, orderType: number | undefined, offset: number | undefined, page: number) {
+    let cacheData = this.cache[id];
+    if (!cacheData) cacheData = this.cache[id] = {};
+    cacheData.prevCursor = cacheData.cursor;
+    cacheData.cursor = cursor;
+    cacheData.orderType = orderType;
+    cacheData.offset = offset;
+    cacheData.page = page;
+  },
+};
 
-  type WyRaw = {
-    commentId?: number;
+const WY_COMMENT_COOKIE = 'MUSIC_U=';
+const WY_COMMENT_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36';
+
+type WyRaw = {
+  commentId?: number;
+  content?: string;
+  time?: number;
+  likedCount?: number;
+  ipLocation?: { location?: string };
+  user?: { nickname?: string; avatarUrl?: string; userId?: number };
+  beReplied?: Array<{
+    beRepliedCommentId?: number;
     content?: string;
-    time?: number;
-    likedCount?: number;
     ipLocation?: { location?: string };
     user?: { nickname?: string; avatarUrl?: string; userId?: number };
-    beReplied?: Array<{
-      beRepliedCommentId?: number;
-      content?: string;
-      ipLocation?: { location?: string };
-      user?: { nickname?: string; avatarUrl?: string; userId?: number };
-    }>;
+  }>;
+};
+
+async function resolveWyCommentCookies(): Promise<string> {
+  const auth = await loadAuthSession('netease');
+  if (auth?.cookies?.trim()) return auth.cookies;
+  return WY_COMMENT_COOKIE;
+}
+
+function mapWyComments(rawList: WyRaw[]): MusicComment[] {
+  return rawList.map((item) => {
+    const data = comment({
+      id: String(item.commentId ?? ''),
+      content: item.content ? applyWyEmoji(item.content) : '',
+      time: item.time ? formatCommentTime(item.time) : undefined,
+      location: item.ipLocation?.location,
+      user: item.user?.nickname ?? '匿名',
+      avatar: item.user?.avatarUrl ?? null,
+      likedCount: item.likedCount ?? null,
+    });
+    const replyData = item.beReplied?.[0];
+    if (!replyData) return data;
+    // 对齐 lx：被回复内容作父节点，当前评论嵌套在 reply
+    return comment({
+      id: String(item.commentId ?? ''),
+      content: replyData.content ? applyWyEmoji(replyData.content) : '',
+      time: undefined,
+      location: replyData.ipLocation?.location,
+      user: replyData.user?.nickname ?? '匿名',
+      avatar: replyData.user?.avatarUrl ?? null,
+      likedCount: null,
+      reply: [data],
+    });
+  });
+}
+
+function wyCommentHeaders(cookies: string): Record<string, string> {
+  return {
+    'User-Agent': WY_COMMENT_UA,
+    Origin: 'https://music.163.com',
+    Referer: 'https://music.163.com/',
+    Cookie: cookies,
   };
+}
 
-  const mapWy = (rawList: WyRaw[]): MusicComment[] =>
-    rawList.map((item) => {
-      const data = comment({
-        id: String(item.commentId ?? ''),
-        content: item.content ? applyWyEmoji(item.content) : '',
-        time: item.time ? formatCommentTime(item.time) : undefined,
-        location: item.ipLocation?.location,
-        user: item.user?.nickname ?? '匿名',
-        avatar: item.user?.avatarUrl ?? null,
-        likedCount: item.likedCount ?? null,
-      });
-      const replyData = item.beReplied?.[0];
-      if (!replyData) return data;
-      // 对齐 lx：被回复内容作父节点，当前评论嵌套在 reply
-      return comment({
-        id: String(item.commentId ?? ''),
-        content: replyData.content ? applyWyEmoji(replyData.content) : '',
-        time: undefined,
-        location: replyData.ipLocation?.location,
-        user: replyData.user?.nickname ?? '匿名',
-        avatar: replyData.user?.avatarUrl ?? null,
-        likedCount: null,
-        reply: [data],
-      });
-    });
-
-  if (sort === 'hot') {
-    const body = await weapiPost<{
-      hotComments?: WyRaw[];
-      hasMore?: boolean;
-      total?: number;
-    }>(`v1/resource/hotcomments/R_SO_4_${id}`, {
-      rid: `R_SO_4_${id}`,
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-      beforeTime: 0,
-    });
-    const comments = mapWy(body.hotComments ?? []);
-    const total = body.total ?? comments.length;
-    return {
-      comments,
-      page,
-      hasMore: body.hasMore ?? page * PAGE_SIZE < total,
-    };
-  }
+/** 对齐 lx getHotComment（weapi） */
+async function wyHotCommentsWeapi(
+  rid: string,
+  page: number,
+  cookies: string,
+): Promise<CommentPageResult | null> {
   const body = await weapiPost<{
-    comments?: WyRaw[];
+    code?: number;
+    hotComments?: WyRaw[];
+    hasMore?: boolean;
     total?: number;
-  }>('comment/music/get', { rid: id, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE });
-  const comments = mapWy(body.comments ?? []);
+  }>(
+    `v1/resource/hotcomments/${rid}`,
+    {
+      rid,
+      limit: PAGE_SIZE,
+      offset: PAGE_SIZE * (page - 1),
+      beforeTime: Date.now().toString(),
+    },
+    cookies,
+    { userAgent: WY_COMMENT_UA },
+  );
+  if (body.code != null && body.code !== 200) return null;
+  const comments = mapWyComments(body.hotComments ?? []);
   const total = body.total ?? comments.length;
+  return {
+    comments,
+    page,
+    hasMore: body.hasMore ?? page * PAGE_SIZE < total,
+  };
+}
+
+/** weapi 被掐时空响应：同平台降级到 /api/v1（非跨源） */
+async function wyHotCommentsApi(
+  rid: string,
+  page: number,
+  cookies: string,
+): Promise<CommentPageResult | null> {
+  const offset = PAGE_SIZE * (page - 1);
+  const body = await onlineFetchJson<{
+    code?: number;
+    hotComments?: WyRaw[];
+    hasMore?: boolean;
+    total?: number;
+  }>(
+    `https://music.163.com/api/v1/resource/hotcomments/${rid}?limit=${PAGE_SIZE}&offset=${offset}`,
+    { headers: wyCommentHeaders(cookies) },
+  );
+  if (body.code != null && body.code !== 200) return null;
+  const comments = mapWyComments(body.hotComments ?? []);
+  const total = body.total ?? comments.length;
+  return {
+    comments,
+    page,
+    hasMore: body.hasMore ?? page * PAGE_SIZE < total,
+  };
+}
+
+/** 对齐 lx getComment（weapi + cursor） */
+async function wyLatestCommentsWeapi(
+  songmid: string,
+  rid: string,
+  page: number,
+  cookies: string,
+): Promise<CommentPageResult | null> {
+  const cursorInfo = wyCommentCursor.getCursor(songmid, page, PAGE_SIZE);
+  const body = await weapiPost<{
+    code?: number;
+    data?: {
+      comments?: WyRaw[];
+      totalCount?: number;
+      cursor?: number;
+    };
+  }>(
+    'comment/resource/comments/get',
+    {
+      cursor: cursorInfo.cursor,
+      offset: cursorInfo.offset,
+      orderType: cursorInfo.orderType,
+      pageNo: page,
+      pageSize: PAGE_SIZE,
+      rid,
+      threadId: rid,
+    },
+    cookies,
+    { userAgent: WY_COMMENT_UA },
+  );
+  if (body.code != null && body.code !== 200) return null;
+  if (body.data?.cursor != null) {
+    wyCommentCursor.setCursor(
+      songmid,
+      body.data.cursor,
+      cursorInfo.orderType,
+      cursorInfo.offset,
+      page,
+    );
+  }
+  const comments = mapWyComments(body.data?.comments ?? []);
+  const total = body.data?.totalCount ?? comments.length;
   return {
     comments,
     page,
     hasMore: page * PAGE_SIZE < total,
   };
+}
+
+/** weapi 被掐时空响应：同平台降级到 /api/v1（非跨源） */
+async function wyLatestCommentsApi(
+  rid: string,
+  page: number,
+  cookies: string,
+): Promise<CommentPageResult | null> {
+  const offset = PAGE_SIZE * (page - 1);
+  const body = await onlineFetchJson<{
+    code?: number;
+    comments?: WyRaw[];
+    more?: boolean;
+    total?: number;
+  }>(
+    `https://music.163.com/api/v1/resource/comments/${rid}?limit=${PAGE_SIZE}&offset=${offset}`,
+    { headers: wyCommentHeaders(cookies) },
+  );
+  if (body.code != null && body.code !== 200) return null;
+  const comments = mapWyComments(body.comments ?? []);
+  const total = body.total ?? comments.length;
+  return {
+    comments,
+    page,
+    hasMore: body.more ?? page * PAGE_SIZE < total,
+  };
+}
+
+async function wyComments(
+  track: AudioTrack,
+  page = 1,
+  sort: CommentSort = 'latest',
+): Promise<CommentPageResult> {
+  const songmid = String(track.meta.songId ?? track.meta.songmid ?? '');
+  if (!songmid) return { comments: [], page, hasMore: false };
+  const rid = `R_SO_4_${songmid}`;
+  const cookies = await resolveWyCommentCookies();
+
+  // 仅网易云站内降级：weapi（对齐 lx）→ /api/v1；不跨酷我等其它源
+  if (sort === 'hot') {
+    const result = await firstSuccess([
+      () => wyHotCommentsWeapi(rid, page, cookies),
+      () => wyHotCommentsApi(rid, page, cookies),
+    ]);
+    if (!result) throw new Error('获取热门评论失败');
+    return result;
+  }
+
+  const result = await firstSuccess([
+    () => wyLatestCommentsWeapi(songmid, rid, page, cookies),
+    () => wyLatestCommentsApi(rid, page, cookies),
+  ]);
+  if (!result) throw new Error('获取评论失败');
+  return result;
 }
 
 async function kwComments(

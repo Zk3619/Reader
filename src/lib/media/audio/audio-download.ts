@@ -1,5 +1,5 @@
 /**
- * 音乐下载队列管理
+ * 音乐下载队列 — 对齐 LX：waiting/run/pause/error/completed、字节进度、暂停续传、磁盘同名跳过、manual 缓存
  */
 
 import { getDatabase } from '@/lib/database/database-core';
@@ -9,10 +9,11 @@ import { cacheMusicTrackAudio } from '@/lib/media/audio/audio-disk-cache';
 import { resolveTrackPlaybackUrls } from '@/lib/media/audio/online/online-resolver';
 import { getPlayQuality } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
-import { request } from '@/lib/http';
+import { request, isAbortError } from '@/lib/http';
 import { isTauri } from '@/lib/platform/detect';
 import { resolveOnlineLyricFull } from '@/lib/media/audio/online/source-router';
 import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
+import { embedDownloadAudioTags } from '@/lib/media/audio/music-download-tags';
 
 function maxConcurrent(): number {
   return getMusicSettings().downloadConcurrent || 2;
@@ -25,13 +26,12 @@ function downloadQuality(): MusicQuality {
 export function formatDownloadFileName(track: AudioTrack, quality = downloadQuality()): string {
   const tpl = getMusicSettings().downloadFileNameTemplate ?? '{artist}-{name}';
   const safe = (s: string) => s.replace(/[<>:"/\\|?*]/g, '_').trim();
-  const rendered =
-    tpl
-      .replace(/\{artist\}/g, safe(track.artist))
-      .replace(/\{name\}/g, safe(track.name))
-      .replace(/\{source\}/g, safe(String(track.source)))
-      .replace(/\{quality\}/g, quality)
-      .replace(/\{album\}/g, safe(String(track.meta.album ?? '')));
+  const rendered = tpl
+    .replace(/\{artist\}/g, safe(track.artist))
+    .replace(/\{name\}/g, safe(track.name))
+    .replace(/\{source\}/g, safe(String(track.source)))
+    .replace(/\{quality\}/g, quality)
+    .replace(/\{album\}/g, safe(String(track.meta.album ?? track.meta.albumName ?? '')));
   return safe(rendered) || track.id;
 }
 
@@ -50,7 +50,41 @@ function extensionFromResponse(url: string, contentType: string | null): string 
   return url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)?.[1]?.toLowerCase() ?? 'mp3';
 }
 
-async function saveDownloadedFile(
+function mimeFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    flac: 'audio/flac',
+    wav: 'audio/wav',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4',
+    ogg: 'audio/ogg',
+  };
+  return map[ext.toLowerCase()] ?? 'audio/mpeg';
+}
+
+async function joinDownloadPath(
+  directory: string,
+  folder: string,
+  fileName: string,
+): Promise<string> {
+  const { join } = await import('@tauri-apps/api/path');
+  const targetDir = folder ? await join(directory, folder) : directory;
+  return join(targetDir, fileName);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  if (!isTauri() || !path) return false;
+  const { exists } = await import('@tauri-apps/plugin-fs');
+  return exists(path);
+}
+
+async function readPartialBytes(path: string): Promise<Uint8Array | null> {
+  if (!(await fileExists(path))) return null;
+  const { readFile } = await import('@tauri-apps/plugin-fs');
+  return readFile(path);
+}
+
+async function writeDownloadedFile(
   directory: string,
   folder: string,
   fileName: string,
@@ -77,14 +111,32 @@ async function saveDownloadedFile(
   return fileName;
 }
 
-export type DownloadTaskStatus = 'pending' | 'downloading' | 'completed' | 'failed';
+async function removeFileQuiet(path: string | undefined): Promise<void> {
+  if (!path || !isTauri()) return;
+  try {
+    const { remove, exists } = await import('@tauri-apps/plugin-fs');
+    if (await exists(path)) await remove(path);
+  } catch {
+    /* ignore */
+  }
+}
+
+export type DownloadTaskStatus = 'waiting' | 'run' | 'pause' | 'error' | 'completed';
 
 export interface AudioDownloadTask {
   id: string;
   trackId: string;
   trackName: string;
   status: DownloadTaskStatus;
+  /** 0–1 派生进度 */
   progress: number;
+  progressDownloaded: number;
+  progressTotal: number;
+  statusText: string;
+  quality: string;
+  ext: string;
+  fileName: string;
+  position: number;
   sourceUrl: string;
   localPath?: string;
   error?: string;
@@ -92,6 +144,7 @@ export interface AudioDownloadTask {
   updatedAt: number;
 }
 
+const activeAbortControllers = new Map<string, AbortController>();
 let activeDownloads = 0;
 
 function queuedTaskOptions(sourceUrl: string): {
@@ -120,13 +173,44 @@ function queuedTaskOptions(sourceUrl: string): {
   };
 }
 
+function normalizeStatus(raw: string): DownloadTaskStatus {
+  switch (raw) {
+    case 'waiting':
+    case 'run':
+    case 'pause':
+    case 'error':
+    case 'completed':
+      return raw;
+    case 'pending':
+      return 'waiting';
+    case 'downloading':
+      return 'run';
+    case 'failed':
+      return 'error';
+    default:
+      return 'waiting';
+  }
+}
+
 function rowToTask(row: Record<string, unknown>): AudioDownloadTask {
+  const downloaded = Number(row.progress_downloaded ?? 0);
+  const total = Number(row.progress_total ?? 0);
+  const legacyProgress = Number(row.progress ?? 0);
+  const progress =
+    total > 0 ? Math.min(1, downloaded / total) : Number.isFinite(legacyProgress) ? legacyProgress : 0;
   return {
     id: String(row.id),
     trackId: String(row.track_id),
     trackName: String(row.track_name ?? ''),
-    status: String(row.status) as DownloadTaskStatus,
-    progress: Number(row.progress ?? 0),
+    status: normalizeStatus(String(row.status ?? 'waiting')),
+    progress,
+    progressDownloaded: downloaded,
+    progressTotal: total,
+    statusText: String(row.status_text ?? ''),
+    quality: String(row.quality ?? ''),
+    ext: String(row.ext ?? 'mp3'),
+    fileName: String(row.file_name ?? ''),
+    position: Number(row.position ?? 0),
     sourceUrl: String(row.source_url ?? ''),
     localPath: row.local_path ? String(row.local_path) : undefined,
     error: row.error ? String(row.error) : undefined,
@@ -138,9 +222,171 @@ function rowToTask(row: Record<string, unknown>): AudioDownloadTask {
 export async function listDownloadTasks(): Promise<AudioDownloadTask[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM audio_download_tasks ORDER BY created_at DESC',
+    'SELECT * FROM audio_download_tasks ORDER BY position ASC, created_at DESC',
   );
   return rows.map(rowToTask);
+}
+
+type TaskPatch = Partial<{
+  status: DownloadTaskStatus;
+  progress: number;
+  progressDownloaded: number;
+  progressTotal: number;
+  statusText: string;
+  quality: string;
+  ext: string;
+  fileName: string;
+  position: number;
+  sourceUrl: string;
+  localPath: string;
+  error: string | null;
+}>;
+
+async function updateTask(id: string, patch: TaskPatch): Promise<void> {
+  const db = await getDatabase();
+  const fields: string[] = ['updated_at = ?'];
+  const values: unknown[] = [Date.now()];
+  const map: Array<[keyof TaskPatch, string]> = [
+    ['status', 'status'],
+    ['progress', 'progress'],
+    ['progressDownloaded', 'progress_downloaded'],
+    ['progressTotal', 'progress_total'],
+    ['statusText', 'status_text'],
+    ['quality', 'quality'],
+    ['ext', 'ext'],
+    ['fileName', 'file_name'],
+    ['position', 'position'],
+    ['sourceUrl', 'source_url'],
+    ['localPath', 'local_path'],
+    ['error', 'error'],
+  ];
+  for (const [key, col] of map) {
+    if (patch[key] !== undefined) {
+      fields.push(`${col} = ?`);
+      values.push(patch[key]);
+    }
+  }
+  values.push(id);
+  await db.execute(`UPDATE audio_download_tasks SET ${fields.join(', ')} WHERE id = ?`, values);
+}
+
+async function fetchCoverJpeg(track: AudioTrack): Promise<Uint8Array | null> {
+  const url = typeof track.meta.coverUrl === 'string' ? track.meta.coverUrl : '';
+  if (!url) return null;
+  try {
+    const res = await request(url, {
+      timeout: 15_000,
+      ignorePageNavigationAbort: true,
+      useBackendHttp: true,
+    });
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.length < 32) return null;
+    const cacheKey = `track:${track.id}`;
+    void import('@/lib/media/audio/music-cover-disk-cache')
+      .then(({ writeMusicCoverToDisk }) =>
+        writeMusicCoverToDisk(
+          cacheKey,
+          url,
+          buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+          res.headers['content-type'] ?? res.headers['Content-Type'] ?? 'image/jpeg',
+        ),
+      )
+      .catch(() => undefined);
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+async function downloadBytesWithProgress(options: {
+  url: string;
+  signal: AbortSignal;
+  existing: Uint8Array | null;
+  onProgress: (downloaded: number, total: number) => void;
+}): Promise<Uint8Array> {
+  const { url, signal, existing, onProgress } = options;
+  const startAt = existing?.byteLength ?? 0;
+  const headers: Record<string, string> = {};
+  if (startAt > 0) headers.Range = `bytes=${startAt}-`;
+
+  // 优先流式 fetch（可字节进度）；失败再走后端 request
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal,
+      credentials: 'omit',
+    });
+    if (!res.ok && res.status !== 206) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const contentLength = Number(res.headers.get('content-length') ?? 0);
+    const total =
+      res.status === 206 && contentLength > 0
+        ? startAt + contentLength
+        : contentLength > 0
+          ? contentLength
+          : startAt;
+    if (!res.body) {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      const merged =
+        startAt > 0 && res.status === 206 && existing
+          ? (() => {
+              const out = new Uint8Array(startAt + buf.length);
+              out.set(existing, 0);
+              out.set(buf, startAt);
+              return out;
+            })()
+          : buf;
+      onProgress(merged.byteLength, Math.max(total, merged.byteLength));
+      return merged;
+    }
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = existing && res.status === 206 ? [existing] : [];
+    let downloaded = existing && res.status === 206 ? startAt : 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        downloaded += value.length;
+        onProgress(downloaded, Math.max(total, downloaded));
+      }
+    }
+    const out = new Uint8Array(downloaded);
+    let offset = 0;
+    for (const c of chunks) {
+      out.set(c, offset);
+      offset += c.length;
+    }
+    return out;
+  } catch (err) {
+    if (isAbortError(err) || signal.aborted) throw err;
+  }
+
+  const res = await request(url, {
+    headers,
+    signal,
+    timeout: 120_000,
+    ignorePageNavigationAbort: true,
+    useBackendHttp: true,
+    allowNon2xx: true,
+  });
+  if (!res.ok && res.status !== 206) {
+    throw new Error(`下载失败 HTTP ${res.status}`);
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const merged =
+    startAt > 0 && res.status === 206 && existing
+      ? (() => {
+          const out = new Uint8Array(startAt + buf.length);
+          out.set(existing, 0);
+          out.set(buf, startAt);
+          return out;
+        })()
+      : buf;
+  onProgress(merged.byteLength, merged.byteLength);
+  return merged;
 }
 
 export async function enqueueTrackDownload(
@@ -149,7 +395,75 @@ export async function enqueueTrackDownload(
 ): Promise<string> {
   if (!getMusicSettings().downloadEnabled) throw new Error('音乐下载已在设置中禁用');
   const db = await getDatabase();
-  if (getMusicSettings().downloadSkipExisting) {
+  const quality = options?.quality ?? downloadQuality();
+  const settings = getMusicSettings();
+  const fileBase = formatDownloadFileName(track, quality);
+  const playlistFolder = settings.downloadGroupByPlaylist
+    ? String(options?.playlistName || track.meta.playlistName || track.meta.listName || '未分类')
+        .replace(/[<>:"/\\|?*]/g, '_')
+        .trim()
+    : '';
+
+  if (settings.downloadSkipExisting && settings.downloadTargetDirectory.trim() && isTauri()) {
+    // 磁盘同名（常见扩展）跳过
+    for (const ext of ['mp3', 'flac', 'm4a', 'ogg', 'wav', 'aac']) {
+      const path = await joinDownloadPath(
+        settings.downloadTargetDirectory,
+        playlistFolder,
+        `${fileBase}.${ext}`,
+      );
+      if (await fileExists(path)) {
+        const existing = await db.select<{ id: string }>(
+          `SELECT id FROM audio_download_tasks
+           WHERE track_id = ? AND status = 'completed'
+           ORDER BY updated_at DESC LIMIT 1`,
+          [track.id],
+        );
+        if (existing[0]?.id) return existing[0].id;
+        const id = `dl_${track.id}_${Date.now()}`;
+        const now = Date.now();
+        await db.execute(
+          `INSERT INTO audio_download_tasks (
+            id, track_id, track_name, status, progress, source_url, local_path,
+            created_at, updated_at, quality, ext, file_name, progress_downloaded,
+            progress_total, status_text, position
+          ) VALUES (?, ?, ?, 'completed', 1, ?, ?, ?, ?, ?, ?, ?, 0, 0, '已存在，跳过', 0)`,
+          [
+            id,
+            track.id,
+            fileBase,
+            `queue:${encodeURIComponent(
+              JSON.stringify({
+                playlistName: options?.playlistName ?? '',
+                quality,
+              }),
+            )}`,
+            path,
+            now,
+            now,
+            quality,
+            ext,
+            `${fileBase}.${ext}`,
+          ],
+        );
+        // 提升为 manual 缓存（若尚未缓存则后续播放仍可走文件）
+        try {
+          const bytes = await readPartialBytes(path);
+          if (bytes) {
+            await cacheMusicTrackAudio(track.id, path, bytes.buffer.slice(0), mimeFromExt(ext), {
+              tier: 'manual',
+              quality,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+        return id;
+      }
+    }
+  }
+
+  if (settings.downloadSkipExisting) {
     const existing = await db.select<{ id: string }>(
       `SELECT id FROM audio_download_tasks
        WHERE track_id = ? AND status = 'completed'
@@ -158,69 +472,66 @@ export async function enqueueTrackDownload(
     );
     if (existing[0]?.id) return existing[0].id;
   }
+
   const id = `dl_${track.id}_${Date.now()}`;
   const now = Date.now();
+  const posRows = await db.select<{ m: number | null }>(
+    'SELECT MAX(position) as m FROM audio_download_tasks',
+  );
+  const position = (posRows[0]?.m ?? 0) + 1;
   await db.execute(
-    `INSERT INTO audio_download_tasks (id, track_id, track_name, status, progress, source_url, created_at, updated_at)
-     VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)`,
+    `INSERT INTO audio_download_tasks (
+      id, track_id, track_name, status, progress, source_url,
+      created_at, updated_at, quality, ext, file_name, progress_downloaded,
+      progress_total, status_text, position
+    ) VALUES (?, ?, ?, 'waiting', 0, ?, ?, ?, ?, 'mp3', ?, 0, 0, '等待下载', ?)`,
     [
       id,
       track.id,
-      formatDownloadFileName(track, options?.quality),
+      fileBase,
       `queue:${encodeURIComponent(
         JSON.stringify({
           playlistName: options?.playlistName ?? '',
-          quality: options?.quality ?? downloadQuality(),
+          quality,
         }),
       )}`,
       now,
       now,
+      quality,
+      fileBase,
+      position,
     ],
   );
   void processDownloadQueue();
   return id;
 }
 
-async function updateTask(
-  id: string,
-  patch: Partial<Pick<AudioDownloadTask, 'status' | 'progress' | 'sourceUrl' | 'localPath' | 'error'>>,
-): Promise<void> {
-  const db = await getDatabase();
-  const fields: string[] = ['updated_at = ?'];
-  const values: unknown[] = [Date.now()];
-  if (patch.status != null) {
-    fields.push('status = ?');
-    values.push(patch.status);
-  }
-  if (patch.progress != null) {
-    fields.push('progress = ?');
-    values.push(patch.progress);
-  }
-  if (patch.sourceUrl != null) {
-    fields.push('source_url = ?');
-    values.push(patch.sourceUrl);
-  }
-  if (patch.localPath != null) {
-    fields.push('local_path = ?');
-    values.push(patch.localPath);
-  }
-  if (patch.error != null) {
-    fields.push('error = ?');
-    values.push(patch.error);
-  }
-  values.push(id);
-  await db.execute(`UPDATE audio_download_tasks SET ${fields.join(', ')} WHERE id = ?`, values);
-}
-
 async function runTask(task: AudioDownloadTask): Promise<void> {
+  if (activeAbortControllers.has(task.id)) return;
+  const controller = new AbortController();
+  activeAbortControllers.set(task.id, controller);
   activeDownloads++;
+  const partialPath =
+    task.localPath && task.localPath.endsWith('.part')
+      ? task.localPath
+      : task.localPath
+        ? `${task.localPath}.part`
+        : undefined;
+
   try {
-    await updateTask(task.id, { status: 'downloading', progress: 0.1 });
+    await updateTask(task.id, {
+      status: 'run',
+      statusText: '正在下载',
+      error: null,
+      progress: task.progress || 0,
+    });
     const { getAudioTrack } = await import('@/lib/database/audio-library');
     const track = await getAudioTrack(task.trackId);
     if (!track) throw new Error('曲目不存在');
     const queuedOptions = queuedTaskOptions(task.sourceUrl);
     const quality = queuedOptions.quality ?? downloadQuality();
+    await updateTask(task.id, { quality, statusText: '正在获取歌曲链接' });
+
     const { urls } = await resolveTrackPlaybackUrls(track, {
       skipCache: true,
       quality,
@@ -228,66 +539,154 @@ async function runTask(task: AudioDownloadTask): Promise<void> {
     const candidates =
       getMusicSettings().downloadSourceStrategy === 'fallback' ? urls : urls.slice(0, 1);
     if (!candidates.length) throw new Error('无法解析下载地址');
-    let res: Awaited<ReturnType<typeof request>> | undefined;
-    let url = '';
-    for (const candidate of candidates) {
-      const response = await request(candidate);
-      if (response.ok) {
-        res = response;
-        url = candidate;
-        break;
-      }
-    }
-    if (!res) throw new Error('所有下载源均失败');
-    await updateTask(task.id, { sourceUrl: url, progress: 0.3 });
-    const buf = await res.arrayBuffer();
-    await updateTask(task.id, { progress: 0.8 });
-    const cacheId = await cacheMusicTrackAudio(track.id, url, buf);
+
     const settings = getMusicSettings();
-    const extension = extensionFromResponse(
-      url,
-      res.headers['content-type'] ?? res.headers['Content-Type'] ?? null,
-    );
-    const fileBase = formatDownloadFileName(track, quality);
-    const queuedPlaylistName = queuedOptions.playlistName;
     const playlistFolder = settings.downloadGroupByPlaylist
-      ? String(queuedPlaylistName || track.meta.playlistName || track.meta.listName || '未分类')
+      ? String(queuedOptions.playlistName || track.meta.playlistName || track.meta.listName || '未分类')
           .replace(/[<>:"/\\|?*]/g, '_')
           .trim()
       : '';
-    const localPath = await saveDownloadedFile(
-      settings.downloadTargetDirectory,
-      playlistFolder,
-      `${fileBase}.${extension}`,
-      new Uint8Array(buf),
-    );
-    if (settings.downloadSaveLyricFile) {
-      const lyric = await resolveOnlineLyricFull(track);
-      const rawText = lyric?.lyric ?? lyric?.lxlyric ?? '';
-      const text = await convertChineseText(
-        rawText,
-        settings.lyricChineseConversion,
-      );
-      if (text) {
-        await saveDownloadedFile(
-          settings.downloadTargetDirectory,
-          playlistFolder,
-          `${fileBase}.lrc`,
-          new TextEncoder().encode(text),
-        );
+    const fileBase = formatDownloadFileName(track, quality);
+
+    let lastError: unknown;
+    let audioBytes: Uint8Array | null = null;
+    let usedUrl = '';
+    let ext = task.ext || 'mp3';
+
+    for (const candidate of candidates) {
+      if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      try {
+        const partName = `${fileBase}.${extensionFromResponse(candidate, null)}.part`;
+        let existing: Uint8Array | null = null;
+        let writePartPath = partialPath;
+        if (isTauri() && settings.downloadTargetDirectory.trim()) {
+          writePartPath = await joinDownloadPath(
+            settings.downloadTargetDirectory,
+            playlistFolder,
+            partName,
+          );
+          existing = await readPartialBytes(writePartPath);
+          await updateTask(task.id, { localPath: writePartPath });
+        }
+
+        const bytes = await downloadBytesWithProgress({
+          url: candidate,
+          signal: controller.signal,
+          existing,
+          onProgress: (downloaded, total) => {
+            void updateTask(task.id, {
+              progressDownloaded: downloaded,
+              progressTotal: total,
+              progress: total > 0 ? downloaded / total : 0,
+              statusText: '正在下载',
+            });
+          },
+        });
+        // 探测扩展：用 HEAD 式 content 不可用时按 URL
+        ext = extensionFromResponse(candidate, null);
+        audioBytes = bytes;
+        usedUrl = candidate;
+        break;
+      } catch (err) {
+        if (isAbortError(err) || controller.signal.aborted) throw err;
+        lastError = err;
       }
     }
+    if (!audioBytes) {
+      throw lastError instanceof Error ? lastError : new Error('所有下载源均失败');
+    }
+
+    await updateTask(task.id, { sourceUrl: usedUrl, statusText: '正在写入文件', ext });
+
+    let lyricText = '';
+    if (settings.downloadSaveLyricFile || settings.downloadEmbedLyric) {
+      try {
+        const lyric = await resolveOnlineLyricFull(track);
+        const rawText = lyric?.lyric ?? lyric?.lxlyric ?? '';
+        lyricText = await convertChineseText(rawText, settings.lyricChineseConversion);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    let coverJpeg: Uint8Array | null = null;
+    if (settings.downloadEmbedCover) {
+      coverJpeg = await fetchCoverJpeg(track);
+    }
+
+    const tagged = embedDownloadAudioTags(audioBytes, ext, {
+      title: track.name,
+      artist: track.artist,
+      album: String(track.meta.album ?? track.meta.albumName ?? ''),
+      lyric: lyricText,
+      coverJpeg,
+      embedLyric: settings.downloadEmbedLyric,
+      embedCover: settings.downloadEmbedCover,
+    });
+
+    const finalName = `${fileBase}.${ext}`;
+    const localPath = await writeDownloadedFile(
+      settings.downloadTargetDirectory,
+      playlistFolder,
+      finalName,
+      tagged,
+    );
+
+    // 清理半成品
+    if (partialPath && partialPath !== localPath) await removeFileQuiet(partialPath);
+    if (isTauri() && settings.downloadTargetDirectory.trim()) {
+      const maybePart = await joinDownloadPath(
+        settings.downloadTargetDirectory,
+        playlistFolder,
+        `${fileBase}.${ext}.part`,
+      );
+      if (maybePart !== localPath) await removeFileQuiet(maybePart);
+    }
+
+    if (settings.downloadSaveLyricFile && lyricText) {
+      await writeDownloadedFile(
+        settings.downloadTargetDirectory,
+        playlistFolder,
+        `${fileBase}.lrc`,
+        new TextEncoder().encode(lyricText),
+      );
+    }
+
+    const cacheBuf = tagged.buffer.slice(
+      tagged.byteOffset,
+      tagged.byteOffset + tagged.byteLength,
+    ) as ArrayBuffer;
+    await cacheMusicTrackAudio(track.id, usedUrl || localPath, cacheBuf, mimeFromExt(ext), {
+      tier: 'manual',
+      quality,
+    });
+
     await updateTask(task.id, {
       status: 'completed',
       progress: 1,
-      localPath: localPath || cacheId,
+      progressDownloaded: tagged.byteLength,
+      progressTotal: tagged.byteLength,
+      localPath,
+      fileName: finalName,
+      ext,
+      statusText: '下载完成',
+      error: null,
     });
   } catch (e) {
-    await updateTask(task.id, {
-      status: 'failed',
-      error: e instanceof Error ? e.message : String(e),
-    });
+    if (isAbortError(e) || activeAbortControllers.get(task.id)?.signal.aborted) {
+      await updateTask(task.id, {
+        status: 'pause',
+        statusText: '已暂停',
+      });
+    } else {
+      await updateTask(task.id, {
+        status: 'error',
+        statusText: '任务出错',
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   } finally {
+    activeAbortControllers.delete(task.id);
     activeDownloads--;
     void processDownloadQueue();
   }
@@ -299,7 +698,10 @@ export async function processDownloadQueue(): Promise<void> {
   if (activeDownloads >= limit) return;
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    "SELECT * FROM audio_download_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?",
+    `SELECT * FROM audio_download_tasks
+     WHERE status = 'waiting'
+     ORDER BY position ASC, created_at ASC
+     LIMIT ?`,
     [limit - activeDownloads],
   );
   for (const row of rows) {
@@ -307,9 +709,82 @@ export async function processDownloadQueue(): Promise<void> {
   }
 }
 
-export async function deleteDownloadTask(id: string): Promise<void> {
+export async function pauseDownloadTask(id: string): Promise<void> {
+  const controller = activeAbortControllers.get(id);
+  if (controller) {
+    controller.abort();
+  }
+  await updateTask(id, { status: 'pause', statusText: '已暂停' });
+}
+
+export async function resumeDownloadTask(id: string): Promise<void> {
+  await updateTask(id, {
+    status: 'waiting',
+    statusText: '等待下载',
+    error: null,
+  });
+  void processDownloadQueue();
+}
+
+export async function retryDownloadTask(id: string): Promise<void> {
+  await updateTask(id, {
+    status: 'waiting',
+    statusText: '等待下载',
+    error: null,
+    progress: 0,
+    progressDownloaded: 0,
+  });
+  void processDownloadQueue();
+}
+
+/**
+ * 移除任务。未完成可删半成品；已完成默认不删用户目录文件，且保留 manual 缓存。
+ */
+export async function deleteDownloadTask(
+  id: string,
+  options?: { deleteFile?: boolean },
+): Promise<void> {
   const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM audio_download_tasks WHERE id = ? LIMIT 1',
+    [id],
+  );
+  const task = rows[0] ? rowToTask(rows[0]) : null;
+  const controller = activeAbortControllers.get(id);
+  if (controller) controller.abort();
+  activeAbortControllers.delete(id);
+
+  if (task) {
+    const unfinished = task.status !== 'completed';
+    if (unfinished && task.localPath) {
+      await removeFileQuiet(task.localPath);
+      if (!task.localPath.endsWith('.part')) await removeFileQuiet(`${task.localPath}.part`);
+    }
+    if (options?.deleteFile && task.status === 'completed' && task.localPath) {
+      await removeFileQuiet(task.localPath);
+    }
+  }
   await db.execute('DELETE FROM audio_download_tasks WHERE id = ?', [id]);
+}
+
+export async function openDownloadTaskFolder(task: AudioDownloadTask): Promise<void> {
+  if (!isTauri()) return;
+  const settings = getMusicSettings();
+  const target =
+    task.localPath && !task.localPath.endsWith('.part')
+      ? task.localPath
+      : settings.downloadTargetDirectory;
+  if (!target) throw new Error('未设置下载目录');
+  try {
+    const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+    await revealItemInDir(target);
+  } catch {
+    const { openPath } = await import('@tauri-apps/plugin-opener');
+    const dir = task.localPath?.includes('/') || task.localPath?.includes('\\')
+      ? task.localPath.replace(/[/\\][^/\\]+$/, '')
+      : settings.downloadTargetDirectory;
+    await openPath(dir || settings.downloadTargetDirectory);
+  }
 }
 
 export async function isTrackDownloaded(trackId: string): Promise<boolean> {
@@ -319,4 +794,19 @@ export async function isTrackDownloaded(trackId: string): Promise<boolean> {
     [trackId],
   );
   return (rows[0]?.c ?? 0) > 0;
+}
+
+/** 已完成任务的本地路径（存在才返回） */
+export async function getCompletedDownloadPath(trackId: string): Promise<string | null> {
+  const db = await getDatabase();
+  const rows = await db.select<{ local_path: string | null }>(
+    `SELECT local_path FROM audio_download_tasks
+     WHERE track_id = ? AND status = 'completed' AND local_path IS NOT NULL AND local_path != ''
+     ORDER BY updated_at DESC LIMIT 1`,
+    [trackId],
+  );
+  const path = rows[0]?.local_path;
+  if (!path || path.endsWith('.part')) return null;
+  if (isTauri() && !(await fileExists(path))) return null;
+  return path;
 }

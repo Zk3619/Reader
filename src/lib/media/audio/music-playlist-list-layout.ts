@@ -57,8 +57,8 @@ export function lxPlaylistCardHeightPx(cardWidth: number): number {
 }
 
 export function estimateLxDesktopPlaylistRowHeightPx(metrics: VirtualGridRowLayoutMetrics): number {
-  const cardWidth = lxPlaylistCardWidthPx(metrics.colWidth);
-  return lxPlaylistCardHeightPx(cardWidth) + LX_PLAYLIST_ROW_HOVER_PAD_PX;
+  // 固定列数时列宽即卡宽（卡片 w-full 拉伸）；不再按 240–360 钳制
+  return lxPlaylistCardHeightPx(metrics.colWidth) + LX_PLAYLIST_ROW_HOVER_PAD_PX;
 }
 
 export function estimateLxMobilePlaylistRowHeightPx(metrics: VirtualGridRowLayoutMetrics): number {

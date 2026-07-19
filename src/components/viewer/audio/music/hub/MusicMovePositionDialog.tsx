@@ -2,6 +2,7 @@ import { createEffect, createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -42,7 +43,7 @@ export const MusicMovePositionDialog: Component<{
     } catch (error) {
       showAppToast({
         title: '调整位置失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

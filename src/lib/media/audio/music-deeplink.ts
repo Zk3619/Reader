@@ -6,6 +6,7 @@ import { openListFromUrlInput } from '@/stores/music-hub/songList';
 import { navigateToMusicHub } from '@/stores/shell-tabs';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import type { MusicSdkSource } from '@/lib/media/audio/music-sdk';
 
 export function isMusicDeepLink(uri: string): boolean {
@@ -49,7 +50,7 @@ export async function handleMusicDeepLink(uri: string): Promise<boolean> {
   } catch (err) {
     showAppToast({
       title: '音乐链接解析失败',
-      description: err instanceof Error ? err.message : String(err),
+      description: toUserFacingMusicError(err, '音乐链接解析失败'),
       variant: 'destructive',
     });
     return true;

@@ -1,6 +1,7 @@
 import { createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { listAudioTracks, upsertAudioTracks } from '@/lib/database/audio-library';
 import { matchLocalTrackOnline } from '@/lib/media/audio/library/local-online-match';
 import { MusicSettingsBackup } from '@/components/viewer/audio/music/settings/MusicSettingsBackup';
@@ -36,7 +37,7 @@ export const MusicSettingsDataMaintenance: Component = () => {
     } catch (error) {
       showAppToast({
         title: '本地曲在线匹配失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

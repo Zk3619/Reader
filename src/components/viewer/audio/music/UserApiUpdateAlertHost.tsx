@@ -28,13 +28,15 @@ import { Label } from '@/components/ui/label';
 import {
   clearUserApiUpdateAlert,
   subscribeUserApiUpdateAlert,
+  subscribeUserApiUpdateCheckFailed,
   type UserApiUpdateAlert,
 } from '@/lib/media/audio/online/lx-user-api-shim';
 import { applyUserApiUpdateDialogChoices } from '@/lib/media/audio/online/user-api-update-prefs';
-import { importUserApiScript } from '@/lib/media/audio/online/user-api-engine';
+import { importUserApiScript, listUserApiScripts } from '@/lib/media/audio/online/user-api-engine';
 import { openUrlInBrowser } from '@/lib/platform/open-url';
 import { request } from '@/lib/http';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 import { clearFocusBeforeModal } from '@/utils/accessibility';
 
@@ -134,18 +136,35 @@ export const UserApiUpdateAlertHost: Component = () => {
       const text = await res.text();
       if (!text.trim()) throw new Error('脚本内容为空');
       const nameGuess = url.split('/').pop()?.split('?')[0] || 'update.js';
+      const replaceId =
+        (alert.scriptId && listUserApiScripts().some((s) => s.id === alert.scriptId)
+          ? alert.scriptId
+          : undefined) ||
+        listUserApiScripts().find((s) => s.name.trim() === alert.scriptName.trim())?.id;
       const result = await importUserApiScript({
         script: text,
         fileName: nameGuess,
         fallbackName: alert.scriptName,
+        replaceId,
       });
       // 失败时 importUserApiScript 已弹窗并移出列表
       if (!result.ok) return;
-      showAppToast({ title: `已升级「${result.name}」`, variant: 'success' });
+      if (result.skipped) {
+        showAppToast({
+          title: '无需升级',
+          description: result.error || '脚本文本与本地相同',
+          variant: 'warning',
+        });
+        return;
+      }
+      showAppToast({
+        title: result.updated ? `已升级「${result.name}」` : `已导入「${result.name}」`,
+        variant: 'success',
+      });
     } catch (err) {
       showAppToast({
         title: '从更新地址升级失败',
-        description: err instanceof Error ? err.message : String(err),
+        description: toUserFacingMusicError(err),
         variant: 'destructive',
       });
     } finally {
@@ -159,7 +178,17 @@ export const UserApiUpdateAlertHost: Component = () => {
 
   onMount(() => {
     const unsub = subscribeUserApiUpdateAlert(pushBatch);
-    onCleanup(unsub);
+    const unsubCheckFail = subscribeUserApiUpdateCheckFailed((info) => {
+      showAppToast({
+        title: `「${info.scriptName}」检查更新失败`,
+        description: toUserFacingMusicError(info.error, '无法连接更新服务器，已跳过更新检查'),
+        variant: 'warning',
+      });
+    });
+    onCleanup(() => {
+      unsub();
+      unsubCheckFail();
+    });
   });
 
   return (

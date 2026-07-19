@@ -12,6 +12,7 @@ import {
 } from '@/lib/media/audio/platform/music-openapi-client';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 
 export interface MusicSettingsOpenApiProps {
   embedded?: boolean;
@@ -51,7 +52,7 @@ export const MusicSettingsOpenApi: Component<MusicSettingsOpenApiProps> = (props
       }
       await refreshStatus();
     } catch (error) {
-      showAppToast({ title: 'OpenAPI 操作失败', description: String(error), variant: 'destructive' });
+      showAppToast({ title: 'OpenAPI 操作失败', description: toUserFacingMusicError(error), variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -105,7 +106,7 @@ export const MusicSettingsOpenApi: Component<MusicSettingsOpenApiProps> = (props
           </label>
           <label class="space-y-1">
             <span class="block text-xs font-medium text-muted-foreground">
-              Reader 扩展 · 自定义绑定地址
+              自定义绑定地址
             </span>
             <AppTextFieldBareInput
               aria-label="OpenAPI 绑定地址"

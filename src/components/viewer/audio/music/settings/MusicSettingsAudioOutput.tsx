@@ -177,11 +177,7 @@ export const MusicSettingsAudioOutput: Component<MusicSettingsAudioOutputProps> 
       </section>
 
       <section class="space-y-3 border-t pt-4">
-        <h2 class="text-base font-semibold">Reader 扩展 · 音效与可视化</h2>
-        <p class="text-xs text-muted-foreground">
-          以下十段均衡器与播放详情频谱是 Reader 高级音频能力，不是 LX Music 2.12.2
-          播放设置原项。
-        </p>
+        <h2 class="text-base font-semibold">音效与可视化</h2>
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">均衡器：</span>
           <MusicAppSelect

@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal, type Component } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -42,7 +43,7 @@ export const MusicTrackSourceDialog: Component<{
     } catch (error) {
       showAppToast({
         title: '歌曲换源失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

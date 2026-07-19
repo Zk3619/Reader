@@ -45,7 +45,6 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
         console.warn('[music] Sync Server 自动启动失败', error),
       );
     }
-    let desktopLyricOpen = false;
     const setCollected = async (requested?: boolean) => {
       const track = hubPlayer.currentTrack();
       if (!track) return;
@@ -56,16 +55,15 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
     };
     const toggleDesktopLyric = async () => {
       if (!isTauri()) return;
-      const { invoke } = await import('@tauri-apps/api/core');
-      desktopLyricOpen = !desktopLyricOpen;
-      await invoke(
-        desktopLyricOpen ? 'open_desktop_lyric_window' : 'close_desktop_lyric_window',
+      const { toggleDesktopLyricEnabled } = await import(
+        '@/lib/media/audio/desktop-lyric-window'
       );
+      await toggleDesktopLyricEnabled();
     };
     const handleAction = (action: string, payload: Record<string, unknown> = {}) => {
       switch (action) {
         case 'play':
-          if (!hubPlayer.player.playing()) hubPlayer.player.togglePlay();
+          void hubPlayer.playOrFetch();
           break;
         case 'pause':
           if (hubPlayer.player.playing()) hubPlayer.player.togglePlay();

@@ -15,6 +15,7 @@ import {
   importMusicSettings,
 } from '@/lib/media/audio/music-settings';
 import { MusicAppSelect } from '@/components/viewer/audio/music/MusicAppSelect';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 
 export interface MusicSettingsBackupProps {
   embedded?: boolean;
@@ -64,7 +65,7 @@ export const MusicSettingsBackup: Component<MusicSettingsBackupProps> = (props) 
         `导入成功：${result.tracks} 首歌曲、${result.playlists} 个列表、${result.storageKeys} 项旁路设置（${result.mode === 'merge' ? '合并' : '覆盖'}）`,
       );
     } catch (error) {
-      setFeedback(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+      setFeedback(`导入失败：${toUserFacingMusicError(error)}`);
     }
   };
 

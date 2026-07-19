@@ -7,7 +7,7 @@ import { Music2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
-import { BookCoverPreviewDialog } from '@/components/books/BookCoverPreviewDialog';
+import { BookCoverPreviewDialog } from '@/components/media/reader/books/BookCoverPreviewDialog';
 import { PlayIcon, PlusIcon } from '@/components/shared/icons';
 import { getSongListState } from '@/stores/music-hub/songList';
 import { playAsTemp } from '@/stores/viewer/media/audio';
@@ -18,6 +18,7 @@ import { MusicHubPageShell } from '@/components/viewer/audio/music/hub/MusicHubP
 import { MusicOnlineTrackList } from '@/components/viewer/audio/music/hub/MusicSearchResultLists';
 import { MusicTrackListSkeleton } from '@/components/viewer/audio/music/hub/MusicHubSkeletons';
 import { cn } from '@/lib/utils';
+import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
 
 export interface MusicSongListDetailProps {
   onBack: () => void;
@@ -25,6 +26,8 @@ export interface MusicSongListDetailProps {
 
 function DetailCover(props: {
   coverUrl?: string;
+  playlistSource?: string;
+  playlistId?: string;
   playCount?: string;
   name: string;
   onPreview: () => void;
@@ -54,12 +57,19 @@ function DetailCover(props: {
           </div>
         }
       >
-        <img
+        <MusicCoverImg
           src={props.coverUrl}
+          playlistSource={props.playlistSource}
+          playlistId={props.playlistId}
           alt={props.name}
           class="h-full w-full object-cover"
           loading="lazy"
           draggable={false}
+          fallback={
+            <div class="flex h-full w-full items-center justify-center text-muted-foreground">
+              <Music2 class="h-8 w-8 opacity-40" />
+            </div>
+          }
         />
       </Show>
       <Show when={props.playCount?.trim()}>
@@ -142,6 +152,8 @@ export const MusicSongListDetail: Component<MusicSongListDetailProps> = (props) 
               <div class="flex shrink-0 gap-3 border-b py-3">
                 <DetailCover
                   coverUrl={d().info.coverUrl}
+                  playlistSource={d().info.source}
+                  playlistId={d().info.id}
                   playCount={d().info.playCount}
                   name={d().info.name}
                   onPreview={() => setCoverPreviewOpen(true)}

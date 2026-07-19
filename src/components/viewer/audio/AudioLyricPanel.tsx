@@ -20,9 +20,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText } from '@/lib/media/audio/lyric-types';
-
-/** 对齐 lx：自动滚动锚点与预览线均在容器高度约 38% 处 */
-const LYRIC_SCROLL_ANCHOR = 0.38;
+import {
+  computeLyricScrollTop,
+  LYRIC_SCROLL_ANCHOR,
+} from '@/lib/media/audio/lyric-scroll';
+import { settingsStore } from '@/stores/settings';
 
 interface LxWord {
   timeMs: number;
@@ -197,6 +199,11 @@ export interface AudioLyricPanelProps {
   /** 字号（rem，默认约 0.875 ≈ 14px @16px 根字号） */
   fontSize?: number;
   zoomActiveLyric?: boolean;
+  /**
+   * 当前行视觉缩放倍率（仅 transform，不改字号/布局，避免放大换行导致滚动错位）。
+   * 默认 1.28；1 表示不放大。
+   */
+  zoomActiveScale?: number;
   onSeek?: (positionSec: number) => void;
   /** 开启后：手动浏览显示时间预览线并可确认跳转（对齐 playDetail.isShowLyricProgressSetting） */
   allowProgressPreview?: boolean;
@@ -247,6 +254,10 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   const [previewTimeSec, setPreviewTimeSec] = createSignal<number | null>(null);
   const [smoothPositionSec, setSmoothPositionSec] = createSignal(props.positionSec);
 
+  const reduceMotion = () => settingsStore.state.app.reduceMotion === true;
+  const followScrollBehavior = (): ScrollBehavior =>
+    reduceMotion() ? 'auto' : 'smooth';
+
   const primaryKind = () => props.lyricTrack ?? 'lyric';
 
   const primaryRaw = createMemo(() => {
@@ -258,20 +269,53 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   /** 开启卡拉 OK 时即启用扫光插值（含无逐字时的均分降级） */
   const useKaraoke = createMemo(() => karaokeMode());
 
-  // timeupdate 约 4Hz，卡拉 OK 需更密采样：播放中用墙钟插值
+  /**
+   * 卡拉 OK 墙钟插值：主窗/桌面歌词的 positionSec 刷新往往落后于墙钟预测，
+   * 若每次都用新 base 重置会出现扫光「倒退」。仅在前进或大跳（seek）时重锚。
+   */
+  let karaokeAnchorSec = props.positionSec;
+  let karaokeAnchorAt = performance.now();
+  let karaokeRaf = 0;
+  const stopKaraokeRaf = () => {
+    if (!karaokeRaf) return;
+    cancelAnimationFrame(karaokeRaf);
+    karaokeRaf = 0;
+  };
+  const startKaraokeRaf = () => {
+    if (karaokeRaf) return;
+    const tick = () => {
+      setSmoothPositionSec(
+        karaokeAnchorSec + (performance.now() - karaokeAnchorAt) / 1000,
+      );
+      karaokeRaf = requestAnimationFrame(tick);
+    };
+    karaokeRaf = requestAnimationFrame(tick);
+  };
+
   createEffect(() => {
     const base = props.positionSec;
-    setSmoothPositionSec(base);
-    if (props.playing !== true || !useKaraoke()) return;
-    const baseAt = performance.now();
-    let raf = 0;
-    const tick = () => {
-      setSmoothPositionSec(base + (performance.now() - baseAt) / 1000);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    onCleanup(() => cancelAnimationFrame(raf));
+    const playing = props.playing === true && useKaraoke();
+    if (!playing) {
+      stopKaraokeRaf();
+      karaokeAnchorSec = base;
+      karaokeAnchorAt = performance.now();
+      setSmoothPositionSec(base);
+      return;
+    }
+
+    const now = performance.now();
+    const predicted = karaokeAnchorSec + (now - karaokeAnchorAt) / 1000;
+    const drift = base - predicted;
+    // 大跳（seek / 换曲）或明显超前：重锚；轻微落后：忽略，继续墙钟前进
+    if (Math.abs(drift) > 0.75 || drift > 0.04) {
+      karaokeAnchorSec = base;
+      karaokeAnchorAt = now;
+      setSmoothPositionSec(base);
+    }
+    startKaraokeRaf();
   });
+
+  onCleanup(stopKaraokeRaf);
 
   const positionMs = createMemo(
     () => (smoothPositionSec() + (props.lyricOffset ?? 0)) * 1000,
@@ -351,48 +395,102 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     props.unplayedColor || 'hsl(var(--muted-foreground) / 0.45)';
   const karaokeVertical = () => props.direction === 'vertical';
 
-  const visibleLines = createMemo(() => {
+  /**
+   * 用行下标（primitive）驱动 For，避免每次新建 {line,index} 对象导致整表重挂载，
+   * 否则 font-size/transform 过渡永远不会播放。
+   */
+  const visibleIndices = createMemo(() => {
     const lines = mergedLines();
     const active = Math.max(0, activeIndex());
     if (props.singleLine) {
       const idx = activeIndex();
-      if (idx < 0 || !lines[idx]) return [] as Array<{ line: MergedLine; originalIndex: number }>;
-      return [{ line: lines[idx]!, originalIndex: idx }];
+      if (idx < 0 || !lines[idx]) return [] as number[];
+      return [idx];
     }
     const maxLines = Math.max(0, Math.floor(props.maxLines ?? 0));
-    if (maxLines > 0 && lines.length > maxLines) {
+    // 减少动画时仍按 maxLines 裁窗；否则渲染全量以便滚动动画跟手
+    if (reduceMotion() && maxLines > 0 && lines.length > maxLines) {
       const start = Math.max(
         0,
         Math.min(lines.length - maxLines, active - Math.floor(maxLines / 2)),
       );
-      return lines
-        .slice(start, start + maxLines)
-        .map((line, index) => ({ line, originalIndex: start + index }));
+      const out: number[] = [];
+      for (let i = 0; i < maxLines && start + i < lines.length; i++) out.push(start + i);
+      return out;
     }
-    return lines.map((line, originalIndex) => ({ line, originalIndex }));
+    return lines.map((_, i) => i);
   });
 
   const useFullScrollLayout = () =>
-    !props.singleLine && !(props.maxLines && props.maxLines > 0);
+    !props.singleLine &&
+    !(reduceMotion() && props.maxLines != null && props.maxLines > 0);
 
-  const scrollActiveIntoView = () => {
-    if (!container || userBrowsing()) return;
+  /** keep-alive 隐藏时为 false；再次进入详情需瞬时对齐当前行 */
+  let panelWasActive = false;
+  let layoutRetryRaf = 0;
+  let scrollAnimRaf = 0;
+  const [containerEl, setContainerEl] = createSignal<HTMLDivElement | undefined>();
+
+  const clearResumeTimer = () => {
+    if (!resumeTimer) return;
+    clearTimeout(resumeTimer);
+    resumeTimer = undefined;
+  };
+
+  const cancelScrollAnim = () => {
+    if (!scrollAnimRaf) return;
+    cancelAnimationFrame(scrollAnimRaf);
+    scrollAnimRaf = 0;
+  };
+
+  /** 自定义缓动滚动，比浏览器默认 smooth 更明显（约 420ms） */
+  const animateScrollTop = (el: HTMLElement, target: number, durationMs: number) => {
+    cancelScrollAnim();
+    const start = el.scrollTop;
+    const delta = target - start;
+    if (Math.abs(delta) < 0.5) {
+      el.scrollTop = target;
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / durationMs);
+      // ease-out cubic
+      const eased = 1 - (1 - t) ** 3;
+      el.scrollTop = start + delta * eased;
+      if (t < 1) {
+        scrollAnimRaf = requestAnimationFrame(step);
+      } else {
+        scrollAnimRaf = 0;
+        el.scrollTop = target;
+      }
+    };
+    scrollAnimRaf = requestAnimationFrame(step);
+  };
+
+  const scrollActiveIntoView = (behavior: ScrollBehavior = followScrollBehavior()) => {
+    if (!container || userBrowsing()) return false;
     const active = container.querySelector<HTMLElement>('[data-lyric-active="true"]');
     if (!active) {
+      cancelScrollAnim();
       container.scrollTop = 0;
-      return;
+      // 无高亮行（尚未到首句 / 歌词未渲染）：已置顶；歌词就绪后由 activeIndex effect 再滚
+      return true;
     }
     if (useFullScrollLayout()) {
-      // 对齐 lx：scrollTop = offsetTop - clientHeight * 0.38
-      const target = Math.max(
-        0,
-        active.offsetTop - container.clientHeight * LYRIC_SCROLL_ANCHOR,
-      );
-      container.scrollTo({ top: target, behavior: 'smooth' });
-      return;
+      // 容器高度为 0（section hidden / 首帧未布局）时滚动无效，需等布局后再滚
+      if (container.clientHeight <= 0) return false;
+      const target = computeLyricScrollTop(active.offsetTop, container.clientHeight);
+      if (behavior === 'auto' || reduceMotion()) {
+        cancelScrollAnim();
+        container.scrollTop = target;
+      } else {
+        animateScrollTop(container, target, 420);
+      }
+      return true;
     }
     active.scrollIntoView({
-      behavior: 'smooth',
+      behavior: reduceMotion() ? 'auto' : behavior,
       block:
         props.scrollPosition === 'top'
           ? 'start'
@@ -400,21 +498,79 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
             ? 'end'
             : 'center',
     });
+    return true;
+  };
+
+  const cancelLayoutRetry = () => {
+    if (!layoutRetryRaf) return;
+    cancelAnimationFrame(layoutRetryRaf);
+    layoutRetryRaf = 0;
+  };
+
+  /** 等容器有可测高度后再滚，避免进详情首帧 / 取消 hidden 时滚到错误位置 */
+  const scrollWhenLaidOut = (behavior: ScrollBehavior, attemptsLeft = 12) => {
+    cancelLayoutRetry();
+    const tick = (left: number) => {
+      layoutRetryRaf = 0;
+      if (props.active === false) return;
+      if (scrollActiveIntoView(behavior) || left <= 0) return;
+      layoutRetryRaf = requestAnimationFrame(() => tick(left - 1));
+    };
+    layoutRetryRaf = requestAnimationFrame(() => tick(attemptsLeft));
+  };
+
+  const scheduleFollowScroll = () => {
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(
+      () => scrollActiveIntoView(followScrollBehavior()),
+      Math.max(0, props.scrollDelayMs ?? 0),
+    );
   };
 
   createEffect(() => {
     void activeIndex();
-    void props.active;
-    if (props.active === false) return;
-    if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(scrollActiveIntoView, Math.max(0, props.scrollDelayMs ?? 0));
+    const isActive = props.active !== false;
+    if (!isActive) {
+      panelWasActive = false;
+      if (scrollTimer) clearTimeout(scrollTimer);
+      cancelLayoutRetry();
+      return;
+    }
+    const justActivated = !panelWasActive;
+    panelWasActive = true;
+    if (justActivated) {
+      // 进入详情：清掉 keep-alive 残留的手动浏览态，瞬时跳到当前播放行
+      clearResumeTimer();
+      setUserBrowsing(false);
+      setPreviewTimeSec(null);
+      lastPreviewEl = null;
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollWhenLaidOut('auto');
+      return;
+    }
+    scheduleFollowScroll();
   });
 
-  const clearResumeTimer = () => {
-    if (!resumeTimer) return;
-    clearTimeout(resumeTimer);
-    resumeTimer = undefined;
-  };
+  // 容器首次挂载或从零高度恢复时瞬时对齐
+  createEffect(() => {
+    if (props.active === false) return;
+    const el = containerEl();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    // 刚挂上 DOM 时先对齐一次（歌词 Show 延迟出现的常见路径）
+    queueMicrotask(() => {
+      if (props.active !== false && !userBrowsing()) scrollWhenLaidOut('auto');
+    });
+    let lastHeight = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const next = el.clientHeight;
+      if (lastHeight <= 0 && next > 0 && !userBrowsing()) {
+        scrollActiveIntoView('auto');
+      }
+      lastHeight = next;
+    });
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
+  });
 
   const startResumeTimer = () => {
     clearResumeTimer();
@@ -425,7 +581,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       setPreviewTimeSec(null);
       lastPreviewEl = null;
       if (props.playing === false) return;
-      scrollActiveIntoView();
+      scrollActiveIntoView(followScrollBehavior());
     }, 3000);
   };
 
@@ -524,6 +680,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     if (!didDrag) return;
     if (!userBrowsing()) lastPreviewEl = null;
     setUserBrowsing(true);
+    cancelScrollAnim();
     container.scrollTop = msDownScrollY + msDownY - y;
     startResumeTimer();
     updatePreviewFromSkipLine();
@@ -550,6 +707,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     event.preventDefault();
     if (!userBrowsing()) lastPreviewEl = null;
     setUserBrowsing(true);
+    cancelScrollAnim();
     container.scrollTop += event.deltaY;
     startResumeTimer();
     updatePreviewFromSkipLine();
@@ -574,6 +732,8 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
 
   onCleanup(() => {
     if (scrollTimer) clearTimeout(scrollTimer);
+    cancelLayoutRetry();
+    cancelScrollAnim();
     clearResumeTimer();
   });
 
@@ -600,7 +760,10 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       </Show>
       <Show when={!props.loading && !props.errorText && plainText()}>
         <div
-          ref={container}
+          ref={(el) => {
+            container = el;
+            setContainerEl(el);
+          }}
           class={cn(
             // 对齐 lx：overflow hidden + 自定义拖拽/滚轮，避免原生滚动条抢交互
             'min-h-0 flex-1 overflow-hidden px-3 py-8 mask-[linear-gradient(transparent,black_12%,black_88%,transparent)] select-none',
@@ -639,81 +802,119 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
               </p>
             }
           >
-            <ul class="space-y-3">
-              <For each={visibleLines()}>
-                {(entry) => (
-                  <li
-                    data-lyric-active={entry.originalIndex === activeIndex() ? 'true' : undefined}
-                    data-lyric-time={String(entry.line.timeMs)}
-                    class={cn(
-                      'transition-all duration-200',
-                      (props.doubleClickSeek ||
-                        (props.onSeek && !props.allowProgressPreview)) &&
-                      'cursor-pointer hover:opacity-90',
-                      entry.originalIndex === activeIndex()
-                        ? cn(
-                          'font-medium text-foreground',
-                          // 有逐字时避免 transform:scale 破坏 background-clip 扫光
-                          props.zoomActiveLyric !== false &&
-                          !(entry.line.words && entry.line.words.length > 0) &&
-                          'scale-[1.04]',
-                          props.zoomActiveLyric !== false &&
-                          entry.line.words &&
-                          entry.line.words.length > 0 &&
-                          'text-[1.04em]',
-                        )
-                        : 'text-muted-foreground/70',
-                    )}
-                    style={{
-                      color:
-                        entry.originalIndex === activeIndex()
+            <ul class="space-y-3 overflow-visible">
+              <For each={visibleIndices()}>
+                {(originalIndex) => {
+                  const line = () => mergedLines()[originalIndex]!;
+                  const isActive = () => activeIndex() === originalIndex;
+                  const zoom = () =>
+                    isActive() && props.zoomActiveLyric !== false;
+                  const zoomScale = () => {
+                    const s = props.zoomActiveScale ?? 1.28;
+                    return Math.max(1, Math.min(1.8, s));
+                  };
+                  const origin =
+                    props.align === 'left'
+                      ? 'left center'
+                      : props.align === 'right'
+                        ? 'right center'
+                        : 'center center';
+                  return (
+                    <li
+                      data-lyric-active={isActive() ? 'true' : undefined}
+                      data-lyric-time={String(line()?.timeMs ?? 0)}
+                      class={cn(
+                        'overflow-visible',
+                        (props.doubleClickSeek ||
+                          (props.onSeek && !props.allowProgressPreview)) &&
+                          'cursor-pointer hover:opacity-90',
+                        isActive()
+                          ? 'font-medium text-foreground'
+                          : 'text-muted-foreground/70',
+                        !reduceMotion() &&
+                          'transition-[color,opacity] duration-420 ease-out',
+                      )}
+                      style={{
+                        color: isActive()
                           ? props.playedColor
                           : props.unplayedColor,
-                      'white-space': props.wrap === false ? 'nowrap' : 'normal',
-                    }}
-                    onClick={() => {
-                      // 开启进度预览时单击不跳转（需点播放按钮或松手自动播放）
-                      if (!props.onSeek || props.allowProgressPreview || props.doubleClickSeek)
-                        return;
-                      seekToLine(entry.line.timeMs);
-                    }}
-                    onDblClick={(e) => {
-                      if (!props.doubleClickSeek || !props.onSeek) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      seekToLine(entry.line.timeMs);
-                    }}
-                  >
-                    <Show
-                      when={entry.originalIndex === activeIndex() && entry.line.words}
-                      fallback={<span>{entry.line.text}</span>}
+                        opacity: isActive() ? '1' : '0.62',
+                        'white-space':
+                          props.wrap === false ? 'nowrap' : 'normal',
+                      }}
+                      onClick={() => {
+                        if (
+                          !props.onSeek ||
+                          props.allowProgressPreview ||
+                          props.doubleClickSeek
+                        )
+                          return;
+                        seekToLine(line()!.timeMs);
+                      }}
+                      onDblClick={(e) => {
+                        if (!props.doubleClickSeek || !props.onSeek) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        seekToLine(line()!.timeMs);
+                      }}
                     >
-                      {(words) => (
-                        <span>
-                          <For each={words()}>
-                            {(w) => (
-                              <span
-                                style={karaokeWordStyle(
-                                  wordFillPercent(w, positionMs()),
-                                  karaokePlayedColor(),
-                                  karaokeUnplayedColor(),
-                                  karaokeVertical(),
+                      {/*
+                        仅用 transform 放大：不改变布局宽高与换行，避免放大变多行、
+                        缩小回单行后 offsetTop/滚动锚点错乱。
+                      */}
+                      <div
+                        class={cn(
+                          'inline-block max-w-full',
+                          !reduceMotion() &&
+                            'transition-transform duration-420 ease-out',
+                        )}
+                        style={{
+                          transform: zoom()
+                            ? `scale(${zoomScale()})`
+                            : 'scale(1)',
+                          'transform-origin': origin,
+                        }}
+                      >
+                        <Show
+                          when={
+                            isActive() &&
+                            line()?.words &&
+                            line()!.words!.length > 0
+                              ? line()!.words!
+                              : false
+                          }
+                          fallback={<span>{line()?.text}</span>}
+                        >
+                          {(words) => (
+                            <span>
+                              <For each={words()}>
+                                {(w) => (
+                                  <span
+                                    style={karaokeWordStyle(
+                                      wordFillPercent(w, positionMs()),
+                                      karaokePlayedColor(),
+                                      karaokeUnplayedColor(),
+                                      karaokeVertical(),
+                                    )}
+                                  >
+                                    {w.text}
+                                  </span>
                                 )}
-                              >
-                                {w.text}
-                              </span>
-                            )}
-                          </For>
-                        </span>
-                      )}
-                    </Show>
-                    <For each={entry.line.extended}>
-                      {(ext) => (
-                        <p class="mt-0.5 text-[0.85em] leading-snug opacity-70">{ext}</p>
-                      )}
-                    </For>
-                  </li>
-                )}
+                              </For>
+                            </span>
+                          )}
+                        </Show>
+                        <For each={line()?.extended ?? []}>
+                          {(ext) => (
+                            <p class="mt-0.5 text-[0.85em] leading-snug opacity-70">
+                              {ext}
+                            </p>
+                          )}
+                        </For>
+                      </div>
+                    </li>
+                  );
+                }}
               </For>
             </ul>
           </Show>

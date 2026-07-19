@@ -12,6 +12,8 @@ import {
 import type { Book, BookChapter } from '@/types';
 import type { PlayableItem } from '@/lib/media/audio/playable-item';
 import { getPlayableUrls } from '@/lib/media/audio/playable-item';
+import { shouldIgnoreTransientAudioFailure } from '@/lib/media/audio/ignore-transient-audio-failure';
+import { noteMusicPlaybackHealthy } from '@/lib/media/audio/music-auto-skip-guard';
 
 const POS_STORE_INTERVAL_MS = 2000;
 
@@ -72,8 +74,31 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
   let lastSegmentKey = '';
   let pendingLoadAfterFetch = false;
   let playbackErrorHandled = false;
+  /** src 切换后 metadata 就绪前暂存起播位置 */
+  let pendingSeekSec: number | null = null;
+  /** 主动清 src / 取链重置中，忽略随之而来的 error/ended */
+  let intentionalReset = false;
+  /** 最近一次写入可播 src 的时间戳 */
+  let srcAppliedAt = 0;
+  /** 同一 src 只派发一次曲终，防止 ended 重入在取链中再次 playNext */
+  let endedDispatchedForSrc = '';
+
+  const msSinceSrcApplied = () =>
+    srcAppliedAt > 0 ? Date.now() - srcAppliedAt : Number.POSITIVE_INFINITY;
 
   const handlePlaybackError = () => {
+    if (
+      shouldIgnoreTransientAudioFailure({
+        loading: options.loading?.() ?? false,
+        intentionalReset,
+        hasPlayableUrl: segmentUrls().length > 0,
+        duration: audioEl?.duration,
+        msSinceSrcApplied: msSinceSrcApplied(),
+        event: 'error',
+      })
+    ) {
+      return;
+    }
     if (playbackErrorHandled) return;
     playbackErrorHandled = true;
     void options.onPlaybackError?.();
@@ -121,6 +146,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
   const pauseAndResetUi = (clearSrc = false) => {
     if (audioEl) {
       seekingFromUser = true;
+      intentionalReset = true;
       audioEl.pause();
       if (clearSrc) {
         audioEl.removeAttribute('src');
@@ -144,6 +170,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       pauseAndResetUi(true);
       return;
     }
+    intentionalReset = false;
     const clamped = Math.min(Math.max(0, index), urls.length - 1);
     setSegmentIndex(clamped);
     closeCreditsTriggered = false;
@@ -153,22 +180,25 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       audioEl.pause();
       audioEl.src = url;
       audioEl.preload = 'auto';
+      srcAppliedAt = Date.now();
+      endedDispatchedForSrc = '';
       if (url.startsWith('blob:')) {
         audioEl.removeAttribute('crossorigin');
       }
+    } else if (srcAppliedAt <= 0) {
+      srcAppliedAt = Date.now();
     }
     applyPlaybackRate();
     const seek = clamped === 0 ? initialSeekSeconds() : 0;
-    if (srcChanged) {
-      resetProgressUi(seek);
-    }
-    if (seek > 0 && (srcChanged || Math.abs(audioEl.currentTime - seek) > 0.5)) {
+    // 切歌后无论 src 是否变化都必须对齐进度，禁止残留上一曲 currentTime
+    pendingSeekSec = seek;
+    resetProgressUi(seek);
+    try {
       audioEl.currentTime = seek;
-      setCurrentTime(seek);
-    } else if (srcChanged && seek <= 0) {
-      audioEl.currentTime = 0;
-      setCurrentTime(0);
+    } catch {
+      // metadata 未就绪时可能抛错；loadedmetadata 会再对齐
     }
+    setCurrentTime(seek);
     // 选中/切歌自动播放时，清掉「用户暂停」以免旧暂停状态挡住新曲
     if (autoplay) userPaused = false;
     const shouldPlay = autoplay && !userPaused;
@@ -178,6 +208,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       audioEl.pause();
       setPlaying(false);
     }
+  };
+
+  /** 仅在确有可播 URL 时才读取 autoPlay（避免空链时消费 forceNextLoadAutoPlay） */
+  const loadSegmentWithAutoPlayPolicy = (index: number) => {
+    if (segmentUrls().length === 0) {
+      pauseAndResetUi(true);
+      return;
+    }
+    loadSegment(index, options.autoPlay?.() ?? true);
   };
 
   const maybeSaveProgress = () => {
@@ -195,19 +234,40 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     if (!Number.isFinite(dur) || dur <= 0) return;
     if (audioEl.currentTime >= dur - closeCredits) {
       closeCreditsTriggered = true;
+      intentionalReset = true;
       audioEl.pause();
       setPlaying(false);
+      const srcKey = segmentUrls()[0] ?? audioEl.src ?? '';
+      if (srcKey && endedDispatchedForSrc === srcKey) return;
+      endedDispatchedForSrc = srcKey || 'ended';
       void options.onEndedChapter();
     }
   };
 
   const onSegmentEnded = () => {
+    if (
+      shouldIgnoreTransientAudioFailure({
+        loading: options.loading?.() ?? false,
+        intentionalReset,
+        hasPlayableUrl: segmentUrls().length > 0,
+        duration: audioEl?.duration,
+        msSinceSrcApplied: msSinceSrcApplied(),
+        event: 'ended',
+      })
+    ) {
+      return;
+    }
     const urls = segmentUrls();
     const nextSeg = segmentIndex() + 1;
     if (nextSeg < urls.length) {
       loadSegment(nextSeg, !userPaused);
       return;
     }
+    const srcKey = urls[0] ?? audioEl?.src ?? '';
+    if (srcKey && endedDispatchedForSrc === srcKey) return;
+    endedDispatchedForSrc = srcKey || 'ended';
+    // 曲终后立刻阻断后续 timeupdate 把曲末进度写回 store
+    intentionalReset = true;
     setPlaying(false);
     void options.onEndedChapter();
   };
@@ -247,7 +307,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       if (!audioEl) return;
       const t = audioEl.currentTime;
       setCurrentTime(t);
-      if (!seekingFromUser) {
+      if (!seekingFromUser && !intentionalReset) {
         const now = Date.now();
         if (now - lastPosStore >= POS_STORE_INTERVAL_MS) {
           lastPosStore = now;
@@ -262,7 +322,21 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       }
     });
     el.addEventListener('loadedmetadata', () => {
-      if (audioEl) setDuration(audioEl.duration);
+      if (!audioEl) return;
+      setDuration(audioEl.duration);
+      if (Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
+        noteMusicPlaybackHealthy();
+      }
+      if (pendingSeekSec != null) {
+        const seek = pendingSeekSec;
+        pendingSeekSec = null;
+        try {
+          audioEl.currentTime = seek;
+        } catch {
+          // ignore
+        }
+        setCurrentTime(seek);
+      }
     });
     el.addEventListener('durationchange', () => {
       if (audioEl && Number.isFinite(audioEl.duration)) {
@@ -280,7 +354,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       return;
     }
     lastSegmentKey = key;
-    loadSegment(0, options.autoPlay?.() ?? true);
+    loadSegmentWithAutoPlayPolicy(0);
   };
 
   createEffect(
@@ -300,7 +374,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
         pendingLoadAfterFetch = false;
         playbackErrorHandled = false;
         // 切歌后按「选中/自动切歌后开始播放」设置决定，不沿用上一曲的用户暂停
-        loadSegment(0, options.autoPlay?.() ?? true);
+        loadSegmentWithAutoPlayPolicy(0);
       },
       { defer: true },
     ),
@@ -326,7 +400,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     lastPosStore = Date.now();
     options.onChapterPosChange(clamped);
     seekingFromUser = false;
+    // seek 后允许再次曲终
     closeCreditsTriggered = false;
+    endedDispatchedForSrc = '';
     if (autoplay && !userPaused) {
       void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
     }

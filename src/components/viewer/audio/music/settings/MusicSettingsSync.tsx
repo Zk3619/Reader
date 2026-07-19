@@ -13,6 +13,7 @@ import {
 } from '@/lib/media/audio/sync/lx-sync-server';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 
 export interface MusicSettingsSyncProps {
   embedded?: boolean;
@@ -48,7 +49,7 @@ export const MusicSettingsSync: Component<MusicSettingsSyncProps> = (props) => {
       }
       await refreshStatus();
     } catch (error) {
-      showAppToast({ title: '本机同步服务操作失败', description: String(error), variant: 'destructive' });
+      showAppToast({ title: '本机同步服务操作失败', description: toUserFacingMusicError(error), variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -119,7 +120,7 @@ export const MusicSettingsSync: Component<MusicSettingsSyncProps> = (props) => {
       <section>
         <h3 class="mb-2 font-medium">连接与远程同步</h3>
         <p class="mb-3 text-xs text-muted-foreground">
-          LX Sync 用于实时连接；下方 WebDAV、GitHub 与 JSON 快照是 Reader 扩展能力。
+          LX Sync 用于实时连接；下方可配置 WebDAV、GitHub 与 JSON 快照。
         </p>
         <AudioSyncSettings open inline embedded={props.embedded} />
       </section>

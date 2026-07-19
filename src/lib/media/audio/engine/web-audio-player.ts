@@ -191,7 +191,7 @@ export class WebAudioPlayerEngine {
 
   /** 对齐 lx setPitchShifter：1 为原调，偏离时接入 phase-vocoder */
   setPitchShifter(rate: number): void {
-    const next = Math.max(0.5, Math.min(1.5, Math.round(rate * 100) / 100));
+    const next = Math.max(0.5, Math.min(2, Math.round(rate * 100) / 100));
     this.pitchFactor = next;
     switch (this.pitchLoadStatus) {
       case 'loading':

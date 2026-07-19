@@ -20,6 +20,7 @@ import { searchSourceShortLabel } from '@/lib/media/audio/online/source-router';
 import { formatPlaylistStatCount } from '@/lib/media/audio/music-search-result-ui';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import { cn } from '@/lib/utils';
+import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
 import { MusicPlaylistContextMenu } from '@/components/viewer/audio/music/hub/MusicPlaylistContextMenu';
 
 export type MusicPlaylistCardVariant = 'horizontal' | 'grid';
@@ -34,6 +35,8 @@ export interface MusicPlaylistListCardProps {
 
 function PlaylistCoverImage(props: {
   coverUrl?: string;
+  playlistSource?: string;
+  playlistId?: string;
   iconClass?: string;
 }) {
   return (
@@ -45,12 +48,19 @@ function PlaylistCoverImage(props: {
         </div>
       }
     >
-      <img
+      <MusicCoverImg
         src={props.coverUrl}
+        playlistSource={props.playlistSource}
+        playlistId={props.playlistId}
         alt=""
         class="h-full w-full object-cover"
         loading="lazy"
         draggable={false}
+        fallback={
+          <div class="flex h-full w-full items-center justify-center text-muted-foreground">
+            <Music2 class={props.iconClass ?? 'h-8 w-8 opacity-40'} />
+          </div>
+        }
       />
     </Show>
   );
@@ -115,7 +125,12 @@ function MobilePlaylistGridCard(props: MusicPlaylistListCardProps) {
       >
         <div class={bookGroupGridCoverClass('aspect-square')}>
           <div class={bookGroupGridCoverZoomClass()}>
-            <PlaylistCoverImage coverUrl={props.playlist.coverUrl} iconClass="h-8 w-8 opacity-40" />
+            <PlaylistCoverImage
+              coverUrl={props.playlist.coverUrl}
+              playlistSource={props.playlist.source}
+              playlistId={props.playlist.id}
+              iconClass="h-8 w-8 opacity-40"
+            />
           </div>
           <Show when={props.showSource}>
             <span class="absolute right-1 top-1 z-1 rounded bg-black/55 px-1 py-0.5 text-[10px] text-white">
@@ -146,7 +161,11 @@ export const MusicPlaylistListCard: Component<MusicPlaylistListCardProps> = (pro
           {...bookGroupCardPressHandlers}
         >
           <div class="relative aspect-square w-[40%] shrink-0 self-center overflow-hidden rounded bg-muted/50 shadow-sm">
-            <PlaylistCoverImage coverUrl={props.playlist.coverUrl} />
+            <PlaylistCoverImage
+              coverUrl={props.playlist.coverUrl}
+              playlistSource={props.playlist.source}
+              playlistId={props.playlist.id}
+            />
           </div>
           <div class="flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden py-0.5 pl-2 pr-2 text-left">
             <h4 class="line-clamp-1 text-sm font-medium leading-snug">{props.playlist.name}</h4>

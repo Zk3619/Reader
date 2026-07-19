@@ -3,7 +3,7 @@
  */
 
 import { createEffect, createMemo, createSignal, For, onMount, Show, type Component } from 'solid-js';
-import { SearchHistoryChip } from '@/components/bookshelf/SearchHistoryChip';
+import { SearchHistoryChip } from '@/components/media/reader/bookshelf/SearchHistoryChip';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import {
   ensureLocalMusicSearchCache,

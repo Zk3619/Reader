@@ -24,6 +24,7 @@ import {
 import { getMusicGroups } from '@/lib/database/media-groups';
 import { setActiveMusicGroupId } from '@/stores/viewer/media/audio';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { MediaGroupId } from '@/types/book-group';
 
 export interface MusicListCreateDialogProps {
@@ -74,7 +75,7 @@ export const MusicListCreateDialog: Component<MusicListCreateDialogProps> = (pro
       props.onCreated?.();
       props.onOpenChange(false);
     } catch (e) {
-      showAppToast({ title: '创建失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '创建失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setBusy(false);
     }

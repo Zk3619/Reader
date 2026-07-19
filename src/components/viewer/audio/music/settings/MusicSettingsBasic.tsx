@@ -17,7 +17,7 @@ export const MusicSettingsBasic: Component = () => (
     </section>
 
     <section class="space-y-2 p-4">
-      <h2 class="text-base font-semibold">Reader 扩展 · 平台账号</h2>
+      <h2 class="text-base font-semibold">平台账号</h2>
       <AudioAccountPanel open inline />
     </section>
   </div>

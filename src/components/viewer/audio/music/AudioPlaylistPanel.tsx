@@ -15,6 +15,7 @@ import {
 import { playByListId } from '@/stores/viewer/media/audio';
 import { saveNeteasePlaylistAsLocal } from '@/lib/media/audio/platform/playlist-sync';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { AudioPanelShell } from '@/components/viewer/audio/music/AudioPanelShell';
 import { cn } from '@/lib/utils';
 
@@ -68,7 +69,7 @@ export const AudioPlaylistPanel: Component<AudioPlaylistPanelProps> = (props) =>
       showAppToast({ title: '已保存为本地歌单' });
       void refetch();
     } catch (e) {
-      showAppToast({ title: '保存失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '保存失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     }
   };
 

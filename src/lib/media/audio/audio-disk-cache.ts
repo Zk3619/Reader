@@ -28,6 +28,9 @@ export type AudioCacheMeta = {
   mime: string;
   byteSize: number;
   savedAt: number;
+  /** 音乐曲目缓存分级；听书章节可缺省 */
+  cacheTier?: import('@/lib/media/audio/music-cache-tier').MusicCacheTier;
+  quality?: string;
 };
 
 type AudioCacheRecord = {
@@ -434,10 +437,204 @@ export type MusicTrackCacheMeta = {
   mime: string;
   byteSize: number;
   savedAt: number;
+  cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier;
+  quality?: string;
 };
 
-export async function buildMusicTrackCacheId(trackId: string, sourceUrl: string): Promise<string> {
-  return `${MUSIC_TRACK_PREFIX}${await buildAudioCacheId(trackId, 0, 0, sourceUrl, 'music')}`;
+export type MusicTrackCacheHit = {
+  bytes: ArrayBuffer;
+  mime: string;
+  sourceUrl: string;
+  cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier;
+  cachePath?: string;
+};
+
+/**
+ * 曲目缓存 id（逻辑键）。磁盘目录名必须用 {@link musicTrackFsDirName}，
+ * 不可直接 slice 本字符串——前缀 `music:` 在 Windows 上非法。
+ * 不纳入 sourceUrl，避免 CDN 换链导致同曲多份/漏命中。
+ */
+export async function buildMusicTrackCacheId(
+  trackId: string,
+  _sourceUrl?: string,
+): Promise<string> {
+  return `${MUSIC_TRACK_PREFIX}${await buildAudioCacheId(trackId, 0, 0, '', 'music')}`;
+}
+
+/** 仅取 hash 前 16 位作目录名（不含 `music:`） */
+function musicTrackFsDirName(cacheId: string): string {
+  const hash = cacheId.startsWith(MUSIC_TRACK_PREFIX)
+    ? cacheId.slice(MUSIC_TRACK_PREFIX.length)
+    : cacheId;
+  return hash.slice(0, 16);
+}
+
+function musicTrackBookUrl(trackId: string): string {
+  return MUSIC_TRACK_PREFIX + trackId;
+}
+
+async function readMusicMetaFromDir(dir: string): Promise<AudioCacheMeta | null> {
+  const fs = await getFileSystem();
+  const metaPath = await join(dir, META_FILE);
+  if (!(await fs.exists(metaPath))) return null;
+  try {
+    const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
+    return JSON.parse(metaText) as AudioCacheMeta;
+  } catch {
+    return null;
+  }
+}
+
+async function readMusicHitFromDir(
+  dir: string,
+  relativeCachePath?: string,
+): Promise<MusicTrackCacheHit | null> {
+  const { normalizeMusicCacheTier } = await import('@/lib/media/audio/music-cache-tier');
+  const fs = await getFileSystem();
+  const binPath = await join(dir, AUDIO_BIN_FILE);
+  if (!(await fs.exists(binPath))) return null;
+  const raw = await fs.readFile(binPath);
+  const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+  const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  if (!buf.byteLength) return null;
+  let mime = 'audio/mpeg';
+  let sourceUrl = '';
+  let cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier = 'auto';
+  const meta = await readMusicMetaFromDir(dir);
+  if (meta) {
+    mime = meta.mime || mime;
+    sourceUrl = meta.audioUrl || '';
+    cacheTier = normalizeMusicCacheTier(meta.cacheTier);
+  }
+  return {
+    bytes: buf,
+    mime,
+    sourceUrl,
+    cacheTier,
+    cachePath: relativeCachePath,
+  };
+}
+
+async function readExistingMusicMeta(
+  trackId: string,
+): Promise<AudioCacheMeta | null> {
+  const bookUrl = musicTrackBookUrl(trackId);
+  if (!isTauri()) {
+    const db = await openWebAudioDb();
+    const records = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
+      const tx = db.transaction([WEB_STORE_NAME], 'readonly');
+      const index = tx.objectStore(WEB_STORE_NAME).index('bookUrl');
+      const request = index.getAll(bookUrl);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as AudioCacheRecord[]) ?? []);
+    });
+    return records[0]?.meta ?? null;
+  }
+  const root = await ensureAudioCacheDir();
+  const fs = await getFileSystem();
+  // 优先稳定目录（按 trackId hash）
+  const stableId = await buildMusicTrackCacheId(trackId);
+  const stableDir = await join(root, 'music-tracks', musicTrackFsDirName(stableId));
+  const stableMeta = await readMusicMetaFromDir(stableDir);
+  if (stableMeta?.bookUrl === bookUrl) return stableMeta;
+  // 兼容旧目录：全量扫 meta
+  const musicDir = await join(root, 'music-tracks');
+  if (!(await fs.exists(musicDir))) return null;
+  for (const name of await fs.readDir(musicDir)) {
+    if (!name) continue;
+    const meta = await readMusicMetaFromDir(await join(musicDir, name));
+    if (meta?.bookUrl === bookUrl) return meta;
+  }
+  return null;
+}
+
+async function syncTrackCacheIndex(options: {
+  trackId: string;
+  cachePath: string | null;
+  cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier | null;
+  bytes: number;
+  mime: string;
+  quality?: string;
+}): Promise<void> {
+  try {
+    const { updateAudioTrackCacheMeta } = await import('@/lib/database/audio-library');
+    const ok = await updateAudioTrackCacheMeta(options.trackId, {
+      cachePath: options.cachePath,
+      cacheTier: options.cacheTier,
+      cachedAt: options.cachePath ? Date.now() : null,
+      cacheBytes: options.bytes || null,
+      cacheMime: options.mime || null,
+      cacheQuality: options.quality ?? null,
+    });
+    if (!ok && options.cachePath) {
+      // 曲目尚未入库：暂存，等 upsertAudioTrack 后冲刷
+      pendingTrackCacheMeta.set(options.trackId, { ...options });
+    } else if (ok) {
+      pendingTrackCacheMeta.delete(options.trackId);
+    }
+  } catch (err) {
+    console.warn('[music-cache] sync audio_tracks meta failed', err);
+    if (options.cachePath) {
+      pendingTrackCacheMeta.set(options.trackId, { ...options });
+    }
+  }
+}
+
+type PendingTrackCacheMeta = {
+  trackId: string;
+  cachePath: string | null;
+  cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier | null;
+  bytes: number;
+  mime: string;
+  quality?: string;
+};
+
+/** 写盘成功但曲目尚未入库时的暂存索引 */
+const pendingTrackCacheMeta = new Map<string, PendingTrackCacheMeta>();
+
+/** 曲目入库后冲刷暂存的 cache meta */
+export async function flushPendingTrackCacheMeta(trackId: string): Promise<boolean> {
+  const pending = pendingTrackCacheMeta.get(trackId);
+  if (!pending) return false;
+  try {
+    const { updateAudioTrackCacheMeta } = await import('@/lib/database/audio-library');
+    const ok = await updateAudioTrackCacheMeta(pending.trackId, {
+      cachePath: pending.cachePath,
+      cacheTier: pending.cacheTier,
+      cachedAt: pending.cachePath ? Date.now() : null,
+      cacheBytes: pending.bytes || null,
+      cacheMime: pending.mime || null,
+      cacheQuality: pending.quality ?? null,
+    });
+    if (ok) {
+      pendingTrackCacheMeta.delete(trackId);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[music-cache] flush pending meta failed', trackId.slice(0, 40), err);
+  }
+  return false;
+}
+
+async function backfillTrackCacheIndexIfNeeded(
+  trackId: string,
+  hit: MusicTrackCacheHit,
+): Promise<void> {
+  const rel = hit.cachePath?.trim();
+  if (!rel) return;
+  try {
+    const { audioTrackNeedsCacheIndexBackfill } = await import('@/lib/database/audio-library');
+    if (!(await audioTrackNeedsCacheIndexBackfill(trackId))) return;
+    await syncTrackCacheIndex({
+      trackId,
+      cachePath: rel,
+      cacheTier: hit.cacheTier,
+      bytes: hit.bytes.byteLength,
+      mime: hit.mime,
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function cacheMusicTrackAudio(
@@ -445,11 +642,39 @@ export async function cacheMusicTrackAudio(
   sourceUrl: string,
   bytes: ArrayBuffer,
   mime = 'audio/mpeg',
+  options?: {
+    tier?: import('@/lib/media/audio/music-cache-tier').MusicCacheTier;
+    quality?: string;
+  },
 ): Promise<string> {
+  const { mergeMusicCacheTier, normalizeMusicCacheTier } = await import(
+    '@/lib/media/audio/music-cache-tier'
+  );
+  const existing = await readExistingMusicMeta(trackId);
+  const existingTier = existing?.cacheTier
+    ? normalizeMusicCacheTier(existing.cacheTier)
+    : undefined;
+  const requested = options?.tier ?? 'auto';
+  const tier = mergeMusicCacheTier(existingTier, requested);
+
+  // 已有 manual 时不允许 auto 用更小/空内容覆盖文件体（仍更新索引 tier）
+  if (existingTier === 'manual' && requested === 'auto' && existing) {
+    const dirName = musicTrackFsDirName(existing.id || (await buildMusicTrackCacheId(trackId)));
+    await syncTrackCacheIndex({
+      trackId,
+      cachePath: isTauri() ? `music-tracks/${dirName}` : null,
+      cacheTier: 'manual',
+      bytes: existing.byteSize || bytes.byteLength,
+      mime: existing.mime || mime,
+      quality: options?.quality,
+    });
+    return existing.id;
+  }
+
   const id = await buildMusicTrackCacheId(trackId, sourceUrl);
   const meta: AudioCacheMeta = {
     id,
-    bookUrl: MUSIC_TRACK_PREFIX + trackId,
+    bookUrl: musicTrackBookUrl(trackId),
     chapterIndex: 0,
     segmentIndex: 0,
     audioUrl: sourceUrl,
@@ -457,22 +682,35 @@ export async function cacheMusicTrackAudio(
     mime,
     byteSize: bytes.byteLength,
     savedAt: Date.now(),
+    cacheTier: tier,
+    quality: options?.quality,
   };
+  let cachePath: string | null = null;
   if (!isTauri()) {
     await webPutRecord({ id, bytes, meta });
     invalidateAudioCacheMetaIndex();
-    return id;
+  } else {
+    const root = await ensureAudioCacheDir();
+    const fs = await getFileSystem();
+    const dirName = musicTrackFsDirName(id);
+    const dir = await join(root, 'music-tracks', dirName);
+    await fs.mkdir(dir, true);
+    await fs.writeFile(await join(dir, AUDIO_BIN_FILE), new Uint8Array(bytes));
+    await fs.writeFile(
+      await join(dir, META_FILE),
+      new TextEncoder().encode(JSON.stringify(meta)),
+    );
+    cachePath = `music-tracks/${dirName}`;
+    invalidateAudioCacheMetaIndex();
   }
-  const root = await ensureAudioCacheDir();
-  const fs = await getFileSystem();
-  const dir = await join(root, 'music-tracks', id.slice(0, 16));
-  await fs.mkdir(dir, true);
-  await fs.writeFile(await join(dir, AUDIO_BIN_FILE), new Uint8Array(bytes));
-  await fs.writeFile(
-    await join(dir, META_FILE),
-    new TextEncoder().encode(JSON.stringify(meta)),
-  );
-  invalidateAudioCacheMetaIndex();
+  await syncTrackCacheIndex({
+    trackId,
+    cachePath,
+    cacheTier: tier,
+    bytes: bytes.byteLength,
+    mime,
+    quality: options?.quality,
+  });
   return id;
 }
 
@@ -484,45 +722,25 @@ export async function getCachedMusicTrackAudio(
     const hit = await getCachedMusicTrackAudioByKey(trackId, sourceUrl);
     if (hit) return hit;
   }
-  return getCachedMusicTrackByTrackId(trackId);
+  const byId = await getCachedMusicTrackByTrackId(trackId);
+  return byId ? { bytes: byId.bytes, mime: byId.mime } : null;
 }
 
 async function getCachedMusicTrackAudioByKey(
   trackId: string,
   sourceUrl: string,
 ): Promise<{ bytes: ArrayBuffer; mime: string } | null> {
-  const id = await buildMusicTrackCacheId(trackId, sourceUrl);
-  if (!isTauri()) {
-    const record = await webGetRecord(id);
-    if (!record) return null;
-    return { bytes: record.bytes, mime: record.meta.mime || 'audio/mpeg' };
-  }
-  const root = await ensureAudioCacheDir();
-  const fs = await getFileSystem();
-  const dir = await join(root, 'music-tracks', id.slice(0, 16));
-  const binPath = await join(dir, AUDIO_BIN_FILE);
-  if (!(await fs.exists(binPath))) return null;
-  const raw = await fs.readFile(binPath);
-  const metaPath = await join(dir, META_FILE);
-  let mime = 'audio/mpeg';
-  if (await fs.exists(metaPath)) {
-    try {
-      const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
-      const parsed = JSON.parse(metaText) as AudioCacheMeta;
-      mime = parsed.mime || mime;
-    } catch {
-      // ignore
-    }
-  }
-  const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
-  const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
-  return { bytes: buf, mime };
+  // 键已改为仅 trackId；sourceUrl 保留兼容签名
+  void sourceUrl;
+  const byId = await getCachedMusicTrackByTrackId(trackId);
+  return byId ? { bytes: byId.bytes, mime: byId.mime } : null;
 }
 
 export async function getCachedMusicTrackByTrackId(
   trackId: string,
-): Promise<{ bytes: ArrayBuffer; mime: string; sourceUrl: string } | null> {
-  const bookUrl = MUSIC_TRACK_PREFIX + trackId;
+): Promise<MusicTrackCacheHit | null> {
+  const { normalizeMusicCacheTier } = await import('@/lib/media/audio/music-cache-tier');
+  const bookUrl = musicTrackBookUrl(trackId);
   if (!isTauri()) {
     const db = await openWebAudioDb();
     const records = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
@@ -534,31 +752,285 @@ export async function getCachedMusicTrackByTrackId(
     });
     const record = records[0];
     if (!record?.bytes?.byteLength) return null;
-    return {
+    const hit: MusicTrackCacheHit = {
       bytes: record.bytes,
       mime: record.meta.mime || 'audio/mpeg',
       sourceUrl: record.meta.audioUrl,
+      cacheTier: normalizeMusicCacheTier(record.meta.cacheTier),
     };
+    // Web 无相对路径时仍写入 tier/bytes，便于列表徽章
+    void backfillTrackCacheIndexIfNeeded(trackId, {
+      ...hit,
+      cachePath: `idb:${record.id}`,
+    }).catch(() => undefined);
+    return hit;
+  }
+
+  const root = await ensureAudioCacheDir();
+  const fs = await getFileSystem();
+
+  // 1) DB 索引路径（若曲目已入库）
+  try {
+    const { getDatabase } = await import('@/lib/database/database-core');
+    const db = await getDatabase();
+    const rows = await db.select<{ cache_path: string | null }>(
+      'SELECT cache_path FROM audio_tracks WHERE id = ? LIMIT 1',
+      [trackId],
+    );
+    const rel = rows[0]?.cache_path?.trim();
+    if (rel && !rel.startsWith('idb:')) {
+      const parts = rel.split(/[/\\]/).filter(Boolean);
+      let dir = root;
+      for (const p of parts) dir = await join(dir, p);
+      const hit = await readMusicHitFromDir(dir, rel);
+      if (hit) return hit;
+    }
+  } catch {
+    // 索引不可用时回退扫盘
+  }
+
+  // 2) 稳定目录（按 trackId hash）
+  const stableId = await buildMusicTrackCacheId(trackId);
+  const dirName = musicTrackFsDirName(stableId);
+  const stableRel = `music-tracks/${dirName}`;
+  const stableHit = await readMusicHitFromDir(
+    await join(root, 'music-tracks', dirName),
+    stableRel,
+  );
+  if (stableHit) {
+    // 校验 bookUrl，避免极端 hash 碰撞误读
+    const meta = await readMusicMetaFromDir(await join(root, 'music-tracks', dirName));
+    if (!meta || meta.bookUrl === bookUrl) {
+      void backfillTrackCacheIndexIfNeeded(trackId, stableHit).catch(() => undefined);
+      return stableHit;
+    }
+  }
+
+  // 3) 兼容旧目录：按 bookUrl 扫 music-tracks
+  const musicDir = await join(root, 'music-tracks');
+  if (!(await fs.exists(musicDir))) return null;
+  for (const name of await fs.readDir(musicDir)) {
+    if (!name || name.includes(':')) continue; // 跳过非法/历史坏目录名
+    const dir = await join(musicDir, name);
+    const meta = await readMusicMetaFromDir(dir);
+    if (!meta || meta.bookUrl !== bookUrl) continue;
+    const hit = await readMusicHitFromDir(dir, `music-tracks/${name}`);
+    if (hit) {
+      void backfillTrackCacheIndexIfNeeded(trackId, hit).catch(() => undefined);
+      return hit;
+    }
+  }
+  return null;
+}
+
+/**
+ * 扫描磁盘 music-tracks，将已入库曲目的 cache meta 回填到 audio_tracks。
+ * 兼容换源：磁盘可能挂在备用源 id 上，而列表曲目是原 id（meta.toggleMusicInfo）。
+ */
+export async function reconcileMusicTrackCacheIndex(): Promise<{
+  scanned: number;
+  updated: number;
+  skipped: number;
+}> {
+  const { normalizeMusicCacheTier } = await import('@/lib/media/audio/music-cache-tier');
+  const {
+    audioTrackNeedsCacheIndexBackfill,
+    updateAudioTrackCacheMeta,
+    listAudioTracksMissingCacheIndex,
+  } = await import('@/lib/database/audio-library');
+
+  let scanned = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  type DiskEntry = {
+    trackId: string;
+    cachePath: string;
+    cacheTier: import('@/lib/media/audio/music-cache-tier').MusicCacheTier;
+    bytes: number;
+    mime: string;
+    quality?: string;
+    savedAt: number;
+  };
+
+  const diskByTrackId = new Map<string, DiskEntry>();
+
+  const rememberDisk = (entry: DiskEntry) => {
+    const prev = diskByTrackId.get(entry.trackId);
+    if (!prev || entry.bytes >= prev.bytes) diskByTrackId.set(entry.trackId, entry);
+  };
+
+  const applyEntry = async (listTrackId: string, entry: DiskEntry): Promise<boolean> => {
+    if (!(await audioTrackNeedsCacheIndexBackfill(listTrackId))) return false;
+    return updateAudioTrackCacheMeta(listTrackId, {
+      cachePath: entry.cachePath,
+      cacheTier: entry.cacheTier,
+      cachedAt: entry.savedAt || Date.now(),
+      cacheBytes: entry.bytes || null,
+      cacheMime: entry.mime || 'audio/mpeg',
+      cacheQuality: entry.quality ?? null,
+    });
+  };
+
+  if (!isTauri()) {
+    const db = await openWebAudioDb();
+    const all = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
+      const tx = db.transaction([WEB_STORE_NAME], 'readonly');
+      const request = tx.objectStore(WEB_STORE_NAME).getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as AudioCacheRecord[]) ?? []);
+    });
+    for (const record of all) {
+      if (!record.meta.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+      scanned += 1;
+      const trackId = record.meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length);
+      rememberDisk({
+        trackId,
+        cachePath: `idb:${record.id}`,
+        cacheTier: normalizeMusicCacheTier(record.meta.cacheTier),
+        bytes: record.meta.byteSize || record.bytes?.byteLength || 0,
+        mime: record.meta.mime || 'audio/mpeg',
+        quality: record.meta.quality,
+        savedAt: record.meta.savedAt || Date.now(),
+      });
+    }
+  } else {
+    const root = await ensureAudioCacheDir();
+    const fs = await getFileSystem();
+    const musicDir = await join(root, 'music-tracks');
+    if (await fs.exists(musicDir)) {
+      for (const name of await fs.readDir(musicDir)) {
+        if (!name || name.includes(':')) continue;
+        const dir = await join(musicDir, name);
+        const meta = await readMusicMetaFromDir(dir);
+        if (!meta?.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+        scanned += 1;
+        const trackId = meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length);
+        const binPath = await join(dir, AUDIO_BIN_FILE);
+        let bytes = meta.byteSize || 0;
+        if (!bytes && (await fs.exists(binPath))) {
+          try {
+            bytes = await fs.getFileSize(binPath);
+          } catch {
+            /* ignore */
+          }
+        }
+        rememberDisk({
+          trackId,
+          cachePath: `music-tracks/${name}`,
+          cacheTier: normalizeMusicCacheTier(meta.cacheTier),
+          bytes,
+          mime: meta.mime || 'audio/mpeg',
+          quality: meta.quality,
+          savedAt: meta.savedAt || Date.now(),
+        });
+      }
+    }
+  }
+
+  // 1) 磁盘 bookUrl 对应曲目直接回填
+  for (const entry of diskByTrackId.values()) {
+    if (await applyEntry(entry.trackId, entry)) updated += 1;
+    else skipped += 1;
+  }
+
+  // 2) 缺索引的列表曲：按自身 id / toggleMusicInfo.id 关联磁盘
+  const missing = await listAudioTracksMissingCacheIndex();
+  for (const row of missing) {
+    const toggleRaw = row.meta.toggleMusicInfo;
+    const toggleId =
+      toggleRaw &&
+      typeof toggleRaw === 'object' &&
+      typeof (toggleRaw as { id?: unknown }).id === 'string'
+        ? String((toggleRaw as { id: string }).id).trim()
+        : '';
+
+    let entry =
+      diskByTrackId.get(row.id) ?? (toggleId ? diskByTrackId.get(toggleId) : undefined);
+
+    // 稳定 hash 目录（磁盘 meta 可能挂在备用源 id，但文件已在本曲 hash 下）
+    if (!entry && isTauri()) {
+      const stableId = await buildMusicTrackCacheId(row.id);
+      const dirName = musicTrackFsDirName(stableId);
+      const root = await ensureAudioCacheDir();
+      const dir = await join(root, 'music-tracks', dirName);
+      const meta = await readMusicMetaFromDir(dir);
+      if (meta) {
+        entry = {
+          trackId: row.id,
+          cachePath: `music-tracks/${dirName}`,
+          cacheTier: normalizeMusicCacheTier(meta.cacheTier),
+          bytes: meta.byteSize || 0,
+          mime: meta.mime || 'audio/mpeg',
+          quality: meta.quality,
+          savedAt: meta.savedAt || Date.now(),
+        };
+      }
+    }
+
+    if (!entry) continue;
+    if (await applyEntry(row.id, entry)) updated += 1;
+  }
+
+  return { scanned, updated, skipped };
+}
+
+/** 仅清除 auto 级音乐曲目缓存；manual 保留 */
+export async function clearAutoMusicTrackCaches(): Promise<number> {
+  const { normalizeMusicCacheTier } = await import('@/lib/media/audio/music-cache-tier');
+  let removed = 0;
+  if (!isTauri()) {
+    const db = await openWebAudioDb();
+    const all = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
+      const tx = db.transaction([WEB_STORE_NAME], 'readonly');
+      const request = tx.objectStore(WEB_STORE_NAME).getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as AudioCacheRecord[]) ?? []);
+    });
+    for (const record of all) {
+      if (!record.meta.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+      if (normalizeMusicCacheTier(record.meta.cacheTier) === 'manual') continue;
+      await webDeleteRecord(record.id);
+      removed += 1;
+      const trackId = record.meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length);
+      await syncTrackCacheIndex({
+        trackId,
+        cachePath: null,
+        cacheTier: null,
+        bytes: 0,
+        mime: '',
+      }).catch(() => {});
+    }
+    invalidateAudioCacheMetaIndex();
+    return removed;
   }
   const root = await ensureAudioCacheDir();
   const fs = await getFileSystem();
   const musicDir = await join(root, 'music-tracks');
-  if (!(await fs.exists(musicDir))) return null;
+  if (!(await fs.exists(musicDir))) return 0;
   for (const name of await fs.readDir(musicDir)) {
-    const metaPath = await join(musicDir, name, META_FILE);
+    const dir = await join(musicDir, name);
+    const metaPath = await join(dir, META_FILE);
     if (!(await fs.exists(metaPath))) continue;
     try {
       const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
       const meta = JSON.parse(metaText) as AudioCacheMeta;
-      if (meta.bookUrl !== bookUrl) continue;
-      const binPath = await join(musicDir, name, AUDIO_BIN_FILE);
-      const raw = await fs.readFile(binPath);
-      const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
-      const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
-      return { bytes: buf, mime: meta.mime || 'audio/mpeg', sourceUrl: meta.audioUrl };
+      if (!meta.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+      if (normalizeMusicCacheTier(meta.cacheTier) === 'manual') continue;
+      await fs.remove(dir, true);
+      removed += 1;
+      const trackId = meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length);
+      await syncTrackCacheIndex({
+        trackId,
+        cachePath: null,
+        cacheTier: null,
+        bytes: 0,
+        mime: '',
+      }).catch(() => {});
     } catch {
       // continue
     }
   }
-  return null;
+  invalidateAudioCacheMetaIndex();
+  return removed;
 }

@@ -22,6 +22,7 @@ import {
   type SourceListBinding,
 } from '@/lib/media/audio/list/sync-source-list';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { dialogScrollFrameFlex } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
@@ -69,7 +70,7 @@ export const MusicListUpdateManageDialog: Component<MusicListUpdateManageDialogP
       void refetch();
       props.onUpdated?.();
     } catch (e) {
-      showAppToast({ title: '更新失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '更新失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setSyncingId(null);
     }

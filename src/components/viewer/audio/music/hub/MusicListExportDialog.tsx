@@ -19,6 +19,7 @@ import {
 } from '@/components/viewer/viewer-app-overlay';
 import { viewerStore } from '@/stores/viewer';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import {
   buildPlaylistSharePayload,
   downloadPlaylistShareFile,
@@ -83,7 +84,7 @@ export const MusicListExportDialog: Component<MusicListExportDialogProps> = (pro
         variant: 'success',
       });
     } catch (e) {
-      showAppToast({ title: '导出失败', description: String(e), variant: 'destructive' });
+      showAppToast({ title: '导出失败', description: toUserFacingMusicError(e), variant: 'destructive' });
     } finally {
       setBusy(false);
     }

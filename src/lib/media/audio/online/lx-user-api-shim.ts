@@ -20,12 +20,24 @@ export type UserApiUpdateAlert = {
   updateUrl: string;
 };
 
+export type UserApiUpdateCheckFailed = {
+  scriptId?: string;
+  scriptName: string;
+  updateUrl: string;
+  error: string;
+};
+
 type UpdateAlertBatchListener = (alerts: UserApiUpdateAlert[]) => void;
+type UpdateCheckFailedListener = (info: UserApiUpdateCheckFailed) => void;
 
 const updateAlertListeners = new Set<UpdateAlertBatchListener>();
+const updateCheckFailedListeners = new Set<UpdateCheckFailedListener>();
 let pendingUpdateAlerts = new Map<string, UserApiUpdateAlert>();
 let lastUpdateAlertBatch: UserApiUpdateAlert[] = [];
 let updateAlertFlushTimer: ReturnType<typeof setTimeout> | null = null;
+/** 同脚本短时间内只提示一次检查更新失败 */
+const updateCheckFailedToastAt = new Map<string, number>();
+const UPDATE_CHECK_FAIL_TOAST_COOLDOWN_MS = 60_000;
 
 export function subscribeUserApiUpdateAlert(
   listener: UpdateAlertBatchListener,
@@ -33,6 +45,45 @@ export function subscribeUserApiUpdateAlert(
   updateAlertListeners.add(listener);
   if (lastUpdateAlertBatch.length) listener(lastUpdateAlertBatch);
   return () => updateAlertListeners.delete(listener);
+}
+
+export function subscribeUserApiUpdateCheckFailed(
+  listener: UpdateCheckFailedListener,
+): () => void {
+  updateCheckFailedListeners.add(listener);
+  return () => updateCheckFailedListeners.delete(listener);
+}
+
+function notifyUserApiUpdateCheckFailed(info: UserApiUpdateCheckFailed): void {
+  const key = info.scriptId || info.scriptName || info.updateUrl;
+  const now = Date.now();
+  const last = updateCheckFailedToastAt.get(key) ?? 0;
+  if (now - last < UPDATE_CHECK_FAIL_TOAST_COOLDOWN_MS) return;
+  updateCheckFailedToastAt.set(key, now);
+  for (const fn of updateCheckFailedListeners) {
+    try {
+      fn(info);
+    } catch (err) {
+      console.warn('[user-api] updateCheckFailed listener error', err);
+    }
+  }
+}
+
+function isLikelyUpdateCheckUrl(url: string, updateUrl?: string): boolean {
+  const u = url.trim();
+  if (!u) return false;
+  if (updateUrl && u === updateUrl.trim()) return true;
+  // 社区音源常见：@update_url 指向 .json 版本清单
+  if (/\.json(?:\?|#|$)/i.test(u) && /lxmusic|update|version|changqing|svip/i.test(u)) {
+    return true;
+  }
+  return false;
+}
+
+function isTlsOrSendFailureMessage(msg: string): boolean {
+  return /handshake|unexpected\s*EOF|tls|certificate|ssl|error sending request|发送请求失败|Network Error/i.test(
+    msg,
+  );
 }
 
 /** @deprecated 请用 getLastUserApiUpdateAlertBatch */
@@ -326,20 +377,27 @@ export type LxScriptHeaderMeta = {
   description?: string;
   author?: string;
   homepage?: string;
+  updateUrl?: string;
 };
 
-/** 解析 LX UserApi 脚本头部 @name / @version 等注释 */
+/** 解析 LX UserApi 脚本头部 @name / @version / @update_url 等注释 */
 export function parseLxScriptHeaderMeta(script: string): LxScriptHeaderMeta {
   const meta: LxScriptHeaderMeta = {};
   const head = script.slice(0, 4096);
   for (const line of head.split('\n')) {
-    const m = line.match(/^\s*\*\s*@(name|version|description|author|homepage)\s+(.+?)\s*$/);
+    const m = line.match(
+      /^\s*\*\s*@(name|version|description|author|homepage|update_url)\s+(.+?)\s*$/,
+    );
     if (!m) continue;
-    const key = m[1] as keyof LxScriptHeaderMeta;
-    let value = m[2].trim();
+    const rawKey = m[1]!;
+    let value = m[2]!.trim();
     // 部分音源写成 @version v1.2.0，去掉前缀便于统一展示
-    if (key === 'version') value = value.replace(/^v+/i, '');
-    meta[key] = value;
+    if (rawKey === 'version') value = value.replace(/^v+/i, '');
+    if (rawKey === 'update_url') {
+      meta.updateUrl = value;
+      continue;
+    }
+    meta[rawKey as keyof Omit<LxScriptHeaderMeta, 'updateUrl'>] = value;
   }
   return meta;
 }
@@ -432,6 +490,7 @@ export function createLxUserApiEnvironment(meta: {
   version?: string;
   author?: string;
   homepage?: string;
+  updateUrl?: string;
   rawScript: string;
   /** 对齐 lx allowShowUpdateAlert；默认允许 */
   allowShowUpdateAlert?: boolean;
@@ -574,7 +633,7 @@ export function createLxUserApiEnvironment(meta: {
             delete headers.cookie;
           }
 
-          const res = await request(url, {
+          const requestOpts = {
             method,
             headers,
             body: reqBody,
@@ -582,7 +641,29 @@ export function createLxUserApiEnvironment(meta: {
             allowNon2xx: true,
             useBackendHttp: true,
             ignorePageNavigationAbort: true,
-          });
+          } as const;
+
+          let res: Awaited<ReturnType<typeof request>>;
+          try {
+            res = await request(url, requestOpts);
+          } catch (firstErr) {
+            const firstMsg =
+              firstErr instanceof Error ? firstErr.message : String(firstErr ?? '');
+            // 部分更新 CDN（kstore 等）在 download_binary/native-tls 下握手 EOF；再试 plugin-http
+            if (isTlsOrSendFailureMessage(firstMsg)) {
+              console.warn(
+                '[user-api] lx.request backend failed, retry without forced backend',
+                url.slice(0, 80),
+              );
+              try {
+                res = await request(url, { ...requestOpts, useBackendHttp: false });
+              } catch (retryErr) {
+                throw retryErr;
+              }
+            } else {
+              throw firstErr;
+            }
+          }
           if (aborted) return;
           const raw = await res.text();
           // 对齐 needle：非 JSON 保持字符串；仅 JSON 对象做 data 补齐
@@ -623,6 +704,18 @@ export function createLxUserApiEnvironment(meta: {
         } catch (err) {
           if (!aborted) {
             const error = err instanceof Error ? err : new Error(String(err));
+            if (
+              isLikelyUpdateCheckUrl(url, meta.updateUrl) ||
+              (tracksBootstrap && /\.json(?:\?|#|$)/i.test(url))
+            ) {
+              console.warn('[user-api] checkUpdate request failed', meta.name, error.message);
+              notifyUserApiUpdateCheckFailed({
+                scriptId: meta.id,
+                scriptName: meta.name,
+                updateUrl: meta.updateUrl || url,
+                error: error.message,
+              });
+            }
             // 空壳 resp，避免六音等读 resp.statusCode 抛错
             invokeLxRequestCallback(
               callback,
@@ -822,6 +915,7 @@ export async function loadLxUserApiScript(script: {
       version: headerMeta.version ?? '1',
       author: headerMeta.author,
       homepage: headerMeta.homepage,
+      updateUrl: headerMeta.updateUrl,
       rawScript: script.script,
       allowShowUpdateAlert: script.allowShowUpdateAlert !== false,
     });

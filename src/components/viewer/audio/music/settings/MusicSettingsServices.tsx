@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { syncAllBoundLists } from '@/lib/media/audio/list/sync-source-list';
 import { MusicSettingsOpenApi } from '@/components/viewer/audio/music/settings/MusicSettingsOpenApi';
@@ -22,7 +23,7 @@ export const MusicSettingsServices: Component = () => {
     } catch (error) {
       showAppToast({
         title: '绑定列表同步失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

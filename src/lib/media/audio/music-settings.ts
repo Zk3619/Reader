@@ -19,12 +19,18 @@ import {
   patchMusicConfig,
   peekMusicConfigSync,
 } from '@/lib/media/audio/music-config-storage';
+import { isTauri } from '@/lib/platform/detect';
 
 const STORAGE_KEY = 'reader_music_settings';
 const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 9;
+/** 跨 WebView 同步音乐设置（storage 事件不可靠） */
+export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 12;
 const listeners = new Set<(settings: MusicSettings) => void>();
+let remoteListenStarted = false;
+/** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
+let applyingRemoteSettings = false;
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
 /** 音乐搜索页列表加载：滚动追加 / 分页切换 */
@@ -62,6 +68,10 @@ export interface MusicSettings {
   musicSongListTagControl?: MusicSongListTagControlStyle;
   /** 在线歌单页：列表翻页方式（滚动加载 / 分页） */
   musicSongListPaginationPreference?: MusicSearchPaginationPreference;
+  /** 在线歌单页：列表/网格视图（对齐书架 ViewMode 子集） */
+  musicSongListViewMode?: string;
+  /** 在线歌单页：列表/网格间距（0–24，×0.25rem） */
+  musicSongListSpacing?: number;
   /** 排行榜页：列表翻页方式（滚动加载 / 分页） */
   musicLeaderboardPaginationPreference?: MusicSearchPaginationPreference;
   /** 我的列表页：允许拖拽调整歌曲顺序 */
@@ -75,7 +85,7 @@ export interface MusicSettings {
   searchClearResultsOnLeave: boolean;
   playSpeed: number;
   preservesPitch: boolean;
-  /** 音调倍率（对齐 lx pitchShifter.playbackRate），1 为原调，约 0.5～1.5 */
+  /** 音调倍率（对齐 lx pitchShifter.playbackRate），1 为原调，约 0.5～2 */
   pitchShifterRate: number;
   eqPreset: keyof typeof EQ_PRESETS;
   /** 自定义十段 EQ；非 null 时覆盖 eqPreset。 */
@@ -97,6 +107,8 @@ export interface MusicSettings {
   /** 设置页字号输入单位（仅影响编辑显示，存储始终为 rem） */
   playDetailLyricFontSizeUnit: MusicFontSizeUnit;
   playDetailZoomActiveLyric: boolean;
+  /** 播放详情当前行缩放倍率（1 = 不放大，建议 1.1–1.6） */
+  playDetailZoomActiveScale: number;
   playDetailAllowLyricSeek: boolean;
   /** 拖拽歌词松手后自动跳转播放（依赖 playDetailAllowLyricSeek） */
   playDetailLyricSeekAutoPlayOnRelease: boolean;
@@ -146,14 +158,40 @@ export interface MusicSettings {
   downloadTargetDirectory: string;
   downloadGroupByPlaylist: boolean;
   downloadSaveLyricFile: boolean;
+  /** 将歌词嵌入到 MP3 ID3（USLT） */
+  downloadEmbedLyric: boolean;
+  /** 将封面嵌入到 MP3 ID3（APIC） */
+  downloadEmbedCover: boolean;
   downloadSourceStrategy: MusicDownloadSourceStrategy;
   syncAutoUpdateLists: boolean;
+  /** 桌面歌词窗口是否启用（对齐 LX desktopLyric.enable） */
+  desktopLyricEnabled: boolean;
+  /** 桌面歌词窗口几何（逻辑像素）；缺省时开窗使用默认尺寸并居中 */
+  desktopLyricWidth?: number;
+  desktopLyricHeight?: number;
+  desktopLyricX?: number;
+  desktopLyricY?: number;
   desktopLyricPenetrate?: boolean;
+  /**
+   * 穿透高级：无视顶栏热区。开启后整窗始终点穿，悬停不显示任何控制栏（含解锁）；
+   * 关闭穿透或解锁请回设置页。
+   */
+  desktopLyricPenetrateIgnoreChrome?: boolean;
   desktopLyricTrack?: 'lyric' | 'tlyric' | 'rlyric' | 'lxlyric';
   desktopLyricFontSize?: number;
   desktopLyricOpacity?: number;
+  /** 是否显示歌名与艺术家（关闭后移除该区域） */
+  desktopLyricShowMeta: boolean;
+  /** 歌名/艺术家字号（px） */
+  desktopLyricMetaFontSize?: number;
+  /** 歌名/艺术家不透明度 0–1 */
+  desktopLyricMetaOpacity?: number;
+  /** 歌名/艺术家加粗 */
+  desktopLyricMetaBold: boolean;
   desktopLyricAlign: MusicLyricAlign;
   desktopLyricZoomActive: boolean;
+  /** 桌面歌词当前行缩放倍率 */
+  desktopLyricZoomActiveScale: number;
   desktopLyricSingleLine: boolean;
   desktopLyricMaxLines: number;
   desktopLyricPlayedColor: string;
@@ -210,6 +248,8 @@ const DEFAULTS: MusicSettings = {
   musicSongListTagControl: 'grouped',
   /** 对齐 lx 歌单默认用分页条 */
   musicSongListPaginationPreference: 'pagination',
+  musicSongListViewMode: 'list-2',
+  musicSongListSpacing: 12,
   /** 对齐 lx 排行榜默认用分页条 */
   musicLeaderboardPaginationPreference: 'pagination',
   musicListDragSortEnabled: true,
@@ -238,6 +278,7 @@ const DEFAULTS: MusicSettings = {
   playDetailLyricFontSize: PLAY_DETAIL_LYRIC_FONT_REM_DEFAULT,
   playDetailLyricFontSizeUnit: 'rem',
   playDetailZoomActiveLyric: true,
+  playDetailZoomActiveScale: 1.28,
   playDetailAllowLyricSeek: false,
   playDetailLyricSeekAutoPlayOnRelease: false,
   playDetailLyricDoubleClickSeek: false,
@@ -273,14 +314,25 @@ const DEFAULTS: MusicSettings = {
   downloadTargetDirectory: '',
   downloadGroupByPlaylist: false,
   downloadSaveLyricFile: false,
+  downloadEmbedLyric: false,
+  downloadEmbedCover: false,
   downloadSourceStrategy: 'fallback',
   syncAutoUpdateLists: true,
+  desktopLyricEnabled: false,
+  desktopLyricWidth: 600,
+  desktopLyricHeight: 200,
   desktopLyricPenetrate: false,
+  desktopLyricPenetrateIgnoreChrome: false,
   desktopLyricTrack: 'lxlyric',
   desktopLyricFontSize: 20,
   desktopLyricOpacity: 0.85,
+  desktopLyricShowMeta: true,
+  desktopLyricMetaFontSize: 14,
+  desktopLyricMetaOpacity: 0.7,
+  desktopLyricMetaBold: false,
   desktopLyricAlign: 'center',
   desktopLyricZoomActive: true,
+  desktopLyricZoomActiveScale: 1.28,
   desktopLyricSingleLine: false,
   desktopLyricMaxLines: 5,
   desktopLyricPlayedColor: '#ffffff',
@@ -325,6 +377,18 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   musicSongListSortControl: ['select', 'tabs'],
   musicSongListTagControl: ['grouped', 'stacked'],
   musicSongListPaginationPreference: ['scroll', 'pagination'],
+  musicSongListViewMode: [
+    'list',
+    'list-2',
+    'list-3',
+    'grid-2',
+    'grid-3',
+    'grid-4',
+    'grid-5',
+    'grid-6',
+    'grid-7',
+    'grid-8',
+  ],
   musicLeaderboardPaginationPreference: ['scroll', 'pagination'],
   eqPreset: Object.keys(EQ_PRESETS),
   lyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
@@ -393,6 +457,9 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'desktopLyric.style.isZoomActiveLrc': 'desktopLyricZoomActive',
   'desktopLyric.style.lyricPlayedColor': 'desktopLyricPlayedColor',
   'desktopLyric.style.lyricUnplayColor': 'desktopLyricUnplayedColor',
+  'desktopLyric.enable': 'desktopLyricEnabled',
+  'desktopLyric.isLock': 'desktopLyricLocked',
+  'desktopLyric.isAlwaysOnTop': 'desktopLyricAlwaysOnTop',
   'list.isShowSource': 'listShowSource',
   'list.isSaveScrollLocation': 'listSaveScrollPosition',
   'list.actionButtonsVisible': 'listActionButtonsVisible',
@@ -453,11 +520,22 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'downloadConcurrent':
       return Math.max(1, Math.min(20, Math.round(value)));
     case 'playSpeed':
-      return Math.max(0.5, Math.min(3, value));
+      return Math.max(0.25, Math.min(4, value));
     case 'pitchShifterRate':
-      return Math.max(0.5, Math.min(1.5, Math.round(value * 100) / 100));
+      return Math.max(0.5, Math.min(2, Math.round(value * 100) / 100));
     case 'desktopLyricOpacity':
       return Math.max(0, Math.min(1, value));
+    case 'desktopLyricMetaOpacity':
+      return Math.max(0, Math.min(1, value));
+    case 'desktopLyricMetaFontSize':
+      return Math.max(10, Math.min(48, Math.round(value)));
+    case 'desktopLyricWidth':
+      return Math.max(240, Math.min(4000, Math.round(value)));
+    case 'desktopLyricHeight':
+      return Math.max(80, Math.min(2000, Math.round(value)));
+    case 'desktopLyricFontSize':
+      // 设置页单位为 px（默认 20）；防止异常大值把歌词撑满屏
+      return Math.max(12, Math.min(80, Math.round(value)));
     case 'desktopLyricMaxLines':
       return Math.max(1, Math.round(value));
     case 'audioMaxChannels':
@@ -468,10 +546,15 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return clampPlayDetailLyricFontRem(value);
     case 'desktopLyricLineHeight':
       return Math.max(1, Math.min(3, value));
+    case 'playDetailZoomActiveScale':
+    case 'desktopLyricZoomActiveScale':
+      return Math.max(1, Math.min(1.8, Math.round(value * 100) / 100));
     case 'playTimeoutSec':
       return Math.max(0, value);
     case 'playTimerTargetAt':
       return Math.max(0, Math.round(value));
+    case 'musicSongListSpacing':
+      return Math.max(0, Math.min(24, Math.round(value)));
     default:
       return value;
   }
@@ -515,6 +598,12 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
   }
   if (normalized.lyricUseLxLyric === false && normalized.desktopLyricTrack === 'lxlyric') {
     normalized.desktopLyricTrack = 'lyric';
+  }
+  for (const key of ['desktopLyricX', 'desktopLyricY'] as const) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      normalized[key] = value;
+    }
   }
   if (
     source.playQualityPreference === undefined &&
@@ -574,6 +663,7 @@ function writeSettings(settings: MusicSettings): void {
 }
 
 export function getMusicSettings(): MusicSettings {
+  ensureMusicSettingsRemoteSync();
   const fromConfig = peekMusicConfigSync().settings;
   if (fromConfig && Object.keys(fromConfig).length > 0) {
     return normalizeMusicSettings(fromConfig);
@@ -594,14 +684,52 @@ export function getMusicSettings(): MusicSettings {
   return settings;
 }
 
+function broadcastMusicSettingsChanged(next: MusicSettings): void {
+  if (applyingRemoteSettings) return;
+  if (!isTauri()) return;
+  void import('@tauri-apps/api/event')
+    .then(({ emit }) => emit(MUSIC_SETTINGS_CHANGED_EVENT, next))
+    .catch(() => undefined);
+}
+
+/**
+ * 他窗推送的设置：写入本窗缓存并通知本地 listeners，不再二次广播。
+ */
+export function applyRemoteMusicSettings(input: unknown): MusicSettings {
+  const next = normalizeMusicSettings(input);
+  applyingRemoteSettings = true;
+  try {
+    writeSettings(next);
+    for (const listener of listeners) listener(next);
+  } finally {
+    applyingRemoteSettings = false;
+  }
+  return next;
+}
+
+function ensureMusicSettingsRemoteSync(): void {
+  if (remoteListenStarted) return;
+  remoteListenStarted = true;
+  if (!isTauri()) return;
+  void import('@tauri-apps/api/event')
+    .then(({ listen }) =>
+      listen<unknown>(MUSIC_SETTINGS_CHANGED_EVENT, (e) => {
+        applyRemoteMusicSettings(e.payload);
+      }),
+    )
+    .catch(() => undefined);
+}
+
 export function setMusicSettings(patch: Partial<MusicSettings>): void {
   const next = normalizeMusicSettings({ ...getMusicSettings(), ...patch });
   writeSettings(next);
   for (const listener of listeners) listener(next);
+  broadcastMusicSettingsChanged(next);
 }
 export function subscribeMusicSettings(
   listener: (settings: MusicSettings) => void,
 ): () => void {
+  ensureMusicSettingsRemoteSync();
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
@@ -633,6 +761,7 @@ export function importMusicSettings(json: string): void {
   const settings = normalizeMusicSettings(JSON.parse(json));
   writeSettings(settings);
   for (const listener of listeners) listener(settings);
+  broadcastMusicSettingsChanged(settings);
 }
 
 export function getMusicListScrollPosition(listId: string): number {

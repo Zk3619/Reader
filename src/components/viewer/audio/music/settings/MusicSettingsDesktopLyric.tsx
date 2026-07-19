@@ -39,21 +39,37 @@ export const MusicSettingsDesktopLyric: Component = () => {
 
   const openLyric = async () => {
     if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('open_desktop_lyric_window');
+    const { setDesktopLyricEnabled } = await import('@/lib/media/audio/desktop-lyric-window');
+    await setDesktopLyricEnabled(true);
   };
 
   const closeLyric = async () => {
     if (!isTauri()) return;
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('close_desktop_lyric_window');
+    const { setDesktopLyricEnabled } = await import('@/lib/media/audio/desktop-lyric-window');
+    await setDesktopLyricEnabled(false);
   };
 
-  const setPenetrate = async (ignore: boolean) => {
-    apply({ desktopLyricPenetrate: ignore });
+  const setPenetrate = async (enabled: boolean) => {
+    apply({ desktopLyricPenetrate: enabled });
     if (!isTauri()) return;
     const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('set_desktop_lyric_ignore_cursor', { ignore });
+    const next = getMusicSettings();
+    await invoke('set_desktop_lyric_penetrate_mode', {
+      enabled,
+      ignoreChrome: next.desktopLyricPenetrateIgnoreChrome ?? false,
+    });
+  };
+
+  const setPenetrateIgnoreChrome = async (ignoreChrome: boolean) => {
+    apply({ desktopLyricPenetrateIgnoreChrome: ignoreChrome });
+    if (!isTauri()) return;
+    const next = getMusicSettings();
+    if (!next.desktopLyricPenetrate) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('set_desktop_lyric_penetrate_mode', {
+      enabled: true,
+      ignoreChrome,
+    });
   };
 
   const applyWindowOptions = async (patch: Parameters<typeof setMusicSettings>[0]) => {
@@ -71,6 +87,12 @@ export const MusicSettingsDesktopLyric: Component = () => {
     if (!isTauri()) return;
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('reset_desktop_lyric_window_geometry');
+    apply({
+      desktopLyricWidth: 600,
+      desktopLyricHeight: 200,
+      desktopLyricX: undefined,
+      desktopLyricY: undefined,
+    });
   };
 
   const requestOverlayPermission = async () => {
@@ -88,17 +110,25 @@ export const MusicSettingsDesktopLyric: Component = () => {
       <h2 class="text-base font-semibold">桌面歌词设置</h2>
       <Show when={isTauri() && !isAndroid()}>
         <div>
-          <h3 class="font-medium">Reader 平台控制 · 桌面歌词窗口</h3>
+          <h3 class="font-medium">桌面歌词窗口</h3>
           <p class="mt-1 text-xs text-muted-foreground">
-            Reader 通过 Tauri 独立窗口提供桌面歌词；打开、关闭与鼠标穿透不是 LX
-            Music 设置原项。
+            通过独立窗口显示桌面歌词；可在此打开、关闭窗口，或开启鼠标穿透。
           </p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => void openLyric()}>
-            打开
+          <Button
+            size="sm"
+            variant={settings().desktopLyricEnabled ? 'default' : 'outline'}
+            onClick={() => void openLyric()}
+          >
+            {settings().desktopLyricEnabled ? '已打开' : '打开'}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void closeLyric()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!settings().desktopLyricEnabled}
+            onClick={() => void closeLyric()}
+          >
             关闭
           </Button>
         </div>
@@ -112,6 +142,27 @@ export const MusicSettingsDesktopLyric: Component = () => {
             鼠标穿透
           </Label>
         </div>
+        <Show when={settings().desktopLyricPenetrate}>
+          <div class="ml-6 space-y-1 rounded-md border border-border/60 bg-muted/30 p-3">
+            <p class="text-xs font-medium text-muted-foreground">高级</p>
+            <div class="flex items-start gap-2">
+              <Checkbox
+                id="music-desktop-lyric-penetrate-ignore-chrome-input"
+                class="mt-0.5"
+                checked={settings().desktopLyricPenetrateIgnoreChrome ?? false}
+                onChange={(checked) => void setPenetrateIgnoreChrome(checked)}
+              />
+              <div class="space-y-1">
+                <Label for="music-desktop-lyric-penetrate-ignore-chrome-input">
+                  无视顶栏
+                </Label>
+                <p class="text-xs text-muted-foreground">
+                  整窗始终点击穿透，悬停不再显示控制栏（含锁定时的解锁按钮）。关闭穿透或解锁请回本页设置。
+                </p>
+              </div>
+            </div>
+          </div>
+        </Show>
         <div class="flex flex-wrap gap-4">
           <label class="flex items-center gap-2">
             <Checkbox
@@ -132,7 +183,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
               checked={settings().desktopLyricHideWhenPaused}
               onChange={(checked) => apply({ desktopLyricHideWhenPaused: checked })}
             />
-            <span>暂停时隐藏歌词（Reader 行为）</span>
+            <span>暂停时隐藏歌词</span>
           </label>
           <label class="flex items-center gap-2">
             <Checkbox
@@ -143,9 +194,9 @@ export const MusicSettingsDesktopLyric: Component = () => {
           </label>
         </div>
         <p class="text-xs text-muted-foreground">
-          LX Music 的暂停选项会提高歌词透明度；Reader 当前实现为隐藏歌词，故单独标注。
+          暂停时可选择隐藏歌词；全屏主窗口时也可自动隐藏。
         </p>
-        <h3 class="border-t pt-4 font-medium">Reader 扩展 · 歌词内容</h3>
+        <h3 class="border-t pt-4 font-medium">歌词内容</h3>
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-muted-foreground">桌面歌词轨：</span>
           <MusicAppSelect
@@ -176,7 +227,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
             onChange={(value) => apply({ desktopLyricScrollPosition: value })}
             options={SCROLL_POSITIONS}
             optionLabel={(value) =>
-              value === 'top' ? '顶部' : value === 'bottom' ? '底部（Reader 扩展）' : '中心'
+              value === 'top' ? '顶部' : value === 'bottom' ? '底部' : '中心'
             }
             triggerClass="w-24"
             aria-label="桌面歌词滚动位置"
@@ -235,10 +286,64 @@ export const MusicSettingsDesktopLyric: Component = () => {
           重置窗口设置
         </Button>
         <p class="text-xs text-muted-foreground">
-          Reader 平台限制：Windows/macOS/Linux 支持锁定、置顶和窗口设置重置；任务栏显示、
-          自动刷新置顶与锁屏边界限制当前不提供。
+          Windows / macOS / Linux 支持锁定、置顶与窗口设置重置。
         </p>
-        <h3 class="border-t pt-4 font-medium">Reader 扩展 · 显示细节</h3>
+        <h3 class="border-t pt-4 font-medium">显示细节</h3>
+        <div class="flex items-center gap-2">
+          <Checkbox
+            id="music-desktop-lyric-show-meta-input"
+            checked={settings().desktopLyricShowMeta !== false}
+            onChange={(checked) => apply({ desktopLyricShowMeta: checked })}
+          />
+          <Label for="music-desktop-lyric-show-meta-input">显示歌曲名和艺术家</Label>
+        </div>
+        <Show when={settings().desktopLyricShowMeta !== false}>
+          <div class="ml-6 space-y-3 rounded-md border border-border/60 bg-muted/30 p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-muted-foreground">标题字号：</span>
+              <Slider
+                class="w-40"
+                minValue={10}
+                maxValue={32}
+                step={1}
+                value={[settings().desktopLyricMetaFontSize ?? 14]}
+                onChange={(v) => apply({ desktopLyricMetaFontSize: v[0] ?? 14 })}
+              >
+                <SliderTrack>
+                  <SliderFill />
+                  <SliderThumb />
+                </SliderTrack>
+              </Slider>
+              <span class="tabular-nums">{settings().desktopLyricMetaFontSize ?? 14}px</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-muted-foreground">标题不透明度：</span>
+              <Slider
+                class="w-40"
+                minValue={20}
+                maxValue={100}
+                step={1}
+                value={[Math.round((settings().desktopLyricMetaOpacity ?? 0.7) * 100)]}
+                onChange={(v) => apply({ desktopLyricMetaOpacity: (v[0] ?? 70) / 100 })}
+              >
+                <SliderTrack>
+                  <SliderFill />
+                  <SliderThumb />
+                </SliderTrack>
+              </Slider>
+              <span class="tabular-nums">
+                {Math.round((settings().desktopLyricMetaOpacity ?? 0.7) * 100)}%
+              </span>
+            </div>
+            <label class="flex items-center gap-2">
+              <Checkbox
+                checked={settings().desktopLyricMetaBold}
+                onChange={(checked) => apply({ desktopLyricMetaBold: checked })}
+              />
+              <span>标题加粗</span>
+            </label>
+          </div>
+        </Show>
         <div class="flex items-center gap-2">
           <Checkbox
             id="music-desktop-lyric-zoom-active-input"
@@ -249,6 +354,29 @@ export const MusicSettingsDesktopLyric: Component = () => {
             缩放当前播放的歌词
           </Label>
         </div>
+        <Show when={settings().desktopLyricZoomActive}>
+          <div class="ml-6 flex flex-wrap items-center gap-2">
+            <span class="text-muted-foreground">缩放幅度：</span>
+            <Slider
+              class="w-40"
+              minValue={100}
+              maxValue={160}
+              step={1}
+              value={[Math.round((settings().desktopLyricZoomActiveScale ?? 1.28) * 100)]}
+              onChange={(v) =>
+                apply({ desktopLyricZoomActiveScale: (v[0] ?? 128) / 100 })
+              }
+            >
+              <SliderTrack>
+                <SliderFill />
+                <SliderThumb />
+              </SliderTrack>
+            </Slider>
+            <span class="tabular-nums">
+              {Math.round((settings().desktopLyricZoomActiveScale ?? 1.28) * 100)}%
+            </span>
+          </div>
+        </Show>
         <div class="flex items-center gap-2">
           <Checkbox
             id="music-desktop-lyric-single-line-input"
@@ -310,7 +438,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
           <span class="text-muted-foreground">不透明度：</span>
           <Slider
             class="w-40"
-            minValue={20}
+            minValue={0}
             maxValue={100}
             step={1}
             value={[Math.round((settings().desktopLyricOpacity ?? 0.85) * 100)]}

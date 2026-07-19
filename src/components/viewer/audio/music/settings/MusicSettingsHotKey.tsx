@@ -8,6 +8,7 @@ import {
   type MusicHotkeys,
 } from '@/lib/media/audio/platform/music-hotkeys';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 
 const HOTKEY_GROUPS: {
   title: string;
@@ -53,7 +54,7 @@ export const MusicSettingsHotKey: Component = () => {
     } catch (error) {
       showAppToast({
         title: '快捷键应用失败',
-        description: String(error),
+        description: toUserFacingMusicError(error),
         variant: 'destructive',
       });
     } finally {

@@ -60,6 +60,17 @@ import {
   getMusicSettings,
   setMusicActivePlaylistId,
 } from '@/lib/media/audio/music-settings';
+import {
+  clearMusicTrackProgress,
+  musicTrackProgressKey,
+  resolveMusicTrackStartPositionSec,
+} from '@/lib/media/audio/music-track-progress';
+import {
+  cancelScheduledMusicAutoSkip,
+  scheduleMusicAutoSkip,
+  consumeMusicAutoSkipSlot,
+} from '@/lib/media/audio/music-auto-skip-guard';
+import { requestMusicAutoPlayOnce } from '@/lib/media/audio/music-play-intent';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { globalMediaPlayerStore } from '@/stores/global-media-player';
 import { MediaGroupId } from '@/types/book-group';
@@ -80,6 +91,8 @@ import {
 let playbackRevoke: (() => void) | null = null;
 /** 音乐切歌世代：丢弃过期的 applyMusicTrack 结果，防止双音频 */
 let musicApplyGeneration = 0;
+/** 自动切歌进行中（含下一首取链）：阻止 ended 重入再次 playNext */
+let musicTrackAdvanceInFlight = false;
 let restorePlaylistRequestId = 0;
 let randomPlayedTrackKeys = new Set<string>();
 let randomQueueSignature = '';
@@ -168,11 +181,10 @@ export function normalizeMusicHubSection(section: unknown): MusicHubSection {
     case 'songlist':
     case 'leaderboard':
     case 'list':
+    case 'download':
     case 'settings':
     case 'nowPlaying':
       return section;
-    case 'download':
-      return 'settings';
     default:
       return 'search';
   }
@@ -204,12 +216,29 @@ export type MusicPlaybackSnapshot = {
   activeSource: typeof state.activeSource;
   musicMediaUrls: string[];
   musicPrimaryUrl: string | null;
+  musicPositionSec: number;
   musicLoading: boolean;
   musicError: string | null;
   playbackStatus: string | null;
   musicSection: typeof state.musicSection;
-  chapterPos: number;
 };
+
+/** 优先读 Hub <audio> 实时进度，避免与文本 chapterPos 串味 */
+export function readLiveMusicPositionSec(): number {
+  if (typeof document !== 'undefined') {
+    const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+    if (el && Number.isFinite(el.currentTime) && el.currentTime > 0) {
+      return Math.max(0, el.currentTime);
+    }
+  }
+  return Math.max(0, state.musicPositionSec || 0);
+}
+
+export function setMusicPositionSec(pos: number): void {
+  const next = Math.max(0, Number.isFinite(pos) ? pos : 0);
+  if (state.musicPositionSec === next) return;
+  setState({ musicPositionSec: next });
+}
 
 export function snapshotMusicPlayback(): MusicPlaybackSnapshot | null {
   if (!shouldPreserveMusicPlayback()) return null;
@@ -227,11 +256,11 @@ export function snapshotMusicPlayback(): MusicPlaybackSnapshot | null {
     activeSource: state.activeSource,
     musicMediaUrls: [...state.musicMediaUrls],
     musicPrimaryUrl: state.musicPrimaryUrl,
+    musicPositionSec: readLiveMusicPositionSec(),
     musicLoading: state.musicLoading,
     musicError: state.musicError,
     playbackStatus: state.playbackStatus,
     musicSection: state.musicSection,
-    chapterPos: state.chapterPos,
   };
 }
 
@@ -360,6 +389,7 @@ export async function openMusicHub(options?: {
     error: null,
     musicMediaUrls: state.musicMediaUrls,
     musicPrimaryUrl: state.musicPrimaryUrl,
+    musicPositionSec: readLiveMusicPositionSec(),
     musicLoading: false,
     musicError: null,
     playbackStatus: state.playbackStatus,
@@ -492,6 +522,7 @@ export async function applyMusicTrack(
   options?: { forceRefreshUrl?: boolean },
 ): Promise<void> {
   const gen = ++musicApplyGeneration;
+  cancelScheduledMusicAutoSkip();
   const queue = state.trackQueue;
   const track = queue[index];
   if (!track) {
@@ -521,11 +552,28 @@ export async function applyMusicTrack(
     return;
   }
   if (gen !== musicApplyGeneration) return;
+  const prevTrack = state.trackQueue[state.trackIndex];
+  const hasPlayableUrl =
+    !!state.musicPrimaryUrl || (state.musicMediaUrls?.length ?? 0) > 0;
+  const sameTrack =
+    state.trackIndex === index &&
+    !!prevTrack &&
+    musicTrackKey(prevTrack) === musicTrackKey(track) &&
+    // 队列刚整体替换时 urls 已清空，不能当成「同曲重取链」而沿用旧进度
+    hasPlayableUrl;
+  // 切歌时与 trackIndex 同步清进度，避免 loadSegment 读到上一曲曲末秒数
+  const musicPositionSec = resolveMusicTrackStartPositionSec({
+    sameTrack,
+    rememberProgress: getMusicSettings().rememberProgress,
+    trackKey: musicTrackKey(track),
+    currentPositionSec: state.musicPositionSec,
+  });
   setState({
     musicLoading: true,
     musicError: null,
     musicMediaUrls: [],
     musicPrimaryUrl: null,
+    musicPositionSec,
     playbackStatus: (() => {
       const name = getActiveUserApiDisplayName();
       return name
@@ -561,6 +609,7 @@ export async function applyMusicTrack(
       {
         skipCache: options?.forceRefreshUrl,
         activeSource: state.activeSource,
+        preferDownloadedFile: state.musicQueueOrigin === 'download',
         onStatus: (message) => {
           if (gen !== musicApplyGeneration) return;
           setState({ playbackStatus: message });
@@ -592,7 +641,11 @@ export async function applyMusicTrack(
       notifyMusicPlaybackFailure(failMsg, { toggled });
       if (shouldAutoSkipOnError(queue.length)) {
         console.warn('[music] autoSkipOnError after resolve fail');
-        setTimeout(() => void playNextTrackAfterError(), 0);
+        const failGen = gen;
+        scheduleMusicAutoSkip(() => {
+          if (failGen !== musicApplyGeneration) return;
+          void playNextTrackAfterError({ slotConsumed: true });
+        });
       }
       return;
     }
@@ -670,7 +723,11 @@ export async function applyMusicTrack(
     notifyMusicPlaybackFailure(message);
     if (shouldAutoSkipOnError(queue.length)) {
       console.warn('[music] autoSkipOnError after exception');
-      setTimeout(() => void playNextTrackAfterError(), 0);
+      const failGen = gen;
+      scheduleMusicAutoSkip(() => {
+        if (failGen !== musicApplyGeneration) return;
+        void playNextTrackAfterError({ slotConsumed: true });
+      });
     }
   }
 }
@@ -681,7 +738,7 @@ export async function retryMusicTrackPlayback(): Promise<void> {
 }
 
 /** 队列来源：决定失败自动切歌等行为。 */
-export type MusicQueueOrigin = 'search' | 'list' | 'other';
+export type MusicQueueOrigin = 'search' | 'list' | 'download' | 'other';
 
 export interface PlayQueueSourceOptions {
   origin?: MusicQueueOrigin;
@@ -752,9 +809,19 @@ export function setMusicTrackQueue(
       ? TEMP_PLAYER_LIST_ID
       : listPatch.playerListId;
   // 先写入队列状态再落盘，确保快照含 tracks
+  const startTrack = tracks[startIndex];
+  const musicPositionSec = startTrack
+    ? resolveMusicTrackStartPositionSec({
+        sameTrack: false,
+        rememberProgress: getMusicSettings().rememberProgress,
+        trackKey: musicTrackKey(startTrack),
+        currentPositionSec: 0,
+      })
+    : 0;
   setState({
     trackQueue: tracks,
     trackIndex: startIndex,
+    musicPositionSec,
     activeSource: source ?? tracks[0]?.source ?? null,
     musicLoading: true,
     musicMediaUrls: [],
@@ -770,6 +837,9 @@ export function setMusicTrackQueue(
     immediate: true,
   });
   stopMusicHubAudioElement();
+  if (getMusicSettings().autoPlay) {
+    requestMusicAutoPlayOnce();
+  }
   void applyMusicTrack(startIndex);
 }
 
@@ -947,47 +1017,73 @@ export function replaceTrackInQueue(oldTrack: AudioTrack, replacement: AudioTrac
   });
 }
 
+/** 曲终切歌前清掉当前曲进度，避免列表循环回到该曲时 seek 到曲末再 ended */
+function clearCurrentTrackProgressForAdvance(): void {
+  const track = state.trackQueue[state.trackIndex];
+  setMusicPositionSec(0);
+  if (track) clearMusicTrackProgress(musicTrackProgressKey(track.source, track.id));
+  const listId =
+    state.playerListKind === 'temporary' || !state.playerListId
+      ? TEMP_PLAYER_LIST_ID
+      : state.playerListId;
+  if (listId) {
+    persistPlayerListState(listId, state.trackIndex, {
+      time: 0,
+      immediate: true,
+    });
+  }
+}
+
 export async function playNextTrack(options?: { manual?: boolean }): Promise<void> {
   const queue = state.trackQueue;
   if (queue.length === 0) return;
   const cfg = getMusicPlayConfig();
   const cur = state.trackIndex;
   const manual = options?.manual === true;
+  // 自动切歌重入：两首歌列表下第二次 playNext 会切回上一首，且常携带曲末进度
+  if (!manual && (musicTrackAdvanceInFlight || state.musicLoading)) {
+    return;
+  }
   // 禁止切换：曲终不切歌；手动下一首对齐 lx，按列表循环切
   if (cfg.playMode === AudioPlayMode.none && !manual) return;
   const playMode =
     cfg.playMode === AudioPlayMode.none && manual
       ? AudioPlayMode.listLoop
       : cfg.playMode;
-  if (playMode === AudioPlayMode.singleLoop) {
-    // 单曲循环：从头重播。勿沿用曲末记忆进度，否则 seek 到末尾会立刻再次 ended。
-    setState({ chapterPos: 0 });
-    const el =
-      typeof document !== 'undefined'
-        ? document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]')
-        : null;
-    if (el?.src && state.musicPrimaryUrl && !state.musicError) {
-      try {
-        el.currentTime = 0;
-        await el.play();
-        return;
-      } catch {
-        // 播放失败则重新取链
-      }
+
+  if (!manual) musicTrackAdvanceInFlight = true;
+  try {
+    clearCurrentTrackProgressForAdvance();
+    // 曲终/自动切歌后必须起播，不受「选中后播放」关闭或 startup 门闩影响
+    requestMusicAutoPlayOnce();
+    if (playMode === AudioPlayMode.singleLoop) {
+      // 单曲循环：重新 apply 以清 ended 闩并按 autoPlay 起播（勿直接 el.play 绕过播放器状态）
+      setState({ musicPositionSec: 0 });
+      await applyMusicTrack(cur);
+      return;
     }
-    await applyMusicTrack(cur);
-    return;
+    const next =
+      playMode === AudioPlayMode.random
+        ? resolveRandomUnplayedIndex(queue, cur)
+        : resolveNextChapterIndex(cur, queue.length, playMode);
+    if (next == null) return;
+    await applyMusicTrack(next);
+  } finally {
+    if (!manual) musicTrackAdvanceInFlight = false;
   }
-  const next =
-    playMode === AudioPlayMode.random
-      ? resolveRandomUnplayedIndex(queue, cur)
-      : resolveNextChapterIndex(cur, queue.length, playMode);
-  if (next == null) return;
-  await applyMusicTrack(next);
 }
 
 /** 错误恢复必须切换到其它歌曲，不受“单曲循环 / 禁止切换”限制。 */
-export async function playNextTrackAfterError(): Promise<void> {
+export async function playNextTrackAfterError(options?: {
+  /** scheduleMusicAutoSkip 已占用名额时传 true，避免二次冷却拦截 */
+  slotConsumed?: boolean;
+}): Promise<void> {
+  // 取链尚未结束时禁止跳过，否则清 src 触发的伪 error 会连环切歌
+  if (state.musicLoading) return;
+  if (!options?.slotConsumed && !consumeMusicAutoSkipSlot()) {
+    console.warn('[music] autoSkip suppressed (cooldown/burst)');
+    return;
+  }
   const queue = state.trackQueue;
   if (queue.length <= 1) return;
   const cur = state.trackIndex;

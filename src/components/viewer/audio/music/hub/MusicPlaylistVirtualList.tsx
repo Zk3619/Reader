@@ -1,29 +1,45 @@
 /**
- * 在线歌单虚拟列表：桌面 lx 响应式网格 / 移动竖向网格（固定行高，避免聚合来源换行抖动）
+ * 在线歌单虚拟列表：固定列数（书架式 viewMode）+ 横向/网格卡片
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, type Accessor, type Component, type JSX } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+  type Accessor,
+  type Component,
+  type JSX,
+} from 'solid-js';
 import {
   VirtualGridRowsList,
   useVirtualGridContainerWidth,
 } from '@/components/shared/virtual-list';
-import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
-import { MusicPlaylistListCard, type MusicPlaylistCardVariant } from '@/components/viewer/audio/music/hub/MusicPlaylistListCard';
+import {
+  MusicPlaylistListCard,
+  type MusicPlaylistCardVariant,
+} from '@/components/viewer/audio/music/hub/MusicPlaylistListCard';
+import {
+  BOOKSHELF_LAYOUT_GAP_CLASS,
+  bookshelfLayoutGapToRem,
+  bookshelfLayoutSpacingToPx,
+} from '@/lib/bookshelf/bookshelf-layout-gap';
+import {
+  getBookshelfListColumnLayout,
+  getViewModeGridColumnCount,
+  isGridViewMode,
+  isListViewMode,
+} from '@/lib/bookshelf/bookshelf-layout-settings';
 import {
   estimateLxDesktopPlaylistRowHeightPx,
   estimateLxMobilePlaylistRowHeightPx,
-  LX_PLAYLIST_DESKTOP_COL_GAP_PX,
-  LX_PLAYLIST_DESKTOP_ROW_GAP_PX,
   LX_PLAYLIST_LIST_HORIZONTAL_PADDING_PX,
-  LX_PLAYLIST_MOBILE_COL_GAP_PX,
-  LX_PLAYLIST_MOBILE_ROW_GAP_PX,
   LX_PLAYLIST_ROW_HOVER_PAD_PX,
   musicPlaylistItemKey,
-  resolveDesktopPlaylistColumnCount,
-  resolveMobilePlaylistColumnCount,
 } from '@/lib/media/audio/music-playlist-list-layout';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import { musicHubListInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
 import { cn } from '@/lib/utils';
 
 export interface MusicPlaylistVirtualListProps {
@@ -37,48 +53,41 @@ export interface MusicPlaylistVirtualListProps {
   scrollFooter?: JSX.Element;
 }
 
-const PLAYLIST_ROW_GAP_CSS_VAR = 'music-playlist-row-gap';
+const PLAYLIST_ROW_GAP_CSS_VAR = 'bookshelf-layout-gap';
 
 export const MusicPlaylistVirtualList: Component<MusicPlaylistVirtualListProps> = (props) => {
-  const shell = useShellLayout();
-  const isMobileLayout = () => shell().useMobileShell;
+  const ui = getMusicSongListUi;
   const items: Accessor<readonly OnlinePlaylistSummary[]> = () =>
     typeof props.playlists === 'function' ? props.playlists() : props.playlists;
 
   const [scrollRoot, setScrollRoot] = createSignal<HTMLDivElement | undefined>();
   const containerWidth = useVirtualGridContainerWidth(scrollRoot);
 
-  const interRowGapPx = () =>
-    isMobileLayout() ? LX_PLAYLIST_MOBILE_ROW_GAP_PX : LX_PLAYLIST_DESKTOP_ROW_GAP_PX;
+  const isGrid = () => isGridViewMode(ui().viewMode);
 
+  const colCount = () => {
+    const mode = ui().viewMode;
+    if (isGridViewMode(mode)) return getViewModeGridColumnCount(mode);
+    if (isListViewMode(mode)) return getBookshelfListColumnLayout(mode);
+    return 2;
+  };
+
+  const gapPx = () => bookshelfLayoutSpacingToPx(ui().spacing);
   const horizontalPaddingPx = () => LX_PLAYLIST_LIST_HORIZONTAL_PADDING_PX;
 
   createEffect(() => {
     const el = scrollRoot();
     if (!el) return;
-    el.style.setProperty(`--${PLAYLIST_ROW_GAP_CSS_VAR}`, `${interRowGapPx()}px`);
+    const gap = bookshelfLayoutGapToRem(ui().spacing);
+    el.style.setProperty(`--${PLAYLIST_ROW_GAP_CSS_VAR}`, gap);
     onCleanup(() => el.style.removeProperty(`--${PLAYLIST_ROW_GAP_CSS_VAR}`));
   });
 
-  const colCount = createMemo(() => {
-    if (isMobileLayout()) {
-      return resolveMobilePlaylistColumnCount(shell().windowWidth);
-    }
-    const width = containerWidth();
-    if (width <= 0) return 3;
-    return resolveDesktopPlaylistColumnCount(
-      width,
-      LX_PLAYLIST_DESKTOP_COL_GAP_PX,
-      horizontalPaddingPx(),
-    );
-  });
-
-  /** 固定行高：卡片高 + 顶留白（悬停抬升）；列宽按 content box 估算 */
   const fixedRowContentHeightPx = createMemo(() => {
     const cols = Math.max(1, colCount());
     const width = containerWidth();
     const pad = horizontalPaddingPx();
-    const gap = isMobileLayout() ? LX_PLAYLIST_MOBILE_COL_GAP_PX : LX_PLAYLIST_DESKTOP_COL_GAP_PX;
+    const gap = gapPx();
     const inner = Math.max(0, (width > 0 ? width : 720) - pad);
     const colWidth = cols === 1 ? inner : Math.max(0, (inner - gap * (cols - 1)) / cols);
     const metrics = {
@@ -87,23 +96,18 @@ export const MusicPlaylistVirtualList: Component<MusicPlaylistVirtualListProps> 
       gapPx: gap,
       colWidth,
     };
-    return isMobileLayout()
+    return isGrid()
       ? estimateLxMobilePlaylistRowHeightPx(metrics)
       : estimateLxDesktopPlaylistRowHeightPx(metrics);
   });
 
   const remeasureLayout = () =>
-    `${isMobileLayout()}|${shell().windowWidth}|${containerWidth()}|${colCount()}|${interRowGapPx()}|${fixedRowContentHeightPx()}`;
+    `${ui().viewMode}|${ui().spacing}|${containerWidth()}|${colCount()}|${fixedRowContentHeightPx()}`;
 
-  const gridClass = () =>
-    isMobileLayout() ? 'grid gap-x-6' : 'grid gap-x-5';
-
-  // 对齐书架：四周留白；水平 px-2 避免奇数列中间卡右侧被裁切
   const listInnerClass = () =>
     props.listInnerClass ?? cn(musicHubListInsetClass, 'px-2 pb-4 pt-1');
 
-  const cardVariant = (): MusicPlaylistCardVariant =>
-    isMobileLayout() ? 'grid' : 'horizontal';
+  const cardVariant = (): MusicPlaylistCardVariant => (isGrid() ? 'grid' : 'horizontal');
 
   return (
     <VirtualGridRowsList<OnlinePlaylistSummary>
@@ -113,9 +117,9 @@ export const MusicPlaylistVirtualList: Component<MusicPlaylistVirtualListProps> 
       rowHeightMode="fixed"
       estimateRowSize={fixedRowContentHeightPx}
       rowGapCssVar={PLAYLIST_ROW_GAP_CSS_VAR}
-      getInterRowGapPx={interRowGapPx}
+      getInterRowGapPx={gapPx}
       remeasureDeps={remeasureLayout}
-      gridClass={gridClass()}
+      gridClass={cn('grid', BOOKSHELF_LAYOUT_GAP_CLASS)}
       listInnerClass={listInnerClass()}
       overscan={2}
       getItemKey={musicPlaylistItemKey}
