@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::Manager;
 
-const DB_FILE: &str = "reader.db";
-const LEGACY_DB_ALIASES: &[&str] = &["reader.db", "legado.db"];
+const DB_FILE: &str = "mediabox.db";
+const LEGACY_DB_ALIASES: &[&str] = &["mediabox.db", "reader.db", "legado.db"];
 const DATA_DIR_MIGRATION_SOURCE_KEY: &str = "dataDirMigrationSource";
 const DATA_DIR_MIGRATION_BACKUP_KEY: &str = "dataDirMigrationBackup";
 const WEBVIEW_DIR_MIGRATION_SOURCE_KEY: &str = "webviewDataDirMigrationSource";

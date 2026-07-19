@@ -86,7 +86,7 @@ fn urlencoding_decode(s: &str) -> String {
 }
 
 fn cors_preflight(stream: &mut std::net::TcpStream) {
-    let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Max-Age: 86400\r\nConnection: close\r\n\r\n";
+    let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,HEAD,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Max-Age: 86400\r\nConnection: close\r\n\r\n";
     let _ = stream.write_all(resp.as_bytes());
 }
 
@@ -97,23 +97,9 @@ fn write_response(
     body: &[u8],
     extra_headers: &HashMap<String, String>,
 ) {
-    let status = match code {
-        200 => "200 OK",
-        204 => "204 No Content",
-        400 => "400 Bad Request",
-        404 => "404 Not Found",
-        502 => "502 Bad Gateway",
-        _ if (100..=599).contains(&code) => "200 OK",
-        _ => "500 Internal Server Error",
-    };
-    // Prefer explicit status line from code when not in short list
-    let status_line = if (100..=599).contains(&code) && code != 200 && code != 204 && code != 400 && code != 404 && code != 502 {
-        format!("{code} Proxy")
-    } else {
-        status.to_string()
-    };
+    let status_line = http_status_line(code);
     let mut header = format!(
-        "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccept-Ranges: bytes\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n",
         body.len()
     );
     for (k, v) in extra_headers {
@@ -126,6 +112,304 @@ fn write_response(
     header.push_str("\r\n");
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
+}
+
+fn http_status_line(code: i32) -> String {
+    match code {
+        200 => "200 OK".into(),
+        204 => "204 No Content".into(),
+        206 => "206 Partial Content".into(),
+        400 => "400 Bad Request".into(),
+        403 => "403 Forbidden".into(),
+        404 => "404 Not Found".into(),
+        416 => "416 Range Not Satisfiable".into(),
+        502 => "502 Bad Gateway".into(),
+        c if (100..=599).contains(&c) => format!("{c} Proxy"),
+        _ => "500 Internal Server Error".into(),
+    }
+}
+
+/// 常见防盗链 CDN：缺 Referer 时补站点根
+fn infer_default_referer(url: &str) -> Option<&'static str> {
+    let lower = url.to_lowercase();
+    if lower.contains("qpic.cn")
+        || lower.contains("qq.com")
+        || lower.contains("v.qq")
+        || lower.contains("tfogc.com")
+        || lower.contains("vfiles.gtimg")
+    {
+        return Some("https://v.qq.com/");
+    }
+    if lower.contains("iqiyi.com") || lower.contains("qy.net") || lower.contains("qiyi.com") {
+        return Some("https://www.iqiyi.com/");
+    }
+    if lower.contains("youku.com") || lower.contains("ykimg.com") {
+        return Some("https://www.youku.com/");
+    }
+    if lower.contains("bilivideo") || lower.contains("bilibili.com") || lower.contains("hdslb.com") {
+        return Some("https://www.bilibili.com/");
+    }
+    if lower.contains("mgtv.com") || lower.contains("hitv.com") {
+        return Some("https://www.mgtv.com/");
+    }
+    None
+}
+
+fn build_upstream_request(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    params: &HashMap<String, String>,
+    method: &str,
+) -> reqwest::blocking::RequestBuilder {
+    let mut req = if method.eq_ignore_ascii_case("HEAD") {
+        client.head(url)
+    } else {
+        client.get(url)
+    };
+    if let Some(ua) = params.get("User-Agent").or_else(|| params.get("user-agent")) {
+        req = req.header("User-Agent", ua);
+    } else {
+        req = req.header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        );
+    }
+    let referer = params
+        .get("Referer")
+        .or_else(|| params.get("referer"))
+        .cloned()
+        .filter(|s| !s.is_empty())
+        .or_else(|| infer_default_referer(url).map(|s| s.to_string()));
+    if let Some(ref_url) = referer {
+        req = req.header("Referer", ref_url);
+    }
+    if let Some(cookie) = params.get("Cookie").or_else(|| params.get("cookie")) {
+        req = req.header("Cookie", cookie);
+    }
+    // 透传 Range（HTML5 video / HLS 分片都依赖）
+    if let Some(range) = params
+        .get("Range")
+        .or_else(|| params.get("range"))
+        .filter(|s| !s.is_empty())
+    {
+        req = req.header("Range", range);
+    }
+    req
+}
+
+/// 流式代理：支持 Range/206 / HEAD；m3u8 仍缓冲改写
+fn handle_http_fetch_proxy_to_stream(
+    stream: &mut std::net::TcpStream,
+    params: &HashMap<String, String>,
+    method: &str,
+) {
+    let url = match params.get("url").cloned().filter(|s| !s.is_empty()) {
+        Some(u) if u.starts_with("http://") || u.starts_with("https://") => u,
+        Some(_) => {
+            write_response(
+                stream,
+                400,
+                "application/json",
+                br#"{"ok":false,"error":"do=http only allows http(s)"}"#,
+                &HashMap::new(),
+            );
+            return;
+        }
+        None => {
+            write_response(
+                stream,
+                400,
+                "application/json",
+                br#"{"ok":false,"error":"do=http missing url"}"#,
+                &HashMap::new(),
+            );
+            return;
+        }
+    };
+
+    let range = params
+        .get("Range")
+        .or_else(|| params.get("range"))
+        .cloned()
+        .unwrap_or_default();
+    eprintln!(
+        "[tv-proxy] do=http upstream={} range={} hasReferer={}",
+        url,
+        if range.is_empty() { "-" } else { range.as_str() },
+        params.contains_key("Referer")
+            || params.contains_key("referer")
+            || infer_default_referer(&url).is_some()
+    );
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .danger_accept_invalid_certs(true)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let body = format!(
+                r#"{{"ok":false,"error":{}}}"#,
+                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"err\"".into())
+            );
+            write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
+            return;
+        }
+    };
+
+    let resp = match build_upstream_request(&client, &url, params, method).send() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[tv-proxy] upstream fetch error: {e}");
+            let body = format!(
+                r#"{{"ok":false,"error":{}}}"#,
+                serde_json::to_string(&format!("http proxy fetch: {e}"))
+                    .unwrap_or_else(|_| "\"err\"".into())
+            );
+            write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
+            return;
+        }
+    };
+
+    let status = resp.status().as_u16() as i32;
+    let mime = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let content_range = resp
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let content_length = resp
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let accept_ranges = resp
+        .headers()
+        .get(reqwest::header::ACCEPT_RANGES)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let known_m3u8 = params.get("do").map(|d| d == "m3u8").unwrap_or(false)
+        || mime.contains("mpegurl")
+        || mime.contains("m3u8")
+        || url.to_lowercase().contains(".m3u8");
+
+    // HEAD：只回状态与头，供前端探测 Content-Type
+    if method.eq_ignore_ascii_case("HEAD") {
+        let status_line = http_status_line(status);
+        let mut header = format!(
+            "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS,HEAD\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
+            accept_ranges.as_deref().unwrap_or("bytes")
+        );
+        if let Some(cl) = &content_length {
+            header.push_str(&format!("Content-Length: {cl}\r\n"));
+        }
+        if let Some(cr) = &content_range {
+            header.push_str(&format!("Content-Range: {cr}\r\n"));
+        }
+        header.push_str("\r\n");
+        let _ = stream.write_all(header.as_bytes());
+        eprintln!("[tv-proxy] do=http HEAD status={status} mime={mime} upstream={url}");
+        return;
+    }
+
+    // 已知 m3u8：整包缓冲并改写分片 URL
+    if known_m3u8 {
+        let bytes = match resp.bytes() {
+            Ok(b) => b.to_vec(),
+            Err(e) => {
+                let body = format!(
+                    r#"{{"ok":false,"error":{}}}"#,
+                    serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"err\"".into())
+                );
+                write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
+                return;
+            }
+        };
+        let body = rewrite_m3u8_playlist(&url, &bytes, params);
+        eprintln!("[tv-proxy] do=http m3u8 status={status} bytes={} upstream={url}", body.len());
+        write_response(
+            stream,
+            if (200..400).contains(&status) { 200 } else { status },
+            "application/vnd.apple.mpegurl",
+            &body,
+            &HashMap::new(),
+        );
+        return;
+    }
+
+    // 流式：peek 魔数，无扩展名的 m3u8 也能改写
+    let mut resp = resp;
+    let mut peek = [0u8; 16];
+    let peeked = match std::io::Read::read(&mut resp, &mut peek) {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+    let peek_is_m3u8 =
+        peeked > 0 && String::from_utf8_lossy(&peek[..peeked]).contains("#EXTM3U");
+
+    if peek_is_m3u8 {
+        let mut rest = Vec::with_capacity(4096);
+        rest.extend_from_slice(&peek[..peeked]);
+        let _ = std::io::Read::read_to_end(&mut resp, &mut rest);
+        let body = rewrite_m3u8_playlist(&url, &rest, params);
+        eprintln!(
+            "[tv-proxy] do=http sniffed-m3u8 status={status} bytes={} upstream={url}",
+            body.len()
+        );
+        write_response(
+            stream,
+            if (200..400).contains(&status) { 200 } else { status },
+            "application/vnd.apple.mpegurl",
+            &body,
+            &HashMap::new(),
+        );
+        return;
+    }
+
+    let status_line = http_status_line(status);
+    let out_mime = if mime.is_empty() {
+        "application/octet-stream"
+    } else {
+        mime.as_str()
+    };
+    let mut header = format!(
+        "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {out_mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
+        accept_ranges.as_deref().unwrap_or("bytes")
+    );
+    // Content-Length 保持上游值（peek 字节仍会计入响应体）
+    if let Some(cl) = &content_length {
+        header.push_str(&format!("Content-Length: {cl}\r\n"));
+    }
+    if let Some(cr) = &content_range {
+        header.push_str(&format!("Content-Range: {cr}\r\n"));
+    }
+    header.push_str("\r\n");
+    if stream.write_all(header.as_bytes()).is_err() {
+        return;
+    }
+    if peeked > 0 && stream.write_all(&peek[..peeked]).is_err() {
+        return;
+    }
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match std::io::Read::read(&mut resp, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                if stream.write_all(&buf[..n]).is_err() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    eprintln!("[tv-proxy] do=http streamed status={status} mime={mime} upstream={url}");
 }
 
 fn handle_jar_proxy(params: &HashMap<String, String>) -> Result<JsProxyResult, String> {
@@ -191,71 +475,36 @@ fn handle_jar_proxy(params: &HashMap<String, String>) -> Result<JsProxyResult, S
     }
 }
 
-fn handle_http_fetch_proxy(params: &HashMap<String, String>) -> Result<JsProxyResult, String> {
-    let url = params
-        .get("url")
+fn proxy_header_query_suffix(params: &HashMap<String, String>, media_url: &str) -> String {
+    let mut suffix = String::new();
+    let mut referer = params
+        .get("Referer")
+        .or_else(|| params.get("referer"))
         .cloned()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "do=http missing url".to_string())?;
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err("do=http only allows http(s)".into());
+        .filter(|s| !s.is_empty());
+    if referer.is_none() {
+        referer = infer_default_referer(media_url).map(|s| s.to_string());
     }
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(45))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut req = client.get(&url);
-    // 透传常用头（来自 query header_ / 播放页可能拼接）
-    if let Some(ua) = params.get("User-Agent").or_else(|| params.get("user-agent")) {
-        req = req.header("User-Agent", ua);
-    } else {
-        req = req.header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        );
+    if let Some(v) = referer {
+        suffix.push_str("&Referer=");
+        suffix.push_str(&urlencoding_encode(&v));
     }
-    if let Some(ref_url) = params.get("Referer").or_else(|| params.get("referer")) {
-        req = req.header("Referer", ref_url);
+    for key in ["User-Agent", "Cookie"] {
+        if let Some(v) = params.get(key).filter(|s| !s.is_empty()) {
+            suffix.push('&');
+            suffix.push_str(key);
+            suffix.push('=');
+            suffix.push_str(&urlencoding_encode(v));
+        }
     }
-    if let Some(cookie) = params.get("Cookie").or_else(|| params.get("cookie")) {
-        req = req.header("Cookie", cookie);
-    }
-    let resp = req.send().map_err(|e| format!("http proxy fetch: {e}"))?;
-    let status = resp.status().as_u16() as i32;
-    let mime = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
-
-    // m3u8：把分片/子播放列表 URL 改写到本代理，避免播放器二次直连踩 CORS
-    let looks_m3u8 = mime.contains("mpegurl")
-        || mime.contains("m3u8")
-        || url.to_lowercase().contains(".m3u8")
-        || params.get("do").map(|d| d == "m3u8").unwrap_or(false);
-    let body = if looks_m3u8 {
-        rewrite_m3u8_playlist(&url, &bytes)
-    } else {
-        bytes
-    };
-    let out_mime = if looks_m3u8 {
-        "application/vnd.apple.mpegurl".to_string()
-    } else {
-        mime
-    };
-    Ok(JsProxyResult {
-        code: if (200..400).contains(&status) { 200 } else { status },
-        mime: out_mime,
-        body,
-        headers: HashMap::new(),
-    })
+    suffix
 }
 
-fn rewrite_m3u8_playlist(playlist_url: &str, raw: &[u8]) -> Vec<u8> {
+fn rewrite_m3u8_playlist(
+    playlist_url: &str,
+    raw: &[u8],
+    params: &HashMap<String, String>,
+) -> Vec<u8> {
     let text = String::from_utf8_lossy(raw);
     if !text.contains("#EXTM3U") {
         return raw.to_vec();
@@ -264,6 +513,7 @@ fn rewrite_m3u8_playlist(playlist_url: &str, raw: &[u8]) -> Vec<u8> {
     if port == 0 {
         return raw.to_vec();
     }
+    let header_qs = proxy_header_query_suffix(params, playlist_url);
     let proxy_prefix = format!("http://127.0.0.1:{port}/proxy?do=http&url=");
     let base = match reqwest::Url::parse(playlist_url) {
         Ok(u) => u,
@@ -274,7 +524,9 @@ fn rewrite_m3u8_playlist(playlist_url: &str, raw: &[u8]) -> Vec<u8> {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             // #EXT-X-KEY:URI="..." / #EXT-X-MAP:URI="..."
-            if let Some(rewritten) = rewrite_m3u8_tag_uris(line, &base, &proxy_prefix) {
+            if let Some(rewritten) =
+                rewrite_m3u8_tag_uris(line, &base, &proxy_prefix, &header_qs)
+            {
                 out.push_str(&rewritten);
             } else {
                 out.push_str(line);
@@ -288,22 +540,29 @@ fn rewrite_m3u8_playlist(playlist_url: &str, raw: &[u8]) -> Vec<u8> {
         };
         out.push_str(&proxy_prefix);
         out.push_str(&urlencoding_encode(&abs));
+        out.push_str(&header_qs);
         out.push('\n');
     }
     out.into_bytes()
 }
 
-fn rewrite_m3u8_tag_uris(line: &str, base: &reqwest::Url, proxy_prefix: &str) -> Option<String> {
+fn rewrite_m3u8_tag_uris(
+    line: &str,
+    base: &reqwest::Url,
+    proxy_prefix: &str,
+    header_qs: &str,
+) -> Option<String> {
     // 简易：替换 URI="..."
     let key = "URI=\"";
     let start = line.find(key)? + key.len();
     let end = line[start..].find('"')? + start;
     let uri = &line[start..end];
     let abs = base.join(uri).ok()?.to_string();
-    let mut out = String::with_capacity(line.len() + 64);
+    let mut out = String::with_capacity(line.len() + 64 + header_qs.len());
     out.push_str(&line[..start]);
     out.push_str(proxy_prefix);
     out.push_str(&urlencoding_encode(&abs));
+    out.push_str(header_qs);
     out.push_str(&line[end..]);
     Some(out)
 }
@@ -341,28 +600,55 @@ fn handle_js_proxy(params: HashMap<String, String>) -> Result<JsProxyResult, Str
     }
 }
 
-fn handle_proxy_path(path: &str) -> Result<JsProxyResult, String> {
-    let params = parse_query(path);
-    // Merge path-only keys
-    if !params.contains_key("do") && path.contains("do=") {
-        // already in query
+/// 对齐 FongMi Proxy：把 HTTP 请求头并入 params（query 优先，不覆盖已有键）
+fn merge_request_headers_into_params(
+    params: &mut HashMap<String, String>,
+    headers: &HashMap<String, String>,
+) {
+    for (k, v) in headers {
+        let lk = k.to_lowercase();
+        // 跳过 hop-by-hop / 宿主相关头，避免污染上游
+        if matches!(
+            lk.as_str(),
+            "host"
+                | "connection"
+                | "content-length"
+                | "transfer-encoding"
+                | "accept-encoding"
+                | "origin"
+                | "sec-fetch-site"
+                | "sec-fetch-mode"
+                | "sec-fetch-dest"
+                | "sec-ch-ua"
+                | "sec-ch-ua-mobile"
+                | "sec-ch-ua-platform"
+        ) {
+            continue;
+        }
+        // 保留常见大小写键名，便于上游识别
+        let key = match lk.as_str() {
+            "user-agent" => "User-Agent".to_string(),
+            "referer" => "Referer".to_string(),
+            "cookie" => "Cookie".to_string(),
+            "range" => "Range".to_string(),
+            _ => k.clone(),
+        };
+        params.entry(key).or_insert_with(|| v.clone());
     }
+}
+
+fn handle_proxy_path(
+    path: &str,
+    request_headers: &HashMap<String, String>,
+) -> Result<JsProxyResult, String> {
+    let mut params = parse_query(path);
+    merge_request_headers_into_params(&mut params, request_headers);
     let do_kind = params.get("do").cloned().unwrap_or_default();
-    if do_kind == "http" || do_kind == "m3u8" || do_kind == "raw" {
-        return handle_http_fetch_proxy(&params);
-    }
+    // http/m3u8/raw 由 handle_stream 走流式路径，不应进入此处
     if do_kind == "js" || do_kind == "py" {
         return handle_js_proxy(params);
     }
-    if params.contains_key("siteKey") && do_kind.is_empty() {
-        // siteKey alone usually jar/spider proxy — still try jar first
-        return handle_jar_proxy(&params);
-    }
-    if do_kind.is_empty() || do_kind == "jar" {
-        return handle_jar_proxy(&params);
-    }
-    // fallback: try js bridge
-    handle_js_proxy(params)
+    handle_jar_proxy(&params)
 }
 
 fn handle_action(path: &str) -> (i32, String, String) {
@@ -414,6 +700,25 @@ fn handle_action(path: &str) -> (i32, String, String) {
     }
 }
 
+fn parse_request_headers(req: &str) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    let mut lines = req.lines();
+    let _ = lines.next(); // request line
+    for line in lines {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let key = k.trim();
+            let val = v.trim();
+            if !key.is_empty() {
+                headers.insert(key.to_string(), val.to_string());
+            }
+        }
+    }
+    headers
+}
+
 fn handle_stream(mut stream: std::net::TcpStream) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let mut buf = [0u8; 65536];
@@ -425,6 +730,7 @@ fn handle_stream(mut stream: std::net::TcpStream) {
     let first = req.lines().next().unwrap_or("");
     let method = first.split_whitespace().next().unwrap_or("GET");
     let path = first.split_whitespace().nth(1).unwrap_or("/");
+    let request_headers = parse_request_headers(&req);
 
     if method.eq_ignore_ascii_case("OPTIONS") {
         cors_preflight(&mut stream);
@@ -432,7 +738,14 @@ fn handle_stream(mut stream: std::net::TcpStream) {
     }
 
     if path.starts_with("/proxy") {
-        match handle_proxy_path(path) {
+        let mut params = parse_query(path);
+        merge_request_headers_into_params(&mut params, &request_headers);
+        let do_kind = params.get("do").cloned().unwrap_or_default();
+        if do_kind == "http" || do_kind == "m3u8" || do_kind == "raw" {
+            handle_http_fetch_proxy_to_stream(&mut stream, &params, method);
+            return;
+        }
+        match handle_proxy_path(path, &request_headers) {
             Ok(r) => write_response(&mut stream, r.code, &r.mime, &r.body, &r.headers),
             Err(e) => {
                 let body = format!(r#"{{"ok":false,"error":{}}}"#, serde_json::to_string(&e).unwrap_or_else(|_| "\"err\"".into()));

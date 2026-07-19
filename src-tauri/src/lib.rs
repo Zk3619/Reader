@@ -2177,9 +2177,17 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_ignore_cursor,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_penetrate_mode,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_window_options,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_resizable,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_bounds,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::reset_desktop_lyric_window_geometry,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::is_desktop_lyric_window_open,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::register_music_hotkeys,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
