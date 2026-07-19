@@ -14,7 +14,7 @@ import {
 import { isLocalBook } from '@/lib/local-book';
 import { flushReadingSession } from '@/lib/media/text/reading-session';
 import type { Book, BookChapter } from '@/types';
-import { state, setState, resetViewerState } from '@/stores/viewer/media/state';
+import { state, setState, resetViewerState, resetViewerStatePreservingMusic } from '@/stores/viewer/media/state';
 import {
   isMediaViewerBootstrapping,
   resetMediaChapterSession,
@@ -237,9 +237,7 @@ export const viewerStore = {
     const book = state.book;
     const kind = state.kind;
     const isMusicHub = state.playbackMode === 'music' && !book;
-    const { snapshotMusicPlayback, restoreMusicPlayback } = await import(
-      '@/stores/viewer/media/audio'
-    );
+    const { snapshotMusicPlayback } = await import('@/stores/viewer/media/audio');
     const musicSnap = isMusicHub ? null : snapshotMusicPlayback();
 
     if (book) {
@@ -263,9 +261,11 @@ export const viewerStore = {
     }
 
     clearChapterContentPool();
-    resetViewerState();
     if (musicSnap) {
-      restoreMusicPlayback(musicSnap);
+      // 同一次写入：清阅读态 + 保留音乐，避免 URL 闪空导致进度归零
+      resetViewerStatePreservingMusic(musicSnap);
+    } else {
+      resetViewerState();
     }
   },
 
@@ -274,18 +274,17 @@ export const viewerStore = {
     const catalog = state.catalog.length > 0 ? [...state.catalog] : undefined;
     if (!book) return;
 
-    const { snapshotMusicPlayback, restoreMusicPlayback } = await import(
-      '@/stores/viewer/media/audio'
-    );
+    const { snapshotMusicPlayback } = await import('@/stores/viewer/media/audio');
     const musicSnap = snapshotMusicPlayback();
 
     resetMediaChapterSession();
     cancelPrefetchOnRead(book.bookUrl);
     resetTextViewerSession();
     clearChapterContentPool();
-    resetViewerState();
     if (musicSnap) {
-      restoreMusicPlayback(musicSnap);
+      resetViewerStatePreservingMusic(musicSnap);
+    } else {
+      resetViewerState();
     }
 
     setTextBookInitialState(book);

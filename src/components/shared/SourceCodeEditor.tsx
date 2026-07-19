@@ -60,13 +60,11 @@ const editorTheme = EditorView.theme({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     lineHeight: '1.6',
   },
+  // 只给 content 加垂直 padding；勿再给 gutters 加 paddingTop，
+  // 否则行号会相对代码行多偏移一次（CM6 会按 content 内边距对齐 gutter）
   '.cm-content': {
     minHeight: '100%',
     padding: '12px 8px',
-  },
-  '.cm-gutters': {
-    paddingTop: '12px',
-    paddingBottom: '12px',
   },
   '&.cm-focused': {
     outline: 'none',

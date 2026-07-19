@@ -6,7 +6,7 @@
  * - store：统一调度入口 viewerStore
  */
 
-export { state, setState, resetViewerState, initialViewerState } from '@/stores/viewer/media/state';
+export { state, setState, resetViewerState, resetViewerStatePreservingMusic, initialViewerState } from '@/stores/viewer/media/state';
 export {
   clampChapterIndex,
   loadChapterRaw,

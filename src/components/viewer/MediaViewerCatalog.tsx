@@ -3,7 +3,7 @@ import { viewerStore } from '@/stores/viewer';
 import {
   scrollCatalogIndexIntoView,
   VirtualChapterList,
-} from '@/components/books/VirtualChapterList';
+} from '@/components/media/reader/books/VirtualChapterList';
 import { Button } from '@/components/ui/button';
 import {
   buildChapterRowMetas,

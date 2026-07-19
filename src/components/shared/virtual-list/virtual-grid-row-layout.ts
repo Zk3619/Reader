@@ -102,21 +102,16 @@ export function useVirtualGridContainerWidth(
     if (!el || typeof ResizeObserver === 'undefined') return;
 
     let raf = 0;
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     const apply = () => {
       const next = el.clientWidth;
       if (next > 0) setWidth((prev) => (prev === next ? prev : next));
     };
+    /** 仅 rAF 合并同帧多次 RO，立即写入宽度；勿再 debounce，否则列数滞后会导致 1fr 列先挤压卡片 */
     const sync = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        // 连续拖拽改窗：先 rAF 合并，再短延迟 settle，避免列数/行高每像素重算
-        if (settleTimer !== undefined) clearTimeout(settleTimer);
-        settleTimer = setTimeout(() => {
-          settleTimer = undefined;
-          apply();
-        }, 120);
+        apply();
       });
     };
 
@@ -125,7 +120,6 @@ export function useVirtualGridContainerWidth(
     ro.observe(el);
     onCleanup(() => {
       if (raf) cancelAnimationFrame(raf);
-      if (settleTimer !== undefined) clearTimeout(settleTimer);
       ro.disconnect();
     });
   });

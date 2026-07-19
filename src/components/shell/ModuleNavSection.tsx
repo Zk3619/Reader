@@ -10,7 +10,7 @@ import {
   getActiveModuleNavIdForShell,
   navigateModuleNav,
 } from '@/lib/modules/module-nav-registry';
-import { ReaderModuleSidebarSection } from '@/components/reader/ReaderModuleSidebarSection';
+import { ReaderModuleSidebarSection } from '@/components/media/reader/ReaderModuleSidebarSection';
 import { ModuleSidebarNavSection } from '@/components/shell/ModuleSidebarNavSection';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
@@ -49,7 +49,7 @@ export function ModuleNavSection(props: ModuleNavSectionProps) {
       >
         <ReaderModuleSidebarSection
           collapsed={props.collapsed}
-          activeTab={activeId()}
+          activeTab={activeId}
           onTabChange={handleNav}
           recentBooks={props.recentBooks}
           onOpenRecentBook={props.onOpenRecentBook}

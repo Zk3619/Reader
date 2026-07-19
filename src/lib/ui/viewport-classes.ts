@@ -194,7 +194,7 @@ export const appBottomChromePadding = 'app-bottom-chrome-inset';
 /** 块级底外边距：仅触摸端，见 App.css `.app-bottom-edge-inset` */
 export const appBottomEdgeInset = 'app-bottom-edge-inset';
 
-/** 主壳 PageToolbar 顶距：安全区 + pt-4（见 App.css `.page-toolbar-shell-top`） */
+/** 主壳 PageToolbar 顶距：安全区 + pt-4；底距由组件 pb-4 与顶距对称 */
 export const pageToolbarShellTop = 'page-toolbar-shell-top';
 
 /** 主壳 PageToolbar 底部分割线（阅读模块 Tab 页、规则管理子页） */

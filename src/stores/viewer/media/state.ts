@@ -32,11 +32,10 @@ function readInitialMusicSection(): ViewerState['musicSection'] {
       case 'songlist':
       case 'leaderboard':
       case 'list':
+      case 'download':
       case 'settings':
       case 'nowPlaying':
         return raw;
-      case 'download':
-        return 'settings';
       default:
         return 'search';
     }
@@ -67,6 +66,7 @@ export const initialViewerState: ViewerState = {
   loading: false,
   musicMediaUrls: [],
   musicPrimaryUrl: null,
+  musicPositionSec: 0,
   musicLoading: false,
   musicError: null,
   playbackStatus: null,
@@ -96,4 +96,55 @@ export const [state, setState] = createStore<ViewerState>({ ...initialViewerStat
 
 export function resetViewerState(): void {
   setState({ ...initialViewerState, config: buildInitialReaderConfig() });
+}
+
+/**
+ * 关闭文本/漫画等阅读器时：一次 setState 清掉阅读会话并写回音乐快照，
+ * 避免 musicMediaUrls 先被清空再 restore，导致 Hub <audio> 清 src、进度被写成 0。
+ */
+export function resetViewerStatePreservingMusic(
+  music: Pick<
+    ViewerState,
+    | 'playbackMode'
+    | 'contentSession'
+    | 'trackQueue'
+    | 'trackIndex'
+    | 'musicQueueOrigin'
+    | 'playerListId'
+    | 'playerListName'
+    | 'playerListKind'
+    | 'activePlaylistId'
+    | 'activeMusicGroupId'
+    | 'activeSource'
+    | 'musicMediaUrls'
+    | 'musicPrimaryUrl'
+    | 'musicPositionSec'
+    | 'musicLoading'
+    | 'musicError'
+    | 'playbackStatus'
+    | 'musicSection'
+  >,
+): void {
+  setState({
+    ...initialViewerState,
+    config: buildInitialReaderConfig(),
+    playbackMode: music.playbackMode,
+    contentSession: music.contentSession,
+    trackQueue: music.trackQueue,
+    trackIndex: music.trackIndex,
+    musicQueueOrigin: music.musicQueueOrigin,
+    playerListId: music.playerListId,
+    playerListName: music.playerListName,
+    playerListKind: music.playerListKind,
+    activePlaylistId: music.activePlaylistId,
+    activeMusicGroupId: music.activeMusicGroupId,
+    activeSource: music.activeSource,
+    musicMediaUrls: music.musicMediaUrls,
+    musicPrimaryUrl: music.musicPrimaryUrl,
+    musicPositionSec: music.musicPositionSec,
+    musicLoading: music.musicLoading,
+    musicError: music.musicError,
+    playbackStatus: music.playbackStatus,
+    musicSection: music.musicSection,
+  });
 }

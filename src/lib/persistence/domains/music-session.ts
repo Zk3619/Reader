@@ -94,11 +94,10 @@ function normalizeSection(section: unknown): MusicHubSection {
     case 'songlist':
     case 'leaderboard':
     case 'list':
+    case 'download':
     case 'settings':
     case 'nowPlaying':
       return section;
-    case 'download':
-      return 'settings';
     default:
       return 'search';
   }
@@ -159,7 +158,7 @@ export function captureMusicSessionSnapshot(
     activePlaylistId: state.activePlaylistId ?? getMusicActivePlaylistId(),
     listId,
     index: overrides?.index ?? state.trackIndex,
-    time: overrides?.time ?? state.chapterPos ?? 0,
+    time: overrides?.time ?? state.musicPositionSec ?? 0,
     maxTime: overrides?.maxTime ?? pendingSnapshot?.maxTime ?? 0,
     tracks: cloneTracks(tracks),
     playerListName: state.playerListName,
@@ -289,15 +288,15 @@ async function applyMusicSessionSnapshot(
   const trackIndex =
     tracks.length > 0 ? Math.min(Math.max(0, snap.index), tracks.length - 1) : 0;
   const saveTime = getMusicSettings().rememberProgress;
-  const chapterPos = saveTime ? Math.max(0, snap.time) : 0;
+  const musicPositionSec = saveTime ? Math.max(0, snap.time) : 0;
 
   // 先写 per-track LS，再 setState，避免 Hub createEffect 读到空进度
-  if (saveTime && chapterPos > 0 && tracks[trackIndex]) {
+  if (saveTime && musicPositionSec > 0 && tracks[trackIndex]) {
     const track = tracks[trackIndex]!;
     try {
       const raw = localStorage.getItem(LEGACY_TRACK_PROGRESS_KEY);
       const progress = raw ? (JSON.parse(raw) as Record<string, number>) : {};
-      progress[`${track.source}:${track.id}`] = chapterPos;
+      progress[`${track.source}:${track.id}`] = musicPositionSec;
       localStorage.setItem(LEGACY_TRACK_PROGRESS_KEY, JSON.stringify(progress));
     } catch {
       // ignore
@@ -312,7 +311,7 @@ async function applyMusicSessionSnapshot(
       ? {
           trackQueue: tracks,
           trackIndex,
-          chapterPos,
+          musicPositionSec,
           playerListId: listId,
           playerListName,
           playerListKind,

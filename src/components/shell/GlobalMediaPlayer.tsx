@@ -13,8 +13,9 @@ import {
   SkipForward,
   Square,
 } from 'lucide-solid';
-import { BookCoverFallback } from '@/components/books/BookCoverFallback';
-import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
+import { BookCoverFallback } from '@/components/media/reader/books/BookCoverFallback';
+import { BookCoverFromBook } from '@/components/media/reader/books/BookCoverFromBook';
+import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
 import {
   bookGroupGridCoverClass,
   bookGroupGridCoverZoomClass,
@@ -32,6 +33,8 @@ import {
   resolveMediaPlayerChromeLayout,
   resolveMediaPlayerChromePosition,
   globalMediaPlayerFloatingEdgeClass,
+  globalMediaPlayerOverReaderBottomClass,
+  globalMediaPlayerOverReaderTopClass,
 } from '@/lib/viewer/media-player-chrome-layout';
 import {
   getReadAloudSessionSnapshot,
@@ -53,6 +56,10 @@ import {
 import { AUDIO_HUB_BOOK_URL } from '@/lib/media/content-session';
 import { isMusicHubShellActive } from '@/stores/shell-tabs';
 import {
+  APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z,
+} from '@/lib/ui/overlay-z';
+import type { OverlayPageKind } from '@/lib/navigation/overlay-stack';
+import {
   audioShellOpenViewer,
   audioShellSkipNext,
   audioShellSkipPrev,
@@ -62,10 +69,29 @@ import {
   hasAudioShellHandlers,
   subscribeAudioShellPlaying,
 } from '@/lib/media/audio/audio-shell-controls';
+import { settingsStore } from '@/stores/settings';
 
+/** 音乐/有声书后台条可叠在其上的阅读器（听书/视频/文件自带播放 UI，不叠） */
+const OVERLAY_KINDS_ALLOW_AUDIO_PLAYER = new Set<OverlayPageKind>([
+  'text-viewer',
+  'image-viewer',
+]);
+
+function mediaPlayerMotionClass(
+  reduceMotion: boolean,
+  variant: 'expanded-bottom' | 'expanded-top' | 'collapsed',
+): string {
+  if (reduceMotion) return '';
+  // 展开：从右侧收起条位置放大铺开；收起：向右侧条收拢成形
+  if (variant === 'collapsed') return 'gmp-chrome-anim-collapse';
+  if (variant === 'expanded-top') return 'gmp-chrome-anim-expand-top';
+  return 'gmp-chrome-anim-expand-bottom';
+}
 export interface GlobalMediaPlayerProps {
-  /** 独立页（阅读器等）打开时隐藏壳层播放器 */
+  /** 独立页（阅读器等）打开时；文本/漫画上仍可显示音频后台条 */
   shellOverlayOpen: Accessor<boolean>;
+  /** 当前导航栈顶叠层 kind（用于判断是否叠在文本/漫画之上） */
+  overlayTopKind?: Accessor<OverlayPageKind | undefined>;
   /** 当前壳层页（用于在音乐模块内隐藏全局播放器） */
   currentShellPage: Accessor<string>;
   showTopNav: Accessor<boolean>;
@@ -78,11 +104,13 @@ export interface GlobalMediaPlayerProps {
 
 export function useGlobalMediaPlayerFixedInset(props: {
   shellOverlayOpen: Accessor<boolean>;
+  overlayTopKind?: Accessor<OverlayPageKind | undefined>;
   currentShellPage: Accessor<string>;
   showTopNav: Accessor<boolean>;
   showBottomBar: Accessor<boolean>;
 }): Accessor<{ top: boolean; bottom: boolean; heightPx: number }> {
   return createMemo(() => {
+    // 叠在阅读器上或主壳隐藏时，无需给主内容让位
     if (props.shellOverlayOpen()) return { top: false, bottom: false, heightPx: 0 };
     if (isMusicHubShellActive(props.currentShellPage())) {
       return { top: false, bottom: false, heightPx: 0 };
@@ -171,7 +199,7 @@ function GlobalMediaPlayerAudioControls() {
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8 text-muted-foreground"
+        class="h-8 w-8"
         aria-label="停止"
         onClick={() => audioShellStop()}
       >
@@ -221,7 +249,7 @@ function GlobalMediaPlayerReadAloudControls(props: {
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8 text-muted-foreground"
+        class="h-8 w-8"
         aria-label="停止"
         onClick={() => {
           stopReadAloudSession();
@@ -302,12 +330,30 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     return !!globalMediaPlayerState.kind;
   };
 
+  /** 音乐/有声书后台：允许叠在文本/漫画阅读器上 */
+  const allowOverTextOrImageReader = () => {
+    if (globalMediaPlayerState.kind !== 'audio') return false;
+    const topKind = props.overlayTopKind?.();
+    return !!topKind && OVERLAY_KINDS_ALLOW_AUDIO_PLAYER.has(topKind);
+  };
+
+  const hideForStandaloneOverlay = () => {
+    if (!props.shellOverlayOpen()) return false;
+    return !allowOverTextOrImageReader();
+  };
+
   const visible = () =>
     globalMediaPlayerState.shellActive &&
     !!globalMediaPlayerState.kind &&
-    !props.shellOverlayOpen() &&
+    !hideForStandaloneOverlay() &&
     !isMusicHubShellActive(props.currentShellPage()) &&
     sessionActive();
+
+  const overReader = () => props.shellOverlayOpen() && allowOverTextOrImageReader();
+
+  /** 叠在阅读器上强制悬浮，避免与固定/层叠阅读器栏抢同一贴边 */
+  const effectiveLayout = (): ViewerChromeLayout =>
+    overReader() ? 'floating' : layout();
 
   const meta = () => globalMediaPlayerState.meta;
   const previewText = createMemo(() => {
@@ -316,12 +362,46 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     return meta()?.preview?.trim() || snapshot().currentParagraphPreview.trim() || '…';
   });
 
-  const isPlaying = () => snapshot().state === 'playing';
-  const canCollapse = () => layout() === 'stacked' || layout() === 'floating';
+  const [audioPlaying, setAudioPlaying] = createSignal(audioShellIsPlaying());
+  onMount(() => {
+    const unsub = subscribeAudioShellPlaying(() => setAudioPlaying(audioShellIsPlaying()));
+    onCleanup(unsub);
+  });
+
+  const isPlaying = () =>
+    globalMediaPlayerState.kind === 'audio'
+      ? audioPlaying()
+      : snapshot().state === 'playing';
+
+  const canCollapse = () =>
+    overReader() || effectiveLayout() === 'stacked' || effectiveLayout() === 'floating';
   const collapsed = () => globalMediaPlayerState.collapsed && canCollapse();
+  const reduceMotion = () => settingsStore.state.app.reduceMotion;
+  /**
+   * 展开/收起共用 key：每次切换都换新 key，强制重挂载以重放 CSS 入场动画
+   *（含手动收起/展开与切章/切歌自动展开）
+   */
+  const chromeViewKey = () =>
+    collapsed()
+      ? `c:${globalMediaPlayerState.collapseAnimEpoch}`
+      : `e:${globalMediaPlayerState.expandAnimEpoch}`;
+  const expandedMotionClass = () =>
+    mediaPlayerMotionClass(
+      reduceMotion(),
+      position() === 'top' ? 'expanded-top' : 'expanded-bottom',
+    );
+  const collapsedMotionClass = () => mediaPlayerMotionClass(reduceMotion(), 'collapsed');
+
+  const playerZClass = () =>
+    overReader() ? APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z : 'z-[48]';
+
+  const overReaderEdgeClass = () =>
+    position() === 'bottom'
+      ? globalMediaPlayerOverReaderBottomClass
+      : globalMediaPlayerOverReaderTopClass;
 
   createEffect(() => {
-    if (!visible() || collapsed() || layout() !== 'fixed') {
+    if (!visible() || collapsed() || effectiveLayout() !== 'fixed') {
       globalMediaPlayerStore.setChromeHeight(0);
       return;
     }
@@ -355,8 +435,23 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     if (url) props.onOpenTextReader?.(url);
   };
 
+  const togglePlay = () => {
+    if (globalMediaPlayerState.kind === 'audio') {
+      audioShellTogglePlay();
+      return;
+    }
+    void toggleReadAloudSessionPlay();
+  };
+
   const positionClass = (l: ViewerChromeLayout) => {
     const pos = position();
+    if (overReader()) {
+      return cn(
+        'fixed flex justify-center px-3 pointer-events-none left-0 right-0',
+        playerZClass(),
+        overReaderEdgeClass(),
+      );
+    }
     const edge = shellHorizontalInsetClass(
       props.showTopNav(),
       props.showBottomBar(),
@@ -365,11 +460,12 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     );
     if (l === 'floating') {
       return cn(
-        'fixed z-[48] flex justify-center px-3 pointer-events-none',
+        'fixed flex justify-center px-3 pointer-events-none',
+        playerZClass(),
         edge,
       );
     }
-    return cn('fixed z-[48]', edge);
+    return cn('fixed', playerZClass(), edge);
   };
 
   const surfaceClass = (l: ViewerChromeLayout) => {
@@ -406,153 +502,169 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     </Button>
   );
 
+  const collapsedEdgeClass = () => {
+    if (overReader()) {
+      return cn('right-0', overReaderEdgeClass());
+    }
+    return position() === 'bottom'
+      ? props.showBottomBar()
+        ? insetBottomAppBar
+        : 'bottom-20 safe-area-inset-bottom'
+      : props.showTopNav()
+        ? insetTopAppBar
+        : 'top-20 safe-area-inset-top';
+  };
+
   return (
     <Show when={visible()}>
-      <Show
-        when={!collapsed()}
-        fallback={
-          <div
-            class={cn(
-              mediaViewerChromeFloatingControlClass,
-              mediaViewerChromeHitTargetClass,
-              'fixed z-48 right-0 flex flex-col items-center gap-2 rounded-l-2xl border-r-0 px-2 py-3 shadow-lg',
-              position() === 'bottom'
-                ? props.showBottomBar()
-                  ? insetBottomAppBar
-                  : 'bottom-20 safe-area-inset-bottom'
-                : props.showTopNav()
-                  ? insetTopAppBar
-                  : 'top-20 safe-area-inset-top',
-            )}
-            role="region"
-            aria-label="媒体播放控制（已收起）"
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9"
-              aria-label={isPlaying() ? '暂停' : '播放'}
-              onClick={() => toggleReadAloudSessionPlay()}
+      <Show when={chromeViewKey()} keyed>
+        {(key) =>
+          key.startsWith('c:') ? (
+            <div
+              class={cn(
+                mediaViewerChromeFloatingControlClass,
+                mediaViewerChromeHitTargetClass,
+                'fixed right-0 flex flex-col items-center gap-2 rounded-l-2xl border-r-0 px-2 py-3 shadow-lg',
+                playerZClass(),
+                collapsedEdgeClass(),
+                collapsedMotionClass(),
+              )}
+              role="region"
+              aria-label="媒体播放控制（已收起）"
             >
-              <Show when={isPlaying()} fallback={<Play class="size-4" />}>
-                <Pause class="size-4" />
-              </Show>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-8 w-8 text-muted-foreground"
-              aria-label="展开播放器"
-              onClick={() => globalMediaPlayerStore.setCollapsed(false)}
-            >
-              <ChevronLeft class="size-4" />
-            </Button>
-          </div>
-        }
-      >
-        <div class={positionClass(layout())} role="region" aria-label="媒体播放控制">
-          <div
-            ref={layout() === 'fixed' ? bindChromeMeasureRef : undefined}
-            class={cn(
-              surfaceClass(layout()),
-              layout() === 'fixed' && 'px-4 py-2.5',
-              layout() === 'stacked' && 'px-4 py-2.5',
-            )}
-          >
-            <div class="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                class="group shrink-0 transition hover:opacity-90"
-                onClick={openReader}
-                aria-label="返回阅读器"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-9 w-9"
+                aria-label={isPlaying() ? '暂停' : '播放'}
+                onClick={() => togglePlay()}
               >
-                <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
-                  <div class={bookGroupGridCoverZoomClass()}>
-                    <Show
-                      when={
-                        globalMediaPlayerState.kind === 'audio' && meta()?.coverUrl
-                      }
-                      fallback={
+                <Show when={isPlaying()} fallback={<Play class="size-4" />}>
+                  <Pause class="size-4" />
+                </Show>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 text-muted-foreground"
+                aria-label="展开播放器"
+                onClick={() => globalMediaPlayerStore.setCollapsed(false)}
+              >
+                <ChevronLeft class="size-4" />
+              </Button>
+            </div>
+          ) : (
+            <div
+              class={positionClass(effectiveLayout())}
+              role="region"
+              aria-label="媒体播放控制"
+            >
+              <div
+                ref={effectiveLayout() === 'fixed' ? bindChromeMeasureRef : undefined}
+                class={cn(
+                  surfaceClass(effectiveLayout()),
+                  expandedMotionClass(),
+                  effectiveLayout() === 'fixed' && 'px-4 py-2.5',
+                  effectiveLayout() === 'stacked' && 'px-4 py-2.5',
+                )}
+              >
+                <div class="flex min-w-0 items-center gap-3">
+                  <button
+                    type="button"
+                    class="group shrink-0 transition hover:opacity-90"
+                    onClick={openReader}
+                    aria-label="返回阅读器"
+                  >
+                    <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
+                      <div class={bookGroupGridCoverZoomClass()}>
                         <Show
-                          when={meta()?.coverBookUrl}
-                          fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                          when={
+                            globalMediaPlayerState.kind === 'audio' && meta()?.coverUrl
+                          }
+                          fallback={
+                            <Show
+                              when={meta()?.coverBookUrl}
+                              fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                            >
+                              <BookCoverFromBook
+                                bookUrl={meta()!.coverBookUrl}
+                                alt=""
+                                class="h-full w-full object-cover"
+                                draggable={false}
+                                fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                              />
+                            </Show>
+                          }
                         >
-                          <BookCoverFromBook
-                            bookUrl={meta()!.coverBookUrl}
+                          <MusicCoverImg
+                            src={meta()!.coverUrl}
                             alt=""
                             class="h-full w-full object-cover"
                             draggable={false}
                             fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
                           />
                         </Show>
-                      }
-                    >
-                      <img
-                        src={meta()!.coverUrl}
-                        alt=""
-                        class="h-full w-full object-cover"
-                        draggable={false}
-                      />
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="min-w-0 flex-1 text-left"
+                    onClick={openReader}
+                  >
+                    <div class="flex items-center gap-2">
+                      <p class="truncate text-sm font-medium text-foreground">
+                        {meta()?.title || '播放中'}
+                      </p>
+                      <ReadAloudEqualizer active={isPlaying()} />
+                    </div>
+                    <Show when={meta()?.subtitle}>
+                      <p class="truncate text-xs text-muted-foreground">{meta()?.subtitle}</p>
                     </Show>
+                    <p class="mt-0.5 line-clamp-1 text-xs text-muted-foreground/90">{previewText()}</p>
+                  </button>
+
+                  <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
+                    <GlobalMediaPlayerReadAloudControls
+                      snapshot={snapshot()}
+                      preview={previewText()}
+                    />
+                  </Show>
+
+                  <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
+                    <GlobalMediaPlayerAudioControls />
+                  </Show>
+
+                  <Show when={canCollapse()}>
+                    <CollapseToggle />
+                  </Show>
+                </div>
+
+                <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
+                  <div class="mt-2 hidden items-center justify-center gap-1 border-t border-border/40 pt-2 sm:flex">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      onClick={() => void prevReadAloudChapter()}
+                    >
+                      上一章
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      onClick={() => void nextReadAloudChapter()}
+                    >
+                      下一章
+                    </Button>
                   </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                class="min-w-0 flex-1 text-left"
-                onClick={openReader}
-              >
-                <div class="flex items-center gap-2">
-                  <p class="truncate text-sm font-medium text-foreground">
-                    {meta()?.title || '播放中'}
-                  </p>
-                  <ReadAloudEqualizer active={isPlaying()} />
-                </div>
-                <Show when={meta()?.subtitle}>
-                  <p class="truncate text-xs text-muted-foreground">{meta()?.subtitle}</p>
                 </Show>
-                <p class="mt-0.5 line-clamp-1 text-xs text-muted-foreground/90">{previewText()}</p>
-              </button>
-
-              <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
-                <GlobalMediaPlayerReadAloudControls
-                  snapshot={snapshot()}
-                  preview={previewText()}
-                />
-              </Show>
-
-              <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
-                <GlobalMediaPlayerAudioControls />
-              </Show>
-
-              <Show when={canCollapse()}>
-                <CollapseToggle />
-              </Show>
-            </div>
-
-            <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
-              <div class="mt-2 hidden items-center justify-center gap-1 border-t border-border/40 pt-2 sm:flex">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-7 px-2 text-xs"
-                  onClick={() => void prevReadAloudChapter()}
-                >
-                  上一章
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-7 px-2 text-xs"
-                  onClick={() => void nextReadAloudChapter()}
-                >
-                  下一章
-                </Button>
               </div>
-            </Show>
-          </div>
-        </div>
+            </div>
+          )
+        }
       </Show>
     </Show>
   );

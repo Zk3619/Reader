@@ -18,6 +18,7 @@ export type MusicHubSection =
   | 'songlist'
   | 'leaderboard'
   | 'list'
+  | 'download'
   | 'settings'
   | 'nowPlaying';
 
@@ -61,6 +62,11 @@ export interface ViewerState extends BaseViewerState {
    */
   musicMediaUrls: string[];
   musicPrimaryUrl: string | null;
+  /**
+   * 音乐播放进度（秒）。与 chapterPos 隔离：文本/漫画阅读进度为 0–1，
+   * 后台播歌时进阅读器不得冲掉音乐进度。
+   */
+  musicPositionSec: number;
   musicLoading: boolean;
   musicError: string | null;
   /** music 模式：获取链接 / 换源过程中的状态提示（对齐 lx setAllStatus） */
@@ -79,7 +85,7 @@ export interface ViewerState extends BaseViewerState {
    * 队列来源：决定失败自动切歌等行为。
    * list = 歌单 / 「我的列表」；search = 搜索结果；other = 榜单/专辑/单曲等。
    */
-  musicQueueOrigin: 'search' | 'list' | 'other';
+  musicQueueOrigin: 'search' | 'list' | 'download' | 'other';
   /** 当前播放队列绑定的列表；与侧栏浏览中的 activePlaylistId 相互独立。 */
   playerListId: string | null;
   /** 播放来源列表名快照，用于播放条和队列面板展示。 */

@@ -36,15 +36,15 @@ function sidebarNavButtonClass(active: boolean, extra?: string) {
   );
 }
 
-function resolveActiveTab(activeTab: string | Accessor<string>): Accessor<string> {
-  return typeof activeTab === 'function' ? activeTab : () => activeTab;
-}
-
 export function ModuleSidebarNavSection(props: ModuleSidebarNavSectionProps) {
   const shellPage = () => normalizePageType(props.shellPage);
   const items = () => getModuleNavItems(shellPage());
   const isCollapsed = () => props.collapsed ?? false;
-  const activeTab = resolveActiveTab(props.activeTab);
+  // 始终从 props 读取，避免误传 string 快照时选中态冻住
+  const activeTab = (): string => {
+    const value = props.activeTab;
+    return typeof value === 'function' ? value() : value;
+  };
 
   return (
     <SidebarGroup>

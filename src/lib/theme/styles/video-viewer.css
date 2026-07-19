@@ -1,60 +1,414 @@
-/* Reader 视频阅读器 — ArtPlayer 主题覆写（影院暗色 + 紫琥珀强调） */
+/* Reader 视频阅读器 — ArtPlayer 主题（B 站风格蓝进度 + 悬停预览） */
 
 .reader-artplayer-stage .art-video-player {
-  --art-theme: var(--art-theme, #a78bfa);
-  --art-hover-color: var(--art-hover-color, #c4b5fd);
-  --art-loaded-color: rgba(167, 139, 250, 0.28);
-  --art-progress-color: var(--art-progress-color, #a78bfa);
+  --art-theme: #00a1d6;
+  --art-hover-color: #00b5e5;
+  --art-loaded-color: rgba(255, 255, 255, 0.42);
+  --art-progress-color: rgba(255, 255, 255, 0.22);
   --art-hover-bg-color: rgba(15, 23, 42, 0.72);
   --art-control-height: 46px;
   --art-bottom-height: 52px;
   font-family: ui-sans-serif, system-ui, sans-serif;
+  /* 铺满舞台，避免按片源尺寸收缩留下空白 */
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .reader-artplayer-stage {
   background-color: var(--video-viewer-letterbox, #000000);
 }
 
-.reader-artplayer-stage .art-video-player .art-bottom {
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.88) 0%,
-    rgba(0, 0, 0, 0.45) 55%,
-    transparent 100%
-  ) !important;
+.reader-artplayer-stage .art-video-player .art-video {
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  background: #000 !important;
+  filter: none !important;
+  opacity: 1 !important;
 }
 
+/* 弹幕条勿再额外撑高播放器（否则下方大块留白） */
+.reader-artplayer-stage .art-video-player:has(> .artplayer-plugin-danmuku) {
+  margin-bottom: 0 !important;
+}
+
+.reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku {
+  bottom: var(--art-bottom-height, 52px) !important;
+  pointer-events: none;
+}
+
+.reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-icon,
+.reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-config,
+.reader-artplayer-stage .art-controls .artplayer-plugin-danmuku {
+  pointer-events: auto;
+}
+
+.reader-artplayer-stage .art-video-player .art-bottom {
+  /*
+   * 库默认 .art-bottom { inset:0 } 全屏铺开；渐变靠 background-size 限制在底栏高度。
+   * 勿用 background 简写，否则会清掉 background-size，渐变铺满整画面 → 发灰雾面。
+   */
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.88),
+    rgba(0, 0, 0, 0.4),
+    transparent
+  ) !important;
+  background-size: 100% var(--art-bottom-height, 52px) !important;
+  background-repeat: repeat-x !important;
+  background-position: center bottom !important;
+}
+
+/*
+ * 仅认 art-control-show 显隐底栏。
+ * 库默认 art-hover 也会 opacity:1，导致鼠标停在画面上时空闲隐藏永远不生效。
+ */
+.reader-artplayer-stage .art-video-player.art-hover:not(.art-control-show) .art-bottom {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.reader-artplayer-stage .art-video-player.art-control-show .art-bottom {
+  opacity: 1 !important;
+}
+
+.reader-artplayer-stage
+  .art-video-player.art-hover:not(.art-control-show)
+  .art-bottom
+  .art-controls,
+.reader-artplayer-stage
+  .art-video-player.art-hover:not(.art-control-show)
+  .art-bottom
+  .art-progress {
+  transform: translateY(var(--art-bottom-offset, 20px)) !important;
+}
+
+.reader-artplayer-stage .art-video-player.art-control-show .art-bottom .art-controls,
+.reader-artplayer-stage .art-video-player.art-control-show .art-bottom .art-progress {
+  transform: translateY(0) !important;
+  pointer-events: auto;
+}
+
+/* 三色进度：未播放 / 已缓冲 / 已播放（已播 = B 站蓝） */
 .reader-artplayer-stage .art-video-player .art-control-progress-inner {
-  background: linear-gradient(90deg, #7c3aed 0%, #a78bfa 45%, #f59e0b 100%) !important;
+  background: rgba(255, 255, 255, 0.22) !important;
 }
 
 .reader-artplayer-stage .art-video-player .art-progress-loaded {
-  background: rgba(196, 181, 253, 0.35) !important;
+  background: rgba(255, 255, 255, 0.42) !important;
+}
+
+.reader-artplayer-stage .art-video-player .art-progress-played {
+  background: #00a1d6 !important;
+}
+
+/* 悬停勿用色块填充未播区间（B 站：仅三角指示） */
+.reader-artplayer-stage .art-video-player .art-progress-hover {
+  background: transparent !important;
+  opacity: 0 !important;
+}
+
+/* 禁用 Artplayer 原生进度时间 tip（由 reader-progress-hover-tip / 缩略图底栏接管） */
+.reader-artplayer-stage .art-video-player .art-progress-tip {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .reader-artplayer-stage .art-video-player .art-control-volume-inner {
-  background: linear-gradient(180deg, #f59e0b 0%, #a78bfa 100%) !important;
+  background: #00a1d6 !important;
+}
+
+/* —— 悬停三角指示器 —— */
+.reader-artplayer-stage .art-control-progress {
+  position: relative;
+}
+
+.reader-artplayer-stage .reader-progress-scrub {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 5;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.55);
+  transition:
+    opacity var(--reader-progress-preview-duration, 0.16s) ease,
+    transform var(--reader-progress-preview-duration, 0.16s) ease;
+  will-change: opacity, transform;
+}
+
+.reader-artplayer-stage .reader-progress-scrub.is-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.reader-artplayer-stage .reader-progress-scrub-tri {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  transform: translateX(-50%);
+}
+
+/* 进度条上方朝下的三角 */
+.reader-artplayer-stage .reader-progress-scrub-tri--up {
+  bottom: calc(50% + 5px);
+  border-width: 5px 4px 0 4px;
+  border-color: #00a1d6 transparent transparent transparent;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.45));
+}
+
+/* 进度条下方朝上的三角 */
+.reader-artplayer-stage .reader-progress-scrub-tri--down {
+  top: calc(50% + 5px);
+  border-width: 0 4px 5px 4px;
+  border-color: transparent transparent #00a1d6 transparent;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.45));
+}
+
+/* 无 VTT 时的时间气泡（有缩略图时用缩略图底栏时间） */
+.reader-artplayer-stage .reader-progress-hover-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 6;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 3px;
+  transform: translateX(-50%) translateY(6px);
+  transition:
+    opacity var(--reader-progress-preview-duration, 0.16s) ease,
+    transform var(--reader-progress-preview-duration, 0.16s) ease;
+  will-change: opacity, transform;
+}
+
+.reader-artplayer-stage .reader-progress-hover-tip.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/*
+ * VTT 缩略图：插件用 display 显隐无法做动画；
+ * 强制 flex 占位，用 .reader-thumb-visible 控制淡入淡出。
+ */
+.reader-artplayer-stage .art-control-thumbnails {
+  position: relative;
+  display: flex !important;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  pointer-events: none !important;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(0, 8px, 0) scale(0.94);
+  transition:
+    opacity var(--reader-progress-preview-duration, 0.18s) ease,
+    transform var(--reader-progress-preview-duration, 0.18s) ease,
+    visibility var(--reader-progress-preview-duration, 0.18s) ease;
+  will-change: opacity, transform;
+}
+
+.reader-artplayer-stage .art-control-thumbnails.reader-thumb-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.reader-artplayer-stage .art-control-thumbnails .reader-thumb-time {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  padding: 4px 6px 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.25) 70%, transparent 100%);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+/* 接入设置「减少动画」：data-reduce-motion 写在 App 根节点 */
+[data-reduce-motion='true'] .reader-artplayer-stage {
+  --reader-progress-preview-duration: 0.01ms;
+}
+
+[data-reduce-motion='true'] .reader-artplayer-stage .reader-progress-scrub,
+[data-reduce-motion='true'] .reader-artplayer-stage .reader-progress-hover-tip,
+[data-reduce-motion='true'] .reader-artplayer-stage .art-control-thumbnails {
+  transition: none !important;
+}
+
+/* 去掉暂停时整层灰色遮罩 / 中间按钮外的矩形雾面 */
+.reader-artplayer-stage .art-video-player .art-mask {
+  background: transparent !important;
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .reader-artplayer-stage .art-video-player .art-state {
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  padding: 0 !important;
 }
 
-.reader-artplayer-stage .art-video-player .art-notice {
+.reader-artplayer-stage .art-video-player .art-state .art-icon {
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.45));
+}
+
+/* 播放中隐藏封面，避免海报压在画面上发灰 */
+.reader-artplayer-stage .art-video-player.art-playing .art-poster {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* 沉浸模式：layers 叠层顶栏（随 art-control-show 显隐） */
+.reader-artplayer-stage .reader-tv-play-overlay {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.65rem 0.75rem 1.75rem;
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-8px);
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.72) 0%,
+    rgba(0, 0, 0, 0.28) 55%,
+    transparent 100%
+  );
+  transition:
+    opacity var(--reader-progress-preview-duration, 0.18s) ease,
+    transform var(--reader-progress-preview-duration, 0.18s) ease;
+}
+
+.reader-artplayer-stage .art-video-player.art-control-show .reader-tv-play-overlay {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-title {
+  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-desc {
+  overflow: hidden;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.78);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-btn {
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+  background: transparent;
+  border: none;
   border-radius: 0.5rem;
-  background: rgba(15, 23, 42, 0.85) !important;
-  border: 1px solid rgba(167, 139, 250, 0.25);
+  transition: background-color 0.12s ease;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.reader-artplayer-stage .reader-tv-play-overlay-btn.is-busy .reader-tv-play-overlay-refresh-icon {
+  animation: reader-tv-spin 0.8s linear infinite;
+}
+
+@keyframes reader-tv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+[data-reduce-motion='true'] .reader-artplayer-stage .reader-tv-play-overlay {
+  transition: none !important;
+}
+
+[data-reduce-motion='true']
+  .reader-artplayer-stage
+  .reader-tv-play-overlay-btn.is-busy
+  .reader-tv-play-overlay-refresh-icon {
+  animation: none !important;
+}
+
+/* 播放/暂停顶部 notice 条 */
+.reader-artplayer-stage .art-video-player .art-notice {
+  display: none !important;
+}
+
+/* Reader 水印层（若旧实例残留） */
+.reader-artplayer-stage .reader-artplayer-watermark {
+  display: none !important;
 }
 
 .reader-artplayer-stage .art-danmuku {
   pointer-events: none;
 }
 
-.reader-artplayer-stage .art-danmuku-emitter {
-  border-radius: 9999px !important;
-  border: 1px solid rgba(167, 139, 250, 0.35) !important;
-  background: rgba(15, 23, 42, 0.75) !important;
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+/* 无发送接口：隐藏弹幕输入/发送区，保留开关与设置 */
+.reader-artplayer-stage .art-danmuku-emitter,
+.reader-artplayer-stage .apd-emitter,
+.reader-artplayer-stage .artplayer-plugin-danmuku .apd-emitter {
+  display: none !important;
 }

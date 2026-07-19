@@ -16,7 +16,7 @@ import {
   getActiveModuleNavIdForShell,
   navigateModuleNav,
 } from '@/lib/modules/module-nav-registry';
-import { ReaderModuleSidebarSection } from '@/components/reader/ReaderModuleSidebarSection';
+import { ReaderModuleSidebarSection } from '@/components/media/reader/ReaderModuleSidebarSection';
 import { ModuleSidebarNavSection } from '@/components/shell/ModuleSidebarNavSection';
 import { resolveModuleRailWidth } from '@/lib/shell/layout';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';

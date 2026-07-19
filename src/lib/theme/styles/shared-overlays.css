@@ -722,6 +722,52 @@ body.reader-inner-web-session--drawer {
   animation-name: fade-in, slide-in-from-bottom;
 }
 
+.slide-in-from-top-4 {
+  animation-name: fade-in, slide-in-from-top-short;
+}
+
+.slide-in-from-right-4 {
+  animation-name: fade-in, slide-in-from-right-short;
+}
+
+/* 全局媒体播放器：展开=从侧边收起态放大铺开；收起=向侧边条收拢成形 */
+@keyframes gmp-chrome-expand-open {
+  from {
+    opacity: 0;
+    transform: scale(0.28, 0.62);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1, 1);
+  }
+}
+
+@keyframes gmp-chrome-collapse-fold {
+  from {
+    opacity: 0;
+    transform: scale(2.4, 0.45);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1, 1);
+  }
+}
+
+.gmp-chrome-anim-expand-bottom {
+  transform-origin: right bottom;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gmp-chrome-anim-expand-top {
+  transform-origin: right top;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gmp-chrome-anim-collapse {
+  transform-origin: right center;
+  animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .slide-in-from-left-52 {
   animation-name: fade-in, slide-in-from-left;
 }
@@ -834,6 +880,11 @@ body.reader-inner-web-session--drawer {
 [data-reduce-motion="true"] .fade-in,
 [data-reduce-motion="true"] .fade-out,
 [data-reduce-motion="true"] .slide-in-from-bottom-4,
+[data-reduce-motion="true"] .slide-in-from-top-4,
+[data-reduce-motion="true"] .slide-in-from-right-4,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-bottom,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-top,
+[data-reduce-motion="true"] .gmp-chrome-anim-collapse,
 [data-reduce-motion="true"] .slide-in-from-left-52,
 [data-reduce-motion="true"] .slide-in-from-right-52,
 [data-reduce-motion="true"] .slide-in-from-top-52,
@@ -845,7 +896,10 @@ body.reader-inner-web-session--drawer {
 [data-reduce-motion="true"] .animate-app-menu-hide,
 [data-reduce-motion="true"] .setting-item-highlight-enter,
 [data-reduce-motion="true"] .setting-item-highlight-exit,
-[data-reduce-motion="true"] .app-overlay-fade-shell {
+[data-reduce-motion="true"] .app-overlay-fade-shell,
+[data-reduce-motion="true"] .reader-progress-scrub,
+[data-reduce-motion="true"] .reader-progress-hover-tip,
+[data-reduce-motion="true"] .art-control-thumbnails {
   animation-duration: 0.01ms !important;
   animation-delay: 0s !important;
 }
@@ -886,7 +940,7 @@ body.reader-inner-web-session--drawer {
   padding-top: var(--safe-area-top-effective);
 }
 
-/** 主壳 PageToolbar：安全区 + 1rem，避免与 Tailwind pt-4 争抢 padding-top */
+/** 主壳 PageToolbar：安全区 + 1rem 顶距（底距由组件 pb-4 对称） */
 .page-toolbar-shell-top {
   padding-top: calc(var(--safe-area-top-effective) + 1rem);
 }

@@ -149,6 +149,26 @@
     }
   }
 
+  @keyframes slide-in-from-top-short {
+    from {
+      transform: translateY(-1rem);
+    }
+
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slide-in-from-right-short {
+    from {
+      transform: translateX(1rem);
+    }
+
+    to {
+      transform: translateX(0);
+    }
+  }
+
   @keyframes slide-in-from-left {
     from {
       transform: translateX(-13rem);

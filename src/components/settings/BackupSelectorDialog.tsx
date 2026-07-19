@@ -57,7 +57,7 @@ export function BackupSelectorDialog(props: BackupSelectorDialogProps) {
         <DialogHeader>
           <DialogTitle>选择性备份 / 恢复</DialogTitle>
           <DialogDescription>
-            勾选需要包含在 ZIP 备份或从 ZIP 合并恢复的数据项（不含 reader.db 时可仅恢复 JSON）。
+            勾选需要包含在 ZIP 备份或从 ZIP 合并恢复的数据项（不含 mediabox.db 时可仅恢复 JSON）。
           </DialogDescription>
         </DialogHeader>
 

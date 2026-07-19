@@ -1,5 +1,8 @@
+import { Show } from 'solid-js';
 import { ViewerChromeLayoutControls } from '@/components/settings/ViewerChromeLayoutControls';
 import { AppTabs } from '@/components/shared/AppTabs';
+import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
+import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
 import {
   defaultMediaPlayerChromeLayout,
   MEDIA_PLAYER_POSITION_HINTS,
@@ -16,6 +19,8 @@ const POSITION_OPTIONS: MediaPlayerChromePosition[] = ['bottom', 'top'];
 export function MediaPlayerChromeSetting() {
   const position = () =>
     normalizeMediaPlayerChromePosition(settingsState.app.mediaPlayerChromePosition);
+  const autoExpand = () => settingsState.app.mediaPlayerAutoExpandOnTrackChange !== false;
+  const autoCollapseSec = () => settingsState.app.mediaPlayerAutoCollapseAfterExpandSec ?? 0;
 
   return (
     <div class="rounded-2xl border border-border/50 bg-card p-6">
@@ -52,6 +57,45 @@ export function MediaPlayerChromeSetting() {
             void settingsStore.setMediaPlayerChromePosition(value as MediaPlayerChromePosition);
           }}
         />
+
+        <div class="space-y-3 border-t border-border/40 pt-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0 space-y-0.5">
+              <p class="text-sm font-medium text-foreground">切章/切歌时自动展开</p>
+              <p class="text-xs text-muted-foreground">
+                播放器已收起时，切换章节或歌曲会自动展开（仅层叠/悬浮布局可收起）
+              </p>
+            </div>
+            <AppSwitch
+              checked={autoExpand()}
+              onChange={(v) => void settingsStore.setMediaPlayerAutoExpandOnTrackChange(!!v)}
+            >
+              <AppSwitchControl class="shrink-0 data-disabled:cursor-not-allowed">
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">切章/切歌时自动展开</AppSwitchLabel>
+            </AppSwitch>
+          </div>
+
+          <Show when={autoExpand()}>
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0 space-y-0.5">
+                <p class="text-sm font-medium text-foreground">自动展开后收起间隔</p>
+                <p class="text-xs text-muted-foreground">
+                  单位：秒。为 0 时保持展开不自动收起
+                </p>
+              </div>
+              <SettingsNumberField
+                value={autoCollapseSec()}
+                min={0}
+                max={300}
+                onValueChange={(value) =>
+                  void settingsStore.setMediaPlayerAutoCollapseAfterExpandSec(value)
+                }
+              />
+            </div>
+          </Show>
+        </div>
       </div>
     </div>
   );

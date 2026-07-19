@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import type { PageType } from "@/components/shell/Navigation";
-import { BookshelfPendingUpdateNavBadge } from '@/components/bookshelf/BookshelfPendingUpdateBadge';
+import { BookshelfPendingUpdateNavBadge } from '@/components/media/reader/bookshelf/BookshelfPendingUpdateBadge';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,

@@ -12,7 +12,12 @@ export interface SettingsPageToolbarProps {
   onSearchQueryChange?: (query: string) => void;
 }
 
-export function SettingsToolbarLeading(props: { onBack: () => void }) {
+export function SettingsToolbarLeading(props: {
+  onBack: () => void;
+  /** 无障碍与 tooltip；默认「返回」 */
+  label?: string;
+}) {
+  const label = () => props.label ?? '返回';
   return (
     <AppTooltip>
       <AppTooltipTrigger
@@ -21,12 +26,12 @@ export function SettingsToolbarLeading(props: { onBack: () => void }) {
         size="icon"
         class="h-9 w-9 shrink-0"
         onClick={props.onBack}
-        aria-label="返回设置"
+        aria-label={label()}
         type="button"
       >
         <ChevronLeftIcon class="h-4 w-4" />
       </AppTooltipTrigger>
-      <AppTooltipContent>返回设置</AppTooltipContent>
+      <AppTooltipContent>{label()}</AppTooltipContent>
     </AppTooltip>
   );
 }

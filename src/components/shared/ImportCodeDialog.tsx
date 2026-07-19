@@ -23,6 +23,8 @@ export interface ImportCodeDialogProps {
   description?: string;
   portalZClass?: string;
   confirmLabel?: string;
+  /** CodeMirror 高亮语言，默认 json（书源等）；音源脚本可用 javascript */
+  language?: 'json' | 'javascript';
 }
 
 export function ImportCodeDialog(props: ImportCodeDialogProps) {
@@ -65,7 +67,7 @@ export function ImportCodeDialog(props: ImportCodeDialogProps) {
             class="h-[min(56vh,480px)]"
             value={text()}
             onChange={setText}
-            language="json"
+            language={props.language ?? 'json'}
             ariaLabel={props.title ?? '代码导入'}
           />
         </div>

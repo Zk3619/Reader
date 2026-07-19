@@ -86,8 +86,8 @@ export function PageToolbar(props: PageToolbarProps) {
   return (
     <div
       class={cn(
-        'flex w-full min-w-0 max-w-full shrink-0 flex-col space-y-3 overflow-x-hidden px-4',
-        insetTopSafeArea() ? pageToolbarShellTop : 'pt-4',
+        'flex w-full min-w-0 max-w-full shrink-0 flex-col space-y-3 overflow-x-hidden px-4 pb-1',
+        insetTopSafeArea() ? pageToolbarShellTop : 'pt-1',
         props.class
       )}
       data-tauri-drag-region={enableTauriWindowChrome() ? true : undefined}

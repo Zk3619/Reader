@@ -54,6 +54,7 @@ import {
 import {
   DEFAULT_AUTO_CHECK_UPDATES,
   DEFAULT_APP_FONT_FAMILY,
+  DEFAULT_APP_FONT_PATH,
   DEFAULT_APP_FONT_SIZE,
   DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
   DEFAULT_NETWORK_RETRY_COUNT,
@@ -101,6 +102,8 @@ export interface AppSettings {
   appFontSize?: number;
   /** 应用界面字体族；空字符串表示系统默认 */
   appFontFamily?: string;
+  /** 本地字体文件路径；有值时优先注册 @font-face */
+  appFontPath?: string;
   /** 减少动效（无障碍 / 偏好） */
   reduceMotion: boolean;
   /** 是否显示界面工具提示（按钮悬停说明等） */
@@ -189,6 +192,15 @@ export interface AppSettings {
   mediaPlayerChromeLayout?: ViewerChromeLayout;
   /** 全局媒体播放器位置：top | bottom */
   mediaPlayerChromePosition?: MediaPlayerChromePosition;
+  /**
+   * 切章/切歌时是否自动展开已收起的全局播放器（层叠/悬浮可收起时）
+   * 默认 true，与历史「切歌即展开」行为一致
+   */
+  mediaPlayerAutoExpandOnTrackChange?: boolean;
+  /**
+   * 因切章/切歌自动展开后，等待多少秒再自动收起；0 表示不自动收起
+   */
+  mediaPlayerAutoCollapseAfterExpandSec?: number;
   /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
   enableReadRecord?: boolean;
   /** 通知 Toast 位置 */
@@ -217,6 +229,7 @@ const defaultAppSettings: AppSettings = {
   autoCheckUpdates: DEFAULT_AUTO_CHECK_UPDATES,
   appFontSize: DEFAULT_APP_FONT_SIZE,
   appFontFamily: DEFAULT_APP_FONT_FAMILY,
+  appFontPath: DEFAULT_APP_FONT_PATH,
   reduceMotion: false,
   showTooltips: true,
   shellLayout: 'auto',
@@ -237,6 +250,8 @@ const defaultAppSettings: AppSettings = {
   enableVisualBlur: true,
   mediaPlayerChromeLayout: defaultMediaPlayerChromeLayout,
   mediaPlayerChromePosition: defaultMediaPlayerChromePosition,
+  mediaPlayerAutoExpandOnTrackChange: true,
+  mediaPlayerAutoCollapseAfterExpandSec: 0,
   enableReadRecord: true,
   toastPosition: DEFAULT_APP_TOAST_POSITION,
   toastVisibleLimit: DEFAULT_APP_TOAST_VISIBLE_LIMIT,
@@ -293,6 +308,7 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
   applyMainProgramAppearance({
     appFontSize: mainProgramSettings.appFontSize,
     appFontFamily: mainProgramSettings.appFontFamily,
+    appFontPath: mainProgramSettings.appFontPath,
   });
   const activeThemePresetByTarget = normalizeActiveThemePresetByTarget(
     merged.activeThemePresetByTarget,
@@ -533,15 +549,20 @@ export const settingsStore = {
     applyMainProgramAppearance({
       appFontSize: normalized.appFontSize,
       appFontFamily: state.app.appFontFamily ?? DEFAULT_APP_FONT_FAMILY,
+      appFontPath: state.app.appFontPath ?? DEFAULT_APP_FONT_PATH,
     });
   },
 
-  async setAppFontFamily(appFontFamily: string): Promise<void> {
-    const normalized = normalizeMainProgramSettings({ appFontFamily });
-    await this.updateAppSettings({ appFontFamily: normalized.appFontFamily });
+  async setAppFontFamily(appFontFamily: string, appFontPath = ''): Promise<void> {
+    const normalized = normalizeMainProgramSettings({ appFontFamily, appFontPath });
+    await this.updateAppSettings({
+      appFontFamily: normalized.appFontFamily,
+      appFontPath: normalized.appFontPath,
+    });
     applyMainProgramAppearance({
       appFontSize: state.app.appFontSize ?? DEFAULT_APP_FONT_SIZE,
       appFontFamily: normalized.appFontFamily,
+      appFontPath: normalized.appFontPath,
     });
   },
 
@@ -659,6 +680,22 @@ export const settingsStore = {
     mediaPlayerChromePosition: MediaPlayerChromePosition,
   ): Promise<void> {
     await this.updateAppSettings({ mediaPlayerChromePosition });
+  },
+
+  async setMediaPlayerAutoExpandOnTrackChange(
+    mediaPlayerAutoExpandOnTrackChange: boolean,
+  ): Promise<void> {
+    await this.updateAppSettings({ mediaPlayerAutoExpandOnTrackChange });
+  },
+
+  async setMediaPlayerAutoCollapseAfterExpandSec(
+    mediaPlayerAutoCollapseAfterExpandSec: number,
+  ): Promise<void> {
+    const sec = Math.max(
+      0,
+      Math.min(300, Math.round(Number(mediaPlayerAutoCollapseAfterExpandSec) || 0)),
+    );
+    await this.updateAppSettings({ mediaPlayerAutoCollapseAfterExpandSec: sec });
   },
 
   /**

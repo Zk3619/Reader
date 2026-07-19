@@ -13,6 +13,15 @@ import { join } from '@tauri-apps/api/path';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import sqlWasmBundledUrl from 'sql.js/dist/sql-wasm.wasm?url';
+import {
+  DATABASE_NAME,
+  INDEXED_DB_NAME,
+  LEGACY_DATABASE_NAMES,
+  LEGACY_INDEXED_DB_KEY,
+  LEGACY_INDEXED_DB_NAME,
+} from '@/lib/database/database-name';
+
+export { DATABASE_NAME, INDEXED_DB_NAME };
 
 /**
  * 检测是否可以使用 Tauri SQL 插件（带缓存）
@@ -139,7 +148,7 @@ export class WebDatabaseAdapter implements DatabaseAdapter {
   constructor(
     db: import('sql.js').Database,
     dbName: string,
-    indexedDBName: string = 'reader-db'
+    indexedDBName: string = INDEXED_DB_NAME
   ) {
     this.db = db;
     this.dbName = dbName;
@@ -255,7 +264,7 @@ export class WebDatabaseAdapter implements DatabaseAdapter {
   static async loadFromIndexedDB(
     SQL: import('sql.js').SqlJsStatic,
     dbName: string,
-    indexedDBName: string = 'reader-db'
+    indexedDBName: string = INDEXED_DB_NAME
   ): Promise<import('sql.js').Database | null> {
     try {
       return new Promise<import('sql.js').Database | null>((resolve) => {
@@ -317,7 +326,34 @@ export class WebDatabaseAdapter implements DatabaseAdapter {
  */
 let dbAdapter: DatabaseAdapter | null = null;
 let initPromise: Promise<DatabaseAdapter> | null = null;
-const DATABASE_NAME = 'reader.db';
+
+/**
+ * 若仅有旧库文件，则 rename 为 mediabox.db（含 -wal/-shm）
+ */
+async function migrateLegacyDbFileIfNeeded(baseDir: string): Promise<void> {
+  const { exists, rename } = await import('@tauri-apps/plugin-fs');
+  const target = await join(baseDir, DATABASE_NAME);
+  if (await exists(target)) return;
+
+  for (const legacyName of LEGACY_DATABASE_NAMES) {
+    const legacyPath = await join(baseDir, legacyName);
+    if (!(await exists(legacyPath))) continue;
+    console.log(`[数据库适配层] 迁移旧库 ${legacyName} → ${DATABASE_NAME}`);
+    await rename(legacyPath, target);
+    for (const suffix of ['-wal', '-shm']) {
+      const legacySide = `${legacyPath}${suffix}`;
+      const targetSide = `${target}${suffix}`;
+      if (await exists(legacySide)) {
+        try {
+          await rename(legacySide, targetSide);
+        } catch (error) {
+          console.warn('[数据库适配层] 旁路文件迁移失败:', legacySide, error);
+        }
+      }
+    }
+    return;
+  }
+}
 
 /**
  * 初始化 Tauri 环境数据库
@@ -330,6 +366,7 @@ async function initTauriDatabase(): Promise<DatabaseAdapter> {
     }
 
     const baseDir = await getAppDataDir();
+    await migrateLegacyDbFileIfNeeded(baseDir);
     const dbPath = await join(baseDir, DATABASE_NAME);
 
     const { default: Database } = await import('@tauri-apps/plugin-sql');
@@ -421,12 +458,24 @@ async function initWebDatabase(): Promise<DatabaseAdapter> {
         : new Error(String(lastError ?? 'sql.js WASM 加载失败'));
     }
 
-    // 尝试从 IndexedDB 加载现有数据库
+    // 尝试从 IndexedDB 加载现有数据库（优先 mediabox，回退旧 reader.db）
     console.log('[数据库适配层] 尝试从 IndexedDB 加载数据库...');
     let database = await WebDatabaseAdapter.loadFromIndexedDB(
       SQL,
-      DATABASE_NAME
+      DATABASE_NAME,
+      INDEXED_DB_NAME
     );
+
+    if (!database) {
+      database = await WebDatabaseAdapter.loadFromIndexedDB(
+        SQL,
+        LEGACY_INDEXED_DB_KEY,
+        LEGACY_INDEXED_DB_NAME
+      );
+      if (database) {
+        console.log('[数据库适配层] 从旧 IndexedDB 键加载，将写入 mediabox');
+      }
+    }
 
     // 如果不存在，创建新数据库
     if (!database) {
@@ -437,7 +486,7 @@ async function initWebDatabase(): Promise<DatabaseAdapter> {
     }
 
     // database 此时肯定不是 null
-    return new WebDatabaseAdapter(database!, DATABASE_NAME);
+    return new WebDatabaseAdapter(database!, DATABASE_NAME, INDEXED_DB_NAME);
   } catch (error) {
     console.error('[数据库适配层] Web 数据库初始化失败:', error);
     throw new Error('数据库初始化失败: ' + (error instanceof Error ? error.message : String(error)));

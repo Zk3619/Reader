@@ -3,13 +3,13 @@ import { Portal } from "solid-js/web";
 import { Navigation, type PageType } from "@/components/shell/Navigation";
 import { PageToolbar } from "@/components/shell/PageToolbar";
 import { PageToolbarTitleDropdown } from "@/components/shell/PageToolbarTitleDropdown";
-import { SourcesPageToolbar } from "@/components/sources/SourcesPageToolbar";
-import { SourcesFilterDialog } from "@/components/sources/SourcesFilterDialog";
+import { SourcesPageToolbar } from "@/components/media/reader/sources/SourcesPageToolbar";
+import { SourcesFilterDialog } from "@/components/media/reader/sources/SourcesFilterDialog";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 import type { ReadingRulePageId } from "@/lib/settings/reading-rules-nav";
-import { ReplaceRulesPage } from "@/pages/replace-rules/ReplaceRulesPage";
-import { TxtTocRulesPage } from "@/pages/txt-toc-rules/TxtTocRulesPage";
-import { DictRulesPage } from "@/pages/dict-rules/DictRulesPage";
+import { ReplaceRulesPage } from "@/pages/media/reader/replace-rules/ReplaceRulesPage";
+import { TxtTocRulesPage } from "@/pages/media/reader/txt-toc-rules/TxtTocRulesPage";
+import { DictRulesPage } from "@/pages/media/reader/dict-rules/DictRulesPage";
 import { ThemeStudioPage } from "@/pages/settings/ThemeStudioPage";
 import { ThemesManagePage } from "@/pages/settings/ThemesManagePage";
 import { GlobalThemeEffectsLayer } from "@/components/theme/GlobalThemeEffectsLayer";
@@ -27,31 +27,31 @@ import {
 import { Tray } from "@/components/shell/Tray";
 import { SplashScreen } from "@/components/shell/SplashScreen";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
-import { ReaderPage } from "@/pages/reader/ReaderPage";
-import { ReaderShelfPanel } from "@/pages/reader/ReaderShelfPanel";
-import { ReaderSettingsPage } from "@/pages/reader/ReaderSettingsPage";
-import { MusicPage } from "@/pages/music/MusicPage";
-import { TvPage } from "@/pages/tv/TvPage";
-import { TvSettingsPage } from "@/pages/tv/TvSettingsPage";
-import { SubscribePage } from "@/pages/subscribe/SubscribePage";
-import { SubscribeSettingsPage } from "@/pages/subscribe/SubscribeSettingsPage";
-import { BookshelfCachePage } from "@/pages/bookshelf/BookshelfCachePage";
-import { SourcesPage } from "@/pages/sources/SourcesPage";
-import { SourcesManagePage } from "@/pages/sources/SourcesManagePage";
-import { SourceEditPage } from "@/pages/sources/SourceEditPage";
-import { ExploreSourcePage } from "@/pages/explore/ExploreSourcePage";
-import { ExplorePage } from "@/pages/explore/ExplorePage";
-import { BookInfoPage } from "@/pages/book-info/BookInfoPage";
-import { BookInfoDrawer } from "@/pages/book-info/BookInfoDrawer";
-import { BookGroupManage } from "@/pages/bookshelf/BookGroupManagePage";
-import { BookshelfManagePage } from "@/pages/bookshelf/BookshelfManagePage";
-import { BookSearchPage, formatSourceScope } from "@/pages/bookshelf/BookSearchPage";
+import { ReaderPage } from "@/pages/media/reader/ReaderPage";
+import { ReaderShelfPanel } from "@/pages/media/reader/ReaderShelfPanel";
+import { ReaderSettingsPage } from "@/pages/media/reader/ReaderSettingsPage";
+import { MusicPage } from "@/pages/media/audio/MusicPage";
+import { TvPage } from "@/pages/media/video/TvPage";
+import { TvSettingsPage } from "@/pages/media/video/TvSettingsPage";
+import { SubscribePage } from "@/pages/media/subscribe/SubscribePage";
+import { SubscribeSettingsPage } from "@/pages/media/subscribe/SubscribeSettingsPage";
+import { BookshelfCachePage } from "@/pages/media/reader/bookshelf/BookshelfCachePage";
+import { SourcesPage } from "@/pages/media/reader/sources/SourcesPage";
+import { SourcesManagePage } from "@/pages/media/reader/sources/SourcesManagePage";
+import { SourceEditPage } from "@/pages/media/reader/sources/SourceEditPage";
+import { ExploreSourcePage } from "@/pages/media/reader/explore/ExploreSourcePage";
+import { ExplorePage } from "@/pages/media/reader/explore/ExplorePage";
+import { BookInfoPage } from "@/pages/media/reader/book-info/BookInfoPage";
+import { BookInfoDrawer } from "@/pages/media/reader/book-info/BookInfoDrawer";
+import { BookGroupManage } from "@/pages/media/reader/bookshelf/BookGroupManagePage";
+import { BookshelfManagePage } from "@/pages/media/reader/bookshelf/BookshelfManagePage";
+import { BookSearchPage, formatSourceScope } from "@/pages/media/reader/bookshelf/BookSearchPage";
 import { bookToSearchBook } from "@/lib/bookshelf/book-to-search-book";
 import { openAudioHubShell, isAudioHubBookUrl } from "@/app/open-content";
 import {
   effectiveSourceTypeFilter,
   SourcesTypeTabs,
-} from "@/components/sources/SourcesTypeTabs";
+} from "@/components/media/reader/sources/SourcesTypeTabs";
 import { navigateToMusicHub } from "@/stores/shell-tabs";
 import { subscribeHubSectionValue, setSubscribeSection } from "@/stores/subscribe-hub/section";
 import { registerGlobalAudioOpenViewer } from "@/lib/media/audio/audio-shell-controls";
@@ -62,9 +62,9 @@ import {
   AudioViewerPage,
   VideoViewerPage,
   FileViewerPage,
-} from "@/pages/viewer";
-import { BookmarkPage } from "@/pages/bookmark/BookmarkPage";
-import { ReadRecordPage } from "@/pages/record/ReadRecordPage";
+} from "@/pages/media/reader/viewer";
+import { BookmarkPage } from "@/pages/media/reader/bookmark/BookmarkPage";
+import { ReadRecordPage } from "@/pages/media/reader/record/ReadRecordPage";
 import {
   RssPage,
   RssSourcesManagePage,
@@ -73,7 +73,7 @@ import {
   RssReadPage,
   RuleSubPage,
   RssFavoritesPage,
-} from "@/pages/rss";
+} from "@/pages/media/reader/rss";
 import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
@@ -86,34 +86,34 @@ import {
   normalizeMediaViewerPage,
   type MediaViewerPage,
 } from "@/lib/book-source/media-viewer";
-import { RemoteBookPage } from "@/pages/remote-book/RemoteBookPage";
-import { AddBookByUrlDialog } from "@/components/books/AddBookByUrlDialog";
-import { ImportSourceNetworkDialog } from "@/components/sources/ImportSourceNetworkDialog";
-import { ImportSourceLocalDialog } from "@/components/sources/ImportSourceLocalDialog";
-import { ImportBookLocalDialog } from "@/components/books/ImportBookLocalDialog";
-import { ImportSourceQrDialog } from "@/components/sources/ImportSourceQrDialog";
+import { RemoteBookPage } from "@/pages/media/reader/remote-book/RemoteBookPage";
+import { AddBookByUrlDialog } from "@/components/media/reader/books/AddBookByUrlDialog";
+import { ImportSourceNetworkDialog } from "@/components/media/reader/sources/ImportSourceNetworkDialog";
+import { ImportSourceLocalDialog } from "@/components/media/reader/sources/ImportSourceLocalDialog";
+import { ImportBookLocalDialog } from "@/components/media/reader/books/ImportBookLocalDialog";
+import { ImportSourceQrDialog } from "@/components/media/reader/sources/ImportSourceQrDialog";
 import { ImportCodeDialog } from "@/components/shared/ImportCodeDialog";
-import { ImportSourceSelectDialog } from "@/components/sources/ImportSourceSelectDialog";
+import { ImportSourceSelectDialog } from "@/components/media/reader/sources/ImportSourceSelectDialog";
 import { ImportThemeLocalDialog } from "@/components/theme/ImportThemeLocalDialog";
 import { ImportThemeSelectDialog } from "@/components/theme/ImportThemeSelectDialog";
-import { ImportRssSourceSelectDialog } from "@/components/rss/ImportRssSourceSelectDialog";
-import { RssPageToolbar } from "@/components/rss/RssPageToolbar";
-import { RssSourcesManageFilterDialog } from "@/components/rss/RssSourcesManageFilterDialog";
-import { RssReadHistoryDialog } from "@/components/rss/RssReadHistoryDialog";
+import { ImportRssSourceSelectDialog } from "@/components/media/reader/rss/ImportRssSourceSelectDialog";
+import { RssPageToolbar } from "@/components/media/reader/rss/RssPageToolbar";
+import { RssSourcesManageFilterDialog } from "@/components/media/reader/rss/RssSourcesManageFilterDialog";
+import { RssReadHistoryDialog } from "@/components/media/reader/rss/RssReadHistoryDialog";
 import {
   EMPTY_RSS_SOURCE_LIST_FILTER,
   buildRssManageFilterDomainOptions,
   hasEffectiveRssSourceListFilter,
   type RssSourceListFilterCriteria,
 } from "@/lib/rss/rss-source-list-filter";
-import { SourceGroupManageDialog } from "@/components/sources/SourceGroupManageDialog";
+import { SourceGroupManageDialog } from "@/components/media/reader/sources/SourceGroupManageDialog";
 import { getActiveShelfNavigation } from "@/lib/bookshelf/active-shelf-navigation";
 import { normalizePageType, dispatchMediaRefresh } from "@/lib/media-shelf/compat-keys";
 import {
   openReaderAtTab,
   prepareShellNavigation,
 } from "@/lib/modules/shell-compat";
-import { hasModuleSidebarRailContent } from "@/lib/modules/module-nav-registry";
+import { hasModuleSidebarRailContent, navigateModuleNav } from "@/lib/modules/module-nav-registry";
 import {
   resolveShellContentLeft,
   shellContentLeftClass,
@@ -185,8 +185,11 @@ import { isDesktopTauri } from "@/lib/platform/webview-storage";
 import { setupWindowStateListeners } from "@/utils/window-state";
 import { settingsStore } from "@/stores/settings";
 import {
+  DEFAULT_STARTUP_PAGE,
+  parseStartupPageTarget,
   persistLastShellPage,
   readLastShellPage,
+  STARTUP_PAGE_LAST_USED,
 } from "@/lib/settings/main-program-settings";
 import { applyThemeToDocument } from "@/lib/theme";
 import { applyActiveThemePackToDocument } from "@/lib/theme/theme-runtime";
@@ -227,9 +230,9 @@ import { fileRefExists, readBytes } from "@/lib/platform/fs/read-write";
 import { isTauri } from "@/lib/platform/detect";
 import { getFileSystem, toNativeFilesystemPath } from "@/lib/platform/filesystem";
 import { basename, extname, join, normalize } from "@tauri-apps/api/path";
-import { BookDirectoryDialog } from "@/components/books/BookDirectoryDialog";
-import { ImportActionDialog, type ImportAction } from "@/components/books/ImportActionDialog";
-import { ReplaceFileDialog, type ReplaceFileAction } from "@/components/books/ReplaceFileDialog";
+import { BookDirectoryDialog } from "@/components/media/reader/books/BookDirectoryDialog";
+import { ImportActionDialog, type ImportAction } from "@/components/media/reader/books/ImportActionDialog";
+import { ReplaceFileDialog, type ReplaceFileAction } from "@/components/media/reader/books/ReplaceFileDialog";
 import {
   formatSourceListFilterSummary,
   formatSourceListToolbarDescription,
@@ -280,7 +283,7 @@ import {
   READER_REPLACE_RULE_IMPORT_EVENT,
 } from "@/lib/platform/legado-import-uri";
 import { handleMusicDeepLink } from "@/lib/media/audio/music-deeplink";
-import { LyricDesktopPage } from "@/pages/lyric-desktop/LyricDesktopPage";
+import { LyricDesktopPage } from "@/pages/media/audio/lyric-desktop/LyricDesktopPage";
 import {
   buildImportComparisons,
   defaultImportSelection,
@@ -323,12 +326,12 @@ import { pickLocalThemeFiles } from "@/lib/theme/import/pick-local-theme-file";
 import { pickLocalThemeDirectory } from "@/lib/theme/import/pick-local-theme-directory";
 import { runAutoRuleSubUpdates } from "@/lib/rss-source";
 import { importDatabase } from "@/lib/database/export-import";
-import { RssOverlayShell } from "@/components/rss/RssOverlayShell";
+import { RssOverlayShell } from "@/components/media/reader/rss/RssOverlayShell";
 import { getRssOverlayPortalMount } from "@/lib/rss/rss-overlay-portal";
-import { InnerWebHost } from "@/components/inner-web/InnerWebHost";
-import { SourceLoginDialog } from "@/components/sources/SourceLoginDialog";
-import { SourceVariableDialog } from "@/components/sources/SourceVariableDialog";
-import { SourceVerificationDialog } from "@/components/sources/SourceVerificationDialog";
+import { InnerWebHost } from "@/components/media/reader/inner-web/InnerWebHost";
+import { SourceLoginDialog } from "@/components/media/reader/sources/SourceLoginDialog";
+import { SourceVariableDialog } from "@/components/media/reader/sources/SourceVariableDialog";
+import { SourceVerificationDialog } from "@/components/media/reader/sources/SourceVerificationDialog";
 import {
   registerSourceVerificationHandler,
   SourceVerificationCancelledError,
@@ -2871,11 +2874,24 @@ function AppContent() {
     void settingsStore
       .loadSettings()
       .then(() => {
-        if (settingsStore.state.app.startupPage === 'last-used') {
+        const startupPage = settingsStore.state.app.startupPage ?? DEFAULT_STARTUP_PAGE;
+        if (startupPage === STARTUP_PAGE_LAST_USED) {
           const lastPage = readLastShellPage();
-          if (lastPage) nav.navigateShell(normalizeShellTab(normalizeRestoredPage(lastPage)));
+          if (lastPage) {
+            nav.navigateShell(normalizeShellTab(normalizeRestoredPage(lastPage)));
+          } else {
+            nav.navigateShell('reader');
+            navigateModuleNav('reader', 'shelf');
+          }
         } else {
-          nav.navigateShell('reader');
+          const target = parseStartupPageTarget(startupPage);
+          if (target) {
+            nav.navigateShell(target.shellPage);
+            navigateModuleNav(target.shellPage, target.navId);
+          } else {
+            nav.navigateShell('reader');
+            navigateModuleNav('reader', 'shelf');
+          }
         }
         setSettingsReady(true);
       })
@@ -3571,6 +3587,7 @@ function AppContent() {
     const showBottomBar = () => !isStandalonePage() && shell().showBottomBar;
     const mediaPlayerFixedInset = useGlobalMediaPlayerFixedInset({
       shellOverlayOpen: isStandalonePage,
+      overlayTopKind: () => nav.top()?.kind,
       currentShellPage: currentPage,
       showTopNav,
       showBottomBar,
@@ -3737,6 +3754,7 @@ function AppContent() {
 
         <GlobalMediaPlayer
           shellOverlayOpen={isStandalonePage}
+          overlayTopKind={() => nav.top()?.kind}
           currentShellPage={currentPage}
           showTopNav={showTopNav}
           showBottomBar={showBottomBar}
@@ -3748,7 +3766,6 @@ function AppContent() {
             });
           }}
         />
-
         {/* 主容器 - 独立页时仅 hidden，保持挂载以保留书架/探索/书源状态 */}
         <div
           id="main-content-container"
@@ -4907,6 +4924,9 @@ const appToastIcons = createAppToastIcons();
 
 function App() {
   if (typeof window !== "undefined" && window.location.hash === "#lyric-desktop") {
+    document.documentElement.classList.add("lyric-desktop");
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
     return (
       <ThemePackRuntimeProvider>
         <LyricDesktopPage />

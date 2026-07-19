@@ -12,7 +12,9 @@ let deferredDone = false;
 
 export function registerPersistDomain(domain: PersistDomain): void {
   if (domains.has(domain.id)) {
-    console.warn(`[persistence] domain already registered: ${domain.id}`);
+    // HMR / 重复 bootstrap：静默覆盖，避免刷屏告警
+    domains.set(domain.id, domain);
+    return;
   }
   domains.set(domain.id, domain);
 }

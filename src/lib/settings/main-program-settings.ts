@@ -1,14 +1,53 @@
 import { isAndroid, isTauri } from '@/lib/platform/detect';
+import { SHELL_MODULES, type ShellModuleId } from '@/lib/modules/module-registry';
+import { getModuleNavItems } from '@/lib/modules/module-nav-items';
+import { ensureReaderFontFace, readerCustomFontFamilyName } from '@/lib/media/text/reader-font';
+import type { PageType } from '@/components/shell/Navigation';
 
-export type StartupPage = 'bookshelf' | 'last-used';
+/** `last-used` 或 `模块:侧栏页`（如 `reader:shelf`） */
+export type StartupPage = string;
 
-export const DEFAULT_STARTUP_PAGE: StartupPage = 'bookshelf';
+export const STARTUP_PAGE_LAST_USED = 'last-used';
+export const DEFAULT_STARTUP_PAGE: StartupPage = STARTUP_PAGE_LAST_USED;
 export const DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS = 30;
 export const DEFAULT_NETWORK_RETRY_COUNT = 1;
 export const DEFAULT_AUTO_CHECK_UPDATES = true;
 export const DEFAULT_APP_FONT_SIZE = 16;
+/** 空字符串表示系统默认字体 */
 export const DEFAULT_APP_FONT_FAMILY = '';
+export const DEFAULT_APP_FONT_PATH = '';
+export const APP_FONT_DEFAULT_OPTION_LABEL = '默认字体';
+
 const LAST_SHELL_PAGE_STORAGE_KEY = 'reader_last_shell_page';
+
+/** queryLocalFonts 不可用时的常见系统字体回退列表 */
+const FALLBACK_SYSTEM_FONT_FAMILIES = [
+  'Microsoft YaHei',
+  'Microsoft YaHei UI',
+  'SimSun',
+  'SimHei',
+  'KaiTi',
+  'FangSong',
+  'Noto Sans SC',
+  'Noto Serif SC',
+  'Source Han Sans SC',
+  'Source Han Serif SC',
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'WenQuanYi Micro Hei',
+  'Segoe UI',
+  'Arial',
+  'Helvetica Neue',
+  'Times New Roman',
+  'Georgia',
+  'Consolas',
+  'Courier New',
+] as const;
+
+export interface StartupPageOption {
+  value: StartupPage;
+  label: string;
+}
 
 export interface MainProgramSettingsInput {
   startupPage?: unknown;
@@ -17,6 +56,7 @@ export interface MainProgramSettingsInput {
   autoCheckUpdates?: unknown;
   appFontSize?: unknown;
   appFontFamily?: unknown;
+  appFontPath?: unknown;
 }
 
 export interface NormalizedMainProgramSettings {
@@ -26,6 +66,12 @@ export interface NormalizedMainProgramSettings {
   autoCheckUpdates: boolean;
   appFontSize: number;
   appFontFamily: string;
+  appFontPath: string;
+}
+
+export interface ResolvedStartupTarget {
+  shellPage: PageType;
+  navId: string;
 }
 
 let runtimeNetworkDefaults = {
@@ -52,16 +98,111 @@ export function getRuntimeNetworkDefaults(): Readonly<typeof runtimeNetworkDefau
   return runtimeNetworkDefaults;
 }
 
+function buildStartupPageCatalog(): { options: StartupPageOption[]; allowed: Set<string> } {
+  const options: StartupPageOption[] = [
+    { value: STARTUP_PAGE_LAST_USED, label: '上次页面' },
+  ];
+  const allowed = new Set<string>([STARTUP_PAGE_LAST_USED]);
+
+  for (const mod of SHELL_MODULES) {
+    for (const item of getModuleNavItems(mod.shellPage)) {
+      const value = `${mod.id}:${item.id}`;
+      options.push({ value, label: `${mod.label} · ${item.label}` });
+      allowed.add(value);
+    }
+  }
+
+  return { options, allowed };
+}
+
+let startupCatalog: ReturnType<typeof buildStartupPageCatalog> | null = null;
+
+function getStartupCatalog(): ReturnType<typeof buildStartupPageCatalog> {
+  if (!startupCatalog) startupCatalog = buildStartupPageCatalog();
+  return startupCatalog;
+}
+
+export function listStartupPageOptions(): StartupPageOption[] {
+  return getStartupCatalog().options;
+}
+
+export function startupPageLabel(value: StartupPage): string {
+  return getStartupCatalog().options.find((o) => o.value === value)?.label ?? value;
+}
+
+/** 兼容旧值 `bookshelf` → `reader:shelf` */
+export function normalizeStartupPage(value: unknown): StartupPage {
+  if (value === 'bookshelf') return 'reader:shelf';
+  if (typeof value === 'string' && getStartupCatalog().allowed.has(value)) return value;
+  return DEFAULT_STARTUP_PAGE;
+}
+
+export function parseStartupPageTarget(value: StartupPage): ResolvedStartupTarget | null {
+  const normalized = normalizeStartupPage(value);
+  if (normalized === STARTUP_PAGE_LAST_USED) return null;
+  const sep = normalized.indexOf(':');
+  if (sep <= 0) return null;
+  const moduleId = normalized.slice(0, sep) as ShellModuleId;
+  const navId = normalized.slice(sep + 1);
+  const mod = SHELL_MODULES.find((m) => m.id === moduleId);
+  if (!mod) return null;
+  const items = getModuleNavItems(mod.shellPage);
+  if (!items.some((item) => item.id === navId)) return null;
+  return { shellPage: mod.shellPage, navId };
+}
+
 export function applyMainProgramAppearance(value: {
   appFontSize: number;
   appFontFamily: string;
+  appFontPath?: string;
 }): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   root.style.fontSize = `${normalizeInteger(value.appFontSize, DEFAULT_APP_FONT_SIZE, 12, 24)}px`;
-  const family = value.appFontFamily.trim();
-  if (family) root.style.setProperty('--font-sans', family);
-  else root.style.removeProperty('--font-sans');
+
+  const path = (value.appFontPath ?? '').trim();
+  let family = value.appFontFamily.trim();
+  if (path) {
+    const faceName =
+      family ||
+      readerCustomFontFamilyName({ customFontName: '', customFontPath: path });
+    ensureReaderFontFace(path, faceName);
+    family = faceName;
+  }
+
+  if (family) {
+    const safe = family.replace(/"/g, '');
+    root.style.setProperty('--font-sans', safe.includes(' ') ? `"${safe}"` : safe);
+  } else {
+    root.style.removeProperty('--font-sans');
+  }
+}
+
+/** 列举系统字体族（优先 Local Font Access API） */
+export async function listSystemFontFamilies(): Promise<string[]> {
+  const queryLocalFonts = (
+    window as Window & {
+      queryLocalFonts?: () => Promise<Array<{ family?: string }>>;
+    }
+  ).queryLocalFonts;
+
+  if (typeof queryLocalFonts === 'function') {
+    try {
+      const fonts = await queryLocalFonts();
+      const families = new Set<string>();
+      for (const font of fonts) {
+        const family = font.family?.trim();
+        if (family) families.add(family);
+      }
+      if (families.size > 0) {
+        return [...families].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+      }
+    } catch {
+      // 用户拒绝或环境不支持时回退
+    }
+  }
+
+  return [...FALLBACK_SYSTEM_FONT_FAMILIES];
 }
 
 export function readLastShellPage(): string | null {
@@ -89,7 +230,7 @@ export function normalizeMainProgramSettings(
   value: MainProgramSettingsInput,
 ): NormalizedMainProgramSettings {
   return {
-    startupPage: value.startupPage === 'last-used' ? 'last-used' : DEFAULT_STARTUP_PAGE,
+    startupPage: normalizeStartupPage(value.startupPage),
     networkRequestTimeoutSeconds: normalizeInteger(
       value.networkRequestTimeoutSeconds,
       DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
@@ -111,6 +252,10 @@ export function normalizeMainProgramSettings(
       typeof value.appFontFamily === 'string'
         ? value.appFontFamily.trim().slice(0, 200)
         : DEFAULT_APP_FONT_FAMILY,
+    appFontPath:
+      typeof value.appFontPath === 'string'
+        ? value.appFontPath.trim().slice(0, 1000)
+        : DEFAULT_APP_FONT_PATH,
   };
 }
 

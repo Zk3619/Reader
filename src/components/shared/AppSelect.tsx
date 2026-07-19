@@ -63,13 +63,17 @@ const CONTENT_LAYOUT_CLASS: Record<AppSelectContentLayout, string> = {
 };
 
 const APP_SELECT_TRIGGER_BASE_CLASS =
-  'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
+  'flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
 const APP_SELECT_CONTENT_MOTION_CLASS =
   'relative min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-expanded:animate-in data-closed:animate-out data-closed:fade-out-0 data-expanded:fade-in-0 data-closed:zoom-out-95 data-expanded:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2';
 
 const APP_SELECT_ITEM_BASE_CLASS =
-  'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50';
+  'relative flex w-full min-w-0 cursor-default select-none items-center overflow-hidden rounded-sm py-1.5 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50';
+
+const APP_SELECT_ITEM_LABEL_CLASS = 'min-w-0 flex-1 truncate';
+
+const APP_SELECT_VALUE_CLASS = 'min-w-0 flex-1 truncate text-left';
 
 const AppSelectCheckmarkContext = createContext<Accessor<boolean>>(() => true);
 
@@ -257,7 +261,9 @@ export const AppSelectItem = <T extends ValidComponent = 'li'>(
           <CheckIcon class="h-4 w-4" />
         </SelectPrimitive.ItemIndicator>
       </Show>
-      <SelectPrimitive.ItemLabel>{local.children}</SelectPrimitive.ItemLabel>
+      <SelectPrimitive.ItemLabel class={APP_SELECT_ITEM_LABEL_CLASS}>
+        {local.children}
+      </SelectPrimitive.ItemLabel>
     </SelectPrimitive.Item>
   );
 };
@@ -295,4 +301,14 @@ export const AppSelectItemIndicator: Component<SelectPrimitive.SelectItemIndicat
   );
 };
 
-export { SelectValue as AppSelectValue };
+type AppSelectValueProps<Option = unknown, T extends ValidComponent = 'span'> =
+  SelectPrimitive.SelectValueProps<Option, T> & {
+    class?: string | undefined;
+  };
+
+export function AppSelectValue<Option = unknown, T extends ValidComponent = 'span'>(
+  props: PolymorphicProps<T, AppSelectValueProps<Option, T>>,
+) {
+  const [local, others] = splitProps(props as AppSelectValueProps<Option>, ['class']);
+  return <SelectValue class={cn(APP_SELECT_VALUE_CLASS, local.class)} {...others} />;
+}

@@ -23,6 +23,11 @@ export type VirtualGridListBodyProps<T> = {
   gridClass: string;
   rowUlClass?: string;
   rowGapCssVar?: string;
+  /**
+   * 固定列轨宽度（px）。提供时使用 `repeat(N, Xpx)`，卡片不随容器挤压；
+   * 未提供时保持 `repeat(N, minmax(0, 1fr))`。
+   */
+  columnTrackPx?: Accessor<number> | number;
   usesRowGapPadding: () => boolean;
   externalScrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onScrollContainer?: (el: HTMLDivElement) => void;
@@ -150,7 +155,17 @@ export function VirtualGridListBody<T>(props: VirtualGridListBodyProps<T>) {
             )}
             style={{
               // fixed / responsive 都按 colCount 铺列；否则仅 `grid` class 会塌成单列
-              'grid-template-columns': `repeat(${Math.max(1, props.colCount())}, minmax(0, 1fr))`,
+              'grid-template-columns': (() => {
+                const cols = Math.max(1, props.colCount());
+                const track =
+                  typeof props.columnTrackPx === 'function'
+                    ? props.columnTrackPx()
+                    : props.columnTrackPx;
+                if (typeof track === 'number' && track > 0) {
+                  return `repeat(${cols}, ${Math.round(track)}px)`;
+                }
+                return `repeat(${cols}, minmax(0, 1fr))`;
+              })(),
               ...(gapVar && !lastRow
                 ? { 'padding-bottom': `var(--${gapVar})` }
                 : undefined),

@@ -90,6 +90,16 @@ function shouldRestoreItem(fileName: string, selected?: Set<string>): boolean {
   return false;
 }
 
+function shouldRestoreDb(selected?: Set<string>): boolean {
+  if (!selected) return true;
+  return (
+    selected.has('mediabox.db') ||
+    selected.has('reader.db') ||
+    selected.has('legado.db') ||
+    selected.has('backup.db')
+  );
+}
+
 async function unzipBackup(bytes: Uint8Array): Promise<{
   text: Record<string, string>;
   binary: Record<string, Uint8Array>;
@@ -187,7 +197,7 @@ export async function restoreBackupFromBytes(
   }
 
   if (isSqliteBuffer(bytes) || /\.(db|sqlite3?)$/.test(lower)) {
-    if (!shouldRestoreItem('reader.db', selected)) {
+    if (!shouldRestoreDb(selected)) {
       throw new Error('选择性恢复未包含数据库项');
     }
     await importDatabase(toArrayBuffer(bytes), options.replace !== false);
@@ -203,10 +213,10 @@ export async function restoreBackupFromBytes(
     }
 
     const dbEntry = Object.entries(binary).find(([name]) =>
-      shouldRestoreItem('reader.db', selected)
-      && (/^(reader|legado|backup)\.(db|sqlite3?)$/.test(basename(name)) || name.endsWith('.db')),
+      shouldRestoreDb(selected)
+      && (/^(mediabox|reader|legado|backup)\.(db|sqlite3?)$/.test(basename(name)) || name.endsWith('.db')),
     );
-    if (dbEntry && shouldRestoreItem('reader.db', selected)) {
+    if (dbEntry && shouldRestoreDb(selected)) {
       await importDatabase(toArrayBuffer(dbEntry[1]), options.replace !== false);
       summary.push(`已全量恢复数据库：${basename(dbEntry[0])}`);
       return summary;

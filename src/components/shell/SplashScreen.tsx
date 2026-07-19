@@ -30,7 +30,13 @@ export function SplashScreen(props: SplashScreenProps) {
       return;
     }
 
-    await ensureMainWindowVisible();
+    // 限时 show 窗口：避免被影视 JAR 等 IPC 堵住后永远不启动淡出定时器
+    await Promise.race([
+      ensureMainWindowVisible(),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 2000);
+      }),
+    ]);
 
     // 检测当前主题（支持 class=\"dark\" 和 data-kb-theme=\"dark\" 两种方式）
     const checkTheme = () => {

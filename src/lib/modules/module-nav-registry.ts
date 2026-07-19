@@ -2,28 +2,7 @@
  * 壳模块内子页导航注册表（顶栏 / 融合侧栏 / 独立侧栏共用）
  */
 
-import type { Component } from 'solid-js';
-import {
-  Search,
-  ListMusic,
-  Library,
-  Trophy,
-  Settings2,
-  History,
-  Heart,
-  Radio,
-  Home,
-} from 'lucide-solid';
 import type { PageType } from '@/components/shell/Navigation';
-import {
-  BookshelfIcon,
-  BookSearchIcon,
-  BookSourceIcon,
-  BookmarkIcon,
-  RecordIcon,
-  RssTabIcon,
-  GroupVideoIcon,
-} from '@/components/shared/icons';
 import type { ReaderInternalTab } from '@/stores/reader-internal-tab';
 import { readerInternalTabValue, setReaderInternalTab } from '@/stores/reader-internal-tab';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
@@ -36,63 +15,13 @@ import {
   subscribeHubSectionValue,
 } from '@/stores/subscribe-hub/section';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
+import {
+  getModuleNavItems,
+  type ModuleNavItem,
+} from '@/lib/modules/module-nav-items';
 
-export type ModuleNavItem = {
-  id: string;
-  label: string;
-  description?: string;
-  icon?: Component<{ class?: string; size?: number }>;
-};
-
-const READER_NAV: ModuleNavItem[] = [
-  { id: 'shelf', label: '书架', icon: BookshelfIcon },
-  { id: 'explore', label: '探索', icon: BookSearchIcon },
-  { id: 'sources', label: '书源', icon: BookSourceIcon },
-  { id: 'bookmark', label: '书签', icon: BookmarkIcon },
-  { id: 'record', label: '记录', icon: RecordIcon },
-  { id: 'rss', label: 'RSS', icon: RssTabIcon },
-  { id: 'settings', label: '设置', icon: Settings2 },
-];
-
-const MUSIC_NAV: ModuleNavItem[] = [
-  { id: 'search', label: '搜索', icon: Search },
-  { id: 'songlist', label: '歌单', icon: Library },
-  { id: 'leaderboard', label: '排行榜', icon: Trophy },
-  { id: 'list', label: '我的列表', icon: ListMusic },
-  { id: 'settings', label: '设置', icon: Settings2 },
-];
-
-const TV_NAV: ModuleNavItem[] = [
-  { id: 'home', label: '首页', icon: Home },
-  { id: 'live', label: '直播', icon: Radio },
-  { id: 'search', label: '搜索', icon: Search },
-  { id: 'keep', label: '收藏', icon: Heart },
-  { id: 'history', label: '历史', icon: History },
-  { id: 'settings', label: '设置', icon: Settings2 },
-];
-
-const SUBSCRIBE_NAV: ModuleNavItem[] = [
-  { id: 'home', label: '首页', icon: GroupVideoIcon },
-  { id: 'settings', label: '设置', icon: Settings2 },
-];
-
-export function getModuleNavItems(shellPage: PageType): ModuleNavItem[] {
-  const page = normalizePageType(shellPage);
-  switch (page) {
-    case 'reader':
-      return READER_NAV;
-    case 'music':
-      return MUSIC_NAV;
-    case 'tv':
-      return TV_NAV;
-    case 'subscribe':
-      return SUBSCRIBE_NAV;
-    case 'settings':
-      return [];
-    default:
-      return [];
-  }
-}
+export type { ModuleNavItem };
+export { getModuleNavItems };
 
 /** 桌面独立模块侧栏：当前模块是否有可展示的子导航 */
 export function hasModuleSidebarRailContent(shellPage: PageType): boolean {

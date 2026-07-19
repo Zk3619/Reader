@@ -12,6 +12,7 @@ import {
   ComboboxControl,
   ComboboxInput,
   ComboboxItem,
+  ComboboxItemLabel,
   ComboboxTrigger,
 } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
@@ -20,6 +21,11 @@ import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { popperMenuPanelShell, type ScrollGutterMode } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
+
+const APP_COMBOBOX_ITEM_CLASS = 'w-full min-w-0 overflow-hidden';
+const APP_COMBOBOX_ITEM_LABEL_CLASS = 'min-w-0 flex-1 truncate';
+const APP_COMBOBOX_CONTROL_CLASS = 'min-w-0 w-full';
+const APP_COMBOBOX_INPUT_CLASS = 'min-w-0 flex-1 truncate';
 
 export type AppComboboxProps = {
   options: string[];
@@ -38,6 +44,11 @@ export type AppComboboxProps = {
    * 用于倍速/音调等：输入框显示实际值，选项仅为预设）。
    */
   disableFilter?: boolean;
+  /**
+   * 为 true 时不下拉 Portal（内容留在当前 DOM 树）。
+   * 嵌在 Popover 内时必须开启，否则 Portal 挂载会触发 Popover 的 interactOutside 立刻关闭。
+   */
+  disablePortal?: boolean;
   'aria-label'?: string;
 };
 
@@ -52,6 +63,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
     'contentClass',
     'scrollGutter',
     'disableFilter',
+    'disablePortal',
     'aria-label',
   ]);
 
@@ -64,9 +76,26 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
     return local.options.filter((opt) => filter.contains(opt, q));
   });
 
+  const content = () => (
+    <ComboboxPrimitive.Content
+      data-kb-combobox-content=""
+      class={cn(
+        popperMenuPanelShell,
+        overlayLayerZ().popper,
+        'relative isolate overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+        local.contentClass,
+      )}
+    >
+      <ThemedComponentBackground componentId="combobox" />
+      <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
+        <ComboboxPrimitive.Listbox class="m-0 p-0" />
+      </PopperScrollViewport>
+    </ComboboxPrimitive.Content>
+  );
+
   return (
     <Combobox
-      class={local.class}
+      class={cn('min-w-0', local.class)}
       options={filteredOptions()}
       value={local.value || null}
       onChange={(v) => local.onChange(v ?? '')}
@@ -75,28 +104,22 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       noResetInputOnBlur
       modal={false}
       itemComponent={(itemProps) => (
-        <ComboboxItem item={itemProps.item}>{itemProps.item.rawValue}</ComboboxItem>
+        <ComboboxItem item={itemProps.item} class={APP_COMBOBOX_ITEM_CLASS}>
+          <ComboboxItemLabel class={APP_COMBOBOX_ITEM_LABEL_CLASS}>
+            {itemProps.item.rawValue}
+          </ComboboxItemLabel>
+        </ComboboxItem>
       )}
     >
-      <ComboboxControl aria-label={local['aria-label']}>
-        <ComboboxInput />
+      <ComboboxControl class={APP_COMBOBOX_CONTROL_CLASS} aria-label={local['aria-label']}>
+        <ComboboxInput class={APP_COMBOBOX_INPUT_CLASS} />
         <ComboboxTrigger />
       </ComboboxControl>
-      <ComboboxPrimitive.Portal mount={mount}>
-        <ComboboxPrimitive.Content
-          class={cn(
-            popperMenuPanelShell,
-            overlayLayerZ().popper,
-            'relative isolate overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
-            local.contentClass,
-          )}
-        >
-          <ThemedComponentBackground componentId="combobox" />
-          <PopperScrollViewport class="relative z-1 px-1" scrollGutter={local.scrollGutter}>
-            <ComboboxPrimitive.Listbox class="m-0 p-0" />
-          </PopperScrollViewport>
-        </ComboboxPrimitive.Content>
-      </ComboboxPrimitive.Portal>
+      {local.disablePortal ? (
+        content()
+      ) : (
+        <ComboboxPrimitive.Portal mount={mount}>{content()}</ComboboxPrimitive.Portal>
+      )}
     </Combobox>
   );
 };

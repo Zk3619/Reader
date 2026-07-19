@@ -38,3 +38,12 @@ export const defaultMediaPlayerChromePosition: MediaPlayerChromePosition = 'bott
 
 /** 悬浮模式：与顶/底壳层的间距（对称） */
 export const globalMediaPlayerFloatingEdgeClass = 'm-3';
+
+/**
+ * 叠在文本/漫画阅读器上时，避开阅读器顶/底 chrome（工具栏/进度条）的竖直偏移。
+ * 含 safe-area，避免与刘海/手势条及阅读器栏重叠。
+ */
+export const globalMediaPlayerOverReaderBottomClass =
+  'bottom-[calc(5.75rem+env(safe-area-inset-bottom,0px))]';
+export const globalMediaPlayerOverReaderTopClass =
+  'top-[calc(5.75rem+env(safe-area-inset-top,0px))]';

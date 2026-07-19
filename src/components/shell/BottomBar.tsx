@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { appBottomChromePadding } from "@/lib/ui/viewport-classes";
 import type { PageType } from "@/components/shell/Navigation";
-import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
+import { BookshelfPendingUpdateNavBadge } from "@/components/media/reader/bookshelf/BookshelfPendingUpdateBadge";
 import { SHELL_PAGE_CONFIG } from "@/lib/shell/shell-page-config";
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 

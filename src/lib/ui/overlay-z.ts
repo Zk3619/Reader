@@ -29,6 +29,12 @@ export const APP_DIALOG_POPPER_Z = 'z-[110]';
 /** 导航栈上的阅读器叠层（须高于壳层内 fixed 页如 book-search 自带的 z-50） */
 export const APP_OVERLAY_VIEWER_Z = 'z-[110]';
 
+/**
+ * 全局后台播放条叠在文本/漫画阅读器之上（音乐/有声书后台播）。
+ * 须高于 APP_OVERLAY_VIEWER_Z，低于书籍详情抽屉与阅读器内 Dialog。
+ */
+export const APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z = 'z-[112]';
+
 /** 书籍详情抽屉（App 根级，高于阅读器壳层、低于阅读器内 Dialog 档位） */
 export const APP_BOOK_INFO_DRAWER_OVERLAY_Z = 'z-[115]';
 export const APP_BOOK_INFO_DRAWER_Z = 'z-[120]';

@@ -1,18 +1,39 @@
 import type { JSX } from 'solid-js';
+import { Show, createMemo, createSignal, onMount } from 'solid-js';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { AppTabs } from '@/components/shared/AppTabs';
-import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
-import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
+import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import {
+  APP_FONT_DEFAULT_OPTION_LABEL,
   DEFAULT_APP_FONT_FAMILY,
+  DEFAULT_APP_FONT_PATH,
   DEFAULT_APP_FONT_SIZE,
   DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
   DEFAULT_NETWORK_RETRY_COUNT,
   DEFAULT_STARTUP_PAGE,
   detectMainProgramRuntime,
   desktopIntegrationUnavailableReason,
+  listStartupPageOptions,
+  listSystemFontFamilies,
+  startupPageLabel,
   type StartupPage,
 } from '@/lib/settings/main-program-settings';
+import {
+  ensureReaderFontFace,
+  readerCustomFontFamilyName,
+} from '@/lib/media/text/reader-font';
+import { isTauri } from '@/lib/platform/detect';
 import { settingsState, settingsStore } from '@/stores/settings';
 import packageInfo from '../../../package.json';
 
@@ -23,11 +44,12 @@ const languageLabels: Record<(typeof languageOptions)[number], string> = {
   'zh-TW': '繁體中文',
   'en-US': 'English',
 };
-const startupPageOptions: StartupPage[] = ['bookshelf', 'last-used'];
-const startupPageLabels: Record<StartupPage, string> = {
-  bookshelf: '书架',
-  'last-used': '上次页面',
-};
+
+/** AppSelect 用哨兵值表示「默认字体」（空字符串对部分 Select 实现不友好） */
+const APP_FONT_DEFAULT_SELECT_VALUE = '__app_font_default__';
+
+const startupPageOptions = listStartupPageOptions();
+const startupPageValues = startupPageOptions.map((o) => o.value);
 
 interface SwitchRowProps {
   title: string;
@@ -71,7 +93,89 @@ export function GeneralProgramSetting() {
     languageOptions.includes(settingsState.app.language as (typeof languageOptions)[number])
       ? (settingsState.app.language as (typeof languageOptions)[number])
       : 'zh-CN';
-  const startupPage = () => settingsState.app.startupPage ?? DEFAULT_STARTUP_PAGE;
+  const startupPage = () => {
+    const raw = settingsState.app.startupPage ?? DEFAULT_STARTUP_PAGE;
+    return startupPageValues.includes(raw) ? raw : DEFAULT_STARTUP_PAGE;
+  };
+
+  const [systemFonts, setSystemFonts] = createSignal<string[]>([]);
+
+  onMount(() => {
+    void listSystemFontFamilies().then(setSystemFonts);
+  });
+
+  const appFontFamily = () => settingsState.app.appFontFamily ?? DEFAULT_APP_FONT_FAMILY;
+  const appFontPath = () => settingsState.app.appFontPath ?? DEFAULT_APP_FONT_PATH;
+
+  const fontSelectValue = () => {
+    const family = appFontFamily().trim();
+    if (!family && !appFontPath().trim()) return APP_FONT_DEFAULT_SELECT_VALUE;
+    return family || APP_FONT_DEFAULT_SELECT_VALUE;
+  };
+
+  const fontSelectOptions = createMemo(() => {
+    const opts = new Set<string>([APP_FONT_DEFAULT_SELECT_VALUE, ...systemFonts()]);
+    const current = appFontFamily().trim();
+    if (current) opts.add(current);
+    return [...opts];
+  });
+
+  const fontOptionLabel = (value: string) =>
+    value === APP_FONT_DEFAULT_SELECT_VALUE ? APP_FONT_DEFAULT_OPTION_LABEL : value;
+
+  const onFontSelectChange = (value: string | null) => {
+    if (value == null) return;
+    if (value === APP_FONT_DEFAULT_SELECT_VALUE) {
+      void settingsStore.setAppFontFamily(DEFAULT_APP_FONT_FAMILY, DEFAULT_APP_FONT_PATH);
+      return;
+    }
+    void settingsStore.setAppFontFamily(value, DEFAULT_APP_FONT_PATH);
+  };
+
+  const pickLocalFontFile = async () => {
+    try {
+      let selectedPath: string | null = null;
+      let suggestedName = '';
+
+      if (isTauri()) {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({
+          multiple: false,
+          filters: [{ name: '字体', extensions: ['ttf', 'otf', 'woff', 'woff2'] }],
+        });
+        if (!selected || Array.isArray(selected)) return;
+        selectedPath = selected;
+      } else {
+        const { pickFile } = await import('@/lib/platform/fs/pick-file');
+        const { isUserCancelled } = await import('@/lib/platform/fs/errors');
+        try {
+          const pick = await pickFile({
+            multiple: false,
+            filters: [{ name: '字体', extensions: ['ttf', 'otf', 'woff', 'woff2'] }],
+          });
+          suggestedName = pick.fileName.replace(/\.[^.]+$/, '');
+          if (pick.bytes) {
+            selectedPath = URL.createObjectURL(new Blob([pick.bytes]));
+          } else if (pick.ref.kind === 'path' || pick.ref.kind === 'uri') {
+            selectedPath = pick.ref.value;
+          }
+        } catch (e) {
+          if (isUserCancelled(e)) return;
+          throw e;
+        }
+      }
+
+      if (!selectedPath) return;
+      const family = readerCustomFontFamilyName({
+        customFontName: suggestedName,
+        customFontPath: selectedPath,
+      });
+      ensureReaderFontFace(selectedPath, family);
+      await settingsStore.setAppFontFamily(family, selectedPath);
+    } catch (e) {
+      console.warn('[GeneralProgramSetting] pick font failed', e);
+    }
+  };
 
   return (
     <div class={cardClass}>
@@ -90,20 +194,40 @@ export function GeneralProgramSetting() {
           hint="语言偏好会持久化；尚未翻译的界面将继续显示简体中文。"
           onChange={(value) => void settingsStore.setLanguage(value)}
         />
-        <AppTabs
-          value={startupPage()}
-          options={startupPageOptions}
-          labels={startupPageLabels}
-          variant="settings-equal"
-          label="启动页面"
-          ariaLabel="启动页面"
-          hint="“上次页面”需要运行环境支持会话恢复；不支持时回退到书架。"
-          onChange={(value) => void settingsStore.setStartupPage(value)}
-        />
+        <div class="space-y-2">
+          <Label for="settings-startup-page">启动页面</Label>
+          <AppSelect
+            value={startupPage()}
+            onChange={(value) => {
+              if (value != null) void settingsStore.setStartupPage(value as StartupPage);
+            }}
+            options={startupPageValues}
+            itemComponent={(itemProps) => (
+              <AppSelectItem item={itemProps.item}>
+                {startupPageLabel(String(itemProps.item.rawValue))}
+              </AppSelectItem>
+            )}
+          >
+            <AppSelectTrigger id="settings-startup-page" layout="form" aria-label="启动页面">
+              <AppSelectValue<string>>
+                {(state) => startupPageLabel(String(state.selectedOption() ?? startupPage()))}
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
+          <p class="text-xs text-muted-foreground">
+            默认「上次页面」；其余选项按模块侧栏顺序排列。不支持会话恢复时回退到阅读 · 书架。
+          </p>
+        </div>
         <div class="flex items-center justify-between gap-4">
           <div>
             <p class="text-sm font-medium text-foreground">界面字号</p>
-            <p class="text-xs text-muted-foreground">12–24 px，全应用即时生效</p>
+            <p class="text-xs text-muted-foreground">
+              调整文档根字号（html font-size），范围 12–24 px，全应用即时生效
+            </p>
           </div>
           <SettingsNumberField
             value={settingsState.app.appFontSize ?? DEFAULT_APP_FONT_SIZE}
@@ -112,19 +236,73 @@ export function GeneralProgramSetting() {
             onValueChange={(value) => void settingsStore.setAppFontSize(value)}
           />
         </div>
-        <div class="space-y-1.5">
-          <label class="text-sm font-medium text-foreground" for="settings-app-font-family">
-            界面字体
-          </label>
-          <AppTextFieldBareInput
-            id="settings-app-font-family"
-            value={settingsState.app.appFontFamily ?? DEFAULT_APP_FONT_FAMILY}
-            placeholder="系统默认，例如 Microsoft YaHei"
-            onChange={(event: Event & { currentTarget: HTMLInputElement }) =>
-              void settingsStore.setAppFontFamily(event.currentTarget.value)
-            }
-          />
-          <p class="text-xs text-muted-foreground">可填写 CSS 字体族，留空恢复系统默认。</p>
+        <div class="space-y-2">
+          <Label for="settings-app-font-family">界面字体</Label>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div class="min-w-0 flex-1">
+              <AppSelect
+                value={fontSelectValue()}
+                onChange={onFontSelectChange}
+                options={fontSelectOptions()}
+                itemComponent={(itemProps) => (
+                  <AppSelectItem item={itemProps.item}>
+                    <span
+                      style={{
+                        'font-family':
+                          itemProps.item.rawValue === APP_FONT_DEFAULT_SELECT_VALUE
+                            ? undefined
+                            : String(itemProps.item.rawValue),
+                      }}
+                    >
+                      {fontOptionLabel(String(itemProps.item.rawValue))}
+                    </span>
+                  </AppSelectItem>
+                )}
+              >
+                <AppSelectTrigger
+                  id="settings-app-font-family"
+                  layout="form"
+                  aria-label="界面字体"
+                >
+                  <AppSelectValue<string>>
+                    {(state) => (
+                      <span
+                        class="truncate"
+                        style={{
+                          'font-family':
+                            fontSelectValue() === APP_FONT_DEFAULT_SELECT_VALUE
+                              ? undefined
+                              : fontSelectValue(),
+                        }}
+                      >
+                        {fontOptionLabel(String(state.selectedOption() ?? fontSelectValue()))}
+                      </span>
+                    )}
+                  </AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              class="shrink-0"
+              onClick={() => void pickLocalFontFile()}
+            >
+              选择本地字体
+            </Button>
+          </div>
+          <Show when={appFontPath().trim()}>
+            <p class="truncate text-xs text-muted-foreground" title={appFontPath()}>
+              本地文件：{appFontPath()}
+            </p>
+          </Show>
+          <p class="text-xs text-muted-foreground">
+            默认选中「默认字体」；可从系统字体列表选择，或指定本地字体文件。
+          </p>
         </div>
       </div>
     </div>

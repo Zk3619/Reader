@@ -19,7 +19,7 @@ import { getEffectiveDark } from "@/lib/theme";
 import { settingsStore } from "@/stores/settings";
 import { cn } from "@/lib/utils";
 import { isMobile } from "@/lib/platform/detect";
-import { BookshelfPendingUpdateNavBadge } from "@/components/bookshelf/BookshelfPendingUpdateBadge";
+import { BookshelfPendingUpdateNavBadge } from "@/components/media/reader/bookshelf/BookshelfPendingUpdateBadge";
 import { useShellLayout } from "@/components/shell/ShellLayoutProvider";
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 import { APP_DISPLAY_NAME } from "@/lib/shell/shell-page-config";

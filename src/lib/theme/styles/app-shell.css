@@ -27,6 +27,80 @@
       "calt" 1;
   }
 
+  /* 桌面歌词窗：强制透明底，避免白屏块；圆角裁剪 */
+  html.lyric-desktop,
+  html.lyric-desktop body {
+    background: transparent !important;
+  }
+
+  html.lyric-desktop #root {
+    background: transparent;
+  }
+
+  html.lyric-desktop .lyric-desktop-shell {
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .lyric-resize {
+    position: absolute;
+    z-index: 20;
+    background: transparent;
+  }
+  .lyric-resize-left,
+  .lyric-resize-right {
+    top: 8px;
+    bottom: 8px;
+    width: 6px;
+    cursor: ew-resize;
+  }
+  .lyric-resize-left {
+    left: 0;
+  }
+  .lyric-resize-right {
+    right: 0;
+  }
+  .lyric-resize-top,
+  .lyric-resize-bottom {
+    left: 8px;
+    right: 8px;
+    height: 6px;
+    cursor: ns-resize;
+  }
+  .lyric-resize-top {
+    top: 0;
+  }
+  .lyric-resize-bottom {
+    bottom: 0;
+  }
+  .lyric-resize-top-left,
+  .lyric-resize-top-right,
+  .lyric-resize-bottom-left,
+  .lyric-resize-bottom-right {
+    width: 12px;
+    height: 12px;
+  }
+  .lyric-resize-top-left {
+    top: 0;
+    left: 0;
+    cursor: nwse-resize;
+  }
+  .lyric-resize-top-right {
+    top: 0;
+    right: 0;
+    cursor: nesw-resize;
+  }
+  .lyric-resize-bottom-left {
+    bottom: 0;
+    left: 0;
+    cursor: nesw-resize;
+  }
+  .lyric-resize-bottom-right {
+    bottom: 0;
+    right: 0;
+    cursor: nwse-resize;
+  }
+
   /* 主程序根节点：滚动由各页面内部 scroll 区承担，禁止文档级滚动 */
   #root {
     height: 100%;

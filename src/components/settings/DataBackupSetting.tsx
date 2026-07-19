@@ -15,7 +15,7 @@ import { getDatabaseLocation, checkDatabaseExists, openDatabaseDirectory } from 
 import { isTauri } from '@/lib/platform/detect';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { DownloadIcon, UploadIcon } from '@/components/shared/icons';
-import { WebDavConfigDialog } from '@/components/remote-book/WebDavConfigDialog';
+import { WebDavConfigDialog } from '@/components/media/reader/remote-book/WebDavConfigDialog';
 import { WebDavRestoreDialog } from '@/components/settings/WebDavRestoreDialog';
 import {
   findNewerRemoteBackup,
@@ -325,7 +325,7 @@ export function DataBackupSetting() {
           <div>
             <h4 class="text-sm font-semibold">备份内容预览</h4>
             <p class="text-xs text-muted-foreground">
-              ZIP 含完整 reader.db、Legado 兼容 JSON 与阅读器配置
+              ZIP 含完整 mediabox.db、Legado 兼容 JSON 与阅读器配置
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading()}>

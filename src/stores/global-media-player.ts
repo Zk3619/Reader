@@ -3,6 +3,7 @@
  */
 
 import { createStore } from 'solid-js/store';
+import { settingsState } from '@/stores/settings';
 
 export type GlobalMediaPlayerKind = 'read-aloud' | 'audio' | 'video';
 
@@ -25,6 +26,14 @@ export type GlobalMediaPlayerState = {
   bookUrl: string | null;
   /** 固定布局时实测 chrome 高度（px） */
   chromeHeightPx: number;
+  /**
+   * 展开动画世代：展开时递增，驱动 UI 重挂载以重放入场动画
+   */
+  expandAnimEpoch: number;
+  /**
+   * 收起动画世代：收起时递增，驱动侧边条重挂载以重放入场动画
+   */
+  collapseAnimEpoch: number;
 };
 
 const [state, setState] = createStore<GlobalMediaPlayerState>({
@@ -34,9 +43,70 @@ const [state, setState] = createStore<GlobalMediaPlayerState>({
   meta: null,
   bookUrl: null,
   chromeHeightPx: 0,
+  expandAnimEpoch: 0,
+  collapseAnimEpoch: 0,
 });
 
 export const globalMediaPlayerState = state;
+
+let autoCollapseTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearAutoCollapseTimer(): void {
+  if (autoCollapseTimer != null) {
+    clearTimeout(autoCollapseTimer);
+    autoCollapseTimer = null;
+  }
+}
+
+function autoExpandEnabled(): boolean {
+  return settingsState.app.mediaPlayerAutoExpandOnTrackChange !== false;
+}
+
+function autoCollapseDelayMs(): number {
+  const sec = settingsState.app.mediaPlayerAutoCollapseAfterExpandSec ?? 0;
+  if (!Number.isFinite(sec) || sec <= 0) return 0;
+  return Math.round(sec * 1000);
+}
+
+function bumpExpandAnim(): void {
+  setState('expandAnimEpoch', (n) => n + 1);
+}
+
+function bumpCollapseAnim(): void {
+  setState('collapseAnimEpoch', (n) => n + 1);
+}
+
+function setCollapsedWithAnim(collapsed: boolean): void {
+  if (state.collapsed === collapsed) return;
+  setState('collapsed', collapsed);
+  if (collapsed) bumpCollapseAnim();
+  else bumpExpandAnim();
+}
+
+/** 因切章/切歌自动展开后，按设置安排自动收起 */
+function scheduleAutoCollapseAfterExpand(): void {
+  clearAutoCollapseTimer();
+  const delay = autoCollapseDelayMs();
+  if (delay <= 0) return;
+  autoCollapseTimer = setTimeout(() => {
+    autoCollapseTimer = null;
+    if (!state.shellActive || !state.kind) return;
+    setCollapsedWithAnim(true);
+  }, delay);
+}
+
+/**
+ * 切章/切歌等内容变更：按设置决定是否从收起态自动展开并定时收起。
+ * 仅更新 meta 时不会触发（请继续用 updateMeta）。
+ */
+function handleContentChangeExpand(): void {
+  if (!autoExpandEnabled()) return;
+  const wasCollapsed = state.collapsed;
+  if (wasCollapsed) {
+    setCollapsedWithAnim(false);
+    scheduleAutoCollapseAfterExpand();
+  }
+}
 
 export const globalMediaPlayerStore = {
   get state() {
@@ -48,6 +118,13 @@ export const globalMediaPlayerStore = {
   },
 
   activateReadAloud(meta: GlobalMediaPlayerMeta, bookUrl: string): void {
+    clearAutoCollapseTimer();
+    const contentChange = state.shellActive && state.kind === 'read-aloud';
+    if (contentChange) {
+      setState({ meta, bookUrl, shellActive: true, kind: 'read-aloud' });
+      handleContentChangeExpand();
+      return;
+    }
     setState({
       kind: 'read-aloud',
       shellActive: true,
@@ -55,9 +132,17 @@ export const globalMediaPlayerStore = {
       meta,
       bookUrl,
     });
+    bumpExpandAnim();
   },
 
   activate(kind: GlobalMediaPlayerKind, meta: GlobalMediaPlayerMeta, bookUrl: string | null): void {
+    clearAutoCollapseTimer();
+    const contentChange = state.shellActive && state.kind === kind;
+    if (contentChange) {
+      setState({ meta, bookUrl, shellActive: true, kind });
+      handleContentChangeExpand();
+      return;
+    }
     setState({
       kind,
       shellActive: true,
@@ -65,6 +150,20 @@ export const globalMediaPlayerStore = {
       meta,
       bookUrl,
     });
+    bumpExpandAnim();
+  },
+
+  /**
+   * 切章/切歌等：更新展示信息，并按设置自动展开 / 定时收起。
+   * 用于已在 shell 中播放、但未再次走 activate 的路径（如有声书切章）。
+   */
+  notifyTrackOrChapterChange(metaPatch?: Partial<GlobalMediaPlayerMeta>): void {
+    if (!state.shellActive || !state.kind) return;
+    clearAutoCollapseTimer();
+    if (metaPatch && state.meta) {
+      setState('meta', (prev) => ({ ...prev!, ...metaPatch }));
+    }
+    handleContentChangeExpand();
   },
 
   updateMeta(patch: Partial<GlobalMediaPlayerMeta>): void {
@@ -73,14 +172,17 @@ export const globalMediaPlayerStore = {
   },
 
   setCollapsed(collapsed: boolean): void {
-    setState('collapsed', collapsed);
+    clearAutoCollapseTimer();
+    setCollapsedWithAnim(collapsed);
   },
 
   toggleCollapsed(): void {
-    setState('collapsed', (v) => !v);
+    clearAutoCollapseTimer();
+    setCollapsedWithAnim(!state.collapsed);
   },
 
   deactivate(): void {
+    clearAutoCollapseTimer();
     setState({
       kind: null,
       shellActive: false,
@@ -98,6 +200,7 @@ export const globalMediaPlayerStore = {
   },
 
   clearShell(): void {
+    clearAutoCollapseTimer();
     setState('shellActive', false);
   },
 };

@@ -448,7 +448,7 @@ export function SettingsPage(props: SettingsPageProps) {
                 dropdownEnabled={false}
               />
             }
-            leading={<SettingsToolbarLeading onBack={closeSubPage} />}
+            leading={<SettingsToolbarLeading onBack={closeSubPage} label="返回设置" />}
           >
             <SettingsPageToolbar
               searchQuery={searchQuery()}
