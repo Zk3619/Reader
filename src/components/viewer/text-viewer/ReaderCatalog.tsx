@@ -1,10 +1,10 @@
 import { createEffect, createMemo, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
-import { ChapterCacheCloudIcon } from '@/components/books/ChapterCacheCloudIcon';
+import { ChapterCacheCloudIcon } from '@/components/media/reader/books/ChapterCacheCloudIcon';
 import {
   scrollCatalogIndexIntoView,
   VirtualChapterList,
-} from '@/components/books/VirtualChapterList';
+} from '@/components/media/reader/books/VirtualChapterList';
 import { useCachedChapterIndices } from '@/lib/chapter-cache/use-cached-chapter-indices';
 import {
   buildChapterRowMetas,

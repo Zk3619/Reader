@@ -14,6 +14,7 @@ import {
   getMangaImageCacheStats,
   invalidateMangaImageMetaIndex,
 } from '@/lib/media/image/image-disk-cache';
+import { ReaderTables } from '@/lib/database/table-names';
 
 const FILE_CHAPTER_ESTIMATE_BYTES = 600 * 1024;
 
@@ -93,10 +94,10 @@ export async function getChapterCacheStats(): Promise<ChapterCacheStats> {
               SUM(
                 CASE WHEN file_path IS NOT NULL AND file_path != '' THEN 1 ELSE 0 END
               ) as file_cnt
-       FROM chapter_cache`,
+       FROM ${ReaderTables.chapterCache}`,
     ),
     db.select<Record<string, unknown>>(
-      `SELECT file_path FROM chapter_cache
+      `SELECT file_path FROM ${ReaderTables.chapterCache}
        WHERE file_path IS NOT NULL AND file_path != ''`,
     ),
     loadMangaImageStats(),

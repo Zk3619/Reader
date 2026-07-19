@@ -5,7 +5,7 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
-import { EffectiveReplacesDialog } from '@/components/replace-rules/EffectiveReplacesDialog';
+import { EffectiveReplacesDialog } from '@/components/media/reader/replace-rules/EffectiveReplacesDialog';
 import { ContentEditDialog } from '@/components/viewer/text-viewer/ContentEditDialog';
 import { BookPageAnimDialog } from '@/components/viewer/text-viewer/BookPageAnimDialog';
 import { BookThemeOverrideDialog } from '@/components/viewer/text-viewer/BookThemeOverrideDialog';

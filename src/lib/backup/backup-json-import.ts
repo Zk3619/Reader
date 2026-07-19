@@ -1,5 +1,5 @@
 /**
- * 从 Legado / Reader 备份 ZIP 文本条目导入附加 JSON（无 reader.db 时使用）
+ * 从 Legado / MediaBox 备份 ZIP 文本条目导入附加 JSON（无 mediabox.db / reader.db 时使用）
  */
 
 import * as bookmarksDb from '@/lib/database/bookmarks';

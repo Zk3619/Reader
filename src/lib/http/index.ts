@@ -416,8 +416,139 @@ async function executeRequest(
           combinedSignal,
         );
 
+      const isTlsOrSendFailure = (err: unknown) =>
+        /handshake|unexpected\s*EOF|tls|certificate|ssl|error sending request/i.test(
+          String((err as { message?: unknown })?.message ?? err ?? ''),
+        );
+
       if (useRustDirect) {
-        response = await fetchViaRust();
+        try {
+          response = await fetchViaRust();
+        } catch (rustDirectErr: unknown) {
+          if (isAbortError(rustDirectErr) || !!proxy) throw rustDirectErr;
+          // 强制 backend 时部分站点 TLS 握手 EOF；无 Cookie/Referer 时回退 plugin-http
+          if (
+            requestNeedsDownloadBinary(defaultHeaders) ||
+            !isTlsOrSendFailure(rustDirectErr)
+          ) {
+            throw rustDirectErr;
+          }
+          console.warn(
+            '[HTTP] download_binary TLS/网络失败，回退 Tauri HTTP 插件:',
+            String((rustDirectErr as { message?: unknown })?.message ?? rustDirectErr).slice(0, 160),
+          );
+          try {
+            const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+            const tauriOptions: Record<string, unknown> = {
+              method,
+              headers: defaultHeaders,
+              connectTimeout: timeout,
+              maxRedirections: followRedirects ? 10 : 0,
+              danger: {
+                acceptInvalidCerts: true,
+                acceptInvalidHostnames: true,
+              },
+            };
+            if (body !== undefined && body !== null) {
+              tauriOptions.body = body;
+            }
+            const tauriResponse = await raceWithAbortSignal(
+              tauriFetch(normalizedUrl, tauriOptions as Parameters<typeof tauriFetch>[1]),
+              combinedSignal,
+            );
+            const responseHeaders = new Headers();
+            if (tauriResponse.headers) {
+              if (tauriResponse.headers instanceof Map) {
+                tauriResponse.headers.forEach((value: string, key: string) => {
+                  responseHeaders.set(key, value);
+                });
+              } else if (typeof tauriResponse.headers === 'object') {
+                Object.entries(tauriResponse.headers).forEach(([key, value]) => {
+                  responseHeaders.set(key, String(value));
+                });
+              }
+            }
+            let cachedText: string | null = null;
+            let cachedArrayBuffer: ArrayBuffer | null = null;
+            try {
+              const tauriResponseAny = tauriResponse as {
+                bytes?: () => Promise<Uint8Array | number[]>;
+              };
+              if (typeof tauriResponseAny.bytes === 'function') {
+                const bytes = await tauriResponseAny.bytes();
+                if (bytes instanceof Uint8Array) {
+                  const copy = bytes.slice();
+                  cachedArrayBuffer = copy.buffer.slice(
+                    copy.byteOffset,
+                    copy.byteOffset + copy.byteLength,
+                  );
+                } else if (Array.isArray(bytes)) {
+                  cachedArrayBuffer = new Uint8Array(bytes).buffer;
+                }
+              }
+            } catch (e) {
+              console.warn('[HTTP] Tauri fetch bytes() 失败:', e);
+            }
+            response = {
+              status: tauriResponse.status,
+              statusText: tauriResponse.statusText || '',
+              ok: tauriResponse.ok,
+              headers: responseHeaders,
+              url: tauriResponse.url || url,
+              text: async () => {
+                if (cachedText === null) {
+                  if (cachedArrayBuffer !== null) {
+                    cachedText = await bytesToHttpResponseText(
+                      cachedArrayBuffer,
+                      responseHeaders.get('content-encoding'),
+                    );
+                  } else {
+                    const ab = await tauriResponse.arrayBuffer();
+                    cachedText = await bytesToHttpResponseText(
+                      ab,
+                      responseHeaders.get('content-encoding'),
+                    );
+                  }
+                }
+                return cachedText;
+              },
+              json: async () => {
+                if (cachedText === null) {
+                  if (cachedArrayBuffer !== null) {
+                    cachedText = await bytesToHttpResponseText(
+                      cachedArrayBuffer,
+                      responseHeaders.get('content-encoding'),
+                    );
+                  } else {
+                    const ab = await tauriResponse.arrayBuffer();
+                    cachedText = await bytesToHttpResponseText(
+                      ab,
+                      responseHeaders.get('content-encoding'),
+                    );
+                  }
+                }
+                return JSON.parse(cachedText);
+              },
+              arrayBuffer: async () => {
+                if (cachedArrayBuffer !== null) return cachedArrayBuffer;
+                if (cachedText === null) {
+                  cachedText = await tauriResponse.text();
+                }
+                cachedArrayBuffer = new TextEncoder().encode(cachedText).buffer;
+                return cachedArrayBuffer;
+              },
+            } as Response;
+          } catch (pluginFallbackErr: unknown) {
+            if (isAbortError(pluginFallbackErr)) throw pluginFallbackErr;
+            console.warn(
+              '[HTTP] Tauri HTTP 插件回退仍失败，抛出原 download_binary 错误',
+              String(
+                (pluginFallbackErr as { message?: unknown })?.message ?? pluginFallbackErr,
+              ).slice(0, 120),
+            );
+            throw rustDirectErr;
+          }
+        }
       } else {
       // 普通书源 GET：优先 Tauri HTTP 插件；失败（非取消）再回退 download_binary
       try {

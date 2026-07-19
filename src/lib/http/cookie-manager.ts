@@ -24,9 +24,10 @@ export async function deleteCookie(url: string): Promise<void> {
 export async function clearAllCookies(): Promise<void> {
   try {
     const { getDatabase } = await import('@/lib/database/database-core');
+    const { ShellTables } = await import('@/lib/database/table-names');
     const { clearSessionCookies } = await import('@/lib/http/cookie-jar');
     const db = await getDatabase();
-    await db.execute('DELETE FROM cookies');
+    await db.execute(`DELETE FROM ${ShellTables.cookies}`);
     clearSessionCookies();
   } catch (error) {
     console.error('清空Cookie失败:', error);

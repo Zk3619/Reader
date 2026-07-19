@@ -6,6 +6,7 @@ import { getDatabase } from '@/lib/database/database-core';
 import * as chapterCacheDb from '@/lib/database/chapter-cache';
 import { deleteChapterFile } from '@/lib/chapter-cache/file-storage';
 import { getChapterCacheSettings } from '@/lib/chapter-cache/settings';
+import { ReaderTables } from '@/lib/database/table-names';
 
 const AUTO_TIER_SQL = `(cache_tier IS NULL OR cache_tier = 'auto')`;
 
@@ -27,7 +28,7 @@ async function purgeAutoChapterCacheByRetention(retentionDays: number): Promise<
     chapter_index: number;
     file_path: string | null;
   }>(
-    `SELECT book_url, chapter_index, file_path FROM chapter_cache
+    `SELECT book_url, chapter_index, file_path FROM ${ReaderTables.chapterCache}
      WHERE ${AUTO_TIER_SQL} AND created_at > 0 AND created_at < ?`,
     [cutoff],
   );
@@ -49,7 +50,7 @@ async function purgeAutoChapterCacheByTotalSize(maxBytes: number): Promise<void>
     created_at: number;
   }>(
     `SELECT book_url, chapter_index, file_path, content, created_at
-     FROM chapter_cache
+     FROM ${ReaderTables.chapterCache}
      WHERE ${AUTO_TIER_SQL}
      ORDER BY created_at ASC`,
   );

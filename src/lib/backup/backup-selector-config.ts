@@ -14,7 +14,7 @@ export interface BackupSelectorItem {
 }
 
 export const BACKUP_SELECTOR_ITEMS: BackupSelectorItem[] = [
-  { key: 'readerDb', fileName: 'reader.db', title: 'SQLite 数据库', group: '核心' },
+  { key: 'readerDb', fileName: 'mediabox.db', title: 'SQLite 数据库', group: '核心' },
   { key: 'bookshelf', fileName: 'bookshelf.json', title: '书架', group: '数据库' },
   { key: 'bookmark', fileName: 'bookmark.json', title: '书签', group: '数据库' },
   { key: 'bookGroup', fileName: 'bookGroup.json', title: '书籍分组', group: '数据库' },

@@ -48,8 +48,8 @@ import {
   ReadAloudTimerNumberField,
 } from '@/components/viewer/text-viewer/ReaderReadAloudNumberFields';
 import { ReaderReadAloudMoreDialog } from '@/components/viewer/text-viewer/ReaderReadAloudMoreDialog';
-import { BookCoverFromBook } from '@/components/books/BookCoverFromBook';
-import { BookCoverFallback } from '@/components/books/BookCoverFallback';
+import { BookCoverFromBook } from '@/components/media/reader/books/BookCoverFromBook';
+import { BookCoverFallback } from '@/components/media/reader/books/BookCoverFallback';
 import {
   bookGroupGridCoverClass,
   bookGroupGridCoverZoomClass,

@@ -7,6 +7,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ShellTables } from '@/lib/database/table-names';
 import { mergeLegadoCookieHeaderStrings } from '@/lib/js-engine/legado/normalize-legado-ajax-body';
 
 const sessionByDomain = new Map<string, string>();
@@ -76,7 +77,7 @@ function setSessionCookie(domain: string, cookie: string): void {
 async function readPersistentCookieForKey(key: string): Promise<string> {
   const db = await getDatabase();
   const rows = await db.select<{ cookie: string }>(
-    'SELECT cookie FROM cookies WHERE url = ?',
+    `SELECT cookie FROM ${ShellTables.cookies} WHERE url = ?`,
     [key],
   );
   return rows[0]?.cookie?.trim() ?? '';
@@ -141,7 +142,7 @@ export async function setPersistentCookie(url: string, cookie: string): Promise<
   const trimmed = cookie.trim();
   try {
     const db = await getDatabase();
-    await db.execute('INSERT OR REPLACE INTO cookies (url, cookie) VALUES (?, ?)', [
+    await db.execute(`INSERT OR REPLACE INTO ${ShellTables.cookies} (url, cookie) VALUES (?, ?)`, [
       domain,
       trimmed,
     ]);
@@ -168,7 +169,7 @@ export async function removeJarCookies(url: string): Promise<void> {
   sessionByDomain.delete(domain);
   try {
     const db = await getDatabase();
-    await db.execute('DELETE FROM cookies WHERE url = ?', [domain]);
+    await db.execute(`DELETE FROM ${ShellTables.cookies} WHERE url = ?`, [domain]);
   } catch (e) {
     console.warn('[cookie-jar] removeJarCookies failed', e);
   }

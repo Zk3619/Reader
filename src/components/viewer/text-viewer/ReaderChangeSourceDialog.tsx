@@ -22,7 +22,7 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { SourcesFilterDialog } from '@/components/sources/SourcesFilterDialog';
+import { SourcesFilterDialog } from '@/components/media/reader/sources/SourcesFilterDialog';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
   AppDialog,

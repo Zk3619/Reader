@@ -10,6 +10,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { bookCacheFolderKey } from '@/lib/chapter-cache/book-cache-key';
 import { getChapterFileByteSize } from '@/lib/chapter-cache/file-storage';
 import { sqlNonNegativeInt } from '@/lib/chapter-cache/sql-stats';
+import { ReaderTables } from '@/lib/database/table-names';
 
 export interface BookChapterCacheStats {
   chapterCount: number;
@@ -33,7 +34,7 @@ export async function getChapterCacheStatsForBook(
               CASE WHEN file_path IS NULL OR file_path = '' THEN LENGTH(content) ELSE 0 END
             ), 0) as inline_bytes,
             SUM(CASE WHEN file_path IS NOT NULL AND file_path != '' THEN 1 ELSE 0 END) as file_cnt
-     FROM chapter_cache WHERE book_url = ?`,
+     FROM ${ReaderTables.chapterCache} WHERE book_url = ?`,
     [bookUrl],
   );
   const row = rows[0] ?? {};
@@ -59,7 +60,7 @@ export async function getChapterCacheStatsForBook(
     }
     if (fileBytes <= 0) {
       const fileRows = await db.select<Record<string, unknown>>(
-        `SELECT file_path FROM chapter_cache
+        `SELECT file_path FROM ${ReaderTables.chapterCache}
          WHERE book_url = ? AND file_path IS NOT NULL AND file_path != ''`,
         [bookUrl],
       );

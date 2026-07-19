@@ -37,6 +37,7 @@ import {
 import { AppDropdownMenuContent } from '@/components/shared/AppDropdownMenu';
 import { AppContextMenuContent } from '@/components/shared/AppContextMenu';
 import { AppSelectContent } from '@/components/shared/AppSelect';
+import { AppPopoverContent } from '@/components/shared/AppPopover';
 
 /** 阅读器内 Dialog / Drawer / Popper 的 z-index 档位（与 overlay-z 同步） */
 export const VIEWER_OVERLAY_Z = MEDIA_VIEWER_OVERLAY_LAYER_Z;
@@ -145,6 +146,26 @@ export const ViewerAppSelectContent: Component<ViewerAppSelectContentProps> = (p
   return (
     <AppSelectContent
       portalToBody
+      portalZClass={popperZ()}
+      class={cn(popperZ(), local.class)}
+      {...rest}
+    />
+  );
+};
+
+export type ViewerAppPopoverContentProps = Omit<
+  ComponentProps<typeof AppPopoverContent>,
+  'portalToBody' | 'layer'
+>;
+
+/** 阅读器 / 音乐 Hub 叠层内 Popover：显式 viewer popper z-index */
+export const ViewerAppPopoverContent: Component<ViewerAppPopoverContentProps> = (props) => {
+  const [local, rest] = splitProps(props, ['class', 'portalZClass']);
+  const popperZ = () => local.portalZClass ?? VIEWER_OVERLAY_Z.popper;
+  return (
+    <AppPopoverContent
+      portalToBody
+      layer="viewer"
       portalZClass={popperZ()}
       class={cn(popperZ(), local.class)}
       {...rest}

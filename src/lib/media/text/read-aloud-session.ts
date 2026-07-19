@@ -134,6 +134,26 @@ function notify(): void {
   ctx?.onStateChange?.(snapshot);
 }
 
+/** 切章后：按设置自动展开全局播放器（朗读后台） */
+function notifyShellChapterChange(): void {
+  if (!globalMediaPlayerStore.isReadAloudShellActive()) return;
+  const media = ctx?.getMediaMetadata?.();
+  const preview = paragraphs[paragraphIndex]
+    ? plainTextForAloud(paragraphs[paragraphIndex]).slice(0, 80)
+    : undefined;
+  globalMediaPlayerStore.notifyTrackOrChapterChange(
+    media
+      ? {
+          title: media.bookName || '朗读中',
+          subtitle: media.chapterTitle || undefined,
+          preview,
+        }
+      : preview
+        ? { preview }
+        : undefined,
+  );
+}
+
 export function getReadAloudSessionSnapshot(): ReadAloudSessionSnapshot {
   const playbackState = resolveSessionPlaybackState();
   const paragraphText = paragraphs[paragraphIndex] ?? '';
@@ -515,6 +535,7 @@ export async function prevReadAloudParagraph(): Promise<void> {
   await loadQueueFromCurrentChapter(false);
   paragraphIndex = Math.max(0, paragraphs.length - 1);
   notify();
+  notifyShellChapterChange();
   await playCurrentParagraph();
 }
 
@@ -548,6 +569,7 @@ export async function nextReadAloudParagraph(): Promise<void> {
   await loadQueueFromCurrentChapter(false);
   paragraphIndex = 0;
   notify();
+  notifyShellChapterChange();
   await playCurrentParagraph();
 }
 
@@ -564,6 +586,7 @@ export async function prevReadAloudChapter(): Promise<void> {
   await loadQueueFromCurrentChapter(false);
   paragraphIndex = 0;
   notify();
+  notifyShellChapterChange();
   await playCurrentParagraph();
 }
 
@@ -581,6 +604,7 @@ export async function nextReadAloudChapter(): Promise<void> {
   await loadQueueFromCurrentChapter(false);
   paragraphIndex = 0;
   notify();
+  notifyShellChapterChange();
   await playCurrentParagraph();
 }
 
