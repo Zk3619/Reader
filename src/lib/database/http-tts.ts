@@ -1,16 +1,19 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { HttpTTS } from '@/types';
 
 export async function getAllHttpTTS(): Promise<HttpTTS[]> {
   const db = await getDatabase();
-  const rows = await db.select<Record<string, unknown>>('SELECT * FROM httpTTS ORDER BY id');
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM ${ReaderTables.httpTts} ORDER BY id`,
+  );
   return rows.map(mapRow);
 }
 
 export async function getHttpTTS(id: number): Promise<HttpTTS | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM httpTTS WHERE id = ?',
+    `SELECT * FROM ${ReaderTables.httpTts} WHERE id = ?`,
     [id]
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -19,7 +22,7 @@ export async function getHttpTTS(id: number): Promise<HttpTTS | null> {
 export async function upsertHttpTTS(tts: HttpTTS): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO httpTTS (
+    `INSERT OR REPLACE INTO ${ReaderTables.httpTts} (
       id, name, url, contentType, concurrentRate, loginUrl, loginUi, header,
       jsLib, enabledCookieJar, loginCheckJs, lastUpdateTime
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -42,7 +45,7 @@ export async function upsertHttpTTS(tts: HttpTTS): Promise<void> {
 
 export async function deleteHttpTTS(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM httpTTS WHERE id = ?', [id]);
+  await db.execute(`DELETE FROM ${ReaderTables.httpTts} WHERE id = ?`, [id]);
 }
 
 function mapRow(row: Record<string, unknown>): HttpTTS {

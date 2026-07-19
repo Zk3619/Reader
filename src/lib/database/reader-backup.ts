@@ -20,6 +20,17 @@ import { loadReaderUiConfig } from '@/lib/media/text/read-config-storage';
 import { exportLegadoReadConfigBundle } from '@/lib/media/text/legado-read-config-sync';
 import { defaultTextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 import { formatLegadoStyleBackupFileName } from '@/lib/backup/backup-filename';
+import { DATABASE_NAME } from '@/lib/database/database-name';
+
+/** 备份 ZIP 中数据库条目名（含旧名兼容） */
+const DB_BACKUP_NAMES = new Set([DATABASE_NAME, 'reader.db', 'legado.db', 'backup.db']);
+
+function selectedIncludesDb(selected: Set<string>): boolean {
+  for (const name of DB_BACKUP_NAMES) {
+    if (selected.has(name)) return true;
+  }
+  return false;
+}
 
 export interface BackupItemInfo {
   fileName: string;
@@ -67,7 +78,7 @@ async function buildBackupEntries(options: CreateReaderBackupOptions = {}): Prom
   const backupPassword = options.backupPassword ?? (await getBackupPassword());
 
   const [dbBuffer, readerUi, jsonBundle, bookCacheBundle, bgBundle] = await Promise.all([
-    selected.has('reader.db') ? exportDatabase() : Promise.resolve(null),
+    selectedIncludesDb(selected) ? exportDatabase() : Promise.resolve(null),
     loadReaderUiConfig(),
     collectBackupJsonBundle({ selected, backupPassword }),
     selected.has('book_cache') ? collectBookCacheZipEntries() : Promise.resolve(EMPTY_BUNDLE),
@@ -79,9 +90,9 @@ async function buildBackupEntries(options: CreateReaderBackupOptions = {}): Prom
   const items: BackupItemInfo[] = [];
 
   if (dbBuffer) {
-    entries['reader.db'] = new Uint8Array(dbBuffer);
+    entries[DATABASE_NAME] = new Uint8Array(dbBuffer);
     items.push({
-      fileName: 'reader.db',
+      fileName: DATABASE_NAME,
       displayName: '数据库',
       description: '完整 SQLite 数据库',
       count: 1,
@@ -219,6 +230,6 @@ export async function restoreReaderBackupFromUserFile(file: File): Promise<{
   return { summary, reloadRecommended };
 }
 
-export async function exportDatabaseFileDownload(filename = 'reader.db'): Promise<void> {
+export async function exportDatabaseFileDownload(filename = DATABASE_NAME): Promise<void> {
   await exportDatabaseAndDownload(filename);
 }

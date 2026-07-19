@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { BookChapter, NewBookChapter } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { BookChapter, NewBookChapter } from '@/types';
 export async function getChapterList(bookUrl: string): Promise<BookChapter[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapters WHERE bookUrl = ? ORDER BY "index"',
+    `SELECT * FROM ${ReaderTables.chapters} WHERE bookUrl = ? ORDER BY "index"`,
     [bookUrl]
   );
   return rows.map(row => mapRowToChapter(row));
@@ -28,7 +29,7 @@ export async function getChapterListByRange(
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapters WHERE bookUrl = ? AND "index" >= ? AND "index" <= ? ORDER BY "index"',
+    `SELECT * FROM ${ReaderTables.chapters} WHERE bookUrl = ? AND "index" >= ? AND "index" <= ? ORDER BY "index"`,
     [bookUrl, start, end]
   );
   return rows.map(row => mapRowToChapter(row));
@@ -43,7 +44,7 @@ export async function getChapter(
 ): Promise<BookChapter | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapters WHERE bookUrl = ? AND "index" = ?',
+    `SELECT * FROM ${ReaderTables.chapters} WHERE bookUrl = ? AND "index" = ?`,
     [bookUrl, chapterIndex]
   );
   return rows.length > 0 ? mapRowToChapter(rows[0]) : null;
@@ -58,7 +59,7 @@ export async function getChapterByTitle(
 ): Promise<BookChapter | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapters WHERE bookUrl = ? AND title = ?',
+    `SELECT * FROM ${ReaderTables.chapters} WHERE bookUrl = ? AND title = ?`,
     [bookUrl, title]
   );
   return rows.length > 0 ? mapRowToChapter(rows[0]) : null;
@@ -73,7 +74,7 @@ export async function searchChapters(
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapters WHERE bookUrl = ? AND title LIKE ? || ? || ? ORDER BY "index"',
+    `SELECT * FROM ${ReaderTables.chapters} WHERE bookUrl = ? AND title LIKE ? || ? || ? ORDER BY "index"`,
     [bookUrl, '%', keyword, '%']
   );
   return rows.map(row => mapRowToChapter(row));
@@ -90,7 +91,7 @@ export async function searchChaptersInRange(
 ): Promise<BookChapter[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM chapters 
+    `SELECT * FROM ${ReaderTables.chapters} 
      WHERE bookUrl = ? AND "index" >= ? AND "index" <= ? 
      AND title LIKE ? || ? || ?
      ORDER BY "index"`,
@@ -105,7 +106,7 @@ export async function searchChaptersInRange(
 export async function getChapterCount(bookUrl: string): Promise<number> {
   const db = await getDatabase();
   const rows = await db.select<{ count: number }>(
-    'SELECT COUNT(url) as count FROM chapters WHERE bookUrl = ?',
+    `SELECT COUNT(url) as count FROM ${ReaderTables.chapters} WHERE bookUrl = ?`,
     [bookUrl]
   );
   return rows[0]?.count ?? 0;
@@ -117,7 +118,7 @@ export async function getChapterCount(bookUrl: string): Promise<number> {
 export async function insertChapter(chapter: NewBookChapter): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO chapters (
+    `INSERT OR REPLACE INTO ${ReaderTables.chapters} (
       url, title, isVolume, baseUrl, bookUrl, "index",
       isVip, isPay, resourceUrl, tag, wordCount, variable, imgUrl
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -156,7 +157,7 @@ export async function insertChapters(
 export async function updateChapter(chapter: BookChapter): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE chapters SET
+    `UPDATE ${ReaderTables.chapters} SET
       title = ?, isVolume = ?, baseUrl = ?,
       isVip = ?, isPay = ?, resourceUrl = ?,
       tag = ?, wordCount = ?, start = ?,
@@ -194,7 +195,7 @@ export async function updateChapterWordCount(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE chapters SET wordCount = ? WHERE bookUrl = ? AND url = ?',
+    `UPDATE ${ReaderTables.chapters} SET wordCount = ? WHERE bookUrl = ? AND url = ?`,
     [wordCount, bookUrl, url]
   );
 }
@@ -204,7 +205,7 @@ export async function updateChapterWordCount(
  */
 export async function deleteChaptersByBook(bookUrl: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM chapters WHERE bookUrl = ?', [bookUrl]);
+  await db.execute(`DELETE FROM ${ReaderTables.chapters} WHERE bookUrl = ?`, [bookUrl]);
 }
 
 /**

@@ -1,16 +1,19 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { TxtTocRule } from '@/types';
 
 export async function countTxtTocRules(): Promise<number> {
   const db = await getDatabase();
-  const rows = await db.select<{ count: number }>('SELECT COUNT(*) as count FROM txtTocRules');
+  const rows = await db.select<{ count: number }>(
+    `SELECT COUNT(*) as count FROM ${ReaderTables.txtTocRules}`,
+  );
   return Number(rows[0]?.count ?? 0);
 }
 
 export async function getEnabledTxtTocRules(): Promise<TxtTocRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM txtTocRules WHERE enable = 1 ORDER BY serialNumber ASC'
+    `SELECT * FROM ${ReaderTables.txtTocRules} WHERE enable = 1 ORDER BY serialNumber ASC`
   );
   return rows.map(mapRow);
 }
@@ -18,7 +21,7 @@ export async function getEnabledTxtTocRules(): Promise<TxtTocRule[]> {
 export async function allocateTxtTocRuleId(): Promise<number> {
   const db = await getDatabase();
   const rows = await db.select<{ maxId: number | null }>(
-    'SELECT MAX(id) as maxId FROM txtTocRules WHERE id > 0'
+    `SELECT MAX(id) as maxId FROM ${ReaderTables.txtTocRules} WHERE id > 0`
   );
   const maxId = rows[0]?.maxId;
   if (maxId == null) return 1;
@@ -28,7 +31,7 @@ export async function allocateTxtTocRuleId(): Promise<number> {
 export async function getAllTxtTocRules(): Promise<TxtTocRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM txtTocRules ORDER BY serialNumber ASC'
+    `SELECT * FROM ${ReaderTables.txtTocRules} ORDER BY serialNumber ASC`
   );
   return rows.map(mapRow);
 }
@@ -36,7 +39,7 @@ export async function getAllTxtTocRules(): Promise<TxtTocRule[]> {
 export async function getTxtTocRule(id: number): Promise<TxtTocRule | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM txtTocRules WHERE id = ?',
+    `SELECT * FROM ${ReaderTables.txtTocRules} WHERE id = ?`,
     [id]
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -45,7 +48,7 @@ export async function getTxtTocRule(id: number): Promise<TxtTocRule | null> {
 export async function upsertTxtTocRule(rule: TxtTocRule): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO txtTocRules (id, name, rule, replacement, example, serialNumber, enable)
+    `INSERT OR REPLACE INTO ${ReaderTables.txtTocRules} (id, name, rule, replacement, example, serialNumber, enable)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       rule.id,
@@ -61,14 +64,14 @@ export async function upsertTxtTocRule(rule: TxtTocRule): Promise<void> {
 
 export async function deleteTxtTocRule(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM txtTocRules WHERE id = ?', [id]);
+  await db.execute(`DELETE FROM ${ReaderTables.txtTocRules} WHERE id = ?`, [id]);
 }
 
 export async function deleteTxtTocRules(ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const db = await getDatabase();
   const placeholders = ids.map(() => '?').join(',');
-  await db.execute(`DELETE FROM txtTocRules WHERE id IN (${placeholders})`, ids);
+  await db.execute(`DELETE FROM ${ReaderTables.txtTocRules} WHERE id IN (${placeholders})`, ids);
 }
 
 export async function setTxtTocRulesEnabled(ids: number[], enabled: boolean): Promise<void> {
@@ -76,7 +79,7 @@ export async function setTxtTocRulesEnabled(ids: number[], enabled: boolean): Pr
   const db = await getDatabase();
   const placeholders = ids.map(() => '?').join(',');
   await db.execute(
-    `UPDATE txtTocRules SET enable = ? WHERE id IN (${placeholders})`,
+    `UPDATE ${ReaderTables.txtTocRules} SET enable = ? WHERE id IN (${placeholders})`,
     [enabled ? 1 : 0, ...ids],
   );
 }
@@ -84,7 +87,7 @@ export async function setTxtTocRulesEnabled(ids: number[], enabled: boolean): Pr
 async function getSerialNumberBounds(): Promise<{ min: number; max: number }> {
   const db = await getDatabase();
   const rows = await db.select<{ minOrder: number | null; maxOrder: number | null }>(
-    'SELECT MIN(serialNumber) as minOrder, MAX(serialNumber) as maxOrder FROM txtTocRules',
+    `SELECT MIN(serialNumber) as minOrder, MAX(serialNumber) as maxOrder FROM ${ReaderTables.txtTocRules}`,
   );
   return {
     min: Number(rows[0]?.minOrder ?? 0),

@@ -18,6 +18,7 @@ import {
 } from '@/lib/database/database-core';
 import { isTauri } from '@/lib/platform/detect';
 import type { DatabaseAdapter } from '@/lib/platform/database';
+import { DATABASE_NAME } from '@/lib/database/database-name';
 
 /**
  * 导出数据库为 ArrayBuffer
@@ -43,7 +44,7 @@ export async function exportDatabase(): Promise<ArrayBuffer> {
 async function exportTauriDatabase(): Promise<ArrayBuffer> {
   try {
     const dataDir = await getAppDataDir();
-    const dbPath = await join(dataDir, 'reader.db');
+    const dbPath = await join(dataDir, DATABASE_NAME);
 
     const data = await readFile(dbPath);
     const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
@@ -94,9 +95,9 @@ export async function exportDatabaseAsBlob(_filename?: string): Promise<Blob> {
 /**
  * 导出数据库并触发下载（Web 环境）
  * 
- * @param filename 文件名，默认为 'reader.db'
+ * @param filename 文件名，默认为 mediabox.db
  */
-export async function exportDatabaseAndDownload(filename: string = 'reader.db'): Promise<void> {
+export async function exportDatabaseAndDownload(filename: string = DATABASE_NAME): Promise<void> {
   try {
     const blob = await exportDatabaseAsBlob(filename);
     const url = URL.createObjectURL(blob);
@@ -151,7 +152,7 @@ async function importTauriDatabase(
 ): Promise<void> {
   try {
     const dataDir = await getAppDataDir();
-    const dbPath = await join(dataDir, 'reader.db');
+    const dbPath = await join(dataDir, DATABASE_NAME);
 
     // 如果替换，直接写入
     if (replace) {
@@ -196,8 +197,9 @@ async function importWebDatabase(
 
     if (replace) {
       // 替换模式：直接替换 IndexedDB 中的数据
-      const indexedDBName = 'reader-db';
-      const dbName = 'reader.db';
+      const { INDEXED_DB_NAME } = await import('@/lib/database/database-name');
+      const indexedDBName = INDEXED_DB_NAME;
+      const dbName = DATABASE_NAME;
 
       // 保存到 IndexedDB
       await new Promise<void>((resolve, reject) => {

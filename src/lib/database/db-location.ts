@@ -8,23 +8,28 @@ import { exists } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-shell';
 import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
+import {
+  DATABASE_NAME,
+  INDEXED_DB_NAME,
+  LEGACY_INDEXED_DB_KEY,
+  LEGACY_INDEXED_DB_NAME,
+} from '@/lib/database/database-name';
 
 /**
  * 获取数据库文件的实际存储路径
- * 
+ *
  * @returns 数据库文件路径（Tauri）或存储位置描述（Web）
  */
 export async function getDatabaseLocation(): Promise<string> {
   if (isTauri()) {
     try {
       const dataDir = await getAppDataDir();
-      return await join(dataDir, 'reader.db');
+      return await join(dataDir, DATABASE_NAME);
     } catch (error) {
       console.error('[数据库位置] 获取 Tauri 数据目录失败:', error);
       return '无法获取数据目录';
     }
   } else {
-    // Web 环境：存储在 IndexedDB
     return 'IndexedDB (浏览器本地存储)';
   }
 }
@@ -33,25 +38,33 @@ export async function getDatabaseLocation(): Promise<string> {
  * Web 环境检查数据库是否存在（IndexedDB）
  */
 async function checkWebDatabaseExists(): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      const request = indexedDB.open('reader-db', 1);
-      request.onsuccess = () => {
-        const db = request.result;
-        const transaction = db.transaction(['databases'], 'readonly');
-        const store = transaction.objectStore('databases');
-        const checkRequest = store.get('reader.db');
-        checkRequest.onsuccess = () => {
-          resolve(checkRequest.result !== undefined);
+  const tryKey = (dbName: string, key: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      try {
+        const request = indexedDB.open(dbName, 1);
+        request.onsuccess = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains('databases')) {
+            resolve(false);
+            return;
+          }
+          const transaction = db.transaction(['databases'], 'readonly');
+          const store = transaction.objectStore('databases');
+          const checkRequest = store.get(key);
+          checkRequest.onsuccess = () => {
+            resolve(checkRequest.result !== undefined);
+          };
+          checkRequest.onerror = () => resolve(false);
         };
-        checkRequest.onerror = () => resolve(false);
-      };
-      request.onerror = () => resolve(false);
-    } catch (error) {
-      console.warn('[数据库位置] IndexedDB 检查失败:', error);
-      resolve(false);
-    }
-  });
+        request.onerror = () => resolve(false);
+      } catch (error) {
+        console.warn('[数据库位置] IndexedDB 检查失败:', error);
+        resolve(false);
+      }
+    });
+
+  if (await tryKey(INDEXED_DB_NAME, DATABASE_NAME)) return true;
+  return tryKey(LEGACY_INDEXED_DB_NAME, LEGACY_INDEXED_DB_KEY);
 }
 
 /**
@@ -59,7 +72,6 @@ async function checkWebDatabaseExists(): Promise<boolean> {
  */
 export async function checkDatabaseExists(): Promise<boolean> {
   if (!isTauri()) {
-    // Web 环境：检查 IndexedDB
     return await checkWebDatabaseExists();
   }
 
@@ -90,6 +102,8 @@ export async function openDatabaseDirectory(): Promise<void> {
     await open(dataDir);
   } catch (error) {
     console.error('[数据库位置] 打开目录失败:', error);
-    throw new Error('无法打开数据库目录: ' + (error instanceof Error ? error.message : String(error)));
+    throw new Error(
+      '无法打开数据库目录: ' + (error instanceof Error ? error.message : String(error)),
+    );
   }
 }

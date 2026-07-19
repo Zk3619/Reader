@@ -4,9 +4,10 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { RssArticle, NewRssArticle } from '@/types';
 
-const RSS_ARTICLE_INSERT_SQL = `INSERT OR REPLACE INTO rssArticles (
+const RSS_ARTICLE_INSERT_SQL = `INSERT OR REPLACE INTO ${ReaderTables.rssArticles} (
   origin, sort, title, "order", link, pubDate,
   description, content, image, "group", read, variable, type, durPos
 ) VALUES `;
@@ -40,8 +41,8 @@ export async function getRssArticlesByOriginAndSort(
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
     `SELECT t1.*, IFNULL(t2.read, 0) as read
-     FROM rssArticles as t1 
-     LEFT JOIN rssReadRecords as t2 ON t1.link = t2.record
+     FROM ${ReaderTables.rssArticles} as t1 
+     LEFT JOIN ${ReaderTables.rssReadRecords} as t2 ON t1.link = t2.record
      WHERE t1.origin = ? AND t1.sort = ?
      ORDER BY t1."order" DESC`,
     [origin, sort]
@@ -58,7 +59,7 @@ export async function getRssArticle(
 ): Promise<RssArticle | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssArticles WHERE origin = ? AND link = ?',
+    `SELECT * FROM ${ReaderTables.rssArticles} WHERE origin = ? AND link = ?`,
     [origin, link]
   );
   return rows.length > 0 ? mapRowToArticle(rows[0]) : null;
@@ -81,7 +82,7 @@ export async function insertRssArticle(article: NewRssArticle): Promise<void> {
 export async function appendRssArticle(article: NewRssArticle): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR IGNORE INTO rssArticles (
+    `INSERT OR IGNORE INTO ${ReaderTables.rssArticles} (
       origin, sort, title, "order", link, pubDate,
       description, content, image, "group", read, variable, type, durPos
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -133,7 +134,7 @@ export async function clearOldRssArticles(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM rssArticles WHERE origin = ? AND sort = ? AND "order" < ?',
+    `DELETE FROM ${ReaderTables.rssArticles} WHERE origin = ? AND sort = ? AND "order" < ?`,
     [origin, sort, order]
   );
 }
@@ -144,7 +145,7 @@ export async function clearOldRssArticles(
 export async function updateRssArticle(article: RssArticle): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE rssArticles SET
+    `UPDATE ${ReaderTables.rssArticles} SET
       sort = ?, title = ?, "order" = ?, pubDate = ?,
       description = ?, content = ?, image = ?,
       "group" = ?, read = ?, variable = ?, type = ?, durPos = ?
@@ -177,7 +178,7 @@ export async function deleteRssArticlesByOriginAndSort(
   sort: string,
 ): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM rssArticles WHERE origin = ? AND sort = ?', [
+  await db.execute(`DELETE FROM ${ReaderTables.rssArticles} WHERE origin = ? AND sort = ?`, [
     origin,
     sort,
   ]);
@@ -188,7 +189,7 @@ export async function deleteRssArticlesByOriginAndSort(
  */
 export async function deleteRssArticlesByOrigin(origin: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM rssArticles WHERE origin = ?', [origin]);
+  await db.execute(`DELETE FROM ${ReaderTables.rssArticles} WHERE origin = ?`, [origin]);
 }
 
 /**

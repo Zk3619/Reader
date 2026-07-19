@@ -1,4 +1,5 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { ReadRecordSession } from '@/types';
 
 export async function getReadRecordSessions(
@@ -8,7 +9,7 @@ export async function getReadRecordSessions(
 ): Promise<ReadRecordSession[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM readRecordSession
+    `SELECT * FROM ${ReaderTables.readRecordSession}
      WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?
      ORDER BY startTime DESC`,
     [deviceId, bookName, bookAuthor]
@@ -19,7 +20,7 @@ export async function getReadRecordSessions(
 export async function insertReadRecordSession(session: ReadRecordSession): Promise<number> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT INTO readRecordSession (deviceId, bookName, bookAuthor, startTime, endTime, words)
+    `INSERT INTO ${ReaderTables.readRecordSession} (deviceId, bookName, bookAuthor, startTime, endTime, words)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [
       session.deviceId,
@@ -36,7 +37,7 @@ export async function insertReadRecordSession(session: ReadRecordSession): Promi
 
 export async function deleteReadRecordSession(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM readRecordSession WHERE id = ?', [id]);
+  await db.execute(`DELETE FROM ${ReaderTables.readRecordSession} WHERE id = ?`, [id]);
 }
 
 function mapRow(row: Record<string, unknown>): ReadRecordSession {

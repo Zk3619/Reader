@@ -3,7 +3,9 @@
  * 对应 legado 项目的 RssSourceDao.kt
  */
 
+
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { RssSource, NewRssSource } from '@/types';
 
 /**
@@ -12,7 +14,7 @@ import type { RssSource, NewRssSource } from '@/types';
 export async function getAllRssSources(): Promise<RssSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssSources ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.rssSources} ORDER BY customOrder ASC`
   );
   return rows.map(row => mapRowToRssSource(row));
 }
@@ -23,7 +25,7 @@ export async function getAllRssSources(): Promise<RssSource[]> {
 export async function getEnabledRssSources(): Promise<RssSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssSources WHERE enabled = 1 ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.rssSources} WHERE enabled = 1 ORDER BY customOrder ASC`
   );
   return rows.map(row => mapRowToRssSource(row));
 }
@@ -34,7 +36,7 @@ export async function getEnabledRssSources(): Promise<RssSource[]> {
 export async function getRssSource(sourceUrl: string): Promise<RssSource | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssSources WHERE sourceUrl = ?',
+    `SELECT * FROM ${ReaderTables.rssSources} WHERE sourceUrl = ?`,
     [sourceUrl]
   );
   return rows.length > 0 ? mapRowToRssSource(rows[0]) : null;
@@ -46,7 +48,7 @@ export async function getRssSource(sourceUrl: string): Promise<RssSource | null>
 export async function insertRssSource(source: NewRssSource): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO rssSources (
+    `INSERT OR REPLACE INTO ${ReaderTables.rssSources} (
       sourceUrl, sourceName, sourceIcon, sourceGroup, sourceComment,
       enabled, variableComment, jsLib, enabledCookieJar, concurrentRate,
       header, loginUrl, loginUi, loginCheckJs, coverDecodeJs, sortUrl,
@@ -111,7 +113,7 @@ export async function insertRssSource(source: NewRssSource): Promise<void> {
 export async function updateRssSource(source: RssSource): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE rssSources SET
+    `UPDATE ${ReaderTables.rssSources} SET
       sourceName = ?, sourceIcon = ?, sourceGroup = ?, sourceComment = ?,
       enabled = ?, variableComment = ?, jsLib = ?, enabledCookieJar = ?,
       concurrentRate = ?, header = ?, loginUrl = ?, loginUi = ?,
@@ -179,7 +181,7 @@ export async function updateRssSource(source: RssSource): Promise<void> {
 export async function getAllRssSourceGroups(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT DISTINCT sourceGroup FROM rssSources
+    `SELECT DISTINCT sourceGroup FROM ${ReaderTables.rssSources}
      WHERE sourceGroup IS NOT NULL AND TRIM(sourceGroup) != ''
      ORDER BY sourceGroup ASC`
   );
@@ -194,7 +196,7 @@ export async function updateRssSourceOrder(
   customOrder: number,
 ): Promise<void> {
   const db = await getDatabase();
-  await db.execute('UPDATE rssSources SET customOrder = ? WHERE sourceUrl = ?', [
+  await db.execute(`UPDATE ${ReaderTables.rssSources} SET customOrder = ? WHERE sourceUrl = ?`, [
     customOrder,
     sourceUrl,
   ]);
@@ -209,7 +211,7 @@ export async function updateRssSourceOrders(
   const db = await getDatabase();
   for (const { sourceUrl, customOrder } of orders) {
     await db.execute(
-      'UPDATE rssSources SET customOrder = ? WHERE sourceUrl = ?',
+      `UPDATE ${ReaderTables.rssSources} SET customOrder = ? WHERE sourceUrl = ?`,
       [customOrder, sourceUrl],
     );
   }
@@ -220,7 +222,7 @@ export async function updateRssSourceOrders(
  */
 export async function deleteRssSource(sourceUrl: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM rssSources WHERE sourceUrl = ?', [sourceUrl]);
+  await db.execute(`DELETE FROM ${ReaderTables.rssSources} WHERE sourceUrl = ?`, [sourceUrl]);
 }
 
 /**
@@ -231,7 +233,7 @@ export async function updateRssSourceGroupField(
   sourceGroup: string | undefined,
 ): Promise<void> {
   const db = await getDatabase();
-  await db.execute('UPDATE rssSources SET sourceGroup = ? WHERE sourceUrl = ?', [
+  await db.execute(`UPDATE ${ReaderTables.rssSources} SET sourceGroup = ? WHERE sourceUrl = ?`, [
     sourceGroup ?? null,
     sourceUrl,
   ]);
@@ -246,7 +248,7 @@ export async function enableRssSource(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE rssSources SET enabled = ? WHERE sourceUrl = ?',
+    `UPDATE ${ReaderTables.rssSources} SET enabled = ? WHERE sourceUrl = ?`,
     [enabled ? 1 : 0, sourceUrl]
   );
 }

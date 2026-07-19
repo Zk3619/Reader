@@ -1,15 +1,16 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { ReadRecordDetail } from '@/types';
 
 export async function clearAllReadRecordDetails(): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM readRecordDetail');
+  await db.execute(`DELETE FROM ${ReaderTables.readRecordDetail}`);
 }
 
 export async function getAllReadRecordDetails(): Promise<ReadRecordDetail[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM readRecordDetail ORDER BY date DESC',
+    `SELECT * FROM ${ReaderTables.readRecordDetail} ORDER BY date DESC`,
   );
   return rows.map(mapRow);
 }
@@ -22,7 +23,7 @@ export async function getReadRecordDetail(
 ): Promise<ReadRecordDetail | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM readRecordDetail
+    `SELECT * FROM ${ReaderTables.readRecordDetail}
      WHERE deviceId = ? AND bookName = ? AND bookAuthor = ? AND date = ?
      LIMIT 1`,
     [deviceId, bookName, bookAuthor, date],
@@ -38,7 +39,7 @@ export async function getReadRecordDetails(
 ): Promise<ReadRecordDetail[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM readRecordDetail
+    `SELECT * FROM ${ReaderTables.readRecordDetail}
      WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?
      ORDER BY date DESC`,
     [deviceId, bookName, bookAuthor]
@@ -49,7 +50,7 @@ export async function getReadRecordDetails(
 export async function upsertReadRecordDetail(detail: ReadRecordDetail): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO readRecordDetail (
+    `INSERT OR REPLACE INTO ${ReaderTables.readRecordDetail} (
       deviceId, bookName, bookAuthor, date, readTime, readWords, firstReadTime, lastReadTime
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -73,7 +74,7 @@ export async function deleteReadRecordDetail(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `DELETE FROM readRecordDetail
+    `DELETE FROM ${ReaderTables.readRecordDetail}
      WHERE deviceId = ? AND bookName = ? AND bookAuthor = ? AND date = ?`,
     [deviceId, bookName, bookAuthor, date]
   );

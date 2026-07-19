@@ -49,6 +49,46 @@ import {
   migrateMusicListsV106,
 } from '@/lib/database/migration-v106-music-lists';
 import {
+  SCHEMA_MODULES_SCHEMA_VERSION,
+  migrateSchemaModulesV110,
+} from '@/lib/database/migration-v110-schema-modules';
+import {
+  MODULE_SPLIT_SCHEMA_VERSION,
+  migrateModuleSplitV111,
+} from '@/lib/database/migration-v111-module-split';
+import {
+  READER_PREFIX_SCHEMA_VERSION,
+  migrateReaderPrefixV112,
+} from '@/lib/database/migration-v112-reader-prefix';
+import {
+  MODULE_CONVERGE_SCHEMA_VERSION,
+  migrateModuleConvergeV113,
+} from '@/lib/database/migration-v113-module-converge';
+import {
+  LEGACY_CLEANUP_SCHEMA_VERSION,
+  migrateLegacyCleanupV114,
+} from '@/lib/database/migration-v114-legacy-cleanup';
+import {
+  VIDEO_GROUPS_SCHEMA_VERSION,
+  migrateVideoGroupsV115,
+} from '@/lib/database/migration-v115-video-groups';
+import {
+  LEGACY_DUAL_CLEANUP_SCHEMA_VERSION,
+  migrateLegacyDualCleanupV116,
+} from '@/lib/database/migration-v116-legacy-dual-cleanup';
+import {
+  VIDEO_SOURCES_SCHEMA_VERSION,
+  migrateVideoSourcesV117,
+} from '@/lib/database/migration-v117-video-sources';
+import {
+  MUSIC_CACHE_DOWNLOAD_SCHEMA_VERSION,
+  migrateMusicCacheDownloadV118,
+} from '@/lib/database/migration-v118-music-cache-download';
+import {
+  MUSIC_LYRIC_COVER_CACHE_SCHEMA_VERSION,
+  migrateMusicLyricCoverCacheV119,
+} from '@/lib/database/migration-v119-music-lyric-cover-cache';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -530,5 +570,45 @@ export const migrations: Migration[] = [
   {
     version: MUSIC_PLAYBACK_SCHEMA_VERSION,
     up: migrateMusicPlaybackV109,
+  },
+  {
+    version: SCHEMA_MODULES_SCHEMA_VERSION,
+    up: migrateSchemaModulesV110,
+  },
+  {
+    version: MODULE_SPLIT_SCHEMA_VERSION,
+    up: migrateModuleSplitV111,
+  },
+  {
+    version: READER_PREFIX_SCHEMA_VERSION,
+    up: migrateReaderPrefixV112,
+  },
+  {
+    version: MODULE_CONVERGE_SCHEMA_VERSION,
+    up: migrateModuleConvergeV113,
+  },
+  {
+    version: LEGACY_CLEANUP_SCHEMA_VERSION,
+    up: migrateLegacyCleanupV114,
+  },
+  {
+    version: VIDEO_GROUPS_SCHEMA_VERSION,
+    up: migrateVideoGroupsV115,
+  },
+  {
+    version: LEGACY_DUAL_CLEANUP_SCHEMA_VERSION,
+    up: migrateLegacyDualCleanupV116,
+  },
+  {
+    version: VIDEO_SOURCES_SCHEMA_VERSION,
+    up: migrateVideoSourcesV117,
+  },
+  {
+    version: MUSIC_CACHE_DOWNLOAD_SCHEMA_VERSION,
+    up: migrateMusicCacheDownloadV118,
+  },
+  {
+    version: MUSIC_LYRIC_COVER_CACHE_SCHEMA_VERSION,
+    up: migrateMusicLyricCoverCacheV119,
   },
 ];

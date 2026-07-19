@@ -17,6 +17,7 @@ import {
   rebuildGroupMaskFromItems,
   removeGroupItem,
 } from '@/lib/database/media-groups';
+import { ReaderTables, ShellTables } from '@/lib/database/table-names';
 import { bookFromPreviewItem } from '@/lib/bookshelf/preview-book';
 import type { Book, NewBook } from '@/types';
 import { MediaGroupId } from '@/types/book-group';
@@ -34,7 +35,7 @@ export type ReadProgressUpdate = {
 export async function getAllBooks(): Promise<Book[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM books ORDER BY durChapterTime DESC'
+    `SELECT * FROM ${ReaderTables.books} ORDER BY durChapterTime DESC`
   );
   return rows.map(row => mapRowToBook(row));
 }
@@ -91,42 +92,37 @@ export async function getBooksByGroup(groupId: number): Promise<Book[]> {
   // 根据分组ID构建不同的查询
   switch (groupId) {
     case MediaGroupId.All:
-      query = 'SELECT * FROM books ORDER BY durChapterTime DESC';
+      query = `SELECT * FROM ${ReaderTables.books} ORDER BY durChapterTime DESC`;
       break;
     case MediaGroupId.Local:
-      query = `SELECT * FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION} ORDER BY "order"`;
+      query = `SELECT * FROM ${ReaderTables.books} WHERE ${SQL_LOCAL_BOOK_CONDITION} ORDER BY "order"`;
       break;
     case MediaGroupId.Favorite:
-      query = `SELECT b.* FROM books b
-        INNER JOIN media_group_items mgi
-          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?
-        ORDER BY mgi.sort_order ASC, b.durChapterTime DESC`;
-      params.push(MediaGroupId.Favorite);
+      query = `SELECT b.* FROM ${ReaderTables.books} b
+        INNER JOIN ${ShellTables.favorites} fav
+          ON fav.item_id = b.bookUrl AND fav.item_kind = 'book'
+        ORDER BY fav.sort_order ASC, b.durChapterTime DESC`;
       break;
     case MediaGroupId.NetNone:
-      query = `SELECT b.* FROM books b
+      query = `SELECT b.* FROM ${ReaderTables.books} b
         WHERE ${SQL_NETWORK_BOOK_CONDITION} AND NOT (${SQL_AUDIO_BOOK_CONDITION})
         AND NOT EXISTS (
-          SELECT 1 FROM media_group_items mgi
-          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
-          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
-            AND mg.domain = 'shelf' AND mg.groupId > 0
+          SELECT 1 FROM ${ReaderTables.bookGroupItems} mgi
+          WHERE mgi.item_id = b.bookUrl AND mgi.group_id > 0
         )
         ORDER BY b."order"`;
       break;
     case MediaGroupId.LocalNone:
-      query = `SELECT b.* FROM books b
+      query = `SELECT b.* FROM ${ReaderTables.books} b
         WHERE ${SQL_LOCAL_BOOK_CONDITION}
         AND NOT EXISTS (
-          SELECT 1 FROM media_group_items mgi
-          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
-          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
-            AND mg.domain = 'shelf' AND mg.groupId > 0
+          SELECT 1 FROM ${ReaderTables.bookGroupItems} mgi
+          WHERE mgi.item_id = b.bookUrl AND mgi.group_id > 0
         )
         ORDER BY b."order"`;
       break;
     case MediaGroupId.Error:
-      query = 'SELECT * FROM books WHERE type & 16 > 0 ORDER BY durChapterTime DESC';
+      query = `SELECT * FROM ${ReaderTables.books} WHERE type & 16 > 0 ORDER BY durChapterTime DESC`;
       break;
     case MediaGroupId.Preview: {
       const previews = await getPreviewItemsByKind();
@@ -135,9 +131,9 @@ export async function getBooksByGroup(groupId: number): Promise<Book[]> {
         .filter((b): b is Book => b != null);
     }
     default:
-      query = `SELECT b.* FROM books b
-        INNER JOIN media_group_items mgi
-          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?
+      query = `SELECT b.* FROM ${ReaderTables.books} b
+        INNER JOIN ${ReaderTables.bookGroupItems} mgi
+          ON mgi.item_id = b.bookUrl AND mgi.group_id = ?
         ORDER BY mgi.sort_order ASC, b."order"`;
       params.push(groupId);
       break;
@@ -156,47 +152,42 @@ export async function getBookCountByGroup(groupId: number): Promise<number> {
   const params: unknown[] = [];
   switch (groupId) {
     case MediaGroupId.All:
-      query = 'SELECT COUNT(*) as count FROM books';
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books}`;
       break;
     case MediaGroupId.Local:
-      query = `SELECT COUNT(*) as count FROM books WHERE ${SQL_LOCAL_BOOK_CONDITION}`;
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books} WHERE ${SQL_LOCAL_BOOK_CONDITION}`;
       break;
     case MediaGroupId.Favorite:
-      query = `SELECT COUNT(*) as count FROM books b
-        INNER JOIN media_group_items mgi
-          ON mgi.item_id = b.bookUrl AND mgi.item_kind = 'book' AND mgi.group_id = ?`;
-      params.push(MediaGroupId.Favorite);
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books} b
+        INNER JOIN ${ShellTables.favorites} fav
+          ON fav.item_id = b.bookUrl AND fav.item_kind = 'book'`;
       break;
     case MediaGroupId.NetNone:
-      query = `SELECT COUNT(*) as count FROM books b
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books} b
         WHERE ${SQL_NETWORK_BOOK_CONDITION} AND NOT (${SQL_AUDIO_BOOK_CONDITION})
         AND NOT EXISTS (
-          SELECT 1 FROM media_group_items mgi
-          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
-          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
-            AND mg.domain = 'shelf' AND mg.groupId > 0
+          SELECT 1 FROM ${ReaderTables.bookGroupItems} mgi
+          WHERE mgi.item_id = b.bookUrl AND mgi.group_id > 0
         )`;
       break;
     case MediaGroupId.LocalNone:
-      query = `SELECT COUNT(*) as count FROM books b
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books} b
         WHERE ${SQL_LOCAL_BOOK_CONDITION}
         AND NOT EXISTS (
-          SELECT 1 FROM media_group_items mgi
-          INNER JOIN media_groups mg ON mg.groupId = mgi.group_id
-          WHERE mgi.item_kind = 'book' AND mgi.item_id = b.bookUrl
-            AND mg.domain = 'shelf' AND mg.groupId > 0
+          SELECT 1 FROM ${ReaderTables.bookGroupItems} mgi
+          WHERE mgi.item_id = b.bookUrl AND mgi.group_id > 0
         )`;
       break;
     case MediaGroupId.Error:
-      query = 'SELECT COUNT(*) as count FROM books WHERE type & 16 > 0';
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.books} WHERE type & 16 > 0`;
       break;
     case MediaGroupId.Preview: {
       const previews = await getPreviewItemsByKind();
       return previews.length;
     }
     default:
-      query = `SELECT COUNT(*) as count FROM media_group_items
-        WHERE group_id = ? AND item_kind = 'book'`;
+      query = `SELECT COUNT(*) as count FROM ${ReaderTables.bookGroupItems}
+        WHERE group_id = ?`;
       params.push(groupId);
       break;
   }
@@ -210,7 +201,7 @@ export async function getBookCountByGroup(groupId: number): Promise<number> {
 export async function getBook(bookUrl: string): Promise<Book | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM books WHERE bookUrl = ?',
+    `SELECT * FROM ${ReaderTables.books} WHERE bookUrl = ?`,
     [bookUrl]
   );
   return rows.length > 0 ? mapRowToBook(rows[0]) : null;
@@ -225,7 +216,7 @@ export async function getBookByNameAndAuthor(
 ): Promise<Book | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM books WHERE name = ? AND author = ?',
+    `SELECT * FROM ${ReaderTables.books} WHERE name = ? AND author = ?`,
     [name, author]
   );
   const firstRow = rows[0];
@@ -238,7 +229,7 @@ export async function getBookByNameAndAuthor(
 export async function searchBooks(keyword: string): Promise<Book[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM books 
+    `SELECT * FROM ${ReaderTables.books} 
      WHERE name LIKE '%' || ? || '%' OR author LIKE '%' || ? || '%'`,
     [keyword, keyword]
   );
@@ -251,7 +242,7 @@ export async function searchBooks(keyword: string): Promise<Book[]> {
 export async function hasBook(bookUrl: string): Promise<boolean> {
   const db = await getDatabase();
   const rows = await db.select<{ count: number }>(
-    'SELECT COUNT(*) as count FROM books WHERE bookUrl = ?',
+    `SELECT COUNT(*) as count FROM ${ReaderTables.books} WHERE bookUrl = ?`,
     [bookUrl]
   );
   return (rows[0]?.count ?? 0) > 0;
@@ -264,12 +255,12 @@ export async function insertBook(book: NewBook): Promise<void> {
   const db = await getDatabase();
   const now = Date.now();
   const orderRows = await db.select<{ minOrder: number }>(
-    'SELECT COALESCE(MIN("order"), 0) as minOrder FROM books'
+    `SELECT COALESCE(MIN("order"), 0) as minOrder FROM ${ReaderTables.books}`
   );
   const topOrder = Number(orderRows[0]?.minOrder ?? 0) - 1;
 
   await db.execute(
-    `INSERT INTO books (
+    `INSERT INTO ${ReaderTables.books} (
       bookUrl, tocUrl, origin, originName, name, author, kind,
       intro, coverUrl, charset, type, "group", latestChapterTime,
       lastCheckTime, durChapterTime, "order", variable
@@ -306,7 +297,7 @@ export async function replaceBookUrl(oldBookUrl: string, book: Book): Promise<vo
   }
   const db = await getDatabase();
   await db.execute(
-    `UPDATE books SET
+    `UPDATE ${ReaderTables.books} SET
       bookUrl = ?, tocUrl = ?, origin = ?, originName = ?, name = ?, author = ?,
       kind = ?, customTag = ?, coverUrl = ?, customCoverUrl = ?,
       intro = ?, customIntro = ?, charset = ?, type = ?, "group" = ?,
@@ -355,7 +346,7 @@ export async function replaceBookUrl(oldBookUrl: string, book: Book): Promise<vo
       oldBookUrl,
     ]
   );
-  await db.execute('UPDATE chapters SET bookUrl = ? WHERE bookUrl = ?', [
+  await db.execute(`UPDATE ${ReaderTables.chapters} SET bookUrl = ? WHERE bookUrl = ?`, [
     book.bookUrl,
     oldBookUrl,
   ]);
@@ -368,7 +359,7 @@ export async function updateBook(book: Book): Promise<void> {
   const db = await getDatabase();
 
   await db.execute(
-    `UPDATE books SET
+    `UPDATE ${ReaderTables.books} SET
       tocUrl = ?, origin = ?, originName = ?, name = ?, author = ?,
       kind = ?, customTag = ?, coverUrl = ?, customCoverUrl = ?,
       intro = ?, customIntro = ?, charset = ?, type = ?, "group" = ?,
@@ -430,7 +421,7 @@ export async function updateReadProgress(
   const chapterPos = Math.min(1, Math.max(0, update.chapterPos));
 
   await db.execute(
-    `UPDATE books SET
+    `UPDATE ${ReaderTables.books} SET
       durChapterIndex = ?,
       durChapterPos = ?,
       durChapterTime = ?,
@@ -457,7 +448,7 @@ export async function deleteBook(bookUrl: string): Promise<void> {
   }
   const db = await getDatabase();
   // 由于外键约束，删除书籍时会自动删除相关章节
-  await db.execute('DELETE FROM books WHERE bookUrl = ?', [bookUrl]);
+  await db.execute(`DELETE FROM ${ReaderTables.books} WHERE bookUrl = ?`, [bookUrl]);
 }
 
 /** 批量设置是否允许更新 */
@@ -469,11 +460,11 @@ export async function updateBooksCanUpdate(
   const db = await getDatabase();
   const value = canUpdate ? 1 : 0;
   for (const bookUrl of bookUrls) {
-    await db.execute('UPDATE books SET canUpdate = ? WHERE bookUrl = ?', [value, bookUrl]);
+    await db.execute(`UPDATE ${ReaderTables.books} SET canUpdate = ? WHERE bookUrl = ?`, [value, bookUrl]);
   }
 }
 
-/** 批量设置分组掩码（v105：写入 media_group_items 并同步 books."group" 供导出） */
+/** 批量设置分组掩码（写入 bookGroupItems / favorites 并同步 books."group" 供导出） */
 export async function updateBooksGroupMask(
   bookUrls: string[],
   groupMask: number
@@ -481,7 +472,7 @@ export async function updateBooksGroupMask(
   if (bookUrls.length === 0) return;
   const db = await getDatabase();
   const shelfGroups = await db.select<{ groupId: number }>(
-    `SELECT groupId FROM media_groups WHERE groupId > 0 AND domain IN ('shelf', 'shared')`,
+    `SELECT groupId FROM ${ReaderTables.bookGroups} WHERE groupId > 0`,
   );
   const shelfIds = shelfGroups.map((g) => Number(g.groupId));
   const managedIds = [...shelfIds, MediaGroupId.Favorite];
@@ -495,11 +486,11 @@ export async function updateBooksGroupMask(
       }
     }
     const mask = await rebuildGroupMaskFromItems(bookUrl);
-    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [mask, bookUrl]);
+    await db.execute(`UPDATE ${ReaderTables.books} SET "group" = ? WHERE bookUrl = ?`, [mask, bookUrl]);
   }
 }
 
-/** 为所选书籍加入分组（media_group_items） */
+/** 为所选书籍加入分组 */
 export async function addBooksToGroupMask(
   bookUrls: string[],
   groupId: number
@@ -509,7 +500,7 @@ export async function addBooksToGroupMask(
   for (const bookUrl of bookUrls) {
     await addGroupItem(groupId, 'book', bookUrl);
     const mask = await rebuildGroupMaskFromItems(bookUrl);
-    await db.execute('UPDATE books SET "group" = ? WHERE bookUrl = ?', [mask, bookUrl]);
+    await db.execute(`UPDATE ${ReaderTables.books} SET "group" = ? WHERE bookUrl = ?`, [mask, bookUrl]);
   }
 }
 
@@ -533,7 +524,7 @@ export async function updateBooksOrder(
   if (updates.length === 0) return;
   const db = await getDatabase();
   for (const { bookUrl, order } of updates) {
-    await db.execute('UPDATE books SET "order" = ? WHERE bookUrl = ?', [order, bookUrl]);
+    await db.execute(`UPDATE ${ReaderTables.books} SET "order" = ? WHERE bookUrl = ?`, [order, bookUrl]);
   }
 }
 
@@ -546,7 +537,7 @@ export async function updateBookGroup(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE books SET "group" = ? WHERE "group" = ?',
+    `UPDATE ${ReaderTables.books} SET "group" = ? WHERE "group" = ?`,
     [newGroupId, oldGroupId]
   );
 }
@@ -557,8 +548,8 @@ export async function updateBookGroup(
 export async function removeBookGroup(groupId: number): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM media_group_items WHERE group_id = ? AND item_kind = ?',
-    [groupId, 'book'],
+    `DELETE FROM ${ReaderTables.bookGroupItems} WHERE group_id = ?`,
+    [groupId],
   );
 }
 
@@ -568,7 +559,7 @@ export async function removeBookGroup(groupId: number): Promise<void> {
 export async function getBookCount(): Promise<number> {
   const db = await getDatabase();
   const rows = await db.select<{ count: number }>(
-    'SELECT COUNT(*) as count FROM books'
+    `SELECT COUNT(*) as count FROM ${ReaderTables.books}`
   );
   const firstRow = rows[0];
   return firstRow?.count ?? 0;
@@ -580,7 +571,7 @@ export async function getBookCount(): Promise<number> {
 export async function getLastReadBook(): Promise<Book | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM books 
+    `SELECT * FROM ${ReaderTables.books} 
      WHERE type & 1 > 0 
      ORDER BY durChapterTime DESC 
      LIMIT 1`

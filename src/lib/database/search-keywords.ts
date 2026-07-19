@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { SearchKeyword } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { SearchKeyword } from '@/types';
 export async function getAllSearchKeywords(): Promise<SearchKeyword[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM search_keywords ORDER BY lastUseTime DESC'
+    `SELECT * FROM ${ReaderTables.searchKeywords} ORDER BY lastUseTime DESC`
   );
   return rows.map(row => mapRowToKeyword(row));
 }
@@ -25,7 +26,7 @@ export async function searchSearchKeywords(key: string): Promise<SearchKeyword[]
     return getAllSearchKeywords();
   }
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM search_keywords WHERE word LIKE '%' || ? || '%'
+    `SELECT * FROM ${ReaderTables.searchKeywords} WHERE word LIKE '%' || ? || '%'
      ORDER BY usage DESC, lastUseTime DESC`,
     [q]
   );
@@ -40,7 +41,7 @@ export async function getSearchKeyword(
 ): Promise<SearchKeyword | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM search_keywords WHERE word = ?',
+    `SELECT * FROM ${ReaderTables.searchKeywords} WHERE word = ?`,
     [word]
   );
   return rows.length > 0 ? mapRowToKeyword(rows[0]) : null;
@@ -56,13 +57,13 @@ export async function upsertSearchKeyword(word: string): Promise<void> {
   if (existing) {
     // 增加使用次数并更新时间
     await db.execute(
-      'UPDATE search_keywords SET usage = usage + 1, lastUseTime = ? WHERE word = ?',
+      `UPDATE ${ReaderTables.searchKeywords} SET usage = usage + 1, lastUseTime = ? WHERE word = ?`,
       [Date.now(), word]
     );
   } else {
     // 插入新关键词
     await db.execute(
-      'INSERT INTO search_keywords (word, usage, lastUseTime) VALUES (?, ?, ?)',
+      `INSERT INTO ${ReaderTables.searchKeywords} (word, usage, lastUseTime) VALUES (?, ?, ?)`,
       [word, 1, Date.now()]
     );
   }
@@ -73,7 +74,7 @@ export async function upsertSearchKeyword(word: string): Promise<void> {
  */
 export async function deleteSearchKeyword(word: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM search_keywords WHERE word = ?', [word]);
+  await db.execute(`DELETE FROM ${ReaderTables.searchKeywords} WHERE word = ?`, [word]);
 }
 
 /**
@@ -81,7 +82,7 @@ export async function deleteSearchKeyword(word: string): Promise<void> {
  */
 export async function clearSearchKeywords(): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM search_keywords');
+  await db.execute(`DELETE FROM ${ReaderTables.searchKeywords}`);
 }
 
 /**

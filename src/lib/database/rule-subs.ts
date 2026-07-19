@@ -1,10 +1,11 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { RuleSub } from '@/types';
 
 export async function getAllRuleSubs(): Promise<RuleSub[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM ruleSubs ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.ruleSubs} ORDER BY customOrder ASC`
   );
   return rows.map(mapRow);
 }
@@ -13,7 +14,7 @@ export async function upsertRuleSub(sub: RuleSub): Promise<void> {
   const db = await getDatabase();
   if (sub.id != null) {
     await db.execute(
-      `UPDATE ruleSubs SET name = ?, url = ?, type = ?, customOrder = ?, autoUpdate = ?,
+      `UPDATE ${ReaderTables.ruleSubs} SET name = ?, url = ?, type = ?, customOrder = ?, autoUpdate = ?,
         "update" = ?, updateInterval = ?, silentUpdate = ?, js = ?, showRule = ?, sourceUrl = ?
        WHERE id = ?`,
       [
@@ -34,7 +35,7 @@ export async function upsertRuleSub(sub: RuleSub): Promise<void> {
     return;
   }
   await db.execute(
-    `INSERT INTO ruleSubs (name, url, type, customOrder, autoUpdate, "update", updateInterval,
+    `INSERT INTO ${ReaderTables.ruleSubs} (name, url, type, customOrder, autoUpdate, "update", updateInterval,
       silentUpdate, js, showRule, sourceUrl)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -55,13 +56,13 @@ export async function upsertRuleSub(sub: RuleSub): Promise<void> {
 
 export async function deleteRuleSub(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM ruleSubs WHERE id = ?', [id]);
+  await db.execute(`DELETE FROM ${ReaderTables.ruleSubs} WHERE id = ?`, [id]);
 }
 
 export async function findRuleSubByUrl(url: string): Promise<RuleSub | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM ruleSubs WHERE url = ? LIMIT 1',
+    `SELECT * FROM ${ReaderTables.ruleSubs} WHERE url = ? LIMIT 1`,
     [url.trim()],
   );
   return rows[0] ? mapRow(rows[0]) : null;
@@ -70,7 +71,7 @@ export async function findRuleSubByUrl(url: string): Promise<RuleSub | null> {
 export async function getMaxRuleSubOrder(): Promise<number> {
   const db = await getDatabase();
   const rows = await db.select<{ maxOrder: number | null }>(
-    'SELECT MAX(customOrder) AS maxOrder FROM ruleSubs',
+    `SELECT MAX(customOrder) AS maxOrder FROM ${ReaderTables.ruleSubs}`,
   );
   return Number(rows[0]?.maxOrder ?? 0);
 }

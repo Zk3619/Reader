@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { RssStar } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { RssStar } from '@/types';
 export async function getAllRssStars(): Promise<RssStar[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssStars ORDER BY starTime DESC'
+    `SELECT * FROM ${ReaderTables.rssStars} ORDER BY starTime DESC`
   );
   return rows.map(row => mapRowToStar(row));
 }
@@ -26,7 +27,7 @@ export async function getRssStarsByOriginAndSort(
 ): Promise<RssStar[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssStars WHERE origin = ? AND sort = ? ORDER BY starTime DESC',
+    `SELECT * FROM ${ReaderTables.rssStars} WHERE origin = ? AND sort = ? ORDER BY starTime DESC`,
     [origin, sort]
   );
   return rows.map(row => mapRowToStar(row));
@@ -41,7 +42,7 @@ export async function getRssStar(
 ): Promise<RssStar | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssStars WHERE origin = ? AND link = ?',
+    `SELECT * FROM ${ReaderTables.rssStars} WHERE origin = ? AND link = ?`,
     [origin, link]
   );
   return rows.length > 0 ? mapRowToStar(rows[0]) : null;
@@ -53,7 +54,7 @@ export async function getRssStar(
 export async function insertRssStar(star: RssStar): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO rssStars (
+    `INSERT OR REPLACE INTO ${ReaderTables.rssStars} (
       origin, sort, title, starTime, link, pubDate,
       description, content, image, "group", variable, type, durPos
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -81,7 +82,7 @@ export async function insertRssStar(star: RssStar): Promise<void> {
 export async function deleteRssStar(origin: string, link: string): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM rssStars WHERE origin = ? AND link = ?',
+    `DELETE FROM ${ReaderTables.rssStars} WHERE origin = ? AND link = ?`,
     [origin, link]
   );
 }

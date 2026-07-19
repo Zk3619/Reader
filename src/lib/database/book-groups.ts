@@ -1,5 +1,5 @@
 /**
- * 书籍分组数据访问对象（兼容层，内部使用 media_groups）
+ * 书籍分组数据访问对象（兼容层 → reader_book_groups / audio_groups）
  * @deprecated 新代码请使用 media-groups.ts
  */
 

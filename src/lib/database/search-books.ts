@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { SearchBook } from '@/types';
 import { UNGROUPED_SOURCE_LABEL } from '@/lib/sources/source-list-filter';
 
@@ -13,7 +14,7 @@ import { UNGROUPED_SOURCE_LABEL } from '@/lib/sources/source-list-filter';
 export async function insertSearchBook(book: SearchBook): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO searchBooks (
+    `INSERT OR REPLACE INTO ${ReaderTables.searchBooks} (
       bookUrl, origin, originName, type, name, author, kind,
       coverUrl, intro, wordCount, latestChapterTitle, tocUrl,
       time, variable, originOrder, chapterWordCountText,
@@ -59,7 +60,7 @@ export async function getSearchBook(
 ): Promise<SearchBook | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM searchBooks WHERE bookUrl = ?',
+    `SELECT * FROM ${ReaderTables.searchBooks} WHERE bookUrl = ?`,
     [bookUrl]
   );
   return rows.length > 0 ? mapRowToSearchBook(rows[0]) : null;
@@ -73,7 +74,7 @@ export async function getSearchBooksByOrigin(
 ): Promise<SearchBook[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM searchBooks WHERE origin = ? ORDER BY originOrder DESC',
+    `SELECT * FROM ${ReaderTables.searchBooks} WHERE origin = ? ORDER BY originOrder DESC`,
     [origin]
   );
   return rows.map(row => mapRowToSearchBook(row));
@@ -84,7 +85,7 @@ export async function getSearchBooksByOrigin(
  */
 export async function deleteSearchBook(bookUrl: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM searchBooks WHERE bookUrl = ?', [bookUrl]);
+  await db.execute(`DELETE FROM ${ReaderTables.searchBooks} WHERE bookUrl = ?`, [bookUrl]);
 }
 
 /**
@@ -92,7 +93,7 @@ export async function deleteSearchBook(bookUrl: string): Promise<void> {
  */
 export async function clearSearchBooks(): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM searchBooks');
+  await db.execute(`DELETE FROM ${ReaderTables.searchBooks}`);
 }
 
 function sourceMatchesAnyGroup(sourceGroup: string | undefined, groupNames: string[]): boolean {
@@ -121,7 +122,7 @@ export async function queryChangeSourceBooks(params: {
   const author = params.checkAuthor ? params.author.trim() : '';
   const screen = params.screenKey?.trim() ?? '';
 
-  let sql = 'SELECT * FROM searchBooks WHERE name = ?';
+  let sql = `SELECT * FROM ${ReaderTables.searchBooks} WHERE name = ?`;
   const args: unknown[] = [name];
   if (author) {
     sql += ' AND author LIKE ?';
@@ -155,7 +156,7 @@ export async function queryChangeSourceBooks(params: {
  */
 export async function deleteChangeSourceBooksByOrigin(origin: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM searchBooks WHERE origin = ?', [origin]);
+  await db.execute(`DELETE FROM ${ReaderTables.searchBooks} WHERE origin = ?`, [origin]);
 }
 
 /**

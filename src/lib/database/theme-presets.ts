@@ -3,6 +3,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ShellTables } from '@/lib/database/table-names';
 import { deleteThemePresetAssets } from '@/lib/theme/theme-asset-storage';
 import {
   BUILTIN_DEFAULT_PRESET_ID,
@@ -53,7 +54,7 @@ async function getBuiltinThemePreset(
 ): Promise<ThemePresetRecord | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    "SELECT * FROM theme_presets WHERE id = ? AND kind = 'builtin'",
+    `SELECT * FROM ${ShellTables.themePresets} WHERE id = ? AND kind = 'builtin'`,
     [id],
   );
   return rows[0] ? mapSqliteRow(rows[0]) : null;
@@ -62,7 +63,7 @@ async function getBuiltinThemePreset(
 async function listBuiltinThemePresets(): Promise<ThemePresetRecord[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    "SELECT * FROM theme_presets WHERE kind = 'builtin'",
+    `SELECT * FROM ${ShellTables.themePresets} WHERE kind = 'builtin'`,
   );
   return rows.map(mapSqliteRow);
 }
@@ -71,7 +72,7 @@ async function listBuiltinThemePresets(): Promise<ThemePresetRecord[]> {
 async function migrateUserPresetsToFiles(): Promise<void> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    "SELECT * FROM theme_presets WHERE kind != 'builtin'",
+    `SELECT * FROM ${ShellTables.themePresets} WHERE kind != 'builtin'`,
   );
   for (const row of rows) {
     try {
@@ -80,7 +81,7 @@ async function migrateUserPresetsToFiles(): Promise<void> {
       if (!existing) {
         await writeThemePresetFile(record.manifest, record.kind, record);
       }
-      await db.execute('DELETE FROM theme_presets WHERE id = ?', [record.id]);
+      await db.execute(`DELETE FROM ${ShellTables.themePresets} WHERE id = ?`, [record.id]);
     } catch (error) {
       console.warn('迁移主题预设失败:', row.id, error);
     }
@@ -122,7 +123,7 @@ export async function upsertThemePreset(
     const now = Date.now();
     const existing = await getBuiltinThemePreset(manifest.id);
     await db.execute(
-      `INSERT OR REPLACE INTO theme_presets
+      `INSERT OR REPLACE INTO ${ShellTables.themePresets}
         (id, name, kind, scopes_app, scopes_viewer, manifest_json, thumbnail_path, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -193,7 +194,7 @@ export async function deleteThemePreset(id: string): Promise<void> {
 export async function ensureBuiltinThemePresets(): Promise<void> {
   const db = await getDatabase();
   const rows = await db.select<{ id: string }>(
-    "SELECT id FROM theme_presets WHERE kind = 'builtin'",
+    `SELECT id FROM ${ShellTables.themePresets} WHERE kind = 'builtin'`,
   );
   const existingIds = new Set(rows.map((row) => String(row.id)));
 

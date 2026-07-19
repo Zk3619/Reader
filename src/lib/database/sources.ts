@@ -3,7 +3,9 @@
  * 对应 legado 项目的 BookSourceDao.kt
  */
 
+
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { BookSource, NewBookSource } from '@/types';
 import type {
   SearchRule,
@@ -20,7 +22,7 @@ import type {
 export async function getAllSources(): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM book_sources ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.bookSources} ORDER BY customOrder ASC`
   );
   return rows.map(row => mapRowToSource(row));
 }
@@ -31,7 +33,7 @@ export async function getAllSources(): Promise<BookSource[]> {
 export async function getEnabledSources(): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM book_sources WHERE enabled = 1 ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.bookSources} WHERE enabled = 1 ORDER BY customOrder ASC`
   );
   return rows.map(row => mapRowToSource(row));
 }
@@ -42,7 +44,7 @@ export async function getEnabledSources(): Promise<BookSource[]> {
 export async function getDisabledSources(): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM book_sources WHERE enabled = 0 ORDER BY customOrder ASC'
+    `SELECT * FROM ${ReaderTables.bookSources} WHERE enabled = 0 ORDER BY customOrder ASC`
   );
   return rows.map(row => mapRowToSource(row));
 }
@@ -53,7 +55,7 @@ export async function getDisabledSources(): Promise<BookSource[]> {
 export async function searchSources(keyword: string): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM book_sources 
+    `SELECT * FROM ${ReaderTables.bookSources} 
      WHERE bookSourceName LIKE '%' || ? || '%'
      OR bookSourceGroup LIKE '%' || ? || '%'
      OR bookSourceUrl LIKE '%' || ? || '%'
@@ -72,7 +74,7 @@ export async function getSourcesByGroup(
 ): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM book_sources 
+    `SELECT * FROM ${ReaderTables.bookSources} 
      WHERE bookSourceGroup = ?
      OR bookSourceGroup LIKE ? || ',%'
      OR bookSourceGroup LIKE '%,' || ?
@@ -89,7 +91,7 @@ export async function getSourcesByGroup(
 export async function getBookSourceForAddBook(baseUrl: string): Promise<BookSource | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM book_sources WHERE enabled = 1 AND bookSourceUrl = ?',
+    `SELECT * FROM ${ReaderTables.bookSources} WHERE enabled = 1 AND bookSourceUrl = ?`,
     [baseUrl]
   );
   return rows.length > 0 ? mapRowToSource(rows[0]) : null;
@@ -101,7 +103,7 @@ export async function getBookSourceForAddBook(baseUrl: string): Promise<BookSour
 export async function getEnabledSourcesWithBookUrlPattern(): Promise<BookSource[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM book_sources
+    `SELECT * FROM ${ReaderTables.bookSources}
      WHERE enabled = 1
        AND bookUrlPattern IS NOT NULL
        AND trim(bookUrlPattern) <> ''
@@ -117,7 +119,7 @@ export async function getEnabledSourcesWithBookUrlPattern(): Promise<BookSource[
 export async function getSource(sourceUrl: string): Promise<BookSource | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM book_sources WHERE bookSourceUrl = ?',
+    `SELECT * FROM ${ReaderTables.bookSources} WHERE bookSourceUrl = ?`,
     [sourceUrl]
   );
   return rows.length > 0 ? mapRowToSource(rows[0]) : null;
@@ -129,7 +131,7 @@ export async function getSource(sourceUrl: string): Promise<BookSource | null> {
 export async function hasSource(sourceUrl: string): Promise<boolean> {
   const db = await getDatabase();
   const rows = await db.select<{ count: number }>(
-    'SELECT COUNT(*) as count FROM book_sources WHERE bookSourceUrl = ?',
+    `SELECT COUNT(*) as count FROM ${ReaderTables.bookSources} WHERE bookSourceUrl = ?`,
     [sourceUrl]
   );
   return (rows[0]?.count ?? 0) > 0;
@@ -142,7 +144,7 @@ export async function insertSource(source: NewBookSource): Promise<void> {
   const db = await getDatabase();
   
   await db.execute(
-    `INSERT OR REPLACE INTO book_sources (
+    `INSERT OR REPLACE INTO ${ReaderTables.bookSources} (
       bookSourceUrl, bookSourceName, bookSourceGroup, bookSourceType,
       bookUrlPattern, customOrder, enabled, enabledExplore,
       jsLib, enabledCookieJar, concurrentRate, header,
@@ -198,7 +200,7 @@ export async function updateSource(source: BookSource): Promise<void> {
   const db = await getDatabase();
   
   await db.execute(
-    `UPDATE book_sources SET
+    `UPDATE ${ReaderTables.bookSources} SET
       bookSourceName = ?, bookSourceGroup = ?, bookSourceType = ?,
       bookUrlPattern = ?, customOrder = ?, enabled = ?, enabledExplore = ?,
       jsLib = ?, enabledCookieJar = ?, concurrentRate = ?, header = ?,
@@ -252,7 +254,7 @@ export async function updateSource(source: BookSource): Promise<void> {
  */
 export async function deleteSource(sourceUrl: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM book_sources WHERE bookSourceUrl = ?', [
+  await db.execute(`DELETE FROM ${ReaderTables.bookSources} WHERE bookSourceUrl = ?`, [
     sourceUrl,
   ]);
 }
@@ -266,7 +268,7 @@ export async function enableSource(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE book_sources SET enabled = ? WHERE bookSourceUrl = ?',
+    `UPDATE ${ReaderTables.bookSources} SET enabled = ? WHERE bookSourceUrl = ?`,
     [enabled ? 1 : 0, sourceUrl]
   );
 }
@@ -280,7 +282,7 @@ export async function enableExplore(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE book_sources SET enabledExplore = ? WHERE bookSourceUrl = ?',
+    `UPDATE ${ReaderTables.bookSources} SET enabledExplore = ? WHERE bookSourceUrl = ?`,
     [enabled ? 1 : 0, sourceUrl]
   );
 }
@@ -294,7 +296,7 @@ export async function updateSourceOrder(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE book_sources SET customOrder = ? WHERE bookSourceUrl = ?',
+    `UPDATE ${ReaderTables.bookSources} SET customOrder = ? WHERE bookSourceUrl = ?`,
     [customOrder, sourceUrl]
   );
 }
@@ -308,7 +310,7 @@ export async function updateSourceGroup(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE book_sources SET bookSourceGroup = ? WHERE bookSourceUrl = ?',
+    `UPDATE ${ReaderTables.bookSources} SET bookSourceGroup = ? WHERE bookSourceUrl = ?`,
     [groupName, sourceUrl]
   );
 }
@@ -319,7 +321,7 @@ export async function updateSourceGroup(
 export async function getAllSourceGroups(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.select<{ groupName: string }>(
-    'SELECT DISTINCT bookSourceGroup as groupName FROM book_sources WHERE bookSourceGroup IS NOT NULL AND bookSourceGroup != ""'
+    `SELECT DISTINCT bookSourceGroup as groupName FROM ${ReaderTables.bookSources} WHERE bookSourceGroup IS NOT NULL AND bookSourceGroup != ""`
   );
   return rows.map(row => row.groupName).filter(Boolean);
 }

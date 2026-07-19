@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { Bookmark } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { Bookmark } from '@/types';
 export async function getAllBookmarks(): Promise<Bookmark[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM bookmarks 
+    `SELECT * FROM ${ReaderTables.bookmarks} 
      ORDER BY bookName, bookAuthor, chapterIndex, chapterPos`
   );
   return rows.map(row => mapRowToBookmark(row));
@@ -27,7 +28,7 @@ export async function getBookmarksByBook(
 ): Promise<Bookmark[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM bookmarks WHERE bookName = ? AND bookAuthor = ? ORDER BY chapterIndex',
+    `SELECT * FROM ${ReaderTables.bookmarks} WHERE bookName = ? AND bookAuthor = ? ORDER BY chapterIndex`,
     [bookName, bookAuthor]
   );
   return rows.map(row => mapRowToBookmark(row));
@@ -43,7 +44,7 @@ export async function searchBookmarks(
 ): Promise<Bookmark[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM bookmarks 
+    `SELECT * FROM ${ReaderTables.bookmarks} 
      WHERE bookName = ? AND bookAuthor = ?
      AND (chapterName LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%')
      ORDER BY chapterIndex`,
@@ -58,7 +59,7 @@ export async function searchBookmarks(
 export async function insertBookmark(bookmark: Bookmark): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO bookmarks (
+    `INSERT OR REPLACE INTO ${ReaderTables.bookmarks} (
       time, bookName, bookAuthor, chapterIndex, chapterPos,
       chapterName, bookText, content
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -81,7 +82,7 @@ export async function insertBookmark(bookmark: Bookmark): Promise<void> {
 export async function updateBookmark(bookmark: Bookmark): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE bookmarks SET
+    `UPDATE ${ReaderTables.bookmarks} SET
       bookName = ?, bookAuthor = ?, chapterIndex = ?,
       chapterPos = ?, chapterName = ?, bookText = ?, content = ?
     WHERE time = ?`,
@@ -103,7 +104,7 @@ export async function updateBookmark(bookmark: Bookmark): Promise<void> {
  */
 export async function deleteBookmark(time: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM bookmarks WHERE time = ?', [time]);
+  await db.execute(`DELETE FROM ${ReaderTables.bookmarks} WHERE time = ?`, [time]);
 }
 
 /**
@@ -115,7 +116,7 @@ export async function deleteBookmarksByBook(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM bookmarks WHERE bookName = ? AND bookAuthor = ?',
+    `DELETE FROM ${ReaderTables.bookmarks} WHERE bookName = ? AND bookAuthor = ?`,
     [bookName, bookAuthor]
   );
 }

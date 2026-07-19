@@ -17,6 +17,7 @@ import {
   getNextMusicUserGroupId,
   insertGroup as insertMediaGroup,
 } from '@/lib/database/media-groups';
+import { AudioTables, ShellTables } from '@/lib/database/table-names';
 import { MediaGroupId } from '@/types/book-group';
 import type {
   AudioPlaylist,
@@ -92,12 +93,100 @@ export async function upsertAudioTrack(track: AudioTrack): Promise<void> {
       now,
     ],
   );
+  // 播放缓存常先于入库完成：冲刷暂存的 cache meta
+  void import('@/lib/media/audio/audio-disk-cache')
+    .then(({ flushPendingTrackCacheMeta }) => flushPendingTrackCacheMeta(track.id))
+    .catch(() => undefined);
 }
 
 export async function upsertAudioTracks(tracks: AudioTrack[]): Promise<void> {
   for (const track of tracks) {
     await upsertAudioTrack(track);
   }
+}
+
+export async function updateAudioTrackCacheMeta(
+  trackId: string,
+  meta: {
+    cachePath: string | null;
+    cacheTier: string | null;
+    cachedAt: number | null;
+    cacheBytes: number | null;
+    cacheMime: string | null;
+    cacheQuality?: string | null;
+  },
+): Promise<boolean> {
+  const db = await getDatabase();
+  // 曲目可能尚未入库：仅更新已存在行（调用方应暂存并在 upsert 后重试）
+  const existing = await db.select<{ id: string }>(
+    'SELECT id FROM audio_tracks WHERE id = ? LIMIT 1',
+    [trackId],
+  );
+  if (!existing[0]) return false;
+  await db.execute(
+    `UPDATE audio_tracks SET
+      cache_path = ?,
+      cache_tier = ?,
+      cached_at = ?,
+      cache_bytes = ?,
+      cache_mime = ?,
+      cache_quality = ?,
+      updated_at = ?
+     WHERE id = ?`,
+    [
+      meta.cachePath,
+      meta.cacheTier,
+      meta.cachedAt,
+      meta.cacheBytes,
+      meta.cacheMime,
+      meta.cacheQuality ?? null,
+      Date.now(),
+      trackId,
+    ],
+  );
+  return true;
+}
+
+/** 曲目是否已入库且缺少 cache_path（用于磁盘命中后回填） */
+export async function audioTrackNeedsCacheIndexBackfill(
+  trackId: string,
+): Promise<boolean> {
+  const db = await getDatabase();
+  const rows = await db.select<{ id: string; cache_path: string | null }>(
+    'SELECT id, cache_path FROM audio_tracks WHERE id = ? LIMIT 1',
+    [trackId],
+  );
+  const row = rows[0];
+  if (!row) return false;
+  return !row.cache_path?.trim();
+}
+
+/** 缺少 cache_path 的已入库曲目（含 meta，便于按 toggleMusicInfo 关联磁盘） */
+export async function listAudioTracksMissingCacheIndex(): Promise<
+  Array<{ id: string; meta: AudioTrackMeta }>
+> {
+  const db = await getDatabase();
+  const rows = await db.select<{ id: string; meta_json: string }>(
+    `SELECT id, meta_json FROM ${AudioTables.tracks}
+     WHERE cache_path IS NULL OR trim(cache_path) = ''`,
+  );
+  return rows.map((row) => ({
+    id: String(row.id),
+    meta: parseMeta(String(row.meta_json ?? '{}')),
+  }));
+}
+
+export async function getAudioTrackCacheTier(
+  trackId: string,
+): Promise<'auto' | 'manual' | null> {
+  const db = await getDatabase();
+  const rows = await db.select<{ cache_tier: string | null }>(
+    'SELECT cache_tier FROM audio_tracks WHERE id = ? LIMIT 1',
+    [trackId],
+  );
+  const tier = rows[0]?.cache_tier;
+  if (tier === 'manual' || tier === 'auto') return tier;
+  return null;
 }
 
 export async function getAudioTrack(id: string): Promise<AudioTrack | null> {
@@ -130,6 +219,8 @@ export async function listPlaylists(): Promise<AudioPlaylist[]> {
       id: g.listId!,
       name: g.groupName,
       source: (g.source ?? 'builtin') as AudioPlaylist['source'],
+      description: g.description,
+      coverUrl: g.cover,
       createdAt: 0,
       updatedAt: 0,
     }));
@@ -143,9 +234,18 @@ async function groupIdForPlaylist(playlistId: string): Promise<number | null> {
 
 export async function getTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
   const db = await getDatabase();
+  if (groupId === MediaGroupId.Favorite) {
+    const rows = await db.select<Record<string, unknown>>(
+      `SELECT t.* FROM ${AudioTables.tracks} t
+       INNER JOIN ${ShellTables.favorites} f
+         ON f.item_id = t.id AND f.item_kind = 'track'
+       ORDER BY f.sort_order ASC`,
+    );
+    return rows.map(rowToTrack);
+  }
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT t.* FROM audio_tracks t
-     INNER JOIN media_group_items i ON i.item_id = t.id AND i.item_kind = 'track'
+    `SELECT t.* FROM ${AudioTables.tracks} t
+     INNER JOIN ${AudioTables.groupItems} i ON i.item_id = t.id
      WHERE i.group_id = ?
      ORDER BY i.sort_order ASC`,
     [groupId],
@@ -177,11 +277,6 @@ export async function addTrackToPlaylist(
   const groupId = await groupIdForPlaylist(playlistId);
   if (groupId == null) return;
   await addGroupItem(groupId, 'track', trackId, order);
-  const db = await getDatabase();
-  await db.execute('UPDATE audio_playlists SET updated_at = ? WHERE id = ?', [
-    Date.now(),
-    playlistId,
-  ]).catch(() => undefined);
 }
 
 function isCuratedPlaylistId(playlistId: string): boolean {
@@ -197,17 +292,17 @@ export async function isTrackInCuratedList(trackId: string): Promise<boolean> {
   const db = await getDatabase();
   const rows = await db.select<{ ok: number }>(
     `SELECT 1 AS ok
-     FROM media_group_items o
-     INNER JOIN media_groups g ON g.groupId = o.group_id
-     WHERE o.item_kind = 'track'
-       AND o.item_id = ?
-       AND (
-         g.groupId = ?
-         OR g.listId = ?
-         OR g.listId LIKE 'pl_%'
-       )
+     FROM (
+       SELECT item_id FROM ${ShellTables.favorites}
+       WHERE item_kind = 'track' AND item_id = ?
+       UNION ALL
+       SELECT o.item_id FROM ${AudioTables.groupItems} o
+       INNER JOIN ${AudioTables.groups} g ON g.groupId = o.group_id
+       WHERE o.item_id = ?
+         AND (g.listId = ? OR g.listId LIKE 'pl_%')
+     )
      LIMIT 1`,
-    [trackId, MediaGroupId.Favorite, BUILTIN_PLAYLIST_IDS.LOCAL],
+    [trackId, trackId, BUILTIN_PLAYLIST_IDS.LOCAL],
   );
   return rows.length > 0;
 }
@@ -224,24 +319,24 @@ export async function syncTrialListMembership(track: AudioTrack): Promise<void> 
   const db = await getDatabase();
   await withDatabaseBusyRetry(() =>
     db.execute(
-      `UPDATE media_group_items
+      `UPDATE ${AudioTables.groupItems}
        SET sort_order = sort_order + 1
-       WHERE group_id = ? AND item_kind = 'track' AND item_id <> ?`,
+       WHERE group_id = ? AND item_id <> ?`,
       [groupId, track.id],
     ),
   );
   await withDatabaseBusyRetry(() =>
     db.execute(
-      `INSERT OR REPLACE INTO media_group_items
-       (group_id, item_kind, item_id, sort_order, created_at)
-       VALUES (?, 'track', ?, 0, ?)`,
+      `INSERT OR REPLACE INTO ${AudioTables.groupItems}
+       (group_id, item_id, sort_order, created_at)
+       VALUES (?, ?, 0, ?)`,
       [groupId, track.id, Date.now()],
     ),
   );
   await withDatabaseBusyRetry(() =>
     db.execute(
-      `DELETE FROM media_group_items
-       WHERE group_id = ? AND item_kind = 'track' AND sort_order >= ?`,
+      `DELETE FROM ${AudioTables.groupItems}
+       WHERE group_id = ? AND sort_order >= ?`,
       [groupId, RECENT_MAX],
     ),
   );
@@ -374,7 +469,6 @@ export async function createPlaylist(
   source: AudioPlaylist['source'] = 'local',
   options?: { position?: number },
 ): Promise<AudioPlaylist> {
-  const db = await getDatabase();
   const now = Date.now();
   const pl: AudioPlaylist = {
     id,
@@ -383,10 +477,6 @@ export async function createPlaylist(
     createdAt: now,
     updatedAt: now,
   };
-  await db.execute(
-    `INSERT OR IGNORE INTO audio_playlists (id, name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-    [id, name, source, now, now],
-  );
   const groupId = await getNextMusicUserGroupId();
   const existing = await listUserMusicPlaylists();
   const pos =
@@ -426,26 +516,18 @@ export async function deletePlaylist(playlistId: string): Promise<void> {
     return;
   }
   const group = await getMusicGroupByListId(playlistId);
-  const db = await getDatabase();
   if (group) {
-    await db.execute('DELETE FROM media_group_items WHERE group_id = ? AND item_kind = ?', [
+    const db = await getDatabase();
+    await db.execute(`DELETE FROM ${AudioTables.groupItems} WHERE group_id = ?`, [
       group.groupId,
-      'track',
     ]);
     const { deleteGroup } = await import('@/lib/database/media-groups');
     await deleteGroup(group.groupId);
   }
-  await db.execute('DELETE FROM audio_playlists WHERE id = ?', [playlistId]);
   notifyMusicPlaylistsChanged();
 }
 
 export async function renamePlaylist(playlistId: string, name: string): Promise<void> {
-  const db = await getDatabase();
-  await db.execute('UPDATE audio_playlists SET name = ?, updated_at = ? WHERE id = ?', [
-    name,
-    Date.now(),
-    playlistId,
-  ]);
   const group = await getMusicGroupByListId(playlistId);
   if (group) {
     const { updateGroup } = await import('@/lib/database/media-groups');
@@ -466,7 +548,7 @@ export async function removeTrackFromPlaylist(
 export async function cacheTrackUrl(
   trackId: string,
   url: string,
-  ttlMs = 30 * 60 * 1000,
+  ttlMs = 7 * 24 * 60 * 60 * 1000,
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
@@ -502,24 +584,24 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
     const db = await getDatabase();
     await withDatabaseBusyRetry(() =>
       db.execute(
-        `UPDATE media_group_items
+        `UPDATE ${AudioTables.groupItems}
          SET sort_order = sort_order + 1
-         WHERE group_id = ? AND item_kind = 'track' AND item_id <> ?`,
+         WHERE group_id = ? AND item_id <> ?`,
         [groupId, track.id],
       ),
     );
     await withDatabaseBusyRetry(() =>
       db.execute(
-        `INSERT OR REPLACE INTO media_group_items
-         (group_id, item_kind, item_id, sort_order, created_at)
-         VALUES (?, 'track', ?, 0, ?)`,
+        `INSERT OR REPLACE INTO ${AudioTables.groupItems}
+         (group_id, item_id, sort_order, created_at)
+         VALUES (?, ?, 0, ?)`,
         [groupId, track.id, Date.now()],
       ),
     );
     await withDatabaseBusyRetry(() =>
       db.execute(
-        `DELETE FROM media_group_items
-         WHERE group_id = ? AND item_kind = 'track' AND sort_order >= ?`,
+        `DELETE FROM ${AudioTables.groupItems}
+         WHERE group_id = ? AND sort_order >= ?`,
         [groupId, RECENT_MAX],
       ),
     );
@@ -581,25 +663,36 @@ export async function deleteDislikeRule(id: string): Promise<void> {
 }
 
 export async function upsertAudioPlaylists(playlists: AudioPlaylist[]): Promise<void> {
-  const db = await getDatabase();
   for (const pl of playlists) {
-    await db.execute(
-      `INSERT INTO audio_playlists (id, name, source, description, cover_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name=excluded.name, source=excluded.source, description=excluded.description,
-         cover_url=excluded.cover_url, updated_at=excluded.updated_at`,
-      [
-        pl.id,
-        pl.name,
-        pl.source,
-        pl.description ?? null,
-        pl.coverUrl ?? null,
-        pl.createdAt,
-        pl.updatedAt,
-      ],
-    );
+    const existing = await getMusicGroupByListId(pl.id);
+    if (existing) {
+      const { updateGroup } = await import('@/lib/database/media-groups');
+      await updateGroup({
+        ...existing,
+        groupName: pl.name,
+        source: pl.source,
+        cover: pl.coverUrl ?? existing.cover,
+        description: pl.description ?? existing.description,
+      });
+      continue;
+    }
+    const groupId = await getNextMusicUserGroupId();
+    await insertMediaGroup({
+      groupId,
+      groupName: pl.name,
+      order: 0,
+      enableRefresh: false,
+      show: true,
+      bookSort: -1,
+      onlyUpdateRead: false,
+      domain: 'music',
+      listId: pl.id,
+      source: pl.source,
+      cover: pl.coverUrl,
+      description: pl.description,
+    });
   }
+  notifyMusicPlaylistsChanged();
 }
 
 export async function saveAuthSession(session: AudioAuthSession): Promise<void> {

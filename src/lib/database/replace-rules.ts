@@ -3,7 +3,9 @@
  * 对应 legado 项目的 ReplaceRuleDao.kt
  */
 
+
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { ReplaceRule } from '@/types';
 
 /**
@@ -12,7 +14,7 @@ import type { ReplaceRule } from '@/types';
 export async function getAllReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM replace_rules ORDER BY sortOrder ASC'
+    `SELECT * FROM ${ReaderTables.replaceRules} ORDER BY sortOrder ASC`
   );
   return rows.map(row => mapRowToRule(row));
 }
@@ -25,7 +27,7 @@ export async function searchReplaceRules(
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM replace_rules 
+    `SELECT * FROM ${ReaderTables.replaceRules} 
      WHERE "group" LIKE '%' || ? || '%' OR name LIKE '%' || ? || '%'
      ORDER BY sortOrder ASC`,
     [keyword, keyword]
@@ -41,7 +43,7 @@ export async function getReplaceRulesByGroup(
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM replace_rules 
+    `SELECT * FROM ${ReaderTables.replaceRules} 
      WHERE "group" LIKE '%' || ? || '%'
      ORDER BY sortOrder ASC`,
     [groupName]
@@ -55,7 +57,7 @@ export async function getReplaceRulesByGroup(
 export async function getNoGroupReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM replace_rules 
+    `SELECT * FROM ${ReaderTables.replaceRules} 
      WHERE "group" IS NULL OR TRIM("group") = '' OR TRIM("group") LIKE '%未分组%'
      ORDER BY sortOrder ASC`
   );
@@ -68,7 +70,7 @@ export async function getNoGroupReplaceRules(): Promise<ReplaceRule[]> {
 export async function getEnabledReplaceRules(): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM replace_rules WHERE isEnabled = 1 ORDER BY sortOrder ASC'
+    `SELECT * FROM ${ReaderTables.replaceRules} WHERE isEnabled = 1 ORDER BY sortOrder ASC`
   );
   return rows.map(row => mapRowToRule(row));
 }
@@ -82,7 +84,7 @@ export async function getEnabledRulesByContentScope(
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM replace_rules 
+    `SELECT * FROM ${ReaderTables.replaceRules} 
      WHERE isEnabled = 1 AND scopeContent = 1
      AND (scope LIKE '%' || ? || '%' OR scope LIKE '%' || ? || '%' OR scope IS NULL OR scope = '')
      AND (excludeScope IS NULL OR (excludeScope NOT LIKE '%' || ? || '%' AND excludeScope NOT LIKE '%' || ? || '%'))
@@ -101,7 +103,7 @@ export async function getEnabledRulesByTitleScope(
 ): Promise<ReplaceRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    `SELECT * FROM replace_rules 
+    `SELECT * FROM ${ReaderTables.replaceRules} 
      WHERE isEnabled = 1 AND scopeTitle = 1
      AND (scope LIKE '%' || ? || '%' OR scope LIKE '%' || ? || '%' OR scope IS NULL OR scope = '')
      AND (excludeScope IS NULL OR (excludeScope NOT LIKE '%' || ? || '%' AND excludeScope NOT LIKE '%' || ? || '%'))
@@ -117,7 +119,7 @@ export async function getEnabledRulesByTitleScope(
 export async function getReplaceRuleById(id: number): Promise<ReplaceRule | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM replace_rules WHERE id = ?',
+    `SELECT * FROM ${ReaderTables.replaceRules} WHERE id = ?`,
     [id]
   );
   return rows.length > 0 ? mapRowToRule(rows[0]) : null;
@@ -129,7 +131,7 @@ export async function getReplaceRuleById(id: number): Promise<ReplaceRule | null
 export async function insertReplaceRule(rule: ReplaceRule): Promise<number> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT INTO replace_rules (
+    `INSERT INTO ${ReaderTables.replaceRules} (
       name, "group", pattern, replacement, scope,
       scopeTitle, scopeContent, excludeScope,
       isEnabled, isRegex, timeoutMillisecond, sortOrder
@@ -163,7 +165,7 @@ export async function insertReplaceRule(rule: ReplaceRule): Promise<number> {
 export async function updateReplaceRule(rule: ReplaceRule): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE replace_rules SET
+    `UPDATE ${ReaderTables.replaceRules} SET
       name = ?, "group" = ?, pattern = ?, replacement = ?,
       scope = ?, scopeTitle = ?, scopeContent = ?, excludeScope = ?,
       isEnabled = ?, isRegex = ?, timeoutMillisecond = ?, sortOrder = ?
@@ -191,14 +193,14 @@ export async function updateReplaceRule(rule: ReplaceRule): Promise<void> {
  */
 export async function deleteReplaceRule(id: number): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM replace_rules WHERE id = ?', [id]);
+  await db.execute(`DELETE FROM ${ReaderTables.replaceRules} WHERE id = ?`, [id]);
 }
 
 export async function deleteReplaceRules(ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const db = await getDatabase();
   const placeholders = ids.map(() => '?').join(',');
-  await db.execute(`DELETE FROM replace_rules WHERE id IN (${placeholders})`, ids);
+  await db.execute(`DELETE FROM ${ReaderTables.replaceRules} WHERE id IN (${placeholders})`, ids);
 }
 
 export async function setReplaceRulesEnabled(ids: number[], enabled: boolean): Promise<void> {
@@ -206,7 +208,7 @@ export async function setReplaceRulesEnabled(ids: number[], enabled: boolean): P
   const db = await getDatabase();
   const placeholders = ids.map(() => '?').join(',');
   await db.execute(
-    `UPDATE replace_rules SET isEnabled = ? WHERE id IN (${placeholders})`,
+    `UPDATE ${ReaderTables.replaceRules} SET isEnabled = ? WHERE id IN (${placeholders})`,
     [enabled ? 1 : 0, ...ids],
   );
 }
@@ -214,7 +216,7 @@ export async function setReplaceRulesEnabled(ids: number[], enabled: boolean): P
 async function getSortOrderBounds(): Promise<{ min: number; max: number }> {
   const db = await getDatabase();
   const rows = await db.select<{ minOrder: number | null; maxOrder: number | null }>(
-    'SELECT MIN(sortOrder) as minOrder, MAX(sortOrder) as maxOrder FROM replace_rules',
+    `SELECT MIN(sortOrder) as minOrder, MAX(sortOrder) as maxOrder FROM ${ReaderTables.replaceRules}`,
   );
   return {
     min: Number(rows[0]?.minOrder ?? 0),
@@ -247,7 +249,7 @@ export async function reorderReplaceRules(orderedIds: number[]): Promise<void> {
   if (orderedIds.length === 0) return;
   const db = await getDatabase();
   for (let i = 0; i < orderedIds.length; i++) {
-    await db.execute('UPDATE replace_rules SET sortOrder = ? WHERE id = ?', [i, orderedIds[i]!]);
+    await db.execute(`UPDATE ${ReaderTables.replaceRules} SET sortOrder = ? WHERE id = ?`, [i, orderedIds[i]!]);
   }
 }
 
@@ -256,7 +258,7 @@ export async function reorderReplaceRules(orderedIds: number[]): Promise<void> {
  */
 export async function enableAllReplaceRules(enabled: boolean): Promise<void> {
   const db = await getDatabase();
-  await db.execute('UPDATE replace_rules SET isEnabled = ?', [
+  await db.execute(`UPDATE ${ReaderTables.replaceRules} SET isEnabled = ?`, [
     enabled ? 1 : 0,
   ]);
 }
@@ -267,7 +269,7 @@ export async function enableAllReplaceRules(enabled: boolean): Promise<void> {
 export async function getAllRuleGroups(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.select<{ group: string }>(
-    `SELECT DISTINCT "group" FROM replace_rules 
+    `SELECT DISTINCT "group" FROM ${ReaderTables.replaceRules} 
      WHERE "group" IS NOT NULL AND TRIM("group") != ''`
   );
   return rows.map(row => row.group).filter(Boolean);

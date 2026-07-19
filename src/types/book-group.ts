@@ -1,5 +1,5 @@
 /**
- * 媒体分组类型定义（原 book_groups，迁移为 media_groups）
+ * 媒体分组类型定义（目标：reader_book_groups / audio_groups / shell_favorites）
  */
 
 export type MediaGroupDomain = 'shelf' | 'music' | 'shared';
@@ -22,6 +22,8 @@ export interface BookGroup {
   listId?: string;
   /** 音乐列表来源 */
   source?: string;
+  /** 音频歌单描述（audio_groups.description） */
+  description?: string;
 }
 
 /** 媒体分组实体（新名称） */
@@ -46,6 +48,11 @@ export const MediaGroupId = {
   /** 试听列表（播放过且未加入其它列表） */
   MusicTrial: -23,
   MusicUserStart: -1000,
+  /** 影视：最近观看 */
+  VideoRecent: -30,
+  /** 影视：收藏 */
+  VideoKeep: -31,
+  VideoUserStart: -2000,
 } as const;
 
 /** @deprecated 使用 MediaGroupId */

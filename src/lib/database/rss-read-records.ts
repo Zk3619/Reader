@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { RssReadRecord } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { RssReadRecord } from '@/types';
 export async function getAllRssReadRecords(): Promise<RssReadRecord[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssReadRecords ORDER BY readTime DESC',
+    `SELECT * FROM ${ReaderTables.rssReadRecords} ORDER BY readTime DESC`,
   );
   return rows.map((row) => mapRowToRecord(row));
 }
@@ -21,7 +22,7 @@ export async function getAllRssReadRecords(): Promise<RssReadRecord[]> {
 export async function getRssReadRecordsByOrigin(origin: string): Promise<RssReadRecord[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssReadRecords WHERE origin = ? ORDER BY readTime DESC',
+    `SELECT * FROM ${ReaderTables.rssReadRecords} WHERE origin = ? ORDER BY readTime DESC`,
     [origin],
   );
   return rows.map((row) => mapRowToRecord(row));
@@ -35,7 +36,7 @@ export async function getRssReadRecord(
 ): Promise<RssReadRecord | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM rssReadRecords WHERE record = ?',
+    `SELECT * FROM ${ReaderTables.rssReadRecords} WHERE record = ?`,
     [record]
   );
   return rows.length > 0 ? mapRowToRecord(rows[0]) : null;
@@ -49,7 +50,7 @@ export async function upsertRssReadRecord(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO rssReadRecords (
+    `INSERT OR REPLACE INTO ${ReaderTables.rssReadRecords} (
       record, title, readTime, read, origin, sort, image, type, durPos, pubDate
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -76,7 +77,7 @@ export async function markRssArticleAsRead(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'INSERT OR REPLACE INTO rssReadRecords (record, title, readTime, read) VALUES (?, ?, ?, ?)',
+    `INSERT OR REPLACE INTO ${ReaderTables.rssReadRecords} (record, title, readTime, read) VALUES (?, ?, ?, ?)`,
     [record, title ?? null, Date.now(), 1]
   );
 }
@@ -86,7 +87,7 @@ export async function markRssArticleAsRead(
  */
 export async function deleteRssReadRecord(record: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM rssReadRecords WHERE record = ?', [record]);
+  await db.execute(`DELETE FROM ${ReaderTables.rssReadRecords} WHERE record = ?`, [record]);
 }
 
 /**

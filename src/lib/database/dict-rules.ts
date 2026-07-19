@@ -1,10 +1,11 @@
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { DictRule } from '@/types';
 
 export async function getEnabledDictRules(): Promise<DictRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM dictRules WHERE enabled = 1 ORDER BY sortNumber ASC'
+    `SELECT * FROM ${ReaderTables.dictRules} WHERE enabled = 1 ORDER BY sortNumber ASC`
   );
   return rows.map(mapRow);
 }
@@ -12,7 +13,7 @@ export async function getEnabledDictRules(): Promise<DictRule[]> {
 export async function getAllDictRules(): Promise<DictRule[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM dictRules ORDER BY sortNumber ASC'
+    `SELECT * FROM ${ReaderTables.dictRules} ORDER BY sortNumber ASC`
   );
   return rows.map(mapRow);
 }
@@ -20,7 +21,7 @@ export async function getAllDictRules(): Promise<DictRule[]> {
 export async function upsertDictRule(rule: DictRule): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO dictRules (name, urlRule, showRule, enabled, sortNumber)
+    `INSERT OR REPLACE INTO ${ReaderTables.dictRules} (name, urlRule, showRule, enabled, sortNumber)
      VALUES (?, ?, ?, ?, ?)`,
     [rule.name, rule.urlRule, rule.showRule, rule.enabled ? 1 : 0, rule.sortNumber]
   );
@@ -28,14 +29,14 @@ export async function upsertDictRule(rule: DictRule): Promise<void> {
 
 export async function deleteDictRule(name: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM dictRules WHERE name = ?', [name]);
+  await db.execute(`DELETE FROM ${ReaderTables.dictRules} WHERE name = ?`, [name]);
 }
 
 export async function deleteDictRules(names: string[]): Promise<void> {
   if (names.length === 0) return;
   const db = await getDatabase();
   for (const name of names) {
-    await db.execute('DELETE FROM dictRules WHERE name = ?', [name]);
+    await db.execute(`DELETE FROM ${ReaderTables.dictRules} WHERE name = ?`, [name]);
   }
 }
 
@@ -43,14 +44,14 @@ export async function setDictRulesEnabled(names: string[], enabled: boolean): Pr
   if (names.length === 0) return;
   const db = await getDatabase();
   for (const name of names) {
-    await db.execute('UPDATE dictRules SET enabled = ? WHERE name = ?', [enabled ? 1 : 0, name]);
+    await db.execute(`UPDATE ${ReaderTables.dictRules} SET enabled = ? WHERE name = ?`, [enabled ? 1 : 0, name]);
   }
 }
 
 async function getSortNumberBounds(): Promise<{ min: number; max: number }> {
   const db = await getDatabase();
   const rows = await db.select<{ minOrder: number | null; maxOrder: number | null }>(
-    'SELECT MIN(sortNumber) as minOrder, MAX(sortNumber) as maxOrder FROM dictRules',
+    `SELECT MIN(sortNumber) as minOrder, MAX(sortNumber) as maxOrder FROM ${ReaderTables.dictRules}`,
   );
   return {
     min: Number(rows[0]?.minOrder ?? 0),

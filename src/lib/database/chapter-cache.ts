@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import { normalizeChapterCacheTier } from '@/lib/chapter-cache/cache-tier';
 import type { ChapterCache, ChapterCacheTier } from '@/types';
 
@@ -16,7 +17,7 @@ export async function getChapterCache(
 ): Promise<ChapterCache | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapter_cache WHERE book_url = ? AND chapter_index = ?',
+    `SELECT * FROM ${ReaderTables.chapterCache} WHERE book_url = ? AND chapter_index = ?`,
     [bookUrl, chapterIndex],
   );
   return rows.length > 0 ? mapRowToCache(rows[0]) : null;
@@ -28,7 +29,7 @@ export async function getChapterCache(
 export async function upsertChapterCache(cache: ChapterCache): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO chapter_cache (
+    `INSERT OR REPLACE INTO ${ReaderTables.chapterCache} (
       book_url, chapter_index, content, file_path, created_at, cache_tier
     ) VALUES (?, ?, ?, ?, ?, ?)`,
     [
@@ -51,7 +52,7 @@ export async function deleteChapterCache(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM chapter_cache WHERE book_url = ? AND chapter_index = ?',
+    `DELETE FROM ${ReaderTables.chapterCache} WHERE book_url = ? AND chapter_index = ?`,
     [bookUrl, chapterIndex],
   );
 }
@@ -61,7 +62,7 @@ export async function deleteChapterCache(
  */
 export async function deleteChapterCacheByBook(bookUrl: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM chapter_cache WHERE book_url = ?', [bookUrl]);
+  await db.execute(`DELETE FROM ${ReaderTables.chapterCache} WHERE book_url = ?`, [bookUrl]);
 }
 
 /**
@@ -69,13 +70,13 @@ export async function deleteChapterCacheByBook(bookUrl: string): Promise<void> {
  */
 export async function clearAllChapterCache(): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM chapter_cache');
+  await db.execute(`DELETE FROM ${ReaderTables.chapterCache}`);
 }
 
 export async function countChapterCacheByBook(bookUrl: string): Promise<number> {
   const db = await getDatabase();
   const rows = await db.select<{ cnt: number }>(
-    'SELECT COUNT(*) as cnt FROM chapter_cache WHERE book_url = ?',
+    `SELECT COUNT(*) as cnt FROM ${ReaderTables.chapterCache} WHERE book_url = ?`,
     [bookUrl],
   );
   return rows[0]?.cnt ?? 0;
@@ -84,7 +85,7 @@ export async function countChapterCacheByBook(bookUrl: string): Promise<number> 
 export async function listChapterCacheByBook(bookUrl: string): Promise<ChapterCache[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM chapter_cache WHERE book_url = ? ORDER BY chapter_index',
+    `SELECT * FROM ${ReaderTables.chapterCache} WHERE book_url = ? ORDER BY chapter_index`,
     [bookUrl],
   );
   return rows.map(mapRowToCache);
@@ -93,7 +94,7 @@ export async function listChapterCacheByBook(bookUrl: string): Promise<ChapterCa
 export async function listDistinctCachedBookUrls(): Promise<string[]> {
   const db = await getDatabase();
   const rows = await db.select<{ book_url: string }>(
-    'SELECT DISTINCT book_url FROM chapter_cache',
+    `SELECT DISTINCT book_url FROM ${ReaderTables.chapterCache}`,
   );
   return rows.map((r) => String(r.book_url ?? ''));
 }
@@ -105,7 +106,7 @@ export async function setChapterCacheTier(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `UPDATE chapter_cache SET cache_tier = ? WHERE book_url = ? AND chapter_index = ?`,
+    `UPDATE ${ReaderTables.chapterCache} SET cache_tier = ? WHERE book_url = ? AND chapter_index = ?`,
     [cacheTier, bookUrl, chapterIndex],
   );
 }

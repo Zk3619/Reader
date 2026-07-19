@@ -4,6 +4,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { ReaderTables } from '@/lib/database/table-names';
 import type { ReadRecord } from '@/types';
 
 /**
@@ -12,7 +13,7 @@ import type { ReadRecord } from '@/types';
 export async function getAllReadRecords(): Promise<ReadRecord[]> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM readRecord ORDER BY lastRead DESC',
+    `SELECT * FROM ${ReaderTables.readRecord} ORDER BY lastRead DESC`,
   );
   return rows.map((row) => mapRowToRecord(row));
 }
@@ -27,7 +28,7 @@ export async function getReadRecord(
 ): Promise<ReadRecord | null> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
-    'SELECT * FROM readRecord WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    `SELECT * FROM ${ReaderTables.readRecord} WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?`,
     [deviceId, bookName, bookAuthor]
   );
   return rows.length > 0 ? mapRowToRecord(rows[0]) : null;
@@ -39,7 +40,7 @@ export async function getReadRecord(
 export async function upsertReadRecord(record: ReadRecord): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    `INSERT OR REPLACE INTO readRecord (
+    `INSERT OR REPLACE INTO ${ReaderTables.readRecord} (
       deviceId, bookName, bookAuthor, readTime, lastRead, durChapterTitle, durChapterIndex
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -65,7 +66,7 @@ export async function updateReadTime(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'UPDATE readRecord SET readTime = ?, lastRead = ? WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    `UPDATE ${ReaderTables.readRecord} SET readTime = ?, lastRead = ? WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?`,
     [readTime, Date.now(), deviceId, bookName, bookAuthor]
   );
 }
@@ -80,7 +81,7 @@ export async function deleteReadRecord(
 ): Promise<void> {
   const db = await getDatabase();
   await db.execute(
-    'DELETE FROM readRecord WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?',
+    `DELETE FROM ${ReaderTables.readRecord} WHERE deviceId = ? AND bookName = ? AND bookAuthor = ?`,
     [deviceId, bookName, bookAuthor]
   );
 }
@@ -90,7 +91,7 @@ export async function deleteReadRecord(
  */
 export async function clearAllReadRecords(): Promise<void> {
   const db = await getDatabase();
-  await db.execute('DELETE FROM readRecord');
+  await db.execute(`DELETE FROM ${ReaderTables.readRecord}`);
 }
 
 /**

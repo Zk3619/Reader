@@ -3,6 +3,7 @@
  */
 
 import { getDatabase } from '@/lib/database/database-core';
+import { AudioTables } from '@/lib/database/table-names';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import type { AudioPlayMode } from '@/lib/media/audio/types';
 import type { MusicPlayerListKind } from '@/stores/viewer/base-state';
@@ -35,7 +36,7 @@ export async function loadMusicPlaybackState(): Promise<MusicPlaybackRow | null>
   const db = await getDatabase();
     const rows = (await db.select(
     `SELECT list_id, track_index, position, max_time, player_list_name, player_list_kind, play_mode, tracks_json, updated_at
-     FROM music_playback_state WHERE id = 1 LIMIT 1`,
+     FROM ${AudioTables.playbackState} WHERE id = 1 LIMIT 1`,
   )) as Record<string, unknown>[];
   const row = rows[0];
   if (!row) return null;
@@ -65,7 +66,7 @@ export async function saveMusicPlaybackState(state: {
   const db = await getDatabase();
   const now = Date.now();
   await db.execute(
-    `INSERT INTO music_playback_state (
+    `INSERT INTO ${AudioTables.playbackState} (
       id, list_id, track_index, position, max_time, player_list_name, player_list_kind, play_mode, tracks_json, updated_at
     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET

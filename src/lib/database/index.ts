@@ -7,6 +7,8 @@
 export {
   initDatabase,
   getDatabase,
+  isDatabaseReady,
+  whenDatabaseReady,
   closeDatabase,
   runMigrations,
   reinitializeDatabaseAfterImport,
@@ -65,9 +67,6 @@ export * from '@/lib/database/rule-subs';
 export * from '@/lib/database/dict-rules';
 export * from '@/lib/database/keyboard-assists';
 export * from '@/lib/database/servers';
-export * from '@/lib/database/url-records';
-export * from '@/lib/database/direct-link-upload-rules';
-export * from '@/lib/database/upload-histories';
 
 export { LEGADO_SCHEMA_VERSION } from '@/lib/database/migrations';
 
