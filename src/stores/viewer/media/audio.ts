@@ -555,19 +555,21 @@ export async function applyMusicTrack(
   const prevTrack = state.trackQueue[state.trackIndex];
   const hasPlayableUrl =
     !!state.musicPrimaryUrl || (state.musicMediaUrls?.length ?? 0) > 0;
-  const sameTrack =
+  const resumingCurrentTrack =
     state.trackIndex === index &&
     !!prevTrack &&
-    musicTrackKey(prevTrack) === musicTrackKey(track) &&
+    musicTrackKey(prevTrack) === musicTrackKey(track);
+  const sameTrack =
+    resumingCurrentTrack &&
     // 队列刚整体替换时 urls 已清空，不能当成「同曲重取链」而沿用旧进度
     hasPlayableUrl;
   // 切歌时与 trackIndex 同步清进度，避免 loadSegment 读到上一曲曲末秒数
-  const musicPositionSec = resolveMusicTrackStartPositionSec({
-    sameTrack,
-    rememberProgress: getMusicSettings().rememberProgress,
-    trackKey: musicTrackKey(track),
-    currentPositionSec: state.musicPositionSec,
-  });
+  const musicPositionSec = resumingCurrentTrack
+    ? resolveMusicTrackStartPositionSec({
+        sameTrack,
+        currentPositionSec: state.musicPositionSec,
+      })
+    : 0;
   setState({
     musicLoading: true,
     musicError: null,
@@ -809,19 +811,10 @@ export function setMusicTrackQueue(
       ? TEMP_PLAYER_LIST_ID
       : listPatch.playerListId;
   // 先写入队列状态再落盘，确保快照含 tracks
-  const startTrack = tracks[startIndex];
-  const musicPositionSec = startTrack
-    ? resolveMusicTrackStartPositionSec({
-        sameTrack: false,
-        rememberProgress: getMusicSettings().rememberProgress,
-        trackKey: musicTrackKey(startTrack),
-        currentPositionSec: 0,
-      })
-    : 0;
   setState({
     trackQueue: tracks,
     trackIndex: startIndex,
-    musicPositionSec,
+    musicPositionSec: 0,
     activeSource: source ?? tracks[0]?.source ?? null,
     musicLoading: true,
     musicMediaUrls: [],

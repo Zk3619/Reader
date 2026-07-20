@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldAcceptListPlayGesture } from '@/components/viewer/audio/music/hub/list-track-play-gesture';
+import { shouldAcceptListPlayGesture } from '@/components/media/viewer/audio/music/hub/list-track-play-gesture';
 
 describe('shouldAcceptListPlayGesture', () => {
   it('mobile always accepts single click only', () => {

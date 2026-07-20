@@ -2162,6 +2162,7 @@ pub fn run() {
             tv_jar_host::tv_jar_engine_kind,
             tv_jar_host::tv_jar_invoke,
             tv_jar_host::tv_jar_json_ext,
+            tv_jar_host::tv_jar_prefetch,
             tv_jar_host::tv_start_jar_host,
             tv_jar_host::tv_jar_clear_cache,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2184,6 +2185,7 @@ pub fn run() {
             desktop_lyric::set_desktop_lyric_resizable,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_bounds,
+            desktop_lyric::clamp_desktop_lyric_to_screen,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::reset_desktop_lyric_window_geometry,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

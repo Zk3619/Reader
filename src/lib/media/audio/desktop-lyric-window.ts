@@ -26,6 +26,10 @@ async function invokeOpen(): Promise<void> {
     height: s.desktopLyricHeight ?? 200,
     x: s.desktopLyricX ?? null,
     y: s.desktopLyricY ?? null,
+    showTaskbar: s.desktopLyricShowTaskbar ?? false,
+    alwaysOnTop: s.desktopLyricAlwaysOnTop ?? true,
+    alwaysOnTopLoop: s.desktopLyricAlwaysOnTopLoop ?? false,
+    lockScreen: s.desktopLyricLockScreen ?? false,
   });
   // 若期间已请求关闭，立刻拆掉刚建好的窗
   if (gen !== openGeneration || !getMusicSettings().desktopLyricEnabled) {
@@ -79,9 +83,21 @@ export function bootstrapDesktopLyricWindow(): void {
   }) as EventListener);
 
   if (!getMusicSettings().desktopLyricEnabled) return;
-  void invokeOpen().catch((err) =>
-    console.warn('[desktop-lyric] restore open failed', err),
-  );
+  scheduleDesktopLyricRestoreOpen();
+}
+
+/** 主窗就绪后再恢复桌面歌词，避免与主 WebView 初始化抢锁卡死 */
+function scheduleDesktopLyricRestoreOpen(): void {
+  const open = () => {
+    void invokeOpen().catch((err) =>
+      console.warn('[desktop-lyric] restore open failed', err),
+    );
+  };
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(open, { timeout: 4000 });
+  } else {
+    window.setTimeout(open, 2000);
+  }
 }
 
 export function teardownDesktopLyricWindowSync(): void {
@@ -141,6 +157,34 @@ export function notifyDesktopLyricWindowClosed(): void {
   setMusicSettings({ desktopLyricEnabled: false });
   syncing = false;
   broadcastEnabled(false);
+}
+
+/** 将窗口选项同步到原生桌面歌词窗 */
+export async function syncDesktopLyricWindowOptions(
+  patch?: Partial<{
+    alwaysOnTop: boolean;
+    locked: boolean;
+    showTaskbar: boolean;
+    alwaysOnTopLoop: boolean;
+    lockScreen: boolean;
+  }>,
+): Promise<void> {
+  if (!isTauri()) return;
+  const s = getMusicSettings();
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('set_desktop_lyric_window_options', {
+    alwaysOnTop: patch?.alwaysOnTop ?? s.desktopLyricAlwaysOnTop,
+    locked: patch?.locked ?? s.desktopLyricLocked,
+    showTaskbar: patch?.showTaskbar ?? s.desktopLyricShowTaskbar,
+    alwaysOnTopLoop: patch?.alwaysOnTopLoop ?? s.desktopLyricAlwaysOnTopLoop,
+    lockScreen: patch?.lockScreen ?? s.desktopLyricLockScreen,
+  }).catch(() => undefined);
+}
+
+export async function clampDesktopLyricToScreen(): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('clamp_desktop_lyric_to_screen').catch(() => undefined);
 }
 
 /** 持久化窗口几何 */

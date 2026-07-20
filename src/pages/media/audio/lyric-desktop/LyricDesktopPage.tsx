@@ -12,7 +12,7 @@ import {
   onMount,
   type Component,
 } from 'solid-js';
-import { AudioLyricPanel } from '@/components/viewer/audio/AudioLyricPanel';
+import { AudioLyricPanel } from '@/components/media/viewer/audio/AudioLyricPanel';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -22,7 +22,9 @@ import {
 import {
   notifyDesktopLyricWindowClosed,
   persistDesktopLyricGeometry,
+  clampDesktopLyricToScreen,
 } from '@/lib/media/audio/desktop-lyric-window';
+import { buildLyricTextEffectStyle } from '@/lib/media/audio/lyric-text-shadow';
 import { isTauri } from '@/lib/platform/detect';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { resolveEffectiveLyricTrack } from '@/lib/media/audio/lyric-types';
@@ -30,6 +32,7 @@ import { getMusicPlayConfig } from '@/lib/media/audio/music-play-config';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 import { LyricDesktopControlBar } from '@/pages/media/audio/lyric-desktop/LyricDesktopControlBar';
+import { MusicAudioVisualizer } from '@/components/media/viewer/audio/music/hub/MusicAudioVisualizer';
 
 type ResizeOrigin =
   | 'left'
@@ -87,6 +90,11 @@ export const LyricDesktopPage: Component = () => {
   );
   /** 顶栏显隐：显式 hover，避免 ThemeTargetHost/group-hover 在 WebView2 上失效 */
   const [chromeVisible, setChromeVisible] = createSignal(false);
+  /** 鼠标是否在歌词窗内（用于 hoverHide 降透明度） */
+  const [shellHovered, setShellHovered] = createSignal(false);
+  const [analyserData, setAnalyserData] = createSignal<Uint8Array | null>(null);
+  /** 首帧后再挂歌词面板，避免开窗瞬间全量 DOM 阻塞 WebView */
+  const [lyricPanelReady, setLyricPanelReady] = createSignal(false);
   let chromeLeaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   const showChrome = () => {
@@ -115,9 +123,15 @@ export const LyricDesktopPage: Component = () => {
   };
 
   const onShellMouseEnter = () => {
+    setShellHovered(true);
     const s = getMusicSettings();
     if (s.desktopLyricPenetrate && s.desktopLyricPenetrateIgnoreChrome) return;
     showChrome();
+  };
+
+  const onShellMouseLeave = () => {
+    setShellHovered(false);
+    scheduleHideChrome();
   };
 
   const applyPenetrateMode = (enabled: boolean) => {
@@ -171,6 +185,9 @@ export const LyricDesktopPage: Component = () => {
       window.removeEventListener('mouseup', finish);
       window.removeEventListener('blur', finish);
       if (isWin) void setWinResizable(true);
+      if (getMusicSettings().desktopLyricLockScreen) {
+        void clampDesktopLyricToScreen();
+      }
       void persistDesktopLyricGeometry();
     };
 
@@ -273,6 +290,9 @@ export const LyricDesktopPage: Component = () => {
         cancelAnimationFrame(raf);
         flush();
       }
+      if (getMusicSettings().desktopLyricLockScreen) {
+        void clampDesktopLyricToScreen();
+      }
       void persistDesktopLyricGeometry();
     };
     window.addEventListener('mousemove', onMove);
@@ -294,6 +314,7 @@ export const LyricDesktopPage: Component = () => {
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
     void getInvoke();
+    requestAnimationFrame(() => setLyricPanelReady(true));
 
     if (!isTauri()) return;
 
@@ -301,6 +322,8 @@ export const LyricDesktopPage: Component = () => {
     let unlistenCmd: (() => void) | undefined;
     let unlistenHover: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
+    let unlistenAnalyser: (() => void) | undefined;
+    let analyserBuf: Uint8Array | undefined;
 
     void import('@tauri-apps/api/event').then(({ listen, emit }) => {
       listen<{
@@ -355,6 +378,22 @@ export const LyricDesktopPage: Component = () => {
         unlistenHover = fn;
       });
 
+      listen<number[]>('desktop-lyric-analyser', (e) => {
+        const payload = e.payload;
+        if (!Array.isArray(payload) || payload.length === 0) {
+          analyserBuf = undefined;
+          setAnalyserData(null);
+          return;
+        }
+        if (!analyserBuf || analyserBuf.length !== payload.length) {
+          analyserBuf = new Uint8Array(payload.length);
+          setAnalyserData(analyserBuf);
+        }
+        analyserBuf.set(payload);
+      }).then((fn) => {
+        unlistenAnalyser = fn;
+      });
+
       void emit('desktop-lyric-command', { action: 'request-info' });
     });
 
@@ -365,11 +404,16 @@ export const LyricDesktopPage: Component = () => {
       }).then((fn) => {
         unlistenClose = fn;
       });
+      win.onMoved(() => {
+        if (getMusicSettings().desktopLyricLockScreen) {
+          void clampDesktopLyricToScreen();
+        }
+      }).catch(() => undefined);
     });
 
     const penetrate = getMusicSettings().desktopLyricPenetrate;
     if (penetrate) {
-      applyPenetrateMode(true);
+      window.setTimeout(() => applyPenetrateMode(true), 800);
     }
     let lastNativeSyncKey = '';
     const syncNativeFromSettings = (next: ReturnType<typeof getMusicSettings>) => {
@@ -378,6 +422,9 @@ export const LyricDesktopPage: Component = () => {
         next.desktopLyricPenetrateIgnoreChrome ? 1 : 0,
         next.desktopLyricAlwaysOnTop ? 1 : 0,
         next.desktopLyricLocked ? 1 : 0,
+        next.desktopLyricShowTaskbar ? 1 : 0,
+        next.desktopLyricAlwaysOnTopLoop ? 1 : 0,
+        next.desktopLyricLockScreen ? 1 : 0,
       ].join(':');
       if (key === lastNativeSyncKey) return;
       lastNativeSyncKey = key;
@@ -385,6 +432,9 @@ export const LyricDesktopPage: Component = () => {
         void invoke('set_desktop_lyric_window_options', {
           alwaysOnTop: next.desktopLyricAlwaysOnTop,
           locked: next.desktopLyricLocked,
+          showTaskbar: next.desktopLyricShowTaskbar,
+          alwaysOnTopLoop: next.desktopLyricAlwaysOnTopLoop,
+          lockScreen: next.desktopLyricLockScreen,
         }).catch(() => undefined);
         void invoke('set_desktop_lyric_penetrate_mode', {
           enabled: !!next.desktopLyricPenetrate,
@@ -397,6 +447,9 @@ export const LyricDesktopPage: Component = () => {
       getMusicSettings().desktopLyricPenetrateIgnoreChrome ? 1 : 0,
       getMusicSettings().desktopLyricAlwaysOnTop ? 1 : 0,
       getMusicSettings().desktopLyricLocked ? 1 : 0,
+      getMusicSettings().desktopLyricShowTaskbar ? 1 : 0,
+      getMusicSettings().desktopLyricAlwaysOnTopLoop ? 1 : 0,
+      getMusicSettings().desktopLyricLockScreen ? 1 : 0,
     ].join(':');
 
     const unsubscribeSettings = subscribeMusicSettings((next) => {
@@ -421,13 +474,7 @@ export const LyricDesktopPage: Component = () => {
       }
     };
     window.addEventListener('storage', handleStorage);
-    const current = getMusicSettings();
-    void getInvoke().then((invoke) =>
-      invoke('set_desktop_lyric_window_options', {
-        alwaysOnTop: current.desktopLyricAlwaysOnTop,
-        locked: current.desktopLyricLocked,
-      }),
-    );
+    window.setTimeout(() => syncNativeFromSettings(getMusicSettings()), 600);
 
     onCleanup(() => {
       if (chromeLeaveTimer) clearTimeout(chromeLeaveTimer);
@@ -435,17 +482,26 @@ export const LyricDesktopPage: Component = () => {
       unlistenCmd?.();
       unlistenHover?.();
       unlistenClose?.();
+      unlistenAnalyser?.();
       unsubscribeSettings();
       window.removeEventListener('storage', handleStorage);
-      notifyDesktopLyricWindowClosed();
     });
   });
 
   createEffect(() => {
-    const opacity = settings().desktopLyricOpacity ?? 0.85;
+    const base = settings().desktopLyricOpacity ?? 0.85;
+    const pauseDim =
+      settings().desktopLyricHideWhenPaused && !playing() ? 0.05 : 1;
+    const hoverDim =
+      settings().desktopLyricHoverHide && shellHovered() ? 0.05 : 1;
+    // 全屏隐藏仍用 visibility；暂停/悬停对齐 LX 用内容透明度
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
-    document.body.style.setProperty('--desktop-lyric-bg', `rgba(0,0,0,${opacity})`);
+    document.body.style.setProperty('--desktop-lyric-bg', `rgba(0,0,0,${base})`);
+    document.body.style.setProperty(
+      '--desktop-lyric-content-opacity',
+      String(Math.min(pauseDim, hoverDim)),
+    );
   });
 
   createEffect(() => {
@@ -455,9 +511,8 @@ export const LyricDesktopPage: Component = () => {
   });
 
   const fontRem = () => desktopLyricFontRem(settings().desktopLyricFontSize);
-  const hidden = () =>
-    (settings().desktopLyricHideWhenPaused && !playing()) ||
-    (settings().desktopLyricHideWhenFullscreen && mainFullscreen());
+  const fullscreenHidden = () =>
+    settings().desktopLyricHideWhenFullscreen && mainFullscreen();
   const showResize = () => !settings().desktopLyricLocked;
   const metaLine = () => {
     const t = title().trim();
@@ -475,30 +530,46 @@ export const LyricDesktopPage: Component = () => {
       opacity: String(opacity),
       'font-weight': settings().desktopLyricMetaBold ? '700' : undefined,
       'line-height': '1.35',
+      ...(buildLyricTextEffectStyle({
+        enabled: settings().desktopLyricUnplayedShadow,
+        shadowColor: settings().desktopLyricUnplayedShadowColor,
+        transparentBackdrop: true,
+        mode: 'line',
+        direction: settings().desktopLyricDirection,
+      }) ?? {}),
     } as Record<string, string | undefined>;
   };
 
-  /** 双击空白区：仅用于解锁（穿透改走顶栏，避免开穿透后无法再交互） */
   const handleRootDblClick = () => {
     if (!settings().desktopLyricLocked) return;
     setMusicSettings({ desktopLyricLocked: false });
-    void getInvoke().then((invoke) =>
-      invoke('set_desktop_lyric_window_options', {
-        alwaysOnTop: getMusicSettings().desktopLyricAlwaysOnTop,
-        locked: false,
-      }),
+    void import('@/lib/media/audio/desktop-lyric-window').then(({ syncDesktopLyricWindowOptions }) =>
+      syncDesktopLyricWindowOptions({ locked: false }),
     );
+  };
+
+  const shellHeightPx = () => {
+    const fontSize = settings().desktopLyricFontSize ?? 20;
+    const layout = settings().desktopLyricLayout;
+    if (layout === 'single') return Math.max(80, fontSize * 4);
+    if (layout === 'dual') return Math.max(120, fontSize * 7);
+    return null;
   };
 
   return (
     <div
-      class="lyric-desktop-shell relative flex h-screen w-screen select-none flex-col overflow-hidden text-white"
+      class="lyric-desktop-shell relative flex w-screen select-none flex-col overflow-hidden text-white"
+      classList={{
+        'h-screen': shellHeightPx() == null,
+      }}
       style={{
         'font-family': settings().desktopLyricFontFamily || undefined,
         background: 'var(--desktop-lyric-bg, rgba(0,0,0,0.85))',
+        opacity: 'var(--desktop-lyric-content-opacity, 1)',
+        ...(shellHeightPx() != null ? { height: `${shellHeightPx()}px` } : {}),
       }}
       onMouseEnter={onShellMouseEnter}
-      onMouseLeave={scheduleHideChrome}
+      onMouseLeave={onShellMouseLeave}
       onMouseDown={startDrag}
       onDblClick={handleRootDblClick}
     >
@@ -517,10 +588,24 @@ export const LyricDesktopPage: Component = () => {
           onRequestPenetrate={applyPenetrateMode}
         />
 
+        <Show when={settings().desktopLyricAudioVisualization}>
+          <Show keyed when={settings().desktopLyricLayout}>
+            <MusicAudioVisualizer
+              getFrequencyData={() => analyserData()}
+              active={
+                settings().desktopLyricAudioVisualization &&
+                playing() &&
+                !fullscreenHidden()
+              }
+              targetFps={() => settings().desktopLyricAudioVisualizerFps}
+            />
+          </Show>
+        </Show>
+
         <div
-          class="pointer-events-none flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-3 text-center"
+          class="lyric-desktop-lyric-body pointer-events-none flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-3 text-center"
           style={{
-            visibility: hidden() ? 'hidden' : 'visible',
+            visibility: fullscreenHidden() ? 'hidden' : 'visible',
           }}
         >
           <Show when={showMeta()}>
@@ -529,6 +614,7 @@ export const LyricDesktopPage: Component = () => {
             </p>
           </Show>
           <div class="min-h-0 w-full flex-1 overflow-hidden">
+            <Show when={lyricPanelReady()}>
             <AudioLyricPanel
               class="h-full max-h-full bg-transparent"
               bundle={lyricBundle()}
@@ -541,21 +627,34 @@ export const LyricDesktopPage: Component = () => {
               secondaryOrder={settings().lyricSecondaryOrder}
               align={settings().desktopLyricAlign}
               fontSize={fontRem()}
-              zoomActiveLyric={settings().desktopLyricZoomActive}
+              zoomActiveLyric={settings().desktopLyricZoomActive !== false}
               zoomActiveScale={settings().desktopLyricZoomActiveScale ?? 1.28}
-              singleLine={settings().desktopLyricSingleLine}
+              layout={settings().desktopLyricLayout}
+              singleLine={settings().desktopLyricLayout === 'single'}
               maxLines={settings().desktopLyricMaxLines}
-              playedColor={settings().desktopLyricPlayedColor}
-              unplayedColor={settings().desktopLyricUnplayedColor}
+              playedColor={settings().desktopLyricPlayedColor || undefined}
+              unplayedColor={settings().desktopLyricUnplayedColor || undefined}
+              unplayedShadowEnabled={settings().desktopLyricUnplayedShadow}
+              unplayedShadowColor={settings().desktopLyricUnplayedShadowColor}
+              playedShadowEnabled={settings().desktopLyricPlayedShadow}
+              playedShadowColor={settings().desktopLyricPlayedShadowColor}
+              scrollDelayMs={settings().desktopLyricDelayScroll ? 600 : 0}
               scrollPosition={settings().desktopLyricScrollPosition}
               fontFamily={settings().desktopLyricFontFamily}
               lineHeight={settings().desktopLyricLineHeight}
-              textShadow={settings().desktopLyricShadow}
+              lineGap={settings().desktopLyricLineGap}
+              textShadow={settings().desktopLyricUnplayedShadow}
+              shadowColor={settings().desktopLyricUnplayedShadowColor}
               bold={settings().desktopLyricBold}
+              boldFont={settings().desktopLyricBoldFont}
+              boldLine={settings().desktopLyricBoldLine}
+              boldExtended={settings().desktopLyricBoldExtended}
               wrap={settings().desktopLyricWrap}
               direction={settings().desktopLyricDirection}
+              transparentBackdrop
               karaokeMode={settings().lyricUseLxLyric !== false}
             />
+            </Show>
           </div>
         </div>
 

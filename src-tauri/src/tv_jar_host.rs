@@ -355,7 +355,7 @@ pub fn rpc_call(port: u16, method: &str, params: serde_json::Value) -> Result<St
         Duration::from_secs(3),
     )
     .map_err(|e| format!("连接 jar-host 失败: {e}"))?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(60)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(120)));
     let req = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -460,6 +460,28 @@ pub async fn tv_jar_json_ext(
                 "url": url,
                 "flag": flag,
             }),
+        )
+    }
+}
+
+#[tauri::command]
+pub async fn tv_jar_prefetch(
+    app: AppHandle,
+    jar: String,
+) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, jar);
+        Ok(r#"{"ok":true}"#.into())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        let port = ensure_host()?;
+        rpc_call(
+            port,
+            "prefetchJar",
+            serde_json::json!({ "jar": jar }),
         )
     }
 }

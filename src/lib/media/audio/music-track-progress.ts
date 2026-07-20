@@ -49,13 +49,11 @@ export function clearMusicTrackProgress(trackKey: string): void {
 
 /**
  * 切到新曲时的起播秒数：不得沿用上一曲进度（否则列表循环会在曲末无限切歌）。
- * - 同曲重取链：保留当前进度（但若已在曲末则归零，避免立刻再 ended）
- * - 新曲：记忆进度开启则读该曲 LS，否则 0
+ * - 同曲重取链 / 启动恢复同一曲：保留当前 state 进度（贴近曲末则归零）
+ * - 切到新曲：始终从 0 开始（不读 per-track 本地记忆，避免列表循环/随机/手动切歌续播）
  */
 export function resolveMusicTrackStartPositionSec(options: {
   sameTrack: boolean;
-  rememberProgress: boolean;
-  trackKey: string;
   currentPositionSec: number;
   /** 已知时长时，贴近曲末的记忆进度视为已播完 */
   durationSec?: number;
@@ -63,8 +61,6 @@ export function resolveMusicTrackStartPositionSec(options: {
   let pos = 0;
   if (options.sameTrack) {
     pos = Math.max(0, options.currentPositionSec || 0);
-  } else if (options.rememberProgress) {
-    pos = readMusicTrackProgress(options.trackKey);
   }
   const dur = options.durationSec;
   if (dur != null && Number.isFinite(dur) && dur > 1 && pos >= Math.max(0, dur - 2)) {

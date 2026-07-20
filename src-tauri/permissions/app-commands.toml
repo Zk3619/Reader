@@ -41,6 +41,7 @@ commands.allow = [
   "set_desktop_lyric_window_options",
   "set_desktop_lyric_resizable",
   "set_desktop_lyric_bounds",
+  "clamp_desktop_lyric_to_screen",
   "reset_desktop_lyric_window_geometry",
   "is_desktop_lyric_window_open",
   "download_binary",
@@ -119,6 +120,7 @@ commands.allow = [
   "tv_jar_engine_kind",
   "tv_jar_invoke",
   "tv_jar_json_ext",
+  "tv_jar_prefetch",
   "tv_start_jar_host",
   "tv_jar_clear_cache",
 ]

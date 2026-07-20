@@ -26,4 +26,26 @@ public final class TextUtils {
     }
     return true;
   }
+
+  public static String join(CharSequence delimiter, Object[] tokens) {
+    if (tokens == null || tokens.length == 0) return "";
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < tokens.length; i++) {
+      if (i > 0) sb.append(delimiter);
+      sb.append(tokens[i]);
+    }
+    return sb.toString();
+  }
+
+  public static String join(CharSequence delimiter, Iterable<?> tokens) {
+    if (tokens == null) return "";
+    StringBuilder sb = new StringBuilder();
+    boolean first = true;
+    for (Object token : tokens) {
+      if (!first) sb.append(delimiter);
+      first = false;
+      sb.append(token);
+    }
+    return sb.toString();
+  }
 }

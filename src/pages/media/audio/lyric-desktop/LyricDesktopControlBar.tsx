@@ -137,13 +137,11 @@ function PlayModeIcon(props: { mode: AudioPlayMode }) {
 
 async function applyWindowOptions(): Promise<void> {
   if (!isTauri()) return;
-  const next = getMusicSettings();
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('set_desktop_lyric_window_options', {
-      alwaysOnTop: next.desktopLyricAlwaysOnTop,
-      locked: next.desktopLyricLocked,
-    });
+    const { syncDesktopLyricWindowOptions } = await import(
+      '@/lib/media/audio/desktop-lyric-window'
+    );
+    await syncDesktopLyricWindowOptions();
   } catch {
     /* ignore */
   }

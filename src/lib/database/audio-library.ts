@@ -2,6 +2,7 @@
  * 音频曲库数据库访问层
  */
 
+import { createStore } from 'solid-js/store';
 import { getDatabase } from '@/lib/database/database-core';
 import {
   addFavoriteTrack,
@@ -32,7 +33,40 @@ export const MUSIC_PLAYLISTS_CHANGED_EVENT = 'reader:music-playlists-changed';
 
 const RECENT_MAX = 200;
 
+/** 按 groupId 缓存列表曲目，切换已访问列表时同步命中，避免重复 SQL */
+const groupTracksCache = new Map<number, AudioTrack[]>();
+
+const [groupTracksCacheState, setGroupTracksCacheState] = createStore({ revision: 0 });
+
+function bumpGroupTracksCacheRevision(): void {
+  setGroupTracksCacheState('revision', (value) => value + 1);
+}
+
+/** 订阅缓存变更（如工具栏「播放全部」禁用态） */
+export function getGroupTracksCacheRevision(): number {
+  return groupTracksCacheState.revision;
+}
+
+export function peekGroupTracksCache(groupId: number): AudioTrack[] | undefined {
+  return groupTracksCache.get(groupId);
+}
+
+export function setGroupTracksCache(groupId: number, tracks: AudioTrack[]): void {
+  groupTracksCache.set(groupId, tracks);
+  bumpGroupTracksCacheRevision();
+}
+
+export function invalidateGroupTracksCache(groupId?: number): void {
+  if (groupId == null) {
+    groupTracksCache.clear();
+  } else {
+    groupTracksCache.delete(groupId);
+  }
+  bumpGroupTracksCacheRevision();
+}
+
 function notifyMusicPlaylistsChanged(): void {
+  invalidateGroupTracksCache();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(MUSIC_PLAYLISTS_CHANGED_EVENT));
   }
@@ -63,13 +97,18 @@ function parseMeta(json: string): AudioTrackMeta {
 }
 
 function rowToTrack(row: Record<string, unknown>): AudioTrack {
+  const meta = parseMeta(String(row.meta_json ?? '{}'));
+  const cacheTier = row.cache_tier;
+  if (cacheTier === 'manual' || cacheTier === 'auto') {
+    meta.cacheTier = cacheTier;
+  }
   return {
     id: String(row.id),
     name: String(row.name),
     artist: String(row.artist ?? ''),
     source: String(row.source ?? 'local'),
     duration: String(row.duration ?? '00:00'),
-    meta: parseMeta(String(row.meta_json ?? '{}')),
+    meta,
   };
 }
 
@@ -232,7 +271,7 @@ async function groupIdForPlaylist(playlistId: string): Promise<number | null> {
   return group?.groupId ?? null;
 }
 
-export async function getTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
+async function queryTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
   const db = await getDatabase();
   if (groupId === MediaGroupId.Favorite) {
     const rows = await db.select<Record<string, unknown>>(
@@ -251,6 +290,14 @@ export async function getTracksForGroupId(groupId: number): Promise<AudioTrack[]
     [groupId],
   );
   return rows.map(rowToTrack);
+}
+
+export async function getTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
+  const cached = groupTracksCache.get(groupId);
+  if (cached) return cached;
+  const tracks = await queryTracksForGroupId(groupId);
+  setGroupTracksCache(groupId, tracks);
+  return tracks;
 }
 
 export async function getPlaylistTracks(playlistId: string): Promise<AudioTrack[]> {
@@ -394,6 +441,7 @@ export async function reorderGroupTracks(
   trackIds: string[],
 ): Promise<void> {
   await reorderGroupItems(groupId, 'track', trackIds);
+  invalidateGroupTracksCache(groupId);
 }
 
 export async function replaceTrackInPlaylist(
@@ -419,6 +467,7 @@ export async function setPlaylistTracks(
   const groupId = await groupIdForPlaylist(playlistId);
   if (groupId == null) return;
   await setGroupItems(groupId, 'track', trackIds);
+  invalidateGroupTracksCache(groupId);
   if (isCuratedPlaylistId(playlistId) && trackIds.length > 0) {
     for (const trackId of trackIds) {
       await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, trackId);
@@ -543,6 +592,7 @@ export async function removeTrackFromPlaylist(
   const groupId = await groupIdForPlaylist(playlistId);
   if (groupId == null) return;
   await removeGroupItem(groupId, 'track', trackId);
+  invalidateGroupTracksCache(groupId);
 }
 
 export async function cacheTrackUrl(

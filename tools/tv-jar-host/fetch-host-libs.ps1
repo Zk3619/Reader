@@ -26,6 +26,10 @@ $deps = @(
   @{
     Name = "gson-2.10.1.jar"
     Url  = "https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar"
+  },
+  @{
+    Name = "bcprov-jdk18on-1.79.jar"
+    Url  = "https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/1.79/bcprov-jdk18on-1.79.jar"
   }
 )
 

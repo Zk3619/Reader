@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MUSIC_SETTINGS_SECTIONS,
-} from '@/components/viewer/audio/music/settings/music-settings-sections';
+} from '@/components/media/viewer/audio/music/settings/music-settings-sections';
 
 describe('music settings sections', () => {
   it('matches the Reader music domain category order', () => {

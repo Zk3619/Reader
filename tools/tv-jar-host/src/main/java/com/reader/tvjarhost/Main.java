@@ -6,6 +6,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.MessageDigest;
+import java.security.Security;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.jar.JarEntry;
@@ -37,6 +38,16 @@ public class Main {
         cacheArg = args[i + 1];
         i++;
       }
+    }
+    // 注册 BouncyCastle 以支持 AES/ECB/PKCS7Padding 等算法
+    try {
+      Class<?> bcProv = Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider");
+      Security.insertProviderAt((java.security.Provider) bcProv.getDeclaredConstructor().newInstance(), 1);
+      System.out.println("[tv-jar-host] BouncyCastle provider registered");
+    } catch (ClassNotFoundException e) {
+      System.err.println("[tv-jar-host] BouncyCastle not found in classpath; PKCS7Padding will be unavailable");
+    } catch (Throwable e) {
+      System.err.println("[tv-jar-host] BouncyCastle init failed: " + e.getMessage());
     }
     cacheDir = resolveCacheDir(cacheArg);
     Files.createDirectories(cacheDir);
@@ -153,6 +164,9 @@ public class Main {
           break;
         case "clearCache":
           result = clearCache();
+          break;
+        case "prefetchJar":
+          result = prefetchJar(params);
           break;
         default:
           return Json.error(id, "unknown method: " + method);
@@ -348,6 +362,23 @@ public class Main {
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("ok", true);
     out.put("path", cacheDir != null ? cacheDir.toString() : "");
+    return out;
+  }
+
+  /** 预热：下载 / dex2jar / 建立 ClassLoader，不实例化 Spider */
+  static Object prefetchJar(Map<String, Object> p) throws Exception {
+    String jar = str(p, "jar");
+    if (jar.isBlank()) {
+      Map<String, Object> out = new LinkedHashMap<>();
+      out.put("ok", false);
+      out.put("reason", "empty jar");
+      return out;
+    }
+    String jaKey = md5(jar);
+    ensureLoader(jaKey, jar);
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("ok", true);
+    out.put("key", jaKey);
     return out;
   }
 

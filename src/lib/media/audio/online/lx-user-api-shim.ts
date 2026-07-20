@@ -54,19 +54,54 @@ export function subscribeUserApiUpdateCheckFailed(
   return () => updateCheckFailedListeners.delete(listener);
 }
 
-function notifyUserApiUpdateCheckFailed(info: UserApiUpdateCheckFailed): void {
-  const key = info.scriptId || info.scriptName || info.updateUrl;
-  const now = Date.now();
-  const last = updateCheckFailedToastAt.get(key) ?? 0;
-  if (now - last < UPDATE_CHECK_FAIL_TOAST_COOLDOWN_MS) return;
-  updateCheckFailedToastAt.set(key, now);
-  for (const fn of updateCheckFailedListeners) {
+/**
+ * 是否允许展示该音源的更新相关 UI（弹窗 / 检查失败通知）。
+ * 优先读脚本列表中的实时 allowShowUpdateAlert（设置页勾选即时生效），
+ * 无脚本记录时回退到运行时 meta 捕获值。
+ */
+async function isUserApiUpdateUiAllowed(
+  scriptId: string | undefined,
+  allowFallback?: boolean,
+): Promise<boolean> {
+  if (scriptId) {
     try {
-      fn(info);
-    } catch (err) {
-      console.warn('[user-api] updateCheckFailed listener error', err);
+      const { listUserApiScripts } = await import(
+        '@/lib/media/audio/online/user-api-engine'
+      );
+      const script = listUserApiScripts().find((s) => s.id === scriptId);
+      if (script) return script.allowShowUpdateAlert !== false;
+    } catch {
+      // ignore，回退 allowFallback
     }
   }
+  return allowFallback !== false;
+}
+
+function notifyUserApiUpdateCheckFailed(
+  info: UserApiUpdateCheckFailed,
+  allowFallback?: boolean,
+): void {
+  void (async () => {
+    if (!(await isUserApiUpdateUiAllowed(info.scriptId, allowFallback))) {
+      console.info(
+        '[user-api] updateCheckFailed suppressed (allowShowUpdateAlert=false)',
+        info.scriptName,
+      );
+      return;
+    }
+    const key = info.scriptId || info.scriptName || info.updateUrl;
+    const now = Date.now();
+    const last = updateCheckFailedToastAt.get(key) ?? 0;
+    if (now - last < UPDATE_CHECK_FAIL_TOAST_COOLDOWN_MS) return;
+    updateCheckFailedToastAt.set(key, now);
+    for (const fn of updateCheckFailedListeners) {
+      try {
+        fn(info);
+      } catch (err) {
+        console.warn('[user-api] updateCheckFailed listener error', err);
+      }
+    }
+  })();
 }
 
 function isLikelyUpdateCheckUrl(url: string, updateUrl?: string): boolean {
@@ -106,14 +141,52 @@ export function clearUserApiUpdateAlert(): void {
 
 function flushPendingUpdateAlerts(): void {
   updateAlertFlushTimer = null;
-  const batch = [...pendingUpdateAlerts.values()];
-  pendingUpdateAlerts.clear();
-  if (!batch.length) return;
-  lastUpdateAlertBatch = batch;
-  for (const fn of updateAlertListeners) fn(batch);
+  void (async () => {
+    const candidates = [...pendingUpdateAlerts.values()];
+    pendingUpdateAlerts.clear();
+    const batch: UserApiUpdateAlert[] = [];
+    for (const alert of candidates) {
+      if (await isUserApiUpdateUiAllowed(alert.scriptId, true)) {
+        batch.push(alert);
+      } else {
+        console.info(
+          '[user-api] updateAlert dropped at flush (allowShowUpdateAlert=false)',
+          alert.scriptName,
+        );
+      }
+    }
+    if (!batch.length) return;
+    lastUpdateAlertBatch = batch;
+    for (const fn of updateAlertListeners) fn(batch);
+  })();
 }
 
-async function notifyUserApiUpdateAlert(alert: UserApiUpdateAlert): Promise<void> {
+/** 取消某音源更新提示后，清除其待展示 / 已缓存的更新弹窗项 */
+export function dropUserApiUpdateAlertsForScript(scriptId: string): void {
+  if (!scriptId) return;
+  for (const [key, alert] of pendingUpdateAlerts) {
+    if (alert.scriptId === scriptId) pendingUpdateAlerts.delete(key);
+  }
+  lastUpdateAlertBatch = lastUpdateAlertBatch.filter((a) => a.scriptId !== scriptId);
+  if (lastUpdateAlertBatch.length === 0 && pendingUpdateAlerts.size === 0) {
+    if (updateAlertFlushTimer) {
+      clearTimeout(updateAlertFlushTimer);
+      updateAlertFlushTimer = null;
+    }
+  }
+}
+
+async function notifyUserApiUpdateAlert(
+  alert: UserApiUpdateAlert,
+  allowFallback?: boolean,
+): Promise<void> {
+  if (!(await isUserApiUpdateUiAllowed(alert.scriptId, allowFallback))) {
+    console.info(
+      '[user-api] updateAlert suppressed (allowShowUpdateAlert=false)',
+      alert.scriptName,
+    );
+    return;
+  }
   try {
     const { shouldSuppressUserApiUpdateAlert } = await import(
       '@/lib/media/audio/online/user-api-update-prefs'
@@ -134,7 +207,9 @@ async function notifyUserApiUpdateAlert(alert: UserApiUpdateAlert): Promise<void
   pendingUpdateAlerts.set(key, alert);
   if (updateAlertFlushTimer) clearTimeout(updateAlertFlushTimer);
   // 多个音源顺序 init 时合并为一次列表弹窗
-  updateAlertFlushTimer = setTimeout(flushPendingUpdateAlerts, 800);
+  updateAlertFlushTimer = setTimeout(() => {
+    void flushPendingUpdateAlerts();
+  }, 800);
 }
 
 export type LxUserApiSourceInfo = {
@@ -709,12 +784,15 @@ export function createLxUserApiEnvironment(meta: {
               (tracksBootstrap && /\.json(?:\?|#|$)/i.test(url))
             ) {
               console.warn('[user-api] checkUpdate request failed', meta.name, error.message);
-              notifyUserApiUpdateCheckFailed({
-                scriptId: meta.id,
-                scriptName: meta.name,
-                updateUrl: meta.updateUrl || url,
-                error: error.message,
-              });
+              notifyUserApiUpdateCheckFailed(
+                {
+                  scriptId: meta.id,
+                  scriptName: meta.name,
+                  updateUrl: meta.updateUrl || url,
+                  error: error.message,
+                },
+                meta.allowShowUpdateAlert,
+              );
             }
             // 空壳 resp，避免六音等读 resp.statusCode 抛错
             invokeLxRequestCallback(
@@ -803,12 +881,15 @@ export function createLxUserApiEnvironment(meta: {
         }
         isShowedUpdateAlert = true;
         console.info('[user-api] updateAlert', { log, updateUrl, name: meta.name });
-        void notifyUserApiUpdateAlert({
-          scriptId: meta.id,
-          scriptName: meta.name,
-          log,
-          updateUrl,
-        });
+        void notifyUserApiUpdateAlert(
+          {
+            scriptId: meta.id,
+            scriptName: meta.name,
+            log,
+            updateUrl,
+          },
+          meta.allowShowUpdateAlert,
+        );
         return;
       }
       throw new Error('The event is not supported: ' + eventName);

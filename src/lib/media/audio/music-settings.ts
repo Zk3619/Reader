@@ -20,13 +20,18 @@ import {
   peekMusicConfigSync,
 } from '@/lib/media/audio/music-config-storage';
 import { isTauri } from '@/lib/platform/detect';
+import { clampVisualizerFps } from '@/lib/media/audio/music-audio-visualizer-fps';
+import {
+  normalizeMusicLyricCustomPresets,
+  type MusicLyricCustomPreset,
+} from '@/lib/media/audio/music-lyric-color-presets';
 
 const STORAGE_KEY = 'reader_music_settings';
 const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 12;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 15;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -37,9 +42,10 @@ export type MusicSearchControlStyle = 'select' | 'tabs';
 export type MusicSearchPaginationPreference = 'scroll' | 'pagination';
 /** 在线歌单页：标签控件（lx 分组下拉 / 探索页徽标堆叠） */
 export type MusicSongListTagControlStyle = 'grouped' | 'stacked';
-export type MusicLyricAlign = 'left' | 'center' | 'right';
+export type MusicLyricAlign = 'left' | 'center' | 'right' | 'justify';
 export type MusicListAddPosition = 'top' | 'bottom';
 export type MusicLyricDirection = 'horizontal' | 'vertical';
+export type MusicLyricLayout = 'default' | 'single' | 'dual';
 export type MusicLyricScrollPosition = 'top' | 'center' | 'bottom';
 export type MusicDownloadSourceStrategy = 'primary' | 'fallback';
 /** 播放栏进度条布局，对齐 LX Music 的 mini / middle / full。 */
@@ -96,6 +102,8 @@ export interface MusicSettings {
   /** 使用当前设备声明的最大输出声道数。 */
   audioUseMaxChannels: boolean;
   audioVisualizationEnabled: boolean;
+  /** 播放详情频谱可视化帧率（fps） */
+  playDetailAudioVisualizerFps: number;
   lyricOffset: number;
   lyricTrack: 'lyric' | 'tlyric' | 'rlyric' | 'lxlyric';
   lyricSecondaryOrder: 'translation-first' | 'roma-first';
@@ -115,6 +123,17 @@ export interface MusicSettings {
   /** 双击歌词行跳转到对应进度 */
   playDetailLyricDoubleClickSeek: boolean;
   playDetailLyricScrollDelayMs: number;
+  /** @deprecated 播放详情固定默认布局，保留字段仅供旧配置迁移 */
+  playDetailLyricLayout: MusicLyricLayout;
+  /** 播放详情已播放字色（空=主题色） */
+  playDetailLyricPlayedColor: string;
+  /** 播放详情未播放字色（空=主题色） */
+  playDetailLyricUnplayedColor: string;
+  playDetailLyricColorPreset: string;
+  playDetailLyricUnplayedShadow: boolean;
+  playDetailLyricUnplayedShadowColor: string;
+  playDetailLyricPlayedShadow: boolean;
+  playDetailLyricPlayedShadowColor: string;
   /** 播放详情以独立全视口覆盖层展示（覆盖主壳顶栏/侧栏） */
   playDetailStandalone: boolean;
   /** 隐藏播放详情顶栏，将返回/设置按钮分布到内容顶部 */
@@ -180,6 +199,10 @@ export interface MusicSettings {
   desktopLyricTrack?: 'lyric' | 'tlyric' | 'rlyric' | 'lxlyric';
   desktopLyricFontSize?: number;
   desktopLyricOpacity?: number;
+  /** 设置页字号/间距输入单位（存储仍为 px） */
+  desktopLyricFontSizeUnit?: MusicFontSizeUnit;
+  desktopLyricLineGapUnit?: MusicFontSizeUnit;
+  desktopLyricMetaFontSizeUnit?: MusicFontSizeUnit;
   /** 是否显示歌名与艺术家（关闭后移除该区域） */
   desktopLyricShowMeta: boolean;
   /** 歌名/艺术家字号（px） */
@@ -192,20 +215,54 @@ export interface MusicSettings {
   desktopLyricZoomActive: boolean;
   /** 桌面歌词当前行缩放倍率 */
   desktopLyricZoomActiveScale: number;
+  /** 歌词布局：默认多行 / 单行 / 双行 */
+  desktopLyricLayout: MusicLyricLayout;
+  /** @deprecated 由 desktopLyricLayout === 'single' 推导 */
   desktopLyricSingleLine: boolean;
   desktopLyricMaxLines: number;
+  desktopLyricColorPreset: string;
   desktopLyricPlayedColor: string;
   desktopLyricUnplayedColor: string;
   desktopLyricLocked: boolean;
   desktopLyricAlwaysOnTop: boolean;
+  /** 暂停时降低歌词不透明度（对齐 LX desktopLyric.pauseHide） */
   desktopLyricHideWhenPaused: boolean;
   desktopLyricHideWhenFullscreen: boolean;
+  /** 桌面歌词窗口内音频可视化（对齐 LX desktopLyric.audioVisualization） */
+  desktopLyricAudioVisualization: boolean;
+  /** 桌面歌词频谱 IPC 帧率（fps） */
+  desktopLyricAudioVisualizerFps: number;
+  /** 延迟歌词滚动（对齐 LX desktopLyric.isDelayScroll） */
+  desktopLyricDelayScroll: boolean;
+  /** 在任务栏显示歌词进程（对齐 LX desktopLyric.isShowTaskbar） */
+  desktopLyricShowTaskbar: boolean;
+  /** 自动刷新歌词置顶（对齐 LX desktopLyric.isAlwaysOnTopLoop） */
+  desktopLyricAlwaysOnTopLoop: boolean;
+  /** 不允许歌词窗口拖出主屏幕（对齐 LX desktopLyric.isLockScreen） */
+  desktopLyricLockScreen: boolean;
+  /** 鼠标移入时降低歌词不透明度（对齐 LX desktopLyric.isHoverHide） */
+  desktopLyricHoverHide: boolean;
   desktopLyricDirection: MusicLyricDirection;
   desktopLyricScrollPosition: MusicLyricScrollPosition;
   desktopLyricFontFamily: string;
+  /** 行间距（px，对齐 LX desktopLyric.style.lineGap） */
+  desktopLyricLineGap: number;
   desktopLyricLineHeight: number;
+  /** 未播放描边/外发光 */
+  desktopLyricUnplayedShadow: boolean;
+  desktopLyricUnplayedShadowColor: string;
+  /** 已播放描边/外发光 */
+  desktopLyricPlayedShadow: boolean;
+  desktopLyricPlayedShadowColor: string;
+  /** @deprecated 使用 desktopLyricUnplayedShadow */
   desktopLyricShadow: boolean;
+  /** @deprecated 使用 desktopLyricUnplayedShadowColor */
+  desktopLyricShadowColor: string;
+  /** @deprecated 使用 desktopLyricBoldFont/Line/Extended */
   desktopLyricBold: boolean;
+  desktopLyricBoldFont: boolean;
+  desktopLyricBoldLine: boolean;
+  desktopLyricBoldExtended: boolean;
   desktopLyricWrap: boolean;
   openApiPort: number;
   openApiBindAddress: string;
@@ -229,6 +286,8 @@ export interface MusicSettings {
   showLyricTranslation?: boolean;
   /** 歌词是否显示罗马音 */
   showLyricRoma?: boolean;
+  /** 用户自定义歌词颜色预设（播放详情 / 桌面歌词共用） */
+  customLyricColorPresets: MusicLyricCustomPreset[];
   /** 音乐播放器音量（0-1） */
   musicVolume: number;
   /** 音乐播放器静音状态 */
@@ -269,6 +328,7 @@ const DEFAULTS: MusicSettings = {
   audioMaxChannels: 2,
   audioUseMaxChannels: false,
   audioVisualizationEnabled: false,
+  playDetailAudioVisualizerFps: 60,
   lyricOffset: 0,
   lyricTrack: 'lyric',
   lyricSecondaryOrder: 'roma-first',
@@ -283,6 +343,14 @@ const DEFAULTS: MusicSettings = {
   playDetailLyricSeekAutoPlayOnRelease: false,
   playDetailLyricDoubleClickSeek: false,
   playDetailLyricScrollDelayMs: 0,
+  playDetailLyricLayout: 'default',
+  playDetailLyricPlayedColor: '',
+  playDetailLyricUnplayedColor: '',
+  playDetailLyricColorPreset: 'system',
+  playDetailLyricUnplayedShadow: false,
+  playDetailLyricUnplayedShadowColor: 'rgba(0, 0, 0, 0.18)',
+  playDetailLyricPlayedShadow: false,
+  playDetailLyricPlayedShadowColor: 'rgba(0, 0, 0, 0.28)',
   playDetailStandalone: false,
   playDetailHideHeader: false,
   playDetailDesktopSidePaneDrawer: false,
@@ -325,6 +393,9 @@ const DEFAULTS: MusicSettings = {
   desktopLyricPenetrateIgnoreChrome: false,
   desktopLyricTrack: 'lxlyric',
   desktopLyricFontSize: 20,
+  desktopLyricFontSizeUnit: 'px',
+  desktopLyricLineGapUnit: 'px',
+  desktopLyricMetaFontSizeUnit: 'px',
   desktopLyricOpacity: 0.85,
   desktopLyricShowMeta: true,
   desktopLyricMetaFontSize: 14,
@@ -333,20 +404,39 @@ const DEFAULTS: MusicSettings = {
   desktopLyricAlign: 'center',
   desktopLyricZoomActive: true,
   desktopLyricZoomActiveScale: 1.28,
+  desktopLyricLayout: 'default',
   desktopLyricSingleLine: false,
   desktopLyricMaxLines: 5,
-  desktopLyricPlayedColor: '#ffffff',
-  desktopLyricUnplayedColor: 'rgba(255, 255, 255, 0.5)',
+  desktopLyricColorPreset: 'system',
+  desktopLyricPlayedColor: '',
+  desktopLyricUnplayedColor: '',
   desktopLyricLocked: false,
   desktopLyricAlwaysOnTop: true,
-  desktopLyricHideWhenPaused: false,
+  desktopLyricHideWhenPaused: true,
   desktopLyricHideWhenFullscreen: true,
+  desktopLyricAudioVisualization: false,
+  desktopLyricAudioVisualizerFps: 60,
+  desktopLyricDelayScroll: true,
+  desktopLyricShowTaskbar: false,
+  desktopLyricAlwaysOnTopLoop: false,
+  desktopLyricLockScreen:
+    typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
+  desktopLyricHoverHide: false,
   desktopLyricDirection: 'horizontal',
   desktopLyricScrollPosition: 'center',
   desktopLyricFontFamily: '',
+  desktopLyricLineGap: 15,
   desktopLyricLineHeight: 1.5,
+  desktopLyricUnplayedShadow: false,
+  desktopLyricUnplayedShadowColor: 'rgba(0, 0, 0, 0.18)',
+  desktopLyricPlayedShadow: false,
+  desktopLyricPlayedShadowColor: 'rgba(0, 0, 0, 0.28)',
   desktopLyricShadow: true,
+  desktopLyricShadowColor: 'rgba(0, 0, 0, 0.18)',
   desktopLyricBold: false,
+  desktopLyricBoldFont: true,
+  desktopLyricBoldLine: true,
+  desktopLyricBoldExtended: true,
   desktopLyricWrap: true,
   openApiPort: 23330,
   openApiBindAddress: '127.0.0.1',
@@ -364,6 +454,7 @@ const DEFAULTS: MusicSettings = {
   autoSkipOnError: true,
   showLyricTranslation: false,
   showLyricRoma: false,
+  customLyricColorPresets: [],
   musicVolume: 1,
   musicMuted: false,
 };
@@ -395,7 +486,12 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   lyricSecondaryOrder: ['translation-first', 'roma-first'],
   lyricChineseConversion: [0, 1, 2],
   playDetailLyricAlign: ['left', 'center', 'right'],
+  playDetailLyricLayout: ['default', 'single', 'dual'],
+  desktopLyricLayout: ['default', 'single', 'dual'],
   playDetailLyricFontSizeUnit: ['rem', 'px'],
+  desktopLyricFontSizeUnit: ['rem', 'px'],
+  desktopLyricLineGapUnit: ['rem', 'px'],
+  desktopLyricMetaFontSizeUnit: ['rem', 'px'],
   playQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   playQualityPreference: [
     'lowest',
@@ -411,7 +507,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   urlSourceMode: ['builtin', 'userApi', 'auto'],
   listAddPosition: ['top', 'bottom'],
   desktopLyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
-  desktopLyricAlign: ['left', 'center', 'right'],
+  desktopLyricAlign: ['left', 'center', 'right', 'justify'],
   desktopLyricDirection: ['horizontal', 'vertical'],
   desktopLyricScrollPosition: ['top', 'center', 'bottom'],
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
@@ -457,9 +553,25 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'desktopLyric.style.isZoomActiveLrc': 'desktopLyricZoomActive',
   'desktopLyric.style.lyricPlayedColor': 'desktopLyricPlayedColor',
   'desktopLyric.style.lyricUnplayColor': 'desktopLyricUnplayedColor',
+  'desktopLyric.style.lyricShadowColor': 'desktopLyricShadowColor',
+  'desktopLyric.style.font': 'desktopLyricFontFamily',
+  'desktopLyric.style.lineGap': 'desktopLyricLineGap',
+  'desktopLyric.style.isFontWeightFont': 'desktopLyricBoldFont',
+  'desktopLyric.style.isFontWeightLine': 'desktopLyricBoldLine',
+  'desktopLyric.style.isFontWeightExtended': 'desktopLyricBoldExtended',
   'desktopLyric.enable': 'desktopLyricEnabled',
   'desktopLyric.isLock': 'desktopLyricLocked',
   'desktopLyric.isAlwaysOnTop': 'desktopLyricAlwaysOnTop',
+  'desktopLyric.isAlwaysOnTopLoop': 'desktopLyricAlwaysOnTopLoop',
+  'desktopLyric.isShowTaskbar': 'desktopLyricShowTaskbar',
+  'desktopLyric.pauseHide': 'desktopLyricHideWhenPaused',
+  'desktopLyric.fullscreenHide': 'desktopLyricHideWhenFullscreen',
+  'desktopLyric.audioVisualization': 'desktopLyricAudioVisualization',
+  'desktopLyric.isDelayScroll': 'desktopLyricDelayScroll',
+  'desktopLyric.isLockScreen': 'desktopLyricLockScreen',
+  'desktopLyric.isHoverHide': 'desktopLyricHoverHide',
+  'desktopLyric.direction': 'desktopLyricDirection',
+  'desktopLyric.scrollAlign': 'desktopLyricScrollPosition',
   'list.isShowSource': 'listShowSource',
   'list.isSaveScrollLocation': 'listSaveScrollPosition',
   'list.actionButtonsVisible': 'listActionButtonsVisible',
@@ -481,6 +593,12 @@ function importLxDottedKeys(raw: Record<string, unknown>): Record<string, unknow
     typeof raw['desktopLyric.style.opacity'] === 'number'
   ) {
     mapped.desktopLyricOpacity = raw['desktopLyric.style.opacity'] / 100;
+  }
+  if (
+    mapped.desktopLyricWrap === undefined &&
+    typeof raw['desktopLyric.style.ellipsis'] === 'boolean'
+  ) {
+    mapped.desktopLyricWrap = !raw['desktopLyric.style.ellipsis'];
   }
   if (
     mapped.playDetailLyricFontSize === undefined &&
@@ -546,6 +664,8 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return clampPlayDetailLyricFontRem(value);
     case 'desktopLyricLineHeight':
       return Math.max(1, Math.min(3, value));
+    case 'desktopLyricLineGap':
+      return Math.max(0, Math.min(25, Math.round(value)));
     case 'playDetailZoomActiveScale':
     case 'desktopLyricZoomActiveScale':
       return Math.max(1, Math.min(1.8, Math.round(value * 100) / 100));
@@ -555,6 +675,9 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return Math.max(0, Math.round(value));
     case 'musicSongListSpacing':
       return Math.max(0, Math.min(24, Math.round(value)));
+    case 'playDetailAudioVisualizerFps':
+    case 'desktopLyricAudioVisualizerFps':
+      return clampVisualizerFps(value);
     default:
       return value;
   }
@@ -593,6 +716,9 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
     customEq.every((value) => typeof value === 'number' && Number.isFinite(value))
       ? customEq.map((value) => Math.max(-12, Math.min(12, value)))
       : null;
+  normalized.customLyricColorPresets = normalizeMusicLyricCustomPresets(
+    source.customLyricColorPresets,
+  );
   if (normalized.lyricUseLxLyric === false && normalized.lyricTrack === 'lxlyric') {
     normalized.lyricTrack = 'lyric';
   }
@@ -638,6 +764,50 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
       prevSchema < 9
         ? migratePlayDetailLyricFontSizeToRem(source.playDetailLyricFontSize)
         : clampPlayDetailLyricFontRem(source.playDetailLyricFontSize);
+  }
+  // 阴影字段迁移
+  if (source.desktopLyricShadow !== undefined && source.desktopLyricUnplayedShadow === undefined) {
+    normalized.desktopLyricUnplayedShadow = source.desktopLyricShadow as boolean;
+  }
+  if (
+    typeof source.desktopLyricShadowColor === 'string' &&
+    source.desktopLyricUnplayedShadowColor === undefined
+  ) {
+    normalized.desktopLyricUnplayedShadowColor = source.desktopLyricShadowColor;
+  }
+  normalized.desktopLyricShadow = normalized.desktopLyricUnplayedShadow;
+  normalized.desktopLyricShadowColor = normalized.desktopLyricUnplayedShadowColor;
+  // 布局迁移
+  if (source.desktopLyricLayout === undefined) {
+    normalized.desktopLyricLayout = source.desktopLyricSingleLine ? 'single' : 'default';
+  }
+  normalized.desktopLyricSingleLine = normalized.desktopLyricLayout === 'single';
+  normalized.playDetailLyricLayout = 'default';
+  if (
+    normalized.desktopLyricLayout !== 'dual' &&
+    normalized.desktopLyricAlign === 'justify'
+  ) {
+    normalized.desktopLyricAlign = 'center';
+  }
+  if (source.playDetailLyricLayout === undefined && source.playDetailLyricSingleLine === true) {
+    normalized.playDetailLyricLayout = 'default';
+  }
+  // schema < 15：system 预设统一为主题语义（播放详情 / 桌面歌词）
+  if ((source.schemaVersion as number | undefined) === undefined || (source.schemaVersion as number) < 15) {
+    if (normalized.desktopLyricColorPreset === 'system') {
+      normalized.desktopLyricPlayedColor = '';
+      normalized.desktopLyricUnplayedColor = '';
+      normalized.desktopLyricUnplayedShadow = false;
+      normalized.desktopLyricPlayedShadow = false;
+      normalized.desktopLyricShadow = normalized.desktopLyricUnplayedShadow;
+      normalized.desktopLyricShadowColor = normalized.desktopLyricUnplayedShadowColor;
+    }
+    if (normalized.playDetailLyricColorPreset === 'system') {
+      normalized.playDetailLyricPlayedColor = '';
+      normalized.playDetailLyricUnplayedColor = '';
+      normalized.playDetailLyricUnplayedShadow = false;
+      normalized.playDetailLyricPlayedShadow = false;
+    }
   }
   return normalized as MusicSettings;
 }

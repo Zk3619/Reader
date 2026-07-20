@@ -16,6 +16,7 @@ import {
   isLxUserApiScript,
   loadLxUserApiScript,
   parseLxScriptHeaderMeta,
+  dropUserApiUpdateAlertsForScript,
   type LxRequestPayload,
 } from '@/lib/media/audio/online/lx-user-api-shim';
 import {
@@ -538,6 +539,9 @@ export function setUserApiAllowShowUpdateAlert(id: string, allow: boolean): void
   scripts.set(id, { ...script, allowShowUpdateAlert: allow });
   persistScripts();
   notifyScriptsChanged();
+  if (!allow) {
+    dropUserApiUpdateAlertsForScript(id);
+  }
 }
 
 export function setUserApiDefaultScript(id: string | null): void {
