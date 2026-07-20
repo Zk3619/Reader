@@ -48,12 +48,36 @@ export const MediaGroupId = {
   /** 试听列表（播放过且未加入其它列表） */
   MusicTrial: -23,
   MusicUserStart: -1000,
-  /** 影视：最近观看 */
+  /**
+   * @deprecated v120 起观看历史写入 video_play_record，不再使用该分组
+   */
   VideoRecent: -30,
-  /** 影视：收藏 */
+  /**
+   * @deprecated v120 起收藏为 tracks.library + 系统分组，不再使用该分组
+   */
   VideoKeep: -31,
+  /** 影视系统分组：全部 */
+  VideoAll: -40,
+  /** 影视系统分组：点播 */
+  VideoVod: -41,
+  /** 影视系统分组：直播 */
+  VideoLive: -42,
+  /** 影视系统分组：本地 */
+  VideoLocal: -43,
   VideoUserStart: -2000,
 } as const;
+
+/** 影视系统分组（虚拟过滤 library 片单） */
+export const VIDEO_SYSTEM_GROUP_IDS = [
+  MediaGroupId.VideoAll,
+  MediaGroupId.VideoVod,
+  MediaGroupId.VideoLive,
+  MediaGroupId.VideoLocal,
+] as const;
+
+export function isVideoSystemGroupId(groupId: number): boolean {
+  return (VIDEO_SYSTEM_GROUP_IDS as readonly number[]).includes(groupId);
+}
 
 /** @deprecated 使用 MediaGroupId */
 export const BookGroupId = MediaGroupId;

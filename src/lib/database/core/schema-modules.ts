@@ -22,7 +22,7 @@ export const SCHEMA_MODULE_TARGET: Record<SchemaModuleId, number> = {
   shell: 4,
   reader: 6,
   audio: 7,
-  video: 6,
+  video: 8,
   subscribe: 2,
 };
 

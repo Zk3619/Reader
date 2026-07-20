@@ -56,6 +56,8 @@ export const VideoTables = {
   tracks: 'video_tracks',
   groups: 'video_groups',
   groupItems: 'video_group_items',
+  /** 观看记录（独立于分组，对齐 reader_read_record） */
+  playRecord: 'video_play_record',
   sitePref: 'video_site_pref',
   searchKeywords: 'video_search_keywords',
 } as const;

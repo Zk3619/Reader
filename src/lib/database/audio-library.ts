@@ -2,7 +2,6 @@
  * 音频曲库数据库访问层
  */
 
-import { createStore } from 'solid-js/store';
 import { getDatabase } from '@/lib/database/database-core';
 import {
   addFavoriteTrack,
@@ -18,6 +17,15 @@ import {
   getNextMusicUserGroupId,
   insertGroup as insertMediaGroup,
 } from '@/lib/database/media-groups';
+import {
+  getGroupTracksCacheRevision,
+  invalidateGroupTracksCache,
+  loadGroupTracksThroughCache,
+  peekGroupTracksCache,
+  prependTrackInGroupTracksCache,
+  removeTrackFromGroupTracksCache,
+  setGroupTracksCache,
+} from '@/lib/database/group-tracks-cache';
 import { AudioTables, ShellTables } from '@/lib/database/table-names';
 import { MediaGroupId } from '@/types/book-group';
 import type {
@@ -31,44 +39,43 @@ import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 
 export const MUSIC_PLAYLISTS_CHANGED_EVENT = 'reader:music-playlists-changed';
 
+export type MusicPlaylistsChangedDetail = {
+  /** 受影响曲目缓存的 groupId；省略表示可能影响全部 */
+  groupIds?: number[];
+  /**
+   * 侧栏歌单列表是否变化（建删改名/侧栏排序）。
+   * `false`：仅曲目变化，勿整表刷新侧栏。
+   */
+  listsChanged?: boolean;
+  /** 调用方已按 group 更新/失效缓存，勿再整表 invalidate */
+  cachesPatched?: boolean;
+};
+
+export {
+  getGroupTracksCacheRevision,
+  invalidateGroupTracksCache,
+  peekGroupTracksCache,
+  setGroupTracksCache,
+};
+
 const RECENT_MAX = 200;
 
-/** 按 groupId 缓存列表曲目，切换已访问列表时同步命中，避免重复 SQL */
-const groupTracksCache = new Map<number, AudioTrack[]>();
-
-const [groupTracksCacheState, setGroupTracksCacheState] = createStore({ revision: 0 });
-
-function bumpGroupTracksCacheRevision(): void {
-  setGroupTracksCacheState('revision', (value) => value + 1);
-}
-
-/** 订阅缓存变更（如工具栏「播放全部」禁用态） */
-export function getGroupTracksCacheRevision(): number {
-  return groupTracksCacheState.revision;
-}
-
-export function peekGroupTracksCache(groupId: number): AudioTrack[] | undefined {
-  return groupTracksCache.get(groupId);
-}
-
-export function setGroupTracksCache(groupId: number, tracks: AudioTrack[]): void {
-  groupTracksCache.set(groupId, tracks);
-  bumpGroupTracksCacheRevision();
-}
-
-export function invalidateGroupTracksCache(groupId?: number): void {
-  if (groupId == null) {
-    groupTracksCache.clear();
-  } else {
-    groupTracksCache.delete(groupId);
+function notifyMusicPlaylistsChanged(detail?: MusicPlaylistsChangedDetail): void {
+  if (!detail?.cachesPatched) {
+    if (detail?.groupIds && detail.groupIds.length > 0) {
+      for (const id of detail.groupIds) {
+        invalidateGroupTracksCache(id);
+      }
+    } else if (!detail?.groupIds) {
+      invalidateGroupTracksCache();
+    }
   }
-  bumpGroupTracksCacheRevision();
-}
-
-function notifyMusicPlaylistsChanged(): void {
-  invalidateGroupTracksCache();
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(MUSIC_PLAYLISTS_CHANGED_EVENT));
+    window.dispatchEvent(
+      new CustomEvent<MusicPlaylistsChangedDetail>(MUSIC_PLAYLISTS_CHANGED_EVENT, {
+        detail: detail ?? {},
+      }),
+    );
   }
 }
 
@@ -293,11 +300,7 @@ async function queryTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
 }
 
 export async function getTracksForGroupId(groupId: number): Promise<AudioTrack[]> {
-  const cached = groupTracksCache.get(groupId);
-  if (cached) return cached;
-  const tracks = await queryTracksForGroupId(groupId);
-  setGroupTracksCache(groupId, tracks);
-  return tracks;
+  return loadGroupTracksThroughCache(groupId, () => queryTracksForGroupId(groupId));
 }
 
 export async function getPlaylistTracks(playlistId: string): Promise<AudioTrack[]> {
@@ -355,14 +358,16 @@ export async function isTrackInCuratedList(trackId: string): Promise<boolean> {
 }
 
 /** 维护试听列表：未加入其它列表则写入，已加入则移出 */
-export async function syncTrialListMembership(track: AudioTrack): Promise<void> {
+export async function syncTrialListMembership(
+  track: AudioTrack,
+): Promise<'added' | 'removed'> {
   if (await isTrackInCuratedList(track.id)) {
     await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, track.id);
-    return;
+    return 'removed';
   }
   await upsertAudioTrack(track);
   const groupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL);
-  if (groupId == null) return;
+  if (groupId == null) return 'removed';
   const db = await getDatabase();
   await withDatabaseBusyRetry(() =>
     db.execute(
@@ -387,6 +392,7 @@ export async function syncTrialListMembership(track: AudioTrack): Promise<void> 
       [groupId, RECENT_MAX],
     ),
   );
+  return 'added';
 }
 
 /** 用给定曲目整体替换「播放列表」（显式收藏/导入场景；在线整表播放请用临时队列） */
@@ -396,7 +402,11 @@ export async function replaceDefaultPlayList(tracks: AudioTrack[]): Promise<void
     BUILTIN_PLAYLIST_IDS.DEFAULT,
     tracks.map((track) => track.id),
   );
-  notifyMusicPlaylistsChanged();
+  const groupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.DEFAULT);
+  notifyMusicPlaylistsChanged({
+    groupIds: groupId != null ? [groupId] : undefined,
+    listsChanged: false,
+  });
 }
 
 export async function addTracksToPlaylist(
@@ -425,7 +435,14 @@ export async function addTracksToPlaylist(
     }
   }
   if (tracks.length > 0) {
-    notifyMusicPlaylistsChanged();
+    const groupId = await groupIdForPlaylist(playlistId);
+    const trialGroupId = isCuratedPlaylistId(playlistId)
+      ? await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL)
+      : null;
+    notifyMusicPlaylistsChanged({
+      groupIds: [groupId, trialGroupId].filter((id): id is number => id != null),
+      listsChanged: false,
+    });
   }
 }
 
@@ -441,7 +458,8 @@ export async function reorderGroupTracks(
   trackIds: string[],
 ): Promise<void> {
   await reorderGroupItems(groupId, 'track', trackIds);
-  invalidateGroupTracksCache(groupId);
+  // 不在此处 invalidate：由调用方 setGroupTracksCache 原子替换顺序，
+  // 避免空窗期 list() 回落到旧 resource / 在途查询写回旧序。
 }
 
 export async function replaceTrackInPlaylist(
@@ -472,6 +490,21 @@ export async function setPlaylistTracks(
     for (const trackId of trackIds) {
       await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, trackId);
     }
+  }
+}
+
+/** 按完整曲目数组重排并立即写回缓存，避免 invalidate 空窗被旧 resource / 在途查询填回 */
+export async function setPlaylistTrackOrder(
+  playlistId: string,
+  tracks: AudioTrack[],
+): Promise<void> {
+  await setPlaylistTracks(
+    playlistId,
+    tracks.map((track) => track.id),
+  );
+  const groupId = await groupIdForPlaylist(playlistId);
+  if (groupId != null) {
+    setGroupTracksCache(groupId, tracks);
   }
 }
 
@@ -592,7 +625,7 @@ export async function removeTrackFromPlaylist(
   const groupId = await groupIdForPlaylist(playlistId);
   if (groupId == null) return;
   await removeGroupItem(groupId, 'track', trackId);
-  invalidateGroupTracksCache(groupId);
+  removeTrackFromGroupTracksCache(groupId, trackId);
 }
 
 export async function cacheTrackUrl(
@@ -655,8 +688,20 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
         [groupId, RECENT_MAX],
       ),
     );
-    await syncTrialListMembership(track);
-    notifyMusicPlaylistsChanged();
+    const trialResult = await syncTrialListMembership(track);
+    const trialGroupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL);
+    prependTrackInGroupTracksCache(groupId, track, RECENT_MAX);
+    if (trialGroupId != null && trialResult === 'added') {
+      prependTrackInGroupTracksCache(trialGroupId, track, RECENT_MAX);
+    }
+    const affected = [groupId, trialGroupId].filter(
+      (id): id is number => id != null,
+    );
+    notifyMusicPlaylistsChanged({
+      groupIds: affected,
+      listsChanged: false,
+      cachesPatched: true,
+    });
   };
   const result = recentPlayWriteQueue.then(persist, persist);
   recentPlayWriteQueue = result.catch(() => undefined);
@@ -666,7 +711,15 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
 export async function addTrackToLove(trackId: string): Promise<void> {
   await addFavoriteTrack(trackId);
   await removeTrackFromPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL, trackId);
-  notifyMusicPlaylistsChanged();
+  invalidateGroupTracksCache(MediaGroupId.Favorite);
+  const trialGroupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL);
+  notifyMusicPlaylistsChanged({
+    groupIds: [MediaGroupId.Favorite, trialGroupId].filter(
+      (id): id is number => id != null,
+    ),
+    listsChanged: false,
+    cachesPatched: true,
+  });
 }
 
 export async function removeTrackFromLove(trackId: string): Promise<void> {

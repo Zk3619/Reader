@@ -89,6 +89,10 @@ import {
   migrateMusicLyricCoverCacheV119,
 } from '@/lib/database/migration-v119-music-lyric-cover-cache';
 import {
+  VIDEO_PLAY_RECORD_SCHEMA_VERSION,
+  migrateVideoPlayRecordV120,
+} from '@/lib/database/migration-v120-video-play-record';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -610,5 +614,9 @@ export const migrations: Migration[] = [
   {
     version: MUSIC_LYRIC_COVER_CACHE_SCHEMA_VERSION,
     up: migrateMusicLyricCoverCacheV119,
+  },
+  {
+    version: VIDEO_PLAY_RECORD_SCHEMA_VERSION,
+    up: migrateVideoPlayRecordV120,
   },
 ];

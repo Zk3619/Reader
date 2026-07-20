@@ -14,7 +14,7 @@ import { DEFAULT_KEYBOARD_ASSISTS } from '@/lib/database/default-keyboard-assist
 import { DEFAULT_TXT_TOC_RULES } from '@/lib/database/default-txt-toc-rules';
 import { DEFAULT_DICT_RULES } from '@/lib/database/default-dict-rules';
 import { LEGADO_SCHEMA_VERSION } from '@/lib/database/migration-v96';
-import { ReaderTables, AudioTables } from '@/lib/database/table-names';
+import { ReaderTables, AudioTables, VideoTables } from '@/lib/database/table-names';
 import { tableExists } from '@/lib/database/core/migration-helpers';
 
 let db: DatabaseAdapter | null = null;
@@ -259,6 +259,30 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
       INSERT INTO ${AudioTables.groups}(groupId, groupName, "order", enableRefresh, show, bookSort, listId, source)
       SELECT -22, '本地音乐', -2, 0, 1, -1, 'local', 'builtin'
       WHERE NOT EXISTS (SELECT * FROM ${AudioTables.groups} WHERE groupId = -22)
+    `);
+  }
+
+  const hasVideoGroups = await tableExists(db, VideoTables.groups);
+  if (hasVideoGroups) {
+    await db.execute(`
+      INSERT INTO ${VideoTables.groups}(groupId, groupName, "order", enableRefresh, show, bookSort, listId, source)
+      SELECT -40, '全部', -10, 0, 1, -1, 'all', 'builtin'
+      WHERE NOT EXISTS (SELECT * FROM ${VideoTables.groups} WHERE groupId = -40)
+    `);
+    await db.execute(`
+      INSERT INTO ${VideoTables.groups}(groupId, groupName, "order", enableRefresh, show, bookSort, listId, source)
+      SELECT -41, '点播', -9, 0, 1, -1, 'vod', 'builtin'
+      WHERE NOT EXISTS (SELECT * FROM ${VideoTables.groups} WHERE groupId = -41)
+    `);
+    await db.execute(`
+      INSERT INTO ${VideoTables.groups}(groupId, groupName, "order", enableRefresh, show, bookSort, listId, source)
+      SELECT -42, '直播', -8, 0, 1, -1, 'live', 'builtin'
+      WHERE NOT EXISTS (SELECT * FROM ${VideoTables.groups} WHERE groupId = -42)
+    `);
+    await db.execute(`
+      INSERT INTO ${VideoTables.groups}(groupId, groupName, "order", enableRefresh, show, bookSort, listId, source)
+      SELECT -43, '本地', -7, 0, 1, -1, 'local', 'builtin'
+      WHERE NOT EXISTS (SELECT * FROM ${VideoTables.groups} WHERE groupId = -43)
     `);
   }
 
